@@ -18,6 +18,26 @@ fn picker_reply(s: &mut UiSession<Recorder>, rgba: [f32; 4]) {
 }
 
 #[test]
+fn picker_cancellation_replies_release_zen_chrome_and_keep_capy() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        invoke(&mut s, CommandId::ZenMode);
+        s.state.workspace.layout.header.add(HeaderZone::Left, None,
+            &[HeaderItem::Tool { control: ToolbarControl::ColorPicker }]).unwrap();
+        let id = s.state.workspace.layout.header.entries().map(|entry| entry.id).max().unwrap();
+        s.dispatch(UiAction::MeasureHeader { height: 48., items: vec![HeaderItemBounds {
+            id, bounds: Bounds { x: 6., y: 6., width: 36., height: 36. } }] }).unwrap();
+        invoke(&mut s, CommandId::Eyedropper);
+        s.dispatch(UiAction::ColorPicker { action: ColorPickerAction::Settings { anchor: DrawerAnchor::Header { id } } }).unwrap();
+        assert!(s.state.customization.drawer.as_ref().unwrap().compact);
+        assert!(!chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default()).chrome_hidden);
+        let reply = key(&mut s, "Escape", true, false, false);
+        assert!(s.state.customization.drawer.is_none());
+        assert!(reply.chrome_hidden && reply.keep_zen_button, "{platform:?}: picker cancellation must publish current Zen visibility");
+    }
+}
+
+#[test]
 fn color_picker_mouse_press_and_pen_release_commit_without_a_stroke() {
     for kind in [PointerKind::Mouse, PointerKind::Pen] {
         let mut s = session(Platform::Gtk);

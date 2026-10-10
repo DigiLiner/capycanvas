@@ -150,6 +150,11 @@ keeps it available when removed or overflowed.
 
 ## Checks
 
+Trace each control's state writers, toolkit feedback transitions, contact ownership
+and asynchronous query inputs before testing. The window-free Zen matrix covers
+visibility pins, blocked input, focus loss and leave; native query tests cover
+queued model changes. Rectangle and opacity assertions alone do not check color.
+
 Run native input in a private compositor, never on the user's desktop:
 
 ```bash

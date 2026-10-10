@@ -65,7 +65,6 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
     val specs = view.array("items").objects().associateBy { it.getInt("id") }
     val size = view.array("sizes").objects().first { it.getString("id") == model.getString("size") }
     val tile = size.number("tile")
-    val height = size.number("height")
     val editing = view.optBoolean("editing")
     val colors = LocalPalette.current
     val density = LocalDensity.current.density
@@ -117,25 +116,32 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
     CompositionLocalProvider(LocalWorkspaceZ provides 300) {
     BoxWithConstraints(Modifier.fillMaxSize().zIndex(300f)) {
         val width = maxWidth.value
-        val geometryKey = "$width:$modelKey:$editing:$metrics:${host.drawingTabs.rows.size}"
-        SideEffect { input.width = width; input.metrics = metrics }
+        val documents = host.drawingTabs.rows.size
+        val geometryKey = "$width:$modelKey:$editing:$metrics:$documents"
         LaunchedEffect(geometryKey) {
             input.finish(true)
-            input.geometry = host.awaitQuery(obj("type" to "header", "request" to obj("op" to "geometry",
-                "width" to width, "insets" to JSONArray(listOf(0, 0)), "metrics" to metrics)))
-            input.geometryKey = geometryKey
+            val request = obj("op" to "geometry", "model" to model, "editing" to editing, "documents" to documents,
+                "width" to width, "insets" to JSONArray(listOf(0, 0)), "metrics" to metrics)
+            host.awaitQuery(obj("type" to "header", "request" to request))?.let {
+                input.geometry = it; input.measurement = request; input.geometryKey = geometryKey
+            }
         }
         val resolved = input.geometry?.takeIf { input.geometryKey == geometryKey }
+        val geometry = input.preview?.objectOrNull("geometry") ?: resolved ?: input.geometry
+        val size = view.array("sizes").objects().first { it.getString("id") == (geometry?.getString("size") ?: model.getString("size")) }
+        val height = size.number("height")
         LaunchedEffect(resolved?.toString(), height, bankHeight, editing) {
             resolved?.let { host.dispatch(obj("type" to "measure_header", "height" to (height + if (editing) bankHeight + 12f else 0f), "items" to it.array("items"))) }
         }
-        if (snapshot.optBoolean("chrome_hidden")) return@BoxWithConstraints
-        Box(Modifier.fillMaxWidth().height(height.dp).testTag("title-bar").chromeRegion(input.dock)
+        if (snapshot.optBoolean("chrome_hidden")) {
+            if (snapshot.optBoolean("keep_zen_button")) geometry?.getJSONObject("zen_button")?.let { ZenButton(host, snapshot, input.dock, it, size) }
+            return@BoxWithConstraints
+        }
+        Box(Modifier.fillMaxWidth().height(height.dp).testTag("title-bar").chromeRegion(input.dock, header = true)
             .headerSource(input, obj("kind" to "background"), host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("title_bar"), -1).headerChrome())
         // Keep existing item nodes at their prior positions while the native
         // owner resolves new metrics. Compaction changes a child's presentation,
         // never the identity or capture lifetime of its enclosing editable item.
-        val geometry = input.preview?.objectOrNull("geometry") ?: resolved ?: input.geometry
         val heldId = input.held?.source?.takeIf { it.optString("kind") == "item" }?.getInt("value")
         val placements = geometry?.array("items")?.objects()?.associateBy { it.getInt("id") } ?: emptyMap()
         val bars = geometry?.optJSONArray("bars")?.objects() ?: emptyList()
@@ -152,7 +158,7 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
                 val heldBounds = if (id == heldId) input.preview?.objectOrNull("held") else null
                 val bounds = heldBounds ?: placements[id]?.getJSONObject("bounds")
                 if (bounds != null) {
-                    val x by animateFloatAsState(bounds.number("x"), tween(if (heldBounds != null) 0 else 120), label = "header-x")
+                    val x by animateFloatAsState(bounds.number("x"), tween(if (input.preview != null && heldBounds == null) 120 else 0), label = "header-x")
                     val natural = metrics.objects().first { it.getInt("id") == id }.number("width")
                     HeaderItem(host, snapshot, input, entry, specs.getValue(id), size, title,
                         compact = bounds.number("width") < natural - .5f, inBar = id in joined,
@@ -342,7 +348,7 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
                 kind == "clock" -> SystemStatus(showBattery = false)
                 kind == "battery" -> SystemStatus(clock = false)
                 kind == "space" -> if (editing) Text("·", color = colors.secondary)
-                else -> HeaderButton(label, spec.optBoolean("selected") && kind != "capy", !editing && spec.optBoolean("enabled"), open,
+                else -> HeaderButton(label, spec.optBoolean("selected"), !editing && spec.optBoolean("enabled"), open,
                     Modifier.fillMaxSize().testTag(if (kind == "menu_labels") "header-menu-labels-compact" else "header-control-$id"),
                     inBar = inBar,
                     onDoubleClick = if (spec.optBoolean("double_click")) ({ host.dispatch(obj("type" to "double_click_tool", "control" to spec.getJSONObject("resolved_control"))) }) else null,
@@ -378,13 +384,13 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
 /** Active tools stay blue through hover/press; actions use neutral feedback. */
 @Composable internal fun HeaderButton(label: String, selected: Boolean, enabled: Boolean, open: Boolean,
     modifier: Modifier, fillWidth: Boolean = true, surface: Boolean = true, shape: Shape = drawerButtonShape(if (open) "bottom" else null),
-    inBar: Boolean = false, onDoubleClick: (() -> Unit)? = null, onClick: () -> Unit, content: @Composable () -> Unit) {
+    inBar: Boolean = false, onDoubleClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null, onClick: () -> Unit, content: @Composable () -> Unit) {
     val colors = LocalPalette.current
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val pressed by interaction.collectIsPressedAsState()
     val click = Modifier.hoverable(interaction).combinedClickable(interactionSource = interaction, indication = rememberChromeFocusIndication(),
-        enabled = enabled, role = Role.Button, onClickLabel = label, onDoubleClick = onDoubleClick, onClick = onClick)
+        enabled = enabled, role = Role.Button, onClickLabel = label, onDoubleClick = onDoubleClick, onLongClick = onLongClick, onClick = onClick)
     HoverTip(label, modifier) {
     Box((if (fillWidth) Modifier.fillMaxSize() else Modifier.fillMaxHeight()).clip(shape)
         .then(if (surface && !inBar) Modifier.glass(shape, colors.headerSurface) else Modifier).background(when {

@@ -924,7 +924,7 @@ pub struct Workspace {
     zen_capy: gtk::Button,
     system_status: Rc<crate::system_status::SystemStatus>,
     popovers: RefCell<Vec<glib::WeakRef<gtk::Popover>>>,
-    chrome_held: Cell<bool>,
+    chrome_contacts: RefCell<std::collections::HashSet<(Option<gdk::Device>, Option<gdk::EventSequence>, u32)>>,
     dragging: Cell<bool>,
     drag_targets: RefCell<Vec<(glib::WeakRef<gtk::Widget>, DragTarget)>>,
     workspace_drag: RefCell<Option<NativeWorkspaceDrag>>,
@@ -935,7 +935,6 @@ pub struct Workspace {
     toolbar: TileStrip,
     panels: Vec<(Panel, gtk::Widget)>,
     groups: RefCell<Vec<GroupView>>,
-    commands: RefCell<Vec<(CommandId, gtk::Button)>>,
     tool_set: crate::tool_panels::ToolSet,
     brush_sets: crate::tool_panels::ToolSet,
     sculpt_sets: crate::tool_panels::ToolSet,
@@ -1211,6 +1210,7 @@ impl Workspace {
             .visible(false)
             .build();
         zen_capy.set_widget_name("zen-capy");
+        zen_capy.add_css_class("flat");
         zen_capy.add_css_class("zen-capy");
         let capy_icon = crate::icons::image("layer-zen-looking-up-symbolic");
         zen_capy.set_child(Some(&capy_icon));
@@ -1259,7 +1259,7 @@ impl Workspace {
             zen_capy,
             system_status,
             popovers: RefCell::new(Vec::new()),
-            chrome_held: Cell::new(false),
+            chrome_contacts: RefCell::default(),
             dragging: Cell::new(false),
             drag_targets: RefCell::new(Vec::new()),
             workspace_drag: RefCell::new(None),
@@ -1289,7 +1289,6 @@ impl Workspace {
                 (Panel::Histogram, scroll(&histogram.root)),
                 (Panel::Waveform, scroll(&waveform.root)),
             ],
-            commands: RefCell::new(Vec::new()),
             tool_set,
             brush_sets,
             sculpt_sets,
@@ -1644,9 +1643,6 @@ impl Workspace {
             );
         }
         self.header.bind(self);
-        // Observe native title-bar grabs without claiming events from Adw's
-        // window handle. WM grabs can consume release; the next unpressed
-        // motion also clears the latch, never a leave/cancel during the drag.
         let hold = gtk::EventControllerLegacy::new();
         hold.set_propagation_phase(gtk::PropagationPhase::Capture);
         hold.connect_event(glib::clone!(
@@ -1656,13 +1652,22 @@ impl Workspace {
             glib::Propagation::Proceed,
             move |controller, event| {
                 let point = this.event_point(controller);
-                if matches!(
-                    event.event_type(),
-                    gdk::EventType::ButtonPress | gdk::EventType::TouchBegin
-                ) && this.window.visible_dialog().is_none()
+                let kind = event.event_type();
+                let down = matches!(kind, gdk::EventType::ButtonPress | gdk::EventType::TouchBegin);
+                let touch = matches!(kind, gdk::EventType::TouchBegin | gdk::EventType::TouchUpdate | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel);
+                let key = (event.device(), touch.then(|| event.event_sequence()), event.downcast_ref::<gdk::ButtonEvent>().map_or(0, |e| e.button()));
+                let was_held = !this.chrome_contacts.borrow().is_empty();
+                if down && this.window.visible_dialog().is_none() && this.header.root.can_target() && point.is_some_and(|[_, y]| y < this.header.height()) {
+                    this.chrome_contacts.borrow_mut().insert(key.clone());
+                } else if matches!(kind, gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel) {
+                    this.chrome_contacts.borrow_mut().remove(&key);
+                } else if matches!(kind, gdk::EventType::MotionNotify | gdk::EventType::EnterNotify)
+                    && !event.modifier_state().intersects(gdk::ModifierType::BUTTON1_MASK | gdk::ModifierType::BUTTON2_MASK
+                        | gdk::ModifierType::BUTTON3_MASK | gdk::ModifierType::BUTTON4_MASK | gdk::ModifierType::BUTTON5_MASK) {
+                    this.chrome_contacts.borrow_mut().retain(|(device, sequence, _)| device != &key.0 || sequence.is_some());
+                }
+                if down && this.window.visible_dialog().is_none()
                     && let Some(position) = point
-                    // Canvas input has its own reveal/dismiss boundary before
-                    // any pen samples are queued. Do not process it twice.
                     && !this.surface.pick(position[0] as f64, position[1] as f64, gtk::PickFlags::DEFAULT)
                         .is_some_and(|picked| picked == this.area)
                     && this
@@ -1672,25 +1677,11 @@ impl Workspace {
                         })
                         .handled
                 {
+                    this.chrome_contacts.borrow_mut().remove(&key);
+                    this.update_zen();
                     return glib::Propagation::Stop;
                 }
-                let was_held = this.chrome_held.get();
-                if event.event_type() == gdk::EventType::ButtonPress
-                    && this.header.root.can_target()
-                    && point.is_some_and(|[_, y]| y < this.header.height())
-                {
-                    this.chrome_held.set(true);
-                } else if event.event_type() == gdk::EventType::ButtonRelease
-                    || (matches!(
-                        event.event_type(),
-                        gdk::EventType::MotionNotify | gdk::EventType::EnterNotify
-                    ) && !event
-                        .modifier_state()
-                        .contains(gdk::ModifierType::BUTTON1_MASK))
-                {
-                    this.chrome_held.set(false);
-                }
-                if was_held != this.chrome_held.get() {
+                if was_held != !this.chrome_contacts.borrow().is_empty() {
                     this.update_zen();
                 }
                 glib::Propagation::Proceed
@@ -1880,7 +1871,7 @@ impl Workspace {
                 .drawer
                 .placement()
                 .and_then(|p| p.connection().map(|c| c.bounds)),
-            held: self.chrome_held.get(),
+            held: !self.chrome_contacts.borrow().is_empty(),
             dragging: self.dragging.get(),
             popup_open: self
                 .popovers
@@ -1939,6 +1930,7 @@ impl Workspace {
             }
         }
         if matches!(input, UiInput::Blur) {
+            self.chrome_contacts.borrow_mut().clear();
             self.color_panel.set_resizing(false);
             if let Some(mut drag) = self.workspace_drag.take() {
                 self.reset_drag_recognizers(&drag);
@@ -2821,20 +2813,6 @@ impl Workspace {
                     &image,
                     zen.icon.map(|i| format!("layer-{i}-symbolic")).as_deref(),
                 );
-            }
-            for (id, button) in self.commands.borrow().iter() {
-                if let Some(command) = state.commands.iter().find(|c| c.id == *id) {
-                    button.set_sensitive(command.enabled);
-                    selected(button, command.selected);
-                    if let Some(icon) = command.icon
-                        && let Some(image) = button.child().and_downcast::<gtk::Image>()
-                    {
-                        let name = format!("layer-{icon}-symbolic");
-                        if crate::icons::name(&image).as_deref() != Some(&name) {
-                            crate::icons::set(&image, Some(&name));
-                        }
-                    }
-                }
             }
         }
         if regions & regions::SETTINGS != 0 {

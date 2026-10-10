@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -310,19 +311,14 @@ internal fun Modifier.placed(rect: JSONObject, density: Float): Modifier = offse
         }
         if (snapshot != null && state != null) {
             val hidden = snapshot.optBoolean("chrome_hidden")
-            run {
-                val shown = !hidden && snapshot.objectOrNull("preferences") == null
-                Layout(content = { WorkspaceHeader(host, snapshot, header) },
-                    modifier = Modifier.fillMaxSize().zIndex(300f)
-                        .then(if (shown) Modifier else Modifier.clearAndSetSemantics {})) { children, constraints ->
-                    val child = children.single().measure(constraints)
-                    layout(constraints.maxWidth, constraints.maxHeight) {
-                        if (shown) child.place(0, 0)
-                    }
+            val shown = snapshot.objectOrNull("preferences") == null && (!hidden || snapshot.optBoolean("keep_zen_button"))
+            Layout(content = { WorkspaceHeader(host, snapshot, header) },
+                modifier = Modifier.fillMaxSize().zIndex(if (hidden) 1000f else 300f)
+                    .then(if (shown) Modifier else Modifier.clearAndSetSemantics {})) { children, constraints ->
+                val child = children.single().measure(constraints)
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    if (shown) child.place(0, 0)
                 }
-            }
-            if (snapshot.objectOrNull("preferences") == null && (hidden && snapshot.optBoolean("keep_zen_button"))) {
-                header.geometry?.getJSONObject("zen_button")?.let { ZenButton(host, snapshot, dock, it) }
             }
             val layout = snapshot.getJSONObject("layout")
             if (!hidden) CollapsedColumns(host, snapshot, panels, dock)
@@ -488,18 +484,13 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
     lineTo(left, radius); squircleTo(Offset(left + radius, radius), Offset(-radius, 0f), Offset(0f, -radius)); close()
 }
 
-@Composable private fun ZenButton(host: CanvasHost, snapshot: JSONObject, dock: DockInteraction, bounds: JSONObject) {
-    val colors = LocalPalette.current
-    val state = snapshot.getJSONObject("state")
-    val header = snapshot.getJSONObject("header")
-    val size = header.array("sizes").objects().first { it.getString("id") == header.getJSONObject("model").getString("size") }
-    val command = state.array("commands").objects().first { it.getString("id") == "zen_mode" }
+@Composable internal fun ZenButton(host: CanvasHost, snapshot: JSONObject, dock: DockInteraction, bounds: JSONObject, size: JSONObject) {
+    val command = snapshot.getJSONObject("state").array("commands").objects().first { it.getString("id") == "zen_mode" }
     val target = remember { obj("kind" to "zen_mode") }
     val anchor = dock.anchorKey(target)
     DisposableEffect(dock) { onDispose { dock.anchors.remove(anchor) } }
-    IconTile(command.getString("icon"), command.getString("tooltip"),
-        modifier = Modifier.offset(bounds.number("x").dp, bounds.number("y").dp).zIndex(1000f).testTag("zen-button").chromeRegion(dock)
-            .glass(TileShape, colors.headerSurface)
+    HeaderButton(command.getString("tooltip"), false, command.optBoolean("enabled"), false,
+        Modifier.offset(bounds.number("x").dp, bounds.number("y").dp).size(size.number("tile").dp).alpha(if (command.optBoolean("enabled")) 1f else .4f).zIndex(1000f).testTag("zen-button").chromeRegion(dock)
             .onGloballyPositioned {
                 val bounds = it.boundsInRoot().translate(-dock.origin)
                 dock.anchors[anchor] = bounds
@@ -510,8 +501,9 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                     if (currentEvent.buttons.isSecondaryPressed) { down.consume(); dock.context(target) }
                 }
             },
-        onLongClick = { dock.holdContext(target) }, iconSize = size.number("capy_icon").dp,
-        tileSize = size.number("tile").dp) { host.invoke("zen_mode") }
+        onLongClick = { dock.holdContext(target) }, onClick = { host.invoke("zen_mode") }) {
+        SharedIcon(command.getString("icon"), command.getString("tooltip"), Modifier.size(size.number("capy_icon").dp))
+    }
 }
 
 @Composable private fun PanelGroup(host: CanvasHost, state: JSONObject, group: JSONObject,

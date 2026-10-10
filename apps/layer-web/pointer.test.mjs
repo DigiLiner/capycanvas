@@ -1,4 +1,3 @@
-// Exercise the actual DOM listeners and packed Wasm records without a GPU.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
@@ -56,7 +55,7 @@ test("cursor hover preserves mouse, pen, and eraser device kinds", () => {
   assert.deepEqual(changes, ["cursor-left"]);
 });
 function harness({ raw = false, prediction = false, paint: allowPaint = true } = {}) {
-  const listeners = new Map(), records = [], phases = [], buttons = [], cursors = [];
+  const listeners = new Map(), windowListeners = new Map(), records = [], phases = [], buttons = [], cursors = [], captures = [];
   let contact = null;
   const context = {
     canvas: {
@@ -81,11 +80,18 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
       return { paint, handled };
     },
     cursorInput(event) { cursors.push(event?.type ?? null); }, wake() {},
-    window: { addEventListener() {} }, setTimeout: () => 0, clearTimeout() {},
+    heldPointers: new Set(),
+    workspace: {setPointerCapture: id => captures.push(id)},
+    document: {documentElement: {hasAttribute: () => false, toggleAttribute() {}}, addEventListener() {}},
+    chromeInput: event => ({handled: event.kind === 'contact' && !!context.consumeChrome}),
+    updateZen() {}, closeMenusOutside() {}, requestAnimationFrame() {}, endWorkspaceGesture() {}, queuePen() {},
+    window: { addEventListener: (name, fn) => windowListeners.set(name, fn) }, setTimeout: () => 0, clearTimeout() {},
   };
   if (raw) context.onpointerrawupdate = null;
   runInNewContext(source.slice(source.indexOf("function position("),
     source.indexOf('canvas.addEventListener("contextmenu"')), context);
+  runInNewContext(source.slice(source.indexOf('function pointerStyle('), source.indexOf('function position(')), context);
+  runInNewContext(source.slice(source.indexOf('window.addEventListener("blur", () => {\n  endWorkspaceGesture'), source.indexOf('function tabHits(')), context);
   let timeStamp = 0;
   return {
     send(type, overrides = {}) {
@@ -95,6 +101,14 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
     },
     samples: () => Array.from({ length: records.length / 11 }, (_, i) => records.slice(i * 11, i * 11 + 11)),
     phases, buttons, cursors,
+    chrome(type, overrides = {}) {
+      let prevented = false;
+      windowListeners.get(type)?.({pointerId: 1, pointerType: 'mouse', buttons: 1, detail: 1,
+        target: {closest: selector => selector === '#header' ? {} : null},
+        preventDefault() { prevented = true; }, stopImmediatePropagation() {}, ...overrides});
+      return prevented;
+    },
+    context, captures,
   };
 }
 
@@ -103,7 +117,8 @@ for (const ending of ["pointerup", "pointercancel", "lostpointercapture", "point
     const h = harness();
     h.send("pointerdown");
     h.send("pointermove", { clientX: 100 });
-    h.send(ending, { clientX: 700, clientY: 500, buttons: 0, pressure: 0 });
+    h.send(ending, { pointerType: ending === 'lostpointercapture' ? '' : 'pen', clientX: 700, clientY: 500, buttons: 0, pressure: 0 });
+    if (ending === 'lostpointercapture') assert.equal(h.cursors.at(-1), null);
     h.send("lostpointercapture", { pointerType: "", buttons: 0 });
     h.send("pointerup", { buttons: 0, pressure: 0 });
     h.send("pointermove", { buttons: 0, pressure: 0 });
@@ -113,20 +128,11 @@ for (const ending of ["pointerup", "pointercancel", "lostpointercapture", "point
     if (ending !== "pointerup") {
       assert.deepEqual(samples[2].slice(2, 5), [100, 50, 0.6]);
     }
-    // A second stroke must remain usable after interruption.
     h.send("pointerdown");
     h.send("pointerup", { buttons: 0, pressure: 0 });
     assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 3, 1, 3]);
   });
 }
-
-test("capture loss with missing pointer type still finishes the active pen", () => {
-  const h = harness();
-  h.send("pointerdown");
-  h.send("lostpointercapture", { pointerType: "", pressure: 0, buttons: 0 });
-  assert.deepEqual(h.samples().map(s => s[1]), [1, 3]);
-  assert.equal(h.cursors.at(-1), null);
-});
 
 test("normal mouse and pen release preserves hover after capture ends", () => {
   for (const pointerType of ["mouse", "pen"]) {
@@ -146,6 +152,22 @@ test("foreign pointers cannot end the active stroke", () => {
   h.send("pointermove");
   h.send("pointerup");
   assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 3]);
+  for (const ending of ['pointerup', 'pointercancel', 'lostpointercapture', 'pointermove']) {
+    h.chrome('pointerdown');
+    h.chrome('pointerdown', {pointerId: 2, pointerType: 'touch'});
+    h.chrome(ending, {pointerId: 2, buttons: 0});
+    assert.deepEqual([...h.context.heldPointers], [1], ending);
+    h.chrome('pointerup');
+    assert.equal(h.context.heldPointers.size, 0);
+  }
+  h.context.consumeChrome = true;
+  for (const pointerId of [1, 2]) h.chrome('pointerdown', {pointerId});
+  assert.deepEqual(h.captures, [1, 2], 'consumed contacts capture the stable workspace');
+  assert.equal(h.context.heldPointers.size, 0, 'consumed contacts cannot leave a pin');
+  assert.equal(h.chrome('click', {pointerId: 1, detail: 0}), false, 'keyboard click is independent');
+  h.chrome('pointercancel', {pointerId: 2});
+  h.chrome('blur');
+  assert.equal(h.context.heldPointers.size, 0);
 });
 
 test("zero pressure with tip or eraser contact is not a lift", () => {
@@ -243,7 +265,6 @@ for (const ending of ["pointerup", "pointercancel", "lostpointercapture", "point
     h.send("pointermove", { buttons: 0, pressure: 0 });
     assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 3]);
     h.send("pointerdown");
-    // A contact without actual raw delivery still uses pointermove.
     h.send("pointermove", { clientX: 200 });
     h.send("pointerup");
     assert.deepEqual(h.samples().map(s => s[1]), [1, 2, 3, 1, 2, 3]);

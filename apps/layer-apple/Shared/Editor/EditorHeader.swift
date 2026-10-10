@@ -16,7 +16,8 @@ import SwiftUI
     private var model: JSON { view["model"] }
     private var editing: Bool { view["editing"].bool }
     private var entries: [JSON] { model["zones"].array.flatMap(\.array) }
-    private var size: JSON { view["sizes"].array.first { $0["id"].string == model["size"].string } ?? JSON() }
+    private var requestedSize: JSON { view["sizes"].array.first { $0["id"].string == model["size"].string } ?? JSON() }
+    private var size: JSON { header.size }
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var geometry: JSON { header.preview.isNull ? header.geometry : header.preview["geometry"] }
     private var radius: CGFloat { size["tile"].number / 2 }
@@ -33,7 +34,8 @@ import SwiftUI
             && entries.contains { ["clock", "battery"].contains($0["item"]["kind"].string) }
     }
     private var metrics: [Any] {
-        entries.map { entry in
+        let size = requestedSize
+        return entries.map { entry in
             let kind = entry["item"]["kind"].string, tile = size["tile"].number
             let hidden = !editing && (["clock", "battery"].contains(kind) && !store.state["fullscreen"].bool
                 || kind == "battery" && status.battery == nil)
@@ -58,9 +60,11 @@ import SwiftUI
         }
     }
     private var specification: JSON {
-        JSON(["model":model.raw, "editing":editing, "height":size["height"].number + (editing ? editorHeight : 0),
-            "request":["op":"geometry", "width":store.snapshot["layout"]["viewport"][0].number,
-                "insets":[store.headerLeadingInset + (recoveryMenu ? size["tile"].number + size["item_gap"].number : 0), 0], "metrics":metrics]])
+        guard let inset = store.headerLeadingInset else { return JSON() }
+        let size = requestedSize
+        return JSON(["model":model.raw, "editing":editing, "height":size["height"].number + (editing ? editorHeight : 0),
+            "request":["op":"geometry", "model":model.raw, "editing":editing, "documents":store.snapshot["document_tabs"]["tabs"].array.count, "width":store.snapshot["layout"]["viewport"][0].number,
+                "insets":[inset + (recoveryMenu ? size["tile"].number + size["item_gap"].number : 0), 0], "metrics":metrics]])
     }
     private var controls: some View {
         ZStack(alignment: .topLeading) {
@@ -78,7 +82,7 @@ import SwiftUI
                     let bounds = geometry["bars"][index]["bounds"]
                     SquircleShape(radius).fill(palette.chromeSurface).modifier(GlassRegistration(shape: SquircleShape(radius)))
                         .placed(bounds).allowsHitTesting(false).accessibilityHidden(true)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: bounds.rect)
+                        .animation(reduceMotion || header.preview.isNull ? nil : .easeOut(duration: 0.12), value: bounds.rect)
                 }
             }
             ForEach(entries, id: \.headerID) { entry in slot(entry) }
@@ -87,7 +91,7 @@ import SwiftUI
                     .frame(width: size["tile"].number, height: size["tile"].number) }
                     .buttonStyle(HeaderButtonStyle(radius: radius))
                     .accessibilityLabel(store.bootstrap["application_menus"].string).accessibilityIdentifier("header-recovery-menu")
-                    .offset(x: store.headerLeadingInset + size["item_gap"].number, y: size["item_gap"].number)
+                    .offset(x: (store.headerLeadingInset ?? 0) + size["item_gap"].number, y: size["item_gap"].number)
             }
             ForEach(0..<3, id: \.self) { zone in
                 if !geometry["overflow"][zone].isNull {
@@ -189,7 +193,7 @@ import SwiftUI
             }.modifier(HeaderControlMeasurement(id: "header-item-\(id)"))
                 .overlay(SquircleShape(radius).stroke(editing && header.selected == id ? palette.accent : .clear, lineWidth: 2))
                 .placed(allocation["bounds"]).opacity(held ? 0 : 1).allowsHitTesting(!held)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: allocation["bounds"].rect)
+                .animation(reduceMotion || header.preview.isNull ? nil : .easeOut(duration: 0.12), value: allocation["bounds"].rect)
         }
     }
     private func metadata(_ entry: JSON) -> JSON {

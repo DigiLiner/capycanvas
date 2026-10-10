@@ -38,8 +38,7 @@ internal class HeaderInteraction(val host: CanvasHost, val dock: DockInteraction
     val sources = mutableMapOf<Any, Source>()
     var editing = false
     var enabled = false
-    var width = 0f
-    var metrics = JSONArray()
+    var measurement: JSONObject? = null
     var geometry by mutableStateOf<JSONObject?>(null)
     var geometryKey by mutableStateOf("")
     var preview by mutableStateOf<JSONObject?>(null)
@@ -54,11 +53,11 @@ internal class HeaderInteraction(val host: CanvasHost, val dock: DockInteraction
     private var generation = 0
     private var last = Offset.Zero
     fun begin(source: Source, press: Offset) {
+        val request = measurement ?: return
         generation++
         held = source; last = press; context = null; contextRequest = null; contextProvider = null; overflow = null
-        host.headerQuery(obj("op" to "begin", "source" to source.source, "width" to width,
-            "insets" to JSONArray(listOf(0, 0)), "metrics" to metrics,
-            "press" to press.headerPoint(), "grab" to source.bounds.headerBounds()))
+        host.headerQuery(JSONObject(request.toString()).put("op", "begin").put("source", source.source)
+            .put("press", press.headerPoint()).put("grab", source.bounds.headerBounds()))
     }
     fun move(point: Offset) {
         last = point

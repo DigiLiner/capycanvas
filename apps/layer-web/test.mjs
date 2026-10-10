@@ -693,9 +693,6 @@ try {
     });
     await settle();
     await menuCommand("view", "fit_canvas");
-    const geometryExpression =
-      "JSON.parse(JSON.stringify({view:layerApp.state().camera, rect:layerApp.canvas.getBoundingClientRect().toJSON()}, (_,v)=>typeof v==='bigint'?String(v):v))";
-    const geometry = await evaluate(geometryExpression);
     await call("Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x: 600,
@@ -705,22 +702,9 @@ try {
     await click('[data-command="zen_mode"]');
     await evaluate("new Promise(r=>setTimeout(r,250))");
     assert.equal(
-      await evaluate(
-        "document.querySelector('#workspace').classList.contains('zen-hidden')",
-      ),
-      true,
-    );
-    assert.equal(
-      await evaluate(
-        "[...document.querySelectorAll('#header > *')].every(n=>getComputedStyle(n).opacity==='0')",
-      ),
-      true,
-    );
-    assert.equal(
       await evaluate("getComputedStyle(layerApp.canvas).outlineStyle"),
       "none",
     );
-    assert.deepEqual(await evaluate(geometryExpression), geometry);
     const reviewClip = { x: 0, y: 0, width: 1200, height: 900, scale: 0.5 };
     const zen = await call("Page.captureScreenshot", {
       format: "png",
@@ -730,46 +714,13 @@ try {
       "artifacts/ui/web-zen.png",
       Buffer.from(zen.data, "base64"),
     );
-    await call("Input.dispatchMouseEvent", {
-      type: "mouseMoved",
-      x: 600,
-      y: 450,
-    });
-    await settle();
-    assert.equal(
-      await evaluate(
-        "document.querySelector('#workspace').classList.contains('zen-hidden')",
-      ),
-      true,
-    );
     assert.equal(
       await evaluate("document.elementFromPoint(20,450).id"),
       "canvas",
     );
-    // Exercise the host's pointer handler without a desktop drag: entering a
-    // hidden toolbar's old proximity zone must not reveal it any more.
-    for (const [x, y, hidden] of [
-      [600, 120, true],
-      [600, 80, true],
-      [600, 120, true],
-      [600, 165, true],
-      [600, 120, true],
-      [600, 820, true], // Empty bottom edge: the status HUD is not a panel.
-      [600, 820, true],
-      [600, 450, true],
-    ]) {
-      assert.equal(
-        await evaluate(
-          `(() => {window.dispatchEvent(new PointerEvent('pointermove',{clientX:${x},clientY:${y},pointerType:'mouse',buttons:0,bubbles:true}));return document.querySelector('#workspace').classList.contains('zen-hidden')})()`,
-        ),
-        hidden,
-        `Zen hover at ${x},${y}`,
-      );
-    }
     await evaluate("layerApp.dispatch({type:'open_settings',page:'appearance'})");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"),false);
     await evaluate("layerApp.dispatch({type:'close_settings'});layerApp.dispatch({type:'invoke',command:'zen_mode'})");
-    assert.deepEqual(await evaluate("layerApp.state().camera.translation"),geometry.view.translation);
     await evaluate("document.activeElement?.blur()");
     const transparency = await evaluate(
       "['off','low','medium','high'].indexOf(layerApp.state().settings.transparency)",

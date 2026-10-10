@@ -34,16 +34,18 @@ import SwiftUI
             && store.workspaces?.presented != true && !store.workspace.hasPopover(excluding: popup)
             && ["picker", "toolbar_prompt", "toolbar_manager", "preferences"].allSatisfy { store.snapshot[$0].isNull }
     }
+    var size: JSON { store?.snapshot["header"]["sizes"].array.first { $0["id"].string == geometry["size"].string } ?? JSON() }
     func reconcile(_ specification: JSON) {
+        guard !specification.isNull else { return }
         let key = specification.stableKey
         guard key != layoutKey else { return }
-        cancel(); layoutKey = key; layout = specification
+        cancel(); layoutKey = key
         if let selected, !specification["model"]["zones"].array.flatMap(\.array).contains(where: { $0["id"].uint == selected }) {
             self.selected = nil
         }
         query(specification["request"].object) { [weak self] value in
             guard let self, self.layoutKey == key, !value.isNull else { return }
-            self.geometry = value
+            self.layout = specification; self.geometry = value
             var items = value["items"].array.map(\.raw)
             // Hidden tools open drawers from their visible overflow control.
             for zone in 0..<3 where !value["overflow"][zone].isNull {

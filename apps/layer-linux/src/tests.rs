@@ -4831,8 +4831,8 @@ fn native_layer_panel_review() {
 }
 
 fn command(w: &Workspace, id: CommandId) -> gtk::Button {
-    if let Some((_, button)) = w.commands.borrow().iter().find(|(c, _)| *c == id) {
-        return button.clone();
+    if id == CommandId::ZenMode && let Some(button) = find_css(w.header.root.upcast_ref(), "capy-button") {
+        return button.downcast().unwrap();
     }
     for panel in &state(w).workspace.layout.panels {
         if let Some(tile) = panel
@@ -5154,17 +5154,6 @@ fn native_zen_icons() {
         );
         capture_reference(&w, &format!("{dir}/gtk-selector-{name}.png"), 1.0);
         w.dispatch(UiAction::CloseSettings);
-        pump(250);
-        click(&zen);
-        w.chrome_event(layer_ui::ChromeEvent::Motion);
-        pump(250);
-        assert!(zen.has_css_class("selected-tool"));
-        assert!(!w.header.root.can_target());
-        capture_reference(&w, &format!("{dir}/gtk-total-zen-{name}.png"), 1.0);
-        click(&w.zen_capy);
-        pump(250);
-        assert!(!zen.has_css_class("selected-tool"));
-        capture_reference(&w, &format!("{dir}/gtk-inactive-{name}.png"), 1.0);
     }
     w.window.close();
     pump(100);
@@ -5462,9 +5451,8 @@ fn native_zen_behaviors() {
                     "{label}: Capy clears native/recovery control {:?}", [x, y, width, height]);
             }
         }
-        let normal = w.commands.borrow().iter().find(|(id, button)| {
-            *id == CommandId::ZenMode && button.is_mapped()
-        }).map(|(_, button)| button.clone());
+        let normal = find_css(w.header.root.upcast_ref(), "capy-button")
+            .and_then(|button| button.downcast::<gtk::Button>().ok()).filter(|button| button.is_mapped());
         let expected = normal.as_ref().map(|button| capy_rects(button, w));
         if let Some(expected) = expected {
             assert_eq!(expected[0], expected_button, "{label}: normal/shared button");
@@ -5497,6 +5485,7 @@ fn native_zen_behaviors() {
         w.chrome_event(ChromeEvent::Motion);
         pump(250);
         assert!(state(w).workspace.zen_mode, "{label}");
+        assert!(normal.as_ref().is_none_or(|button| !button.has_css_class("selected-tool")), "{label}: hidden Capy stays neutral");
         assert_eq!(w.zen_capy.is_visible(), show, "{label}");
         assert!(!w.header.root.can_target(), "{label}");
         for (slot, widget) in w.surface.imp().children.borrow().iter() {
@@ -5538,6 +5527,7 @@ fn native_zen_behaviors() {
             assert!(frames.iter().any(|(_, _, _, opacity)| *opacity > 0. && *opacity < 0.999), "{label}: non-Capy header controls still fade");
         }
         assert!(!state(w).workspace.zen_mode, "{label}");
+        assert!(normal.as_ref().is_none_or(|button| !button.has_css_class("selected-tool")), "{label}: revealed Capy stays neutral");
         assert!(!w.zen_capy.is_visible(), "{label}");
         assert_eq!(state(w).workspace.layout, layout, "{label}: unchanged layout");
         assert_eq!(state(w).camera, camera, "{label}: unchanged camera");
@@ -9160,7 +9150,7 @@ fn native_workspace_restore() {
         saved
     );
     assert_eq!(geometry(&fresh), expected);
-    assert!(command(&fresh, CommandId::ZenMode).has_css_class("selected-tool"));
+    assert!(!command(&fresh, CommandId::ZenMode).has_css_class("selected-tool"));
     assert_eq!(
         fresh
             .groups
@@ -10206,7 +10196,7 @@ fn native_window_drag_input() {
                 "The same title-bar contact dismisses the drawer and moves the window"
             );
             assert!(w.workspace_drag.borrow().is_none());
-            assert!(!w.chrome_held.get());
+            assert!(w.chrome_contacts.borrow().is_empty());
             origin = moved;
         }
         let viewport = [w.surface.width() as f32, w.surface.height() as f32];
@@ -12349,7 +12339,7 @@ fn native_workspace_controls_docking_and_ink() {
     crate::capture(&w, "../../artifacts/ui/gtk-zen.png");
     assert!(!w.chrome_contact_at(600.0, 24.0));
     assert!(w.header.root.has_css_class("zen-hidden"));
-    assert!(command(&w, CommandId::ZenMode).has_css_class("selected-tool"));
+    assert!(!command(&w, CommandId::ZenMode).has_css_class("selected-tool"));
     pump(200);
     crate::capture(&w, "../../artifacts/ui/gtk-zen-controls.png");
     w.chrome_event(ChromeEvent::Motion);

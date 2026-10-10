@@ -65,7 +65,7 @@ internal class DockInteraction(val host: CanvasHost) {
     data class Region(val token: Any, val action: JSONObject, val bounds: Rect, val z: Int, val priority: Int,
         val context: JSONObject?, val cursor: Int, val holdToDrag: Boolean)
     val regions = mutableMapOf<Any, Region>()
-    data class ChromeRegion(val bounds: Rect, val z: Int)
+    data class ChromeRegion(val bounds: Rect, val z: Int, val header: Boolean)
     val chromeRegions = mutableMapOf<Any, ChromeRegion>()
     var drawer: JSONObject? = null
     val drawerSources = mutableStateMapOf<String, DrawerSource>()
@@ -100,6 +100,7 @@ internal class DockInteraction(val host: CanvasHost) {
     var configurationHeight by mutableFloatStateOf(0f)
     var contextMenu by mutableStateOf<JSONObject?>(null)
     var contextRequest: JSONObject? = null
+    var headerHeld = false
     var contactHeld by mutableStateOf(false)
     var contactType: PointerType? = null
     var contactSource: Any? = null
@@ -165,7 +166,7 @@ internal class DockInteraction(val host: CanvasHost) {
 
     // Shared workspace gestures have their own Zen state in Rust. Only tile
     // reordering uses the host's generic dragging fact.
-    fun facts() = obj("held" to false, "dragging" to (active?.optString("type") == "tile_drag"),
+    fun facts() = obj("held" to headerHeld, "dragging" to (active?.optString("type") == "tile_drag"),
         "popup_open" to (popupOpen || contextMenu != null), "expanded_panel" to expansion, "content_drawer" to drawer?.optJSONObject("placement")?.optJSONObject("bounds"),
         "drawer_connection" to drawer?.optJSONObject("connection")?.optJSONObject("bounds"))
     fun refresh() = host.chrome(obj("kind" to "refresh"), facts())
@@ -331,7 +332,9 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
         try {
             val previousTap = chromeTap
             chromeTap = null
-            if (dock.chromeRegions.values.any { it.bounds.contains(down.position) }) {
+            val chrome = dock.chromeRegions.values.filter { it.bounds.contains(down.position) }.maxByOrNull { it.z }
+            dock.headerHeld = chrome?.header == true
+            if (chrome != null) {
                 val tab = dock.tabs.values.firstOrNull { it.getJSONObject("bounds").let { b ->
                     Rect(b.number("x"), b.number("y"), b.number("x") + b.number("width"), b.number("y") + b.number("height")).contains(down.position / dock.density)
                 } }?.optString("panel")
@@ -346,6 +349,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
                 if (currentEvent.buttons.isSecondaryPressed) {
                     source.context?.let(dock::context)
                     down.consume()
+                    while (currentEvent.changes.any { it.pressed }) awaitPointerEvent(PointerEventPass.Final)
                     return@awaitEachGesture
                 }
                 var started = false
@@ -432,18 +436,18 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
             // Non-draggable chrome still needs the original device when a
             // child delivers its native long-click callback.
             while (currentEvent.changes.any { it.pressed }) awaitPointerEvent(PointerEventPass.Final)
-        } finally { dock.contactType = null }
+        } finally { dock.headerHeld = false; dock.refresh(); dock.contactType = null }
     }
 }
 
 
 /** Only UI-covered contacts are sent here; CanvasHost gates bare canvas contacts. */
-@Composable internal fun Modifier.chromeRegion(dock: DockInteraction): Modifier {
+@Composable internal fun Modifier.chromeRegion(dock: DockInteraction, header: Boolean = false): Modifier {
     val token = remember { Any() }
     val z = LocalWorkspaceZ.current
     DisposableEffect(dock, token) { onDispose { dock.chromeRegions.remove(token) } }
-    SideEffect { dock.chromeRegions[token]?.takeIf { it.z != z }?.let { dock.chromeRegions[token] = it.copy(z = z) } }
-    return onGloballyPositioned { dock.chromeRegions[token] = DockInteraction.ChromeRegion(it.boundsInRoot().translate(-dock.origin), z) }
+    SideEffect { dock.chromeRegions[token]?.takeIf { it.z != z || it.header != header }?.let { dock.chromeRegions[token] = it.copy(z = z, header = header) } }
+    return onGloballyPositioned { dock.chromeRegions[token] = DockInteraction.ChromeRegion(it.boundsInRoot().translate(-dock.origin), z, header) }
 }
 @Composable internal fun Modifier.contextAnchor(dock: DockInteraction, target: JSONObject): Modifier {
     val key = dock.anchorKey(target)

@@ -226,13 +226,10 @@ export function createHeader({app, state, paintPair, workspace, element, button,
       if(editing&&!wasEditing)bank.querySelector(`[data-header-size="${size.id}"]`).focus();
       if(!editing&&wasEditing)document.querySelector('#canvas').focus({preventScroll:true});
     }
-    root.dataset.size=size.id;
     for(const [name,value] of Object.entries({tile:size.tile,icon:size.icon,'capy-icon':size.capy_icon,gap:size.gap})) {
-      workspace.style.setProperty(`--header-${name}`,`${value}px`);
-      root.style.setProperty(`--header-${name}`,`${value}px`);
       bank.style.setProperty(`--header-${name}`,`${value}px`);
     }
-    root.style.height=`${size.height}px`; bank.style.top=`${size.height+6}px`;
+    bank.style.top=`${size.height+6}px`;
     bank.style.maxHeight=`${Math.max(1,workspace.clientHeight-size.height-12)}px`;
     for(const [id,r] of records) {
       const spec=view.items.find(i=>i.id===id); r.spec=spec;r.root.setAttribute('aria-label',spec.label);
@@ -299,6 +296,13 @@ export function createHeader({app, state, paintPair, workspace, element, button,
     return result;
   }
   function present(g, dragging=false) {
+    const accepted=view.sizes.find(s=>s.id===g.size);
+    root.dataset.size=accepted.id;
+    root.style.height=`${accepted.height}px`;
+    for(const [name,value] of Object.entries({tile:accepted.tile,icon:accepted.icon,'capy-icon':accepted.capy_icon,gap:accepted.gap})) {
+      workspace.style.setProperty(`--header-${name}`,`${value}px`);
+      root.style.setProperty(`--header-${name}`,`${value}px`);
+    }
     place(document.querySelector('#zen-capy'),g.zen_button);
     let focus;
     for(const [id,r] of records) {

@@ -237,16 +237,16 @@ Zen’s visibility and interaction pins live in Rust (`Settings.zen_show_capy`
 and `InputReply`’s `chrome_hidden` and `keep_zen_button` flags). Hosts send
 `UiInput::Chrome`: `Refresh` updates native facts; `Motion` releases keyboard
 visibility; `Contact` carries the position for drawer dismissal. `ChromeFacts`
-reports native grabs, panel drags and popups. Hosts apply visibility and input
-ownership. Android carries both flags in its change-detected snapshot, even
-without a document revision.
+reports native grabs, panel drags and popups. Rust finalizes both visibility flags
+after handling every input. Hosts apply visibility and input ownership; Android
+publishes flag changes even without a document revision.
 
 The standalone Capy button uses the title bar’s current Small, Medium or Large
 size even when Capy was removed from the title bar. Its button dimensions and
 icon match the normal header button: shared `HeaderSize::tile` and
 `HeaderSize::capy_icon` supply 36/31, 48/41 and 60/52 logical pixels. Hosts read
 these metrics from `HeaderSizeView`; Zen never substitutes a fixed button or
-icon size.
+icon size. `HeaderGeometry::size` keeps accepted bounds and size metrics together.
 
 `HeaderGeometry::zen_button` keeps the visible Capy's complete normal header
 rectangle, including customized placement, document-tab expansion and native
@@ -257,7 +257,11 @@ entering or leaving Zen never changes its position. GTK allocates both buttons
 on the same surface pixel grid. Windows excludes the Zen rectangle from native
 caption dragging so mouse, touch and pen contacts reach the button.
 Android and Apple keep their measurement owners alive while removing hidden
-controls and their input and glass registrations.
+controls and their input and glass registrations. Native geometry queries resolve
+the model, editing state and document count supplied with their measurements;
+drag pickup rejects a measured model that differs from the current shared model.
+Capy uses neutral hover/press feedback in both presentations, while menus retain
+the command's checked Zen state.
 
 **Button icon** offers Looking up (default), Facing forward, Bathing and
 Sleeping. Rust stores `Settings.zen_icon` and supplies each command's icon. The

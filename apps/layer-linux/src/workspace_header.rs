@@ -443,9 +443,6 @@ impl Header {
             for item in self.items.take() {
                 self.root.remove(&item.root);
             }
-            w.commands
-                .borrow_mut()
-                .retain(|(id, _)| *id != CommandId::ZenMode);
             *self.model.borrow_mut() = Some(model.clone());
             let items = model
                 .entries()
@@ -508,14 +505,11 @@ impl Header {
             }
             if let Some(button) = &item.button {
                 button.set_tooltip_text(Some(&label));
-                let (enabled, active) = match item.entry.item {
-                    HeaderItem::Tool { control } => projected.map(|view| (view.enabled, view.selected))
-                        .unwrap_or_else(|| tool_state(state, control)),
-                    HeaderItem::Capy => (true, state.workspace.zen_mode),
-                    // Full Screen is an action, not a selected drawing tool.
-                    HeaderItem::Fullscreen => (true, false),
-                    _ => (true, false),
-                };
+                let (enabled, active) = projected.map(|view| (view.enabled, view.selected))
+                    .unwrap_or_else(|| match item.entry.item {
+                        HeaderItem::Tool { control } => tool_state(state, control),
+                        _ => (true, false),
+                    });
                 let has_variants = projected.is_some_and(|view| view.has_variants);
                 button.set_sensitive(enabled || has_variants || editing);
                 if let Some(content) = customization::tool_button_content(button) {
@@ -681,11 +675,6 @@ impl Header {
                     HeaderItem::Fullscreen => Some(CommandId::Fullscreen),
                     _ => None,
                 };
-                if command == Some(CommandId::ZenMode) {
-                    w.commands
-                        .borrow_mut()
-                        .push((CommandId::ZenMode, b.clone()));
-                }
                 if let HeaderItem::Tool { control: control @ (ToolbarControl::ColorPicker | ToolbarControl::Command { command: CommandId::Eyedropper }) } = entry.item {
                     crate::color_picker::bind_button(w, &b, layer_ui::DrawerAnchor::Header { id }, control);
                 } else {

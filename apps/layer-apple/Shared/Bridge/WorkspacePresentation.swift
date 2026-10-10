@@ -28,6 +28,7 @@ import SwiftUI
         return inputState!
     }
     private var chromeKey = ""
+    var headerHeld = false
     private var popovers = Set<UUID>()
     var languageInputBusy: Bool { !popovers.isEmpty }
     private struct Drag {
@@ -133,7 +134,7 @@ import SwiftUI
         let tool = store.contentDrawers.items["tool"]?.geometry ?? JSON()
         let modal = ["picker", "toolbar_prompt", "toolbar_manager", "preferences"].contains { !store.snapshot[$0].isNull }
             || !store.state["customization"]["control"].isNull
-        return JSON(["held": inputState?.contact.held ?? false, "dragging": drag?.item["kind"].string == "tile", "popup_open": modal || !popovers.isEmpty,
+        return JSON(["held": headerHeld || (inputState?.contact.held ?? false), "dragging": drag?.item["kind"].string == "tile", "popup_open": modal || !popovers.isEmpty,
             "expanded_panel": expansion.raw, "content_drawer": tool["placement"]["bounds"].raw,
             "drawer_connection": tool["connection"]["bounds"].raw])
     }

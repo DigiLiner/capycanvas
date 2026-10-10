@@ -138,7 +138,7 @@ import SwiftUI
                                     "theme": theme, "fullscreen": true, "size": size, "clock": status.time, "battery_percent": 85,
                                     "active_workspace": workspace["id"].raw,
                                     "surface": paper ? "#ffffff" : store.state["palette"]["bg"].string,
-                                    "header_leading_inset": store.headerLeadingInset, "workspace": store.state["workspace"].raw,
+                                    "header_leading_inset": store.headerLeadingInset ?? 0, "workspace": store.state["workspace"].raw,
                                     "header": store.snapshot["header"].raw, "geometry": store.header.geometry.raw,
                                     "title": store.state["tabs"][0].raw, "elements": elements]))
                             }

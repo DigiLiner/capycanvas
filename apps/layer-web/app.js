@@ -65,7 +65,7 @@ let app,
   scheduled = false,
   layout,
   lastPenEvent = null,
-  chromeHeld = false,
+  heldPointers = new Set(),
   dragItem = null,
   statusTimer,
   statusError = null,
@@ -289,7 +289,7 @@ function queueLanguage() {
   if (languageTimer) return;
   languageTimer = setTimeout(() => {
     languageTimer = null;
-    const change = app.prepare_language(composingKey({target:document.activeElement}) || !!workspaceGesture || chromeHeld || compilerContacts.size > 0);
+    const change = app.prepare_language(composingKey({target:document.activeElement}) || !!workspaceGesture || heldPointers.size > 0 || compilerContacts.size > 0);
     if (change) applyChange(change);
     if (app.language_pending()) queueLanguage();
   }, 4);
@@ -984,7 +984,6 @@ function update(regions) {
 
 // Rust owns transient interaction policy. These are only DOM event/capture
 // records; CSS animates the returned visibility without resizing the canvas.
-let revealPointer = null;
 let workspaceGesture = null;
 // Watch only until pickup: an invalidated held tile must not leave a grab cursor.
 // Disconnect before dragging, when shared updates may deliberately reparent it.
@@ -1171,7 +1170,7 @@ function endWorkspaceGesture(e, cancel = false) {
   workspaceCursor(null);
   if (workspace.hasPointerCapture(drag.id)) workspace.releasePointerCapture(drag.id);
   dropIndicator.hidden = true;
-  if (drag.started || drag.held || drag.context) { revealPointer = drag.id; e?.preventDefault(); e?.stopPropagation(); }
+  if (!cancel && (drag.started || drag.held || drag.context)) { e?.preventDefault(); e?.stopPropagation(); }
   updateZen();
 }
 workspace.addEventListener("pointerdown", e => {
@@ -1318,7 +1317,7 @@ function chromeInput(event) {
       contact_tab: event.kind === "contact"
         ? document.elementFromPoint(...event.position)?.closest(".dock-tab")?.dataset.panel ?? null
         : null,
-      held: chromeHeld,
+      held: heldPointers.size > 0,
       dragging: dragItem !== null,
       popup_open:
         !!(document.querySelector("dialog[open], details[open]") || document.querySelector(":popover-open:not(.hover-tooltip)")) ||
@@ -1362,7 +1361,7 @@ window.addEventListener(
   (e) => {
     pointerStyle(e);
     if (e.target.closest?.("dialog[open]")) return;
-    if (!e.buttons) chromeHeld = false;
+    if (!e.buttons) heldPointers.delete(e.pointerId);
     // A captured paint contact cannot reveal chrome. The canvas listener owns
     // its samples/cursor; querying popups and hit-testing here duplicates work
     // and can force layout between input and the next drawing submission.
@@ -1380,7 +1379,6 @@ window.addEventListener(
   "pointerdown",
   (e) => {
     pointerStyle(e);
-    revealPointer = null;
     // Native DOM modals own their contacts. Workspace transitions deliberately
     // consume editor input, so forwarding a dialog contact would swallow its
     // buttons before the DOM click handler can run.
@@ -1389,14 +1387,16 @@ window.addEventListener(
       e.preventDefault();
       return;
     }
-    if (e.target.closest("#header")) chromeHeld = true;
+    if (e.target.closest("#header")) heldPointers.add(e.pointerId);
     const reply = chromeInput({
       kind: "contact",
       position: [e.clientX, e.clientY],
       canvas: e.target === canvas,
     });
     if (reply.handled) {
-      revealPointer = e.pointerId;
+      workspace.setPointerCapture(e.pointerId);
+      heldPointers.delete(e.pointerId);
+      updateZen();
       e.preventDefault();
       e.stopImmediatePropagation();
     }
@@ -1405,30 +1405,17 @@ window.addEventListener(
   { capture: true },
 );
 window.addEventListener(
-  "click",
-  (e) => {
-    // A reveal/dismiss contact must not activate a newly uncovered control.
-    if (revealPointer === e.pointerId) {
-      revealPointer = null;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
-  },
-  { capture: true },
-);
-window.addEventListener(
   "pointercancel",
-  () => {
-    revealPointer = null;
-    chromeHeld = false;
+  e => {
+    heldPointers.delete(e.pointerId);
     updateZen();
   },
   { capture: true },
 );
-window.addEventListener(
-  "pointerup",
-  () => {
-    chromeHeld = false;
+for (const name of ["pointerup", "lostpointercapture"]) window.addEventListener(
+  name,
+  e => {
+    heldPointers.delete(e.pointerId);
     updateZen();
   },
   { capture: true },
@@ -1732,7 +1719,7 @@ window.addEventListener("blur", () => {
 window.addEventListener("blur", () => {
   endWorkspaceGesture(null, true);
   cursorInput(null);
-  chromeHeld = false;
+  heldPointers.clear();
   if (input({ type: "blur" }).cancel_paint && lastPenEvent)
     queuePen(lastPenEvent, 4);
 });

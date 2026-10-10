@@ -82,7 +82,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
       await send({type:'close_settings'});
       const normal = await rectangles('#zen-button');
       const layout = await evaluate('layerApp.state().workspace.layout');
-      const camera = await evaluate('JSON.stringify(layerApp.state().camera,(_,v)=>typeof v==="bigint"?String(v):v)');
+      const camera = await evaluate('JSON.stringify({camera:layerApp.state().camera,canvas:layerApp.canvas.getBoundingClientRect().toJSON()},(_,v)=>typeof v==="bigint"?String(v):v)');
       const [width,height] = await evaluate('[innerWidth,innerHeight]');
       const center = [width/2,height/2], edge = [width/2,6];
       for (const device of ['touch','mouse','pen']) {
@@ -91,6 +91,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
         if(show)await checkTransition(normal,`${preset}/${theme}/${size}/${device}: entry`,true);
         await evaluate('new Promise(r=>setTimeout(r,220))');
         assert.ok(await hidden()); assert.equal(await capy(),show);
+        assert.ok(await evaluate("[...document.querySelectorAll('#header > *')].every(n=>getComputedStyle(n).opacity==='0')"));
         await capture(`zen-${theme}-${show}-${size}-${device}`);
         await motion(edge);
         await contact(device,edge);
@@ -114,7 +115,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
         }
         assert.equal(await hidden(),false); assert.equal(await capy(),false);
         assert.deepEqual(await evaluate('layerApp.state().workspace.layout'),layout);
-        assert.deepEqual(await evaluate('JSON.stringify(layerApp.state().camera,(_,v)=>typeof v==="bigint"?String(v):v)'),camera);
+        assert.deepEqual(await evaluate('JSON.stringify({camera:layerApp.state().camera,canvas:layerApp.canvas.getBoundingClientRect().toJSON()},(_,v)=>typeof v==="bigint"?String(v):v)'),camera);
       }
     }
     }

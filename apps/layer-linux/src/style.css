@@ -28,10 +28,12 @@ window, label, text { font-size: var(--ui-text-size); }
 .window-bar #document-selector > button { border-radius: var(--header-radius); }
 .window-bar .document-title { padding: 6px 8px; }
 .window-bar .header-tool:hover,
+.zen-capy:hover,
 .window-bar menubutton.chrome-control > button:hover,
 .window-bar #document-selector > button:hover,
 .window-bar windowcontrols > button:hover > image { background-image: image(alpha(var(--window-fg-color), .10)); }
 .window-bar .header-tool:active,
+.zen-capy:active,
 .window-bar menubutton.chrome-control > button:active,
 .window-bar menubutton.chrome-control > button:checked,
 .window-bar #document-selector > button:active,

@@ -48,7 +48,7 @@ import Darwin
     var acceptsGamepad: (() -> Bool)?
     static var gamepadTarget: EditorStore? { instances.allObjects.first { $0.acceptsGamepad?() == true } }
     /// Measured native window controls; editor geometry otherwise comes from Rust.
-    @Published var headerLeadingInset: CGFloat = 0
+    @Published var headerLeadingInset: CGFloat?
     var cameraRevision: UInt64 = 0
     var wake: (() -> Void)?
     var observeDisplayHeadroom: (() -> Void)?
@@ -325,7 +325,7 @@ import Darwin
         }
     }
     func input(_ value: [String: Any]) {
-        if value["type"] as? String == "blur" { interruptInput?(); workspace.dismissTransients(at: nil) }
+        if value["type"] as? String == "blur" { interruptInput?(); workspace.headerHeld = false; workspace.dismissTransients(at: nil) }
         if value["type"] as? String == "key", let key = value["key"] as? String,
            let modifiers = value["modifiers"] as? [String: Any],
            palettes.key(key, pressed: value["pressed"] as? Bool == true,

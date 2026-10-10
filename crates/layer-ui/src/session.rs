@@ -1025,6 +1025,15 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// Small event/reply boundary shared by native and Wasm hosts. Pen samples
     /// are only queued when `paint` is true, without serializing UiState.
     pub fn input(&mut self, input: UiInput) -> Result<InputReply, String> {
+        let reply = self.route_input(input)?;
+        self.refresh_chrome();
+        Ok(InputReply {
+            chrome_hidden: self.interaction.hidden,
+            keep_zen_button: self.interaction.hidden && self.state.settings.zen_show_capy,
+            ..reply
+        })
+    }
+    fn route_input(&mut self, input: UiInput) -> Result<InputReply, String> {
         self.engine.backend_mut().shader_input();
         // Tool routing and UI transitions may consume terminal events, but
         // must never keep their contacts alive in the camera gesture.
@@ -1035,10 +1044,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.touch.release(*id);
         }
         let tap = self.recognize_tap(&input);
-        let mut reply = InputReply {
-            chrome_hidden: self.interaction.hidden,
-            ..Default::default()
-        };
+        let mut reply = InputReply::default();
         let mut contact = None;
         if self.workspace_transition {
             reply.handled = true;
@@ -1366,7 +1372,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                         }
                         reply.change = self.changed(regions::SETTINGS, false);
                         reply.handled = true;
-                        reply.chrome_hidden = false;
                         return Ok(reply);
                     }
                     if key == "escape" && !editing && self.canvas_idle() && !self.interaction.facts.popup_open && self.state.pressure_calibration.is_some() {
@@ -1624,8 +1629,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 || (was_hidden && !self.interaction.hidden)
                 || (released_chrome_pin && self.interaction.hidden);
         }
-        reply.chrome_hidden = self.interaction.hidden;
-        reply.keep_zen_button = self.interaction.hidden && self.state.settings.zen_show_capy;
         reply.navigation_cursor = self.navigation_mode();
         reply.pan_cursor = reply.navigation_cursor == Some(NavigationMode::Pan);
         Ok(reply)
@@ -11090,7 +11093,7 @@ mod tests {
 
     #[test]
     fn tab_toggles_zen_but_preserves_editor_navigation_and_custom_bindings() {
-        for platform in [Platform::Gtk, Platform::Web, Platform::Android] {
+        for platform in Platform::ALL {
             let mut s = session(platform);
             assert_eq!(s.command(CommandId::ZenMode).shortcut, "Tab");
             assert!(!key(&mut s, "Tab", true, false, true).handled);
@@ -11117,19 +11120,22 @@ mod tests {
     }
 
     #[test]
-    fn zen_keeps_capy_size_and_hides_chrome_at_every_edge() {
+    fn zen_preserves_header_camera_layout_and_fit_without_canvas_work() {
         for platform in Platform::ALL {
             for (size, icon) in HeaderSize::ALL.into_iter().zip([31, 41, 52]) {
                 for capy in [true, false] {
                     let mut s = session(platform);
                     s.state.workspace.layout.header.size = size;
+                    s.set_viewport([1000.; 2], [1000; 2]).unwrap();
                     preference(&mut s, PreferenceAction::Edit {
                         id: PreferenceId::ZenShowCapy, value: PreferenceValue::Bool(capy),
                     });
                     let layout = s.state.workspace.layout.clone();
                     let camera = s.state.camera.clone();
                     let normal = serde_json::to_value(s.header_view()).unwrap();
-                    invoke(&mut s, CommandId::ZenMode);
+                    chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default());
+                    assert!(!invoke(&mut s, CommandId::ZenMode).canvas_wake);
+                    assert!(s.interaction.hidden);
                     let zen = serde_json::to_value(s.header_view()).unwrap();
                     assert_eq!(normal["sizes"], zen["sizes"]);
                     assert_eq!(normal["model"]["size"], zen["model"]["size"]);
@@ -11148,114 +11154,70 @@ mod tests {
                     }
                     assert_eq!(s.state.workspace.layout, layout);
                     assert_eq!(s.state.camera, camera);
-                    assert!(!key(&mut s, "Tab", true, false, false).chrome_hidden);
+                    assert!(!invoke(&mut s, CommandId::ZenMode).canvas_wake);
+                    assert!(!chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default()).chrome_hidden);
                     assert!(!s.state.workspace.zen_mode);
+                    invoke(&mut s, CommandId::FitCanvas);
+                    assert_eq!(s.state.camera.viewport, [1000, 1000]);
+                    assert_eq!(s.state.camera.translation, camera.translation);
+                    assert_eq!(s.state.camera.zoom, camera.zoom);
+                    let mut full = session(platform);
+                    full.set_viewport([2000.; 2], [2000; 2]).unwrap();
+                    invoke(&mut full, CommandId::FitCanvas);
+                    assert!(full.state.camera.zoom > camera.zoom);
                 }
             }
         }
     }
 
     #[test]
-    fn zen_visibility_pinning_and_first_contact_are_core_state() {
-        let mut s = session(Platform::Gtk);
-        invoke(&mut s, CommandId::ZenMode);
-        let touch = |p| ChromeEvent::Contact {
-            position: p,
-            canvas: true,
-        };
-        let facts = ChromeFacts::default();
-        assert!(chrome(&mut s, ChromeEvent::Motion, facts).chrome_hidden);
-        assert!(
-            !chrome(&mut s, touch([600.0, 898.0]), facts).handled,
-            "HUD is not a bottom panel"
-        );
-        let first = chrome(&mut s, touch([20.0, 450.0]), facts);
-        assert!(!first.handled && first.chrome_hidden);
-        assert!(!chrome(&mut s, touch([20.0, 450.0]), facts).handled);
-        assert!(chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
-        for facts in [
-            ChromeFacts {
-                held: true,
-                ..facts
-            },
-            ChromeFacts {
-                popup_open: true,
-                ..facts
-            },
-        ] {
-            assert!(!chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
+    fn zen_visibility_events_keep_capy_neutral_for_every_pin_combination() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            for zen in [false, true] { for show in [false, true] { for mask in 0..512 {
+                let [held, dragging, popup_open, keyboard, until_contact, settings, customization, read_only, transitioning] =
+                    std::array::from_fn(|bit| mask & (1 << bit) != 0);
+                let facts = ChromeFacts { held, dragging, popup_open, ..Default::default() };
+                for input in [ChromeEvent::Refresh, ChromeEvent::Motion,
+                    ChromeEvent::Contact { position: [600., 450.], canvas: false },
+                    ChromeEvent::Contact { position: [600., 450.], canvas: true }]
+                    .map(|event| UiInput::Chrome { event, facts, viewport: [1200., 900.] })
+                    .into_iter().chain([UiInput::Blur, UiInput::CursorLeave]) {
+                    s.state.workspace.zen_mode = zen;
+                    s.state.settings.zen_show_capy = show;
+                    s.state.settings_open = settings;
+                    s.state.customization.toolbar_manager = customization.then(Default::default);
+                    s.workspace_read_only = read_only;
+                    s.workspace_transition = transitioning;
+                    s.interaction.keyboard_chrome = keyboard;
+                    s.interaction.keep_chrome_until_contact = until_contact;
+                    s.interaction.facts = facts;
+                    s.refresh_chrome();
+                    s.refresh_commands();
+                    let contact = matches!(input, UiInput::Chrome { event: ChromeEvent::Contact { .. }, .. });
+                    let blocked = transitioning || (read_only && contact);
+                    let blur = matches!(input, UiInput::Blur) && !blocked;
+                    let pinned = (held && !blur) || dragging || popup_open || settings || customization
+                        || ((blocked || matches!(input, UiInput::Chrome { event: ChromeEvent::Refresh, .. } | UiInput::CursorLeave)) && keyboard)
+                        || ((blocked || !contact) && until_contact);
+                    let hidden = zen && !pinned;
+                    let reply = s.input(input.clone()).unwrap();
+                    assert_eq!(reply.chrome_hidden, hidden, "{platform:?}/{zen}/{show}/{mask}/{input:?}");
+                    assert_eq!(reply.keep_zen_button, hidden && show);
+                    let canvas = matches!(input, UiInput::Chrome { event: ChromeEvent::Contact { canvas: true, .. }, .. });
+                    assert_eq!(reply.dismiss_popups, !blocked && canvas && facts.popup_open);
+                    assert_eq!(reply.handled, blocked || (canvas && (popup_open || (until_contact && hidden))));
+                    assert_eq!(s.command(CommandId::ZenMode).selected, zen && !read_only && !transitioning);
+                    let view = s.header_view();
+                    let capy = view.model.entries().find(|entry| entry.item == HeaderItem::Capy).unwrap().id;
+                    let button = view.items.iter().find(|item| item.id == capy).unwrap();
+                    assert_eq!(button.enabled, s.command(CommandId::ZenMode).enabled);
+                    assert!(!button.selected,
+                        "Capy must have no retained selection fill: {platform:?}/{zen}/{mask}/{input:?}");
+                }
+            } } }
         }
-        let dismiss = chrome(
-            &mut s,
-            touch([600.0, 450.0]),
-            ChromeFacts {
-                popup_open: true,
-                ..facts
-            },
-        );
-        assert!(dismiss.handled && dismiss.dismiss_popups);
-        invoke(&mut s, CommandId::Settings);
-        assert!(!chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
-        s.dispatch(UiAction::CloseSettings).unwrap();
-        assert!(chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
-        assert!(!key(&mut s, "Tab", true, false, false).chrome_hidden);
-        assert!(!s.state.workspace.zen_mode);
-        assert!(!chrome(&mut s, ChromeEvent::Motion, facts).chrome_hidden);
     }
-    #[test]
-    fn enabling_zen_hides_immediately_after_capy_contact() {
-        let mut s = session(Platform::Gtk);
-        let facts = ChromeFacts::default();
-        chrome(&mut s, ChromeEvent::Motion, facts);
-        invoke(&mut s, CommandId::ZenMode);
-        assert!(s.interaction.hidden);
-        for event in [ChromeEvent::Refresh,
-            ChromeEvent::Motion,
-            ChromeEvent::Contact { position: [24., 24.], canvas: false }] {
-            assert!(chrome(&mut s, event, facts).chrome_hidden);
-        }
-        invoke(&mut s, CommandId::ZenMode);
-        assert!(!chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
-    }
-
-    #[test]
-    fn zen_stays_visible_through_drag_focus_loss_until_drag_end() {
-        let mut s = session(Platform::Gtk);
-        invoke(&mut s, CommandId::ZenMode);
-        let dragging = ChromeFacts {
-            dragging: true,
-            ..ChromeFacts::default()
-        };
-        assert!(
-            !chrome(
-                &mut s,
-                ChromeEvent::Motion,
-                dragging
-            )
-            .chrome_hidden
-        );
-        assert!(!s.input(UiInput::Blur).unwrap().chrome_hidden);
-        assert!(!chrome(&mut s, ChromeEvent::Refresh, dragging).chrome_hidden);
-        assert!(chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default()).chrome_hidden);
-        assert!(
-            chrome(
-                &mut s,
-                ChromeEvent::Motion,
-                ChromeFacts::default()
-            )
-            .chrome_hidden
-        );
-        let next = chrome(
-            &mut s,
-            ChromeEvent::Contact {
-                position: [600.0, 450.0],
-                canvas: true,
-            },
-            ChromeFacts::default(),
-        );
-        assert!(!next.handled && next.chrome_hidden && !next.paint);
-    }
-
     #[test]
     fn native_editor_escape_preserves_popups_and_drawers() {
         for platform in Platform::ALL {
@@ -14967,29 +14929,6 @@ mod tests {
         assert!((s.state.camera.zoom - before.zoom * 1.25).abs() < 0.0001);
         assert!((s.state.camera.rotation - before.rotation - 0.2).abs() < 0.0001);
         assert!(s.state.host_error.is_none());
-    }
-    #[test]
-    fn zen_does_not_move_camera_layout_or_request_canvas_work() {
-        let mut s = session(Platform::Gtk);
-        s.set_viewport([1000.0; 2], [1000; 2]).unwrap();
-        let camera = s.state.camera.clone();
-        let layout = s.state.workspace.layout.clone();
-        for zen_mode in [true, false] {
-            let change = invoke(&mut s, CommandId::ZenMode);
-            assert!(!change.canvas_wake);
-            assert_eq!(s.state.camera, camera);
-            assert_eq!(s.state.workspace.layout, layout);
-            assert_eq!(s.state.workspace.zen_mode, zen_mode);
-            assert_eq!(s.command(CommandId::ZenMode).selected, zen_mode);
-        }
-        invoke(&mut s, CommandId::FitCanvas);
-        assert_eq!(s.state.camera.viewport, [1000, 1000]);
-        assert_eq!(s.state.camera.translation, camera.translation);
-        assert_eq!(s.state.camera.zoom, camera.zoom);
-        let mut full = session(Platform::Gtk);
-        full.set_viewport([2000.0; 2], [2000; 2]).unwrap();
-        invoke(&mut full, CommandId::FitCanvas);
-        assert!(full.state.camera.zoom > camera.zoom);
     }
     #[test]
     fn initial_state_and_every_preset_are_valid() {

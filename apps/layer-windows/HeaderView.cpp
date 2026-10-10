@@ -73,7 +73,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     MenuFlyout activeMenu{nullptr};std::function<void(MenuItems)> menuPopulate;hstring menuSource,hoveredMenu;
     bool scheduled=false,trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     float leftInset=0,rightInset=0;
-    double tile=36,iconSize=20,capyIconSize=0,itemGap=6,height=48,totalHeight=48,menuWidth=0,switchWidth=36;
+    double tile=36,iconSize=20,itemGap=6,height=48,totalHeight=48,menuWidth=0,switchWidth=36;
     std::optional<uint64_t> menuGeneration;
     uint32_t focusedItem=0;
     std::set<uint32_t> handledRequests;
@@ -447,6 +447,8 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         }
     }
     void applyItems(){
+        auto size=find(array(view,L"sizes"),L"id",str(geometry,L"size",str(object(view,L"model"),L"size")));
+        tile=num(size,L"tile",36);iconSize=num(size,L"icon",20);itemGap=num(size,L"item_gap");height=num(size,L"height",48);
         std::map<uint32_t,hstring> incoming;
         for(auto zone:array(object(view,L"model"),L"zones"))for(auto value:zone.GetArray()){
             auto entry=value.GetObject();incoming.emplace(uint32_t(num(entry,L"id")),object(entry,L"item").Stringify());
@@ -499,7 +501,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
                 }else if(kind==L"tool"&&ctlKind==L"divider"){
                     Border line;line.Height(1);line.Margin({6,6,6,6});line.Background(data->brush(L"tabbar"));pick.Content(line);
                 }else if(!iconName.empty()){
-                    auto glyphSize=kind==L"capy"?capyIconSize:iconSize;
+                    auto glyphSize=kind==L"capy"?num(size,L"capy_icon"):iconSize;
                     auto iconKey=iconName+L":"+to_hstring(glyphSize);
                     if(native.iconKey!=iconKey){pick.Content(icon(iconName,data->theme(),glyphSize));native.iconKey=iconKey;}
                     if(kind==L"capy")pick.Padding({0,0,0,0});
@@ -581,8 +583,9 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         place(background,O({{L"x",N(0)},{L"y",N(0)},{L"width",N(width)},{L"height",N(height)}}));
         background.Visibility(hidden?Visibility::Collapsed:Visibility::Visible);
         A metrics;auto model=object(view,L"model");
+        auto requestedSize=find(array(view,L"sizes"),L"id",str(model,L"size"));double requestedTile=num(requestedSize,L"tile");
         for(auto const& [id,native]:items){
-            auto kind=str(object(native.entry,L"item"),L"kind");double natural=tile,compact=tile;
+            auto kind=str(object(native.entry,L"item"),L"kind");double natural=requestedTile,compact=requestedTile;
             if(kind==L"menu_labels")natural=menuWidth;
             else if(kind==L"workspaces"){natural=std::max(144.,switchWidth);compact=144.;}
             else if(kind==L"document_title"){
@@ -593,25 +596,30 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
                 auto padding=systemStatus->Clock().Padding();
                 natural=fullscreenActive||editing?textWidth(editing&&!fullscreenActive?data->caption(L"header",L"clock"):systemStatus->Clock().Child().as<TextBlock>().Text())+padding.Left+padding.Right:0;
             }
-            else if(kind==L"battery")natural=editing||(fullscreenActive&&systemStatus->HasBattery())?tile:0;
+            else if(kind==L"battery")natural=editing||(fullscreenActive&&systemStatus->HasBattery())?requestedTile:0;
             if(kind==L"clock"||kind==L"battery")compact=natural;
             double grip=editing?20.:0.;metrics.Append(O({{L"id",N(id)},{L"width",N(natural+grip)},{L"compact",N(compact+grip)}}));
         }
         bool navigation=false;
         for(auto const& [id,native]:items){auto kind=str(object(native.entry,L"item"),L"kind");navigation|=kind==L"capy"||kind==L"menu"||kind==L"menu_labels";}
-        A insets;insets.Append(N(leftInset+(!editing&&!navigation?tile+itemGap:0)));insets.Append(N(rightInset));
-        configuration=O({{L"op",S(L"geometry")},{L"width",N(width)},{L"insets",insets},{L"metrics",metrics}});
-        input->Configure(model,editing,configuration);
-        auto key=model.Stringify()+configuration.Stringify()+(editing?L":editing":L":normal");
+        A insets;insets.Append(N(leftInset+(!editing&&!navigation?requestedTile+num(requestedSize,L"item_gap"):0)));insets.Append(N(rightInset));
+        auto requested=O({{L"op",S(L"geometry")},{L"model",model},{L"editing",B(editing)},{L"documents",N(array(object(data->model,L"windows_tabs"),L"tabs").Size())},{L"width",N(width)},{L"insets",insets},{L"metrics",metrics}});
+        auto key=requested.Stringify();
         desiredKey=key;
         if(key!=geometryKey&&!queryBusy){
             queryBusy=true;
-            bool accepted=QueryWorkspace(data->query,O({{L"type",S(L"header")},{L"request",configuration}}),
-                [weak=weak_from_this(),key](J reply){if(auto self=weak.lock()){
+            bool accepted=QueryWorkspace(data->query,O({{L"type",S(L"header")},{L"request",requested}}),
+                [weak=weak_from_this(),key,requested](J reply){if(auto self=weak.lock()){
                     self->queryBusy=false;
                     if(self->desiredKey==key){
                         auto next=object(reply,L"result");
-                        if(next.Size()){self->geometry=next;self->geometryKey=key;self->present();self->publish();}
+                        if(next.Size()){
+                            bool resized=str(next,L"size")!=str(self->geometry,L"size");
+                            self->geometry=next;self->configuration=requested;self->geometryKey=key;
+                            self->input->Configure(object(requested,L"model"),flag(requested,L"editing"),requested);
+                            if(resized){self->applyItems();self->reflow();}
+                            else{self->present();self->publish();}
+                        }
                     }
                     self->schedule();
                 }});
@@ -716,8 +724,8 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         if(!snapshot.HasKey(L"state"))return;
         data->model=snapshot;data->state=object(snapshot,L"state");data->refreshPalette();view=object(snapshot,L"header");
         if(!view.Size())return;
+        if(editing!=flag(view,L"editing"))input->Cancel();
         editing=flag(view,L"editing");hidden=flag(snapshot,L"chrome_hidden")&&!flag(snapshot,L"windows_rendering_suspended");
-        auto size=find(array(view,L"sizes"),L"id",str(object(view,L"model"),L"size"));tile=num(size,L"tile",36);iconSize=num(size,L"icon",20);capyIconSize=num(size,L"capy_icon");itemGap=num(size,L"item_gap");height=num(size,L"height",48);
         auto nextTheme=data->theme(),nextPalette=object(data->state,L"palette").Stringify();
         if(!built||nextTheme!=theme||nextPalette!=palette){theme=nextTheme;palette=nextPalette;build();}
         root.RequestedTheme(theme==L"dark"?ElementTheme::Dark:ElementTheme::Light);
@@ -780,7 +788,7 @@ HeaderView::~HeaderView()=default;
 Grid HeaderView::Root()const{return impl->root;}
 void HeaderView::Apply(Json const& snapshot){impl->apply(snapshot);}
 void HeaderView::SetInsets(float left,float right){if(left!=impl->leftInset||right!=impl->rightInset){impl->leftInset=left;impl->rightInset=right;impl->schedule();}}
-HeaderView::Json HeaderView::ZenButtonBounds()const{return CapyUi::object(impl->geometry,L"zen_button");}
+HeaderView::Json HeaderView::Geometry()const{return impl->geometry;}
 void HeaderView::SetFullscreen(bool active){
     if(active==impl->fullscreenActive)return;
     impl->fullscreenActive=active;

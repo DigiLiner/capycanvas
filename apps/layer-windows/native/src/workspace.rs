@@ -211,7 +211,7 @@ mod tests {
             json!({"type":"panel_handle_target","item":{"kind":"panel","panel":"layers"}}),
             json!({"type":"drawer","column":null,"heights":[],"progress":1}),
             json!({"type":"expansion","panel":"toolbar","heights":[0,420],"progress":1}),
-            json!({"type":"header","request":{"op":"geometry","width":1400,"insets":[0,0],"metrics":[]}}),
+            json!({"type":"header","request":{"op":"geometry","model":host.session.state().workspace.layout.header.projected_for(layer_ui::Platform::Windows),"editing":false,"documents":1,"width":1400,"insets":[0,0],"metrics":[]}}),
             json!({"type":"swatch_sheet","query":"","current":layer_core::color::RgbColor::WHITE}),
             json!({"type":"swatch_sheet","query":"zzz","current":layer_core::color::RgbColor::WHITE}),
         ] {

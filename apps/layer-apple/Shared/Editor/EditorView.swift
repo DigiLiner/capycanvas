@@ -72,9 +72,12 @@ struct EditorView<Canvas: View>: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(EditorPopoverHost())
         .coordinateSpace(name: "editor-workspace")
-        .editorChromeContact { point in
+        .editorChromeContact { point, held in
+            guard let point else { store.workspace.headerHeld = held; store.workspace.refreshChrome(); return false }
+            let header = !store.snapshot["chrome_hidden"].bool && point.y >= 0 && point.y < store.header.size["height"].number
+            store.workspace.headerHeld = store.workspace.headerHeld || (held && header)
             store.layerSwipe.contact(at: point)
-            store.workspace.chrome(["kind": "contact", "position": [point.x, point.y], "canvas": false])
+            store.workspace.chrome(["kind": "contact", "position": [point.x, point.y], "canvas": false]); return header
         }
         .onContinuousHover(coordinateSpace: .named("editor-workspace")) { phase in
             switch phase {
@@ -301,17 +304,20 @@ private struct ManagedPersistenceProbe: View {
 @MainActor private struct ZenCapy: View {
     @ObservedObject var store: EditorStore
     @ObservedObject private var header: HeaderPresentation
+    @State private var hovering = false
     init(store: EditorStore) { self.store = store; self.header = store.header }
     var body: some View {
         if store.snapshot["keep_zen_button"].bool && !header.geometry["zen_button"].isNull {
             let command = store.command("zen_mode")
-            let view = store.snapshot["header"]
-            let size = view["sizes"].array.first { $0["id"].string == view["model"]["size"].string } ?? JSON()
-            let palette = EditorPalette(source: store.state["palette"])
-            IconTile(icon: command["icon"].string, label: command["tooltip"].string,
-                enabled: command["enabled"].bool, size: size["capy_icon"].number, corner: .half) { store.invoke("zen_mode") }
+            let size = header.size
+            Button { store.invoke("zen_mode") } label: {
+                PanelIcon(name: command["icon"].string, size: size["capy_icon"].number)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+            }.buttonStyle(HeaderButtonStyle(hovering: hovering, radius: size["tile"].number / 2))
                 .frame(width: size["tile"].number, height: size["tile"].number)
-                .glassSurface(SquircleShape.tile, fill: palette.chromeSurface)
+                .disabled(!command["enabled"].bool).opacity(command["enabled"].bool ? 1 : 0.36)
+                .accessibilityLabel(command["label"].string).help(command["tooltip"].string)
+                .onHover { hovering = $0 }.onDisappear { hovering = false }
                 .modifier(WorkspaceContext(store: store, target: JSON(["kind": "zen_mode"])))
                 .placed(header.geometry["zen_button"]).accessibilityIdentifier("zen-button")
         }

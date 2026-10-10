@@ -1,6 +1,12 @@
 use super::*;
 
-fn request(app: &App, value: Value) -> Value {
+fn request(app: &App, mut value: Value) -> Value {
+    if matches!(value["op"].as_str(), Some("geometry" | "begin")) {
+        let snapshot = app.full_snapshot();
+        value["model"] = snapshot["header"]["model"].clone();
+        value["editing"] = snapshot["header"]["editing"].clone();
+        value["documents"] = json!(snapshot["document_tabs"]["tabs"].as_array().map_or(1, Vec::len));
+    }
     let action = matches!(value["op"].as_str(), Some("finish" | "step"));
     let reply = app
         .request(2, json!({"type":"header","request":value}))

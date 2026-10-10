@@ -46,6 +46,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         return false;
     }
     bool active()const{return pointer||starting||started||busy||ending;}
+    bool editable()const{return editing&&flag(object(data->model,L"header"),L"editing");}
     void evidence(){
         if(!trace)return;
         AutomationProperties::SetHelpText(root,O({
@@ -67,7 +68,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(!keepMenu)hideMenu();
         release();++generation;starting=started=busy=ending=cancelled=dragging=dirty=held=false;
         dragCursor(root,false,false);
-        source=J{};beginRequest=J{};preview=J{};timer.Stop();notify();
+        source=J{};beginRequest=J{};preview=J{};timer.Stop();chrome(position,false);notify();
     }
     bool cancel(hstring reason=L"cancel"){
         if(!active()&&!menuOpen)return false;
@@ -105,13 +106,13 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(!accepted)cancel(L"capture_failed");
         return accepted;
     }
-    void chrome(Point at){
+    void chrome(Point at,bool pressed=true){
         if(!data->input||!root.XamlRoot())return;
         auto size=root.XamlRoot().Size();if(size.Width<=0||size.Height<=0)return;
-        auto facts=O({{L"held",B(held||dragging)},{L"dragging",B(dragging)},
+        auto facts=O({{L"held",B(pointer.has_value()||held||dragging)},{L"dragging",B(dragging)},
             {L"popup_open",B(data->externalPopup||data->popupCount>0)}});
         data->input(to_string(O({{L"type",S(L"chrome")},{L"viewport",point({size.Width,size.Height})},
-            {L"event",O({{L"kind",S(L"contact")},{L"position",point(at)},{L"canvas",B(false)}})},{L"facts",facts}}).Stringify()));
+            {L"event",pressed?O({{L"kind",S(L"contact")},{L"position",point(at)},{L"canvas",B(false)}}):O({{L"kind",S(L"refresh")}})},{L"facts",facts}}).Stringify()));
     }
     FrameworkElement target(Windows::Foundation::IInspectable const& original)const{
         for(auto node=original.try_as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node)){
@@ -143,7 +144,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
                     self->started=result.ValueType()==JsonValueType::Boolean&&result.GetBoolean();
                     if(!self->started){self->clear();return;}
                 }else if(finish){
-                    bool commit=!self->cancelled&&self->editing&&self->focused()&&self->current();
+                    bool commit=!self->cancelled&&self->editable()&&self->focused()&&self->current();
                     auto action=result.ValueType()==JsonValueType::Object?result.GetObject():J{};
                     self->clear();
                     if(commit&&action.Size())self->data->dispatch(action);
@@ -213,24 +214,24 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             });
     }
     void down(PointerRoutedEventArgs const& e){
-        if(active()){if(pointer!=e.Pointer().PointerId())cancel(L"additional_contact");return;}
+        if(active()){if(pointer==e.Pointer().PointerId())return;cancel(L"additional_contact");if(active())return;}
         if(data->externalPopup)return;
         auto p=e.GetCurrentPoint(root);if(!p.IsInContact())return;
         auto element=target(e.OriginalSource());if(!element)return;
         auto tag=element.Tag().as<J>();auto item=object(tag,L"header_source");
         if(p.Properties().IsRightButtonPressed()||p.Properties().IsBarrelButtonPressed())return;
         if(p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse&&!p.Properties().IsLeftButtonPressed())return;
-        chrome(p.Position());auto kind=str(item,L"kind");
-        if(kind==L"background"){if(editing){selected=0;notify();e.Handled(true);}return;}
+        auto kind=str(item,L"kind");
         bool isItem=kind==L"item";
-        if(!editing&&(!isItem||p.PointerDeviceType()==NativeInput::PointerDeviceType::Mouse))return;
-        if(editing)selected=isItem?uint32_t(num(item,L"value")):0;
+        if(editable())selected=isItem?uint32_t(num(item,L"value")):0;
         ++generation;cancelled=false;hideMenu();source=item;originElement=make_weak(element);originFocus=make_weak(focusSource(e.OriginalSource()));
         for(auto node=e.OriginalSource().try_as<DependencyObject>();node;node=VisualTreeHelper::GetParent(node)){
             if(auto target=node.try_as<UIElement>())pressedPath.push_back(make_weak(target));
             if(node==root)break;
         }
         origin=position=p.Position();pointer=p.PointerId();contact=e.Pointer();device=p.PointerDeviceType();
+        chrome(position);
+        if(kind==L"background"&&editable()){selected=0;notify();e.Handled(true);}
         owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);auto dpi=GetDpiForWindow(owner);
         slopX=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));
         slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
@@ -240,17 +241,18 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(isItem&&device!=NativeInput::PointerDeviceType::Mouse){
             recognizing=true;recognizer.GestureSettings(NativeInput::GestureSettings::Hold);recognizer.ProcessDownEvent(p);
         }
-        if(editing){claim();e.Handled(true);}
+        if(editable()&&kind!=L"background"){claim();e.Handled(true);}
         timer.Start();notify();
     }
     void move(PointerRoutedEventArgs const& e){
         if(!pointer||*pointer!=e.Pointer().PointerId()||ending)return;
         if(!focused()||!current()){cancel(L"source_or_focus_lost");return;}
+        if(!editable()&&device==NativeInput::PointerDeviceType::Mouse)return;
         auto next=e.GetCurrentPoint(root).Position();
         if(recognizing&&!held)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
         bool moved=std::abs(next.X-origin.X)>slopX||std::abs(next.Y-origin.Y)>slopY;
         if(!dragging&&moved){
-            if(!editing){clear();return;}
+            if(!editable()){clear();return;}
             if(!claim())return;
             hideMenu();stopRecognition();dragging=true;starting=true;dragCursor(root,device==NativeInput::PointerDeviceType::Touch,true);
         }
@@ -258,13 +260,14 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     }
     void up(PointerRoutedEventArgs const& e){
         if(!pointer||*pointer!=e.Pointer().PointerId())return;
+        if(device==NativeInput::PointerDeviceType::Mouse&&e.GetCurrentPoint(root).Properties().IsLeftButtonPressed())return;
         if(!focused()||!current()){cancel(L"source_or_focus_lost");e.Handled(true);return;}
         auto p=e.GetCurrentPoint(root);
         if(recognizing){recognizing=false;recognizer.ProcessUpEvent(p);}
         if(dragging){
             position=p.Position();ending=true;release();pump();e.Handled(true);notify();
         }else{
-            bool handled=editing||held;clear(held);if(handled)e.Handled(true);
+            bool handled=editable()||held;clear(held);if(handled)e.Handled(true);
         }
     }
     void init(){
@@ -350,7 +353,7 @@ bool HeaderInput::Key(KeyRoutedEventArgs const& e,bool pressed){
         }
     }
     if(key==K::Escape&&impl->menuOpen){e.Handled(true);if(pressed)impl->cancel();return true;}
-    if(!impl->editing)return false;
+    if(!impl->editable())return false;
     if(key!=K::Escape&&key!=K::Left&&key!=K::Right&&key!=K::Delete&&key!=K::Back&&!context)return false;
     if(key!=K::Escape&&!impl->selected)return false;
     e.Handled(true);if(!pressed)return true;
@@ -361,7 +364,7 @@ bool HeaderInput::Key(KeyRoutedEventArgs const& e,bool pressed){
     else {
         auto serial=impl->identity;auto id=impl->selected;
         QueryWorkspace(impl->data->query,O({{L"type",S(L"header")},{L"request",O({{L"op",S(L"step")},{L"id",N(id)},{L"forward",B(key==K::Right)}})}}),
-            [weak=std::weak_ptr<Impl>(impl),serial](J reply){if(auto self=weak.lock();self&&self->editing&&self->identity==serial){
+            [weak=std::weak_ptr<Impl>(impl),serial](J reply){if(auto self=weak.lock();self&&self->editable()&&self->identity==serial){
                 auto action=object(reply,L"result");if(action.Size())self->data->dispatch(action);
             }});
     }

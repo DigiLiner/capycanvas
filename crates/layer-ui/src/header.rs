@@ -518,6 +518,7 @@ pub struct HeaderNativeGeometry {
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct HeaderGeometry {
+    pub size: HeaderSize,
     pub zen_button: Bounds,
     pub items: Vec<HeaderItemBounds>,
     pub zones: [Bounds; 3],
@@ -668,7 +669,7 @@ impl<R: layer_render::CanvasRenderer> UiSession<R> {
                         let (enabled, selected) = tool_state(state, control);
                         (enabled, selected, tool_icon(state, control))
                     }
-                    HeaderItem::Capy => (true, state.workspace.zen_mode, ""),
+                    HeaderItem::Capy => (tool_state(state, ToolbarControl::Command { command: CommandId::ZenMode }).0, false, ""),
                     _ => (true, false, ""),
                 };
                 let (label,enabled,selected,icon,resolved_control,has_variants)=match entry.item {
@@ -752,7 +753,7 @@ impl HeaderLayout {
         metrics: &[HeaderMetric],
         editing: bool,
     ) -> HeaderGeometry {
-        let mut result = HeaderGeometry::default();
+        let mut result = HeaderGeometry { size: self.size, ..Default::default() };
         if !width.is_finite() || width <= 0. {
             return result;
         }
@@ -1085,6 +1086,7 @@ mod tests {
                             for insets in [[0.; 2], [80., 120.]] {
                                 for documents in [1, 3] {
                                     let geometry = header.resolve_documents(width, insets, &[], false, documents);
+                                    assert_eq!(geometry.size, size);
                                     if let Some(item) = geometry.items.iter().find(|item| item.id == capy) {
                                         assert_eq!(geometry.zen_button, item.bounds, "{platform:?}/{preset:?}/{size:?}/{zone:?}/{width}/{documents}");
                                     } else {

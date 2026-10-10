@@ -15,6 +15,7 @@ import SwiftUI
         store.native?.resize(width: 1200, height: 870, scale: 1)
         let window = NSWindow(contentRect: CGRect(x: 60, y: 80, width: 1200, height: 870),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        store.headerLeadingInset = 0
         window.isReleasedWhenClosed = false; window.animationBehavior = .none
         defer { window.contentView = nil; window.close() }
         let notifications = NotificationCenter()
