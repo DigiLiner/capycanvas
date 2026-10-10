@@ -8533,8 +8533,9 @@ fn native_panel_slider_input() {
         assert!(bar.y() - bottom <= 4., "hit area reaches the label's bottom");
         assert_eq!(size.height(), 36);
         assert_eq!(bar.x(), 36.);
-        assert_eq!(size.width() as f32 - bar.x() - bar.width(), 72.);
+        assert_eq!(size.width() as f32 - bar.x() - bar.width(), 76.);
         let value = find_css(size.upcast_ref(), "number-value").unwrap().compute_bounds(&size).unwrap();
+        assert_eq!(size.width() as f32 - value.x() - value.width(), 0.);
         assert!((value.y() + value.height() / 2. - size.height() as f32 / 2.).abs() <= 1.);
         assert_eq!(opacity.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 2.);
         assert!(find_css(size.upcast_ref(), "number-step").is_none());
@@ -8835,12 +8836,24 @@ fn native_number_controls() {
     assert!(find_css(size.upcast_ref(), "number-step").is_none());
     assert_eq!(bar.height(), 16.0);
     assert_eq!(bar.x(), 36.0);
-    assert_eq!(size.width() as f32 - bar.x() - bar.width(), 72.0);
+    assert_eq!(size.width() as f32 - bar.x() - bar.width(), 76.0);
     assert_eq!(scale.range_rect().width(), scale.width());
     let (start, end) = scale.slider_range();
     assert_eq!(start, end, "compact slider reserves no thumb width");
     let value_label: gtk::Label = descendant(&descendant::<gtk::Button>(&size).unwrap()).unwrap();
     assert_eq!(value_label.xalign(), 1.0);
+    for value in [2048., 2047.9, 123.5] {
+        size.set_value(value);
+        pump(30);
+        assert!(value_label.width() >= value_label.layout().pixel_size().0, "the full number readout fits");
+        click(&descendant::<gtk::Button>(&size).unwrap());
+        pump(30);
+        let editor = descendant::<gtk::Entry>(&size).unwrap();
+        let text = descendant::<gtk::Text>(&editor).unwrap();
+        assert!(text.width() >= text.create_pango_layout(Some(&editor.text())).pixel_size().0,
+            "the full number fits in the editor: {}", editor.text());
+        size.cancel_edit();
+    }
     scale.set_value(0.5);
     assert!((size.value() - 32.0).abs() < 0.1);
     let display: gtk::Button = descendant(&size).unwrap();
@@ -8897,7 +8910,9 @@ fn native_number_controls() {
                 editor.set_text(draft);
                 pump(30);
                 let bounds = editor.compute_bounds(field).unwrap();
-                assert!(bounds.width() <= 64., "panel editor stays within its reserved space: {bounds:?}");
+                assert!(bounds.width() <= 68., "panel editor stays within its reserved space: {bounds:?}");
+                if draft.len() > 3 { assert_eq!(bounds.width(), 68., "long expressions use the wider panel editor"); }
+                assert_eq!(field.width() as f32 - bounds.x() - bounds.width(), 0., "panel editor stays flush with the right edge");
                 assert!(bounds.x() >= track.x() + track.width() + 8., "editor keeps an 8px gap from the slider hit area: {bounds:?}, {track:?}");
                 assert_eq!(slider.compute_bounds(field).unwrap(), track, "editing keeps the slider's bounds fixed");
                 assert_eq!(field.height(), 36, "editing preserves the compact row height");
