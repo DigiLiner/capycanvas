@@ -40,21 +40,26 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     auto phase=presentation.phase;auto presented=presentation.text;
     auto finish=[local,phase](hstring const& name){if(local->gesture){local->gesture=false;phase(name,local->value);}};
     auto showText=[local,spec,presented](wchar_t const* field){return presented?presented():str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),field);};
-    bool ranged=str(spec,L"kind")==L"slider",preference=presentation.preference;
+    bool ranged=str(spec,L"kind")==L"slider",preference=presentation.preference,compact=presentation.compact&&!preference;
     bool panel=ranged&&!preference&&!valueOnly&&!inlineTrack;
-    double valueHeight=preference?34.:(ranged?24.:32.),stepSize=panel?16.:ranged&&!preference?24.:32.;
+    double valueHeight=compact?data->controlHeight():preference?34.:(ranged?24.:32.),stepSize=panel?16.:compact?data->panelMetric(L"control_height"):ranged&&!preference?24.:32.;
     StackPanel root;root.Spacing(0);
     auto numberId=identifier.empty()?title:identifier;
     AutomationProperties::SetAutomationId(root,L"number-root-"+numberId);
     AutomationProperties::SetName(root,title);
-    Grid header;header.UseLayoutRounding(false);header.ColumnSpacing(6);header.MinHeight(valueHeight);ColumnDefinition left;left.Width({1,GridUnitType::Star});header.ColumnDefinitions().Append(left);
+    Grid header;header.UseLayoutRounding(false);header.ColumnSpacing(compact?data->panelMetric(L"control_spacing"):6);header.MinHeight(valueHeight);ColumnDefinition left;left.Width({1,GridUnitType::Star});header.ColumnDefinitions().Append(left);
     ColumnDefinition right;right.Width({panel?76.:1.,panel?GridUnitType::Pixel:GridUnitType::Auto});header.ColumnDefinitions().Append(right);
-    if(panel){header.Height(36);header.MinHeight(36);}
-    auto text=label(data,title);text.Margin(Thickness{preference?0.:6.,0,0,0});text.VerticalAlignment(VerticalAlignment::Center);
+    if(panel){
+        header.MinHeight(data->panelMetric(L"slider_height"));
+        RowDefinition captionRow;captionRow.Height({1,GridUnitType::Auto});header.RowDefinitions().Append(captionRow);
+        RowDefinition trackRow;trackRow.Height({stepSize,GridUnitType::Pixel});header.RowDefinitions().Append(trackRow);
+    }
+    auto text=label(data,title);text.Margin(Thickness{preference||compact?0.:6.,0,0,0});text.VerticalAlignment(VerticalAlignment::Center);
+    AutomationProperties::SetAutomationId(text,L"number-caption-"+numberId);
     text.LineHeight(20);text.TextTrimming(TextTrimming::CharacterEllipsis);
     tooltip(text,title);
     StackPanel labels;labels.UseLayoutRounding(false);labels.VerticalAlignment(VerticalAlignment::Center);labels.Children().Append(text);
-    if(panel){labels.VerticalAlignment(VerticalAlignment::Top);text.Height(20);}
+    if(panel){labels.VerticalAlignment(VerticalAlignment::Top);text.MinHeight(20);}
     weak_ref<TextBlock> detailView;
     if(!presentation.description.empty()||presentation.descriptionText){
         auto detail=label(data,presentation.description);detailView=make_weak(detail);detail.FontSize(data->textSize()/1.2);
@@ -62,10 +67,10 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         labels.Children().Append(detail);
     }
     header.Children().Append(labels);
-    TextBox entry;entry.UseLayoutRounding(false);entry.Width(panel?68:ranged?72:60);entry.MinWidth(0);entry.MinHeight(0);entry.Height(valueHeight);entry.Padding(Thickness{preference?9.:6.,(valueHeight-20)/2,preference?9.:6.,(valueHeight-20)/2});
+    TextBox entry;entry.UseLayoutRounding(false);entry.Width(panel?68:ranged?72:60);entry.MinWidth(0);entry.MinHeight(0);entry.Height(valueHeight);entry.Padding(Thickness{preference?9.:6.,compact?0.:(valueHeight-20)/2,preference?9.:6.,compact?0.:(valueHeight-20)/2});
     entry.VerticalAlignment(panel?VerticalAlignment::Bottom:VerticalAlignment::Center);entry.VerticalContentAlignment(VerticalAlignment::Center);
     inheritLanguage(entry,data);entry.FontSize(data->textSize());entry.FontFamily(FontFamily(L"Segoe UI"));entry.Foreground(data->brush(L"text"));
-    entry.Background(data->brush(L"input"));entry.BorderThickness(Thickness{0});entry.CornerRadius({6,6,6,6});
+    entry.Background(data->brush(L"input"));entry.BorderThickness(Thickness{0});entry.CornerRadius(data->controlCorner());
     entry.Resources().Insert(box_value(L"TextControlBackgroundDisabled"),clear());
     auto disabledText=clear(),hiddenText=clear();
     entry.Resources().Insert(box_value(L"TextControlForegroundDisabled"),disabledText);
@@ -88,7 +93,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         Grid valueBox;valueBox.UseLayoutRounding(false);Grid::SetColumn(valueBox,1);Grid::SetColumn(entry,0);
         valueBox.Children().Append(entry);
         if(panel){
-            valueBox.Width(68);valueBox.HorizontalAlignment(HorizontalAlignment::Right);valueBox.VerticalAlignment(VerticalAlignment::Bottom);
+            valueBox.Width(68);valueBox.Height(valueHeight);
             entry.HorizontalAlignment(HorizontalAlignment::Right);panelValueBox=make_weak(valueBox);
             Border hit;hit.Background(clear());hit.ManipulationMode(ManipulationModes::None);hit.Child(display);
             valueSurface=ContentControl();valueSurface.Content(hit);valueSurface.Padding({0});valueSurface.Height(valueHeight);
@@ -97,7 +102,17 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
             AutomationProperties::SetAccessibilityView(valueSurface,Automation::Peers::AccessibilityView::Raw);
             valueBox.Children().Append(valueSurface);
         }else valueBox.Children().Append(display);
-        header.Children().Append(valueBox);
+        if(panel){
+            Canvas overlay;Grid::SetColumn(overlay,1);Grid::SetRowSpan(overlay,2);overlay.Children().Append(valueBox);
+            auto placeValue=[canvas=make_weak(overlay),box=make_weak(valueBox)](auto&&,SizeChangedEventArgs const&){
+                if(auto overlay=canvas.get())if(auto value=box.get()){
+                    Canvas::SetLeft(value,overlay.ActualWidth()-value.ActualWidth());
+                    Canvas::SetTop(value,overlay.ActualHeight()-value.ActualHeight());
+                }
+            };
+            overlay.SizeChanged(placeValue);valueBox.SizeChanged(placeValue);
+            header.Children().Append(overlay);
+        }else header.Children().Append(valueBox);
         entry.IsEnabledChanged([readout](auto&&,DependencyPropertyChangedEventArgs const& args){
             if(auto view=readout.get())view.Opacity(unbox_value<bool>(args.NewValue())?1.:.36);
         });
@@ -351,13 +366,21 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         root.Children().Append(entry);return root;
     }
     if(panel){
-        slider.Margin({36,0,76,0});slider.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(slider,2);
+        slider.Margin({36,0,76,0});slider.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(slider,2);Grid::SetRow(slider,1);
         header.Children().Append(slider);root.Children().Append(header);return root;
     }
     StackPanel spin;spin.Orientation(Orientation::Horizontal);spin.Spacing(0);
     if(!ranged){
+        if(compact){
+            auto low=str(local->resolve(spec,num(spec,L"min"),O({{L"type",S(L"format")}})),L"text");
+            auto high=str(local->resolve(spec,num(spec,L"max"),O({{L"type",S(L"format")}})),L"text");
+            std::wstring measure(low.size()>high.size()?low.c_str():high.c_str());
+            for(auto const& sample:presentation.widthSamples)if(sample.size()>measure.size())measure=sample.c_str();
+            for(auto& ch:measure)if(ch>=L'0'&&ch<=L'9')ch=L'8';
+            entry.Width(std::max(24.,measureText(hstring(measure)))+2*data->panelMetric(L"field_padding"));
+        }
         header.Children().RemoveAt(1);spin.Children().Append(entry);
-        Border frame;frame.Child(spin);frame.Background(data->brush(L"input"));frame.CornerRadius({6,6,6,6});
+        Border frame;frame.Child(spin);frame.Background(data->brush(L"input"));frame.CornerRadius(data->controlCorner());
         Grid::SetColumn(frame,1);header.Children().Append(frame);
     }
     Grid trackRow;trackRow.ColumnSpacing(6);

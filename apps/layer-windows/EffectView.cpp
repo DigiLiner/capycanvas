@@ -28,11 +28,11 @@ struct ColorButton : std::enable_shared_from_this<ColorButton> {
         Shapes::Rectangle color;color.Fill(sample);color.Margin({2,2,2,2});pick.Content(color);
         pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);pick.VerticalContentAlignment(VerticalAlignment::Stretch);
         AutomationProperties::SetAutomationId(pick,id+L"-color");
-        if(compact){pick.Width(36);pick.Height(28);return;}
+        if(compact){pick.Width(36);pick.Height(data->controlHeight());return;}
         ColumnDefinition text;text.Width({1,GridUnitType::Star});root.ColumnDefinitions().Append(text);
         ColumnDefinition swatch;swatch.Width({56,GridUnitType::Pixel});root.ColumnDefinitions().Append(swatch);
         name=label(data,title);name.VerticalAlignment(VerticalAlignment::Center);root.Children().Append(name);
-        pick.Height(32);pick.HorizontalAlignment(HorizontalAlignment::Stretch);
+        pick.Height(data->controlHeight());pick.HorizontalAlignment(HorizontalAlignment::Stretch);
         Grid::SetColumn(pick,1);root.Children().Append(pick);
     }
     void edit(){
@@ -91,23 +91,19 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
         }
     }
     Grid propertyRow(std::shared_ptr<Property> const& property,FrameworkElement const& field,Bindings& bindings){
-        Grid row;row.ColumnSpacing(6);row.RowSpacing(6);
+        Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));
         ColumnDefinition caption;caption.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(caption);
         ColumnDefinition value;value.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(value);
-        for(int i=0;i<2;i++){RowDefinition line;line.Height({1,GridUnitType::Auto});row.RowDefinitions().Append(line);}
         auto text=label(data,str(property->model(),L"label"));text.VerticalAlignment(VerticalAlignment::Center);text.TextTrimming(TextTrimming::CharacterEllipsis);row.Children().Append(text);
-        auto arrange=[text,weak=make_weak(field)](double width){
-            auto field=weak.get();if(!field)return;
-            text.Measure({INFINITY,INFINITY});
-            bool wrap=width-text.DesiredSize().Width-6<std::min(150.,width);
-            Grid::SetColumnSpan(text,wrap?2:1);
-            Grid::SetRow(field,wrap?1:0);Grid::SetColumn(field,wrap?0:1);Grid::SetColumnSpan(field,wrap?2:1);
+        auto measured=std::make_shared<std::pair<hstring,double>>();
+        auto arrange=[data=data,caption,measured](double width){
+            A labels;for(auto value:array(object(data->state,L"layer_properties"),L"controls")){auto item=value.GetObject();if(str(object(item,L"kind"),L"kind")==L"choice")labels.Append(S(str(item,L"label")));}
+            auto key=labels.Stringify()+to_hstring(data->textSize());
+            if(key!=measured->first){double largest=0;for(auto value:labels){auto text=label(data,value.GetString(),false,false);text.Measure({INFINITY,INFINITY});largest=std::max(largest,double(text.DesiredSize().Width));}*measured={key,largest};}
+            caption.Width({std::min(measured->second,width*.45),GridUnitType::Pixel});
         };
         row.SizeChanged([arrange](auto&&,SizeChangedEventArgs const& event){arrange(event.NewSize().Width);});
-        bindings.emplace_back([property,text,weak=make_weak(row),arrange]{
-            auto title=str(property->model(),L"label");if(text.Text()==title)return;text.Text(title);
-            if(auto row=weak.get();row&&row.ActualWidth()>0)arrange(row.ActualWidth());
-        });
+        bindings.emplace_back([property,text,weak=make_weak(row),arrange]{auto title=str(property->model(),L"label");if(text.Text()!=title)text.Text(title);if(auto row=weak.get();row&&row.ActualWidth()>0)arrange(row.ActualWidth());});
         Grid::SetColumn(field,1);row.Children().Append(field);return row;
     }
     FrameworkElement build(J const& c,Bindings& bindings){
@@ -125,10 +121,10 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
             return field;
         }
         if(type==L"choice"){
-            ComboBox choices;choices.MinWidth(0);choices.MinHeight(32);choices.Height(32);
+            ComboBox choices;choices.MinWidth(0);choices.MinHeight(data->controlHeight());choices.Height(data->controlHeight());
             choices.HorizontalAlignment(HorizontalAlignment::Stretch);choices.Padding({6,0,0,0});
             choices.FontSize(data->textSize());
-            choices.Background(data->brush(L"input"));choices.BorderThickness({0,0,0,0});choices.CornerRadius({6,6,6,6});
+            choices.Background(data->brush(L"input"));choices.BorderThickness({0,0,0,0});choices.CornerRadius(data->controlCorner());
             for(auto option:array(kind,L"options"))comboOption(choices,option.GetString());
             AutomationProperties::SetName(choices,name);AutomationProperties::SetAutomationId(choices,property->id());
             choices.SelectionChanged([property,weak=make_weak(choices)](auto&&,auto&&){if(auto choices=weak.get();choices&&choices.SelectedIndex()>=0)property->set(N(choices.SelectedIndex()));});
@@ -136,7 +132,7 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
             return propertyRow(property,choices,bindings);
         }
         if(type==L"toggle"){
-            CheckBox check;auto caption=label(data,name);check.Content(caption);check.MinHeight(32);check.MinWidth(0);
+            CheckBox check;auto caption=label(data,name);check.Content(caption);check.MinHeight(data->controlHeight());check.Height(data->controlHeight());check.Padding({0});check.MinWidth(0);
             AutomationProperties::SetName(check,name);AutomationProperties::SetAutomationId(check,property->id());
             check.Click([property,weak=make_weak(check)](auto&&,auto&&){if(auto c=weak.get())property->set(B(c.IsChecked().Value()));});
             bindings.emplace_back([property,check,caption]{auto model=property->model();auto title=str(model,L"label");caption.Text(title);AutomationProperties::SetName(check,title);check.IsChecked(flag(object(model,L"value"),L"value"));});return check;
@@ -146,12 +142,12 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
                 [property](J a){property->set(a);},bindings);
             auto action=object(c,L"color_action");
             if(!action.Size())return color;
-            Grid row;row.ColumnSpacing(6);
+            Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));
             ColumnDefinition fill;fill.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(fill);
-            ColumnDefinition actionColumn;actionColumn.Width({40,GridUnitType::Pixel});row.ColumnDefinitions().Append(actionColumn);
+            ColumnDefinition actionColumn;actionColumn.Width({data->panelMetric(L"control_height"),GridUnitType::Pixel});row.ColumnDefinitions().Append(actionColumn);
             row.Children().Append(color);
             auto bucket=button(data,data->caption(L"color",L"use_selected"),[property,action]{if(property->current()&&!property->data->updating&&flag(property->view(),L"enabled"))property->data->dispatchDocument(action,to_hstring(uint64_t(property->epoch)));});
-            bucket.Content(icon(L"fill",data->theme()));bucket.Width(40);bucket.Height(36);bucket.VerticalAlignment(VerticalAlignment::Top);
+            bucket.Content(icon(L"fill",data->theme()));bucket.Width(data->panelMetric(L"control_height"));bucket.Height(data->panelMetric(L"control_height"));bucket.VerticalAlignment(VerticalAlignment::Top);
             std::wstring id(str(c,L"key").c_str());std::replace(id.begin(),id.end(),L'_',L'-');
             bindings.emplace_back([data=data,bucket]{auto caption=data->caption(L"color",L"use_selected");AutomationProperties::SetName(bucket,caption);CapyUi::tooltip(bucket,caption);});AutomationProperties::SetAutomationId(bucket,hstring(id+L"-bucket"));Grid::SetColumn(bucket,1);row.Children().Append(bucket);
             return row;
@@ -167,9 +163,9 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
             to_hstring(uint64_t(num(object(data->state,L"document_file"),L"epoch"))));
     }
     Button actionButton(J const& spec,hstring const& id,hstring const& text,std::function<void()> click){
-        auto pick=button(data,text,std::move(click));pick.Height(28);pick.MinWidth(28);pick.Background(data->brush(L"input"));
-        if(auto glyph=str(spec,L"icon");!glyph.empty()){pick.Width(28);pick.Content(icon(glyph,data->theme()));}
-        else pick.Padding({8,0,8,0});
+        auto pick=button(data,text,std::move(click));pick.Height(data->controlHeight());pick.MinWidth(data->panelMetric(L"control_height"));pick.Background(data->brush(L"input"));
+        if(auto glyph=str(spec,L"icon");!glyph.empty()){pick.Width(data->panelMetric(L"control_height"));pick.Content(icon(glyph,data->theme()));}
+        else pick.Padding({6,0,6,0});
         AutomationProperties::SetAutomationId(pick,id);return pick;
     }
     void buildActions(A const& list){
@@ -238,22 +234,22 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
         if(statistics)for(auto const& bind:tonalBindings)bind();
     }
     void styleChoice(ComboBox const& box,hstring const& id){
-        box.MinWidth(0);box.MinHeight(32);box.HorizontalAlignment(HorizontalAlignment::Stretch);box.FontSize(data->textSize());
-        box.Background(data->brush(L"input"));box.BorderThickness({0,0,0,0});box.CornerRadius({6,6,6,6});
+        box.MinWidth(0);box.MinHeight(data->controlHeight());box.Height(data->controlHeight());box.Padding({6,0,0,0});box.HorizontalAlignment(HorizontalAlignment::Stretch);box.FontSize(data->textSize());
+        box.Background(data->brush(L"input"));box.BorderThickness({0,0,0,0});box.CornerRadius(data->controlCorner());
         AutomationProperties::SetAutomationId(box,id);box.Visibility(Visibility::Collapsed);
     }
     explicit PropertiesView(std::shared_ptr<WorkspaceData> source):data(std::move(source)){
-        root.Spacing(6);body.Spacing(2);title=label(data,L"",true);
+        root.Spacing(data->panelMetric(L"control_spacing"));body.Spacing(data->panelMetric(L"control_spacing"));title=label(data,L"",true);
         title.TextTrimming(TextTrimming::CharacterEllipsis);
         AutomationProperties::SetAutomationId(title,L"properties-layer-name");
         layerType=label(data,L"");layerType.Opacity(.55);layerType.TextTrimming(TextTrimming::CharacterEllipsis);layerType.VerticalAlignment(VerticalAlignment::Center);
         AutomationProperties::SetAutomationId(layerType,L"properties-layer-type");
-        header.ColumnSpacing(6);
+        header.ColumnSpacing(data->panelMetric(L"control_spacing"));
         for(auto width:{GridUnitType::Star,GridUnitType::Auto}){ColumnDefinition column;column.Width({1,width});header.ColumnDefinitions().Append(column);}
         AutomationProperties::SetAutomationId(root,L"layer-properties");
         bodyGate.Content(body);bodyGate.IsTabStop(false);bodyGate.HorizontalContentAlignment(HorizontalAlignment::Stretch);
         styleChoice(page,L"properties-page");styleChoice(resource,L"property-resource-choice");
-        toolbar.ColumnSpacing(6);
+        toolbar.ColumnSpacing(data->panelMetric(L"control_spacing"));
         for(auto width:{GridUnitType::Star,GridUnitType::Auto}){ColumnDefinition column;column.Width({1,width});toolbar.ColumnDefinitions().Append(column);}
         actions.Orientation(Orientation::Horizontal);actions.Spacing(4);actions.VerticalAlignment(VerticalAlignment::Center);
         Grid::SetColumn(actions,1);toolbar.Children().Append(page);toolbar.Children().Append(resource);toolbar.Children().Append(actions);
@@ -267,7 +263,7 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
                 to_hstring(uint64_t(num(object(data->state,L"document_file"),L"epoch"))));
         });
         addFilter=button(data,L"",[]{});addFilter.MinHeight(24);addFilter.Height(24);addFilter.Padding({6,0,6,0});
-        {StackPanel content;content.Orientation(Orientation::Horizontal);content.Spacing(6);
+        {StackPanel content;content.Orientation(Orientation::Horizontal);content.Spacing(data->panelMetric(L"control_spacing"));
             addFilterLabel=label(data,L"");addFilterLabel.VerticalAlignment(VerticalAlignment::Center);
             addFilterIcon.Width(16);addFilterIcon.Height(16);content.Children().Append(addFilterIcon);content.Children().Append(addFilterLabel);addFilterArrow.Width(12);addFilterArrow.Height(12);content.Children().Append(addFilterArrow);addFilter.Content(content);}
         addFilter.Click([data=data,weak=make_weak(addFilter)](auto&&,auto&&){
@@ -321,8 +317,7 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
                 auto c=value.GetObject();
                 auto nextSectionId=c.GetNamedValue(L"section_id",JsonValue::CreateNullValue()).Stringify();
                 if(sectionId!=nextSectionId){sectionId=nextSectionId;auto section=str(c,L"section");
-                    if(!items.empty()){Shapes::Rectangle line;line.Height(1);line.Opacity(.15);line.Fill(data->brush(L"text"));line.Margin({0,3,0,3});items.push_back(line);}
-                    if(!section.empty()){auto heading=label(data,section,true);heading.Margin({6,0,0,0});items.push_back(heading);auto property=std::make_shared<Property>(data,c);headings.emplace_back([heading,property]{heading.Text(str(property->model(),L"section"));});}
+                    if(!section.empty()){auto heading=label(data,section,true);heading.Margin({0,items.empty()?0.:2.,0,0});items.push_back(heading);auto property=std::make_shared<Property>(data,c);headings.emplace_back([heading,property]{heading.Text(str(property->model(),L"section"));});}
                 }
                 std::wstring key=str(c,L"key").c_str();auto shape=fieldSchema(c);
                 auto found=previous.find(key);

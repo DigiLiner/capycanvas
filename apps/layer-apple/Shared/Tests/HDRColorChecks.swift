@@ -78,6 +78,12 @@ extension XCTestCase {
         // Exercise the native print-mode control while the proof surface is retained.
         workspaceActivate(app.buttons["proof-mode-print"])
         XCTAssertTrue(app.descendants(matching: .any)["proof-profile"].firstMatch.waitForExistence(timeout: 15))
+        for (identifier, label) in [("proof-simulation", "Simulate"), ("proof-intent", "Intent")] {
+            let choice = app.buttons[identifier]
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
+            expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: choice)
+        }
+        waitForExpectations(timeout: 5)
         attachEditor(in: app, name: "hdr-print-panel")
         workspaceActivate(app.buttons["proof-mode-off"])
         command("Export…")

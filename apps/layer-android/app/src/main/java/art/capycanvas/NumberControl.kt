@@ -99,15 +99,17 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     var fieldValue by remember { mutableDoubleStateOf(shown.getDouble("value")) }
     var error by remember { mutableStateOf<Exception?>(null) }
     val errorCaption = remember(error, host.languageTag) { error?.let { numericFailureCopy(it, host.languageTag, host.bootstrap!!.getString("action_failed")) } }
-    val height = if (settings) 48.dp else if (ranged || toolbar) 24.dp else 32.dp
+    val compact = LocalCompactPanel.current
+    val metrics = panelMetrics()
+    val height = if (settings) 48.dp else if (compact || ranged || toolbar) metrics.height else 32.dp
     val valuePadding = if (settings) 12.dp else if (toolbar && !showUnits && !valueOnly) 2.dp else 6.dp
     val measurer = rememberTextMeasurer()
     val widest = remember(inline, control.toString(), showUnits, host.languageTag) {
-        if (inline) (if (toolbar) JSONObject(Native.toolbarUi(obj("type" to "numeric_info", "id" to id, "control" to control, "compact" to true, "units" to true).toString(), host.languageTag)).array("samples").let { samples -> (0 until samples.length()).map(samples::getString) }
+        if (inline || (compact && !ranged)) (if (toolbar) JSONObject(Native.toolbarUi(obj("type" to "numeric_info", "id" to id, "control" to control, "compact" to true, "units" to true).toString(), host.languageTag)).array("samples").let { samples -> (0 until samples.length()).map(samples::getString) }
             else listOf(control.getDouble("min"), control.getDouble("max")).map { resolve(it, obj("type" to "format")).getString("text") })
             .maxBy { it.length }.replace(Regex("[0-9]"), "8") else ""
     }
-    val fixedWidth = if (inline) with(LocalDensity.current) { measurer.measure(if (valueOnly) shown.getString("text") else widest, LocalTextStyle.current).size.width.toDp() } + valuePadding * 2 + 2.dp else 0.dp
+    val fixedWidth = if (inline || (compact && !ranged)) with(LocalDensity.current) { measurer.measure(if (valueOnly) shown.getString("text") else widest, LocalTextStyle.current).size.width.toDp() } + valuePadding * 2 + 2.dp else 0.dp
     var active by remember { mutableIntStateOf(0) }
     var heldKey by remember { mutableStateOf<Key?>(null) }
     val phase by rememberUpdatedState(onEditPhase)
@@ -233,7 +235,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 host.textComposition.update(requester, text, focused)
                 if (dirty) onText(it)
             }
-        }, Modifier.then(if (panel) Modifier.width(68.dp) else if (inline && valueOnly && !toolbar) Modifier.fillMaxWidth() else if (inline) Modifier.width(fixedWidth) else if (ranged) Modifier.widthIn(min = 48.dp, max = 100.dp).width(IntrinsicSize.Min) else Modifier.width(if (presentedText != null || control.optString("unit").isNotEmpty()) 80.dp else 60.dp)).height(height)
+        }, Modifier.then(if (panel) Modifier.width(68.dp) else if (inline && valueOnly && !toolbar) Modifier.fillMaxWidth() else if (inline) Modifier.width(fixedWidth) else if (ranged) Modifier.widthIn(min = 48.dp, max = 100.dp).width(IntrinsicSize.Min) else if(compact) Modifier.width(fixedWidth) else Modifier.width(if (presentedText != null || control.optString("unit").isNotEmpty()) 80.dp else 60.dp)).height(height)
             .onGloballyPositioned { fieldBounds = it.boundsInRoot(); if (toolbar && focused) host.toolbarEditorBounds = fieldBounds }
             .focusRequester(requester).onFocusChanged {
                 if (focused && !it.isFocused) { finish(); if (heldKey != null) endEdit() }
@@ -279,7 +281,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     if (panel) {
         Column(modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(36.dp)) {
-                Text(label, Modifier.fillMaxWidth().padding(start = 6.dp, end = 76.dp).align(Alignment.TopStart)
+                Text(label, Modifier.fillMaxWidth().padding(start = if(compact)0.dp else 6.dp, end = 76.dp).align(Alignment.TopStart)
                     .pointerInput(enabled, onReset, control.toString()) { if (enabled) detectTapGestures(onDoubleTap = {
                         finish(cancel = true)
                         if (onReset != null) onReset() else if (!control.isNull("default_value")) apply(obj("type" to "expression", "text" to ""))
@@ -305,8 +307,8 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         return
     }
     Column(modifier.widthIn(max = if (settings) 600.dp else 1000.dp).fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Column(Modifier.weight(1f).padding(start = if (settings) 0.dp else 6.dp).testTag("preference-label-$id"), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if(compact)metrics.spacing else 6.dp)) {
+            Column(Modifier.weight(1f).padding(start = if (settings || compact) 0.dp else 6.dp).testTag("preference-label-$id"), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(label, color = if (enabled) colors.text else colors.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (description.isNotEmpty()) Text(description, color = colors.settingsSecondary, fontSize = 14.sp, lineHeight = 20.sp)
             }

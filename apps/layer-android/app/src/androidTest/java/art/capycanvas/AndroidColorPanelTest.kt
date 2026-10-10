@@ -80,6 +80,7 @@ class AndroidColorPanelTest {
             activity = it; host = it.host; owner = it.window.decorView.descendant<ViewRootForTest>()!!; density = it.resources.displayMetrics.density
         }
         action(obj("type" to "close_settings"))
+        InstrumentationRegistry.getArguments().getString("theme")?.let { action(obj("type" to "set_theme", "theme" to it)) }
         val defaults = createEnglishHostForTest()
         try { action(obj("type" to "restore_workspace", "workspace" to JSONObject(Native.snapshot(defaults)!!).getJSONObject("state").getJSONObject("workspace"))) }
         finally { Native.destroy(defaults) }

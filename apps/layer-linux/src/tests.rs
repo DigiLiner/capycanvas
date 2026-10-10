@@ -8858,7 +8858,7 @@ fn native_number_controls() {
         assert!(!title.wraps());
         assert_eq!(title.ellipsize(), gtk::pango::EllipsizeMode::End);
         assert_eq!(title.tooltip_text().unwrap(), title.text());
-        assert_eq!(title.compute_bounds(field).unwrap().x(), 6.0);
+        assert_eq!(title.compute_bounds(field).unwrap().x(), 0.0);
         if field == &narrow {
             assert!(title.layout().is_ellipsized());
         }

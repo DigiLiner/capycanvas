@@ -61,7 +61,7 @@ private fun CanvasHost.effect(action: JSONObject) = dispatch(obj("type" to "effe
     var emptyHeight by remember { mutableFloatStateOf(36f) }
     val categoryCount = if(splitPicker) 0 else choices.filterIndexed { i, choice -> i == 0 || choices[i - 1].getString("category") != choice.getString("category") }.size
     val listHeight = if (choices.isEmpty()) emptyHeight else choices.size * rowHeight + categoryCount * categoryHeight + (choices.size + categoryCount - 1) * 2f
-    val fixedHeight = if(splitPicker) 16f else headerHeight + 18f // Native outer padding and header/list gap.
+    val fixedHeight = panelMetrics().inset.value * 2 + if(splitPicker)0f else headerHeight + panelMetrics().spacing.value
     val measured = if (splitPicker || headerHeight > 0f) PanelContentSize(fixedHeight + listHeight, fixedHeight, rowHeight + 2f) else null
     SideEffect { measured?.let(onContent) }
     val currentChoices by rememberUpdatedState(choices)
@@ -81,19 +81,19 @@ private fun CanvasHost.effect(action: JSONObject) = dispatch(obj("type" to "effe
             currentChoices.map { it.getString("id") }.filter { it in visible } to currentSize
         }.collect { (ids, size) -> cache.update(previewView, ids, size) }
     }
-    Column(modifier.padding(if (splitPicker) 8.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if(!splitPicker) Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { headerHeight = it.height / density }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.padding(panelMetrics().inset), verticalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
+        if(!splitPicker) Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { headerHeight = it.height / density }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
             if (search == null) SharedIcon(categories.firstOrNull { it.optString("id") == picker.optString("category") }?.getString("icon") ?: "adjustments", null)
             Box(Modifier.weight(1f)) {
                 if (search != null) CoreTextField(search, { send(obj("op" to "search", "query" to it)) },
-                    Modifier.fillMaxWidth().focusRequester(focus).testTag("filter-search"), height = 34.dp, maxLength = 120, shape = ControlShape,
+                    Modifier.fillMaxWidth().focusRequester(focus).testTag("filter-search"), height = panelMetrics().height, maxLength = 120, shape = ControlShape,
                     placeholder = { Text(picker.getString("search_label"), maxLines = 1) })
                 else PropertyChoice(host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("category"), categories.map { it.getString("label") },
                     categories.indexOfFirst { it.optString("id") == picker.optString("category") }.coerceAtLeast(0)) {
                     send(obj("op" to "category", "category" to categories[it].get("id")))
                 }
             }
-            Box(Modifier.size(48.dp,34.dp).clip(ControlShape).testTag("filter-search-toggle")
+            Box(Modifier.size(panelMetrics().height).clip(ControlShape).testTag("filter-search-toggle")
                 .clickable { send(obj("op" to "toggle_search")) }, contentAlignment = Alignment.Center) {
                 SharedIcon("search", picker.getString("search_label"))
             }
@@ -154,19 +154,16 @@ private fun CanvasHost.effect(action: JSONObject) = dispatch(obj("type" to "effe
     }
 }
 
-@Composable internal fun PropertyChoice(label: String, options: List<String>, selected: Int, enabled: Boolean = true, onOpenChanged: (Boolean) -> Unit = {}, select: (Int) -> Unit) {
+@Composable internal fun PropertyChoice(label: String, options: List<String>, selected: Int, enabled: Boolean = true, onOpenChanged: (Boolean) -> Unit = {}, modifier: Modifier = Modifier, optionEnabled: (Int) -> Boolean = { true }, optionTag: (Int) -> String = { "" }, select: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val openChanged by rememberUpdatedState(onOpenChanged)
     fun close() { open=false;openChanged(false) }
     DisposableEffect(Unit) { onDispose { if(open)openChanged(false) } }
     Box {
-        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(ControlShape)
-            .background(LocalPalette.current.input).clickable(enabled = enabled) { openChanged(true);open = true }.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(options.getOrNull(selected) ?: label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            SharedIcon("chevron-down", label)
-        }
+        PanelChoiceButton(options.getOrNull(selected) ?: label, modifier, enabled) { openChanged(true);open = true }
         DropdownMenu(open, ::close) {
-            options.forEachIndexed { index, text -> DropdownMenuItem(text = { Text(text,maxLines=1,overflow=TextOverflow.Ellipsis) }, onClick = { close(); select(index) }) }
+            options.forEachIndexed { index, text -> DropdownMenuItem(text = { Text(text,maxLines=1,overflow=TextOverflow.Ellipsis) },
+                enabled=optionEnabled(index), modifier=Modifier.testTag(optionTag(index)), onClick = { close(); select(index) }) }
         }
     }
 }
@@ -178,11 +175,13 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
     val controls = view.array("controls").objects()
     val layer = view.optLong("layer")
     val enabled = view.getBoolean("enabled")
+    val metrics = panelMetrics()
+    val labelWidth=panelLabelWidth(controls.filter {it.getJSONObject("kind").getString("kind")=="choice"}.map {it.getString("label")})
     val pages = view.array("pages").objects()
     key(state.getJSONObject("document_file").optLong("epoch"), layer) {
-    Column(Modifier.fillMaxWidth().testTag("layer-properties").alpha(if(enabled) 1f else .4f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(Modifier.fillMaxWidth().testTag("layer-properties").alpha(if(enabled) 1f else .4f), verticalArrangement = Arrangement.spacedBy(metrics.spacing)) {
         Text(view.getString("name"), Modifier.testTag("properties-layer-name"), fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (view.getString("layer_type").isNotEmpty() || !view.isNull("add_filter")) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (view.getString("layer_type").isNotEmpty() || !view.isNull("add_filter")) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(view.getString("layer_type"), Modifier.weight(1f).testTag("properties-layer-type"), color = LocalPalette.current.secondary,
                 fontSize = LocalTextStyle.current.fontSize * .9f, maxLines = 1, overflow = TextOverflow.Ellipsis)
             view.optJSONObject("add_filter")?.let { model ->
@@ -206,13 +205,13 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
             val current=view.takeUnless {it.isNull("resource_selection")}?.getInt("resource_selection")
             val labels=choices.map {it.value.getString("label")}+if(current==null)listOf(view.getString("resource_name"))else emptyList()
             val importAction=actions.first {it.getJSONObject("action").getString("op")=="import_lookup"}
-            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)) {
                 HoverTip(view.getString("resource_name"),Modifier.weight(1f).testTag("property-resource-choice")) {
                     PropertyChoice(view.getString("resource_label"),labels,choices.indexOfFirst {it.index==current}.let {if(it<0)choices.size else it},enabled) {
                         choices.getOrNull(it)?.let {choice->host.effect(choice.value.getJSONObject("action"))}
                     }
                 }
-                IconButton({host.effect(importAction.getJSONObject("action"))},enabled=enabled,modifier=Modifier.size(40.dp).testTag("import-lookup")) {
+                IconButton({host.effect(importAction.getJSONObject("action"))},enabled=enabled,modifier=Modifier.size(metrics.height).testTag("import-lookup")) {
                     SharedIcon(importAction.getString("icon").removePrefix("layer-").removeSuffix("-symbolic"),importAction.getString("label"))
                 }
             }
@@ -231,9 +230,9 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
                 var open by remember(layer, view.optString("page"), view.optLong("epoch"), id) { mutableStateOf(false) }
                 Box {
                     val click = { if (group != null) open = true else host.effect(action.getJSONObject("action")) }
-                    if (!action.isNull("icon")) IconButton(click, enabled = enabled, modifier = Modifier.size(32.dp).testTag(if (group == null) "property-action-$id" else "property-action-group-$id")) {
+                    if (!action.isNull("icon")) IconButton(click, enabled = enabled, modifier = Modifier.size(metrics.height).testTag(if (group == null) "property-action-$id" else "property-action-group-$id")) {
                         SharedIcon(action.getString("icon").removePrefix("layer-").removeSuffix("-symbolic"), label)
-                    } else TextButton(click, enabled = enabled, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(32.dp).testTag("property-action-$id")) { Text(label, maxLines = 1) }
+                    } else TextButton(click, enabled = enabled, contentPadding = PaddingValues(horizontal = 6.dp), modifier = Modifier.height(metrics.height).testTag("property-action-$id")) { Text(label, maxLines = 1) }
                     DropdownMenu(open, { open = false }) {
                         choices.forEach { choice ->
                             val request = choice.getJSONObject("action")
@@ -249,8 +248,7 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
             val sectionId = propertySectionId(control)
             val previousSectionId = controls.getOrNull(index - 1)?.let(::propertySectionId) ?: "[null]"
             if(sectionId != previousSectionId) {
-                if(index > 0) HorizontalDivider(Modifier.padding(vertical = 3.dp), color = LocalPalette.current.text.copy(alpha = .15f))
-                if(section != null) Text(section, Modifier.padding(start = 6.dp), fontWeight = FontWeight.Bold)
+                if(section != null) Text(section, Modifier.padding(top = if(index>0)2.dp else 0.dp), fontWeight = FontWeight.Bold)
             }
             val key = control.getString("key")
             val label = control.getString("label")
@@ -264,14 +262,14 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
                 }
                 "curve" -> key(layer, key, control.getJSONObject("curve").getJSONObject("domain").toString()) { CurveControl(host, state, layer, control, enabled) }
                 "toggle" -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(label, Modifier.weight(1f)); Switch(value as Boolean, { change(it) }, enabled = enabled)
+                    Text(label, Modifier.weight(1f)); EditorCheck(value as Boolean,label,enabled=enabled) { change(it) }
                 }
-                "choice" -> Row(Modifier.fillMaxWidth().testTag("property-$key"),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                    Text(label,Modifier.weight(1f))
-                    Box(Modifier.weight(2f)){PropertyChoice(label,kind.array("options").values().map{it.toString()},(value as Number).toInt(),enabled){change(it)}}
+                "choice" -> Row(Modifier.fillMaxWidth().testTag("property-$key"),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+                    Text(label,Modifier.width(labelWidth),maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Box(Modifier.weight(1f)){PropertyChoice(label,kind.array("options").values().map{it.toString()},(value as Number).toInt(),enabled){change(it)}}
                 }
                 "color" -> ManagedColorButton(host,label,value as JSONObject,enabled,opaque = kind.optBoolean("opaque"),trailing = {
-                    if(!control.isNull("color_action")) Box(Modifier.size(40.dp,36.dp).testTag("${key.replace('_','-')}-bucket")
+                    if(!control.isNull("color_action")) Box(Modifier.size(metrics.height).testTag("${key.replace('_','-')}-bucket")
                         .clickable(enabled=enabled){host.dispatch(control.getJSONObject("color_action"))},contentAlignment=Alignment.Center) { SharedIcon("fill",host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("use_selected")) }
                 }) { change(it) }
                 "gradient" -> GradientControl(host,control,enabled)
@@ -334,7 +332,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
         if (captured != null) send(captured, "contact", "cancel")
     }
     DisposableEffect(Unit) { onDispose { cancel(); if (host.pointControlFocus === focus) host.pointControlFocus = null } }
-    Column(Modifier.fillMaxWidth().testTag("curve-$key"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().testTag("curve-$key"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Column(Modifier.height(200.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(axes[1].getString("maximum"), color = colors.secondary)
@@ -433,7 +431,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
                             drawCircle(colors.text, (if (selected) 5f else 3.5f).dp.toPx(), position(p), style = if (selected) Stroke(1.5.dp.toPx()) else androidx.compose.ui.graphics.drawscope.Fill)
                         }
                     }
-                    if (histogram && control.optBoolean("modified")) Box(Modifier.align(Alignment.BottomEnd).padding(2.dp).size(32.dp).testTag("curve-reset")
+                    if (histogram && control.optBoolean("modified")) Box(Modifier.align(Alignment.BottomEnd).padding(2.dp).size(panelMetrics().height).testTag("curve-reset")
                         .clickable(enabled = enabled) { lastTap = null; dispatch(obj("kind" to "reset")) }, contentAlignment = Alignment.Center) {
                         SharedIcon("reset", curve.getString("reset_label"), tint = colors.secondary)
                     }
@@ -445,7 +443,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
                 }
             }
         }
-        if (curve.getBoolean("coordinate_readouts")) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (curve.getBoolean("coordinate_readouts")) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf("input", "output").forEachIndexed { index, axis ->
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     val coordinate = curve.optJSONObject(axis)
@@ -466,7 +464,7 @@ private data class CurveTap(val position: Offset, val time: Long, val epoch: Lon
     var stats by remember { mutableStateOf<JSONObject?>(null) }
     LaunchedEffect(host) { while(isActive) { host.query(obj("type" to "renderer_stats")) { stats = it as? JSONObject }; delay(200) } }
     val colors = LocalPalette.current
-    Column(Modifier.fillMaxWidth().testTag("renderer-stats"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().testTag("renderer-stats"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         stats?.let { view ->
             view.array("rows").objects().forEachIndexed { index, row ->
                 HoverTip(row.getString("description")) {

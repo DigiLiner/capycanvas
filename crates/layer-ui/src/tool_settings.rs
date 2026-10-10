@@ -9,9 +9,33 @@ use serde::Serialize;
 /// Reusable tool settings actions. Labels, enabled/checked state and shortcuts
 /// come from the same command model as menus and toolbar tiles.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(into = "ToolSettingActionView")]
 pub struct ToolSettingAction {
     pub command: crate::CommandId,
     pub checkable: bool,
+}
+
+#[derive(Serialize)]
+struct ToolSettingActionView {
+    command: crate::CommandId,
+    checkable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<&'static str>,
+    segmented: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    row: Option<&'static str>,
+    icon_only: bool,
+}
+impl From<ToolSettingAction> for ToolSettingActionView {
+    fn from(action: ToolSettingAction) -> Self {
+        Self {
+            command: action.command, checkable: action.checkable,
+            group: action.group().map(ToolActionGroup::id),
+            segmented: action.group().is_some_and(ToolActionGroup::segmented),
+            row: action.row().map(ToolActionRow::id),
+            icon_only: action.row().is_some_and(ToolActionRow::icon_only),
+        }
+    }
 }
 
 macro_rules! tool_action_groups {
@@ -20,11 +44,15 @@ macro_rules! tool_action_groups {
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub enum ToolActionGroup { $($group),+ }
         impl ToolActionGroup {
+            pub const ALL: &'static [Self] = &[$(Self::$group),+];
             pub fn segmented(self) -> bool {
                 match self { $(Self::$group => $segmented),+ }
             }
             pub fn id(self) -> &'static str {
                 match self { $(Self::$group => $id),+ }
+            }
+            pub fn commands(self) -> &'static [crate::CommandId] {
+                match self { $(Self::$group => &[$(crate::CommandId::$command),+]),+ }
             }
             pub fn message_id(self) -> MessageId { match self { $(Self::$group => MessageId::$label),+ } }
             pub fn localized_label(self, localizer: &Localizer) -> Arc<str> { localizer.text(self.message_id()) }
@@ -39,6 +67,56 @@ macro_rules! tool_action_groups {
             }
         }
     };
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct ToolActionGroupView {
+    pub id: &'static str,
+    pub label: Arc<str>,
+    pub segmented: bool,
+    pub commands: &'static [crate::CommandId],
+}
+impl ToolActionGroupView {
+    pub fn catalog(localizer: &Localizer) -> Vec<Self> {
+        ToolActionGroup::ALL.iter().map(|group| Self {
+            id: group.id(), label: group.localized_label(localizer),
+            segmented: group.segmented(), commands: group.commands(),
+        }).collect()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolActionRow { Flip, Rotate, Completion }
+impl ToolActionRow {
+    pub const ALL: &'static [Self] = &[Self::Flip, Self::Rotate, Self::Completion];
+    pub fn id(self) -> &'static str {
+        match self { Self::Flip => "transform-flip", Self::Rotate => "transform-rotate", Self::Completion => "completion" }
+    }
+    pub fn commands(self) -> &'static [crate::CommandId] {
+        use crate::CommandId::*;
+        match self {
+            Self::Flip => &[TransformFlipHorizontal, TransformFlipVertical],
+            Self::Rotate => &[TransformRotateLeft, TransformRotateRight],
+            Self::Completion => &[ApplyTransform, CancelTransform, CompleteSelection, CancelSelection],
+        }
+    }
+    pub fn icon_only(self) -> bool { self != Self::Completion }
+}
+impl ToolSettingAction {
+    pub fn row(self) -> Option<ToolActionRow> {
+        ToolActionRow::ALL.iter().copied().find(|row| row.commands().contains(&self.command))
+    }
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct ToolActionRowView {
+    pub id: &'static str,
+    pub commands: &'static [crate::CommandId],
+    pub icon_only: bool,
+}
+impl ToolActionRowView {
+    pub fn catalog() -> Vec<Self> {
+        ToolActionRow::ALL.iter().map(|row| Self { id: row.id(), commands: row.commands(), icon_only: row.icon_only() }).collect()
+    }
 }
 
 tool_action_groups! {
@@ -370,6 +448,34 @@ pub(crate) fn edit_value(brush: &BrushSnapshot, id: &str, value: f32) -> Result<
 mod tests {
     use super::*;
     use layer_core::{DefaultBrushPreset, default_brush};
+
+    #[test]
+    fn compact_action_transport_preserves_exclusive_groups_and_command_rows() {
+        let catalog=crate::ui_catalog();
+        for group in &catalog.tool_action_groups {
+            assert!(!group.label.is_empty());
+            for &command in group.commands {
+                let action=ToolSettingAction { command, checkable:true };
+                let value=serde_json::to_value(action).unwrap();
+                assert_eq!(value["group"],group.id);
+                assert_eq!(value["segmented"],group.segmented);
+            }
+        }
+        for row in &catalog.tool_action_rows {
+            for &command in row.commands {
+                let value=serde_json::to_value(ToolSettingAction { command, checkable:false }).unwrap();
+                assert_eq!(value["row"],row.id);
+                assert_eq!(value["icon_only"],row.icon_only);
+            }
+        }
+        let value=serde_json::to_value(ToolSettingAction { command:crate::CommandId::SelectionAntialias,checkable:true }).unwrap();
+        assert!(value.get("group").is_none());
+        assert!(value.get("row").is_none());
+        let metrics=catalog.panel_metrics;
+        assert_eq!(metrics.control_radius,metrics.control_height/2.);
+        assert!(metrics.compound_spacing<metrics.control_spacing && metrics.control_spacing<metrics.group_spacing);
+        assert!(2.*metrics.field_padding<metrics.control_height);
+    }
 
     #[test]
     fn option_control_localization_preserves_ids_values_and_numeric_rules() {

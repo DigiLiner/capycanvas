@@ -10,17 +10,17 @@ struct LayerPropertiesPanel: View {
         let epoch = store.state["document_file"]["epoch"].uint, layer = view["layer"].uint, pages = view["pages"].array
         let actions = view["actions"].array, palette = EditorPalette(source: store.state["palette"])
         let tools = actions.filter { !["lookup_preset", "import_lookup"].contains($0["action"]["op"].string) }
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
             Text(view["name"].string).fontWeight(.bold).lineLimit(1).help(view["title"].string)
                 .accessibilityIdentifier("properties-layer-name")
             if !view["layer_type"].string.isEmpty || !view["add_filter"].isNull {
-                HStack(spacing: 6) {
+                HStack(spacing: store.panelMetrics.spacing) {
                     Text(view["layer_type"].string).font(.system(size: store.catalog["text_size_pt"].number * 0.9)).foregroundStyle(palette["text"].opacity(0.55))
                         .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).help(view["layer_type"].string)
                         .accessibilityIdentifier("properties-layer-type")
                     if !view["add_filter"].isNull {
                         EditorMenuButton(menu: { AppleContextMenu(view["add_filter"]) { store.dispatch($0) } }, identifier: "properties-filter-menu") {
-                            HStack(spacing: 6) {
+                            HStack(spacing: store.panelMetrics.spacing) {
                                 SharedIcon(name: "add-filter")
                                 Text(view["add_filter"]["title"].string)
                                 SharedIcon(name: "chevron-down").frame(width: 12, height: 12)
@@ -30,14 +30,14 @@ struct LayerPropertiesPanel: View {
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
                 if !view["resource_label"].isNull { lookup(actions, palette: palette) }
                 if pages.count > 1 || !tools.isEmpty {
                     HStack(spacing: 4) {
                         if pages.count > 1 {
                             EditorChoice(label: view["title"].string, options: pages.map { $0["label"].string },
                                 selected: pages.firstIndex { $0["id"].string == view["page"].string } ?? 0, identifier: "properties-page",
-                                background: palette["input"]) {
+                                background: palette["input"], compact: true) {
                                 store.dispatch(["type": "effect", "action": ["op": "select_page", "layer": layer, "page": pages[$0]["id"].string]])
                             }
                         }
@@ -48,14 +48,13 @@ struct LayerPropertiesPanel: View {
                 ForEach(controls.indices, id: \.self) { index in
                     let control = controls[index]
                     if index == 0 || control["section_id"].stableKey != controls[index - 1]["section_id"].stableKey {
-                        if index > 0 { Divider().padding(.vertical, 3) }
-                        if !control["section"].isNull { Text(control["section"].string).fontWeight(.bold).padding(.leading, 6) }
+                        if !control["section"].isNull { Text(control["section"].string).fontWeight(.bold).padding(.top, index > 0 ? 2 : 0) }
                     }
                     if control["kind"]["kind"].string == "curve" {
                         CurveProperty(store: store, layer: layer, control: control)
                             .id("\(epoch):\(layer):\(control["key"].string):\(control["curve"]["domain"].stableKey)")
                     } else {
-                        PropertyField(store: store, layer: layer, epoch: epoch, control: control)
+                        PropertyField(store: store, layer: layer, epoch: epoch, control: control, labelWidth: store.panelLabelWidth(controls.filter { $0["kind"]["kind"].string == "choice" }.map { $0["label"].string }))
                             .id("\(epoch):\(layer):\(control["key"].string):\(control["kind"]["kind"].string)")
                     }
                 }
@@ -73,8 +72,8 @@ struct LayerPropertiesPanel: View {
     @ViewBuilder private func action(_ id: String, _ choices: [JSON], palette: EditorPalette) -> some View {
         let first = choices[0], group = first["group"], label = group.isNull ? first["label"].string : group["label"].string
         let face = Group {
-            if first["icon"].isNull { Text(label).lineLimit(1).padding(.horizontal, 6).frame(height: 32) }
-            else { SharedIcon(name: first["icon"].string).frame(width: 32, height: 32) }
+            if first["icon"].isNull { Text(label).lineLimit(1).padding(.horizontal, 6).frame(height: store.panelMetrics.height) }
+            else { SharedIcon(name: first["icon"].string).frame(width: store.panelMetrics.height, height: store.panelMetrics.height) }
         }.contentShape(Rectangle()).help(label).accessibilityLabel(label)
         if group.isNull {
             Button { effect(first["action"]) } label: { face }.buttonStyle(EditorControlButtonStyle())
@@ -92,14 +91,14 @@ struct LayerPropertiesPanel: View {
         let selected = view["resource_selection"].isNull ? nil : indices.firstIndex(of: Int(view["resource_selection"].uint))
         let labels = presets.map { $0["label"].string } + (selected == nil ? [view["resource_name"].string] : [])
         let importer = actions.first { $0["action"]["op"].string == "import_lookup" }
-        return HStack(spacing: 6) {
+        return HStack(spacing: store.panelMetrics.spacing) {
             EditorChoice(label: view["resource_label"].string, options: labels, selected: selected ?? presets.count,
-                identifier: "property-resource-choice", background: palette["input"]) { index in
+                identifier: "property-resource-choice", background: palette["input"], compact: true) { index in
                 if presets.indices.contains(index) { effect(presets[index]["action"]) }
             }.help(view["resource_name"].string)
             if let importer {
                 IconTile(icon: importer["icon"].string, label: importer["label"].string) { effect(importer["action"]) }
-                    .frame(width: 40, height: 36).accessibilityIdentifier("import-lookup")
+                    .frame(width: store.panelMetrics.height, height: store.panelMetrics.height).accessibilityIdentifier("import-lookup")
             }
         }
     }
@@ -113,6 +112,7 @@ private struct PropertyField: View {
     let layer: UInt64
     let epoch: UInt64
     let control: JSON
+    var labelWidth: CGFloat = 0
     private var key: String { control["key"].string }
     private var kind: String { control["kind"]["kind"].string }
     private var label: String { control["label"].string }
@@ -146,21 +146,21 @@ private struct PropertyField: View {
             }.id(control["kind"].stableKey + label)
         case "toggle":
             Toggle(label, isOn: Binding(get: { value.bool }, set: { change($0, revision: revision) }))
-                .toggleStyle(.switch).controlSize(.small).accessibilityIdentifier("property-" + key)
+                .toggleStyle(PanelCheckStyle()).accessibilityIdentifier("property-" + key)
         case "choice":
-            PropertyChoiceRow {
+            PropertyChoiceRow(labelWidth: labelWidth) {
                 Text(label).lineLimit(1)
                 EditorChoice(label: label, options: control["kind"]["options"].array.map(\.string),
                     selected: Int(value.uint), identifier: "property-" + key,
-                    background: EditorPalette(source: store.state["palette"])["input"]) { change($0, revision: revision) }
+                    background: EditorPalette(source: store.state["palette"])["input"], compact: true) { change($0, revision: revision) }
             }
         case "color":
-            HStack(spacing: 6) {
+            HStack(spacing: store.panelMetrics.spacing) {
                 ManagedColorButton(label: label, identifier: "property-" + key, value: value,
                     colors: store.displayColors, viewing: store.colorViewing, opaque: control["kind"]["opaque"].bool) { change($0.raw, revision: revision) }
                 if !control["color_action"].isNull {
                     IconTile(icon: "fill", label: nativeCopy["color"]["use_selected"].string) { store.dispatch(control["color_action"]) }
-                        .frame(width: 40, height: 36).accessibilityIdentifier("property-\(key)-bucket")
+                        .frame(width: store.panelMetrics.height, height: store.panelMetrics.height).accessibilityIdentifier("property-\(key)-bucket")
                 }
             }
         case "gradient":
@@ -251,7 +251,7 @@ struct CurveEditor: View {
     }
     var body: some View {
         let axes = curve["axes"].array
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
             HStack(spacing: 4) {
                 VStack {
                     ForEach(Array(axisLabels(axes[1], reversed: true).enumerated()), id: \.offset) { index, text in
@@ -268,10 +268,10 @@ struct CurveEditor: View {
                     }.font(.caption).foregroundStyle(palette["text"].opacity(0.7))
                 }
             }
-            if curve["coordinate_readouts"].bool { HStack(alignment: .top, spacing: 6) {
+            if curve["coordinate_readouts"].bool { HStack(alignment: .top, spacing: store.panelMetrics.spacing) {
                 ForEach(["input", "output"].indices, id: \.self) { index in
                     let axis = index == 0 ? "input" : "output", coordinate = curve[axis]
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
                         Text(axes[index]["label"].string).lineLimit(1)
                         NumberControl(store: store, label: axes[index]["label"].string, value: coordinate["value"].number,
                             control: curve["numeric"], identifier: "curve-" + axis, presentedText: coordinate.isNull ? "" : coordinate["text"].string,

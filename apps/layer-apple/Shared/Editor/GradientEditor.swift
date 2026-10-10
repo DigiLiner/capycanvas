@@ -54,12 +54,12 @@ struct GradientEditor: View {
         edit(["kind": "position", "index": held.index, "operation": ["type": "step", "steps": 0]], phase: "up", target: held.target)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
+            HStack(spacing: store.panelMetrics.spacing) {
                 let modes = gradient["interpolations"].array
                 EditorChoice(label: gradient["interpolation_label"].string, options: modes.map { $0[1].string },
                     selected: modes.firstIndex { $0[0].string == control["value"]["value"]["interpolation"].string } ?? 0,
-                    identifier: identifier + "-interpolation", background: palette["input"]) {
+                    identifier: identifier + "-interpolation", background: palette["input"], compact: true) {
                     edit(["kind": "interpolation", "value": modes[$0][0].raw])
                 }.frame(maxWidth: .infinity)
                 action("flip-horizontal", gradient["reverse_label"].string, "reverse") {
@@ -69,7 +69,7 @@ struct GradientEditor: View {
                 action("reset", nativeCopy["color"]["reset_gradient"].string, "reset") { revision &+= 1; edit(["kind": "reset"]) }
             }
             strip
-            HStack(spacing: 6) {
+            HStack(spacing: store.panelMetrics.spacing) {
                 NumberControl(store: store, label: nativeCopy["color"]["position"].string, value: stops.isEmpty ? 0 : stops[index]["position"].number,
                     control: store.catalog["opacity"], identifier: identifier + "-position", valueOnly: true,
                     gestureChange: { [index, target, field] phase, value, completion in
@@ -88,14 +88,14 @@ struct GradientEditor: View {
                 }
                 action("fill", nativeCopy["color"]["use_selected"].string, "use-color") { edit(["kind": "use_current_color", "index": index]) }
             }
-        }.accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
+        }.environment(\.compactPanelControls, true).accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
             .onChange(of: ownerKey, initial: true) { _, next in
                 if owner != next { cancel(); selected = 0; owner = next }
             }
             .onDisappear(perform: cancel)
     }
     private func action(_ icon: String, _ label: String, _ name: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
-        IconTile(icon: icon, label: label, enabled: enabled, action: run).frame(width: 32, height: 28)
+        IconTile(icon: icon, label: label, enabled: enabled, action: run).frame(width: store.panelMetrics.height, height: store.panelMetrics.height)
             .accessibilityIdentifier("\(identifier)-\(name)").modifier(NumberControlMeasurement(id: "\(identifier)-\(name):root"))
     }
     private var strip: some View {
@@ -103,7 +103,7 @@ struct GradientEditor: View {
             let width = max(1, geometry.size.width - 12)
             ZStack(alignment: .topLeading) {
                 GradientPreview(store: store, gradient: control["value"]["value"])
-                    .frame(width: width, height: 32).clipShape(RoundedRectangle(cornerRadius: 4)).offset(x: 6)
+                    .frame(width: width, height: 32).clipShape(SquircleShape.control).offset(x: 6)
                 ForEach(stops.indices, id: \.self) { stop in
                     Circle().fill(ColorUI.preview(stops[stop]["color"])["rgba"].paintColor)
                         .overlay(Circle().strokeBorder(palette["text"], lineWidth: 1))
@@ -112,7 +112,7 @@ struct GradientEditor: View {
                         .overlay(Circle().strokeBorder(palette["text"], lineWidth: 2).padding(-2).opacity(stop == index ? 1 : 0))
                         .accessibilityElement().accessibilityLabel("\(nativeCopy["color"]["color"].string) \(stop + 1)")
                         .accessibilityAddTraits(stop == index ? .isSelected : []).accessibilityIdentifier("\(identifier)-marker-\(stop)")
-                        .position(x: 6 + stops[stop]["position"].number * width, y: 32 + 7)
+                        .position(x: 6 + stops[stop]["position"].number * width, y: 32 + 6)
                 }
             }.frame(maxWidth: .infinity, alignment: .topLeading).contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).updating($touching) { _, active, _ in active = true }.onChanged { event in
@@ -137,7 +137,7 @@ struct GradientEditor: View {
                     edit(["kind": "position", "index": c.index, "operation": ["type": "step", "steps": 0]], phase: "up", target: c.target)
                 })
                 .onChange(of: touching) { _, active in if !active && contact != nil { cancel() } }
-        }.frame(height: 46).modifier(NumberControlMeasurement(id: identifier + "-strip:track"))
+        }.frame(height: 44).modifier(NumberControlMeasurement(id: identifier + "-strip:track"))
             .focusable(enabled).focused($focused).focusEffectDisabled()
             .onKeyPress(keys: [.leftArrow, .rightArrow], phases: [.down, .repeat, .up]) { press in
                 guard enabled else { return .ignored }

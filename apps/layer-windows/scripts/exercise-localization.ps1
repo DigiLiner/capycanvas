@@ -1,6 +1,7 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly)
 $ErrorActionPreference='Stop'
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
+if($Theme.StartsWith('blend-large-')){$Theme=$Theme.Substring(12);$LargeText=$true;$BlendOnly=$true;$LanguageLimit=2}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 . (Join-Path $PSScriptRoot 'LocalizationProfiles.ps1')
 . (Join-Path $PSScriptRoot 'LocalizationShortcuts.ps1')
@@ -123,6 +124,8 @@ function Select-Draft($Control,[string]$Text){
 function Capture-Window($Window,[string]$Name){
  Use-Window $Window;Start-Sleep -Milliseconds 250
  & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $Window.hwnd -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed *> (Join-Path $run ($Name+'-capture.json'))
+ $workspace=Workspace-Root
+ if($workspace){@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow([IntPtr]$Window.hwnd)}|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run ($Name+'-layout.json'))}
  (Fresh-Model $Window)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))
 }
 function Application-Menu([string]$Menu){

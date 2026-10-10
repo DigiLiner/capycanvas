@@ -84,6 +84,7 @@ pub fn button(name: &str) -> gtk::Button {
 
 pub fn set_button(button: &impl IsA<gtk::Button>, name: &str) {
     let button = button.as_ref();
+    button.add_css_class("panel-icon-action");
     if let Some(image) = button.child().and_downcast::<gtk::Image>() {
         set(&image, Some(name));
     } else {

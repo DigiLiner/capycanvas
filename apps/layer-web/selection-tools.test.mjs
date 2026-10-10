@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {checkPaintableSelections} from './selection-masks.test.mjs';
+import {chooseToolActionGroup} from './panel-controls-journey.test.mjs';
 
 // Run on the dedicated test origin: canvas contacts exercise the real GPU queue.
 export async function checkSelectionTools({call, evaluate, settle}) {
@@ -81,7 +82,8 @@ export async function checkSelectionTools({call, evaluate, settle}) {
     await contact(mode('selection_fixed_size'));
     await invoke('color_select');
     for(const id of ['tolerance','expansion','smoothing']) assert.ok(await evaluate(`!!document.querySelector('[data-tool-setting=${id}]')`));
-    for(const id of ['selection_visible','selection_editing','selection_reference']) assert.ok(await evaluate(`!!document.querySelector('[data-tool-action=${id}]')`));
+    assert.deepEqual(await evaluate(`[...document.querySelector('[data-tool-action-group="selection-source"]').options].map(o=>o.value)`),['selection_visible','selection_editing','selection_reference']);
+    await chooseToolActionGroup({call,evaluate,settle},'selection-source','selection_visible');
     await mkdir('artifacts/selection-web',{recursive:true});
     for(const theme of ['light','dark']) {
       await send({type:'set_theme',theme});

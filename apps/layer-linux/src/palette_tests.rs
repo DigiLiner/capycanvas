@@ -429,11 +429,22 @@ fn native_palette_panel_input() {
         state(&d.w).color_library.active_palette().swatches.len(),
         colors.len()
     );
+    let name = d.named("palette-color-name");
+    let label = descendant::<gtk::Label>(&name).unwrap().compute_bounds(&d.w.window).unwrap();
+    let before = name.compute_bounds(&d.w.window).unwrap();
+    assert_eq!(before.x()+before.width()-label.x()-label.width(),6.,"palette readout uses the field text inset");
+    capture_palette(&mut d,"palette-name-readout.png");
     d.click_name("palette-color-name");
     let entry = d
         .named("palette-name-editor")
         .downcast::<gtk::Entry>()
         .unwrap();
+    let text = descendant::<gtk::Text>(&entry).unwrap().compute_bounds(&d.w.window).unwrap();
+    let editing = entry.compute_bounds(&d.w.window).unwrap();
+    assert_eq!(editing.x()+editing.width()-text.x()-text.width(),6.,"palette editor retains the readout text inset");
+    assert_eq!(editing.x()+editing.width(),before.x()+before.width(),"name editing retains the footer right edge");
+    capture_palette(&mut d,"palette-name-editing.png");
+    std::fs::write(std::path::PathBuf::from(std::env::var_os("LAYER_TEST_ARTIFACTS").unwrap()).join("palette-name-geometry.json"),serde_json::to_vec_pretty(&serde_json::json!({"readout":[before.x(),before.y(),before.width(),before.height()],"label":[label.x(),label.width()],"editor":[editing.x(),editing.y(),editing.width(),editing.height()],"text":[text.x(),text.width()]})).unwrap()).unwrap();
     entry.set_text("Linen");
     d.input.key(0xff0d);
     assert_eq!(

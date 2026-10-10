@@ -69,6 +69,7 @@ pub struct EffectPanels {
     property_localization: RefCell<Option<std::sync::Arc<layer_ui::Localizer>>>,
     fields: RefCell<Vec<Field>>,
     property_labels: RefCell<Vec<(usize, gtk::Label)>>,
+    property_choice_labels: gtk::SizeGroup,
     section_labels: RefCell<Vec<(usize, gtk::Label)>>,
     property_updating: Rc<Cell<bool>>,
     stats_labels: RefCell<Vec<gtk::Label>>,
@@ -146,7 +147,8 @@ impl EffectPanels {
         filter_types.append(&cancel_filter);
         let adjustments = gtk::Box::new(gtk::Orientation::Vertical, 6);
         adjustments.add_css_class("filter-picker");
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        adjustments.add_css_class("dock-panel");
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
         header.add_css_class("filter-picker-header");
         header.set_visible(!split_picker);
         let category = crate::panel_controls::dropdown(&[]);
@@ -173,18 +175,19 @@ impl EffectPanels {
         scroller.add_css_class("filter-picker-scroll");
         adjustments.append(&header);
         adjustments.append(&scroller);
-        let properties = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let properties = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         properties.add_css_class("effect-properties");
+        properties.add_css_class("dock-panel");
         let title = gtk::Label::new(None);
         title.set_xalign(0.);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.add_css_class("heading");
         title.set_widget_name("properties-layer-name");
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let body = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         let page = crate::panel_controls::dropdown(&[]);
         page.set_widget_name("properties-page");
         properties.append(&title);
-        let property_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let property_header = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
         property_header.add_css_class("properties-header");
         let layer_type = gtk::Label::builder().xalign(0.).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
         layer_type.add_css_class("dim-label");
@@ -298,6 +301,7 @@ impl EffectPanels {
             property_localization: RefCell::new(None),
             fields: RefCell::new(Vec::new()),
             property_labels: RefCell::default(),
+            property_choice_labels: gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal),
             section_labels: RefCell::default(),
             property_updating: Rc::new(Cell::new(false)),
             stats_labels: RefCell::new(Vec::new()),
@@ -829,17 +833,13 @@ impl EffectPanels {
                 let mut section = None;let mut previous:Option<gtk::Widget>=None;
                 for (index, control) in view.controls.iter().enumerate() {
                     if section != control.section_id.as_ref() {
-                        if index > 0 {
-                            let divider = gtk::Separator::new(gtk::Orientation::Horizontal);
-                            divider.add_css_class("property-divider");
-                            self.body.insert_child_after(&divider,previous.as_ref());previous=Some(divider.upcast());
-                        }
                         section = control.section_id.as_ref();
                         if let Some(text) = control.section.as_deref() {
                             let heading = gtk::Label::new(Some(text));
                             heading.set_xalign(0.);
                             heading.add_css_class("heading");
                             heading.add_css_class("property-section");
+                            heading.set_margin_top(if index > 0 { crate::panel_controls::SPACING - crate::panel_controls::CONTROL_SPACING } else { 0 });
                             self.body.insert_child_after(&heading,previous.as_ref());previous=Some(heading.clone().upcast());
                             self.section_labels.borrow_mut().push((index, heading));
                         }
@@ -864,6 +864,7 @@ impl EffectPanels {
                     let field = match &control.kind {
                         PropertyKind::Number { numeric } => {
                             let input = NumberControl::panel(numeric.clone(), &control.label, w.localization().clone());
+                            input.fit_spin_width();
                             input.set_widget_name(&format!("property-{}", control.key));
                             let reset_key = control.key.clone();
                             input.connect_reset_requested(glib::clone!(#[weak] w, move || {
@@ -901,7 +902,7 @@ impl EffectPanels {
                             input.widget.set_widget_name(&format!("effect-color-{}", control.key));
                             input.bind(w, move |_, color| dispatch(EffectValue::Color(color)));
                             if let Some(action) = &control.color_action {
-                                let line = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                                let line = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
                                 line.append(&input.widget);
                                 let bucket = w.action_button("", action.clone());
                                 bucket.set_widget_name(&format!("{}-bucket", control.key.replace('_', "-")));
@@ -925,7 +926,7 @@ impl EffectPanels {
                             Field::Curve(input)
                         }
                         PropertyKind::Gradient => {
-                            let input = GradientEditor::new(w, control, crate::panel_controls::SPACING);
+                            let input = GradientEditor::new(w, control, crate::panel_controls::CONTROL_SPACING);
                             self.body.append(&input.root);
                             Field::Gradient(input)
                         }
@@ -975,7 +976,12 @@ impl EffectPanels {
     }
     fn append_property_row(&self, index: usize, title: &str, input: &impl IsA<gtk::Widget>) {
         let row = row(title, input);
-        self.property_labels.borrow_mut().push((index, row.first_child().and_downcast::<gtk::Label>().unwrap()));
+        let label=row.first_child().and_downcast::<gtk::Label>().unwrap();
+        let widget: &gtk::Widget=input.as_ref();
+        if widget.is::<gtk::DropDown>() {
+            label.set_hexpand(false);self.property_choice_labels.add_widget(&label);input.set_hexpand(true);
+        }
+        self.property_labels.borrow_mut().push((index, label));
         self.body.append(&row);
     }
     fn recording_error(w: &Rc<Workspace>, message: &str) {
@@ -1135,7 +1141,7 @@ fn same_property_kind(a: &PropertyKind, b: &PropertyKind) -> bool {
     }
 }
 fn row(title: &str, input: &impl IsA<gtk::Widget>) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
     let label = gtk::Label::new(Some(title));
     label.set_xalign(0.);
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);

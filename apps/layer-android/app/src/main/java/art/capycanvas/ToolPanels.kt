@@ -11,8 +11,6 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,7 +27,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import org.json.JSONObject
 import org.json.JSONArray
 import kotlinx.coroutines.Dispatchers
@@ -108,57 +105,60 @@ import kotlinx.coroutines.withContext
         val picker=state.getJSONObject("color_picker")
         val copy=remember(host.catalog) { host.catalog.getJSONObject("native_copy").getJSONObject("sampler") }
         val sizeLabels=remember(copy) { copy.array("sizes").values().associate { value -> (value as JSONArray).getInt(0) to value.getString(1) } }
-        ProvideTextStyle(LocalTextStyle.current.copy(fontSize=13.sp)) {
-        Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth().testTag("picker-setting-source"),verticalAlignment=Alignment.CenterVertically) {
-                Text(copy.getString("source"),Modifier.width(76.dp),maxLines=1)
+        Column(verticalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
+            val labelWidth=panelLabelWidth(listOf(copy.getString("source"),copy.getString("sample_size")))
+            Row(Modifier.fillMaxWidth().testTag("picker-setting-source"),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing),verticalAlignment=Alignment.CenterVertically) {
+                Text(copy.getString("source"),Modifier.width(labelWidth),maxLines=1)
                 PropertyChoice(copy.getString("source"),if(picker.optBoolean("can_sample_layer"))listOf(copy.getString("visible_color"),copy.getString("selected_layer")) else listOf(copy.getString("visible_color")),if(picker.getBoolean("layer"))1 else 0,onOpenChanged={host.pickerPopupOpen=it}) {
                     host.dispatch(obj("type" to "color_picker","action" to obj("kind" to "source","layer" to (it==1))))
                 }
             }
             val sizes=picker.array("sample_sizes").values().map{(it as Number).toInt()}
-            Row(Modifier.fillMaxWidth().testTag("picker-setting-size"),verticalAlignment=Alignment.CenterVertically) {
-                Text(copy.getString("sample_size"),Modifier.width(76.dp),maxLines=1)
+            Row(Modifier.fillMaxWidth().testTag("picker-setting-size"),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing),verticalAlignment=Alignment.CenterVertically) {
+                Text(copy.getString("sample_size"),Modifier.width(labelWidth),maxLines=1)
                 PropertyChoice(copy.getString("sample_size"),sizes.map{sizeLabels.getValue(it)},sizes.indexOf(picker.getInt("sample_width")),onOpenChanged={host.pickerPopupOpen=it}) {
                     host.dispatch(obj("type" to "set_color_sample_size","width" to sizes[it]))
                 }
             }
         }
-        }
         return
     }
+    val metrics = panelMetrics()
     val controlCopy = remember(host.catalog) { host.catalog.getJSONObject("native_copy").getJSONObject("tool_controls") }
-    val modes = setOf("selection_new", "selection_add", "selection_subtract", "selection_intersect")
     val actions = state.array("tool_actions").objects()
     val commands = state.array("commands").let { list -> remember(list) { list.objects().associateBy { it.getString("id") } } }
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (actions.any { it.getString("command") in modes }) Row(Modifier.fillMaxWidth().clip(ControlShape).border(1.dp, LocalPalette.current.divider, ControlShape).selectableGroup().testTag("selection-mode-row")) {
-            actions.filter { it.getString("command") in modes }.forEach { action ->
+    Column(verticalArrangement = Arrangement.spacedBy(metrics.group)) {
+        if (actions.any { it.optBoolean("segmented") }) Column(verticalArrangement=Arrangement.spacedBy(metrics.spacing)) {
+        actions.filter {it.optBoolean("segmented")}.groupBy {it.getString("group")}.forEach { (group, grouped) -> Row(Modifier.fillMaxWidth().clip(ControlShape).border(1.dp, LocalPalette.current.divider, ControlShape).selectableGroup().testTag(if(group=="selection-mode") "selection-mode-row" else "tool-action-group-$group")) {
+            grouped.forEach { action ->
                 val id = action.getString("command")
                 val command = commands.getValue(id)
                 val selected = command.getBoolean("selected")
                 HoverTip(command.getString("tooltip"), Modifier.weight(1f)) {
-                    Box(Modifier.fillMaxWidth().height(48.dp).testTag("tool-action-$id")
+                    Box(Modifier.fillMaxWidth().height(metrics.height).testTag("tool-action-$id")
                         .background(if (selected) LocalPalette.current.active else Color.Transparent)
                         .selectable(selected = selected, enabled = command.getBoolean("enabled"), role = Role.RadioButton) { host.invoke(id) },
                         contentAlignment = Alignment.Center) {
-                        SharedIcon(command.getString("icon"), command.getString("label"), Modifier.size(20.dp))
+                        SharedIcon(command.getString("icon"), command.getString("label"), Modifier.size(metrics.icon))
                     }
                 }
             }
         }
-        if (actions.any { it.getString("command") in modes }) SelectionMenuButton(host, controlCopy.getString("selection_menu"), "selection")
+        }
+        if (actions.any { it.optString("group")=="selection-mode" }) SelectionMenuButton(host, controlCopy.getString("selection_menu"), "selection", panel = true)
+        }
+        Column(verticalArrangement=Arrangement.spacedBy(metrics.spacing)) {
         val choices = state.array("tool_extra").objects().mapNotNull { it.optJSONObject("Choice") }
         val beside = choices.filter { it.has("beside") }.associateBy { it.getString("beside") }
         choices.filterNot { it.has("beside") }.forEach { choice ->
-            ToolbarChoice(choice, false, false, false, 20, host::dispatch, prefix = "tool", height = 32f)
+            ToolbarChoice(choice, false, false, false, 20, host::dispatch, prefix = "tool", height = metrics.height.value)
         }
         state.array("tool_extra").objects().mapNotNull {it.optJSONObject("Gradient")}.forEach {GradientControl(host,it)}
         val generation = state.optLong("toolbar_context_generation")
         val fieldControl: @Composable (JSONObject, Boolean) -> Unit = { field, compact ->
             val id = field.getString("id")
             Box(Modifier.testTag("tool-setting-$id")) {
-                if (compact) Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (compact) Row(Modifier.fillMaxWidth().height(metrics.height), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(metrics.spacing)) {
                     Text(field.getString("label"), Modifier.weight(1f), maxLines = 1)
                     NumericSetting(field.getString("label"), field.number("value"), field.getJSONObject("numeric"), id = id, inline = true, showSlider = false) {
                         host.dispatch(obj("type" to "set_tool_setting", "id" to id, "value" to it))
@@ -169,30 +169,66 @@ import kotlinx.coroutines.withContext
                 }
             }
         }
-        state.array("tool_settings").objects().groupBy { it.getString("group") }.forEach { (group, fields) ->
+        state.array("tool_settings").objects().groupBy { it.getString("group") }.entries.forEachIndexed { index, (group, fields) ->
             val choice = beside[fields.first().getString("id")]
             val title = choice?.getString("label") ?: group
-            if (title.isNotEmpty()) Text(title, fontWeight = FontWeight.Bold, color = LocalPalette.current.secondary)
+            if (title.isNotEmpty()) Text(title, Modifier.padding(top=if(index>0)2.dp else 0.dp), fontWeight = FontWeight.Bold, color = LocalPalette.current.secondary)
             if (choice == null) fields.forEach { fieldControl(it, false) }
-            else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(metrics.compound)) {
                 ToolbarChoice(choice, false, false, false, 20, host::dispatch, prefix = "tool")
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { fields.forEach { fieldControl(it, true) } }
             }
         }
-        actions.filter { it.getString("command") !in modes }.forEach { action ->
-            val id = action.getString("command")
-            commands[id]?.let { command ->
-                if (action.optBoolean("checkable")) HoverTip(command.getString("tooltip"), Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().testTag("tool-action-$id")
-                    .toggleable(command.getBoolean("selected"), enabled = command.getBoolean("enabled"), role = Role.Checkbox) { host.invoke(id) },
-                    verticalAlignment = Alignment.CenterVertically) {
-                    EditorCheck(command.optBoolean("selected"), command.getString("label"), Modifier.clearAndSetSemantics {}, enabled = command.getBoolean("enabled")) { host.invoke(id) }
-                    Text(command.getString("label"))
-                } } else TextButton({ host.invoke(id) }, Modifier.testTag("tool-action-$id"), enabled = command.getBoolean("enabled")) {
-                    SharedIcon(command.getString("icon"), null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(command.getString("label"))
+        ToolActionRows(host,state,actions.filterNot {it.optBoolean("segmented")},commands)
+        }
+    }
+}
+
+@Composable private fun ToolActionRows(host:CanvasHost,state:JSONObject,actions:List<JSONObject>,commands:Map<String,JSONObject>) {
+    val metrics=panelMetrics()
+    val groups=host.catalog.array("tool_action_groups").objects().associateBy {it.getString("id")}
+    val labelWidth=panelLabelWidth(actions.mapNotNull {it.optString("group").takeIf(String::isNotEmpty)}.distinct().map {groups.getValue(it).getString("label")})
+    val completed=mutableSetOf<String>()
+    actions.forEach {action ->
+        val group=action.optString("group")
+        val row=action.optString("row")
+        if(group.isNotEmpty()) {
+            if(completed.add(group)) {
+                val choices=actions.filter {it.optString("group")==group}.map {commands.getValue(it.getString("command"))}
+                val label=groups.getValue(group).getString("label")
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(metrics.spacing)) {
+                    Text(label,Modifier.width(labelWidth),maxLines=1,overflow=TextOverflow.Ellipsis)
+                    Box(Modifier.weight(1f)) {PropertyChoice(label,choices.map {it.getString("label")},choices.indexOfFirst {it.getBoolean("selected")},choices.any {it.getBoolean("enabled")},
+                        modifier=Modifier.testTag("tool-action-group-$group"),optionEnabled={choices[it].getBoolean("enabled")},optionTag={"tool-action-${choices[it].getString("id")}"}) {host.invoke(choices[it].getString("id"))}}
                 }
             }
+        } else if(row.isNotEmpty()) {
+            if(completed.add(row)) Row(Modifier.fillMaxWidth().testTag("tool-action-row-$row"),horizontalArrangement=Arrangement.spacedBy(metrics.spacing)) {
+                actions.filter {it.optString("row")==row}.forEach {spec -> ToolActionButton(host,state,spec,commands.getValue(spec.getString("command")),if(spec.optBoolean("icon_only"))Modifier else Modifier.weight(1f))}
+            }
+        } else ToolActionButton(host,state,action,commands.getValue(action.getString("command")),Modifier.fillMaxWidth())
+    }
+}
+
+@Composable private fun ToolActionButton(host:CanvasHost,state:JSONObject,action:JSONObject,command:JSONObject,modifier:Modifier) {
+    val metrics=panelMetrics()
+    val id=command.getString("id")
+    val enabled=command.getBoolean("enabled")
+    val selected=command.getBoolean("selected")
+    val label=command.getString("label")
+    val iconOnly=action.optBoolean("icon_only")
+    val caption=state.objectOrNull("canvas_bar")?.array("completion")?.objects()?.firstOrNull {it.objectOrNull("option")?.objectOrNull("Action")?.getJSONObject("state")?.getString("id")==id}?.getString("label")?:label
+    HoverTip(command.getString("tooltip"),modifier) {
+        if(action.optBoolean("checkable")) Row(Modifier.fillMaxWidth().heightIn(min=metrics.height).testTag("tool-action-$id")
+            .toggleable(selected,enabled=enabled,role=Role.Checkbox){host.invoke(id)},verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(metrics.spacing)) {
+            EditorCheck(selected,label,Modifier.clearAndSetSemantics{},enabled){host.invoke(id)}
+            Text(label,maxLines=1,overflow=TextOverflow.Ellipsis)
+        } else Row((if(iconOnly)Modifier.size(metrics.height)else Modifier.fillMaxWidth().heightIn(min=metrics.height)).clip(ControlShape)
+            .background(if(selected)LocalPalette.current.active else LocalPalette.current.button).alpha(if(enabled)1f else .4f)
+            .clickable(enabled=enabled){host.invoke(id)}.padding(horizontal=if(iconOnly)0.dp else metrics.padding).testTag("tool-action-$id"),
+            verticalAlignment=Alignment.CenterVertically,horizontalArrangement=if(iconOnly)Arrangement.Center else Arrangement.spacedBy(metrics.spacing)) {
+            if(!command.isNull("icon")) SharedIcon(command.getString("icon"),if(iconOnly)label else null,Modifier.size(metrics.icon))
+            if(!iconOnly)Text(caption,maxLines=1,overflow=TextOverflow.Ellipsis)
         }
     }
 }
@@ -206,10 +242,10 @@ import kotlinx.coroutines.withContext
         obj("icon" to command.getString("icon"), "label" to command.getString("label"), "selected" to command.getBoolean("selected"),
             "action" to obj("type" to "invoke", "command" to action.getString("command")))
     }))
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        ToolbarChoice(modes, false, false, false, 20, host::dispatch, prefix="tool", height=36f)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
+        ToolbarChoice(modes, false, false, false, 20, host::dispatch, prefix="tool", height=panelMetrics().height.value)
         state.array("tool_extra").objects().forEach { option ->
-            ToolbarChoice(option.getJSONObject("Choice"), false, false, false, 20, host::dispatch, prefix="tool", height=36f)
+            ToolbarChoice(option.getJSONObject("Choice"), false, false, false, 20, host::dispatch, prefix="tool", height=panelMetrics().height.value)
         }
         val fields = state.array("tool_settings").objects()
         if (fields.any { it.getString("id") == "tonal_lower" }) {
@@ -220,7 +256,7 @@ import kotlinx.coroutines.withContext
         }
         fields.filter { it.getString("id") !in listOf("tonal_lower", "tonal_upper") }.forEach { field ->
             val id = field.getString("id")
-            Row(Modifier.fillMaxWidth().height(28.dp).testTag("tool-setting-$id"), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().height(panelMetrics().height).testTag("tool-setting-$id"), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
                 Text(field.getString("label"), Modifier.width(62.dp), maxLines=1)
                 NumericSetting(field.getString("label"), field.number("value"), field.getJSONObject("numeric"), Modifier.weight(1f), id=id, inline=true) {
                     host.dispatch(obj("type" to "set_tool_setting", "id" to id, "value" to it))

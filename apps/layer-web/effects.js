@@ -206,7 +206,6 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
       for(const [index,c] of view.controls.entries()){
         const identity=JSON.stringify(c.section_id);
         if(section!==identity){
-          if(index>0)children.push(element("hr","property-divider"));
           section=identity;
           if(c.section)children.push(element("h4","property-section",()=>state().layer_properties.controls.find(v=>v.key===c.key)?.section??""));
         }

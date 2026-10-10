@@ -132,7 +132,7 @@ pub(crate) struct GradientButton {
 }
 impl GradientButton {
     pub fn new(w:&Rc<Workspace>,control:&layer_ui::PropertyControl)->Self {
-        let editor=GradientEditor::new(w,control,crate::panel_controls::SPACING);
+        let editor=GradientEditor::new(w,control,crate::panel_controls::CONTROL_SPACING);
         editor.root.set_size_request(240,-1);
         let popover=gtk::Popover::new();popover.set_child(Some(&editor.root));
         w.watch_popover(&popover);

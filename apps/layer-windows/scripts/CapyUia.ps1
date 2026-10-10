@@ -118,6 +118,22 @@ function Control([string]$Value,[switch]$Name,$Within=$root,$Type,[int]$Seconds=
     } "Missing control: $Value" $Seconds
     $hit.item
 }
+function Control-Trace($Element){
+    $walker=[System.Windows.Automation.TreeWalker]::RawViewWalker
+    $items=@();$node=$Element
+    for($i=0;$node -and $i -lt 25;$i++){
+        $current=$node.Current;$scroll=$null
+        $item=[ordered]@{id=$current.AutomationId;name=$current.Name;type=$current.ControlType.ProgrammaticName;process=$current.ProcessId;bounds=$current.BoundingRectangle;offscreen=$current.IsOffscreen;focused=$current.HasKeyboardFocus}
+        if($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$scroll)){$item.scroll=@{vertical=$scroll.Current.VerticallyScrollable;percent=$scroll.Current.VerticalScrollPercent;view_size=$scroll.Current.VerticalViewSize}}
+        $items+=[pscustomobject]$item
+        $node=$walker.GetParent($node)
+    }
+    $items
+}
+function Input-Trace([int]$X,[int]$Y){
+    $point=[System.Windows.Point]::new($X,$Y)
+    @{point=@($X,$Y);foreground=[CapyRowPointer]::GetForegroundWindow().ToInt64();owned_window=$review.MainWindowHandle.ToInt64();hit=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FromPoint($point)));focus=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FocusedElement))}
+}
 function Scroll-Position($Control,[ValidateRange(0,100)][double]$Percent){
     $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$scroller=$walker.GetParent($Control);$scroll=$null
     while($scroller -and !$scroller.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$scroll)){$scroller=$walker.GetParent($scroller)}
@@ -190,6 +206,8 @@ function Capture([string]$Name,[switch]$WithModel,[switch]$Composed){
     [CapyWindowApi]::GetWindowThreadProcessId($handle,[ref]$owner)|Out-Null
     if($owner -ne $review.Id){throw 'The capture window no longer belongs to the owned process'}
     & (Join-Path $script:CapyScripts 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $handle.ToInt64() -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed:$Composed *> (Join-Path $run ($Name+'.json'))
+    $workspace=Workspace-Root
+    if($workspace -and ('CapyRowPointer' -as [type])){@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow($handle)}|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run ($Name+'-layout.json'))}
     if($WithModel){(Model)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))}
 }
 function Enter-CapyEnvironment([string[]]$Names=@()){
@@ -297,8 +315,47 @@ function Save-ProjectAs([string]$Path,[scriptblock]$NativeSaved){
     Wait-Until {!(Find 'Save As' -Name) -and (Control 'drawing-canvas').Current.IsEnabled} 'The Save As dialog did not close'
 }
 function Workspace-Root{
-    $named=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'Drawing workspace')
-    foreach($workspace in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$named)){
-        if($workspace.Current.ItemStatus){return $workspace}
+    $traced=[System.Windows.Automation.NotCondition]::new([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ItemStatusProperty,''))
+    foreach($workspace in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$traced)){
+        $status=$workspace.Current.ItemStatus
+        if(!$status.StartsWith('{')){continue}
+        try{$presentation=$status|ConvertFrom-Json}catch{continue}
+        if($presentation.PSObject.Properties.Name -contains 'groups' -and $presentation.PSObject.Properties.Name -contains 'elements'){return $workspace}
     }
+}
+function Compact-Choice([string]$Id,[double]$Scale,[double]$Height=24){
+    $box=Control $Id -Arranged
+    $bounds=Native-Bounds $Id $Scale
+    $selected=$box.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()
+    if($selected.Count -ne 1){throw "Compact choice $Id has no native selection"}
+    $texts=@(foreach($text in $box.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)){
+        $current=$text.Current
+        if(!$current.IsOffscreen -and ($current.ControlType -eq [System.Windows.Automation.ControlType]::Text -or $current.ClassName -eq 'TextBlock')){
+            @{name=$current.Name;bounds=$current.BoundingRectangle}
+        }
+    })
+    $record=@{id=$Id;bounds=$bounds;selected=$selected[0].Current.Name;texts=$texts;dpi=96*$Scale;visual_review='Required when the closed caption has no native text provider'}
+    $record|ConvertTo-Json -Depth 6|Set-Content (Join-Path $run ($Id+'-compact-geometry.json'))
+    if([Math]::Abs($bounds.Height/$Scale-$Height) -gt 1){throw "Compact choice $Id has the wrong height"}
+    $contained=$bounds;$contained.Inflate(1,1)
+    foreach($text in $texts){
+        if($text.name -ne $record.selected -or !$contained.Contains($text.bounds) -or $text.bounds.Height/$Scale -lt 18){throw "Compact choice $Id clips or mislabels its visible caption"}
+    }
+    $record
+}
+function Native-Bounds([string]$Id,[double]$Scale,[switch]$Group){
+    $hit=@{record=$null}
+    Wait-Until {
+        $workspace=Workspace-Root
+        if(!$workspace){return $false}
+        $presentation=$workspace.Current.ItemStatus|ConvertFrom-Json
+        $records=if($Group){$presentation.groups}else{$presentation.elements}
+        $hit.record=@($records|Where-Object id -eq $Id)[0]
+        $bounds=if($Group){$hit.record.bounds}else{$hit.record.actual_bounds}
+        $hit.record -and $bounds.width -gt 0 -and $bounds.height -gt 0
+    } "Native arranged bounds did not become available: $Id"
+    $bounds=if($Group){$hit.record.bounds}else{$hit.record.actual_bounds}
+    $origin=[CapyRowPointer+Point]::new()
+    if(![CapyRowPointer]::ClientToScreen([IntPtr]$root.Current.NativeWindowHandle,[ref]$origin)){throw 'Native client origin is unavailable'}
+    [Windows.Rect]::new($origin.x+$bounds.x*$Scale,$origin.y+$bounds.y*$Scale,$bounds.width*$Scale,$bounds.height*$Scale)
 }

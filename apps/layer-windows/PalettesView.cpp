@@ -472,7 +472,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
     }
     void init(){
         auto weak=weak_from_this();
-        root.Padding({8,6,8,6});root.RowSpacing(6);root.MinWidth(0);root.Tag(O({{L"native_keys",B(true)}}));AutomationProperties::SetAutomationId(root,L"palettes-panel");AutomationProperties::SetName(root,data->caption(L"palettes",L"title"));
+        root.Padding({8,8,8,8});root.RowSpacing(6);root.MinWidth(0);root.Tag(O({{L"native_keys",B(true)}}));AutomationProperties::SetAutomationId(root,L"palettes-panel");AutomationProperties::SetName(root,data->caption(L"palettes",L"title"));
         for(auto star:{true,false,false,false}){RowDefinition row;row.Height(star?GridLength{1,GridUnitType::Star}:GridLength{1,GridUnitType::Auto});root.RowDefinitions().Append(row);}
         auto divider=[&]{Border line;line.Height(1);line.Background(data->tint(L"text",38));return line;};
         normal.Spacing(6);history.Height(Cell);AutomationProperties::SetAutomationId(history,L"palette-history");AutomationProperties::SetName(history,data->caption(L"palettes",L"recent"));
@@ -500,7 +500,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         overlays.Children().Append(chooser);root.Children().Append(body);
         auto footerLine=divider();Grid::SetRow(footerLine,1);root.Children().Append(footerLine);
         footer.ColumnSpacing(4);ColumnDefinition left;left.Width({1,GridUnitType::Star});footer.ColumnDefinitions().Append(left);ColumnDefinition right;right.Width({1,GridUnitType::Star});footer.ColumnDefinitions().Append(right);
-        selector=button(data,data->copyCaption(L"palettes",L"choose"),[]{});selector.Height(24);selector.MinHeight(24);selector.Padding({4,0,4,0});selector.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());
+        selector=button(data,data->copyCaption(L"palettes",L"choose"),[]{});selector.Height(24);selector.MinHeight(24);selector.Padding({6,0,6,0});selector.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());
         Grid selectorContent;selectorContent.ColumnSpacing(4);ColumnDefinition textColumn;textColumn.Width({1,GridUnitType::Star});selectorContent.ColumnDefinitions().Append(textColumn);ColumnDefinition arrowColumn;arrowColumn.Width({1,GridUnitType::Auto});selectorContent.ColumnDefinitions().Append(arrowColumn);selectorLabel=label(data,L"");selectorLabel.TextTrimming(TextTrimming::CharacterEllipsis);
         selectorLabel.VerticalAlignment(VerticalAlignment::Center);selectorContent.Children().Append(selectorLabel);auto up=icon(L"chevron-down",data->theme(),12);up.RenderTransformOrigin({.5f,.5f});
         RotateTransform flip;flip.Angle(180);up.RenderTransform(flip);up.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(up,1);selectorContent.Children().Append(up);selector.Content(selectorContent);
@@ -510,7 +510,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         selector.Click([weak](auto&&,auto&&){if(auto self=weak.lock()){bool touch=self->openerTouch;self->openerTouch=false;self->browse(self->chooser.Visibility()!=Visibility::Visible,!touch);}});
         footer.Children().Append(selector);
         info.HorizontalAlignment(HorizontalAlignment::Right);info.MinWidth(0);
-        name=button(data,data->copyCaption(L"palettes",L"name"),[weak]{if(auto self=weak.lock())self->editName();});name.Height(24);name.MinHeight(24);name.Padding({2,0,2,0});
+        name=button(data,data->copyCaption(L"palettes",L"name"),[weak]{if(auto self=weak.lock())self->editName();});name.Height(24);name.MinHeight(24);name.Padding({6,0,6,0});
         name.HorizontalAlignment(HorizontalAlignment::Right);name.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());nameLabel=label(data,L"");nameLabel.TextTrimming(TextTrimming::CharacterEllipsis);name.Content(nameLabel);
         AutomationProperties::SetAutomationId(name,L"palette-name");info.Children().Append(name);
         editor.MaxLength(64);editor.Height(24);editor.MinHeight(24);editor.Padding({6,2,6,2});editor.TextAlignment(TextAlignment::Right);editor.Background(data->brush(L"input"));editor.BorderThickness({0,0,0,0});
@@ -518,7 +518,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         editor.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(composingKey(e))return;if(e.Key()==winrt::Windows::System::VirtualKey::Enter)if(auto self=weak.lock()){e.Handled(true);self->commitName();if(!self->editing)self->name.Focus(FocusState::Programmatic);}});
         editor.LostFocus([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->editing&&self->editor.Visibility()==Visibility::Visible)self->commitName();});
         info.Children().Append(editor);
-        detail=label(data,L"");detail.TextWrapping(TextWrapping::Wrap);detail.FontSize(data->textSize()*.9);detail.Opacity(.55);detail.HorizontalAlignment(HorizontalAlignment::Right);detail.Margin({0,0,2,0});
+        detail=label(data,L"");detail.TextWrapping(TextWrapping::Wrap);detail.FontSize(data->textSize()*.9);detail.Opacity(.55);detail.HorizontalAlignment(HorizontalAlignment::Right);detail.Margin({0,0,6,0});
         tooltip(detail,data->caption(L"palettes",L"hex_help"));
         AutomationProperties::SetAutomationId(detail,L"palette-detail");info.Children().Append(detail);
         Grid::SetColumn(info,1);footer.Children().Append(info);Grid::SetRow(footer,2);root.Children().Append(footer);

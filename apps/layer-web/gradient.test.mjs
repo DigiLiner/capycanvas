@@ -63,11 +63,11 @@ export async function checkGradientDefinitions({call,evaluate,settle}) {
     try {
       const selected=(await read()).gradient.destination.layer;
       const rows=await evaluate('JSON.parse(JSON.stringify(layerApp.state().layers,(_,v)=>typeof v==="bigint"?Number(v):v))');
-      await invoke('save_document_as');await wait('!layerApp.state().document_file.busy&&!layerApp.state().document_file.modified');
+      await invoke('save_document_as');await wait('!layerApp.state().document_file.busy&&!layerApp.documents.busy()&&!layerApp.state().document_file.modified');
       const saved=await readPackage(evaluate,'gradientFiles.bytes'),occurrences=packageOccurrences(saved);
       const target=occurrences[rows.findIndex(row=>row.id===selected)].id;
-      const epoch=await evaluate('String(layerApp.state().document_file.epoch)');
-      await invoke('open_document');await wait(`String(layerApp.state().document_file.epoch)!==${JSON.stringify(epoch)}`);await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready()');
+      const location=await evaluate('layerApp.state().document_file.location.uri');
+      await invoke('open_document');await wait(`layerApp.state().document_file.location?.uri!==${JSON.stringify(location)}`);await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready()');
       const reopenedRows=await evaluate('JSON.parse(JSON.stringify(layerApp.state().layers,(_,v)=>typeof v==="bigint"?Number(v):v))');
       await send({type:'layer',action:{op:'select',id:reopenedRows[occurrences.findIndex(row=>row.id===target)].id,mask:false}});
       await wait('layerApp.state().layer_properties.controls.some(c=>c.gradient)');
@@ -145,7 +145,7 @@ export async function checkGradientDefinitions({call,evaluate,settle}) {
       assert.ok(await evaluate(`!!document.querySelector(${JSON.stringify(editor+' .gradient-preview')})`),'Properties presents the common canvas editor');
       if(effect==='gradient_fill'){
         assert.equal(await evaluate('layerApp.state().layer_properties.controls[0].key'),'style','Fill Shape is the first shared control');
-        const bounds=await evaluate(`(()=>{const root=document.querySelector('.dock-group[data-panel=properties]'),shape=root.querySelector('[data-property-key=style]'),editor=root.querySelector('.gradient-editor');return{shape:shape.getBoundingClientRect().toJSON(),editor:editor.getBoundingClientRect().toJSON(),visible:shape.checkVisibility()}})()`);
+        const bounds=await evaluate(`(()=>{const root=document.querySelector('.dock-group[data-panel=properties]'),shape=root.querySelector('[data-property-key=style] select'),editor=root.querySelector('.gradient-editor');return{shape:shape.getBoundingClientRect().toJSON(),editor:editor.getBoundingClientRect().toJSON(),visible:shape.checkVisibility()}})()`);
         assert.ok(bounds.visible&&bounds.shape.height>=24&&bounds.shape.bottom<=bounds.editor.top+1,'The actual Fill Shape control is visible above the gradient editor');
       }
       for(const [index,[value]] of control.gradient.interpolations.entries()) {
@@ -254,6 +254,7 @@ export async function checkGradientDefinitions({call,evaluate,settle}) {
     assert.deepEqual(await definition(),retained);
     const region=await evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]*.3)*r.width/c.viewport[0],y:r.y+(a[1]+a[3]*.4)*r.height/c.viewport[1],dx:Math.min(80,a[2]*r.width/c.viewport[0]*.3)}})()`);
     for(const device of ['mouse','touch','pen']) {
+      await wait('layerApp.app.brush_ready()&&!layerApp.documents.busy()');
       const revision=()=>evaluate('String(layerApp.state().document_file.revision)');
       assert.equal(await evaluate(`document.elementFromPoint(${region.x},${region.y})===layerApp.canvas`),true,'Gradient geometry contact hits the actual canvas');
       const before=await revision(),start={x:region.x,y:region.y},end={x:region.x+region.dx,y:region.y+10};
@@ -265,6 +266,7 @@ export async function checkGradientDefinitions({call,evaluate,settle}) {
       };
       await contact('down');await contact('move');await contact('up');
       if(device==='touch'){assert.equal(await revision(),before,'A finger navigates without painting a gradient');await invoke('fit_canvas');continue;}
+      await wait(`String(layerApp.state().document_file.revision)!==${JSON.stringify(before)}`);
       assert.notEqual(await revision(),before,`${device} native geometry contact commits the reflected tool`);
       await invoke('undo');assert.deepEqual(await definition(),retained,'Undoing painted geometry preserves retained tool settings');
       await invoke('redo');await invoke('undo');

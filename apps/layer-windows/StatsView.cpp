@@ -33,7 +33,7 @@ struct StatsView:std::enable_shared_from_this<StatsView>{
         return true;
     }
     void init(){
-        root.Spacing(6);
+        root.Spacing(data->panelMetric(L"control_spacing"));
         AutomationProperties::SetAutomationId(root,L"renderer-stats");
         chart.Height(46);chart.IsHitTestVisible(false);
         AutomationProperties::SetAutomationId(chart,L"renderer-stats-chart");
@@ -42,7 +42,7 @@ struct StatsView:std::enable_shared_from_this<StatsView>{
         chart.Children().Append(budget);chart.Children().Append(samples);
         chart.SizeChanged([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->draw();});
         record=button(data,L"Start stroke recording",[weak=weak_from_this()]{if(auto self=weak.lock();self&&self->data->strokes)self->data->strokes->click();});
-        record.HorizontalAlignment(HorizontalAlignment::Stretch);record.MinHeight(34);record.Padding({10,4,10,4});
+        record.HorizontalAlignment(HorizontalAlignment::Stretch);record.MinHeight(data->controlHeight());record.Padding({6,0,6,0});
         AutomationProperties::SetAutomationId(record,L"stroke-recording");
         recordError=label(data,L"");recordError.TextWrapping(TextWrapping::Wrap);recordError.Opacity(.75);AutomationProperties::SetAutomationId(recordError,L"stroke-recording-error");
         AutomationProperties::SetLiveSetting(recordError,Automation::Peers::AutomationLiveSetting::Polite);
@@ -75,7 +75,7 @@ struct StatsView:std::enable_shared_from_this<StatsView>{
                 auto row=rows.GetObjectAt(i);Grid line;
                 ColumnDefinition caption;caption.Width({1,GridUnitType::Star});line.ColumnDefinitions().Append(caption);
                 ColumnDefinition reading;reading.Width({1,GridUnitType::Auto});line.ColumnDefinitions().Append(reading);
-                line.ColumnSpacing(6);
+                line.ColumnSpacing(data->panelMetric(L"control_spacing"));
                 auto text=label(data,str(row,L"label"));line.Children().Append(text);
                 auto value=label(data,L"");Grid::SetColumn(value,1);line.Children().Append(value);values.push_back(value);
                 AutomationProperties::SetAutomationId(value,L"renderer-stat-"+to_hstring(i));

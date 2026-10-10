@@ -1,6 +1,18 @@
 import XCTest
 
 extension XCTestCase {
+    @MainActor func editorToolActionChoice(_ command: String, group: String = "selection-source", in app: XCUIApplication) {
+        let choice = app.buttons["tool-action-group-" + group]
+        revealEditorControl(choice, in: app.scrollViews.containing(.button, identifier: choice.identifier).firstMatch)
+        workspaceActivate(choice)
+        let option = app.buttons["tool-action-" + command]
+        XCTAssertTrue(option.waitForExistence(timeout: 5))
+        let label = option.label
+        workspaceActivate(option)
+        expectation(for: NSPredicate(format: "value == %@", label), evaluatedWith: choice)
+        waitForExpectations(timeout: 5)
+    }
+
     @MainActor func checkToolGroups(in app: XCUIApplication, theme: String) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:photographer"}}]"#
         app.launch()
@@ -44,12 +56,10 @@ extension XCTestCase {
         for id in ["gap_closing", "expansion"] {
             XCTAssertTrue(app.textFields["number-entry-tool-" + id].waitForExistence(timeout: 10), "Enclose and Fill shares Fill's \(id)")
         }
-        let reference = app.buttons["tool-action-selection_reference"], visible = app.buttons["tool-action-selection_visible"]
-        revealEditorControl(reference, in: app.scrollViews.containing(.button, identifier: reference.identifier).firstMatch)
-        XCTAssertTrue(reference.isSelected, "Enclose and Fill samples reference layers by default")
-        workspaceActivate(visible)
-        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: visible)
-        waitForExpectations(timeout: 5)
+        let source = app.buttons["tool-action-group-selection-source"]
+        XCTAssertTrue(source.waitForExistence(timeout: 5))
+        XCTAssertEqual(source.value as? String, "Reference layers", "Enclose and Fill samples reference layers by default")
+        editorToolActionChoice("selection_visible", in: app)
         XCTAssertTrue(tile.exists, "Changing the source keeps Enclose and Fill")
         attachEditor(in: app, name: "enclose-fill-tool")
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)

@@ -1,6 +1,8 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','layout-dark','layout-light')][string]$Theme='dark')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','layout-dark','layout-light','compact-dark','compact-light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
-$layoutOnly=$Theme.StartsWith('layout-');if($layoutOnly){$Theme=$Theme.Substring(7)}
+$compactOnly=$Theme.StartsWith('compact-')
+$layoutOnly=$Theme.StartsWith('layout-') -or $compactOnly
+if($compactOnly){$Theme=$Theme.Substring(8)}elseif($layoutOnly){$Theme=$Theme.Substring(7)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true
 Add-Type -AssemblyName System.Drawing
@@ -201,13 +203,16 @@ function Localized-Layout{
     $tags=@((Read-Snapshot $bootstrap).shipped_tags)
     if(!$tags.Count){throw 'The native bootstrap has no registered languages'}
     $seen=@()
-    for($index=0;$index -lt $tags.Count;$index++){
+    $indexes=0..($tags.Count-1)
+    if($compactOnly){$indexes=@('en','ru','ja'|ForEach-Object {[array]::IndexOf($tags,$_)}|Where-Object {$_ -ge 0})}
+    foreach($index in $indexes){
         Scope-Language $tags[$index] ($index+1)
         $tag=$tags[$index]
         foreach($width in 1100,1500){
             & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width $width -Height 1000
             foreach($prefix in 'histogram','waveform'){
                 Select-Panel $prefix
+                if($compactOnly){foreach($choice in 'source','channel'){Compact-Choice ($prefix+'-'+$choice) ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)|Out-Null}}
                 $null=Reveal ($prefix+'-highlights')
                 $plot=(Control ($prefix+'-chart') -Arranged).Current.BoundingRectangle
                 $log=Control ($prefix+'-log') -Arranged
@@ -265,6 +270,11 @@ try{
     if($chart.Current.Name -ne (View 'histogram').description -or $chart.Current.HelpText -ne (View 'histogram').range){throw 'The graph does not expose the shared counts'}
     if($layoutOnly){
         Localized-Layout
+        if($compactOnly){
+            Select-Filter 'color_lookup' 'Color Lookup (LUT)'
+            Compact-Choice 'property-resource-choice' ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)|Out-Null
+            Capture ('resource-choice-'+$Theme) -Composed -WithModel
+        }
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
         [pscustomobject]@{theme=$Theme;checks=$checks;evidence=$run}|ConvertTo-Json -Depth 6
         return

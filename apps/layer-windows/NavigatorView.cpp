@@ -42,7 +42,7 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
         root.Children().Append(surround);
         content.Margin({8,8,8,8});content.RowSpacing(4);content.VerticalAlignment(VerticalAlignment::Top);
         RowDefinition imageRow;imageRow.Height({1,GridUnitType::Auto});content.RowDefinitions().Append(imageRow);
-        RowDefinition buttonsRow;buttonsRow.Height({32,GridUnitType::Pixel});content.RowDefinitions().Append(buttonsRow);
+        RowDefinition buttonsRow;buttonsRow.Height({data->panelMetric(L"control_height"),GridUnitType::Pixel});content.RowDefinitions().Append(buttonsRow);
         overview.Background(clear());overview.Height(220);
         overview.HorizontalAlignment(HorizontalAlignment::Stretch);
         AutomationProperties::SetName(overview,data->caption(L"color",L"navigator_overview"));
@@ -74,7 +74,7 @@ struct NavigatorView::Impl : std::enable_shared_from_this<Impl> {
     void refreshGeometry(){
         double width=root.ActualWidth(),height=root.ActualHeight();
         if(!root.IsLoaded()||width<=0||height<=0)return;
-        double imageHeight=std::clamp(height-52.,0.,naturalImage(width));
+        double imageHeight=std::clamp(height-44.,0.,naturalImage(width));
         if(overview.Height()!=imageHeight){overview.Height(imageHeight);return;}
         auto tabs=array(data->state,L"tabs");auto document=tabs.Size()?tabs.GetObjectAt(0):J{};
         float bounds[4]{};
@@ -118,6 +118,6 @@ NavigatorView::NavigatorView(std::shared_ptr<WorkspaceData> data,std::function<v
     impl(std::make_shared<Impl>(std::move(data),std::move(changed))){impl->init();}
 NavigatorView::~NavigatorView(){impl->cancel();}
 FrameworkElement NavigatorView::Root()const{return impl->root;}
-double NavigatorView::NaturalHeight(double width)const{return impl->naturalImage(width)+52;}
+double NavigatorView::NaturalHeight(double width)const{return impl->naturalImage(width)+44;}
 void NavigatorView::Apply(bool visible){impl->apply(visible);}
 J NavigatorView::Placement(UIElement const& reference,Rect clip,int order)const{return impl->placement(reference,clip,order);}

@@ -1,5 +1,6 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','settings-dark','settings-light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
+$settingsOnly=$Theme.StartsWith('settings-');if($settingsOnly){$Theme=$Theme.Substring(9)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='visible'
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
@@ -83,13 +84,13 @@ function Close-Menu{
     for($i=0;$i -lt 3 -and @(Menu-Items).Count;$i++){[CapyRowPointer]::Key([uint16]0x1B);Start-Sleep -Milliseconds 150}
     Wait-Until {!@(Menu-Items).Count} 'Menu did not close'
 }
-function Check-Modes([string[]]$Expected,[bool]$Compact){
+function Check-Modes([string[]]$Expected){
     $tops=@()
     foreach($id in $Expected){
         $button=Control ('tool-action-'+$id) -Type $ControlType::Button
         $command=Command $id
         if($button.Current.Name -ne $command.label){throw "Mode $id is not named by the shared label"}
-        $height=Dip $button;$want=if($Compact){36}else{44}
+        $height=Dip $button;$want=24
         if([Math]::Abs($height-$want) -gt 1.5){throw "Mode $id is $height px, expected $want"}
         $tops+=$button.Current.BoundingRectangle.Y
         $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -103,6 +104,7 @@ function Check-Modes([string[]]$Expected,[bool]$Compact){
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
@@ -114,9 +116,11 @@ try {
     $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
 
-    Switch-Workspace 'Photo' 'builtin:workspace:photographer'
-    foreach($command in @('rectangle_select','ellipse_select','polygon_select','color_select')){
-        Wait-Until {@((Model).panels|ForEach-Object {$_.tiles}|Where-Object {$_.control.command -eq $command}).Count -gt 0} "Photo has no $command tool"
+    if(!$settingsOnly){
+        Switch-Workspace 'Photo' 'builtin:workspace:photographer'
+        foreach($command in @('rectangle_select','ellipse_select','polygon_select','color_select')){
+            Wait-Until {@((Model).panels|ForEach-Object {$_.tiles}|Where-Object {$_.control.command -eq $command}).Count -gt 0} "Photo has no $command tool"
+        }
     }
     Switch-Workspace 'Sketch' 'builtin:workspace:painter'
     Fit-Canvas;Start-Sleep -Milliseconds 300;Canvas-Points
@@ -142,7 +146,7 @@ try {
         if(!(Model).state.customization.drawer){throw "$($choice.label) closed the Select drawer"}
         $brush=$choice.icon -eq 'selection-brush';$tonal=$choice.icon -eq 'tonal-select'
         $expected=if($brush){@('selection_add','selection_subtract')}else{@('selection_new','selection_add','selection_subtract','selection_intersect')}
-        Check-Modes $expected $tonal
+        Check-Modes $expected
         $setting=if($brush){'selection_brush_size'}elseif($tonal){'selection_feather'}else{'selection_feather'}
         $null=Control ('tool-setting-'+$setting) -Type $ControlType::Edit
         if(!$brush -and !$tonal){$null=Control 'tool-action-selection_antialias' -Type $ControlType::CheckBox}
@@ -168,6 +172,11 @@ try {
     Tap (Center (Control 'tool-subtool-0'))
     Wait-Until {$current=Model;$current -and $current.state.tool_set.subtools[0].selected} 'Rectangle Select did not restore'
     Capture 'select-drawer'
+    if($settingsOnly){
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        @{theme=$Theme;selection_controls='passed';custom_tonal_range='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
+        return
+    }
     Invoke 'selection-actions-menu'
     Wait-Until {@(Menu-Items).Count -gt 0} 'Selection Actions did not open a menu'
     $rows=@(Menu-Items)

@@ -6,6 +6,7 @@ import UIKit
 #endif
 
 struct ManagedColorButton: View {
+    @Environment(\.compactPanelControls) private var compact
     @Environment(\.capyNativeCopy) private var nativeCopy
     @Environment(\.editorPopupStore) private var store
     let label: String
@@ -19,12 +20,12 @@ struct ManagedColorButton: View {
     let change: (JSON) -> Void
     var body: some View {
         let preview = ColorUI.preview(value)
-        HStack {
+        HStack(spacing: compact ? 4 : nil) {
             if titled { Text(label).frame(maxWidth: .infinity, alignment: .leading) }
             Button {
                 store?.colorEditing.open(colors: colors, value: value, opaque: opaque, viewing: viewing) { color, _ in change(color) }
             } label: {
-                ColorSwatch(rgba: preview["rgba"], shape: .control).frame(width: swatchWidth, height: 28)
+                ColorSwatch(rgba: preview["rgba"], shape: .control).frame(width: swatchWidth, height: compact ? 24 : 28)
                     .overlay(SquircleShape.control.stroke(.primary.opacity(0.3), lineWidth: 1))
             }.buttonStyle(.plain).accessibilityLabel(label).accessibilityIdentifier(identifier + "-color")
                 .help(preview["in_gamut"].bool ? label : nativeCopy["color"]["outside_p3"].string)

@@ -109,23 +109,21 @@ extension XCTestCase {
         XCTAssertEqual(order, order.sorted(), "Size, picker, opacity, Undo, Redo")
         #if os(macOS)
         picker.doubleClick()
-        let size = app.popUpButtons["picker-setting-size"]
         #else
         picker.doubleTap()
-        let size = app.buttons["picker-setting-size"]
         #endif
+        let size = app.buttons["picker-setting-size"]
         XCTAssertTrue(app.descendants(matching: .any)["tool-drawer"].firstMatch.waitForExistence(timeout: 10), "A double press opens picker settings")
         expectSelected(picker, true)
         XCTAssertTrue(size.waitForExistence(timeout: 10))
         workspaceActivate(size)
         let circles = ["Single pixel", "5 px circle", "15 px circle", "51 px circle", "101 px circle"]
-        #if os(macOS)
-        for label in circles { XCTAssertTrue(app.menuItems[label].firstMatch.waitForExistence(timeout: 5), label) }
-        workspaceActivate(app.menuItems["15 px circle"].firstMatch)
-        #else
-        for label in circles { XCTAssertTrue(app.buttons[label].firstMatch.waitForExistence(timeout: 5), label) }
-        workspaceActivate(app.buttons["15 px circle"].firstMatch)
-        #endif
+        for (index, label) in circles.enumerated() {
+            let option = app.buttons["picker-setting-size-option-\(index)"]
+            XCTAssertTrue(option.waitForExistence(timeout: 5), label)
+            XCTAssertEqual(option.label, label)
+        }
+        workspaceActivate(app.buttons["picker-setting-size-option-2"])
         attachEditor(in: app, name: "picker-settings-\(theme)")
         workspaceActivate(picker)
         expectSelected(picker, false)

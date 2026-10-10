@@ -436,7 +436,7 @@ impl ToolSettings {
                 fields.push((control.clone(), input));
             }
             let mut mode_group: Option<gtk::ToggleButton> = None;
-            let mut action_row = None::<(layer_ui::CommandId, gtk::Box)>;
+            let mut action_row = None::<(layer_ui::ToolActionRow, gtk::Box)>;
             for action in &state.tool_actions {
                 let command = state
                     .commands
@@ -512,15 +512,8 @@ impl ToolSettings {
                 widget.set_widget_name(&format!("tool-action-{:?}", action.command));
                 if mode { self.modes.append(&widget); }
                 else {
-                    use layer_ui::CommandId::*;
-                    let pair=match action.command {
-                        TransformFlipHorizontal | TransformFlipVertical => Some(TransformFlipHorizontal),
-                        TransformRotateLeft | TransformRotateRight => Some(TransformRotateLeft),
-                        ApplyTransform | CancelTransform | CompleteSelection | CancelSelection => Some(ApplyTransform),
-                        _ => None,
-                    };
-                    if let Some(pair)=pair {
-                        if matches!(pair,TransformFlipHorizontal | TransformRotateLeft) && let Some(button)=widget.downcast_ref::<gtk::Button>() {
+                    if let Some(pair)=action.row() {
+                        if pair.icon_only() && let Some(button)=widget.downcast_ref::<gtk::Button>() {
                             let icon=crate::icons::image(&format!("layer-{}-symbolic",command.icon.unwrap()));
                             icon.set_pixel_size(16);button.set_child(Some(&icon));button.add_css_class("tool-icon-action");
                         }
@@ -637,7 +630,7 @@ pub struct SizePanel {
 impl SizePanel {
     pub fn new(workspace: &Rc<Workspace>) -> Self {
         let root = body();
-        root.set_spacing(12);
+        root.set_spacing(crate::panel_controls::SPACING);
         let number = NumberControl::panel(layer_ui::NumericControl::brush_size(), &workspace.localization().text(layer_ui::MessageId::WORKSPACE_CONTROL_BRUSH_SIZE), workspace.localization().clone());
         number.set_widget_name("drawer-control-brush-size");
         number.connect_reset_requested(glib::clone!(#[weak] workspace, move || {
@@ -677,6 +670,7 @@ impl SizePanel {
 
 fn body() -> gtk::Box {
     let root = crate::panel_controls::column();
+    root.add_css_class("dock-panel");
     let inset = layer_ui::PANEL_CONTENT_INSET as i32;
     root.set_margin_start(inset);
     root.set_margin_end(inset);

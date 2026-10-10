@@ -14,28 +14,28 @@ struct AdjustmentPanel: View {
     private func send(_ action: [String: Any]) { store.dispatch(["type": "filter_picker", "action": action]) }
     var body: some View {
         VStack(spacing: 0) {
-            if !splitPicker { HStack(spacing: 6) {
+            if !splitPicker { HStack(spacing: store.panelMetrics.spacing) {
                 if !picker["search"].isNull {
                     EditorTextField(picker["search_label"].string, value: picker["search"].string) {
                         send(["op": "search", "query": $0])
                     }
-                        .editorSearchInput().textFieldStyle(.plain).padding(.horizontal, 12).frame(height: 34)
-                        .background(palette["input"], in: SquircleShape(2))
-                        .overlay(SquircleShape(2).stroke(palette["text"].opacity(0.4), lineWidth: 1))
+                        .editorSearchInput().textFieldStyle(.plain).padding(.horizontal, store.panelMetrics.padding).frame(height: store.panelMetrics.height)
+                        .background(palette["input"], in: SquircleShape.control)
+                        .overlay(SquircleShape.control.stroke(palette["text"].opacity(0.4), lineWidth: 1))
                         .focused($searching).accessibilityIdentifier("filter-search")
                         .onKeyPress(.escape) { send(["op": "toggle_search"]); return .handled }
                 } else {
                     SharedIcon(name: categories.first { $0["id"].string == picker["category"].string }?["icon"].string ?? "adjustments")
                     EditorChoice(label: store.catalog["native_copy"]["color"]["category"].string, options: categories.map { $0["label"].string },
                         selected: categories.firstIndex { $0["id"].stableKey == picker["category"].stableKey } ?? 0,
-                        identifier: "filter-category", background: palette["input"], bold: true) {
+                        identifier: "filter-category", background: palette["input"], compact: true, bold: true) {
                         send(["op": "category", "category": categories[$0]["id"].raw])
                     }.frame(maxWidth: .infinity)
                 }
                 IconTile(icon: "search", label: picker["search_label"].string) {
                     send(["op": "toggle_search"])
-                }.frame(width: 48, height: 34).accessibilityIdentifier("filter-search-toggle")
-            }.frame(minHeight: 34).modifier(PanelBodyMeasurement(panel: "adjustments", part: "header")) }
+                }.frame(width: store.panelMetrics.height, height: store.panelMetrics.height).accessibilityIdentifier("filter-search-toggle")
+            }.frame(minHeight: store.panelMetrics.height).modifier(PanelBodyMeasurement(panel: "adjustments", part: "header")) }
             GeometryReader { viewport in
                 EditorScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -66,8 +66,8 @@ struct AdjustmentPanel: View {
                     }.modifier(PanelBodyMeasurement(panel: "adjustments", part: "choices", kind: .scroll))
                 }.coordinateSpace(name: projection).accessibilityIdentifier("filter-list")
             }
-        }.padding(6)
-            .modifier(PanelBodyMeasurement(panel: "adjustments", part: "insets", intrinsicHeight: 12))
+        }.padding(store.panelMetrics.inset)
+            .modifier(PanelBodyMeasurement(panel: "adjustments", part: "insets", intrinsicHeight: store.panelMetrics.inset * 2))
             .onChange(of: picker["search"].isNull) { _, closed in searching = !closed }
             .onAppear { store.filterPreviews.setActive(phase != .background) }
             .onChange(of: phase) { _, phase in store.filterPreviews.setActive(phase != .background) }

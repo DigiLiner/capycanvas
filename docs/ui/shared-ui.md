@@ -50,7 +50,11 @@ needed for the Rust GTK and Wasm clients.
 
 Picker enums can use `variants!` to keep declaration-order `ALL` arrays with
 their definitions, preserving fixed-size arrays and variant attributes.
-Tool action groups declare their command members, label and bar/list presentation together.
+Tool action groups declare their command members, localized label and segmented or
+dropdown presentation together. The catalog publishes `tool_action_groups`,
+`tool_action_rows` and `panel_metrics`; resolved tool actions carry their group,
+row and icon-only roles. Hosts retain native controls, while Rust owns which
+actions belong together. Ungrouped checkable actions use compact checkboxes.
 Tool groups declare their engine, label and medium icon together; their getters
 expand to constant matches.
 

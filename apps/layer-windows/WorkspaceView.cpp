@@ -470,7 +470,10 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 if(item.Visibility()!=Visibility::Visible)return;
                 auto id=AutomationProperties::GetAutomationId(item);
                 auto key=std::wstring_view(id);
-                if((key.starts_with(L"layer-")||key.starts_with(L"column-")||key.starts_with(L"collapsed-column-"))
+                if((key.starts_with(L"layer-")||key.starts_with(L"column-")||key.starts_with(L"collapsed-column-")
+                    ||key.starts_with(L"tool-")||key.starts_with(L"number-")||key.starts_with(L"property-")||key.starts_with(L"properties-")
+                    ||key.starts_with(L"filter-")||key.starts_with(L"histogram-")||key.starts_with(L"waveform-")||key.starts_with(L"navigator-")
+                    ||key.starts_with(L"palette-")||key.starts_with(L"palettes-")||key.starts_with(L"proof-panel-"))
                     &&item.IsLoaded()&&item.ActualWidth()>0&&item.ActualHeight()>0){
                     auto transform=item.TransformToVisual(root);auto size=item.RenderSize();
                     auto bounds=transform.TransformBounds({0,0,size.Width,size.Height});

@@ -69,11 +69,13 @@ impl Inspector {
     pub fn waveform() -> Rc<Self> {Self::create(true)}
     fn create(waveform:bool) -> Rc<Self> {
         let prefix=if waveform {"waveform"} else {"histogram"};
-        let root = crate::panel_controls::column();root.set_widget_name(&format!("{prefix}-panel"));
-        root.set_margin_top(6);root.set_margin_bottom(6);root.set_margin_start(6);root.set_margin_end(6);
+        let root = gtk::Box::new(gtk::Orientation::Vertical,crate::panel_controls::CONTROL_SPACING);root.set_widget_name(&format!("{prefix}-panel"));
+        root.add_css_class("dock-panel");
+        let inset=layer_ui::PANEL_CONTENT_INSET as i32;
+        root.set_margin_top(inset);root.set_margin_bottom(inset);root.set_margin_start(inset);root.set_margin_end(inset);
         let source = crate::panel_controls::dropdown(&[]);source.set_widget_name(&format!("{prefix}-source"));source.set_hexpand(true);
         let channel = crate::panel_controls::dropdown(&[]);channel.set_widget_name(&format!("{prefix}-channel"));channel.set_hexpand(true);
-        let toolbar = crate::panel_controls::action_row(crate::panel_controls::SPACING);toolbar.set_homogeneous(true);toolbar.append(&source);toolbar.append(&channel);root.append(&toolbar);
+        let toolbar = crate::panel_controls::action_row(crate::panel_controls::CONTROL_SPACING);toolbar.set_homogeneous(true);toolbar.append(&source);toolbar.append(&channel);root.append(&toolbar);
         let chart = gtk::DrawingArea::builder().content_height(160).hexpand(true).build();chart.set_widget_name(&format!("{prefix}-chart"));
         let axis = [gtk::Label::builder().xalign(0.).hexpand(true).build(),gtk::Label::builder().xalign(1.).build()];
         if waveform {

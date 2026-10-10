@@ -3389,6 +3389,222 @@ class AndroidHostTest {
         assertNotSame(host.brushPreviews.get("1-light.png"), host.brushPreviews.get("1-dark.png"))
     }
 
+    @Test fun compactPanelSpacingAndAlignmentAcrossContexts() {
+        device.landscape(compose.activityRule.scenario)
+        val density = compose.activity.resources.displayMetrics.density
+        val reports = JSONArray()
+        val output = File(compose.activity.getExternalFilesDir(null), "validation").apply { mkdirs() }
+        fun node(panel: String, tag: String) = compose.onNode(hasTestTag(tag) and hasAnyAncestor(hasTestTag("panel-body-$panel")), useUnmergedTree = true)
+        fun area(panel: String, tag: String) = node(panel, tag).fetchSemanticsNode().boundsInRoot
+        fun gap(panel: String, before: String, after: String, expected: Float, horizontal: Boolean = false) {
+            val first = area(panel, before); val next = area(panel, after)
+            val actual = if (horizontal) next.left - first.right else next.top - first.bottom
+            assertEquals("$panel $before → $after allocated gap", expected * density, actual, 1f)
+        }
+        fun inspect(context: String, panel: String, theme: String, width: Int) {
+            compose.waitForIdle()
+            val body = compose.onNodeWithTag("panel-body-$panel", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val nodes = compose.onAllNodes(hasAnyAncestor(hasTestTag("panel-body-$panel")), useUnmergedTree = true).fetchSemanticsNodes()
+            val controls = nodes.filter { it.config.getOrNull(SemanticsProperties.TestTag) != null || it.config.getOrNull(SemanticsProperties.Text) != null }
+            reports.put(obj("context" to context, "theme" to theme, "requested_width" to width, "density" to density, "panel_metrics" to host.catalog.getJSONObject("panel_metrics"),
+                "panel_bounds" to JSONArray(listOf(body.left, body.top, body.width, body.height)), "controls" to JSONArray(controls.map {
+                    val bounds = it.boundsInRoot
+                    obj("tag" to it.config.getOrNull(SemanticsProperties.TestTag), "text" to it.config.getOrNull(SemanticsProperties.Text)?.joinToString { text -> text.text },
+                        "bounds" to JSONArray(listOf(bounds.left - body.left, bounds.top - body.top, bounds.width, bounds.height)))
+                })))
+            File(output, "compact-panel-controls.json").writeText(reports.toString(2))
+            capture("compact-panels-$context-$theme-$width")
+            controls.filter { it.boundsInRoot.width > 0 && it.boundsInRoot.height > 0 }.forEach {
+                assertTrue("$context ${it.config.getOrNull(SemanticsProperties.TestTag)} fits its horizontal panel bounds", it.boundsInRoot.left >= body.left - 1 && it.boundsInRoot.right <= body.right + 1)
+                val tag = it.config.getOrNull(SemanticsProperties.TestTag) ?: ""
+                if (tag.startsWith("tool-action-") || tag.startsWith("property-action-") || tag == "properties-page") {
+                    assertEquals("$context $tag compact single-line control", 24f * density, it.boundsInRoot.height, 1f)
+                }
+            }
+        }
+        action(obj("type" to "invoke", "command" to "add_layer"))
+        action(obj("type" to "invoke", "command" to "select_all"))
+        action(obj("type" to "layer", "action" to obj("op" to "fill_selection")))
+        for (theme in listOf("light", "dark")) for (width in listOf(242, 320)) {
+            val fixture = JSONObject(defaultWorkspace)
+            fixture.getJSONObject("layout").apply {
+                fun tabs(id: Int, panel: String) = obj("kind" to "tabs", "id" to id, "panels" to JSONArray(listOf(panel)), "active" to panel, "tab_style" to "automatic")
+                put("bands", JSONArray(listOf(obj("id" to 40, "edge" to "left", "extent" to width, "root" to tabs(41, "tool_settings")),
+                    obj("id" to 42, "edge" to "right", "extent" to width, "root" to tabs(43, "properties")))))
+                put("floating", JSONArray()); put("collapsed", JSONArray()); put("column_scroll", JSONArray()); put("fit_tab_groups", JSONArray()); put("fit_height_groups", JSONArray()); put("column_stacks", JSONArray())
+                put("next_id", maxOf(44, getInt("next_id")))
+            }
+            fixture.put("zen_mode", false)
+            action(obj("type" to "restore_workspace", "workspace" to fixture))
+            action(obj("type" to "set_theme", "theme" to theme))
+            for ((context, command) in listOf("painting" to "brush", "fill" to "fill", "zoom" to "zoom", "eyedropper" to "eyedropper", "gradient" to "gradient", "crop" to "crop")) {
+                action(obj("type" to "invoke", "command" to command))
+                val fields = state().array("tool_settings").objects()
+                inspect(context, "tool_settings", theme, width)
+                val compound = state().array("tool_extra").objects().mapNotNull { it.optJSONObject("Choice")?.optString("beside")?.takeIf(String::isNotEmpty) }.toSet()
+                fields.filter { it.getJSONObject("numeric").getString("kind") == "slider" && it.getString("id") !in compound }.forEach { field ->
+                    val id = field.getString("id")
+                    val bounds = area("tool_settings", "tool-setting-$id")
+                    val labels = compose.onAllNodes(hasText(field.getString("label")) and hasAnyAncestor(hasTestTag("tool-setting-$id")), useUnmergedTree = true).fetchSemanticsNodes()
+                    assertEquals("$context $id plain label aligns with the field", bounds.left, labels.single().boundsInRoot.left, 1f)
+                    assertEquals("$context $id compact slider row", 36f * density, bounds.height, 1f)
+                    val slider = node("tool_settings", "number-slider-${field.getString("label")}").fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
+                    val readout = node("tool_settings", "number-value-$id").fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
+                    assertEquals("$context $id reserves the upstream editor column", bounds.right - 76f * density, slider.right, 1f)
+                    assertEquals("$context $id readout bottom aligns with the slider row", bounds.bottom, readout.bottom, 1f)
+                    assertEquals("$context $id readout glyphs retain field padding", bounds.right - 6f * density, readout.right, 1f)
+                    assertEquals("$context $id compact readout height", 24f * density, readout.height, 1f)
+                }
+                fields.zipWithNext().filter { (first, next) -> first.getString("group") == next.getString("group") && first.getString("id") !in compound && next.getString("id") !in compound }.forEach { (first, next) ->
+                    gap("tool_settings", "tool-setting-${first.getString("id")}", "tool-setting-${next.getString("id")}", 4f)
+                }
+                when (context) {
+                    "zoom" -> gap("tool_settings", "tool-segments-zoom-click", "tool-segments-zoom-drag", 4f)
+                    "gradient" -> {
+                        gap("tool_settings", "tool-segments-gradient-shape", "gradient-interpolation", 4f)
+                        gap("tool_settings", "gradient-interpolation", "effect-gradient", 4f)
+                        gap("tool_settings", "effect-gradient", "gradient-remove", 4f)
+                        gap("tool_settings", "gradient-remove", "tool-setting-opacity", 4f)
+                        gap("tool_settings", "gradient-reverse", "gradient-reset", 4f, horizontal = true)
+                        val caption = host.catalog.getJSONObject("native_copy").getJSONObject("color").getString("color")
+                        gap("tool_settings", "gradient-remove", "property-color-$caption", 4f, horizontal = true)
+                        for (tag in listOf("gradient-reverse", "gradient-reset", "gradient-remove", "gradient-use-color", "property-color-$caption")) {
+                            assertEquals("Gradient $tag compact peer height", 24f * density, area("tool_settings", tag).height, 1f)
+                        }
+                    }
+                    "eyedropper" -> {
+                        gap("tool_settings", "picker-setting-source", "picker-setting-size", 4f)
+                        val source = area("tool_settings", "picker-setting-source"); val size = area("tool_settings", "picker-setting-size")
+                        assertEquals("Picker source compact row", 24f * density, source.height, 1f)
+                        assertEquals("Picker size compact row", 24f * density, size.height, 1f)
+                        fun choice(tag: String) = compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                        val sourceChoice = choice("picker-setting-source"); val sizeChoice = choice("picker-setting-size")
+                        assertEquals("Picker dropdowns share their left column", sourceChoice.left, sizeChoice.left, 1f)
+                        assertEquals("Picker dropdowns share their right rail", sourceChoice.right, sizeChoice.right, 1f)
+                        val copy = host.catalog.getJSONObject("native_copy").getJSONObject("sampler")
+                        for ((tag, caption) in listOf("picker-setting-source" to "source", "picker-setting-size" to "sample_size")) {
+                            val label = compose.onNode(hasText(copy.getString(caption)) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                            assertEquals("Picker plain caption aligns with its row", source.left, label.left, 1f)
+                        }
+                    }
+                    "crop" -> gap("tool_settings", "tool-action-apply_transform", "tool-action-cancel_transform", 4f, horizontal = true)
+                }
+                if (context == "fill") {
+                    val field = fields.first { it.getString("id") == "gap_closing" }
+                    val editor = node("tool_settings", "number-${field.getString("label")}")
+                    gap("tool_settings", "preference-label-gap_closing", "number-${field.getString("label")}", 4f, horizontal = true)
+                    editor.performClick()
+                    editor.performTextReplacement("3*2"); editor.performImeAction()
+                    waitState { it.array("tool_settings").objects().first { setting -> setting.getString("id") == "gap_closing" }.getDouble("value") == 6.0 }
+                    editor.performClick()
+                    editor.performTextReplacement("sqrt(-1)"); editor.performImeAction()
+                    editor.assertIsFocused()
+                    assertEquals(6.0, state().array("tool_settings").objects().first { it.getString("id") == "gap_closing" }.getDouble("value"), 0.0)
+                    node("tool_settings", "number-error-gap_closing").assertExists()
+                    inspect("fill-invalid", "tool_settings", theme, width)
+                    editor.performTextReplacement("0"); editor.performImeAction()
+                }
+                if (context == "crop") action(obj("type" to "invoke", "command" to "cancel_transform"))
+            }
+            action(obj("type" to "invoke", "command" to "rectangle_select"))
+            action(obj("type" to "invoke", "command" to "select_all"))
+            action(obj("type" to "layer", "action" to obj("op" to "fill_selection")))
+            action(obj("type" to "invoke", "command" to "scale_rotate"))
+            waitState { it.array("commands").objects().first { command -> command.getString("id") == "transform_free" }.getBoolean("enabled") }
+            for (mode in listOf("free", "warp")) {
+                action(obj("type" to "invoke", "command" to "transform_$mode"))
+                gap("tool_settings", "tool-action-transform_flip_horizontal", "tool-action-transform_flip_vertical", 4f, horizontal = true)
+                gap("tool_settings", "tool-action-transform_flip_horizontal", "tool-action-transform_rotate_left", 4f)
+                gap("tool_settings", "tool-action-transform_rotate_left", "tool-action-transform_rotate_right", 4f, horizontal = true)
+                gap("tool_settings", "tool-action-apply_transform", "tool-action-cancel_transform", 4f, horizontal = true)
+                inspect("transform-$mode", "tool_settings", theme, width)
+            }
+            action(obj("type" to "invoke", "command" to "cancel_transform"))
+            inspect("properties-paint", "properties", theme, width)
+            val property = state().getJSONObject("layer_properties").array("controls").objects().first { it.getString("key") == "opacity" }
+            val value = node("properties", "number-value-opacity").fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
+            val label = compose.onNode(hasText(property.getString("label")) and hasAnyAncestor(hasTestTag("panel-body-properties")), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val body = compose.onNodeWithTag("panel-body-properties", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("Properties plain labels respect the eight-pixel panel rail", body.left + 8f * density, label.left, 1f)
+            assertEquals("Properties numeric glyphs retain six-pixel field padding inside the panel rail", body.right - 14f * density, value.right, 1f)
+            for (effect in listOf("levels", "curves")) {
+                action(obj("type" to "effect", "action" to obj("op" to "insert", "effect" to effect)))
+                val controls = state().getJSONObject("layer_properties").array("controls").objects()
+                fun slider(control: JSONObject) = control.getJSONObject("kind").getString("kind") == "number" && control.getJSONObject("kind").getJSONObject("numeric").getString("kind") == "slider"
+                controls.zipWithNext().filter { (first, next) -> slider(first) && slider(next) && propertySectionId(first) == propertySectionId(next) }.forEach { (first, next) ->
+                    val before = area("properties", "number-value-${first.getString("key")}"); val after = area("properties", "number-value-${next.getString("key")}")
+                    assertEquals("$effect compact sliders keep four-pixel peer gaps", 40f * density, after.top - before.top, 1f)
+                }
+                inspect("properties-$effect", "properties", theme, width)
+                action(obj("type" to "invoke", "command" to "undo"))
+            }
+            action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "proof", "visible" to true)))
+            fixture.getJSONObject("layout").getJSONArray("bands").apply {
+                getJSONObject(0).getJSONObject("root").put("panels", JSONArray(listOf("adjustments"))).put("active", "adjustments")
+                getJSONObject(1).getJSONObject("root").put("panels", JSONArray(listOf("proof"))).put("active", "proof")
+            }
+            action(obj("type" to "restore_workspace", "workspace" to fixture))
+            action(obj("type" to "filter_picker", "action" to obj("op" to "category", "category" to "distort")))
+            val category = state().array("filter_categories").objects().first { it.optString("id") == "distort" }.getString("label")
+            val categoryChoice = compose.onNode(hasClickAction() and hasText(category) and hasAnyAncestor(hasTestTag("panel-body-adjustments")))
+            val categoryBounds = categoryChoice.fetchSemanticsNode().boundsInRoot
+            val filterBody = compose.onNodeWithTag("panel-body-adjustments", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("Filters category compact height", 24f * density, categoryBounds.height, 1f)
+            assertEquals("Filters category/search peer gap", 4f * density, area("adjustments", "filter-search-toggle").left - categoryBounds.right, 1f)
+            assertEquals("Filters search button right rail", filterBody.right - 8f * density, area("adjustments", "filter-search-toggle").right, 1f)
+            assertEquals("Filters header/list peer gap", 4f * density, area("adjustments", "filter-list").top - categoryBounds.bottom, 1f)
+            assertEquals("Filters list left rail", filterBody.left + 8f * density, area("adjustments", "filter-list").left, 1f)
+            inspect("filters-category", "adjustments", theme, width)
+            node("adjustments", "filter-search-toggle").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasSetTextAction() and hasAnyAncestor(hasTestTag("filter-search"))).fetchSemanticsNodes().isNotEmpty() }
+            val search = compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("filter-search")))
+            search.performClick()
+            instrumentation.sendStringSync("glass")
+            waitState { it.array("adjustments").objects().map { choice -> choice.getString("id") } == listOf("glass", "rainy_glass") }
+            search.assertTextContains("glass").performImeAction()
+            search.assertTextContains("glass").assertIsNotFocused()
+            assertEquals("Filters search compact height", 24f * density, area("adjustments", "filter-search").height, 1f)
+            assertEquals("Filters search left rail", filterBody.left + 8f * density, area("adjustments", "filter-search").left, 1f)
+            gap("adjustments", "filter-search", "filter-search-toggle", 4f, horizontal = true)
+            gap("adjustments", "filter-search", "filter-list", 4f)
+            inspect("filters-search", "adjustments", theme, width)
+            node("adjustments", "filter-search-toggle").performClick()
+            action(obj("type" to "filter_picker", "action" to obj("op" to "category", "category" to null)))
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("proof-mode-print") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            node("proof", "proof-mode-print").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("proof-profile").fetchSemanticsNodes().isNotEmpty() }
+            val proofControls = host.proof.form!!.array("print_controls").objects().filter { it.getString("id") in listOf("profile", "simulation", "intent") }
+            val proofTags = proofControls.map { if (it.getString("id") == "profile") "proof-profile" else "color-choice-${it.getString("label")}" }
+            for ((control, tag) in proofControls.zip(proofTags)) {
+                val caption = compose.onNode(hasText(control.getString("label")) and hasAnyAncestor(hasTestTag("panel-body-proof")), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertEquals("Proof ${control.getString("id")} label/control peer gap", 4f * density, area("proof", tag).left - caption.right, 1f)
+                assertEquals("Proof $tag compact height", 24f * density, area("proof", tag).height, 1f)
+            }
+            val proofModes = listOf("off") + (if (host.proof.form!!.optBoolean("hdr")) listOf("sdr") else emptyList()) + "print"
+            proofModes.zipWithNext().forEach { (first, next) -> gap("proof", "proof-mode-$first", "proof-mode-$next", 4f, horizontal = true) }
+            proofTags.zipWithNext().forEach { (first, next) -> gap("proof", first, next, 4f) }
+            inspect("proof-print", "proof", theme, width)
+            node("proof", "proof-mode-off").performClick()
+            action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "palettes", "visible" to true)))
+            fixture.getJSONObject("layout").getJSONArray("bands").getJSONObject(0).getJSONObject("root").put("panels", JSONArray(listOf("palettes"))).put("active", "palettes")
+            action(obj("type" to "restore_workspace", "workspace" to fixture))
+            val paletteBody = compose.onNodeWithTag("panel-body-palettes", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            val footer = area("palettes", "palette-footer")
+            assertEquals("Palette footer left rail", paletteBody.left + 8f * density, footer.left, 1f)
+            assertEquals("Palette footer right rail", paletteBody.right - 8f * density, footer.right, 1f)
+            assertEquals("Palette footer bottom inset", paletteBody.bottom - 8f * density, footer.bottom, 1f)
+            assertEquals("Palette chooser compact height", 24f * density, area("palettes", "palette-chooser").height, 1f)
+            assertEquals("Palette chooser text padding", 6f * density, area("palettes", "palette-selector-name").left - area("palettes", "palette-chooser").left, 1f)
+            inspect("palettes-footer", "palettes", theme, width)
+            node("palettes", "palette-chooser").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("palette-search").fetchSemanticsNodes().isNotEmpty() }
+            assertEquals("Palette search compact height", 24f * density, area("palettes", "palette-search").height, 1f)
+            gap("palettes", "palette-search", "palette-library-add", 4f, horizontal = true)
+            inspect("palettes-search", "palettes", theme, width)
+            node("palettes", "palette-chooser").performClick()
+        }
+    }
+
     @Test fun editorGeometryStaysConsistent() {
         action(obj("type" to "customize", "action" to obj("type" to "set_control_visible", "panel" to "sizes", "control" to "brush_size", "visible" to true)))
         val toolbar = host.snapshot!!.array("panels").objects().first { it.getString("id") == "toolbar" }
@@ -3414,7 +3630,7 @@ class AndroidHostTest {
         waitState { it.getJSONObject("brush").getDouble("diameter") < 2.0 }
         val brush = state().getJSONObject("brush").getInt("preset")
         compose.onNodeWithTag("brush-preview-$brush", useUnmergedTree = true).assertHeightIsEqualTo(40.dp)
-        compose.onAllNodesWithContentDescription(host.catalog.getJSONObject("document_delivery_copy").getString("move_group")).onFirst().assertWidthIsEqualTo(20.dp)
+        compose.onNodeWithTag("group-grip-${group("brushes").getInt("id")}", useUnmergedTree = true).assertWidthIsEqualTo(20.dp)
         compose.onNodeWithTag("tab-brushes").assertHeightIsEqualTo(36.dp)
         compose.runOnIdle { host.invoke("fit_canvas") }
         capture("25-editor-default-light")
@@ -3510,8 +3726,7 @@ class AndroidHostTest {
                     field.performTextReplacement("42.5"); field.performImeAction()
                     waitState { it.getJSONObject("brush").getDouble("diameter") == 42.5 }
                     assertEquals(42.5, diameter(), 0.0)
-                    val rowBottom = valueNode().fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot().bottom
-                    val title = compose.onNode(hasText("Brush size") and SemanticsMatcher("numeric row label") { kotlin.math.abs(it.boundsInRoot.top - (rowBottom - 36f * density)) < 4f * density })
+                    val title = compose.onNode(hasText("Brush size") and hasAnyAncestor(hasTestTag("panel-body-sizes")), useUnmergedTree = true)
                     title.performTouchInput { doubleClick(androidx.compose.ui.geometry.Offset(24f * density, center.y)) }
                     waitState { it.getJSONObject("brush").getDouble("diameter") == defaultSize }
                     valueNode().performClick()

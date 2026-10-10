@@ -143,6 +143,7 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
             val textStyle = LocalTextStyle.current
             fun textWidth(text: String) = measurer.measure(text, textStyle).size.width / density
             val measureKey = options.map { option -> when {
+                option.has("Gradient") -> option.getJSONObject("Gradient").getJSONObject("gradient").getJSONObject("destination").toString()
                 option.has("Range") -> option.getJSONObject("Range").let { listOf(it.getString("id"), it.array("bounds").objects().map { f -> f.getJSONObject("numeric").toString() }) }
                 option.has("Numeric") -> option.getJSONObject("Numeric").let { listOf(it.getString("id"), it.getString("label"), it.getJSONObject("numeric").toString()) }
                 option.has("Choice") -> option.getJSONObject("Choice").let { listOf(it.getBoolean("segmented"), it.optBoolean("labeled"), it.array("items").length(), it.optInt("columns"), it.optString("beside")) }
@@ -380,12 +381,15 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
         val host = LocalCanvasHost.current
         val geometry = remember(style, host.languageTag) { toolbarUi(host.languageTag, obj("type" to "choice_style", "labeled" to true, "style" to style)) }
         val size = geometry.array("size")
-        Row(Modifier.fillMaxWidth().height(size.getDouble(1).toFloat().dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val metrics=panelMetrics()
+        val choiceHeight=if(prefix=="tool")metrics.height else size.getDouble(1).toFloat().dp
+        val choiceWidth=if(prefix=="tool")metrics.height else size.getDouble(0).toFloat().dp
+        Row(Modifier.fillMaxWidth().height(choiceHeight), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if(prefix=="tool")metrics.spacing else 8.dp)) {
             Text(choice.getString("label"), Modifier.weight(1f), maxLines = 2, softWrap = true)
-            Box(Modifier.width((size.getDouble(0).toFloat() * choice.array("items").length()).dp)) {
-                ToolbarChoice(JSONObject(choice.toString()).put("labeled", false), false, false, false, geometry.getInt("icon"), edit,
-                    prefix, size.getDouble(1).toFloat(), menu = menu, menuCopy = menuCopy, style = style)
+            Box(Modifier.width(choiceWidth * choice.array("items").length())) {
+                ToolbarChoice(JSONObject(choice.toString()).put("labeled", false), false, false, false, if(prefix=="tool")metrics.icon.value.toInt() else geometry.getInt("icon"), edit,
+                    prefix, choiceHeight.value, menu = menu, menuCopy = menuCopy, style = style)
             }
         }
         return
@@ -424,7 +428,7 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
                 .then(if (captions) Modifier.focusProperties { canFocus = false } else Modifier)
                 .selectable(item.getBoolean("selected"), role = Role.RadioButton) { edit(item.getJSONObject("action")) },
                 horizontalArrangement = Arrangement.spacedBy(CaptionGap.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
-                SharedIcon(item.getString("icon"), item.getString("label"), Modifier.size(if (vertical || prefix == "tool") iconSize.dp else 16.dp))
+                SharedIcon(item.getString("icon"), item.getString("label"), Modifier.size(if(prefix=="tool")panelMetrics().icon else if(vertical)iconSize.dp else 16.dp))
                 if (captions) Text(item.getString("label"), maxLines = 1, softWrap = false)
             }
             }

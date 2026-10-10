@@ -18,7 +18,7 @@ extension XCTestCase {
         let prefix = inline ? "toolbar" : "tool"
         let tones = app.descendants(matching: .any)["\(prefix)-segments-tonal-tones"]
         XCTAssertTrue(tones.waitForExistence(timeout: 10), "Tonal range shows its tone presets")
-        XCTAssertEqual(tones.frame.height, inline ? 24 : 36, accuracy: 1)
+        XCTAssertEqual(tones.frame.height, 24, accuracy: 1)
         let segments = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "\(prefix)-segment-tonal-tones-"))
         XCTAssertEqual(segments.count, 6)
         let highlights = app.buttons["\(prefix)-segment-tonal-tones-4"]

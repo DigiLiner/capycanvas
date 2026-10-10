@@ -5,7 +5,7 @@ window.background.capy-workspace.native-canvas-background { background: transpar
 /* Pen fallback for GTK's mouse-position tooltip query; match native Adwaita. */
 popover.pen-tooltip { padding:0; margin:0; }
 popover.pen-tooltip > contents { padding:6px 10px; border-radius:9px; background:rgba(0,0,6,.8); border:1px solid rgba(255,255,255,.1); color:white; box-shadow:none; }
-window.capy-workspace { --window-bg-color: var(--capy-bg); --window-fg-color: var(--capy-text); --headerbar-bg-color: var(--capy-panel); --headerbar-backdrop-color: var(--capy-panel); --view-bg-color: var(--capy-view); --popover-bg-color: var(--capy-panel); --panel-bg: var(--capy-panel); --tabbar-bg: var(--capy-tabbar); --input-bg: var(--capy-input); --sidebar-bg-color: var(--capy-sidebar); --sidebar-backdrop-color: var(--capy-sidebar-backdrop); --dialog-bg-color: var(--capy-dialog); --corner-fit: .54; --surface-radius: calc(18px * var(--corner-fit)); --control-radius: calc(12px * var(--corner-fit)); --tile-radius: 18px; --accent-bg-color: var(--capy-accent); --accent-fg-color: var(--capy-accent-foreground); --selection-bg: var(--capy-selection); --header-selection: var(--capy-header-selection); --header-selection-hover: var(--capy-header-selection-hover); }
+window.capy-workspace { --window-bg-color: var(--capy-bg); --window-fg-color: var(--capy-text); --headerbar-bg-color: var(--capy-panel); --headerbar-backdrop-color: var(--capy-panel); --view-bg-color: var(--capy-view); --popover-bg-color: var(--capy-panel); --panel-bg: var(--capy-panel); --tabbar-bg: var(--capy-tabbar); --input-bg: var(--capy-input); --sidebar-bg-color: var(--capy-sidebar); --sidebar-backdrop-color: var(--capy-sidebar-backdrop); --dialog-bg-color: var(--capy-dialog); --corner-fit: .54; --surface-radius: calc(18px * var(--corner-fit)); --control-radius: calc(var(--panel-control-radius) * var(--corner-fit)); --tile-radius: 18px; --accent-bg-color: var(--capy-accent); --accent-fg-color: var(--capy-accent-foreground); --selection-bg: var(--capy-selection); --header-selection: var(--capy-header-selection); --header-selection-hover: var(--capy-header-selection-hover); }
 /* Shared 6px workspace gaps; retain native close-circle padding/placement. */
 window, label, text { font-size: var(--ui-text-size); }
 .window-bar { background: transparent; }
@@ -129,14 +129,16 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-panel .heading { font-size: inherit; }
 .selected-tool { background: var(--selection-bg); box-shadow: none; }
 .dock-panel button, .dock-panel entry { border-radius: var(--control-radius); }
-.dock-panel button { min-height: 1.66em; padding: 4px 12px; }
+.dock-panel button { min-height: var(--panel-control-height); padding: 0 var(--panel-field-padding); }
+.dock-panel toggle-group.flat { min-height: var(--panel-control-height); padding: 0; }
+.dock-panel toggle-group.flat toggle { min-height: var(--panel-control-height); padding: 0 var(--panel-field-padding); border-radius: var(--control-radius); }
 .dock-panel image { -gtk-icon-size: 14px; }
-.navigator-controls button { min-width: 24px; min-height: 28px; padding: 0; margin: 0; }
+.navigator-controls button { min-width: 24px; min-height: 24px; padding: 0; margin: 0; }
 .navigator-controls image { -gtk-icon-size: 16px; }
 .navigator-overview { color: var(--accent-color); }
 .number-control { font-size: var(--ui-text-size); }
 .layers-panel { padding: 0; }
-.layer-header, .layer-footer { padding: 4px 6px; }
+.layer-header, .layer-footer { padding: 4px 8px; }
 .layer-header menubutton > button { min-height: 24px; padding: 0 6px; }
 .layers-panel button.layer-icon, .layers-panel menubutton.layer-icon > button { min-width: 24px; min-height: 24px; padding: 0; }
 .layer-icon image { -gtk-icon-size: 16px; }
@@ -166,7 +168,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-drop-after { box-shadow: inset 0 -2px var(--accent-color); }
 .layer-drop-into { box-shadow: inset 0 0 0 2px var(--accent-color); }
 .layer-drop-attach { box-shadow: inset 0 0 0 2px var(--accent-color); }
-.dock-panel .number-labels { padding-left: 6px; }
+.dock-panel .number-labels { padding-left: 0; }
 .number-control button.number-value, .number-control entry.number-entry { min-height: 20px; padding: 2px 6px; font-weight: 400; font-feature-settings: "tnum"; }
 .number-control entry.number-entry { border: 0; border-radius: var(--control-radius); background: var(--input-bg); }
 .number-control button.number-step { min-width: 32px; min-height: 32px; padding: 0; }
@@ -217,18 +219,20 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .effect-properties .property-actions > button,
 .effect-properties .gradient-editor > box > button { min-height: 24px; padding: 0 6px; }
 .tool-settings button { min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); }
-.tool-settings .number-labels { padding-left: 0; }
-.tool-settings .number-inline button.number-value, .tool-settings .number-inline entry.number-entry { padding: 2px 6px; }
+.dock-panel .number-inline button.number-value, .dock-panel .number-inline entry.number-entry { padding: 2px 6px; }
 .tool-settings .selection-modes button { min-width: 24px; padding: 0; }
 .tool-settings .selection-modes.labeled button { padding: 0 6px; }
-.tool-settings .tool-icon-action { min-width: 24px; padding: 0; }
-.tool-settings checkbutton { min-height: 18px; padding: 3px 0; }
+.dock-panel button.tool-icon-action, .dock-panel button.panel-icon-action { min-width: 24px; min-height: 24px; padding: 0; }
+.dock-panel switch { min-height: var(--panel-control-height); padding: 0; }
+.dock-panel switch > slider { min-height: 20px; min-width: 20px; padding: 0; margin: 1px; }
+.dock-panel checkbutton { min-height: 18px; padding: 3px 0; }
 .tool-settings dropdown > button, .tool-settings spinbutton { background: var(--input-bg); border-radius: var(--control-radius); }
-.tool-settings .number-panel spinbutton { min-height: 24px; padding: 0; }
-.tool-settings .number-panel spinbutton text { min-width: 0; min-height: 24px; padding: 0 6px; font-feature-settings: "tnum"; }
-.tool-settings .number-panel spinbutton button { min-width: 24px; min-height: 24px; padding: 0; }
+.dock-panel .number-panel spinbutton { min-height: 24px; padding: 0; }
+.dock-panel .number-panel spinbutton text { min-width: 0; min-height: 24px; padding: 0 6px; font-feature-settings: "tnum"; }
+.dock-panel .number-panel spinbutton button { min-width: 24px; min-height: 24px; padding: 0; }
 .tool-settings .choice-grid button { min-width: 0; min-height: 0; padding: 0; }
-.tool-settings .gradient-editor > box > button { min-width: 24px; padding: 0; }
+.dock-panel .gradient-editor > box > button { min-width: 24px; padding: 0; }
+.dock-panel dropdown > button, .dock-panel menubutton > button { min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); }
 .dock-panel .brush-choice { padding: 3px 6px; }
 .brush-choice label { font-size: 1em; }
 .tool-groups flowboxchild { padding: 0; margin: 0; }
@@ -293,18 +297,20 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .shortcut-hint { font-weight: 400; }
 /* Adjustment tiles share the editor's compact 36px tool-cell rhythm. */
 /* Inset content, not the scroller: its scrollbar belongs at the panel edge. */
-.filter-picker-header { margin: 6px 6px 0; }
-.filter-picker-body { margin: 0 6px 6px; }
+.filter-picker-header { margin: var(--panel-inset) var(--panel-inset) 0; }
+.filter-picker-header entry { min-height: var(--panel-control-height); padding: 0 var(--panel-field-padding); border-radius: var(--control-radius); }
+.filter-picker-header entry > text { padding: 0; min-height: 0; }
+.filter-picker-header entry > image { min-height: 16px; min-width: 16px; padding: 0; margin: 0; -gtk-icon-size: 16px; }
+.filter-picker-body { margin: 0 var(--panel-inset) var(--panel-inset); }
 .filter-picker .filter-row { padding: 3px 6px; min-width: 0; min-height: 0; font-weight: normal; }
 .filter-category { margin: 8px; font-weight: bold; opacity: .55; }
-.effect-properties { margin: 6px; }
+.effect-properties { margin: var(--panel-inset); }
 .properties-header > label { font-size: .9em; }
 .content-drawer .filter-types,
 .content-drawer .filter-picker-body,
-.content-drawer .effect-properties { margin: 8px; }
-.property-divider { margin-top: 3px; margin-bottom: 3px; }
-.property-section { margin-left: 6px; }
-.renderer-stats { margin: 6px; }
+.content-drawer .effect-properties { margin: var(--panel-inset); }
+.property-section { margin-left: 0; }
+.renderer-stats { margin: var(--panel-inset); }
 /* The swatch pair intentionally overlaps; round hit regions match the paint. */
 .color-panel .color-swatch, .color-panel .color-utility { min-width:0; min-height:0; padding:3px; border-radius:999px; }
 .color-panel .color-swatch { padding:1px; background:var(--panel-bg); box-shadow:none; }
@@ -383,7 +389,7 @@ window.capy-workspace.glass .window-bar .header-tool.drawer-open:not(.selected-t
 window.capy-workspace.glass .workspace-switcher button:checked { background: var(--glass-switcher-selection); }
 window.capy-workspace.glass .document-tab.selected { background-color: var(--glass-document-tab); }
 window.capy-workspace.glass .palette-cover { background: transparent; }
-.palette-panel { padding: 6px 8px; }
+.palette-panel { padding: 8px; }
 .palette-cover { background: var(--panel-bg); }
 .palette-panel button.palette-tile, .edit-color-dialog button.palette-tile { padding: 3px; min-width: 0; min-height: 0; border-radius: var(--control-radius); background: transparent; box-shadow: none; }
 .palette-tile > * { border-radius: var(--control-radius); }
@@ -391,9 +397,8 @@ window.capy-workspace.glass .palette-cover { background: transparent; }
 .palette-panel button.palette-tile:hover, .edit-color-dialog button.palette-tile:hover { background: alpha(currentColor, .10); }
 .palette-empty { margin: 3px; border-radius: var(--control-radius); background: alpha(currentColor, .05); }
 .palette-panel button.palette-add { border: 0; border-radius: calc(var(--control-radius) + 3px); background: var(--input-bg); background-clip: content-box; padding: 3px; min-width: 0; min-height: 0; }
-.palette-panel button.palette-selector, .palette-panel button.palette-name { min-width: 0; min-height: 24px; padding: 0 4px; border-radius: var(--control-radius); font-weight: 400; }
-.palette-panel button.palette-name { padding: 0 2px; }
-.palette-panel .palette-detail { font-size: .9em; margin-right: 2px; }
+.palette-panel button.palette-selector, .palette-panel button.palette-name { min-width: 0; min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); font-weight: 400; }
+.palette-panel .palette-detail { font-size: .9em; margin-right: 6px; }
 .palette-panel .palette-entry { min-width: 0; min-height: 20px; padding: 2px 6px; background: var(--input-bg); border: 0; border-radius: var(--control-radius); box-shadow: none; }
 .palette-panel .palette-entry.error { box-shadow: inset 0 0 0 1px #e55; }
 .palette-panel button.palette-icon, .palette-panel menubutton.palette-icon > button { min-width: 24px; min-height: 24px; padding: 0; border-radius: var(--control-radius); }

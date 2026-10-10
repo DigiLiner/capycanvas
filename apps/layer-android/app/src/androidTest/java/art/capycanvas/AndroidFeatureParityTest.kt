@@ -71,18 +71,21 @@ class AndroidFeatureParityTest {
                 compose.onNodeWithTag("tool-setting-${field.getString("id")}").assertExists()
             }
             state().array("tool_actions").objects().forEach { item ->
-                compose.onNodeWithTag("tool-action-${item.getString("command")}").assertExists()
+                val tag = if (!item.isNull("group") && !item.optBoolean("segmented")) "tool-action-group-${item.getString("group")}" else "tool-action-${item.getString("command")}"
+                compose.onNodeWithTag(tag).assertExists()
             }
             capture("tool-$command")
             assertNull(host.actionError)
         }
     }
     private fun tap(tag: String, tool: Int) {
-        val at = compose.onNodeWithTag(tag).performScrollTo().fetchSemanticsNode().boundsInWindow.center
+        compose.onNodeWithTag(tag).performScrollTo()
+        val (root, node) = findTag(tag)!!
+        val at = node.boundsInRoot.center
         val downAt = android.os.SystemClock.uptimeMillis()
         for (phase in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
             val event = motion(tool, phase, at, downAt)
-            try { instrumentation.runOnMainSync { compose.activity.window.decorView.dispatchTouchEvent(event) } }
+            try { instrumentation.runOnMainSync { root.view.dispatchTouchEvent(event) } }
             finally { event.recycle() }
             android.os.SystemClock.sleep(40)
         }
@@ -110,14 +113,17 @@ class AndroidFeatureParityTest {
         }
         action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "tool_settings", "visible" to true)))
         action(obj("type" to "move_panel", "panel" to "tool_settings", "target" to obj("kind" to "edge", "edge" to "right", "outer" to false), "viewport" to viewport()))
-        compose.onAllNodesWithTag("tool-action-color_mix_oklab").assertCountEquals(0)
+        compose.onAllNodesWithTag("tool-action-group-color-mixing").assertCountEquals(0)
         action(obj("type" to "select_brush", "id" to 24))
-        for (id in choices) compose.onNodeWithTag("tool-action-$id").assertExists()
+        compose.onNodeWithTag("tool-action-group-color-mixing").assertExists()
         assertTrue("Mixing brushes default to Oklab", command("color_mix_oklab").getBoolean("selected"))
         for ((i, choice) in listOf(android.view.MotionEvent.TOOL_TYPE_MOUSE to "color_mix_classic",
             android.view.MotionEvent.TOOL_TYPE_FINGER to "color_mix_linear", android.view.MotionEvent.TOOL_TYPE_STYLUS to "color_mix_oklab").withIndex()) {
             val (tool, id) = choice
+            tap("tool-action-group-color-mixing", tool)
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag("tool-action-$id").fetchSemanticsNodes().isNotEmpty() }
             tap("tool-action-$id", tool)
+            compose.waitUntil(10_000) { command(id).getBoolean("selected") }
             for (other in choices) assertEquals("tool $tool chose $id", other == id, command(other).getBoolean("selected"))
             val x = .4f + i * .1f
             paint(Offset(x, .4f), Offset(x, .6f))
@@ -125,7 +131,7 @@ class AndroidFeatureParityTest {
         }
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme))
-            compose.onNodeWithTag("tool-action-color_mix_classic").performScrollTo()
+            compose.onNodeWithTag("tool-action-group-color-mixing").performScrollTo()
             compose.waitForIdle()
             capture("color-mixing-$theme")
         }

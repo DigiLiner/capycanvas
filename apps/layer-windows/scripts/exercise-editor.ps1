@@ -1,5 +1,6 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','panel-dark','panel-light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
+$panelOnly=$Theme.StartsWith('panel-');if($panelOnly){$Theme=$Theme.Substring(6)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true
 Add-Type -AssemblyName System.Drawing
@@ -152,6 +153,7 @@ try{
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
     $env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
+    if($panelOnly){[IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))}
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
@@ -189,7 +191,13 @@ try{
     $measured=$model.panel_measurements|ConvertTo-Json -Compress
     Start-Sleep -Milliseconds 600
     if(((Model).panel_measurements|ConvertTo-Json -Compress) -ne $measured){throw 'Native measurements did not settle'}
-    & (Join-Path $PSScriptRoot 'exercise-tools.ps1') -ProcessId $review.Id -StateFile (State-File)
+    & (Join-Path $PSScriptRoot 'exercise-tools.ps1') -ProcessId $review.Id -StateFile (State-File) -OutputDirectory $run
+    if($panelOnly){
+        Capture ('tools-panel-'+$Theme)
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        @{theme=$Theme;tool_controls='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
+        return
+    }
     $normal=(Model).layout|ConvertTo-Json -Compress -Depth 70
     $retained=(Control 'drawing-canvas').GetRuntimeId() -join ':'
     $generation=(Model).windows_gpu_generation

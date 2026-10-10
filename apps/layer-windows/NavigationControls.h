@@ -3,13 +3,13 @@
 
 namespace CapyUi {
 inline Grid NavigationButtons(std::shared_ptr<WorkspaceData> const& data,hstring const& prefix,std::function<A()> states,Bindings& bindings){
-    Grid row;row.ColumnSpacing(2);
+    Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));
     auto ids=array(data->catalog,L"navigator_commands");
     for(uint32_t i=0;i<ids.Size();++i){
         ColumnDefinition column;column.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(column);
         auto id=ids.GetStringAt(i);
         auto pick=button(data,L"",[data,id]{data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(id)}}));});
-        pick.Height(32);pick.HorizontalAlignment(HorizontalAlignment::Stretch);
+        pick.Height(data->panelMetric(L"control_height"));pick.HorizontalAlignment(HorizontalAlignment::Stretch);
         AutomationProperties::SetAutomationId(pick,prefix+L"-"+id);Grid::SetColumn(pick,int(i));row.Children().Append(pick);
         auto shown=std::make_shared<hstring>();
         bindings.emplace_back([data,states,id,pick,shown]{

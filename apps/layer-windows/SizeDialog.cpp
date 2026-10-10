@@ -121,7 +121,7 @@ struct SizeDialog::Impl:std::enable_shared_from_this<Impl>{
         auto& field=fields[index];auto generation=++field.generation;
         field.binds.clear();field.admissions.clear();
         auto weak=weak_from_this();auto operation=op(index);auto control=spec(size,index);
-        NumberPresentation presentation;presentation.title=[weak,index]{if(auto self=weak.lock())return label(self->view(),index);return hstring();};
+        NumberPresentation presentation;presentation.compact=false;presentation.title=[weak,index]{if(auto self=weak.lock())return label(self->view(),index);return hstring();};
         auto number=CapyUi::number(data,label(size,index),control,
             [weak,index]{if(auto self=weak.lock())return value(self->view(),index);return 0.;},
             [weak,operation,index,generation](double next){

@@ -135,24 +135,24 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
 };
 struct SettingsView : std::enable_shared_from_this<SettingsView> {
     std::shared_ptr<WorkspaceData> data;
-    StackPanel root;
+    StackPanel root,body,modeSection;
     Bindings fields;
     hstring key;
     std::shared_ptr<RangeControl> range;
-    explicit SettingsView(std::shared_ptr<WorkspaceData> data):data(std::move(data)){root.Spacing(2);}
+    explicit SettingsView(std::shared_ptr<WorkspaceData> data):data(std::move(data)){root.Spacing(this->data->panelMetric(L"control_spacing"));}
     static bool picking(J const& state){
         auto tool=str(object(state,L"layer_tools"),L"tool");return tool==L"pick_visible"||tool==L"pick_layer";
     }
     void pickerChoice(std::function<hstring()> const& title,hstring const& id,std::function<std::vector<hstring>()> const& names,
         std::function<int(J const&)> current,std::function<void(int)> select){
-        Grid row;row.ColumnSpacing(8);row.MinHeight(36);
-        ColumnDefinition caption;caption.Width({68,GridUnitType::Pixel});row.ColumnDefinitions().Append(caption);
+        Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));row.MinHeight(data->controlHeight());
+        ColumnDefinition caption;caption.Width({pickerLabelWidth(),GridUnitType::Pixel});row.ColumnDefinitions().Append(caption);
         ColumnDefinition value;value.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(value);
-        auto text=label(data,title());text.FontSize(13);text.VerticalAlignment(VerticalAlignment::Center);
+        auto text=label(data,title());text.FontSize(data->textSize());text.VerticalAlignment(VerticalAlignment::Center);
         text.TextWrapping(TextWrapping::NoWrap);row.Children().Append(text);
-        ComboBox choices;choices.MinWidth(0);choices.MinHeight(32);choices.FontSize(13);choices.Padding({8,6,0,6});
+        ComboBox choices;choices.MinWidth(0);choices.MinHeight(data->controlHeight());choices.Height(data->controlHeight());choices.FontSize(data->textSize());choices.Padding({6,0,0,0});
         choices.HorizontalAlignment(HorizontalAlignment::Stretch);choices.VerticalAlignment(VerticalAlignment::Center);
-        choices.Background(data->brush(L"input"));choices.BorderThickness({0,0,0,0});choices.CornerRadius({6,6,6,6});
+        choices.Background(data->brush(L"input"));choices.BorderThickness({0,0,0,0});choices.CornerRadius(data->controlCorner());
         for(auto const& name:names())comboOption(choices,name);
         AutomationProperties::SetName(choices,title());AutomationProperties::SetAutomationId(choices,id);
         auto syncing=std::make_shared<bool>(false);
@@ -169,6 +169,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
             auto index=current(object(self->data->state,L"color_picker"));
             if(choices.SelectedIndex()!=index){*syncing=true;choices.SelectedIndex(index);*syncing=false;}
         }});
+        fields.emplace_back([weak=weak_from_this(),caption]{if(auto self=weak.lock())caption.Width({self->pickerLabelWidth(),GridUnitType::Pixel});});
         Grid::SetColumn(choices,1);row.Children().Append(choices);root.Children().Append(row);
     }
     void refreshPicker(){
@@ -176,7 +177,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
         bool layers=flag(picker,L"can_sample_layer"),calibrating=flag(picker,L"calibrating");
         auto next=O({{L"picker",B(true)},{L"layers",B(layers)},{L"calibrating",B(calibrating)},{L"sizes",sizes}}).Stringify();
         if(next!=key){
-            key=next;fields.clear();root.Children().Clear();
+            key=next;fields.clear();root.Children().Clear();root.Spacing(data->panelMetric(L"control_spacing"));
             auto weak=weak_from_this();
             auto sourceTitle=[weak]{if(auto self=weak.lock())return self->data->caption(L"sampler",L"source");return hstring();};
             auto sources=[weak,layers]{std::vector<hstring> names;if(auto self=weak.lock()){names.push_back(self->data->caption(L"sampler",L"visible_color"));if(layers)names.push_back(self->data->caption(L"sampler",L"selected_layer"));}return names;};
@@ -198,11 +199,34 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
         }
         for(auto const& bind:fields)bind();
     }
-    static bool mode(hstring const& id){
-        return id==L"selection_new"||id==L"selection_add"||id==L"selection_subtract"||id==L"selection_intersect";
+    mutable std::map<std::wstring,double> captionWidths;
+    double captionWidth(std::vector<hstring> const& titles)const{
+        std::wstring key=std::to_wstring(data->textSize())+data->language().c_str();for(auto const& title:titles){key+=L'\0';key+=title.c_str();}
+        if(auto found=captionWidths.find(key);found!=captionWidths.end())return found->second;
+        double width=0;for(auto const& title:titles){auto text=label(data,title,false,false);text.Measure({INFINITY,INFINITY});width=std::max(width,double(text.DesiredSize().Width));}width=std::min(120.,width);captionWidths.insert_or_assign(std::move(key),width);return width;
     }
-    static bool source(hstring const& id){
-        return id==L"selection_visible"||id==L"selection_editing"||id==L"selection_reference";
+    double pickerLabelWidth()const{return captionWidth({data->caption(L"sampler",L"source"),data->caption(L"sampler",L"sample_size")});}
+    hstring actionGroupLabel(hstring const& id)const{return str(find(array(data->catalog,L"tool_action_groups"),L"id",id),L"label");}
+    double actionLabelWidth()const{
+        std::vector<hstring> titles;for(auto value:array(data->state,L"tool_actions")){auto item=value.GetObject();if(auto group=str(item,L"group");!group.empty()&&!flag(item,L"segmented"))titles.push_back(actionGroupLabel(group));}return captionWidth(titles);
+    }
+    void actionChoice(hstring const& group,hstring const& context){
+        Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));
+        ColumnDefinition caption;caption.Width({actionLabelWidth(),GridUnitType::Pixel});row.ColumnDefinitions().Append(caption);
+        ColumnDefinition field;field.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(field);
+        auto title=label(data,actionGroupLabel(group));title.VerticalAlignment(VerticalAlignment::Center);title.TextTrimming(TextTrimming::CharacterEllipsis);row.Children().Append(title);
+        ComboBox choices;choices.MinWidth(0);choices.MinHeight(data->controlHeight());choices.Height(data->controlHeight());choices.Padding({6,0,0,0});choices.FontSize(data->textSize());
+        choices.Background(data->brush(L"input"));choices.BorderThickness({0});choices.CornerRadius(data->controlCorner());choices.HorizontalAlignment(HorizontalAlignment::Stretch);
+        AutomationProperties::SetAutomationId(choices,L"tool-action-group-"+group);
+        std::vector<hstring> commands;for(auto value:array(data->state,L"tool_actions"))if(auto item=value.GetObject();str(item,L"group")==group){auto id=str(item,L"command");commands.push_back(id);comboOption(choices,str(find(array(data->state,L"commands"),L"id",id),L"label"),L"tool-action-"+id);}
+        auto weak=weak_from_this();auto syncing=std::make_shared<bool>(false);
+        choices.SelectionChanged([weak,choices,commands,syncing,context](auto&&,auto&&){if(auto self=weak.lock();self&&!*syncing&&!self->data->updating&&settingsContext(self->data->state)==context&&choices.SelectedIndex()>=0)self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(commands.at(choices.SelectedIndex()))}}));});
+        auto open=std::make_shared<bool>(false);choices.DropDownOpened([data=data,open](auto&&,auto&&){if(!std::exchange(*open,true))data->popup(true);});choices.DropDownClosed([data=data,open](auto&&,auto&&){if(std::exchange(*open,false))data->popup(false);});choices.Unloaded([data=data,open](auto&&,auto&&){if(std::exchange(*open,false))data->popup(false);});
+        fields.emplace_back([weak,choices,commands,syncing,title,caption,group]{if(auto self=weak.lock()){
+            auto name=self->actionGroupLabel(group);title.Text(name);AutomationProperties::SetName(choices,name);caption.Width({self->actionLabelWidth(),GridUnitType::Pixel});
+            bool enabled=false;*syncing=true;for(uint32_t i=0;i<commands.size();++i){auto command=find(array(self->data->state,L"commands"),L"id",commands[i]);comboOptionText(choices,i,str(command,L"label"));choices.Items().GetAt(i).as<ComboBoxItem>().IsEnabled(flag(command,L"enabled"));enabled=enabled||flag(command,L"enabled");if(flag(command,L"selected"))choices.SelectedIndex(int(i));}*syncing=false;choices.IsEnabled(enabled);
+        }});
+        Grid::SetColumn(choices,1);row.Children().Append(choices);body.Children().Append(row);
     }
     static A extraSchema(A const& extra){
         A result;for(auto value:extra){
@@ -217,15 +241,14 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
         for(auto value:array(state,L"tool_extra"))if(auto gradient=object(value.GetObject(),L"Gradient");gradient.Size())return gradient;
         return J{};
     }
-    Grid segmented(bool compact,size_t count){
+    Grid segmented(size_t count){
         Grid row;row.ColumnSpacing(0);row.HorizontalAlignment(HorizontalAlignment::Stretch);
         for(size_t i=0;i<count;i++){ColumnDefinition column;column.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(column);}
-        if(compact){row.Margin({0,0,0,2});return row;}
         return row;
     }
     Button segment(hstring const& iconName,hstring const& name,hstring const& tooltip,hstring const& id,bool compact,size_t index,std::function<void()> action){
-        auto pick=button(data,name,std::move(action));pick.Height(compact?36:44);pick.HorizontalAlignment(HorizontalAlignment::Stretch);
-        pick.CornerRadius({0,0,0,0});pick.Content(icon(iconName,data->theme(),20));
+        auto pick=button(data,name,std::move(action));pick.Height(data->panelMetric(L"control_height"));pick.HorizontalAlignment(HorizontalAlignment::Stretch);
+        pick.CornerRadius({0,0,0,0});pick.Content(icon(iconName,data->theme(),data->panelMetric(L"icon_size")));
         pick.Background(compact?data->brush(L"input"):clear());
         if(!compact&&index>0){pick.BorderThickness({1,0,0,0});pick.BorderBrush(data->tint(L"text",51));}
         CapyUi::tooltip(pick,tooltip);AutomationProperties::SetAutomationId(pick,id);
@@ -239,16 +262,16 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
             NativeMenuItems(menu.Items(),array(model,L"sections"),self->data,[data=self->data](J action){data->dispatch(action);});
         }});
         TrackPopup(menu,data);
-        Button open=button(data,data->caption(L"tool_controls",L"selection_menu"),[]{});open.MinHeight(44);open.HorizontalAlignment(HorizontalAlignment::Stretch);
-        open.HorizontalContentAlignment(HorizontalAlignment::Stretch);open.Padding({12,0,12,0});open.Flyout(menu);
-        Grid content;content.ColumnSpacing(8);
+        Button open=button(data,data->caption(L"tool_controls",L"selection_menu"),[]{});open.MinHeight(data->controlHeight());open.HorizontalAlignment(HorizontalAlignment::Stretch);
+        open.HorizontalContentAlignment(HorizontalAlignment::Stretch);open.Padding({6,0,6,0});open.Flyout(menu);
+        Grid content;content.ColumnSpacing(data->panelMetric(L"control_spacing"));
         ColumnDefinition text;text.Width({1,GridUnitType::Star});content.ColumnDefinitions().Append(text);
         ColumnDefinition arrow;arrow.Width({1,GridUnitType::Auto});content.ColumnDefinitions().Append(arrow);
         auto title=label(data,data->caption(L"tool_controls",L"selection_menu"),true);title.VerticalAlignment(VerticalAlignment::Center);content.Children().Append(title);
         auto chevron=icon(L"chevron-down",data->theme(),12);chevron.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(chevron,1);content.Children().Append(chevron);
         open.Content(content);AutomationProperties::SetAutomationId(open,L"selection-actions-menu");
         fields.emplace_back([weak,open,title]{if(auto self=weak.lock()){auto caption=self->data->caption(L"tool_controls",L"selection_menu");title.Text(caption);AutomationProperties::SetName(open,caption);}});
-        root.Children().Append(open);
+        modeSection.Children().Append(open);
     }
     void refresh(){
         if(picking(data->state))return refreshPicker();
@@ -263,23 +286,23 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
             key=next;fields.clear();if(range){range->Dispose();range=nullptr;}root.Children().Clear();hstring group;
             auto weak=weak_from_this();
             bool compact=false;for(auto value:extra)compact=compact||str(object(value.GetObject(),L"Choice"),L"id")==L"tonal-tones";
-            root.Spacing(compact?2:6);
-            size_t modeCount=0;bool selectionTool=false;
-            for(auto value:actions){auto id=str(value.GetObject(),L"command");if(mode(id))modeCount++;selectionTool=selectionTool||mode(id)||source(id);}
-            Grid modes{nullptr};
-            if(modeCount){
-                modes=segmented(compact,modeCount);AutomationProperties::SetAutomationId(modes,L"selection-mode-row");
-                AutomationProperties::SetName(modes,data->caption(L"tool_controls",L"selection_mode"));
-                fields.emplace_back([weak,modes]{if(auto self=weak.lock())AutomationProperties::SetName(modes,self->data->caption(L"tool_controls",L"selection_mode"));});
-                if(compact)root.Children().Append(modes);
-                else{Border frame;frame.BorderThickness({1,1,1,1});frame.BorderBrush(data->tint(L"text",51));frame.CornerRadius({6,6,6,6});
-                    frame.Child(modes);root.Children().Append(frame);}
+            root.Spacing(data->panelMetric(L"group_spacing"));body=StackPanel();body.Spacing(data->panelMetric(L"control_spacing"));modeSection=StackPanel();modeSection.Spacing(data->panelMetric(L"control_spacing"));
+            std::map<std::wstring,Grid> modeRows;std::map<std::wstring,size_t> modeIndices;bool selectionTool=false;
+            for(auto value:actions){auto item=value.GetObject();auto id=str(item,L"group");selectionTool=selectionTool||id==L"selection-mode";
+                if(flag(item,L"segmented")&&!modeRows.contains(id.c_str())){
+                    size_t count=0;for(auto option:actions)if(str(option.GetObject(),L"group")==id)++count;
+                    auto bar=segmented(count);AutomationProperties::SetAutomationId(bar,id==L"selection-mode"?L"selection-mode-row":L"tool-action-group-"+id);
+                    AutomationProperties::SetName(bar,actionGroupLabel(id));modeRows.emplace(id.c_str(),bar);modeSection.Children().Append(bar);
+                    fields.emplace_back([weak,bar,id]{if(auto self=weak.lock())AutomationProperties::SetName(bar,self->actionGroupLabel(id));});
+                }
             }
+            if(!modeRows.empty()){root.Children().Append(modeSection);if(selectionTool&&!compact)selectionActions();}
+            root.Children().Append(body);
             std::map<std::wstring,J> beside;
             for(auto value:extra){auto spec=object(value.GetObject(),L"Choice");if(auto target=str(spec,L"beside");!target.empty())beside.emplace(target.c_str(),spec);}
             for(auto value:extra){
                 if(object(value.GetObject(),L"Gradient").Size()){
-                    root.Children().Append(CapyEffects::GradientEditor(data,{[weak]{if(auto self=weak.lock())return toolGradient(self->data->state);return J{};},
+                    body.Children().Append(CapyEffects::GradientEditor(data,{[weak]{if(auto self=weak.lock())return toolGradient(self->data->state);return J{};},
                         [weak,context](J action,hstring phase){
                             auto self=weak.lock();bool continuing=!phase.empty()&&phase!=L"down";
                             if(self&&(continuing||settingsContext(self->data->state)==context))
@@ -289,18 +312,16 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                 }
                 auto spec=object(value.GetObject(),L"Choice");auto items=array(spec,L"items");auto specId=str(spec,L"id");
                 if(!str(spec,L"beside").empty())continue;
-                auto bar=segmented(true,items.Size());AutomationProperties::SetName(bar,str(spec,L"label"));
+                auto bar=segmented(items.Size());AutomationProperties::SetName(bar,str(spec,L"label"));
                 bool labeled=flag(spec,L"labeled");
-                auto choiceStyle=toolbarUi(data->localization.get(),O({{L"type",S(L"choice_style")},{L"labeled",B(labeled)},{L"style",S(L"small")}})).GetObject();
-                auto choiceSize=array(choiceStyle,L"size");
                 auto caption=label(data,str(spec,L"label"));
                 if(labeled){
-                    bar.HorizontalAlignment(HorizontalAlignment::Right);bar.Width(choiceSize.GetNumberAt(0)*items.Size());bar.Height(choiceSize.GetNumberAt(1));bar.Margin({0,0,0,0});
-                    Grid row;row.ColumnSpacing(8);
+                    bar.HorizontalAlignment(HorizontalAlignment::Right);bar.Width(data->panelMetric(L"control_height")*items.Size());bar.Height(data->panelMetric(L"control_height"));bar.Margin({0,0,0,0});
+                    Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));
                     ColumnDefinition title;title.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(title);
                     ColumnDefinition control;control.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(control);
                     caption.TextWrapping(TextWrapping::Wrap);bar.VerticalAlignment(VerticalAlignment::Center);caption.VerticalAlignment(VerticalAlignment::Center);row.Children().Append(caption);
-                    Grid::SetColumn(bar,1);row.Children().Append(bar);root.Children().Append(row);
+                    Grid::SetColumn(bar,1);row.Children().Append(bar);body.Children().Append(row);
                 }
                 AutomationProperties::SetAutomationId(bar,L"tool-choice-"+specId);
                 fields.emplace_back([weak,bar,caption,specId]{if(auto self=weak.lock())for(auto option:array(self->data->state,L"tool_extra"))
@@ -310,21 +331,21 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                     auto pick=segment(str(item,L"icon"),str(item,L"label"),str(item,L"label"),L"tool-choice-"+specId+L"-"+to_hstring(i),true,i,
                         [weak,action,context]{if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)self->data->dispatch(action);});
                     if(labeled){
-                        auto glyph=icon(str(item,L"icon"),data->theme(),num(choiceStyle,L"icon"));AutomationProperties::SetAutomationId(glyph,L"icon-"+str(item,L"icon"));pick.Content(glyph);
-                        pick.Width(choiceSize.GetNumberAt(0));pick.Height(choiceSize.GetNumberAt(1));
-                        double first=i==0?6:0,last=i+1==items.Size()?6:0;pick.CornerRadius({first,last,last,first});
+                        auto glyph=icon(str(item,L"icon"),data->theme(),data->panelMetric(L"icon_size"));AutomationProperties::SetAutomationId(glyph,L"icon-"+str(item,L"icon"));pick.Content(glyph);
+                        pick.Width(data->panelMetric(L"control_height"));pick.Height(data->panelMetric(L"control_height"));
                     }
+                    double first=i==0?data->panelMetric(L"control_radius")*CornerFit:0,last=i+1==items.Size()?data->panelMetric(L"control_radius")*CornerFit:0;pick.CornerRadius({first,last,last,first});
                     Grid::SetColumn(pick,int(i));bar.Children().Append(pick);
-                    fields.emplace_back([weak,pick,specId,i,labeled,choiceStyle,shownTheme=data->theme() ]() mutable{if(auto self=weak.lock()){
+                    fields.emplace_back([weak,pick,specId,i,labeled,shownTheme=data->theme() ]() mutable{if(auto self=weak.lock()){
                         J current;for(auto option:array(self->data->state,L"tool_extra"))if(str(object(option.GetObject(),L"Choice"),L"id")==specId)current=object(option.GetObject(),L"Choice");
                         auto items=array(current,L"items");bool chosen=i<items.Size()&&flag(items.GetObjectAt(i),L"selected");
                         pick.Background(chosen?selected(self->data):self->data->brush(L"input"));
                         if(i<items.Size()){auto title=str(items.GetObjectAt(i),L"label");AutomationProperties::SetName(pick,title);tooltip(pick,title);}
-                        if(labeled&&shownTheme!=self->data->theme()){shownTheme=self->data->theme();auto glyph=icon(str(items.GetObjectAt(i),L"icon"),shownTheme,num(choiceStyle,L"icon"));AutomationProperties::SetAutomationId(glyph,L"icon-"+str(items.GetObjectAt(i),L"icon"));pick.Content(glyph);}
+                        if(labeled&&shownTheme!=self->data->theme()){shownTheme=self->data->theme();auto glyph=icon(str(items.GetObjectAt(i),L"icon"),shownTheme,self->data->panelMetric(L"icon_size"));AutomationProperties::SetAutomationId(glyph,L"icon-"+str(items.GetObjectAt(i),L"icon"));pick.Content(glyph);}
                         AutomationProperties::SetItemStatus(pick,chosen?self->data->caption(L"search",L"selected"):hstring());
                     }});
                 }
-                if(!labeled)root.Children().Append(bar);
+                if(!labeled)body.Children().Append(bar);
             }
             auto settings=array(data->state,L"tool_settings");StackPanel numbers{nullptr};
             for(auto value:settings){
@@ -335,7 +356,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                     range=RangeControl::Create(data,item,upper,data->caption(L"tool_controls",L"range_hint"),L"tool-setting",true,
                         [weak,context](int index,double value){if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)
                             self->data->dispatch(O({{L"type",S(L"set_tool_setting")},{L"id",S(index?L"tonal_upper":L"tonal_lower")},{L"value",N(value)}}));});
-                    root.Children().Append(range->root);
+                    body.Children().Append(range->root);
                     fields.emplace_back([weak]{if(auto self=weak.lock();self&&self->range){
                         auto current=array(self->data->state,L"tool_settings");
                         auto lower=find(current,L"id",L"tonal_lower"),upper=find(current,L"id",L"tonal_upper");
@@ -347,7 +368,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                 if(group!=str(item,L"group")){
                     group=str(item,L"group");numbers=nullptr;auto anchor=beside.find(id.c_str());
                     if(!group.empty()||anchor!=beside.end()){
-                        auto heading=label(data,anchor!=beside.end()?str(anchor->second,L"label"):group,true);heading.Opacity(.55);heading.Margin({0,6,0,0});root.Children().Append(heading);
+                        auto heading=label(data,anchor!=beside.end()?str(anchor->second,L"label"):group,true);heading.Opacity(.55);heading.Margin({0,body.Children().Size()?2.:0.,0,0});body.Children().Append(heading);
                         auto specId=anchor!=beside.end()?str(anchor->second,L"id"):hstring();
                         fields.emplace_back([weak,heading,id,specId]{if(auto self=weak.lock()){
                             auto title=str(find(array(self->data->state,L"tool_settings"),L"id",id),L"group");
@@ -358,10 +379,10 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                         auto specId=str(anchor->second,L"id");
                         auto grid=choiceGrid(data,anchor->second,L"tool-choice-"+specId,[weak,context](J action){
                             if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)self->data->dispatch(action);});
-                        Grid row;row.ColumnSpacing(12);
+                        Grid row;row.ColumnSpacing(data->panelMetric(L"compound_spacing"));
                         for(auto width:{GridUnitType::Auto,GridUnitType::Star}){ColumnDefinition column;column.Width({1,width});row.ColumnDefinitions().Append(column);}
                         grid.grid.VerticalAlignment(VerticalAlignment::Center);row.Children().Append(grid.grid);
-                        numbers=StackPanel();numbers.Spacing(6);Grid::SetColumn(numbers,1);row.Children().Append(numbers);root.Children().Append(row);
+                        numbers=StackPanel();numbers.Spacing(data->panelMetric(L"compound_spacing"));Grid::SetColumn(numbers,1);row.Children().Append(numbers);body.Children().Append(row);
                         fields.emplace_back([weak,grid,specId]{if(auto self=weak.lock())for(auto option:array(self->data->state,L"tool_extra"))
                             if(auto spec=object(option.GetObject(),L"Choice");str(spec,L"id")==specId)grid.update(self->data,spec);});
                     }
@@ -376,73 +397,48 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                         self->data->dispatch(O({{L"type",S(L"set_tool_setting")},{L"id",S(id)},{L"value",N(value)}}));},fields,nullptr,bool(numbers),L"tool-setting-"+id,compact,presentation);
                 AutomationProperties::SetAutomationId(control,L"number-root-tool-setting-"+id);
                 if(numbers){
-                    Grid line;line.ColumnSpacing(6);
+                    Grid line;line.ColumnSpacing(data->panelMetric(L"control_spacing"));
                     for(auto width:{GridUnitType::Auto,GridUnitType::Star}){ColumnDefinition column;column.Width({1,width});line.ColumnDefinitions().Append(column);}
                     auto text=label(data,str(item,L"label"));text.MinWidth(16);text.VerticalAlignment(VerticalAlignment::Center);line.Children().Append(text);
                     fields.emplace_back([text,title=presentation.title]{text.Text(title());});
                     Grid::SetColumn(control,1);line.Children().Append(control);numbers.Children().Append(line);
                 }else if(compact){
-                    Grid row;row.ColumnSpacing(6);row.Height(28);
+                    Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));row.Height(data->controlHeight());
                     ColumnDefinition caption;caption.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(caption);
-                    ColumnDefinition body;body.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(body);
+                    ColumnDefinition fieldColumn;fieldColumn.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(fieldColumn);
                     auto text=label(data,str(item,L"label"));text.MinWidth(62);text.VerticalAlignment(VerticalAlignment::Center);row.Children().Append(text);
                     fields.emplace_back([text,title=presentation.title]{text.Text(title());});
-                    control.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(control,1);row.Children().Append(control);root.Children().Append(row);
-                }else root.Children().Append(control);
+                    control.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(control,1);row.Children().Append(control);body.Children().Append(row);
+                }else body.Children().Append(control);
             }
-            size_t modeIndex=0;
+            std::map<std::wstring,Grid> actionRows;std::map<std::wstring,size_t> actionIndices;std::vector<hstring> groups;
             for(auto value:actions){
-                auto item=value.GetObject();auto id=str(item,L"command");auto command=find(array(data->state,L"commands"),L"id",id);
-                auto invoke=[weak,id,context]{if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)
-                    self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(id)}}));};
-                if(mode(id)&&modes){
-                    auto pick=segment(str(command,L"icon"),str(command,L"label"),str(command,L"tooltip"),L"tool-action-"+id,compact,modeIndex,
-                        [weak,id,invoke]{if(auto self=weak.lock();self&&!flag(find(array(self->data->state,L"commands"),L"id",id),L"selected"))invoke();});
-                    Grid::SetColumn(pick,int(modeIndex++));modes.Children().Append(pick);
-                    fields.emplace_back([weak,id,pick,compact]{if(auto self=weak.lock()){
-                        auto command=find(array(self->data->state,L"commands"),L"id",id);bool chosen=flag(command,L"selected");
-                        pick.IsEnabled(flag(command,L"enabled"));pick.Opacity(pick.IsEnabled()?1.:.36);
-                        pick.Background(chosen?selected(self->data):compact?self->data->brush(L"input"):clear());
-                        AutomationProperties::SetName(pick,str(command,L"label"));
-                        AutomationProperties::SetItemStatus(pick,chosen?self->data->caption(L"search",L"selected"):hstring());
-                        tooltip(pick,str(command,L"tooltip"));
-                    }});
-                }else if(source(id)){
-                    RadioButton radio;radio.GroupName(L"selection-source");auto text=toolLabel(data,command,false);text.Margin({6,0,0,0});radio.Content(text);
-                    radio.MinWidth(0);radio.MinHeight(44);radio.Padding({0,0,0,0});radio.HorizontalAlignment(HorizontalAlignment::Stretch);
-                    radio.VerticalContentAlignment(VerticalAlignment::Center);
-                    AutomationProperties::SetName(radio,str(command,L"label"));AutomationProperties::SetAutomationId(radio,L"tool-action-"+id);
-                    auto syncing=std::make_shared<bool>(false);
-                    radio.Checked([invoke,syncing](auto&&,auto&&){if(!*syncing)invoke();});
-                    root.Children().Append(radio);
-                    fields.emplace_back([weak,id,radio,syncing]{if(auto self=weak.lock()){
-                        auto command=find(array(self->data->state,L"commands"),L"id",id);
-                        radio.Content().as<Grid>().Children().GetAt(1).as<TextBlock>().Text(str(command,L"label"));AutomationProperties::SetName(radio,str(command,L"label"));
-                        *syncing=true;radio.IsEnabled(flag(command,L"enabled"));radio.IsChecked(flag(command,L"selected"));*syncing=false;
-                        tooltip(radio,str(command,L"tooltip"));
-                    }});
+                auto item=value.GetObject();auto id=str(item,L"command"),group=str(item,L"group"),rowId=str(item,L"row");auto command=find(array(data->state,L"commands"),L"id",id);
+                auto invoke=[weak,id,context]{if(auto self=weak.lock();self&&settingsContext(self->data->state)==context)self->data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(id)}}));};
+                if(flag(item,L"segmented")){
+                    auto modes=modeRows.at(group.c_str());auto index=modeIndices[group.c_str()]++;
+                    auto pick=segment(str(command,L"icon"),str(command,L"label"),str(command,L"tooltip"),L"tool-action-"+id,compact,index,invoke);
+                    double r=data->panelMetric(L"control_radius")*CornerFit;pick.CornerRadius({index==0?r:0,index+1==modes.ColumnDefinitions().Size()?r:0,index+1==modes.ColumnDefinitions().Size()?r:0,index==0?r:0});Grid::SetColumn(pick,int(index));modes.Children().Append(pick);
+                    fields.emplace_back([weak,id,pick,compact]{if(auto self=weak.lock()){auto command=find(array(self->data->state,L"commands"),L"id",id);bool chosen=flag(command,L"selected");pick.IsEnabled(flag(command,L"enabled"));pick.Background(chosen?selected(self->data):compact?self->data->brush(L"input"):clear());AutomationProperties::SetItemStatus(pick,chosen?self->data->caption(L"search",L"selected"):hstring());AutomationProperties::SetName(pick,str(command,L"label"));tooltip(pick,str(command,L"tooltip"));}});
+                }else if(!group.empty()){
+                    if(std::find(groups.begin(),groups.end(),group)==groups.end()){groups.push_back(group);actionChoice(group,context);}
                 }else if(flag(item,L"checkable")){
-                    CheckBox check;FrameworkElement text{nullptr};if(str(command,L"icon").empty())text=label(data,str(command,L"label"),false);else text=toolLabel(data,command,false);text.Margin({6,0,0,0});check.Content(text);
-                    check.MinWidth(0);check.MinHeight(selectionTool?44:32);check.Padding({0,0,0,0});check.HorizontalAlignment(HorizontalAlignment::Stretch);
-                    check.VerticalContentAlignment(VerticalAlignment::Center);
-                    AutomationProperties::SetName(check,str(command,L"label"));AutomationProperties::SetAutomationId(check,L"tool-action-"+id);
-                    check.Click([invoke](auto&&,auto&&){invoke();});root.Children().Append(check);
-                    fields.emplace_back([weak,id,check]{if(auto self=weak.lock()){
-                        auto command=find(array(self->data->state,L"commands"),L"id",id);
-                        if(auto text=check.Content().try_as<TextBlock>())text.Text(str(command,L"label"));else check.Content().as<Grid>().Children().GetAt(1).as<TextBlock>().Text(str(command,L"label"));AutomationProperties::SetName(check,str(command,L"label"));
-                        check.IsEnabled(flag(command,L"enabled"));check.IsChecked(flag(command,L"selected"));
-                        tooltip(check,str(command,L"tooltip"));
-                    }});
+                    CheckBox check;auto text=label(data,str(command,L"label"));check.Content(text);check.MinWidth(0);check.MinHeight(data->controlHeight());check.Height(data->controlHeight());check.Padding({0});check.HorizontalAlignment(HorizontalAlignment::Stretch);check.VerticalContentAlignment(VerticalAlignment::Center);
+                    AutomationProperties::SetName(check,str(command,L"label"));AutomationProperties::SetAutomationId(check,L"tool-action-"+id);check.Click([invoke](auto&&,auto&&){invoke();});body.Children().Append(check);
+                    fields.emplace_back([weak,id,check,text]{if(auto self=weak.lock()){auto command=find(array(self->data->state,L"commands"),L"id",id);text.Text(str(command,L"label"));AutomationProperties::SetName(check,str(command,L"label"));check.IsEnabled(flag(command,L"enabled"));check.IsChecked(flag(command,L"selected"));tooltip(check,str(command,L"tooltip"));}});
                 }else{
-                    auto pick=button(data,str(command,L"label"),invoke);pick.Height(selectionTool?44:36);pick.HorizontalAlignment(HorizontalAlignment::Stretch);
-                    if(str(command,L"icon").empty())pick.Content(label(data,str(command,L"label")));else pick.Content(toolLabel(data,command));AutomationProperties::SetAutomationId(pick,L"tool-action-"+id);root.Children().Append(pick);
-                    fields.emplace_back([weak,id,pick]{if(auto self=weak.lock()){
-                        auto command=find(array(self->data->state,L"commands"),L"id",id);if(auto text=pick.Content().try_as<TextBlock>())text.Text(str(command,L"label"));else pick.Content().as<Grid>().Children().GetAt(1).as<TextBlock>().Text(str(command,L"label"));AutomationProperties::SetName(pick,str(command,L"label"));pick.IsEnabled(flag(command,L"enabled"));
-                        tooltip(pick,str(command,L"tooltip"));
-                    }});
+                    bool iconOnly=flag(item,L"icon_only");auto pick=button(data,str(command,L"label"),invoke);pick.MinHeight(iconOnly?data->panelMetric(L"control_height"):data->controlHeight());pick.Padding({iconOnly?0.:6.,0,iconOnly?0.:6.,0});pick.HorizontalAlignment(HorizontalAlignment::Stretch);
+                    TextBlock caption{nullptr};if(iconOnly){pick.Width(data->panelMetric(L"control_height"));pick.Height(data->panelMetric(L"control_height"));pick.Content(icon(str(command,L"icon"),data->theme(),data->panelMetric(L"icon_size")));}
+                    else{caption=label(data,str(command,L"label"));caption.TextTrimming(TextTrimming::CharacterEllipsis);caption.TextWrapping(TextWrapping::NoWrap);pick.Content(caption);}
+                    AutomationProperties::SetAutomationId(pick,L"tool-action-"+id);
+                    if(rowId.empty())body.Children().Append(pick);else{
+                        if(!actionRows.contains(rowId.c_str())){Grid row;row.ColumnSpacing(data->panelMetric(L"control_spacing"));for(auto other:actions)if(str(other.GetObject(),L"row")==rowId){ColumnDefinition column;column.Width({iconOnly?data->panelMetric(L"control_height"):1.,iconOnly?GridUnitType::Pixel:GridUnitType::Star});row.ColumnDefinitions().Append(column);}actionRows.emplace(rowId.c_str(),row);body.Children().Append(row);AutomationProperties::SetAutomationId(row,L"tool-action-row-"+rowId);}
+                        auto row=actionRows.at(rowId.c_str());Grid::SetColumn(pick,int(actionIndices[rowId.c_str()]++));row.Children().Append(pick);
+                    }
+                    fields.emplace_back([weak,id,pick,caption]{if(auto self=weak.lock()){auto command=find(array(self->data->state,L"commands"),L"id",id);auto title=str(command,L"label");for(auto value:array(object(self->data->state,L"canvas_bar"),L"completion")){auto item=value.GetObject();if(str(object(object(item,L"option"),L"Action"),L"id")==id||str(object(object(object(item,L"option"),L"Action"),L"state"),L"id")==id)title=str(item,L"label");}if(caption)caption.Text(title);AutomationProperties::SetName(pick,str(command,L"label"));pick.IsEnabled(flag(command,L"enabled"));tooltip(pick,str(command,L"tooltip"));}});
                 }
             }
-            if(modeCount&&!compact)selectionActions();
+
         }
         for(auto const& bind:fields)bind();
     }

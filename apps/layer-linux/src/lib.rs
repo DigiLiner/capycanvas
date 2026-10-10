@@ -63,11 +63,18 @@ use std::{cell::RefCell, rc::Rc};
 
 fn stylesheet() -> String {
     format!(
-        "window {{ --ui-text-size: {}pt; --command-inset: {}px; --command-gap: {}px; --command-radius: {}px; }}\n{}",
+        "window {{ --ui-text-size: {}pt; --command-inset: {}px; --command-gap: {}px; --command-radius: {}px; --panel-inset: {}px; --panel-control-spacing: {}px; --panel-group-spacing: {}px; --panel-compound-spacing: {}px; --panel-control-height: {}px; --panel-field-padding: {}px; --panel-control-radius: {}px; }}\n{}",
         layer_ui::UI_TEXT_PT,
         layer_ui::COMMAND_SEARCH_STYLE.inset,
         layer_ui::COMMAND_SEARCH_STYLE.gap,
         layer_ui::COMMAND_SEARCH_STYLE.radius,
+        layer_ui::PANEL_CONTROL_METRICS.inset,
+        layer_ui::PANEL_CONTROL_METRICS.control_spacing,
+        layer_ui::PANEL_CONTROL_METRICS.group_spacing,
+        layer_ui::PANEL_CONTROL_METRICS.compound_spacing,
+        layer_ui::PANEL_CONTROL_METRICS.control_height,
+        layer_ui::PANEL_CONTROL_METRICS.field_padding,
+        layer_ui::PANEL_CONTROL_METRICS.control_radius,
         include_str!("style.css")
     )
 }

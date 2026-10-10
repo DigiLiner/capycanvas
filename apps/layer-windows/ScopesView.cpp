@@ -132,8 +132,8 @@ struct WaveformView : std::enable_shared_from_this<WaveformView> {
     }
 };
 ComboBox selector(std::shared_ptr<WorkspaceData> const& data,hstring const& id){
-    ComboBox box;box.MinWidth(0);box.MinHeight(32);box.Height(32);box.HorizontalAlignment(HorizontalAlignment::Stretch);
-    box.FontSize(data->textSize());box.Background(data->brush(L"input"));box.BorderThickness({0,0,0,0});box.CornerRadius({6,6,6,6});
+    ComboBox box;box.MinWidth(0);box.MinHeight(data->controlHeight());box.Height(data->controlHeight());box.Padding({6,0,0,0});box.HorizontalAlignment(HorizontalAlignment::Stretch);
+    box.FontSize(data->textSize());box.Background(data->brush(L"input"));box.BorderThickness({0,0,0,0});box.CornerRadius(data->controlCorner());
     AutomationProperties::SetAutomationId(box,id);
     auto open=std::make_shared<bool>(false);
     box.DropDownOpened([data,open](auto&&,auto&&){if(!std::exchange(*open,true))data->popup(true);});
@@ -165,9 +165,9 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
     J view()const{return object(data->state,tonal?L"tonal_histogram":waveform?L"waveform":L"histogram");}
     void init(Bindings& bindings){
         auto weak=weak_from_this();auto scopes=feed(data);
-        root.Spacing(6);
+        root.Spacing(data->panelMetric(L"control_spacing"));
         if(!tonal){
-            Grid toolbar;toolbar.ColumnSpacing(6);
+            Grid toolbar;toolbar.ColumnSpacing(data->panelMetric(L"control_spacing"));
             for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,GridUnitType::Star});toolbar.ColumnDefinitions().Append(column);}
             source=selector(data,prefix+L"-source");channel=selector(data,prefix+L"-channel");Grid::SetColumn(channel,1);
             toolbar.Children().Append(source);toolbar.Children().Append(channel);root.Children().Append(toolbar);
@@ -194,7 +194,7 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
             Grid::SetColumn(axis[1],1);scale.Children().Append(axis[0]);scale.Children().Append(axis[1]);root.Children().Append(scale);
         }
         if(!tonal){
-            logarithmic=CheckBox();logarithmic.MinWidth(0);logarithmic.MinHeight(28);logarithmic.Padding({4,0,0,0});
+            logarithmic=CheckBox();logarithmic.MinWidth(0);logarithmic.MinHeight(data->controlHeight());logarithmic.Height(data->controlHeight());logarithmic.Padding({0});
             AutomationProperties::SetAutomationId(logarithmic,prefix+L"-log");
             auto text=label(data,L"");text.TextWrapping(TextWrapping::Wrap);logarithmic.Content(text);
             logarithmic.HorizontalContentAlignment(HorizontalAlignment::Stretch);root.Children().Append(logarithmic);
@@ -239,7 +239,7 @@ FrameworkElement CapyScopes::ScopeFooter(std::shared_ptr<WorkspaceData> const& d
     for(int i=0;i<2;++i){
         auto name=i?L"highlights":L"shadows";
         auto toggle=button<Primitives::ToggleButton>(data,L"",[]{});clipping[i]=toggle;
-        toggle.Width(28);toggle.Height(28);toggle.Content(icon(hstring(L"tonal-")+name,data->theme()));
+        toggle.Width(data->panelMetric(L"control_height"));toggle.Height(data->panelMetric(L"control_height"));toggle.Content(icon(hstring(L"tonal-")+name,data->theme()));
         AutomationProperties::SetAutomationId(toggle,prefix+L"-"+name);
         toggle.Click([data,name,weak=make_weak(toggle)](auto&&,auto&&){if(auto toggle=weak.get())
             sendHistogram(data,O({{L"type",S(name)},{L"enabled",B(toggle.IsChecked().Value())}}));});

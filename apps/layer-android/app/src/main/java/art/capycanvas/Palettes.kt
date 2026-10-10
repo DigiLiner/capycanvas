@@ -335,7 +335,7 @@ private fun Modifier.paletteKeys(activate: () -> Unit, menu: (() -> Unit)?): Mod
             if (top > 0f && bottom > 0f) onContent(cells.content(count, top + bottom))
         }
         val covered = controller.chooser || controller.expanded
-        Column(Modifier.fillMaxWidth().then(if (bounded) Modifier.fillMaxHeight() else Modifier).padding(horizontal = 8.dp, vertical = 6.dp)) {
+        Column(Modifier.fillMaxWidth().then(if (bounded) Modifier.fillMaxHeight() else Modifier).padding(8.dp)) {
             Box((if (bounded) Modifier.weight(1f) else Modifier).fillMaxWidth().onSizeChanged { bodyHeight = it.height / density }) {
                 Column(Modifier.fillMaxWidth().alpha(if (covered) 0f else 1f)) {
                     Column(Modifier.onSizeChanged { top = it.height / density }) {
@@ -395,7 +395,7 @@ private fun Modifier.paletteKeys(activate: () -> Unit, menu: (() -> Unit)?): Mod
 
 private fun PaletteCells.grid(count: Int) = height(rows(count).coerceIn(2, GridRows))
 private fun PaletteCells.content(count: Int, fixed: Float) = PanelContentSize(
-    (fixed * density + 2 * (6 * density).roundToInt() + (grid(count) * density).roundToInt()).roundToInt() / density)
+    (fixed * density + 2 * (8 * density).roundToInt() + (grid(count) * density).roundToInt()).roundToInt() / density)
 
 @Composable internal fun PaletteMeasurement(host: CanvasHost, onContent: (PanelContentSize) -> Unit) {
     val controller = host.palettes
@@ -609,7 +609,7 @@ private fun DrawScope.checker() {
                 .clickable(role = Role.Button, onClickLabel = host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("choose")) {
                     if (controller.editing) controller.commitName(controller.editText)
                     controller.expanded = false; controller.chooser = !controller.chooser
-                }.testTag("palette-chooser").padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                }.testTag("palette-chooser").padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(view.getString("name"), Modifier.weight(1f, fill = false).testTag("palette-selector-name"), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 SharedIcon("chevron-down", null, Modifier.size(12.dp).rotate(180f))
@@ -621,10 +621,10 @@ private fun DrawScope.checker() {
                 Text(name, Modifier.heightIn(min = 24.dp).clip(ControlShape).alpha(if (view.getBoolean("can_name")) 1f else .4f).paletteFocus(controller)
                     .clickable(enabled = view.getBoolean("can_name"), role = Role.Button, onClickLabel = host.catalog.getJSONObject("native_copy").getJSONObject("palettes").getString("name")) {
                         controller.beginEditing()
-                    }.testTag("palette-color-name").padding(horizontal = 2.dp, vertical = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }.testTag("palette-color-name").padding(horizontal = 6.dp, vertical = 3.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             HoverTip("sRGB hex preview; saved colors retain their original color space, alpha and HDR intensity") {
-                Text(view.getString("color_detail"), Modifier.padding(end = 2.dp).testTag("palette-color-detail"),
+                Text(view.getString("color_detail"), Modifier.padding(end = 6.dp).testTag("palette-color-detail"),
                     color = colors.secondary, fontSize = LocalTextStyle.current.fontSize * .9f)
             }
         }

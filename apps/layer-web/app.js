@@ -1321,7 +1321,7 @@ function chromeInput(event) {
       dragging: dragItem !== null,
       popup_open:
         !!(document.querySelector("dialog[open], details[open]") || document.querySelector(":popover-open:not(.hover-tooltip)")) ||
-        !!document.activeElement?.matches("select"),
+        (CSS.supports("selector(select:open)") && !!document.querySelector("select:open")),
     },
   });
 }
@@ -1816,6 +1816,7 @@ try {
   catalog = liveCopy(app, "catalog");
   performance.mark("capy.startup.model");
   document.documentElement.style.setProperty("--ui-text-size", `${catalog.text_size_pt}pt`);
+  for(const [key,value] of Object.entries(catalog.panel_metrics))document.documentElement.style.setProperty(`--panel-${key.replaceAll("_","-")}`,`${value}px`);
   publishAppName();
   pressureCalibration=createPressureCalibration({state:()=>state,workspace,element,button,icon,numberField,panelFrame,dispatch});
   refreshPreferences = createPreferences({ app, element, button, icon, numberField, panelFrame, dispatch, nativeCopy: catalog.native_copy, view: () => app.preferences_cached() });

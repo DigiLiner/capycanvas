@@ -44,7 +44,7 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
     std::optional<hstring> searchDraft;
     void send(J action){if(!data->updating)data->dispatch(O({{L"type",S(L"filter_picker")},{L"action",action}}));}
     void init(){
-        auto weak=weak_from_this();root.Padding({6,6,6,6});root.RowSpacing(split?0:6);
+        auto weak=weak_from_this();root.Padding({8,8,8,8});root.RowSpacing(split?0:data->panelMetric(L"control_spacing"));
         header.Visibility(split?Visibility::Collapsed:Visibility::Visible);
         AutomationProperties::SetAutomationId(root,L"filter-picker");
         auto title=[source=std::weak_ptr<WorkspaceData>(data)]{if(auto current=source.lock())return str(find(array(current->model,L"panels"),L"id",L"adjustments"),L"title");return hstring();};
@@ -53,8 +53,8 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
         RowDefinition a;a.Height({1,GridUnitType::Auto});root.RowDefinitions().Append(a);
         RowDefinition b;b.Height({1,GridUnitType::Star});root.RowDefinitions().Append(b);
         ColumnDefinition content;content.Width({1,GridUnitType::Star});header.ColumnDefinitions().Append(content);
-        ColumnDefinition action;action.Width({32,GridUnitType::Pixel});header.ColumnDefinitions().Append(action);header.ColumnSpacing(6);
-        category.MinWidth(0);category.MinHeight(32);category.FontSize(data->textSize());category.Background(data->brush(L"input"));
+        ColumnDefinition action;action.Width({data->panelMetric(L"control_height"),GridUnitType::Pixel});header.ColumnDefinitions().Append(action);header.ColumnSpacing(data->panelMetric(L"control_spacing"));
+        category.MinWidth(0);category.MinHeight(data->controlHeight());category.Height(data->controlHeight());category.Padding({6,0,0,0});category.FontSize(data->textSize());category.Background(data->brush(L"input"));category.BorderThickness({0});category.CornerRadius(data->controlCorner());
         category.HorizontalAlignment(HorizontalAlignment::Stretch);
         copyName(data,category,data->copyCaption(L"color",L"category"));AutomationProperties::SetAutomationId(category,L"filter-category");
         category.SelectionChanged([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->data->updating){
@@ -65,8 +65,8 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
         category.Margin({22,0,0,0});header.Children().Append(category);
         categoryGlyph.Width(16);categoryGlyph.Height(16);categoryGlyph.IsHitTestVisible(false);
         categoryGlyph.HorizontalAlignment(HorizontalAlignment::Left);header.Children().Append(categoryGlyph);
-        search.MinWidth(0);search.MinHeight(32);search.FontSize(data->textSize());search.MaxLength(120);
-        search.Background(data->brush(L"input"));search.Padding({6,4,6,4});search.BorderThickness({0});
+        search.MinWidth(0);search.MinHeight(data->controlHeight());search.Height(data->controlHeight());search.FontSize(data->textSize());search.MaxLength(120);
+        search.Background(data->brush(L"input"));search.Padding({6,0,6,0});search.CornerRadius(data->controlCorner());search.BorderThickness({0});
         AutomationProperties::SetAutomationId(search,L"filter-search");header.Children().Append(search);
         // TextChanging is synchronous, so programmatic updates stay inside
         // Updating. Keep typed text until its own model acknowledgement arrives.
@@ -78,7 +78,7 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
             if(auto self=weak.lock())self->send(O({{L"op",S(L"toggle_search")}}));e.Handled(true);
         }});
         toggle=button(data,str(object(data->state,L"filter_picker"),L"search_label"),[weak]{if(auto self=weak.lock())self->send(O({{L"op",S(L"toggle_search")}}));});
-        toggle.Content(icon(L"search",data->theme()));toggle.Height(32);Grid::SetColumn(toggle,1);
+        toggle.Content(icon(L"search",data->theme()));toggle.Height(data->panelMetric(L"control_height"));Grid::SetColumn(toggle,1);
         AutomationProperties::SetAutomationId(toggle,L"filter-search-toggle");header.Children().Append(toggle);root.Children().Append(header);
         list.Content(rows);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
         list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
@@ -155,11 +155,11 @@ FrameworkElement FiltersPanel(std::shared_ptr<WorkspaceData> const& data,Binding
     if(scrollMetrics)*scrollMetrics=[weak=std::weak_ptr(view)]{
         if(auto view=weak.lock()){
             double unit=0;for(auto const& row:view->previews)if(row.button.IsLoaded()&&row.button.ActualHeight()>0){auto margin=row.button.Margin();unit=row.button.ActualHeight()+margin.Top+margin.Bottom+view->rows.Spacing();break;}
-            return O({{L"fixed_height",N((view->split?12.:18.+view->header.ActualHeight()))},{L"unit_height",N(unit)}});
+            return O({{L"fixed_height",N((view->split?16.:20.+view->header.ActualHeight()))},{L"unit_height",N(unit)}});
         }return J{};
     };
     if(contentHeight)*contentHeight=[weak=std::weak_ptr(view)]{
-        if(auto view=weak.lock())return (view->split?12.:18.+view->header.ActualHeight())+view->list.ExtentHeight();
+        if(auto view=weak.lock())return (view->split?16.:20.+view->header.ActualHeight())+view->list.ExtentHeight();
         return -1.;
     };
     return view->root;
@@ -167,7 +167,7 @@ FrameworkElement FiltersPanel(std::shared_ptr<WorkspaceData> const& data,Binding
 
 FrameworkElement FilterTypesPanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings){
     struct State {hstring key;std::vector<Button> buttons;std::vector<TextBlock> labels;};
-    auto state=std::make_shared<State>();Grid root;root.Padding({6,6,6,6});root.RowSpacing(6);
+    auto state=std::make_shared<State>();Grid root;root.Padding({8,8,8,8});root.RowSpacing(data->panelMetric(L"control_spacing"));
     RowDefinition rows;rows.Height({1,GridUnitType::Star});root.RowDefinitions().Append(rows);
     RowDefinition footer;footer.Height({1,GridUnitType::Auto});root.RowDefinitions().Append(footer);
     StackPanel choices;choices.Spacing(2);
@@ -175,7 +175,7 @@ FrameworkElement FilterTypesPanel(std::shared_ptr<WorkspaceData> const& data,Bin
     scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
     scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);root.Children().Append(scroll);
     auto cancel=button(data,data->copyCommon(L"cancel"),[data]{data->dispatch(O({{L"type",S(L"effect")},{L"action",O({{L"op",S(L"cancel_filter")}})}}));});
-    cancel.HorizontalAlignment(HorizontalAlignment::Left);cancel.Height(36);
+    cancel.HorizontalAlignment(HorizontalAlignment::Left);cancel.MinHeight(data->controlHeight());
     AutomationProperties::SetAutomationId(cancel,L"cancel-filter");Grid::SetRow(cancel,1);root.Children().Append(cancel);
     bindings.emplace_back([data,state,choices]{
         auto categories=array(data->state,L"filter_categories");auto key=categorySchema(categories).Stringify()+data->theme();

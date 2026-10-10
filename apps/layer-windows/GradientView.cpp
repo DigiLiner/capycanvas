@@ -52,7 +52,7 @@ struct RampView:std::enable_shared_from_this<RampView> {
     std::shared_ptr<RampWorker> worker=std::make_shared<RampWorker>();
     hstring requested,shown;
     void init(){
-        root.Height(height);root.CornerRadius({4,4,4,4});root.Background(data->brush(L"input"));
+        root.Height(height);root.CornerRadius(data->controlCorner());root.Background(data->brush(L"input"));
         image.Stretch(Stretch::Fill);image.IsHitTestVisible(false);root.Child(image);
         auto weak=weak_from_this();
         worker->deliver=[weak](RampResult result){if(auto self=weak.lock())self->install(std::move(result));};
@@ -114,15 +114,15 @@ struct EditorView:std::enable_shared_from_this<EditorView> {
         selected=std::max(0,index-1);send(stopEdit(N(index),0,JsonValue::CreateNullValue(),true));
     }
     Button iconButton(wchar_t const* glyph,hstring const& suffix,std::function<void()> action){
-        auto pick=button(data,L"",std::move(action));pick.Width(32);pick.Height(32);pick.Content(icon(glyph,data->theme(),20));
+        auto pick=button(data,L"",std::move(action));pick.Width(data->panelMetric(L"control_height"));pick.Height(data->panelMetric(L"control_height"));pick.Content(icon(glyph,data->theme(),data->panelMetric(L"icon_size")));
         AutomationProperties::SetAutomationId(pick,source.id+L"-"+suffix);return pick;
     }
     void name(Button const& pick,hstring const& text){if(AutomationProperties::GetName(pick)!=text){AutomationProperties::SetName(pick,text);tooltip(pick,text);}}
     void column(Grid const& row,GridLength width){ColumnDefinition definition;definition.Width(width);row.ColumnDefinitions().Append(definition);}
     void init(){
-        auto weak=weak_from_this();root.Spacing(6);
-        top.ColumnSpacing(6);column(top,{1,GridUnitType::Star});column(top,{1,GridUnitType::Auto});column(top,{1,GridUnitType::Auto});
-        interpolation.HorizontalAlignment(HorizontalAlignment::Stretch);interpolation.MinWidth(0);interpolation.MinHeight(32);
+        auto weak=weak_from_this();root.Spacing(data->panelMetric(L"control_spacing"));
+        top.ColumnSpacing(data->panelMetric(L"control_spacing"));column(top,{1,GridUnitType::Star});column(top,{1,GridUnitType::Auto});column(top,{1,GridUnitType::Auto});
+        interpolation.HorizontalAlignment(HorizontalAlignment::Stretch);interpolation.MinWidth(0);interpolation.MinHeight(data->controlHeight());interpolation.Height(data->controlHeight());
         interpolation.FontSize(data->textSize());AutomationProperties::SetAutomationId(interpolation,source.id+L"-interpolation");
         interpolation.SelectionChanged([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->syncing&&!self->data->updating){
             auto modes=array(self->gradient(),L"interpolations");auto index=self->interpolation.SelectedIndex();
@@ -153,7 +153,7 @@ struct EditorView:std::enable_shared_from_this<EditorView> {
         focus.KeyUp([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock())self->key(e,false);});
         focus.LostFocus([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();});
         focus.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock())self->cancel();});
-        bottom.ColumnSpacing(6);column(bottom,{1,GridUnitType::Star});for(int i=0;i<3;++i)column(bottom,{1,GridUnitType::Auto});
+        bottom.ColumnSpacing(data->panelMetric(L"control_spacing"));column(bottom,{1,GridUnitType::Star});for(int i=0;i<3;++i)column(bottom,{1,GridUnitType::Auto});
         NumberPresentation presentation;presentation.title=data->copyCaption(L"color",L"position").current;
         presentation.identity=[weak]{if(auto self=weak.lock())return self->context();return hstring();};
         positionGate.Content(number(data,presentation.title(),object(data->catalog,L"opacity"),

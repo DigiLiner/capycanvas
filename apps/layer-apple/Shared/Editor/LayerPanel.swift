@@ -78,8 +78,8 @@ struct LayerPanel: View {
         }
     }
     private var header: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 6) {
+        VStack(spacing: store.panelMetrics.spacing) {
+            HStack(spacing: store.panelMetrics.spacing) {
                 let blends = store.catalog["layer_blends"].array.map(\.string)
                 EditorChoice(label: store.catalog["native_copy"]["layers"]["blend"].string, options: blends,
                     selected: blends.firstIndex(of: current["blend_label"].string) ?? -1, identifier: "layer-blend", background: palette["input"], compact: true,
@@ -90,7 +90,7 @@ struct LayerPanel: View {
                     }) { _ in }.disabled(!view["controls"]["blend"].bool).frame(maxWidth: .infinity)
                 LayerOpacityField(store: store).disabled(!view["controls"]["opacity"].bool).frame(maxWidth: .infinity)
             }
-            HStack(spacing: 2) {
+            HStack(spacing: store.panelMetrics.spacing) {
                 flag("alpha-lock", store.catalog["native_copy"]["layers"]["alpha_lock"].string, "alpha_locked", "alpha_lock", "alpha_lock")
                 flag("lock", store.catalog["native_copy"]["layers"]["lock_editing"].string, "locked", "lock", "edit_lock")
                 let attachment = view["attachment"]
@@ -106,7 +106,7 @@ struct LayerPanel: View {
                 }
                 Spacer(minLength: 0)
             }
-        }.padding(.horizontal, 6).padding(.vertical, 4)
+        }.padding(.horizontal, store.panelMetrics.inset).padding(.vertical, 4)
     }
     private func flag(_ icon: String, _ label: String, _ property: String, _ op: String, _ capability: String) -> some View {
         LayerButton(icon: icon, label: label, enabled: view["controls"][capability].bool, selected: current[property].bool) {
@@ -114,7 +114,7 @@ struct LayerPanel: View {
         }
     }
     private var footer: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: store.panelMetrics.spacing) {
             LayerButton(icon: "add-layer", label: store.catalog["native_copy"]["layers"]["new_layer"].string) { store.layer(["op": "new", "group": false, "clipped": false]) }
             LayerButton(icon: "folder", label: store.catalog["native_copy"]["layers"]["new_group"].string) { store.layer(["op": "new", "group": true, "clipped": false]) }
             LayerButton(icon: "selection-brush", label: store.catalog["native_copy"]["layers"]["new_selection_layer"].string, enabled: store.command("new_selection_layer")["enabled"].bool) {
@@ -137,7 +137,7 @@ struct LayerPanel: View {
             LayerButton(icon: "more-small", label: store.catalog["native_copy"]["layers"]["actions"].string, enabled: !current.isNull) {
                 openMenu(current, mask: current["mask_selected"].bool, source: .footer)
             }.editorPopover(isPresented: menuPresented(at: .footer), placement: .inward) { menuContent }
-        }.padding(.horizontal, 6).padding(.vertical, 4)
+        }.padding(.horizontal, store.panelMetrics.inset).padding(.vertical, 4)
     }
     private func menuPresented(at source: LayerMenuSource) -> Binding<Bool> {
         Binding(get: { interaction.menuSource == source && !interaction.menu.isNull }, set: { presented in

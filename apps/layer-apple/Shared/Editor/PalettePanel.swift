@@ -55,8 +55,8 @@ struct PalettePanel: View {
                     }
                 }.modifier(PanelBodyMeasurement(panel: "palettes", part: "footer"))
             }.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .modifier(PanelBodyMeasurement(panel: "palettes", part: "padding", intrinsicHeight: 12))
+                .padding(8)
+                .modifier(PanelBodyMeasurement(panel: "palettes", part: "padding", intrinsicHeight: 16))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("palette-panel")
                 .onAppear { grid.store = store; rows.store = store; rows.owner = grid.owner }
                 .onChange(of: controller.menu?.owner == grid.owner) { _, open in store.workspace.popover(popupID, open: open) }
@@ -237,7 +237,7 @@ private struct PaletteFooter: View {
                 HStack(spacing: 4) {
                     Text(view["name"].string).lineLimit(1).truncationMode(.tail)
                     SharedIcon(name: "chevron-down", size: 12).rotationEffect(.degrees(180))
-                }.padding(.horizontal, 4).frame(minHeight: 24).contentShape(Rectangle())
+                }.padding(.horizontal, 6).frame(minHeight: 24).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle()).frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 .help(chooseCaption).accessibilityLabel(controller.copy["choose"].string)
                 .accessibilityValue(view["name"].string).accessibilityIdentifier("palette-chooser")
@@ -257,12 +257,12 @@ private struct PaletteFooter: View {
                         .accessibilityIdentifier("palette-name-editor")
                 } else {
                     Button { controller.focused = true; controller.beginEditing() } label: {
-                        Text(name).lineLimit(1).padding(.horizontal, 2).frame(minHeight: 24).contentShape(Rectangle())
+                        Text(name).lineLimit(1).padding(.horizontal, 6).frame(minHeight: 24).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(!view["can_name"].bool).opacity(view["can_name"].bool ? 1 : 0.4)
                         .help(controller.copy["rename_help"].string).accessibilityLabel(name).accessibilityIdentifier("palette-color-name")
                 }
                 Text(view["color_detail"].string).font(.system(size: 12)).foregroundStyle(palette["text"].opacity(0.6))
-                    .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true).padding(.trailing, 2)
+                    .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true).padding(.trailing, 6)
                     .help("sRGB hex preview; saved colors retain their original color space, alpha and HDR intensity")
                     .accessibilityIdentifier("palette-color-detail")
             }.frame(maxWidth: .infinity, alignment: .trailing)
@@ -368,7 +368,7 @@ struct PaletteMeasurement: View {
                         .modifier(PanelBodyMeasurement(panel: "palettes", part: "grid",
                             intrinsicHeight: cells.viewport(view["swatches"].array.count + 1), kind: .scroll))
                         .modifier(PanelBodyMeasurement(panel: "palettes", part: "grid-unit", intrinsicHeight: cells.pitch, kind: .unit))
-                        .modifier(PanelBodyMeasurement(panel: "palettes", part: "padding", intrinsicHeight: 12))
+                        .modifier(PanelBodyMeasurement(panel: "palettes", part: "padding", intrinsicHeight: 16))
                 }.frame(height: 1)
                 VStack(spacing: 0) {
                     Rectangle().frame(height: 1).padding(.vertical, 6)

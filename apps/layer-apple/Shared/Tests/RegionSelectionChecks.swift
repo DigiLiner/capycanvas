@@ -105,11 +105,7 @@ extension XCTestCase {
         for tool in ["Fill", "Auto select"] {
             selectTool(tool)
             if tool == "Fill" { editorChoice("Visible artwork", in: app) } else {
-                let visible = app.buttons["tool-action-selection_visible"]
-                revealEditorControl(visible, in: app.scrollViews.containing(.button, identifier: visible.identifier).firstMatch)
-                workspaceActivate(visible)
-                expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: visible)
-                waitForExpectations(timeout: 5)
+                editorToolActionChoice("selection_visible", in: app)
             }
             setting("tolerance", 0); setting("gap_closing", 0)
             for (expansion, smoothing) in [(0, 0), (2, 0), (-2, 0), (0, 100)] {
@@ -211,11 +207,7 @@ extension XCTestCase {
             editorTool(tool, in: app)
             for source in ["Visible artwork", "Editing layer", "Reference layers"] {
                 if tool == "Fill" { editorChoice(source, in: app) } else {
-                    let action = app.buttons["tool-action-selection_" + ["Visible artwork": "visible", "Editing layer": "editing", "Reference layers": "reference"][source]!]
-                    revealEditorControl(action, in: app.scrollViews.containing(.button, identifier: action.identifier).firstMatch)
-                    workspaceActivate(action)
-                    expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: action)
-                    waitForExpectations(timeout: 5)
+                    editorToolActionChoice("selection_" + ["Visible artwork": "visible", "Editing layer": "editing", "Reference layers": "reference"][source]!, in: app)
                 }
                 for setting in ["tolerance", "smoothing"] {
                     XCTAssertTrue(app.buttons["number-value-tool-" + setting].exists)

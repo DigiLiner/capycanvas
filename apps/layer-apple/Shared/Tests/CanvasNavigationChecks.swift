@@ -113,10 +113,10 @@ extension XCTestCase {
         }
         func source(_ label: String) {
             editorTool("Eyedropper", in: app)
-            let menu = app.popUpButtons["picker-setting-source"]
+            let menu = app.buttons["picker-setting-source"]
             XCTAssertTrue(menu.waitForExistence(timeout: 10), "Picking shows its source setting")
             workspaceActivate(menu)
-            workspaceActivate(app.menuItems[label].firstMatch)
+            workspaceActivate(app.buttons["picker-setting-source-option-" + (label == "Selected layer" ? "1" : "0")])
             expectation(for: NSPredicate(format: "value == %@", label), evaluatedWith: menu)
             waitForExpectations(timeout: 5)
         }

@@ -3,6 +3,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {png} from './clone-journey.test.mjs';
 import {placementSave} from './image-placement-motion.test.mjs';
 import {rasterIdentity,sourceIdentity} from './package-fixture.test.mjs';
+import {chooseToolActionGroup} from './panel-controls-journey.test.mjs';
 
 export async function checkEncloseFill({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/enclose-fill/web';
@@ -62,10 +63,10 @@ export async function checkEncloseFill({call,evaluate,settle}) {
       await contact(`${toolset} .tool-groups [data-tool-choice="Lasso fill"]`);
       assert.ok(await selected('enclose_fill'),'Lasso Fill category remembers the Enclose subtool');
       for(const source of ['selection_visible','selection_editing','selection_reference']){
-        await contact(`.dock-group [data-tool-action="${source}"]`);
+        await chooseToolActionGroup({call,evaluate,settle},'selection-source',source);
         assert.ok(await selected(source));assert.ok(await selected('enclose_fill'),'source preserves Enclose variant');
       }
-      await evaluate(`document.querySelector('.dock-group [data-tool-action="selection_reference"]').scrollIntoView({block:'nearest'})`);await settle();
+      await evaluate(`document.querySelector('.dock-group [data-tool-action-group="selection-source"]').scrollIntoView({block:'nearest'})`);await settle();
       await writeFile(`${directory}/controls-${theme}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
       const controls=await evaluate('layerApp.state().tool_settings.map(c=>c.id)');
       for(const id of ['tolerance','gap_closing','expansion','smoothing']){

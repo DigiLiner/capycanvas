@@ -541,7 +541,7 @@ impl NumberControl {
             control.add_css_class("number-inline");
             control.set_tooltip_text(Some(title));
         }
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, if compact { 2 } else { 6 });
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, if panel { crate::panel_controls::CONTROL_SPACING } else if compact { 2 } else { 6 });
         header.set_vexpand(compact);
         let labels = gtk::Box::new(gtk::Orientation::Vertical, 0);
         labels.set_hexpand(true);

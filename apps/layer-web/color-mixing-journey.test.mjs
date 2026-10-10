@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir, writeFile} from 'node:fs/promises';
+import {chooseToolActionGroup} from './panel-controls-journey.test.mjs';
 
 export async function checkColorMixing({call, evaluate, settle}) {
   const directory = process.env.LAYER_TEST_ARTIFACTS ?? 'artifacts/color-mixing/web';
@@ -20,18 +21,20 @@ export async function checkColorMixing({call, evaluate, settle}) {
     await settle(); await pause(250);
   };
   const command = id => evaluate(`layerApp.state().commands.find(c=>c.id===${JSON.stringify(id)})`);
-  const option = id => `[data-tool-action="${id}"]`;
+  const option = '[data-tool-action-group="color-mixing"]';
   const choices = ['color_mix_oklab', 'color_mix_linear', 'color_mix_classic'];
   await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('dialog[open]');})()`);
   const theme = await evaluate('layerApp.state().settings.theme ?? null');
   try {
     await send({type: 'invoke', command: 'fit_canvas'});
     const center = await evaluate('(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]/2)*r.width/c.viewport[0],y:r.y+(a[1]+a[3]/2)*r.height/c.viewport[1]}})()');
-    const stroke = async (y, device) => {
+    const stroke = async (y, device, vertical=false) => {
+      await wait('layerApp.app.brush_ready()');
       const revision = await evaluate('Number(layerApp.state().document_file.revision)');
-      await point({x: center.x - 120, y: center.y + y}, device, 'mousePressed');
-      for (let x = -100; x <= 120; x += 20) await point({x: center.x + x, y: center.y + y}, device, 'mouseMoved');
-      await point({x: center.x + 120, y: center.y + y}, device, 'mouseReleased');
+      const position=x=>vertical?{x:center.x+y,y:center.y+x/2}:{x:center.x+x,y:center.y+y};
+      await point(position(-120), device, 'mousePressed');
+      for (let x = -100; x <= 120; x += 20) await point(position(x), device, 'mouseMoved');
+      await point(position(120), device, 'mouseReleased');
       await wait(`Number(layerApp.state().document_file.revision)>${revision}`);
     };
     await send({type: 'select_brush', id: 1});
@@ -41,18 +44,20 @@ export async function checkColorMixing({call, evaluate, settle}) {
       await stroke(y, 'pen');
     }
     await wait(`!!document.querySelector('[data-tool-setting="flow"]')`);
-    assert.equal(await evaluate(`!!document.querySelector('[data-tool-action^="color_mix_"]')`), false, 'G-Pen does not mix paint');
+    assert.equal(await evaluate(`!!document.querySelector('${option}')`), false, 'G-Pen does not mix paint');
     await send({type: 'select_brush', id: 24});
-    await wait(`!!document.querySelector(${JSON.stringify(option('color_mix_oklab'))})`);
-    assert.deepEqual(await evaluate(`[...document.querySelectorAll('[data-tool-action^="color_mix_"]')].map(n=>n.dataset.toolAction)`), choices);
+    await wait(`!!document.querySelector(${JSON.stringify(option)})`);
+    assert.deepEqual(await evaluate(`[...document.querySelector('${option}').options].map(o=>o.value)`), choices);
     assert.equal((await command('color_mix_oklab')).selected, true, 'mixing brushes default to Oklab');
     for (const [device, id] of [['mouse', 'color_mix_classic'], ['touch', 'color_mix_linear'], ['pen', 'color_mix_oklab']]) {
-      await contact(option(id), device);
+      await contact(option, device);
+      for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await settle();
+      await chooseToolActionGroup({call,evaluate,settle},'color-mixing',id);
       for (const other of choices) {
         assert.equal((await command(other)).selected, other === id, `${device}: ${id}`);
-        assert.equal(await evaluate(`document.querySelector(${JSON.stringify(option(other))}).getAttribute('aria-pressed')`), String(other === id));
+        assert.equal(await evaluate(`document.querySelector('${option}').value===${JSON.stringify(other)}`), other===id);
       }
-      assert.match(await evaluate(`document.querySelector(${JSON.stringify(option(id))}).textContent`), /mixing$/);
+      assert.match(await evaluate(`document.querySelector('${option}').selectedOptions[0].textContent`), /mixing$/);
     }
     for (const name of ['light', 'dark']) {
       await send({type: 'set_theme', theme: name});
@@ -61,7 +66,7 @@ export async function checkColorMixing({call, evaluate, settle}) {
     }
     for (const [i, id] of choices.entries()) {
       await send({type: 'invoke', command: id});
-      await stroke(-40 + i * 40, 'pen');
+      await stroke(-40 + i * 40, 'pen',true);
       assert.equal((await command(id)).selected, true, `${id} holds while painting`);
     }
     console.log('PASS color mixing: mouse, touch and pen choices, Oklab default, hidden for G-Pen, strokes in each space, light and dark');

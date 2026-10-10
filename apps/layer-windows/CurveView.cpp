@@ -114,7 +114,7 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
         result.Children().Append(ev[axis]);Grid::SetColumn(result,axis);return result;
     }
     void init(Bindings& bindings){
-        auto data=this->data;auto weak=weak_from_this();root.Spacing(6);
+        auto data=this->data;auto weak=weak_from_this();root.Spacing(data->panelMetric(L"control_spacing"));
         graph.Background(clear());graph.Children().Append(grid);graph.Children().Append(line);graph.Children().Append(dots);
         grid.IsHitTestVisible(false);line.IsHitTestVisible(false);dots.IsHitTestVisible(false);
         graph.ManipulationMode(ManipulationModes::None);
@@ -123,11 +123,11 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
         focus.VerticalContentAlignment(VerticalAlignment::Stretch);
         AutomationProperties::SetAutomationId(focus,property?property->id()+L"-curve":L"pen-pressure-curve");
         reset=button(data,L"",[weak]{if(auto self=weak.lock()){self->cancel();self->send(O({{L"kind",S(L"reset")}}));}});
-        reset.Width(28);reset.Height(28);reset.Content(icon(L"reset",data->theme()));reset.Visibility(Visibility::Collapsed);
+        reset.Width(data->panelMetric(L"control_height"));reset.Height(data->panelMetric(L"control_height"));reset.Content(icon(L"reset",data->theme()));reset.Visibility(Visibility::Collapsed);
         AutomationProperties::SetAutomationId(reset,property?property->id()+L"-reset":L"pen-pressure-curve-reset");
         chart.Height(200);chart.MinWidth(64);chart.Background(data->brush(L"input"));
         if(property)chart.Children().Append(CapyScopes::TonalPlot(data,bindings));chart.Children().Append(focus);
-        Grid frame;frame.ColumnSpacing(6);frame.RowSpacing(4);
+        Grid frame;frame.ColumnSpacing(data->panelMetric(L"control_spacing"));frame.RowSpacing(4);
         for(auto width:{GridUnitType::Auto,GridUnitType::Star}){ColumnDefinition column;column.Width({1,width});frame.ColumnDefinitions().Append(column);}
         for(auto height:{GridUnitType::Star,GridUnitType::Auto}){RowDefinition row;row.Height({1,height});frame.RowDefinitions().Append(row);}
         Grid vertical,horizontal;

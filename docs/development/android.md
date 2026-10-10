@@ -281,6 +281,10 @@ It preserves only that named test directory between invocations and removes it
 after verification. It checks saved and dirty tabs, camera, recovered labels,
 manual save checkpoints and undo/redo after an actual process death.
 
+- `AndroidHostTest#compactPanelSpacingAndAlignmentAcrossContexts` captures Tools
+  and Properties at 242/320 dp in both themes. It checks 24 dp controls, 36 dp
+  slider rows, 8 dp content edges, common caption columns and 4 dp gaps on both
+  axes; it also exercises numeric expressions and refusals through native input.
 - `AndroidHostTest#nativeGradientStopContactsAndCompactControlsRetainDefinition`
   checks native stop contacts, precise positions, interpolation, color and
   history, with archive reopening and Activity recreation.

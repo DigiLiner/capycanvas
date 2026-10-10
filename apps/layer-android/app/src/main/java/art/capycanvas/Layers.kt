@@ -191,14 +191,14 @@ internal class LayerSwipe {
     }
     Box(modifier.fillMaxSize().onGloballyPositioned { panelOrigin = it.boundsInRoot().topLeft }) {
         Column(Modifier.fillMaxSize()) {
-            Column(Modifier.wrapContentHeight(unbounded = true).onSizeChanged { headerHeight = it.height / density.density }.padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.wrapContentHeight(unbounded = true).onSizeChanged { headerHeight = it.height / density.density }.padding(horizontal = panelMetrics().inset, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(panelMetrics().spacing)) {
                     var blendMenu by remember { mutableStateOf<JSONObject?>(null) }
                     var blendRequest by remember { mutableStateOf<JSONObject?>(null) }
                     var blendGeneration by remember { mutableIntStateOf(0) }
                     LaunchedEffect(epoch) { blendGeneration++; blendMenu = null; blendRequest = null }
                     Box(Modifier.weight(1f)) {
-                        Row(Modifier.fillMaxWidth().height(26.dp).background(colors.input,ControlShape).testTag("layer-blend")
+                        Row(Modifier.fillMaxWidth().height(panelMetrics().height).background(colors.input,ControlShape).testTag("layer-blend")
                             .clickable(enabled = controls.getBoolean("blend")) {
                                 active?.let {
                                     val ticket = ++blendGeneration
@@ -216,7 +216,7 @@ internal class LayerSwipe {
                     NumericSetting(host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("opacity"),active?.number("opacity") ?: 1f,host.catalog.getJSONObject("layer_opacity"),Modifier.weight(1f).testTag("layer-opacity"),
                         enabled=controls.getBoolean("opacity"),inline=true) { host.dispatch(obj("type" to "set_layer_opacity","opacity" to it)) }
                 }
-                Row(horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+                Row(horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
                     for ((icon, label, property, op, capability) in listOf(
                         listOf("alpha-lock",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("alpha_lock"),"alpha_locked","alpha_lock","alpha_lock"),
                         listOf("lock",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("lock_editing"),"locked","lock","edit_lock"))) {
@@ -247,7 +247,7 @@ internal class LayerSwipe {
                 }
                 LayerConnections(layers,view.array("connections").objects(),thumbnails,Modifier.matchParentSize())
             }
-            Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { footerHeight = it.height / density.density }.padding(horizontal=6.dp,vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+            Row(Modifier.fillMaxWidth().wrapContentHeight(unbounded = true).onSizeChanged { footerHeight = it.height / density.density }.padding(horizontal=panelMetrics().inset,vertical=4.dp),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
                 LayerButton(host,"add-layer",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_layer"),action=obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false)))
                 LayerButton(host,"folder",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_group"),action=obj("type" to "layer","action" to obj("op" to "new","group" to true,"clipped" to false)))
                 LayerButton(host,"selection-brush",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("new_selection_layer"),action=obj("type" to "invoke","command" to "new_selection_layer"))

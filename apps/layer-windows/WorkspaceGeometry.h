@@ -123,7 +123,7 @@ inline PathGeometry roundedRectangle(float width,float height,std::array<float,4
     line({bl,height});arc({0,height-bl},bl);line({0,tl});arc({tl,0},tl);
     PathGeometry geometry;geometry.Figures().Append(figure);return geometry;
 }
-constexpr float SurfaceRadius=18,CornerFit=.54f;
+constexpr float SurfaceRadius=18;
 inline void squircleCorner(PointCollection const& points,Point center,Point start,Point end){
     for(int i=0;i<=24;++i){
         double angle=i*3.14159265358979/48,along=std::sqrt(std::cos(angle)),across=std::sqrt(std::sin(angle));

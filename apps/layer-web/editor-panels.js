@@ -7,10 +7,9 @@ import { wheelPainter, wheelPicker, hueStopCache, wheelHit, rgba } from './color
 import { createRangeControl } from './range-control.js';
 import { actionField, choiceField } from './toolbar-components.js';
 import {gradientEditor} from './gradient.js';
-const selectionModes = new Set(['selection_new', 'selection_add', 'selection_subtract', 'selection_intersect']);
 // DOM widgets for shared editor models. Rust owns tool/color/geometry policy.
 export function createEditorPanels({ selectionUi, app, wasmModule, state, element, button, icon, numberField, dispatch, asset, wake, applyChange, contentChanged }) {
-  const copy=liveCopy(app,"catalog").native_copy;
+  const catalog=liveCopy(app,"catalog"),copy=catalog.native_copy;
   const updates = new Map(), navigators = new Set(), pendingPaints = new Set();
   let positioning = 0, nextNavigator = 1;
   const fieldWorker = createRasterWorker(wasmModule);
@@ -70,7 +69,7 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
     };
   }
   function toolSettings(root) {
-    let key = "", numbers = [], actions = [], range, choices = [], sampler, gradient;
+    let key = "", numbers = [], actions = [], actionGroups = [], range, choices = [], sampler, gradient;
     root.disposeSettings = () => { gradient?.dispose();gradient=null; range?.dispose(); numbers.forEach(([,n])=>n.dispose()); };
     return () => {
       const s = state(),editing=s.layer_tools.editing_layer;
@@ -78,6 +77,7 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
       const picking = ['pick_visible','pick_layer'].includes(s.layer_tools.tool);
       const compact = s.tool_extra.some(o=>o.Choice?.id==='tonal-tones');
       root.classList.toggle('tonal-settings', compact);
+      root.classList.toggle('picker-settings',picking);
       if (picking) {
         const picker=s.color_picker;
         const next=JSON.stringify([owner,picker.can_sample_layer,picker.sample_sizes]);
@@ -101,19 +101,33 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
       }
       const next = JSON.stringify([owner,s.tool_settings.map(f=>[f.id,f.numeric,f.group_id]),s.tool_actions.map(a=>[a.command,a.checkable]),s.tool_extra.map(o=>o.Choice?[o.Choice.id,o.Choice.items.map(i=>[i.icon,i.action])]:["gradient",o.Gradient.gradient.destination])],(_,v)=>typeof v==='bigint'?String(v):v);
       if (next !== key) {
-        key = next; root.disposeSettings(); range=null; root.replaceChildren(); numbers=[]; actions=[]; choices=[]; let group="";
-        const modes = element("div", "selection-modes");
-        modes.setAttribute("role", "group"); bindCopy(modes,()=>copy.tool_controls.selection_mode,"ariaLabel");
-        if (s.tool_actions.some(spec => selectionModes.has(spec.command))) root.append(modes);
+        const previousBody=root.querySelector('.tool-settings-body'),focused=document.activeElement;
+        const retainedChoice=previousBody?.contains(focused)&&focused.matches('select[data-tool-action-group]')?focused:null;
+        const retainedRows=new Map();
+        key = next; root.disposeSettings(); range=null;
+        for(const child of [...root.children])if(child!==previousBody)child.remove();
+        numbers=[]; actions=[]; actionGroups=[]; choices=[]; let group="";
+        const modes=element('div','tool-mode-section'),body=element('div','tool-settings-body');
+        const modeGroups=new Map();
+        for(const spec of s.tool_actions.filter(a=>a.segmented)){
+          let bar=modeGroups.get(spec.group);
+          if(!bar){bar=element('div','selection-modes');bar.setAttribute('role','group');bindCopy(bar,()=>catalog.tool_action_groups.find(g=>g.id===spec.group).label,'ariaLabel');bar.dataset.toolActionGroup=spec.group;modeGroups.set(spec.group,bar);modes.append(bar);}
+          const node=button('',()=>dispatch({type:'invoke',command:spec.command}),'tool-setting-action');node.dataset.toolAction=spec.command;bar.append(node);actions.push([spec,node,null]);
+        }
+        if(modes.children.length){
+          root.insertBefore(modes,previousBody);
+          if(!compact&&modeGroups.has("selection-mode"))modes.append(selectionUi.menuButton(()=>copy.tool_controls.selection_menu,'selection'));
+        }
+        if(!previousBody)root.append(body);
         const beside=new Map();let grouped;
         for (const option of s.tool_extra) {
-          if(option.Gradient){gradient=gradientEditor({app,element,button,icon,dispatch});root.append(gradient.node);continue;}
+          if(option.Gradient){gradient=gradientEditor({app,element,button,icon,dispatch});body.append(gradient.node);continue;}
           const spec=option.Choice;
           const field=choiceField({app,element,button,icon},spec,dispatch),bar=field.row;
           bar.dataset.toolChoiceBar=spec.id;
           [...bar.children].forEach((node,index)=>node.dataset.toolChoiceTone=String(index));
           choices.push([spec.id,field]);
-          if(spec.beside)beside.set(spec.beside,{spec,bar});else root.append(bar);
+          if(spec.beside)beside.set(spec.beside,{spec,bar});else body.append(bar);
         }
         for (const field of s.tool_settings) {
           if (compact && field.id==='tonal_upper') continue;
@@ -121,42 +135,70 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
             const bounds=[field,s.tool_settings.find(f=>f.id==='tonal_upper')];
             range=createRangeControl({app,bounds,label:'Range in stops relative to reference white (0)',icon,
               onChange:(index,value)=>dispatch({type:'set_tool_setting',id:bounds[index].id,value})});
-            root.append(range);continue;
+            body.append(range);continue;
           }
           if(field.group!==group){
             group=field.group;grouped=null;const extra=beside.get(field.id);
-            if(group)root.append(element('h3','',()=>state().tool_extra.find(o=>o.Choice?.beside===field.id)?.Choice.label??state().tool_settings.find(f=>f.id===field.id)?.group??''));
-            if(extra){const row=element('div','tool-position-group');grouped=element('div','tool-position-numbers');row.append(extra.bar,grouped);root.append(row);}
+            if(group)body.append(element('h3','',()=>state().tool_extra.find(o=>o.Choice?.beside===field.id)?.Choice.label??state().tool_settings.find(f=>f.id===field.id)?.group??''));
+            if(extra){const row=element('div','tool-position-group');grouped=element('div','tool-position-numbers');row.append(extra.bar,grouped);body.append(row);}
           }
           const node=numberField(field.numeric,()=>state().tool_settings.find(f=>f.id===field.id)?.label??"",value=>{if(key===next)dispatch({type:"set_tool_setting",id:field.id,value});},compact||!!grouped);
           node.onReset=()=>{if(key===next)dispatch({type:'reset_tool_setting',id:field.id});};
           node.dataset.toolSetting=field.id;
           if(grouped)node.querySelector('.number-track').hidden=true;
-          if(compact||grouped){const row=element('label','tonal-numeric-row');row.append(element('span','',()=>state().tool_settings.find(f=>f.id===field.id)?.label??''),node);(grouped??root).append(row);}else root.append(node);
+          if(compact||grouped){const row=element('label','tonal-numeric-row');row.append(element('span','',()=>state().tool_settings.find(f=>f.id===field.id)?.label??''),node);(grouped??body).append(row);}else body.append(node);
           numbers.push([field.id,node]);
         }
-        for (const spec of s.tool_actions) {
-          const command = s.commands.find(c=>c.id===spec.command);
-          const field = spec.checkable && !command.icon ? actionField({element,button,icon},{state:command,checkable:spec.checkable},dispatch) : null;
-          const node=field?.row??button("",()=>dispatch({type:"invoke",command:spec.command}),"tool-setting-action");
-          node.dataset.toolAction=spec.command;
-          (selectionModes.has(spec.command) ? modes : root).append(node); actions.push([spec,node,field]);
+        const groups=new Set(),rows=new Map();
+        for(const spec of s.tool_actions.filter(a=>!a.segmented)){
+          if(spec.group){
+            if(groups.has(spec.group))continue;groups.add(spec.group);
+            const group=catalog.tool_action_groups.find(g=>g.id===spec.group),row=element('label','tool-action-choice');
+            const commands=s.tool_actions.filter(a=>a.group===spec.group).map(a=>a.command);
+            const retained=retainedChoice?.dataset.toolActionGroup===spec.group&&JSON.stringify([...retainedChoice.options].map(o=>o.value))===JSON.stringify(commands);
+            const input=retained?retainedChoice:element('select'),caption=retained?retainedChoice.parentElement.querySelector('span'):element('span');
+            if(retained)retainedRows.set(row,retainedChoice.parentElement);else row.append(caption,input);
+            input.dataset.toolActionGroup=spec.group;input.onchange=()=>dispatch({type:'invoke',command:input.value});
+            if(!retained)for(const command of commands){const option=element('option');option.value=command;option.dataset.toolAction=command;input.append(option);}
+            body.append(row);actionGroups.push({id:group.id,input,caption});continue;
+          }
+          const command=s.commands.find(c=>c.id===spec.command);
+          const field=spec.checkable?actionField({element,button,icon},{state:command,checkable:spec.checkable},dispatch,{checkbox:true}):null;
+          const node=field?.row??button('',()=>dispatch({type:'invoke',command:spec.command}),'tool-setting-action');node.dataset.toolAction=spec.command;
+          if(spec.icon_only)node.classList.add('tool-icon-action');
+          let parent=body;
+          if(spec.row){
+            if(!rows.has(spec.row)){const row=element('div','tool-action-row');row.dataset.toolActionRow=spec.row;body.append(row);rows.set(spec.row,row);}
+            parent=rows.get(spec.row);
+          }
+          parent.append(node);actions.push([spec,node,field]);
         }
-        if(!compact && s.tool_actions.some(spec=>selectionModes.has(spec.command))) root.append(selectionUi.menuButton(()=>copy.tool_controls.selection_menu,"selection"));
+        if(previousBody){
+          const children=[...body.children].map(child=>retainedRows.get(child)??child),retained=new Set(children);
+          for(const child of [...previousBody.children])if(!retained.has(child))child.remove();
+          let before=previousBody.firstChild;
+          for(const child of children){if(child===before)before=before.nextSibling;else previousBody.insertBefore(child,before);}
+        }
         contentChanged("tool_settings");
       }
       for (const [id,node] of numbers) node.update(s.tool_settings.find(f=>f.id===id).value);
       if(range) {range.relabel(['tonal_lower','tonal_upper'].map(id=>s.tool_settings.find(f=>f.id===id)),copy.tool_controls.range_hint);range.update(['tonal_lower','tonal_upper'].map(id=>s.tool_settings.find(f=>f.id===id).value));}
       for(const [id,field] of choices)field.update(s.tool_extra.find(o=>o.Choice?.id===id));
       if(gradient)gradient.update(s.tool_extra.find(o=>o.Gradient).Gradient);
+      for(const {id,input,caption} of actionGroups){
+        const group=catalog.tool_action_groups.find(g=>g.id===id);caption.textContent=group.label;input.setAttribute('aria-label',group.label);
+        for(const option of input.options){const c=s.commands.find(c=>c.id===option.value);option.textContent=c.label;option.disabled=!c.enabled;if(c.selected)input.value=c.id;}
+        input.disabled=[...input.options].every(o=>o.disabled);
+      }
       for (const [spec,node,field] of actions) {
         const c=s.commands.find(c=>c.id===spec.command);
         if (field) { field.update({Action:{state:c,checkable:spec.checkable}}); continue; }
         if(!node.firstChild) {
           node.append(icon(c.icon));
-          if (!selectionModes.has(spec.command)) node.append(element("span","",c.label));
+          if (!spec.segmented&&!spec.icon_only) node.append(element("span","",c.label));
         }
-        const text=node.querySelector("span");if(text)text.textContent=c.label;
+        const caption=s.canvas_bar?.completion.find(item=>item.option.Action?.state.id===spec.command)?.label??c.label;
+        const text=node.querySelector("span");if(text)text.textContent=caption;
         node.setAttribute("aria-label", c.label);
         node.disabled=!c.enabled; node.title=c.tooltip;
         if(spec.checkable) node.setAttribute("aria-pressed",String(c.selected));

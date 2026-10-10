@@ -54,7 +54,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     for(const frame of frames){
       assert.deepEqual(frame.rects,expected,`${label}: frame zen=${frame.zen}`);
       assert.ok(frame.capy>=.999,`${label}: Capy stays opaque throughout transition`);
-      assert.ok(!frame.inBar&&frame.surface>=frame.minimum-.002,`${label}: Capy's own surface stays painted throughout transition`);
+      assert.ok(!frame.inBar&&Math.fround(frame.surface+.002)>=frame.minimum,`${label}: Capy's own surface stays painted throughout transition`);
     }
     if(fade)assert.ok(frames.some(frame=>!frame.zen&&frame.controls>0&&frame.controls<.99),`${label}: other header controls still fade in`);
   };

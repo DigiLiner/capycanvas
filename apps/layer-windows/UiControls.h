@@ -18,6 +18,7 @@
 #include <type_traits>
 
 namespace CapyUi {
+constexpr float CornerFit=.54f;
 using namespace winrt;
 using namespace Windows::Data::Json;
 using namespace Microsoft::UI::Xaml;
@@ -267,6 +268,9 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         return tintBrushes.emplace(key,fill(value)).first->second;
     }
     double textSize()const{return num(catalog,L"text_size_pt",11)*96./72.;}
+    double panelMetric(wchar_t const* name)const{return num(object(catalog,L"panel_metrics"),name);}
+    double controlHeight()const{return std::max(panelMetric(L"control_height"),std::ceil(textSize()*Windows::UI::ViewManagement::UISettings().TextScaleFactor()*1.3));}
+    CornerRadius controlCorner()const{auto r=panelMetric(L"control_radius")*CornerFit;return {r,r,r,r};}
 };
 inline void inheritLanguage(FrameworkElement const& element,std::shared_ptr<WorkspaceData> const& data) {
     auto language=data->language();if(!language.empty())element.Language(language);
@@ -335,7 +339,7 @@ inline T button(std::shared_ptr<WorkspaceData> const& data,hstring const& text,s
     inheritLanguage(result,data);result.FontFamily(FontFamily(L"Segoe UI"));result.Foreground(data->brush(L"text"));
     result.FontWeight(Windows::UI::Text::FontWeights::Bold());
     result.MinWidth(0);result.MinHeight(0);result.Padding(Thickness{0});
-    result.BorderThickness(Thickness{0});result.CornerRadius(CornerRadius{6,6,6,6});
+    result.BorderThickness(Thickness{0});result.CornerRadius(data->controlCorner());
     result.Background(clear());AutomationProperties::SetName(result,text);
     buttonColors(data,result);
     result.Click([action=std::move(action)](auto&&,auto&&){action();});
@@ -469,6 +473,7 @@ struct NumberPresentation {
     bool preference=false;hstring description;std::function<hstring()> identity;std::function<void()> reset;
     std::vector<hstring> widthSamples;std::function<J(J const&,double,J const&)> resolve;std::function<hstring()> title,text,descriptionText;
     std::function<void(hstring const&,double)> phase;
+    bool compact=true;
 };
 StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& title,J const& spec,
     std::function<double()> get,std::function<void(double)> set,Bindings& bindings,Bindings* commits=nullptr,bool valueOnly=false,hstring const& identifier=L"",bool inlineTrack=false,NumberPresentation const& presentation={},NumericAdmissions* admissions=nullptr);

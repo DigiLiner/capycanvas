@@ -61,6 +61,7 @@ import QuartzCore
                     } else if mode == "layer-opacity" { LayerOpacityField(store: store) }
                     else { LayerPropertiesPanel(store: store) }
                 }.padding(6).frame(width: 300, height: 500, alignment: .topLeading)
+                    .environment(\.compactPanelControls, true)
                     .coordinateSpace(name: "number-capture").environment(\.measureNumberControls, true)
                     .onPreferenceChange(NumberControlFrames.self) { geometry.frames = $0 }
                     .coordinateSpace(name: "choice-capture").environment(\.measureChoices, true)
@@ -91,6 +92,19 @@ import QuartzCore
                     delegate.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
                     try await drain()
                     try require(field.stringValue == text, "The property draft must remain unfinished")
+                    guard let entryFrame = geometry.frames[identifier + ":entry"] else {
+                        throw HostFailure(message: "Missing mounted property editor geometry")
+                    }
+                    try require(abs(valueFrame.height - 24) < 0.5 && abs(entryFrame.height - 24) < 0.5,
+                        "Panel readouts and editors must share twenty-four-point height")
+                    try require(abs(valueFrame.maxY - entryFrame.maxY) < 0.5,
+                        "Entering a panel number must preserve its bottom alignment")
+                    if let root = geometry.frames[identifier + ":root"],
+                        let track = geometry.frames[identifier + ":track"], abs(root.height - 36) < 0.5 && abs(track.height - 16) < 0.5 {
+                        try require(abs(entryFrame.width - 68) < 0.5 && abs(entryFrame.maxX - root.maxX) < 0.5
+                            && abs(entryFrame.maxY - root.maxY) < 0.5 && entryFrame.minX - track.maxX >= 7.5,
+                            "Panel editors must keep the upstream width, bottom rail and track clearance")
+                    }
                     return (field, delegate)
                 }
                 func commit(_ field: NSTextField, _ delegate: any NSTextFieldDelegate) async throws {
@@ -201,7 +215,7 @@ import QuartzCore
                     note("PASS: platform \(platform), native curve insertion/selection/removal and history")
                     continue
                 }
-                let markerY = (geometry.frames["gradient-strip:track"]?.minY ?? 0) + 39
+                let markerY = (geometry.frames["gradient-strip:track"]?.minY ?? 0) + 38
                 if effect == "gradient_map" {
                     // Add the stop through the real view. Its controls must target
                     // the inserted stop immediately, without a second selection tap.

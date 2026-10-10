@@ -5,25 +5,34 @@
 namespace CapyUi {
 // Each retained panel/drawer owns native controls; Rust owns mode and edit policy.
 inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings){
-    StackPanel root;root.Spacing(8);
+    StackPanel root;root.Spacing(data->panelMetric(L"control_spacing"));
     auto form=[data]{return object(data->model,L"windows_proof_form");};
     auto copy=[form](wchar_t const* key){return str(object(form(),L"copy"),key);};
     auto send=[data](J const& action){
         auto epoch=to_hstring(uint64_t(num(object(data->state,L"document_file"),L"epoch")));
         data->dispatch(O({{L"windows_proof_action",action},{L"windows_epoch",S(epoch)}}));
     };
-    Grid mode;mode.ColumnSpacing(2);mode.Margin({0,0,0,6});
+    Grid mode;mode.ColumnSpacing(data->panelMetric(L"control_spacing"));
     AutomationProperties::SetAutomationId(mode,L"proof-panel-mode");AutomationProperties::SetName(mode,copy(L"mode"));
     std::vector<std::pair<Button,hstring>> modes;
     for(auto [value,name]:std::initializer_list<std::pair<hstring,hstring>>{{L"off",copy(L"mode_off")},{L"sdr",L"SDR"},{L"print",copy(L"mode_print")}}){
-        ColumnDefinition column;column.Width({1,GridUnitType::Star});mode.ColumnDefinitions().Append(column);
         auto choice=button(data,name,[data,send,value=value]{if(!data->updating)send(O({{L"type",S(L"mode")},{L"mode",S(value)}}));});
-        choice.HorizontalAlignment(HorizontalAlignment::Stretch);choice.MinHeight(34);choice.Padding({6,0,6,0});
+        choice.HorizontalAlignment(HorizontalAlignment::Stretch);choice.MinHeight(data->controlHeight());choice.Padding({6,0,6,0});
         AutomationProperties::SetAutomationId(choice,L"proof-panel-mode-"+value);
-        Grid::SetColumn(choice,int32_t(modes.size()));mode.Children().Append(choice);modes.emplace_back(choice,value);
+        mode.Children().Append(choice);modes.emplace_back(choice,value);
     }
+    auto arrangeModes=[mode,modes](bool hdr){
+        mode.ColumnDefinitions().Clear();
+        for(auto const& [choice,id]:modes){
+            bool visible=id!=L"sdr"||hdr;choice.Visibility(visible?Visibility::Visible:Visibility::Collapsed);
+            if(!visible)continue;
+            Grid::SetColumn(choice,int32_t(mode.ColumnDefinitions().Size()));
+            ColumnDefinition column;column.Width({1,GridUnitType::Star});mode.ColumnDefinitions().Append(column);
+        }
+    };
+    auto modeHdr=std::make_shared<bool>(flag(form(),L"hdr"));arrangeModes(*modeHdr);
     root.Children().Append(mode);
-    StackPanel sdr;sdr.Spacing(6);ContentControl sdrGate;sdrGate.IsTabStop(false);sdrGate.Content(sdr);sdrGate.Visibility(Visibility::Collapsed);root.Children().Append(sdrGate);
+    StackPanel sdr;sdr.Spacing(data->panelMetric(L"control_spacing"));ContentControl sdrGate;sdrGate.IsTabStop(false);sdrGate.Content(sdr);sdrGate.Visibility(Visibility::Collapsed);root.Children().Append(sdrGate);
     sdr.Children().Append(ProofDialControl(data,bindings));
     auto initial=form();
     NumberPresentation presentation;presentation.identity=[form]{return array(form(),L"identity").Stringify();};
@@ -43,23 +52,23 @@ inline StackPanel ProofPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
             [form,index]{return array(form(),L"pad_values").GetNumberAt(index);},
             [data,send,key=str(axis,L"key")](double value){if(!data->updating)send(O({{L"type",S(L"number")},{L"key",S(key)},{L"value",N(value)}}));},bindings,nullptr,false,L"proof-panel-"+str(axis,L"key"),false,presentation));
     }
-    StackPanel print;print.Spacing(8);print.Visibility(Visibility::Collapsed);root.Children().Append(print);
+    StackPanel print;print.Spacing(data->panelMetric(L"control_spacing"));print.Visibility(Visibility::Collapsed);root.Children().Append(print);
     auto heading=label(data,copy(L"print_profile"),true);heading.Opacity(.55);print.Children().Append(heading);
     auto profile=label(data,L"");profile.TextWrapping(TextWrapping::Wrap);print.Children().Append(profile);
     auto setup=button(data,str(find(array(data->state,L"commands"),L"id",L"soft_proof_setup"),L"label"),[data]{data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"soft_proof_setup")}}));});
-    AutomationProperties::SetAutomationId(setup,L"proof-panel-setup");setup.Padding({6,6,6,6});print.Children().Append(setup);
-    CheckBox gamut;gamut.Content(box_value(copy(L"gamut_warning")));AutomationProperties::SetName(gamut,copy(L"gamut_warning"));AutomationProperties::SetAutomationId(gamut,L"proof-panel-gamut");
+    AutomationProperties::SetAutomationId(setup,L"proof-panel-setup");setup.MinHeight(data->controlHeight());setup.Padding({6,0,6,0});print.Children().Append(setup);
+    CheckBox gamut;gamut.Content(box_value(copy(L"gamut_warning")));gamut.MinWidth(0);gamut.MinHeight(data->controlHeight());gamut.Height(data->controlHeight());gamut.Padding({0});AutomationProperties::SetName(gamut,copy(L"gamut_warning"));AutomationProperties::SetAutomationId(gamut,L"proof-panel-gamut");
     gamut.Click([data](auto&&,auto&&){if(!data->updating)data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"gamut_warning")}}));});print.Children().Append(gamut);
     auto status=label(data,L"");status.TextWrapping(TextWrapping::Wrap);status.Visibility(Visibility::Collapsed);root.Children().Append(status);
-    bindings.emplace_back([data,form,copy,mode,modes,sdrGate,print,heading,profile,setup,gamut,status]{
+    bindings.emplace_back([data,form,copy,mode,modes,arrangeModes,modeHdr,sdrGate,print,heading,profile,setup,gamut,status]{
         auto value=form();auto selected=str(value,L"mode");bool hdr=flag(value,L"hdr");
         bool available=!flag(object(data->state,L"document_file"),L"busy")&&!flag(data->model,L"windows_rendering_suspended");
-        mode.ColumnDefinitions().GetAt(1).Width(hdr?GridLength{1,GridUnitType::Star}:GridLength{0,GridUnitType::Pixel});
+        if(hdr!=*modeHdr){*modeHdr=hdr;arrangeModes(hdr);}
         AutomationProperties::SetName(mode,copy(L"mode"));
         for(auto const& [choice,id]:modes){
             auto title=id==L"off"?copy(L"mode_off"):id==L"print"?copy(L"mode_print"):hstring(L"SDR");choice.Content(box_value(title));AutomationProperties::SetName(choice,title);
             bool pressed=id==selected;
-            choice.Visibility(id!=L"sdr"||hdr?Visibility::Visible:Visibility::Collapsed);choice.IsEnabled(available);
+            choice.IsEnabled(available);
             choice.Background(pressed?Brush(data->tint(L"text",31)):Brush(clear()));
             AutomationProperties::SetItemStatus(choice,pressed?data->caption(L"search",L"selected"):hstring());
         }

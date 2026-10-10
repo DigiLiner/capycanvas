@@ -58,6 +58,7 @@ pub(crate) struct ProofPanel {
     form: RefCell<Option<Rc<Form>>>,
 }
 struct Form {
+    _labels: gtk::SizeGroup,
     mode: adw::ToggleGroup,
     stack: gtk::Stack,
     dial: Rc<crate::proof_dial::ProofDial>,
@@ -77,11 +78,13 @@ impl ProofPanel {
     fn with_model(model: Rc<Model>) -> Rc<Self> {
         let root = panel_controls::column();
         root.set_widget_name("proof-panel");
+        root.add_css_class("dock-panel");
+        root.set_spacing(panel_controls::CONTROL_SPACING);
         root.set_vexpand(true);
-        root.set_margin_top(6);
-        root.set_margin_bottom(6);
-        root.set_margin_start(8);
-        root.set_margin_end(8);
+        root.set_margin_top(layer_ui::PANEL_CONTENT_INSET as i32);
+        root.set_margin_bottom(layer_ui::PANEL_CONTENT_INSET as i32);
+        root.set_margin_start(layer_ui::PANEL_CONTENT_INSET as i32);
+        root.set_margin_end(layer_ui::PANEL_CONTENT_INSET as i32);
         let p = Rc::new(Self {
             root,
             model: model.clone(),
@@ -487,6 +490,7 @@ impl Form {
         let dial = crate::proof_dial::ProofDial::new(&w.localization());
         stack.add_named(&dial.root, Some("sdr"));
         let print = panel_controls::column();
+        print.set_spacing(panel_controls::CONTROL_SPACING);
         print.set_widget_name("soft-proof-setup");
         let chooser = profile::ProfilePicker::compact(
             w,
@@ -504,22 +508,23 @@ impl Form {
         warning.set_widget_name("proof-gamut-warning");
         // Shared order and labels; only native widget construction lives here.
         let mut captions = Vec::new();
+        let labels = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
         for field in PrintProofControl::ALL {
             match field {
                 PrintProofControl::Profile => {
-                    let row = panel_controls::row(&field.localized_label(&w.localization()), &chooser.button, panel_controls::SPACING, None);
+                    let row = panel_controls::row(&field.localized_label(&w.localization()), &chooser.button, panel_controls::CONTROL_SPACING, Some(&labels));
                     captions.push((field, row.first_child().and_downcast::<gtk::Label>().unwrap().downgrade()));
                     row.set_widget_name("proof-profile");
                     print.append(&row);
                     print.append(&chooser.error);
                 }
                 PrintProofControl::Simulation => {
-                    let row = panel_controls::row(&field.localized_label(&w.localization()), &simulation, panel_controls::SPACING, None);
+                    let row = panel_controls::row(&field.localized_label(&w.localization()), &simulation, panel_controls::CONTROL_SPACING, Some(&labels));
                     captions.push((field, row.first_child().and_downcast::<gtk::Label>().unwrap().downgrade()));
                     print.append(&row);
                 }
                 PrintProofControl::Intent => {
-                    let row = panel_controls::row(&field.localized_label(&w.localization()), &intent, panel_controls::SPACING, None);
+                    let row = panel_controls::row(&field.localized_label(&w.localization()), &intent, panel_controls::CONTROL_SPACING, Some(&labels));
                     captions.push((field, row.first_child().and_downcast::<gtk::Label>().unwrap().downgrade()));
                     print.append(&row);
                 }
@@ -527,6 +532,7 @@ impl Form {
                 PrintProofControl::GamutWarning => print.append(&warning),
             }
         }
+        for (_, label) in &captions { if let Some(label) = label.upgrade() { label.set_width_chars(0); } }
         stack.add_named(&crate::workspace::scroll(&print), Some("print"));
         let progress = gtk::Spinner::new();
         progress.update_property(&[gtk::accessible::Property::Label(&copy.preparing_print)]);
@@ -539,6 +545,7 @@ impl Form {
         error.set_widget_name("proof-setup-error");
         panel.root.append(&error);
         let f = Rc::new(Self {
+            _labels: labels,
             mode,
             stack,
             dial,

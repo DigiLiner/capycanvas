@@ -100,6 +100,15 @@ class AndroidTitleBarTest {
         waitFor("bar settled") { node("header-item-1") != null && !editing() }
         idle()
     }
+    private fun resetPreset(id: String) {
+        send(obj("type" to "switch", "id" to id))
+        instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "form", "action" to obj("type" to "reset", "value" to id))) }
+        host.drain()
+        waitFor("starting group layout confirmation") { node("workspace-submit") != null }
+        tap("workspace-submit")
+        waitFor("starting group layout confirmation closes") { node("workspace-submit") == null }
+        idle()
+    }
     private fun launch() {
         scenario = launchCapy(90_000)
         scenario.onActivity { host = it.host; density = it.resources.displayMetrics.density }
@@ -906,7 +915,7 @@ class AndroidTitleBarTest {
         shot("sketch-default")
     }
     @Test fun selectionDrawerToolsModesAndRememberedIcons() {
-        send(obj("type" to "switch", "id" to "builtin:workspace:painter"))
+        resetPreset("builtin:workspace:painter")
         fun header(command: String) = "header-control-" + entries().first {
             it.getJSONObject("item").objectOrNull("control")?.optString("command") == command
         }.getInt("id")
@@ -915,6 +924,7 @@ class AndroidTitleBarTest {
         val select = header("select")
         tap(select)
         if (state().getJSONObject("customization").isNull("drawer")) tap(select)
+        waitFor("Selection drawer opens") { !state().getJSONObject("customization").isNull("drawer") }
         assertEquals("[[\"tools\"],[\"tool_settings\"]]", state().getJSONObject("customization").getJSONObject("drawer").getJSONArray("columns").toString())
         val choices = state().getJSONObject("tool_set").array("subtools").objects()
         assertEquals(8, choices.size)
@@ -946,7 +956,15 @@ class AndroidTitleBarTest {
         tap("tool-action-selection_fixed_size")
         invoke("color_select")
         for (id in listOf("tolerance", "expansion", "smoothing")) assertNotNull(node("tool-setting-$id"))
-        for (id in listOf("selection_visible", "selection_editing", "selection_reference")) assertNotNull(node("tool-action-$id"))
+        assertNotNull(node("tool-action-group-selection-source"))
+        for (id in listOf("selection_visible", "selection_editing", "selection_reference")) {
+            tap("tool-action-group-selection-source")
+            waitFor("Selection source option $id") { node("tool-action-$id") != null }
+            if (command(id).getBoolean("enabled")) {
+                tap("tool-action-$id")
+                assertTrue(command(id).getBoolean("selected"))
+            } else key(KeyEvent.KEYCODE_ESCAPE)
+        }
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme)); shot("selection-drawer-$theme")
         }
@@ -954,7 +972,7 @@ class AndroidTitleBarTest {
         assertEquals("color-select", command("select").getString("icon"))
         tap(select); assertTrue(command("color_select").getBoolean("selected"))
         tap(select)
-        send(obj("type" to "switch", "id" to "builtin:workspace:photographer"))
+        resetPreset("builtin:workspace:photographer")
         for (slot in listOf("marquee", "lasso", "automatic_selection"))
             assertTrue("Photo toolbar $slot", layout().contains("\"slot\":\"$slot\""))
         send(obj("type" to "switch", "id" to "builtin:workspace:painter"))
@@ -964,15 +982,6 @@ class AndroidTitleBarTest {
 
     @Test fun commandGroupsProjectTheirOwnChoicesIconsAndSelectionScope() {
         device.landscape(scenario); idle()
-        fun resetPreset(id: String) {
-            send(obj("type" to "switch", "id" to id))
-            instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "form", "action" to obj("type" to "reset", "value" to id))) }
-            host.drain()
-            waitFor("starting group layout confirmation") { node("workspace-submit") != null }
-            tap("workspace-submit")
-            waitFor("starting group layout confirmation closes") { node("workspace-submit") == null }
-            idle()
-        }
         fun tiles() = snapshot().array("panels").objects().first { it.getString("id") == "toolbar" }.array("tiles").objects()
         fun command(id: String) = state().array("commands").objects().first { it.getString("id") == id }
         fun header(id: Int) = snapshot().getJSONObject("header").array("items").objects().first { it.getInt("id") == id }
@@ -1799,10 +1808,7 @@ class AndroidTitleBarTest {
     }
 
     @Test fun filterDrawerLayersAndPenScrolling() {
-        send(obj("type" to "switch", "id" to "builtin:workspace:painter"))
-        instrumentation.runOnMainSync { host.workspaceInput(obj("type" to "form", "action" to obj("type" to "reset", "value" to "builtin:workspace:painter"))) }
-        waitFor("restore prompt") { !view().isNull("prompt") }
-        send(obj("type" to "submit"))
+        resetPreset("builtin:workspace:painter")
         fun header(panel: String) = "header-control-" + entries().first {
             it.getJSONObject("item").objectOrNull("control")?.optString("panel") == panel
         }.getInt("id")

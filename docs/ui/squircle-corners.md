@@ -22,8 +22,9 @@ the former 8–10px circular corners.
 - **Surfaces** (panels, tab tops, drawers, collapsed columns, the title-bar
   editor and notices) use `SURFACE_RADIUS`, 18px or half a small tile.
 - **Panel controls** (buttons, entries, dropdowns, segmented choices and list
-  highlights) use 12px, concentric with surfaces at the standard 6px inset.
-  Controls 24px tall or shorter become capsules.
+  highlights) use the shared 12px control radius. Compact panel content has one
+  8px inset; the control radius is independent of that inset. Controls 24px tall
+  or shorter become capsules.
 - **Concave joins** (tab feet, drawer bridges and expanded-panel joins) keep
   their sizes and use inverted squircle curves.
 - Layer and mask thumbnails use full squircles on every host. Their editing target
@@ -61,8 +62,7 @@ inside them. Native hosts keep platform styling for settings, dialogs, menus,
 tooltips and other popovers.
 
 Web squircles those as well. Menus and popovers use `SURFACE_RADIUS` with
-12px items, concentric at their 6px inset like panels, and 6px controls use
-the 12px control radius. Other dialogs, cards, list highlights and tooltips
+12px items, concentric at their own 6px inset. Other dialogs, cards, list highlights and tooltips
 keep their former visual rounding: `--squircle-scale` divides the former
 circular radius by the corner fit. Circular icon buttons, such as dialog close
 buttons, and switch tracks and knobs become squircles.

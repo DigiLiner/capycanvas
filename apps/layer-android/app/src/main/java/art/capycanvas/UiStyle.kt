@@ -260,10 +260,34 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
     }
 }
 
+internal val LocalCompactPanel = staticCompositionLocalOf { false }
+internal class PanelMetrics(view: JSONObject) {
+    val inset = view.getDouble("inset").toFloat().dp
+    val spacing = view.getDouble("control_spacing").toFloat().dp
+    val group = view.getDouble("group_spacing").toFloat().dp
+    val compound = view.getDouble("compound_spacing").toFloat().dp
+    val height = view.getDouble("control_height").toFloat().dp
+    val sliderHeight = view.getDouble("slider_height").toFloat().dp
+    val padding = view.getDouble("field_padding").toFloat().dp
+    val icon = view.getDouble("icon_size").toFloat().dp
+}
+@Composable internal fun panelMetrics(): PanelMetrics {
+    val host = LocalCanvasHost.current
+    return remember(host.catalog) { PanelMetrics(host.catalog.getJSONObject("panel_metrics")) }
+}
+@Composable internal fun panelLabelWidth(labels: List<String>): androidx.compose.ui.unit.Dp {
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val style = LocalTextStyle.current
+    return with(androidx.compose.ui.platform.LocalDensity.current) {
+        labels.maxOfOrNull { measurer.measure(it, style).size.width }?.toDp() ?: 0.dp
+    }.coerceAtMost(120.dp)
+}
+
 @Composable internal fun EditorCheck(checked: Boolean, label: String, modifier: Modifier = Modifier,
     enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     val colors = LocalPalette.current
-    Box(modifier.size(22.dp, 28.dp).toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange)
+    val compact=LocalCompactPanel.current
+    Box(modifier.size(if (compact) 18.dp else 22.dp, if (compact) panelMetrics().height else 28.dp).toggleable(checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange)
         .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
         Box(Modifier.size(16.dp).clip(SquircleShape(4.dp))
             .then(if (checked) Modifier.background(colors.accent) else Modifier.border(2.dp, colors.text.copy(alpha = .35f), SquircleShape(4.dp)))) {

@@ -69,9 +69,8 @@ import SwiftUI
                 guard let choice = geometry.frames["filter-category"] else {
                     throw HostFailure(message: "Filters must reuse the measured editor choice")
                 }
-                // 226-wide panel: 12 insets, 16 icon, two 6-point gaps, 48 search.
-                try require(abs(choice.width - 138) < 0.5 && abs(choice.height - 34) < 0.5,
-                    "Category allocation must match Web/Android: \(choice)")
+                try require(abs(choice.width - 162) < 0.5 && abs(choice.height - 24) < 0.5,
+                    "Category allocation must use the shared compact panel spacing: \(choice)")
                 try capture("closed")
                 for next in 1...categories.count {
                     try await click(CGPoint(x: choice.midX, y: choice.midY))
@@ -84,7 +83,7 @@ import SwiftUI
                         store.state["adjustments"].array.allSatisfy { expected.isNull || $0["category"].string == expected.string },
                         "The native choice must publish only its category's filters")
                 }
-                let search = CGPoint(x: choice.maxX + 6 + 24, y: choice.midY)
+                let search = CGPoint(x: choice.maxX + 4 + 12, y: choice.midY)
                 try await click(search)
                 try require(!store.state["filter_picker"]["search"].isNull, "Search must open from its full-width button")
                 for (text, code): (String, UInt16) in [("b", 11), ("l", 37), ("u", 32), ("r", 15)] {

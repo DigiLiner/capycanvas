@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyWaitSeconds=45
@@ -9,6 +9,7 @@ $run=Join-Path $repo ('artifacts/windows/notice/'+[Guid]::NewGuid().ToString('N'
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $CapyTraceDirectory=$run
 $checks=[ordered]@{}
+$CapyPopups=$true
 function Owned([string]$Value,$Type){
  $condition=[System.Windows.Automation.AndCondition]::new([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$Value),
   [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$review.Id))
@@ -30,6 +31,7 @@ function Lock([bool]$Value){
 try {
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1'
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned notice review $($review.Id): $run"
@@ -75,7 +77,7 @@ try {
  if(!(Focused)){throw 'The notice took focus from the canvas'}
  $notice=(Find 'canvas-notice').Current.BoundingRectangle
  if([Math]::Abs(($notice.X+$notice.Width/2)-($canvas.X+$canvas.Width/2)) -gt ($canvas.Width*.25)){throw 'The notice is not centered over the canvas'}
- Capture 'locked-notice-dark'
+ Capture ("locked-notice-$Theme")
  $first=(Notice).id
  Click 'pen' $point
  Wait-Until {(Notice).id -gt $first -and (NoticeText) -eq $reason} 'A repeated refusal did not show again'
@@ -103,8 +105,10 @@ try {
  Wait-Until {(Model).state.layers.Count -eq $count+1} 'New layer was not created'
  (Find 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x57)
  Wait-Until {((Model).state.commands|Where-Object id -eq 'auto_select').selected} 'W did not choose Auto Select'
- $source=Control 'tool-action-selection_reference'
- $source.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+ $source=Control 'tool-action-group-selection-source'
+ $source.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+ $sourceCaption=@((Model).state.commands|Where-Object id -eq 'selection_reference')[0].label
+ (Control $sourceCaption -Name -Type ([System.Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
  Wait-Until {((Model).state.commands|Where-Object id -eq 'selection_reference').selected} 'Reference sampling was not chosen'
  (Find 'drawing-canvas').SetFocus()
  Click 'mouse' $point
@@ -115,7 +119,7 @@ try {
  $frame=(Find 'canvas-notice').Current.BoundingRectangle;$line=(Find 'canvas-notice-text').Current.BoundingRectangle;$offer=$action.Current.BoundingRectangle
  if($line.Top -lt $frame.Top -or $line.Bottom -gt $frame.Bottom -or $line.Right -gt $offer.Left){throw 'The notice text is clipped or overlaps its action'}
  if([Math]::Abs(($line.Top+$line.Bottom)/2-($frame.Top+$frame.Bottom)/2) -gt 3 -or [Math]::Abs(($offer.Top+$offer.Bottom)/2-($frame.Top+$frame.Bottom)/2) -gt 3){throw 'The notice text and action are not vertically centered'}
- Capture 'reference-notice-dark'
+ Capture ("reference-notice-$Theme")
  Click 'pen' (Center $action)
  Wait-Until {@((Model).state.layers|Where-Object reference).Count -eq 1 -and !(Shown 'canvas-notice') -and !(Notice)} 'The notice action did not mark one reference layer'
  if(!(Focused)){throw 'Accepting the notice took focus from the canvas'}

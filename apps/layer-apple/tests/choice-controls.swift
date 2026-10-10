@@ -42,8 +42,8 @@ import SwiftUI
                                 PropertyChoiceRow {
                                     Text("Blend mode").lineLimit(1)
                                     EditorChoice(label: "Blend mode", options: options, selected: selected,
-                                        identifier: "property", background: palette["input"]) { _ in }
-                                }.frame(width: width - 12, height: 34).disabled(!enabled)
+                                        identifier: "property", background: palette["input"], compact: true) { _ in }
+                                }.frame(width: width - 12, height: 24).disabled(!enabled)
                                     .opacity(enabled ? 1 : 0.4).offset(x: 6, y: 6)
                                 EditorChoice(label: "Channel", options: options, selected: selected,
                                     identifier: "wide", background: palette["input"]) { _ in }
@@ -65,6 +65,13 @@ import SwiftUI
                             let name = "\(platform)-\(theme)-\(Int(width))-\(selected)-\(enabled ? "enabled" : "disabled")"
                             try bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent("native-\(name).png"))
                             precondition(geometry.frames.count == 9)
+                            for identifier in ["property", "compact"] {
+                                let bounds = geometry.frames[identifier]!, text = geometry.frames[identifier + ":text"]!
+                                precondition(abs(bounds.height - 24) < 0.5 && abs(text.minX - bounds.minX - 6) < 0.5,
+                                    "Compact choices must share twenty-four-point height and six-point field padding")
+                            }
+                            precondition(abs(geometry.frames["wide"]!.height - 34) < 0.5,
+                                "Standalone choices must preserve their native height")
                             fixtures.append(JSON(["name": name, "platform": platform, "width": width, "height": height,
                                 "scale": Double(bitmap.pixelsWide) / width, "theme": theme, "text_size": textSize,
                                 "palette": store.state["palette"].raw, "options": options, "selected": selected,

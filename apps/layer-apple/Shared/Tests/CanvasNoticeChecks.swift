@@ -10,11 +10,7 @@ extension XCTestCase {
         func tapCanvas() { viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).clickOrTap() }
         workspaceActivate(app.buttons["layer-New layer"])
         editorTool("Auto select", in: app)
-        let reference = app.buttons["tool-action-selection_reference"]
-        revealEditorControl(reference, in: app.scrollViews.containing(.button, identifier: reference.identifier).firstMatch)
-        workspaceActivate(reference)
-        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: reference)
-        waitForExpectations(timeout: 5)
+        editorToolActionChoice("selection_reference", in: app)
 
         tapCanvas()
         XCTAssertTrue(text.waitForExistence(timeout: 10), "A Wand without a marked reference explains itself")

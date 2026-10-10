@@ -1,5 +1,6 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','mix-dark','mix-light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
+$mixOnly=$Theme.StartsWith('mix-');if($mixOnly){$Theme=$Theme.Substring(4)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyWaitSeconds=45
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
@@ -9,6 +10,7 @@ $run=Join-Path $repo ('artifacts/windows/photo-tools/'+[Guid]::NewGuid().ToStrin
 [IO.Directory]::CreateDirectory($run)|Out-Null
 $CapyTraceDirectory=$run
 $checks=[ordered]@{}
+$CapyPopups=$true
 function Visible([string]$Id){$item=Find $Id;if($item -and !$item.Current.IsOffscreen){$item}}
 function Bar {Visible 'canvas-action-bar'}
 function Kind {(Model).state.canvas_bar.context.kind}
@@ -42,18 +44,46 @@ function Tap([string]$Id,[string]$Device){
  $item=@{value=$null};Wait-Until {$item.value=Find $Id;$item.value -and !$item.value.Current.IsOffscreen -and $item.value.Current.IsEnabled} "Missing bar control $Id" 10
  $at=Center (Control $Id -Arranged);[CapyRowPointer]::Down($Device,$at[0],$at[1]);Start-Sleep -Milliseconds 40;[CapyRowPointer]::Up()
 }
+function Pick-ToolAction([string]$Group,[string]$Command,[string]$Device){
+ $id="tool-action-group-$Group"
+ Reveal $id
+ $box=Control $id -Arranged
+ $bounds=Native-Bounds $id ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)
+ $point=[System.Windows.Point]::new(0.,0.)
+ if(!$box.TryGetClickablePoint([ref]$point)){throw "Tool action group $Group has no native clickable point"}
+ $x=[int]$point.X;$y=[int]$point.Y
+ $trace=[ordered]@{device=$Device;id=$id;native_bounds=$bounds;control=@(Control-Trace $box);before=Input-Trace $x $y;expand_before=$box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Current.ExpandCollapseState.ToString()}
+ if(!$box.Current.BoundingRectangle.Contains($point) -or $trace.before.foreground -ne $trace.before.owned_window -or !@($trace.before.hit|Where-Object {$_.process -eq $review.Id}).Count){$trace|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run ($id+'-'+$Device+'-input.json'));throw "Native clickable point is outside the owned Tool action group $Group"}
+ [CapyRowPointer]::Down($Device,$x,$y);Start-Sleep -Milliseconds 40;[CapyRowPointer]::Up()
+ try{Wait-Until {$box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Current.ExpandCollapseState -eq [System.Windows.Automation.ExpandCollapseState]::Expanded} "Tool action group $Group did not expand from $Device input"}finally{
+  $trace.after=Input-Trace $x $y;$trace.expand_after=$box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Current.ExpandCollapseState.ToString()
+  $trace|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run ($id+'-'+$Device+'-input.json'))
+ }
+ $caption=(Command $Command).label
+ $option=Control $caption -Name -Type ([System.Windows.Automation.ControlType]::ListItem) -Arranged
+ $at=Center $option
+ [CapyRowPointer]::Down($Device,$at[0],$at[1]);Start-Sleep -Milliseconds 40;[CapyRowPointer]::Up()
+ Wait-Until {(Command $Command).selected} "Tool Settings did not select $Command"
+}
 function Reveal([string]$Id){
+ $target=Control $Id
+ $target.SetFocus()
+ Wait-Until {$target.Current.HasKeyboardFocus} "$Id did not receive focus"
  $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker
- $node=$walker.GetParent((Control $Id));$scroll=$null
+ $node=$walker.GetParent((Control $Id));$scroll=$null;$viewport=$null
  while($node -and !$scroll){
   $pattern=$null
-  if($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern) -and $pattern.Current.VerticallyScrollable){$scroll=$pattern}
+  if($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern) -and $pattern.Current.VerticallyScrollable){$scroll=$pattern;$viewport=$node}
   $node=$walker.GetParent($node)
  }
- if(!$scroll){throw "$Id has no scrolling ancestor"}
+ if(!$scroll){return}
  Wait-Until {
   $item=Find $Id
-  if($item -and !$item.Current.IsOffscreen){return $true}
+  if($item -and !$item.Current.IsOffscreen){
+   $bounds=$item.Current.BoundingRectangle
+   $clip=$viewport.Current.BoundingRectangle;$clip.Inflate(1,1)
+   if($clip.Contains($bounds)){return $true}
+  }
   $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,[System.Windows.Automation.ScrollAmount]::LargeIncrement);Start-Sleep -Milliseconds 200;$false
  } "$Id did not scroll into view" 10
 }
@@ -83,9 +113,22 @@ function Run([string]$Label){
 function Shortcut([uint16[]]$Modifiers,[uint16]$Key){(Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,$Modifiers,$Key)}
 function Undo{Wait-Until {(Command 'undo').enabled} 'Undo did not become available' 60;Shortcut @(0x11) 0x5A}
 function Width{[int]@((Model).state.tabs)[0].width}
+function Check-Mixing{
+ Run 'Smudge'
+ Wait-Until {(Command 'color_mix_linear').enabled} 'The Smudge brush did not offer color mixing'
+ Reveal 'tool-action-group-color-mixing'
+ Compact-Choice 'tool-action-group-color-mixing' ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)|Out-Null
+ Pick-ToolAction 'color-mixing' 'color_mix_linear' 'pen'
+ Wait-Until {(Command 'color_mix_linear').selected -and !(Command 'color_mix_oklab').selected} 'Linear mixing did not take effect from Tool Settings'
+ Pick-ToolAction 'color-mixing' 'color_mix_oklab' 'touch'
+ Wait-Until {(Command 'color_mix_oklab').selected -and !(Command 'color_mix_linear').selected} 'OKLab mixing did not take effect from Tool Settings'
+ Capture ('mixing-'+$Theme) -WithModel
+ $checks.color_mixing_tool_settings='passed'
+}
 try {
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1'
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned photo tools review $($review.Id): $run"
@@ -97,6 +140,12 @@ try {
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
  [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)
+ if($mixOnly){
+  Check-Mixing
+  [pscustomobject]$checks|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
+  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+  return
+ }
  Wait-Until {$b=(Find 'drawing-canvas').Current.BoundingRectangle;$b.Width -gt 1200} 'Maximized canvas did not settle' 10
  Fit-Canvas;Start-Sleep -Milliseconds 300
  (Find 'Test stroke' -Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -197,14 +246,7 @@ try {
  }
  $checks.healing_and_spot_healing_one_undo='passed'
 
- Run 'Smudge'
- Wait-Until {(Command 'color_mix_linear').enabled} 'The Smudge brush did not offer color mixing'
- Reveal 'tool-action-color_mix_linear'
- Tap 'tool-action-color_mix_linear' 'pen'
- Wait-Until {(Command 'color_mix_linear').selected -and !(Command 'color_mix_oklab').selected} 'Linear mixing did not take effect from Tool Settings'
- Tap 'tool-action-color_mix_oklab' 'touch'
- Wait-Until {(Command 'color_mix_oklab').selected -and !(Command 'color_mix_linear').selected} 'OKLab mixing did not take effect from Tool Settings'
- $checks.color_mixing_tool_settings='passed'
+ Check-Mixing
 
  $null=Tool 'brush'
  Shortcut @(0x11) 0x54

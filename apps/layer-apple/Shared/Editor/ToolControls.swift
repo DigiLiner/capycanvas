@@ -112,7 +112,8 @@ struct ToolSettingsControls: View {
             + ":" + String(store.state["layer_tools"]["editing_layer"]["id"].uint)
             + ":" + String(store.state["layer_tools"]["editing_layer"]["mask_selected"].bool)
     }
-    var body: some View {
+    var body: some View { content.environment(\.compactPanelControls, true) }
+    @ViewBuilder private var content: some View {
         if ["pick_visible", "pick_layer"].contains(store.state["layer_tools"]["tool"].string) {
             PickerSettingsRows(store: store)
         } else if store.tonalActive {
@@ -124,9 +125,19 @@ struct ToolSettingsControls: View {
     @ViewBuilder private var settingsBody: some View {
         let editingContext = context
         let actions = store.state["tool_actions"].array
-        let modes = actions.filter { SelectionModes.commands.contains($0["command"].string) }
-        VStack(alignment: .leading, spacing: 2) {
-            if !modes.isEmpty { SelectionModeGroup(store: store, actions: modes) }
+        let modes = actions.filter { $0["segmented"].bool }
+        VStack(alignment: .leading, spacing: store.panelMetrics.group) {
+            if !modes.isEmpty {
+                VStack(spacing: store.panelMetrics.spacing) {
+                    ForEach(actionGroups(modes), id: \.id) { group in
+                        SelectionModeGroup(store: store, actions: group.items, height: store.panelMetrics.height, iconSize: store.panelMetrics.icon)
+                    }
+                    if modes.contains(where: { $0["group"].string == "selection-mode" }) {
+                        SelectionMenuButton(store: store, label: store.catalog["native_copy"]["tool_controls"]["selection_menu"].string, kind: "selection", compact: true)
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
             ForEach(store.state["tool_extra"].array.map { $0["Gradient"] }.filter { !$0.isNull }, id: \.["gradient"]["destination"].stableKey) { gradient in
                 GradientEditor(store: store, control: gradient, identifier: "tool-gradient") { action, completion in
                     store.edit(action as? [String: Any] ?? [:], completion: completion)
@@ -134,24 +145,24 @@ struct ToolSettingsControls: View {
             }
             let choices = store.state["tool_extra"].array.map { $0["Choice"] }.filter { !$0.isNull }
             ForEach(choices.filter { $0["beside"].isNull }, id: \.stableKey) { choice in
-                ToolOptionField(store: store, option: JSON(["Choice": choice.raw]), iconSize: 20, vertical: false, labeled: true,
+                ToolOptionField(store: store, option: JSON(["Choice": choice.raw]), iconSize: store.panelMetrics.icon, vertical: false, labeled: true,
                     style: "small", preferences: JSON(), stacked: false, prefix: "tool") { action, completion in
                     store.edit(action as? [String: Any] ?? [:], completion: completion)
-                }.frame(height: choice["labeled"].bool ? nil : 32)
+                }.frame(height: choice["labeled"].bool ? nil : store.panelMetrics.height)
             }
             ForEach(settingGroups.map { ($0[0].settingID, $0) }, id: \.0) { _, group in
                 let first = group[0], choice = choices.first { $0["beside"].string == first.settingID }
                 let title = choice?["label"].string ?? first["group"].string
-                if !title.isEmpty { Text(title).fontWeight(.bold).padding(.vertical, 4) }
+                if !title.isEmpty { Text(title).fontWeight(.bold).padding(.top, group[0].settingID == settings.first?.settingID ? 0 : 2) }
                 if let choice {
-                    HStack(spacing: 12) {
+                    HStack(spacing: store.panelMetrics.compound) {
                         SegmentedChoiceBar(choice: choice, prefix: "tool", height: nil, iconSize: 6, palette: palette) { store.dispatch($0["action"]) }
                         VStack(spacing: 2) {
                             ForEach(group, id: \.settingID) { item in
-                                HStack(spacing: 6) {
+                                HStack(spacing: store.panelMetrics.spacing) {
                                     Text(item["label"].string).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                                     setting(item, editingContext: editingContext, valueOnly: true)
-                                }.frame(height: 26)
+                                }.frame(height: store.panelMetrics.height)
                             }
                         }
                     }
@@ -159,22 +170,49 @@ struct ToolSettingsControls: View {
                     ForEach(group, id: \.settingID) { setting($0, editingContext: editingContext) }
                 }
             }
-            ForEach(actions.indices, id: \.self) { index in
-                let action = actions[index]
-                if !SelectionModes.commands.contains(action["command"].string) {
-                    let command = store.command(action["command"].string)
-                    ToolActionControl(command: command, checkable: action["checkable"].bool,
-                        textSize: store.catalog["text_size_pt"].number * 4 / 3) {
-                        store.invoke(command["id"].string)
-                    }
-                }
+            ForEach(actionGroups(actions.filter { !$0["segmented"].bool }), id: \.id) { group in
+                if !group.items[0]["group"].isNull { actionChoice(group) }
+                else if !group.items[0]["row"].isNull {
+                    HStack(spacing: store.panelMetrics.spacing) { ForEach(group.items, id: \.["command"].string) { actionButton($0) } }
+                } else { actionButton(group.items[0]) }
             }
-            if !modes.isEmpty { SelectionMenuButton(store: store, label: "Selection Actions…", kind: "selection") }
+            }
+
         }
     }
 }
 
 private extension ToolSettingsControls {
+    func actionGroups(_ actions: [JSON]) -> [(id: String, items: [JSON])] {
+        actions.reduce(into: []) { groups, action in
+            let id = action["group"].isNull ? action["row"].isNull ? action["command"].string : action["row"].string : action["group"].string
+            if let index = groups.firstIndex(where: { $0.id == id }) { groups[index].items.append(action) }
+            else { groups.append((id, [action])) }
+        }
+    }
+    func actionButton(_ action: JSON) -> some View {
+        let command = store.command(action["command"].string)
+        let caption = store.state["canvas_bar"]["completion"].array.first { $0["option"]["Action"]["state"]["id"].string == command["id"].string }?["label"].string
+        return ToolActionControl(command: command, checkable: action["checkable"].bool,
+            textSize: store.catalog["text_size_pt"].number * 4 / 3, caption: caption, iconOnly: action["icon_only"].bool) { store.invoke(command["id"].string) }
+    }
+    func actionChoice(_ group: (id: String, items: [JSON])) -> some View {
+        let label = store.catalog["tool_action_groups"].array.first { $0["id"].string == group.id }?["label"].string ?? ""
+        let commands = group.items.map { store.command($0["command"].string) }
+        let labels = actionGroups(store.state["tool_actions"].array.filter { !$0["group"].isNull && !$0["segmented"].bool }).map { group in
+            store.catalog["tool_action_groups"].array.first { $0["id"].string == group.id }?["label"].string ?? ""
+        }
+        return PropertyChoiceRow(labelWidth: store.panelLabelWidth(labels)) {
+            Text(label).lineLimit(1)
+            EditorChoice(label: label, options: commands.map { $0["label"].string }, selected: commands.firstIndex { $0["selected"].bool } ?? 0,
+                identifier: "tool-action-group-" + group.id, background: palette["input"], compact: true, menu: { open in
+                    open(AppleContextMenu(JSON(["sections": [commands.map { command in
+                        ["label": command["label"].raw, "enabled": command["enabled"].raw, "selected": command["selected"].raw,
+                         "identifier": "tool-action-" + command["id"].string, "action": ["type": "invoke", "command": command["id"].raw]]
+                    }]])) { store.dispatch($0) })
+                }) { store.invoke(commands[$0]["id"].string) }
+        }
+    }
     var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     var settingGroups: [[JSON]] {
         settings.reduce(into: [[JSON]]()) { groups, item in
@@ -208,14 +246,14 @@ private struct TonalSettingsControls: View {
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     var body: some View {
         let settings = store.state["tool_settings"].array
-        let modes = store.state["tool_actions"].array.filter { SelectionModes.commands.contains($0["command"].string) }
+        let modes = store.state["tool_actions"].array.filter { $0["segmented"].bool }
         let bounds = settings.filter { ["tonal_lower", "tonal_upper"].contains($0["id"].string) }
-        VStack(alignment: .leading, spacing: 2) {
-            if !modes.isEmpty { SelectionModeGroup(store: store, actions: modes, height: 36) }
+        VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
+            if !modes.isEmpty { SelectionModeGroup(store: store, actions: modes, height: store.panelMetrics.height, iconSize: store.panelMetrics.icon) }
             ForEach(store.state["tool_extra"].array.indices, id: \.self) { index in
                 let choice = store.state["tool_extra"][index]["Choice"]
                 if !choice.isNull {
-                    SegmentedChoiceBar(choice: choice, prefix: "tool", height: 36, iconSize: 20, palette: palette) { item in
+                    SegmentedChoiceBar(choice: choice, prefix: "tool", height: store.panelMetrics.height, iconSize: store.panelMetrics.icon, palette: palette) { item in
                         store.dispatch(item["action"])
                     }
                 }
@@ -227,13 +265,13 @@ private struct TonalSettingsControls: View {
                 }
             }
             ForEach(settings.filter { !["tonal_lower", "tonal_upper"].contains($0["id"].string) }, id: \.settingID) { item in
-                HStack(spacing: 6) {
+                HStack(spacing: store.panelMetrics.spacing) {
                     Text(item["label"].string).lineLimit(1).frame(width: 62, alignment: .leading)
                     NumberControl(store: store, label: item["label"].string, value: item["value"].number,
                         control: item["numeric"], identifier: "tool-" + item.settingID, inline: true) { value, completion in
                         store.edit(["type": "set_tool_setting", "id": item.settingID, "value": value], completion: completion)
                     }
-                }.frame(height: 28).accessibilityElement(children: .contain).accessibilityIdentifier("tool-setting-" + item.settingID)
+                }.frame(height: store.panelMetrics.height).accessibilityElement(children: .contain).accessibilityIdentifier("tool-setting-" + item.settingID)
             }
         }
     }
@@ -242,31 +280,23 @@ private struct TonalSettingsControls: View {
 private struct PickerSettingsRows: View {
     @ObservedObject var store: EditorStore
     var body: some View {
-        let picker = store.state["color_picker"]
-        VStack(alignment: .leading, spacing: 8) {
-            row("Source") {
-                Picker("Source", selection: Binding(get: { picker["layer"].bool }, set: { layer in
-                    store.dispatch(["type": "color_picker", "action": ["kind": "source", "layer": layer]])
-                })) {
-                    Text("Visible color").tag(false)
-                    if picker["can_sample_layer"].bool { Text("Selected layer").tag(true) }
-                }.accessibilityIdentifier("picker-setting-source")
+        let picker=store.state["color_picker"],copy=store.catalog["native_copy"]["sampler"]
+        let labels=[copy["source"].string,copy["sample_size"].string]
+        let source=[copy["visible_color"].string]+(picker["can_sample_layer"].bool ? [copy["selected_layer"].string] : [])
+        let sizes=picker["sample_sizes"].array.map(\.uint)
+        VStack(alignment:.leading,spacing:store.panelMetrics.spacing) {
+            PropertyChoiceRow(labelWidth:store.panelLabelWidth(labels)) {
+                Text(labels[0]).lineLimit(1)
+                EditorChoice(label:labels[0],options:source,selected:picker["layer"].bool ? 1 : 0,identifier:"picker-setting-source",background:EditorPalette(source:store.state["palette"])["input"],compact:true) {
+                    store.dispatch(["type":"color_picker","action":["kind":"source","layer":$0==1]])
+                }
             }
-            row("Sample size") {
-                Picker("Sample size", selection: Binding(get: { picker["sample_width"].uint }, set: { width in
-                    store.dispatch(["type": "set_color_sample_size", "width": width])
-                })) {
-                    ForEach(picker["sample_sizes"].array.map(\.uint), id: \.self) { width in
-                        Text(width == 1 ? "Single pixel" : "\(width) px circle").tag(width)
-                    }
-                }.accessibilityIdentifier("picker-setting-size")
+            PropertyChoiceRow(labelWidth:store.panelLabelWidth(labels)) {
+                Text(labels[1]).lineLimit(1)
+                EditorChoice(label:labels[1],options:sizes.map { width in copy["sizes"].array.first { $0[0].uint==width }?[1].string ?? "" },selected:sizes.firstIndex(of:picker["sample_width"].uint) ?? 0,identifier:"picker-setting-size",background:EditorPalette(source:store.state["palette"])["input"],compact:true) {
+                    store.dispatch(["type":"set_color_sample_size","width":sizes[$0]])
+                }
             }
-        }.font(.system(size: 13))
-    }
-    private func row(_ label: String, @ViewBuilder control: () -> some View) -> some View {
-        HStack(spacing: 8) {
-            Text(label).lineLimit(1).fixedSize().frame(minWidth: 76, alignment: .leading)
-            control().pickerStyle(.menu).labelsHidden().frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

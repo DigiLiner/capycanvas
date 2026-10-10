@@ -305,6 +305,14 @@ For sandbox acceptance, mount private power-supply fixtures read-only over the
 kernel paths in an isolated namespace and exercise the packaged reader's live
 polling. Do not add Flatpak permissions or override the real system's files.
 
+`native_tool_controls_compact` captures Tool Settings at 242- and 320-pixel
+widths in both themes, including numeric drafts and grouped choices.
+`native_workspace_panel_controls` covers Properties, gradients, curve and scope
+controls, Color, Sizes, Filters and Proof, including visible search entry. The
+fixtures check allocated control geometry, common caption columns, 4-pixel peer
+gaps, 8-pixel content edges and fitted squircle outlines. Run them through the
+private-display runner and keep measurements and original captures in `artifacts/`.
+
 Photo binding changes use `native_multiple_photo_import_chooser` for native
 multi-select import, retained samples, paint above and below photos, save/reopen
 and undo. `native_photo_file_drops` checks canvas and layer destinations and

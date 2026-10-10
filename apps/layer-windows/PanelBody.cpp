@@ -157,9 +157,9 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
             }
             root=tiles;
         }else{
-            StackPanel content;content.Spacing(12);auto panelId=str(panel,L"id");
+            StackPanel content;content.Spacing(data->panelMetric(L"group_spacing"));auto panelId=str(panel,L"id");
             bool scope=panelId==L"histogram"||panelId==L"waveform";
-            double inset=scope||panelId==L"stats"||panelId==L"properties"?6:8;
+            double inset=data->panelMetric(L"inset");
             contentHeight=[content]{return content.ActualHeight();};
             content.Padding(Thickness{inset,inset,inset,inset});
             if(panelId==L"proof"){content.VerticalAlignment(VerticalAlignment::Top);content.Children().Append(ProofPanel(data,bindings));}
@@ -197,7 +197,7 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                     for(auto commandValue:array(data->catalog,L"layer_commands")){
                         auto id=commandValue.GetString();auto command=find(array(data->state,L"commands"),L"id",id);
                         auto pick=button(data,str(command,L"label"),[data=data,id]{data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(id)}}));});
-                        pick.Width(28);pick.Height(28);pick.Content(icon(str(command,L"icon"),data->theme()));actions.Children().Append(pick);
+                        pick.Width(data->panelMetric(L"control_height"));pick.Height(data->panelMetric(L"control_height"));pick.Padding({0});pick.Content(icon(str(command,L"icon"),data->theme()));actions.Children().Append(pick);
                         bindings.emplace_back([data=data,id,pick]{pick.IsEnabled(flag(find(array(data->state,L"commands"),L"id",id),L"enabled"));});
                     }content.Children().Append(actions);
                 }

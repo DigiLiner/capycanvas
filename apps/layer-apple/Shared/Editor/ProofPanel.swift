@@ -6,13 +6,13 @@ struct ProofPanel: View {
     @ObservedObject var controller: ProofController
     private var model: JSON { store.snapshot["proof_panel"] }
     var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 2) {
+        VStack(spacing: store.panelMetrics.spacing) {
+            HStack(spacing: store.panelMetrics.spacing) {
                 ForEach(["off", "sdr", "print"], id: \.self) { mode in
                     Button {
                         controller.close(); controller.action(["type": "mode", "mode": mode])
                     } label: {
-                        Text(mode == "sdr" ? "SDR" : mode.capitalized).frame(maxWidth: .infinity).padding(.vertical, 5)
+                        Text(mode == "sdr" ? "SDR" : mode.capitalized).frame(maxWidth: .infinity, minHeight: store.panelMetrics.height)
                             .background(model["mode"].string == mode ? Color.primary.opacity(0.12) : .clear,
                                 in: SquircleShape.control)
                     }.buttonStyle(.plain).disabled(mode == "sdr" && !model["hdr"].bool)
@@ -25,7 +25,7 @@ struct ProofPanel: View {
             } else if model["mode"].string == "print" {
                 EditorScrollView { PrintProofControls(controller: controller, model: model, store: store) }
             } else { Spacer(minLength: 0) }
-        }.padding(.horizontal, 8).padding(.vertical, 6)
+        }.padding(store.panelMetrics.inset)
             .modifier(PanelBodyMeasurement(panel: "proof", kind: .fixed))
     }
 }
@@ -187,16 +187,31 @@ private struct PrintProofControls: View {
         recipe = normalized; controller.applyLive(normalized)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PrintProfileMenu(controller: controller, recipe: recipe, busy: $importing) { p in
+        let simulations=model["simulations"].array,intents=model["intents"].array
+        let labels=controller.form["print_controls"].array.filter { ["profile","simulation","intent"].contains($0["id"].string) }.map { $0["label"].string }
+        let labelWidth=store.panelLabelWidth(labels)
+        let simulation=recipe["simulate_paper"].bool ? "paper_and_ink" : recipe["simulate_black_ink"].bool ? "black_ink" : "colors"
+        VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
+            PrintProfileMenu(controller: controller, recipe: recipe, busy: $importing, labelWidth: labelWidth) { p in
                 change(recipe.replacing("name", with: p["name"]).replacing("profile", with: p["profile"]))
             }
-            FormPicker("Simulate", selection: Binding(get: { recipe["simulate_paper"].bool ? "paper_and_ink" : recipe["simulate_black_ink"].bool ? "black_ink" : "colors" }, set: { v in
-                change(recipe.replacing("simulate_paper", with: JSON(v == "paper_and_ink")).replacing("simulate_black_ink", with: JSON(v != "colors")))
-            })) { ForEach(model["simulations"].array, id: \.stableKey) { Text($0["label"].string).tag($0["value"].string) } }
-            FormPicker("Intent", selection: Binding(get: { recipe["conversion"]["intent"].string }, set: { v in
-                change(recipe.replacing("conversion", with: recipe["conversion"].replacing("intent", with: JSON(v))))
-            })) { ForEach(model["intents"].array, id: \.stableKey) { Text($0["label"].string).tag($0["value"].string) } }
+            PropertyChoiceRow(labelWidth:labelWidth) {
+                let label=controller.form["print_controls"].array.first { $0["id"].string=="simulation" }?["label"].string ?? ""
+                Text(label).lineLimit(1)
+                EditorChoice(label:label,options:simulations.map { $0["label"].string },selected:simulations.firstIndex { $0["value"].string==simulation } ?? 0,
+                    identifier:"proof-simulation",background:EditorPalette(source:store.state["palette"])["input"],compact:true) { index in
+                    let value=simulations[index]["value"].string
+                    change(recipe.replacing("simulate_paper", with: JSON(value == "paper_and_ink")).replacing("simulate_black_ink", with: JSON(value != "colors")))
+                }
+            }
+            PropertyChoiceRow(labelWidth:labelWidth) {
+                let label=controller.form["print_controls"].array.first { $0["id"].string=="intent" }?["label"].string ?? ""
+                Text(label).lineLimit(1)
+                EditorChoice(label:label,options:intents.map { $0["label"].string },selected:intents.firstIndex { $0["value"].string==recipe["conversion"]["intent"].string } ?? 0,
+                    identifier:"proof-intent",background:EditorPalette(source:store.state["palette"])["input"],compact:true) { index in
+                    change(recipe.replacing("conversion", with: recipe["conversion"].replacing("intent", with: intents[index]["value"])))
+                }
+            }
             Toggle("Black point compensation", isOn: Binding(get: { recipe["conversion"]["black_point_compensation"].bool }, set: { v in
                 change(recipe.replacing("conversion", with: recipe["conversion"].replacing("black_point_compensation", with: JSON(v))))
             })).disabled(recipe["conversion"]["intent"].string == "AbsoluteColorimetric")
@@ -204,8 +219,8 @@ private struct PrintProofControls: View {
                 .disabled(model["print"].isNull).accessibilityIdentifier("proof-gamut-warning")
             if controller.busy { ProgressView("Preparing proof…") }
             if let error = controller.error { Text(error).foregroundStyle(.red).font(.caption) }
-        }.disabled(controller.busy || importing)
-            .task { controller.loadForm() }
+        }.toggleStyle(PanelCheckStyle()).disabled(controller.busy || importing)
+            .task(id:store.interfaceLanguage) { controller.loadForm() }
             .onChange(of: controller.formRevision, initial: true) { _, _ in
                 if !controller.form.isNull && !controller.busy { recipe = controller.form["recipe"] }
             }
@@ -214,18 +229,19 @@ private struct PrintProofControls: View {
 
 /// The same section order as the shared profile menus; ICC loading stays off UI.
 private struct PrintProfileMenu: View {
+    @Environment(\.editorPalette) private var palette
     @ObservedObject var controller: ProofController
     let recipe: JSON
     @Binding var busy: Bool
+    var labelWidth: CGFloat? = nil
     let choose: (JSON) -> Void
     @State private var saved: [JSON] = []
     @State private var importing = false
     @State private var library = false
     @State private var mounted = false
     var body: some View {
-        HStack {
-            Text("Profile")
-            Spacer(minLength: 4)
+        PropertyChoiceRow(labelWidth:labelWidth) {
+            Text("Profile").lineLimit(1)
             Menu {
                 if !controller.form["document_profile"].isNull {
                     Section("Document Profile") { Button(controller.form["document_profile"]["name"].string) { choose(controller.form["document_profile"]) } }
@@ -239,7 +255,14 @@ private struct PrintProfileMenu: View {
                 Divider()
                 Button("Add ICC Profile…") { importing = true }
                 Button("Manage Profiles…") { library = true }
-            } label: { Text(recipe["name"].string.isEmpty ? "Choose a profile" : recipe["name"].string).lineLimit(1) }
+            } label: {
+                HStack(spacing:4) {
+                    Text(recipe["name"].string.isEmpty ? "Choose a profile" : recipe["name"].string).lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength:0)
+                    SharedIcon(name:"chevron-down",size:12)
+                }.padding(.horizontal,6).frame(minHeight:24)
+                    .background(palette["input"],in:SquircleShape.control)
+            }.buttonStyle(.plain).controlSize(.mini)
                 .accessibilityIdentifier("proof-profile")
         }
         .onAppear { mounted = true; reload() }.onDisappear { mounted = false }

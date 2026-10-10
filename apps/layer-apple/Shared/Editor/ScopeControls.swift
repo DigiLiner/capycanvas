@@ -56,7 +56,7 @@ struct ScopeFooter: View {
                 let on = histogram[name].bool
                 Button { send(name, !on) } label: {
                     SharedIcon(name: "tonal-" + name).foregroundStyle(on ? palette.accent : palette["text"])
-                        .frame(width: 28, height: 28).contentShape(Rectangle())
+                        .frame(width: store.panelMetrics.height, height: store.panelMetrics.height).contentShape(Rectangle())
                 }.buttonStyle(.plain).help(histogram["labels"][index + 1].string)
                     .accessibilityLabel(histogram["labels"][index + 1].string)
                     .accessibilityAddTraits(on ? .isSelected : []).accessibilityIdentifier("scope-\(kind)-\(name)")
@@ -79,9 +79,9 @@ struct ScopeControl: View {
             if !tonal {
                 HStack(spacing: 4) {
                     EditorChoice(label: copy["sampler"]["source"].string, options: view["sources"].array.map(\.string),
-                        selected: Int(view["source"].uint), identifier: "scope-\(kind)-source", background: palette["input"]) { select("source", $0) }
+                        selected: Int(view["source"].uint), identifier: "scope-\(kind)-source", background: palette["input"], compact: true) { select("source", $0) }
                     EditorChoice(label: copy["color"]["channel"].string, options: view["channels"].array.map(\.string),
-                        selected: Int(view["channel"].uint), identifier: "scope-\(kind)-channel", background: palette["input"]) {
+                        selected: Int(view["channel"].uint), identifier: "scope-\(kind)-channel", background: palette["input"], compact: true) {
                         select(waveform ? "waveform_channel" : "channel", $0)
                     }
                 }

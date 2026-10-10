@@ -77,6 +77,7 @@ try{
   Wait-Until {@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'}).Count -gt 0} 'Tool panel did not open'
  }
  if(!@((Model).layout.groups|Where-Object active -eq 'tool_settings').Count){Invoke-Id 'panel-tab-tool_settings'}
+ $zoomRows=@{}
  foreach($id in 'zoom-click','zoom-drag'){
   $spec=Choice $id
   if(!$spec.labeled){throw "Zoom choice $id is missing its shared label"}
@@ -87,13 +88,18 @@ try{
    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text),
    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$spec.label)))
   if(!$caption -or $caption.Current.IsOffscreen -or $caption.Current.BoundingRectangle.Right -gt $bar.Current.BoundingRectangle.Left){throw "Zoom choice $id does not display its label to the left"}
+  $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+  $captionBounds=$caption.Current.BoundingRectangle;$barBounds=Native-Bounds ("tool-choice-$id") $scale
+  $rowBounds=[Windows.Rect]::new([Math]::Min($captionBounds.Left,$barBounds.Left),[Math]::Min($captionBounds.Top,$barBounds.Top),[Math]::Max($captionBounds.Right,$barBounds.Right)-[Math]::Min($captionBounds.Left,$barBounds.Left),[Math]::Max($captionBounds.Bottom,$barBounds.Bottom)-[Math]::Min($captionBounds.Top,$barBounds.Top))
+  $zoomRows[$id]=@{row=$rowBounds;bar=$barBounds;caption=$captionBounds}
+  $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
   for($i=0;$i -lt $spec.items.Count;$i++){
    $button=Control "tool-choice-$id-$i" -Arranged
    $label=$spec.items[$i].label
    if($button.Current.Name -ne $label){throw "Zoom segment $id/$i has the wrong accessible label"}
    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
-   $bounds=$button.Current.BoundingRectangle
-   if([Math]::Abs($bounds.Width/$scale-36) -gt 1 -or [Math]::Abs($bounds.Height/$scale-36) -gt 1){throw "Zoom segment $id/$i is not a Small square"}
+   $bounds=Native-Bounds ("tool-choice-$id-$i") $scale
+   if([Math]::Abs($bounds.Width/$scale-24) -gt 1 -or [Math]::Abs($bounds.Height/$scale-24) -gt 1){throw "Zoom segment $id/$i is not a compact square"}
    $glyph=Control ('icon-'+$spec.items[$i].icon) -Within $button -Arranged
    $image=$glyph.Current.BoundingRectangle
    if([Math]::Abs($image.Width/$scale-16) -gt 1 -or [Math]::Abs($image.Height/$scale-16) -gt 1){throw "Zoom segment $id/$i has the wrong icon size"}
@@ -103,6 +109,14 @@ try{
    Pick $id $i
   }
  }
+ $zoomRows|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'zoom-row-geometry.json')
+ $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+ $zoomGroup=@((Model).layout.groups|Where-Object active -eq 'tool_settings')[0]
+ $zoomPanel=Native-Bounds $zoomGroup.id $scale -Group
+ if([Math]::Abs(($zoomRows['zoom-click'].row.Left-$zoomPanel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($zoomPanel.Right-$zoomRows['zoom-click'].bar.Right)/$scale-8) -gt 1){throw 'Zoom controls do not share the panel content inset'}
+ if([Math]::Abs(($zoomRows['zoom-drag'].row.Top-$zoomRows['zoom-click'].row.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($zoomRows['zoom-click'].bar.Right-$zoomRows['zoom-drag'].bar.Right) -gt 1){throw 'Zoom Click and Drag rows do not share the compact gap and trailing edge'}
+ $center=Native-Bounds 'tool-action-center_zoom_clicks' $scale
+ if([Math]::Abs(($center.Top-$zoomRows['zoom-drag'].row.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($center.Left-$zoomRows['zoom-drag'].row.Left) -gt 1 -or [Math]::Abs($center.Height/$scale-24) -gt 1){throw 'Zoom Center does not share the compact row gap, leading edge and height'}
  Pick 'zoom-click' 0;Pick 'zoom-drag' 3
  foreach($device in 'mouse','pen','touch'){
   Reset-Zoom

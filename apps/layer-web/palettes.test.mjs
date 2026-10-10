@@ -80,11 +80,13 @@ export async function checkPalettes({ call, evaluate, settle, reload }) {
   const colorGroup = Number(await groupOf("color"));
   assert.deepEqual(await tabs(colorGroup), ["color", "palettes"], "Palettes follows Color in Paint");
   const measurement = await evaluate("JSON.parse(JSON.stringify(layerApp.app.panel_measurements().find(m=>m.panel==='palettes')))");
-  assert.ok(measurement.content_height > 0 && measurement.scroll.unit_height === 44 && measurement.scroll.fixed_height > 0, `palette measurement: ${JSON.stringify(measurement)}`);
+  assert.ok(measurement.content_height > 0 && measurement.scroll.unit_height > 4 && measurement.scroll.fixed_height > 0, `palette measurement: ${JSON.stringify(measurement)}`);
   const groupRect = () => rect(`.dock-group[data-group="${colorGroup}"]`);
   await selectTab(colorGroup, "color");
   const fitted = await groupRect();
   await selectPalettes();
+  const paletteRow=await evaluate(`(()=>{const grid=document.querySelector('${P} .palette-swatches');return grid.firstElementChild.getBoundingClientRect().height+Number.parseFloat(getComputedStyle(grid).rowGap)})()`);
+  assert.ok(Math.abs(measurement.scroll.unit_height-paletteRow)<.1,`Palette scroll unit matches its responsive tile and gap: ${JSON.stringify({measurement,paletteRow})}`);
   assert.deepEqual(await groupRect(), fitted, "choosing Palettes does not resize the fitted Color group");
   await selectTab(colorGroup, "color");
   assert.deepEqual(await groupRect(), fitted);

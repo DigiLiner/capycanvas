@@ -95,10 +95,10 @@ internal class ColorEditorRequest(val slot: String?, val color: JSONObject?, val
     val change by rememberUpdatedState(onChange)
     val windowed = inSeparateWindow()
     DisposableEffect(Unit) { onDispose { live[0] = false } }
-    Row(if(compact) Modifier else Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(if(compact) Modifier else Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(if(LocalCompactPanel.current)panelMetrics().spacing else 6.dp), verticalAlignment = Alignment.CenterVertically) {
         if(!compact) Text(label, Modifier.weight(1f))
         Button(onClick = { host.colorEditor = ColorEditorRequest(null, JSONObject(value.toString()), opaque, windowed) { selected, _ -> if (live[0]) change(selected) } }, enabled = enabled,
-            modifier = Modifier.size(if(compact) 36.dp else 56.dp, 32.dp).semantics {contentDescription=label}.testTag("property-color-$label"), contentPadding = PaddingValues(0.dp),
+            modifier = Modifier.size(if(compact) 36.dp else 56.dp, if(LocalCompactPanel.current)panelMetrics().height else 32.dp).semantics {contentDescription=label}.testTag("property-color-$label"), shape=ControlShape, contentPadding = PaddingValues(0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = displayColor(preview))) { if(!compact) Text("…") }
         trailing()
     }

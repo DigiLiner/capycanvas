@@ -122,7 +122,33 @@ function Blend-CaptionSurface{
  Wait-Until {@((Model).state.layers|Where-Object object).Count -eq 3 -and (Model).brush_ready} 'Blend image fixture did not prepare' 90
  $layer=@((Model).state.layers|Where-Object object)[0].id
  Invoke-Id "layer-$layer-name";Property-Panel 'properties'
+ Wait-Until {$view=Fresh-Model $first 'en';$view.state.layer_properties.layer -eq $layer -and !$view.state.document_file.busy} 'Selected image Properties did not finish adoption' 30
  $box=Control 'property-blend' -Arranged;$baseline=Fresh-Model $first 'en'
+ if($actualTextScale -gt 1.01){
+  $opacity=@($baseline.state.layer_properties.controls|Where-Object key -eq 'opacity')[0]
+  $number=Control 'number-root-property-opacity' -Arranged
+  $caption=Control $opacity.label -Name -Within $number -Type ([System.Windows.Automation.ControlType]::Text) -Arranged
+  $entry=Control 'property-opacity' -Within $number -Arranged
+  $scale=[CapyRowPointer]::GetDpiForWindow([IntPtr]$first.hwnd)/96.
+  $numberBounds=Native-Bounds 'number-root-property-opacity' $scale
+  $captionBounds=Native-Bounds 'number-caption-property-opacity' $scale
+  $entryBounds=Native-Bounds 'property-opacity' $scale
+  $fontSize=$null;$textPattern=$null
+  if($caption.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$textPattern)){
+   $attribute=$textPattern.DocumentRange.GetAttributeValue([System.Windows.Automation.TextPattern]::FontSizeAttribute)
+   if($attribute -is [double]){$fontSize=$attribute}
+  }
+  @{system_text_scale=$actualTextScale;dpi=96*$scale;field=$numberBounds;caption=$captionBounds;entry=$entryBounds;native_font_size=$fontSize}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $run 'large-text-number-geometry.json')
+  Capture-Window $first 'large-text-number-caption'
+  if($captionBounds.Height/$scale -le 20.5 -or ($fontSize -and $captionBounds.Height -lt $fontSize*4./3.*$scale-1)){throw 'Large text clips the stacked numeric caption'}
+  if([Math]::Abs($entryBounds.Bottom-$numberBounds.Bottom) -gt 1 -or [Math]::Abs($entryBounds.Right-$numberBounds.Right) -gt 1){throw 'Large-text numeric readout does not retain bottom and trailing alignment'}
+  $entry.SetFocus();Wait-Until {$entry.Current.HasKeyboardFocus} 'Large-text numeric editor did not take focus'
+  $editingBounds=Native-Bounds 'property-opacity' $scale
+  @{readout=$entryBounds;editing=$editingBounds;dpi=96*$scale}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'large-text-number-editing-geometry.json')
+  if([Math]::Abs($editingBounds.Width-68*$scale) -gt 1 -or [Math]::Abs($editingBounds.Height-$entryBounds.Height) -gt 1 -or [Math]::Abs($editingBounds.Right-$entryBounds.Right) -gt 1 -or [Math]::Abs($editingBounds.Bottom-$entryBounds.Bottom) -gt 1){throw 'Large-text editor changes readout bottom or trailing alignment'}
+  Capture-Window $first 'large-text-number-editor'
+  $box.SetFocus();Wait-Until {!$entry.Current.HasKeyboardFocus} 'Large-text unchanged draft did not finish'
+ }
  $field=@($baseline.state.layer_properties.controls|Where-Object key -eq 'blend')[0]
  if($field.kind.kind -ne 'choice' -or $field.value.value -ne 0){throw 'Image Properties did not expose the unchanged Normal blend choice'}
  $comboId=$box.GetRuntimeId() -join ':';$optionId=(Selected-Option $box).GetRuntimeId() -join ':';$rawIndex=$field.value.value
@@ -134,7 +160,10 @@ function Blend-CaptionSurface{
   Use-Window $first;$view=Fresh-Model $first $choice.tag
   $field=@($view.state.layer_properties.controls|Where-Object key -eq 'blend')[0];$expected=$field.kind.options[$rawIndex]
   if($field.value.value -ne $rawIndex -or $expected -ne (Catalog-Text $choice.tag 'resources-blend-normal' 'resources')){throw 'Shared blend choice did not retain its semantic index/current canonical label'}
-  if(($view.state.document_file|ConvertTo-Json -Depth 30 -Compress) -ne $document -or $view.windows_gpu_generation -ne $gpu -or (Property-Values $view) -ne $values){throw 'Language publication changed authored Properties values or document/GPU ownership'}
+  if(($view.state.document_file|ConvertTo-Json -Depth 30 -Compress) -ne $document -or $view.windows_gpu_generation -ne $gpu -or (Property-Values $view) -ne $values){
+   @{expected_document=$document;actual_document=($view.state.document_file|ConvertTo-Json -Depth 30 -Compress);expected_gpu=$gpu;actual_gpu=$view.windows_gpu_generation;expected_properties=$values;actual_properties=(Property-Values $view);tag=$choice.tag;ordinal=$ordinal}|ConvertTo-Json -Depth 40|Set-Content (Join-Path $run 'blend-owner-failure.json')
+   throw 'Language publication changed authored Properties values or document/GPU ownership'
+  }
   $box=Control 'property-blend' -Arranged
   Wait-Until {$box.Current.Name -eq $field.label} 'Blend control accessibility label did not acknowledge the language' 15
   $closed=Blend-CaptionRecord $box

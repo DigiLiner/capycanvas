@@ -28,10 +28,14 @@ struct NumberControl: View {
     @GestureState private var contact = false
     @State private var editing = false
     @State private var inlineMeasure = ""
+    @Environment(\.compactPanelControls) private var compact
     @Environment(\.isEnabled) private var enabled
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var slider: Bool { control["kind"].string == "slider" }
     private var compactPanel: Bool { panel && slider && !inline && !valueOnly && toolbar == nil }
+    private var spinWidth: CGFloat {
+        compact && !slider ? max(24, EditorTextMetrics.width(inlineMeasure, size: store.catalog["text_size_pt"].number * 4 / 3, weight: .regular, monospacedDigits: true)) : entryWidth
+    }
     private var key: String { identifier.isEmpty ? label : identifier }
 
     var body: some View {
@@ -63,7 +67,7 @@ struct NumberControl: View {
                 ZStack {
                     Text(label).lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading).frame(height: 20)
-                        .padding(.leading, 6).padding(.trailing, 76)
+                        .padding(.leading, compact ? 0 : 6).padding(.trailing, 76)
                         .modifier(NumberControlMeasurement(id: key + ":label"))
                         .onTapGesture(count: 2, perform: resetValue)
                         .frame(maxHeight: .infinity, alignment: .top)
@@ -76,9 +80,9 @@ struct NumberControl: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 }.frame(height: 36).modifier(NumberControlMeasurement(id: key + ":header"))
             } else {
-                HStack(spacing: 6) {
+                HStack(spacing: compact ? store.panelMetrics.spacing : 6) {
                     Text(label).lineLimit(1).truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, compact ? 0 : 6)
                         .modifier(NumberControlMeasurement(id: key + ":label"))
                     if !slider {
                         HStack(spacing: 0) {
@@ -191,8 +195,8 @@ struct NumberControl: View {
             color: palette["text"], identifier: "number-entry-" + key,
             submit: finish, cancel: cancel, step: step)
             .focusedValue(\.editorTextCommit, { _ = commit() })
-            .frame(width: valueOnly || inline || toolbar != nil ? nil : compactPanel ? 56 : slider ? 80 : entryWidth)
-            .padding(.horizontal, 6).frame(height: valueOnly || slider ? 24 : 32)
+            .frame(width: valueOnly || inline || toolbar != nil ? nil : compactPanel ? 56 : slider ? 80 : spinWidth)
+            .padding(.horizontal, 6).frame(height: compact ? store.panelMetrics.height : valueOnly || slider ? 24 : 32)
             .background(palette["input"], in: SquircleShape.control)
             .modifier(NumberControlMeasurement(id: key + ":entry"))
             .accessibilityHint(field.error ?? "")
@@ -218,7 +222,7 @@ struct NumberControl: View {
     private func stepButton(_ direction: Int) -> some View {
         let active = enabled && (direction < 0 ? field.value > control["min"].number : field.value < control["max"].number)
         return Button { step(direction) } label: {
-            SharedIcon(name: direction < 0 ? "minus" : "plus").frame(width: slider ? 24 : 32, height: slider ? 24 : 32)
+            SharedIcon(name: direction < 0 ? "minus" : "plus").frame(width: compact ? store.panelMetrics.height : slider ? 24 : 32, height: compact ? store.panelMetrics.height : slider ? 24 : 32)
                 .contentShape(Rectangle())
         }.buttonStyle(EditorControlButtonStyle()).opacity(active ? 1 : 0.36)
             .modifier(NumberControlMeasurement(id: key + (direction < 0 ? ":minus" : ":plus")))
@@ -234,7 +238,7 @@ struct NumberControl: View {
         } catch { field.error = error.localizedDescription }
     }
     private func measureInlineRange() {
-        guard inline else { return }
+        guard inline || (compact && !slider) else { return }
         do {
             let minimum = try resolveNumber(value: control["min"].number, operation: ["type": "format"])["text"].string
             let maximum = try resolveNumber(value: control["max"].number, operation: ["type": "format"])["text"].string

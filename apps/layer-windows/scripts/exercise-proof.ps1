@@ -1,6 +1,9 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','panel-dark','panel-light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
+$panelOnly=$Theme.StartsWith('panel-');if($panelOnly){$Theme=$Theme.Substring(6)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
+Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
 $CapyWaitSeconds=15;$CapyFind='visible'
 Add-Type -TypeDefinition @'
 using System;
@@ -79,6 +82,7 @@ function Export([string]$Name){
 try {
  Enter-CapyEnvironment
  $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
+ [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle;Write-Output "Proof review $($review.Id), $run"
  Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Proof app did not start' 60
@@ -106,9 +110,22 @@ try {
  if($settings.profile.name -ne 'Display P3' -or $settings.simulation -ne 'paper_and_ink' -or $settings.intent -ne 'RelativeColorimetric'){throw 'Profile/library navigation lost the draft'}
  Button 'Cancel';Idle
  $withProof=(Model).state.document_file|ConvertTo-Json -Compress
+ $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+ $modeBounds=@('off','print'|ForEach-Object {Native-Bounds ('proof-panel-mode-'+$_) $scale})
+ $setupBounds=Native-Bounds 'proof-panel-setup' $scale
+ $gamutBounds=Native-Bounds 'proof-panel-gamut' $scale
+ foreach($bounds in $modeBounds+@($setupBounds,$gamutBounds)){if([Math]::Abs($bounds.Height/$scale-24) -gt 1){throw 'Proof panel controls do not use compact height'}}
+ if([Math]::Abs(($modeBounds[1].Left-$modeBounds[0].Right)/$scale-4) -gt 1 -or [Math]::Abs(($gamutBounds.Top-$setupBounds.Bottom)/$scale-4) -gt 1 -or [Math]::Abs($gamutBounds.Left-$setupBounds.Left) -gt 1){throw 'Proof panel controls do not use consistent peer gaps and side alignment'}
+ @{theme=$Theme;dpi=96*$scale;modes=$modeBounds;setup=$setupBounds;gamut=$gamutBounds}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'proof-panel-geometry.json')
+ Capture ('proof-panel-'+$Theme)
  Invoke 'proof-panel-gamut';Wait-Until {(Model).state.gamut_warning} 'Gamut warning failed'
  Command 'soft_proof';Wait-Until {!(Model).state.soft_proof -and !(Model).state.gamut_warning -and !(Model).windows_proof.text} 'Off did not clear proof status'
  if(((Model).state.document_file|ConvertTo-Json -Compress) -ne $withProof){throw 'Viewing toggles modified the drawing'}
+ if($panelOnly){
+  @{theme=$Theme;compact_geometry='passed';apply_view_warning='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
+  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $directory
+  return
+ }
  Command 'undo' 'Edit';Idle
  Wait-Until {!(Model).state.document_file.modified} 'One Undo did not restore the clean drawing'
  Command 'redo' 'Edit';Idle;Command 'soft_proof'
@@ -138,7 +155,7 @@ try {
  & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'proof.png') -ClientOnly *> (Join-Path $run 'proof.json')
  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $directory
  if((Get-Item (Join-Path $run 'stderr.log')).Length){throw 'Proof stderr requires inspection'}
- [pscustomobject]@{first_use_cancel='passed';shared_options='passed';picker_cancel_draft='passed';library_draft='passed';apply_view_warning='passed';proof_history='passed';artwork_history_pixels='passed';export_uncontaminated='passed';d3d12_device_recovery='passed';save_reopen='passed';scope='Native UIA and hardware D3D12 functional checks; no physical print or performance acceptance'}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
+ [pscustomobject]@{first_use_cancel='passed';shared_options='passed';picker_cancel_draft='passed';library_draft='passed';apply_view_warning='passed';proof_history='passed';artwork_history_pixels='passed';export_uncontaminated='passed';d3d12_device_recovery='passed';save_reopen='passed';scope='Native UIA and D3D12 functional checks; adapter provenance is recorded by the runner; no physical print or performance acceptance'}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
 }catch{
  if($review -and !$review.HasExited){try{& (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure.json')}catch{}}
  [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw

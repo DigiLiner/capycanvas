@@ -90,10 +90,10 @@ import kotlin.math.roundToInt
         fun cancel() {if(dragging||held!=null){dragging=false;held=null;send(obj("kind" to "reset"),"cancel")}}
         DisposableEffect(Unit) {onDispose {cancel();if(host.pointControlFocus===focus)host.pointControlFocus=null}}
         @Composable fun icon(name:String,label:String,id:String,active:Boolean=enabled,click:()->Unit) {
-            HoverTip(label) {Box(Modifier.size(32.dp).clip(ControlShape).testTag("gradient-$id").clickable(enabled=active,onClick=click),contentAlignment=Alignment.Center) {SharedIcon(name,label,Modifier.size(20.dp))}}
+            HoverTip(label) {Box(Modifier.size(panelMetrics().height).clip(ControlShape).testTag("gradient-$id").clickable(enabled=active,onClick=click),contentAlignment=Alignment.Center) {SharedIcon(name,label,Modifier.size(panelMetrics().icon))}}
         }
-        Column(Modifier.fillMaxWidth().testTag("gradient-editor"),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically) {
+        Column(Modifier.fillMaxWidth().testTag("gradient-editor"),verticalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing),verticalAlignment=Alignment.CenterVertically) {
                 val modes=metadata.getJSONArray("interpolations").values().map {it as JSONArray}
                 Box(Modifier.weight(1f).testTag("gradient-interpolation")) {PropertyChoice(metadata.getString("interpolation_label"),modes.map {it.getString(1)},modes.indexOfFirst {it.getString(0)==gradient.getString("interpolation")},enabled) {send(obj("kind" to "interpolation","value" to modes[it].getString(0)))}}
                 icon("flip-horizontal",metadata.getString("reverse_label"),"reverse") {selected=stops.lastIndex-index;send(obj("kind" to "reverse"))}
@@ -136,10 +136,10 @@ import kotlin.math.roundToInt
                         } finally {cancel()}
                     }
                 }.semantics {contentDescription=copy.getString("add_stop")}) {
-                GradientPreview(host,gradient,Modifier.fillMaxWidth().padding(horizontal=6.dp).height(32.dp))
+                GradientPreview(host,gradient,Modifier.fillMaxWidth().padding(horizontal=6.dp).height(32.dp).clip(ControlShape))
                 Canvas(Modifier.fillMaxSize()) {val margin=6.dp.toPx();stops.forEachIndexed {i,stop->drawCircle(palette.text,(if(index==i)4f else 2.5f).dp.toPx(),Offset(margin+stop.number("position")*(size.width-2*margin),39.dp.toPx()))}}
             }
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing),verticalAlignment=Alignment.CenterVertically) {
                 val interior=index>0&&index<stops.lastIndex
                 key(index) {NumericSetting(copy.getString("position"),stops[index].getDouble("position"),host.catalog.getJSONObject("opacity"),Modifier.weight(1f),enabled=enabled&&interior,id="gradient-position",inline=true,valueOnly=true,showSlider=false,
                     onEditPhase={phase->if(phase=="down")numericOwner=index;numericOwner?.let {owner->send(obj("kind" to "position","index" to owner,"operation" to obj("type" to "step","steps" to 0)),phase)};if(phase=="up"||phase=="cancel")numericOwner=null}) {

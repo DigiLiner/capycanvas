@@ -6,8 +6,8 @@ const key = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? Str
 const semantic = ({label, tooltip, disabled_reason, ...value}) => value;
 const fieldSemantic = ({group, ...value}) => semantic(value);
 
-export function actionField({ element, button, icon }, spec, send, { label, ariaDisabled = false, explain } = {}) {
-  const check = spec.checkable && !spec.state.icon;
+export function actionField({ element, button, icon }, spec, send, { label, ariaDisabled = false, explain, checkbox = false } = {}) {
+  const check = spec.checkable && (checkbox || !spec.state.icon);
   const row = element(check ? 'label' : 'div', `toolbar-option ${check ? 'toolbar-check' : 'toolbar-action'}`); row.dataset.toolbarField = '';
   const invoke = () => {
     if (b.getAttribute('aria-disabled') !== 'true') send({ type: 'invoke', command: spec.state.id });

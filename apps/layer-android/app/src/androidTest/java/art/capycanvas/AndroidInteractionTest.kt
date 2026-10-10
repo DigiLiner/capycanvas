@@ -1976,7 +1976,7 @@ class AndroidInteractionTest {
         for(theme in listOf("light","dark")) { action(obj("type" to "set_theme","theme" to theme));captureToolbar("tonal-toolbar-$theme") }
         tap(bounds("toolbar-more-${options.second}").center)
         waitFor("range in complete panel") { exists("tool-range-track") };settle()
-        assertEquals(36*density,bounds("tool-segments-tonal-tones").height,1f)
+        assertEquals(24*density,bounds("tool-segments-tonal-tones").height,1f)
         assertEquals(28*density,bounds("tool-range-tonal").height,1f)
         handles("tool")
         for(id in listOf("tonal_lower","tonal_upper"))assertTrue("Compact endpoint",bounds("tool-setting-$id").width<=48*density)
@@ -2333,8 +2333,8 @@ class AndroidInteractionTest {
             }
             for ((id, count) in listOf("zoom-click" to 2, "zoom-drag" to 4)) for (index in 0 until count) {
                 val segment = bounds("tool-segment-$id-$index")
-                assertEquals("Zoom segment width", 36 * density, segment.width, 1f)
-                assertEquals("Zoom segment height", 36 * density, segment.height, 1f)
+                assertEquals("Zoom segment width", 24 * density, segment.width, 1f)
+                assertEquals("Zoom segment height", 24 * density, segment.height, 1f)
             }
             command("reset_view")
             val work = camera().getJSONArray("work_area")
@@ -4073,8 +4073,8 @@ class AndroidInteractionTest {
     private fun typeNumber(tag: String, text: String) {
         tap(settledBounds(tag).center)
         waitFor("$tag takes the keys", 5_000) { host.editingText && tagged(tag)?.second?.config?.getOrNull(SemanticsProperties.Focused) == true }
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_MOVE_END)
-        repeat(16) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
+        pressKey(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON)
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL)
         instrumentation.sendStringSync(text)
     }
     /** Remove the layers a journey added and return the document's extent. */
@@ -4547,14 +4547,10 @@ class AndroidInteractionTest {
                         action(obj("type" to "select_panel_tab", "group" to it.getLong("id"), "panel" to "tool_settings"))
                     }
                     if (shown("tool-setting-crop_width")) {
-                        tap(bounds("number-value-Width").center)
+                        tap(bounds("number-value-crop_width").center)
                         waitFor("Width opens for editing", 5_000) { exists("number-Width") }
-                        tap(bounds("number-Width").center)
-                        waitFor("Width takes the keys", 5_000) { host.editingText }
                         val typed = Math.round(cropped) - 100
-                        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_MOVE_END)
-                        repeat(8) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
-                        instrumentation.sendStringSync(typed.toString())
+                        typeNumber("number-Width", typed.toString())
                         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
                         waitFor("Tool Options sets the width, keeping 1:1", 5_000) { setting("crop_width") == typed.toDouble() && setting("crop_height") == typed.toDouble() && !host.editingText }
                     } else println("Tool Options is not shown in this workspace; its width is set through the session")

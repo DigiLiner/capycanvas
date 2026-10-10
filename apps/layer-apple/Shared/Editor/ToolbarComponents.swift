@@ -600,13 +600,14 @@ struct SegmentedChoiceBar: View {
     let send: (JSON) -> Void
     private var choiceStyle: JSON { ToolbarUI.cached(["type": "choice_style", "labeled": choice["labeled"].bool]) }
     private var cellSize: CGSize? {
-        choice["labeled"].bool ? CGSize(width: choiceStyle["size"][0].number, height: choiceStyle["size"][1].number) : nil
+        if prefix == "tool" && choice["labeled"].bool { return CGSize(width: 24, height: 24) }
+        return choice["labeled"].bool ? CGSize(width: choiceStyle["size"][0].number, height: choiceStyle["size"][1].number) : nil
     }
     var body: some View {
         if choice["labeled"].bool {
             HStack(spacing: 0) {
                 Text(choice["label"].string).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
+                Spacer(minLength: prefix == "tool" ? 4 : 8)
                 bar
             }
         } else if choice["columns"].uint > 0 { grid } else { bar }
@@ -638,7 +639,7 @@ struct SegmentedChoiceBar: View {
             let item = items[index]
             Button { send(item) } label: {
                 HStack(spacing: captionGap) {
-                    SharedIcon(name: item["icon"].string, size: choice["labeled"].bool ? CGFloat(choiceStyle["icon"].number) : iconSize)
+                    SharedIcon(name: item["icon"].string, size: prefix == "tool" ? 16 : choice["labeled"].bool ? CGFloat(choiceStyle["icon"].number) : iconSize)
                     if captions && !choice["labeled"].bool { Text(item["label"].string).lineLimit(1) }
                 }.padding(.horizontal, captions && !choice["labeled"].bool ? captionPadding : 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

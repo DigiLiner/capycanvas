@@ -1,5 +1,6 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark',[switch]$PropertyLayout)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','curve-dark','curve-light')][string]$Theme='dark',[switch]$PropertyLayout)
 $ErrorActionPreference='Stop'
+$curveOnly=$Theme.StartsWith('curve-');if($curveOnly){$Theme=$Theme.Substring(6)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCacheModel=$true;$CapyCaptureDelay=250
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
@@ -127,6 +128,7 @@ function Tap-Point([int]$Index){
     if(!$hit -or $hit.Current.ProcessId -ne $review.Id -or $graph.Current.IsOffscreen -or !$graph.Current.IsEnabled -or !$r.Contains([System.Windows.Point]::new($at[0],$at[1]))){throw "Curve point $Index misses the owned visible graph: at=$at bounds=$r native=$native points=$((Property 'rgb').value.value|ConvertTo-Json -Compress)"}
     [CapyRowPointer]::Down('mouse',$at[0],$at[1]);[CapyRowPointer]::Up()
     Wait-Until {(Property 'rgb').curve.selected -eq $Index} "Tapping point $Index did not select it: at=$at bounds=$r native=$native"
+    Wait-Until {$graph.Current.HasKeyboardFocus} "Tapping curve point $Index did not focus the graph"
 }
 function Pointer-Session([scriptblock]$Body){
     [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
@@ -205,16 +207,27 @@ function Property-Row([string]$Key,[string]$Case){
     $field=Control ('number-root-property-'+$Key) -Within $panel -Arranged
     $entry=Control ('property-'+$Key) -Within $field -Arranged
     $track=Control ('property-'+$Key+'-slider') -Within $field -Arranged
-    $entry.SetFocus();Wait-Until {$entry.Current.HasKeyboardFocus} 'Property editor did not receive focus for geometry'
-    Start-Sleep -Milliseconds 100
-    $bounds=@{panel=$panel.Current.BoundingRectangle;caption=$caption.Current.BoundingRectangle;field=$field.Current.BoundingRectangle;entry=$entry.Current.BoundingRectangle;track=$track.Current.BoundingRectangle}
-    @{case=$Case;key=$Key;label=$property.label;bounds=$bounds;value=$property.value;dpi=[CapyRowPointer]::GetDpiForWindow($drawingWindow);identities=@{entry=($entry.GetRuntimeId() -join ':');track=($track.GetRuntimeId() -join ':')}}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run ($Case+'-geometry.json'))
-    $outer=[Windows.Rect]::new($bounds.panel.X-1,$bounds.panel.Y-1,$bounds.panel.Width+2,$bounds.panel.Height+2);$inner=[Windows.Rect]::new($bounds.field.X-1,$bounds.field.Y-1,$bounds.field.Width+2,$bounds.field.Height+2)
-    if(!$outer.Contains($bounds.caption) -or !$outer.Contains($bounds.field) -or !$inner.Contains($bounds.entry) -or !$inner.Contains($bounds.track)){throw "Property controls are outside their visible panel: $Key"}
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
-    if([Math]::Abs($bounds.field.Height-36*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Width-68*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Height-24*$scale) -gt 1){throw "Compact property row or value dimensions differ: $Key"}
+    $track.SetFocus();Wait-Until {!$entry.Current.HasKeyboardFocus} 'Property editor did not return to readout'
+    $readout=Native-Bounds ('property-'+$Key) $scale
+    Capture $Case -Composed
+    $entry.SetFocus();Wait-Until {$entry.Current.HasKeyboardFocus} 'Property editor did not receive focus for geometry'
+    $bounds=@{panel=$panel.Current.BoundingRectangle;caption=(Native-Bounds ('number-caption-property-'+$Key) $scale);field=(Native-Bounds ('number-root-property-'+$Key) $scale);entry=(Native-Bounds ('property-'+$Key) $scale);track=(Native-Bounds ('property-'+$Key+'-slider') $scale)}
+    @{case=$Case;key=$Key;label=$property.label;bounds=$bounds;value=$property.value;dpi=96*$scale;identities=@{entry=($entry.GetRuntimeId() -join ':');track=($track.GetRuntimeId() -join ':')}}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run ($Case+'-geometry.json'))
+    @{readout=$readout;editing=$bounds.entry;dpi=96*$scale}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run ($Case+'-editing-geometry.json'))
     Capture ($Case+'-editing') -Composed
-    $origin=$bounds.caption.Left-6*$scale
+    $outer=[Windows.Rect]::new($bounds.panel.X-1,$bounds.panel.Y-1,$bounds.panel.Width+2,$bounds.panel.Height+2);$inner=[Windows.Rect]::new($bounds.field.X-1,$bounds.field.Y-1,$bounds.field.Width+2,$bounds.field.Height+2)
+    if(!$outer.Contains($bounds.caption) -or !$outer.Contains($bounds.field) -or !$inner.Contains($bounds.entry) -or !$inner.Contains($bounds.track) -or !$inner.Contains($readout)){throw "Property controls are outside their visible panel: $Key"}
+    if([Math]::Abs($bounds.field.Height-36*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Width-68*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Height-24*$scale) -gt 1){throw "Compact property row or value dimensions differ: $Key"}
+    if([Math]::Abs($bounds.caption.Left-$bounds.field.Left) -gt 1 -or [Math]::Abs($bounds.entry.Right-$bounds.field.Right) -gt 1){throw "Compact property label or value has an extra inset: $Key"}
+    if([Math]::Abs($bounds.entry.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($bounds.track.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($readout.Right-$bounds.entry.Right) -gt 1 -or [Math]::Abs($readout.Bottom-$bounds.entry.Bottom) -gt 1 -or [Math]::Abs($readout.Height-$bounds.entry.Height) -gt 1){throw "Compact property readout/editor bottom or right alignment differs: $Key"}
+    $controls=@((Model).state.layer_properties.controls)
+    $position=[array]::IndexOf(@($controls|ForEach-Object key),$Key)
+    if($position -ge 0 -and $position+1 -lt $controls.Count -and $controls[$position+1].kind.kind -eq 'number' -and $controls[$position+1].section -eq $property.section){
+        $next=Find ('number-root-property-'+$controls[$position+1].key)
+        if($next -and !$next.Current.IsOffscreen -and [Math]::Abs(((Native-Bounds ('number-root-property-'+$controls[$position+1].key) $scale).Top-$bounds.field.Bottom)/$scale-4) -gt 1){throw "Related Properties numeric rows do not share the compact gap: $Key"}
+    }
+    $origin=$bounds.field.Left
     if([Math]::Abs($bounds.track.Height-16*$scale) -gt 1 -or [Math]::Abs($bounds.track.Left-$origin-36*$scale) -gt 1 -or [Math]::Abs($bounds.field.Right-$bounds.track.Right-76*$scale) -gt (2*$scale+1) -or $bounds.track.Width -lt 80*$scale){throw "Compact property slider dimensions differ: $Key"}
     $client=[CapyWindowCapture+Point]::new()
     if(![CapyWindowCapture]::ClientToScreen($drawingWindow,[ref]$client)){throw 'Property capture origin unavailable'}
@@ -226,12 +239,11 @@ function Property-Row([string]$Key,[string]$Case){
         if(!$pixels.Count){throw 'Visible property slider pixels were absent'}
         $visibleLeft=$pixels[0]+$client.x;$visibleRight=$pixels[-1]+$client.x+1
         @{origin=$origin;left=$visibleLeft;right=$visibleRight;editor_left=$bounds.entry.Left;editor_right=$bounds.entry.Right;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run ($Case+'-track-pixels.json'))
-        if([Math]::Abs($visibleLeft-$origin-36*$scale) -gt 1 -or [Math]::Abs($bounds.field.Right-$visibleRight-76*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Left-$visibleRight-8*$scale) -gt 1){throw "Visible property track insets or editor gap differ: $Key"}
+        if([Math]::Abs($visibleLeft-[Math]::Round($origin+36*$scale)) -gt 1 -or [Math]::Abs($visibleRight-[Math]::Round($bounds.field.Right-76*$scale)) -gt 1 -or [Math]::Abs($visibleRight-[Math]::Round($bounds.entry.Left-8*$scale)) -gt 1){throw "Visible property track insets or editor gap differ: $Key"}
     }finally{$bitmap.Dispose()}
-    if([Math]::Abs($bounds.entry.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($bounds.track.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($bounds.entry.Right-$bounds.field.Right) -gt 1){throw "Compact property bottom or right alignment differs: $Key"}
     if($bounds.caption.Right -gt $bounds.entry.Left+1 -or $bounds.track.Right -gt $bounds.entry.Left+1 -or $bounds.caption.Bottom -gt $bounds.track.Top+1){throw "Compact property caption, slider or value overlap: $Key"}
-    $track.SetFocus();Wait-Until {!$entry.Current.HasKeyboardFocus} 'Property editor did not return to readout'
-    Capture $Case -Composed
+    (Control 'drawing-canvas').SetFocus()
+    Wait-Until {!$entry.Current.HasKeyboardFocus} 'The compact editor did not finish its unchanged draft'
 }
 function Property-Resize([int]$Width){
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
@@ -371,10 +383,14 @@ function Check-PropertyLayout {
     Property-Language 'en';Property-Resize 1200
     Property-Row 'opacity' 'opacity-restored-en'
     if(!(& $retained)){throw 'Restored English Properties changed retained controls, values or document/GPU ownership'}
+    Select-Panel 'adjustments'
+    Compact-Choice 'filter-category' ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)|Out-Null
+    Capture 'filter-category-compact'
     Select-Filter 'color_balance' 'Color Balance'
     $page=@((Model).state.layer_properties.pages|Where-Object id -eq 'midtones')[0]
     Choose 'properties-page' $page.label
     Wait-Until {(Model).state.layer_properties.page -eq 'midtones' -and (Find 'property-midtones_red')} 'Color Balance midtones did not appear'
+    Compact-Choice 'properties-page' ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)|Out-Null
     Property-Row 'midtones_red' 'filter-inline-en'
     Property-Typed 'midtones_red' '12' 12
     Pointer-Session {
@@ -517,7 +533,10 @@ function Check-CurveGestures {
         try{Wait-Until {[Math]::Abs((Property 'rgb').value.value[1][1]-$point[1]-5/255) -lt 1e-4} 'A held Up arrow did not step the point by 1/255 per repeat'}
         catch{throw "Held Up: initial=$($point[1]), expected=$($point[1]+5/255), actual=$((Property 'rgb').value.value[1][1]), count=$((Property 'rgb').value.value.Count), selected=$((Property 'rgb').curve.selected), step=$((Property 'rgb').curve.numeric.step)"}
         Invoke 'Undo' -Name;Wait-Until {(Curve-Json) -eq $original} 'A held arrow was not one Undo'
-        Tap-Point 1;[CapyRowPointer]::Key(0x2E)
+        Tap-Point 1
+        $focused=[System.Windows.Automation.AutomationElement]::FocusedElement
+        @{graph_focus=(Control 'property-rgb-curve').Current.HasKeyboardFocus;focused_id=$focused.Current.AutomationId;focused_name=$focused.Current.Name;focused_type=$focused.Current.ControlType.ProgrammaticName;selected=(Property 'rgb').curve.selected;points=(Property 'rgb').value.value}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'curve-delete-focus.json')
+        [CapyRowPointer]::Key(0x2E)
         Wait-Until {(Property 'rgb').value.value.Count -eq 2} 'Delete did not remove the selected point'
         Invoke 'Undo' -Name;Wait-Until {(Curve-Json) -eq $original} 'Delete was not one Undo'
         Tap-Point 0
@@ -555,6 +574,14 @@ try {
     }
     if(!$resized){throw 'Initial resize did not reach the canvas'}
     $root=(Owned-DrawingWindow $review $drawingWindow.ToInt64()).Root
+    if($curveOnly){
+        Select-Filter 'curves' 'Curves'
+        $curveGestures=Check-CurveGestures
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
+        if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
+        @{theme=$Theme;curve_pointer_transactions=$curveGestures;run=$run}|ConvertTo-Json
+        return
+    }
     if($PropertyLayout){
         Check-PropertyLayout
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved

@@ -198,7 +198,7 @@ impl CurveEditor {
             w.dispatch(UiAction::CurveEditor { target: target.clone(), action: CurveEditorAction::Reset });
         }));
 
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         root.set_vexpand(false); root.set_valign(gtk::Align::Start);
         let graph = gtk::Grid::builder().column_spacing(6).row_spacing(4).build();
         let vertical = gtk::CenterBox::new(); vertical.set_orientation(gtk::Orientation::Vertical);
@@ -220,7 +220,7 @@ impl CurveEditor {
         let readouts = control.controls.coordinate_readouts.then(|| {
             let ev = std::array::from_fn(|_| { let label = gtk::Label::new(None); label.set_xalign(1.); label.add_css_class("dim-label"); label });
             let labels = std::array::from_fn(|index| gtk::Label::builder().label(&curve.axes[index].label).xalign(0.).ellipsize(gtk::pango::EllipsizeMode::End).build());
-            let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);row.set_homogeneous(true);
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);row.set_homogeneous(true);
             let coordinates = std::array::from_fn(|index| {
                 let input = NumberControl::value_only(curve.numeric.clone(), &curve.axes[index].label, w.localization().clone());
                 input.set_widget_name(&format!("{name}-{}", if index == 0 { "input" } else { "output" }));

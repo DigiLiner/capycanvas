@@ -9,8 +9,8 @@ struct BrushColorButton: View {
                 if store.snapshot["color_panel"]["hdr"].bool { HDRColorSwatch(color: store.snapshot["color_panel"]["definition"], viewing: store.colorViewing) }
                 else { ColorSwatch(rgba: store.snapshot["paint_pair"]["rgba"]) }
             }
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .padding(.horizontal, 12).padding(.vertical, 4).frame(height: 34)
+                .clipShape(SquircleShape.control)
+                .padding(.horizontal, store.panelMetrics.padding).frame(height: store.panelMetrics.height)
                 .background(EditorPalette(source: store.state["palette"])["button"].opacity(13 / 255),
                     in: SquircleShape.control)
                 .contentShape(Rectangle())
@@ -29,12 +29,9 @@ struct PanelControls: View {
     private var fitsColorWheel: Bool {
         panel["id"].string == "color" && panel["controls"].array.filter { $0["visible_in_panel"].bool }.map { $0["control"].string } == ["color_wheel"]
     }
-    private var padding: CGFloat {
-        if !measureForWorkspace && store.state["customization"]["drawer"]["compact"].bool { return 12 }
-        return ["properties", "stats", "histogram", "waveform"].contains(panel["id"].string) ? 6 : 8
-    }
+    private var padding: CGFloat { store.panelMetrics.inset }
     var body: some View {
-        contents.environment(\.measuresWorkspacePanel, measureForWorkspace)
+        contents.environment(\.measuresWorkspacePanel, measureForWorkspace).environment(\.compactPanelControls, true)
             .background {
                 Color.clear.preference(key: PanelSizeFacts.self, value: measureForWorkspace
                     ? [PanelSizeKey(panel: panel["id"].string, part: "present"): 0] : [:])
@@ -71,7 +68,7 @@ struct PanelControls: View {
         }
     }
     private func controlBody(maximumHeight: CGFloat? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: store.panelMetrics.group) {
                 ForEach(panel["controls"].array.indices, id: \.self) { index in
                     let item = panel["controls"][index]
                     if item["visible_in_panel"].bool { control(item, maximumHeight: maximumHeight) }

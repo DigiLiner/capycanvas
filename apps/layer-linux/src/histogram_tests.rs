@@ -373,10 +373,14 @@ pub(super) fn photo_workspace(app: &NativeTestApp) -> Rc<Workspace> {
     w.window.maximize();w.window.present();ready(&w);
     let weak=Rc::downgrade(&w);
     *w.open_document.borrow_mut()=Some(Rc::new(move |project,location| {if let Some(w)=weak.upgrade() {w.documents.enqueue(&w,(project,location));}}));
+    let photo=std::env::temp_dir().join(format!("capy-waveform-photo-{}.png",std::process::id()));
+    layer_color::photo::write_png(std::fs::File::create(&photo).unwrap(),&super::place_source::source()).unwrap();
     invoke(&w,CommandId::OpenDocument);let dialog=super::new_photo::chooser();
-    let photo=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../artifacts/photo-editing-color/g2-inputs/portrait.png");
-    dialog.set_file(&gtk::gio::File::for_path(photo)).unwrap();pump(200);dialog.response(gtk::ResponseType::Accept);
+    dialog.set_file(&gtk::gio::File::for_path(&photo)).unwrap();
+    until(||dialog.file().and_then(|file|file.path()).as_ref()==Some(&photo),"native chooser selects the generated photo");
+    pump(200);dialog.response(gtk::ResponseType::Accept);
     super::new_photo::finish(&w);ready(&w);
+    std::fs::remove_file(photo).unwrap();
     assert!(super::photo_edit::document(&w).artwork.paint.iter().any(|(_,_,paint)|paint.base.is_some()));w
 }
 

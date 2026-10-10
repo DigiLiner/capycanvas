@@ -100,7 +100,14 @@ import kotlin.math.roundToInt
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun PanelControls(host: CanvasHost, state: JSONObject, panel: JSONObject, modifier: Modifier = Modifier, scrollable: Boolean = true, splitFilters: Boolean = false, toolSet: JSONObject? = null, onContent: (PanelContentSize) -> Unit = {}, onHeight: (Float) -> Unit = {}) {
+    CompositionLocalProvider(LocalCompactPanel provides true, LocalMinimumInteractiveComponentSize provides 0.dp) {
+        PanelControlsBody(host, state, panel, modifier, scrollable, splitFilters, toolSet, onContent, onHeight)
+    }
+}
+
+@Composable private fun PanelControlsBody(host: CanvasHost, state: JSONObject, panel: JSONObject, modifier: Modifier, scrollable: Boolean, splitFilters: Boolean, toolSet: JSONObject?, onContent: (PanelContentSize) -> Unit, onHeight: (Float) -> Unit) {
     if(panel.getString("id")=="proof") {
         ProofPanel(host,modifier,scrollable){height->onContent(PanelContentSize(height,fixedHeight=0f));onHeight(height)}
         return
@@ -140,8 +147,8 @@ import kotlin.math.roundToInt
         Column(Modifier.fillMaxWidth().then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier).onGloballyPositioned {
             contentHeight = it.size.height / density
             naturalHeight = contentHeight + (if (hasColor) deficits[0] else 0f) + (if (hasNavigator) deficits[1] else 0f)
-        }.padding(when(panel.getString("id")) { "adjustments" -> 4.dp; "properties" -> if (splitFilters) 8.dp else 6.dp; "stats", "histogram", "waveform" -> 6.dp; else -> 8.dp }),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        }.padding(panelMetrics().inset),
+            verticalArrangement = Arrangement.spacedBy(panelMetrics().group)) {
             controls.forEach { item ->
                 when (item.getString("control")) {
                     "brushes", "brush_sets", "sculpt_sets", "tools" -> ToolSetControls(host, state, item.getString("control"), toolSet)

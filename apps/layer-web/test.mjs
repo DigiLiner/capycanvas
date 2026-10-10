@@ -71,6 +71,7 @@ import {checkImageLayers} from "./image-layers-journey.test.mjs";
 import { checkCanvasBar } from "./canvas-bar-journey.test.mjs";
 import { checkNotices } from "./notice-journey.test.mjs";
 import { checkZoomReadout, checkWheelNavigation, checkZoomToolSettings } from "./zoom-readout-journey.test.mjs";
+import {checkPanelControls} from './panel-controls-journey.test.mjs';
 import { checkBlendMenu } from "./blend-menu-journey.test.mjs";
 import { checkColorMixing } from "./color-mixing-journey.test.mjs";
 import { checkPassThrough } from "./pass-through-journey.test.mjs";
@@ -121,7 +122,7 @@ const cdp = await launchChrome(
     "--window-size=1440,1000",
   ],
   {
-    timeout: process.argv.some(x=>['--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--selection-tools","--color-mixing","--contact-brushes","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--pipeline-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending"].includes(x)) ? 180000 : 30000,
+    timeout: process.argv.some(x=>['--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--selection-tools","--color-mixing","--contact-brushes","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--pipeline-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending"].includes(x)) ? 180000 : 30000,
     onEvent: (event) => {
       if (
         event.method === "Runtime.consoleAPICalled" &&
@@ -216,6 +217,7 @@ try {
   console.log('WebGPU hardware:',JSON.stringify(gpuAdapter));
   const checkErrors = () => assert.deepEqual(errors, []);
   if (!await runJourney([
+    [process.argv.includes('--panel-controls'), () => checkPanelControls({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--zoom-tool-settings"), () => checkZoomToolSettings({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--wheel-navigation"), () => checkWheelNavigation({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--filter-investigation"), async () => {

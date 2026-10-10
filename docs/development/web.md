@@ -321,6 +321,11 @@ Wasm method to verify that rejection released the borrow and preserved drawings.
 It also checks that raw JavaScript Error and DOMException messages and strings stay literal,
 including after a language change; other objects use deterministic JSON.
 
+`--panel-controls` captures Tool Settings, Properties, Histogram, Waveform, Proof and Palettes
+in light and dark themes at 242- and 320-pixel panel widths. It checks 8-pixel
+content edges, shared dropdown columns, 4-pixel peer gaps on both axes, 24-pixel
+controls, 36-pixel sliders, editor focus and squircle radii.
+
 `--pointwise-effects` checks Hue range pages and Colorize value retention,
 Threshold and Photo Filter controls, Invert/Desaturate insertion, slider history,
 visible source pixels, keyboard focus and saved source identity at narrow and

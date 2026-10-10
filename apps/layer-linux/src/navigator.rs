@@ -318,8 +318,9 @@ pub struct Navigator {
 }
 impl Navigator {
     pub fn new(images: &Rc<Overviews>) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         root.set_widget_name("navigator-panel");
+        root.add_css_class("dock-panel");
         root.set_margin_start(8);
         root.set_margin_end(8);
         root.set_margin_top(8);
@@ -425,7 +426,7 @@ pub(crate) struct NavigationControls {
 }
 impl NavigationControls {
     pub fn new(prefix: &str) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        let root = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
         root.set_homogeneous(true);
         root.add_css_class("navigator-controls");
         let buttons = layer_ui::NAVIGATOR_COMMANDS.into_iter().map(|id| {

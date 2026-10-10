@@ -1,10 +1,13 @@
-param([Parameter(Mandatory)][int]$ProcessId,[Parameter(Mandatory)][string]$StateFile)
+param([Parameter(Mandatory)][int]$ProcessId,[Parameter(Mandatory)][string]$StateFile,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
 [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
 $app=Get-Process -Id $ProcessId
 if($app.ProcessName -ne 'CapyCanvas'){throw 'Expected an isolated CapyCanvas review process'}
+if(!$OutputDirectory){$OutputDirectory=Split-Path -Parent $StateFile}
+[IO.Directory]::CreateDirectory($OutputDirectory)|Out-Null
 function Model {
     try {$snapshot=Get-Content -LiteralPath $StateFile -Raw|ConvertFrom-Json;if($snapshot.process_id -eq $ProcessId){return $snapshot.model}}catch{}
 }
@@ -18,9 +21,9 @@ if(!(Model).windows_isolated_settings){throw 'Use an isolated review settings pr
 $root=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
 function Find([string]$Value,$Type=[System.Windows.Automation.ControlType]::Button,[switch]$Id){
     $property=if($Id){[System.Windows.Automation.AutomationElement]::AutomationIdProperty}else{[System.Windows.Automation.AutomationElement]::NameProperty}
-    $condition=[System.Windows.Automation.AndCondition]::new(
-        [System.Windows.Automation.PropertyCondition]::new($property,$Value),
-        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$Type))
+    $condition=[System.Windows.Automation.PropertyCondition]::new($property,$Value)
+    if($Type){$condition=[System.Windows.Automation.AndCondition]::new($condition,
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$Type))}
     $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
 }
 function Control([string]$Value,$Type=[System.Windows.Automation.ControlType]::Button,[switch]$Id){
@@ -28,6 +31,43 @@ function Control([string]$Value,$Type=[System.Windows.Automation.ControlType]::B
     Wait-Until {$script:found=Find $Value $Type -Id:$Id;$null -ne $script:found} "Missing control: $Value"
     $script:found
 }
+function Arranged([string]$Id,$Type){
+    $hit=@{item=$null;bounds=$null;stable=0}
+    Wait-Until {
+        $hit.item=Find $Id $Type -Id
+        if(!$hit.item -or $hit.item.Current.IsOffscreen){return $false}
+        $bounds=$hit.item.Current.BoundingRectangle
+        if($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){return $false}
+        if($bounds -eq $hit.bounds){$hit.stable++}else{$hit.stable=0;$hit.bounds=$bounds}
+        $hit.stable -ge 2
+    } "Tool control did not arrange: $Id"
+    $hit.item
+}
+function Reveal-Control([string]$Id,[string]$RootId,$Type,[double]$Height,[double]$Scale){
+    $entry=Control $Id $Type -Id;$entry.SetFocus()
+    Wait-Until {$entry.Current.HasKeyboardFocus} "Tool control did not receive focus: $Id"
+    $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $node=$walker.GetParent($entry);$scroll=$null;$viewport=$null
+    while($node -and !$scroll){
+        $pattern=$null
+        if($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern) -and $pattern.Current.VerticallyScrollable){$scroll=$pattern;$viewport=$node}
+        $node=$walker.GetParent($node)
+    }
+    for($step=0;$step -lt 20;$step++){
+        $field=Find $RootId $null -Id;$bounds=$field.Current.BoundingRectangle
+        $clip=if($viewport){$viewport.Current.BoundingRectangle}else{$root.Current.BoundingRectangle}
+        $clip.Inflate(1,1)
+        if(!$field.Current.IsOffscreen -and $clip.Contains($bounds) -and $bounds.Height/$Scale -ge $Height-1){return (Arranged $RootId $null)}
+        if(!$scroll){throw "Partially visible control has no scroll container: $Id"}
+        $below=$bounds.Top -ge ($clip.Top+$clip.Bottom)/2
+        $direction=if($bounds.Top -ge $clip.Bottom){[System.Windows.Automation.ScrollAmount]::LargeIncrement}elseif($bounds.Bottom -le $clip.Top){[System.Windows.Automation.ScrollAmount]::LargeDecrement}elseif($below){[System.Windows.Automation.ScrollAmount]::SmallIncrement}else{[System.Windows.Automation.ScrollAmount]::SmallDecrement}
+        $before=$scroll.Current.VerticalScrollPercent
+        $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,$direction)
+        Wait-Until {[Math]::Abs($scroll.Current.VerticalScrollPercent-$before) -gt .01} "Control $Id did not scroll fully into view"
+    }
+    throw "Control $Id remained clipped after scrolling"
+}
+function Reveal-Number([string]$Id,[double]$Height,[double]$Scale){Reveal-Control ('tool-setting-'+$Id) ('number-root-tool-setting-'+$Id) ([System.Windows.Automation.ControlType]::Edit) $Height $Scale}
 function Invoke-Control([string]$Name){(Control $Name).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
 function Invoke-Id([string]$Id){(Control $Id -Id).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
 function Field([string]$Id){Control ('tool-setting-'+$Id) ([System.Windows.Automation.ControlType]::Edit) -Id}
@@ -57,7 +97,7 @@ function Select-Tool([string]$Id,[switch]$Cancel){
 function Check-Projection {
     # Both the snapshot and XAML can advance while asynchronous raster work settles.
     # Reacquire both: an old snapshot may describe a superseded transform schema.
-    Wait-Until {
+    try{Wait-Until {
         try {
             $state=(Model).state
             if(!$state){return $false}
@@ -81,21 +121,89 @@ function Check-Projection {
             }
             foreach($action in $state.tool_actions){
                 $command=$state.commands|Where-Object id -eq $action.command
-                $mode=$action.command -in @('selection_new','selection_add','selection_subtract','selection_intersect')
-                $source=$action.command -in @('selection_visible','selection_editing','selection_reference')
-                $type=if($mode){[System.Windows.Automation.ControlType]::Button}elseif($source){[System.Windows.Automation.ControlType]::RadioButton}elseif($action.checkable){[System.Windows.Automation.ControlType]::CheckBox}else{[System.Windows.Automation.ControlType]::Button}
+                $script:projectionIssue="action=$($action.command), group=$($action.group), segmented=$($action.segmented), checkable=$($action.checkable)"
+                if($action.group -and !$action.segmented){
+                    $native=Find ('tool-action-group-'+$action.group) ([System.Windows.Automation.ControlType]::ComboBox) -Id
+                    if(!$native -or !$native.Current.Name){return $false}
+                    if($command.selected){
+                        $selected=$native.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()
+                        $script:projectionIssue+="; selected count=$($selected.Count), name=$($selected[0].Current.Name), expected=$($command.label), offscreen=$($native.Current.IsOffscreen)"
+                        if($selected.Count -ne 1 -or $selected[0].Current.Name -ne $command.label){return $false}
+                    }
+                    continue
+                }
+                $mode=$action.segmented
+                $type=if($mode){[System.Windows.Automation.ControlType]::Button}elseif($action.checkable){[System.Windows.Automation.ControlType]::CheckBox}else{[System.Windows.Automation.ControlType]::Button}
                 $native=Find ('tool-action-'+$action.command) $type -Id
                 if(!$native -or $native.Current.Name -ne $command.label -or $native.Current.IsEnabled -ne $command.enabled){return $false}
                 if($mode){if(($native.Current.ItemStatus -eq 'Selected') -ne $command.selected){return $false};continue}
-                if($source){if($native.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected -ne $command.selected){return $false};continue}
                 if($action.checkable){
                     $checked=$native.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On
                     if($checked -ne $command.selected){return $false}
                 }
             }
             return $true
-        }catch [System.Windows.Automation.ElementNotAvailableException]{return $false}
-    } 'Native tool labels, selection, settings or actions did not reach the shared model'
+        }catch{$script:projectionIssue+="; $($_.Exception.Message)";return $false}
+    } 'Native tool labels, selection, settings or actions did not reach the shared model'}catch{
+        [IO.File]::WriteAllText((Join-Path $OutputDirectory 'tool-projection-failure.txt'),$script:projectionIssue)
+        throw "$($_.Exception.Message): $script:projectionIssue"
+    }
+}
+$toolGeometry=@()
+function Check-Geometry([string]$Tool){
+    $state=(Model).state
+    $scale=[CapyRowPointer]::GetDpiForWindow($app.MainWindowHandle)/96.
+    $tonal=@($state.tool_extra|Where-Object {$_.Choice.id -eq 'tonal-tones'}).Count -gt 0
+    $rows=@()
+    foreach($setting in $state.tool_settings){
+        $field=Find ('number-root-tool-setting-'+$setting.id) $null -Id
+        $entry=Find ('tool-setting-'+$setting.id) ([System.Windows.Automation.ControlType]::Edit) -Id
+        if(!$field -or !$entry){continue}
+        $expected=if($setting.numeric.kind -ne 'slider' -or $tonal -or $setting.id -in @('transform_x','transform_y')){24}else{36}
+        $field=Reveal-Number $setting.id $expected $scale
+        $entry=Arranged ('tool-setting-'+$setting.id) ([System.Windows.Automation.ControlType]::Edit)
+        $bounds=Native-Bounds ('number-root-tool-setting-'+$setting.id) $scale;$value=Native-Bounds ('tool-setting-'+$setting.id) $scale
+        if([Math]::Abs($bounds.Height/$scale-$expected) -gt 1 -or [Math]::Abs($value.Height/$scale-24) -gt 1){throw "Tool $Tool field $($setting.id) does not use compact dimensions: root=$bounds entry=$value expected=$expected"}
+        if($expected -eq 36 -and ([Math]::Abs($value.Width/$scale-68) -gt 1 -or [Math]::Abs($value.Bottom-$bounds.Bottom) -gt 1 -or [Math]::Abs($value.Right-$bounds.Right) -gt 1)){throw "Tool $Tool field $($setting.id) does not retain its editor width and bottom/trailing alignment"}
+        $captions=$field.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text))
+        $caption=@($captions|Where-Object {$_.Current.Name -eq $setting.label})[0]
+        if($caption -and [Math]::Abs((Native-Bounds ('number-caption-tool-setting-'+$setting.id) $scale).Left-$bounds.Left) -gt 1){throw "Tool $Tool field $($setting.id) indents its plain caption"}
+        $rows+=@{id=$setting.id;bounds=$bounds;entry=$value;kind=$setting.numeric.kind}
+    }
+    $actionRows=@()
+    foreach($group in @($state.tool_actions|Where-Object row|Group-Object row)){
+        $buttons=@()
+        foreach($action in $group.Group){
+            $button=Find ('tool-action-'+$action.command) ([System.Windows.Automation.ControlType]::Button) -Id
+            if($button){
+                $button=Reveal-Control ('tool-action-'+$action.command) ('tool-action-'+$action.command) ([System.Windows.Automation.ControlType]::Button) 24 $scale
+                $buttons+=@{id=$action.command;bounds=(Native-Bounds ('tool-action-'+$action.command) $scale)}
+            }
+        }
+        if($buttons.Count -lt 2){continue}
+        for($index=0;$index -lt $buttons.Count;$index++){
+            $bounds=$buttons[$index].bounds
+            if([Math]::Abs($bounds.Height/$scale-24) -gt 1){throw "Tool $Tool action $($buttons[$index].id) is not compact"}
+            if($index -and ([Math]::Abs(($bounds.Left-$buttons[$index-1].bounds.Right)/$scale-4) -gt 1 -or [Math]::Abs($bounds.Top-$buttons[$index-1].bounds.Top) -gt 1)){throw "Tool $Tool row $($group.Name) does not use matching horizontal spacing"}
+        }
+        $actionRows+=@{id=$group.Name;icon_only=$group.Group[0].icon_only;buttons=$buttons}
+    }
+    foreach($row in $actionRows){foreach($button in $row.buttons){$button.bounds=Native-Bounds ('tool-action-'+$button.id) $scale}}
+    $iconRows=@($actionRows|Where-Object icon_only|Sort-Object {$_.buttons[0].bounds.Top})
+    for($index=1;$index -lt $iconRows.Count;$index++){
+        if([Math]::Abs(($iconRows[$index].buttons[0].bounds.Top-$iconRows[$index-1].buttons[0].bounds.Bottom)/$scale-4) -gt 1){throw "Tool $Tool action rows do not match their horizontal spacing"}
+    }
+    $script:toolGeometry+=@{tool=$Tool;theme=$state.theme;dpi=96*$scale;rows=$rows;action_rows=$actionRows}
+    $script:toolGeometry|ConvertTo-Json -Depth 8|Set-Content (Join-Path $OutputDirectory 'tool-settings-geometry.json')
+    $group=@((Model).layout.groups|Where-Object active -eq 'tool_settings')[0]
+    $origin=[CapyRowPointer+Point]::new();[CapyRowPointer]::ClientToScreen($app.MainWindowHandle,[ref]$origin)|Out-Null
+    @{client_origin=$origin;panel=(Native-Bounds $group.id $scale -Group);dpi=96*$scale}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture-layout.json'))
+    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $app.MainWindowHandle.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture.json'))
+    if($rows.Count -gt 5){
+        $first=$state.tool_settings[0];$expected=if($first.numeric.kind -eq 'slider'){36}else{24}
+        $null=Reveal-Number $first.id $expected $scale
+        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $app.MainWindowHandle.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'-top.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-top-capture.json'))
+    }
 }
 if(!@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'}).Count){
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Window'
@@ -111,9 +219,14 @@ Select-Tool 'pen'
 $null=Field 'flow'
 $entry=Field 'flow';$original=$entry.GetRuntimeId() -join ':'
 $subtool=(Control 'tool-subtool-0' -Id).GetRuntimeId() -join ':'
+$before=Model
+$ownership=[ordered]@{before=@{field=$original;subtool=$subtool;state=$before.state;workspace=$before.windows_workspace}}
 Draft 'flow' '40 + 2'
 Focus (Field 'opacity')
 Wait-Until {[Math]::Abs((Value 'flow')-.42) -lt .0001} 'Flow expression was not committed through the shared core'
+$after=Model
+$ownership.after=@{field=((Field 'flow').GetRuntimeId() -join ':');subtool=((Control 'tool-subtool-0' -Id).GetRuntimeId() -join ':');state=$after.state;workspace=$after.windows_workspace}
+$ownership|ConvertTo-Json -Depth 50|Set-Content (Join-Path $OutputDirectory 'tool-flow-ownership.json')
 if(((Field 'flow').GetRuntimeId() -join ':') -ne $original){throw 'A value update replaced the tool field'}
 if(((Control 'tool-subtool-0' -Id).GetRuntimeId() -join ':') -ne $subtool){throw 'A value update replaced the subtool button'}
 # A range edit replaces an invalid text draft and must keep the formatted units.
@@ -163,12 +276,14 @@ Invoke-Control 'Undo'
 $tools=@('pen','pencil','brush','eraser','airbrush','decoration','blend','liquify','lasso','move','hand','eyedropper','gradient','figure','ruler','auto_select','fill')
 foreach($tool in $tools){
     Select-Tool $tool;Check-Projection
+    Check-Geometry $tool
     if($tool -eq 'eyedropper'){
         if((Model).state.layer_tools.tool -notlike 'pick_*'){throw 'Eyedropper did not start temporary picking'}
         Select-Tool 'eyedropper' -Cancel
         Wait-Until {(Model).state.layer_tools.tool -notlike 'pick_*'} 'Eyedropper did not cancel temporary picking'
     }
 }
+$toolGeometry|ConvertTo-Json -Depth 8|Set-Content (Join-Path $OutputDirectory 'tool-settings-geometry.json')
 # Exercise real keyboard routing through the native spin field and Rust policy.
 Select-Tool 'auto_select'
 Draft 'gap_closing' '6 * 2'
@@ -274,6 +389,8 @@ Invoke-Control 'Test stroke'
 Wait-Until {@((Model).state.commands|Where-Object {$_.id -eq 'undo' -and $_.enabled}).Count -eq 1} 'Controlled stroke did not complete'
 Select-Tool 'scale_rotate'
 Check-Projection
+Check-Geometry 'scale_rotate'
+$toolGeometry|ConvertTo-Json -Depth 8|Set-Content (Join-Path $OutputDirectory 'tool-settings-geometry.json')
 Invoke-Id 'tool-action-cancel_transform'
 Wait-Until {@((Model).state.tool_actions|Where-Object command -eq 'cancel_transform').Count -eq 0} 'Transform cancel did not finish'
 Select-Tool 'pen'

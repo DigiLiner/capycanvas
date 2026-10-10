@@ -12,11 +12,12 @@ import org.json.JSONObject
 internal fun JSONObject.displayColors(): JSONObject = objectOrNull("layer_tools")
     ?.objectOrNull("mask_editing")?.objectOrNull("colors") ?: getJSONObject("colors")
 
-@Composable internal fun SelectionMenuButton(host: CanvasHost, label: String, kind: String, modifier: Modifier = Modifier, compact: Boolean = false) {
+@Composable internal fun SelectionMenuButton(host: CanvasHost, label: String, kind: String, modifier: Modifier = Modifier, compact: Boolean = false, panel: Boolean = false) {
     var menu by remember { mutableStateOf<JSONObject?>(null) }
     Box(modifier) {
         val open = { host.query(obj("type" to "selection_menu", "kind" to kind)) { menu = it as? JSONObject } }
         if (compact) IconButton(open, Modifier.size(48.dp).testTag("selection-menu-$kind")) { SharedIcon("more", label) }
+        else if(panel) PanelChoiceButton(label,Modifier.testTag("selection-menu-$kind"),onClick=open)
         else TextButton(open,
             Modifier.heightIn(min = 48.dp).testTag("selection-menu-$kind")) {
             Text(label); Spacer(Modifier.width(6.dp)); SharedIcon("chevron-down", null, Modifier.size(16.dp))

@@ -28,6 +28,30 @@ pub const PANEL_CONTENT_INSET: f32 = 8.0;
 pub const PANEL_CONTROL_SPACING: f32 = 4.0;
 pub const PANEL_GROUP_SPACING: f32 = 6.0;
 pub const PANEL_COMPOUND_SPACING: f32 = 2.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct PanelControlMetrics {
+    pub inset: f32,
+    pub control_spacing: f32,
+    pub group_spacing: f32,
+    pub compound_spacing: f32,
+    pub control_height: f32,
+    pub slider_height: f32,
+    pub field_padding: f32,
+    pub icon_size: f32,
+    pub control_radius: f32,
+}
+pub const PANEL_CONTROL_METRICS: PanelControlMetrics = PanelControlMetrics {
+    inset: PANEL_CONTENT_INSET,
+    control_spacing: PANEL_CONTROL_SPACING,
+    group_spacing: PANEL_GROUP_SPACING,
+    compound_spacing: PANEL_COMPOUND_SPACING,
+    control_height: 24.,
+    slider_height: 36.,
+    field_padding: 6.,
+    icon_size: 16.,
+    control_radius: 12.,
+};
 /// Three standard tiles, two gaps, and the tool list's two content insets.
 pub const TOOL_PANEL_MIN_WIDTH: f32 = 3.0 * TILE_SIZE + 2.0 * TILE_GAP + 2.0 * PANEL_CONTENT_INSET;
 /// Six standard tiles, five gaps, and two content insets.

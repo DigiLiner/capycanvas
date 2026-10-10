@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='visible'
@@ -78,13 +78,22 @@ function Picker([string]$Title,[string]$Path){
     if(![CapyPalettePicker]::PostMessage([IntPtr]$accept.value.Current.NativeWindowHandle,245,[UIntPtr]::Zero,[IntPtr]::Zero)){throw "Cannot accept the $Title picker"}
 }
 function Drag($from,$to,[string]$Device='mouse'){
+    $trace=[ordered]@{device=$Device;from=Input-Trace $from.x $from.y;to=Input-Trace $to.x $to.y;before=@(Swatches)}
+    $watch=[Diagnostics.Stopwatch]::StartNew()
     [CapyRowPointer]::Down($Device,$from.x,$from.y)
     try{for($i=1;$i -le 16;$i++){[CapyRowPointer]::Move([int]($from.x+($to.x-$from.x)*$i/16),[int]($from.y+($to.y-$from.y)*$i/16));Start-Sleep -Milliseconds 16}
-        Start-Sleep -Milliseconds 250}finally{[CapyRowPointer]::Up()}
+        Start-Sleep -Milliseconds 250
+        $trace.release_ms=$watch.Elapsed.TotalMilliseconds;$trace.panel_before_release=(Control 'palettes-panel').Current.ItemStatus;$trace.preview_before_release=(Control 'palette-swatches').Current.ItemStatus
+    }finally{
+        [CapyRowPointer]::Up()
+        $trace.panel_after_release=(Control 'palettes-panel').Current.ItemStatus;$trace.preview_after_release=(Control 'palette-swatches').Current.ItemStatus;$trace.after=@(Swatches)
+        $trace|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run ('palette-drag-'+$Device+'-'+[Guid]::NewGuid().ToString('N')+'.json'))
+    }
 }
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
@@ -109,6 +118,14 @@ try {
     Invoke 'panel-tab-palettes'
     $null=Control 'palettes-panel'
     Wait-Until {@(Swatches).Count -gt 5 -and (Control ('palette-swatch-'+(Swatches)[0])).Current.BoundingRectangle.Y -eq (Control ('palette-swatch-'+(Swatches)[5])).Current.BoundingRectangle.Y} 'Six saved swatches did not render across the first row'
+    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $panel=Native-Bounds 'palettes-panel' $scale
+    $selector=Native-Bounds 'palette-selector' $scale
+    $name=Native-Bounds 'palette-name' $scale
+    $first=Native-Bounds ('palette-swatch-'+(Swatches)[0]) $scale
+    @{theme=$Theme;dpi=96*$scale;panel=$panel;selector=$selector;name=$name;first_swatch=$first}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $run 'palette-geometry.json')
+    if([Math]::Abs(($selector.Left-$panel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($first.Left-$panel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($panel.Right-$name.Right)/$scale-8) -gt 1){throw 'Palette content does not use equal eight-pixel side insets'}
+    if([Math]::Abs($selector.Height/$scale-24) -gt 1 -or [Math]::Abs($name.Height/$scale-24) -gt 1){throw 'Palette footer controls are not compact'}
     Capture 'paint-palettes'
 
     $count=@(Swatches).Count
@@ -118,6 +135,9 @@ try {
     Wait-Until {(Find ('palette-swatch-'+$added)).Current.ItemStatus -eq 'Selected'} 'The added swatch was not selected'
     Invoke 'palette-name'
     $editor=Control 'palette-name-editor' -Type $ControlType::Edit
+    $editBounds=Native-Bounds 'palette-name-editor' $scale
+    if([Math]::Abs($editBounds.Right-$name.Right) -gt 1 -or [Math]::Abs($editBounds.Height/$scale-24) -gt 1){throw 'Palette name editor does not retain the readout trailing edge and compact height'}
+    Capture 'palette-name-editor'
     $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Fixture ink')
     $editor.SetFocus();[CapyRowPointer]::Key([uint16]0x0D)
     Wait-Until {((Panel).swatches|Where-Object {$_.id -eq $added}).name -eq 'Fixture ink'} 'Inline name did not rename the swatch'

@@ -78,7 +78,7 @@ export async function checkCrop({call,evaluate,settle,device=false}) {
   const openCrop=async kind=>{
     if(await tool()==='pick_visible')await invoke('eyedropper');
     if(kind==='mouse')await key('c','KeyC',67);
-    else await choose('edit',['Image','Crop'],kind);
+    else await choose('image',['Crop'],kind);
     await wait(cropping);
   };
   const apply=async kind=>{

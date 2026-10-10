@@ -93,7 +93,7 @@ pub use color::{
     HdrIntensityArc, ColorAction, ColorComponentView, ColorHueStop, ColorPanelLayout, ColorPanelView, ColorReadout, ColorShape, ColorSlot, ColorSpace, ColorState,
     ColorSwatchView, PaintPairView, PaintSwatchView, ColorWheelGeometry, ColorWheelPart, render_color_field, render_hue_guide_in, render_hue_ring_f16_in,
 };
-pub use tool_settings::{ToolActionGroup, ToolSetting, ToolSettingAction};
+pub use tool_settings::{ToolActionGroup, ToolActionGroupView, ToolActionRow, ToolActionRowView, ToolSetting, ToolSettingAction};
 pub use tools::{
     Tool, ToolFamily, ToolGroup, ToolPanels, ToolSetItem, ToolSetView, ToolMemory, brush_catalog,
     brush_categories, brush_categories_localized, brush_catalog_localized, brush_ids, preset,
@@ -166,6 +166,7 @@ pub use layout::{
 pub use layout::{
     DropHint, BRUSH_SETS_MIN_WIDTH, LAYERS_MIN_WIDTH, PANEL_CONTENT_INSET,
     PANEL_CONTROL_SPACING, PANEL_GROUP_SPACING, PANEL_COMPOUND_SPACING, PanelKind, SURFACE_RADIUS, TAB_BAR_HEIGHT,
+    PanelControlMetrics, PANEL_CONTROL_METRICS,
     TILE_GAP, TILE_SIZE,
     TOOL_PANEL_MIN_WIDTH, PANEL_MIN_WIDTH, TabHit, TileLayout, tile_layout, toolbar_content_height,
     toolbar_tile_layout,
@@ -337,6 +338,9 @@ pub struct BrushCategory {
 #[derive(Clone, Debug, Serialize)]
 pub struct UiCatalog {
     pub native_copy: NativeCopy,
+    pub panel_metrics: PanelControlMetrics,
+    pub tool_action_groups: Vec<ToolActionGroupView>,
+    pub tool_action_rows: Vec<ToolActionRowView>,
     pub profile_copy: color_feature_copy::ProfileCopy,
     pub export_copy: color_feature_copy::ExportCopy,
     pub document_color_copy: color_feature_copy::DocumentColorCopy,
@@ -370,6 +374,9 @@ pub fn ui_catalog() -> UiCatalog {
 pub fn ui_catalog_localized(localization: &Localizer) -> UiCatalog {
     UiCatalog {
         native_copy: NativeCopy::new(localization),
+        panel_metrics: PANEL_CONTROL_METRICS,
+        tool_action_groups: ToolActionGroupView::catalog(localization),
+        tool_action_rows: ToolActionRowView::catalog(),
         profile_copy: color_feature_copy::ProfileCopy::new(localization),
         export_copy: color_feature_copy::ExportCopy::new(localization),
         document_color_copy: color_feature_copy::DocumentColorCopy::new(localization),

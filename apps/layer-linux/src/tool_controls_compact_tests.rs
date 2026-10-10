@@ -346,3 +346,234 @@ fn native_tool_controls_compact() {
     input.finish();
     w.window.destroy();
 }
+
+fn float_panel(w: &Rc<Workspace>, panel: Panel, width: i32) {
+    let mut workspace = state(w).workspace;
+    for candidate in [Panel::Properties,Panel::Histogram,Panel::Waveform,Panel::Color,Panel::Sizes,Panel::Adjustments,Panel::Proof,Panel::FilterTypes] {
+        workspace.layout.set_panel_visible(candidate, candidate == panel).unwrap();
+    }
+    workspace.layout.set_panel_visible(panel, true).unwrap();
+    workspace.layout.move_panel([w.surface.width() as f32, w.surface.height() as f32], panel, DockTarget::Float { position: [470., 100.] }).unwrap();
+    let group = workspace.layout.panel_group(panel).unwrap();
+    workspace.layout.fit_tab_groups.retain(|id| *id != group);
+    let floating = workspace.layout.floating.iter_mut().find(|floating| floating.root.id() == group).unwrap();
+    floating.width = width as f32;
+    floating.height = Some(760.);
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
+    pump(180);
+}
+
+fn rounded_corners(node: &gtk::gsk::RenderNode) -> Vec<[f32; 4]> {
+    if let Some(clip) = node.downcast_ref::<gtk::gsk::RoundedClipNode>() {
+        let rect = clip.clip();
+        let mut corners = vec![std::array::from_fn(|index| rect.corner()[index].width())];
+        corners.extend(rounded_corners(&clip.child()));
+        corners
+    } else if let Some(container) = node.downcast_ref::<gtk::gsk::ContainerNode>() {
+        (0..container.n_children()).flat_map(|index| rounded_corners(&container.child(index))).collect()
+    } else if let Some(border) = node.downcast_ref::<gtk::gsk::BorderNode>() {
+        let outline = border.outline();
+        vec![std::array::from_fn(|index| outline.corner()[index].width())]
+    } else if let Some(shadow) = node.downcast_ref::<gtk::gsk::OutsetShadowNode>() {
+        let outline = shadow.outline();
+        vec![std::array::from_fn(|index| outline.corner()[index].width())]
+    } else if let Some(transform) = node.downcast_ref::<gtk::gsk::TransformNode>() {
+        rounded_corners(&transform.child())
+    } else if let Some(shadow) = node.downcast_ref::<gtk::gsk::ShadowNode>() {
+        rounded_corners(&shadow.child())
+    } else if let Some(clip) = node.downcast_ref::<gtk::gsk::ClipNode>() {
+        rounded_corners(&clip.child())
+    } else if let Some(opacity) = node.downcast_ref::<gtk::gsk::OpacityNode>() {
+        rounded_corners(&opacity.child())
+    } else { Vec::new() }
+}
+
+fn contains_mask(node: &gtk::gsk::RenderNode) -> bool {
+    node.is::<gtk::gsk::MaskNode>()
+        || node.downcast_ref::<gtk::gsk::ContainerNode>().is_some_and(|container| (0..container.n_children()).any(|index| contains_mask(&container.child(index))))
+        || node.downcast_ref::<gtk::gsk::OpacityNode>().is_some_and(|opacity| contains_mask(&opacity.child()))
+        || node.downcast_ref::<gtk::gsk::TransformNode>().is_some_and(|transform| contains_mask(&transform.child()))
+        || node.downcast_ref::<gtk::gsk::BlurNode>().is_some_and(|blur| contains_mask(&blur.child()))
+}
+
+#[allow(deprecated)]
+fn shape(widget: &gtk::Widget, radius: f32) -> serde_json::Value {
+    let flags = widget.state_flags();
+    widget.set_state_flags(gtk::StateFlags::PRELIGHT, false);
+    let snapshot = gtk::Snapshot::new();
+    snapshot.render_background(&widget.style_context(), 0., 0., widget.width() as f64, widget.height() as f64);
+    snapshot.render_frame(&widget.style_context(), 0., 0., widget.width() as f64, widget.height() as f64);
+    let node = snapshot.to_node().unwrap_or_else(|| panic!("{} has no inspectable background", widget.widget_name()));
+    widget.set_state_flags(flags, true);
+    let corners = rounded_corners(&node);
+    assert!(corners.iter().flatten().any(|corner| *corner > 0.), "{} background has rounded corners: {node:?}", widget.widget_name());
+    let outer = corners.iter().flatten().copied().fold(0., f32::max);
+    assert!((outer-radius*crate::squircle::CORNER_FIT).abs()<0.05, "{} fitted outer CSS corner {outer}, design radius {radius}", widget.widget_name());
+    let converted = crate::squircle::converted(&node, 1.);
+    if node.is::<gtk::gsk::OutsetShadowNode>() {
+        assert!(!converted.is::<gtk::gsk::OutsetShadowNode>(), "native surface shadow uses the squircle contour");
+    } else {
+        assert!(contains_mask(&converted), "native workspace conversion preserves the squircle contour");
+    }
+    json!({"name": widget.widget_name().to_string(), "size": [widget.width(), widget.height()], "css_corners": corners, "design_radius": radius})
+}
+
+fn capture_panel(w: &Rc<Workspace>, output: &std::path::Path, panel_id: Panel, context: &str, theme: Theme, width: i32, reports: &mut Vec<serde_json::Value>) {
+    pump(150);
+    let panel = w.panel_widget(panel_id);
+    capture_reference(w, output.join(format!("panel-{context}-{theme:?}-{width}.png")).to_str().unwrap(), 1.);
+    assert_eq!(panel.width()+panel.margin_start()+panel.margin_end(), width, "{context}: requested panel width is preserved");
+    assert!(panel.measure(gtk::Orientation::Horizontal, -1).0 <= panel.width(), "{context}: minimum content fits narrow panel");
+    if panel_id == Panel::Properties {
+        let mut child = w.effects.properties.first_child();
+        let mut previous: Option<gtk::graphene::Rect> = None;
+        while let Some(row) = child {
+            if row.is_mapped() {
+                let bounds = row.compute_bounds(&panel).unwrap();
+                if bounds.height() > 0. {
+                    if let Some(before) = previous {
+                        assert_eq!(bounds.y()-before.y()-before.height(),4.,"{context}: Properties title, metadata, toolbar and fields share the peer gap");
+                    }
+                    previous = Some(bounds);
+                }
+            }
+            child = row.next_sibling();
+        }
+    }
+    for widget in widgets(&panel).filter(|widget| widget.is_mapped()) {
+        let bounds = widget.compute_bounds(&panel).unwrap();
+        let mut ancestor = Some(widget.clone());
+        let mut scrollbar = false;
+        while let Some(parent) = ancestor {
+            scrollbar |= parent.is::<gtk::Scrollbar>();
+            if parent == panel { break; }
+            ancestor = parent.parent();
+        }
+        if !scrollbar {
+            assert!(bounds.x() >= -1. && bounds.x()+bounds.width() <= panel.width() as f32+1., "{context}: {} fits panel: {bounds:?}", widget.widget_name());
+        }
+        if widget.is::<gtk::DropDown>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::Switch>() || widget.is::<gtk::SearchEntry>() {
+            assert_eq!(bounds.height(), 24., "{context}: {} is a single compact row", widget.widget_name());
+        }
+        if panel_id == Panel::Proof && (widget.is::<adw::ToggleGroup>() || widget.is::<gtk::ToggleButton>()) {
+            assert_eq!(bounds.height(),24.,"{context}: Proof mode {} CSS node {} uses the compact row",widget.type_().name(),widget.css_name());
+        }
+        if let Ok(number) = widget.clone().downcast::<crate::number_control::NumberControl>() {
+            if number.has_css_class("number-panel") {
+                let slider = descendant::<gtk::Scale>(&number).is_some_and(|scale| scale.is_mapped());
+                assert_eq!(bounds.height(), if slider {36.} else {24.}, "{context}: {} retains approved number height", number.widget_name());
+            }
+            if let Some(title) = find_css(number.upcast_ref(), "number-title").filter(|title| title.is_mapped()) {
+                assert_eq!(title.compute_bounds(&panel).unwrap().x(), bounds.x(), "{context}: numeric caption aligns with its row");
+            }
+            if let Some(readout) = find_css(number.upcast_ref(), "number-value").filter(|readout| readout.is_mapped()) {
+                let padding = padding(&readout);
+                assert_eq!([padding[3],padding[1]], [6,6], "{context}: numeric readout shares compact padding");
+            }
+            if let Some(next) = number.next_sibling().filter(|next| next.is_mapped() && next.is::<crate::number_control::NumberControl>()) {
+                assert_eq!(next.compute_bounds(&panel).unwrap().y()-bounds.y()-bounds.height(), 4., "{context}: numeric peers are four pixels apart");
+            }
+        }
+    }
+    if matches!(panel_id, Panel::Histogram | Panel::Waveform) {
+        let prefix = if panel_id == Panel::Histogram {"histogram"} else {"waveform"};
+        assert_gap(&panel, &format!("{prefix}-source"), &format!("{prefix}-channel"), 4., true);
+        let source = named::<gtk::Widget>(&panel, &format!("{prefix}-source")).compute_bounds(&panel).unwrap();
+        assert_eq!([source.x(),source.y()], [8.,8.], "chart controls respect the panel inset");
+    }
+    if context == "layer-properties" {
+        let blend = named::<gtk::DropDown>(&panel, "property-blend").compute_bounds(&panel).unwrap();
+        let color = named::<gtk::DropDown>(&panel, "property-color_mode").compute_bounds(&panel).unwrap();
+        assert_eq!([blend.x(),blend.x()+blend.width()], [color.x(),color.x()+color.width()], "layer property choices share both field edges");
+    }
+    if context == "proof-print" {
+        let profile = named::<gtk::Widget>(&panel,"proof-profile-choose").compute_bounds(&panel).unwrap();
+        for name in ["proof-simulation","proof-intent"] {
+            let field = named::<gtk::Widget>(&panel,name);
+            let bounds = field.compute_bounds(&panel).unwrap();
+            assert_eq!(bounds.x(),profile.x(),"print proof fields share the caption column");
+            let label = field.parent().unwrap().first_child().unwrap().compute_bounds(&panel).unwrap();
+            assert_eq!(bounds.x()-label.x()-label.width(),4.,"print proof caption and field are peers");
+        }
+        assert_gap(&panel,"proof-profile-choose","proof-simulation",4.,false);
+        assert_gap(&panel,"proof-simulation","proof-intent",4.,false);
+        assert_gap(&panel,"proof-intent","proof-bpc",4.,false);
+        assert_gap(&panel,"proof-bpc","proof-gamut-warning",4.,false);
+    }
+    let mut shapes = Vec::new();
+    if let Some(button) = find_named(&panel, "gradient-reverse").filter(|button| button.is_mapped()) {
+        let bounds = button.compute_bounds(&panel).unwrap();
+        assert_eq!([bounds.width(),bounds.height()], [24.,24.], "gradient action is a small square control");
+        shapes.push(shape(&button, 12.));
+    }
+    let mut ancestor = panel.parent();
+    while let Some(widget) = ancestor {
+        if widget.has_css_class("dock-panel") { shapes.push(shape(&widget, 18.)); break; }
+        ancestor = widget.parent();
+    }
+    let controls: Vec<_> = widgets(&panel).filter(|widget| widget.is_mapped()).filter_map(|widget| {
+        let bounds = widget.compute_bounds(&panel)?;
+        Some(json!({"name": widget.widget_name().to_string(), "type": widget.type_().name(), "css_node":widget.css_name().to_string(), "text": widget.downcast_ref::<gtk::Label>().map(|label|label.text().to_string()), "x":bounds.x(),"y":bounds.y(),"width":bounds.width(),"height":bounds.height(),"padding":padding(&widget)}))
+    }).collect();
+    reports.push(json!({"context":context,"panel":format!("{panel_id:?}"),"theme":format!("{theme:?}"),"requested_width":width,"controls":controls,"shapes":shapes}));
+    std::fs::write(output.join("panels.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+}
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU: real reusable workspace panels"]
+fn native_workspace_panel_controls() {
+    let app = native_test_app("art.capycanvas.WorkspacePanelControls");
+    let w = fixture_workspace(&app);
+    w.window.maximize();w.window.present();
+    super::new_photo::ready(&w);
+    let output = std::path::PathBuf::from(std::env::var_os("LAYER_TEST_ARTIFACTS").expect("panel capture directory"));
+    std::fs::create_dir_all(&output).unwrap();
+    let mut input = RemoteInput::new().settle_ms(60).timeout_secs(30);
+    input.ready();
+    let mut reports = Vec::new();
+    for theme in [Theme::Light,Theme::Dark] {
+        w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        for width in [242,320] {
+            float_panel(&w,Panel::Properties,width);
+            capture_panel(&w,&output,Panel::Properties,"layer-properties",theme,width,&mut reports);
+            for effect in ["kaleidoscope","levels","curves","color_lookup","gradient_map","hue_saturation"] {
+                w.dispatch(UiAction::Effect {action:EffectAction::Insert {effect:effect.into()}});
+                super::new_photo::ready(&w);
+                float_panel(&w,Panel::Properties,width);
+                if effect == "kaleidoscope" {
+                    let number = named::<crate::number_control::NumberControl>(&w.panel_widget(Panel::Properties), "property-segments");
+                    let spin = descendant::<gtk::SpinButton>(&number).expect("count property has a native spin field");
+                    spin.set_text("2*3");spin.update();spin.spin(gtk::SpinType::StepForward, 1.);pump(100);
+                    assert_eq!(number.value(), 7.);
+                    assert!(state(&w).layer_properties.controls.iter().any(|control| control.key == "segments" && control.value == layer_core::EffectValue::Number(7.)));
+                }
+                capture_panel(&w,&output,Panel::Properties,effect,theme,width,&mut reports);
+                w.dispatch(UiAction::Invoke {command:CommandId::DeleteLayer});
+                super::new_photo::ready(&w);
+            }
+            for (panel,context) in [(Panel::Histogram,"histogram"),(Panel::Waveform,"waveform"),(Panel::Color,"color"),(Panel::Sizes,"sizes"),(Panel::Adjustments,"adjustments"),(Panel::Proof,"proof"),(Panel::FilterTypes,"filters")] {
+                float_panel(&w,panel,width);
+                capture_panel(&w,&output,panel,context,theme,width,&mut reports);
+                if panel == Panel::Proof {
+                    let mode = named::<adw::ToggleGroup>(&w.panel_widget(panel),"proof-mode");
+                    mode.set_active_name(Some("print"));
+                    capture_panel(&w,&output,panel,"proof-print",theme,width,&mut reports);
+                    mode.set_active_name(Some("off"));
+                }
+                if panel == Panel::Adjustments {
+                    let root = w.panel_widget(panel);
+                    let header = find_css(&root,"filter-picker-header").unwrap();
+                    let search = header.last_child().unwrap();
+                    input.click(screen_point(&search,&w.window,[0.5,0.5]));
+                    for key in "curves".chars() { input.key(key as u32); }
+                    assert_eq!(state(&w).filter_picker.search.as_deref(),Some("curves"));
+                    capture_panel(&w,&output,panel,"filters-search",theme,width,&mut reports);
+                    input.key(0xff1b);
+                    assert!(state(&w).filter_picker.search.is_none());
+                }
+            }
+        }
+    }
+    input.finish();
+    w.window.destroy();
+}

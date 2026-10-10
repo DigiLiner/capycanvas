@@ -81,7 +81,8 @@ mod imp {
             let textures = self.textures.borrow();
             let (_, textures) = textures.as_ref().unwrap();
             let bounds = gtk::graphene::Rect::new(inset, 0., width - 2.*inset, height - bottom);
-            snapshot.push_clip(&bounds);
+            snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::from_rect(bounds,
+                layer_ui::PANEL_CONTROL_METRICS.control_radius * crate::squircle::CORNER_FIT));
             snapshot.append_texture(&textures[0], &bounds);
             let cell = layer_ui::TRANSPARENCY_CHECKER_CELL;
             for y in 0..((height - bottom) / cell).ceil() as i32 {

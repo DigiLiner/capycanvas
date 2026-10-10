@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
@@ -212,13 +213,14 @@ internal class ProofController(private val host: CanvasHost) {
     }
     LaunchedEffect(mode){if(mode=="sdr")controller.ensureTexture()}
     BoxWithConstraints(modifier) {
+        val contentWidth=maxWidth-panelMetrics().inset*2
         val dialSide=minOf(maxWidth-16.dp,maxHeight-52.dp).coerceAtLeast(128.dp)
         Column(Modifier.fillMaxWidth().then(if(scrollable&&constraints.hasBoundedHeight)Modifier.verticalScroll(rememberScrollState())else Modifier)
-            .onSizeChanged{onHeight(it.height/density)}.padding(horizontal=8.dp,vertical=6.dp),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(2.dp)) {
+            .onSizeChanged{onHeight(it.height/density)}.padding(panelMetrics().inset),verticalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
                 (listOf("off" to copy.getString("mode_off"))+(if(model?.optBoolean("hdr")==true)listOf("sdr" to "SDR")else emptyList())+listOf("print" to copy.getString("mode_print"))).forEach{(value,label)->
                     val selected=mode==value
-                    Box(Modifier.weight(1f).heightIn(min=34.dp).clip(ControlShape)
+                    Box(Modifier.weight(1f).heightIn(min=panelMetrics().height).clip(ControlShape)
                         .background(if(selected)colors.text.copy(alpha=.12f)else Color.Transparent)
                         .selectable(selected,enabled=model!=null&&!controller.committing,role=Role.RadioButton){controller.cancel();controller.action(obj("type" to "mode","mode" to value))}
                         .testTag("proof-mode-$value"),contentAlignment=Alignment.Center){Text(label,color=colors.text)}
@@ -226,12 +228,15 @@ internal class ProofController(private val host: CanvasHost) {
             }
             if(mode=="sdr"&&model!=null)Box(Modifier.width(dialSide).align(Alignment.CenterHorizontally)){ProofSdrControls(host,model,controller.texture,controller::action)}
             if(mode=="print"&&model!=null&&settings!=null) {
-                for(control in model.getJSONArray("print_controls").objects()) {
+                val controls=model.getJSONArray("print_controls").objects()
+                val labelWidth=panelLabelWidth(controls.filter{it.getString("id") in listOf("profile","simulation","intent")}.map{it.getString("label")})
+                    .coerceAtMost(contentWidth*.45f)
+                for(control in controls) {
                     val label=control.getString("label")
                     when(control.getString("id")) {
-                        "profile"->ProofOptionRow(label){PanelChoiceButton(settings.objectOrNull("profile")?.let{profileCaption(host,it)}?:profiles.getString("choose"),Modifier.testTag("proof-profile"),!controller.committing){picker=true}}
-                        "simulation"->ProofChoice(label,model.getJSONArray("simulations").objects().map{it.getString("value") to it.getString("label")},settings.getString("simulation"),!controller.committing){controller.edit("simulation",it)}
-                        "intent"->ProofChoice(label,model.getJSONArray("intents").objects().map{it.getString("value") to it.getString("label")},settings.getString("intent"),!controller.committing){controller.edit("intent",it)}
+                        "profile"->ProofOptionRow(label,labelWidth){PanelChoiceButton(settings.objectOrNull("profile")?.let{profileCaption(host,it)}?:profiles.getString("choose"),Modifier.testTag("proof-profile"),!controller.committing){picker=true}}
+                        "simulation"->ProofChoice(label,labelWidth,model.getJSONArray("simulations").objects().map{it.getString("value") to it.getString("label")},settings.getString("simulation"),!controller.committing){controller.edit("simulation",it)}
+                        "intent"->ProofChoice(label,labelWidth,model.getJSONArray("intents").objects().map{it.getString("value") to it.getString("label")},settings.getString("intent"),!controller.committing){controller.edit("intent",it)}
                         "black_point_compensation"->ProofCheck(label,settings.getBoolean("bpc")&&settings.getString("intent")!="AbsoluteColorimetric",!controller.committing&&settings.getString("intent")!="AbsoluteColorimetric"){controller.edit("bpc",it)}
                         "gamut_warning"->ProofCheck(label,host.snapshot?.objectOrNull("state")?.optBoolean("gamut_warning")==true,model.objectOrNull("document_profile")!=null){host.invoke("gamut_warning")}
                     }
@@ -257,15 +262,15 @@ internal class ProofController(private val host: CanvasHost) {
     if(library)ProfileLibraryDialog(host,{library=false;scope.launch{rawSaved=ProfileStore.list(context)}})
 }
 
-@Composable private fun ProofOptionRow(label:String,content:@Composable ()->Unit) {
-    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-        Text(label,Modifier.width(72.dp),style=MaterialTheme.typography.bodyMedium)
+@Composable private fun ProofOptionRow(label:String,labelWidth:Dp,content:@Composable ()->Unit) {
+    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
+        Text(label,Modifier.width(labelWidth),style=MaterialTheme.typography.bodyMedium)
         Box(Modifier.weight(1f)){content()}
     }
 }
-@Composable private fun ProofChoice(label:String,choices:List<Pair<String,String>>,value:String,enabled:Boolean,onChange:(String)->Unit) {
+@Composable private fun ProofChoice(label:String,labelWidth:Dp,choices:List<Pair<String,String>>,value:String,enabled:Boolean,onChange:(String)->Unit) {
     var open by remember{mutableStateOf(false)}
-    ProofOptionRow(label){Box {
+    ProofOptionRow(label,labelWidth){Box {
         PanelChoiceButton(choices.firstOrNull{it.first==value}?.second?:value,Modifier.testTag("color-choice-$label"),enabled){open=true}
         DropdownMenu(open&&enabled,{open=false}){choices.forEach{(id,title)->DropdownMenuItem(text={Text(title)},onClick={open=false;onChange(id)})}}
     }}
@@ -273,7 +278,7 @@ internal class ProofController(private val host: CanvasHost) {
 
 @Composable private fun ProofCheck(label:String,checked:Boolean,enabled:Boolean,onChange:(Boolean)->Unit) {
     Row(Modifier.fillMaxWidth().toggleable(checked,enabled=enabled,role=Role.Checkbox,onValueChange=onChange),
-        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+        verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(panelMetrics().spacing)) {
         EditorCheck(checked,label,Modifier.clearAndSetSemantics{},enabled,onChange)
         Text(label,color=LocalPalette.current.text.copy(alpha=if(enabled)1f else .5f))
     }

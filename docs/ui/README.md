@@ -119,8 +119,10 @@ those habits while keeping the underlying commands consistent. These workflows
 are arrangements of a common editor rather than separate applications. Tool
 Settings follows the active tool, and Properties exposes the relevant effect
 parameters. Shared Properties copy identifies the layer name and localized type.
-GTK Tool Settings uses 24-pixel dropdowns, checkboxes, action buttons and joined
-choices, with 16-pixel icons. Numeric sliders keep their 36-pixel rows; tonal
+Workspace panels on GTK, Web, Android, Windows, macOS and iPadOS use 24-unit
+dropdowns, checkboxes, action buttons and joined choices, with 16-unit icons.
+These measurements are logical pixels, dp on Android. Numeric sliders keep their
+36-unit base rows; tonal
 intervals, transform anchors and gradient stop strips keep their specialized
 layouts. Independent controls have 4-pixel gaps horizontally and vertically,
 with 6-pixel gaps between logical groups and one 8-pixel panel inset.
@@ -130,8 +132,11 @@ together. Eyedropper labels sit beside their Source and Sample size dropdowns.
 
 ### Compact panel spacing
 
-The shared panel spacing roles apply on both axes. GTK Tool Settings uses these
-roles in docks, floating panels and drawers:
+The shared panel spacing roles apply on both axes. Tool Settings, Properties,
+gradient and curve editors, graph toolbars, Proof, palette controls, Navigator controls and Layers action
+rows use these roles in docks, floating panels and drawers. `UiCatalog.panel_metrics`
+publishes the measurements from `PANEL_CONTROL_METRICS`; native hosts present
+them without changing the shared roles:
 
 | Role | Gap | Use |
 | --- | --- | --- |
@@ -159,7 +164,10 @@ belong to one group, as do Gradient shape, stop editing and opacity.
 
 Toolbar tiles keep their shared 2-pixel or 4-pixel gaps and 36-pixel base size.
 Preferences and dialogs keep their larger section spacing. These contexts do not
-set the density of compact Tool Settings forms.
+set the density of compact workspace forms. Single-line controls have a 24-unit
+base height and may grow for system text scaling; icon-only actions stay square.
+Ordinary numeric readouts and editors use the same 24-unit height. Control
+surfaces follow the [12-unit squircle rule](squircle-corners.md#radii).
 
 ### Properties
 
@@ -179,7 +187,7 @@ layer type below it. **Add Filter** sits at the right of that second row with an
 **fx+** icon, its text label and a menu arrow. The Layers footer uses the same icon.
 Its Add Filter button shares the other footer buttons' theme color and flat style,
 with a transparent resting background.
-GTK Properties dropdowns and their adjacent action buttons share the compact
+Properties dropdowns and their adjacent action buttons share the compact
 24-pixel panel height and 6-pixel horizontal padding, in docks and drawers.
 **Add Filter** is also available in each eligible layer's context menu. It opens
 the menu bar's filter categories and

@@ -40,7 +40,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   if (panel) root.classList.add('number-panel');
   const buttonValue = ranged || valueOnly;
   if (ranged) { if (panel) track.append(slider); else track.append(minus, slider, plus); root.append(track); }
-  else { valueBox.classList.add("number-spin"); valueBox.append(minus, plus); }
+  else { valueBox.classList.add("number-spin"); valueBox.append(minus, plus); entry.size=Math.max(3,...(widthSamples||[control.min,control.max].map(value=>resolve({control,value,operation:{type:"format"}}).text)).map(text=>text.length)); }
   if (inline) {
     root.classList.add("number-inline"); root.title = label;
     labels.remove(); minus.remove(); plus.remove();

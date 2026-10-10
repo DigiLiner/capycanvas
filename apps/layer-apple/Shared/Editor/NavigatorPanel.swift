@@ -11,13 +11,13 @@ struct NavigatorPanel: View {
         return (try? JSON.decode(String(cString: pointer)))?["overview_aspect"].number ?? 1
     }
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: store.panelMetrics.spacing) {
             NavigatorDrawing(store: store)
                 .frame(minHeight: 0, idealHeight: 164, maxHeight: .infinity)
             NavigationButtons(store: store, prefix: "navigator")
         }.padding(8)
             .modifier(PanelBodyMeasurement(panel: "navigator", kind: .scroll,
-                naturalHeight: { [aspect] width in max(0, width - 16) * aspect + 2 + 32 + 16 }))
+                naturalHeight: { [aspect] width in max(0, width - 16) * aspect + 4 + 24 + 16 }))
     }
 }
 
@@ -25,12 +25,12 @@ struct NavigationButtons: View {
     @ObservedObject var store: EditorStore
     let prefix: String
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: store.panelMetrics.spacing) {
             ForEach(store.catalog["navigator_commands"].array.map(\.string), id: \.self) { id in
                 let command = store.command(id)
                 IconTile(icon: command["icon"].string, label: command["tooltip"].string,
                     selected: command["selected"].bool, enabled: command["enabled"].bool) { store.invoke(id) }
-                    .frame(height: 32).accessibilityIdentifier(prefix + "-" + id)
+                    .frame(height: store.panelMetrics.height).accessibilityIdentifier(prefix + "-" + id)
             }
         }
     }
@@ -89,7 +89,7 @@ struct RendererStatsPanel: View {
     @State private var viewer = UUID()
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: store.panelMetrics.spacing) {
             ForEach(stats.view["rows"].array.indices, id: \.self) { index in
                 let row = stats.view["rows"][index]
                 HStack(spacing: 0) {
@@ -133,7 +133,7 @@ private struct RecordingButton: View {
     @ObservedObject var recording: StrokeRecording
     var body: some View {
         Button { recording.activate() } label: {
-            Text(recording.label).fontWeight(.bold).frame(maxWidth: .infinity, minHeight: 32).contentShape(Rectangle())
+            Text(recording.label).fontWeight(.bold).frame(maxWidth: .infinity, minHeight: 24).contentShape(Rectangle())
         }.buttonStyle(EditorControlButtonStyle(background: Color.primary.opacity(0.05))).disabled(recording.busy)
             .help(nativeCopy["color"]["record_tablet"].string).accessibilityIdentifier("stroke-recording")
     }

@@ -1,24 +1,19 @@
 import SwiftUI
 
-/// Match the web flex row: shrink content proportionally, excluding the select's
-/// 20 points of CSS padding, then cap the select at 60% of the row.
 struct PropertyChoiceRow: Layout {
+    var labelWidth: CGFloat? = nil
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let ideal = subviews.reduce(CGFloat(6)) { $0 + $1.sizeThatFits(.unspecified).width }
-        let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? ideal
-        return CGSize(width: width, height: 34)
+        let natural = subviews.reduce(CGFloat(4)) { $0 + $1.sizeThatFits(.unspecified).width }
+        let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil } ?? natural
+        return CGSize(width: width, height: max(24, subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0))
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 2 else { return }
-        let label = subviews[0].sizeThatFits(.unspecified).width
-        let ideal = subviews[1].sizeThatFits(.unspecified).width
-        let content = max(0, ideal - 20)
-        let shrink = min(1, max(0, bounds.width - 6 - 20) / max(1, label + content))
-        let choice = min(bounds.width * 0.6, content * shrink + 20)
-        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY + 1), anchor: .leading,
-            proposal: ProposedViewSize(width: max(0, bounds.width - choice - 6), height: bounds.height))
-        subviews[1].place(at: CGPoint(x: bounds.maxX - choice, y: bounds.minY), anchor: .topLeading,
-            proposal: ProposedViewSize(width: choice, height: bounds.height))
+        let label = min(bounds.width * 0.45, labelWidth ?? subviews[0].sizeThatFits(.unspecified).width)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+            proposal: ProposedViewSize(width: label, height: bounds.height))
+        subviews[1].place(at: CGPoint(x: bounds.minX + label + 4, y: bounds.minY), anchor: .topLeading,
+            proposal: ProposedViewSize(width: max(0, bounds.width - label - 4), height: bounds.height))
     }
 }
 
@@ -42,7 +37,7 @@ struct EditorChoice: View {
                 Text(options.indices.contains(selected) ? options[selected] : label).lineLimit(1)
             }.fontWeight(compact || bold ? .bold : .regular).clipped()
                 .modifier(ChoiceMeasurement(id: identifier + ":text"))
-                .padding(.leading, compact ? 10 : 14).padding(.trailing, compact ? 22 : 26)
+                .padding(.leading, compact ? 6 : 14).padding(.trailing, compact ? 22 : 26)
                 .frame(height: compact ? 24 : 34)
                 .overlay(alignment: .trailing) {
                     ChoiceArrow().stroke(style: StrokeStyle(lineWidth: 2, lineCap: .butt, lineJoin: .miter))

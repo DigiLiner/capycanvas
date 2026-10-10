@@ -1,7 +1,10 @@
 import AppKit
 import SwiftUI
 
-@MainActor private final class NumberGeometry { var frames: [String: CGRect] = [:] }
+@MainActor private final class NumberGeometry {
+    var frames: [String: CGRect] = [:]
+    var choices: [String: CGRect] = [:]
+}
 
 /// Real shared NumberControls and Rust formatting, on invisible AppKit surfaces.
 /// This covers both Apple presets, not UIKit pixels or physical input delivery.
@@ -63,6 +66,7 @@ import SwiftUI
                         }.frame(width: widths[column])
                     }
                 }.padding(6).frame(width: width, height: height, alignment: .topLeading)
+                    .environment(\.compactPanelControls, true)
                     .coordinateSpace(name: "number-capture").environment(\.measureNumberControls, true)
                     .onPreferenceChange(NumberControlFrames.self) { geometry.frames = $0 }
                     .environment(\.colorScheme, theme == "dark" ? .dark : .light)
@@ -99,6 +103,15 @@ import SwiftUI
                         precondition(abs(track.maxY - root.maxY) < 0.5)
                         precondition(geometry.frames[key + ":minus"] == nil && geometry.frames[key + ":plus"] == nil)
                     }
+                    for row in [5, 6, 7, 8] {
+                        let key = "\(column)-\(row)", root = geometry.frames[key + ":root"]!
+                        let entry = geometry.frames[key + ":entry"]!
+                        let minus = geometry.frames[key + ":minus"]!, plus = geometry.frames[key + ":plus"]!
+                        precondition(abs(root.height - 24) < 0.5 && abs(entry.height - 24) < 0.5)
+                        precondition(abs(minus.width - 24) < 0.5 && abs(minus.height - 24) < 0.5)
+                        precondition(abs(plus.width - 24) < 0.5 && abs(plus.height - 24) < 0.5)
+                        precondition(abs(entry.maxX - minus.minX) < 0.5 && abs(minus.maxX - plus.minX) < 0.5)
+                    }
                 }
                 for column in widths.indices {
                     precondition(geometry.frames["\(column)-2:value"]!.width > geometry.frames["\(column)-0:value"]!.width,
@@ -106,8 +119,65 @@ import SwiftUI
                 }
                 precondition(store.failure == nil, store.failure ?? "")
                 print("Captured 30 numeric controls: \(name)")
+                try await checkPanelGeometry(store, directory: directory, platform: platform, theme: theme)
             }
             try await checkEditing(store)
+        }
+    }
+
+    @MainActor private static func checkPanelGeometry(_ store: EditorStore, directory: URL, platform: UInt32, theme: String) async throws {
+        try await store.apply(["type": "invoke", "command": "pencil"])
+        for panelID in ["tool_settings", "properties"] {
+            for width: CGFloat in [160, 226, 320] {
+                let geometry = NumberGeometry(), palette = EditorPalette(source: store.state["palette"])
+                let panel = JSON(["id": panelID, "controls": [["control": panelID, "visible_in_panel": true]]])
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 700),
+                    styleMask: [.borderless], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                defer { window.contentView = nil; window.close() }
+                window.appearance = NSAppearance(named: theme == "dark" ? .darkAqua : .aqua)
+                let content = PanelControls(store: store, panel: panel, scrollable: false)
+                    .frame(width: width, height: 700, alignment: .topLeading)
+                    .coordinateSpace(name: "number-capture").environment(\.measureNumberControls, true)
+                    .onPreferenceChange(NumberControlFrames.self) { geometry.frames = $0 }
+                    .coordinateSpace(name: "choice-capture").environment(\.measureChoices, true)
+                    .onPreferenceChange(ChoiceFrames.self) { geometry.choices = $0 }
+                    .environment(\.colorScheme, theme == "dark" ? .dark : .light)
+                    .environment(\.controlActiveState, .active)
+                    .font(.system(size: store.catalog["text_size_pt"].number * 4 / 3))
+                    .foregroundStyle(palette["text"]).tint(palette.accent).background(palette["panel"])
+                let host = NSHostingView(rootView: content); window.contentView = host
+                for _ in 0..<40 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(5)) }
+                let roots = geometry.frames.filter { $0.key.hasSuffix(":root") }.sorted { $0.value.minY < $1.value.minY }
+                precondition(!roots.isEmpty, "Mounted \(panelID) must expose numeric controls")
+                for (_, bounds) in roots {
+                    precondition(abs(bounds.minX - 8) < 0.5 && abs(bounds.maxX - width + 8) < 0.5,
+                        "\(panelID) must share the eight-point content rails: \(bounds)")
+                }
+                for pair in zip(roots, roots.dropFirst()) {
+                    precondition(abs(pair.1.value.minY - pair.0.value.maxY - 4) < 0.5,
+                        "\(panelID) independent numeric rows must have a four-point gap")
+                }
+                if panelID == "properties" {
+                    let choice = geometry.choices["property-blend"]!, text = geometry.choices["property-blend:text"]!
+                    precondition(abs(choice.height - 24) < 0.5 && abs(choice.maxX - width + 8) < 0.5,
+                        "Property choices must share compact height and the right content rail")
+                    precondition(abs(text.minX - choice.minX - 6) < 0.5,
+                        "Property choice text must use six-point field padding")
+                }
+                guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+                    throw HostFailure(message: "No mounted panel capture")
+                }
+                window.appearance?.performAsCurrentDrawingAppearance { host.cacheDisplay(in: host.bounds, to: bitmap) }
+                let name = "panel-\(panelID)-\(platform)-\(theme)-\(Int(width))"
+                try bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent(name + ".png"))
+                try JSON(["panel": panelID, "platform": platform, "theme": theme, "width": width,
+                    "frames": geometry.frames.mapValues {
+                        ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] },
+                    "choices": geometry.choices.mapValues {
+                        ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] }])
+                    .encoded().write(to: directory.appendingPathComponent(name + ".json"), atomically: true, encoding: .utf8)
+            }
         }
     }
 

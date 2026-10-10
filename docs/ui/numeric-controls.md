@@ -6,7 +6,7 @@ Every host shares the same numeric policy and editable values.
 
 - Small-range integers: label left, a conventional spin control right. GTK
   uses `GtkSpinButton` in panels and `AdwSpinRow` in Preferences.
-  GTK Tool Settings spin controls are 24 pixels high, with compact step buttons
+  Compact workspace spin controls have a 24-unit base height, with compact step buttons
   and a value field sized from the shared formatted range and units.
 - Wider integers and continuous values: label left and a plain, tappable value
   right; a native slider underneath. Tapping the value enters text editing.
@@ -21,24 +21,26 @@ Every host shares the same numeric policy and editable values.
   Android uses 48 dp settings targets; GTK and web use 32-pixel settings tracks.
 - Titles stay on one line with ellipsis (desktop/web hover shows the full name).
   Values align right. Settings values center against the full title/description block.
-  Stacked panel sliders sit just below the text, within a 36-pixel control.
+  Stacked panel sliders sit just below the text, within a control with a 36-unit base height.
   The 4-pixel track has a symmetric 16-pixel hit area starting just below the
   visible bottom of the label. Its left inset is 36 pixels; its fixed right
   inset reserves room for ordinary values and units: 76 pixels. Panels have no
   step buttons. Panel values and text editors align with the bottom of the
-  slider hit area.
+  slider hit area. Windows grows the caption and row for system text scaling,
+  preserving the 16-unit track allocation and bottom-aligned editor.
   GTK panel readouts align shaped text within their allocated line width so
   units stay anchored when the digit count changes.
-  The panel editor is 68 pixels wide and 24 pixels high, keeping an 8-pixel gap
+  The panel editor is 68 pixels wide with a 24-unit base height, keeping an 8-pixel gap
   from the slider hit area. Readouts use their text's natural width and retain
   the same right inset. Long expressions scroll within the field.
   Double-clicking a tool setting or property label restores its shared default.
-  GTK Tool Settings uses the [panel spacing roles](README.md#compact-panel-spacing):
+  Workspace panels use the [panel spacing roles](README.md#compact-panel-spacing):
   adjacent independent controls have a 4-pixel gap below that hit area; the
-  compound transform X/Y fields keep a 2-pixel gap. Properties retains its
-  2-pixel gap between adjacent numeric controls.
-  Ordinary size, export and preview dialogs and brush value popovers use this
-  same presentation. Layers opacity, toolbar tiles, view readouts, Curves point
+  compound transform X/Y fields keep a 2-pixel gap. Properties uses the same
+  4-pixel gaps between independent numeric controls.
+  Brush value popovers use this same presentation. Native size, export and
+  preview dialogs may retain their larger platform fields within the slider layout.
+  Layers opacity, toolbar tiles, view readouts, Curves point
   coordinates, tonal ranges and color controls keep their specialized layouts.
   GTK, Web, Android, Windows, macOS and iPadOS share this panel geometry
   (logical pixels, dp on Android). Preferences retain step buttons and larger
@@ -50,11 +52,9 @@ Every host shares the same numeric policy and editable values.
   inset. Text editing uses a rounded field; panel editors reserve their full
   width while editing, and other fields size to the value. Descriptions remain
   wrapped and can increase row height.
-  GTK Tool Settings labels align with the panel's 8-pixel content inset;
-  readouts and text editors use 6-pixel horizontal padding, including inline
-  fields. Standard panel labels elsewhere keep their 6-pixel left inset matching
-  the value's right inset; settings preserve the common label alignment with
-  nonnumeric rows.
+  Workspace labels align with the panel's 8-unit content inset, without another
+  label indent. Readouts and text editors use 6-unit horizontal padding, including
+  inline fields; settings preserve the common label alignment with nonnumeric rows.
 - Text commits on Enter/IME Done or focus loss. Escape cancels. Invalid
   expressions keep the previous value; typed finite results clamp to hard
   bounds. Refused text stays in the editor with its localized error. Pending
