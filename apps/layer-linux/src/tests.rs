@@ -5474,8 +5474,9 @@ fn native_zen_behaviors() {
             #[weak] w,
             move |_| {
                 let zen = state(&w).workspace.zen_mode;
-                let button = if zen { w.zen_capy.is_visible().then_some(&w.zen_capy) } else { normal.as_ref() };
+                let button = if w.zen_capy.is_visible() { Some(&w.zen_capy) } else { normal.as_ref().filter(|_| !w.header.root.has_css_class("zen-hidden")) };
                 if let Some(button) = button {
+                    assert!(button.parent().is_none_or(|parent| !parent.has_css_class("in-bar")), "Capy owns its surface throughout visibility changes");
                     let alpha = controls.iter().map(rendered_opacity).fold(0., f32::max);
                     frames.borrow_mut().push((zen, capy_rects(button, &w), rendered_opacity(button), alpha));
                 }

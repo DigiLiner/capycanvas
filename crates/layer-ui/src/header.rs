@@ -172,9 +172,6 @@ impl HeaderItem {
             Self::Menu | Self::Settings | Self::Fullscreen | Self::Tool { .. }
         )
     }
-    pub fn has_bar(self) -> bool {
-        self.joins_bar() || self == Self::Capy
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -765,7 +762,6 @@ impl HeaderLayout {
         let gap = 2. * item_gap;
         let bar_gap = self.size.gap();
         let joins = |e: &HeaderEntry| !editing && e.item.joins_bar();
-        let barred = |e: &HeaderEntry| !editing && e.item.has_bar();
         let spacing = |a: &HeaderEntry, b: &HeaderEntry| {
             if joins(a) && joins(b) { bar_gap } else { item_gap }
         };
@@ -899,7 +895,7 @@ impl HeaderLayout {
                     result.bars.extend(bar.take());
                 }
                 previous = Some(entry);
-                if barred(entry) {
+                if joins(entry) {
                     bar.get_or_insert_default().items.push(entry.id);
                 }
                 if !joins(entry) {
@@ -1087,6 +1083,7 @@ mod tests {
                                 for documents in [1, 3] {
                                     let geometry = header.resolve_documents(width, insets, &[], false, documents);
                                     assert_eq!(geometry.size, size);
+                                    assert!(geometry.bars.iter().all(|bar| !bar.items.contains(&capy)), "Capy's surface must not belong to fading chrome: {platform:?}/{preset:?}/{size:?}/{zone:?}/{width}/{documents}");
                                     if let Some(item) = geometry.items.iter().find(|item| item.id == capy) {
                                         assert_eq!(geometry.zen_button, item.bounds, "{platform:?}/{preset:?}/{size:?}/{zone:?}/{width}/{documents}");
                                     } else {
@@ -1454,7 +1451,6 @@ mod tests {
         assert_eq!(
             g.bars.iter().map(|b| b.items.clone()).collect::<Vec<_>>(),
             vec![
-                vec![id(0, 0)],
                 vec![id(0, 1), id(0, 2)],
                 vec![id(0, 4)],
                 vec![id(2, 0), id(2, 1)],
@@ -1462,7 +1458,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            g.bars[1].bounds.height, TILE_SIZE,
+            g.bars[0].bounds.height, TILE_SIZE,
             "matches a small toolbar tile"
         );
         assert_eq!(

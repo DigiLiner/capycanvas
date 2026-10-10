@@ -310,13 +310,15 @@ void CanvasWindow::Resize() {
     PublishGlass();
 }
 void CanvasWindow::PublishGlass(){
-    if(closing||closed||!panel||!workspace)return;
-    if(header)header->SetDrawerSources(workspace->DrawerSources());
-    Windows::Data::Json::JsonArray connections;auto regions=workspace->Glass(panel,connections);
-    if(header)header->AppendGlass(regions,panel);
+    dispatcher.TryEnqueue([weak=weak_from_this()]{
+    auto self=weak.lock();if(!self||self->closing||self->closed||!self->panel||!self->workspace)return;
+    if(self->header)self->header->SetDrawerSources(self->workspace->DrawerSources());
+    Windows::Data::Json::JsonArray connections;auto regions=self->workspace->Glass(self->panel,connections);
+    if(self->header)self->header->AppendGlass(regions,self->panel);
     Windows::Data::Json::JsonObject request;request.Insert(L"regions",regions);request.Insert(L"connections",connections);
     auto json=to_string(request.Stringify());
-    if(json==lastGlass)return;lastGlass=json;Send(json,CanvasCommandKind::Glass);
+    if(json==self->lastGlass)return;self->lastGlass=json;self->Send(json,CanvasCommandKind::Glass);
+    });
 }
 void CanvasWindow::Start() {
     if(renderer.joinable()||closing)return;

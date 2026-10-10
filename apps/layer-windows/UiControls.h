@@ -88,13 +88,17 @@ inline void dragCursor(UIElement const& element,bool touch,bool dragging,bool he
     if(touch||(!dragging&&!held)){target.ProtectedCursor(nullptr);return;}
     target.ProtectedCursor(InputSystemCursor::Create(dragging?InputSystemCursorShape::SizeAll:InputSystemCursorShape::Hand));
 }
-inline Image icon(hstring name,hstring theme,double size=16){
+inline void setIcon(Image const& result,hstring name,hstring theme,double size=16){
     std::wstring file=name.c_str();
     if(!file.starts_with(L"layer-"))file=L"layer-"+file;
     if(!file.ends_with(L"-symbolic"))file+=L"-symbolic";
-    Image result;result.Width(size);result.Height(size);
-    result.Source(Imaging::SvgImageSource(asset(L"icons/"+std::wstring(theme.c_str())+L"/"+file+L".svg")));
-    result.IsHitTestVisible(false);return result;
+    result.Width(size);result.Height(size);result.IsHitTestVisible(false);
+    auto uri=asset(L"icons/"+std::wstring(theme.c_str())+L"/"+file+L".svg");
+    auto source=result.Source().try_as<Imaging::SvgImageSource>();
+    if(!source||!source.UriSource()||source.UriSource().AbsoluteUri()!=uri.AbsoluteUri())result.Source(Imaging::SvgImageSource(uri));
+}
+inline Image icon(hstring name,hstring theme,double size=16){
+    Image result;setIcon(result,name,theme,size);return result;
 }
 // Use the same trailing grip asset, orientation and inset as GTK/Android.
 inline void orientGrip(FrameworkElement const& grip,bool vertical){
@@ -308,15 +312,22 @@ inline void comboOptionText(ComboBox const& control,uint32_t index,hstring const
     comboOptionText(control.Items().GetAt(index).as<ComboBoxItem>(),text);
 }
 template<typename T>
-inline void buttonColors(std::shared_ptr<WorkspaceData> const& data,T const& result){
+inline void buttonColors(std::shared_ptr<WorkspaceData> const& data,T const& result,uint8_t hover=20){
     hstring prefix=std::is_same_v<T,Primitives::ToggleButton>?L"ToggleButton":L"Button";
-    result.Resources().Insert(box_value(prefix+L"BackgroundPointerOver"),data->tint(L"text",20));
+    result.Resources().Insert(box_value(prefix+L"BackgroundPointerOver"),data->tint(L"text",hover));
     result.Resources().Insert(box_value(prefix+L"BackgroundPressed"),data->tint(L"text",41));
     result.Resources().Insert(box_value(prefix+L"BackgroundDisabled"),clear());
     result.Resources().Insert(box_value(prefix+L"ForegroundDisabled"),data->tint(L"text",92));
     if constexpr(std::is_same_v<T,Primitives::ToggleButton>)
         for(auto role:{L"ToggleButtonBackgroundChecked",L"ToggleButtonBackgroundCheckedPointerOver",L"ToggleButtonBackgroundCheckedPressed"})
             result.Resources().Insert(box_value(role),selected(data));
+}
+inline void headerButtonColors(std::shared_ptr<WorkspaceData> const& data,Button const& item){
+    item.UseLayoutRounding(false);
+    item.Background(clear());item.BorderBrush(clear());item.BackgroundSizing(BackgroundSizing::InnerBorderEdge);
+    for(auto role:{L"ButtonBorderBrush",L"ButtonBorderBrushPointerOver",L"ButtonBorderBrushPressed",L"ButtonBorderBrushDisabled"})
+        item.Resources().Insert(box_value(role),clear());
+    buttonColors(data,item,26);
 }
 template<typename T=Button>
 inline T button(std::shared_ptr<WorkspaceData> const& data,hstring const& text,std::function<void()> action){

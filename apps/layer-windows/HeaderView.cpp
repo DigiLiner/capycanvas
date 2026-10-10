@@ -30,12 +30,7 @@ void style(Button const& item,std::shared_ptr<WorkspaceData> const& data,bool su
         item.Resources().Insert(box_value(L"ButtonBackgroundPressed"),fill(blend(bg,ink,.16f)));
         item.Resources().Insert(box_value(L"ButtonBackgroundDisabled"),headerSurface(data));
     }else{
-        item.Background(clear());item.BorderBrush(clear());item.BackgroundSizing(BackgroundSizing::InnerBorderEdge);
-        for(auto role:{L"ButtonBorderBrush",L"ButtonBorderBrushPointerOver",L"ButtonBorderBrushPressed",L"ButtonBorderBrushDisabled"})
-            item.Resources().Insert(box_value(role),clear());
-        item.Resources().Insert(box_value(L"ButtonBackgroundPointerOver"),data->tint(L"text",26));
-        item.Resources().Insert(box_value(L"ButtonBackgroundPressed"),data->tint(L"text",41));
-        item.Resources().Insert(box_value(L"ButtonBackgroundDisabled"),clear());
+        headerButtonColors(data,item);
     }
 }
 }

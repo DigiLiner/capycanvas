@@ -34,11 +34,15 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
       const sample=()=>{
         const now=performance.now(),zen=layerApp.state().workspace.zen_mode;
         if(zen===${target})changed??=now;
-        const n=document.querySelector(zen?'#zen-capy':'#header #zen-button');
+        const n=[document.querySelector('#zen-capy'),document.querySelector('#header #zen-button')]
+          .find(node=>node&&!node.hidden&&node.getClientRects().length&&(!node.closest('#header')||!document.querySelector('#workspace').classList.contains('zen-hidden')));
         if(n&&!n.hidden&&n.getClientRects().length){
           const b=n.getBoundingClientRect(),g=n.querySelector('svg').getBoundingClientRect();
+          const fill=getComputedStyle(n).backgroundColor;
+          const alpha=fill.includes('/')?parseFloat(fill.split('/')[1]):fill.startsWith('rgba(')?parseFloat(fill.split(',')[3]):fill==='transparent'?0:1;
           frames.push({zen,rects:[[b.x,b.y,b.width,b.height],[g.x,g.y,g.width,g.height]],
-            capy:opacity(n),controls:opacity(document.querySelector('#header [data-header-item]:not([data-kind="capy"])'))});
+            capy:opacity(n),surface:alpha,minimum:layerApp.state().palette.glass.chip[3],inBar:!!n.closest('.in-bar'),
+            controls:opacity(document.querySelector('#header [data-header-item]:not([data-kind="capy"])'))});
         }
         if(now>=deadline||(changed!=null&&now-changed>=220))resolve(frames);else requestAnimationFrame(sample);
       };requestAnimationFrame(sample);
@@ -50,6 +54,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     for(const frame of frames){
       assert.deepEqual(frame.rects,expected,`${label}: frame zen=${frame.zen}`);
       assert.ok(frame.capy>=.999,`${label}: Capy stays opaque throughout transition`);
+      assert.ok(!frame.inBar&&frame.surface>=frame.minimum-.002,`${label}: Capy's own surface stays painted throughout transition`);
     }
     if(fade)assert.ok(frames.some(frame=>!frame.zen&&frame.controls>0&&frame.controls<.99),`${label}: other header controls still fade in`);
   };

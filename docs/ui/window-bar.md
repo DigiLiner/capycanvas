@@ -153,7 +153,10 @@ keeps it available when removed or overflowed.
 Trace each control's state writers, toolkit feedback transitions, contact ownership
 and asynchronous query inputs before testing. The window-free Zen matrix covers
 visibility pins, blocked input, focus loss and leave; native query tests cover
-queued model changes. Rectangle and opacity assertions alone do not check color.
+queued model changes. Check all paint behind the glyph: sibling surfaces, native
+hover/press/focus identity, glass registration and publication. Sample the visible
+control from chrome visibility; Zen can also keep the normal header temporarily
+visible. Bounds and glyph opacity alone do not establish paint continuity.
 
 Run native input in a private compositor, never on the user's desktop:
 

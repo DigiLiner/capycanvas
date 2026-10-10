@@ -231,7 +231,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
     await tap(menu);
     assert.equal(await evaluate("document.querySelector('.header-menu[data-menu=file]').open"), false);
     await tap(zen);
-    assert.equal(await evaluate(`document.querySelector('${zen}').getAttribute('aria-pressed')`), "true", "Touch preserves intentional toggle selection");
+    assert.equal(await evaluate(`document.querySelector('${zen}').getAttribute('aria-pressed')`), "false", "Capy keeps neutral header presentation in Zen");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
     await tap("#zen-capy");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), false);

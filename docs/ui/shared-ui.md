@@ -261,7 +261,8 @@ controls and their input and glass registrations. Native geometry queries resolv
 the model, editing state and document count supplied with their measurements;
 drag pickup rejects a measured model that differs from the current shared model.
 Capy uses neutral hover/press feedback in both presentations, while menus retain
-the command's checked Zen state.
+the command's checked Zen state. Capy paints its own surface and stays outside
+joined header bars, so its background never fades with neighboring chrome.
 
 **Button icon** offers Looking up (default), Facing forward, Bathing and
 Sleeping. Rust stores `Settings.zen_icon` and supplies each command's icon. The
