@@ -74,11 +74,9 @@ impl ExtraField {
         }
         for (index, button) in buttons.iter().enumerate() {
             if columns.is_none() {
-                let size = if *labeled { layer_ui::tool_choice_style(*labeled, layer_ui::TileStyle::Small).size() } else { [24., 36.] };
-                button.set_size_request(size[0] as i32, size[1] as i32);
+                button.set_size_request(24, 24);
                 button.set_hexpand(!*labeled);
-                button.child().and_downcast::<gtk::Image>().unwrap().set_pixel_size(
-                    if *labeled { layer_ui::tool_choice_style(*labeled, layer_ui::TileStyle::Small).icon_size() as i32 } else { 20 });
+                button.child().and_downcast::<gtk::Image>().unwrap().set_pixel_size(16);
             }
             button.set_widget_name(&format!("tool-choice-{id}-{index}"));
         }

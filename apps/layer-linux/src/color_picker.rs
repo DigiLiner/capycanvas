@@ -20,29 +20,18 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new() -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 2);
         root.set_widget_name("color-picker-settings");
-        root.set_margin_start(8);
-        root.set_margin_end(8);
-        root.set_margin_top(8);
-        root.set_margin_bottom(8);
-        let source = gtk::DropDown::from_strings(&["Visible color", "Selected layer"]);
+        let source = crate::panel_controls::dropdown(&["Visible color", "Selected layer"]);
         source.set_widget_name("color-picker-source");
         let sizes = layer_ui::COLOR_SAMPLE_WIDTHS.map(|width| {
             if width == 1 { "Single pixel".to_string() } else { format!("{width} px circle") }
         });
-        let size = gtk::DropDown::from_strings(&sizes.each_ref().map(String::as_str));
+        let size = crate::panel_controls::dropdown(&sizes.each_ref().map(String::as_str));
         size.set_widget_name("color-picker-size");
         for (name, widget) in [("Source", &source), ("Sample size", &size)] {
-            let row = gtk::Box::new(gtk::Orientation::Vertical, 5);
-            let label = gtk::Label::new(Some(name));
-            label.set_xalign(0.);
-            label.add_css_class("dim-label");
-            widget.set_hexpand(true);
             widget.update_property(&[gtk::accessible::Property::Label(name)]);
-            row.append(&label);
-            row.append(widget);
-            root.append(&row);
+            root.append(&crate::panel_controls::row(name,widget));
         }
         let owner: Rc<RefCell<Weak<Workspace>>> = Rc::default();
         let updating = Rc::new(Cell::new(false));

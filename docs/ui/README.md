@@ -119,6 +119,13 @@ those habits while keeping the underlying commands consistent. These workflows
 are arrangements of a common editor rather than separate applications. Tool
 Settings follows the active tool, and Properties exposes the relevant effect
 parameters. Shared Properties copy identifies the layer name and localized type.
+GTK Tool Settings uses 24-pixel dropdowns, checkboxes, action buttons and joined
+choices, with 16-pixel icons. Numeric sliders keep their 36-pixel rows; tonal
+intervals, transform anchors and gradient stop strips keep their specialized
+layouts. Rows have 2-pixel gaps within groups and 6-pixel gaps between groups,
+inside one 8-pixel panel inset. Mutually exclusive action groups use labeled
+dropdowns. Flip and quarter-turn actions sit in icon rows; Apply and Cancel sit
+together. Eyedropper labels sit beside their Source and Sample size dropdowns.
 Shared Properties pages choose which
 parameter controls are shown; hidden values remain active. Channel selection,
 automatic adjustment and sampling share one toolbar. Levels and Curves offer

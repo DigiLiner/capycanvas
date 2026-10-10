@@ -110,8 +110,9 @@ Segmented choices retain connected icon buttons (for example New/Add/Subtract/
 Intersect selection); list choices such as selection source remain dropdowns.
 Choices with `labeled` put the shared label beside the bar, including Zoom Click
 and Drag. Hosts right-align the joined icon bar in its row; each segment
-is one small tile square (36×36 logical pixels), in panels, Tool Options and
-drawers. Tooltips and accessibility labels retain each option's full name. The
+is one small tile square (36×36 logical pixels) in Tool Options. GTK Tool Settings
+panels and their drawers use 24×24-pixel segments with 16-pixel icons.
+Tooltips and accessibility labels retain each option's full name. The
 toolbar measures the label beside these segments and enters overflow as a whole.
 Panel captions wrap to fit narrow docks.
 Iconless checkable actions use a text checkbox, including Center on click.

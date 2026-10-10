@@ -45,6 +45,26 @@ pub fn dropdown(choices: &[&str]) -> gtk::DropDown {
     dropdown
 }
 
+pub fn command_dropdown(commands: &[&layer_ui::CommandState]) -> gtk::DropDown {
+    let model = gtk::gio::ListStore::new::<gtk::glib::BoxedAnyObject>();
+    let dropdown = gtk::DropDown::new(Some(model), None::<gtk::Expression>);
+    dropdown.set_factory(Some(&choice_factory(true)));
+    dropdown.set_list_factory(Some(&choice_factory(false)));
+    update_commands(&dropdown, commands);
+    dropdown
+}
+
+pub fn update_commands(dropdown: &gtk::DropDown, commands: &[&layer_ui::CommandState]) {
+    let model = dropdown.model().unwrap().downcast::<gtk::gio::ListStore>().unwrap();
+    if model.n_items() != commands.len() as u32 || commands.iter().enumerate().any(|(i, command)| {
+        let item = model.item(i as u32).unwrap().downcast::<gtk::glib::BoxedAnyObject>().unwrap();
+        let old = item.borrow::<(std::sync::Arc<str>, bool)>();
+        old.0 != command.label || old.1 != command.enabled
+    }) {
+        model.splice(0, model.n_items(), &commands.iter().map(|command| gtk::glib::BoxedAnyObject::new((command.label.clone(), command.enabled))).collect::<Vec<_>>());
+    }
+}
+
 fn choice_factory(shrink: bool) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(move |_, object| {
@@ -59,10 +79,15 @@ fn choice_factory(shrink: bool) -> gtk::SignalListItemFactory {
     });
     factory.connect_bind(|_, object| {
         let item = object.downcast_ref::<gtk::ListItem>().unwrap();
-        let value = item.item().and_downcast::<gtk::StringObject>().unwrap();
+        let value = item.item().unwrap();
+        let (text, enabled) = if let Some(value) = value.downcast_ref::<gtk::StringObject>() { (value.string().to_string(), true) }
+        else { let value = value.downcast_ref::<gtk::glib::BoxedAnyObject>().unwrap().borrow::<(std::sync::Arc<str>, bool)>(); (value.0.to_string(), value.1) };
         let label = item.child().and_downcast::<gtk::Label>().unwrap();
-        label.set_label(&value.string());
-        label.set_tooltip_text(Some(&value.string()));
+        label.set_label(&text);
+        label.set_tooltip_text(Some(&text));
+        label.set_sensitive(enabled);
+        item.set_selectable(enabled);
+        item.set_activatable(enabled);
     });
     factory
 }

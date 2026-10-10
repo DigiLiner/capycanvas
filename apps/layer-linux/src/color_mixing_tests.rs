@@ -47,7 +47,7 @@ fn journey(d: &mut Driver, devices: &[&str], painter: &str) {
             stroke(d, painter, [300., y], [1100., y]);
         }
         let panel = d.w.panel_widget(Panel::ToolSettings);
-        assert!(find_named(&panel, "tool-action-ColorMixOklab").is_none(), "G-Pen does not mix paint");
+        assert!(find_named(&panel, "tool-action-group-color-mixing").is_none(), "G-Pen does not mix paint");
         d.w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::NaturalBlender as u32 });
         d.w.dispatch(UiAction::SetBrushSize { value: 160. });
         pump(150);
@@ -62,11 +62,15 @@ fn journey(d: &mut Driver, devices: &[&str], painter: &str) {
         {
             let device = devices[i % devices.len()];
             let panel = d.w.panel_widget(Panel::ToolSettings);
-            let button = find_named(&panel, &format!("tool-action-{command:?}")).unwrap();
+            let button = find_named(&panel, "tool-action-group-color-mixing").unwrap();
             let p = d.point(&button);
             drag(d, device, p, p, false);
+            d.input.key(0xff50);
+            let index = match command { CommandId::ColorMixClassic => 2, CommandId::ColorMixLinear => 1, _ => 0 };
+            for _ in 0..index { d.input.key(0xff54); }
+            d.input.key(0xff0d);
             pump(50);
-            assert!(button.downcast_ref::<gtk::CheckButton>().unwrap().is_active(), "{device}: {command:?}");
+            assert_eq!(button.downcast_ref::<gtk::DropDown>().unwrap().selected(), index, "{device}: {command:?}");
             assert_eq!(mixing(d), space, "{device}: {command:?}");
             assert!(state(&d.w).commands.iter().any(|c| c.id == command && c.selected));
             let x = 450. + i as f32 * 250.;

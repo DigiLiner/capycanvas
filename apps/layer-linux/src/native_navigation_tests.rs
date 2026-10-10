@@ -452,7 +452,7 @@ fn assert_zoom_icon_bar(w: &Rc<Workspace>, root: &gtk::Widget, id: &str) -> gtk:
     let buttons: Vec<_> = widgets(&group).filter_map(|widget| widget.downcast::<gtk::ToggleButton>().ok()).collect();
     assert_eq!(buttons.len(), items.len());
     assert_eq!(items.iter().map(|item| item.icon).collect::<Vec<_>>(), expected_icons, "choices use distinct Zoom icons");
-    let tile = layer_ui::TILE_SIZE as i32;
+    let tile = if root == &w.panel_widget(Panel::ToolSettings) || root.widget_name() == "drawer-panel-ToolSettings" { 24 } else { layer_ui::TILE_SIZE as i32 };
     assert_eq!([group.width(), group.height()], [buttons.len() as i32 * tile, tile], "{id} is one row of small square tiles");
     let parent = group.parent().unwrap();
     let bounds = group.compute_bounds(&parent).unwrap();

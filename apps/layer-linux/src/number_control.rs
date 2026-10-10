@@ -320,6 +320,11 @@ impl NumberControl {
     pub fn panel(spec: NumericControl, title: &str, localization: std::sync::Arc<layer_ui::Localizer>) -> Self {
         Self::build(spec, title, "", false, false, true, localization)
     }
+    pub fn fit_spin_width(&self) {
+        if let Some(spin) = self.imp().spin.get() {
+            spin.set_width_chars(self.spec().width_samples(false).iter().map(|text| text.chars().count() as i32).max().unwrap_or(1));
+        }
+    }
     pub fn connect_reset_requested(&self, callback: impl Fn() + 'static) {
         self.connect_closure("reset-requested", false, glib::closure_local!(move |_: Self| callback()));
         let label = self.imp().inline_caption.get().or_else(|| self.imp().caption.get()).unwrap();

@@ -216,6 +216,18 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .effect-properties menubutton > button,
 .effect-properties .property-actions > button,
 .effect-properties .gradient-editor > box > button { min-height: 24px; padding: 0 6px; }
+.tool-settings button { min-height: 24px; padding: 0 6px; border-radius: var(--control-radius); }
+.tool-settings .selection-modes button { min-width: 24px; padding: 0; }
+.tool-settings .selection-modes.labeled button { padding: 0 6px; }
+.tool-settings .tool-icon-action { min-width: 24px; padding: 0; }
+.tool-settings checkbutton { min-height: 18px; padding: 3px 0; }
+.tool-settings dropdown > button, .tool-settings spinbutton { background: var(--input-bg); border-radius: var(--control-radius); }
+.tool-settings .number-panel spinbutton { min-height: 24px; padding: 0; }
+.tool-settings .number-panel spinbutton text { min-width: 0; min-height: 24px; padding: 0 6px; font-feature-settings: "tnum"; }
+.tool-settings .number-panel spinbutton button { min-width: 24px; min-height: 24px; padding: 0; }
+.tool-settings .choice-grid button { min-width: 0; min-height: 0; padding: 0; }
+.tool-settings .panel-control-row > label { padding-left: 6px; }
+.tool-settings .gradient-editor > box > button { min-width: 24px; padding: 0; }
 .dock-panel .brush-choice { padding: 3px 6px; }
 .brush-choice label { font-size: 1em; }
 .tool-groups flowboxchild { padding: 0; margin: 0; }

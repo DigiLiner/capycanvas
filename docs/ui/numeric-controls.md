@@ -6,6 +6,8 @@ Every host shares the same numeric policy and editable values.
 
 - Small-range integers: label left, a conventional spin control right. GTK
   uses `GtkSpinButton` in panels and `AdwSpinRow` in Preferences.
+  GTK Tool Settings spin controls are 24 pixels high, with compact step buttons
+  and a value field sized from the shared formatted range and units.
 - Wider integers and continuous values: label left and a plain, tappable value
   right; a native slider underneath. Tapping the value enters text editing.
   Panel values also accept vertical mouse, touch and pen drags for fine

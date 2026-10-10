@@ -94,16 +94,19 @@ fn native_enclose_fill_pointer_workflow() {
         assert!(ui_session(&w).command(CommandId::Fill).selected);
         input.click(screen_point(&mapped_label(&groups, "Lasso fill").unwrap(), &w.window, [0.5, 0.5]));
         assert!(ui_session(&w).command(CommandId::EncloseFill).selected);
-        for source in [CommandId::SelectionVisible, CommandId::SelectionEditing, CommandId::SelectionReference] {
-            let option = find_named(&w.panel_widget(Panel::ToolSettings), &format!("tool-action-{source:?}")).unwrap();
-            histogram::scroll_to(&option);
-            input.click(screen_point(&option, &w.window, [0.5, 0.5]));
+        for (index, source) in [CommandId::SelectionVisible, CommandId::SelectionEditing, CommandId::SelectionReference].into_iter().enumerate() {
+            let option = named::<gtk::DropDown>(&w.panel_widget(Panel::ToolSettings), "tool-action-group-selection-source");
+            histogram::scroll_to(option.upcast_ref());
+            input.click(screen_point(option.upcast_ref(), &w.window, [0.5, 0.5]));
+            input.key(0xff50);
+            for _ in 0..index { input.key(0xff54); }
+            input.key(0xff0d);
             assert!(ui_session(&w).command(source).selected);
             assert!(ui_session(&w).command(CommandId::EncloseFill).selected,
                 "source choices preserve the Enclose variant");
         }
         capture_ui(&w, &output, &format!("enclose-controls-{theme:?}.png"));
-        let source = find_named(&w.panel_widget(Panel::ToolSettings), "tool-action-SelectionReference").unwrap();
+        let source = find_named(&w.panel_widget(Panel::ToolSettings), "tool-action-group-selection-source").unwrap();
         histogram::scroll_to(&source);
         capture_ui(&w, &output, &format!("enclose-source-{theme:?}.png"));
         for (id, value) in [("tolerance", "15"), ("gap_closing", "0"), ("expansion", "0"), ("smoothing", "0")] {

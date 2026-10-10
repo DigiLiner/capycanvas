@@ -13,6 +13,8 @@ mod stroke_recording;
 mod native_navigation;
 #[path = "editing_tools_tests.rs"]
 mod editing_tools;
+#[path = "tool_controls_compact_tests.rs"]
+mod tool_controls_compact;
 #[path = "color_panel_tests.rs"]
 mod color_panel;
 #[path = "color_management_tests.rs"]

@@ -247,10 +247,11 @@ pub struct ToolSettings {
 impl ToolSettings {
     pub fn new() -> Self {
         let localization = crate::launch_localization();
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let form = body();
+        let root = body();
+        root.add_css_class("tool-settings");
+        let form = gtk::Box::new(gtk::Orientation::Vertical, 2);
         let picker = crate::color_picker::Settings::new();
-        let mode_container=body();
+        let mode_container=crate::panel_controls::column();
         let modes=gtk::Box::new(gtk::Orientation::Horizontal,0);
         modes.set_homogeneous(true);
         modes.set_widget_name("selection-mode-row");
@@ -264,10 +265,9 @@ impl ToolSettings {
             .popover(&selection_menu)
             .build();
         selection_actions.set_widget_name("selection-actions");
-        selection_actions.set_margin_top(6);
         mode_container.append(&selection_actions);
         root.append(&mode_container);
-        let extra=body();
+        let extra=gtk::Box::new(gtk::Orientation::Vertical, 2);
         root.append(&extra);
         root.append(&form);
         root.append(&picker.root);
@@ -291,17 +291,15 @@ impl ToolSettings {
     pub fn refresh(&self, workspace: &Rc<Workspace>, state: &UiState) {
         let picking = state.layer_tools.tool.picks_color();
         let compact = state.layer_tools.tool.selection_tool() == Some(layer_ui::SelectionTool::Tonal);
+        let action_caption=|command: &layer_ui::CommandState| state.canvas_bar.as_ref().into_iter().flat_map(|bar| &bar.completion).find_map(|item| match &item.option {
+            layer_ui::ToolOption::Action {state,..} if state.id==command.id => Some(item.label.clone()),
+            _ => None,
+        }).unwrap_or_else(|| command.label.clone());
         self.form.set_visible(!picking);
         self.extra.set_visible(!picking && state.tool_extra.iter().any(|option| !matches!(option, layer_ui::ToolOption::Choice { beside: Some(_), .. })));
-        // Use one outer inset and a small gap between sections, instead of
-        // stacking each section's top and bottom body margins.
-        let inset=layer_ui::PANEL_CONTENT_INSET as i32;
-        self.mode_container.set_margin_bottom(if compact {4} else {inset});
-        self.extra.set_margin_top(if compact {0} else {inset});
-        self.extra.set_margin_bottom(if compact {4} else {inset});
-        self.form.set_margin_top(if compact {0} else {inset});
-        self.form.set_spacing(2);
-        self.mode_container.set_visible(state.layer_tools.tool.selection_tool().is_some());
+        let mode_group=state.tool_actions.iter().find_map(|action| action.group().filter(|group| group.segmented()));
+        self.mode_container.set_visible(!picking && mode_group.is_some());
+        if let Some(group)=mode_group { self.modes.update_property(&[gtk::accessible::Property::Label(&group.localized_label(&workspace.localization()))]); }
         self.selection_actions.set_visible(!compact && state.layer_tools.tool.selection_tool().is_some());
         if !self.selection_bound.replace(true) {
             workspace.watch_popover(self.selection_menu.upcast_ref());
@@ -401,8 +399,8 @@ impl ToolSettings {
                         self.headings.borrow_mut().push((control.id, title));
                     }
                     if let Some((_, field)) = beside {
-                        let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-                        let numbers = gtk::Box::new(gtk::Orientation::Vertical, 6);
+                        let row = crate::panel_controls::action_row();
+                        let numbers = gtk::Box::new(gtk::Orientation::Vertical, 2);
                         numbers.set_hexpand(true);
                         row.append(&field.root); row.append(&numbers); self.form.append(&row);
                         grouped = Some(numbers);
@@ -411,6 +409,7 @@ impl ToolSettings {
                 let input = if compact || grouped.is_some() {
                     NumberControl::labeled_inline(control.numeric.clone(), &control.label, &control.tooltip_localized(&workspace.localization()), &inline_labels, &inline_values, workspace.localization().clone())
                 } else { NumberControl::panel(control.numeric.clone(), &control.label, workspace.localization().clone()) };
+                input.fit_spin_width();
                 if grouped.is_some() { input.set_slider_visible(false); }
                 input.set_widget_name(&format!("tool-setting-{}", control.id));
                 let id = control.id;
@@ -430,8 +429,8 @@ impl ToolSettings {
                 grouped.as_ref().unwrap_or(&self.form).append(&input);
                 fields.push((control.clone(), input));
             }
-            let mut source_group: Option<gtk::CheckButton> = None;
             let mut mode_group: Option<gtk::ToggleButton> = None;
+            let mut action_row = None::<(layer_ui::CommandId, gtk::Box)>;
             for action in &state.tool_actions {
                 let command = state
                     .commands
@@ -439,19 +438,31 @@ impl ToolSettings {
                     .find(|c| c.id == action.command)
                     .expect("core command exists");
                 let mode = action.group().is_some_and(ToolActionGroup::segmented);
+                let caption=action_caption(command);
+                if action.checkable && let Some(group)=action.group().filter(|group| !group.segmented()) {
+                    let existing=actions.iter().find(|(old,_,_)| old.group()==Some(group));
+                    let dropdown=if let Some((_,_,widget))=existing { widget.clone() } else {
+                        let commands=state.tool_actions.iter().filter(|a| a.checkable && a.group()==Some(group)).map(|a| a.command).collect::<Vec<_>>();
+                        let states=commands.iter().map(|id| state.commands.iter().find(|c| c.id==*id).unwrap()).collect::<Vec<_>>();
+                        let dropdown=crate::panel_controls::command_dropdown(&states);
+                        dropdown.set_widget_name(&format!("tool-action-group-{}",group.id()));
+                        let updating=self.updating.clone();
+                        dropdown.connect_selected_notify(glib::clone!(#[weak] workspace,move |dropdown| {
+                            if !updating.get() && let Some(&command)=commands.get(dropdown.selected() as usize) { workspace.dispatch(UiAction::Invoke {command}); }
+                        }));
+                        self.form.append(&crate::panel_controls::row(&group.localized_label(&workspace.localization()),&dropdown));
+                        dropdown.upcast()
+                    };
+                    actions.push((*action,command.label.clone(),dropdown));
+                    action_row=None;
+                    continue;
+                }
                 let widget: gtk::Widget = if mode {
                     let button = gtk::ToggleButton::new();
-                    button.set_size_request(28, layer_ui::TILE_SIZE as i32);
+                    button.set_size_request(24, 24);
                     let image = crate::icons::image(&format!("layer-{}-symbolic", command.icon.unwrap()));
-                    image.set_pixel_size(20);
-                    if state.layer_tools.tool.selection_tool() == Some(layer_ui::SelectionTool::Brush) {
-                        let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-                        row.set_halign(gtk::Align::Center);
-                        row.append(&image);
-                        row.append(&gtk::Label::new(Some(&command.label)));
-                        button.set_child(Some(&row));
-                        button.set_size_request(44,44);
-                    } else { button.set_child(Some(&image)); }
+                    image.set_pixel_size(16);
+                    button.set_child(Some(&image));
                     button.update_property(&[gtk::accessible::Property::Label(&command.label)]);
                     if let Some(first) = &mode_group { button.set_group(Some(first)); }
                     else { mode_group = Some(button.clone()); }
@@ -469,20 +480,14 @@ impl ToolSettings {
                     button.upcast()
                 } else if action.checkable {
                     let check = crate::panel_controls::check(&command.label);
-                    if action.command == layer_ui::CommandId::SelectionBrushPressure { check.set_size_request(-1,44); }
-                    let source_choice = action.group().is_some();
-                    if source_choice {
-                        if let Some(first) = &source_group { check.set_group(Some(first)); }
-                        else { source_group = Some(check.clone()); }
-                    }
                     check.set_tooltip_text(Some(&command.label));
                     let updating = self.updating.clone();
                     let id = action.command;
                     check.connect_toggled(glib::clone!(
                         #[weak]
                         workspace,
-                        move |check| {
-                            if !updating.get() && (!source_choice || check.is_active()) {
+                        move |_| {
+                            if !updating.get() {
                                 workspace.dispatch(UiAction::Invoke { command: id });
                             }
                         }
@@ -490,18 +495,36 @@ impl ToolSettings {
                     check.upcast()
                 } else {
                     let button = workspace.action_button(
-                        &command.label,
+                        &caption,
                         UiAction::Invoke {
                             command: action.command,
                         },
                     );
-                    button.set_child(Some(&icon_label(&command.label, command.icon.unwrap())));
+                    button.set_child(Some(&icon_label(&caption, command.icon.unwrap())));
                     button.upcast()
                 };
                 widget.set_widget_name(&format!("tool-action-{:?}", action.command));
                 if mode { self.modes.append(&widget); }
-                else { self.form.append(&widget); }
-                actions.push((*action, command.label.clone(), widget));
+                else {
+                    use layer_ui::CommandId::*;
+                    let pair=match action.command {
+                        TransformFlipHorizontal | TransformFlipVertical => Some(TransformFlipHorizontal),
+                        TransformRotateLeft | TransformRotateRight => Some(TransformRotateLeft),
+                        ApplyTransform | CancelTransform | CompleteSelection | CancelSelection => Some(ApplyTransform),
+                        _ => None,
+                    };
+                    if let Some(pair)=pair {
+                        if matches!(pair,TransformFlipHorizontal | TransformRotateLeft) && let Some(button)=widget.downcast_ref::<gtk::Button>() {
+                            let icon=crate::icons::image(&format!("layer-{}-symbolic",command.icon.unwrap()));
+                            icon.set_pixel_size(16);button.set_child(Some(&icon));button.add_css_class("tool-icon-action");
+                        }
+                        if action_row.as_ref().is_none_or(|(old,_)| *old!=pair) {
+                            let row=crate::panel_controls::action_row();self.form.append(&row);action_row=Some((pair,row));
+                        }
+                        action_row.as_ref().unwrap().1.append(&widget);
+                    } else { action_row=None;self.form.append(&widget); }
+                }
+                actions.push((*action, caption, widget));
             }
         }
         for (id, title) in self.headings.borrow().iter() {
@@ -515,18 +538,33 @@ impl ToolSettings {
         if let Some(range) = self.range.borrow().as_ref() {
             range.set_values([fields[0].1.value(), fields[1].1.value()]);
         }
+        let mut refreshed_groups=Vec::new();
         for (action, label, widget) in actions.iter_mut() {
             if let Some(command) = state.commands.iter().find(|c| c.id == action.command) {
-                if *label != command.label {
+                if let Some(dropdown)=widget.downcast_ref::<gtk::DropDown>() {
+                    let group=action.group().unwrap();
+                    *label=command.label.clone();
+                    if refreshed_groups.contains(&group) {continue;}
+                    refreshed_groups.push(group);
+                    let commands=state.tool_actions.iter().filter(|a| a.checkable && a.group()==Some(group)).filter_map(|a| state.commands.iter().find(|c| c.id==a.command)).collect::<Vec<_>>();
+                    crate::panel_controls::update_commands(dropdown,&commands);
+                    let caption=group.localized_label(&workspace.localization());
+                    dropdown.update_property(&[gtk::accessible::Property::Label(&caption)]);
+                    dropdown.set_tooltip_text(Some(&caption));
+                    if let Some(caption_label)=dropdown.parent().and_then(|row| row.first_child()).and_downcast::<gtk::Label>() {caption_label.set_label(&caption);}
+                    dropdown.set_sensitive(commands.iter().any(|c| c.enabled));
+                    dropdown.set_selected(commands.iter().position(|c| c.selected).map_or(gtk::INVALID_LIST_POSITION,|i| i as u32));
+                    continue;
+                }
+                let caption=action_caption(command);
+                if *label != caption {
                     if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                        check.set_label(Some(&command.label));
+                        check.set_label(Some(&caption));
                     } else if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-                        if !action.group().is_some_and(ToolActionGroup::segmented) {
-                            if let Some(child) = button.child().and_then(|row| row.last_child()).and_downcast::<gtk::Label>() { child.set_text(&command.label); }
-                        }
+                        if let Some(child) = button.child().and_then(|row| row.last_child()).and_downcast::<gtk::Label>() { child.set_text(&caption); }
                     }
                     widget.update_property(&[gtk::accessible::Property::Label(&command.label)]);
-                    *label = command.label.clone();
+                    *label = caption;
                 }
                 widget.set_sensitive(command.enabled);
                 widget.set_tooltip_text(Some(&command.tooltip));
