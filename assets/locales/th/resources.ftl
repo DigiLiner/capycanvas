@@ -541,3 +541,9 @@ resources-illustration-white = ขาว
 resources-illustration-transparency = ความโปร่งใส
 resources-illustration-keep = คงไว้
 resources-illustration-alpha-threshold = เกณฑ์อัลฟา
+
+resources-layer-properties = คุณสมบัติเลเยอร์
+resources-layer-type-image = เลเยอร์ภาพ
+resources-layer-type-mask = มาสก์เลเยอร์
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

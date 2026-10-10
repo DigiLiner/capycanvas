@@ -683,6 +683,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             anchor
         };
         self.state.customization.drawer = Some(ContentDrawer {
+            layer_properties: None,
             anchor,
             columns,
             tool_set: None,

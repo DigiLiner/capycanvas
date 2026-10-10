@@ -389,6 +389,10 @@ window.capy-workspace.glass .workspace-switcher button:checked { background: var
 window.capy-workspace.glass .document-tab.selected { background-color: var(--glass-document-tab); }
 window.capy-workspace.glass .palette-cover { background: transparent; }
 .palette-panel { padding: 8px; }
+.layer-properties-disclosure { padding: 0 8px; font-weight: 400; }
+.layer-properties-disclosure image { -gtk-icon-size: 20px; }
+.layer-properties-disclosure image.layer-properties-chevron { -gtk-icon-transform: rotate(180deg); }
+.layer-properties-disclosure.open image.layer-properties-chevron { -gtk-icon-transform: none; }
 .palette-cover { background: var(--panel-bg); }
 .palette-panel button.palette-tile, .edit-color-dialog button.palette-tile { padding: 3px; min-width: 0; min-height: 0; border-radius: var(--control-radius); background: transparent; box-shadow: none; }
 .palette-tile > * { border-radius: var(--control-radius); }

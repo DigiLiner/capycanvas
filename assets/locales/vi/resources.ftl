@@ -541,3 +541,9 @@ resources-illustration-white = Trắng
 resources-illustration-transparency = Độ trong suốt
 resources-illustration-keep = Giữ nguyên
 resources-illustration-alpha-threshold = Ngưỡng alpha
+
+resources-layer-properties = Thuộc tính lớp
+resources-layer-type-image = Lớp hình ảnh
+resources-layer-type-mask = Mặt nạ lớp
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

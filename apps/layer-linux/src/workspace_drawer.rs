@@ -58,6 +58,82 @@ glib::wrapper! {
     pub struct Columns(ObjectSubclass<allocation::Columns>)
         @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
+struct LayerInspector {
+    root: gtk::Box,
+    preferred_height: Cell<f32>,
+    layers: Rc<LayerPanel>,
+    effects: Rc<EffectPanels>,
+    stack: gtk::Stack,
+    button: gtk::Button,
+    label: gtk::Label,
+    summary: gtk::Label,
+}
+impl LayerInspector {
+    fn new(w: &Rc<Workspace>) -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.set_overflow(gtk::Overflow::Hidden);
+        let layers = Rc::new(LayerPanel::new(w.localization().clone()));
+        margins(&layers.root, PANEL_CONTENT_INSET as i32);
+        layers.bind(w);
+        let effects = Rc::new(EffectPanels::with_filter_types(false));
+        let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(true).transition_duration(160).build();
+        stack.set_vexpand(true);
+        stack.set_widget_name("layer-properties-stack");
+        stack.add_named(&layers.root, Some("layers"));
+        margins(&effects.properties, PANEL_CONTENT_INSET as i32);
+        let properties = scroll(&effects.properties);
+        properties.set_widget_name("drawer-panel-Properties");
+        stack.add_named(&properties, Some("properties"));
+        stack.set_visible_child_name("layers");
+        let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        footer.add_css_class("layer-properties-footer");
+        footer.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        let button = w.action_button("", UiAction::Customize {action:CustomizationAction::ToggleLayerDrawerProperties});
+        button.set_widget_name("layer-properties-disclosure");
+        button.add_css_class("flat");
+        button.add_css_class("layer-properties-disclosure");
+        button.set_height_request(layer_ui::PropertyDisclosure::HEIGHT as i32);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        content.append(&crate::icons::image("layer-properties-symbolic"));
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
+        text.set_hexpand(true);
+        text.set_valign(gtk::Align::Center);
+        let label = gtk::Label::builder().xalign(0.).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(1).build();
+        label.set_widget_name("layer-properties-disclosure-label");
+        let summary = gtk::Label::builder().xalign(0.).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(1).build();
+        summary.set_widget_name("layer-properties-disclosure-summary");
+        summary.add_css_class("dim-label"); summary.add_css_class("caption");
+        text.append(&label); text.append(&summary); content.append(&text);
+        let chevron = crate::icons::image("layer-chevron-down-symbolic");
+        chevron.add_css_class("layer-properties-chevron");
+        chevron.set_pixel_size(16); content.append(&chevron);
+        button.set_child(Some(&content)); footer.append(&button);
+        root.append(&stack); root.append(&footer);
+        Self {root, preferred_height:Cell::new(0.), layers, effects, stack, button, label, summary}
+    }
+    fn refresh(&self, w: &Rc<Workspace>, state: &UiState) {
+        self.layers.refresh(state); self.effects.refresh(w, state);
+        let open = state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true));
+        let page = if open {"properties"} else {"layers"};
+        if self.stack.visible_child_name().as_deref() != Some(page) {
+            self.stack.set_visible_child_full(page, if open {gtk::StackTransitionType::SlideUp} else {gtk::StackTransitionType::SlideDown});
+        }
+        let disclosure = &state.layer_properties.disclosure;
+        self.label.set_label(&disclosure.label);
+        self.summary.set_label(&disclosure.summary);
+        self.summary.set_visible(!open && !disclosure.summary.is_empty());
+        self.button.set_sensitive(state.layer_properties.layer.is_some());
+        self.button.set_tooltip_text(Some(&if !open && !disclosure.summary.is_empty() {format!("{}\n{}", disclosure.label, disclosure.summary)} else {disclosure.label.clone()}));
+        self.button.update_property(&[gtk::accessible::Property::Label(&disclosure.label), gtk::accessible::Property::Description(if open {""} else {&disclosure.summary})]);
+        self.button.update_state(&[gtk::accessible::State::Expanded(Some(open))]);
+        if open { self.button.add_css_class("open"); } else { self.button.remove_css_class("open"); }
+    }
+    fn measure(&self, width: i32) {
+        let (_, measurement) = self.layers.content_measurement(width);
+        let height = layer_ui::PropertyDisclosure::drawer_height(measurement.fixed_height, measurement.unit_height);
+        if self.preferred_height.replace(height) != height { self.root.queue_resize(); }
+    }
+}
 
 enum Body {
     Toolbar(ToolbarBody),
@@ -67,6 +143,7 @@ enum Body {
     Palettes(Rc<crate::color_library::PalettePanel>),
     Sizes(crate::tool_panels::SizePanel),
     Layers(Rc<LayerPanel>),
+    LayerInspector(LayerInspector),
     Effects(Panel, Rc<EffectPanels>),
     Navigator(crate::navigator::Navigator),
     Proof(Rc<crate::files::proof::ProofPanel>),
@@ -121,6 +198,7 @@ impl Body {
             Self::Palettes(v) => v.root.clone().upcast(),
             Self::Sizes(v) => v.root.clone().upcast(),
             Self::Layers(v) => v.root.clone().upcast(),
+            Self::LayerInspector(v) => v.root.clone().upcast(),
             Self::Navigator(v) => v.root.clone().upcast(),
             Self::Proof(v) => v.root.clone().upcast(),
             Self::Histogram(v) => v.root.clone().upcast(),
@@ -143,6 +221,7 @@ impl Body {
             }
             Self::Sizes(_) => regions::BRUSH,
             Self::Layers(_) | Self::Effects(_, _) => regions::DOCUMENT,
+            Self::LayerInspector(_) => regions::DOCUMENT | regions::CUSTOMIZATION | regions::SETTINGS,
             Self::Proof(_) => regions::DOCUMENT | regions::COMMANDS | regions::LAYOUT,
             Self::Histogram(_) => regions::HISTOGRAM | regions::SETTINGS | regions::LAYOUT,
             Self::Navigator(_) => {
@@ -161,6 +240,7 @@ impl Body {
             Self::Palettes(v) => v.refresh(state, w.paint_view_color(), w.picker_headroom()),
             Self::Sizes(v) => v.refresh(w, state),
             Self::Layers(v) => v.refresh(state),
+            Self::LayerInspector(v) => v.refresh(w, state),
             Self::Navigator(v) => v.refresh(state),
             Self::Proof(v) => v.refresh(w, state),
             Self::Histogram(v) => v.refresh(w, state),
@@ -260,6 +340,7 @@ impl View {
                         v.bind(w);
                         Body::Navigator(v)
                     }
+                    Panel::Layers if drawer.layer_properties.is_some() => Body::LayerInspector(LayerInspector::new(w)),
                     Panel::Layers => {
                         let v = Rc::new(LayerPanel::new(w.localization().clone()));
                         margins(&v.root, PANEL_CONTENT_INSET as i32);
@@ -283,24 +364,18 @@ impl View {
                 column.append(&widget);
                 bodies.push(body);
             }
-            // A toolbar body may wrap beyond the available height. Preserve
-            // its natural height inside the viewport instead of clipping it
-            // to the one-tile minimum used for ordinary dock constraints.
-            let viewport = gtk::Viewport::builder()
-                .vscroll_policy(gtk::ScrollablePolicy::Natural)
-                .child(&column)
-                .build();
-            let scroller = scroll(&viewport);
+            let scroller = if drawer.layer_properties.is_some() {
+                let widget = bodies.last().unwrap().widget();
+                column.remove(&widget);
+                widget
+            } else {
+                let viewport = gtk::Viewport::builder().vscroll_policy(gtk::ScrollablePolicy::Natural).child(&column).build();
+                let scroller = scroll(&viewport);
+                scroller.downcast_ref::<gtk::ScrolledWindow>().unwrap().vadjustment()
+                    .connect_value_changed(glib::clone!(#[weak] w, move |_| w.surface.queue_allocate()));
+                scroller
+            };
             clips.push(scroller.clone());
-            scroller
-                .downcast_ref::<gtk::ScrolledWindow>()
-                .unwrap()
-                .vadjustment()
-                .connect_value_changed(glib::clone!(
-                    #[weak]
-                    w,
-                    move |_| w.surface.queue_allocate()
-                ));
             let child = if let Some(tabs) = &drawer.tabs {
                 let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -427,6 +502,8 @@ impl Drawer {
         self.view.borrow().as_ref()?.bodies.iter().find_map(|b| {
             if let Body::Layers(v) = b {
                 Some(v.clone())
+            } else if let Body::LayerInspector(v) = b {
+                Some(v.layers.clone())
             } else {
                 None
             }
@@ -436,6 +513,8 @@ impl Drawer {
         self.view.borrow().as_ref()?.bodies.iter().find_map(|b| {
             if let Body::Effects(_, v) = b {
                 Some(v.clone())
+            } else if let Body::LayerInspector(v) = b {
+                Some(v.effects.clone())
             } else {
                 None
             }
@@ -636,6 +715,9 @@ impl Drawer {
                 .drawer_placement(state, &layout, viewport, heights)
         };
         let sizing = place(&vec![0.0; view.columns.len()])?;
+        for body in &view.bodies {
+            if let Body::LayerInspector(inspector) = body { inspector.measure(sizing.columns[0].width as i32); }
+        }
         if let (Some(panel), Some(column)) = (
             view.bodies.iter().find_map(|body| if let Body::Palettes(panel) = body { Some(panel) } else { None }),
             state.columns.iter().position(|panels| panels.contains(&Panel::Palettes)),
@@ -646,7 +728,8 @@ impl Drawer {
             .iter()
             .zip(&sizing.columns)
             .map(|(body, b)| {
-                body.measure(gtk::Orientation::Vertical, b.width as i32).1 as f32
+                view.bodies.iter().find_map(|body| if let Body::LayerInspector(v) = body {Some(v.preferred_height.get())} else {None})
+                    .unwrap_or_else(|| body.measure(gtk::Orientation::Vertical, b.width as i32).1 as f32)
                     + if state.tabs.is_some() {
                         TAB_BAR_HEIGHT
                     } else {
@@ -854,7 +937,7 @@ impl Drawer {
             .state
             .borrow()
             .as_ref()
-            .is_none_or(|old| old.columns != next.columns || old.tabs != next.tabs);
+            .is_none_or(|old| old.columns != next.columns || old.tabs != next.tabs || old.layer_properties.is_some() != next.layer_properties.is_some());
         if rebuild {
             w.surface
                 .remove_slots(|slot| matches!(slot, Slot::Drawer(id) | Slot::DrawerConnection(id) | Slot::DrawerShadow(id) if id == self.id));

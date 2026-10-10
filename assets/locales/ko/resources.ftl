@@ -657,3 +657,9 @@ resources-illustration-white = 흰색
 resources-illustration-transparency = 투명도
 resources-illustration-keep = 유지
 resources-illustration-alpha-threshold = 알파 임계값
+
+resources-layer-properties = 레이어 속성
+resources-layer-type-image = 이미지 레이어
+resources-layer-type-mask = 레이어 마스크
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

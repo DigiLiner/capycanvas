@@ -129,6 +129,19 @@ Crop uses the existing [crop bar](canvas-action-bar.md#crop), while Clone and
 Healing retain their [retouching controls](../internals/brushes.md#clone-stamp).
 The retouching tools also remain available in Sketch's Sculpt drawer.
 
+GTK Sketch's Layers drawer has a fixed footer below a divider. Paint layers
+label it **Layer properties**; filters and other targets use their localized type.
+An optional second line shows up to two useful filter values, using the same
+labels and units as Properties. Layer names, blending, opacity, locks and reduced
+color modes remain in Layers and are not repeated in the summary.
+The footer opens Properties upward inside the same drawer. It covers the layer
+controls, list and action bar while retaining their widgets and scroll position.
+The footer and drawer bounds stay fixed; tapping again or pressing Escape
+returns to Layers. An outside canvas contact dismisses the drawer without painting.
+Adding a filter from this drawer opens its settings in the same body.
+The drawer prefers six layer rows, clamps to the available height, and scrolls
+the current body. Paint and Photo retain their ordinary Properties presentation.
+
 ## Workspace behavior
 
 - Fresh installations open Paint. Startup resumes the saved workspace when

@@ -540,3 +540,9 @@ resources-illustration-white = Weiß
 resources-illustration-transparency = Transparenz
 resources-illustration-keep = Beibehalten
 resources-illustration-alpha-threshold = Alpha-Schwellenwert
+
+resources-layer-properties = Ebeneneigenschaften
+resources-layer-type-image = Bildebene
+resources-layer-type-mask = Ebenenmaske
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

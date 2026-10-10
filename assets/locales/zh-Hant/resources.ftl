@@ -657,3 +657,9 @@ resources-illustration-white = 白色
 resources-illustration-transparency = 透明度
 resources-illustration-keep = 保留
 resources-illustration-alpha-threshold = 透明度閾值
+
+resources-layer-properties = 圖層屬性
+resources-layer-type-image = 影像圖層
+resources-layer-type-mask = 圖層遮色片
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

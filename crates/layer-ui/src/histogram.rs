@@ -180,7 +180,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             || (layout.active_panel(panel) == Some(panel) && layout.panel_group(panel).is_none_or(|group|
                 layout.collapsed_column_for_group(group).is_none_or(|column| layout.column_stack(column).open_column == Some(column))))
             || self.state.customization.drawer.iter().chain(self.state.customization.column_drawers.iter())
-                .any(|drawer| drawer.columns.iter().any(|column| column.contains(&panel)))
+                .any(|drawer| if drawer.layer_properties == Some(true) {
+                    panel == Panel::Properties
+                } else { drawer.columns.iter().any(|column| column.contains(&panel)) })
     }
     pub(super) fn histogram_visibility_changed(&self)->bool {
         let document=self.engine.document();

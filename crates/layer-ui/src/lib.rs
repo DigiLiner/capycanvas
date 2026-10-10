@@ -137,7 +137,7 @@ pub use session::{
     LARGE_CLIP_PIXELS, PasteMode, PixelClip, clipboard_color_changes,
     DEFAULT_DOCUMENT_EXTENT,
     DocumentColorOperation, DocumentIdleReason, ExportRepeat, DocumentHostError, DocumentHostErrorCopy, HostRequestFailure, DocumentExport, DocumentFileState, DocumentLocation, DocumentRequest, EffectAction, FilterCategoryChoice,
-    FilterLoadState, FilterPickerAction, FilterPickerState, LayerPropertiesView,
+    FilterLoadState, FilterPickerAction, FilterPickerState, LayerPropertiesView, PropertyDisclosure,
     MAX_NEW_DOCUMENT_DIMENSION, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
 };
 pub use stats::{StatRow, StatsView};

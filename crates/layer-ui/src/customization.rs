@@ -526,6 +526,7 @@ pub enum ContextTarget {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CustomizationAction {
+    ToggleLayerDrawerProperties,
     ToggleHeaderDrawer {
         id: u32,
     },
@@ -1948,6 +1949,11 @@ impl CustomizationState {
             self.drawer = None;
         }
         match action {
+            ToggleLayerDrawerProperties => {
+                if let Some(open) = self.drawer.as_mut().and_then(|d| d.layer_properties.as_mut()) {
+                    *open = !*open;
+                }
+            }
             Header { action } => {
                 use HeaderAction as H;
                 match action {

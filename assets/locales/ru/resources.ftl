@@ -541,3 +541,9 @@ resources-illustration-white = Белый
 resources-illustration-transparency = Прозрачность
 resources-illustration-keep = Сохранить
 resources-illustration-alpha-threshold = Порог альфа
+
+resources-layer-properties = Свойства слоя
+resources-layer-type-image = Слой изображения
+resources-layer-type-mask = Маска слоя
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

@@ -384,6 +384,7 @@ pub(super) fn catalog(
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct LayerPropertiesView {
+    pub disclosure: PropertyDisclosure,
     pub add_filter: Option<ContextMenu>,
     pub histogram:bool,
     pub actions: Vec<PropertyActionView>,
@@ -403,6 +404,72 @@ pub struct LayerPropertiesView {
     /// Linear input/output range for HDR curve axes; absent for encoded curves.
     pub curve_max: Option<f32>,
     pub curve_white: Option<f32>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct PropertyDisclosure {
+    pub label: String,
+    pub summary: String,
+}
+impl PropertyDisclosure {
+    pub const HEIGHT: f32 = 48.;
+    pub fn drawer_height(fixed_height: f32, row_height: f32) -> f32 {
+        fixed_height + 6. * row_height + Self::HEIGHT + 1.
+    }
+}
+pub(super) fn property_disclosure(doc: &Document, view: &LayerPropertiesView, l: &Localizer) -> PropertyDisclosure {
+    let layer = view.layer.and_then(|id| occurrence_handle(id).ok()).and_then(|id| doc.scene().occurrence(id));
+    let label = if view.layer == Some(0) {
+        l.text(MessageId::COMMAND_QUICK_MASK).to_string()
+    } else if matches!(doc.working.target, Some(SourceTarget::Coverage(_))) || doc.working.inspect_mask.is_some() {
+        l.text(MessageId::RESOURCES_LAYER_TYPE_MASK).to_string()
+    } else { match layer.map(|layer| layer.kind()) {
+        Some(LayerKind::Effect | LayerKind::Group | LayerKind::Selection) => view.layer_type.clone(),
+        Some(LayerKind::Object) => l.text(MessageId::RESOURCES_LAYER_TYPE_IMAGE).to_string(),
+        _ => l.text(MessageId::RESOURCES_LAYER_PROPERTIES).to_string(),
+    }};
+    let effect = view.layer.and_then(|id| occurrence_handle(id).ok()).and_then(|id| property_effect(doc, id));
+    let keys: &[&str] = match effect.map(|fx| fx.program.id.as_ref()) {
+        Some("gaussian_blur" | "soft_focus" | "pencil") => &["sigma"],
+        Some("exposure") => &["exposure"],
+        Some("brightness_contrast") => &["brightness", "contrast"],
+        Some("motion_blur" | "chromatic_aberration") => &["distance", "angle"],
+        Some("unsharp_mask" | "high_pass" | "bloom") => &["sigma", "amount"],
+        Some("vibrance") => &["vibrance", "saturation"],
+        Some("posterize") => &["levels"],
+        Some("pixel_mosaic" | "halftone") => &["size"],
+        Some("denoise" | "vignette" | "iridescence") => &["strength"],
+        Some("clarity" | "dehaze" | "gradient_map" | "film_grain") => &["amount"],
+        Some("shadows_highlights") => &["shadows", "highlights"],
+        Some("white_balance") => &["temperature", "tint"],
+        Some("color_lookup") => &["intensity"],
+        _ => &[],
+    };
+    let mut fields = Vec::new();
+    if effect.is_some_and(|fx| fx.program.id.as_ref() == "color_lookup") {
+        fields.extend(view.resource_name.iter().cloned());
+    }
+    for key in keys {
+        let Some(control) = view.controls.iter().find(|control| control.key == *key) else { continue };
+        let value = match (&control.kind, &control.value) {
+            (PropertyKind::Number {numeric}, EffectValue::Number(value)) => numeric.resolve(*value as f64, NumericOperation::Format).ok().map(|value| value.text),
+            (PropertyKind::Choice {options}, EffectValue::Choice(index)) => options.get(*index as usize).map(|value| value.to_string()),
+            _ => None,
+        };
+        if let Some(value) = value {
+            let mut args = FluentArgs::new(); args.set("label", control.label.as_str()); args.set("value", value);
+            fields.push(l.format(MessageId::RESOURCES_PROPERTY_SUMMARY_FIELD, &args));
+        }
+    }
+    fields.truncate(2);
+    let summary = match fields.as_slice() {
+        [first, second] => {
+            let mut args = FluentArgs::new(); args.set("first", first.as_str()); args.set("second", second.as_str());
+            l.format(MessageId::RESOURCES_PROPERTY_SUMMARY_PAIR, &args)
+        }
+        [first] => first.clone(),
+        _ => String::new(),
+    };
+    PropertyDisclosure {label, summary}
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PropertyActionView { pub label: String, pub icon: Option<String>, pub group: Option<PropertyActionGroup>, pub action: EffectAction }
@@ -976,7 +1043,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_edit_with(Edit::Batch(edits), operations)?;
         if !choosing {
             self.state.customization.expanded = None;
-            self.state.workspace.layout.reveal_after(Panel::Properties, Panel::Adjustments)?;
+            if let Some(drawer) = self.state.customization.drawer.as_mut().filter(|d| d.layer_properties.is_some()) {
+                drawer.layer_properties = Some(true);
+            } else {
+                self.state.workspace.layout.reveal_after(Panel::Properties, Panel::Adjustments)?;
+            }
         }
         Ok(())
     }

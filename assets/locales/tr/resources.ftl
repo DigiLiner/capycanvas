@@ -540,3 +540,9 @@ resources-illustration-white = Beyaz
 resources-illustration-transparency = Saydamlık
 resources-illustration-keep = Koru
 resources-illustration-alpha-threshold = Alfa eşiği
+
+resources-layer-properties = Katman özellikleri
+resources-layer-type-image = Görüntü katmanı
+resources-layer-type-mask = Katman maskesi
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

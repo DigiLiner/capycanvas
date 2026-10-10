@@ -75,6 +75,8 @@ pub enum DrawerDismissal {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct ContentDrawer {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_properties: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_set: Option<ToolSetView>,
     pub anchor: DrawerAnchor,
     /// Each column contains vertically stacked, undecorated panel bodies.
@@ -363,6 +365,7 @@ impl ContentDrawer {
             return Err("This item has no tool drawer".into());
         };
         Ok(Self {
+            layer_properties: None,
             anchor: DrawerAnchor::Header { id },
             columns: control
                 .drawer_columns()
@@ -382,6 +385,7 @@ impl ContentDrawer {
             .ok_or("The tool no longer exists")?
             .control;
         Ok(Self {
+            layer_properties: None,
             anchor: anchor.into(),
             columns: control.drawer_columns().ok_or("This tile has no drawer")?,
             dismissal: DrawerDismissal::OutsideContact,
@@ -405,6 +409,7 @@ impl ContentDrawer {
         }
         let active = layout.active_panel(origin).unwrap();
         Ok(Self {
+            layer_properties: None,
             anchor: DrawerAnchor::Column {
                 column,
                 group,

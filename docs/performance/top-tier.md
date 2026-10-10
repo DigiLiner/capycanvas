@@ -126,7 +126,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps | `dc27e04d`, 2026-09-23 |
 | Panel or column resize | 120 | **Unqualified.** GTK desktop Color column 12.88–44.61, floating panel 39.63–100.58 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** GTK desktop panel 119.2–119.4 presents/s, p99 up to 8.66 ms; curve p99 up to 16.712 ms exceeds the strict two-frame budget; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
-| Drawer open and close | 120 | | |
+| Drawer open and close | 120 | **Unqualified.** GTK Sketch Properties slide 117.85–120.27 presents/s; moving-frame interval p99 8.575–16.654 ms; reference tablet unmeasured | [GTK Sketch Properties diagnostic](#gtk-sketch-properties-diagnostic), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
@@ -169,6 +169,36 @@ APK hashes and the rate calculation are under
 The post-rebase repeat at `2a55ce947`, with identical app and test APK hashes,
 recorded 77.08, 79.86 and 78.65 window frames/s, with p99 gaps of 33.33, 25.00
 and 33.33 ms. Dropped reports remained zero and thermal status remained 0.
+
+## GTK Sketch Properties diagnostic
+
+Measured 2026-10-10 on the working tree based on `3332d9f90`, with a release
+GTK build on NVIDIA RTX PRO 6000 Blackwell Max-Q/Vulkan 615.71.09. The private
+Mutter display is 1100 × 640 at a requested 120 Hz, with a 2048 × 1536 empty
+drawing and a renamed Gaussian Blur layer. This is a desktop diagnostic;
+the reference tablet and tier photographic workload remain unmeasured.
+The frozen test executable is
+`artifacts/sketch-properties-verification/candidate-layer-linux`, SHA-256
+`82da321be8835895b64c37753f1bb66d67aa8923de3876473fd9e3d1600f3667`.
+
+`native_sketch_layer_properties_drawer` primes both page transitions, then runs
+four five-second windows of native mouse footer toggles in each theme. GTK
+FrameClock presentation timestamps count only frames while the page transition
+runs. Intervals remain within each transition; idle gaps between clicks are
+excluded. All builds and other test runs completed before measurement.
+
+| Theme | Transition | Presented frames/s | Moving-frame interval p99 |
+| --- | --- | --- | --- |
+| Light | Slide up | 118.05 | 16.654 ms |
+| Light | Slide down | 119.42 | 8.657 ms |
+| Dark | Slide up | 120.27 | 8.575 ms |
+| Dark | Slide down | 117.85 | 15.259 ms |
+
+The same native journey checks the unchanged drawer bounds, retained layer-list
+scroll, native filter insertion and editing, Undo, and footer, Escape and outside
+dismissal. A separate private tablet-proxy journey checks pen footer contacts.
+Raw timings and captures are in
+`artifacts/sketch-properties-verification/review/`.
 
 ## GTK panel slider diagnostic
 

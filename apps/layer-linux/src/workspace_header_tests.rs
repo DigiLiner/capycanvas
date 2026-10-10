@@ -22,6 +22,187 @@ fn wait_for_drawer_close(w: &Workspace) {
     }
 }
 
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_properties_drawer"]
+fn native_sketch_layer_properties_drawer() {
+    let mut d = Driver::new("art.capycanvas.SketchLayerProperties");
+    let output = std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(|| d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    let mut reports = Vec::new();
+    for theme in [Theme::Light, Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default()
+        })});
+        d.w.dispatch(UiAction::SelectLayer {id:1});
+        pump(250);
+        let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        d.click_name(&opener);
+        let mut footer = d.named("layer-properties-disclosure");
+        let mut label = d.named("layer-properties-disclosure-label").downcast::<gtk::Label>().unwrap();
+        let mut summary = d.named("layer-properties-disclosure-summary").downcast::<gtk::Label>().unwrap();
+        assert_eq!(label.text(), "Layer properties");
+        assert!(!summary.is_visible());
+        assert!(!footer.has_css_class("heading"));
+        let bounds = d.w.drawer.placement().unwrap().bounds;
+        let mut stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        let checkpoint = ui_session(&d.w).engine().checkpoint();
+        let _warm = crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("properties-plain-{theme:?}.png"))).unwrap();
+        let point = d.point(&footer);
+        for open in [true, false] {
+            d.input.perform(serde_json::json!([{"touch":"down","point":point},{"touch":"up"}]));
+            assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(open), "touch footer contact");
+        }
+        for close in ["footer", "escape", "outside"] {
+            d.click(&footer);
+            assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(true));
+            assert_eq!(stack.visible_child_name().as_deref(), Some("properties"));
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            assert!(d.named("drawer-panel-Properties").is_mapped());
+            assert!(!stack.child_by_name("layers").unwrap().is_child_visible());
+            match close {
+                "footer" => d.click(&footer),
+                "escape" => d.input.key(0xff1b),
+                _ => {
+                    let p = [d.w.surface.width() as f32 * 0.45, d.w.surface.height() as f32 * 0.75];
+                    assert!(!bounds.contains(p[0], p[1]));
+                    d.input.click(screen_point(d.w.surface.upcast_ref(), &d.w.window, [0.45, 0.75]));
+                }
+            }
+            assert_eq!(ui_session(&d.w).engine().checkpoint(), checkpoint, "{theme:?}/{close}: dismissal does not paint");
+            if close == "outside" {
+                assert!(state(&d.w).customization.drawer.is_none());
+                d.click_name(&opener);
+                footer = d.named("layer-properties-disclosure");
+                label = d.named("layer-properties-disclosure-label").downcast::<gtk::Label>().unwrap();
+                summary = d.named("layer-properties-disclosure-summary").downcast::<gtk::Label>().unwrap();
+                stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+            }
+            assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(false));
+            assert_eq!(stack.visible_child_name().as_deref(), Some("layers"));
+        }
+        for _ in 0..14 {
+            d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false, clipped:false}});
+        }
+        pump(300);
+        let list = find_css(stack.child_by_name("layers").unwrap().upcast_ref(), "layer-list").unwrap();
+        let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+        assert!(scroll.vadjustment().upper() > scroll.vadjustment().page_size());
+        d.input.perform(serde_json::json!([{"point":d.point(&list)}, {"wheel":[0,5]}]));
+        let position = scroll.vadjustment().value();
+        assert!(position > 0.);
+        d.click(&footer);
+        d.click(&footer);
+        assert!((scroll.vadjustment().value() - position).abs() < 1., "list scroll survives page switching");
+        let workspace = ui_session_mut(&d.w).capture_workspace();
+        let add_filter = find_named(stack.child_by_name("layers").unwrap().upcast_ref(), "layer-add-filter").unwrap();
+        assert!(add_filter.is_sensitive());
+        let _warm = crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("properties-add-filter-{theme:?}.png"))).unwrap();
+        let point = d.point(&add_filter);
+        let picked = d.w.window.pick(point[0] as f64, point[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+        assert!(picked == add_filter || picked.is_ancestor(&add_filter), "Add Filter hit target: {} at {point:?}", picked.widget_name());
+        let menu = add_filter.downcast_ref::<gtk::MenuButton>().unwrap().popover().unwrap();
+        d.click(&add_filter);
+        assert!(menu.is_mapped(), "native Add Filter opens its menu");
+        let blur = widgets(menu.upcast_ref()).find(|node| node.is_mapped() && node.type_().name() == "GtkModelButton" && node.property::<String>("text") == "Blur").unwrap();
+        let submenu = blur.property::<Option<gtk::PopoverMenu>>("popover").unwrap();
+        let point = d.point(&blur);
+        d.input.perform(serde_json::json!([{"point":point},{"wait_ms":200}]));
+        if !submenu.is_mapped() { d.input.click(point); }
+        until(|| submenu.is_mapped(), "Blur submenu opens");
+        let gaussian = widgets(submenu.upcast_ref()).find(|node| node.is_mapped() && node.type_().name() == "GtkModelButton" && node.property::<String>("text") == "Gaussian Blur").unwrap();
+        d.click(&gaussian);
+        assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(true));
+        assert_eq!(ui_session_mut(&d.w).capture_workspace(), workspace);
+        d.click(&footer);
+        let id = state(&d.w).layer_properties.layer.unwrap();
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Rename {id, name:"Soft light".into()}});
+        pump(250);
+        assert_eq!(label.text(), "Gaussian Blur");
+        assert!(summary.is_visible());
+        let original = summary.text().to_string();
+        assert!(original.chars().any(|c| c.is_ascii_digit()));
+        d.click(&footer);
+        assert!(!summary.is_visible());
+        let sigma = find_named(stack.child_by_name("properties").unwrap().upcast_ref(), "property-sigma").unwrap();
+        d.number(&sigma, "7");
+        d.click(&footer);
+        assert!(summary.text().contains('7'));
+        d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
+        assert_eq!(summary.text().as_str(), original);
+        let bounds = d.w.drawer.placement().unwrap().bounds;
+        for repeat in 0..4 {
+            let window = Instant::now();
+            while window.elapsed() < Duration::from_secs(5) {
+              for open in [true, false] {
+                let timings = Rc::new(RefCell::new(Vec::new()));
+                let clock = d.w.surface.frame_clock().unwrap();
+                let capture = clock.connect_after_paint(glib::clone!(#[strong] timings, #[weak] stack, move |clock| {
+                    if stack.is_transition_running() && let Some(timing) = clock.current_timings() {
+                        timings.borrow_mut().push(timing);
+                    }
+                }));
+                d.click(&footer);
+                pump(100);
+                clock.disconnect(capture);
+                assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+                let mut times:Vec<_> = timings.borrow().iter().filter(|t| t.is_complete() && t.presentation_time() > 0).map(|t|t.presentation_time()).collect();
+                times.sort_unstable(); times.dedup();
+                let intervals:Vec<_> = times.windows(2).map(|pair| pair[1]-pair[0]).collect();
+                reports.push(serde_json::json!({"theme":format!("{theme:?}"),"repeat":repeat,"open":open,"presentations":times,"intervals_us":intervals,"viewport":[d.w.surface.width(),d.w.surface.height()],"canvas":super::photo_edit::document(&d.w).composition().size}));
+              }
+            }
+        }
+        let _warm = crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("properties-footer-{theme:?}.png"))).unwrap();
+        d.click(&footer);
+        let _warm = crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("properties-page-{theme:?}.png"))).unwrap();
+        d.click_name(&opener);
+        for preset in [WorkspacePreset::Illustrator, WorkspacePreset::Photographer] {
+            d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout:preset.layout(Platform::Gtk),..WorkspaceState::default()})});
+            pump(200);
+            assert!(find_named(d.w.window.upcast_ref(), "layer-properties-disclosure").is_none_or(|footer|!footer.is_mapped()));
+        }
+    }
+    std::fs::write(output.join("properties-animation.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    d.input.finish(); d.w.window.destroy(); pump(100);
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_properties_footer_pen --tablet"]
+fn native_sketch_layer_properties_footer_pen() {
+    assert!(std::env::var("WAYLAND_DISPLAY").is_ok_and(|display|display.ends_with("-tablet")));
+    let mut d = Driver::new("art.capycanvas.SketchLayerPropertiesPen");
+    sketch_layer_properties_pen(&mut d);
+    d.input.finish(); d.w.window.destroy(); pump(100);
+}
+
+fn sketch_layer_properties_pen(d: &mut Driver) {
+    for theme in [Theme::Light, Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Gtk), ..WorkspaceState::default()
+        })});
+        pump(250);
+        let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        d.click_name(&opener);
+        let footer = d.named("layer-properties-disclosure");
+        let bounds = d.w.drawer.placement().unwrap().bounds;
+        let checkpoint = ui_session(&d.w).engine().checkpoint();
+        for open in [true, false, true, false] {
+            d.input.perform(serde_json::json!([{"pen":"down","point":d.point(&footer)},{"pen":"up"}]));
+            assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(open));
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            assert_eq!(ui_session(&d.w).engine().checkpoint(), checkpoint);
+        }
+        d.input.perform(serde_json::json!([{"pen":"leave"}]));
+        d.click_name(&opener);
+    }
+}
+
 fn assert_shared_icons(widget: &gtk::Widget) {
     if let Some(image) = widget.downcast_ref::<gtk::Image>()
         && let Some(name) = crate::icons::name(image).filter(|name| name.starts_with("layer-"))

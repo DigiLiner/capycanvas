@@ -541,3 +541,9 @@ resources-illustration-white = Branco
 resources-illustration-transparency = Transparência
 resources-illustration-keep = Manter
 resources-illustration-alpha-threshold = Limiar alfa
+
+resources-layer-properties = Propriedades da camada
+resources-layer-type-image = Camada de imagem
+resources-layer-type-mask = Máscara de camada
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

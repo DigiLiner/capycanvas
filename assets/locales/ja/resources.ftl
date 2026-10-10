@@ -657,3 +657,9 @@ resources-illustration-white = 白
 resources-illustration-transparency = 透明度
 resources-illustration-keep = 保持
 resources-illustration-alpha-threshold = アルファしきい値
+
+resources-layer-properties = レイヤープロパティ
+resources-layer-type-image = 画像レイヤー
+resources-layer-type-mask = レイヤーマスク
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

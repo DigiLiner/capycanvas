@@ -969,3 +969,9 @@ resources-illustration-white = Putih
 resources-illustration-transparency = Transparansi
 resources-illustration-keep = Pertahankan
 resources-illustration-alpha-threshold = Ambang alfa
+
+resources-layer-properties = Properti lapisan
+resources-layer-type-image = Lapisan gambar
+resources-layer-type-mask = Masker lapisan
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

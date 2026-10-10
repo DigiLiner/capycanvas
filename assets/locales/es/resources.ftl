@@ -540,3 +540,9 @@ resources-illustration-white = Blanco
 resources-illustration-transparency = Transparencia
 resources-illustration-keep = Conservar
 resources-illustration-alpha-threshold = Umbral alfa
+
+resources-layer-properties = Propiedades de capa
+resources-layer-type-image = Capa de imagen
+resources-layer-type-mask = Máscara de capa
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

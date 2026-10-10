@@ -142,7 +142,7 @@ pub use renderer_lifecycle::ThumbnailRequests;
 pub use document_files::*;
 pub use effects::{
     GradientDestination, GradientEdit, GradientControls, AdjustmentChoice, EffectAction, FilterCategoryChoice, FilterPickerAction, FilterPickerState,
-    LayerPropertiesView, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
+    LayerPropertiesView, PropertyDisclosure, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
 };
 pub use filter_loading::FilterLoadState;
 
@@ -1381,6 +1381,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                         reply.handled = true; return Ok(reply);
                     }
                     if key == "escape" && !editing {
+                        if !self.interaction.facts.popup_open && self.state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true)) {
+                            reply.change = self.dispatch(UiAction::Customize { action: CustomizationAction::ToggleLayerDrawerProperties })?;
+                            reply.handled = true;
+                            return Ok(reply);
+                        }
                         self.interaction.keyboard_chrome = true;
                         reply.dismiss_popups = true;
                         if self.cancel_layer_gesture()? {
@@ -3176,6 +3181,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 (LAYOUT, false)
             }
             UiAction::Customize { action } => {
+                let opening_drawer = matches!(action, CustomizationAction::ToggleHeaderDrawer {..} | CustomizationAction::ToggleToolDrawer {..});
+                if matches!(action, CustomizationAction::ToggleLayerDrawerProperties) && self.state.layer_properties.layer.is_none() {
+                    return Ok(UiChange::default());
+                }
                 let editing_header = matches!(
                     &action,
                     CustomizationAction::Header {
@@ -3193,6 +3202,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                     viewport,
                 &self.state.localization,
                 )?;
+                if opening_drawer && self.state.platform == Platform::Gtk
+                    && self.managed_workspace.as_ref().map_or(self.state.workspace.layout.panel_group(Panel::Layers).is_none(), |w| w.id == "builtin:workspace:painter")
+                    && let Some(drawer) = self.state.customization.drawer.as_mut().filter(|d| d.columns == [vec![Panel::Layers]])
+                {
+                    drawer.layer_properties = Some(false);
+                }
                 if editing_header && self.state.workspace.zen_mode {
                     self.state.workspace.zen_mode = false;
                     changed |= LAYOUT;
@@ -5943,6 +5958,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         self.state.layer_tools.connections = crate::layer_relationships::connections(doc, &self.state.layers);
         effects::publish_properties(&mut self.state.layer_properties,doc,&mut self.property_editor,self.effect_gesture.as_ref(),&self.state.localization);
+        self.state.layer_properties.disclosure = effects::property_disclosure(doc, &self.state.layer_properties, &self.state.localization);
         if let Some(id) = self.state.layer_properties.layer.and_then(|id| occurrence_handle(id).ok()).and_then(|id| self.effect_analyses.status(id)) {
             let status = self.state.localization.text(id);
             self.state.layer_properties.title = format!("{} · {status}", self.state.layer_properties.title);
@@ -6383,6 +6399,7 @@ mod tests {
     include!("histogram_tests.rs");
     include!("session_source_tests.rs");
     include!("layer_relationship_tests.rs");
+    include!("layer_drawer_tests.rs");
     include!("selection_tests.rs");
     include!("navigation_tests.rs");
     include!("enclose_fill_tests.rs");

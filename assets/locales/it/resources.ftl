@@ -541,3 +541,9 @@ resources-illustration-white = Bianco
 resources-illustration-transparency = Trasparenza
 resources-illustration-keep = Mantieni
 resources-illustration-alpha-threshold = Soglia alfa
+
+resources-layer-properties = Proprietà livello
+resources-layer-type-image = Livello immagine
+resources-layer-type-mask = Maschera livello
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

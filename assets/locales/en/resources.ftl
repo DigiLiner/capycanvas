@@ -541,3 +541,9 @@ resources-illustration-white = White
 resources-illustration-transparency = Transparency
 resources-illustration-keep = Keep
 resources-illustration-alpha-threshold = Alpha threshold
+
+resources-layer-properties = Layer properties
+resources-layer-type-image = Image layer
+resources-layer-type-mask = Layer mask
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }

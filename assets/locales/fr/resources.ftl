@@ -540,3 +540,9 @@ resources-illustration-white = Blanc
 resources-illustration-transparency = Transparence
 resources-illustration-keep = Conserver
 resources-illustration-alpha-threshold = Seuil alpha
+
+resources-layer-properties = Propriétés du calque
+resources-layer-type-image = Calque d’image
+resources-layer-type-mask = Masque de calque
+resources-property-summary-field = { $label } { $value }
+resources-property-summary-pair = { $first } · { $second }
