@@ -1266,6 +1266,8 @@ pub struct LayerState {
     pub label: String,
     pub description: String,
     pub can_delete: bool,
+    pub can_lock: bool,
+    pub can_duplicate: bool,
     pub visible: bool,
     pub visibility_blocked: bool,
     pub adjustment_effect: bool,

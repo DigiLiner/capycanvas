@@ -411,6 +411,7 @@ impl LayerPropertiesView {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct PropertyDisclosure {
     pub label: String,
+    pub return_label: String,
     pub summary: String,
 }
 impl PropertyDisclosure {
@@ -441,7 +442,8 @@ pub(super) fn property_disclosure(doc: &Document, view: &LayerPropertiesView, l:
     } else if matches!(doc.working.target, Some(SourceTarget::Coverage(_))) || doc.working.inspect_mask.is_some() {
         l.text(MessageId::RESOURCES_LAYER_TYPE_MASK).to_string()
     } else { match layer.map(|layer| layer.kind()) {
-        Some(LayerKind::Effect | LayerKind::Group | LayerKind::Selection) => view.layer_type.clone(),
+        Some(LayerKind::Group) => l.text(MessageId::RESOURCES_LAYER_GROUP_PROPERTIES).to_string(),
+        Some(LayerKind::Effect | LayerKind::Selection) => view.layer_type.clone(),
         Some(LayerKind::Object) => l.text(MessageId::RESOURCES_LAYER_TYPE_IMAGE).to_string(),
         _ => l.text(MessageId::RESOURCES_LAYER_PROPERTIES).to_string(),
     }};
@@ -487,7 +489,7 @@ pub(super) fn property_disclosure(doc: &Document, view: &LayerPropertiesView, l:
         [first] => first.clone(),
         _ => String::new(),
     };
-    PropertyDisclosure {label, summary}
+    PropertyDisclosure {label, return_label:l.text(MessageId::RESOURCES_LAYER_ALL_LAYERS).to_string(), summary}
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PropertyActionView { pub label: String, pub icon: Option<String>, pub group: Option<PropertyActionGroup>, pub action: EffectAction }

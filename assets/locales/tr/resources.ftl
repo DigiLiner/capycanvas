@@ -546,3 +546,8 @@ resources-layer-type-image = Görüntü katmanı
 resources-layer-type-mask = Katman maskesi
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Grup özellikleri
+resources-layer-all-layers = Tüm katmanlar
+resources-layer-swipe-lock = Kilitle
+resources-layer-swipe-unlock = Kilidi aç

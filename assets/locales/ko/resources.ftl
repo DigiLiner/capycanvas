@@ -663,3 +663,8 @@ resources-layer-type-image = 이미지 레이어
 resources-layer-type-mask = 레이어 마스크
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = 그룹 속성
+resources-layer-all-layers = 모든 레이어
+resources-layer-swipe-lock = 잠금
+resources-layer-swipe-unlock = 잠금 해제

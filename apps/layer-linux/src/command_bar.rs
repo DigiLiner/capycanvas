@@ -485,9 +485,9 @@ mod tests {
         let removed = Rc::new(Cell::new(false));
         let signal = removed.clone();
         let content = gtk::Label::new(Some("literal layer"));
-        let row = crate::swipe_row::SwipeRow::new(&content, move || signal.set(true), || {}, |_| {}, || {});
-        assert_eq!(row.delete_button().label().as_deref(), Some(CommonCopy::new(crate::launch_localization()).delete.as_ref()));
-        row.set_actions(true, false);
+        let row = crate::swipe_row::SwipeRow::new(&content, move || signal.set(true), || {}, || {}, || {}, |_| {}, || {});
+        let copy = layer_ui::NativeCopy::new(crate::launch_localization()).layers;
+        assert_eq!(row.delete_button().child().unwrap().downcast::<gtk::Label>().unwrap().text().as_str(), copy.swipe_delete.as_ref());
         row.delete_button().emit_clicked();
         assert!(removed.get());
     }

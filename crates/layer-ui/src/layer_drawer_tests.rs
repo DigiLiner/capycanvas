@@ -161,6 +161,7 @@ fn sketch_layer_drawer_properties_scope_and_dismissal() {
 fn layer_drawer_disclosure_uses_types_and_nonredundant_authored_values() {
     let mut s = session(Platform::Gtk);
     assert_eq!(s.state.layer_properties.disclosure.label, "Layer properties");
+    assert_eq!(s.state.layer_properties.disclosure.return_label, "All layers");
     assert!(s.state.layer_properties.disclosure.summary.is_empty());
     s.dispatch(UiAction::Layer {action:LayerAction::ColorMode {id:1, epoch:s.state.document_file.epoch, mode:layer_core::color::LayerColorMode::Grayscale}}).unwrap();
     assert!(s.state.layers.iter().find(|l| l.id == 1).unwrap().description.contains("Grayscale"));
@@ -182,4 +183,42 @@ fn layer_drawer_disclosure_uses_types_and_nonredundant_authored_values() {
     assert!(!s.state.layer_properties.disclosure.summary.contains("Radius"));
     s.dispatch(UiAction::Effect {action:EffectAction::Insert {effect:"curves".into()}}).unwrap();
     assert!(s.state.layer_properties.disclosure.summary.is_empty());
+    s.dispatch(UiAction::Layer {action:LayerAction::New {group:true, clipped:false}}).unwrap();
+    assert_eq!(s.state.layer_properties.disclosure.label, s.localization().text(MessageId::RESOURCES_LAYER_GROUP_PROPERTIES).as_ref());
+    assert_eq!(s.state.layer_properties.disclosure.return_label, s.localization().text(MessageId::RESOURCES_LAYER_ALL_LAYERS).as_ref());
+    s.set_localization(Localizer::shared(UiLanguage::English));
+    assert_eq!(s.state.layer_properties.disclosure.label, "Group properties");
+    assert_eq!(s.state.layer_properties.disclosure.return_label, "All layers");
+}
+
+#[test]
+fn layer_swipe_actions_follow_parent_locks_and_undo() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        let row = |s: &UiSession<Recorder>, id| s.state.layers.iter().find(|row| row.id == id).unwrap().clone();
+        assert!(row(&s, 1).can_lock && row(&s, 1).can_duplicate);
+        layer(&mut s, LayerAction::Lock { id:1, value:true });
+        assert!(row(&s, 1).can_lock && row(&s, 1).can_duplicate);
+        assert!(!row(&s, 1).can_delete);
+        layer(&mut s, LayerAction::Duplicate { id:1 });
+        let copy = s.state.layer_properties.layer.unwrap();
+        assert_ne!(copy, 1);
+        assert!(row(&s, copy).locked);
+        invoke(&mut s, CommandId::Undo);
+        assert!(!s.state.layers.iter().any(|row| row.id == copy));
+        invoke(&mut s, CommandId::Undo);
+        layer(&mut s, LayerAction::New { group:true, clipped:false });
+        let group = s.state.layer_properties.layer.unwrap();
+        layer(&mut s, LayerAction::New { group:false, clipped:false });
+        let child = s.state.layer_properties.layer.unwrap();
+        layer(&mut s, LayerAction::Lock { id:group, value:true });
+        assert!(!row(&s, child).can_lock && !row(&s, child).can_duplicate);
+        assert!(row(&s, group).can_lock && row(&s, group).can_duplicate);
+        assert!(s.dispatch(UiAction::Layer { action:LayerAction::Lock { id:child, value:false } }).is_err());
+        assert!(s.dispatch(UiAction::Layer { action:LayerAction::Duplicate { id:child } }).is_err());
+        invoke(&mut s, CommandId::Undo);
+        assert!(row(&s, child).can_lock && row(&s, child).can_duplicate);
+        invoke(&mut s, CommandId::QuickMask);
+        assert!(!row(&s, 0).can_lock && !row(&s, 0).can_duplicate && row(&s, 0).can_delete);
+    }
 }

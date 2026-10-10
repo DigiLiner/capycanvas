@@ -547,3 +547,8 @@ resources-layer-type-image = Livello immagine
 resources-layer-type-mask = Maschera livello
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Proprietà del gruppo
+resources-layer-all-layers = Tutti i livelli
+resources-layer-swipe-lock = Blocca
+resources-layer-swipe-unlock = Sblocca

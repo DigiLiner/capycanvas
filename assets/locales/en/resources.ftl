@@ -547,3 +547,8 @@ resources-layer-type-image = Image layer
 resources-layer-type-mask = Layer mask
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Group properties
+resources-layer-all-layers = All layers
+resources-layer-swipe-lock = Lock
+resources-layer-swipe-unlock = Unlock

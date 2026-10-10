@@ -547,3 +547,8 @@ resources-layer-type-image = Слой изображения
 resources-layer-type-mask = Маска слоя
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Свойства группы
+resources-layer-all-layers = Все слои
+resources-layer-swipe-lock = Заблокировать
+resources-layer-swipe-unlock = Разблокировать

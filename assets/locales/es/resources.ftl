@@ -546,3 +546,8 @@ resources-layer-type-image = Capa de imagen
 resources-layer-type-mask = Máscara de capa
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Propiedades del grupo
+resources-layer-all-layers = Todas las capas
+resources-layer-swipe-lock = Bloquear
+resources-layer-swipe-unlock = Desbloquear

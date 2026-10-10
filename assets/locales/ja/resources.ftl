@@ -663,3 +663,8 @@ resources-layer-type-image = 画像レイヤー
 resources-layer-type-mask = レイヤーマスク
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = グループのプロパティ
+resources-layer-all-layers = すべてのレイヤー
+resources-layer-swipe-lock = ロック
+resources-layer-swipe-unlock = ロック解除

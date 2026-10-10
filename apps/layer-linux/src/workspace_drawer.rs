@@ -13,6 +13,7 @@ mod allocation {
     pub struct Columns {
         pub children: RefCell<Vec<gtk::Widget>>,
         pub geometry: RefCell<Vec<Bounds>>,
+        pub natural_height: Cell<Option<i32>>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for Columns {
@@ -28,8 +29,8 @@ mod allocation {
         }
     }
     impl WidgetImpl for Columns {
-        fn measure(&self, _: gtk::Orientation, _: i32) -> (i32, i32, i32, i32) {
-            (0, 0, -1, -1)
+        fn measure(&self, orientation: gtk::Orientation, _: i32) -> (i32, i32, i32, i32) {
+            (0, if orientation == gtk::Orientation::Vertical {self.natural_height.get().unwrap_or(0)} else {0}, -1, -1)
         }
         fn size_allocate(&self, _: i32, height: i32, _: i32) {
             for (child, bounds) in self
@@ -38,10 +39,14 @@ mod allocation {
                 .iter()
                 .zip(self.geometry.borrow().iter())
             {
+                let (width, height) = if self.natural_height.get().is_some() {
+                    let width = bounds.width.max(child.measure(gtk::Orientation::Horizontal, -1).0 as f32);
+                    (width, (height as f32).max(child.measure(gtk::Orientation::Vertical, width as i32).0 as f32))
+                } else { (bounds.width, height as f32) };
                 allocate_at(
                     child,
                     Bounds {
-                        height: height as f32,
+                        width, height,
                         ..*bounds
                     },
                 );
@@ -60,11 +65,11 @@ glib::wrapper! {
 }
 struct LayerInspector {
     root: gtk::Box,
-    sizing: Cell<layer_ui::LayerDrawerSizing>,
+    pages: [Columns; 2],
     row_height: Cell<f32>,
     target: Cell<Option<(u64, Option<u64>)>>,
     anchor: Rc<Cell<Option<(u64, f32)>>>,
-    restore: Rc<RefCell<Option<gtk::TickCallbackId>>>,
+    restore: Rc<RefCell<Option<(gdk::FrameClock, glib::SignalHandlerId)>>>,
     rows: Cell<usize>,
     properties: Cell<bool>,
     layers: Rc<LayerPanel>,
@@ -90,15 +95,20 @@ impl LayerInspector {
         }));
         layers.list.add_controller(input);
         let effects = Rc::new(EffectPanels::with_filter_types(false));
-        let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(false).transition_duration(160).build();
+        let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(false).interpolate_size(true).transition_duration(PANEL_EXPANSION_MS).build();
         stack.connect_transition_running_notify(glib::clone!(#[weak] w, move |_| w.surface.queue_allocate()));
         stack.set_vexpand(true);
         stack.set_widget_name("layer-properties-stack");
-        stack.add_named(&layers.root, Some("layers"));
         margins(&effects.properties, PANEL_CONTENT_INSET as i32);
         let properties = scroll(&effects.properties);
         properties.set_widget_name("drawer-panel-Properties");
-        stack.add_named(&properties, Some("properties"));
+        let pages = [layers.root.clone().upcast::<gtk::Widget>(), properties.upcast()].map(|child| {
+            let page: Columns = glib::Object::new();
+            child.set_parent(&page); page.imp().children.borrow_mut().push(child);
+            page.imp().geometry.borrow_mut().push(Bounds::default());
+            page
+        });
+        stack.add_named(&pages[0], Some("layers")); stack.add_named(&pages[1], Some("properties"));
         stack.set_visible_child_name("layers");
         let footer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         footer.add_css_class("layer-properties-footer");
@@ -124,7 +134,7 @@ impl LayerInspector {
         chevron.set_pixel_size(16); content.append(&chevron);
         button.set_child(Some(&content)); footer.append(&button);
         root.append(&stack); root.append(&footer);
-        Self {root, sizing:Cell::new(Default::default()), row_height:Cell::new(layer_ui::TILE_SIZE), target:Cell::new(None), anchor, restore:Rc::new(RefCell::new(None)), rows:Cell::new(0),
+        Self {root, pages, row_height:Cell::new(layer_ui::TILE_SIZE), target:Cell::new(None), anchor, restore:Rc::new(RefCell::new(None)), rows:Cell::new(0),
             properties:Cell::new(false), layers, effects, stack, button, label, summary}
     }
     fn refresh(&self, w: &Rc<Workspace>, state: &UiState, regions: u32) {
@@ -141,7 +151,7 @@ impl LayerInspector {
         let open = state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true));
         let previous = self.properties.replace(open);
         if previous != open {
-            if let Some(callback) = self.restore.borrow_mut().take() { callback.remove(); }
+            if let Some((clock, callback)) = self.restore.borrow_mut().take() { clock.disconnect(callback); }
             if open { self.anchor.set(self.layers.scroll_anchor()); }
             else if self.anchor.get().is_some() { self.restore_anchor(w); }
         }
@@ -150,45 +160,53 @@ impl LayerInspector {
             self.stack.set_visible_child_full(page, if open {gtk::StackTransitionType::SlideUp} else {gtk::StackTransitionType::SlideDown});
         }
         let disclosure = &state.layer_properties.disclosure;
-        self.label.set_label(&disclosure.label);
+        let label = if open { &disclosure.return_label } else { &disclosure.label };
+        self.label.set_label(label);
         self.summary.set_label(&disclosure.summary);
         self.summary.set_visible(!open && !disclosure.summary.is_empty());
         self.button.set_sensitive(state.layer_properties.drawer_toggle_enabled(open));
-        self.button.set_tooltip_text(Some(&if !open && !disclosure.summary.is_empty() {format!("{}\n{}", disclosure.label, disclosure.summary)} else {disclosure.label.clone()}));
-        self.button.update_property(&[gtk::accessible::Property::Label(&disclosure.label), gtk::accessible::Property::Description(if open {""} else {&disclosure.summary})]);
-        self.button.update_state(&[gtk::accessible::State::Expanded(Some(open))]);
+        self.button.set_tooltip_text(Some(&if !open && !disclosure.summary.is_empty() {format!("{}\n{}", label, disclosure.summary)} else {label.clone()}));
+        self.button.update_property(&[gtk::accessible::Property::Label(label), gtk::accessible::Property::Description(if open {""} else {&disclosure.summary})]);
         if open { self.button.add_css_class("open"); } else { self.button.remove_css_class("open"); }
     }
     fn measure(&self, width: i32, viewport_height: f32) {
         let mut measurement = self.layers.scroll_measurement(width);
         if measurement.unit_height > 0. { self.row_height.set(measurement.unit_height); }
         else { measurement.unit_height = self.row_height.get(); }
-        let properties_height = self.properties.get().then(|| self.effects.properties.measure(gtk::Orientation::Vertical, width).1 as f32);
-        let mut sizing = self.sizing.get();
-        if sizing.update(measurement, self.rows.get(), viewport_height, properties_height) {
-            self.sizing.set(sizing); self.root.queue_resize();
+        let properties_height = self.effects.properties.measure(gtk::Orientation::Vertical, width).1 as f32;
+        for (page, properties_height) in self.pages.iter().zip([None, Some(properties_height)]) {
+            let mut sizing = layer_ui::LayerDrawerSizing::default();
+            sizing.update(measurement, self.rows.get(), viewport_height, properties_height);
+            let height = (sizing.height() - layer_ui::PropertyDisclosure::HEIGHT - 1.).max(0.).round() as i32;
+            if page.imp().natural_height.replace(Some(height)) != Some(height) { page.queue_resize(); }
+            let mut geometry = page.imp().geometry.borrow_mut();
+            if geometry[0].width != width as f32 { geometry[0].width = width as f32; page.queue_allocate(); }
         }
     }
     fn restore_anchor(&self, w: &Rc<Workspace>) {
-        let callback = self.root.add_tick_callback(glib::clone!(#[weak] w, #[weak(rename_to = layers)] self.layers,
-            #[weak(rename_to = stack)] self.stack, #[weak(rename_to = anchor)] self.anchor, #[weak(rename_to = restore)] self.restore,
-            #[upgrade_or] glib::ControlFlow::Break, move |root, _| {
-                let Some(position) = anchor.get() else { restore.borrow_mut().take(); return glib::ControlFlow::Break; };
+        let Some(clock) = self.root.frame_clock() else { self.anchor.set(None); return; };
+        let confirmed = Rc::new(Cell::new(false));
+        let callback = clock.connect_after_paint(glib::clone!(#[weak] w, #[weak(rename_to = root)] self.root, #[weak(rename_to = layers)] self.layers,
+            #[weak(rename_to = stack)] self.stack, #[weak(rename_to = anchor)] self.anchor, #[weak(rename_to = restore)] self.restore, #[strong] confirmed,
+            move |_| {
+                let finish = || { anchor.set(None); if let Some((clock, callback)) = restore.borrow_mut().take() { clock.disconnect(callback); } };
+                let Some(position) = anchor.get() else { finish(); return; };
                 let drawer = w.drawers().into_iter().find(|drawer| drawer.view.borrow().as_ref().is_some_and(|view| root.is_ancestor(&view.root)));
-                let Some(drawer) = drawer else { restore.borrow_mut().take(); return glib::ControlFlow::Break; };
-                if stack.is_transition_running() || drawer.from.borrow().is_some() { return glib::ControlFlow::Continue; }
-                let Some(placement) = drawer.target(&w) else { restore.borrow_mut().take(); return glib::ControlFlow::Break; };
-                if (root.height() as f32 - placement.bounds.height).abs() > 1. { return glib::ControlFlow::Continue; }
+                let Some(drawer) = drawer else { finish(); return; };
+                if stack.is_transition_running() || drawer.from.borrow().is_some() { return; }
+                let Some(placement) = drawer.target(&w) else { finish(); return; };
+                if (root.height() as f32 - placement.bounds.height).abs() > 1. { return; }
                 if layers.list.is_mapped() && layers.restore_scroll_anchor(position) {
-                    anchor.set(None); restore.borrow_mut().take(); glib::ControlFlow::Break
-                } else { glib::ControlFlow::Continue }
+                    if confirmed.replace(true) { finish(); return; }
+                } else { confirmed.set(false); }
+                root.queue_draw();
             }));
-        *self.restore.borrow_mut() = Some(callback);
+        *self.restore.borrow_mut() = Some((clock, callback));
     }
 }
 impl Drop for LayerInspector {
     fn drop(&mut self) {
-        if let Some(callback) = self.restore.borrow_mut().take() { callback.remove(); }
+        if let Some((clock, callback)) = self.restore.borrow_mut().take() { clock.disconnect(callback); }
     }
 }
 
@@ -785,7 +803,7 @@ impl Drawer {
             .iter()
             .zip(&sizing.columns)
             .map(|(body, b)| {
-                view.bodies.iter().find_map(|body| if let Body::LayerInspector(v) = body {Some(v.sizing.get().height())} else {None})
+                view.bodies.iter().find_map(|body| if let Body::LayerInspector(v) = body {Some(v.root.measure(gtk::Orientation::Vertical, b.width as i32).1 as f32)} else {None})
                     .unwrap_or_else(|| body.measure(gtk::Orientation::Vertical, b.width as i32).1 as f32)
                     + if state.tabs.is_some() {
                         TAB_BAR_HEIGHT
@@ -1043,7 +1061,7 @@ impl Drawer {
                 .zip(self.placement())
                 .is_some_and(|(to, from)| to.bounds != from.bounds);
         if !switching && (changed || resized || rows_changed) {
-            if next.layer_properties.is_some() && !changed { self.finish_animation(); }
+            if next.layer_properties.is_some() && !rebuild { self.finish_animation(); }
             else { self.animate(w, false); }
         }
         w.surface.raise_drawer(self.id);

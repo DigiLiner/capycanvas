@@ -5869,6 +5869,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             can_delete: doc.can_delete_layers(&if collapsed.contains(&id) {
                 doc.scene().order().iter().copied().filter(|h| *h == id || layer_core::descends_from(doc.scene(), *h, Some(id))).collect()
             } else { vec![id] }),
+            can_lock: LayerControls::for_layer(doc, id, l).edit_lock,
+            can_duplicate: !scene.parent(id).is_some_and(|parent| doc.is_locked(parent)),
             visible: doc.effective_visibility(id),
             visibility_blocked: l.is_artwork() && l.visible && !scene.visible(id),
             adjustment_effect: scene.effect(id).is_some_and(|fx| fx.program.kind == layer_core::EffectKind::Adjustment),
@@ -5946,7 +5948,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 id: 0, selection_layer: true, quick_mask: true, can_rename: false, has_thumbnail: true,
                 content_icon: Some("layer-selection-brush-symbolic".into()),
                 label: self.localization().text(MessageId::COMMAND_QUICK_MASK).to_string(), description: String::new(),
-                can_delete: true, visible: self.selection_masks.quick_visible,
+                can_delete: true, can_lock: false, can_duplicate: false, visible: self.selection_masks.quick_visible,
                 visibility_blocked: false, adjustment_effect: false,
                 opacity: 1., selected: true, mask_selected: false, content_selected: true, selection_icon: "layer-brush-symbolic",
                 load_selection_tooltip: "Finish Quick Mask and use it as the current selection",

@@ -55,12 +55,16 @@ fn native_sketch_layer_properties_drawer() {
             d.input.perform(serde_json::json!([{"touch":"down","point":point},{"touch":"up"}]));
             layer_page_settled(&d,&stack,"touch Properties toggle");
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(open), "touch footer contact");
+            assert_eq!(label.text(), if open { "All layers" } else { "Layer properties" });
+            assert!(!summary.is_visible());
         }
         for close in ["footer", "escape", "outside"] {
             d.click(&footer);
             layer_page_settled(&d,&stack,"Properties before dismissal");
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(true));
             assert_eq!(stack.visible_child_name().as_deref(), Some("properties"));
+            assert_eq!(label.text(), "All layers");
+            assert!(!summary.is_visible());
             assert!(d.w.drawer.placement().unwrap().bounds.height<=bounds.height);
             assert!(d.named("drawer-panel-Properties").is_mapped());
             assert!(!stack.child_by_name("layers").unwrap().is_child_visible());
@@ -95,9 +99,14 @@ fn native_sketch_layer_properties_drawer() {
         d.input.perform(serde_json::json!([{"point":d.point(&list)}, {"wheel":[0,5]}]));
         let position = scroll.vadjustment().value();
         assert!(position > 0.);
+        let anchor = layer_list_anchor(&list, &scroll);
         d.click(&footer);
+        layer_page_settled(&d,&stack,"plain Properties scroll retention");
         d.click(&footer);
-        assert!((scroll.vadjustment().value() - position).abs() < 1., "list scroll survives page switching");
+        layer_page_settled(&d,&stack,"Layers scroll retention");
+        let retained = find_named(&list, &anchor.0).unwrap();
+        assert!(retained.is_mapped());
+        assert!((retained.compute_bounds(&scroll).unwrap().y()-anchor.1).abs()<1., "visible layer survives page switching");
         let workspace = ui_session_mut(&d.w).capture_workspace();
         let add_filter = find_named(stack.child_by_name("layers").unwrap().upcast_ref(), "layer-add-filter").unwrap();
         assert!(add_filter.is_sensitive());
@@ -397,6 +406,12 @@ fn native_sketch_layer_drawer_immediate_audit() {
         d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:true,clipped:false}});
         let group = state(&d.w).layer_properties.layer.unwrap();
         assert!(!find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        assert_eq!(d.named("layer-properties-disclosure-label").downcast::<gtk::Label>().unwrap().text(),"All layers");
+        d.click(&footer); layer_page_settled(&d,&stack,"group Layers footer");
+        assert_eq!(d.named("layer-properties-disclosure-label").downcast::<gtk::Label>().unwrap().text(),"Group properties");
+        assert!(!d.named("layer-properties-disclosure-summary").is_visible());
+        d.click(&footer); layer_page_settled(&d,&stack,"group Properties footer");
+        assert_eq!(d.named("layer-properties-disclosure-label").downcast::<gtk::Label>().unwrap().text(),"All layers");
         d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Delete {id:group}});
         d.w.dispatch(UiAction::SelectLayer {id:raster});
         d.w.dispatch(UiAction::Effect {action:layer_ui::EffectAction::Insert {effect:"curves".into()}}); pump(100);
@@ -3821,6 +3836,257 @@ mod color_mixing;
 fn native_layer_swipe_alpha_lock() { layer_swipes(&["touch", "pen"]); }
 
 #[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_swipe_actions"]
+fn native_sketch_layer_swipe_actions() { sketch_layer_swipe_actions("touch"); }
+
+#[test]
+#[ignore = "isolated native-input.js --tablet --native-test=native_sketch_layer_swipe_actions_pen"]
+fn native_sketch_layer_swipe_actions_pen() { sketch_layer_swipe_actions("pen"); }
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_swipe_motion"]
+fn native_sketch_layer_swipe_motion() {
+    let mut d=Driver::new("art.capycanvas.SketchSwipeMotion");
+    let output=std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    let mut reports=Vec::new();
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Gtk),..WorkspaceState::default()
+        })});
+        d.w.dispatch(UiAction::SelectLayer {id:1}); pump(250);
+        let opener=d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        d.click_name(&opener);
+        let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"swipe motion Layers ready");
+        for repeat in 0..3 {
+            let window=Instant::now();
+            while window.elapsed()<Duration::from_secs(6) {
+                for open in [true,false] {
+                    let content=d.named("art-layer-1");
+                    let row=content.parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+                    let x=Rc::new(Cell::new(content.compute_bounds(&row).unwrap().x()));
+                    let timings=Rc::new(RefCell::new(Vec::new()));
+                    let clock=d.w.surface.frame_clock().unwrap();
+                    let capture=clock.connect_after_paint(glib::clone!(#[strong] timings,#[strong] x,#[weak] content,#[weak] row,move |clock| {
+                        if let Some(bounds)=content.compute_bounds(&row) {
+                            if x.replace(bounds.x())!=bounds.x() && let Some(timing)=clock.current_timings() {timings.borrow_mut().push(timing);}
+                        }
+                    }));
+                    let p=d.point(row.upcast_ref());
+                    let distance=if open {-240.} else {72.};
+                    let mut events=vec![contact("touch","down",p)];
+                    for step in 1..=18 {events.push(contact("touch","move",[p[0]+distance*step as f32/18.,p[1]]));}
+                    events.push(contact("touch","up",[p[0]+distance,p[1]]));
+                    d.input.perform(serde_json::Value::Array(events)); pump(100);
+                    clock.disconnect(capture);
+                    assert_eq!(row.is_open(),open);
+                    let mut times:Vec<_>=timings.borrow().iter().filter(|t|t.is_complete() && t.presentation_time()>0).map(|t|t.presentation_time()).collect();
+                    times.sort_unstable(); times.dedup();
+                    assert!(times.len()>2,"moving swipe presentations");
+                    let intervals:Vec<_>=times.windows(2).map(|pair|pair[1]-pair[0]).collect();
+                    reports.push(serde_json::json!({"theme":format!("{theme:?}"),"repeat":repeat,"open":open,"presentations":times,"intervals_us":intervals,"viewport":[d.w.surface.width(),d.w.surface.height()]}));
+                }
+            }
+        }
+        let _warm=crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("swipe-closed-{theme:?}.png"))).unwrap();
+        d.click_name(&opener); wait_for_drawer_close(&d.w);
+    }
+    std::fs::write(output.join("swipe-animation.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    d.finish();
+}
+
+fn sketch_layer_swipe_actions(device: &str) {
+    let mut d = Driver::new("art.capycanvas.SketchLayerSwipeActions");
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Gtk),..WorkspaceState::default()
+        })});
+        d.w.dispatch(UiAction::SelectLayer {id:1});
+        pump(250);
+        let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        d.click_name(&opener);
+        let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"swipe Layers ready");
+        let swipe = || d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        let row = swipe();
+        let start = d.point(&d.named("art-layer-1"));
+        d.input.perform(serde_json::json!([contact(device,"down",start),contact(device,"move",[start[0]-18.,start[1]]),contact(device,"up",[start[0]-18.,start[1]])]));
+        pump(180); assert!(!row.is_open(),"short left swipe remains closed");
+        let open = |d:&mut Driver| {
+            let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+            if row.is_open() {return;}
+            let p=d.point(row.upcast_ref());
+            d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"move",[p[0]-30.,p[1]]),contact(device,"move",[p[0]-240.,p[1]]),contact(device,"up",[p[0]-240.,p[1]])]));
+            pump(180);
+        };
+        open(&mut d);
+        let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        assert!(row.is_open());
+        let output=std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+        std::fs::create_dir_all(&output).unwrap();
+        let _warm=crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("swipe-actions-{device}-{theme:?}.png"))).unwrap();
+        for button in [row.lock_button(),row.duplicate_button(),row.delete_button()] {
+            assert!(button.is_sensitive());
+            let label=button.child().unwrap().downcast::<gtk::Label>().unwrap();
+            assert!(!label.layout().is_ellipsized(),"English swipe action fits: {}",label.text());
+        }
+        let p=d.point(row.lock_button().upcast_ref());
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
+        assert!(state(&d.w).layers.iter().find(|l|l.id==1).unwrap().locked);
+        open(&mut d);
+        let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        assert!(row.lock_button().is_sensitive());
+        assert_eq!(row.lock_button().child().unwrap().downcast::<gtk::Label>().unwrap().text(),"Unlock");
+        assert!(row.duplicate_button().is_sensitive()); assert!(!row.delete_button().is_sensitive());
+        let p=d.point(row.lock_button().upcast_ref());
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
+        assert!(!state(&d.w).layers.iter().find(|l|l.id==1).unwrap().locked);
+        assert_eq!(row.lock_button().child().unwrap().downcast::<gtk::Label>().unwrap().text(),"Lock");
+        let count=state(&d.w).layers.len();
+        open(&mut d);
+        let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        let p=d.point(row.duplicate_button().upcast_ref());
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
+        assert_eq!(state(&d.w).layers.len(),count+1);
+        d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
+        assert_eq!(state(&d.w).layers.len(),count);
+        open(&mut d);
+        let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        let p=d.point(row.delete_button().upcast_ref());
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
+        assert!(!state(&d.w).layers.iter().any(|l|l.id==1));
+        d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
+        assert!(state(&d.w).layers.iter().any(|l|l.id==1));
+        open(&mut d);
+        let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        let p=d.point(row.upcast_ref());
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"move",[p[0]+30.,p[1]]),contact(device,"move",[p[0]+260.,p[1]]),contact(device,"up",[p[0]+260.,p[1]])]));
+        pump(180); assert!(!row.is_open(),"reverse swipe closes action strip");
+        assert!(!state(&d.w).layers.iter().find(|l|l.id==1).unwrap().alpha_locked,"closing actions does not invoke right swipe");
+        let p=d.point(&d.named("art-layer-1"));
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"move",[p[0]-240.,p[1]])]));
+        let controllers=row.observe_controllers();
+        for i in 0..controllers.n_items() {
+            if let Some(gesture)=controllers.item(i).and_downcast::<gtk::GestureDrag>() {gesture.set_state(gtk::EventSequenceState::Denied);}
+        }
+        d.input.perform(serde_json::json!([contact(device,"up",[p[0]-240.,p[1]])]));
+        pump(180); assert!(!row.is_open(),"canceled contact closes actions");
+        d.w.dispatch(UiAction::Invoke {command:CommandId::QuickMask}); pump(100);
+        let row=d.named("art-layer-0").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        assert!(!row.lock_button().is_visible()); assert!(!row.duplicate_button().is_visible());
+        assert!(row.delete_button().is_sensitive());
+        d.w.dispatch(UiAction::Invoke {command:CommandId::QuickMask});
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:true,clipped:false}});
+        let group=state(&d.w).layer_properties.layer.unwrap();
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false,clipped:false}});
+        let child=state(&d.w).layer_properties.layer.unwrap();
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Lock {id:group,value:true}}); pump(100);
+        let row=d.named(&format!("art-layer-{child}")).parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        assert!(!row.lock_button().is_sensitive()); assert!(!row.duplicate_button().is_sensitive());
+        assert!(!row.delete_button().is_sensitive());
+        let p=d.point(&d.named(&format!("art-layer-{child}")));
+        d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"move",[p[0]-240.,p[1]]),contact(device,"up",[p[0]-240.,p[1]])]));
+        assert!(!row.is_open(),"locked parent denies unavailable actions");
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Lock {id:group,value:false}});
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Delete {id:group}});
+        d.click_name(&opener); wait_for_drawer_close(&d.w);
+    }
+    d.finish();
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_properties_transition"]
+fn native_sketch_layer_properties_transition() {
+    let mut d=Driver::new("art.capycanvas.SketchPropertiesTransition");
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Gtk),..WorkspaceState::default()
+        })});
+        for _ in 0..32 {d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false,clipped:false}});}
+        let opener=d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        d.click_name(&opener);
+        let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"transition Layers ready");
+        let native=d.named("tool-drawer");
+        let footer=d.named("layer-properties-disclosure");
+        let start=native.height();
+        let overhead=start-stack.height();
+        let frames=Rc::new(RefCell::new(Vec::new()));
+        let clock=d.w.surface.frame_clock().unwrap();
+        let capture=clock.connect_after_paint(glib::clone!(#[strong] frames,#[weak] stack,#[weak] native,move |_| {
+            let slide=stack.visible_child().and_then(|child|child.compute_bounds(&stack)).map(|b|1.-b.y().abs()/stack.height().max(1) as f32);
+            frames.borrow_mut().push((native.height(),stack.height(),stack.is_transition_running(),slide));
+        }));
+        d.click(&footer);
+        layer_page_settled(&d,&stack,"synchronized Properties opening");
+        let end=native.height();
+        clock.disconnect(capture);
+        assert!(end<start);
+        let frames=frames.borrow();
+        assert!(frames.iter().any(|&(h,_,running,_)|running && h> end+2 && h<start-2),"native intermediate height during slide");
+        for &(h,s,running,slide) in frames.iter() {
+            assert!((h-s-overhead).abs()<=2,"stack/container synchronized: {h}/{s}/{overhead}");
+            if running && h>end+2 && h<start-2 {
+                let height_progress=(h-start) as f32/(end-start) as f32;
+                let slide=slide.unwrap();
+                let tolerance=2./(start-end).abs() as f32+2./s.max(1) as f32;
+                assert!((height_progress-slide).abs()<=tolerance,"height/slide progress synchronized: {height_progress}/{slide}, tolerance {tolerance}");
+            }
+        }
+        drop(frames);
+        let frames=Rc::new(RefCell::new(Vec::new()));
+        let capture=clock.connect_after_paint(glib::clone!(#[strong] frames,#[weak] stack,#[weak] native,move |_| {
+            let slide=stack.visible_child().and_then(|child|child.compute_bounds(&stack)).map(|b|1.-b.y().abs()/stack.height().max(1) as f32);
+            frames.borrow_mut().push((native.height(),stack.height(),stack.is_transition_running(),slide));
+        }));
+        d.click(&footer); layer_page_settled(&d,&stack,"synchronized Layers return");
+        clock.disconnect(capture);
+        assert!((native.height()-start).abs()<=1);
+        assert!(frames.borrow().iter().any(|&(h,_,running,_)|running && h>end+2 && h<start-2));
+        for &(h,s,running,slide) in frames.borrow().iter() {
+            assert!((h-s-overhead).abs()<=2);
+            if running && h>end+2 && h<start-2 {
+                let height_progress=(h-end) as f32/(start-end) as f32;
+                let slide=slide.unwrap();
+                let tolerance=2./(start-end).abs() as f32+2./s.max(1) as f32;
+                assert!((height_progress-slide).abs()<=tolerance,"return height/slide progress synchronized: {height_progress}/{slide}, tolerance {tolerance}");
+            }
+        }
+        d.click(&footer); layer_page_settled(&d,&stack,"Properties before rapid reversal");
+        d.input.settle_ms=0;
+        for (index,open) in [false,true,false].into_iter().enumerate() {
+            if index>0 {assert!(stack.is_transition_running(),"reverse during active native transition");}
+            let p=d.point(&footer);
+            let picked=d.w.window.pick(p[0] as f64,p[1] as f64,gtk::PickFlags::DEFAULT).unwrap();
+            assert!(picked==footer || picked.is_ancestor(&footer),"rapid footer native hit at {p:?}: {}",picked.widget_name());
+            d.input.perform(serde_json::json!([contact("touch","down",p),contact("touch","up",p)]));
+            until(||state(&d.w).customization.drawer.unwrap().layer_properties==Some(open),"rapid native touch adopted");
+            pump(100);
+        }
+        d.input.settle_ms=180;
+        layer_page_settled(&d,&stack,"rapid reversal returns Layers");
+        assert_eq!(stack.visible_child_name().as_deref(),Some("layers"));
+        assert!((native.height()-start).abs()<=1);
+        let settings=gtk::Settings::for_display(&gtk::prelude::WidgetExt::display(&d.w.window));
+        let animations=settings.is_gtk_enable_animations();
+        settings.set_gtk_enable_animations(false);
+        d.click(&footer); layer_page_settled(&d,&stack,"animations disabled Properties");
+        assert!(!stack.is_transition_running()); assert!((native.height()-end).abs()<=1);
+        d.click(&footer); layer_page_settled(&d,&stack,"animations disabled Layers");
+        assert!((native.height()-start).abs()<=1);
+        settings.set_gtk_enable_animations(animations);
+        d.click_name(&opener); wait_for_drawer_close(&d.w);
+    }
+    d.finish();
+}
+
+#[test]
 #[ignore = "isolated native-input.js --native-test=native_layer_swipe_mouse"]
 fn native_layer_swipe_mouse() { layer_swipes(&["mouse"]); }
 
@@ -3868,7 +4134,7 @@ fn layer_swipes(devices: &[&str]) {
             for distance in [-60., 90.] {
                 let row = d.named("art-layer-1");
                 let swipe = row.parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
-                let p = d.point(&row);
+                let p = if swipe.is_open() {d.point(swipe.upcast_ref())} else {d.point(&row)};
                 d.input.perform(serde_json::json!([contact(device,"down",p),
                     contact(device,"move",[p[0]+distance/3.,p[1]]), contact(device,"move",[p[0]+distance,p[1]]),
                     contact(device,"up",[p[0]+distance,p[1]])]));

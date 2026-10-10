@@ -119,6 +119,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Figure or ruler drag | 120 | | |
 | Layer opacity scrub | 120 | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Layer reorder drag | 120 | **Met.** Native UI 117.20–119.41 fps; moving-frame gap p99 8.38–16.67 ms | [Layer reorder and retained photo translation](#layer-reorder-and-retained-photo-translation), 2026-10-04 |
+| Layer row swipe | 120 | **Unqualified.** GTK desktop Lock/Duplicate/Delete reveal satisfies the desktop criteria: 119.71–120.06 presents/s, p99 up to 10.615 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Layer thumbnail selection animation | 120 | **Not met.** Repeated content/mask selection 77.08–79.86 window frames/s; worst moving-frame gap p99 33.33 ms | [Layer thumbnail selection](#layer-thumbnail-selection), 2026-10-05 |
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
@@ -126,13 +127,13 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps | `dc27e04d`, 2026-09-23 |
 | Panel or column resize | 120 | **Unqualified.** GTK desktop Color column 12.88–44.61, floating panel 39.63–100.58 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** GTK desktop panel 119.2–119.4 presents/s, p99 up to 8.66 ms; curve p99 up to 16.712 ms exceeds the strict two-frame budget; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
-| Drawer open and close | 120 | **Unqualified.** GTK Sketch Properties misses the desktop 120 Hz criteria overall: pooled 107.46–115.73 presents/s, p99 16.526–16.741 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| Drawer open and close | 120 | **Unqualified.** GTK Sketch Properties satisfies the desktop criteria: pooled 116.57–118.62 presents/s, p99 12.661–16.395 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
 | Canvas action bar show, hide and move | 120 | **Not met.** UI frame p50/p95: 63.2/90.0 ms moving the bar, 23.0/34.6 ms show and hide (2048 × 1536) | Canvas-bar `ui-bar-move` and `ui-bar-show-hide`, 2026-09-27 |
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
-| List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK Sketch with 1,000 layers misses desktop 120 Hz criteria overall: normal touch at scales 1/2 gives 78.97–117.28 presents/s, p99 up to 66.639 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK Sketch with 1,000 layers misses desktop 120 Hz criteria: normal touch at scales 1/2 gives 93.38–113.27 presents/s, p99 up to 24.967 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
 
 ## Layer thumbnail selection
@@ -172,7 +173,7 @@ and 33.33 ms. Dropped reports remained zero and thermal status remained 0.
 
 ## GTK Sketch Layers diagnostic
 
-Measured 2026-10-10 on the working tree based on `adac319af`, with release
+Measured 2026-10-10 on the working tree based on `8e48e9060`, with release
 Rust, GTK 4.22.5, libadwaita 1.9 and NVIDIA RTX PRO 6000 Blackwell
 Max-Q/Vulkan 615.71.09.
 The private Mutter display runs at a requested 120 Hz and 1100 × 1000 logical
@@ -181,12 +182,12 @@ pixels; scale 2 uses 2200 × 2000 physical pixels. The drawing is empty,
 photographic workloads and sustained window resizing remain unmeasured.
 Verification builds and native motion runs execute separately.
 The frozen baseline test executable has SHA-256
-`b386ff0a9482d0d7acaf57897bbedb5212427e666736fa36fa9ba37ab15921b5`.
+`49d4a24724363688b8e679aa53435ca6cc83edd12696e8825e513baca8f59542`.
 The current test executable is
-`artifacts/layer-drawer-immediate/final-review-layer-linux`, SHA-256
-`49d4a24724363688b8e679aa53435ca6cc83edd12696e8825e513baca8f59542`;
+`artifacts/layer-drawer-actions/painted-layer-linux`, SHA-256
+`70bd2846f92312b3c060b8da607ac651efa5948ed92c20f7444301195908ba3b`;
 the review application has SHA-256
-`a1a0175943112a870b069f2f6f7a6a0a7c01db27a6a789e3982175c2b6ff006e`.
+`c644e9d92a931e75faba43734d30ab403d4c35a312193af53e09c4c9f83a0182`.
 
 `native_sketch_layer_drawer_auto_height` checks 2, 6, 12, 32 and 1,000 listed
 rows in both themes at scales 1 and 2. Native Add/Delete and Undo/Redo resize
@@ -194,7 +195,7 @@ on the first painted frame. Drawer heights are 395, 395, 635, 850 and 850
 logical pixels, and plain Properties returns to 395 pixels. Four page round
 trips at each size preserve the same visible layer and its offset; measured
 drift at 1,000 rows is zero at both scales in both themes. The 1,000-row list
-realizes 205–206 row widgets, with zero pending thumbnail requests at sampled
+realizes 206 row widgets, with zero pending thumbnail requests at sampled
 scroll endpoints. Thumbnail textures remain
 cached for visited rows; this does not establish constant total memory use.
 The numeric adjustment may change as GTK re-estimates the list.
@@ -207,9 +208,20 @@ closing Properties after deleting all layers. Native painted-row checks wait
 for the scroll endpoint's layout and presentation. Both-theme visual checks at
 both scales cover header bridges, hover corners and raster, mask, fill, group,
 filter and object Properties. Pen-footer and affected header-control journeys
-pass. The existing relationship journey times out in capture acknowledgement
-before its drag phase on both baseline and current builds; that drag remains
+pass. The earlier relationship journey timed out in capture acknowledgement
+before its drag phase on both `adac319af` and `8e48e9060`; that drag remains
 unverified.
+
+Native swipe action journeys check Lock/Unlock, Duplicate, Delete, exact native
+Undo, short and cancelled contacts, reverse closure, parent-lock restrictions
+and Quick Mask in both themes with touch and injected pen. Default English
+labels fit without ellipsis. The footer checks Group properties and All layers,
+including summary restoration. The transition journey compares normalized
+container height and native child slide progress on each painted frame in both
+directions, with pixel-rounding tolerance. It also checks reversal during an
+active transition and disabled animations. Page wrappers preserve child minimum
+allocations while the popup clips to its animated bounds. Scroll restoration
+observes native painted rows and confirms the result on another frame.
 
 After page transitions settle, each theme runs three primed six-second scroll
 gestures. Normal touch uses a 140-pixel triangular motion with touch-down and
@@ -217,41 +229,62 @@ gestures. Normal touch uses a 140-pixel triangular motion with touch-down and
 presentations only while the scroll adjustment changes; idle frames are
 excluded. Rates use consecutive unique presentation timestamps; interval p99
 uses nearest rank. The baseline comparison uses the same touch workload at
-scale 1. No matched baseline touch run at scale 2 was measured. The current
+both scales. The current
 large-stack scrolling workload still misses the desktop 114 presents/s floor
 or 16.667 ms p99 limit across repeated runs.
 
 | Build / scale | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
 | --- | --- | --- |
-| Baseline / 1 | 73.90–78.14 / 50.107 ms | 81.07–89.44 / 41.763 ms |
-| Current / 1 | 102.22–108.97 / 58.372 ms | 116.48–117.28 / 16.690 ms |
-| Current / 2 | 78.97–88.06 / 66.639 ms | 94.39–103.19 / 16.917 ms |
+| Baseline / 1 | 102.22–108.97 / 58.372 ms | 116.48–117.28 / 16.690 ms |
+| Current / 1 | 111.61–112.99 / 16.816 ms | 112.46–113.27 / 24.941 ms |
+| Baseline / 2 | 78.97–88.06 / 66.639 ms | 94.39–103.19 / 16.917 ms |
+| Current / 2 | 93.38–94.64 / 16.826 ms | 100.61–107.38 / 24.967 ms |
 
 `native_sketch_layer_properties_drawer` checks native filter insertion,
 editing, Undo, footer toggles, Escape and outside dismissal, then primes the
-160 ms slide transitions and runs four five-second windows of footer toggles
+transitions and runs four five-second windows of footer toggles
 per theme. Moving intervals include Stack transitions, changes to allocated
 drawer height and mapped list adjustment changes, including restoration.
-The baseline keeps both pages at 850 pixels; the current journey adds the same
-32 rows and resizes between 850-pixel Layers and 395-pixel Properties. These
-are different visual workloads and do not isolate measurement cost. Pooled
-interval results follow; only the current Light/down row meets both desktop
-criteria. The overall Properties transition target remains unmet.
+Both builds add 32 rows and resize between 850-pixel Layers and 395-pixel
+Properties. The baseline slides for 160 ms while resizing independently for
+200 ms; the current version uses one native 200 ms timeline. This compares
+the complete presentation change rather than isolating a helper's cost. All
+current sampled transition windows satisfy the desktop rate and interval
+criteria; this does not qualify the reference tier. Pooled interval results
+follow.
 
 | Theme / transition | Baseline presents/s / p99 gap | Current presents/s / p99 gap |
 | --- | --- | --- |
-| Light / up | 109.64 / 20.643 ms | 114.12 / 16.704 ms |
-| Light / down | 103.42 / 22.925 ms | 115.73 / 16.526 ms |
-| Dark / up | 117.69 / 12.682 ms | 112.60 / 16.741 ms |
-| Dark / down | 117.04 / 13.841 ms | 107.46 / 16.687 ms |
+| Light / up | 114.12 / 16.748 ms | 116.73 / 15.834 ms |
+| Light / down | 118.03 / 16.609 ms | 118.62 / 15.089 ms |
+| Dark / up | 113.26 / 16.737 ms | 116.57 / 16.395 ms |
+| Dark / down | 115.86 / 16.612 ms | 118.51 / 12.661 ms |
+
+`native_sketch_layer_swipe_motion` primes the Lock/Duplicate/Delete strip and
+runs three six-second touch gestures per theme at scale 1. Only completed
+presentations where the native row content changes horizontal position count;
+intervals across stationary endpoints are excluded. The current implementation
+satisfies the desktop criteria in every sampled window. This is a current-only
+diagnostic, not a baseline comparison or reference-tablet qualification.
+
+| Theme / swipe | Presents/s, three runs | Maximum interval p99 |
+| --- | --- | --- |
+| Light / open | 119.71–120.06 | 10.615 ms |
+| Light / close | 119.98–120.04 | 8.520 ms |
+| Dark / open | 119.86–119.88 | 8.485 ms |
+| Dark / close | 119.99–120.01 | 8.513 ms |
 
 Raw timings, source and binary hashes, visible-anchor checks and screenshots
-are under `artifacts/layer-drawer-immediate/`. Current qualified runs are
-`final-qualified-touch1/`, `final-qualified-touch2/`,
-`final-qualified-properties/`, `final-qualified-viewport/`,
-`final-qualified-audit1/`, `final-qualified-audit2/`, `final-qualified-pen/`
-and `final-qualified-header/`; matched baseline runs are `baseline-touch/`
-and `baseline-properties/`. The native growth journey uses
+are under `artifacts/layer-drawer-actions/`. Current painted runs include
+`painted-touch1/`, `painted-touch2/`, `painted-properties/`, `painted-viewport/`,
+`painted-audit1/`, `painted-audit2/` and `painted-swipe-motion/`. The unchanged
+action and synchronization checks use the preserved pre-restoration tester in
+`frozen-swipe-touch/`, `frozen-swipe-pen/` and `frozen-transition/`, with its own
+source and binary hashes. Baseline scroll timings for `8e48e9060` are in
+`artifacts/layer-drawer-immediate/final-qualified-touch1/` and
+`final-qualified-touch2/`; matched Properties timings are in the current
+artifact root's `baseline-properties/` and `properties-pooled-comparison.json`.
+The native growth journey uses
 `LAYER_NATIVE_EVENT_MS=4` and `LAYER_DRAWER_SCROLL_INPUT=touch`.
 
 ## GTK panel slider diagnostic

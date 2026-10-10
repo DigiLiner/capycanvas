@@ -547,3 +547,8 @@ resources-layer-type-image = Lớp hình ảnh
 resources-layer-type-mask = Mặt nạ lớp
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Thuộc tính nhóm
+resources-layer-all-layers = Tất cả lớp
+resources-layer-swipe-lock = Khóa
+resources-layer-swipe-unlock = Mở khóa

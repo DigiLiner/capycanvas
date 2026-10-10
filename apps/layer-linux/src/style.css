@@ -143,7 +143,9 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .layer-icon image { -gtk-icon-size: 16px; }
 .layer-list { background: transparent; }
 .layer-list > row { padding: 0; margin: 0; border-radius: 0; }
-.dock-panel button.layer-swipe-delete { border-radius: 0; padding: 0 8px; background: #c01c28; color: white; }
+.dock-panel .layer-swipe-actions button { min-width: 0; border-radius: 0; padding: 0 4px; background: mix(@window_bg_color, @window_fg_color, 0.16); }
+.dock-panel button.layer-swipe-duplicate { background: mix(@window_bg_color, @window_fg_color, 0.24); }
+.dock-panel button.layer-swipe-delete { background: #c01c28; color: white; }
 .layer-row { min-height: 36px; padding: 2px 6px; border-radius: 0; }
 .layer-row.selected { background: var(--selection-bg); }
 .layers-panel button.layer-column { min-width: 24px; }

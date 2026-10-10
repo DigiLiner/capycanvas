@@ -90,6 +90,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Figure or ruler drag | 90 | | |
 | Layer opacity scrub | 90 | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Layer reorder drag | 90 | | |
+| Layer row swipe | 90 | Unmeasured on the reference tablet; GTK has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Layer thumbnail selection animation | 90 | **Not met.** 59.705–59.706 window frames/s; p99 gap 16.80–16.91 ms on the device's 60 Hz panel | Isolated outline; measurement below, 2026-10-05 |
 | Attached filter drag inside a clipping run | 90 | Unmeasured: both attempts timed out waiting for the 24 MP drawing's shaders before motion | `7f69a9356` + clipping-filter changes, benchmark APK; `artifacts/clipping-filter/mid-performance{,-retry}.log`, 2026-10-04 |
 | Layer swipe right: alpha lock (24 MP photo) | 90 | **Not met.** Android relationship overlay 58.8–59.4 fps, interval p99 16.8–16.9 ms; Web 53.1–54.6 fps, interval p99 33.5–50.2 ms | Android `00b2d6e73` + native port, 2026-10-04; Web `1d251ece`, 2026-09-27; details below |

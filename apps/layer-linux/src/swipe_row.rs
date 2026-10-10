@@ -1,4 +1,4 @@
-//! Native contact tracking and presentation; deletion stays a shared action.
+//! Native contact tracking and presentation for shared layer actions.
 use adw::prelude::*;
 use gtk::{glib, subclass::prelude::*};
 use std::cell::{Cell, OnceCell, RefCell};
@@ -10,6 +10,9 @@ mod imp {
     pub struct SwipeRow {
         pub content: OnceCell<gtk::Widget>,
         pub delete: OnceCell<gtk::Button>,
+        pub lock: OnceCell<gtk::Button>,
+        pub duplicate: OnceCell<gtk::Button>,
+        pub actions: OnceCell<gtk::Box>,
         pub offset: Cell<f64>,
         pub origin: Cell<f64>,
         pub admitted: Cell<bool>,
@@ -35,17 +38,16 @@ mod imp {
         }
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             let shift = |x| Some(gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x, 0.)));
-            self.delete.get().unwrap().allocate(REVEAL as i32, height, baseline, shift(width as f32 - REVEAL as f32));
+            let reveal = self.obj().reveal_width() as i32;
+            self.actions.get().unwrap().allocate(reveal, height, baseline, shift((width - reveal) as f32));
             self.content.get().unwrap().allocate(width, height, baseline, shift(-self.offset.get() as f32));
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             let obj = self.obj();
-            // Only the revealed area paints red; transparent row backgrounds
-            // must not expose the action under an unopened row.
             let reveal = self.offset.get().max(0.) as f32;
             snapshot.push_clip(&gtk::graphene::Rect::new(obj.width() as f32 - reveal,
                 0., reveal, obj.height() as f32));
-            obj.snapshot_child(self.delete.get().unwrap(), snapshot);
+            if reveal > 0. { obj.snapshot_child(self.actions.get().unwrap(), snapshot); }
             snapshot.pop();
             obj.snapshot_child(self.content.get().unwrap(), snapshot);
         }
@@ -56,18 +58,32 @@ glib::wrapper! {
         @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 impl SwipeRow {
-    pub fn new(content: &impl IsA<gtk::Widget>, remove: impl Fn() + 'static, swipe_right: impl Fn() + 'static, opening: impl Fn(&Self) + 'static, changed: impl Fn() + 'static) -> Self {
+    pub fn new(content: &impl IsA<gtk::Widget>, remove: impl Fn() + 'static, lock: impl Fn() + 'static, duplicate: impl Fn() + 'static, swipe_right: impl Fn() + 'static, opening: impl Fn(&Self) + 'static, changed: impl Fn() + 'static) -> Self {
         let row: Self = glib::Object::new();
         let _ = row.imp().changed.set(Box::new(changed));
         row.set_overflow(gtk::Overflow::Hidden);
-        let copy = layer_ui::CommonCopy::new(crate::launch_localization());
-        let delete = gtk::Button::with_label(copy.delete.as_ref());
-        delete.add_css_class("destructive-action");
-        delete.add_css_class("layer-swipe-delete");
-        delete.set_widget_name("layer-swipe-delete");
-        delete.set_parent(&row);
-        delete.connect_clicked(move |_| remove());
-        row.imp().delete.set(delete).unwrap();
+        let copy = layer_ui::NativeCopy::new(crate::launch_localization()).layers;
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        actions.add_css_class("layer-swipe-actions");
+        let button = |name: &str, text: &str| {
+            let button = gtk::Button::new();
+            button.set_hexpand(true);
+            button.set_child(Some(&gtk::Label::builder().label(text).ellipsize(gtk::pango::EllipsizeMode::End).width_chars(1).build()));
+            button.set_widget_name(name); button.add_css_class(name);
+            actions.append(&button); button
+        };
+        let lock_button = button("layer-swipe-lock", &copy.swipe_lock);
+        let duplicate_button = button("layer-swipe-duplicate", &copy.duplicate);
+        let delete_button = button("layer-swipe-delete", &copy.swipe_delete);
+        delete_button.add_css_class("destructive-action");
+        lock_button.connect_clicked(move |_| lock());
+        duplicate_button.connect_clicked(move |_| duplicate());
+        delete_button.connect_clicked(move |_| remove());
+        row.imp().lock.set(lock_button).unwrap();
+        row.imp().duplicate.set(duplicate_button).unwrap();
+        row.imp().delete.set(delete_button).unwrap();
+        actions.set_parent(&row); actions.set_child_visible(false);
+        row.imp().actions.set(actions).unwrap();
         content.as_ref().set_parent(&row);
         row.imp().content.set(content.as_ref().clone()).unwrap();
         let drag = gtk::GestureDrag::new();
@@ -79,8 +95,7 @@ impl SwipeRow {
             let mut direct = false;
             while let Some(w) = picked {
                 if w == row { break; }
-                direct |= w.has_css_class("drag-immediate") || w.is::<gtk::Editable>()
-                    || w == *row.imp().delete.get().unwrap();
+                direct |= w.has_css_class("drag-immediate") || w.is::<gtk::Editable>();
                 picked = w.parent();
             }
             if !crate::input::touch_or_pen(g) || direct {
@@ -92,7 +107,7 @@ impl SwipeRow {
         drag.connect_drag_update(glib::clone!(#[weak] row, move |g, dx, dy| {
             if !row.imp().admitted.get() {
                 if !row.drag_check_threshold(0, 0, dx as i32, dy as i32) { return; }
-                let allowed = if dx < 0. { row.imp().delete.get().unwrap().is_sensitive() }
+                let allowed = if dx < 0. { [row.lock_button(), row.duplicate_button(), row.delete_button()].iter().any(|button| button.is_visible() && button.is_sensitive()) }
                     else { row.imp().origin.get() > 0. || row.imp().can_swipe_right.get() };
                 if dy.abs() >= dx.abs() || !allowed {
                     g.set_state(gtk::EventSequenceState::Denied); return;
@@ -102,13 +117,14 @@ impl SwipeRow {
                 opening(&row);
             }
             let minimum = if row.imp().origin.get() == 0. && row.imp().can_swipe_right.get() { -REVEAL } else { 0. };
-            row.position((row.imp().origin.get() - dx).clamp(minimum, REVEAL));
+            row.position((row.imp().origin.get() - dx).clamp(minimum, row.reveal_width()));
         }));
         drag.connect_drag_end(glib::clone!(#[weak] row, move |g, _, _| {
             if row.imp().admitted.replace(false) {
                 let released = g.current_event().is_some_and(|e| matches!(e.event_type(), gtk::gdk::EventType::ButtonRelease | gtk::gdk::EventType::TouchEnd));
                 let toggle = released && row.imp().offset.get() <= -REVEAL * 0.4;
-                row.reveal(released && row.imp().offset.get() >= REVEAL * 0.4);
+                let threshold = if row.imp().origin.get() > 0. { row.imp().origin.get() - REVEAL * 0.4 } else { REVEAL * 0.4 };
+                row.reveal(released && row.imp().offset.get() >= threshold);
                 if toggle { swipe_right(); }
             }
         }));
@@ -122,7 +138,7 @@ impl SwipeRow {
     }
     fn position(&self, offset: f64) {
         self.imp().offset.set(offset);
-        self.imp().delete.get().unwrap().set_can_target(offset > 0.);
+        self.imp().actions.get().unwrap().set_child_visible(offset > 0.);
         self.queue_allocate();
         if let Some(changed) = self.imp().changed.get() { changed(); }
     }
@@ -130,18 +146,39 @@ impl SwipeRow {
         if let Some(a) = self.imp().animation.take() { a.pause(); }
         self.position(0.);
     }
-    pub fn set_actions(&self, can_delete: bool, can_swipe_right: bool) {
-        self.imp().delete.get().unwrap().set_sensitive(can_delete);
-        self.imp().can_swipe_right.set(can_swipe_right);
-        if (!can_delete && self.is_open()) || (!can_swipe_right && self.imp().offset.get() < 0.) { self.reset(); }
+    pub fn set_actions(&self, state: &layer_ui::LayerState, copy: &layer_ui::native_copy::LayerCopy) {
+        for (button, label, enabled, visible) in [
+            (self.lock_button(), if state.locked { &copy.swipe_unlock } else { &copy.swipe_lock }, state.can_lock, !state.quick_mask),
+            (self.duplicate_button(), &copy.duplicate, state.can_duplicate, !state.quick_mask),
+            (self.delete_button(), &copy.swipe_delete, state.can_delete, true),
+        ] {
+            let child = button.child().and_downcast::<gtk::Label>().unwrap();
+            if child.text().as_str() != label.as_ref() { child.set_label(label); }
+            if button.tooltip_text().as_deref() != Some(label.as_ref()) {
+                button.set_tooltip_text(Some(label));
+                button.update_property(&[gtk::accessible::Property::Label(label)]);
+            }
+            button.set_sensitive(enabled); button.set_visible(visible);
+        }
+        self.imp().can_swipe_right.set(state.right_swipe.is_some());
+        if (!(state.can_delete || state.can_lock || state.can_duplicate) && self.is_open()) || (state.right_swipe.is_none() && self.imp().offset.get() < 0.) { self.reset(); }
     }
     pub fn reveal(&self, open: bool) {
         if let Some(a) = self.imp().animation.take() { a.pause(); }
         let target = adw::CallbackAnimationTarget::new(glib::clone!(#[weak(rename_to = row)] self, move |value| row.position(value)));
-        let animation = adw::TimedAnimation::new(self, self.imp().offset.get(), if open { REVEAL } else { 0. }, 150, target);
+        let animation = adw::TimedAnimation::new(self, self.imp().offset.get(), if open { self.reveal_width() } else { 0. }, 150, target);
         animation.play();
         *self.imp().animation.borrow_mut() = Some(animation);
     }
     pub fn is_open(&self) -> bool { self.imp().offset.get() > 0. }
     pub fn delete_button(&self) -> &gtk::Button { self.imp().delete.get().unwrap() }
+    pub fn lock_button(&self) -> &gtk::Button { self.imp().lock.get().unwrap() }
+    pub fn duplicate_button(&self) -> &gtk::Button { self.imp().duplicate.get().unwrap() }
+    pub fn is_action(&self, widget: &gtk::Widget) -> bool {
+        let actions = self.imp().actions.get().unwrap();
+        widget == actions.upcast_ref::<gtk::Widget>() || widget.is_ancestor(actions)
+    }
+    fn reveal_width(&self) -> f64 {
+        (REVEAL * [self.lock_button(), self.duplicate_button(), self.delete_button()].iter().filter(|button| button.is_visible()).count() as f64).min(self.width().max(1) as f64)
+    }
 }

@@ -547,3 +547,8 @@ resources-layer-type-image = เลเยอร์ภาพ
 resources-layer-type-mask = มาสก์เลเยอร์
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = คุณสมบัติกลุ่ม
+resources-layer-all-layers = เลเยอร์ทั้งหมด
+resources-layer-swipe-lock = ล็อก
+resources-layer-swipe-unlock = ปลดล็อก

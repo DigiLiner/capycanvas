@@ -546,3 +546,8 @@ resources-layer-type-image = Calque d’image
 resources-layer-type-mask = Masque de calque
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Propriétés du groupe
+resources-layer-all-layers = Tous les calques
+resources-layer-swipe-lock = Verrouiller
+resources-layer-swipe-unlock = Déverrouiller

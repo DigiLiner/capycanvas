@@ -663,3 +663,8 @@ resources-layer-type-image = 图像图层
 resources-layer-type-mask = 图层蒙版
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = 组属性
+resources-layer-all-layers = 所有图层
+resources-layer-swipe-lock = 锁定
+resources-layer-swipe-unlock = 解锁

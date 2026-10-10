@@ -546,3 +546,8 @@ resources-layer-type-image = Bildebene
 resources-layer-type-mask = Ebenenmaske
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Gruppeneigenschaften
+resources-layer-all-layers = Alle Ebenen
+resources-layer-swipe-lock = Sperren
+resources-layer-swipe-unlock = Entsperren

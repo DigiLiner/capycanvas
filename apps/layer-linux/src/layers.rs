@@ -829,6 +829,16 @@ impl LayerPanel {
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
                         if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
+                            action(&w, A::Lock { id: row.id, value: !row.locked });
+                        }
+                    }),
+                    glib::clone!(#[weak] item, #[strong] owner, move || {
+                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
+                            action(&w, A::Duplicate { id: row.id });
+                        }
+                    }),
+                    glib::clone!(#[weak] item, #[strong] owner, move || {
+                        if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
                             if let Some(command) = row.right_swipe { action(&w, command); }
                         }
                     }),
@@ -1262,9 +1272,8 @@ impl LayerPanel {
         for row in self.rows.borrow().values().filter(|r| r.swipe.is_open()) {
             let local = widget.compute_point(&row.swipe, &gtk::graphene::Point::new(point[0] as f32, point[1] as f32));
             let picked = local.and_then(|p| row.swipe.pick(p.x() as f64, p.y() as f64, gtk::PickFlags::DEFAULT));
-            let delete = row.swipe.delete_button();
-            let on_delete = picked.as_ref().is_some_and(|p| p == delete || p.is_ancestor(delete));
-            if picked.is_none() || (release && !on_delete) { row.swipe.reveal(false); }
+            let on_action = picked.as_ref().is_some_and(|picked| row.swipe.is_action(picked));
+            if picked.is_none() || (release && !on_action) { row.swipe.reveal(false); }
         }
     }
     pub(crate) fn refresh_theme(&self) { self.connections.queue_draw(); }
@@ -1492,7 +1501,7 @@ impl Row {
             self.mask_image.set_paintable(None::<&gdk::Paintable>);
         }
         self.root.set_widget_name(&format!("art-layer-{}", s.id));
-        self.swipe.set_actions(s.can_delete, s.right_swipe.is_some());
+        self.swipe.set_actions(s, &copy.layer);
         let thumbnail = s.has_thumbnail && !s.adjustment_effect;
         self.effect_icon.set_visible(s.group || s.content_icon.is_some() && !s.selection_layer);
         self.content_image.set_visible(thumbnail);

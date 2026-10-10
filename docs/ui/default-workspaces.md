@@ -130,14 +130,17 @@ Healing retain their [retouching controls](../internals/brushes.md#clone-stamp).
 The retouching tools also remain available in Sketch's Sculpt drawer.
 
 GTK Sketch's Layers drawer has a fixed footer below a divider. Paint layers
-label it **Layer properties**; filters and other targets use their localized type.
+label it **Layer properties**, and groups use **Group properties**; filters and
+other targets use their localized type.
 An optional second line shows up to two useful filter values, using the same
 labels and units as Properties. Layer names, blending, opacity, locks and reduced
 color modes remain in Layers and are not repeated in the summary.
 The footer opens Properties upward inside the same drawer. It covers the layer
 controls, list and action bar while retaining their widgets and scroll position.
-The footer stays below either page; tapping again or pressing Escape
-returns to Layers. An outside canvas contact dismisses the drawer without painting.
+While Properties is open, the footer says **All layers** and hides the summary.
+Tapping it or pressing Escape returns to Layers. The interior slide and container
+resize use the same native Stack transition, including reversals and disabled
+animations. An outside canvas contact dismisses the drawer without painting.
 Adding a filter from this drawer opens its settings in the same body.
 The drawer reserves six layer rows and grows to fit additional listed rows,
 up to 85% of the window height and the available space below its opener.
@@ -146,14 +149,15 @@ Properties footer stay outside the scrolling layer list. Adding, deleting,
 undoing and expanding or collapsing groups resize the drawer immediately.
 Selecting a different layer or drawing scrolls its editing row into view.
 Properties uses the default six-row Layers height, growing when its contents
-need more space, within the same window
-limits. Returning restores the current Layers height and the first visible row's
-offset after native allocation. New selection or scroll input takes precedence;
+need more space, within the same window limits. Returning restores the current
+Layers height and the first visible row's
+offset after native layout and paint, confirming it on the next frame. New
+selection or scroll input takes precedence;
 window changes clamp the restored position to the list's current limits.
 Window and text-size changes recompute both pages. GTK measures realized rows
 through its native measurement cache and keeps the virtual list and its
-asynchronous thumbnails. The bridge joins
-the drawer to centered title-bar buttons at every header size, and the footer's
+asynchronous thumbnails. The bridge joins the drawer to centered title-bar
+buttons at every header size, and the footer's
 top hover corners meet its divider squarely. Properties offers Add filter on raster
 and object layers; filter layers already have their settings. Paint and Photo retain
 their ordinary Properties presentation.
@@ -343,6 +347,7 @@ bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_sw
 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_compact_switcher_input
 bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_drawer_immediate_audit
 bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_drawer_viewport_input
+bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_properties_transition
 bash tools/performance/workspace-motion.sh gtk --workspace-menus
 bash tools/performance/workspace-motion.sh gtk --native-test=native_paint_fitted_columns
 bash tools/performance/workspace-motion.sh gtk --native-test=native_brush_drawer_input

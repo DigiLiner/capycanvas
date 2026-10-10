@@ -975,3 +975,8 @@ resources-layer-type-image = Lapisan gambar
 resources-layer-type-mask = Masker lapisan
 resources-property-summary-field = { $label } { $value }
 resources-property-summary-pair = { $first } · { $second }
+
+resources-layer-group-properties = Properti grup
+resources-layer-all-layers = Semua lapisan
+resources-layer-swipe-lock = Kunci
+resources-layer-swipe-unlock = Buka kunci

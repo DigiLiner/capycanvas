@@ -62,7 +62,12 @@ change the immediate pickup rule for handles and title/tab bars.
 - Pen drags scroll lists like touch on every host (GTK's shared pen scroller,
   Web `pen-scroll.js`, Android Compose); mouse drags never pan lists.
 - A touch or pen swipe left across a layer row reveals Delete; a reverse swipe
-  or an outside click closes it. Swiping right
+  or an outside click closes it. GTK also reveals **Lock** (or **Unlock**) and
+  **Duplicate**, in that order before Delete. These act on the swiped row and
+  retain shared Undo. A locked parent disables changes to its children; Quick
+  Mask offers only Delete. The action strip sizes buttons from their labels and
+  fits the row width, with full labels available through accessibility and
+  tooltips. Swiping right
   on a closed paint-layer row toggles alpha lock. Locked layers cannot toggle alpha
   lock. Release commits one undo step; a short or cancelled swipe changes nothing.
   Swiping right to close Delete does not also toggle alpha lock.
@@ -178,6 +183,10 @@ and `--native-test=native_layer_swipe_mouse` (without `--tablet`), Web
 `AndroidTitleBarTest#layerSwipeFrameTiming` with `-e layerSwipeBenchmark true`
 and `-e photo <device-path>` pointing to the mid-tier photo; it writes
 `layer-swipe-1.json` through `layer-swipe-3.json` in the test app's external files.
+GTK's additional actions run `--native-test=native_sketch_layer_swipe_actions`
+and `--native-test=native_sketch_layer_swipe_actions_pen --tablet`, in both themes.
+`--native-test=native_sketch_layer_swipe_motion` records three sustained native
+touch gestures per theme, counting presentations while the row moves.
 GTK `--native-test=native_layer_relationship_review` covers group-mode
 swipes, clipped owners, effect thumbnail drops, normalized gap feedback and
 relationship geometry in both themes at narrow and wide panel widths.

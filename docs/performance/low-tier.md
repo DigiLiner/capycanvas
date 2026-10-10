@@ -139,6 +139,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Figure or ruler drag | 60 | | |
 | Layer opacity scrub | 60 | **Not met.** Maskless Solid Color over photo: screen 47.44 presents/s, p99 ≤49.98 ms; renderer 32.51 fresh completed updates/s | [Solid Color fills](#solid-color-fills); baseline also misses |
 | Layer reorder drag | 60 | | |
+| Layer row swipe | 60 | Unmeasured on the reference tablet; GTK has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Layer thumbnail selection animation | 60 | Unmeasured on the reference tablet | [Selection benchmark](../development/android.md#benchmarks) |
 | Attached filter drag inside a clipping run | 60 | **Not met.** 55.64–59.72 native UI fps; moving-frame gap p99 16.75–33.34 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 8 visible paint layers | 60 | | |
