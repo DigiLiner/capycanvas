@@ -317,7 +317,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         }
         if(!dragging)return;
         position=next;++motion;dirty=true;send(L"move");
-        if(str(action,L"type")==L"tile_drag")chrome(O({{L"kind",S(L"motion")},{L"position",point(position)}}));
+        if(str(action,L"type")==L"tile_drag")chrome(O({{L"kind",S(L"motion")}}));
         dropQuery();e.Handled(true);evidence();
     }
     void up(PointerRoutedEventArgs const& e){

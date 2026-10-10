@@ -1701,17 +1701,15 @@ impl Workspace {
         motion.connect_motion(glib::clone!(
             #[weak(rename_to = this)]
             self,
-            move |_, x, y| {
-                this.chrome_event(ChromeEvent::Motion {
-                    position: [x as f32, y as f32],
-                });
+            move |_, _, _| {
+                this.chrome_event(ChromeEvent::Motion);
             }
         ));
         motion.connect_leave(glib::clone!(
             #[weak(rename_to = this)]
             self,
             move |_| {
-                this.chrome_event(ChromeEvent::Leave { touch: false });
+                this.chrome_event(ChromeEvent::Refresh);
             }
         ));
         self.window.add_controller(motion);
@@ -2051,7 +2049,7 @@ impl Workspace {
         }
     }
 
-    pub fn reveal_chrome_at(&self, x: f32, y: f32) -> bool {
+    pub fn chrome_contact_at(&self, x: f32, y: f32) -> bool {
         self.chrome_event(ChromeEvent::Contact {
             position: [x, y],
             canvas: true,

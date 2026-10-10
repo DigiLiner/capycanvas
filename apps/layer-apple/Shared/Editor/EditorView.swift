@@ -78,8 +78,8 @@ struct EditorView<Canvas: View>: View {
         }
         .onContinuousHover(coordinateSpace: .named("editor-workspace")) { phase in
             switch phase {
-            case .active(let point): store.workspace.chrome(["kind": "motion", "position": [point.x, point.y]])
-            case .ended: store.workspace.chrome(["kind": "leave", "touch": false])
+            case .active: store.workspace.chrome(["kind": "motion"])
+            case .ended: store.workspace.chrome(["kind": "refresh"])
             }
         }
         .onPreferenceChange(WorkspaceTabs.self) { bounds in

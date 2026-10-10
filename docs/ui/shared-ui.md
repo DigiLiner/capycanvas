@@ -227,18 +227,19 @@ default) and **Button icon**. Moving or touching a screen edge keeps controls
 hidden. Floating panels remain available, and their drags can merge with other
 floating panels without exposing hidden docks.
 
-Enabling Zen hides the chrome at once. Hosts animate opacity over 180 ms and
-disable hit-testing while hidden. Web respects reduced-motion preferences; GTK
-uses the platform animation setting. Keyboard navigation, open menus, settings
-and native title-bar grabs keep controls available. The next canvas contact
-releases an interaction pin without also painting.
+Zen immediately disables hidden controls. GTK and Web fade other chrome over
+180 ms; Capy switches without fading. Web respects reduced-motion preferences
+and GTK uses the platform animation setting. Keyboard navigation, open menus,
+settings and native title-bar grabs keep controls available. The next canvas
+contact releases an interaction pin without also painting.
 
 Zen’s visibility and interaction pins live in Rust (`Settings.zen_show_capy`
 and `InputReply`’s `chrome_hidden` and `keep_zen_button` flags). Hosts send
-`UiInput::Chrome` events plus `ChromeFacts` (native grab, panel drag and popup
-visibility) and apply visibility, hit-testing and styling. Android carries both
-flags in its change-detected snapshot, including updates without a document
-revision.
+`UiInput::Chrome`: `Refresh` updates native facts; `Motion` releases keyboard
+visibility; `Contact` carries the position for drawer dismissal. `ChromeFacts`
+reports native grabs, panel drags and popups. Hosts apply visibility and input
+ownership. Android carries both flags in its change-detected snapshot, even
+without a document revision.
 
 The standalone Capy button uses the title bar’s current Small, Medium or Large
 size even when Capy was removed from the title bar. Its button dimensions and

@@ -35,6 +35,14 @@ function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds=$scri
     throw $Message
 }
 function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle){
+    $registered=$false
+    if($WindowHandle){
+        $path=Join-Path (Split-Path -Parent $Process.Path) "windows-$($Process.Id).json"
+        if(Test-Path $path){
+            $trace=Read-Snapshot $path
+            $registered=$trace.process_id -eq $Process.Id -and $WindowHandle -in $trace.windows.hwnd
+        }
+    }
     $windows=if($WindowHandle){@([System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$WindowHandle))}
         else{[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children,
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$Process.Id))}
@@ -42,7 +50,7 @@ function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle){
     $found=@(foreach($window in $windows){
         $handle=[IntPtr]$window.Current.NativeWindowHandle;$owner=[uint32]0
         [CapyWindowApi]::GetWindowThreadProcessId($handle,[ref]$owner)|Out-Null
-        if($handle -ne [IntPtr]::Zero -and $owner -eq $Process.Id -and $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$canvas)){
+        if($handle -ne [IntPtr]::Zero -and $owner -eq $Process.Id -and ($registered -or $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$canvas))){
             [pscustomobject]@{Root=$window;Handle=$handle}
         }
     })

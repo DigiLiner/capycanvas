@@ -168,7 +168,7 @@ Web runs `tools/performance/workspace-motion.sh web` with `--title-bar`,
 `--menu-labels`, `--compact-workspaces` and `--header-controls`.
 The Zen geometry checks are GTK's `native_zen_behaviors`, Web's `--zen`,
 Android's `AndroidTitleBarTest#zenCapyKeepsNativeButtonAndGlyphBoundsAcrossWorkspaces`
-and Windows' `tools/windows-vm/windows-vm.py fixtures editor:zen`. They compare
+and Windows' `tools/windows-vm/windows-vm.py fixtures header:zen`. They compare
 the button and icon rectangles through entry and exit in each starting workspace
 and header size, in both themes. Customized regions, absent or overflowed Capy,
 native-control clearance and right-to-left GTK/Web layouts have separate cases.

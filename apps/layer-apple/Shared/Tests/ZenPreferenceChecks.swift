@@ -28,22 +28,18 @@ extension XCTestCase {
             workspaceActivate(workspaceViewport(in: app))
             app.typeKey("k", modifierFlags: .command)
             XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 10))
-            for (id, title, value, saved) in [
-                ("zen_show_capy", "Show Capy in Zen mode", show, current),
-            ] {
-                let search = app.textFields["settings-search"]
-                workspaceActivate(search)
-                search.typeKey("a", modifierFlags: .command)
-                search.typeText(title)
-                workspaceActivate(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch)
-                let control = app.switches["preference-" + id]
-                XCTAssertTrue(control.waitForExistence(timeout: 10), "Search reveals the \(title) switch")
-                XCTAssertEqual(isOn(control), saved, "\(title) keeps its saved value")
-                if saved != value {
-                    toggle(control)
-                    expectation(for: NSPredicate { _, _ in isOn(control) == value }, evaluatedWith: control)
-                    waitForExpectations(timeout: 5)
-                }
+            let search = app.textFields["settings-search"]
+            workspaceActivate(search)
+            search.typeKey("a", modifierFlags: .command)
+            search.typeText("Show Capy in Zen mode")
+            workspaceActivate(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show Capy in Zen mode")).firstMatch)
+            let control = app.switches["preference-zen_show_capy"]
+            XCTAssertTrue(control.waitForExistence(timeout: 10), "Search reveals the Show Capy switch")
+            XCTAssertEqual(isOn(control), current, "Show Capy keeps its saved value")
+            if current != show {
+                toggle(control)
+                expectation(for: NSPredicate { _, _ in isOn(control) == show }, evaluatedWith: control)
+                waitForExpectations(timeout: 5)
             }
             current = show
             attachEditor(in: app, name: "zen-settings-\(theme)-\(show)")

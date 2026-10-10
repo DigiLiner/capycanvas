@@ -803,8 +803,8 @@ int CanvasWindow::DispatchWork(CanvasWork const& item,bool retiring) {
             if(last.phase==3||last.phase==4)consumedContacts.erase(first.id);
             return 0;
         }
-        auto result=capy_chrome(host,first.phase==1?2:first.phase==4?3:1,
-            first.phase==1?first.x:last.x,first.phase==1?first.y:last.y,true,menuOpen.load(),first.tool==3);
+        auto result=capy_chrome(host,first.phase==1?2:first.phase==4?0:1,
+            first.phase==1?first.x:last.x,first.phase==1?first.y:last.y,true,menuOpen.load());
         if(result>=0){
             if(first.phase==1&&(result&1))consumedContacts.insert(first.id);
             bool accepted=!consumedContacts.contains(first.id);
@@ -904,20 +904,20 @@ void CanvasWindow::Run() {
                 continue;
             }
             std::deque<CanvasWork> pending;
-            bool overflow;std::optional<Hover> hover;
+            bool overflow;std::optional<bool> hover;
             // Samples admitted during reconstruction must wait for replacement
             // brushes; draining sooner would classify their presses as unready.
             {std::lock_guard lock(mutex);if(!recoveryAttempts)pending=work.Take();overflow=transportFailed;hover=std::exchange(pendingHover,std::nullopt);}
             space.notify_all();
             bool failed=false;
-            if(hover&&capy_chrome(host,hover->leave?3:1,hover->x,hover->y,false,menuOpen.load(),hover->touch)<0){Fail(capy_error());break;}
+            if(hover&&capy_chrome(host,*hover?0:1,0,0,false,menuOpen.load())<0){Fail(capy_error());break;}
             for(auto& item:pending) {
                 auto result=DispatchWork(item,false);
                 if(result>0)Fail(capy_error()); // A rejected UI action leaves the canvas running.
                 if(result<0) {Fail(capy_error());failed=true;break;}
             }
             if(failed) break;
-            if((!pending.empty()||hover)&&capy_chrome(host,0,0,0,false,menuOpen.load(),false)<0){Fail(capy_error());break;}
+            if((!pending.empty()||hover)&&capy_chrome(host,0,0,0,false,menuOpen.load())<0){Fail(capy_error());break;}
             if(overflow){sentModifiers.store(0);if(capy_input(host,R"({"type":"blur"})")<0){Fail(capy_error());break;}}
             if(capy_device_lost(host))continue;
             auto now=Now();
@@ -1314,8 +1314,7 @@ void CanvasWindow::ChromeMotion(PointerRoutedEventArgs const& e,bool leave) {
     {
         std::lock_guard lock(mutex);
         if(closing||!host||rendererDone.load())return;
-        pendingHover=Hover{position.X*inputScale,position.Y*inputScale,leave,
-            point.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Touch};
+        pendingHover=leave;
     }
     wake.notify_one();
 }

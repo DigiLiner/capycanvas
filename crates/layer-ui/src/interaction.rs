@@ -143,8 +143,7 @@ pub struct ChromeFacts {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ChromeEvent {
     Refresh,
-    Motion { position: [f32; 2] },
-    Leave { touch: bool },
+    Motion,
     Contact { position: [f32; 2], canvas: bool },
 }
 
@@ -206,7 +205,7 @@ pub struct InputReply {
     pub cancel_paint: bool,
     pub dismiss_popups: bool,
     pub chrome_hidden: bool,
-    /// Whether to show the standalone top-left Capy while chrome is hidden.
+    /// Whether to show the standalone Capy while chrome is hidden.
     pub keep_zen_button: bool,
     pub pan_cursor: bool,
     pub navigation_cursor: Option<NavigationMode>,

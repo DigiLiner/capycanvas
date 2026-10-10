@@ -241,7 +241,7 @@ pub fn install(workspace: &Rc<Workspace>) {
         #[strong]
         input,
         move |g, x, y| {
-            if workspace.reveal_chrome_at(x as f32, y as f32) {
+            if workspace.chrome_contact_at(x as f32, y as f32) {
                 g.set_state(gtk::EventSequenceState::Denied);
                 return;
             }
@@ -381,7 +381,7 @@ pub fn install(workspace: &Rc<Workspace>) {
             let position =
                 located.or_else(|| matches!(phase, PenPhase::Up | PenPhase::Cancel).then_some([0.0; 2]));
             if let Some(position) = position {
-                if phase == PenPhase::Down && workspace.reveal_chrome_at(position[0], position[1]) {
+                if phase == PenPhase::Down && workspace.chrome_contact_at(position[0], position[1]) {
                     return glib::Propagation::Stop;
                 }
                 input.picker_hold.input(&workspace, id, contact_phase(phase), position, input.touches.borrow().len());
@@ -423,7 +423,7 @@ pub fn install(workspace: &Rc<Workspace>) {
             #[weak]
             workspace,
             move |g, x, y| {
-                if workspace.reveal_chrome_at(x as f32, y as f32) {
+                if workspace.chrome_contact_at(x as f32, y as f32) {
                     g.set_state(gtk::EventSequenceState::Denied);
                     return;
                 }

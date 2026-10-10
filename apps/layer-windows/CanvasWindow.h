@@ -97,8 +97,7 @@ private:
     bool applyingDialogs=false,headerPopupOpen=false,workspacePopupOpen=false;
     std::atomic<bool> menuOpen{false},dialogOpen{false};
     std::atomic<uint32_t> sentModifiers{0};
-    struct Hover {float x,y;bool leave,touch;};
-    std::optional<Hover> pendingHover;
+    std::optional<bool> pendingHover;
     std::unordered_set<uint64_t> consumedContacts; // render thread
     winrt::Microsoft::UI::Xaml::Controls::StackPanel toolbar;
     winrt::Microsoft::UI::Xaml::Controls::Grid root;

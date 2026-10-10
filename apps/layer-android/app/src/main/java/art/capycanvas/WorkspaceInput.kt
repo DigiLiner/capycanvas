@@ -249,7 +249,7 @@ internal class DockInteraction(val host: CanvasHost) {
     fun move(point: Offset) {
         position = point; send("move", preview = true)
         if (active?.optString("type") == "tile_drag") {
-            host.chrome(obj("kind" to "motion", "position" to JSONArray(listOf(point.x, point.y))), facts())
+            host.chrome(obj("kind" to "motion"), facts())
             val request = generation
             host.query(query()) { if (request == generation) hint = it as? JSONObject }
         }

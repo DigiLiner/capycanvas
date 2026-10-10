@@ -5156,19 +5156,11 @@ fn native_zen_icons() {
         w.dispatch(UiAction::CloseSettings);
         pump(250);
         click(&zen);
-        w.chrome_event(layer_ui::ChromeEvent::Motion {
-            position: [600.0, 450.0],
-        });
+        w.chrome_event(layer_ui::ChromeEvent::Motion);
         pump(250);
         assert!(zen.has_css_class("selected-tool"));
         assert!(!w.header.root.can_target());
         capture_reference(&w, &format!("{dir}/gtk-total-zen-{name}.png"), 1.0);
-        w.chrome_event(layer_ui::ChromeEvent::Motion {
-            position: [600.0, 1.0],
-        });
-        pump(250);
-        assert!(!w.header.root.can_target());
-        capture_reference(&w, &format!("{dir}/gtk-active-{name}.png"), 1.0);
         click(&w.zen_capy);
         pump(250);
         assert!(!zen.has_css_class("selected-tool"));
@@ -5425,6 +5417,29 @@ fn native_zen_behaviors() {
         let pixels = image.pixel_size() as f32;
         [rect(button, w), [x + (width - pixels) / 2., y + (height - pixels) / 2., pixels, pixels]]
     }
+    fn rendered_opacity(widget: &impl IsA<gtk::Widget>) -> f32 {
+        let mut result = 1.;
+        let mut child = widget.as_ref().clone();
+        while let Some(parent) = child.parent() {
+            let snapshot = gtk::Snapshot::new();
+            parent.snapshot_child(&child, &snapshot);
+            let Some(mut node) = snapshot.to_node() else { return 0.; };
+            loop {
+                if let Some(opacity) = node.downcast_ref::<gtk::gsk::OpacityNode>() {
+                    result *= opacity.opacity();
+                    node = opacity.child();
+                } else if let Some(transform) = node.downcast_ref::<gtk::gsk::TransformNode>() {
+                    node = transform.child();
+                } else if let Some(clip) = node.downcast_ref::<gtk::gsk::ClipNode>() {
+                    node = clip.child();
+                } else if let Some(clip) = node.downcast_ref::<gtk::gsk::RoundedClipNode>() {
+                    node = clip.child();
+                } else { break; }
+            }
+            child = parent;
+        }
+        result
+    }
     fn cycle(w: &Rc<Workspace>, label: &str, show: bool) {
         w.dispatch(UiAction::Preferences {
             action: PreferenceAction::Edit { id: PreferenceId::ZenShowCapy, value: PreferenceValue::Bool(show) },
@@ -5454,22 +5469,32 @@ fn native_zen_behaviors() {
         if let Some(expected) = expected {
             assert_eq!(expected[0], expected_button, "{label}: normal/shared button");
         }
+        let mut controls = Vec::new();
+        let mut child = w.header.root.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            if widget.is_mapped() && widget.is_child_visible() && !widget.has_css_class("capy-item") {
+                controls.push(widget);
+            }
+        }
         let frames = Rc::new(std::cell::RefCell::new(Vec::new()));
         let clock = w.surface.frame_clock().unwrap();
         let signal = clock.connect_after_paint(glib::clone!(
             #[strong] frames,
             #[strong] normal,
+            #[strong] controls,
             #[weak] w,
             move |_| {
-                if state(&w).workspace.zen_mode && w.zen_capy.is_visible() {
-                    frames.borrow_mut().push((true, capy_rects(&w.zen_capy, &w)));
-                } else if !state(&w).workspace.zen_mode && let Some(button) = normal.as_ref() {
-                    frames.borrow_mut().push((false, capy_rects(button, &w)));
+                let zen = state(&w).workspace.zen_mode;
+                let button = if zen { w.zen_capy.is_visible().then_some(&w.zen_capy) } else { normal.as_ref() };
+                if let Some(button) = button {
+                    let alpha = controls.iter().map(rendered_opacity).fold(0., f32::max);
+                    frames.borrow_mut().push((zen, capy_rects(button, &w), rendered_opacity(button), alpha));
                 }
             }
         ));
         w.dispatch(UiAction::Invoke { command: CommandId::ZenMode });
-        w.chrome_event(ChromeEvent::Motion { position: [600., 450.] });
+        w.chrome_event(ChromeEvent::Motion);
         pump(250);
         assert!(state(w).workspace.zen_mode, "{label}");
         assert_eq!(w.zen_capy.is_visible(), show, "{label}");
@@ -5480,7 +5505,7 @@ fn native_zen_behaviors() {
             }
         }
         for position in [[600., 6.], [6., 450.], [w.surface.width() as f32 - 6., 450.]] {
-            assert!(!w.reveal_chrome_at(position[0], position[1]), "{label}: edge contact");
+            assert!(!w.chrome_contact_at(position[0], position[1]), "{label}: edge contact");
         }
         if show {
             assert_eq!(capy_rects(&w.zen_capy, w)[0], expected_button, "{label}: shared Zen position");
@@ -5496,17 +5521,21 @@ fn native_zen_behaviors() {
         clock.disconnect(signal);
         let frames = frames.borrow();
         if show {
-            assert!(frames.iter().any(|(zen, _)| *zen), "{label}: painted Zen frames");
+            assert!(frames.iter().any(|(zen, _, _, _)| *zen), "{label}: painted Zen frames");
+        }
+        if expected.is_some() {
+            assert!(frames.iter().any(|(zen, _, _, _)| !*zen), "{label}: painted exit frames");
+        }
+        for (zen, actual, opacity, _) in frames.iter() {
             if let Some(expected) = expected {
-                assert!(frames.iter().any(|(zen, _)| !*zen), "{label}: painted exit frames");
-                for (zen, actual) in frames.iter() {
-                    assert_eq!(*actual, expected, "{label}: painted frame zen={zen}");
-                }
+                assert_eq!(*actual, expected, "{label}: painted frame zen={zen}");
             } else {
-                for (_, actual) in frames.iter() {
-                    assert_eq!(actual[0], expected_button, "{label}: fallback frame");
-                }
+                assert_eq!(actual[0], expected_button, "{label}: fallback frame");
             }
+            assert!(*opacity >= 0.999, "{label}: effective rendered Capy opacity={opacity}, zen={zen}");
+        }
+        if gtk::Settings::default().is_some_and(|settings| settings.is_gtk_enable_animations()) {
+            assert!(frames.iter().any(|(_, _, _, opacity)| *opacity > 0. && *opacity < 0.999), "{label}: non-Capy header controls still fade");
         }
         assert!(!state(w).workspace.zen_mode, "{label}");
         assert!(!w.zen_capy.is_visible(), "{label}");
@@ -6690,7 +6719,7 @@ fn native_panel_customization() {
         pump(100);
         assert!(compact_opacity.is_visible());
         capture_reference(&w, &format!("{dir}/expanded-sizes-{theme:?}.png"), 1.0);
-        assert!(w.reveal_chrome_at(850.0, 850.0));
+        assert!(w.chrome_contact_at(850.0, 850.0));
         pump(300);
         assert!(state(&w).customization.expanded.is_none());
         assert!(
@@ -12217,16 +12246,10 @@ fn native_workspace_controls_docking_and_ink() {
     restore_fixture_docking();
     pump(100);
     let camera = state(&w).camera;
-    w.chrome_event(ChromeEvent::Motion {
-        position: [600.0, 450.0],
-    });
+    w.chrome_event(ChromeEvent::Motion);
     click(&command(&w, CommandId::ZenMode));
     pump(250);
-    // Native enter events from reparenting may arrive during the pump. This
-    // assertion supplies its own hover location, independently of the desktop cursor.
-    w.chrome_event(ChromeEvent::Motion {
-        position: [600.0, 450.0],
-    });
+    w.chrome_event(ChromeEvent::Motion);
     w.update_zen();
     // Capture the settled 180ms fade, not the first frame after hiding chrome.
     pump(200);
@@ -12242,14 +12265,12 @@ fn native_workspace_controls_docking_and_ink() {
         }
     }
     crate::capture(&w, "../../artifacts/ui/gtk-zen.png");
-    assert!(!w.reveal_chrome_at(600.0, 24.0));
+    assert!(!w.chrome_contact_at(600.0, 24.0));
     assert!(w.header.root.has_css_class("zen-hidden"));
     assert!(command(&w, CommandId::ZenMode).has_css_class("selected-tool"));
     pump(200);
     crate::capture(&w, "../../artifacts/ui/gtk-zen-controls.png");
-    w.chrome_event(ChromeEvent::Motion {
-        position: [600.0, 450.0],
-    });
+    w.chrome_event(ChromeEvent::Motion);
     w.dispatch(UiAction::OpenSettings { page: SettingsPage::Appearance });
     assert!(!w.header.root.has_css_class("zen-hidden"), "settings must pin chrome");
     w.dispatch(UiAction::CloseSettings);

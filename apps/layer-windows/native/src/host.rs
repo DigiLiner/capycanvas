@@ -919,15 +919,12 @@ pub unsafe extern "C" fn capy_chrome(
     y: f32,
     canvas: bool,
     popup_open: bool,
-    touch: bool,
 ) -> i32 {
     guard(host, |host| {
-        let position = [x / host.scale, y / host.scale];
         let event = match kind {
             0 => layer_ui::ChromeEvent::Refresh,
-            1 => layer_ui::ChromeEvent::Motion { position },
-            2 => layer_ui::ChromeEvent::Contact { position, canvas },
-            3 => layer_ui::ChromeEvent::Leave { touch },
+            1 => layer_ui::ChromeEvent::Motion,
+            2 => layer_ui::ChromeEvent::Contact { position: [x / host.scale, y / host.scale], canvas },
             _ => return Err("Invalid chrome event".into()),
         };
         let reply = host.native.input(layer_ui::UiInput::Chrome {

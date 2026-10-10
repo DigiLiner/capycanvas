@@ -215,10 +215,10 @@ class CanvasSurfaceView(context: Context, private val host: CanvasHost,
         )
         if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT) {
             barrelTwistDevice = -1
-            host.chrome(obj("kind" to "leave", "touch" to false))
+            host.chrome(obj("kind" to "refresh"))
             host.input(obj("type" to "cursor_leave"))
         } else {
-            host.chrome(obj("kind" to "motion", "position" to JSONArray(listOf(event.x / resources.displayMetrics.density, event.y / resources.displayMetrics.density))))
+            host.chrome(obj("kind" to "motion"))
             send(event, 0, 0, true)
         }
         return true

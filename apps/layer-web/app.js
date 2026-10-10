@@ -1367,14 +1367,14 @@ window.addEventListener(
     // its samples/cursor; querying popups and hit-testing here duplicates work
     // and can force layout between input and the next drawing submission.
     if (!(e.target === canvas && lastPenEvent?.pointerId === e.pointerId))
-      chromeInput({ kind: "motion", position: [e.clientX, e.clientY] });
+      chromeInput({ kind: "motion" });
     if (e.target !== canvas) cursorInput(e);
   },
   { capture: true },
 );
-document.addEventListener("pointerleave", (e) => {
+document.addEventListener("pointerleave", () => {
   cursorInput(null);
-  chromeInput({ kind: "leave", touch: e.pointerType === "touch" });
+  chromeInput({ kind: "refresh" });
 });
 window.addEventListener(
   "pointerdown",

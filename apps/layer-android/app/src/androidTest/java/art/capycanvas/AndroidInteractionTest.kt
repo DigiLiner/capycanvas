@@ -2985,7 +2985,7 @@ class AndroidInteractionTest {
                     waitFor("$device Cancel ends the transform", 5_000) { barKind() == "selection" && shown("canvas-action-bar") }
                 }
 
-                instrumentation.runOnMainSync { host.chrome(obj("kind" to "motion", "position" to JSONArray(listOf(work.width / density / 2, work.height / density / 2)))) }
+                instrumentation.runOnMainSync { host.chrome(obj("kind" to "motion")) }
                 invoke("zen_mode")
                 waitFor("$device Zen hides docked chrome") { snapshot().optBoolean("chrome_hidden") }
                 waitFor("$device Zen keeps the bar", 3_000) { shown("canvas-action-bar") }

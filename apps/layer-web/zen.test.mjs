@@ -20,59 +20,38 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     await evaluate('new Promise(r=>setTimeout(r,350))'); await settle();
   };
   const motion = async position => { await call('Input.dispatchMouseEvent', {type:'mouseMoved',x:position[0],y:position[1]}); await settle(); };
-  // Sample the rendered ancestor opacity while exiting, before contact()'s
-  // click-settlement delay can hide a brief fade-to-invisible regression.
-  const watchCapyExit = () => evaluate(`(() => {
-    window.zenExitFrames = new Promise(resolve => {
-      const frames = [], deadline = performance.now() + 2000;
-      let exitTime;
-      const opacity = node => {
-        if (!node?.getClientRects().length) return 0;
-        let value = 1;
-        for (; node; node = node.parentElement) value *= Number(getComputedStyle(node).opacity);
+  const rectangles = selector => evaluate(`(() => {const n=document.querySelector(${JSON.stringify(selector)}),b=n.getBoundingClientRect(),g=n.querySelector('svg').getBoundingClientRect();return [[b.x,b.y,b.width,b.height],[g.x,g.y,g.width,g.height]]})()`);
+  const watchTransition = target => evaluate(`(() => {
+    window.zenFrames = new Promise(resolve => {
+      const frames=[], deadline=performance.now()+2000;
+      let changed;
+      const opacity=node=>{
+        if(!node?.getClientRects().length)return 0;
+        let value=1;
+        for(;node;node=node.parentElement)value*=Number(getComputedStyle(node).opacity);
         return value;
       };
-      const sample = () => {
-        const now = performance.now();
-        if (!layerApp.state().workspace.zen_mode) {
-          exitTime ??= now;
-          frames.push({capy:opacity(document.querySelector('#header #zen-button')),
-            controls:opacity(document.querySelector('#header [data-header-item]:not([data-kind="capy"])'))});
-        }
-        if (now >= deadline || (exitTime != null && now - exitTime >= 220)) resolve(frames);
-        else requestAnimationFrame(sample);
-      };
-      requestAnimationFrame(sample);
-    });
-    return true;
-  })()`);
-  const checkCapyExit = async label => {
-    const frames = await evaluate('window.zenExitFrames');
-    assert.ok(frames.length > 1, `${label}: sampled the Zen exit transition`);
-    assert.ok(frames.every(frame => frame.capy >= .999),
-      `${label}: Capy stays opaque throughout exit: ${JSON.stringify(frames)}`);
-    assert.ok(frames.some(frame => frame.controls > 0 && frame.controls < .99),
-      `${label}: other header controls still fade in`);
-  };
-  const rectangles = selector => evaluate(`(() => {const n=document.querySelector(${JSON.stringify(selector)}),b=n.getBoundingClientRect(),g=n.querySelector('svg').getBoundingClientRect();return [[b.x,b.y,b.width,b.height],[g.x,g.y,g.width,g.height]]})()`);
-  const watchRectangles = () => evaluate(`(() => {
-    window.zenGeometryFrames = new Promise(resolve => {
-      const frames=[], deadline=performance.now()+280;
       const sample=()=>{
-        const zen=layerApp.state().workspace.zen_mode;
+        const now=performance.now(),zen=layerApp.state().workspace.zen_mode;
+        if(zen===${target})changed??=now;
         const n=document.querySelector(zen?'#zen-capy':'#header #zen-button');
         if(n&&!n.hidden&&n.getClientRects().length){
           const b=n.getBoundingClientRect(),g=n.querySelector('svg').getBoundingClientRect();
-          frames.push({zen,rects:[[b.x,b.y,b.width,b.height],[g.x,g.y,g.width,g.height]]});
+          frames.push({zen,rects:[[b.x,b.y,b.width,b.height],[g.x,g.y,g.width,g.height]],
+            capy:opacity(n),controls:opacity(document.querySelector('#header [data-header-item]:not([data-kind="capy"])'))});
         }
-        if(performance.now()>=deadline)resolve(frames);else requestAnimationFrame(sample);
+        if(now>=deadline||(changed!=null&&now-changed>=220))resolve(frames);else requestAnimationFrame(sample);
       };requestAnimationFrame(sample);
     });return true;
   })()`);
-  const checkRectangles = async (expected,label,zen) => {
-    const frames=await evaluate('window.zenGeometryFrames');
-    assert.ok(frames.some(frame=>frame.zen===zen),`${label}: transition produced frames`);
-    for(const frame of frames)assert.deepEqual(frame.rects,expected,`${label}: frame zen=${frame.zen}`);
+  const checkTransition = async (expected,label,zen,fade=false) => {
+    const frames=await evaluate('window.zenFrames');
+    assert.ok(frames.length>1&&frames.some(frame=>frame.zen===zen),`${label}: sampled transition frames`);
+    for(const frame of frames){
+      assert.deepEqual(frame.rects,expected,`${label}: frame zen=${frame.zen}`);
+      assert.ok(frame.capy>=.999,`${label}: Capy stays opaque throughout transition`);
+    }
+    if(fade)assert.ok(frames.some(frame=>!frame.zen&&frame.controls>0&&frame.controls<.99),`${label}: other header controls still fade in`);
   };
   const switchWorkspace = async name => {
     const id='builtin:workspace:'+name;
@@ -107,9 +86,9 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
       const [width,height] = await evaluate('[innerWidth,innerHeight]');
       const center = [width/2,height/2], edge = [width/2,6];
       for (const device of ['touch','mouse','pen']) {
-        if(show)await watchRectangles();
+        if(show)await watchTransition(true);
         await invoke('zen_mode'); await motion(center);
-        if(show)await checkRectangles(normal,`${preset}/${theme}/${size}/${device}: entry`,true);
+        if(show)await checkTransition(normal,`${preset}/${theme}/${size}/${device}: entry`,true);
         await evaluate('new Promise(r=>setTimeout(r,220))');
         assert.ok(await hidden()); assert.equal(await capy(),show);
         await capture(`zen-${theme}-${show}-${size}-${device}`);
@@ -120,18 +99,18 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
         if (show) {
           const target = await point('#zen-capy');
           if (device === 'mouse') await motion(target);
-          await watchCapyExit();
-          await watchRectangles();
+          await watchTransition(false);
           await contact(device,target);
           assert.equal(await evaluate('layerApp.state().workspace.zen_mode'),false,'one Capy tap exits Zen');
-          await checkCapyExit(`${preset}/${theme}/${size}/${device}`);
-          await checkRectangles(normal,`${preset}/${theme}/${size}/${device}: exit`,false);
+          await checkTransition(normal,`${preset}/${theme}/${size}/${device}: exit`,false,true);
         } else {
+          await watchTransition(false);
           await evaluate('document.activeElement?.blur()');
           await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
           await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});
           await settle();
           assert.equal(await evaluate('layerApp.state().workspace.zen_mode'),false);
+          await checkTransition(normal,`${preset}/${theme}/${size}/${device}: keyboard exit`,false,true);
         }
         assert.equal(await hidden(),false); assert.equal(await capy(),false);
         assert.deepEqual(await evaluate('layerApp.state().workspace.layout'),layout);
@@ -160,14 +139,14 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
       if(kind==='overflow')assert.equal(visible,false,`${direction}/${size}: Capy overflows`);
       if(kind==='recovery')assert.ok(await evaluate("document.querySelector('#header-recovery')?.getClientRects().length"));
       await send({type:'restore_settings',settings:{...saved.settings,zen_show_capy:true}});
-      if(normal)await watchRectangles();
+      if(normal)await watchTransition(true);
       await invoke('zen_mode');
       const actual=await rectangles('#zen-capy');
-      if(normal){assert.deepEqual(actual,normal,`${direction}/${theme}/${size}/${kind}: full bounds`);await checkRectangles(normal,`${direction}/${theme}/${size}/${kind}: entry`,true);}
+      if(normal){assert.deepEqual(actual,normal,`${direction}/${theme}/${size}/${kind}: full bounds`);await checkTransition(normal,`${direction}/${theme}/${size}/${kind}: entry`,true);}
       else{const spec=await evaluate('layerApp.app.header_view().sizes.find(s=>s.id===layerApp.state().workspace.layout.header.size)');assert.deepEqual(actual[0],[spec.item_gap,spec.item_gap,spec.tile,spec.tile],`${direction}/${theme}/${size}/${kind}: fallback`);}
-      if(normal)await watchRectangles();
+      if(normal)await watchTransition(false);
       await contact('touch',await point('#zen-capy'));
-      if(normal)await checkRectangles(normal,`${direction}/${theme}/${size}/${kind}: exit`,false);
+      if(normal)await checkTransition(normal,`${direction}/${theme}/${size}/${kind}: exit`,false);
       assert.equal(await hidden(),false);
     }
     await evaluate("document.documentElement.dir='ltr'");
@@ -187,15 +166,6 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     await evaluate(`document.documentElement.dir=${JSON.stringify(saved.direction)}`);
     await resize(saved.viewport[0]);
     await send({type:'restore_workspace',workspace:saved.workspace});
-    // The fallback is independent of title-bar customization, including no Capy.
-    const workspace = await evaluate('layerApp.state().workspace');
-    for (const zone of workspace.layout.header.zones) for (let i=zone.length-1;i>=0;i--)
-      if (zone[i].item.kind === 'capy') zone.splice(i,1);
-    await send({type:'restore_workspace',workspace});
-    await send({type:'restore_settings',settings:{}});
-    await invoke('zen_mode'); assert.ok(await capy());
-    await contact('touch',await point('#zen-capy')); assert.equal(await hidden(),false);
-    assert.equal(await evaluate("document.querySelector('#header #zen-button')"),null);
     try {
       await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
       await invoke('zen_mode');
@@ -212,7 +182,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     await capture('failure');
     throw error;
   } finally {
-    await evaluate(`delete window.zenExitFrames;delete window.zenGeometryFrames;document.documentElement.dir=${JSON.stringify(saved.direction)}`);
+    await evaluate(`delete window.zenFrames;document.documentElement.dir=${JSON.stringify(saved.direction)}`);
     await call('Emulation.setDeviceMetricsOverride',{width:saved.viewport[0],height:saved.viewport[1],deviceScaleFactor:saved.viewport[2],mobile:false});
     await evaluate(`layerApp.app.workspace_input(JSON.stringify({type:'switch',id:${JSON.stringify(saved.id)}}));null`);
     await send({type:'close_settings'});

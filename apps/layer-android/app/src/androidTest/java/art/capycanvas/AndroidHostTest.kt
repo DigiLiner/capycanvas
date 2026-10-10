@@ -2473,50 +2473,54 @@ class AndroidHostTest {
     }
 
     @Test fun zenFloatingDragOnlyMergesFloatsAtEveryEdge() {
-        customize(obj("type" to "set_control_visible", "panel" to "sizes", "control" to "size_presets", "visible" to false))
-        floatPanel("sizes", 480f, 300f)
-        floatPanel("layers", 750f, 360f)
-        action(obj("type" to "invoke", "command" to "zen_mode"))
-        compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
-        compose.onNodeWithTag("group-${group("sizes").getInt("id")}").assertIsDisplayed()
-        val workspace = compose.onNodeWithTag("workspace")
-        val root = workspace.fetchSemanticsNode().boundsInRoot
-        val density = compose.activity.resources.displayMetrics.density
-        fun grip(panel: String) = compose.onNodeWithTag("group-grip-${group(panel).getInt("id")}").fetchSemanticsNode().boundsInRoot.center - root.topLeft
-        val bottom = androidx.compose.ui.geometry.Offset(root.width / 2, root.height - 10 * density)
-        workspace.performTouchInput { down(grip("sizes")); moveTo(bottom, 16) }
-        compose.waitForIdle()
-        assertTrue("An unoccupied bottom edge cannot reveal docks", host.snapshot!!.getBoolean("chrome_hidden"))
-        compose.onNodeWithTag("workspace-drop-hint").assertDoesNotExist()
-        capture("workspace-zen-hidden-edge")
-        workspace.performTouchInput { up() }
-        compose.waitForIdle()
-        assertTrue(group("sizes").getBoolean("floating"))
-        val target = group("layers").getJSONObject("bounds")
-        val merge = androidx.compose.ui.geometry.Offset(target.number("x") + 2, target.number("y") + target.number("height") / 2) * density
-        val source = grip("sizes")
-        workspace.performTouchInput { down(source); moveTo(merge, 16) }
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("workspace-drop-hint").fetchSemanticsNodes().isNotEmpty() }
-        assertTrue("Floating merge does not reveal docks", host.snapshot!!.getBoolean("chrome_hidden"))
-        capture("workspace-zen-floating-merge")
-        workspace.performTouchInput { up() }
-        compose.waitUntil(10_000) { group("sizes").getInt("id") == group("layers").getInt("id") }
-        assertEquals(2, group("layers").array("panels").length())
-        assertTrue(group("layers").getBoolean("tabs_visible"))
-        val start = grip("layers")
-        val left = androidx.compose.ui.geometry.Offset(10 * density, root.height / 2)
-        workspace.performTouchInput { down(start); moveTo(left, 16) }
-        compose.waitForIdle()
-        assertTrue(host.snapshot!!.getBoolean("chrome_hidden"))
-        workspace.performTouchInput { moveTo(root.center - root.topLeft, 16) }
-        compose.waitForIdle()
-        assertTrue("Edge contact keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
-        capture("workspace-zen-edge-drag")
-        workspace.performTouchInput { up() }
-        compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
-        assertTrue("Dropping in the center stays floating", group("layers").getBoolean("floating"))
-        assertNull(host.actionError)
-        action(obj("type" to "invoke", "command" to "zen_mode"))
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "restore_workspace", "workspace" to JSONObject(defaultWorkspace)))
+            customize(obj("type" to "set_control_visible", "panel" to "sizes", "control" to "size_presets", "visible" to false))
+            floatPanel("sizes", 480f, 300f)
+            floatPanel("layers", 750f, 360f)
+            action(obj("type" to "invoke", "command" to "zen_mode"))
+            compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
+            compose.onNodeWithTag("group-${group("sizes").getInt("id")}").assertIsDisplayed()
+            val workspace = compose.onNodeWithTag("workspace")
+            val root = workspace.fetchSemanticsNode().boundsInRoot
+            val density = compose.activity.resources.displayMetrics.density
+            fun grip(panel: String) = compose.onNodeWithTag("group-grip-${group(panel).getInt("id")}").fetchSemanticsNode().boundsInRoot.center - root.topLeft
+            val bottom = androidx.compose.ui.geometry.Offset(root.width / 2, root.height - 10 * density)
+            workspace.performTouchInput { down(grip("sizes")); moveTo(bottom, 16) }
+            compose.waitForIdle()
+            assertTrue("An unoccupied bottom edge cannot reveal docks", host.snapshot!!.getBoolean("chrome_hidden"))
+            compose.onNodeWithTag("workspace-drop-hint").assertDoesNotExist()
+            capture("workspace-zen-hidden-edge-$theme")
+            workspace.performTouchInput { up() }
+            compose.waitForIdle()
+            assertTrue(group("sizes").getBoolean("floating"))
+            val target = group("layers").getJSONObject("bounds")
+            val merge = androidx.compose.ui.geometry.Offset(target.number("x") + 2, target.number("y") + target.number("height") / 2) * density
+            val source = grip("sizes")
+            workspace.performTouchInput { down(source); moveTo(merge, 16) }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("workspace-drop-hint").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue("Floating merge does not reveal docks", host.snapshot!!.getBoolean("chrome_hidden"))
+            capture("workspace-zen-floating-merge-$theme")
+            workspace.performTouchInput { up() }
+            compose.waitUntil(10_000) { group("sizes").getInt("id") == group("layers").getInt("id") }
+            assertEquals(2, group("layers").array("panels").length())
+            assertTrue(group("layers").getBoolean("tabs_visible"))
+            val start = grip("layers")
+            val left = androidx.compose.ui.geometry.Offset(10 * density, root.height / 2)
+            workspace.performTouchInput { down(start); moveTo(left, 16) }
+            compose.waitForIdle()
+            assertTrue(host.snapshot!!.getBoolean("chrome_hidden"))
+            workspace.performTouchInput { moveTo(root.center - root.topLeft, 16) }
+            compose.waitForIdle()
+            assertTrue("Edge contact keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
+            capture("workspace-zen-edge-drag-$theme")
+            workspace.performTouchInput { up() }
+            compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
+            assertTrue("Dropping in the center stays floating", group("layers").getBoolean("floating"))
+            assertNull(host.actionError)
+            action(obj("type" to "invoke", "command" to "zen_mode"))
+        }
     }
 
     @Test fun toolbarConfigurationAndGroupCollapseUseTheSharedDefault() {
@@ -2595,24 +2599,6 @@ class AndroidHostTest {
         compose.waitUntil(10_000) { !group("toolbar").getBoolean("floating") }
         assertEquals("horizontal", group("toolbar").getString("axis"))
         assertNull(host.actionError)
-    }
-
-    @Test fun zenMouseCanMoveFromCanvasOntoFloatingPanel() {
-        floatPanel("brushes", 420f, 300f)
-        action(obj("type" to "invoke", "command" to "zen_mode"))
-        val workspace = compose.onNodeWithTag("workspace")
-        workspace.performMouseInput { moveTo(center) }
-        compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
-        workspace.performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(1f, center.y)) }
-        compose.waitForIdle()
-        assertTrue(host.snapshot!!.getBoolean("chrome_hidden"))
-        val root = workspace.fetchSemanticsNode().boundsInRoot
-        val tab = compose.onNodeWithTag("tab-brushes").fetchSemanticsNode().boundsInRoot.center - root.topLeft
-        workspace.performMouseInput { moveTo(tab) }
-        compose.waitForIdle()
-        assertTrue("Hovering a floating tab keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
-        capture("workspace-zen-mouse-on-panel")
-        action(obj("type" to "invoke", "command" to "zen_mode"))
     }
 
     @Test fun cursorHidesWhileDrawingAndReturnsOnRelease() {
@@ -3945,34 +3931,54 @@ class AndroidHostTest {
     }
 
     @Test fun zenKeepsFloatingPanelsThroughDrawerDismissalAndPanelDrag() {
-        floatPanel("toolbar", 420f, 120f)
-        floatPanel("brushes", 420f, 300f)
-        floatPanel("layers", 740f, 300f)
-        compose.onNodeWithTag(capyTag()).performClick()
-        waitState { it.getJSONObject("workspace").getBoolean("zen_mode") }
-        val center = androidx.compose.ui.geometry.Offset(0.7f, 0.6f)
-        compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
-        val tile = host.snapshot!!.array("panels").objects().first { it.getString("id") == "toolbar" }.array("tiles").objects().first().getInt("id")
-        compose.onNodeWithTag("tile-toolbar-$tile").performClick()
-        waitState { it.getJSONObject("customization").objectOrNull("drawer") != null }
-        compose.waitForIdle()
-        canvasEvent(MotionEvent.ACTION_DOWN, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
-        canvasEvent(MotionEvent.ACTION_UP, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
-        waitState { it.getJSONObject("customization").isNull("drawer") }
-        assertFalse("First outside contact closes only the drawer", host.snapshot!!.getBoolean("chrome_hidden"))
-        canvasEvent(MotionEvent.ACTION_DOWN, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
-        canvasEvent(MotionEvent.ACTION_UP, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
-        compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
-        compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
-        val source = compose.onNodeWithTag("tab-brushes")
-        val target = compose.onNodeWithTag("tab-layers").fetchSemanticsNode().boundsInRoot.center
-        val origin = source.fetchSemanticsNode().boundsInRoot.topLeft
-        source.performTouchInput { swipe(this.center, target - origin, 700) }
-        compose.waitUntil(10_000) { host.snapshot!!.getJSONObject("layout").array("groups").objects().any {
-            it.array("panels").values().containsAll(listOf("brushes", "layers"))
-        } }
-        assertTrue("Dropping a floating panel keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
-        capture("24-zen-after-drag")
-        compose.runOnIdle { host.invoke("zen_mode") }
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "restore_workspace", "workspace" to JSONObject(defaultWorkspace)))
+            floatPanel("toolbar", 420f, 120f)
+            floatPanel("brushes", 420f, 300f)
+            floatPanel("layers", 740f, 300f)
+            compose.onNodeWithTag(capyTag()).performClick()
+            waitState { it.getJSONObject("workspace").getBoolean("zen_mode") }
+            compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
+            val tile = host.snapshot!!.array("panels").objects().first { it.getString("id") == "toolbar" }.array("tiles").objects().first().getInt("id")
+            compose.onNodeWithTag("tile-toolbar-$tile").performClick()
+            waitState { it.getJSONObject("customization").objectOrNull("drawer") != null }
+            compose.waitForIdle()
+            capture("workspace-zen-before-drawer-dismiss-$theme")
+            val center = compose.runOnIdle {
+                val canvas = findCanvas(compose.activity.window.decorView)!!
+                val chrome = host.glassBoxesForTest.map { androidx.compose.ui.geometry.Rect(it[0], it[1], it[0] + it[2], it[1] + it[3]) }
+                listOf(.25f, .5f, .75f).flatMap { x -> listOf(.25f, .5f, .75f).map { y -> androidx.compose.ui.geometry.Offset(x, y) } }
+                    .first { point -> chrome.none { it.contains(androidx.compose.ui.geometry.Offset(point.x * canvas.width, point.y * canvas.height)) } }
+            }
+            canvasEvent(MotionEvent.ACTION_DOWN, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
+            canvasEvent(MotionEvent.ACTION_UP, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
+            waitState { it.getJSONObject("customization").isNull("drawer") }
+            assertFalse("First outside contact closes only the drawer", host.snapshot!!.getBoolean("chrome_hidden"))
+            canvasEvent(MotionEvent.ACTION_DOWN, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
+            canvasEvent(MotionEvent.ACTION_UP, listOf(center), MotionEvent.TOOL_TYPE_STYLUS)
+            compose.waitUntil(10_000) { host.snapshot!!.getBoolean("chrome_hidden") }
+            val workspace = compose.onNodeWithTag("workspace")
+            val root = workspace.fetchSemanticsNode().boundsInRoot
+            workspace.performMouseInput { moveTo(root.center - root.topLeft) }
+            workspace.performMouseInput { moveTo(androidx.compose.ui.geometry.Offset(1f, root.height / 2)) }
+            compose.waitForIdle()
+            assertTrue("Canvas edge hover keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
+            val tab = compose.onNodeWithTag("tab-brushes").fetchSemanticsNode().boundsInRoot.center - root.topLeft
+            workspace.performMouseInput { moveTo(tab) }
+            compose.waitForIdle()
+            assertTrue("Hovering a floating tab keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
+            capture("workspace-zen-mouse-on-panel-$theme")
+            val source = compose.onNodeWithTag("tab-brushes")
+            val target = compose.onNodeWithTag("tab-layers").fetchSemanticsNode().boundsInRoot.center
+            val origin = source.fetchSemanticsNode().boundsInRoot.topLeft
+            source.performTouchInput { swipe(this.center, target - origin, 700) }
+            compose.waitUntil(10_000) { host.snapshot!!.getJSONObject("layout").array("groups").objects().any {
+                it.array("panels").values().containsAll(listOf("brushes", "layers"))
+            } }
+            assertTrue("Dropping a floating panel keeps docks hidden", host.snapshot!!.getBoolean("chrome_hidden"))
+            capture("24-zen-after-drag-$theme")
+            compose.runOnIdle { host.invoke("zen_mode") }
+        }
     }
 }

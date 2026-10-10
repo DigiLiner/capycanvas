@@ -1081,13 +1081,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 viewport,
             } => {
                 valid_viewport(viewport)?;
-                let position = match event {
-                    ChromeEvent::Motion { position } | ChromeEvent::Contact { position, .. } => {
-                        Some(position)
-                    }
-                    _ => None,
-                };
-                if position.is_some_and(|p| !p.into_iter().all(f32::is_finite)) {
+                if let ChromeEvent::Contact { position, .. } = event
+                    && !position.into_iter().all(f32::is_finite)
+                {
                     return Err("Invalid chrome position".into());
                 }
                 let was_hidden = self.interaction.hidden;
@@ -1241,7 +1237,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     })?;
                     reply.handled = true;
                 }
-                if matches!(event, ChromeEvent::Motion { .. } | ChromeEvent::Contact { .. }) {
+                if matches!(event, ChromeEvent::Motion | ChromeEvent::Contact { .. }) {
                     self.interaction.keyboard_chrome = false;
                 }
                 if let ChromeEvent::Contact { canvas: true, .. } = event {
@@ -11141,15 +11137,14 @@ mod tests {
                         .find(|v| v["id"] == size.id()).unwrap();
                     assert_eq!(metrics["tile"], size.tile());
                     assert_eq!(metrics["capy_icon"], icon);
-                    for position in [[600., 450.], [600., 6.], [600., 898.],
-                        [6., 450.], [1198., 450.], [24., 24.]] {
-                        for event in [ChromeEvent::Motion { position },
-                            ChromeEvent::Contact { position, canvas: true }] {
-                            let reply = chrome(&mut s, event, ChromeFacts::default());
-                            assert!(reply.chrome_hidden);
-                            assert_eq!(reply.keep_zen_button, capy);
-                            assert!(!reply.handled);
-                        }
+                    let contacts = [[600., 450.], [600., 6.], [600., 898.],
+                        [6., 450.], [1198., 450.], [24., 24.]].into_iter()
+                        .map(|position| ChromeEvent::Contact { position, canvas: true });
+                    for event in [ChromeEvent::Refresh, ChromeEvent::Motion].into_iter().chain(contacts) {
+                        let reply = chrome(&mut s, event, ChromeFacts::default());
+                        assert!(reply.chrome_hidden);
+                        assert_eq!(reply.keep_zen_button, capy);
+                        assert!(!reply.handled);
                     }
                     assert_eq!(s.state.workspace.layout, layout);
                     assert_eq!(s.state.camera, camera);
@@ -11164,13 +11159,12 @@ mod tests {
     fn zen_visibility_pinning_and_first_contact_are_core_state() {
         let mut s = session(Platform::Gtk);
         invoke(&mut s, CommandId::ZenMode);
-        let motion = |p| ChromeEvent::Motion { position: p };
         let touch = |p| ChromeEvent::Contact {
             position: p,
             canvas: true,
         };
         let facts = ChromeFacts::default();
-        assert!(chrome(&mut s, motion([600.0, 450.0]), facts).chrome_hidden);
+        assert!(chrome(&mut s, ChromeEvent::Motion, facts).chrome_hidden);
         assert!(
             !chrome(&mut s, touch([600.0, 898.0]), facts).handled,
             "HUD is not a bottom panel"
@@ -11178,8 +11172,7 @@ mod tests {
         let first = chrome(&mut s, touch([20.0, 450.0]), facts);
         assert!(!first.handled && first.chrome_hidden);
         assert!(!chrome(&mut s, touch([20.0, 450.0]), facts).handled);
-        assert!(chrome(&mut s, ChromeEvent::Leave { touch: true }, facts).chrome_hidden);
-        assert!(chrome(&mut s, motion([600.0, 450.0]), facts).chrome_hidden);
+        assert!(chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
         for facts in [
             ChromeFacts {
                 held: true,
@@ -11207,17 +11200,17 @@ mod tests {
         assert!(chrome(&mut s, ChromeEvent::Refresh, facts).chrome_hidden);
         assert!(!key(&mut s, "Tab", true, false, false).chrome_hidden);
         assert!(!s.state.workspace.zen_mode);
-        assert!(!chrome(&mut s, motion([600.0, 450.0]), facts).chrome_hidden);
+        assert!(!chrome(&mut s, ChromeEvent::Motion, facts).chrome_hidden);
     }
     #[test]
     fn enabling_zen_hides_immediately_after_capy_contact() {
         let mut s = session(Platform::Gtk);
         let facts = ChromeFacts::default();
-        chrome(&mut s, ChromeEvent::Motion { position: [24., 24.] }, facts);
+        chrome(&mut s, ChromeEvent::Motion, facts);
         invoke(&mut s, CommandId::ZenMode);
         assert!(s.interaction.hidden);
         for event in [ChromeEvent::Refresh,
-            ChromeEvent::Motion { position: [24., 24.] },
+            ChromeEvent::Motion,
             ChromeEvent::Contact { position: [24., 24.], canvas: false }] {
             assert!(chrome(&mut s, event, facts).chrome_hidden);
         }
@@ -11236,24 +11229,18 @@ mod tests {
         assert!(
             !chrome(
                 &mut s,
-                ChromeEvent::Motion {
-                    position: [600.0, 450.0]
-                },
+                ChromeEvent::Motion,
                 dragging
             )
             .chrome_hidden
         );
-        assert!(!chrome(&mut s, ChromeEvent::Leave { touch: false }, dragging).chrome_hidden);
         assert!(!s.input(UiInput::Blur).unwrap().chrome_hidden);
         assert!(!chrome(&mut s, ChromeEvent::Refresh, dragging).chrome_hidden);
-        // End/cancel returns immediately to normal pointer proximity.
         assert!(chrome(&mut s, ChromeEvent::Refresh, ChromeFacts::default()).chrome_hidden);
         assert!(
             chrome(
                 &mut s,
-                ChromeEvent::Motion {
-                    position: [600.0, 450.0]
-                },
+                ChromeEvent::Motion,
                 ChromeFacts::default()
             )
             .chrome_hidden
@@ -12635,30 +12622,19 @@ mod tests {
     #[test]
     fn collapsed_drawer_pins_revealed_total_zen_but_explicit_zen_closes_it() {
         let mut s = session(Platform::Gtk);
-        s.set_platform(Platform::Gtk);
         for column in [4, 8] {
             s.state.workspace.layout.column_stack_mut(column).drawers = true;
         }
         let viewport = [1200., 900.];
         s.dispatch(UiAction::DoubleClickPanelHandle { group: 5, viewport })
             .unwrap();
-        let settings = s.state.settings.clone();
-        s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
         invoke(&mut s, CommandId::ZenMode);
-        let hover = |s: &mut UiSession<Recorder>, position| {
-            s.input(UiInput::Chrome {
-                event: ChromeEvent::Motion { position },
-                facts: ChromeFacts::default(),
-                viewport,
-            })
-            .unwrap()
-        };
-        assert!(hover(&mut s, [10., 400.]).chrome_hidden);
+        assert!(chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default()).chrome_hidden);
         customize(&mut s, CustomizationAction::ToggleColumnDrawer {
             group: 5,
             panel: Panel::Brushes,
         });
-        assert!(!hover(&mut s, [600., 500.]).chrome_hidden);
+        assert!(!chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default()).chrome_hidden);
         assert!(!s.state.customization.blocks_shortcuts());
         customize(&mut s, CustomizationAction::ToggleColumnDrawer {
             group: 5,
@@ -12684,7 +12660,7 @@ mod tests {
         });
         invoke(&mut s, CommandId::ZenMode);
         assert!(s.state.customization.column_drawers.is_empty());
-        assert!(hover(&mut s, [600., 500.]).chrome_hidden);
+        assert!(chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default()).chrome_hidden);
     }
 
     #[test]
@@ -14273,9 +14249,7 @@ mod tests {
         assert!(
             chrome(
                 &mut app,
-                ChromeEvent::Motion {
-                    position: [600.0, 450.0]
-                },
+                ChromeEvent::Motion,
                 ChromeFacts::default()
             )
             .chrome_hidden
@@ -14369,7 +14343,7 @@ mod tests {
         let facts = ChromeFacts::default();
         let center = [650.0, 440.0];
         assert!(
-            chrome(&mut app, ChromeEvent::Motion { position: center }, facts).chrome_hidden
+            chrome(&mut app, ChromeEvent::Motion, facts).chrome_hidden
         );
         let drag = |app: &mut UiSession<_>, phase, position| {
             drag(app, DockItem::Panel { panel: Panel::Sizes }, phase, position, viewport);
@@ -15719,9 +15693,7 @@ mod tests {
         assert!(
             !chrome(
                 &mut app,
-                ChromeEvent::Motion {
-                    position: [600.0, 600.0]
-                },
+                ChromeEvent::Motion,
                 ChromeFacts::default()
             )
             .chrome_hidden
@@ -15729,7 +15701,7 @@ mod tests {
         assert!(
             !chrome(
                 &mut app,
-                ChromeEvent::Leave { touch: false },
+                ChromeEvent::Refresh,
                 ChromeFacts::default()
             )
             .chrome_hidden

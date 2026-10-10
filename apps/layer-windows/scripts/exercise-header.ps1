@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('paint','sketch','photo')][string]$Workspace='paint',[switch]$Catalog,[ValidateSet('dark','light')][string]$Theme='dark',[ValidateSet('full','options','options-light','options-pen','options-touch','menus','menus-light')][string]$Journey='full')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('mouse','pen','touch')][string]$Device='mouse',[ValidateSet('paint','sketch','photo')][string]$Workspace='paint',[switch]$Catalog,[ValidateSet('dark','light')][string]$Theme='dark',[ValidateSet('full','options','options-light','options-pen','options-touch','menus','menus-light','zen')][string]$Journey='full')
 $ErrorActionPreference='Stop'
 if($Journey -eq 'options-light'){$Theme='light'}
 if($Journey -eq 'menus-light'){$Theme='light'}
@@ -486,11 +486,117 @@ function Check-Narrow {
  Check-Geometry
 }
 
+function Check-ZenMatrix {
+    function ImageBounds($Button) {
+        $image=$Button.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Image))
+        if(!$image){throw 'Native Capy image bounds are unavailable'}
+        $image.Current.BoundingRectangle
+    }
+    function SameBounds($Before,$After,[string]$Label) {
+        foreach($field in @('Left','Top','Width','Height')) {
+            if([Math]::Abs($Before.$field-$After.$field) -gt 1){throw "$Label $field differs: $($Before.$field) / $($After.$field)"}
+        }
+    }
+    function Check-CapyBounds([string]$Label,[switch]$Fallback) {
+        $normalControl=$null
+        if($Fallback){Wait-Until {!(Find 'zen-button' -Visible)} 'Fallback retained a normal Capy'}
+        else {
+            $normalControl=Control 'zen-button' -Arranged
+            $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+            $tile=@{small=36;medium=48;large=60}[(Header).size]*$scale
+            if([Math]::Abs($normalControl.Current.BoundingRectangle.Width-$tile) -gt 1){throw "$Label normal Capy size differs"}
+        }
+        $normal=if($normalControl){$normalControl.Current.BoundingRectangle}else{$fallbackNormal}
+        $glyph=if($normalControl){ImageBounds $normalControl}else{$fallbackGlyph}
+        $layout=(Model).layout|ConvertTo-Json -Compress -Depth 70
+        $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
+        Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow} 'Native review did not regain foreground'
+        if($normalControl){[CapyRowPointer]::Down('mouse',[int]($normal.Left+$normal.Width/2),[int]($normal.Top+$normal.Height/2));[CapyRowPointer]::Up()}
+        else {(Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09)}
+        Wait-Until {(Model).chrome_hidden} 'Zen did not activate'
+        if(Find 'zen-button' -Visible){throw 'Zen retained the normal Capy'}
+        SameBounds $normal (Control 'zen-capy').Current.BoundingRectangle "$Label button"
+        SameBounds $glyph (ImageBounds (Control 'zen-capy')) "$Label glyph"
+        Capture ('zen-bounds-'+($Label -replace '/','-'))
+        $at=(Control 'zen-capy').Current.BoundingRectangle
+        [CapyRowPointer]::Down('mouse',[int]($at.Left+$at.Width/2),[int]($at.Top+$at.Height/2));[CapyRowPointer]::Up()
+        Wait-Until {!(Model).chrome_hidden -and !(Model).state.workspace.zen_mode} 'Capy did not leave Zen'
+        if($normalControl){
+            SameBounds $normal (Control 'zen-button').Current.BoundingRectangle "$Label restored button"
+            SameBounds $glyph (ImageBounds (Control 'zen-button')) "$Label restored glyph"
+        }elseif(Find 'zen-button' -Visible){throw "$Label revealed a hidden normal Capy"}
+        if(((Model).layout|ConvertTo-Json -Compress -Depth 70) -ne $layout){throw "$Label changed workspace geometry"}
+        Write-Output "PASS $Label native button/glyph bounds and restored layout"
+    }
+    foreach($theme in @('Dark','Light')) {
+        & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'edit';Invoke 'settings'
+        $dialog=Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)
+        (Control 'Color theme' -Name -Type ([System.Windows.Automation.ControlType]::ComboBox)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        (Control $theme -Name -Type ([System.Windows.Automation.ControlType]::ListItem)).GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        Wait-Until {(Model).state.theme -eq $theme.ToLower()} 'Theme did not apply'
+        Invoke 'CloseButton' -Within $dialog
+        Wait-Until {!(Find 'Preferences' -Name) -and (Control 'drawing-canvas').Current.IsEnabled} 'Preferences did not release canvas'
+        foreach($workspace in @('illustrator','painter','photographer')) {
+            $id='builtin:workspace:'+ $workspace
+            if((Model).windows_workspace.id -ne $id){
+                & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
+                (Control 'Workspaces' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+                $choice=@((Model).windows_workspace.switcher_display|Where-Object id -eq $id)[0]
+                (Control $choice.title -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+            }
+            Wait-Until {(Model).windows_workspace.id -eq $id -and !(Model).windows_workspace.busy} 'Workspace did not switch'
+            foreach($size in @('small','medium','large')) {
+                Edit-Header
+                Invoke ('header-size-'+$size)
+                Wait-Until {(Header).size -eq $size} 'Header size did not update'
+                Invoke 'header-edit-done'
+                Wait-Until {!(Model).header.editing} 'Header editor did not close'
+                Start-Sleep -Milliseconds 300
+                Check-CapyBounds "$workspace/$theme/$size"
+            }
+        }
+    }
+    Edit-Header
+    Invoke 'header-size-small';Invoke 'header-edit-done'
+    Wait-Until {!(Model).header.editing -and (Header).size -eq 'small'} 'Small header did not settle'
+    Start-Sleep -Milliseconds 300
+    $fallbackNormal=(Control 'zen-button').Current.BoundingRectangle
+    $fallbackGlyph=ImageBounds (Control 'zen-button')
+    $capy=@(Entries|Where-Object {$_.item.kind -eq 'capy'})[0].id
+    foreach($zone in @(1,2)){
+        Edit-Header;Select-HeaderItem $capy
+        for($attempt=0;$capy -notin (Header).zones[$zone].id -and $attempt -lt 128;$attempt++){$before=HeaderJson;[CapyRowPointer]::Key(0x27);Wait-Until {(HeaderJson) -ne $before} 'Native right key did not move Capy'}
+        if($capy -notin (Header).zones[$zone].id){throw 'Capy did not reach the requested zone'}
+        Invoke 'header-edit-done';Wait-Until {!(Model).header.editing} 'Header editor did not close'
+        Start-Sleep -Milliseconds 300
+        $null=Control 'zen-button' -Arranged
+        Check-CapyBounds ('custom-zone-'+$zone)
+    }
+    Edit-Header;Select-HeaderItem $capy
+    for($attempt=0;(Header).zones[2][-1].id -ne $capy -and $attempt -lt 128;$attempt++){$before=HeaderJson;[CapyRowPointer]::Key(0x27);Wait-Until {(HeaderJson) -ne $before} 'Native right key did not move Capy'}
+    Invoke 'header-edit-done';Wait-Until {!(Model).header.editing} 'Overflow header editor did not close'
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int](640*$scale)) -Height ([int](500*$scale))
+    Wait-Until {!(Find 'zen-button' -Visible)} 'Narrow fixture did not overflow Capy'
+    Check-CapyBounds 'custom-narrow-overflow' -Fallback
+    Edit-Header;Remove-HeaderItem $capy
+    Invoke 'header-edit-done';Wait-Until {!(Model).header.editing} 'Removed-Capy header editor did not close'
+    Check-CapyBounds 'custom-removed' -Fallback
+
+}
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
     [IO.File]::WriteAllText((Settings-File),(@{theme=$Theme}|ConvertTo-Json))
     Start-Review 'initial';Capture 'normal'
+    if($Journey -eq 'zen'){
+        Check-ZenMatrix
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
+        if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
+        @{zen_native_button_and_glyph_bounds='passed';cases=22}|ConvertTo-Json
+        return
+    }
     if($Journey -in @('menus','menus-light')){
         Check-MenuHover 800;Check-MenuHover 480
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved

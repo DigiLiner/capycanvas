@@ -650,6 +650,7 @@ impl Header {
                     _ => ZenIcon::LookingUp.icon(),
                 };
                 let image = w.customization.icon(w, icon, if entry.item == HeaderItem::Capy {
+                    root.add_css_class("capy-item");
                     b.add_css_class("capy-button");
                     size.capy_icon()
                 } else {
