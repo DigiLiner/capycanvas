@@ -209,8 +209,10 @@ pub(super) struct Effects {
 }
 impl Effects {
     pub(super) fn chain_ready(&self, scene: SceneView<'_>, layers: &[OccurrenceHandle], execution: Execution, space: layer_core::BlendSpace) -> bool {
+        if self.pipelines.is_empty() {return false;}
+        let requested=(execution, space, normal_chain(scene,layers), identity_chain(scene,layers));
         let programs: Vec<_> = layers.iter().filter_map(|&h| scene.effect(h).map(|e| e.program)).collect();
-        self.pipelines.iter().any(|(chain, stage, pipeline, _)| *stage == (execution, space, normal_chain(scene,layers), identity_chain(scene,layers))
+        self.pipelines.iter().any(|(chain, stage, pipeline, _)| *stage == requested
             && chain.iter().map(Arc::as_ref).eq(programs.iter().copied()) && pipeline.ready())
             && self.preparation.pipelines.iter().all(|(_, p)| p.ready())
     }

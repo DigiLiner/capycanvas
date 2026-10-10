@@ -111,9 +111,9 @@ impl Pipelines {
 
     pub fn required(&self, execution:BrushExecution) -> Vec<Deferred<wgpu::ComputePipeline>> {
         let mut kernels=Vec::new();
-        if execution.heals() {kernels.extend([&self.seed,&self.pull,&self.push,&self.relax,&self.apply]);}
-        if execution==BrushExecution::SpotHeal {kernels.extend([&self.score,&self.judge,&self.pick]);}
-        kernels.into_iter().cloned().collect()
+        if execution.heals() {kernels.extend([&self.seed,&self.pull,&self.push,&self.relax,&self.apply].into_iter().cloned());}
+        if execution==BrushExecution::SpotHeal {kernels.extend([&self.score,&self.judge,&self.pick].into_iter().cloned());}
+        kernels
     }
 }
 

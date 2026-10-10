@@ -84,8 +84,8 @@ already drawn. Other commands are not held back.
 raster/parameter edits do not invalidate readiness or trigger effect preparation.
 Changing effect blend mode or crossing between identity and transformed reference
 axes updates the shader dependencies; moving an identity reference does not.
-Effect-chain inspection now borrows layers; only compiler jobs clone their
-owned inputs.
+Effect-chain inspection borrows layers and computes its variant key once per cache
+search; only compiler jobs clone owned inputs.
 
 Android and GTK no longer reload their already embedded filter package during
 startup. Android also stops packaging that redundant asset copy. GTK still
