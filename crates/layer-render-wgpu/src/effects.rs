@@ -70,9 +70,13 @@ impl Execution {
 }
 /// A compiled variant: the execution, and the blend space of the composite
 /// the effect blends onto. Linear variants convert nothing.
-type Stage = (Execution, layer_core::BlendSpace, bool);
+type Stage = (Execution, layer_core::BlendSpace, bool, bool);
 
-fn normal_chain(scene:SceneView<'_>,layers:&[OccurrenceHandle])->bool {
+pub(super) fn identity_chain(scene:SceneView<'_>,layers:&[OccurrenceHandle])->bool {
+    layers.iter().all(|handle|effect_geometry(scene,*handle).is_ok_and(|geometry|geometry[0]==[1.,0.,0.,1.]))
+}
+
+pub(super) fn normal_chain(scene:SceneView<'_>,layers:&[OccurrenceHandle])->bool {
     layers.iter().all(|handle|scene.occurrence(*handle).is_some_and(|o|o.blend==layer_core::LayerBlend::Normal))
 }
 
@@ -206,7 +210,7 @@ pub(super) struct Effects {
 impl Effects {
     pub(super) fn chain_ready(&self, scene: SceneView<'_>, layers: &[OccurrenceHandle], execution: Execution, space: layer_core::BlendSpace) -> bool {
         let programs: Vec<_> = layers.iter().filter_map(|&h| scene.effect(h).map(|e| e.program)).collect();
-        self.pipelines.iter().any(|(chain, stage, pipeline, _)| *stage == (execution, space, normal_chain(scene,layers))
+        self.pipelines.iter().any(|(chain, stage, pipeline, _)| *stage == (execution, space, normal_chain(scene,layers), identity_chain(scene,layers))
             && chain.iter().map(Arc::as_ref).eq(programs.iter().copied()) && pipeline.ready())
             && self.preparation.pipelines.iter().all(|(_, p)| p.ready())
     }
@@ -387,7 +391,7 @@ impl Effects {
         space: layer_core::BlendSpace,
     ) -> Result<PreparedEffect, GpuRasterError> {
         let execution = stage;
-        let stage = (execution, space, normal_chain(scene,layers));
+        let stage = (execution, space, normal_chain(scene,layers), identity_chain(scene,layers));
         self.ids.0.clear();
         self.ids.0.extend_from_slice(layers);
         self.ids.1 = level;
@@ -454,7 +458,7 @@ impl Effects {
         {
             (pipeline.clone(), *original_independent)
         } else {
-            let source = shader_source(
+            let mut source = shader_source(
                 &programs,
                 &offsets,
                 execution,
@@ -462,9 +466,10 @@ impl Effects {
                 r.device().hdr(),
                 space,
                 stage.2,
+                stage.3,
             )?;
             let compute=computable(&programs,execution);
-            let original_independent=validate_source(&source,compute,programs.len().min(MASK_SLOTS),execution.reduced())?;
+            let original_independent=validate_source(&mut source,compute,programs.len().min(MASK_SLOTS),execution.reduced(),&programs)?;
             let module = r
                 .device()
                 .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -694,21 +699,29 @@ fn position_independent(programs:&[Arc<EffectProgram>],source:&str)->Result<bool
 fn computable(programs:&[Arc<EffectProgram>],execution:Execution)->bool {
     execution==Execution::Fused && programs.iter().all(|p|!p.fusion_boundary())
 }
-fn validate_source(source: &str, compute:bool,mask_slots:usize,reduced:bool) -> Result<bool, GpuRasterError> {
-    let (module,info) = validated_module(source)?;
-    if module.global_variables.len() != 9 + if compute { mask_slots + 1 } else { MASK_SLOTS + usize::from(reduced) }
-        || module.entry_points.len() != 3 + usize::from(compute)
+fn validate_source(source: &mut String, compute:bool,mask_slots:usize,reduced:bool,programs:&[Arc<EffectProgram>]) -> Result<bool, GpuRasterError> {
+    let (mut module,info) = validated_module(source)?;
+    if module.global_variables.len() != 11 + if compute { mask_slots + 1 } else { MASK_SLOTS + usize::from(reduced) }
+        || module.entry_points.len() != 2 + usize::from(compute)
         || !module.overrides.is_empty()
     {
         return Err(GpuRasterError::Effect(
             "Effects cannot add bindings, overrides or entry points".into(),
         ));
     }
-    Ok(module.global_variables.iter().find(|(_,global)|global.name.as_deref()==Some("back"))
+    let independent=module.global_variables.iter().find(|(_,global)|global.name.as_deref()==Some("back"))
         .is_some_and(|(back,_)|module.functions.iter().find(|(_,function)|function.name.as_deref()==Some("effect_value"))
-            .is_some_and(|(handle,_)|info[handle][back].is_empty())))
+            .is_some_and(|(handle,_)|info[handle][back].is_empty()));
+    if programs.iter().any(|p|p.wgsl.sources().is_ok_and(|parts|parts.iter().any(|part|part.contains('@')))) {return Ok(independent);}
+    let mut functions:Vec<_>=module.functions.iter().filter_map(|(handle,_)|module.functions.get_span(handle).to_range()).collect();
+    functions.sort_unstable_by_key(|span|span.start);
+    naga::compact::compact(&mut module,naga::compact::KeepUnused::No);
+    let retained:std::collections::HashSet<_>=module.functions.iter().filter_map(|(handle,_)|module.functions.get_span(handle).to_range()).collect();
+    for span in functions.into_iter().rev().filter(|span|!retained.contains(span)) {source.replace_range(span,"");}
+    Ok(independent)
 }
 
+#[expect(clippy::too_many_arguments,reason="Shader specialization keeps execution and color contracts explicit")]
 fn shader_source(
     programs: &[Arc<EffectProgram>],
     offsets: &[u32],
@@ -717,6 +730,7 @@ fn shader_source(
     hdr: bool,
     blend: layer_core::BlendSpace,
     normal:bool,
+    identity:bool,
 ) -> Result<String, GpuRasterError> {
     if programs.len() > 1 && programs.iter().any(|program| program.auxiliary.is_some()) {
         return Err(GpuRasterError::Effect("An auxiliary resource requires its own effect stage".into()));
@@ -733,7 +747,7 @@ fn shader_source(
     let mut source = working_color::source(space);
     source.push_str(&crate::view_color::hdr_shader(space, layer_core::color::RgbSpace::Srgb));
     source.push_str(include_str!("blend_modes.wgsl"));
-    source.push_str(include_str!("scene.wgsl"));
+    source.push_str(include_str!("scene_vertex.wgsl"));
     let space_id = layer_core::color::RgbSpace::ALL
         .iter()
         .position(|s| *s == space)
@@ -741,6 +755,7 @@ fn shader_source(
     let y = space.to_xyz()[1];
     source.push_str(&format!("\nconst FX_EXTENDED:bool=true;\nconst FX_HDR:bool={hdr};\nconst FX_ENCODED:bool={input_encoded};\nconst FX_SPACE:u32={space_id}u;\nconst FX_LUMA:vec3<f32>=vec3<f32>({:.12},{:.12},{:.12});\n", y[0], y[1], y[2]));
     source.push_str(&format!("const FX_CLAMP_INPUT:bool={};\n", !programs[0].passes.is_empty()));
+    source.push_str(&format!("const FX_REFERENCE_IDENTITY:bool={identity};\n"));
     source.push_str(include_str!("effects_color.wgsl"));
     source.push_str(crate::gradient::SOURCE);
     source.push_str(include_str!("float_number.wgsl"));
@@ -777,12 +792,16 @@ fn fx_begin(base:u32) {
     fx_reference_linear=effect_data[base-4u];
     fx_reference_frame=effect_data[base-3u];
     fx_composition_frame=effect_data[base-2u];
+    fx_front_grid=fx_grid(settings.source_over,settings.operation_linear.x,vec4(settings.color.zw,settings.operation_offset.zw));
+    fx_back_grid=fx_grid(settings.backdrop,settings.operation_linear.y,fx_original_support());
 }
 fn fx_to_document(point:vec2<f32>)->vec2<f32> {
+    if FX_REFERENCE_IDENTITY {return point+fx_reference_frame.xy;}
     let m=fx_reference_linear;
     return vec2(m.x*point.x+m.z*point.y,m.y*point.x+m.w*point.y)+fx_reference_frame.xy;
 }
 fn fx_from_document(point:vec2<f32>)->vec2<f32> {
+    if FX_REFERENCE_IDENTITY {return point-fx_reference_frame.xy;}
     let m=fx_reference_linear;let q=point-fx_reference_frame.xy;let determinant=m.x*m.w-m.y*m.z;
     return vec2(m.w*q.x-m.z*q.y,-m.y*q.x+m.x*q.y)/determinant;
 }
@@ -849,25 +868,33 @@ fn fx_grid_coordinate(point:f32,low:f32,high:f32,origin:f32,step:f32)->f32 {
     if point>previous {return last-.5+(point-previous)/(b-previous);}
     return q;
 }
-fn fx_grid_sample(image:texture_2d<f32>,point:vec2<f32>,grid:vec4<f32>,step:f32,bounds:vec4<f32>)->vec4<f32> {
-    if grid.z<=0. {return fx_window_sample(image,point);}
-    if any(bounds.zw<=bounds.xy) {return vec4(0.);}
-    if !FX_CLAMP_INPUT&&(any(point<bounds.xy)||any(point>=bounds.zw)) {return vec4(0.);}
-    let support=fx_finite_support_bounds(bounds,grid.xy,step);
-    if any(support.zw<support.xy) {return vec4(0.);}
-    let sample=select(point,clamp(point,support.xy,support.zw),FX_CLAMP_INPUT);
-    if step==1. {return fx_grid_unit_sample(image,sample,grid.xy);}
-    return fx_window_sample(image,vec2(fx_grid_coordinate(sample.x,bounds.x,bounds.z,grid.x,step),
-        fx_grid_coordinate(sample.y,bounds.y,bounds.w,grid.y,step)));
+struct FxGrid {grid:vec4<f32>,bounds:vec4<f32>,support:vec4<f32>,step:f32,reference:bool,integral:bool}
+var<private> fx_front_grid:FxGrid;
+var<private> fx_back_grid:FxGrid;
+fn fx_grid(grid:vec4<f32>,step:f32,bounds:vec4<f32>)->FxGrid {
+    let reference=grid.z>0.&&step==1.;
+    let offset=select(vec2(0.),fx_reference_frame.xy,reference);
+    let shifted=vec4(grid.xy-offset,grid.zw);let limits=bounds-vec4(offset,offset);
+    return FxGrid(shifted,limits,fx_finite_support_bounds(limits,shifted.xy,max(step,.00001)),step,reference,all(fract(shifted.xy)==vec2(0.)));
 }
-fn fx_reference_sample(image:texture_2d<f32>,p:vec2<f32>,grid:vec4<f32>,step:f32,bounds:vec4<f32>)->vec4<f32> {
-    if grid.z<=0.||step!=1. {return fx_grid_sample(image,fx_to_document(p),grid,step,bounds);}
-    let m=fx_reference_linear;let point=vec2(m.x*p.x+m.z*p.y,m.y*p.x+m.w*p.y);
-    let offset=fx_reference_frame.xy;
-    return fx_grid_sample(image,point,vec4(grid.xy-offset,grid.zw),step,bounds-vec4(offset,offset));
+fn fx_reference_sample(image:texture_2d<f32>,p:vec2<f32>,context:FxGrid)->vec4<f32> {
+    var point=p;
+    if !FX_REFERENCE_IDENTITY {let m=fx_reference_linear;point=vec2(m.x*p.x+m.z*p.y,m.y*p.x+m.w*p.y);}
+    if !context.reference {point+=fx_reference_frame.xy;}
+    if context.grid.z<=0. {return fx_window_sample(image,point);}
+    if any(context.bounds.zw<=context.bounds.xy) {return vec4(0.);}
+    if !FX_CLAMP_INPUT&&(any(point<context.bounds.xy)||any(point>=context.bounds.zw)) {return vec4(0.);}
+    if any(context.support.zw<context.support.xy) {return vec4(0.);}
+    let sample=select(point,clamp(point,context.support.xy,context.support.zw),FX_CLAMP_INPUT);
+    if context.step==1. {
+        if context.integral {let q=sample-.5;return fx_window_gather(image,vec2<i32>(floor(q)-context.grid.xy),fract(q));}
+        return fx_grid_unit_sample(image,sample,context.grid.xy);
+    }
+    return fx_window_sample(image,vec2(fx_grid_coordinate(sample.x,context.bounds.x,context.bounds.z,context.grid.x,context.step),
+        fx_grid_coordinate(sample.y,context.bounds.y,context.bounds.w,context.grid.y,context.step)));
 }
 fn fx_sample(p:vec2<f32>)->vec4<f32> {
-    return fx_reference_sample(front,p,settings.source_over,settings.operation_linear.x,vec4(settings.color.zw,settings.operation_offset.zw));
+    return fx_reference_sample(front,p,fx_front_grid);
 }
 fn fx_sample_bounds()->vec4<f32> {
     let support=fx_support_bounds(settings.operation_linear.x);
@@ -876,7 +903,7 @@ fn fx_sample_bounds()->vec4<f32> {
     return vec4(min(min(a,b),min(c,d)),max(max(a,b),max(c,d)));
 }
 fn fx_original(p:vec2<f32>)->vec4<f32> {
-    return fx_reference_sample(back,p,settings.backdrop,settings.operation_linear.y,fx_original_support());
+    return fx_reference_sample(back,p,fx_back_grid);
 }
 "#,
     );
@@ -1063,11 +1090,39 @@ mod tests {
         );
     }
     #[test]
+    fn checked_modules_omit_unreachable_helpers_after_interface_validation() {
+        let program=crate::tests::fixture("exposure").program();
+        let programs=[program];
+        let mut source=shader_source(&programs,&[3],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
+        let full=source.len();
+        validate_source(&mut source,true,1,false,&programs).unwrap();
+        assert!(source.len()<full/2);
+        assert!(!source.contains("fn capy_domain_warp")&&!source.contains("fn fx_cube"));
+        parse_validated(&source).unwrap();
+        source.push_str("\n@group(4) @binding(0) var injected:texture_2d<f32>;");
+        assert!(validate_source(&mut source,true,1,false,&programs).is_err());
+    }
+
+    #[test]
+    fn checked_modules_preserve_authored_attributes_and_their_dependencies() {
+        for attribute in ["@must_use","@diagnostic(off, derivative_uniformity)"] {
+        let mut program=(*crate::tests::fixture("exposure").program()).clone();
+        program.wgsl=format!("{}\nfn attribute_dependency()->f32{{return 1.;}}\n{attribute} fn attribute_probe()->f32{{return attribute_dependency();}}",
+            program.wgsl.sources().unwrap().join("\n")).into();
+        let program=Arc::new(program);
+        let programs=[program];
+        let mut source=shader_source(&programs,&[3],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
+        validate_source(&mut source,true,1,false,&programs).unwrap();
+        parse_validated(&source).unwrap();
+        assert!(source.contains(&format!("{attribute} fn attribute_probe"))&&source.contains("fn attribute_dependency"));
+        }
+    }
+    #[test]
     fn cached_reduction_requires_coordinate_independent_entries() {
         for (name,expected) in [("threshold",true),("brightness_to_opacity",true),("film_grain",false)] {
             let program=crate::tests::fixture(name).program();
             for blend in layer_core::BlendSpace::ALL {
-                let source=shader_source(std::slice::from_ref(&program),&[3],Execution::Reduced,Default::default(),false,blend,true).unwrap();
+                let source=shader_source(std::slice::from_ref(&program),&[3],Execution::Reduced,Default::default(),false,blend,true,false).unwrap();
                 assert_eq!(position_independent(std::slice::from_ref(&program),&source).unwrap(),expected,"{name} {blend:?}");
             }
         }
@@ -1122,21 +1177,22 @@ mod tests {
         for name in ["threshold","brightness_to_opacity"] {
             let program=crate::tests::fixture(name).program();
             for blend in layer_core::BlendSpace::ALL {
-                let source=shader_source(std::slice::from_ref(&program),&[3],Execution::Fused,Default::default(),false,blend,true).unwrap();
-                assert!(validate_source(&source,true,1,false).unwrap());
+                let mut source=shader_source(std::slice::from_ref(&program),&[3],Execution::Fused,Default::default(),false,blend,true,false).unwrap();
+                assert!(validate_source(&mut source,true,1,false,std::slice::from_ref(&program)).unwrap());
                 let mut original=(*program).clone();
                 original.entry="original_probe".into();
                 original.wgsl=format!("{}\nfn original_helper(p:vec2<f32>)->vec4<f32>{{return fx_original(p);}}\nfn original_probe(c:vec4<f32>,p:vec2<f32>,base:u32)->vec4<f32>{{return original_helper(p);}}",
                     program.wgsl.sources().unwrap().join("\n")).into();
-                let source=shader_source(&[Arc::new(original)],&[3],Execution::Fused,Default::default(),false,blend,true).unwrap();
-                assert!(!validate_source(&source,true,1,false).unwrap());
+                let original=[Arc::new(original)];
+                let mut source=shader_source(&original,&[3],Execution::Fused,Default::default(),false,blend,true,false).unwrap();
+                assert!(!validate_source(&mut source,true,1,false,&original).unwrap());
             }
         }
     }
     fn validate(p: &[Arc<EffectProgram>], execution: Execution) {
         for blend in layer_core::BlendSpace::ALL {for normal in [false,true] {
-            let source = shader_source(p, &vec![3; p.len()], execution, Default::default(), false, blend,normal).unwrap();
-            validate_source(&source,computable(p,execution),p.len().min(MASK_SLOTS),execution.reduced()).unwrap();
+            let mut source = shader_source(p, &vec![3; p.len()], execution, Default::default(), false, blend,normal,false).unwrap();
+            validate_source(&mut source,computable(p,execution),p.len().min(MASK_SLOTS),execution.reduced(),p).unwrap();
         }}
     }
 }

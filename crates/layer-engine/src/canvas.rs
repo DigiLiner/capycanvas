@@ -901,6 +901,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     pub fn set_brush(&mut self, brush: BrushSnapshot) -> Result<(), BrushError> {
         brush.validate()?;
         self.settings.brush = brush;
+        self.refresh_retouch();
         Ok(())
     }
 
@@ -950,11 +951,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let document = self.editor.document();
         let fresh = self.prepared_retouch.as_ref().is_some_and(|(id, revision, prepared)| {
             *id == document.owner && *revision == document.revision && prepared.points == self.retouch_points
+                && prepared.execution == self.settings.brush.execution
         });
         if self.settings.retouch.is_some() && fresh {
             return;
         }
         let prepared = self.settings.retouch.zip(document.try_drawing_content().ok()).map(|(source, target)| RetouchPreparation {
+            execution: self.settings.brush.execution,
             target,
             retouch: Retouch::for_target(document, target, source),
             points: self.retouch_points.clone(),
@@ -3122,6 +3125,23 @@ mod tests {
         let mapping = stroke.retouch.clone().unwrap();
         assert!(engine.backend().styles.iter().rev().take(1).all(|s| s.retouch.as_ref() == Some(&mapping)));
         stroke
+    }
+
+    #[test]
+    fn retouch_execution_changes_prepare_before_the_next_frame() {
+        let (_,mut engine)=engine_with(RecordingRenderer::default(),retouch_document(),view(64,64),TRANSFORM);
+        engine.set_brush(default_brush(DefaultBrushPreset::CloneStamp)).unwrap();
+        engine.set_retouch(Some(RetouchSource::Editing));
+        let original=engine.backend().retouch.last().unwrap().as_ref().unwrap().clone();
+        for (preset,execution) in [(DefaultBrushPreset::HealingBrush,BrushExecution::Heal),(DefaultBrushPreset::SpotHealingBrush,BrushExecution::SpotHeal)] {
+            engine.set_brush(default_brush(preset)).unwrap();
+            let prepared=engine.backend().retouch.last().unwrap().as_ref().unwrap();
+            assert_eq!(prepared.execution,execution);assert_eq!(prepared.target,original.target);
+            assert_eq!(prepared.retouch,original.retouch);assert_eq!(prepared.points,original.points);
+        }
+        let preparations=engine.backend().retouch.len();
+        engine.set_brush(default_brush(DefaultBrushPreset::SpotHealingBrush)).unwrap();
+        assert_eq!(engine.backend().retouch.len(),preparations);
     }
 
     #[test]

@@ -65,8 +65,10 @@ struct DocumentKey {
     operations: bool,
     transform: bool,
     mesh: bool,
+    watercolor: bool,
+    gray: bool,
     blend_space: layer_core::BlendSpace,
-    chains: Vec<(Vec<Arc<layer_core::EffectProgram>>, effects::Execution)>,
+    chains: Vec<(Vec<Arc<layer_core::EffectProgram>>, effects::Execution, bool, bool)>,
 }
 impl DocumentKey {
     fn new(document: &Document) -> Self {
@@ -82,12 +84,16 @@ impl DocumentKey {
             operations: scene.order().iter().any(|&h| scene.mask(h).is_some()) || operations().next().is_some(),
             transform: operations().any(|op| matches!(op.kind, layer_core::RasterOperationKind::Transform(_))),
             mesh: operations().any(|op| matches!(&op.kind, layer_core::RasterOperationKind::Transform(t) if t.placement.mesh.is_some())),
+            gray: scene.targets().any(|t|scene.color_mode(t)!=layer_core::color::LayerColorMode::FullColor),
+            watercolor: scene.targets().any(|t|scene.raster(t).is_some_and(|r|r.try_data().is_none_or(|data|data.is_ok_and(|data|data.watercolor.is_some())))),
             blend_space: document.composition().blend,
             chains: scene::startup_effect_chains(scene).into_iter().map(|(handles, execution)| {
+                let identity=effects::identity_chain(scene,&handles);
+                let normal=effects::normal_chain(scene,&handles);
                 (handles.into_iter().filter_map(|h| {
                     let application = scene.effect_application(h)?;
                     Some(application.program.clone())
-                }).collect(), execution)
+                }).collect(), execution, identity, normal)
             }).collect(),
         }
     }
@@ -190,6 +196,7 @@ impl Requirements {
             self.render.push(r.pipelines.stroke_edge.clone());
         }
         if plan.state.watercolor_wetness {
+            self.compute.push(r.pipelines.watercolor_compute.1.clone());
             self.render
                 .extend(r.pipelines.watercolor_transport.iter().cloned());
             self.render.push(r.pipelines.watercolor_composite.clone());
@@ -349,7 +356,7 @@ impl WgpuRasterizer {
                 .extend(self.scene_pipelines.pipeline.iter().cloned());
             if self.device.portable_blend() { required.compute.extend(self.portable_blend.pipelines.iter().cloned()); }
             required.compute.push(self.scene_pipelines.constant.2.clone());
-            required.compute.push(self.pipelines.watercolor_compute.1.clone());
+            if shader.key.watercolor {required.compute.push(self.pipelines.watercolor_compute.1.clone());}
             required.compute.extend(self.transforms.as_ref().unwrap().placement_pipelines());
             if self.native_edit.is_some() {
                 let mip = self.display_pipelines.get_or_insert_with(|| display_mips::Pipelines::new(&self.device));
@@ -442,7 +449,7 @@ impl WgpuRasterizer {
         // Native publication must be ready before accepting a brush contact,
         // but blank paper does not depend on writeback/promotion/validation.
         if let Some(native) = &self.native_edit {
-            current.compute.extend(native.required_pipelines(document.composition().color.depth).cloned());
+            current.compute.extend(native.required_pipelines(document.composition().color.depth,startup.document_key.as_ref().unwrap().key.gray).cloned());
         }
         let locked = startup.document_key.as_ref().unwrap().key.locked;
         // A physical eraser can select the erase variant without a UI change.
@@ -635,6 +642,23 @@ mod tests {
         assert!(!key.matches(&doc));
     }
     #[test]
+    fn shader_document_tracks_publication_modes_and_reference_axes() {
+        let mut doc=Document::new(layer_core::authored::PortableId::random(),128,128,layer_core::DocumentNames {paint:"Ink".into(),paper:"Paper".into()});
+        let key=ShaderDocument::new(&doc);
+        let target=doc.scene().targets().find_map(|t|if let SourceTarget::Paint(h)=t {Some(h)}else{None}).unwrap();
+        doc.artwork.paint.get_mut(target).unwrap().color_mode=layer_core::color::LayerColorMode::Grayscale;doc.revision+=1;
+        assert!(!key.matches(&doc));
+        crate::artwork_sample_tests::insert_effect(&mut doc,layer_core::EffectInstance::new(crate::tests::fixture("gaussian_blur").program()),0);
+        let handle=doc.scene().children(None)[0];let effect=doc.scene().effect_handle(handle).unwrap();
+        let key=ShaderDocument::new(&doc);
+        doc.artwork.effects.get_mut(effect).unwrap().spatial.as_mut().unwrap().mapping.0[4]+=0.25;doc.revision+=1;
+        assert!(key.matches(&doc));
+        doc.artwork.effects.get_mut(effect).unwrap().spatial.as_mut().unwrap().mapping.0[0]=2.;doc.revision+=1;
+        assert!(!key.matches(&doc));let key=ShaderDocument::new(&doc);
+        doc.artwork.occurrences.get_mut(handle).unwrap().blend=layer_core::LayerBlend::Multiply;doc.revision+=1;
+        assert!(!key.matches(&doc));
+    }
+    #[test]
     fn dependencies_precede_speculation_and_promotions_compile_once() {
         let compiler = Compiler::new().unwrap();
         let order = Arc::new(Mutex::new(Vec::new()));
@@ -738,7 +762,7 @@ mod gpu_tests {
                 .native_edit
                 .as_ref()
                 .unwrap()
-                .required_pipelines(document.composition().color.depth)
+                .required_pipelines(document.composition().color.depth,false)
                 .all(|p| p.ready())
         );
         for coverage in [false, true] {
@@ -781,7 +805,7 @@ mod gpu_tests {
             assert!(renderer.poll_startup().unwrap().brush_ready, "revisiting {preset:?} must reuse its prepared dependencies");
         }
         let target = document.scene().targets().find(|target| matches!(target, SourceTarget::Paint(_))).unwrap();
-        renderer.prepare_retouch_sources(Some(&layer_render::RetouchPreparation {
+        renderer.prepare_retouch_sources(Some(&layer_render::RetouchPreparation {execution:layer_core::BrushExecution::Clone,
             target, retouch: Default::default(), points: Vec::new(),
         }));
         crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready,

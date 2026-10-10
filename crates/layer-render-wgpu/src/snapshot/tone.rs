@@ -39,10 +39,7 @@ impl SnapshotRenderer {
         self.local_tone = Some(guide.clone());
         Ok(guide)
     }
-    /// Construct a document-space guide on the capture device. Source regions
-    /// are composed and reduced in one submission with no image readback. Wait
-    /// between regions and range anchors so cancellation cannot leave a whole
-    /// document's work queued ahead of a newly arriving pen stroke.
+    /// Construct a bounded document-space guide on the capture device.
     pub async fn gpu_local_tone_guide_async(
         &mut self,
     ) -> Result<Arc<crate::local_tone::GpuToneGuide>, String> {
@@ -76,7 +73,6 @@ impl SnapshotRenderer {
             let mut encoder = submission::CommandEncoder::new(&device, &Default::default());
             builder.anchor(&mut encoder, low, step, intervals, index);
             encoder.submit(&queue);
-            wait_async(&device, &queue).await?;
         }
         self.check_cancelled().map_err(|e| e.to_string())?;
         let mut encoder = submission::CommandEncoder::new(&device, &Default::default());
@@ -107,6 +103,7 @@ impl SnapshotRenderer {
         mut reduce: impl FnMut(&mut submission::CommandEncoder, &wgpu::Texture, [u32;2])) -> Result<(), String> {
         let device = self.renderer.device.clone();
         let queue = self.renderer.queue.clone();
+        let mut pending=0;
         for y in (0..self.extent[1]).step_by(512) {
             for x in (0..self.extent[0]).step_by(512) {
                 let mut regions = vec![[
@@ -120,6 +117,10 @@ impl SnapshotRenderer {
                     match self.capture_output_region_gpu(region, output, reserved, |_, texture, encoder| {
                         reduce(encoder, texture, [region[0], region[1]])
                     }).await {
+                        Err(GpuRasterError::CaptureBudget { .. }) if pending>0 => {
+                            crate::local_tone::wait_async(&device,&queue).await?;
+                            pending=0;regions.push(region);
+                        }
                         Err(GpuRasterError::CaptureBudget { .. })
                             if region[2].max(region[3]) > 16 =>
                         {
@@ -133,11 +134,15 @@ impl SnapshotRenderer {
                             regions.push(first);
                         }
                         Err(e) => return Err(e.to_string()),
-                        Ok(()) => crate::local_tone::wait_async(&device, &queue).await?,
+                        Ok(()) => {
+                            pending+=1;
+                            if pending==4 {crate::local_tone::wait_async(&device,&queue).await?;pending=0;}
+                        }
                     }
                 }
             }
         }
+        if pending>0 {crate::local_tone::wait_async(&device,&queue).await?;}
         self.check_cancelled().map_err(|e| e.to_string())?;
         Ok(())
     }

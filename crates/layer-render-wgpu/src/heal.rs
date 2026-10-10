@@ -109,8 +109,11 @@ impl Pipelines {
         }
     }
 
-    pub fn all(&self) -> ([&Deferred<wgpu::RenderPipeline>; 0], [&Deferred<wgpu::ComputePipeline>; 8]) {
-        ([], [&self.seed, &self.score, &self.pull, &self.push, &self.relax, &self.judge, &self.pick, &self.apply])
+    pub fn required(&self, execution:BrushExecution) -> Vec<Deferred<wgpu::ComputePipeline>> {
+        let mut kernels=Vec::new();
+        if execution.heals() {kernels.extend([&self.seed,&self.pull,&self.push,&self.relax,&self.apply]);}
+        if execution==BrushExecution::SpotHeal {kernels.extend([&self.score,&self.judge,&self.pick]);}
+        kernels.into_iter().cloned().collect()
     }
 }
 

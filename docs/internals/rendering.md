@@ -805,6 +805,14 @@ when a capture's source has no live mutable layer pages. Identity paint sources
 clip the signed request to their finite domain before adding the existing mip halo and page
 alignment; interpolation padding applies only to transformed sources.
 
+Effect modules share the scene vertex interface without unrelated scene fragment
+operations. Validation checks the complete authored interface before Naga's
+reachability analysis removes unused function declarations from the submitted
+WGSL. Authored modules with attributes retain their complete declarations and
+dependencies. Pipeline keys include blend mode and identity reference axes; parameter
+values and translations remain buffer data. Sampling prepares finite support
+once per pixel and keeps fractional-grid and reduced-edge reconstruction intact.
+
 The composition frame, bake destination and temporary image edge do not limit
 source reads. Global filters request the finite retained input domain, subject to
 the same allocation allowance and GPU dimension checks. Output, current-pass
@@ -892,8 +900,9 @@ on its existing request path.
 Histogram uses GPU reductions on the same immutable queries. Preview samples a
 256-by-256 stratified grid in original document coordinates; Exact visits every
 pixel. Prepared source windows cover at most 1024-by-1024 pixels and split under
-the capture budget. Exact submits and waits between native 256-pixel tiles so
-navigation and cancellation can proceed without repeating source preparation.
+the capture budget. Exact submits at most sixteen native 256-pixel tiles before
+waiting, while retaining cancellation checks and budget-driven window splitting.
+Source preparation is shared by the tiles in each bounded window.
 Four channel histograms and coverage/clipping counts occupy a 4 KiB readback;
 no full-resolution image reaches the panel. Positive alpha counts once, including
 subnormal coverage. Nonfinite color rejects the result. RGB bin boundaries use
@@ -917,14 +926,21 @@ separate cancellation owners.
 
 Auto Levels has a separate two-pass GPU summary: encoded extrema and 4096 bins
 per channel over each channel's observed range. Both summaries share bounded
-source capture and fold cumulative GPU counters once per pass. Min/max submits
-at most four native tiles together; the heavier bin pass yields after each tile.
+source capture and fold cumulative GPU counters once per pass. Each pass submits
+at most sixteen native tiles before waiting. The extrema readback still precedes
+the bin pass, which uses those observed ranges.
 RGB queries apply channel stages before master; individual queries inspect the
 original adjustment input. Shared Rust selects the .1% and 99.9% nearest ranks
 from those bins, with value error at
 most range/4096, validates the candidate and commits once. Explicit calibration
 and Auto preempt live statistics. Hidden panels release statistics and resume
 only on demand; old owner, page, source and device results cannot publish.
+
+Local tone and Dehaze guide reductions wait after at most four captured regions,
+flushing pending work before retrying a budget-limited region. Local tone anchor
+passes retain GPU ordering and share the final completion wait. Dehaze batches
+dependent rank passes before its required airlight readback, then batches the
+refinement passes before publishing its bounded guide.
 
 Snapshot PNG/TIFF output streams sixteen-row strips through the working-color
 encoder and profiled row writers using borrowed `WorkingRowsOptions`. Gain-map

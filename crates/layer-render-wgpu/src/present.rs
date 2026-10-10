@@ -353,8 +353,7 @@ impl ViewportPresenter {
     }
 
     pub async fn prepare(&mut self, renderer: &WgpuRasterizer) -> Result<(), GpuRasterError> {
-        let backdrop = self.backdrop.get_or_insert_with(|| crate::backdrop_blur::BackdropBlur::new(&renderer.device, self.format));
-        crate::Deferred::prepare_all(self.pipeline.iter().chain([&self.cursor_pipeline]).chain(backdrop.pipelines()))
+        crate::Deferred::prepare_all(self.pipeline.iter().chain([&self.cursor_pipeline]).chain(self.backdrop.iter().flat_map(|b|b.pipelines())))
             .await.map_err(GpuRasterError::Effect)?;
         crate::Deferred::prepare_all(renderer.scene_pipelines.scale_pipelines())
             .await.map_err(GpuRasterError::Effect)?;

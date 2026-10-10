@@ -362,7 +362,7 @@ fn settle(r: &mut WgpuRasterizer, doc: &Document) {
 fn the_reference_cache_follows_its_frame_and_evicts_the_least_recent_page() {
     let mut doc = document([2560, 2560]);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
-    r.prepare_retouch(Some(&RetouchPreparation {
+    r.prepare_retouch(Some(&RetouchPreparation {execution:layer_core::BrushExecution::Clone,
         target: TARGET,
         retouch: Retouch { source: RetouchSource::References, references: Arc::new([PHOTO_USE].into()), ..Retouch::default() },
         points: vec![Point { x: 10., y: 10. }],
@@ -513,7 +513,7 @@ fn retouch_reference_reads_arbitrary_base_offset_and_transparent_tile_override()
     paint.base=Some(PaintBase {image:rgba8_source([300,270],pattern).into(),offset:[17,31],policy:PaintBasePolicy::SourceProfile});
     paint.raster=RasterRevision::backed(RasterData {tiles:[(TileKey {plane:RasterPlane::Color,coordinate:[1,1]},RasterTile::backed(TileBlob::encode(layer_core::color::DocumentColor::default().paint_descriptor(),&vec![0;256*256*4]).unwrap()))].into(),..Default::default()});
     let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
-    r.prepare_retouch(Some(&RetouchPreparation {target:TARGET,retouch:Retouch {source:RetouchSource::References,references:Arc::new([PHOTO_USE].into()),..Default::default()},points:vec![Point {x:250.,y:250.}]}));
+    r.prepare_retouch(Some(&RetouchPreparation {execution:layer_core::BrushExecution::Clone,target:TARGET,retouch:Retouch {source:RetouchSource::References,references:Arc::new([PHOTO_USE].into()),..Default::default()},points:vec![Point {x:250.,y:250.}]}));
     for _ in 0..100 {r.submit(crate::test_support::packet(doc.scene(),extent)).unwrap();if !r.has_pending_work(){break;}}
     let (pixels,complete)=sample(&mut r,[0,0],[0.;2]);assert!(complete);
     for (x,y) in [(0,0),(17,31),(250,250),(255,255)] {

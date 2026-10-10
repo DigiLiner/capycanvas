@@ -123,8 +123,8 @@ impl NativeEdit {
             .chain(self.promoter.iter().flat_map(|p| p.pipelines.iter()))
             .chain(&self.validator.pipelines)
     }
-    pub(crate) fn required_pipelines(&self, depth: layer_core::color::SampleDepth) -> impl Iterator<Item = &Deferred<wgpu::ComputePipeline>> {
-        self.color.pipelines_for_depth(depth)
+    pub(crate) fn required_pipelines(&self, depth: layer_core::color::SampleDepth, gray:bool) -> impl Iterator<Item = &Deferred<wgpu::ComputePipeline>> {
+        self.color.pipelines_for_depth(depth,gray)
             .chain(&self.scalar.pipelines)
             .chain(self.promoter.iter().flat_map(|p| p.pipelines.iter()))
             .chain(&self.validator.pipelines)

@@ -73,7 +73,7 @@ impl SnapshotGpu {
         });
         let reserved = shards.size()+summary.size()*2+boundaries.size()+no_selection.size()+48;
         let mut folded=None;
-        snapshot.capture_query_gpu(output,request.preview,1,reserved,selection.as_ref(),|r,view,region,encoder| {
+        snapshot.capture_query_gpu(output,request.preview,16,reserved,selection.as_ref(),|r,view,region,encoder| {
             let weights = histogram.color.space.to_xyz()[1];
             let words = [region.min_x(), region.min_y(), region.width(), region.height(), extent[0], extent[1],
                 u32::from(request.preview), u32::from(histogram.color.depth.is_float() && histogram.domain==layer_core::color::histogram::HistogramDomain::Artwork),

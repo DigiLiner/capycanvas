@@ -48,9 +48,6 @@ impl Builder {
             aux:[origin[0],origin[1],self.document[0],self.document[1]],..Default::default()},[None,None,Some(&self.transform)],&self.scratch[0],
             Some(&texture.create_view(&Default::default())),[(end[0]-start[0]).div_ceil(8),(end[1]-start[1]).div_ceil(8)]);
     }
-    async fn submit(&self,encoder:CommandEncoder,queue:&wgpu::Queue)->Result<(),String> {
-        encoder.submit(queue);crate::local_tone::wait_async(&self.device,queue).await
-    }
     fn minimum(&self,encoder:&mut CommandEncoder,normalized:bool) {
         let mut p=dims(self.extent);p.aux[1]=u32::from(normalized);
         self.encode(encoder,2,p,[Some(&self.scratch[1]),None,Some(&self.air)],&self.scratch[0],groups(self.extent));
@@ -60,15 +57,14 @@ impl Builder {
     pub(crate) async fn finish(self,queue:&wgpu::Queue,check:impl Fn()->Result<(),String>)->Result<wgpu::Buffer,String> {
         check()?;let mut encoder=CommandEncoder::new(&self.device,&Default::default());
         self.encode(&mut encoder,1,dims(self.extent),[Some(&self.scratch[0]),None,None],&self.scratch[1],groups(self.extent));
-        self.minimum(&mut encoder,false);self.submit(encoder,queue).await?;
+        self.minimum(&mut encoder,false);
         for (step,(shift,mode)) in [(24,0),(16,0),(8,0),(0,0),(16,1),(8,1),(0,1)].into_iter().enumerate() {
-            check()?;let mut encoder=CommandEncoder::new(&self.device,&Default::default());let mut p=dims(self.extent);p.aux=[shift,mode,0,0];
+            check()?;let mut p=dims(self.extent);p.aux=[shift,mode,0,0];
             self.encode(&mut encoder,3,p,[Some(&self.scratch[1]),Some(&self.guide),Some(&self.state[step%2])],&self.histogram,[64,1]);
             let mut p=dims(self.extent);p.aux=[shift,mode,0,0];
             self.encode(&mut encoder,4,p,[Some(&self.histogram),Some(&self.state[step%2]),None],&self.state[1-step%2],[1,1]);
-            self.submit(encoder,queue).await?;
         }
-        check()?;let mut encoder=CommandEncoder::new(&self.device,&Default::default());let mut count=self.extent[0]*self.extent[1];
+        check()?;let mut count=self.extent[0]*self.extent[1];
         let mut p=dims(self.extent);p.aux=[0,0,count,0];
         self.encode(&mut encoder,5,p,[Some(&self.scratch[1]),Some(&self.guide),Some(&self.state[1])],&self.scratch[0],[count.div_ceil(256),1]);
         count=count.div_ceil(256);let mut chosen=0;let mut other=2;
@@ -81,11 +77,12 @@ impl Builder {
         encoder.submit(queue);
         let air=crate::local_tone::read_buffer_async(&self.device,queue,&self.air).await?;
         check()?;if air[24..28]!=[0;4] {return Err("Invalid HDR sample in Dehaze analysis".into());}
-        let mut encoder=CommandEncoder::new(&self.device,&Default::default());self.minimum(&mut encoder,true);self.submit(encoder,queue).await?;
+        let mut encoder=CommandEncoder::new(&self.device,&Default::default());self.minimum(&mut encoder,true);
         for (entry,axis,input,output) in [(7,0,&self.guide,&self.scratch[2]),(7,1,&self.scratch[2],&self.scratch[0]),(8,0,&self.scratch[0],&self.scratch[2]),(8,1,&self.scratch[2],&self.guide)] {
-            check()?;let mut encoder=CommandEncoder::new(&self.device,&Default::default());let mut p=dims(self.extent);p.aux=[axis,0,self.document[0],self.document[1]];
-            self.encode(&mut encoder,entry,p,[Some(&self.scratch[1]),Some(input),Some(&self.air)],output,groups(self.extent));self.submit(encoder,queue).await?;
+            check()?;let mut p=dims(self.extent);p.aux=[axis,0,self.document[0],self.document[1]];
+            self.encode(&mut encoder,entry,p,[Some(&self.scratch[1]),Some(input),Some(&self.air)],output,groups(self.extent));
         }
+        encoder.submit(queue);crate::local_tone::wait_async(&self.device,queue).await?;
         check()?;Ok(self.guide)
     }
 }

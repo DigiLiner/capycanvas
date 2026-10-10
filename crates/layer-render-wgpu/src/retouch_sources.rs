@@ -68,9 +68,8 @@ impl Pipelines {
         Self { layout, gather: pipeline("gather_main"), copy: pipeline("copy_main"), heal: Arc::new(heal::Pipelines::new(device)) }
     }
 
-    pub fn all(&self) -> (Vec<Deferred<wgpu::RenderPipeline>>, Vec<Deferred<wgpu::ComputePipeline>>) {
-        let (render, compute) = self.heal.all();
-        ([&self.gather, &self.copy].into_iter().chain(render).cloned().collect(), compute.into_iter().cloned().collect())
+    pub fn required(&self,execution:BrushExecution) -> (Vec<Deferred<wgpu::RenderPipeline>>, Vec<Deferred<wgpu::ComputePipeline>>) {
+        (vec![self.gather.clone(),self.copy.clone()],self.heal.required(execution))
     }
 }
 
@@ -336,7 +335,7 @@ impl RetouchSources {
 
     /// The pipelines retouching strokes draw with, from pen-down to pen-up.
     pub fn pipelines(&self) -> (Vec<Deferred<wgpu::RenderPipeline>>, Vec<Deferred<wgpu::ComputePipeline>>) {
-        self.pipelines.all()
+        self.pipelines.required(self.prepared.as_ref().map_or(BrushExecution::Clone,|p|p.execution))
     }
 
     pub fn prepared(&self) -> bool {

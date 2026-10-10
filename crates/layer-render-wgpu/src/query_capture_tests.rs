@@ -61,7 +61,7 @@ fn required(result:Result<(&mut WgpuRasterizer,FramePacket<'_>,PixelRect,submiss
 
 #[test]
 fn bounded_query_budget_splitting_preserves_each_pixel_once_across_windows_and_tile_edges() {
-    for batch in [1,4] {
+    for batch in [1,4,16] {
     let extent=[1033,517];let (gpu,mut capture,output)=query(extent,CaptureControl::default());
     let oracle=Oracle::new(&gpu.device);let reserved=oracle.counts.size()+16;
     capture.planned_pixel_bytes=0;

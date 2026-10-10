@@ -216,9 +216,9 @@ impl NativeTileEncoder {
     pub(crate) fn private_pipeline(&self, depth: SampleDepth, mode: layer_core::color::LayerColorMode) -> crate::Deferred<wgpu::ComputePipeline> {
         self.pipelines[self.pipeline_index(depth, mode, false, 1)].clone()
     }
-    pub(crate) fn pipelines_for_depth(&self, depth: SampleDepth) -> impl Iterator<Item = &crate::Deferred<wgpu::ComputePipeline>> {
+    pub(crate) fn pipelines_for_depth(&self, depth: SampleDepth, gray:bool) -> impl Iterator<Item = &crate::Deferred<wgpu::ComputePipeline>> {
         let start = depth.bytes().ilog2() as usize * 2 * self.tiles_per_dispatch;
-        self.pipelines[start..start + 2 * self.tiles_per_dispatch].iter().chain(self.pipelines[6 * self.tiles_per_dispatch..].iter())
+        self.pipelines[start..start + 2 * self.tiles_per_dispatch].iter().chain(self.pipelines[6 * self.tiles_per_dispatch..].iter().filter(move |_|gray))
     }
     #[cfg(test)]
     pub(crate) fn with_device(device: &PipelineDevice) -> Self {

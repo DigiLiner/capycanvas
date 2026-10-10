@@ -11,10 +11,12 @@ is 4248 × 2832.
 
 ## Operations
 
-Required-only shader startup and first-use tool preparation are unmeasured on
-this reference device. Earlier idle-catalog measurements describe their named
-builds, not the current startup policy. See [startup preparation](responsiveness.md#demand-driven-startup)
-for the Apple diagnostic and its limits.
+Native required-only shader startup and first-use tool preparation are unmeasured
+on this reference device. Web diagnostics are recorded under
+[shared shader preparation](#shared-shader-preparation). Earlier idle-catalog
+measurements describe their named builds. See
+[startup preparation](responsiveness.md#demand-driven-startup) for the Apple
+diagnostic and its limits.
 
 The BUILD32 G-Pen pair measures the M3 candidate captured on `192601dac`.
 BUILD28 and selected BUILD20 canvas diagnostics measure frozen `4a2cf6aa0`
@@ -75,7 +77,11 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 
 | Operation | Target | Measured | Source |
 | --- | --- | --- | --- |
-| Startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
+| Native startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
+| Web startup, fresh origins | [Latency limits](responsiveness.md) | Brush readiness median 26.806 → 22.211 s; complete 29.360 → 24.785 s. First canvas essentially unchanged | [Shared shader preparation](#shared-shader-preparation); default-canvas latency diagnostic |
+| Exact histogram, Web, 12 MP | [Latency limits](responsiveness.md) | First request 24.288 → 21.362 s; repeated median 14.717 → 12.103 s. Exact counts match | [Shared shader preparation](#shared-shader-preparation); latency only |
+| Levels Auto, Web, 12 MP | [Latency limits](responsiveness.md) | Median 13.229 → 10.861 s; all controls and resulting exact histograms match | [Shared shader preparation](#shared-shader-preparation); latency only |
+| G-Pen 220 px, Web shader diagnostic | 60 | **Unqualified; no measured gain.** CPU frame calls 21.79–27.24 → 21.97–26.10/s; GPU diagnostic p95 14.48–26.21 → 16.25–32.24 ms | [Shared shader preparation](#shared-shader-preparation); presentation unmeasured |
 | Tool cursor hover, with and without brush size | 60 | Unmeasured on the reference tablet | [Top-tier rendering measurements](top-tier.md#tool-cursors) do not qualify this tier |
 | G-Pen 1024 px, Android with idle brush preparation | 60 | **Meets these strokes.** Pending: 75.57–75.87 fresh updates/s, fresh completion-gap p99 22.64–24.01 ms; fully warm: 75.00–76.19/s, p99 22.50–24.20 ms | [Idle brush preparation](#idle-brush-preparation), Perceptual, 100 × 60 px radii |
 | G-Pen 1024 px, Web while brush warmup is paused | 60 | **Unqualified; CPU proxy below target.** After the in-flight compile: 17.58–22.30 frame calls/s, interval p99 84.6–148.1 ms; fully warm: 21.36–23.31/s. Presentation unmeasured | [Idle brush preparation](#idle-brush-preparation) |
@@ -264,6 +270,83 @@ Both use `dev-perf`; the candidate explicitly disables Cargo incremental builds,
 while the old build manifest does not record that override. Evidence resides in
 `artifacts/transform-root-cause/optimize/` with immutable builds, input witnesses,
 raw traces and per-case summaries.
+
+## Shared shader preparation
+
+Measured 2026-10-10 on TCL TAB 11 Gen 2, Chrome 154, hardware Mali-G52 WebGPU,
+optimized `dev-perf` builds. Baseline `c22937b89` is compared with the shader
+candidate on that base. Every accepted reload verifies the actual served Wasm
+hash with browser network caching disabled. Only owned origins and document
+state are used; driver shader caches are uncontrolled.
+
+The photo is 4248 × 2832 (12,030,336 pixels). Exact histogram requests keep the
+waveform hidden. Levels Auto waits for the accepted controls and a stable exact
+histogram. The guide comparison edits Shadows/Highlights or Dehaze through
+35%, 0%, 35%, waits for shared Properties to finish updating, then waits for
+pipeline readiness and the GPU queue. Exact histogram capture is timed
+separately. The camera and work area match between builds.
+
+| Work | Before | After | Scope |
+| --- | ---: | ---: | --- |
+| First canvas, fresh-origin startup | 7.717 s | 7.775 s | Median of three; essentially unchanged |
+| Document readiness, fresh-origin startup | 14.230 s | 14.069 s | Median of three; essentially unchanged |
+| Brush readiness, fresh-origin startup | 26.806 s | 22.211 s | Median of three; 17.1% less time |
+| Complete startup, fresh origins | 29.360 s | 24.785 s | Median of three; 15.6% less time |
+| First Gaussian insertion, 512² | 7.516 s | 5.586 s | Median of three fresh-origin pairs; 25.7% less time |
+| Repeated Gaussian insertion, 512² | 306.5 ms | 295.6 ms | Median of three; 3.6% less time, candidate range 295–520 ms |
+| Exact histogram, first request | 24.288 s | 21.362 s | One cold-worker request |
+| Exact histogram, repeated | 14.717 s | 12.103 s | Median of two further requests |
+| Levels Auto | 13.229 s | 10.861 s | Median of three; identical controls and histograms |
+| Shadows/Highlights edit | 664.4 ms | 670.2 ms | Median of three; no meaningful response improvement |
+| Exact histogram after Shadows/Highlights | 20.487 s | 13.249 s | Median of three; identical full counts and displayed artwork crops |
+| Dehaze edit | 676.5 ms | 689.5 ms | Median of three; no meaningful response improvement |
+| Exact histogram after Dehaze | 18.597 s | 13.211 s | Median of three; identical full counts and displayed artwork crops |
+| Gaussian Blur edit, 12 MP displayed output | 485.4 ms | 442.5 ms | Median of six; matching artwork crops and final histogram, background work remains pending |
+| Clone → Healing → Spot Healing readiness | 7.975 / 0.154 / 0.164 s | 7.240 / 0.823 / 0.670 s | One ordered sequence; baseline prepares healing during Clone |
+| Motion Blur edit, 1536² diagnostic | 433.9 ms | 427.1 ms | Median of six in-page edits; no material gain |
+| Unsharp Mask edit, 1536² diagnostic | 486.5 ms | 417.0 ms | Median of six in-page edits; 14.3% less time |
+| Bloom edit, 1536² diagnostic | 843.2 ms | 746.6 ms | Median of six in-page edits; 11.4% less time |
+
+Mode-specific retouch preparation reduces the first Clone wait by 9.2%, but
+defers compilation to the first Healing and Spot Healing selections. Total
+sequence time increases from 8.294 to 8.732 s in this observation. This does not
+establish a universal first-use improvement. The procedural field cache is
+excluded: matched small-canvas response gains do not justify its extra
+compilation and memory.
+
+The startup and first-use comparison alternates three pairs of fresh origins,
+with the default 2048 × 1536 drawing before inserting Gaussian on a 512² fixture.
+No recovery dialogs or resumed-document counter resets occur; the first startup
+marks define readiness. All six resulting histograms and artwork crops match.
+Historical sub-second first Gaussian observations use different cache/workflow
+state and are excluded from this first-use comparison. Fresh origins clear
+application state, while driver caches remain uncontrolled.
+
+The painting diagnostic uses three 6 s CDP pen replays on the same 12 MP photo,
+220 px G-Pen, zoom 0.195 and a 920.4 px work area, with Stats GPU timing enabled.
+CPU frame-call rates are 21.79 / 26.24 / 27.24 → 21.97 / 24.74 / 26.10 Hz.
+GPU timestamp p50 is 8.13 / 6.55 / 6.23 → 9.18 / 7.08 / 6.55 ms; p95 is
+26.21 / 14.48 / 14.68 → 32.24 / 18.09 / 16.25 ms. The camera and brush match,
+and the device reports thermal status zero. These observations show no sustained
+painting benefit and include diagnostic overhead.
+
+These are application latency and correctness diagnostics. No physical
+input-to-present or SurfaceFlinger presentation measurements qualify the tier's
+60 fps target. A strict whole-engine retirement endpoint can stall for 12 MP
+Gaussian edits on both builds; it includes background cache and Navigator work.
+Such observations are excluded from isolated filter latency results. The Gaussian
+row measures displayed output and queue completion while separately recording
+pending background work; it does not establish whole-engine retirement. Protocol-
+created Android browser targets that fail to evaluate plain JavaScript are also
+excluded; accepted runs use foreground native Chrome tabs.
+
+Baseline Wasm SHA-256:
+`21024c43265020ed114555e12c76055136c41bf887349a0e862de6c2ab47fafb`.
+Candidate Wasm SHA-256:
+`4e2290f6f9f183e318ff269cc93c66116297a4b06fb99a9ae7d53eedacee0bb8`.
+Raw samples, immutable builds, pixel comparisons and source hashes are under
+`artifacts/shader-optimization/`; `implementation-audit.tsv` records every shader
+and builtin filter conclusion.
 
 ## Idle brush preparation
 

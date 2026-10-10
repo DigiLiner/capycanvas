@@ -42,7 +42,7 @@ impl SnapshotGpu {
                 match i%4 {0=>(result.minimum[c]/scale) as f32,1=>(result.maximum[c]/scale) as f32,2=>scale as f32,_=>0.}
             });
             let mut folded=None;
-            snapshot.capture_query_gpu(output,false,if phase==0 {4} else {1},summary.size()+shards.size(),None,|r,view,region,encoder| {
+            snapshot.capture_query_gpu(output,false,16,summary.size()+shards.size(),None,|r,view,region,encoder| {
                 let words=[region.width(),region.height(),query.snapshot.view().composition().color.space as u32,0].into_iter().chain(ranges.map(f32::to_bits)).flat_map(u32::to_le_bytes).collect::<Vec<_>>();
                 let area=r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("Levels region"),contents:&words,usage:wgpu::BufferUsages::UNIFORM});
                 let bind=crate::bindings::group(&r.device,"Levels region",&pipeline.layout,[wgpu::BindingResource::TextureView(view),area.as_entire_binding(),summary.as_entire_binding(),shards.as_entire_binding()]);

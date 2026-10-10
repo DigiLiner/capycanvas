@@ -231,6 +231,7 @@ impl DabStyle {
 /// `points`, in document coordinates, while nothing is painting.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RetouchPreparation {
+    pub execution: BrushExecution,
     pub target: SourceTarget,
     pub retouch: layer_core::Retouch,
     pub points: Vec<Point>,

@@ -46,6 +46,17 @@ current dependencies and cache finalization, not the entire tool catalog.
 Retouch shader handles survive tool changes; unused source pixels and healing
 buffers are still released.
 
+Clone requires gathering and copying source pixels. Healing also prepares its
+membrane kernels; Spot Healing additionally prepares candidate scoring, judging
+and selection. Shared retouch preparation carries the selected execution so a
+tool change updates readiness even when its source and focus points stay fixed.
+Dry documents omit watercolor composition until a wet backing or selected
+watercolor brush requires it. Native publication omits gray color variants until
+the document contains a gray paint source. Presentation prepares backdrop blur
+only when backdrop regions are configured.
+Unresolved raster backings retain conservative watercolor preparation until their
+material state is available.
+
 Application controls such as Settings remain usable while required shaders and
 raster work prepare. Shared command classification keeps these controls outside
 the ordered drawing-edit queue; file commands still wait for preceding edits.
@@ -71,6 +82,8 @@ document snapshots such as Save wait, so a save never misses a stroke or drag
 already drawn. Other commands are not held back.
 `ShaderDocument` memoizes the dependency-relevant document state: ordinary
 raster/parameter edits do not invalidate readiness or trigger effect preparation.
+Changing effect blend mode or crossing between identity and transformed reference
+axes updates the shader dependencies; moving an identity reference does not.
 Effect-chain inspection now borrows layers; only compiler jobs clone their
 owned inputs.
 

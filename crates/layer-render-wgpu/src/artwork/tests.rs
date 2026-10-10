@@ -241,7 +241,7 @@ fn cold_object_thumbnails_and_retouch_reads_retry_until_exact_pixels_are_ready()
         let packet=crate::test_support::packet(doc.scene(),extent);
         let frame=Arc::new(Frame::new(packet,r.frame_context(packet)));r.artwork_frame=Some(frame.clone());
         if !thumbnail {
-            r.prepare_retouch_sources(Some(&RetouchPreparation {target:doc.scene().source_target(ink).unwrap(),
+            r.prepare_retouch_sources(Some(&RetouchPreparation {execution:layer_core::BrushExecution::Clone,target:doc.scene().source_target(ink).unwrap(),
                 retouch:layer_core::Retouch {source:layer_core::RetouchSource::References,references:Arc::new([owner].into()),..Default::default()},
                 points:vec![Point {x:32.,y:32.}]}));
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
