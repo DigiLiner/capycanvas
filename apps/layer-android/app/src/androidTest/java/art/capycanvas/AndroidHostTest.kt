@@ -3459,6 +3459,19 @@ class AndroidHostTest {
         for (theme in listOf("light", "dark")) {
             action(obj("type" to "set_theme", "theme" to theme))
             compose.onNodeWithTag("tab-sizes").performClick()
+            val glyphs = JSONArray()
+            for (size in listOf(999, 1000)) {
+                action(obj("type" to "set_brush_size", "value" to size))
+                waitState { diameter() == size.toDouble() }
+                val textNode = compose.onAllNodes(hasText("$size px") and hasAnyAncestor(hasTestTag("number-value-Brush size")), useUnmergedTree = true).onFirst()
+                val results = mutableListOf<TextLayoutResult>()
+                textNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+                val layout = results.single()
+                val bounds = textNode.fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
+                glyphs.put(obj("value" to size, "text_bounds" to bounds.toString(), "paragraph_right" to (bounds.left + layout.getLineRight(0)), "last_glyph_right" to (bounds.left + layout.getBoundingBox(layout.layoutInput.text.length - 1).right), "font_size_sp" to layout.layoutInput.style.fontSize.value))
+            }
+            File(File(compose.activity.getExternalFilesDir(null), "validation").apply { mkdirs() }, "number-glyphs-$theme.json").writeText(obj("density" to density, "font_scale" to compose.activity.resources.configuration.fontScale, "glyphs" to glyphs).toString())
+            assertEquals("Numeric suffix endpoint stays fixed across digit counts", glyphs.getJSONObject(0).getDouble("last_glyph_right"), glyphs.getJSONObject(1).getDouble("last_glyph_right"), .01)
             for (tool in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_FINGER, MotionEvent.TOOL_TYPE_STYLUS)) {
                 action(obj("type" to "set_brush_size", "value" to 42))
                 val send = numericContact(valueNode(), tool)

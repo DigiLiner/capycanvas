@@ -172,9 +172,9 @@ and 33.33 ms. Dropped reports remained zero and thermal status remained 0.
 
 ## GTK panel slider diagnostic
 
-Measured 2026-10-10 with bottom-aligned GTK values and shared whole-pixel value
-scrubbing above 1000 px, based on `80c3f8cfc` with the alignment and scrubbing
-changes, in a release build with Adwaita Sans 11 on NVIDIA RTX PRO 6000 Blackwell
+Measured 2026-10-10 at `778c02e48`, with bottom-aligned GTK values and shared
+whole-pixel value scrubbing above 1000 px, in a release build with Adwaita Sans
+11 on NVIDIA RTX PRO 6000 Blackwell
 Max-Q/Vulkan 615.71.09. The private Mutter display is 1600 × 1000 at a requested
 120 Hz, with a 2048 × 1536 empty drawing. `native_panel_slider_motion` uses
 native mouse input at requested 4 ms intervals, warms each field, and records
@@ -188,25 +188,25 @@ slider steps can leave some presentations unchanged at the sampled value.
 
 | Theme / handle / field | Moving presentations/s | Interval p99 |
 | --- | --- | --- |
-| Light / Slider / Size | 117.39–119.18 | 8.546–9.009 ms |
-| Light / Slider / Opacity | 115.22–115.55 | 16.723–16.805 ms |
-| Light / Slider / Flow | 114.89–115.72 | 16.684–16.800 ms |
-| Light / Value / Size (120 px) | 119.84–120.01 | 8.490–8.706 ms |
-| Light / Value / Size (1200 px) | 118.52–119.35 | 8.676–10.636 ms |
-| Light / Value / Opacity | 119.84–119.84 | 8.538–8.559 ms |
-| Light / Value / Flow | 120.00–120.01 | 8.621–8.634 ms |
-| Dark / Slider / Size | 117.87–119.51 | 8.612–10.531 ms |
-| Dark / Slider / Opacity | 113.94–114.74 | 16.731–16.800 ms |
-| Dark / Slider / Flow | 114.08–115.72 | 16.694–16.777 ms |
-| Dark / Value / Size (120 px) | 119.84–120.00 | 8.543–8.566 ms |
-| Dark / Value / Size (1200 px) | 119.02–119.34 | 8.550–8.818 ms |
-| Dark / Value / Opacity | 119.83–120.00 | 8.589–8.606 ms |
-| Dark / Value / Flow | 119.41–120.01 | 8.547–8.608 ms |
+| Light / Slider / Size | 118.53–118.85 | 9.368–16.656 ms |
+| Light / Slider / Opacity | 113.98–115.22 | 16.745–16.822 ms |
+| Light / Slider / Flow | 114.23–115.72 | 16.708–16.788 ms |
+| Light / Value / Size (120 px) | 119.84–120.00 | 8.561–8.596 ms |
+| Light / Value / Size (1200 px) | 119.34–119.67 | 8.532–8.605 ms |
+| Light / Value / Opacity | 120.00–120.01 | 8.559–8.580 ms |
+| Light / Value / Flow | 119.52–119.84 | 8.591–8.668 ms |
+| Dark / Slider / Size | 119.02–119.51 | 8.565–8.829 ms |
+| Dark / Slider / Opacity | 114.07–115.72 | 16.699–16.798 ms |
+| Dark / Slider / Flow | 114.40–115.06 | 16.702–16.795 ms |
+| Dark / Value / Size (120 px) | 119.84–120.01 | 8.524–8.555 ms |
+| Dark / Value / Size (1200 px) | 118.69–119.34 | 8.619–16.573 ms |
+| Dark / Value / Opacity | 119.67–119.84 | 8.613–8.664 ms |
+| Dark / Value / Flow | 119.84–119.84 | 8.587–8.812 ms |
 
 These are workstation diagnostics with a small drawing. They do not qualify
 any reference-tablet target.
 Raw records, the measured source diff and executable hash are in
-`artifacts/gtk-pixel-scrub/`.
+`artifacts/platform-number-controls/gtk/`.
 
 The Web port's four five-second Hue slider diagnostics, at 640 and 1100 pixels
 in both themes on the same GPU, recorded host callback CPU p95 of 0.9–1.0 ms
@@ -220,8 +220,8 @@ Windows hardware presentation were not measured.
 ## Web numeric panel diagnostic
 
 Measured 2026-10-10 on the same NVIDIA workstation with Chrome 154.0.8037.57,
-the optimized `dev-perf` Wasm build based on `87954fabf` with the numeric panel
-port, and actual Adwaita Sans glyph fonts. The private Mutter display is
+the optimized `dev-perf` Wasm build at `778c02e48`, and actual Adwaita Sans
+glyph fonts. The private Mutter display is
 1600 × 1000 at a requested 120 Hz; the drawing is 2048 × 1536.
 After a priming gesture, each theme runs three six-second native mouse scrubs
 from 1200 px through sixteen 240-pixel legs at requested 4 ms input intervals.
@@ -229,13 +229,13 @@ Only animation callbacks where the numeric value changed are counted.
 
 | Theme | Changed-value callbacks/s | Callback interval p99 |
 | --- | --- | --- |
-| Light | 118.94–119.71 | 8.5–9.2 ms |
-| Dark | 119.35–119.60 | 8.4–8.5 ms |
+| Light | 118.82–119.64 | 8.5–11.3 ms |
+| Dark | 119.10–119.52 | 8.4–8.5 ms |
 
 These are browser callback diagnostics, without compositor presentation
 feedback. They do not qualify a reference-tablet target. Raw callbacks, input
 geometry and actual font reports are in
-`artifacts/platform-number-controls/web/numeric-final/`.
+`artifacts/platform-number-controls/web/final-rebase/numeric/`.
 Android numeric input and geometry pass on the MovinkPad 11, but sustained
 numeric presentation is unmeasured. Apple numeric UI builds and hardware
 presentation are unavailable on this Linux host; Windows VM checks use WARP
