@@ -75,13 +75,14 @@ equal pixel size, and compares every pixel. It writes the raw difference, an
 amplified heatmap, a 50% overlay and JSON statistics, and exits with status 1 on
 failure. It never rescales, crops or masks.
 
-- **Acceptance is exact equality.** Tolerance options only make exploratory
-  reports reproducible. Geometry bounds and flat-fill checks never waive the
-  full-image comparison, and a failing exact comparison is never reported as
-  parity.
-- **Apple visual acceptance is perceptual.** At normal viewing size,
-  imperceptible differences are acceptable. Fix visible mismatches and simple
-  refinements; do not add complexity only to reduce pixel error.
+- **UI acceptance is perceptual.** Review matched pairs at normal viewing size.
+  Fix visible workspace/canvas mismatches; record intentional native styling in
+  menus, dialogs and settings. Imperceptible raster differences are acceptable;
+  do not add complexity merely to reduce pixel error.
+- **Comparator results stay exact.** Preserve raw images and failures; never
+  loosen tolerances to obtain a pass or report perceptual acceptance as exact
+  equality. Geometry alone does not establish visual equivalence. Keep exact
+  artwork, Undo/Redo and specified-color assertions; tolerance options are exploratory.
 - **Rotation only for a known raster orientation.** `simctl io screenshot` can
   keep a portrait raster for a landscape editor without an orientation tag; pass
   `--candidate-rotation 90`, `180` or `270` for that case only, never to hide a
@@ -130,8 +131,8 @@ failure. It never rescales, crops or masks.
   current semantic blend button. Workspace buttons use their shared workspace
   IDs, with the options button identified separately. Tool Set position, size
   and edges retain the one-physical-pixel rounding bound. Preserve prior
-  references and exact comparison failures: these geometry checks never waive
-  the full-image comparison or qualify a pixel failure as parity.
+  references and exact comparison failures. Review full-image pairs under
+  [visual acceptance](#comparing-images); geometry does not establish pixel equality.
 
 Use direct editor actions and canvas-output checks for behavior; reserve UI
 automation for targeted input and lifecycle regressions.

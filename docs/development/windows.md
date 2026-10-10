@@ -790,10 +790,10 @@ Layers uses the current semantic blend button. Each host still measures its
 own controls; these records do not alter the raw images or comparison limits.
 
 Compare every image pair and look at the screenshots as well as the geometry
-reports: matching geometry does not mean matching pixels. Never rescale, crop or
-mask captures, and never loosen comparison tolerances to make a comparison pass.
-Preserve exact comparison failures; matching geometry or an inherited host
-difference does not turn a pixel failure into a parity pass.
+reports. Use [visual acceptance](../../tools/visual/README.md#comparing-images): fix
+visible differences and record intentional native styling. Preserve raw captures
+and exact comparison failures; never rescale, crop, mask or loosen tolerances to
+make a comparator pass. Perceptual acceptance does not mean exact pixel equality.
 
 ## Diagnose a running app
 

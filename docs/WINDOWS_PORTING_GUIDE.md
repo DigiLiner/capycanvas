@@ -1,87 +1,110 @@
 # Windows porting guide
 
-[Documentation](README.md) · [Windows development](development/windows.md)
+[Technical documentation](README.md) · [Windows development](development/windows.md)
 
-How to bring the Windows app (`apps/layer-windows`) up to date with work that
-landed first on GTK, Web and Android. The goal is parity with those hosts and no
-performance regression.
+Bring Windows through a recorded `origin/main` revision with missing behavior
+ported, encountered parity gaps fixed and obsolete rollout code removed.
+Follow [AGENTS.md](../AGENTS.md) and the [commit guide](COMMIT_GUIDE.md).
 
-## 1. Audit
+## 1. Inspect the commits
 
-1. Fetch `origin/main` and find the port watermark: the upstream commit named in
-   the newest Windows port commit message (see [committing](#4-validate-and-commit)).
-   `git log -i --grep='Ported origin/main through' --grep='Windows port through'`
-   lists them; older ports used the second form.
-   Confirm that the commits just before the watermark were really ported or are
-   specific to another host.
-2. Review every commit on `origin/main` after the watermark, including merge and
-   integration commits: their conflict resolutions can change behavior or shared
-   interfaces.
-3. For each user-visible change, record:
-   - the behavior, device rules (mouse, touch, pen) and layout sizes;
-   - the source commits and the GTK, Web and Android code to mirror;
-   - the shared Rust API the hosts consume;
-   - the Windows status (missing, partial, handled by shared code, or not
-     applicable), with evidence from the Windows source;
-   - the Windows files and bridge functions to change, performance risks and
-     tests to add.
-4. Audit the shared interfaces as well as the features. WinUI code reads snapshot
-   JSON by field name and sends action names as strings, so a renamed or removed
-   shared field fails silently instead of breaking the build. Compare every field
-   and action Windows uses with the serialized shared types, and list new panels,
-   controls, inputs, host requests and settings that Windows does not consume yet.
-5. Include older gaps: the [known drag gaps](ui/drag-and-reorder.md#known-gaps) and features
-   present on GTK, Web or Android but missing on Windows.
-6. Keep the inventory in ignored `artifacts/windows/`. It is a working report, not
-   documentation.
+1. Fetch `origin/main` and find the latest Windows completion watermark with
+   `git log origin/main --grep='^Ported Windows origin/main through '`. If none
+   exists, inspect earlier Windows port messages for their upstream revision.
+   Verify that coverage in the code and carry forward unfinished gaps.
+2. Record the fetched target SHA. Inspect every commit after the watermark,
+   including infrastructure, merge and integration changes. Read the diffs and
+   conflict resolutions, trace shared Rust through the reference hosts into
+   Windows, and record each commit's disposition.
+3. Audit snapshots, actions, queries, host requests and platform gates. Windows
+   reads JSON fields and sends action names as strings: removed or renamed
+   contracts can fail silently. Check changed interfaces against their native
+   consumers and list missing controls, inputs and settings. Check affected
+   workspace defaults on every platform.
+4. Use current shared behavior as the semantic authority and Web as the visual
+   reference; GTK and Android help explain integration. Resolve disagreements
+   from code and tests. Link superseded commits to the final behavior to port.
 
-## 2. Record a baseline
+## 2. Keep a working ledger
 
-Before changing Windows code, build current `main` in Release and keep a copy of
-the executable under `artifacts/windows/`. Record the unit test results, strict
-Windows Clippy, and the Windows brush and pen latency workloads from
-[measuring](performance/measuring.md). Upstream changes can shift these numbers
-before any Windows work starts; the baseline separates those shifts from
-regressions caused by the port. A regression against it blocks the port.
+Keep one Markdown ledger in ignored `artifacts/windows/`. At its top, record the
+completion watermark, fetched target, audited-through SHA, current milestone and
+next action. Keep implementation and validation status separate:
 
-## 3. Port
+| Record | Required information |
+| --- | --- |
+| Source commit | SHA, behavior or contract change, disposition, source evidence and linked gap IDs. |
+| Gap | ID, source commits, expected behavior, missing behavior, shared/native owner, cleanup, required checks, fix commit and open/in-progress/closed status. |
+| Check | Gap IDs, command or manual journey, target/theme/input, tested revision/build, pass/fail/blocked/unverified result and evidence path. |
 
-- Follow [AGENTS.md](../AGENTS.md), including the
-  [drag and reorder convention](ui/drag-and-reorder.md).
-- Keep business rules, validation, state transitions and history in shared Rust.
-  Windows code presents shared state and forwards native input; native timing and
-  input capture stay in the host. Do not copy logic that another host already
-  consumes from a shared crate.
-- **Workspace and canvas** match the Web and GTK behavior and visuals: layout,
-  docking, hit targets, gestures, canvas overlays, cursors and corner shapes.
-  Check against the Web app with [matched editor captures](development/windows.md#matched-editor-captures).
-  The bar is visual equivalence at normal viewing size. Do not add rendering
-  dependencies, font workarounds or browser-specific pixel corrections only to
-  satisfy a pixel comparator.
-- **Menus, dialogs and settings** may use native WinUI styling, provided their
-  layout, sizing and behavior match the other hosts.
-- **Upstream keeps moving.** Re-fetch `origin/main` at least at every milestone
-  and before every push, add new commits to the inventory, and port them before
-  calling the work finished.
+Use dispositions such as needs work, already covered, superseded or not
+applicable. Each needs evidence; not applicable needs a platform reason.
+For already covered changes, verify that Windows exposes and consumes the
+behavior. Planned checks and unavailable hardware are not passing evidence.
 
-## 4. Validate and commit
+Update the ledger after inspection, implementation and validation, and before
+switching milestones. Read it after resuming or context compaction. Record and
+resolve additional parity gaps and visual glitches encountered along the way,
+including older gaps; a port does not require an unrestricted historical audit.
 
-- Build with `apps/layer-windows/scripts/build.ps1`, then run the shared and
-  Windows unit tests, strict Windows Clippy and the `exercise-*.ps1` fixtures for
-  the affected areas ([testing](development/windows.md#test)).
-- Guard performance: no new UI-thread work, blocking calls or per-frame
-  allocations in pointer, brush or presentation paths. Repeat the baseline
-  measurements on the ported build, isolated from compiles and other GPU work,
-  and compare them with the [performance targets](PERFORMANCE_TARGETS.md).
-- Commit on top of `origin/main` following [the commit guide](COMMIT_GUIDE.md).
-  Rebase onto new upstream commits, rebuild and rerun the affected checks before
-  each push, and push to `origin/main` after each significant milestone: a
-  complete feature area that builds and passes its checks.
-- Name the watermark in the milestone's commit message with a body line
-  `Ported origin/main through <sha>`, as Apple ports do, so the next audit starts
-  there.
-- Update the Windows guides the change affects. Results go in commit messages and
-  performance numbers in the tier tables; logs, captures and profiles stay in
-  `artifacts/windows/`.
-- Finish only when every inventory item is ported or recorded as not applicable
-  with a reason, and there is no performance regression.
+## 3. Implement and clean up
+
+- Keep business rules, validation, state, history, UI text and semantic layout
+  in shared Rust. C++ and WinUI handle native presentation, widget allocation,
+  focus, accessibility, input capture, timing, surfaces, lifecycle and OS services.
+- Fix the class of shared defect in the appropriate Rust crate with a headless
+  regression test that fails without the fix. Reuse existing helpers and
+  harnesses; consolidate duplicated host policy.
+- Delete superseded implementations, obsolete actions and snapshot handling,
+  temporary rollout paths, unused helpers and stale tests in the same milestone.
+  Remove unnecessary compatibility code; add no old-format readers unless asked.
+  Preserve the replaced tests' useful assertions. Review the final diff for
+  duplicate logic and dead code; explain growth in refactors.
+- Enable platform gates with their native presentation and shared platform tests.
+  Do not hide a feature to claim parity. Follow the
+  [drag convention](ui/drag-and-reorder.md) for mouse, touch and pen, including
+  [known gaps](ui/drag-and-reorder.md#known-gaps) encountered in affected paths.
+
+## 4. Validate the gaps
+
+- Choose required checks by [change type](development/testing.md#checks-by-change-type)
+  and record them against each gap. Build with `apps/layer-windows/scripts/build.ps1`;
+  run affected shared and Windows tests, strict Windows Clippy,
+  `apps/layer-windows/scripts/test-without-gpu.ps1` and targeted `exercise-*.ps1`
+  fixtures. Walk affected native journeys in light and dark themes with relevant inputs. See
+  [Windows tests](development/windows.md#test) for commands and fixture rules.
+- Compare with Web using [matched captures](development/windows.md#matched-editor-captures)
+  and [visual acceptance](../tools/visual/README.md#comparing-images). Fix visible
+  workspace and canvas differences. Menus, dialogs and settings may use native
+  styling while preserving shared layout, sizing and behavior. Keep exact artwork,
+  Undo/Redo and specified-color assertions.
+- For changes affecting frames or latency, keep a comparable Release baseline
+  build and measure affected paths before and after the port using
+  [measurement rules](performance/measuring.md). Preserve build, revision and
+  hardware provenance; separate upstream shifts from local regressions. Keep
+  expensive work and blocking calls off UI and input threads, and review hot
+  paths for allocations and copies. Record results in the affected tier tables.
+- Fix reproducible port-caused regressions. Qualify [targets](PERFORMANCE_TARGETS.md)
+  only with current reference-hardware measurements, not a no-regression comparison.
+  [VMs](development/devices.md#windows) check builds and fixtures, not hardware
+  performance or physical pen behavior. Record unavailable checks explicitly.
+- Reuse passing evidence while its code and build remain applicable. Rerun
+  invalidated checks after changes or rebasing. Investigate failures with evidence
+  and a specific hypothesis before retrying; reuse existing automation.
+
+## 5. Close and commit
+
+Keep working until every source commit is accounted for and every in-scope gap
+has its implementation, cleanup and required checks complete.
+Required failed or blocked checks keep the gap open: record the cause and next
+action, and report unfinished verification. Documented unavailable hardware
+checks need not block an otherwise passing implementation milestone, but remain
+unverified and cannot support a claim of fully verified parity.
+
+Commit complete feature milestones. Fetch and rebase before pushing, inspect
+new upstream commits, update the target and ledger, and rerun affected checks.
+Finish against the final fetched target SHA; later commits belong to the next
+batch. Advance the watermark only through a contiguous range with all required
+work closed, using `Ported Windows origin/main through <sha>` in the commit body.
+An audit or partial milestone does not advance it. Follow the commit guide for
+tests and evidence, update affected guides, and keep working reports local.

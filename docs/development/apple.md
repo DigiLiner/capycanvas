@@ -6,8 +6,8 @@ The Apple clients use AppKit on macOS and UIKit on iPadOS. They share Swift
 editor components and the `layer-apple` Rust bridge built around `NativeHost`.
 Metal renders the canvas through a `CAMetalLayer` behind native controls. The
 [package README](../../apps/layer-apple/README.md) describes the source layout,
-and the [Apple porting guide](../APPLE_PORTING_GUIDE.md) holds the porting rules
-and XCTest pitfalls. Features usually land on GTK, Web and Android first.
+and the [Apple porting guide](../APPLE_PORTING_GUIDE.md) defines the audit,
+cleanup and validation workflow. Features usually land on GTK, Web and Android first.
 
 Artwork tasks retain shared authored roots and captured effect phases. Native
 saves write source-only packages through coordinated atomic replacement. A
@@ -177,6 +177,40 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   --env CAPY_INITIAL_ACTIONS='[{"type":"customize","action":{"type":"set_panel_visible","panel":"tool_settings","visible":true}}]' \
   apps/layer-apple/DerivedData/Build/Products/Debug/CapyCanvas-Mac.app
 ```
+
+## Editor integration
+
+- **Shared gates and defaults.** Check `CommandId::available_on`,
+  `HeaderItem::available_on`, `Platform` capabilities and `layout_presets.rs`.
+  Enable Apple gates with the presentation and shared platform tests. Compare
+  `WorkspacePreset::layout(platform)` before and after for every preset/platform.
+- **Menus.** Use `EditorActionMenu` and `editorPopover`, with one
+  `EditorPopoverHost` at the editor or sheet root outside clipped panels. Adapt
+  existing presenters for reproduced native integration needs. Avoid speculative
+  gesture overrides, menu/drag handoffs or per-menu presenters. Keep menus fast,
+  theme colors readable and opaque, and animation minimal, without
+  glass shine. Preserve native keyboard and accessibility conventions.
+- **OS presentation.** macOS top-level menus use the OS menu bar; the header keeps
+  its title, Zen and other controls over the live canvas. Zen clears native window
+  controls. iPad menus use the same command catalog in-app; native iPadOS window
+  controls provide full screen, so the shared Fullscreen command is unavailable.
+- **Independent publications.** Handle small `layer-host` packets such as
+  `{command_search, revision}` in `EditorSnapshotState.receive` without promoting
+  the content revision or refreshing retained panels and thumbnails.
+- **Visibility queries.** Attach queries such as `canvas_bar_layout` to an always
+  present container; `.task` and `.onAppear` do not run on an empty SwiftUI `Group`.
+- **Layer relationships.** Draw shared endpoints over measured row and content
+  thumbnail frames, clipped to the scroll viewport, using current `relationship`
+  and `text` palette roles. Forward supplied attachment/swipe actions and preserve
+  local visibility under inherited hiding. Preview and release query `layer_drop`
+  with epoch, raw target, fraction and hit surface; reject cancelled or stale
+  document replies, and commit the raw release hit through shared `Drop`.
+  Object layers use ordinary rows and shared actions; see [image objects](../ui/image-objects.md).
+- **Settings pages.** macOS sheets have no title bar. Put sub-page titles and Back
+  buttons in the content; navigation titles and `.navigation` toolbar items are hidden.
+- **UIKit fields.** iPadOS consumes Escape before SwiftUI handlers. Use UIKit text
+  fields with priority key commands, explicit height, and fonts/placeholders assigned
+  only when changed, to avoid repeated size invalidation.
 
 ## Tests
 
@@ -366,6 +400,10 @@ and `iOS/` sources; they have no runner script.
 
 ### UI tests
 
+Shared journeys are `check…` functions in `Shared/Tests`, called by `test…`
+methods in `Shared/Tests/EditorLaunchTests.swift`, compiled by both UI targets.
+Platform-only journeys extend that class in `iOS/Tests` or `macOS/Tests`.
+
 XCTest journeys run through `xcodebuild test` with `-only-testing`. Use a fresh
 result-bundle path for each run and inspect the `.xcresult` for failures and
 attachments:
@@ -406,6 +444,28 @@ thumbnails. Keep the hit target independent of its smaller glyph. Mask-transform
 journeys use the inline link control and check independent and linked transforms,
 cancellation and exact Undo/Redo pixels in both themes.
 
+- **Menu routing.** Test the app's menu bindings with native fixtures or manual
+  journeys. For editor-effect automation, use `CAPY_INITIAL_ACTIONS` or in-app
+  controls rather than coordinate-testing the Mac system menu bar.
+- **Pencil.** XCTest cannot synthesize Pencil. Finger drags navigate unless the
+  session claims them for transform handles/boxes or Warp nodes. Create artwork
+  and selections through menus; drawing acceptance still needs physical Pencil.
+- **Text entry.** XCTest Escape does not reach iPad apps; use visible controls.
+  Scroll fields above the software keyboard, replace text without relying on
+  triple-tap selection, and tap a picker's button rather than its static label.
+- **Accessible geometry.** iOS container frames are the union of their children;
+  do not reuse macOS width expectations. Open editor menus hide their buttons
+  from queries: close using the recorded button frame and reveal scrolled rows.
+- **Stable targets.** Place strokes relative to `editorPaper(in:)`, select by
+  label rather than index, reveal controls, and wait for published state. Check
+  changed shared rules before repairing a failed journey; keep its intended assertions.
+- **Window state.** macOS retains window sizes even with `-ApplePersistenceIgnoreState`.
+  Use full screen for a wider work area; restore resizing or full screen in
+  teardown so later journeys start consistently.
+- **Exact history.** Compare Undo/Redo pixels exactly after the stroke settles;
+  the renderer redraws rounded pages at pen-up. Do not add display tolerances.
+- **Retries.** Gather evidence and a specific hypothesis before repeating an
+  inconclusive run. Prefer existing Swift fixtures and Rust tests to new automation.
 - `editorTestApplication()` gives each journey's application a new
   `CAPY_STORAGE_DIR` name, kept across its relaunches, so journeys never touch
   the installation's data. Do not create an `XCUIApplication` for the editor

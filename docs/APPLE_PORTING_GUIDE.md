@@ -1,213 +1,110 @@
 # Apple porting guide
 
-[Technical documentation](README.md)
+[Technical documentation](README.md) · [Apple development](development/apple.md)
 
-How to bring the macOS (AppKit) and iPadOS (UIKit) clients up to date with
-features that land first on GTK, Web and Android. Both targets share the Swift
-editor in `apps/layer-apple/Shared` and the Rust bridge in
-`apps/layer-apple/native`, so every port applies to both. Build and test
-commands are in [macOS and iPadOS development](development/apple.md).
+Bring macOS and iPadOS through a recorded `origin/main` revision with missing
+behavior ported, encountered parity gaps fixed and obsolete rollout code removed.
+Both targets share `apps/layer-apple/Shared` and `native/`; verify each separately.
+Follow [AGENTS.md](../AGENTS.md) and the [commit guide](COMMIT_GUIDE.md).
 
-## Standing rules
+## 1. Inspect the commits
 
-- **Both platforms at every milestone.** Build, test and review macOS and iPadOS
-  together. A result on one target never stands in for the other.
-- **Shared behavior stays in shared Rust.** Business rules, validation, state
-  transitions, layout and history live in the shared crates. Swift presents
-  shared state; the AppKit and UIKit adapters handle input, windowing, lifecycle
-  and system services. `native/` holds only Apple integration, never a second
-  engine or a home for general settings or layout rules.
-- **Fix shared defects in shared Rust with a headless test.** Apple's defaults
-  (2048 × 1536 drawings, Metal, Retina surfaces) can expose shared bugs that the
-  reference hosts' journeys miss. Reproduce them in a `layer-host` or
-  `layer-render-wgpu` test and fix them there, not with a Swift workaround.
-- **Keep native code simple.** Use established SwiftUI, UIKit and AppKit
-  patterns. Editor menus use `EditorActionMenu` and `editorPopover`, with one
-  `EditorPopoverHost` at the editor or sheet root outside clipped panels. Do not
-  add gesture overrides, UIKit menu or drag-session handoffs, per-menu
-  presenters, test-only product behavior or speculative input and rendering
-  workarounds. Replace superseded Apple code in the same change.
-- **Parity is perceptual.** Fix every perceptible difference from Web and
-  Android. Imperceptible rasterization differences do not justify extra code.
-  Never hide or remove a feature to claim parity.
-- **Ergonomics.** Fast menus, readable opaque theme colors, minimal animation
-  and no glass shine. Keep native control, keyboard and accessibility
-  conventions.
+1. Fetch `origin/main` and find the latest Apple completion watermark with
+   `git log origin/main --grep='^Ported Apple origin/main through '`. If none
+   exists, inspect earlier Apple port messages for their upstream revision.
+   Verify that coverage in the code and carry forward unfinished gaps.
+2. Record the fetched target SHA. Inspect every commit after the watermark,
+   including infrastructure, merge and integration changes. Read the diffs and
+   conflict resolutions, trace shared Rust through the reference hosts into both
+   Apple clients, and record each commit's disposition.
+3. Check shared snapshots, actions, queries, host requests and platform gates for
+   changed contracts and missing consumers. Shared code alone does not establish
+   native coverage. Check affected workspace defaults on every platform.
+4. Use current shared behavior as the semantic authority and Web as the visual
+   reference; GTK and Android help explain integration. Resolve disagreements
+   from code and tests. Link superseded commits to the final behavior to port.
 
-## Parity targets
+## 2. Keep a working ledger
 
-- **Workspace and canvas behavior** (toolbars, panels, docking, drawers, canvas
-  overlays, selection and mask presentation, loupe and previews, corner shapes,
-  gestures) must match the reference hosts in layout, sizing and behavior.
-  Compare against the Web app using [the visual tools](../tools/visual/README.md)
-  with matching state, viewport, scale and color space.
-- **Menus, dialogs and settings** may use native AppKit, UIKit or SwiftUI
-  styling, provided their layout, sizing and behavior match the shared design.
-- Input follows the [drag and reorder convention](ui/drag-and-reorder.md) and
-  distinguishes mouse, touch and Pencil on each platform.
-- **Intentional platform differences.** macOS top-level menus live in the OS
-  menu bar; the editor header keeps its title, Zen and other controls over the
-  live canvas, and Zen clears the native window controls. The iPad keeps in-app
-  menus built from the same catalog. iPad full screen uses the native iPadOS
-  window control, so the shared Fullscreen command stays unavailable there.
+Keep one Markdown ledger in ignored `artifacts/apple/`. At its top, record the
+completion watermark, fetched target, audited-through SHA, current milestone and
+next action. Keep implementation and validation status separate:
 
-## Scope of a port
+| Record | Required information |
+| --- | --- |
+| Source commit | SHA, behavior or contract change, disposition, source evidence and linked gap IDs. |
+| Gap | ID, source commits, expected behavior, missing behavior, shared/native owner, cleanup, required checks, fix commit and open/in-progress/closed status. |
+| Check | Gap IDs, command or manual journey, target/theme/input, tested revision/build, pass/fail/blocked/unverified result and evidence path. |
 
-1. **Audit** every commit on `origin/main` since the last recorded port (see
-   [Branches and commits](#branches-and-commits)). Group the commits into
-   user-facing features and shared infrastructure, trace each feature through
-   shared Rust and the reference hosts, and record what Apple is missing. Keep
-   that inventory in ignored `artifacts/`; it is a working document.
-2. **Port** every inventoried feature to both macOS and iPadOS until behavior
-   matches GTK, Web and Android.
-3. **Keep up with main.** Fetch `origin/main` regularly while porting, and audit
-   and port newly landed commits as part of the same effort, so the Apple
-   clients reach parity with the current main rather than the audit's start.
-4. **Do not regress performance.** Hold the
-   [performance targets](PERFORMANCE_TARGETS.md) and measure affected brush,
-   frame and UI paths as described in
-   [Apple performance](../apps/layer-apple/PERFORMANCE.md).
+Use dispositions such as needs work, already covered, superseded or not
+applicable. Each needs evidence; not applicable needs a platform reason.
+For already covered changes, verify that both hosts expose and consume the
+behavior. Planned checks and unavailable hardware are not passing evidence.
 
-## How to port
+Update the ledger after inspection, implementation and validation, and before
+switching milestones. Read it after resuming or context compaction. Record and
+resolve additional parity gaps and visual glitches encountered along the way,
+including older gaps; a port does not require an unrestricted historical audit.
 
-- Follow the [commit guide](COMMIT_GUIDE.md). Prefer the most recent reference
-  port (usually Android and Web) to see which host glue a feature needs, and
-  reuse the same shared APIs.
-- Validate on both targets: Rust bridge tests, the Swift fixtures under
-  `apps/layer-apple/tests`, targeted XCTest journeys on macOS and a physical
-  iPad, and hardware timing where performance may change.
-- Keep raw logs, screenshots and the audit inventory in ignored `artifacts/`.
+## 3. Implement and clean up
 
-## Checklist
+- Keep business rules, validation, state, history, UI text and semantic layout
+  in shared Rust. Swift handles native presentation, widget allocation, focus,
+  accessibility, input capture, timing, surfaces, lifecycle and OS services.
+- Fix the class of shared defect in the appropriate Rust crate with a headless
+  regression test that fails without the fix. Reuse existing helpers and
+  harnesses; consolidate duplicated host policy.
+- Delete superseded implementations, obsolete actions and snapshot handling,
+  temporary rollout paths, unused helpers and stale tests in the same milestone.
+  Remove unnecessary compatibility code; add no old-format readers unless asked.
+  Preserve the replaced tests' useful assertions. Review the final diff for
+  duplicate logic and dead code; explain growth in refactors.
+- Enable `Platform::Mac` and `Platform::Ios` gates with their native presentation
+  and shared platform tests. Do not hide a feature to claim parity. Follow the
+  [drag convention](ui/drag-and-reorder.md) for mouse, touch and Pencil.
+- When changing menus, settings, publications or layers, read the
+  [Apple integration rules](development/apple.md#editor-integration). Preserve
+  intentional OS differences and native keyboard and accessibility conventions.
 
-- **Shared gates.** Features are often enabled per platform in shared Rust, for
-  example `CommandId::available_on`, `HeaderItem::available_on`, the capability
-  methods on `Platform` in `crates/layer-ui/src/settings.rs` and the platform
-  checks in `layout_presets.rs`. Enable `Platform::Mac` or `Platform::Ios` only
-  together with the Swift presentation, and extend the shared tests that loop
-  over `Platform::ALL`.
-- **Included workspace defaults.** Enabling a gate can change the Apple Sketch,
-  Paint or Photo defaults. Before changing shared code, serialize
-  `WorkspacePreset::layout(platform)` for every preset and platform, then make
-  sure other platforms' defaults are unchanged.
-- **Separate publications.** `layer-host` can publish small packets beside the
-  full state and geometry updates (for example `{command_search, revision}`).
-  Handle each in `EditorSnapshotState.receive` without promoting the content
-  revision, so retained panels and thumbnails do not refresh.
-- **Navigation.** Present the published navigation cursor and shared tool
-  double-activation action. Native timing and gesture phases stay in the host;
-  view recall, command availability and customized shortcuts stay in Rust.
-  Complete drawing-cycle requests before switching so they cannot replay when
-  a parked drawing is restored. Group overlapping native recognizers around
-  the first accepted event, including a beginning blocked by a pen contact.
-- **Queries that decide visibility.** SwiftUI never runs `.task` or `.onAppear`
-  on an empty `Group`. Attach a query that decides whether content appears (such
-  as `canvas_bar_layout`) to a container that is always present.
-- **Layer relationships.** Present shared connection endpoints over measured
-  row and content-thumbnail frames, clipped to the native scroll viewport.
-  Read current `relationship` and `text` palette roles for rails and FX links.
-  Forward the supplied attachment and right-swipe actions; preserve local
-  visibility when displaying inherited hiding. Preview and release both query
-  `layer_drop` with epoch, raw target, fraction and hit surface. Guard replies
-  against cancellation and document changes, and commit the raw release hit
-  through shared `Drop` rather than reconstructing policy from the preview.
-- **Object layers.** Each imported image is an ordinary layer row. Use the
-  shared layer actions, context menu and thumbnail target for selection,
-  visibility, masks and reordering. There are no child image rows or separate
-  object actions. The `object` flag identifies preserved source content.
-- **Settings sub-pages.** macOS sheets have no title bar, so navigation titles
-  and `.navigation` toolbar items inside Settings never appear. Put a sub-page's
-  title and Back button in its content, as the shortcut page does.
-- **UIKit fields in SwiftUI.** iPadOS consumes Escape before SwiftUI key
-  handlers; use the UIKit text field with priority key commands. Give it an
-  explicit height and assign fonts and placeholders only when they change, or
-  size invalidation can loop.
-- **Coverage audit.** Keep the expected unavailable commands and native handler
-  references in `apps/layer-apple/command-coverage.json` current. Run the audit in the
-  [Apple guide](development/apple.md#command-coverage-audit).
+## 4. Validate the gaps
 
-## Writing XCTest journeys
+- Choose required checks by [change type](development/testing.md#checks-by-change-type)
+  and record them against each gap. Run affected shared and Rust bridge tests,
+  Swift fixtures, command coverage and targeted XCTest journeys. Build both
+  targets; walk affected native journeys in light and dark themes with relevant
+  inputs. See [Apple tests](development/apple.md#tests) for commands and limitations.
+- Check macOS and iPadOS independently. Mounted fixtures, full-app journeys and
+  physical input prove different things; simulator or injected input does not
+  establish physical Pencil behavior. Record unavailable checks using the
+  [device guide](development/devices.md#apple), without claiming they passed.
+- Review matched Web captures using [visual acceptance](../tools/visual/README.md#comparing-images).
+  Fix visible workspace and canvas differences. Menus, dialogs and settings may
+  use native styling while preserving shared layout, sizing and behavior. Keep
+  exact artwork, Undo/Redo and specified-color assertions.
+- For changes affecting frames or latency, capture a comparable optimized
+  baseline before editing and measure the affected paths after the port using
+  [Apple performance](../apps/layer-apple/PERFORMANCE.md) and the
+  [measurement rules](performance/measuring.md). Separate upstream shifts from
+  local regressions; record results and limits in the affected tier tables.
+  Fix reproducible port-caused regressions. Qualify [targets](PERFORMANCE_TARGETS.md)
+  only with current reference-hardware measurements, not a no-regression comparison.
+- Reuse passing evidence while its code and build remain applicable. Rerun
+  invalidated checks after changes or rebasing. Investigate failures with evidence
+  and a specific hypothesis before retrying; reuse existing automation.
 
-Shared journeys are `check…` functions under `apps/layer-apple/Shared/Tests`,
-called from a `test…` method in `Shared/Tests/EditorLaunchTests.swift`, which
-both UI test targets compile. Platform-only journeys extend `EditorLaunchTests`
-in `iOS/Tests` or `macOS/Tests`.
+## 5. Close and commit
 
-- **Test editor effects, not system menus.** Never coordinate-test the Mac
-  system menu bar; macOS menu mechanics are trusted platform behavior. Use
-  `CAPY_INITIAL_ACTIONS`, in-app controls or the editor's own menus, and check
-  the resulting state, pixels and history.
-- **XCTest cannot synthesize Pencil.** Finger drags on the iPad canvas navigate
-  unless the session claims the finger (a transform handle, inside a transform
-  box, a Warp node); only Pencil draws. Create selections and artwork through
-  menus in iPad journeys. Simulator and injected input never replace a physical
-  Pencil check.
-- **Escape never reaches an iPad app from XCTest.** Assert Escape on macOS and
-  use visible controls on iPad.
-- **The software keyboard covers the lower part of the window.** Keep taps above
-  it, scroll fields into view before typing, and replace text without assuming a
-  triple tap selects it. Tap a picker's native button, not its static label.
-- **Frames differ between platforms.** iOS reports a SwiftUI accessibility
-  container's frame as the union of its children, so do not compare iPad widths
-  against values measured on macOS.
-- **Do not depend on window positions or labels that shared changes move.** Place
-  canvas strokes and samples relative to `editorPaper(in:)`, select items by
-  label rather than index, reveal scrolled controls before activating them, and
-  wait for published state instead of reading it right after a click. When a
-  journey fails, first check whether the reference hosts changed the rule; fix
-  Apple only when it disagrees with them.
-- **Mac window size carries between journeys.** macOS saves window frames per
-  build, even with `-ApplePersistenceIgnoreState`, so a zoomed or resized window
-  carries into the next test, and a new build opens at its default size. For a
-  wider work area, enter full screen and leave it in a teardown block; a journey
-  that resizes the window restores its size the same way.
-- **Editor menus are modal to accessibility.** An open `EditorMenuButton` menu
-  hides its button from queries. Close it by pressing the button's recorded
-  frame, and reveal rows in long menus before activating them.
-- **Exact history.** Displayed Undo/Redo pixels must match exactly; the shared
-  renderer redraws rounded pages at pen-up. Compare against a stroke only after
-  it stops changing, and do not add tolerances for display differences.
-- **One UI run at a time.** Swift fixtures that open windows steal focus from a
-  running XCTest batch; run them before or after, not alongside. Run only one
-  benchmark or UI run per device.
-- **Evidence before retries.** After an inconclusive UI failure, get new
-  evidence and a specific hypothesis before another run or an input workaround.
-  Do not build new automation infrastructure for each control; prefer the Swift
-  fixtures and Rust tests for anything they can check.
-- **Installed-app runs.** To test apps already installed on the iPad, use
-  `UseDestinationArtifacts` in the `.xctestrun`, as described in the
-  [Apple guide](development/apple.md#ui-tests).
+Keep working until every source commit is accounted for and every in-scope gap
+has its implementation, cleanup and required checks complete.
+Required failed or blocked checks keep the gap open: record the cause and next
+action, and report unfinished verification. Documented unavailable hardware
+checks need not block an otherwise passing implementation milestone, but remain
+unverified and cannot support a claim of fully verified parity.
 
-## Acceptance
-
-- **Name what a result proves.** Shared correctness checks, mounted Swift
-  fixtures, full-app journeys and physical input each prove different things.
-  Reuse passing evidence unless changed code or a reproduced failure invalidates
-  it.
-- **Performance.** Apple silicon iPads and Macs exceed the top tier, so its
-  [targets](PERFORMANCE_TARGETS.md) apply. The Mac's display presents at 90 Hz;
-  evaluate Mac presentation at 90 Hz until a 120 Hz display is available.
-  Earlier rejected scheduling experiments are listed in
-  [Apple performance](../apps/layer-apple/PERFORMANCE.md#rejected-scheduling-changes).
-- **Hardware that is not available.** There is no physical iPad hardware
-  keyboard, second Mac display, 120 Hz Mac display or working iCloud Drive
-  account. Leave those checks unverified; do not request the hardware, grant OS
-  permissions for them or block a milestone on them.
-
-## Branches and commits
-
-Work lands on `origin/main` as described in
-[Sharing `main`](COMMIT_GUIDE.md#sharing-main); there are no long-lived port
-branches. Commit at each significant milestone (a complete feature area,
-building and validated on both targets), rebase onto the latest `origin/main`
-before pushing, and port anything new that the rebase brings in.
-
-- **Record the port watermark.** The last commit of a port states the
-  `origin/main` revision it covers, as a body line `Ported origin/main through
-  <sha>`. The next audit starts from the most recent such line
-  (`git log --grep='Ported origin/main through'`).
-- If `origin/main` has been rewritten, compare the rewritten commits' trees with
-  your local ones and move uncommitted work onto the new tip instead of merging
-  the old history back in.
-- Keep drawings, private traces, signing material, team IDs and device or account
-  identifiers out of commits.
+Commit complete feature milestones. Fetch and rebase before pushing, inspect
+new upstream commits, update the target and ledger, and rerun affected checks.
+Finish against the final fetched target SHA; later commits belong to the next
+batch. Advance the watermark only through a contiguous range with all required
+work closed, using `Ported Apple origin/main through <sha>` in the commit body.
+An audit or partial milestone does not advance it. Follow the commit guide for
+tests and evidence, update affected guides, and keep working reports local.
