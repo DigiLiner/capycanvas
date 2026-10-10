@@ -3182,7 +3182,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::Customize { action } => {
                 let opening_drawer = matches!(action, CustomizationAction::ToggleHeaderDrawer {..} | CustomizationAction::ToggleToolDrawer {..});
-                if matches!(action, CustomizationAction::ToggleLayerDrawerProperties) && self.state.layer_properties.layer.is_none() {
+                if matches!(action, CustomizationAction::ToggleLayerDrawerProperties)
+                    && !self.state.layer_properties.drawer_toggle_enabled(self.state.customization.drawer.as_ref()
+                        .is_some_and(|drawer| drawer.layer_properties == Some(true))) {
                     return Ok(UiChange::default());
                 }
                 let editing_header = matches!(
@@ -5934,7 +5936,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.layers = doc.ordered_layers().iter().copied().filter(|id| !self.layer_interaction.hidden_by_group(doc, *id)).map(layer_state).collect();
         self.state.layer_tools.attachment = crate::layer_relationships::attachment_control(doc, doc.working.occurrence, self.localization());
         self.state.layer_tools.add_filter = doc.working.occurrence.and_then(|id| self.layer_filter_menu(id));
-        self.state.layer_properties.add_filter = self.state.layer_tools.add_filter.clone();
+        self.state.layer_properties.add_filter = doc.working.occurrence
+            .filter(|_| doc.working.inspect_mask.is_none() && !matches!(doc.working.target, Some(SourceTarget::Coverage(_))))
+            .and_then(|id| doc.scene().occurrence(id))
+            .filter(|layer| matches!(layer.kind(), LayerKind::Paint | LayerKind::Object))
+            .and(self.state.layer_tools.add_filter.clone());
         if self.selection_masks.quick() {
             let row = LayerState {
                 id: 0, selection_layer: true, quick_mask: true, can_rename: false, has_thumbnail: true,

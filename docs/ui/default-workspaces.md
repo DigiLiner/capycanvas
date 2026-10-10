@@ -136,18 +136,27 @@ labels and units as Properties. Layer names, blending, opacity, locks and reduce
 color modes remain in Layers and are not repeated in the summary.
 The footer opens Properties upward inside the same drawer. It covers the layer
 controls, list and action bar while retaining their widgets and scroll position.
-The footer and drawer bounds stay fixed; tapping again or pressing Escape
+The footer stays below either page; tapping again or pressing Escape
 returns to Layers. An outside canvas contact dismisses the drawer without painting.
 Adding a filter from this drawer opens its settings in the same body.
 The drawer reserves six layer rows and grows to fit additional listed rows,
 up to 85% of the window height and the available space below its opener.
 Collapsed group children do not count. Controls, the action bar and the
-Properties footer stay outside the scrolling layer list. Row-count changes
-settle for 300 ms so repeated Add/Delete taps keep their targets; contacts,
-drags and page transitions defer resizing. Properties retains the current
-height, while a smaller window still clamps it to fit. GTK caches row metrics
-and keeps the virtual list and its asynchronous thumbnails. Paint and Photo
-retain their ordinary Properties presentation.
+Properties footer stay outside the scrolling layer list. Adding, deleting,
+undoing and expanding or collapsing groups resize the drawer immediately.
+Selecting a different layer or drawing scrolls its editing row into view.
+Properties uses the default six-row Layers height, growing when its contents
+need more space, within the same window
+limits. Returning restores the current Layers height and the first visible row's
+offset after native allocation. New selection or scroll input takes precedence;
+window changes clamp the restored position to the list's current limits.
+Window and text-size changes recompute both pages. GTK measures realized rows
+through its native measurement cache and keeps the virtual list and its
+asynchronous thumbnails. The bridge joins
+the drawer to centered title-bar buttons at every header size, and the footer's
+top hover corners meet its divider squarely. Properties offers Add filter on raster
+and object layers; filter layers already have their settings. Paint and Photo retain
+their ordinary Properties presentation.
 
 ## Workspace behavior
 
@@ -332,6 +341,8 @@ bash tools/performance/workspace-motion.sh gtk --workspace-switcher
 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_options
 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_switcher_pending_menu
 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_compact_switcher_input
+bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_drawer_immediate_audit
+bash tools/performance/workspace-motion.sh gtk --native-test=native_sketch_layer_drawer_viewport_input
 bash tools/performance/workspace-motion.sh gtk --workspace-menus
 bash tools/performance/workspace-motion.sh gtk --native-test=native_paint_fitted_columns
 bash tools/performance/workspace-motion.sh gtk --native-test=native_brush_drawer_input

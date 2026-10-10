@@ -61,12 +61,12 @@ glib::wrapper! {
 struct LayerInspector {
     root: gtk::Box,
     sizing: Cell<layer_ui::LayerDrawerSizing>,
-    measurements: Cell<Option<((i32, u32, i32), layer_ui::PanelScrollMeasurement)>>,
+    row_height: Cell<f32>,
+    target: Cell<Option<(u64, Option<u64>)>>,
+    anchor: Rc<Cell<Option<(u64, f32)>>>,
+    restore: Rc<RefCell<Option<gtk::TickCallbackId>>>,
     rows: Cell<usize>,
     properties: Cell<bool>,
-    contact: Rc<Cell<bool>>,
-    settled: Rc<Cell<bool>>,
-    settle_timer: Rc<RefCell<Option<glib::SourceId>>>,
     layers: Rc<LayerPanel>,
     effects: Rc<EffectPanels>,
     stack: gtk::Stack,
@@ -81,8 +81,16 @@ impl LayerInspector {
         let layers = Rc::new(LayerPanel::new(w.localization().clone()));
         margins(&layers.root, PANEL_CONTENT_INSET as i32);
         layers.bind(w);
+        let anchor = Rc::new(Cell::new(None));
+        let input = gtk::EventControllerLegacy::new();
+        input.set_propagation_phase(gtk::PropagationPhase::Capture);
+        input.connect_event(glib::clone!(#[strong] anchor, move |_, event| {
+            if matches!(event.event_type(), gdk::EventType::Scroll | gdk::EventType::ButtonPress | gdk::EventType::TouchBegin | gdk::EventType::KeyPress) { anchor.set(None); }
+            glib::Propagation::Proceed
+        }));
+        layers.list.add_controller(input);
         let effects = Rc::new(EffectPanels::with_filter_types(false));
-        let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(true).transition_duration(160).build();
+        let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(false).transition_duration(160).build();
         stack.connect_transition_running_notify(glib::clone!(#[weak] w, move |_| w.surface.queue_allocate()));
         stack.set_vexpand(true);
         stack.set_widget_name("layer-properties-stack");
@@ -116,49 +124,27 @@ impl LayerInspector {
         chevron.set_pixel_size(16); content.append(&chevron);
         button.set_child(Some(&content)); footer.append(&button);
         root.append(&stack); root.append(&footer);
-        let contact = Rc::new(Cell::new(false));
-        let input = gtk::EventControllerLegacy::new();
-        input.set_propagation_phase(gtk::PropagationPhase::Capture);
-        input.connect_event(glib::clone!(#[strong] contact, #[weak] w, #[upgrade_or] glib::Propagation::Proceed, move |_, event| {
-            let held = contact.get();
-            match event.event_type() {
-                gdk::EventType::ButtonPress | gdk::EventType::TouchBegin => contact.set(true),
-                gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel => contact.set(false),
-                gdk::EventType::MotionNotify | gdk::EventType::EnterNotify if !event.modifier_state().contains(gdk::ModifierType::BUTTON1_MASK) => contact.set(false),
-                _ => (),
-            }
-            if held != contact.get() { w.surface.queue_allocate(); }
-            glib::Propagation::Proceed
-        }));
-        root.add_controller(input);
-        Self {root, sizing:Cell::new(Default::default()), measurements:Cell::new(None), rows:Cell::new(0), properties:Cell::new(false), contact,
-            settled:Rc::new(Cell::new(true)), settle_timer:Rc::new(RefCell::new(None)), layers, effects, stack, button, label, summary}
+        Self {root, sizing:Cell::new(Default::default()), row_height:Cell::new(layer_ui::TILE_SIZE), target:Cell::new(None), anchor, restore:Rc::new(RefCell::new(None)), rows:Cell::new(0),
+            properties:Cell::new(false), layers, effects, stack, button, label, summary}
     }
     fn refresh(&self, w: &Rc<Workspace>, state: &UiState, regions: u32) {
         if regions & (regions::DOCUMENT | regions::SETTINGS) != 0 {
+            let target = Some((state.document_file.epoch, state.layer_tools.editing_layer.as_ref().map(|layer| layer.id)));
+            if self.target.get() != target { self.anchor.set(None); }
             self.layers.refresh(state); self.effects.refresh(w, state);
-        }
-        if regions & regions::SETTINGS != 0 { self.measurements.set(None); }
-        let rows = self.rows.replace(state.layers.len());
-        if rows != state.layers.len() {
-            self.measurements.set(None);
-            if rows > 0 {
-                if let Some(timer) = self.settle_timer.borrow_mut().take() { timer.remove(); }
-                self.settled.set(false);
-                let timer = glib::timeout_add_local(std::time::Duration::from_millis(300), glib::clone!(
-                    #[weak] w, #[weak(rename_to = settled)] self.settled, #[weak(rename_to = contact)] self.contact,
-                    #[weak(rename_to = timers)] self.settle_timer, #[weak(rename_to = stack)] self.stack,
-                    #[upgrade_or] glib::ControlFlow::Break, move || {
-                        if contact.get() || w.dragging.get() || stack.is_transition_running() { return glib::ControlFlow::Continue; }
-                        timers.borrow_mut().take(); settled.set(true); w.surface.queue_allocate();
-                        glib::ControlFlow::Break
-                    }
-                ));
-                *self.settle_timer.borrow_mut() = Some(timer);
+            if let Some(position) = state.layer_tools.drawer_reveal_row(&state.layers, state.document_file.epoch, self.target.get()) {
+                self.layers.reveal_row(position);
             }
+            self.target.set(target);
         }
+        self.rows.set(state.layers.len());
         let open = state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true));
-        self.properties.set(open);
+        let previous = self.properties.replace(open);
+        if previous != open {
+            if let Some(callback) = self.restore.borrow_mut().take() { callback.remove(); }
+            if open { self.anchor.set(self.layers.scroll_anchor()); }
+            else if self.anchor.get().is_some() { self.restore_anchor(w); }
+        }
         let page = if open {"properties"} else {"layers"};
         if self.stack.visible_child_name().as_deref() != Some(page) {
             self.stack.set_visible_child_full(page, if open {gtk::StackTransitionType::SlideUp} else {gtk::StackTransitionType::SlideDown});
@@ -167,31 +153,42 @@ impl LayerInspector {
         self.label.set_label(&disclosure.label);
         self.summary.set_label(&disclosure.summary);
         self.summary.set_visible(!open && !disclosure.summary.is_empty());
-        self.button.set_sensitive(state.layer_properties.layer.is_some());
+        self.button.set_sensitive(state.layer_properties.drawer_toggle_enabled(open));
         self.button.set_tooltip_text(Some(&if !open && !disclosure.summary.is_empty() {format!("{}\n{}", disclosure.label, disclosure.summary)} else {disclosure.label.clone()}));
         self.button.update_property(&[gtk::accessible::Property::Label(&disclosure.label), gtk::accessible::Property::Description(if open {""} else {&disclosure.summary})]);
         self.button.update_state(&[gtk::accessible::State::Expanded(Some(open))]);
         if open { self.button.add_css_class("open"); } else { self.button.remove_css_class("open"); }
     }
-    fn measure(&self, w: &Workspace, width: i32, viewport_height: f32) {
-        let key = (width, self.root.pango_context().serial(), self.root.scale_factor());
-        let measurement = self.measurements.get().filter(|(old, _)| *old == key).map(|(_, measurement)| measurement).unwrap_or_else(|| {
-            let (_, measurement) = self.layers.content_measurement(width);
-            if self.layers.list.child().is_some_and(|view| view.first_child().is_some()) {
-                self.measurements.set(Some((key, measurement)));
-            }
-            measurement
-        });
+    fn measure(&self, width: i32, viewport_height: f32) {
+        let mut measurement = self.layers.scroll_measurement(width);
+        if measurement.unit_height > 0. { self.row_height.set(measurement.unit_height); }
+        else { measurement.unit_height = self.row_height.get(); }
+        let properties_height = self.properties.get().then(|| self.effects.properties.measure(gtk::Orientation::Vertical, width).1 as f32);
         let mut sizing = self.sizing.get();
-        if sizing.update(measurement, self.rows.get(), viewport_height, self.properties.get(),
-            self.settled.get() && !self.contact.get() && !w.dragging.get() && !self.stack.is_transition_running()) {
+        if sizing.update(measurement, self.rows.get(), viewport_height, properties_height) {
             self.sizing.set(sizing); self.root.queue_resize();
         }
+    }
+    fn restore_anchor(&self, w: &Rc<Workspace>) {
+        let callback = self.root.add_tick_callback(glib::clone!(#[weak] w, #[weak(rename_to = layers)] self.layers,
+            #[weak(rename_to = stack)] self.stack, #[weak(rename_to = anchor)] self.anchor, #[weak(rename_to = restore)] self.restore,
+            #[upgrade_or] glib::ControlFlow::Break, move |root, _| {
+                let Some(position) = anchor.get() else { restore.borrow_mut().take(); return glib::ControlFlow::Break; };
+                let drawer = w.drawers().into_iter().find(|drawer| drawer.view.borrow().as_ref().is_some_and(|view| root.is_ancestor(&view.root)));
+                let Some(drawer) = drawer else { restore.borrow_mut().take(); return glib::ControlFlow::Break; };
+                if stack.is_transition_running() || drawer.from.borrow().is_some() { return glib::ControlFlow::Continue; }
+                let Some(placement) = drawer.target(&w) else { restore.borrow_mut().take(); return glib::ControlFlow::Break; };
+                if (root.height() as f32 - placement.bounds.height).abs() > 1. { return glib::ControlFlow::Continue; }
+                if layers.list.is_mapped() && layers.restore_scroll_anchor(position) {
+                    anchor.set(None); restore.borrow_mut().take(); glib::ControlFlow::Break
+                } else { glib::ControlFlow::Continue }
+            }));
+        *self.restore.borrow_mut() = Some(callback);
     }
 }
 impl Drop for LayerInspector {
     fn drop(&mut self) {
-        if let Some(timer) = self.settle_timer.borrow_mut().take() { timer.remove(); }
+        if let Some(callback) = self.restore.borrow_mut().take() { callback.remove(); }
     }
 }
 
@@ -776,7 +773,7 @@ impl Drawer {
         };
         let sizing = place(&vec![0.0; view.columns.len()])?;
         for body in &view.bodies {
-            if let Body::LayerInspector(inspector) = body { inspector.measure(w, sizing.columns[0].width as i32, viewport[1]); }
+            if let Body::LayerInspector(inspector) = body { inspector.measure(sizing.columns[0].width as i32, viewport[1]); }
         }
         if let (Some(panel), Some(column)) = (
             view.bodies.iter().find_map(|body| if let Body::Palettes(panel) = body { Some(panel) } else { None }),
@@ -964,6 +961,12 @@ impl Drawer {
         *self.animation.borrow_mut() = Some(animation.clone());
         animation.play();
     }
+    fn finish_animation(&self) {
+        if let Some(animation) = self.animation.take() { animation.pause(); }
+        self.from.borrow_mut().take();
+        self.closing.set(false);
+        self.progress.set(1.0);
+    }
     pub fn refresh_color_preview(&self, colors: &layer_ui::ColorState, display: crate::display_color::ViewColor, headroom: f32, preview: bool) {
         if let Some(view) = self.view.borrow().as_ref() {
             for body in &view.bodies {
@@ -1011,8 +1014,12 @@ impl Drawer {
         *self.state.borrow_mut() = Some(next.clone());
         self.closing.set(false);
         let mut refreshed = false;
+        let mut rows_changed = false;
         if let Some(view) = self.view.borrow().as_ref() {
             for body in &view.bodies {
+                if let Body::LayerInspector(inspector) = body {
+                    rows_changed |= !rebuild && inspector.rows.get() != state.layers.len();
+                }
                 refreshed |= body.refresh(w, state, if rebuild || changed { regions::ALL } else { regions }, next.tool_set.as_ref());
             }
         }
@@ -1025,12 +1032,7 @@ impl Drawer {
         if switching {
             // Move the body with its new opener, keeping the connector present
             // throughout a switch, including a nested toolbar in a column drawer.
-            if let Some(animation) = self.animation.take() {
-                animation.pause();
-            }
-            self.from.borrow_mut().take();
-            self.closing.set(false);
-            self.progress.set(1.0);
+            self.finish_animation();
         }
         if changed {
             self.mark_origin(w, self.target(w).as_ref());
@@ -1040,8 +1042,9 @@ impl Drawer {
                 .target(w)
                 .zip(self.placement())
                 .is_some_and(|(to, from)| to.bounds != from.bounds);
-        if !switching && (changed || resized) {
-            self.animate(w, false);
+        if !switching && (changed || resized || rows_changed) {
+            if next.layer_properties.is_some() && !changed { self.finish_animation(); }
+            else { self.animate(w, false); }
         }
         w.surface.raise_drawer(self.id);
         w.surface.queue_allocate();

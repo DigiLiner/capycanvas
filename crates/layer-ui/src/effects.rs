@@ -405,6 +405,9 @@ pub struct LayerPropertiesView {
     pub curve_max: Option<f32>,
     pub curve_white: Option<f32>,
 }
+impl LayerPropertiesView {
+    pub fn drawer_toggle_enabled(&self, open: bool) -> bool { open || self.layer.is_some() }
+}
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct PropertyDisclosure {
     pub label: String,
@@ -420,13 +423,12 @@ pub struct LayerDrawerSizing {
 impl LayerDrawerSizing {
     pub const MAX_HEIGHT_FRACTION: f32 = 0.85;
     pub fn height(self) -> f32 { self.height }
-    pub fn update(&mut self, measurement: crate::PanelScrollMeasurement, rows: usize, viewport_height: f32, properties: bool, settled: bool) -> bool {
+    pub fn update(&mut self, measurement: crate::PanelScrollMeasurement, rows: usize, viewport_height: f32, properties_height: Option<f32>) -> bool {
         let limit = viewport_height * Self::MAX_HEIGHT_FRACTION;
-        let height = if self.height > 0. && (properties || !settled) {
-            self.height.min(limit)
-        } else {
-            (measurement.fixed_height + rows.max(6) as f32 * measurement.unit_height + PropertyDisclosure::HEIGHT + 1.).min(limit)
-        };
+        let footer = PropertyDisclosure::HEIGHT + 1.;
+        let default = measurement.fixed_height + 6. * measurement.unit_height;
+        let height = (properties_height.map_or(measurement.fixed_height + rows.max(6) as f32 * measurement.unit_height,
+            |height| height.max(default)) + footer).min(limit);
         if self.height == height { return false; }
         self.height = height;
         true

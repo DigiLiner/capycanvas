@@ -44,21 +44,24 @@ fn native_sketch_layer_properties_drawer() {
         assert_eq!(label.text(), "Layer properties");
         assert!(!summary.is_visible());
         assert!(!footer.has_css_class("heading"));
-        let bounds = d.w.drawer.placement().unwrap().bounds;
         let mut stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"initial Layers drawer");
+        let bounds = d.w.drawer.placement().unwrap().bounds;
         let checkpoint = ui_session(&d.w).engine().checkpoint();
         let _warm = crate::snapshot(&d.w); pump(120);
         crate::snapshot(&d.w).save_to_png(output.join(format!("properties-plain-{theme:?}.png"))).unwrap();
-        let point = d.point(&footer);
         for open in [true, false] {
+            let point = d.point(&footer);
             d.input.perform(serde_json::json!([{"touch":"down","point":point},{"touch":"up"}]));
+            layer_page_settled(&d,&stack,"touch Properties toggle");
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(open), "touch footer contact");
         }
         for close in ["footer", "escape", "outside"] {
             d.click(&footer);
+            layer_page_settled(&d,&stack,"Properties before dismissal");
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(true));
             assert_eq!(stack.visible_child_name().as_deref(), Some("properties"));
-            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            assert!(d.w.drawer.placement().unwrap().bounds.height<=bounds.height);
             assert!(d.named("drawer-panel-Properties").is_mapped());
             assert!(!stack.child_by_name("layers").unwrap().is_child_visible());
             match close {
@@ -115,6 +118,7 @@ fn native_sketch_layer_properties_drawer() {
         let gaussian = widgets(submenu.upcast_ref()).find(|node| node.is_mapped() && node.type_().name() == "GtkModelButton" && node.property::<String>("text") == "Gaussian Blur").unwrap();
         d.click(&gaussian);
         assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(true));
+        assert!(!find_named(stack.child_by_name("properties").unwrap().upcast_ref(),"properties-add-filter").unwrap().is_visible());
         assert_eq!(ui_session_mut(&d.w).capture_workspace(), workspace);
         d.click(&footer);
         let id = state(&d.w).layer_properties.layer.unwrap();
@@ -133,21 +137,35 @@ fn native_sketch_layer_properties_drawer() {
         d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
         assert_eq!(summary.text().as_str(), original);
         let bounds = d.w.drawer.placement().unwrap().bounds;
+        d.click(&footer);
+        layer_page_settled(&d,&stack,"Properties page animation");
+        pump(100);
+        let properties_bounds = d.w.drawer.placement().unwrap().bounds;
+        assert!(properties_bounds.height<bounds.height);
+        d.click(&footer);
+        layer_page_settled(&d,&stack,"Layers page animation");
         for repeat in 0..4 {
             let window = Instant::now();
             while window.elapsed() < Duration::from_secs(5) {
               for open in [true, false] {
                 let timings = Rc::new(RefCell::new(Vec::new()));
+                let native = d.named("tool-drawer");
+                let height = Rc::new(Cell::new(native.height()));
+                let list = find_css(&stack.child_by_name("layers").unwrap(),"layer-list").unwrap();
+                let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+                let position = Rc::new(Cell::new(scroll.vadjustment().value()));
                 let clock = d.w.surface.frame_clock().unwrap();
-                let capture = clock.connect_after_paint(glib::clone!(#[strong] timings, #[weak] stack, move |clock| {
-                    if stack.is_transition_running() && let Some(timing) = clock.current_timings() {
+                let capture = clock.connect_after_paint(glib::clone!(#[strong] timings, #[strong] height, #[strong] position, #[weak] scroll, #[weak] list, #[weak] native, #[weak] stack, move |clock| {
+                    let moved = height.replace(native.height()) != native.height();
+                    let scrolled = position.replace(scroll.vadjustment().value()) != scroll.vadjustment().value() && list.is_mapped();
+                    if (stack.is_transition_running() || moved || scrolled) && let Some(timing) = clock.current_timings() {
                         timings.borrow_mut().push(timing);
                     }
                 }));
                 d.click(&footer);
                 pump(100);
                 clock.disconnect(capture);
-                assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+                assert_eq!(d.w.drawer.placement().unwrap().bounds,if open {properties_bounds} else {bounds});
                 let mut times:Vec<_> = timings.borrow().iter().filter(|t| t.is_complete() && t.presentation_time() > 0).map(|t|t.presentation_time()).collect();
                 times.sort_unstable(); times.dedup();
                 let intervals:Vec<_> = times.windows(2).map(|pair| pair[1]-pair[0]).collect();
@@ -190,10 +208,13 @@ fn sketch_layer_properties_pen(d: &mut Driver) {
         let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
         d.click_name(&opener);
         let footer = d.named("layer-properties-disclosure");
+        let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(d,&stack,"pen Layers drawer");
         let bounds = d.w.drawer.placement().unwrap().bounds;
         let checkpoint = ui_session(&d.w).engine().checkpoint();
         for open in [true, false, true, false] {
             d.input.perform(serde_json::json!([{"pen":"down","point":d.point(&footer)},{"pen":"up"}]));
+            layer_page_settled(d,&stack,"pen Properties toggle");
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(open));
             assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
             assert_eq!(ui_session(&d.w).engine().checkpoint(), checkpoint);
@@ -205,12 +226,209 @@ fn sketch_layer_properties_pen(d: &mut Driver) {
 
 fn layer_list_anchor(list: &gtk::Widget, scroll: &gtk::ScrolledWindow) -> (String, f32) {
     widgets(list).filter_map(|row| {
+        if !row.is_mapped() {return None;}
         let name = row.widget_name();
         if !name.starts_with("art-layer-") {return None;}
         let bounds = row.compute_bounds(scroll)?;
         (bounds.y()+bounds.height()>1. && bounds.y()<scroll.height() as f32)
             .then(||(name.to_string(),bounds.y()))
     }).min_by(|a,b|a.1.total_cmp(&b.1)).unwrap()
+}
+
+fn layer_page_settled(d: &Driver, stack: &gtk::Stack, label: &str) {
+    until(||!stack.is_transition_running(),label);
+    let deadline = Instant::now()+Duration::from_secs(3);
+    let mut bounds = d.w.drawer.placement().unwrap().bounds;
+    let mut stable = Instant::now();
+    while stable.elapsed()<Duration::from_millis(60) {
+        assert!(Instant::now()<deadline,"{label}: native drawer placement settles");
+        pump(20);
+        let current = d.w.drawer.placement().unwrap().bounds;
+        if current!=bounds {bounds=current; stable=Instant::now();}
+    }
+}
+
+fn layer_mutation_frame(d: &mut Driver, rows: usize, action: impl FnOnce(&mut Driver)) -> Bounds {
+    let first = Rc::new(Cell::new(None));
+    let native = d.named("tool-drawer");
+    let clock = d.w.surface.frame_clock().unwrap();
+    let capture = clock.connect_after_paint(glib::clone!(#[strong] first, #[strong] native, #[weak(rename_to=w)] d.w, move |_| {
+        if first.get().is_none() && ui_session(&w).state().layers.len()==rows {
+            first.set(w.drawer.placement().map(|placement|(placement.bounds,native.height())));
+        }
+    }));
+    action(d);
+    until(||first.get().is_some(), "layer mutation allocated frame");
+    clock.disconnect(capture);
+    let (bounds,height) = first.get().unwrap();
+    assert!((bounds.height-height as f32).abs()<=1.,"first native allocation {height} matches placement {bounds:?}");
+    pump(250);
+    let settled = d.w.drawer.placement().unwrap().bounds;
+    assert!((bounds.height-settled.height).abs()<=1.,"first mutation frame {bounds:?} matches settled height {settled:?}");
+    bounds
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_drawer_immediate_audit"]
+fn native_sketch_layer_drawer_immediate_audit() {
+    let mut d = Driver::new("art.capycanvas.LayerDrawerImmediate");
+    let output = std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        let epoch = state(&d.w).document_file.epoch;
+        d.w.documents.enqueue(&d.w,(new_drawing(2048,1536,&d.w.localization()).unwrap(),None));
+        until(||state(&d.w).document_file.epoch!=epoch,"fresh audit drawing");
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout:WorkspacePreset::Painter.layout(Platform::Gtk),..Default::default()})});
+        if state(&d.w).customization.drawer.as_ref().is_some_and(|drawer|drawer.layer_properties==Some(true)) {
+            d.click_name("layer-properties-disclosure");
+        }
+        for _ in 0..4 {d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false,clipped:false}});}
+        let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        if state(&d.w).customization.drawer.is_none() {d.click_name(&opener);}
+        pump(100);
+        let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        let page = stack.child_by_name("layers").unwrap();
+        let minimum = d.w.drawer.placement().unwrap().bounds.height;
+        assert_eq!(state(&d.w).layers.len(),6,"audit starts with six listed rows");
+        let added = layer_mutation_frame(&mut d,7,|d|d.click(&find_named(&page,"layer-add-layer-symbolic").unwrap()));
+        assert!(added.height>minimum+20.,"Add grows on the first frame: minimum {minimum}, added {added:?}, settled {:?}",d.w.drawer.placement().unwrap().bounds);
+        let deleted = layer_mutation_frame(&mut d,6,|d|d.click(&find_named(&page,"delete-selected-layers").unwrap()));
+        assert_eq!(deleted.height,minimum);
+        let restored = layer_mutation_frame(&mut d,7,|d|d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}])));
+        assert_eq!(restored.height,added.height);
+        let redone = layer_mutation_frame(&mut d,6,|d|d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x79,"down":true},{"key":0x79,"down":false},{"key":0xffe3,"down":false}])));
+        assert_eq!(redone.height,minimum);
+        let rename_id = state(&d.w).layer_properties.layer.unwrap();
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::BeginRename {id:rename_id}});
+        let row = find_named(&page,&format!("art-layer-{rename_id}")).unwrap();
+        until(||descendant::<gtk::Entry>(&row).is_some_and(|entry|entry.is_mapped()),"layer rename entry mapped");
+        d.input.key(0xff1b);
+        until(||descendant::<gtk::Entry>(&row).is_some_and(|entry|!entry.is_mapped()),"native Escape cancels rename");
+        assert_eq!(d.w.drawer.placement().unwrap().bounds.height,minimum);
+        let provider = gtk::CssProvider::new();
+        provider.load_from_string("window.capy-workspace { --ui-text-size: 18pt; }");
+        gtk::style_context_add_provider_for_display(&d.w.surface.display(),&provider,gtk::STYLE_PROVIDER_PRIORITY_APPLICATION+1);
+        pump(180);
+        assert!(d.w.drawer.placement().unwrap().bounds.height>minimum,"GTK text size invalidates row metrics");
+        gtk::style_context_remove_provider_for_display(&d.w.surface.display(),&provider); pump(180);
+        assert_eq!(d.w.drawer.placement().unwrap().bounds.height,minimum);
+        for _ in 6..32 {d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false,clipped:false}});}
+        let list = find_css(&page,"layer-list").unwrap();
+        let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+        d.input.perform(serde_json::json!([{"point":d.point(&list)},{"wheel":[0,12]}]));
+        let capped = d.w.drawer.placement().unwrap().bounds;
+        let added = layer_mutation_frame(&mut d,33,|d|d.click(&find_named(&page,"layer-add-layer-symbolic").unwrap()));
+        assert_eq!(added.height,capped.height);
+        let selected_visible = |d:&Driver| {
+            let id = state(&d.w).layer_properties.layer.unwrap();
+            let row = find_named(&list,&format!("art-layer-{id}")).unwrap();
+            let b = row.compute_bounds(&scroll).unwrap();
+            assert!(b.y()>=-1. && b.y()+b.height()<=scroll.height() as f32+1.,"changed target is visible at the viewport cap: {b:?}");
+        };
+        selected_visible(&d);
+        layer_mutation_frame(&mut d,32,|d|d.click(&find_named(&page,"delete-selected-layers").unwrap()));
+        layer_mutation_frame(&mut d,33,|d|d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}])));
+        selected_visible(&d);
+        layer_mutation_frame(&mut d,32,|d|d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x79,"down":true},{"key":0x79,"down":false},{"key":0xffe3,"down":false}])));
+        d.click_name("layer-properties-disclosure");
+        layer_page_settled(&d,&stack,"Properties before hidden-list Add");
+        d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0xffe1,"down":true},{"key":0x6e,"down":true},{"key":0x6e,"down":false},{"key":0xffe1,"down":false},{"key":0xffe3,"down":false}]));
+        until(||state(&d.w).layers.len()==33,"native Add while Properties is open");
+        d.click_name("layer-properties-disclosure");
+        layer_page_settled(&d,&stack,"Layers after hidden-list Add");
+        selected_visible(&d);
+        layer_mutation_frame(&mut d,32,|d|d.click(&find_named(&page,"delete-selected-layers").unwrap()));
+        d.click_name("layer-properties-disclosure");
+        layer_page_settled(&d,&stack,"Properties before hidden-list Undo");
+        d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
+        until(||state(&d.w).layers.len()==33,"native Undo while Properties is open");
+        d.click_name("layer-properties-disclosure");
+        layer_page_settled(&d,&stack,"Layers after hidden-list Undo");
+        selected_visible(&d);
+        layer_mutation_frame(&mut d,32,|d|d.click(&find_named(&page,"delete-selected-layers").unwrap()));
+        for size in [HeaderSize::Medium,HeaderSize::Large] {
+            d.w.dispatch(HeaderAction::SetSize {size}.action()); pump(100);
+            for transparency in [layer_ui::Transparency::Low,layer_ui::Transparency::High] {
+                super::use_transparency(&d.w,transparency); pump(100);
+                let placement = d.w.drawer.placement().unwrap();
+                let bridge = placement.connection().unwrap();
+                assert!(bridge.bounds.height>6.5,"centered titlebar gap remains connected");
+                let button = find_css(&d.named(&opener),"header-tool").unwrap();
+                assert!(button.has_css_class("drawer-open"));
+                let checkpoint = ui_session(&d.w).engine().checkpoint();
+                let p = [bridge.bounds.x+bridge.bounds.width*0.5,bridge.bounds.y+bridge.bounds.height*0.5];
+                let p = d.w.surface.compute_point(&d.w.window,&gtk::graphene::Point::new(p[0],p[1])).unwrap();
+                d.input.click([p.x(),p.y()]);
+                assert!(state(&d.w).customization.drawer.is_some());
+                assert_eq!(ui_session(&d.w).engine().checkpoint(),checkpoint);
+                let footer = d.named("layer-properties-disclosure");
+                d.input.perform(serde_json::json!([{"point":d.point(&footer)}]));
+                let _warm = crate::snapshot(&d.w); pump(120);
+                let texture = crate::snapshot(&d.w);
+                texture.save_to_png(output.join(format!("bridge-footer-{theme:?}-{size:?}-{transparency:?}.png"))).unwrap();
+                let mut download = gdk::TextureDownloader::new(&texture); download.set_format(gdk::MemoryFormat::R8g8b8a8);
+                let (pixels,stride) = download.download_bytes();
+                let scale = texture.width() as f32/d.w.surface.width() as f32;
+                let sample = |x:f32,y:f32| {let at=(y*scale) as usize*stride+(x*scale) as usize*4;pixels[at..at+3].to_vec()};
+                let join = sample(bridge.bounds.x+bridge.bounds.width*0.5,bridge.bounds.y+bridge.bounds.height*0.5);
+                let body = sample(placement.bounds.x+placement.bounds.width*0.5,placement.bounds.y+2.);
+                assert!(join.iter().zip(body).all(|(a,b)|a.abs_diff(b)<=4),"{theme:?}/{transparency:?}: bridge matches body {join:?}");
+                let b = footer.compute_bounds(&d.w.surface).unwrap();
+                let corner = sample(b.x()+1.,b.y()+1.);
+                let top = sample(b.x()+b.width()*0.5,b.y()+1.);
+                assert!(corner.iter().zip(top).all(|(a,b)|a.abs_diff(b)<=3),"hovered footer top corners stay square");
+            }
+        }
+        d.w.dispatch(HeaderAction::SetSize {size:HeaderSize::Medium}.action());
+        let footer = d.named("layer-properties-disclosure");
+        d.click(&footer); layer_page_settled(&d,&stack,"audit Properties animation");
+        let properties = stack.child_by_name("properties").unwrap();
+        assert!(find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        let raster = state(&d.w).layer_properties.layer.unwrap();
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::AddMask {id:raster,replace:false}});
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Select {id:raster,mask:true}}); pump(100);
+        assert!(!find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Select {id:raster,mask:false}});
+        assert!(find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        d.w.dispatch(UiAction::SelectLayer {id:2});
+        assert!(!find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        d.w.dispatch(UiAction::SelectLayer {id:raster});
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:true,clipped:false}});
+        let group = state(&d.w).layer_properties.layer.unwrap();
+        assert!(!find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Delete {id:group}});
+        d.w.dispatch(UiAction::SelectLayer {id:raster});
+        d.w.dispatch(UiAction::Effect {action:layer_ui::EffectAction::Insert {effect:"curves".into()}}); pump(100);
+        assert!(!find_named(&properties,"properties-add-filter").unwrap().is_visible());
+        let long = d.w.drawer.placement().unwrap().bounds.height;
+        assert!(long>minimum,"long Properties grows beyond its default height");
+        d.w.window.unmaximize(); d.w.window.set_default_size(900,420);
+        until(||!d.w.window.is_maximized() && d.w.surface.height()<600,"short Properties window"); pump(100);
+        assert!(d.w.drawer.placement().unwrap().bounds.height<=d.w.surface.height() as f32*0.85+1.);
+        d.w.window.maximize(); until(||d.w.window.is_maximized(),"Properties window regrows"); pump(100);
+        assert!((d.w.drawer.placement().unwrap().bounds.height-long).abs()<2.);
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::SelectAllLayers {selected:true}});
+        d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::DeleteSelected}); pump(100);
+        assert!(d.named("layer-properties-disclosure").is_sensitive(),"empty Properties can still close");
+        d.click(&d.named("layer-properties-disclosure"));
+        assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties,Some(false));
+        let epoch = state(&d.w).document_file.epoch;
+        let mut object = layer_core::Document::from_artwork(layer_core::authored::Artwork::new([2048,1536]).unwrap()).unwrap();
+        let image = layer_core::color::source::rgba8_source([96,64],|_,_|[75,174,158,255]);
+        let (owner,edit) = object.create_object_layer_edit("Object",layer_core::authored::ImageObject::new(image.into()),None,0).unwrap();
+        object.apply(edit).unwrap();
+        d.w.documents.enqueue(&d.w,(object,None)); until(||state(&d.w).document_file.epoch!=epoch,"object drawing replaces the inspected document");
+        d.w.dispatch(UiAction::SelectLayer {id:layer_ui::occurrence_token(owner)});
+        if state(&d.w).customization.drawer.is_none() {d.click_name(&opener);}
+        if !state(&d.w).customization.drawer.as_ref().is_some_and(|drawer|drawer.layer_properties==Some(true)) {d.click_name("layer-properties-disclosure");}
+        let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"object Properties animation");
+        assert!(find_named(&stack.child_by_name("properties").unwrap(),"properties-add-filter").unwrap().is_visible());
+        let _warm = crate::snapshot(&d.w); pump(120);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("object-properties-{theme:?}.png"))).unwrap();
+    }
+    d.input.finish(); d.w.window.destroy(); pump(100);
 }
 
 #[test]
@@ -278,18 +496,30 @@ fn native_sketch_layer_drawer_auto_height() {
             let anchor = layer_list_anchor(&list,&scroll);
             d.click(&footer);
             assert_eq!(stack.visible_child_name().as_deref(),Some("properties"));
-            until(||!stack.is_transition_running(), "Properties page animation");
-            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            layer_page_settled(&d,&stack,"Properties page animation");
+            let properties_bounds = d.w.drawer.placement().unwrap().bounds;
+            let minimum = heights.first().copied().unwrap_or(bounds.height);
+            assert!((properties_bounds.height-minimum).abs()<=1., "plain Properties uses the six-row minimum");
             d.click(&footer);
-            until(||!stack.is_transition_running(), "Layers page animation");
+            layer_page_settled(&d,&stack,"Layers page animation");
             assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
-            let retained = find_named(&list,&anchor.0).unwrap().compute_bounds(&scroll).unwrap().y();
-            assert!((retained-anchor.1).abs()<=1.,"{theme:?}/{count}: {} offset {} -> {}, adjustment {} -> {}",anchor.0,anchor.1,retained,position,scroll.vadjustment().value());
-            std::fs::write(output.join(format!("retention-{count}-{theme:?}.json")),serde_json::to_vec_pretty(&serde_json::json!({"rows":count,"theme":format!("{theme:?}"),"anchor":anchor.0,"offset_before":anchor.1,"offset_after":retained,"offset_delta":retained-anchor.1,"adjustment_before":position,"adjustment_after":scroll.vadjustment().value(),"drawer_height":bounds.height,"viewport_height":d.w.surface.height()})).unwrap()).unwrap();
+            let retained_row = widgets(&list).find(|row|row.widget_name()==anchor.0 && row.is_mapped()).unwrap();
+            let retained = retained_row.compute_bounds(&scroll).unwrap().y();
+            let mut offsets = vec![retained];
+            assert!((retained-anchor.1).abs()<=2.,"{theme:?}/{count}: {} offset {} -> {}, adjustment {} -> {}",anchor.0,anchor.1,retained,position,scroll.vadjustment().value());
+            for _ in 0..3 {
+                d.click(&footer); layer_page_settled(&d,&stack,"repeated Properties page");
+                d.click(&footer); layer_page_settled(&d,&stack,"repeated Layers page");
+                assert_eq!(d.w.drawer.placement().unwrap().bounds,bounds);
+                let offset = widgets(&list).find(|row|row.widget_name()==anchor.0 && row.is_mapped()).unwrap().compute_bounds(&scroll).unwrap().y();
+                offsets.push(offset);
+                assert!((offset-anchor.1).abs()<=2.,"{theme:?}/{count}: original {} offset {} -> {offsets:?} does not drift",anchor.0,anchor.1);
+            }
+            std::fs::write(output.join(format!("retention-{count}-{theme:?}.json")),serde_json::to_vec_pretty(&serde_json::json!({"rows":count,"theme":format!("{theme:?}"),"anchor":anchor.0,"anchor_mapped":retained_row.is_mapped(),"offset_before":anchor.1,"offset_after":retained,"offsets_after_roundtrips":offsets,"offset_delta":retained-anchor.1,"adjustment_before":position,"adjustment_after":scroll.vadjustment().value(),"drawer_height":bounds.height,"viewport_height":d.w.surface.height()})).unwrap()).unwrap();
             d.click(&footer);
             assert_eq!(stack.visible_child_name().as_deref(),Some("properties"));
-            until(||!stack.is_transition_running(), "Properties page animation");
-            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            layer_page_settled(&d,&stack,"Properties page animation");
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, properties_bounds);
             let opacity = find_named(stack.child_by_name("properties").unwrap().upcast_ref(), "property-opacity").unwrap();
             assert!(opacity.is_sensitive(), "{theme:?}/{count}: Properties opacity is editable");
             let _warm = crate::snapshot(&d.w); pump(120);
@@ -299,26 +529,19 @@ fn native_sketch_layer_drawer_auto_height() {
             let picked = d.w.window.pick(point[0] as f64, point[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
             assert!(picked==display || picked.is_ancestor(&display), "{theme:?}/{count}: numeric value hit {} at {point:?}",picked.widget_name());
             d.number(&opacity, "75");
-            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, properties_bounds);
             d.click(&footer);
-            until(||!stack.is_transition_running(), "Layers page animation");
+            layer_page_settled(&d,&stack,"Layers page animation");
             assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
             if count == 6 {
-                d.click(&find_named(&page, "layer-add-layer-symbolic").unwrap());
-                assert_eq!(state(&d.w).layers.len(), 7);
-                pump(450);
-                assert!(d.w.drawer.placement().unwrap().bounds.height > bounds.height);
-                d.click(&find_named(&page, "delete-selected-layers").unwrap());
-                assert_eq!(state(&d.w).layers.len(), 6);
-                pump(450);
-                assert!((d.w.drawer.placement().unwrap().bounds.height-bounds.height).abs()<2.);
-                d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
-                assert_eq!(state(&d.w).layers.len(), 7);
-                pump(450);
-                assert!(d.w.drawer.placement().unwrap().bounds.height > bounds.height);
-                d.click(&find_named(&page, "delete-selected-layers").unwrap());
-                assert_eq!(state(&d.w).layers.len(), 6);
-                pump(450);
+                let added = layer_mutation_frame(&mut d,7,|d|d.click(&find_named(&page,"layer-add-layer-symbolic").unwrap()));
+                assert!(added.height>bounds.height+20.);
+                let deleted = layer_mutation_frame(&mut d,6,|d|d.click(&find_named(&page,"delete-selected-layers").unwrap()));
+                assert!((deleted.height-bounds.height).abs()<2.);
+                let undone = layer_mutation_frame(&mut d,7,|d|d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}])));
+                assert_eq!(undone.height,added.height);
+                let redone = layer_mutation_frame(&mut d,6,|d|d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x79,"down":true},{"key":0x79,"down":false},{"key":0xffe3,"down":false}])));
+                assert_eq!(redone.height,deleted.height);
             }
             if count == 12 {
                 let ids:Vec<_> = state(&d.w).layers.iter().take(2).map(|row|row.id).collect();
@@ -329,17 +552,13 @@ fn native_sketch_layer_drawer_auto_height() {
                 let expanded = state(&d.w).layers.len();
                 let group_row = find_named(&page, &format!("art-layer-{group}")).unwrap();
                 let thumbnail = find_css(&group_row, "layer-thumbnail").unwrap();
-                d.click(&thumbnail);
-                assert!(state(&d.w).layers.len() < expanded);
-                pump(450);
-                let collapsed_height = d.w.drawer.placement().unwrap().bounds.height;
-                d.click(&find_css(&find_named(&page, &format!("art-layer-{group}")).unwrap(), "layer-thumbnail").unwrap());
-                assert_eq!(state(&d.w).layers.len(), expanded);
-                pump(450);
-                assert!(d.w.drawer.placement().unwrap().bounds.height >= collapsed_height);
+                let expanded_height = d.w.drawer.placement().unwrap().bounds.height;
+                let collapsed = layer_mutation_frame(&mut d,expanded-2,|d|d.click(&thumbnail));
+                assert!(collapsed.height<expanded_height-20.);
+                let restored = layer_mutation_frame(&mut d,expanded,|d|d.click(&find_css(&find_named(&page,&format!("art-layer-{group}")).unwrap(),"layer-thumbnail").unwrap()));
+                assert_eq!(restored.height,expanded_height);
                 d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
                 assert_eq!(state(&d.w).layers.len(), count);
-                pump(450);
             }
             if count == 1000 {
                 let clock = d.w.surface.frame_clock().unwrap();
@@ -387,6 +606,7 @@ fn native_sketch_layer_drawer_auto_height() {
                     let extra:Vec<_> = d.w.drawers().iter().filter_map(|drawer|drawer.layers()).collect();
                     let realized = widgets(&list).filter(|widget|widget.widget_name().starts_with("art-layer-")).count();
                     reports.push(serde_json::json!({"theme":format!("{theme:?}"),"input":if touch_motion {"touch"} else {"mouse-wheel"},"run":run,"rows":count,"scroll_start":scroll_start,"scroll_end":adjustment.value(),"scroll_limit":scroll_limit,"first_direction":first_direction,"realized_rows":realized,"thumbnail_requests":d.w.layer_panel.preview_requests(),"thumbnail_work":d.w.layer_panel.preview_debug(&extra),"moving_presentations":times,"seconds":seconds,"viewport":[d.w.surface.width(),d.w.surface.height()],"scale":d.w.surface.scale_factor()}));
+                    std::fs::write(output.join("large-list-scroll.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
                 }
             }
             let _warm = crate::snapshot(&d.w); pump(120);
@@ -396,23 +616,124 @@ fn native_sketch_layer_drawer_auto_height() {
     }
     assert!(heights[2] > heights[1] + 20., "drawer grows beyond six rows: {heights:?}");
     assert!((heights[3]-heights[4]).abs()<2., "large lists share the viewport cap: {heights:?}");
+    std::fs::write(output.join("large-list-scroll.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    d.input.finish(); d.w.window.destroy(); pump(100);
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_drawer_viewport_input"]
+fn native_sketch_layer_drawer_viewport_input() {
+    let mut d = Driver::new("art.capycanvas.LayerDrawerViewport");
+    let output = std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    for _ in 2..32 {d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false,clipped:false}});}
+    let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+    d.click_name(&opener);
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"full Layers viewport");
+        let full = d.w.drawer.placement().unwrap().bounds;
+        layer_drawer_viewport_input(&mut d,&output,theme,full);
+    }
+    d.input.finish(); d.w.window.destroy(); pump(100);
+}
+
+fn layer_drawer_viewport_input(d: &mut Driver, output: &std::path::Path, theme: Theme, full: Bounds) {
+    let original_viewport = [d.w.surface.width(),d.w.surface.height()];
+    let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+    let list = find_css(&stack.child_by_name("layers").unwrap(),"layer-list").unwrap();
+    let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+    let before_anchor = layer_list_anchor(&list,&scroll);
+    d.input.perform(serde_json::json!([{"point":d.point(&list)},{"wheel":[0,10000]}]));
+    until(||(scroll.vadjustment().value()-(scroll.vadjustment().upper()-scroll.vadjustment().page_size())).abs()<=1.,"full viewport reaches end");
+    layer_scroll_painted(d,&scroll);
+    let after_anchor = layer_list_anchor(&list,&scroll);
+    let point = screen_point(scroll.upcast_ref(),&d.w.window,[0.5,0.03]);
+    let mut hit = d.w.window.pick(point[0] as f64,point[1] as f64,gtk::PickFlags::DEFAULT).unwrap();
+    while !hit.widget_name().starts_with("art-layer-") {hit=hit.parent().unwrap();}
+    let hit_id = hit.widget_name().to_string();
+    std::fs::write(output.join(format!("wheel-anchor-{theme:?}.json")),serde_json::to_vec_pretty(&serde_json::json!({"before":before_anchor,"after":after_anchor,"native_top_hit":hit_id,"adjustment":scroll.vadjustment().value(),"limit":scroll.vadjustment().upper()-scroll.vadjustment().page_size()})).unwrap()).unwrap();
+    let _warm = crate::snapshot(&d.w); pump(120);
+    crate::snapshot(&d.w).save_to_png(output.join(format!("layers-wheel-end-before-properties-{theme:?}.png"))).unwrap();
+    assert_ne!(hit_id,before_anchor.0,"native top hit changes when wheel reaches end");
+    d.click_name("layer-properties-disclosure"); layer_page_settled(d,&stack,"Properties before viewport shrink");
+    assert_eq!(stack.visible_child_name().as_deref(),Some("properties"));
     d.w.window.unmaximize(); d.w.window.set_default_size(900, 640);
     until(||!d.w.window.is_maximized() && d.w.surface.height() < 800, "short drawing window");
     pump(300);
+    let footer = d.named("layer-properties-disclosure");
+    layer_footer_key(d,&footer,&stack,"layers","Layers after Properties viewport shrink");
     let short = d.w.drawer.placement().unwrap().bounds;
     assert!(short.height <= d.w.window.height() as f32 * 0.85 + 2.);
     assert!(short.y >= 0. && short.y+short.height <= d.w.surface.height() as f32+1.);
-    assert!(short.height < heights[4], "drawer follows a shorter window");
+    assert!(short.height < full.height, "drawer follows a shorter window");
     let footer = d.named("layer-properties-disclosure");
-    d.click(&footer); assert_eq!(d.w.drawer.placement().unwrap().bounds,short);
-    d.click(&footer); assert_eq!(d.w.drawer.placement().unwrap().bounds,short);
+    let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+    let page = stack.child_by_name("layers").unwrap();
+    let list = find_css(&page,"layer-list").unwrap();
+    let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+    d.input.perform(serde_json::json!([{"point":d.point(&list)},{"wheel":[0,10000]}]));
+    until(||(scroll.vadjustment().value()-(scroll.vadjustment().upper()-scroll.vadjustment().page_size())).abs()<=1.,"short viewport scroll reaches end");
+    layer_scroll_painted(d,&scroll);
+    layer_footer_key(d,&footer,&stack,"properties","short Properties animation");
+    assert!(d.w.drawer.placement().unwrap().bounds.height<=short.height);
+    layer_footer_key(d,&footer,&stack,"layers","short Layers animation");
+    assert_eq!(d.w.drawer.placement().unwrap().bounds,short);
     let _warm = crate::snapshot(&d.w); pump(120);
-    crate::snapshot(&d.w).save_to_png(output.join("layers-1000-short-Dark.png")).unwrap();
+    crate::snapshot(&d.w).save_to_png(output.join(format!("layers-near-end-short-{theme:?}.png"))).unwrap();
+    d.input.perform(serde_json::json!([{"point":d.point(&list)},{"wheel":[0,10000]}]));
+    until(||(scroll.vadjustment().value()-(scroll.vadjustment().upper()-scroll.vadjustment().page_size())).abs()<=1.,"near-end viewport growth starts at end");
+    layer_scroll_painted(d,&scroll);
+    let original_anchor = layer_list_anchor(&list,&scroll);
+    let original_position = scroll.vadjustment().value();
+    layer_footer_key(d,&footer,&stack,"properties","near-end Properties before viewport growth");
     d.w.window.maximize();
-    until(||d.w.window.is_maximized(), "drawing window maximized"); pump(300);
-    assert!((d.w.drawer.placement().unwrap().bounds.height-heights[4]).abs()<2.);
-    std::fs::write(output.join("large-list-scroll.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
-    d.input.finish(); d.w.window.destroy(); pump(100);
+    until(||d.w.window.is_maximized() && [d.w.surface.width(),d.w.surface.height()]==original_viewport, "drawing viewport maximized"); pump(300);
+    let footer = widgets(d.w.window.upcast_ref()).find(|widget|widget.widget_name()=="layer-properties-disclosure" && widget.is_mapped()).unwrap();
+    let stack = widgets(d.w.window.upcast_ref()).find(|widget|widget.widget_name()=="layer-properties-stack" && widget.is_mapped()).unwrap().downcast::<gtk::Stack>().unwrap();
+    let point = d.point(&footer);
+    let picked = d.w.window.pick(point[0] as f64,point[1] as f64,gtk::PickFlags::DEFAULT).unwrap();
+    assert!(picked==footer || picked.is_ancestor(&footer),"maximized Properties footer receives native contact: {picked:?}");
+    d.click(&footer); layer_page_settled(d,&stack,"near-end Layers after viewport growth");
+    assert_eq!(stack.visible_child_name().as_deref(),Some("layers"));
+    let list = find_css(&stack.child_by_name("layers").unwrap(),"layer-list").unwrap();
+    let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+    assert!((d.w.drawer.placement().unwrap().bounds.height-full.height).abs()<2.,"near-end Layers height {:?}, expected {}, viewport {}x{}, page {:?}, state {:?}",d.w.drawer.placement().unwrap().bounds,full.height,d.w.surface.width(),d.w.surface.height(),stack.visible_child_name(),state(&d.w).customization.drawer.as_ref().map(|drawer|drawer.layer_properties));
+    let end = scroll.vadjustment().value();
+    let limit = scroll.vadjustment().upper()-scroll.vadjustment().page_size();
+    let returned = widgets(&list).find(|row|row.widget_name()==original_anchor.0 && row.is_mapped()).unwrap().compute_bounds(&scroll).unwrap().y();
+    let wanted = end+(returned-original_anchor.1) as f64;
+    std::fs::write(output.join(format!("viewport-anchor-{theme:?}.json")),serde_json::to_vec_pretty(&serde_json::json!({"anchor":original_anchor.0,"offset_before":original_anchor.1,"offset_after":returned,"position_before":original_position,"position_after":end,"wanted_position":wanted,"limit":limit,"viewport":[d.w.surface.width(),d.w.surface.height()]})).unwrap()).unwrap();
+    assert!(end>=scroll.vadjustment().lower() && end<=limit,"resized scroll position stays within its bounds");
+    if wanted>=scroll.vadjustment().lower() && wanted<=limit {
+        assert!((returned-original_anchor.1).abs()<=2.,"feasible viewport anchor is preserved: {} -> {returned}",original_anchor.1);
+    } else {
+        assert!((end-wanted.clamp(scroll.vadjustment().lower(),limit)).abs()<=2.,"impossible viewport anchor is clamped: value {end}, wanted {wanted}, limit {limit}");
+    }
+    d.input.perform(serde_json::json!([{"point":d.point(&list)},{"wheel":[0,-3]}]));
+    assert!(scroll.vadjustment().value()<end-20.,"list remains scrollable after an impossible old anchor is clamped");
+}
+
+fn layer_footer_key(d: &mut Driver, footer: &gtk::Widget, stack: &gtk::Stack, page: &str, label: &str) {
+    assert!(footer.grab_focus());
+    assert_eq!(gtk::prelude::GtkWindowExt::focus(&d.w.window),Some(footer.clone()));
+    until(||d.w.window.is_active(),"native footer window active");
+    d.input.key(0xff0d);
+    until(||stack.visible_child_name().as_deref()==Some(page),label);
+    layer_page_settled(d,stack,label);
+}
+
+fn layer_scroll_painted(d: &Driver, scroll: &gtk::ScrolledWindow) {
+    let painted = Rc::new(Cell::new(false));
+    let clock = d.w.surface.frame_clock().unwrap();
+    let previous = clock.frame_counter();
+    let capture = clock.connect_after_paint(glib::clone!(#[strong] painted, #[weak] scroll, move |clock| {
+        if clock.frame_counter()>previous && (scroll.vadjustment().value()-(scroll.vadjustment().upper()-scroll.vadjustment().page_size())).abs()<=1. {painted.set(true);}
+    }));
+    d.w.window.queue_draw();
+    until(||painted.get(),"native end-scroll after-paint frame");
+    clock.disconnect(capture);
 }
 
 fn assert_shared_icons(widget: &gtk::Widget) {

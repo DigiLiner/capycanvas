@@ -149,6 +149,13 @@ pub struct LayersView {
     pub add_filter: Option<ContextMenu>,
     pub connections: Vec<LayerConnection>,
 }
+impl LayersView {
+    pub fn drawer_reveal_row(&self, rows: &[LayerState], epoch: u64, previous: Option<(u64, Option<u64>)>) -> Option<u32> {
+        let id = self.editing_layer.as_ref().map(|layer| layer.id);
+        if previous == Some((epoch, id)) { return None; }
+        rows.iter().position(|row| Some(row.id) == id).map(|index| index as u32)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
 pub struct LayerControls {

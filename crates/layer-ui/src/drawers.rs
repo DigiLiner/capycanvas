@@ -207,7 +207,7 @@ impl DrawerPlacement {
             }
         }
         let length = end - start;
-        if depth <= 0.0 || depth > WORKSPACE_SPACING + 0.5 || length <= 0.0 {
+        if depth <= 0.0 || length <= 0.0 {
             return None;
         }
         let distances = [start - body_start, body_end - end];

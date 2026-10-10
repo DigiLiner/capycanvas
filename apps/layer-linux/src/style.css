@@ -389,7 +389,7 @@ window.capy-workspace.glass .workspace-switcher button:checked { background: var
 window.capy-workspace.glass .document-tab.selected { background-color: var(--glass-document-tab); }
 window.capy-workspace.glass .palette-cover { background: transparent; }
 .palette-panel { padding: 8px; }
-.layer-properties-disclosure { padding: 0 8px; font-weight: 400; }
+button.flat.layer-properties-disclosure { padding: 0 8px; font-weight: 400; border-top-left-radius: 0; border-top-right-radius: 0; }
 .layer-properties-disclosure image { -gtk-icon-size: 20px; }
 .layer-properties-disclosure image.layer-properties-chevron { -gtk-icon-transform: rotate(180deg); }
 .layer-properties-disclosure.open image.layer-properties-chevron { -gtk-icon-transform: none; }

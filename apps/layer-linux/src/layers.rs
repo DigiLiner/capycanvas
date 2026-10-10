@@ -969,6 +969,11 @@ impl LayerPanel {
     /// Layer rows have a uniform height; sample realized rows and multiply by
     /// the visible model count, without instantiating a large document's rows.
     pub fn content_measurement(&self, width: i32) -> (f32, layer_ui::PanelScrollMeasurement) {
+        let mut measurement = self.scroll_measurement(width);
+        if measurement.unit_height == 0. { measurement.unit_height = layer_ui::TILE_SIZE; }
+        ((measurement.fixed_height + measurement.unit_height * self.model.n_items() as f32).min(999_999.), measurement)
+    }
+    pub fn scroll_measurement(&self, width: i32) -> layer_ui::PanelScrollMeasurement {
         let fixed_height = (self.root.measure(gtk::Orientation::Vertical, width).1
             - self.list.measure(gtk::Orientation::Vertical, width).1)
             .max(0) as f32;
@@ -976,19 +981,42 @@ impl LayerPanel {
             .rows
             .borrow()
             .values()
-            .filter(|row| row.id.get() != 0)
+            .filter(|row| row.bound.get())
             .map(|row| row.root.measure(gtk::Orientation::Vertical, width).1)
             .max()
-            .unwrap_or(layer_ui::TILE_SIZE as i32) as f32;
-        let content_height =
-            (fixed_height + unit_height * self.model.n_items() as f32).min(999_999.0);
-        (
-            content_height,
-            layer_ui::PanelScrollMeasurement {
-                fixed_height,
-                unit_height,
-            },
-        )
+            .unwrap_or(0) as f32;
+        layer_ui::PanelScrollMeasurement { fixed_height, unit_height }
+    }
+    pub fn reveal_row(&self, position: u32) {
+        if let Some(list) = self.list.child().and_downcast::<gtk::ListView>() {
+            list.scroll_to(position, gtk::ListScrollFlags::NONE, None);
+        }
+    }
+    pub fn scroll_anchor(&self) -> Option<(u64, f32)> {
+        self.rows.borrow().values().filter(|row| row.bound.get() && row.root.is_mapped()).filter_map(|row| {
+            let bounds = row.root.compute_bounds(&self.list)?;
+            (bounds.y() + bounds.height() > 0. && bounds.y() < self.list.height() as f32)
+                .then_some((row.id.get(), bounds.y()))
+        }).min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+    pub fn restore_scroll_anchor(&self, (id, offset): (u64, f32)) -> bool {
+        let position = self.rows.borrow().values().find(|row| row.bound.get() && row.root.is_mapped() && row.id.get() == id)
+            .and_then(|row| row.root.compute_bounds(&self.list)).map(|bounds| bounds.y());
+        if let Some(position) = position {
+            let delta = position - offset;
+            if delta.abs() < 0.5 { return true; }
+            let adjustment = self.list.vadjustment();
+            let before = adjustment.value();
+            adjustment.set_value((before + delta as f64).clamp(adjustment.lower(), (adjustment.upper() - adjustment.page_size()).max(adjustment.lower())));
+            return adjustment.value() == before;
+        }
+        for position in 0..self.model.n_items() {
+            if self.model.item(position).and_downcast::<glib::BoxedAnyObject>().and_then(|object| item_id(&object)) == Some(id) {
+                self.reveal_row(position);
+                return false;
+            }
+        }
+        true
     }
 
     pub fn bind(&self, w: &Rc<Workspace>) {
