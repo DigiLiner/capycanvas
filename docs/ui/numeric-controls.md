@@ -22,15 +22,14 @@ Every host shares the same numeric policy and editable values.
   Stacked panel sliders sit just below the text, within a 36-pixel control.
   The 4-pixel track has a symmetric 16-pixel hit area starting just below the
   visible bottom of the label. Its left inset is 36 pixels; its fixed right
-  inset reserves room for ordinary values and units: 76 pixels on GTK and
-  72 pixels on the other hosts. Panels have no step buttons.
-  GTK panel values and text editors align with the bottom of the slider hit area;
-  other hosts center them vertically across the label and slider.
+  inset reserves room for ordinary values and units: 76 pixels. Panels have no
+  step buttons. Panel values and text editors align with the bottom of the
+  slider hit area.
   GTK panel readouts align shaped text within their allocated line width so
   units stay anchored when the digit count changes.
-  The panel editor is 68 pixels wide on GTK and capped at 64 pixels on other hosts,
-  keeping at least an 8-pixel gap from the slider hit area. Long expressions
-  scroll within the field.
+  The panel editor is 68 pixels wide and 24 pixels high, keeping an 8-pixel gap
+  from the slider hit area. Readouts use their text's natural width and retain
+  the same right inset. Long expressions scroll within the field.
   Double-clicking a tool setting or property label restores its shared default.
   Adjacent Tool Settings and Properties controls have a 2-pixel gap below that
   hit area.
@@ -44,7 +43,7 @@ Every host shares the same numeric policy and editable values.
   panel background and text. Settings keep larger targets, accent fill and a
   visible thumb. Their values/editors use standard Adwaita input sizing (34px
   high, 9px horizontal padding) on GTK/web; Android keeps 48dp targets with 12dp
-  inset. Text editing uses a rounded field; GTK panel editors reserve their full
+  inset. Text editing uses a rounded field; panel editors reserve their full
   width while editing, and other fields size to the value. Descriptions remain
   wrapped and can increase row height.
   Panel labels have a 6-pixel left inset matching the value's right inset;

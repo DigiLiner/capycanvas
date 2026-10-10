@@ -63,16 +63,17 @@ struct NumberControl: View {
                 ZStack {
                     Text(label).lineLimit(1).truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading).frame(height: 20)
-                        .padding(.leading, 6).padding(.trailing, 72)
+                        .padding(.leading, 6).padding(.trailing, 76)
                         .modifier(NumberControlMeasurement(id: key + ":label"))
                         .onTapGesture(count: 2, perform: resetValue)
                         .frame(maxHeight: .infinity, alignment: .top)
-                    sliderTrack.padding(.leading, 36).padding(.trailing, 72)
+                    sliderTrack.padding(.leading, 36).padding(.trailing, 76)
                         .frame(maxHeight: .infinity, alignment: .bottom)
                     Group {
                         if showsEntry || field.dirty { numericEntry }
                         else { valueButton }
-                    }.frame(width: 64).frame(maxWidth: .infinity, alignment: .trailing)
+                    }.frame(width: showsEntry || field.dirty ? 68 : nil)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
                 }.frame(height: 36).modifier(NumberControlMeasurement(id: key + ":header"))
             } else {
                 HStack(spacing: 6) {
@@ -133,8 +134,8 @@ struct NumberControl: View {
     private var valueReadout: some View {
         Button { showsEntry = true } label: {
             Text(formatted[valueOrigin == nil ? "text" : "scrub_text"].string).monospacedDigit().lineLimit(1)
-                .frame(maxWidth: compactPanel || inline || valueOnly || toolbar != nil ? .infinity : nil, alignment: valueOnly ? .center : .trailing)
-                .padding(.horizontal, 6).frame(height: compactPanel ? 34 : 24)
+                .frame(maxWidth: inline || valueOnly || toolbar != nil ? .infinity : nil, alignment: valueOnly ? .center : .trailing)
+                .padding(.horizontal, 6).frame(height: 24)
         }.buttonStyle(EditorControlButtonStyle()).opacity(enabled ? 1 : 0.36)
             // An asynchronous rejection can arrive after text entry closes.
             // Keep compact errors visible without expanding the layer header.
@@ -190,8 +191,8 @@ struct NumberControl: View {
             color: palette["text"], identifier: "number-entry-" + key,
             submit: finish, cancel: cancel, step: step)
             .focusedValue(\.editorTextCommit, { _ = commit() })
-            .frame(width: valueOnly || inline || toolbar != nil ? nil : compactPanel ? 52 : slider ? 80 : entryWidth)
-            .padding(.horizontal, 6).frame(height: compactPanel ? 34 : valueOnly || slider ? 24 : 32)
+            .frame(width: valueOnly || inline || toolbar != nil ? nil : compactPanel ? 56 : slider ? 80 : entryWidth)
+            .padding(.horizontal, 6).frame(height: valueOnly || slider ? 24 : 32)
             .background(palette["input"], in: SquircleShape.control)
             .modifier(NumberControlMeasurement(id: key + ":entry"))
             .accessibilityHint(field.error ?? "")

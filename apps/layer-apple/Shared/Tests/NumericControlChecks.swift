@@ -262,12 +262,26 @@ extension XCTestCase {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 
-    @MainActor func checkNumericToolControls(in app: XCUIApplication) {
-        capturePaintEditor(in: app)
+    @MainActor func checkNumericToolControls(in app: XCUIApplication, theme: String) {
+        capturePaintEditor(in: app, theme: theme)
         let value = app.buttons["number-value-tool-size"]
         let entry = app.textFields["number-entry-tool-size"]
+        let track = app.descendants(matching: .any)["number-track-tool-size"].firstMatch
+        XCTAssertTrue(track.waitForExistence(timeout: 5))
+        #if os(macOS)
+        XCTAssertEqual(value.frame.height, 24, accuracy: 1)
+        XCTAssertEqual(track.frame.height, 16, accuracy: 1)
+        XCTAssertEqual(value.frame.maxY, track.frame.maxY, accuracy: 1)
+        XCTAssertEqual(value.frame.maxX - track.frame.maxX, 76, accuracy: 1)
+        let readoutRight = value.frame.maxX
+        #endif
         workspaceActivate(value)
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        XCTAssertTrue(entry.isHittable)
+        #if os(macOS)
+        XCTAssertEqual(entry.frame.width, 56, accuracy: 1)
+        XCTAssertEqual(entry.frame.maxX + 6, readoutRight, accuracy: 1)
+        #endif
         entry.typeText("20 + 20\n")
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", "40"), evaluatedWith: value)
         waitForExpectations(timeout: 5)
@@ -278,7 +292,7 @@ extension XCTestCase {
         XCTAssertTrue(preset.isSelected, "Tool Settings and Brush size must reflect the same accepted Rust edit")
         workspaceActivate(app.buttons["panel-tab-tool_settings"])
         workspaceActivate(value); entry.typeText("40.5\n")
-        expectation(for: NSPredicate { _, _ in (value.value as? String)?.hasPrefix("40") == false }, evaluatedWith: value)
+        expectation(for: NSPredicate(format: "value == %@", "40.5 px"), evaluatedWith: value)
         waitForExpectations(timeout: 5)
         let accepted = value.value as? String
         workspaceActivate(value)
@@ -310,6 +324,15 @@ extension XCTestCase {
         waitForExpectations(timeout: 5)
         XCTAssertFalse(error.exists, "A corrected expression must clear local feedback")
         #endif
+        workspaceActivate(value)
+        entry.typeText("1200.5\n")
+        expectation(for: NSPredicate(format: "value == %@", "1200.5 px"), evaluatedWith: value)
+        waitForExpectations(timeout: 5)
+        let start = value.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -8)),
+            withVelocity: .slow, thenHoldForDuration: 0.1)
+        expectation(for: NSPredicate(format: "value == %@", "1203 px"), evaluatedWith: value)
+        waitForExpectations(timeout: 5)
         let remembered = value.value as? String
         workspaceActivate(app.buttons["tool-group-1"])
         workspaceActivate(app.buttons["brush-7"])

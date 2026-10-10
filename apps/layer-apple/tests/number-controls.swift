@@ -33,7 +33,7 @@ import SwiftUI
                 ("Brush opacity", store.catalog["opacity"], 0.5, true),
                 ("Brush opacity", store.catalog["opacity"], 1, true),
                 ("Brush size", store.catalog["brush_size"], 24, true),
-                ("Long brush diameter setting label", store.catalog["brush_size"], 2048, true),
+                ("Long brush diameter setting label", store.catalog["brush_size"], 1200.5, true),
                 (spin["label"].string, spin["numeric"], 0, true),
                 (spin["label"].string, spin["numeric"], 12, true),
                 (spin["label"].string, spin["numeric"], 32, true),
@@ -93,10 +93,16 @@ import SwiftUI
                         let root = geometry.frames[key + ":root"]!, track = geometry.frames[key + ":track"]!
                         let value = geometry.frames[key + ":value"]!
                         precondition(abs(root.height - 36) < 0.5 && abs(track.height - 16) < 0.5)
-                        precondition(abs(track.minX - root.minX - 36) < 0.5 && abs(root.maxX - track.maxX - 72) < 0.5)
-                        precondition(abs(value.width - 64) < 0.5 && abs(value.height - 34) < 0.5 && value.minX - track.maxX >= 7.5)
+                        precondition(abs(track.minX - root.minX - 36) < 0.5 && abs(root.maxX - track.maxX - 76) < 0.5)
+                        precondition(value.width > 12 && abs(value.height - 24) < 0.5)
+                        precondition(abs(value.maxX - root.maxX) < 0.5 && abs(value.maxY - root.maxY) < 0.5)
+                        precondition(abs(track.maxY - root.maxY) < 0.5)
                         precondition(geometry.frames[key + ":minus"] == nil && geometry.frames[key + ":plus"] == nil)
                     }
+                }
+                for column in widths.indices {
+                    precondition(geometry.frames["\(column)-2:value"]!.width > geometry.frames["\(column)-0:value"]!.width,
+                        "Readouts must reserve the complete shaped number rather than a fixed value box")
                 }
                 precondition(store.failure == nil, store.failure ?? "")
                 print("Captured 30 numeric controls: \(name)")
@@ -111,6 +117,17 @@ import SwiftUI
         }
         try await store.apply(["type": "invoke", "command": "auto_select"])
         let diameter = store.state["brush"]["diameter"].number
+        let size = store.catalog["brush_size"]
+        let scrub = try store.resolveNumber(size, value: 1200, operation: ["type": "scrub", "origin": 1200, "pixels": 2])
+        precondition(scrub["value"].number == 1201 && scrub["scrub_text"].string == "1201 px")
+        let settled = try store.resolveNumber(size, value: scrub["value"].number, operation: ["type": "format"])
+        precondition(settled["scrub_text"].string == "1201 px")
+        let operations: [[String: Any]] = [["type": "format"], ["type": "expression", "text": "1200.5 px"]]
+        for operation in operations {
+            let fractional = try store.resolveNumber(size, value: 1200.5, operation: operation)
+            precondition(fractional["value"].number == 1200.5 && fractional["text"].string == "1200.5 px"
+                && fractional["edit"].string == "1200.5")
+        }
         func setting() -> JSON { store.state["tool_settings"].array.first { $0["id"].string == "gap_closing" } ?? JSON() }
         precondition(!setting().isNull, "Auto select must expose Close gaps")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 226, height: 700),

@@ -205,14 +205,32 @@ function Property-Row([string]$Key,[string]$Case){
     $field=Control ('number-root-property-'+$Key) -Within $panel -Arranged
     $entry=Control ('property-'+$Key) -Within $field -Arranged
     $track=Control ('property-'+$Key+'-slider') -Within $field -Arranged
+    $entry.SetFocus();Wait-Until {$entry.Current.HasKeyboardFocus} 'Property editor did not receive focus for geometry'
+    Start-Sleep -Milliseconds 100
     $bounds=@{panel=$panel.Current.BoundingRectangle;caption=$caption.Current.BoundingRectangle;field=$field.Current.BoundingRectangle;entry=$entry.Current.BoundingRectangle;track=$track.Current.BoundingRectangle}
     @{case=$Case;key=$Key;label=$property.label;bounds=$bounds;value=$property.value;dpi=[CapyRowPointer]::GetDpiForWindow($drawingWindow);identities=@{entry=($entry.GetRuntimeId() -join ':');track=($track.GetRuntimeId() -join ':')}}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run ($Case+'-geometry.json'))
-    $outer=$bounds.panel;$outer.Inflate(1,1);$inner=$bounds.field;$inner.Inflate(1,1)
+    $outer=[Windows.Rect]::new($bounds.panel.X-1,$bounds.panel.Y-1,$bounds.panel.Width+2,$bounds.panel.Height+2);$inner=[Windows.Rect]::new($bounds.field.X-1,$bounds.field.Y-1,$bounds.field.Width+2,$bounds.field.Height+2)
     if(!$outer.Contains($bounds.caption) -or !$outer.Contains($bounds.field) -or !$inner.Contains($bounds.entry) -or !$inner.Contains($bounds.track)){throw "Property controls are outside their visible panel: $Key"}
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
-    if([Math]::Abs($bounds.field.Height-36*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Width-64*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Height-34*$scale) -gt 1){throw "Compact property row or value dimensions differ: $Key"}
-    if([Math]::Abs($bounds.track.Height-16*$scale) -gt 1 -or $bounds.track.Left-$bounds.field.Left -lt 24*$scale -or $bounds.entry.Left-$bounds.track.Right -lt 4*$scale -or $bounds.track.Width -lt 80*$scale){throw "Compact property slider dimensions differ: $Key"}
+    if([Math]::Abs($bounds.field.Height-36*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Width-68*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Height-24*$scale) -gt 1){throw "Compact property row or value dimensions differ: $Key"}
+    Capture ($Case+'-editing') -Composed
+    $origin=$bounds.caption.Left-6*$scale
+    if([Math]::Abs($bounds.track.Height-16*$scale) -gt 1 -or [Math]::Abs($bounds.track.Left-$origin-36*$scale) -gt 1 -or [Math]::Abs($bounds.field.Right-$bounds.track.Right-76*$scale) -gt (2*$scale+1) -or $bounds.track.Width -lt 80*$scale){throw "Compact property slider dimensions differ: $Key"}
+    $client=[CapyWindowCapture+Point]::new()
+    if(![CapyWindowCapture]::ClientToScreen($drawingWindow,[ref]$client)){throw 'Property capture origin unavailable'}
+    $bitmap=[Drawing.Bitmap]::new((Join-Path $run ($Case+'-editing.png')))
+    try{
+        $y=[int]($bounds.track.Top+$bounds.track.Height/2-$client.y)
+        $background=$bitmap.GetPixel([int]($bounds.track.Left-$client.x-4*$scale),$y).ToArgb()
+        $pixels=@([int]($bounds.track.Left-$client.x)..[int]($bounds.track.Right-$client.x)|Where-Object {$bitmap.GetPixel($_,$y).ToArgb() -ne $background})
+        if(!$pixels.Count){throw 'Visible property slider pixels were absent'}
+        $visibleLeft=$pixels[0]+$client.x;$visibleRight=$pixels[-1]+$client.x+1
+        @{origin=$origin;left=$visibleLeft;right=$visibleRight;editor_left=$bounds.entry.Left;editor_right=$bounds.entry.Right;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run ($Case+'-track-pixels.json'))
+        if([Math]::Abs($visibleLeft-$origin-36*$scale) -gt 1 -or [Math]::Abs($bounds.field.Right-$visibleRight-76*$scale) -gt 1 -or [Math]::Abs($bounds.entry.Left-$visibleRight-8*$scale) -gt 1){throw "Visible property track insets or editor gap differ: $Key"}
+    }finally{$bitmap.Dispose()}
+    if([Math]::Abs($bounds.entry.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($bounds.track.Bottom-$bounds.field.Bottom) -gt 1 -or [Math]::Abs($bounds.entry.Right-$bounds.field.Right) -gt 1){throw "Compact property bottom or right alignment differs: $Key"}
     if($bounds.caption.Right -gt $bounds.entry.Left+1 -or $bounds.track.Right -gt $bounds.entry.Left+1 -or $bounds.caption.Bottom -gt $bounds.track.Top+1){throw "Compact property caption, slider or value overlap: $Key"}
+    $track.SetFocus();Wait-Until {!$entry.Current.HasKeyboardFocus} 'Property editor did not return to readout'
     Capture $Case -Composed
 }
 function Property-Resize([int]$Width){
@@ -291,7 +309,45 @@ function Check-PropertyLabelReset {Pointer-Session {
         Wait-Until {(Property 'opacity').value.value -eq 1} 'Double label reset did not discard the invalid numeric draft'
         Invoke 'Undo' -Name;Wait-Until {(Property 'opacity').value.value -eq $before} 'Double label reset needed more than one Undo'
     }}
+function Check-PixelValueScrub {Pointer-Session {
+    if(!@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'}).Count){
+        & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
+        $menu=(Model).application_menus|Where-Object id -eq 'window'
+        $item=$menu.model.sections|ForEach-Object {$_}|Where-Object {$_.action.type -eq 'customize' -and $_.action.action.panel -eq 'tool_settings'}
+        (Control $item.label -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+        Wait-Until {@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'}).Count -gt 0} 'Tool panel did not open'
+    }
+    Select-Panel 'tool_settings'
+    Wait-Until {$null -ne (Find 'tool-setting-size')} 'Brush size field did not appear'
+    $value={((Model).state.tool_settings|Where-Object id -eq 'size').value}
+    foreach($case in @(@{origin=1200.5;motion=8},@{origin=1200.5;motion=-8},@{origin=999.5;motion=8},@{origin=999.5;motion=-8})){
+        Edit 'tool-setting-size' ($case.origin.ToString([Globalization.CultureInfo]::InvariantCulture))
+        (Control 'tool-setting-size-slider').SetFocus()
+        Wait-Until {(& $value) -eq $case.origin} 'Typed pixel decimal was not retained'
+        $native=(Control 'tool-setting-size').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        Wait-Until {$native.Current.Value -eq ($case.origin.ToString([Globalization.CultureInfo]::InvariantCulture)+' px')} 'Typed pixel decimal readout was not retained'
+        Capture ('pixel-'+$case.origin+'-'+$case.motion+'-typed') -Composed
+        $bounds=(Control 'tool-setting-size' -Arranged).Current.BoundingRectangle
+        $x=[int]($bounds.Right-12);$y=[int]($bounds.Top+$bounds.Height/2)
+        $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+        $expected=[Math]::Round($case.origin+$case.motion/4,1)
+        if($expected -gt 1000){$expected=[Math]::Floor($expected+.5)}
+        $text=if($expected -ge 1000 -and $expected -eq [Math]::Floor($expected)){$expected.ToString('F0',[Globalization.CultureInfo]::InvariantCulture)+' px'}else{$expected.ToString('F1',[Globalization.CultureInfo]::InvariantCulture)+' px'}
+        [CapyRowPointer]::Down('mouse',$x,$y);Start-Sleep -Milliseconds 60
+        [CapyRowPointer]::Move($x,[int]($y-$case.motion*$scale))
+        try{Wait-Until {(& $value) -eq $expected -and $native.Current.Value -eq $text} 'Pixel scrub precision or readout differed'}catch{throw "Pixel origin=$($case.origin), expected=$expected/$text, actual=$(& $value)/$($native.Current.Value), bounds=$bounds : $_"}
+        $after=(Control 'tool-setting-size').Current.BoundingRectangle
+        if([Math]::Abs($after.Right-$bounds.Right) -gt 1){throw 'Pixel suffix right edge moved during scrub'}
+        Capture ('pixel-'+$case.origin+'-'+$case.motion+'-scrub') -Composed
+        [CapyRowPointer]::Key(0x1B)
+        Wait-Until {(& $value) -eq $case.origin} 'Escape did not restore the typed pixel decimal while held'
+        [CapyRowPointer]::Up()
+        Wait-Until {(& $value) -eq $case.origin -and $native.Current.Value -eq ($case.origin.ToString([Globalization.CultureInfo]::InvariantCulture)+' px')} 'Pixel release changed the canceled typed decimal'
+        @{origin=$case.origin;motion=$case.motion;expected=$expected;readout=$text;right_before=$bounds.Right;right_after=$after.Right}|ConvertTo-Json|Add-Content (Join-Path $run 'pixel-scrub.jsonl')
+    }
+}}
 function Check-PropertyLayout {
+    Check-PixelValueScrub
     Property-Resize 960;Select-Panel 'properties'
     Property-Row 'opacity' 'opacity-compact-en'
     Check-PropertyValueScrub

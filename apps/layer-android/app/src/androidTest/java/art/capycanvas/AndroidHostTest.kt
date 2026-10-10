@@ -3397,14 +3397,16 @@ class AndroidHostTest {
         compose.onNodeWithTag(capyTag()).assertWidthIsEqualTo(36.dp).assertHeightIsEqualTo(36.dp)
         compose.onNodeWithTag("tab-name-tool_settings", useUnmergedTree = true).assertTextEquals("Tool")
         compose.onNodeWithTag("tab-sizes").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("number-value-Brush size").fetchSemanticsNodes().isNotEmpty() }
         val valueNode = compose.onAllNodesWithTag("number-value-Brush size").onFirst()
-        valueNode.assertHeightIsEqualTo(36.dp)
+        valueNode.assertHeightIsEqualTo(24.dp)
         val numericSlider = compose.onAllNodesWithTag("number-slider-Brush size").onFirst()
         numericSlider.assertHeightIsEqualTo(16.dp)
         val rangeBounds = numericSlider.fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
         val valueBounds = valueNode.fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
         val density = compose.activity.resources.displayMetrics.density
-        assertTrue(valueBounds.width <= 64f * density + 1f)
+        assertEquals(rangeBounds.bottom, valueBounds.bottom, 1f)
+        assertEquals(rangeBounds.right + 70f * density, valueBounds.right, 1f)
         assertTrue(valueBounds.left - rangeBounds.right >= 8f * density - 1f)
         numericSlider.performTouchInput { swipe(center, centerRight, 300) }
         waitState { it.getJSONObject("brush").getDouble("diameter") > 1000.0 }
@@ -3412,7 +3414,7 @@ class AndroidHostTest {
         waitState { it.getJSONObject("brush").getDouble("diameter") < 2.0 }
         val brush = state().getJSONObject("brush").getInt("preset")
         compose.onNodeWithTag("brush-preview-$brush", useUnmergedTree = true).assertHeightIsEqualTo(40.dp)
-        compose.onAllNodesWithContentDescription("Move panel group").onFirst().assertWidthIsEqualTo(20.dp)
+        compose.onAllNodesWithContentDescription(host.catalog.getJSONObject("document_delivery_copy").getString("move_group")).onFirst().assertWidthIsEqualTo(20.dp)
         compose.onNodeWithTag("tab-brushes").assertHeightIsEqualTo(36.dp)
         compose.runOnIdle { host.invoke("fit_canvas") }
         capture("25-editor-default-light")
@@ -3477,20 +3479,65 @@ class AndroidHostTest {
                     instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ESCAPE)
                     waitState { it.getJSONObject("brush").getDouble("diameter") == 47.0 }
                     send(MotionEvent.ACTION_UP, 20f)
+                    val beforeSlider = compose.onAllNodesWithTag("number-slider-Brush size").onFirst().fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
+                    val beforeValue = valueNode().fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
                     valueNode().performClick()
                     val field = compose.onAllNodesWithTag("number-Brush size").onFirst()
                     field.performTextReplacement("12345678901234567890 +")
                     val editor = field.fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
                     val slider = compose.onAllNodesWithTag("number-slider-Brush size").onFirst().fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
-                    assertTrue(editor.width <= 64f * density + 1f)
+                    assertEquals(68f * density, editor.width, 1f)
+                    assertEquals(24f * density, editor.height, 1f)
+                    assertEquals(slider.bottom, editor.bottom, 1f)
+                    assertEquals(beforeSlider, slider)
+                    assertEquals(beforeValue.right + 6f * density, editor.right, 1f)
+                    assertEquals(slider.right + 76f * density, editor.right, 1f)
+                    File(File(compose.activity.getExternalFilesDir(null), "validation").apply { mkdirs() }, "number-bounds-$theme-$tool.json").writeText(obj("density" to density, "readout" to beforeValue.toString(), "slider_before" to beforeSlider.toString(), "slider_editing" to slider.toString(), "editor" to editor.toString()).toString())
                     assertTrue(editor.left - slider.right >= 8f * density - 1f)
                     field.performTextReplacement("42.5"); field.performImeAction()
                     waitState { it.getJSONObject("brush").getDouble("diameter") == 42.5 }
                     assertEquals(42.5, diameter(), 0.0)
-                    val valueTop = valueNode().fetchSemanticsNode().boundsInRoot.top
-                    val title = compose.onNode(hasText("Brush size") and SemanticsMatcher("numeric row label") { kotlin.math.abs(it.boundsInRoot.top - valueTop) < 4f * density })
+                    val rowBottom = valueNode().fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot().bottom
+                    val title = compose.onNode(hasText("Brush size") and SemanticsMatcher("numeric row label") { kotlin.math.abs(it.boundsInRoot.top - (rowBottom - 36f * density)) < 4f * density })
                     title.performTouchInput { doubleClick(androidx.compose.ui.geometry.Offset(24f * density, center.y)) }
                     waitState { it.getJSONObject("brush").getDouble("diameter") == defaultSize }
+                    valueNode().performClick()
+                    field.performTextReplacement("1200.5"); field.performImeAction()
+                    waitState { diameter() == 1200.5 }
+                    valueNode().assertTextEquals("1200.5 px")
+                    val large = numericContact(valueNode(), tool)
+                    try {
+                        large(MotionEvent.ACTION_DOWN, 0f); large(MotionEvent.ACTION_MOVE, 20f)
+                        waitState { diameter() == 1206.0 }
+                        valueNode().assertTextEquals("1206 px")
+                        large(MotionEvent.ACTION_MOVE, 4f)
+                        waitState { diameter() == 1202.0 }
+                        valueNode().assertTextEquals("1202 px")
+                        large(MotionEvent.ACTION_CANCEL, 4f)
+                        waitState { diameter() == 1200.5 }
+                        valueNode().assertTextEquals("1200.5 px")
+                        large(MotionEvent.ACTION_DOWN, 0f); large(MotionEvent.ACTION_MOVE, 20f)
+                        waitState { diameter() == 1206.0 }
+                        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ESCAPE)
+                        waitState { diameter() == 1200.5 }
+                        valueNode().assertTextEquals("1200.5 px")
+                        large(MotionEvent.ACTION_UP, 20f)
+                        assertEquals(1200.5, diameter(), 0.0)
+                        valueNode().assertTextEquals("1200.5 px")
+                    } finally { large(MotionEvent.ACTION_CANCEL, 0f) }
+                    action(obj("type" to "set_brush_size", "value" to 999.5))
+                    val crossing = numericContact(valueNode(), tool)
+                    try {
+                        crossing(MotionEvent.ACTION_DOWN, 0f); crossing(MotionEvent.ACTION_MOVE, 20f)
+                        waitState { diameter() == 1005.0 }
+                        valueNode().assertTextEquals("1005 px")
+                        crossing(MotionEvent.ACTION_MOVE, 0f)
+                        waitState { diameter() == 999.5 }
+                        valueNode().assertTextEquals("999.5 px")
+                        crossing(MotionEvent.ACTION_MOVE, 20f); crossing(MotionEvent.ACTION_UP, 20f)
+                        waitState { diameter() == 1005.0 }
+                        valueNode().assertTextEquals("1005 px")
+                    } finally { crossing(MotionEvent.ACTION_CANCEL, 0f) }
                 } finally { send(MotionEvent.ACTION_CANCEL, 0f) }
             }
         }

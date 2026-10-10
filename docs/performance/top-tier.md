@@ -129,7 +129,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Drawer open and close | 120 | | |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
-| Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK workstation diagnostic only; reference tablet unmeasured | [GTK panel slider diagnostic](#gtk-panel-slider-diagnostic), 2026-10-10 |
+| Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
 | Canvas action bar show, hide and move | 120 | **Not met.** UI frame p50/p95: 63.2/90.0 ms moving the bar, 23.0/34.6 ms show and hide (2048 × 1536) | Canvas-bar `ui-bar-move` and `ui-bar-show-hide`, 2026-09-27 |
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
 | List scrolling: layers, brushes, filters | 120 | | |
@@ -216,6 +216,30 @@ input latency. Records are in `artifacts/panel-sliders/port-web-rebase-native/hu
 Android functional checks use the available Huion tablet; the low, mid and top
 reference devices were reserved by other sessions. Apple native hardware and
 Windows hardware presentation were not measured.
+
+## Web numeric panel diagnostic
+
+Measured 2026-10-10 on the same NVIDIA workstation with Chrome 154.0.8037.57,
+the optimized `dev-perf` Wasm build based on `87954fabf` with the numeric panel
+port, and actual Adwaita Sans glyph fonts. The private Mutter display is
+1600 × 1000 at a requested 120 Hz; the drawing is 2048 × 1536.
+After a priming gesture, each theme runs three six-second native mouse scrubs
+from 1200 px through sixteen 240-pixel legs at requested 4 ms input intervals.
+Only animation callbacks where the numeric value changed are counted.
+
+| Theme | Changed-value callbacks/s | Callback interval p99 |
+| --- | --- | --- |
+| Light | 118.94–119.71 | 8.5–9.2 ms |
+| Dark | 119.35–119.60 | 8.4–8.5 ms |
+
+These are browser callback diagnostics, without compositor presentation
+feedback. They do not qualify a reference-tablet target. Raw callbacks, input
+geometry and actual font reports are in
+`artifacts/platform-number-controls/web/numeric-final/`.
+Android numeric input and geometry pass on the MovinkPad 11, but sustained
+numeric presentation is unmeasured. Apple numeric UI builds and hardware
+presentation are unavailable on this Linux host; Windows VM checks use WARP
+and do not measure hardware presentation.
 
 ## GTK selected swatch diagnostic
 

@@ -331,20 +331,24 @@ final class EditorLaunchTests: XCTestCase {
         checkEditorControlLayout(in: app)
     }
 
-    @MainActor func testNumericToolControls() throws {
+    @MainActor func testNumericToolControls() throws { try runNumericToolControls(theme: "light") }
+
+    @MainActor func testNumericToolControlsDark() throws { try runNumericToolControls(theme: "dark") }
+
+    @MainActor private func runNumericToolControls(theme: String) throws {
         let app = ignoringSavedWindows(editorCaptureApplication())
         #if os(macOS)
-        app.launchArguments += ["-AppleInterfaceStyle", "Light"]
+        app.launchArguments += ["-AppleInterfaceStyle", theme == "dark" ? "Dark" : "Light"]
         #endif
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"customize","action":{"type":"set_control_visible","panel":"sizes","control":"brush_size","visible":true}}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = "[{\"type\":\"set_theme\",\"theme\":\"\(theme)\"},{\"type\":\"customize\",\"action\":{\"type\":\"set_control_visible\",\"panel\":\"sizes\",\"control\":\"brush_size\",\"visible\":true}}]"
         app.launch()
-        checkNumericToolControls(in: app)
+        checkNumericToolControls(in: app, theme: theme)
         #if os(macOS)
         let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
-        shot.name = "mac-tool-controls"
+        shot.name = "mac-tool-controls-" + theme
         #else
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "ipad-tool-controls"
+        shot.name = "ipad-tool-controls-" + theme
         #endif
         shot.lifetime = .keepAlways; add(shot)
     }

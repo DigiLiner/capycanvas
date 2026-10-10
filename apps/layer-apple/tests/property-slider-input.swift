@@ -134,8 +134,30 @@ import QuartzCore
                     continue
                 }
                 if brushControl {
+                    if mode == "brush-size" {
+                        try await action(["type": "set_brush_size", "value": 1200.5])
+                        guard let readout = geometry.frames[identifier + ":value"] else {
+                            throw HostFailure(message: "Missing mounted brush readout")
+                        }
+                        let origin = CGPoint(x: readout.midX, y: readout.midY)
+                        let moved = CGPoint(x: origin.x, y: origin.y - 8)
+                        try event(.leftMouseDown, at: origin, marker: host, number: 1); try await drain()
+                        try event(.leftMouseDragged, at: moved, marker: host, number: 1); try await drain()
+                        try require(value() == 1203, "A mounted large-pixel scrub must publish an integer preview")
+                        try NativeWorkspaceInputFixture.key("\u{1B}", code: 53, window: window); try await drain()
+                        try require(value() == 1200.5, "Escape must restore the held brush scrub's fractional origin")
+                        try event(.leftMouseUp, at: moved, marker: host, number: 1); try await drain()
+                        try require(value() == 1200.5, "Release after cancellation must preserve the original brush size")
+                    }
                     let text = mode == "brush-size" ? "37 px" : "37 %"
                     let (field, delegate) = try await draft(identifier, text)
+                    guard let entry = geometry.frames[identifier + ":entry"],
+                        let root = geometry.frames[identifier + ":root"] else {
+                        throw HostFailure(message: "Missing mounted brush entry geometry")
+                    }
+                    try require(abs(entry.width - 68) < 0.5 && abs(entry.height - 24) < 0.5
+                        && abs(entry.maxX - root.maxX) < 0.5 && abs(entry.maxY - root.maxY) < 0.5,
+                        "Mounted panel entries must occupy 68 by 24 points at the bottom right")
                     try await action(["type": "select_brush", "id": 2])
                     let replacement = value()
                     try await commit(field, delegate)

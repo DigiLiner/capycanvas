@@ -165,6 +165,13 @@ node --test apps/layer-web/{run,package,frame,pointer,workspace-client,canvas-ba
 node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
+`workspace-motion.sh web --numeric-controls` checks panel slider and editor
+geometry, complete readouts and unit alignment, large pixel scrubbing, typed
+fractions and cancellation in both themes. Mouse and touch use the private
+Wayland display; pen and keyboard use trusted browser input. It verifies the
+actual Adwaita Sans glyph fonts and records three sustained value scrubs per
+theme as browser callback diagnostics.
+
 `test.mjs --gpu-failure-lifecycle` injects an out-of-memory event on the actual
 canvas device and checks expanded details, copying and restarting in both themes.
 A late event from the retired device must leave the replacement canvas usable.

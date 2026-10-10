@@ -29,6 +29,7 @@ import {checkSdrColor,checkColorEdits,checkSourceImports,checkSourceEdits,checkE
 import {checkHdr} from "./hdr.test.mjs";
 import {checkProof} from "./proof.test.mjs";
 import {checkPackageView} from "./package-view.test.mjs";
+import {checkNumericControls} from './numeric-controls.test.mjs';
 import {checkColorPanel} from "./color-panel.test.mjs";
 import {checkColorEditor} from "./color-editor.test.mjs";
 import {checkDragPickup} from "./drag-pickup.test.mjs";
@@ -319,6 +320,7 @@ try {
       const {windowId} = await call("Browser.getWindowForTarget",{targetId},null);
       await checkFullscreen({call,evaluate,settle,windowId});
     }, checkErrors],
+    [process.argv.includes("--numeric-controls"), () => checkNumericControls({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--color-panel"), () => checkColorPanel({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--color-editor"), () => checkColorEditor({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--filter-drawer"), () => checkFilterDrawer({call,evaluate,settle}), checkErrors],

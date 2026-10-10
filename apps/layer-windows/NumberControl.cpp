@@ -42,13 +42,13 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     auto showText=[local,spec,presented](wchar_t const* field){return presented?presented():str(local->resolve(spec,local->value,O({{L"type",S(L"format")}})),field);};
     bool ranged=str(spec,L"kind")==L"slider",preference=presentation.preference;
     bool panel=ranged&&!preference&&!valueOnly&&!inlineTrack;
-    double valueHeight=preference||panel?34.:(ranged?24.:32.),stepSize=panel?16.:ranged&&!preference?24.:32.;
+    double valueHeight=preference?34.:(ranged?24.:32.),stepSize=panel?16.:ranged&&!preference?24.:32.;
     StackPanel root;root.Spacing(0);
     auto numberId=identifier.empty()?title:identifier;
     AutomationProperties::SetAutomationId(root,L"number-root-"+numberId);
     AutomationProperties::SetName(root,title);
     Grid header;header.UseLayoutRounding(false);header.ColumnSpacing(6);header.MinHeight(valueHeight);ColumnDefinition left;left.Width({1,GridUnitType::Star});header.ColumnDefinitions().Append(left);
-    ColumnDefinition right;right.Width({panel?72.:1.,panel?GridUnitType::Pixel:GridUnitType::Auto});header.ColumnDefinitions().Append(right);
+    ColumnDefinition right;right.Width({panel?76.:1.,panel?GridUnitType::Pixel:GridUnitType::Auto});header.ColumnDefinitions().Append(right);
     if(panel){header.Height(36);header.MinHeight(36);}
     auto text=label(data,title);text.Margin(Thickness{preference?0.:6.,0,0,0});text.VerticalAlignment(VerticalAlignment::Center);
     text.LineHeight(20);text.TextTrimming(TextTrimming::CharacterEllipsis);
@@ -62,8 +62,8 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         labels.Children().Append(detail);
     }
     header.Children().Append(labels);
-    TextBox entry;entry.UseLayoutRounding(false);entry.Width(panel?64:ranged?72:60);entry.MinWidth(0);entry.MinHeight(0);entry.Height(valueHeight);entry.Padding(Thickness{preference?9.:6.,(valueHeight-20)/2,preference?9.:6.,(valueHeight-20)/2});
-    entry.VerticalAlignment(VerticalAlignment::Center);entry.VerticalContentAlignment(VerticalAlignment::Center);
+    TextBox entry;entry.UseLayoutRounding(false);entry.Width(panel?68:ranged?72:60);entry.MinWidth(0);entry.MinHeight(0);entry.Height(valueHeight);entry.Padding(Thickness{preference?9.:6.,(valueHeight-20)/2,preference?9.:6.,(valueHeight-20)/2});
+    entry.VerticalAlignment(panel?VerticalAlignment::Bottom:VerticalAlignment::Center);entry.VerticalContentAlignment(VerticalAlignment::Center);
     inheritLanguage(entry,data);entry.FontSize(data->textSize());entry.FontFamily(FontFamily(L"Segoe UI"));entry.Foreground(data->brush(L"text"));
     entry.Background(data->brush(L"input"));entry.BorderThickness(Thickness{0});entry.CornerRadius({6,6,6,6});
     entry.Resources().Insert(box_value(L"TextControlBackgroundDisabled"),clear());
@@ -74,6 +74,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
     });
     entry.TextAlignment(TextAlignment::Right);Grid::SetColumn(entry,1);
     weak_ref<TextBlock> readout;
+    weak_ref<Grid> panelValueBox;
     ContentControl valueSurface{nullptr};
     if(ranged&&!valueOnly){
         // Read mode has the same text extent as the shared plain value. Keep
@@ -87,9 +88,10 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         Grid valueBox;valueBox.UseLayoutRounding(false);Grid::SetColumn(valueBox,1);Grid::SetColumn(entry,0);
         valueBox.Children().Append(entry);
         if(panel){
-            valueBox.Width(80);valueBox.HorizontalAlignment(HorizontalAlignment::Right);entry.Width(80);
+            valueBox.Width(68);valueBox.HorizontalAlignment(HorizontalAlignment::Right);valueBox.VerticalAlignment(VerticalAlignment::Bottom);
+            entry.HorizontalAlignment(HorizontalAlignment::Right);panelValueBox=make_weak(valueBox);
             Border hit;hit.Background(clear());hit.ManipulationMode(ManipulationModes::None);hit.Child(display);
-            valueSurface=ContentControl();valueSurface.Content(hit);valueSurface.Padding({0});valueSurface.Height(34);
+            valueSurface=ContentControl();valueSurface.Content(hit);valueSurface.Padding({0});valueSurface.Height(valueHeight);
             valueSurface.ManipulationMode(ManipulationModes::None);
             valueSurface.IsTabStop(true);valueSurface.HorizontalContentAlignment(HorizontalAlignment::Stretch);valueSurface.VerticalContentAlignment(VerticalAlignment::Stretch);
             AutomationProperties::SetAccessibilityView(valueSurface,Automation::Peers::AccessibilityView::Raw);
@@ -125,25 +127,26 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         local->measuredText=value;local->measuredWidth=double(measure.DesiredSize().Width);return local->measuredWidth;
     };
     auto surface=make_weak(valueSurface);
-    auto setText=[data,local,measureText,readout,surface,hiddenText,ranged,valueOnly,inlineTrack,preference,panel,weak=make_weak(entry)](hstring const& value){
+    auto setText=[data,local,measureText,readout,panelValueBox,surface,hiddenText,ranged,valueOnly,inlineTrack,preference,panel,weak=make_weak(entry)](hstring const& value){
         bool previous=std::exchange(local->formatting,true);
         struct Reset{bool& value;bool previous;~Reset(){value=previous;}} reset{local->formatting,previous};
         if(auto control=weak.get()){
             if(control.Text()!=value)control.Text(value);
             if(auto display=readout.get()){
                 bool reading=control.FocusState()==FocusState::Unfocused&&!local->editing;
+                if(auto box=panelValueBox.get())box.Width(reading?measureText(value)+12:68);
                 if(display.Text()!=value)display.Text(value);
                 display.Visibility(reading?Visibility::Visible:Visibility::Collapsed);
                 if(auto target=surface.get())target.Visibility(reading?Visibility::Visible:Visibility::Collapsed);
                 control.Foreground(reading?hiddenText:data->brush(L"text"));
             }
             if(ranged&&!valueOnly&&!inlineTrack){
-                auto width=panel?64.:control.FocusState()==FocusState::Unfocused?measureText(value)+(preference?18:12):92.;
+                auto width=panel?68.:control.FocusState()==FocusState::Unfocused?measureText(value)+(preference?18:12):92.;
                 if(std::abs(control.Width()-width)>.01)control.Width(width);
             }
         }
     };
-    entry.TextChanging([data,local,readout,surface,inlineTrack,panel](Windows::Foundation::IInspectable const& sender,auto&&){
+    entry.TextChanging([data,local,readout,panelValueBox,surface,inlineTrack,panel](Windows::Foundation::IInspectable const& sender,auto&&){
         // Covers typing, paste, accessibility and IME edits, including after Enter.
         if(data->updating||local->formatting)return;
         local->editing=true;
@@ -151,8 +154,9 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         // immediately and preserve it when focus subsequently enters.
         if(auto display=readout.get()){
             display.Visibility(Visibility::Collapsed);auto control=sender.as<TextBox>();
+            if(auto box=panelValueBox.get())box.Width(68);
             if(auto target=surface.get())target.Visibility(Visibility::Collapsed);
-            control.Foreground(data->brush(L"text"));if(!inlineTrack)control.Width(panel?80:92);
+            control.Foreground(data->brush(L"text"));if(!inlineTrack)control.Width(panel?68:92);
         }
     });
     slider.Minimum(0);slider.Maximum(1);slider.StepFrequency(0.001);slider.MinHeight(0);slider.Height(stepSize);
@@ -347,7 +351,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
         root.Children().Append(entry);return root;
     }
     if(panel){
-        slider.Margin({36,0,72,0});slider.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(slider,2);
+        slider.Margin({36,0,76,0});slider.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumnSpan(slider,2);
         header.Children().Append(slider);root.Children().Append(header);return root;
     }
     StackPanel spin;spin.Orientation(Orientation::Horizontal);spin.Spacing(0);
