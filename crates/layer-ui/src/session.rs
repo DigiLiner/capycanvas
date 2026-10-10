@@ -142,7 +142,7 @@ pub use renderer_lifecycle::ThumbnailRequests;
 pub use document_files::*;
 pub use effects::{
     GradientDestination, GradientEdit, GradientControls, AdjustmentChoice, EffectAction, FilterCategoryChoice, FilterPickerAction, FilterPickerState,
-    LayerPropertiesView, PropertyDisclosure, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
+    LayerPropertiesView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
 };
 pub use filter_loading::FilterLoadState;
 

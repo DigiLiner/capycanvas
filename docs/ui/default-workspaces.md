@@ -139,8 +139,15 @@ controls, list and action bar while retaining their widgets and scroll position.
 The footer and drawer bounds stay fixed; tapping again or pressing Escape
 returns to Layers. An outside canvas contact dismisses the drawer without painting.
 Adding a filter from this drawer opens its settings in the same body.
-The drawer prefers six layer rows, clamps to the available height, and scrolls
-the current body. Paint and Photo retain their ordinary Properties presentation.
+The drawer reserves six layer rows and grows to fit additional listed rows,
+up to 85% of the window height and the available space below its opener.
+Collapsed group children do not count. Controls, the action bar and the
+Properties footer stay outside the scrolling layer list. Row-count changes
+settle for 300 ms so repeated Add/Delete taps keep their targets; contacts,
+drags and page transitions defer resizing. Properties retains the current
+height, while a smaller window still clamps it to fit. GTK caches row metrics
+and keeps the virtual list and its asynchronous thumbnails. Paint and Photo
+retain their ordinary Properties presentation.
 
 ## Workspace behavior
 

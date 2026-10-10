@@ -606,6 +606,7 @@ impl ContentDrawer {
         };
         width = width.min(room.max(1.0));
         let height = heights.iter().copied().fold(TILE_SIZE, f32::max);
+        let height = if self.layer_properties.is_some() { height.min(viewport[1] * crate::LayerDrawerSizing::MAX_HEIGHT_FRACTION) } else { height };
         let horizontal_x = if options.is_some() { anchor.x + anchor.width - width } else { anchor.x };
         let (x, y, height) = match direction {
             Edge::Bottom => {

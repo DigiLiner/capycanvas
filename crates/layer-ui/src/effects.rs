@@ -412,8 +412,24 @@ pub struct PropertyDisclosure {
 }
 impl PropertyDisclosure {
     pub const HEIGHT: f32 = 48.;
-    pub fn drawer_height(fixed_height: f32, row_height: f32) -> f32 {
-        fixed_height + 6. * row_height + Self::HEIGHT + 1.
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LayerDrawerSizing {
+    height: f32,
+}
+impl LayerDrawerSizing {
+    pub const MAX_HEIGHT_FRACTION: f32 = 0.85;
+    pub fn height(self) -> f32 { self.height }
+    pub fn update(&mut self, measurement: crate::PanelScrollMeasurement, rows: usize, viewport_height: f32, properties: bool, settled: bool) -> bool {
+        let limit = viewport_height * Self::MAX_HEIGHT_FRACTION;
+        let height = if self.height > 0. && (properties || !settled) {
+            self.height.min(limit)
+        } else {
+            (measurement.fixed_height + rows.max(6) as f32 * measurement.unit_height + PropertyDisclosure::HEIGHT + 1.).min(limit)
+        };
+        if self.height == height { return false; }
+        self.height = height;
+        true
     }
 }
 pub(super) fn property_disclosure(doc: &Document, view: &LayerPropertiesView, l: &Localizer) -> PropertyDisclosure {

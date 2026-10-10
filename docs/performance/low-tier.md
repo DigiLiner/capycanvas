@@ -146,14 +146,14 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 60 | Current lifecycle binary unmeasured. Earlier Web checkpoint: group/tab placements 47.38/60.22 Hz; Navigator assertion failed | Web workspace diagnostic below; no tier qualification |
 | Panel or column resize | 60 | **Unqualified.** TCL default-canvas diagnostic: 25.01–58.23 UI Hz, maximum p99 gap 50.08 ms; base 24.99–58.22 Hz. Retained-model assertion fails on both | 2026-10-09 sidebar-width comparison against `ee4805dfe`; `artifacts/sidebar-widths/android-resize{,-base}-logcat.txt`; no reference-canvas qualification |
 | Pen pressure utility and curve drag | 60 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
-| Drawer open and close | 60 | | |
+| Drawer open and close | 60 | Unmeasured on the reference tablet; expanded GTK Sketch has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Grouped tool menus, drawer switching and tile drag | 60 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); functional checks do not qualify this tier |
 | Grouped Drawing drawer scrolling | 60 | **Met**, UI FrameMetrics 58.85–60.02 Hz, maximum p99 33.328 ms | [Grouped tool drawer scrolling](#grouped-tool-drawer-scrolling) below |
 | Colour wheel or picker drag | 60 | **Unqualified.** Committed-wheel diagnostic: mouse 48.24–51.16 UI Hz, touch 52.80–54.39; maximum p99 49.98 ms (2048 × 1536) | [Live paint icon diagnostic](#live-paint-icon-diagnostic) below |
 | Slider and value scrub: size, opacity, flow | 60 | Unmeasured on reference hardware; GTK/Web workstation diagnostics do not qualify this tier | [GTK](top-tier.md#gtk-panel-slider-diagnostic) and [Web](top-tier.md#web-numeric-panel-diagnostic), 2026-10-10 |
 | Canvas action bar show, hide and move | 60 | **Not met.** UI frame p50/p95: 32.9/41.7 ms moving the bar, 11.6/21.0 ms show and hide (2048 × 1536) | Canvas-bar `ui-bar-move` and `ui-bar-show-hide`, 2026-09-27 |
 | Tool Options or panel content change | 60 | **Not met.** UI frame p50/p95 25.4/35.3 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
-| List scrolling: layers, brushes, filters | 60 | | |
+| List scrolling: layers, brushes, filters | 60 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Workspace choices: horizontal scroll | 60 | Screen 59.42–59.82 presents/s, maximum p99 33.24 ms | Workspace switcher scrolling below; long-list fixture |
 | Workspace visibility checklist: vertical scroll | 60 | Screen 60.02 presents/s, maximum p99 17.03 ms | Workspace switcher scrolling below; long-list fixture |
 | Menu open and close | 60 | Application menu heading switching unmeasured on reference hardware | [Menu interaction](../ui/window-bar.md); functional checks do not qualify presented frame rate |

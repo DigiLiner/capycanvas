@@ -98,13 +98,13 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 90 | **Not met.** Floating panel-group drag frame p50/p95 13.4/15.5 ms | `cbfad9e5`, 2026-09-26 |
 | Panel or column resize | 90 | Tier workload unmeasured. Blank-canvas Debug divider diagnostic: 27.22–44.74 changing bounds/s, window-vsync p99 33.50–83.78 ms | [Divider resize diagnostic](#divider-resize-diagnostic), 2026-10-10; [GTK Color resize](top-tier.md#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 90 | Unmeasured on reference hardware | [Pen pressure measurement protocol](../ui/pen-pressure.md#validation); GTK desktop measurements do not qualify this tier |
-| Drawer open and close | 90 | | |
+| Drawer open and close | 90 | Unmeasured on the reference tablet; expanded GTK Sketch has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Grouped tool menus, drawer switching and tile drag | 90 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 90 | Huion: frame CPU p50 4.6–5.1 ms, p95 under 9.6 ms; XP-Pen swatch comparison below is diagnostic only. Huion wheel drags (FrameMetrics, release benchmark, one 5 s mouse and one touch drag each, 90 Hz panel): Edit Color dialog 79.4 / 87.4 fps presented, panel wheel 77.1 / 79.2 fps; not met | [Colour picker](../ui/color-picker.md); [swatch comparison](#selected-swatch-comparison), 2026-10-03; `AndroidWorkspacePerformanceTest#editColorWheelFrameTiming`, 2026-10-04 |
 | Slider and value scrub: size, opacity, flow | 90 | Numeric input and geometry verified on MovinkPad 11; moving presentations unmeasured. Workstation diagnostics do not qualify this tier | [GTK](top-tier.md#gtk-panel-slider-diagnostic) and [Web](top-tier.md#web-numeric-panel-diagnostic), 2026-10-10 |
 | Canvas action bar show, hide and move | 90 | **Not met.** UI frame p50: 22.8 ms show and hide, 34.8 ms moving the bar | `cbfad9e5`, 2026-09-26 |
 | Tool Options or panel content change | 90 | **Not met.** UI frame p50 21.4 ms | `cbfad9e5`, 2026-09-26 |
-| List scrolling: layers, brushes, filters | 90 | | |
+| List scrolling: layers, brushes, filters | 90 | Unmeasured on the reference tablet; GTK Sketch with 1,000 layers has a desktop diagnostic only | [GTK Sketch Layers diagnostic](top-tier.md#gtk-sketch-layers-diagnostic) |
 | Menu open and close | 90 | Application menu heading switching unmeasured on the tier canvas | [Menu interaction](../ui/window-bar.md); mouse and pen functional checks do not qualify presented frame rate |
 | G-Pen 1536 px stroke with a pending language change | 90 | **Not met.** 56.80 fresh updates/s (52.40–56.99), completion-gap p99 32.08–34.97 ms | Language-change diagnostic below; synthetic owner replay, no scanout qualification |
 

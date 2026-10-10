@@ -60,7 +60,13 @@ glib::wrapper! {
 }
 struct LayerInspector {
     root: gtk::Box,
-    preferred_height: Cell<f32>,
+    sizing: Cell<layer_ui::LayerDrawerSizing>,
+    measurements: Cell<Option<((i32, u32, i32), layer_ui::PanelScrollMeasurement)>>,
+    rows: Cell<usize>,
+    properties: Cell<bool>,
+    contact: Rc<Cell<bool>>,
+    settled: Rc<Cell<bool>>,
+    settle_timer: Rc<RefCell<Option<glib::SourceId>>>,
     layers: Rc<LayerPanel>,
     effects: Rc<EffectPanels>,
     stack: gtk::Stack,
@@ -77,6 +83,7 @@ impl LayerInspector {
         layers.bind(w);
         let effects = Rc::new(EffectPanels::with_filter_types(false));
         let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(true).transition_duration(160).build();
+        stack.connect_transition_running_notify(glib::clone!(#[weak] w, move |_| w.surface.queue_allocate()));
         stack.set_vexpand(true);
         stack.set_widget_name("layer-properties-stack");
         stack.add_named(&layers.root, Some("layers"));
@@ -109,11 +116,49 @@ impl LayerInspector {
         chevron.set_pixel_size(16); content.append(&chevron);
         button.set_child(Some(&content)); footer.append(&button);
         root.append(&stack); root.append(&footer);
-        Self {root, preferred_height:Cell::new(0.), layers, effects, stack, button, label, summary}
+        let contact = Rc::new(Cell::new(false));
+        let input = gtk::EventControllerLegacy::new();
+        input.set_propagation_phase(gtk::PropagationPhase::Capture);
+        input.connect_event(glib::clone!(#[strong] contact, #[weak] w, #[upgrade_or] glib::Propagation::Proceed, move |_, event| {
+            let held = contact.get();
+            match event.event_type() {
+                gdk::EventType::ButtonPress | gdk::EventType::TouchBegin => contact.set(true),
+                gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel => contact.set(false),
+                gdk::EventType::MotionNotify | gdk::EventType::EnterNotify if !event.modifier_state().contains(gdk::ModifierType::BUTTON1_MASK) => contact.set(false),
+                _ => (),
+            }
+            if held != contact.get() { w.surface.queue_allocate(); }
+            glib::Propagation::Proceed
+        }));
+        root.add_controller(input);
+        Self {root, sizing:Cell::new(Default::default()), measurements:Cell::new(None), rows:Cell::new(0), properties:Cell::new(false), contact,
+            settled:Rc::new(Cell::new(true)), settle_timer:Rc::new(RefCell::new(None)), layers, effects, stack, button, label, summary}
     }
-    fn refresh(&self, w: &Rc<Workspace>, state: &UiState) {
-        self.layers.refresh(state); self.effects.refresh(w, state);
+    fn refresh(&self, w: &Rc<Workspace>, state: &UiState, regions: u32) {
+        if regions & (regions::DOCUMENT | regions::SETTINGS) != 0 {
+            self.layers.refresh(state); self.effects.refresh(w, state);
+        }
+        if regions & regions::SETTINGS != 0 { self.measurements.set(None); }
+        let rows = self.rows.replace(state.layers.len());
+        if rows != state.layers.len() {
+            self.measurements.set(None);
+            if rows > 0 {
+                if let Some(timer) = self.settle_timer.borrow_mut().take() { timer.remove(); }
+                self.settled.set(false);
+                let timer = glib::timeout_add_local(std::time::Duration::from_millis(300), glib::clone!(
+                    #[weak] w, #[weak(rename_to = settled)] self.settled, #[weak(rename_to = contact)] self.contact,
+                    #[weak(rename_to = timers)] self.settle_timer, #[weak(rename_to = stack)] self.stack,
+                    #[upgrade_or] glib::ControlFlow::Break, move || {
+                        if contact.get() || w.dragging.get() || stack.is_transition_running() { return glib::ControlFlow::Continue; }
+                        timers.borrow_mut().take(); settled.set(true); w.surface.queue_allocate();
+                        glib::ControlFlow::Break
+                    }
+                ));
+                *self.settle_timer.borrow_mut() = Some(timer);
+            }
+        }
         let open = state.customization.drawer.as_ref().is_some_and(|d| d.layer_properties == Some(true));
+        self.properties.set(open);
         let page = if open {"properties"} else {"layers"};
         if self.stack.visible_child_name().as_deref() != Some(page) {
             self.stack.set_visible_child_full(page, if open {gtk::StackTransitionType::SlideUp} else {gtk::StackTransitionType::SlideDown});
@@ -128,10 +173,25 @@ impl LayerInspector {
         self.button.update_state(&[gtk::accessible::State::Expanded(Some(open))]);
         if open { self.button.add_css_class("open"); } else { self.button.remove_css_class("open"); }
     }
-    fn measure(&self, width: i32) {
-        let (_, measurement) = self.layers.content_measurement(width);
-        let height = layer_ui::PropertyDisclosure::drawer_height(measurement.fixed_height, measurement.unit_height);
-        if self.preferred_height.replace(height) != height { self.root.queue_resize(); }
+    fn measure(&self, w: &Workspace, width: i32, viewport_height: f32) {
+        let key = (width, self.root.pango_context().serial(), self.root.scale_factor());
+        let measurement = self.measurements.get().filter(|(old, _)| *old == key).map(|(_, measurement)| measurement).unwrap_or_else(|| {
+            let (_, measurement) = self.layers.content_measurement(width);
+            if self.layers.list.child().is_some_and(|view| view.first_child().is_some()) {
+                self.measurements.set(Some((key, measurement)));
+            }
+            measurement
+        });
+        let mut sizing = self.sizing.get();
+        if sizing.update(measurement, self.rows.get(), viewport_height, self.properties.get(),
+            self.settled.get() && !self.contact.get() && !w.dragging.get() && !self.stack.is_transition_running()) {
+            self.sizing.set(sizing); self.root.queue_resize();
+        }
+    }
+}
+impl Drop for LayerInspector {
+    fn drop(&mut self) {
+        if let Some(timer) = self.settle_timer.borrow_mut().take() { timer.remove(); }
     }
 }
 
@@ -221,7 +281,7 @@ impl Body {
             }
             Self::Sizes(_) => regions::BRUSH,
             Self::Layers(_) | Self::Effects(_, _) => regions::DOCUMENT,
-            Self::LayerInspector(_) => regions::DOCUMENT | regions::CUSTOMIZATION | regions::SETTINGS,
+            Self::LayerInspector(_) => regions::DOCUMENT | regions::CUSTOMIZATION | regions::SETTINGS | regions::LAYOUT,
             Self::Proof(_) => regions::DOCUMENT | regions::COMMANDS | regions::LAYOUT,
             Self::Histogram(_) => regions::HISTOGRAM | regions::SETTINGS | regions::LAYOUT,
             Self::Navigator(_) => {
@@ -240,7 +300,7 @@ impl Body {
             Self::Palettes(v) => v.refresh(state, w.paint_view_color(), w.picker_headroom()),
             Self::Sizes(v) => v.refresh(w, state),
             Self::Layers(v) => v.refresh(state),
-            Self::LayerInspector(v) => v.refresh(w, state),
+            Self::LayerInspector(v) => v.refresh(w, state, regions),
             Self::Navigator(v) => v.refresh(state),
             Self::Proof(v) => v.refresh(w, state),
             Self::Histogram(v) => v.refresh(w, state),
@@ -716,7 +776,7 @@ impl Drawer {
         };
         let sizing = place(&vec![0.0; view.columns.len()])?;
         for body in &view.bodies {
-            if let Body::LayerInspector(inspector) = body { inspector.measure(sizing.columns[0].width as i32); }
+            if let Body::LayerInspector(inspector) = body { inspector.measure(w, sizing.columns[0].width as i32, viewport[1]); }
         }
         if let (Some(panel), Some(column)) = (
             view.bodies.iter().find_map(|body| if let Body::Palettes(panel) = body { Some(panel) } else { None }),
@@ -728,7 +788,7 @@ impl Drawer {
             .iter()
             .zip(&sizing.columns)
             .map(|(body, b)| {
-                view.bodies.iter().find_map(|body| if let Body::LayerInspector(v) = body {Some(v.preferred_height.get())} else {None})
+                view.bodies.iter().find_map(|body| if let Body::LayerInspector(v) = body {Some(v.sizing.get().height())} else {None})
                     .unwrap_or_else(|| body.measure(gtk::Orientation::Vertical, b.width as i32).1 as f32)
                     + if state.tabs.is_some() {
                         TAB_BAR_HEIGHT

@@ -126,13 +126,13 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps | `dc27e04d`, 2026-09-23 |
 | Panel or column resize | 120 | **Unqualified.** GTK desktop Color column 12.88–44.61, floating panel 39.63–100.58 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** GTK desktop panel 119.2–119.4 presents/s, p99 up to 8.66 ms; curve p99 up to 16.712 ms exceeds the strict two-frame budget; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
-| Drawer open and close | 120 | **Unqualified.** GTK Sketch Properties slide 117.85–120.27 presents/s; moving-frame interval p99 8.575–16.654 ms; reference tablet unmeasured | [GTK Sketch Properties diagnostic](#gtk-sketch-properties-diagnostic), 2026-10-10 |
+| Drawer open and close | 120 | **Unqualified.** Expanded GTK Sketch Properties misses the desktop 120 Hz criteria: 86.38–114.56 presents/s, p99 18.516–31.772 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
 | Canvas action bar show, hide and move | 120 | **Not met.** UI frame p50/p95: 63.2/90.0 ms moving the bar, 23.0/34.6 ms show and hide (2048 × 1536) | Canvas-bar `ui-bar-move` and `ui-bar-show-hide`, 2026-09-27 |
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
-| List scrolling: layers, brushes, filters | 120 | | |
+| List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK Sketch with 1,000 layers misses desktop 120 Hz criteria: normal touch 72.58–107.03 presents/s, p99 up to 41.906 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
 
 ## Layer thumbnail selection
@@ -170,35 +170,64 @@ The post-rebase repeat at `2a55ce947`, with identical app and test APK hashes,
 recorded 77.08, 79.86 and 78.65 window frames/s, with p99 gaps of 33.33, 25.00
 and 33.33 ms. Dropped reports remained zero and thermal status remained 0.
 
-## GTK Sketch Properties diagnostic
+## GTK Sketch Layers diagnostic
 
-Measured 2026-10-10 on the working tree based on `3332d9f90`, with a release
-GTK build on NVIDIA RTX PRO 6000 Blackwell Max-Q/Vulkan 615.71.09. The private
-Mutter display is 1100 × 640 at a requested 120 Hz, with a 2048 × 1536 empty
-drawing and a renamed Gaussian Blur layer. This is a desktop diagnostic;
-the reference tablet and tier photographic workload remain unmeasured.
-The frozen test executable is
-`artifacts/sketch-properties-verification/candidate-layer-linux`, SHA-256
-`82da321be8835895b64c37753f1bb66d67aa8923de3876473fd9e3d1600f3667`.
+Measured 2026-10-10 on the working tree based on `25ed893d7`, with release
+Rust, GTK 4.22.5 and NVIDIA RTX PRO 6000 Blackwell Max-Q/Vulkan 615.71.09.
+The private Mutter display runs at a requested 120 Hz and 1100 × 1000 logical
+pixels; scale 2 uses 2200 × 2000 physical pixels. The drawing is empty,
+2048 × 1536. These are desktop diagnostics. The reference tablets, tier
+photographic workloads and sustained window resizing remain unmeasured.
+Verification builds and native motion runs execute separately.
+The frozen current test executable is
+`artifacts/layer-drawer-growth/final-anchor-layer-linux`, SHA-256
+`b386ff0a9482d0d7acaf57897bbedb5212427e666736fa36fa9ba37ab15921b5`.
 
-`native_sketch_layer_properties_drawer` primes both page transitions, then runs
-four five-second windows of native mouse footer toggles in each theme. GTK
-FrameClock presentation timestamps count only frames while the page transition
-runs. Intervals remain within each transition; idle gaps between clicks are
-excluded. All builds and other test runs completed before measurement.
+`native_sketch_layer_drawer_auto_height` checks 2, 6, 12, 32 and 1,000 listed
+rows in both themes, native Add/Delete, Undo, group collapse, Properties edits
+and shorter-window fitting. Drawer heights are 395, 395, 635, 850 and 850
+logical pixels. The 1,000-row list realizes 206 row widgets, with at most eight
+pending thumbnail requests in the measured runs. Thumbnail textures remain
+cached for visited rows; this does not establish constant total memory use.
+Pure page toggles preserve the same visible layer and its offset within one
+logical pixel. The numeric adjustment may change as GTK re-estimates the list.
 
-| Theme | Transition | Presented frames/s | Moving-frame interval p99 |
-| --- | --- | --- | --- |
-| Light | Slide up | 118.05 | 16.654 ms |
-| Light | Slide down | 119.42 | 8.657 ms |
-| Dark | Slide up | 120.27 | 8.575 ms |
-| Dark | Slide down | 117.85 | 15.259 ms |
+After page transitions settle, each theme runs three primed six-second scroll
+gestures. Normal touch uses a 140-pixel triangular motion with touch-down and
+moves in one batch. Wheel stress alternates direction every 125 steps, issuing
+one full step every 4 ms. GTK FrameClock timestamps count completed
+presentations only while the scroll adjustment changes; idle frames are
+excluded. All scrolling rows miss the desktop 114 presents/s floor and
+16.667 ms p99 limit. No baseline large-stack scrolling comparison was measured.
 
-The same native journey checks the unchanged drawer bounds, retained layer-list
-scroll, native filter insertion and editing, Undo, and footer, Escape and outside
-dismissal. A separate private tablet-proxy journey checks pen footer contacts.
-Raw timings and captures are in
-`artifacts/sketch-properties-verification/review/`.
+| Input / scale | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
+| --- | --- | --- |
+| Normal touch / 1 | 76.14–107.03 / 41.831 ms | 72.58–77.24 / 41.906 ms |
+| Wheel stress / 1 | 54.64–62.39 / 41.682 ms | 53.48–57.51 / 41.708 ms |
+| Wheel stress / 2 | 43.04–46.05 / 58.366 ms | 31.87–38.26 / 91.667 ms |
+
+`native_sketch_layer_properties_drawer` checks native filter insertion,
+editing, Undo, footer toggles, Escape and outside dismissal, then primes the
+160 ms slide transitions and runs four five-second windows of footer toggles
+per theme. Presentation gaps are restricted to each moving transition.
+The frozen `25ed893d7` baseline uses 14 added rows and a 395-pixel drawer;
+the current journey adds 32 rows and expands to 850 pixels. This comparison
+measures the enlarged presentation, and does not isolate measurement-cache
+cost. Every current transition misses the rate or p99 criterion.
+
+| Theme / transition | Baseline presents/s / p99 gap | Expanded presents/s / p99 gap |
+| --- | --- | --- |
+| Light / up | 120.07 / 8.592 ms | 102.74 / 25.420 ms |
+| Light / down | 120.08 / 8.549 ms | 86.38 / 31.772 ms |
+| Dark / up | 120.16 / 8.580 ms | 114.56 / 21.159 ms |
+| Dark / down | 120.08 / 8.544 ms | 111.73 / 18.516 ms |
+
+Separate pen-footer and header-control journeys pass. Raw timings, visible
+anchor checks and screenshots are in
+`artifacts/layer-drawer-growth/{initial,normal-touch,scale2,properties-final}/`;
+baseline transitions are in `artifacts/layer-drawer-growth/baseline-properties/`.
+The native growth journey uses `LAYER_NATIVE_EVENT_MS=4`; set
+`LAYER_DRAWER_SCROLL_INPUT=touch` for the normal-touch workload.
 
 ## GTK panel slider diagnostic
 

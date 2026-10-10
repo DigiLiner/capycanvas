@@ -82,7 +82,7 @@ fn native_sketch_layer_properties_drawer() {
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(false));
             assert_eq!(stack.visible_child_name().as_deref(), Some("layers"));
         }
-        for _ in 0..14 {
+        for _ in 0..32 {
             d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false, clipped:false}});
         }
         pump(300);
@@ -201,6 +201,218 @@ fn sketch_layer_properties_pen(d: &mut Driver) {
         d.input.perform(serde_json::json!([{"pen":"leave"}]));
         d.click_name(&opener);
     }
+}
+
+fn layer_list_anchor(list: &gtk::Widget, scroll: &gtk::ScrolledWindow) -> (String, f32) {
+    widgets(list).filter_map(|row| {
+        let name = row.widget_name();
+        if !name.starts_with("art-layer-") {return None;}
+        let bounds = row.compute_bounds(scroll)?;
+        (bounds.y()+bounds.height()>1. && bounds.y()<scroll.height() as f32)
+            .then(||(name.to_string(),bounds.y()))
+    }).min_by(|a,b|a.1.total_cmp(&b.1)).unwrap()
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_sketch_layer_drawer_auto_height"]
+fn native_sketch_layer_drawer_auto_height() {
+    let mut d = Driver::new("art.capycanvas.LayerDrawerGrowth");
+    d.input = d.input.timeout_secs(20);
+    let output = std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    let opener = d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+    d.click_name(&opener);
+    let mut reports = Vec::new();
+    let mut heights = Vec::new();
+    let touch_motion = std::env::var("LAYER_DRAWER_SCROLL_INPUT").is_ok_and(|input|input=="touch");
+    for count in [2, 6, 12, 32, 1000] {
+        {
+            let mut session = ui_session_mut(&d.w);
+            while session.state().layers.len() < count {
+                session.dispatch(UiAction::Layer {action:layer_ui::LayerAction::New {group:false,clipped:false}}).unwrap();
+            }
+        }
+        d.w.refresh_document_view(); pump(450);
+        until(||!ui_session(&d.w).engine().has_pending_document_edits(), "layer fixture edits settle");
+        assert_eq!(state(&d.w).layers.len(), count);
+        for theme in [Theme::Light, Theme::Dark] {
+            d.w.dispatch(UiAction::SetTheme {theme:Some(theme)}); pump(250);
+            let stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+            let page = stack.child_by_name("layers").unwrap();
+            let list = find_css(&page, "layer-list").unwrap();
+            let scroll = list.ancestor(gtk::ScrolledWindow::static_type()).unwrap().downcast::<gtk::ScrolledWindow>().unwrap();
+            let footer = d.named("layer-properties-disclosure");
+            let actions = find_css(&page, "layer-footer").unwrap();
+            let bounds = d.w.drawer.placement().unwrap().bounds;
+            let footer_bounds = footer.compute_bounds(&d.w.surface).unwrap();
+            let action_bounds = actions.compute_bounds(&d.w.surface).unwrap();
+            assert!(bounds.height <= d.w.window.height() as f32 * 0.85 + 2., "{theme:?}/{count}: drawer height {bounds:?}");
+            assert!(bounds.y >= 0. && bounds.y + bounds.height <= d.w.surface.height() as f32 + 1.);
+            assert!((footer_bounds.y() + footer_bounds.height() - bounds.y - bounds.height).abs() < 2.);
+            assert!(action_bounds.y() + action_bounds.height() <= footer_bounds.y() + 1.);
+            let realized = widgets(&list).filter(|widget|widget.widget_name().starts_with("art-layer-")).count();
+            assert!(realized < 256, "{count} listed layers realized {realized} row widgets");
+            if count >= 32 {
+                assert!(scroll.vadjustment().upper() - scroll.vadjustment().page_size() > 40.);
+                d.input.perform(serde_json::json!([{"point":d.point(&list)},{"wheel":[0,5]}]));
+                assert!(scroll.vadjustment().value() > 0.);
+                let before = scroll.vadjustment().value();
+                let point = d.point(scroll.upcast_ref());
+                let direction = if before+100. < scroll.vadjustment().upper()-scroll.vadjustment().page_size() {-1.} else {1.};
+                let mut touch = vec![serde_json::json!({"touch":"down","point":point})];
+                touch.extend((1..=36).map(|step|serde_json::json!({"touch":"move","point":[point[0],point[1]+direction*step as f32*2.]})));
+                touch.push(serde_json::json!({"touch":"up"}));
+                d.input.perform(touch.into());
+                assert!((scroll.vadjustment().value()-before).abs()>10., "{theme:?}/{count}: native touch scrolls the list");
+                let deadline = Instant::now()+Duration::from_secs(5);
+                let mut stable = Instant::now();
+                let mut previous = scroll.vadjustment().value();
+                while stable.elapsed()<Duration::from_millis(150) {
+                    assert!(Instant::now()<deadline, "native touch scroll settles");
+                    pump(30);
+                    let current = scroll.vadjustment().value();
+                    if current!=previous {previous=current; stable=Instant::now();}
+                }
+            }
+            let position = scroll.vadjustment().value();
+            let anchor = layer_list_anchor(&list,&scroll);
+            d.click(&footer);
+            assert_eq!(stack.visible_child_name().as_deref(),Some("properties"));
+            until(||!stack.is_transition_running(), "Properties page animation");
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            d.click(&footer);
+            until(||!stack.is_transition_running(), "Layers page animation");
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            let retained = find_named(&list,&anchor.0).unwrap().compute_bounds(&scroll).unwrap().y();
+            assert!((retained-anchor.1).abs()<=1.,"{theme:?}/{count}: {} offset {} -> {}, adjustment {} -> {}",anchor.0,anchor.1,retained,position,scroll.vadjustment().value());
+            std::fs::write(output.join(format!("retention-{count}-{theme:?}.json")),serde_json::to_vec_pretty(&serde_json::json!({"rows":count,"theme":format!("{theme:?}"),"anchor":anchor.0,"offset_before":anchor.1,"offset_after":retained,"offset_delta":retained-anchor.1,"adjustment_before":position,"adjustment_after":scroll.vadjustment().value(),"drawer_height":bounds.height,"viewport_height":d.w.surface.height()})).unwrap()).unwrap();
+            d.click(&footer);
+            assert_eq!(stack.visible_child_name().as_deref(),Some("properties"));
+            until(||!stack.is_transition_running(), "Properties page animation");
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            let opacity = find_named(stack.child_by_name("properties").unwrap().upcast_ref(), "property-opacity").unwrap();
+            assert!(opacity.is_sensitive(), "{theme:?}/{count}: Properties opacity is editable");
+            let _warm = crate::snapshot(&d.w); pump(120);
+            crate::snapshot(&d.w).save_to_png(output.join(format!("properties-{count}-{theme:?}.png"))).unwrap();
+            let display = find_css(&opacity, "number-value").unwrap();
+            let point = d.point(&display);
+            let picked = d.w.window.pick(point[0] as f64, point[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+            assert!(picked==display || picked.is_ancestor(&display), "{theme:?}/{count}: numeric value hit {} at {point:?}",picked.widget_name());
+            d.number(&opacity, "75");
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            d.click(&footer);
+            until(||!stack.is_transition_running(), "Layers page animation");
+            assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+            if count == 6 {
+                d.click(&find_named(&page, "layer-add-layer-symbolic").unwrap());
+                assert_eq!(state(&d.w).layers.len(), 7);
+                pump(450);
+                assert!(d.w.drawer.placement().unwrap().bounds.height > bounds.height);
+                d.click(&find_named(&page, "delete-selected-layers").unwrap());
+                assert_eq!(state(&d.w).layers.len(), 6);
+                pump(450);
+                assert!((d.w.drawer.placement().unwrap().bounds.height-bounds.height).abs()<2.);
+                d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
+                assert_eq!(state(&d.w).layers.len(), 7);
+                pump(450);
+                assert!(d.w.drawer.placement().unwrap().bounds.height > bounds.height);
+                d.click(&find_named(&page, "delete-selected-layers").unwrap());
+                assert_eq!(state(&d.w).layers.len(), 6);
+                pump(450);
+            }
+            if count == 12 {
+                let ids:Vec<_> = state(&d.w).layers.iter().take(2).map(|row|row.id).collect();
+                d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::SelectAllLayers {selected:false}});
+                for id in ids {d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::ToggleSelection {id}});}
+                d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::GroupSelected}); pump(300);
+                let group = state(&d.w).layer_properties.layer.unwrap();
+                let expanded = state(&d.w).layers.len();
+                let group_row = find_named(&page, &format!("art-layer-{group}")).unwrap();
+                let thumbnail = find_css(&group_row, "layer-thumbnail").unwrap();
+                d.click(&thumbnail);
+                assert!(state(&d.w).layers.len() < expanded);
+                pump(450);
+                let collapsed_height = d.w.drawer.placement().unwrap().bounds.height;
+                d.click(&find_css(&find_named(&page, &format!("art-layer-{group}")).unwrap(), "layer-thumbnail").unwrap());
+                assert_eq!(state(&d.w).layers.len(), expanded);
+                pump(450);
+                assert!(d.w.drawer.placement().unwrap().bounds.height >= collapsed_height);
+                d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
+                assert_eq!(state(&d.w).layers.len(), count);
+                pump(450);
+            }
+            if count == 1000 {
+                let clock = d.w.surface.frame_clock().unwrap();
+                let point = d.point(scroll.upcast_ref());
+                d.input.perform(serde_json::json!([{"point":point},{"wheel":[0,5]}]));
+                pump(250);
+                for run in 0..3 {
+                    d.input.perform(serde_json::json!([{"point":point}]));
+                    pump(100);
+                    let timings = Rc::new(RefCell::new(Vec::new()));
+                    let callbacks = Rc::new(Cell::new(0));
+                    let value = Rc::new(Cell::new(scroll.vadjustment().value()));
+                    let adjustment = scroll.vadjustment();
+                    let scroll_start = adjustment.value();
+                    let scroll_limit = adjustment.upper()-adjustment.page_size();
+                    let first_direction = if scroll_start < scroll_limit*0.5 {1} else {-1};
+                    let capture = clock.connect_after_paint(glib::clone!(#[strong] timings, #[strong] callbacks, #[strong] value, #[strong] adjustment, move |clock| {
+                        callbacks.set(callbacks.get()+1);
+                        if value.replace(adjustment.value()) != adjustment.value() && let Some(timing) = clock.current_timings() {
+                            timings.borrow_mut().push(timing);
+                        }
+                    }));
+                    let mut events = Vec::new();
+                    if touch_motion {events.push(serde_json::json!({"touch":"down","point":point}));}
+                    events.extend((0..1500).map(|step| {
+                        if touch_motion {
+                            let phase = (step as f32/1500.*12.)%2.;
+                            let offset = if phase<1. {phase} else {2.-phase};
+                            serde_json::json!({"touch":"move","point":[point[0],point[1]-offset*140.]})
+                        } else {serde_json::json!({"wheel":[0,if (step/125)%2==0 {first_direction} else {-first_direction}]})}
+                    }));
+                    if touch_motion {events.push(serde_json::json!({"touch":"up"}));}
+                    d.input.perform(events.into()); clock.disconnect(capture);
+                    pump(150);
+                    let mut times:Vec<_> = timings.borrow().iter().filter(|timing|timing.is_complete() && timing.presentation_time()>0).map(|timing|timing.presentation_time()).collect();
+                    times.sort_unstable(); times.dedup();
+                    std::fs::write(output.join(format!("scroll-timings-{theme:?}-{run}.json")),serde_json::to_vec_pretty(&serde_json::json!({"callbacks":callbacks.get(),"moving_timings":timings.borrow().iter().map(|timing|serde_json::json!({"frame_time":timing.frame_time(),"presentation_time":timing.presentation_time(),"complete":timing.is_complete()})).collect::<Vec<_>>()})).unwrap()).unwrap();
+                    assert!(times.len()>100, "{theme:?}: {} moving large-list presentations at adjustment {} of {}",times.len(),scroll.vadjustment().value(),scroll.vadjustment().upper());
+                    let seconds = (times.last().unwrap()-times[0]) as f64/1_000_000.;
+                    assert!(seconds >= 5.);
+                    assert_eq!(d.w.drawer.placement().unwrap().bounds, bounds);
+                    assert_eq!(footer.compute_bounds(&d.w.surface).unwrap(),footer_bounds);
+                    assert_eq!(actions.compute_bounds(&d.w.surface).unwrap(),action_bounds);
+                    assert!(widgets(&list).filter(|widget|widget.widget_name().starts_with("art-layer-")).count()<256);
+                    let extra:Vec<_> = d.w.drawers().iter().filter_map(|drawer|drawer.layers()).collect();
+                    let realized = widgets(&list).filter(|widget|widget.widget_name().starts_with("art-layer-")).count();
+                    reports.push(serde_json::json!({"theme":format!("{theme:?}"),"input":if touch_motion {"touch"} else {"mouse-wheel"},"run":run,"rows":count,"scroll_start":scroll_start,"scroll_end":adjustment.value(),"scroll_limit":scroll_limit,"first_direction":first_direction,"realized_rows":realized,"thumbnail_requests":d.w.layer_panel.preview_requests(),"thumbnail_work":d.w.layer_panel.preview_debug(&extra),"moving_presentations":times,"seconds":seconds,"viewport":[d.w.surface.width(),d.w.surface.height()],"scale":d.w.surface.scale_factor()}));
+                }
+            }
+            let _warm = crate::snapshot(&d.w); pump(120);
+            crate::snapshot(&d.w).save_to_png(output.join(format!("layers-{count}-{theme:?}.png"))).unwrap();
+            if theme == Theme::Dark {heights.push(bounds.height);}
+        }
+    }
+    assert!(heights[2] > heights[1] + 20., "drawer grows beyond six rows: {heights:?}");
+    assert!((heights[3]-heights[4]).abs()<2., "large lists share the viewport cap: {heights:?}");
+    d.w.window.unmaximize(); d.w.window.set_default_size(900, 640);
+    until(||!d.w.window.is_maximized() && d.w.surface.height() < 800, "short drawing window");
+    pump(300);
+    let short = d.w.drawer.placement().unwrap().bounds;
+    assert!(short.height <= d.w.window.height() as f32 * 0.85 + 2.);
+    assert!(short.y >= 0. && short.y+short.height <= d.w.surface.height() as f32+1.);
+    assert!(short.height < heights[4], "drawer follows a shorter window");
+    let footer = d.named("layer-properties-disclosure");
+    d.click(&footer); assert_eq!(d.w.drawer.placement().unwrap().bounds,short);
+    d.click(&footer); assert_eq!(d.w.drawer.placement().unwrap().bounds,short);
+    let _warm = crate::snapshot(&d.w); pump(120);
+    crate::snapshot(&d.w).save_to_png(output.join("layers-1000-short-Dark.png")).unwrap();
+    d.w.window.maximize();
+    until(||d.w.window.is_maximized(), "drawing window maximized"); pump(300);
+    assert!((d.w.drawer.placement().unwrap().bounds.height-heights[4]).abs()<2.);
+    std::fs::write(output.join("large-list-scroll.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+    d.input.finish(); d.w.window.destroy(); pump(100);
 }
 
 fn assert_shared_icons(widget: &gtk::Widget) {
