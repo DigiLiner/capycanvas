@@ -114,7 +114,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     Bindings popupBindings;
     std::shared_ptr<ZoomReadout> zoom=std::make_shared<ZoomReadout>();
     Grid cameraSlot;
-    Button zenCapy{nullptr};J headerGeometry;Border cameraSurface,zenSurface;std::function<void()> glassChanged;std::map<std::wstring,double> tabWidths;
+    Border cameraSurface;std::function<void()> glassChanged;std::map<std::wstring,double> tabWidths;
     Impl(Dispatch send,J catalog,std::shared_ptr<CapyLocalization> localization,Dispatch report,PreviewTransport previews,std::function<void(bool)> popupChanged,Dispatch document,Dispatch input):overviews(std::move(report)){
         data->input=std::move(input);gestures=std::make_shared<WorkspaceGestures>(data,root);
         data->document=std::move(document);
@@ -134,10 +134,6 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         });
         surface.HorizontalAlignment(HorizontalAlignment::Right);surface.VerticalAlignment(VerticalAlignment::Bottom);surface.Margin({4,0,4,0});
         cameraSlot.Children().Append(surface);
-        zenCapy=button(data,L"",[data=data,source=std::weak_ptr<WorkspaceGestures>(gestures)]{if(auto gesture=source.lock();gesture&&gesture->SuppressClick())return;data->dispatch(O({{L"type",S(L"invoke")},{L"command",S(L"zen_mode")}}));});
-        zenCapy.Padding({0,0,0,0});zenCapy.Content(Image());zenSurface.Child(zenCapy);zenSurface.UseLayoutRounding(false);zenSurface.Visibility(Visibility::Collapsed);Canvas::SetZIndex(zenSurface,1001);
-        AutomationProperties::SetAutomationId(zenCapy,L"zen-capy");
-        root.Children().Append(zenSurface);
         canvasBar->data=data;
         canvasBar->changed=[weak=weak_from_this()]{if(auto self=weak.lock()){self->gestures->ChromeChanged();self->placePreviews();if(self->glassChanged)self->glassChanged();}};
         canvasBar->init(root);
@@ -322,7 +318,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         data->refreshPalette();
         auto theme=data->theme(),palette=object(data->state,L"palette").Stringify();
         if(theme!=previousTheme||palette!=previousPalette){
-            expansion->Reset();drawers->Reset();collapsed->Reset();root.Children().Clear();groups.clear();handles.clear();previousTheme=theme;previousPalette=palette;root.Children().Append(cameraSlot);root.Children().Append(zenSurface);canvasBar->attach();notice->attach();colorStrip->attach();for(auto const& panel:previewPanels)panel->attach();
+            expansion->Reset();drawers->Reset();collapsed->Reset();root.Children().Clear();groups.clear();handles.clear();previousTheme=theme;previousPalette=palette;root.Children().Append(cameraSlot);canvasBar->attach();notice->attach();colorStrip->attach();for(auto const& panel:previewPanels)panel->attach();
             measureHost.Children().Clear();offscreen.clear();root.Children().Append(measureHost);
         }
         root.RequestedTheme(theme==L"dark"?ElementTheme::Dark:ElementTheme::Light);
@@ -402,7 +398,6 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         expansion->Apply(configurationHeight());present();
         collapsed->Apply();drawers->Apply();gestures->Refresh();
         auto status=object(layout,L"status");place(cameraSlot,status);
-        updateZenCapy(snapshot);
         cameraSlot.Visibility(num(status,L"height")>0?Visibility::Visible:Visibility::Collapsed);
         zoom->text.Foreground(data->brush(L"text"));
         updateCamera(object(data->state,L"camera"));
@@ -754,21 +749,6 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         AutomationProperties::SetAutomationId(handle,hstring(key));
         AutomationProperties::SetAutomationControlType(handle,Automation::Peers::AutomationControlType::Thumb);
     }
-    void updateZenCapy(J const& snapshot){
-        bool keep=flag(snapshot,L"keep_zen_button");
-        auto size=find(array(object(snapshot,L"header"),L"sizes"),L"id",str(headerGeometry,L"size"));double tile=num(size,L"tile");
-        auto bounds=object(headerGeometry,L"zen_button");
-        auto command=find(array(data->state,L"commands"),L"id",L"zen_mode");
-        zenCapy.IsEnabled(flag(command,L"enabled"));
-        headerButtonColors(data,zenCapy);zenCapy.Opacity(flag(command,L"enabled")?1:.36);
-        zenSurface.Background(headerSurface(data));zenSurface.CornerRadius({tile*.5*CornerFit,tile*.5*CornerFit,tile*.5*CornerFit,tile*.5*CornerFit});zenCapy.CornerRadius(zenSurface.CornerRadius());
-        setIcon(zenCapy.Content().as<Image>(),str(command,L"icon",L"capy"),data->theme(),num(size,L"capy_icon"));
-        AutomationProperties::SetName(zenCapy,str(command,L"label"));tooltip(zenCapy,str(command,L"tooltip"));
-        if(bounds.Size())place(zenSurface,bounds);
-        zenSurface.Visibility(keep&&bounds.Size()?Visibility::Visible:Visibility::Collapsed);
-        if(!zenCapySource){zenCapySource=true;gestures->Source(zenCapy,{},O({{L"kind",S(L"zen_mode")}}),false);}
-    }
-    bool zenCapySource=false;
     void fitTabs(uint32_t id){if(auto found=groups.find(id);found!=groups.end()&&found->second.tabScroll)fitAutomaticTabs(data,found->second.automatic,found->second.tabScroll.ActualWidth(),tabWidths);}
     void publishOverviews(){
         A slots;
@@ -792,7 +772,6 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         for(auto const& [id,group]:groups)if(!group.hidden&&!group.presented.Size())appendGlass(regions,group.frame,reference,{group.corners[0],group.corners[1],group.corners[2],group.corners[3]},true);
         collapsed->AppendGlass(regions,connections,reference);drawers->AppendGlass(regions,connections,reference);
         appendGlass(regions,cameraSurface,reference,cornerRadii(cameraSurface.CornerRadius()));
-        appendGlass(regions,zenSurface,reference,cornerRadii(zenSurface.CornerRadius()));
         canvasBar->AppendGlass(regions,reference);commandSearch->AppendGlass(regions,reference);
         return regions;
     }
@@ -822,11 +801,6 @@ bool WorkspaceView::CancelGesture(){
 }
 void WorkspaceView::SetWindowId(uint64_t id){impl->data->windowId=id;}
 void WorkspaceView::SetGlassChanged(std::function<void()> changed){impl->glassChanged=std::move(changed);}
-void WorkspaceView::SetHeaderGeometry(Json const& geometry){
-    if(impl->headerGeometry==geometry)return;
-    impl->headerGeometry=geometry;impl->updateZenCapy(impl->data->model);
-    if(impl->glassChanged)impl->glassChanged();
-}
 void WorkspaceView::CanvasContact(bool active){impl->canvasBar->Contact(active);if(active){impl->notice->Hide();hideRevealedTooltip();}}
 JsonArray WorkspaceView::DrawerSources()const{return impl->data->drawerSources;}
 JsonArray WorkspaceView::Glass(UIElement const& reference,JsonArray& connections)const{return impl->glass(reference,connections);}

@@ -65,7 +65,7 @@ let app,
   scheduled = false,
   layout,
   lastPenEvent = null,
-  heldPointers = new Set(),
+  heldPointers = new Map(),
   dragItem = null,
   statusTimer,
   statusError = null,
@@ -1286,9 +1286,7 @@ function input(event) {
   try {
     const reply = app.input(event);
     workspace.classList.toggle("zen-hidden", reply.chrome_hidden);
-    const capy = $("zen-capy");
-    if (capy && capy.hidden !== !reply.keep_zen_button)
-      capy.hidden = !reply.keep_zen_button;
+    header?.interaction(reply);
     const cursor = ({pan:"grab", zoom:"zoom-in", zoom_out:"zoom-out", rotate:"crosshair"})[reply.navigation_cursor] ?? "";
     if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
     if (reply.dismiss_popups) {
@@ -1387,7 +1385,7 @@ window.addEventListener(
       e.preventDefault();
       return;
     }
-    if (e.target.closest("#header")) heldPointers.add(e.pointerId);
+    if (e.target.closest("#header") || e.target.closest("#zen-capy") && !workspace.classList.contains("zen-hidden")) heldPointers.set(e.pointerId,e);
     const reply = chromeInput({
       kind: "contact",
       position: [e.clientX, e.clientY],
@@ -1415,8 +1413,11 @@ window.addEventListener(
 for (const name of ["pointerup", "lostpointercapture"]) window.addEventListener(
   name,
   e => {
-    heldPointers.delete(e.pointerId);
-    updateZen();
+    const owner=heldPointers.get(e.pointerId);if(!owner)return;
+    setTimeout(()=>{
+      if(heldPointers.get(e.pointerId)!==owner)return;
+      heldPointers.delete(e.pointerId);updateZen();
+    },0);
   },
   { capture: true },
 );
@@ -1846,11 +1847,10 @@ try {
   glass = createGlass({app,canvas,workspace,connections:()=>workspaceChrome.connections(),enabled:()=>state.palette?.glass.transparency!=="off",wake});
   documents = createDocuments({app,bootstrap,delivery,state:()=>state,canvas,canvasReady:()=>gpuReady,dispatch,applyChange,wake,element,button,icon,numberField,message,gpuOperation,rasterWorker,resumeCanvas:resumeDocumentCanvas,contentChanged:panelContentChanged,refreshInputContext:()=>chromeInput({kind:"refresh"})});
   documents.mountProof(panels.get("proof"));
-  header = createHeader({app,state:()=>state,paintPair:()=>paintPairView,workspace,element,button,icon,place,dispatch,customization,systemStatus,updateZen,documents});
-  const capy = iconButton("zen_mode");
+  const capy = button("",()=>dispatch({type:"invoke",command:"zen_mode"}),"tile-button");
   capy.id = "zen-capy"; capy.hidden = true;
-  customization.target(capy, {kind:"zen_mode"});
-  workspace.append(capy);
+  customization.target(capy, {kind:"zen_mode"});workspace.append(capy);
+  header = createHeader({app,state:()=>state,paintPair:()=>paintPairView,workspace,element,button,icon,place,dispatch,customization,systemStatus,updateZen,documents,capy});
   canvasBar = createCanvasBar({ app, workspace, element, button, icon, dispatch, glass, reappearMs: catalog.canvas_bar_reappear_ms,
     openMenu: node => customization.openMenu(node), presented: () => { selectionUi.place(); frequencySeparationUi.place(); notice?.place(); } });
   notice = createNotice({ workspace, element, button, answer: answerNotice, layout: () => layout, bar: () => selectionUi.bounds() ?? frequencySeparationUi.bounds() ?? canvasBar.bounds() });

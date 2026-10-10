@@ -8,6 +8,7 @@ import SwiftUI
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var statusSubscription: UUID?
     @State private var editorHeight: CGFloat = 0
+    @State private var capyHovering = false
     @FocusState private var focused: Bool
     init(store: EditorStore, status: SystemStatus? = nil) {
         self.store = store; self.header = store.header; self.status = status ?? .shared
@@ -129,9 +130,24 @@ import SwiftUI
                 }.offset(x: header.menuAnchor.minX, y: header.menuAnchor.minY).allowsHitTesting(false)
         }
     }
+    private var capyVisible: Bool {
+        store.snapshot["keep_zen_button"].bool || (!store.snapshot["chrome_hidden"].bool && !editing && !header.geometry["capy_item"].isNull)
+    }
     var body: some View {
         ZStack(alignment: .topLeading) {
             if !store.snapshot["chrome_hidden"].bool { controls }
+            let command = view["capy"]
+            Button { store.invoke("zen_mode") } label: {
+                PanelIcon(name: command["icon"].string, size: size["capy_icon"].number)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+            }.buttonStyle(HeaderButtonStyle(hovering: capyHovering, inBar: !capyVisible, radius: radius))
+                .disabled(!capyVisible || !command["enabled"].bool).opacity(capyVisible ? (command["enabled"].bool ? 1 : 0.36) : 0)
+                .accessibilityLabel(command["label"].string).help(command["tooltip"].string)
+                .onHover { capyHovering = $0 }.onChange(of: capyVisible) { _, visible in if !visible { capyHovering = false } }
+                .modifier(WorkspaceContext(store: store, target: JSON(["kind":"zen_mode"])))
+                .accessibilityIdentifier("zen-button").placed(header.geometry["zen_button"])
+                .modifier(HeaderControlMeasurement(id: "zen-button", alias: header.geometry["capy_item"].isNull ? nil : "header-item-\(header.geometry["capy_item"].uint)"))
+                .allowsHitTesting(capyVisible).accessibilityHidden(!capyVisible)
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(NativeReorderInput(model: header))
             .onPreferenceChange(HeaderSources.self) { header.sources = $0 }
@@ -170,7 +186,7 @@ import SwiftUI
         let held = header.heldSource["kind"].string == "item" && header.heldSource["value"].uint == id
         let allocation = geometry["items"].array.first { $0["id"].uint == id }
             ?? (held ? header.geometry["items"].array.first { $0["id"].uint == id } : nil)
-        if let allocation {
+        if let allocation, editing || entry["item"]["kind"].string != "capy" {
             Group {
                 if editing {
                     Button {
@@ -282,8 +298,8 @@ private struct HeaderItemControl: View {
         Group {
             switch kind {
             case "capy":
-                tile(store.command("zen_mode")["icon"].string) { store.invoke("zen_mode") }.accessibilityIdentifier("zen-button")
-                    .modifier(HeaderControlMeasurement(id: "zen-button"))
+                PanelIcon(name: store.snapshot["header"]["capy"]["icon"].string, size: size["capy_icon"].number)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).glassSurface(SquircleShape(radius), fill: palette.chromeSurface)
             case "menu":
                 ApplicationMenuButton(store: store) { SharedIcon(name: "menu", size: size["icon"].number).frame(maxWidth: .infinity, maxHeight: .infinity) }
                     .buttonStyle(HeaderButtonStyle(hovering: hovering, inBar: inBar, radius: radius))
@@ -340,7 +356,7 @@ private struct HeaderItemControl: View {
     private func tile(_ icon: String, action: @escaping () -> Void) -> some View {
         let selected = description["selected"].bool, enabled = editing || description["enabled"].bool
         return Button(action: action) {
-            PanelIcon(name: icon, size: size[kind == "capy" ? "capy_icon" : "icon"].number)
+            PanelIcon(name: icon, size: size["icon"].number)
                 .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         }.buttonStyle(HeaderButtonStyle(selected: selected, hovering: hovering, inBar: inBar, drawerOpen: drawerOpen, radius: radius))
             .disabled(!enabled).opacity(enabled ? 1 : 0.36)

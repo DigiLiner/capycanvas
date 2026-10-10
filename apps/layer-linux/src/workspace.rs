@@ -924,7 +924,7 @@ pub struct Workspace {
     zen_capy: gtk::Button,
     system_status: Rc<crate::system_status::SystemStatus>,
     popovers: RefCell<Vec<glib::WeakRef<gtk::Popover>>>,
-    chrome_contacts: RefCell<std::collections::HashSet<(Option<gdk::Device>, Option<gdk::EventSequence>, u32)>>,
+    chrome_contacts: RefCell<std::collections::HashMap<(Option<gdk::Device>, Option<gdk::EventSequence>, u32), gdk::Event>>,
     dragging: Cell<bool>,
     drag_targets: RefCell<Vec<(glib::WeakRef<gtk::Widget>, DragTarget)>>,
     workspace_drag: RefCell<Option<NativeWorkspaceDrag>>,
@@ -1654,22 +1654,32 @@ impl Workspace {
                 let point = this.event_point(controller);
                 let kind = event.event_type();
                 let down = matches!(kind, gdk::EventType::ButtonPress | gdk::EventType::TouchBegin);
+                let picked = down.then(|| point.and_then(|[x, y]| this.surface.pick(x as f64, y as f64, gtk::PickFlags::DEFAULT))).flatten();
                 let touch = matches!(kind, gdk::EventType::TouchBegin | gdk::EventType::TouchUpdate | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel);
                 let key = (event.device(), touch.then(|| event.event_sequence()), event.downcast_ref::<gdk::ButtonEvent>().map_or(0, |e| e.button()));
                 let was_held = !this.chrome_contacts.borrow().is_empty();
-                if down && this.window.visible_dialog().is_none() && this.header.root.can_target() && point.is_some_and(|[_, y]| y < this.header.height()) {
-                    this.chrome_contacts.borrow_mut().insert(key.clone());
-                } else if matches!(kind, gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd | gdk::EventType::TouchCancel) {
+                if down && this.window.visible_dialog().is_none() && this.header.root.can_target() && picked.as_ref().is_some_and(|widget|
+                    widget == &this.header.root || widget.is_ancestor(&this.header.root) || widget == &this.zen_capy || widget.is_ancestor(&this.zen_capy)) {
+                    this.chrome_contacts.borrow_mut().insert(key.clone(), event.clone());
+                } else if matches!(kind, gdk::EventType::ButtonRelease | gdk::EventType::TouchEnd) {
+                    if let Some(owner) = this.chrome_contacts.borrow().get(&key).cloned() {
+                        let key = key.clone();
+                        glib::idle_add_local_once(glib::clone!(#[weak] this, move || {
+                            if this.chrome_contacts.borrow().get(&key).is_some_and(|current| current.as_ptr() == owner.as_ptr()) {
+                                this.chrome_contacts.borrow_mut().remove(&key);this.update_zen();
+                            }
+                        }));
+                    }
+                } else if kind == gdk::EventType::TouchCancel {
                     this.chrome_contacts.borrow_mut().remove(&key);
                 } else if matches!(kind, gdk::EventType::MotionNotify | gdk::EventType::EnterNotify)
                     && !event.modifier_state().intersects(gdk::ModifierType::BUTTON1_MASK | gdk::ModifierType::BUTTON2_MASK
                         | gdk::ModifierType::BUTTON3_MASK | gdk::ModifierType::BUTTON4_MASK | gdk::ModifierType::BUTTON5_MASK) {
-                    this.chrome_contacts.borrow_mut().retain(|(device, sequence, _)| device != &key.0 || sequence.is_some());
+                    this.chrome_contacts.borrow_mut().retain(|(device, sequence, _), _| device != &key.0 || sequence.is_some());
                 }
                 if down && this.window.visible_dialog().is_none()
                     && let Some(position) = point
-                    && !this.surface.pick(position[0] as f64, position[1] as f64, gtk::PickFlags::DEFAULT)
-                        .is_some_and(|picked| picked == this.area)
+                    && picked.is_none_or(|widget| widget != this.area)
                     && this
                         .chrome_event(ChromeEvent::Contact {
                             position,
@@ -1985,7 +1995,7 @@ impl Workspace {
 
     fn present_interaction(&self, reply: InputReply) {
         self.set_chrome_hidden(reply.chrome_hidden);
-        self.zen_capy.set_visible(reply.keep_zen_button);
+        self.zen_capy.set_visible(reply.keep_zen_button || (!reply.chrome_hidden && self.header.capy_visible()));
         let cursor = Some(match reply.navigation_cursor {
             Some(layer_ui::NavigationMode::Pan) => "grab",
             Some(layer_ui::NavigationMode::Zoom) => "zoom-in",
@@ -2798,21 +2808,6 @@ impl Workspace {
                 };
                 self.window
                     .set_title(Some(&format!("{modified}{} — {}", tab.title, self.localization().language().app_name())));
-            }
-        }
-        if regions & regions::COMMANDS != 0 {
-            let zen = state
-                .commands
-                .iter()
-                .find(|c| c.id == CommandId::ZenMode)
-                .unwrap();
-            self.zen_capy.set_tooltip_text(Some(&zen.tooltip));
-            self.zen_capy.set_sensitive(zen.enabled);
-            if let Some(image) = self.zen_capy.child().and_downcast::<gtk::Image>() {
-                crate::icons::set(
-                    &image,
-                    zen.icon.map(|i| format!("layer-{i}-symbolic")).as_deref(),
-                );
             }
         }
         if regions & regions::SETTINGS != 0 {

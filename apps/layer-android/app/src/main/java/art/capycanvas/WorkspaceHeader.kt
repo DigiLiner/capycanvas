@@ -133,10 +133,10 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
         LaunchedEffect(resolved?.toString(), height, bankHeight, editing) {
             resolved?.let { host.dispatch(obj("type" to "measure_header", "height" to (height + if (editing) bankHeight + 12f else 0f), "items" to it.array("items"))) }
         }
-        if (snapshot.optBoolean("chrome_hidden")) {
-            if (snapshot.optBoolean("keep_zen_button")) geometry?.getJSONObject("zen_button")?.let { ZenButton(host, snapshot, input.dock, it, size) }
-            return@BoxWithConstraints
-        }
+        val hidden = snapshot.optBoolean("chrome_hidden")
+        val capyVisible = snapshot.objectOrNull("preferences") == null && (snapshot.optBoolean("keep_zen_button") || (!hidden && !editing && geometry?.isNull("capy_item") == false))
+        ZenButton(host, snapshot, input.dock, geometry?.objectOrNull("zen_button")?.takeIf { capyVisible }, size)
+        if (hidden) return@BoxWithConstraints
         Box(Modifier.fillMaxWidth().height(height.dp).testTag("title-bar").chromeRegion(input.dock, header = true)
             .headerSource(input, obj("kind" to "background"), host.catalog.getJSONObject("native_copy").getJSONObject("header").getString("title_bar"), -1).headerChrome())
         // Keep existing item nodes at their prior positions while the native
@@ -157,7 +157,7 @@ private fun CanvasHost.primaryMenu(open: (JSONObject?) -> Unit) =
             key(id) {
                 val heldBounds = if (id == heldId) input.preview?.objectOrNull("held") else null
                 val bounds = heldBounds ?: placements[id]?.getJSONObject("bounds")
-                if (bounds != null) {
+                if (bounds != null && (editing || entry.getJSONObject("item").getString("kind") != "capy")) {
                     val x by animateFloatAsState(bounds.number("x"), tween(if (input.preview != null && heldBounds == null) 120 else 0), label = "header-x")
                     val natural = metrics.objects().first { it.getInt("id") == id }.number("width")
                     HeaderItem(host, snapshot, input, entry, specs.getValue(id), size, title,
@@ -312,12 +312,13 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
             .then(if (kind in listOf("document_title", "clock", "battery"))
                 Modifier.glass(TileShape, colors.headerSurface) else Modifier).then(if(kind=="document_title")Modifier.drawingDropTarget(host,!editing)else Modifier), contentAlignment = Alignment.Center) {
             val icon = when (kind) {
-                "capy" -> snapshot.getJSONObject("state").array("commands").objects().first { it.getString("id") == "zen_mode" }.getString("icon")
+                "capy" -> snapshot.getJSONObject("header").getJSONObject("capy").getString("icon")
                 "settings" -> "settings"
                 "tool" -> spec.getString("icon")
                 else -> "menu"
             }
             when {
+                kind == "capy" -> Box(Modifier.fillMaxSize().glass(TileShape, colors.headerSurface), contentAlignment = Alignment.Center) { SharedIcon(icon, label, Modifier.size(size.number("capy_icon").dp)) }
                 kind == "menu_labels" && !compact -> Row(Modifier.height(36.dp).glass(SquircleShape(50), colors.headerSurface).padding(5.dp)
                     .focusRequester(menuFocus).focusable(!editing),
                     horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -359,8 +360,7 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
                             else -> activate()
                         }
                     }) {
-                    val iconSize = size.number(if (kind == "capy") "capy_icon" else "icon")
-                    LiveIcon(host, icon, label, Modifier.size(iconSize.dp))
+                    LiveIcon(host, icon, label, Modifier.size(size.number("icon").dp))
                 }
             }
             if (!editing && spec.optBoolean("has_variants")) ToolGroupIndicator(
@@ -384,7 +384,7 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
 /** Active tools stay blue through hover/press; actions use neutral feedback. */
 @Composable internal fun HeaderButton(label: String, selected: Boolean, enabled: Boolean, open: Boolean,
     modifier: Modifier, fillWidth: Boolean = true, surface: Boolean = true, shape: Shape = drawerButtonShape(if (open) "bottom" else null),
-    inBar: Boolean = false, onDoubleClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null, onClick: () -> Unit, content: @Composable () -> Unit) {
+    inBar: Boolean = false, active: Boolean = true, onDoubleClick: (() -> Unit)? = null, onLongClick: (() -> Unit)? = null, onClick: () -> Unit, content: @Composable () -> Unit) {
     val colors = LocalPalette.current
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -393,7 +393,7 @@ private fun activateHeader(host: CanvasHost, entry: JSONObject) {
         enabled = enabled, role = Role.Button, onClickLabel = label, onDoubleClick = onDoubleClick, onLongClick = onLongClick, onClick = onClick)
     HoverTip(label, modifier) {
     Box((if (fillWidth) Modifier.fillMaxSize() else Modifier.fillMaxHeight()).clip(shape)
-        .then(if (surface && !inBar) Modifier.glass(shape, colors.headerSurface) else Modifier).background(when {
+        .then(if (surface && !inBar) Modifier.glass(shape, colors.headerSurface, active = active) else Modifier).background(when {
         selected -> colors.headerActive
         open -> colors.onGlass.panelFill
         enabled && pressed -> colors.text.copy(alpha = .16f)

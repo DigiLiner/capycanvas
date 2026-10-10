@@ -97,7 +97,7 @@ import org.json.JSONObject
             Surface(color = colors.panelFill, shape = shape,
                 modifier = Modifier.align(Alignment.TopCenter).padding(start = 16.dp, end = 16.dp, top = top).widthIn(max = metric("width", 560))
                     .fillMaxWidth().testTag("command-bar").graphicsLayer { alpha = progress; translationY = (1f - progress) * -4.dp.toPx() }
-                    .panelShadow(12.dp, shape).glass(shape) { root.screenOffset(editor) }
+                    .panelShadow(12.dp, shape).glass(shape, rootOffset = { root.screenOffset(editor) })
                     .onPreviewKeyEvent { event ->
                         val native = event.nativeKeyEvent
                         if (host.textComposition.owns(native)) false

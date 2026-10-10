@@ -252,19 +252,20 @@ icon match the normal header button: shared `HeaderSize::tile` and
 these metrics from `HeaderSizeView`; Zen never substitutes a fixed button or
 icon size. `HeaderGeometry::size` keeps accepted bounds and size metrics together.
 
-`HeaderGeometry::zen_button` keeps the visible Capy's complete normal header
-rectangle, including customized placement, document-tab expansion and native
-window-control insets. If Capy is absent or overflowed, the shared rectangle
-uses the title bar's leading inset and 6/8/10px padding. Hosts retain and measure
-the header while hidden and use this rectangle for the standalone button;
-entering or leaving Zen never changes its position. GTK allocates both buttons
-on the same surface pixel grid. Windows excludes the Zen rectangle from native
+`HeaderGeometry::zen_button` keeps Capy's complete header rectangle, including
+customized placement, document-tab expansion and native-control insets. Absent
+or overflowed Capy uses the leading inset and 6/8/10px padding. Hosts retain the
+measurement owner and one interactive control through normal and Zen mode,
+preserving hover, press, focus and glass identity. `HeaderGeometry::capy_item`
+identifies its normal slot; absent, overflowed or editable slots have none. Windows excludes the Zen rectangle from native
 caption dragging so mouse, touch and pen contacts reach the button.
 Android and Apple keep their measurement owners alive while removing hidden
 controls and their input and glass registrations. Native geometry queries resolve
 the model, editing state and document count supplied with their measurements;
 drag pickup rejects a measured model that differs from the current shared model.
-Capy uses neutral hover/press feedback in both presentations, while menus retain
+Normal-header holds begin before Contact and retire after native activation;
+queued retirement must match the original press, including reused pointer IDs.
+Capy uses neutral hover/press feedback, while menus retain
 the command's checked Zen state. Capy paints its own surface and stays outside
 joined header bars, so its background never fades with neighboring chrome.
 

@@ -58,8 +58,8 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   for (const size of metrics.fonts) assert.ok(Math.abs(size - points * 4 / 3) < .02, `panel text ${size} should be ${points}pt`);
   assert.equal(metrics.step, 16);
   assert.equal(metrics.tool, 16); assert.equal(metrics.tile, 36); assert.equal(metrics.preview, 40); assert.equal(metrics.slider, 24); assert.equal(metrics.layerIconButton, 24);
-  assert.ok(await evaluate("(() => { const button = document.querySelector('#zen-button'); return Math.abs(button.querySelector('svg').getBoundingClientRect().width - Math.round(button.getBoundingClientRect().height * 440 / 512)) < .02; })()"), 'Capy button uses the enlarged favicon proportions');
-  assert.equal(await evaluate("document.querySelector('#zen-button svg').dataset.asset"), 'zen-looking-up');
+  assert.ok(await evaluate("(() => { const button = document.querySelector('#zen-capy'); return Math.abs(button.querySelector('svg').getBoundingClientRect().width - Math.round(button.getBoundingClientRect().height * 440 / 512)) < .02; })()"), 'Capy button uses the enlarged favicon proportions');
+  assert.equal(await evaluate("document.querySelector('#zen-capy svg').dataset.asset"), 'zen-looking-up');
   assert.equal(await evaluate("layerApp.state().commands.find(c=>c.id==='zen_mode').shortcut"), 'Tab');
   await evaluate("document.activeElement?.blur()");
   await key('Tab');
@@ -74,15 +74,15 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   })()`), 'compact panel track has symmetric 6px gaps before the step buttons');
   await evaluate("layerApp.dispatch({type:'restore_settings',settings:{...layerApp.state().settings,zen_show_capy:false}})");
   await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{clientX:24,clientY:24,pointerType:'mouse',bubbles:true}))");
-  await click('#zen-button');
+  await click('#zen-capy');
   assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
   await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{clientX:299,clientY:24,pointerType:'mouse',bubbles:true}))");
   assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
   await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{clientX:600,clientY:450,pointerType:'mouse',bubbles:true})); window.dispatchEvent(new PointerEvent('pointermove',{clientX:24,clientY:24,pointerType:'mouse',bubbles:true}))");
   assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
   await action({type:'invoke',command:'zen_mode'});
-  const zenVisible = () => evaluate("(async () => { const n=document.querySelector('#zen-button'); await Promise.all(n.getAnimations().map(a=>a.finished)); return getComputedStyle(n).pointerEvents === 'auto' && getComputedStyle(n).opacity === '1'; })()");
-  const zenMenu = () => evaluate(`(() => { const n=document.querySelector('#zen-button'); n.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:24,clientY:36})); })()`);
+  const zenVisible = () => evaluate("(async () => { const n=document.querySelector('#zen-capy'); await Promise.all(n.getAnimations().map(a=>a.finished)); return !n.hidden && !!n.getClientRects().length && getComputedStyle(n).pointerEvents === 'auto' && getComputedStyle(n).opacity === '1'; })()");
+  const zenMenu = () => evaluate(`(() => { const n=document.querySelector('#zen-capy'); n.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:24,clientY:36})); })()`);
   const chooseMenu = async text => {
     await evaluate(`[...document.querySelectorAll('.panel-context-menu:popover-open button')].find(n=>n.textContent===${JSON.stringify(text)}).click()`); await settle();
   };
@@ -103,13 +103,13 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     })()`), 'centered four-tile selector is revealed in the taller dialog');
     for (const [index, name] of ['looking-up','facing-forward','bathing','sleeping'].entries()) {
       await click(`.preference-image-tiles [data-choice="${index}"]`);
-      assert.equal(await evaluate("document.querySelector('#zen-button svg').dataset.asset"), `zen-${name}`);
+      assert.equal(await evaluate("document.querySelector('#zen-capy svg').dataset.asset"), `zen-${name}`);
       assert.equal(await evaluate("document.querySelector('.preference-image-tiles [aria-pressed=true]').dataset.choice"), String(index));
       await capture(`zen-icons-${theme}-${index}`);
     }
     await click('#close-settings');
     await preference({type:'edit',id:'zen_show_capy',value:false});
-    await click('#zen-button');
+    await click('#zen-capy');
     assert.equal(await zenVisible(), false, 'Total Zen hides the Capy with the rest of the chrome');
     await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{clientX:600,clientY:450,bubbles:true}));window.dispatchEvent(new PointerEvent('pointermove',{clientX:24,clientY:24,bubbles:true}))");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
@@ -129,7 +129,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
     await chooseMenu('Change icon…');
     await click('#close-settings');
     await action({ type: 'invoke', command: 'zen_mode' });
-    await click('#zen-button');
+    await click('#zen-capy');
     await settle();
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
     await evaluate("window.dispatchEvent(new PointerEvent('pointermove',{clientX:100,clientY:24,bubbles:true}))");
@@ -138,7 +138,7 @@ export async function checkPreferences({ call, evaluate, settle, errors }) {
   }
   await preference({ type: 'reset', id: 'zen_icon' });
   await action({ type: 'restore_workspace', workspace: originalWorkspace });
-  assert.ok(await evaluate("document.elementFromPoint(24,24).closest('#zen-button') !== null"), 'the visible header must not intercept the persistent button');
+  assert.ok(await evaluate("document.elementFromPoint(24,24).closest('#zen-capy') !== null"), 'the visible header must not intercept the persistent button');
   await call('Input.setIgnoreInputEvents', { ignore: false });
   for (const enabled of [true, false]) {
     await call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 24, y: 24 }] });

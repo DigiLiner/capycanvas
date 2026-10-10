@@ -32,7 +32,6 @@ struct EditorView<Canvas: View>: View {
             // Controls need both the live values and their shared specifications.
             if !store.state.isNull && !store.catalog.isNull {
                 EditorHeader(store: store)
-                    .allowsHitTesting(!store.snapshot["chrome_hidden"].bool).accessibilityHidden(store.snapshot["chrome_hidden"].bool)
                 if !store.snapshot["chrome_hidden"].bool && store.state["workspace"]["layout"]["canvas_info"]["visible"].bool {
                     HStack {
                         Spacer()
@@ -43,7 +42,6 @@ struct EditorView<Canvas: View>: View {
                 }
                 WorkspacePanels(store: store, workspace: store.workspace)
                 PressureCalibration(store: store)
-                ZenCapy(store: store)
             }
             HStack {
                 ToneStatusLabel(store: store, palette: palette)
@@ -300,26 +298,3 @@ private struct ManagedPersistenceProbe: View {
     var body: some View { PersistenceProbe.label(store, saving: workspaces.hasUnsavedChanges, failed: workspaces.error != nil) }
 }
 #endif
-
-@MainActor private struct ZenCapy: View {
-    @ObservedObject var store: EditorStore
-    @ObservedObject private var header: HeaderPresentation
-    @State private var hovering = false
-    init(store: EditorStore) { self.store = store; self.header = store.header }
-    var body: some View {
-        if store.snapshot["keep_zen_button"].bool && !header.geometry["zen_button"].isNull {
-            let command = store.command("zen_mode")
-            let size = header.size
-            Button { store.invoke("zen_mode") } label: {
-                PanelIcon(name: command["icon"].string, size: size["capy_icon"].number)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
-            }.buttonStyle(HeaderButtonStyle(hovering: hovering, radius: size["tile"].number / 2))
-                .frame(width: size["tile"].number, height: size["tile"].number)
-                .disabled(!command["enabled"].bool).opacity(command["enabled"].bool ? 1 : 0.36)
-                .accessibilityLabel(command["label"].string).help(command["tooltip"].string)
-                .onHover { hovering = $0 }.onDisappear { hovering = false }
-                .modifier(WorkspaceContext(store: store, target: JSON(["kind": "zen_mode"])))
-                .placed(header.geometry["zen_button"]).accessibilityIdentifier("zen-button")
-        }
-    }
-}

@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -114,11 +115,13 @@ internal class Palette(val dark: Boolean, private val source: org.json.JSONObjec
 }
 
 @Composable internal fun Modifier.glass(shape: Shape, color: Color = Color.Transparent, rootOffset: () -> Offset = { Offset.Zero },
-    key: Any = remember { Any() }): Modifier {
+    key: Any = remember { Any() }, active: Boolean = true): Modifier {
     val host = LocalCanvasHost.current
     val density = LocalDensity.current
     DisposableEffect(host, key) { onDispose { host.glassBox(key, null) } }
+    SideEffect { if (!active) host.glassBox(key, null) }
     return background(color, shape).onGloballyPositioned { coords ->
+        if (!active) return@onGloballyPositioned
         val origin = coords.positionInRoot() + rootOffset() - host.surfaceOrigin
         val size = coords.size.toSize()
         val radii = (shape as? CornerBasedShape)?.let { s ->

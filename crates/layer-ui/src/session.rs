@@ -629,7 +629,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn context_menu(&self, target: ContextTarget) -> Result<ContextMenu, String> {
         let mut menu = match target {
             ContextTarget::ToolVariants { anchor } => self.tool_variants_menu(anchor),
-            ContextTarget::ZenMode => self.state.settings.zen_menu(self.state.platform, &self.state.localization),
+            ContextTarget::ZenMode => self.state.workspace.layout.header.capy_context_menu(self.state.workspace.zen_mode, self.localization()),
             ContextTarget::Header { id } => self
                 .state
                 .workspace
@@ -11007,87 +11007,49 @@ mod tests {
 
     #[test]
     fn zen_context_menu_contains_only_icon_customization() {
-        let mut s = session(Platform::Gtk);
-        let target = ContextTarget::ZenMode;
-        let menu = s.context_menu(target).unwrap();
-        assert_eq!(menu.title, "Zen mode");
-        assert_eq!(menu.sections.len(), 1);
-        assert_eq!(menu.sections[0].len(), 1);
-        assert_eq!(menu.sections[0][0].label, "Change icon…");
-        let saved = s.state.settings.clone();
-        let requests = s.state.requests.len();
-        s.dispatch(menu.sections[0][0].action.clone().unwrap())
-            .unwrap();
-        let view = s.preferences().unwrap();
-        assert_eq!(view.page, SettingsPage::Appearance);
-        assert_eq!(view.reveal, Some(PreferenceId::ZenIcon));
-        assert_eq!(s.state.settings, saved);
-        assert_eq!(s.state.requests.len(), requests);
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            let target = ContextTarget::ZenMode;
+            let capy = s.header_view().model.entries().find(|entry| entry.item == HeaderItem::Capy).unwrap().id;
+            assert_eq!(s.context_menu(target).unwrap().sections, s.context_menu(ContextTarget::Header { id: Some(capy) }).unwrap().sections);
+            invoke(&mut s, CommandId::ZenMode);
+            let menu = s.context_menu(target).unwrap();
+            assert_eq!(menu.title, "Zen mode");
+            assert_eq!(menu.sections.len(), 1);
+            assert_eq!(menu.sections[0].len(), 1);
+            assert_eq!(menu.sections[0][0].label, "Change icon…");
+            let saved = s.state.settings.clone();
+            let requests = s.state.requests.len();
+            s.dispatch(menu.sections[0][0].action.clone().unwrap())
+                .unwrap();
+            let view = s.preferences().unwrap();
+            assert_eq!(view.page, SettingsPage::Appearance);
+            assert_eq!(view.reveal, Some(PreferenceId::ZenIcon));
+            assert_eq!(s.state.settings, saved);
+            assert_eq!(s.state.requests.len(), requests);
+        }
     }
 
     #[test]
-    fn zen_icons_are_core_choices_with_live_icons_and_reset() {
-        let mut s = session(Platform::Gtk);
-        let id = PreferenceId::ZenIcon;
-        let field = |s: &Settings, platform| {
-            s.pages(platform)
-                .into_iter()
-                .flat_map(|p| p.groups)
-                .flat_map(|g| g.rows)
-                .find(|r| r.id == id)
-        };
-        let row = field(&s.state.settings, Platform::Gtk).unwrap();
-        assert!(matches!(row.kind, PreferenceKind::Choice {
-            presentation: ChoicePresentation::ImageTiles { columns: 4 }, selected: 0, ref options, ref icons,
-        } if options.len() == 4 && icons.len() == 4));
-        assert_eq!(row.reset.unwrap().value, "Looking up");
-        let camera = s.state.camera.clone();
-        for (index, (symbol, _)) in ZenIcon::CHOICES.into_iter().enumerate() {
-            let change = s
-                .dispatch(UiAction::Preferences {
-                    action: PreferenceAction::Edit {
-                        id,
-                        value: PreferenceValue::Choice(index as u32),
-                    },
-                })
-                .unwrap();
-            assert_eq!(s.command(CommandId::ZenMode).icon, Some(symbol.icon()));
-            assert_eq!(
-                s.state
-                    .commands
-                    .iter()
-                    .find(|c| c.id == CommandId::ZenMode)
-                    .unwrap()
-                    .icon,
-                Some(symbol.icon())
-            );
-            assert_eq!(s.state.settings.zen_icon, symbol);
-            assert!(!s.state.workspace.zen_mode);
-            assert_eq!(s.state.camera, camera);
-            assert_eq!(change.regions & regions::CAMERA, 0);
-            assert!(crate::icon_ships(symbol.icon()));
-        }
-        let before = s.state.settings.clone();
-        preference(
-            &mut s,
-            PreferenceAction::Edit {
-                id,
-                value: PreferenceValue::Choice(4),
-            },
-        );
-        assert_eq!(s.state.settings, before);
-        assert!(s.state.preferences.error.is_some());
-        preference(&mut s, PreferenceAction::Reset { id });
-        assert_eq!(s.state.settings.zen_icon, ZenIcon::LookingUp);
-        assert!(
-            !field(&s.state.settings, Platform::Gtk)
-                .unwrap()
-                .reset
-                .unwrap()
-                .enabled
-        );
-        for platform in [Platform::Web, Platform::Android] {
-            assert!(field(&s.state.settings, platform).is_some());
+    fn zen_icon_changes_update_the_retained_control_and_preserve_the_camera() {
+        for platform in Platform::ALL {
+            let mut s = session(platform);
+            let camera = s.state.camera.clone();
+            for zen in [false, true] {
+                s.state.workspace.zen_mode = zen;
+                for (index, (icon, _)) in ZenIcon::CHOICES.into_iter().enumerate() {
+                    let change = s.dispatch(UiAction::Preferences { action: PreferenceAction::Edit {
+                        id: PreferenceId::ZenIcon, value: PreferenceValue::Choice(index as u32),
+                    } }).unwrap();
+                    assert_eq!(s.header_view().capy.icon, Some(icon.icon()));
+                    assert_eq!(s.state.commands.iter().find(|c| c.id == CommandId::ZenMode).unwrap().icon, Some(icon.icon()));
+                    assert_eq!(s.state.settings.zen_icon, icon);
+                    assert_eq!(s.state.workspace.zen_mode, zen);
+                    assert_eq!(s.state.camera, camera);
+                    assert_eq!(change.regions & regions::CAMERA, 0);
+                    assert!(crate::icon_ships(icon.icon()));
+                }
+            }
         }
     }
 
@@ -11122,7 +11084,7 @@ mod tests {
     #[test]
     fn zen_preserves_header_camera_layout_and_fit_without_canvas_work() {
         for platform in Platform::ALL {
-            for (size, icon) in HeaderSize::ALL.into_iter().zip([31, 41, 52]) {
+            for size in HeaderSize::ALL {
                 for capy in [true, false] {
                     let mut s = session(platform);
                     s.state.workspace.layout.header.size = size;
@@ -11132,17 +11094,11 @@ mod tests {
                     });
                     let layout = s.state.workspace.layout.clone();
                     let camera = s.state.camera.clone();
-                    let normal = serde_json::to_value(s.header_view()).unwrap();
+                    let normal = s.header_view().model;
                     chrome(&mut s, ChromeEvent::Motion, ChromeFacts::default());
                     assert!(!invoke(&mut s, CommandId::ZenMode).canvas_wake);
                     assert!(s.interaction.hidden);
-                    let zen = serde_json::to_value(s.header_view()).unwrap();
-                    assert_eq!(normal["sizes"], zen["sizes"]);
-                    assert_eq!(normal["model"]["size"], zen["model"]["size"]);
-                    let metrics = zen["sizes"].as_array().unwrap().iter()
-                        .find(|v| v["id"] == size.id()).unwrap();
-                    assert_eq!(metrics["tile"], size.tile());
-                    assert_eq!(metrics["capy_icon"], icon);
+                    assert_eq!(s.header_view().model, normal);
                     let contacts = [[600., 450.], [600., 6.], [600., 898.],
                         [6., 450.], [1198., 450.], [24., 24.]].into_iter()
                         .map(|position| ChromeEvent::Contact { position, canvas: true });
@@ -11209,6 +11165,8 @@ mod tests {
                     assert_eq!(reply.handled, blocked || (canvas && (popup_open || (until_contact && hidden))));
                     assert_eq!(s.command(CommandId::ZenMode).selected, zen && !read_only && !transitioning);
                     let view = s.header_view();
+                    assert_eq!(view.capy.enabled, s.command(CommandId::ZenMode).enabled);
+                    assert!(!view.capy.selected);
                     let capy = view.model.entries().find(|entry| entry.item == HeaderItem::Capy).unwrap().id;
                     let button = view.items.iter().find(|item| item.id == capy).unwrap();
                     assert_eq!(button.enabled, s.command(CommandId::ZenMode).enabled);

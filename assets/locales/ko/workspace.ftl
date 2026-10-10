@@ -465,7 +465,6 @@ workspace-header-customize-menu = 제목 표시줄 사용자 지정…
 
 workspace-header-title = 제목 표시줄
 
-workspace-header-change-icon-menu = 아이콘 변경…
 
 workspace-header-move-to = { $zone } 위치로 이동
 

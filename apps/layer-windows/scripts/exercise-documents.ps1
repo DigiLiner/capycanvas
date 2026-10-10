@@ -295,7 +295,7 @@ function Start-RecoveryReview([string]$label){
     # GPU readiness can precede the asynchronous restoration of saved Zen/layout.
     Wait-Until {$model=Model;$model.brush_ready -and $model.windows_workspace.ready} 'GPU save review did not restore its workspace' 60
     if((Model).state.workspace.zen_mode){
-        (Find-Id 'zen-button').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        (Find-Id 'zen-capy').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until {!(Model).state.workspace.zen_mode -and !(Model).chrome_hidden} 'Reopened review could not leave Zen'
     }
     Wait-Until {
@@ -691,7 +691,7 @@ if($FailGpu){
     Wait-Until {Test-Path -LiteralPath $before} 'Baseline export did not finish'
     $script:scope=$root
     $revision=(Model).state.document_file.revision
-    (Find-Id 'zen-button').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Find-Id 'zen-capy').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {(Model).state.workspace.zen_mode -and (Model).chrome_hidden} 'Zen did not hide the editor before GPU failure'
     # Completed raster pixels remain saveable. Contacts admitted during failed
     # reconstruction must be canceled without preventing the save workflow.

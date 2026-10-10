@@ -460,7 +460,6 @@ workspace-header-zone-center = Orta
 workspace-header-zone-right = Sağ
 workspace-header-customize-menu = Başlık çubuğunu özelleştir…
 workspace-header-title = Başlık çubuğu
-workspace-header-change-icon-menu = Simgeyi değiştir…
 workspace-header-move-to = { $zone } bölgesine taşı
 workspace-header-move-earlier = Öne taşı
 workspace-header-move-later = Sonraya taşı

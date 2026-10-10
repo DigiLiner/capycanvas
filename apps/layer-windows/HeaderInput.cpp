@@ -37,7 +37,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     uint64_t generation=0,menuGeneration=0;
     double slopX=4,slopY=4;
     bool editing=false,dragging=false,starting=false,started=false,busy=false,ending=false,cancelled=false;
-    bool dirty=false,held=false,recognizing=false,releasing=false,menuOpen=false,workspaceMenu=false;
+    bool dirty=false,held=false,recognizing=false,releasing=false,menuOpen=false,workspaceMenu=false,normalContact=false,released=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     ~Impl(){if(timer)timer.Stop();if(menu)menu.Hide();}
     bool focused()const{return owner&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==owner&&!IsIconic(owner);}
@@ -66,7 +66,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     }
     void clear(bool keepMenu=false){
         if(!keepMenu)hideMenu();
-        release();++generation;starting=started=busy=ending=cancelled=dragging=dirty=held=false;
+        release();++generation;starting=started=busy=ending=cancelled=dragging=dirty=held=normalContact=released=false;
         dragCursor(root,false,false);
         source=J{};beginRequest=J{};preview=J{};timer.Stop();chrome(position,false);notify();
     }
@@ -109,7 +109,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     void chrome(Point at,bool pressed=true){
         if(!data->input||!root.XamlRoot())return;
         auto size=root.XamlRoot().Size();if(size.Width<=0||size.Height<=0)return;
-        auto facts=O({{L"held",B(pointer.has_value()||held||dragging)},{L"dragging",B(dragging)},
+        auto facts=O({{L"held",B((pointer&&normalContact)||held||dragging)},{L"dragging",B(dragging)},
             {L"popup_open",B(data->externalPopup||data->popupCount>0)}});
         data->input(to_string(O({{L"type",S(L"chrome")},{L"viewport",point({size.Width,size.Height})},
             {L"event",pressed?O({{L"kind",S(L"contact")},{L"position",point(at)},{L"canvas",B(false)}}):O({{L"kind",S(L"refresh")}})},{L"facts",facts}}).Stringify()));
@@ -122,10 +122,13 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         }
         return nullptr;
     }
+    bool available(FrameworkElement const& element)const{
+        if(!element)return false;auto bounds=visibleBounds(element,root);auto control=element.try_as<Control>();
+        return bounds.Width>0&&bounds.Height>0&&(!control||control.IsEnabled());
+    }
     bool current()const{
-        auto element=originElement.get();
         return root.IsLoaded()&&root.IsHitTestVisible()&&!data->externalPopup&&
-            (dragging||(element&&element.IsLoaded()));
+            (dragging||available(originElement.get()));
     }
     void pump(){
         if(busy||(!starting&&!started))return;
@@ -180,7 +183,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         });
     }
     void showMenu(J const& presentation,Point at,bool holding,FrameworkElement const& invoking,bool workspaceOptions=false){
-        if(!array(presentation,L"sections").Size())return;
+        if(!array(presentation,L"sections").Size()||!available(invoking))return;
         if(menu)menu.Hide();
         menu=MenuFlyout();workspaceMenu=workspaceOptions;TrackPopup(menu,data);
         auto weak=weak_from_this();auto control=invoking.try_as<Control>();
@@ -202,10 +205,11 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
         if(!invoking)invoking=originElement.get();if(!invoking)invoking=root;
         auto serial=++menuGeneration;
+        auto tag=invoking.Tag().try_as<J>();bool capy=tag&&str(object(tag,L"header_source"),L"kind")==L"capy";
         if(workspace(id)){
             showMenu(object(object(data->model,L"windows_workspace"),L"switcher_options"),at,holding,invoking,true);return;
         }
-        QueryWorkspace(data->query,O({{L"type",S(L"context")},{L"target",O({{L"kind",S(L"header")},
+        QueryWorkspace(data->query,O({{L"type",S(L"context")},{L"target",capy?O({{L"kind",S(L"zen_mode")}}):O({{L"kind",S(L"header")},
             {L"id",id?N(id):JsonValue::CreateNullValue()}})}}),
             [weak=weak_from_this(),serial,at,holding,focus=make_weak(invoking)](J reply){
                 auto self=weak.lock();if(!self||serial!=self->menuGeneration||self->dragging||!self->focused()||self->data->externalPopup)return;
@@ -214,7 +218,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             });
     }
     void down(PointerRoutedEventArgs const& e){
-        if(active()){if(pointer==e.Pointer().PointerId())return;cancel(L"additional_contact");if(active())return;}
+        if(active()){if(released)clear();else {if(pointer==e.Pointer().PointerId())return;cancel(L"additional_contact");if(active())return;}}
         if(data->externalPopup)return;
         auto p=e.GetCurrentPoint(root);if(!p.IsInContact())return;
         auto element=target(e.OriginalSource());if(!element)return;
@@ -229,7 +233,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             if(auto target=node.try_as<UIElement>())pressedPath.push_back(make_weak(target));
             if(node==root)break;
         }
-        origin=position=p.Position();pointer=p.PointerId();contact=e.Pointer();device=p.PointerDeviceType();
+        origin=position=p.Position();pointer=p.PointerId();contact=e.Pointer();device=p.PointerDeviceType();normalContact=!flag(data->model,L"chrome_hidden");
         chrome(position);
         if(kind==L"background"&&editable()){selected=0;notify();e.Handled(true);}
         owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);auto dpi=GetDpiForWindow(owner);
@@ -238,7 +242,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         beginRequest=J::Parse(configuration.Stringify());beginRequest.Insert(L"op",S(L"begin"));
         beginRequest.Insert(L"source",source);beginRequest.Insert(L"press",point(origin));
         beginRequest.Insert(L"grab",rectangle(visibleBounds(element,root)));
-        if(isItem&&device!=NativeInput::PointerDeviceType::Mouse){
+        if((isItem||kind==L"capy")&&device!=NativeInput::PointerDeviceType::Mouse){
             recognizing=true;recognizer.GestureSettings(NativeInput::GestureSettings::Hold);recognizer.ProcessDownEvent(p);
         }
         if(editable()&&kind!=L"background"){claim();e.Handled(true);}
@@ -252,14 +256,14 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(recognizing&&!held)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
         bool moved=std::abs(next.X-origin.X)>slopX||std::abs(next.Y-origin.Y)>slopY;
         if(!dragging&&moved){
-            if(!editable()){clear();return;}
+            if(!editable()){stopRecognition();return;}
             if(!claim())return;
             hideMenu();stopRecognition();dragging=true;starting=true;dragCursor(root,device==NativeInput::PointerDeviceType::Touch,true);
         }
         if(dragging){position=next;dirty=true;pump();e.Handled(true);notify();}
     }
     void up(PointerRoutedEventArgs const& e){
-        if(!pointer||*pointer!=e.Pointer().PointerId())return;
+        if(!pointer||*pointer!=e.Pointer().PointerId()||released)return;
         if(device==NativeInput::PointerDeviceType::Mouse&&e.GetCurrentPoint(root).Properties().IsLeftButtonPressed())return;
         if(!focused()||!current()){cancel(L"source_or_focus_lost");e.Handled(true);return;}
         auto p=e.GetCurrentPoint(root);
@@ -267,7 +271,8 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(dragging){
             position=p.Position();ending=true;release();pump();e.Handled(true);notify();
         }else{
-            bool handled=editable()||held;clear(held);if(handled)e.Handled(true);
+            if(editable()||held){clear(held);e.Handled(true);}
+            else {released=true;auto serial=generation;root.DispatcherQueue().TryEnqueue([weak=weak_from_this(),serial]{if(auto self=weak.lock();self&&self->generation==serial)self->clear();});}
         }
     }
     void init(){
@@ -286,10 +291,10 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         root.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->move(e);})),true);
         root.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);})),true);
         root.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){
-            if(auto self=weak.lock();self&&!self->releasing&&self->pointer==e.Pointer().PointerId())self->cancel(L"pointer_canceled");
+            if(auto self=weak.lock();self&&!self->releasing&&!self->released&&self->pointer==e.Pointer().PointerId())self->cancel(L"pointer_canceled");
         })),true);
         root.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){
-            if(auto self=weak.lock();self&&!self->releasing&&self->pointer==e.Pointer().PointerId()){
+            if(auto self=weak.lock();self&&!self->releasing&&!self->released&&self->pointer==e.Pointer().PointerId()){
                 if(e.OriginalSource().try_as<UIElement>()==self->root||e.GetCurrentPoint(self->root).IsInContact())self->cancel(L"capture_lost");
                 else self->up(e);
             }
@@ -298,7 +303,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
             auto element=self->target(e.OriginalSource());if(!element)return;
             e.Handled(true);if(self->active())return;
             auto item=object(element.Tag().as<J>(),L"header_source");auto kind=str(item,L"kind");
-            if(kind!=L"item"&&kind!=L"background")return;
+            if(kind!=L"item"&&kind!=L"background"&&kind!=L"capy")return;
             Point at{};if(!e.TryGetPosition(self->root,at)){auto box=visibleBounds(element,self->root);at={box.X,box.Y+box.Height};}
             self->selected=uint32_t(num(item,L"value"));self->context(self->selected,at,false,self->focusSource(e.OriginalSource()));self->notify();
         }});
@@ -331,7 +336,7 @@ void HeaderInput::Context(uint32_t id,FrameworkElement const& invoking){
 }
 void HeaderInput::Configure(J const& model,bool editing,J const& request){
     auto identity=model.Stringify()+request.Stringify();
-    if(impl->identity!=identity||impl->editing!=editing)impl->cancel(L"configuration_changed");
+    if((impl->identity!=identity||impl->editing!=editing)&&str(impl->source,L"kind")!=L"capy")impl->cancel(L"configuration_changed");
     impl->model=model;impl->configuration=request;impl->identity=identity;impl->editing=editing;
     impl->refreshWorkspaceMenu();
     bool found=false;for(auto zone:array(model,L"zones"))for(auto entry:zone.GetArray())found|=num(entry.GetObject(),L"id")==impl->selected;
@@ -345,7 +350,7 @@ bool HeaderInput::Key(KeyRoutedEventArgs const& e,bool pressed){
     if(context){
         auto element=impl->target(FocusManager::GetFocusedElement(impl->root.XamlRoot()));
         auto id=element?uint32_t(num(object(element.Tag().as<J>(),L"header_source"),L"value")):impl->selected;
-        if(impl->workspace(id)){
+        if(impl->workspace(id)||(element&&str(object(element.Tag().as<J>(),L"header_source"),L"kind")==L"capy")){
             e.Handled(true);if(pressed&&!impl->active()){
                 auto box=visibleBounds(element?element:impl->root,impl->root);
                 impl->context(id,{box.X,box.Y+box.Height},false,impl->focusSource(FocusManager::GetFocusedElement(impl->root.XamlRoot())));

@@ -68,7 +68,7 @@ More button) join one flush bar that is exactly one tile tall, so a Small bar
 matches a Small toolbar tile (36px). Tiles inside a bar are square, fill the
 bar's height with toolbar-style feedback and use the toolbar tile gap:
 `HeaderSize::gap()` is 2px at Small and Medium and 4px at Large, like
-`TileStyle::gap()`. Capy gets its own single-tile bar. Multiple drawing tabs
+`TileStyle::gap()`. Capy paints its own tile. Multiple drawing tabs
 form one full-height strip with the same gap; each tab's 24px close button
 keeps equal end and vertical insets so it stays concentric with the tab. Every
 title-bar surface (bars, menu labels, the tab strip, the document title, clock,
@@ -146,7 +146,8 @@ system menu bar owns them. Zen hides the title bar like other chrome; see
 [shared UI](shared-ui.md#window-chrome-and-zen-mode).
 The Capy button keeps its header position and dimensions through Zen, including
 customized regions and native-control clearance. A shared fallback rectangle
-keeps it available when removed or overflowed.
+keeps it available when removed or overflowed. Hosts retain one interactive
+control across both presentations; editable slots show a thumbnail and grip.
 
 ## Checks
 
@@ -156,7 +157,9 @@ visibility pins, blocked input, focus loss and leave; native query tests cover
 queued model changes. Check all paint behind the glyph: sibling surfaces, native
 hover/press/focus identity, glass registration and publication. Sample the visible
 control from chrome visibility; Zen can also keep the normal header temporarily
-visible. Bounds and glyph opacity alone do not establish paint continuity.
+visible. Verify the same widget, parent, style, hover, focus and glass identity
+through mouse-up, native activation and deferred retirement. Bounds and glyph
+opacity alone do not establish paint continuity.
 
 Run native input in a private compositor, never on the user's desktop:
 

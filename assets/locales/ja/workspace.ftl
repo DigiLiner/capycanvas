@@ -465,7 +465,6 @@ workspace-header-customize-menu = タイトルバーをカスタマイズ…
 
 workspace-header-title = タイトルバー
 
-workspace-header-change-icon-menu = アイコンを変更…
 
 workspace-header-move-to = { $zone }に移動
 

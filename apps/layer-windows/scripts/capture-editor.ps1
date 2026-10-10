@@ -200,7 +200,7 @@ foreach($theme in @('dark','light')){
             document=$model.state.tabs[0];camera=$model.state.camera;layout=$model.layout;
             tool_set=@($elements|Where-Object{$_.id -match '^tool-(group|subtool)-'});
             layers=$layerElements;layer_geometry_source='UIElement RenderSize transformed into Drawing workspace; ActualWidth/Height and UIA bounds retained';
-            header=@($elements|Where-Object{$_.id -match '^(application-(menu[s-]|primary-menu$)|workspace-switch|header-workspace-menu$|header-overflow-[0-2]$|document-title$|zen-button$|fullscreen$|settings-button$)'})}
+            header=@($elements|Where-Object{$_.id -match '^(application-(menu[s-]|primary-menu$)|workspace-switch|header-workspace-menu$|header-overflow-[0-2]$|document-title$|zen-capy$|fullscreen$|settings-button$)'})}
         Write-Output "Captured $name at $Width x $Height logical, scale $scale"
     }
 }

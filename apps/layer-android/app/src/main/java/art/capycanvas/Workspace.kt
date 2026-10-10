@@ -484,16 +484,18 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
     lineTo(left, radius); squircleTo(Offset(left + radius, radius), Offset(-radius, 0f), Offset(0f, -radius)); close()
 }
 
-@Composable internal fun ZenButton(host: CanvasHost, snapshot: JSONObject, dock: DockInteraction, bounds: JSONObject, size: JSONObject) {
-    val command = snapshot.getJSONObject("state").array("commands").objects().first { it.getString("id") == "zen_mode" }
+@Composable internal fun ZenButton(host: CanvasHost, snapshot: JSONObject, dock: DockInteraction, bounds: JSONObject?, size: JSONObject) {
+    val command = snapshot.getJSONObject("header").getJSONObject("capy")
     val target = remember { obj("kind" to "zen_mode") }
     val anchor = dock.anchorKey(target)
     DisposableEffect(dock) { onDispose { dock.anchors.remove(anchor) } }
-    HeaderButton(command.getString("tooltip"), false, command.optBoolean("enabled"), false,
-        Modifier.offset(bounds.number("x").dp, bounds.number("y").dp).size(size.number("tile").dp).alpha(if (command.optBoolean("enabled")) 1f else .4f).zIndex(1000f).testTag("zen-button").chromeRegion(dock)
+    SideEffect { if (bounds == null) dock.anchors.remove(anchor) }
+    Layout(modifier = Modifier.fillMaxSize().zIndex(1000f), content = {
+    HeaderButton(command.getString("tooltip"), false, bounds != null && command.optBoolean("enabled"), false,
+        Modifier.size(size.number("tile").dp).alpha(if (command.optBoolean("enabled")) 1f else .4f).testTag("zen-button")
+            .chromeRegion(dock, header = !snapshot.optBoolean("chrome_hidden"), active = bounds != null)
             .onGloballyPositioned {
-                val bounds = it.boundsInRoot().translate(-dock.origin)
-                dock.anchors[anchor] = bounds
+                if (bounds != null) dock.anchors[anchor] = it.boundsInRoot().translate(-dock.origin)
             }
             .pointerInput(dock) {
                 awaitEachGesture {
@@ -501,8 +503,14 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                     if (currentEvent.buttons.isSecondaryPressed) { down.consume(); dock.context(target) }
                 }
             },
-        onLongClick = { dock.holdContext(target) }, onClick = { host.invoke("zen_mode") }) {
+        active = bounds != null, onLongClick = { dock.holdContext(target) }, onClick = { host.invoke("zen_mode") }) {
         SharedIcon(command.getString("icon"), command.getString("tooltip"), Modifier.size(size.number("capy_icon").dp))
+    }
+    }) { children, constraints ->
+        val child = children.single().measure(constraints.copy(minWidth = 0, minHeight = 0))
+        layout(constraints.maxWidth, constraints.maxHeight) {
+            bounds?.let { child.place((it.number("x") * dock.density).roundToInt(), (it.number("y") * dock.density).roundToInt()) }
+        }
     }
 }
 

@@ -403,7 +403,6 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     header=std::make_unique<HeaderView>(send,model,localization,
         [weak=weak_from_this()](bool open){if(auto self=weak.lock())self->Popup(open);},
         [weak=weak_from_this()]{if(auto self=weak.lock()){
-            if(self->header&&self->workspace)self->workspace->SetHeaderGeometry(self->header->Geometry());
             self->Resize();
         }},
         [weak=weak_from_this()]{if(auto self=weak.lock())self->Fullscreen();},

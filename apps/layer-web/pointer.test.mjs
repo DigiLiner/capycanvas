@@ -55,7 +55,7 @@ test("cursor hover preserves mouse, pen, and eraser device kinds", () => {
   assert.deepEqual(changes, ["cursor-left"]);
 });
 function harness({ raw = false, prediction = false, paint: allowPaint = true } = {}) {
-  const listeners = new Map(), windowListeners = new Map(), records = [], phases = [], buttons = [], cursors = [], captures = [];
+  const listeners = new Map(), windowListeners = new Map(), records = [], phases = [], buttons = [], cursors = [], captures = [], timers = [];
   let contact = null;
   const context = {
     canvas: {
@@ -80,12 +80,12 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
       return { paint, handled };
     },
     cursorInput(event) { cursors.push(event?.type ?? null); }, wake() {},
-    heldPointers: new Set(),
-    workspace: {setPointerCapture: id => captures.push(id)},
+    heldPointers: new Map(),
+    workspace: {setPointerCapture: id => captures.push(id),classList:{contains:()=>false}},
     document: {documentElement: {hasAttribute: () => false, toggleAttribute() {}}, addEventListener() {}},
     chromeInput: event => ({handled: event.kind === 'contact' && !!context.consumeChrome}),
-    updateZen() {}, closeMenusOutside() {}, requestAnimationFrame() {}, endWorkspaceGesture() {}, queuePen() {},
-    window: { addEventListener: (name, fn) => windowListeners.set(name, fn) }, setTimeout: () => 0, clearTimeout() {},
+    zenUpdates:0,updateZen() {context.zenUpdates++;}, closeMenusOutside() {}, requestAnimationFrame() {}, endWorkspaceGesture() {}, queuePen() {},
+    window: { addEventListener: (name, fn) => windowListeners.set(name, fn) }, setTimeout: fn => timers.push(fn), clearTimeout() {},
   };
   if (raw) context.onpointerrawupdate = null;
   runInNewContext(source.slice(source.indexOf("function position("),
@@ -108,7 +108,7 @@ function harness({ raw = false, prediction = false, paint: allowPaint = true } =
         preventDefault() { prevented = true; }, stopImmediatePropagation() {}, ...overrides});
       return prevented;
     },
-    context, captures,
+    context, captures,flushTimers:()=>timers.splice(0).forEach(fn=>fn()),
   };
 }
 
@@ -156,10 +156,19 @@ test("foreign pointers cannot end the active stroke", () => {
     h.chrome('pointerdown');
     h.chrome('pointerdown', {pointerId: 2, pointerType: 'touch'});
     h.chrome(ending, {pointerId: 2, buttons: 0});
-    assert.deepEqual([...h.context.heldPointers], [1], ending);
+    h.flushTimers();
+    assert.deepEqual([...h.context.heldPointers.keys()], [1], ending);
     h.chrome('pointerup');
+    h.flushTimers();
     assert.equal(h.context.heldPointers.size, 0);
   }
+  h.chrome('pointerdown');h.chrome('pointerup');h.chrome('lostpointercapture');
+  h.chrome('pointerdown');h.flushTimers();
+  assert.deepEqual([...h.context.heldPointers.keys()],[1],'old release callbacks cannot clear a reused pointer');
+  h.chrome('pointercancel');h.flushTimers();
+  const updates=h.context.zenUpdates;
+  h.chrome('pointerup');h.chrome('lostpointercapture');h.flushTimers();
+  assert.equal(h.context.zenUpdates,updates,'release without an owned contact does not publish chrome');
   h.context.consumeChrome = true;
   for (const pointerId of [1, 2]) h.chrome('pointerdown', {pointerId});
   assert.deepEqual(h.captures, [1, 2], 'consumed contacts capture the stable workspace');

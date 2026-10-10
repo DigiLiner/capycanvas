@@ -1330,20 +1330,6 @@ impl Settings {
             .collect();
         swatch_row(id, &title, presets, Some(value), theme.default_base(), true, localizer)
     }
-    pub(crate) fn zen_menu(&self, _platform: Platform, localizer: &Localizer) -> Result<ContextMenu, String> {
-        Ok(ContextMenu {
-            title: CommandId::ZenMode.localized_label(localizer).to_string(),
-            sections: vec![vec![ContextMenuItem::command(
-                localizer.text(MessageId::SETTINGS_CHANGE_ICON).to_string(),
-                UiAction::Preferences {
-                    action: PreferenceAction::Reveal {
-                        id: PreferenceId::ZenIcon,
-                    },
-                },
-            )]],
-        })
-    }
-
     #[cfg(test)]
     pub(crate) fn field(&self, id: PreferenceId, platform: Platform) -> Result<PreferenceRow, String> {
         self.localized_field(id, platform, &Localizer::shared(UiLanguage::English))
@@ -2404,29 +2390,22 @@ mod copy_tests {
                 ]
             );
             assert!(settings.zen_show_capy);
-            let id = PreferenceId::ZenShowCapy;
-            settings.edit(id, PreferenceValue::Bool(false), platform).unwrap();
-            let restored = serde_json::from_str::<Settings>(&serde_json::to_string(&settings).unwrap()).unwrap();
-            assert_eq!(restored, settings);
-            let mut preferences = PreferencesState::default();
-            preferences.edit(&mut settings, PreferenceAction::Reset { id }, platform, &Localizer::shared(UiLanguage::English));
-            assert!(preferences.error.is_none());
-            assert_eq!(settings, Settings::default());
-            settings
-                .edit(PreferenceId::ZenIcon, PreferenceValue::Choice(3), platform)
-                .unwrap();
-            let saved = serde_json::to_string(&settings).unwrap();
-            assert_eq!(serde_json::from_str::<Settings>(&saved).unwrap(), settings);
-            let mut state = PreferencesState::default();
-            state.edit(
-                &mut settings,
-                PreferenceAction::Reset {
-                    id: PreferenceId::ZenIcon,
-                },
-                platform,
-             &Localizer::shared(UiLanguage::English));
-            assert!(state.error.is_none());
-            assert_eq!(settings, Settings::default());
+            let row = settings.field(PreferenceId::ZenIcon, platform).unwrap();
+            assert!(matches!(row.kind, PreferenceKind::Choice { presentation: ChoicePresentation::ImageTiles { columns: 4 }, selected: 0, ref options, ref icons } if options.len() == 4 && icons.len() == 4));
+            assert_eq!(row.reset.unwrap().value, "Looking up");
+            assert!(settings.edit(PreferenceId::ZenIcon, PreferenceValue::Choice(4), platform).is_err());
+            assert_eq!(settings.zen_icon, ZenIcon::LookingUp);
+            for (id, value) in [(PreferenceId::ZenShowCapy, PreferenceValue::Bool(false)),
+                (PreferenceId::ZenIcon, PreferenceValue::Choice(3))] {
+                settings.edit(id, value, platform).unwrap();
+                let saved = serde_json::to_string(&settings).unwrap();
+                assert_eq!(serde_json::from_str::<Settings>(&saved).unwrap(), settings);
+                let mut preferences = PreferencesState::default();
+                preferences.edit(&mut settings, PreferenceAction::Reset { id }, platform, &Localizer::shared(UiLanguage::English));
+                assert!(preferences.error.is_none());
+                assert_eq!(settings, Settings::default());
+                assert!(!settings.field(id, platform).unwrap().reset.unwrap().enabled);
+            }
         }
     }
 

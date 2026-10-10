@@ -442,12 +442,15 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
 
 
 /** Only UI-covered contacts are sent here; CanvasHost gates bare canvas contacts. */
-@Composable internal fun Modifier.chromeRegion(dock: DockInteraction, header: Boolean = false): Modifier {
+@Composable internal fun Modifier.chromeRegion(dock: DockInteraction, header: Boolean = false, active: Boolean = true): Modifier {
     val token = remember { Any() }
     val z = LocalWorkspaceZ.current
     DisposableEffect(dock, token) { onDispose { dock.chromeRegions.remove(token) } }
-    SideEffect { dock.chromeRegions[token]?.takeIf { it.z != z || it.header != header }?.let { dock.chromeRegions[token] = it.copy(z = z, header = header) } }
-    return onGloballyPositioned { dock.chromeRegions[token] = DockInteraction.ChromeRegion(it.boundsInRoot().translate(-dock.origin), z, header) }
+    SideEffect {
+        if (!active) dock.chromeRegions.remove(token)
+        else dock.chromeRegions[token]?.takeIf { it.z != z || it.header != header }?.let { dock.chromeRegions[token] = it.copy(z = z, header = header) }
+    }
+    return onGloballyPositioned { if (active) dock.chromeRegions[token] = DockInteraction.ChromeRegion(it.boundsInRoot().translate(-dock.origin), z, header) }
 }
 @Composable internal fun Modifier.contextAnchor(dock: DockInteraction, target: JSONObject): Modifier {
     val key = dock.anchorKey(target)

@@ -457,7 +457,6 @@ workspace-header-zone-center = Giữa
 workspace-header-zone-right = Phải
 workspace-header-customize-menu = Tùy chỉnh thanh tiêu đề…
 workspace-header-title = Thanh tiêu đề
-workspace-header-change-icon-menu = Đổi biểu tượng…
 workspace-header-move-to = Di chuyển sang { $zone }
 workspace-header-move-earlier = Đưa về trước
 workspace-header-move-later = Đưa về sau

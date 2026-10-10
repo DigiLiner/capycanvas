@@ -138,6 +138,9 @@ impl Header {
     pub fn zen_button_bounds(&self) -> Bounds {
         self.geometry.borrow().zen_button
     }
+    pub fn capy_visible(&self) -> bool {
+        !self.editing.get() && self.geometry.borrow().capy_item.is_some()
+    }
     #[cfg(test)]
     pub fn drag_for_test(&self) -> Option<HeaderDragPreview> {
         self.drag.borrow().as_ref().map(|d| d.preview.clone())
@@ -389,6 +392,11 @@ impl Header {
         let projected = state.workspace.layout.header.projected_for(Platform::Gtk);
         let model = &projected;
         let editing = state.customization.header_editing;
+        w.zen_capy.set_tooltip_text(Some(&view.capy.tooltip));
+        w.zen_capy.set_sensitive(view.capy.enabled);
+        if let Some(image) = w.zen_capy.child().and_downcast::<gtk::Image>() {
+            crate::icons::set(&image, view.capy.icon.map(|icon| format!("layer-{icon}-symbolic")).as_deref());
+        }
         let was_editing = self.editing.replace(editing);
         let rebuild = was_editing != editing || self.model.borrow().as_ref() != Some(model);
         self.editor.refresh(model, editing);
@@ -550,17 +558,6 @@ impl Header {
                         layer_ui::MessageId::WORKSPACE_HEADER_FULLSCREEN
                     })));
                 }
-                if item.entry.item == HeaderItem::Capy {
-                    if let Some(image) = button.child().and_downcast::<gtk::Image>() {
-                        let icon = state
-                            .commands
-                            .iter()
-                            .find(|c| c.id == CommandId::ZenMode)
-                            .and_then(|c| c.icon)
-                            .unwrap_or(ZenIcon::LookingUp.icon());
-                        crate::icons::set(&image, Some(&format!("layer-{icon}-symbolic")));
-                    }
-                }
             }
             if let Some(button) = &item.button {
                 if let Some(caption) = button.tooltip_text() {
@@ -629,8 +626,14 @@ impl Header {
         let mut placeholder_label = None;
         let mut editing_grip = None;
         let content: gtk::Widget = match entry.item {
-            HeaderItem::Capy
-            | HeaderItem::Tool { .. }
+            HeaderItem::Capy => {
+                let image = gtk::Image::new();image.set_pixel_size(size.capy_icon());image.add_css_class("header-readout");
+                w.zen_capy.child().unwrap().bind_property("paintable", &image, "paintable").sync_create().build();
+                image.set_visible(editing);root.set_can_target(editing);
+                root.update_state(&[gtk::accessible::State::Hidden(!editing)]);
+                image.upcast()
+            }
+            HeaderItem::Tool { .. }
             | HeaderItem::Settings
             | HeaderItem::Fullscreen => {
                 let b = gtk::Button::new();
@@ -641,15 +644,9 @@ impl Header {
                     HeaderItem::Tool { control } => control.icon(),
                     HeaderItem::Settings => "settings",
                     HeaderItem::Fullscreen => "fullscreen-enter",
-                    _ => ZenIcon::LookingUp.icon(),
+                    _ => unreachable!(),
                 };
-                let image = w.customization.icon(w, icon, if entry.item == HeaderItem::Capy {
-                    root.add_css_class("capy-item");
-                    b.add_css_class("capy-button");
-                    size.capy_icon()
-                } else {
-                    size.icon()
-                });
+                let image = w.customization.icon(w, icon, size.icon());
                 b.set_child(Some(&image));
                 if entry.item
                     == (HeaderItem::Tool {
@@ -670,7 +667,6 @@ impl Header {
                     customization::tool_group_marker(&b);
                 }
                 let command = match entry.item {
-                    HeaderItem::Capy => Some(CommandId::ZenMode),
                     HeaderItem::Settings => Some(CommandId::Settings),
                     HeaderItem::Fullscreen => Some(CommandId::Fullscreen),
                     _ => None,
@@ -1060,6 +1056,7 @@ impl Header {
             }
         }
         *self.geometry.borrow_mut() = geometry;
+        w.update_zen();
         if !self.measuring.replace(true) {
             glib::idle_add_local_once(glib::clone!(
                 #[weak]

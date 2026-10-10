@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
+import {presentCapy} from './header.js';
+import {colorDialogDom} from './color-dialog-fixture.mjs';
 
 const source = readFileSync(new URL("app.js", import.meta.url), "utf8");
 function harness() {
@@ -54,4 +56,50 @@ test("display estimate adapts after moving to a 60 Hz screen and excludes idle g
   assert.ok(Math.abs(presentation - (1000 + 41 * 1000 / 60)) < .01);
   const idle = h.tick(10000, 10002);
   assert.ok(idle[1] > 10002 && idle[1] < 10020);
+});
+
+test('shared chrome replies retain the same Capy control and contact state', t => {
+  const {doc,element}=colorDialogDom(t),workspace=element('div'),capy=element('button');
+  capy.id='zen-capy';workspace.append(capy);doc.body.append(workspace);capy.focus();
+  capy.setAttribute('data-header-pressed','');
+  let geometry={capy_item:0,size:'medium'},editing=false,reply,hidden=false;
+  const writes=[];
+  Object.defineProperty(capy,'hidden',{get:()=>hidden,set:value=>{writes.push(value);hidden=value;}});
+  const context={workspace,document:doc,canvas:{style:{}},$:(id)=>id==='zen-capy'?capy:null,
+    app:{input:()=>reply},applyChange(){},message:assert.fail,
+    header:{interaction:value=>presentCapy(capy,geometry,value.chrome_hidden,value.keep_zen_button,editing)}};
+  runInNewContext(source.slice(source.indexOf('function input(event)'),source.indexOf('function chromeInput(event)')),context);
+  const same=()=>{
+    assert.equal(doc.activeElement,capy);
+    assert.equal(workspace.firstChild,capy);
+    assert.equal(capy.parentNode,workspace);
+    assert.equal(capy.id,'zen-capy');
+    assert.ok(capy.hasAttribute('data-header-pressed'));
+  };
+  for(const [chrome_hidden,keep_zen_button] of [[false,false],[true,true],[false,false],[true,true],[false,false]]){
+    reply={chrome_hidden,keep_zen_button,change:{}};
+    context.input({type:'chrome'});same();
+    geometry={capy_item:0,size:'large'};
+    presentCapy(capy,geometry,chrome_hidden,keep_zen_button,editing);same();
+    assert.equal(capy.hidden,false);
+  }
+  assert.deepEqual(writes,[],'eligible mode/geometry publications never hide the retained control');
+  for(const [present,chrome_hidden,keep_zen_button,edit,expected] of [
+    [true,true,false,false,true],[true,false,false,false,false],[true,false,false,true,true],
+    [false,false,false,false,true],[false,true,true,false,false],[false,true,false,false,true],
+  ]){
+    geometry=present?{capy_item:0,size:'small'}:{capy_item:null,size:'small'};editing=edit;
+    reply={chrome_hidden,keep_zen_button,change:{}};context.input({type:'chrome'});
+    assert.equal(capy.hidden,expected);assert.equal(workspace.firstChild,capy);
+    const count=writes.length;
+    presentCapy(capy,geometry,chrome_hidden,keep_zen_button,editing);
+    assert.equal(writes.length,count,'unchanged visibility does not write hidden again');
+  }
+  const headerSource=readFileSync(new URL('header.js',import.meta.url),'utf8');
+  const accepted={size:'medium',capy_item:0,items:[],zones:[],bars:[],overflow:[],hidden:[]};
+  const native={...context,capy,root:element('div'),geometry:accepted,preview:{...accepted,capy_item:null},
+    view:{sizes:[{id:'medium'}]},records:new Map(),bars:[],overflow:[],zones:[],place(){},reconcileCapy(){}};
+  native.root.style.setProperty=workspace.style.setProperty=()=>{};
+  runInNewContext(headerSource.slice(headerSource.indexOf('  function present('),headerSource.indexOf('  function allocate('))+'present(preview,true);',native);
+  assert.equal(native.geometry,accepted,'drag presentation preserves the accepted layout for cancellation');
 });

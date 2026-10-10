@@ -243,6 +243,14 @@ impl HeaderLayout {
         self.projected_for(platform)
     }
 
+    pub(crate) fn capy_context_menu(&self, zen: bool, localization: &Localizer) -> Result<ContextMenu, String> {
+        let zen = zen || !self.entries().any(|entry| entry.item == HeaderItem::Capy);
+        let mut menu = if zen { ContextMenu::default() } else { self.context_menu_localized(None, false, localization)? };
+        menu.title = if zen { CommandId::ZenMode.localized_label(localization).to_string() } else { HeaderItem::Capy.localized_label(localization) };
+        menu.sections.push(vec![ContextMenuItem::command(localization.text(MessageId::SETTINGS_CHANGE_ICON).as_ref(),
+            UiAction::Preferences { action: PreferenceAction::Reveal { id: PreferenceId::ZenIcon } })]);
+        Ok(menu)
+    }
     pub fn canonical_context_menu(&self, id: Option<u32>, editing: bool) -> Result<ContextMenu, String> {
         self.context_menu_localized(id, editing, &Localizer::shared(UiLanguage::English))
     }
@@ -264,14 +272,7 @@ impl HeaderLayout {
             let item = self.entry(id)?;
             title = item.item.localized_label(localization);
             if item.item == HeaderItem::Capy && !editing {
-                sections.push(vec![ContextMenuItem::command(
-                    localization.text(MessageId::WORKSPACE_HEADER_CHANGE_ICON_MENU).as_ref(),
-                    UiAction::Preferences {
-                        action: PreferenceAction::Reveal {
-                            id: PreferenceId::ZenIcon,
-                        },
-                    },
-                )]);
+                return self.capy_context_menu(false, localization);
             }
             if !editing {
                 return Ok(ContextMenu { title, sections });
@@ -516,6 +517,7 @@ pub struct HeaderNativeGeometry {
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct HeaderGeometry {
     pub size: HeaderSize,
+    pub capy_item: Option<u32>,
     pub zen_button: Bounds,
     pub items: Vec<HeaderItemBounds>,
     pub zones: [Bounds; 3],
@@ -531,10 +533,11 @@ pub struct HeaderBar {
 }
 
 impl HeaderGeometry {
-    fn place_zen_button(&mut self, layout: &HeaderLayout, insets: [f32; 2]) {
-        self.zen_button = layout.entries().find(|e| e.item == HeaderItem::Capy)
-            .and_then(|entry| self.items.iter().find(|item| item.id == entry.id))
-            .map_or(Bounds {
+    fn place_zen_button(&mut self, layout: &HeaderLayout, insets: [f32; 2], editing: bool) {
+        let capy = layout.entries().find(|e| e.item == HeaderItem::Capy)
+            .and_then(|entry| self.items.iter().find(|item| item.id == entry.id));
+        self.capy_item = capy.filter(|_| !editing).map(|item| item.id);
+        self.zen_button = capy.map_or(Bounds {
                 x: insets[0].max(0.) + layout.size.item_gap(),
                 y: layout.size.item_gap(),
                 width: layout.size.tile(),
@@ -612,6 +615,7 @@ impl HeaderGeometry {
 pub struct HeaderView {
     pub model: HeaderLayout,
     pub editing: bool,
+    pub capy: crate::CommandState,
     pub items: Vec<HeaderItemView>,
     pub sizes: Vec<HeaderSizeView>,
     pub components: Vec<HeaderComponentView>,
@@ -691,6 +695,7 @@ impl<R: layer_render::CanvasRenderer> UiSession<R> {
             })
             .collect();
         HeaderView {
+            capy: crate::CommandState { selected: false, ..self.command(CommandId::ZenMode) },
             model,
             items,
             editing: state.customization.header_editing,
@@ -736,7 +741,7 @@ impl HeaderLayout {
             && let Some(entry) = self.entries().find(|e| e.item == HeaderItem::DocumentTitle)
         {
             geometry.expand_document(entry.id, width, insets, self.size);
-            geometry.place_zen_button(self, insets);
+            geometry.place_zen_button(self, insets, editing);
         }
         geometry
     }
@@ -922,7 +927,7 @@ impl HeaderLayout {
         for i in 0..result.bars.len() {
             result.bars[i].bounds = result.bar_bounds(&result.bars[i]);
         }
-        result.place_zen_button(self, insets);
+        result.place_zen_button(self, insets, editing);
         result
     }
 }
@@ -1072,7 +1077,8 @@ mod tests {
     fn zen_button_retains_header_bounds_and_fallback_clears_native_controls() {
         for platform in Platform::ALL {
             for preset in WorkspacePreset::ALL {
-                for (size, gap, tile) in [(HeaderSize::Small, 6., 36.), (HeaderSize::Medium, 8., 48.), (HeaderSize::Large, 10., 60.)] {
+                for (size, gap, tile, icon) in [(HeaderSize::Small, 6., 36., 31), (HeaderSize::Medium, 8., 48., 41), (HeaderSize::Large, 10., 60., 52)] {
+                    assert_eq!(size.capy_icon(), icon);
                     let mut header = preset.layout(platform).header;
                     header.size = size;
                     let capy = header.entries().find(|e| e.item == HeaderItem::Capy).unwrap().id;
@@ -1085,14 +1091,17 @@ mod tests {
                                     assert_eq!(geometry.size, size);
                                     assert!(geometry.bars.iter().all(|bar| !bar.items.contains(&capy)), "Capy's surface must not belong to fading chrome: {platform:?}/{preset:?}/{size:?}/{zone:?}/{width}/{documents}");
                                     if let Some(item) = geometry.items.iter().find(|item| item.id == capy) {
+                                        assert_eq!(geometry.capy_item, Some(capy));
                                         assert_eq!(geometry.zen_button, item.bounds, "{platform:?}/{preset:?}/{size:?}/{zone:?}/{width}/{documents}");
                                     } else {
+                                        assert_eq!(geometry.capy_item, None);
                                         assert_eq!(geometry.zen_button, Bounds { x: insets[0] + gap, y: gap, width: tile, height: tile });
                                     }
                                 }
                             }
                         }
                     }
+                    assert_eq!(header.resolve_documents(1600., [0.; 2], &[], true, 3).capy_item, None);
                     for removed in [false, true] {
                         let mut fallback = header.clone();
                         if removed { fallback.remove(capy).unwrap(); }

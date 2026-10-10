@@ -17,12 +17,13 @@ struct HeaderControlFrames: PreferenceKey {
 }
 struct HeaderControlMeasurement: ViewModifier {
     let id: String
+    var alias: String? = nil
     @Environment(\.measureHeaderControls) private var enabled
     func body(content: Content) -> some View {
         if enabled {
             content.background(GeometryReader { geometry in
                 Color.clear.preference(key: HeaderControlFrames.self,
-                    value: [id: geometry.frame(in: .named("editor-workspace"))])
+                    value: Dictionary(uniqueKeysWithValues: [id, alias].compactMap { $0 }.map { ($0, geometry.frame(in: .named("editor-workspace"))) }))
             })
         } else { content }
     }

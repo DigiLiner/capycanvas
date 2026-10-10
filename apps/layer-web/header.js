@@ -3,7 +3,12 @@ import {liveCopy,bindCopy} from './localization.js';
 // allocation, overflow, drag slots, validation and publication stay in Rust.
 import { pickerButtonAction, updatePaintPairIcon } from './color-controls.js';
 
-export function createHeader({app, state, paintPair, workspace, element, button, icon, place, dispatch, customization, systemStatus, updateZen, documents}) {
+export function presentCapy(node, geometry, hidden, keep, editing) {
+  const visible=keep||(!hidden&&!editing&&geometry?.capy_item!=null);
+  if(node.hidden===visible)node.hidden=!visible;
+}
+
+export function createHeader({app, state, paintPair, workspace, element, button, icon, place, dispatch, customization, systemStatus, updateZen, documents, capy}) {
   const copy=liveCopy(app,"catalog").native_copy.header,common=liveCopy(app,"bootstrap_view").common,labels=liveCopy(app,"header_view");
   const root = document.querySelector('#header');
   const retained = element('div'); retained.hidden = true; workspace.append(retained);
@@ -23,6 +28,8 @@ export function createHeader({app, state, paintPair, workspace, element, button,
   let menuModels, view, modelKey, geometry, metrics, insets = [0,0], size, editing = false, selected = null;
   let contact, ghost, frame = 0, measured = '', suppressed = null;
   let buttonContact, measurementTheme, refreshKey, allocatedWidth, allocatedModel, allocatedTheme;
+  let interaction={chrome_hidden:false,keep_zen_button:false};
+  const reconcileCapy=()=>presentCapy(capy,geometry,interaction.chrome_hidden,interaction.keep_zen_button,editing);
   function clearButtonPress(e) {
     if(!buttonContact||(e&&e.pointerId!==buttonContact.id))return;
     buttonContact.node.removeAttribute('data-header-pressed');buttonContact=null;
@@ -133,16 +140,16 @@ export function createHeader({app, state, paintPair, workspace, element, button,
     const content=element('div','header-item-content'); node.append(grip,content);
     const r={root:node,content,grip,entry};
     const kind=entry.item.kind;
-    if(['capy','settings','fullscreen','tool'].includes(kind)) {
+    if(kind==='capy') {r.preview=icon(view.capy.icon);content.classList.add('header-tool');content.append(r.preview);}
+    else if(['settings','fullscreen','tool'].includes(kind)) {
       const b=button('',pickerButtonAction(()=>r.spec?.resolved_control??entry.item.control,{kind:'header',id:entry.id},dispatch,()=>activate(entry)),'header-tool'); r.button=b;
       b.addEventListener('dblclick',event=>{
         if(!r.spec?.double_click)return;
         event.preventDefault();event.stopPropagation();
         dispatch({type:'double_click_tool',control:r.spec.resolved_control});
       });
-      if(kind==='capy')b.id='zen-button';
       if(kind==='fullscreen')b.id='fullscreen';
-      const command={capy:'zen_mode',settings:'settings',fullscreen:'fullscreen'}[kind];
+      const command={settings:'settings',fullscreen:'fullscreen'}[kind];
       if(command)b.dataset.command=command;
       content.append(b);
       if(kind==='tool'){r.variants=customization.variationMarker();b.append(r.variants);}
@@ -204,13 +211,17 @@ export function createHeader({app, state, paintPair, workspace, element, button,
     const nextKey=JSON.stringify([view,state().theme,state().commands,state().workspace.layout.canvas_info.visible]);
     if(nextKey===refreshKey)return;
     refreshKey=nextKey;
+    const command=view.capy;
+    if(capy.firstChild?.dataset.asset!==command.icon)capy.replaceChildren(icon(command.icon));
+    capy.title=command.tooltip;capy.setAttribute('aria-label',command.label);capy.setAttribute('aria-pressed',String(state().workspace.zen_mode));capy.disabled=!command.enabled;
+    if(capy.disabled)clearButtonPress();
     menuModels=app.application_menus();
     size=view.sizes.find(s=>s.id===view.model.size);
     const key=JSON.stringify([view.model,view.editing]);
     const remeasure=key!==modelKey || measurementTheme!==state().theme;
     measurementTheme=state().theme;
     if(key!==modelKey) {
-      clearButtonPress();
+      if(buttonContact?.node!==capy)clearButtonPress();
       end(null,true); const wasEditing=editing; editing=view.editing; modelKey=key;
       const focused=root.contains(document.activeElement);
       for(const m of root.querySelectorAll('details[open]'))m.open=false;
@@ -233,6 +244,7 @@ export function createHeader({app, state, paintPair, workspace, element, button,
     bank.style.maxHeight=`${Math.max(1,workspace.clientHeight-size.height-12)}px`;
     for(const [id,r] of records) {
       const spec=view.items.find(i=>i.id===id); r.spec=spec;r.root.setAttribute('aria-label',spec.label);
+      if(r.preview){r.content.style.visibility=editing?'':'hidden';if(r.preview.dataset.asset!==view.capy.icon){r.preview=icon(view.capy.icon);r.content.replaceChildren(r.preview);}r.root.inert=!editing;r.root.setAttribute('aria-hidden',String(!editing));}
       r.root.tabIndex=editing?0:-1; r.content.inert=editing && r.entry.item.kind!=='workspaces'; r.grip.hidden=!editing;
       if(r.button) {
         const kind=r.entry.item.kind, command=state().commands.find(c=>c.id===r.button.dataset.command);
@@ -265,6 +277,7 @@ export function createHeader({app, state, paintPair, workspace, element, button,
     for(const m of root.querySelectorAll('details[open]'))m.refreshMenu?.();
     // Resize/content observers cover the native clock, battery and workspace
     // labels. Canvas/model publications do not change intrinsic item widths.
+    reconcileCapy();
     if(remeasure)queue();
   }
   function measure() {
@@ -303,7 +316,7 @@ export function createHeader({app, state, paintPair, workspace, element, button,
       workspace.style.setProperty(`--header-${name}`,`${value}px`);
       root.style.setProperty(`--header-${name}`,`${value}px`);
     }
-    place(document.querySelector('#zen-capy'),g.zen_button);
+    place(capy,g.zen_button);reconcileCapy();
     let focus;
     for(const [id,r] of records) {
       const b=g.items.find(i=>i.id===id)?.bounds;
@@ -426,12 +439,13 @@ export function createHeader({app, state, paintPair, workspace, element, button,
   // Chromium synthesizes touch mousedown/up together on release, so :active
   // alone supplies no held feedback. Track only the visual contact here;
   // native clicks, context holds and the editor's drag capture keep ownership.
-  root.addEventListener('pointerdown',e=>{
-    const node=e.target.closest('.header-tool');
+  function pressButton(e) {
+    const node=e.target.closest('.header-tool,#zen-capy');
     if(editing||e.button!==0||!e.isPrimary||!node||node.disabled)return;
     clearButtonPress();buttonContact={id:e.pointerId,node,parent:node.parentNode};
     node.setAttribute('data-header-pressed','');
-  });
+  }
+  root.addEventListener('pointerdown',pressButton);capy.addEventListener('pointerdown',pressButton);
   window.addEventListener('pointermove',moveButtonPress,{capture:true});
   for(const name of ['pointerup','pointercancel','lostpointercapture'])window.addEventListener(name,clearButtonPress,{capture:true});
   window.addEventListener('blur',()=>clearButtonPress());
@@ -483,5 +497,5 @@ export function createHeader({app, state, paintPair, workspace, element, button,
   for(const node of [systemStatus.clock,systemStatus.battery])new MutationObserver(()=>{const r=[...records.values()].find(r=>r.status===node);if(r)r.placeholder.hidden=!editing||!node.hidden;queue();})
     .observe(node,{attributes:true,attributeFilter:['hidden'],childList:true,characterData:true,subtree:true});
   refresh();
-  return {refresh,queue};
+  return {refresh,queue,interaction:reply=>{interaction=reply;reconcileCapy();}};
 }

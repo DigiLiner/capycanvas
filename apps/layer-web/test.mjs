@@ -777,7 +777,7 @@ try {
       assert.equal(spacing.tabHeight, spacing.tileHeight);
       assert.equal(spacing.tabHeight, 36);
       const chromeGeometry = await evaluate(`(() => {
-      const strip=document.querySelector('.toolbar-controls[data-axis="horizontal"]'),panel=strip.parentElement,box=strip.getBoundingClientRect(),grip=strip.querySelector('.panel-grip').getBoundingClientRect(),tabGrip=document.querySelector('.dock-tabs>.panel-grip').getBoundingClientRect(),zen=document.querySelector('#zen-button').getBoundingClientRect();
+      const strip=document.querySelector('.toolbar-controls[data-axis="horizontal"]'),panel=strip.parentElement,box=strip.getBoundingClientRect(),grip=strip.querySelector('.panel-grip').getBoundingClientRect(),tabGrip=document.querySelector('.dock-tabs>.panel-grip').getBoundingClientRect(),zen=document.querySelector('#zen-capy').getBoundingClientRect();
       return {gripSize:[grip.width,grip.height],tabGripSize:[tabGrip.width,tabGrip.height],overflow:[panel.scrollWidth-panel.clientWidth,panel.scrollHeight-panel.clientHeight],top:box.top,above:zen.top,below:box.top-zen.bottom};
     })()`);
       assert.deepEqual(chromeGeometry.gripSize, [20, 36]);

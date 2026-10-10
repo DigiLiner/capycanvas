@@ -457,7 +457,6 @@ workspace-header-zone-center = Al centro
 workspace-header-zone-right = A destra
 workspace-header-customize-menu = Personalizza barra del titolo…
 workspace-header-title = Barra del titolo
-workspace-header-change-icon-menu = Cambia icona…
 workspace-header-move-to = Sposta in { $zone }
 workspace-header-move-earlier = Sposta prima
 workspace-header-move-later = Sposta dopo

@@ -118,9 +118,9 @@ function Check-Zen {
     $elements=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     foreach($element in $elements){
         $id=$element.Current.AutomationId
-        if(($id -match '^(tile-|panel-tab-|group-grip-|zen-tile-|application-menu-)' -or $id -in @('zen-button','settings-button','application-menus')) -and !$element.Current.IsOffscreen){throw "Full Zen retained visible chrome: $id"}
+        if(($id -match '^(tile-|panel-tab-|group-grip-|zen-tile-|application-menu-)' -or $id -in @('settings-button','application-menus')) -and !$element.Current.IsOffscreen){throw "Full Zen retained visible chrome: $id"}
     }
-    if($model.keep_zen_button -and !(Find 'zen-capy')){throw 'Full Zen hid the standalone Capy button'}
+    if([bool](Find 'zen-capy' -Visible) -ne [bool]$model.keep_zen_button){throw 'Full Zen Capy visibility differs'}
 }
 function Check-Header {
     $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.

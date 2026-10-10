@@ -900,7 +900,6 @@ workspace-header-customize-menu = Sesuaikan Bilah Judul…
 
 workspace-header-title = Bilah Judul
 
-workspace-header-change-icon-menu = Ubah ikon…
 
 workspace-header-move-to = Pindahkan ke { $zone }
 

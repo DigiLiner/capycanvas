@@ -18,7 +18,6 @@ public:
     bool CancelGesture();
     void CancelPreviews();
     void SetTitlebarInsets(float left,float right,float height);
-    void SetHeaderGeometry(Json const& geometry);
     void SetWindowId(uint64_t id);
     void SetGlassChanged(std::function<void()> changed);
     void CanvasContact(bool active);

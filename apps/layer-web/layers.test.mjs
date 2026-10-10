@@ -76,7 +76,7 @@ export async function checkLayers({ call, evaluate, settle }) {
         'command.ZenMode':[{key:'j',command:true,alt:true,shift:false}],
         'command.AddLayer':[{key:'n',command:true,alt:true,shift:false}]}}});
   })()`);
-  assert.equal(await evaluate("document.querySelector('#zen-button').title"), "Zen mode (Ctrl+Alt+J)");
+  assert.equal(await evaluate("document.querySelector('#zen-capy').title"), "Zen mode (Ctrl+Alt+J)");
   await evaluate(`document.querySelector('.layer-footer [aria-label="New layer"]').dispatchEvent(new PointerEvent('pointerenter'))`);
   assert.equal(await evaluate(`document.querySelector('.layer-footer [aria-label="New layer"]').title`), "New layer (Ctrl+Alt+N)");
   await evaluate("layerApp.dispatch({type:'restore_settings',settings:originalLayerTestSettings}); delete window.originalLayerTestSettings");

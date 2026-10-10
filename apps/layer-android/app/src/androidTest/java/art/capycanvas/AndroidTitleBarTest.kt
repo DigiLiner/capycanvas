@@ -32,7 +32,7 @@ class AndroidTitleBarTest {
     private var density = 1f
     private fun view() = host.workspaceManager!!
     private fun layout() = host.snapshot!!.getJSONObject("state").getJSONObject("workspace").getJSONObject("layout").toString()
-    private fun node(tag: String) = findTag(tag)
+    private fun node(tag: String) = findTag(tag)?.takeIf { it.second.layoutInfo.isPlaced }
     private fun bounds(tag: String): Rect {
         var result: Rect? = null
         instrumentation.runOnMainSync { result = node(tag)?.second?.boundsInRoot }
@@ -97,7 +97,7 @@ class AndroidTitleBarTest {
         val value = JSONObject(fixture.toString())
         value.getJSONObject("layout").getJSONObject("header").put("size", size)
         action(obj("type" to "restore_workspace", "workspace" to value))
-        waitFor("bar settled") { node("header-item-1") != null && !editing() }
+        waitFor("bar settled") { node("zen-button") != null && !editing() }
         idle()
     }
     private fun resetPreset(id: String) {
@@ -240,7 +240,7 @@ class AndroidTitleBarTest {
                 action(obj("type" to "restore_workspace", "workspace" to workspaceState))
                 idle()
                 val label = "$name/$theme/$size/$placement"
-                val tag = "header-control-$capyId"
+                val tag = "zen-button"
                 val fallback = placement in listOf("absent", "overflow")
                 if (!fallback) waitFor("native Capy $label") { node(tag) != null }
                 if (fallback) assertNull("$placement has no visible header Capy", node(tag))
@@ -295,9 +295,9 @@ class AndroidTitleBarTest {
         assertEquals((31 * density).roundToInt().toFloat(), zenGlyph.height, .6f)
         assertNull(node("title-bar"))
         tap("zen-button")
-        waitFor("restored Zen exits") { !snapshot().optBoolean("chrome_hidden") && node("header-control-1") != null }
-        rectEquals("restored Zen Capy", zen, bounds("header-control-1"))
-        rectEquals("restored Zen glyph", zenGlyph, glyph("header-control-1"))
+        waitFor("restored Zen exits") { !snapshot().optBoolean("chrome_hidden") && node("zen-button") != null }
+        rectEquals("restored Zen Capy", zen, bounds("zen-button"))
+        rectEquals("restored Zen glyph", zenGlyph, glyph("zen-button"))
     }
 
     @Test fun zenHeaderRetiresChromeAndLetsCanvasReceiveOldHeaderContacts() {
@@ -537,7 +537,7 @@ class AndroidTitleBarTest {
             action(obj("type" to "set_theme", "theme" to theme))
             restore(size)
             val bar = bounds("title-bar")
-            val capy = bounds("header-item-1")
+            val capy = bounds("zen-button")
             val menus = bounds("header-item-2")
             val settings = bounds("header-item-3")
             assertEquals("Titlebar includes scaled padding", height * density, bar.height, density)
@@ -686,7 +686,7 @@ class AndroidTitleBarTest {
         var readout = true; instrumentation.runOnMainSync { readout = node("camera-readout") != null }; assertFalse(readout)
         tap("header-control-$color")
         waitFor("shared header Color drawer") { node("tool-drawer") != null }
-        tap("header-control-1")
+        tap("zen-button")
         waitFor("full Zen") { snapshot().optBoolean("chrome_hidden") }
         action(obj("type" to "invoke", "command" to "zen_mode")); waitFor("leave Zen") { !snapshot().optBoolean("chrome_hidden") }
         val committed = model().toString()

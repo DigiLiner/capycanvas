@@ -1931,8 +1931,7 @@ class AndroidHostTest {
         val menuTop = maxOf(anchor.bottom, 48f * compose.activity.resources.displayMetrics.density)
         assertEquals("Workspace menu opens below its header button within the screen margin", menuTop, menu.top, 2f)
     }
-    private fun capyTag() = "header-control-" + host.snapshot!!.getJSONObject("header").array("items").objects()
-        .first { it.getString("label") == "Capy (Zen Mode)" }.get("id")
+    private fun capyTag() = "zen-button"
     private fun touch(view: View, downAt: Long, action: Int, point: androidx.compose.ui.geometry.Offset, tool: Int = MotionEvent.TOOL_TYPE_FINGER) = instrumentation.runOnMainSync {
         val properties = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = tool })
         val coords = arrayOf(MotionEvent.PointerCoords().apply { x = point.x; y = point.y; pressure = 1f })
@@ -2752,7 +2751,7 @@ class AndroidHostTest {
                 compose.onNodeWithText("Change icon…").performClick()
                 compose.waitUntil(10_000) { host.snapshot!!.objectOrNull("preferences")?.optString("reveal") == "zen_icon" }
                 compose.onNodeWithTag("image-choice-0").assertIsDisplayed()
-                compose.onNodeWithTag("zen-button").assertDoesNotExist()
+                compose.onNodeWithTag("zen-button").assertIsNotDisplayed()
                 val first = compose.onNodeWithTag("image-choice-0").fetchSemanticsNode().boundsInRoot
                 val last = compose.onNodeWithTag("image-choice-3").fetchSemanticsNode().boundsInRoot
                 val row = compose.onNodeWithTag("preference-zen_icon").fetchSemanticsNode().boundsInRoot
@@ -2784,10 +2783,10 @@ class AndroidHostTest {
                 compose.waitUntil(10_000) { host.snapshot!!.objectOrNull("preferences") == null }
                 edit("zen_show_capy", false)
                 compose.waitUntil(10_000) { host.snapshot!!.optBoolean("chrome_hidden") }
-                compose.onNodeWithTag("zen-button").assertDoesNotExist()
+                compose.onNodeWithTag("zen-button").assertIsNotDisplayed()
                 compose.onNodeWithTag("group-$floating").assertIsDisplayed()
                 edit("zen_show_capy", true)
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("zen-button").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onNodeWithTag("zen-button").isDisplayed() }
                 capture("zen-active-$theme")
                 compose.onNodeWithTag("zen-button").performTouchInput { click() }
                 waitState { !it.getJSONObject("workspace").getBoolean("zen_mode") }

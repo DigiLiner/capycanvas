@@ -448,7 +448,6 @@ workspace-header-zone-center = กึ่งกลาง
 workspace-header-zone-right = ขวา
 workspace-header-customize-menu = ปรับแต่งแถบชื่อเรื่อง…
 workspace-header-title = แถบชื่อเรื่อง
-workspace-header-change-icon-menu = เปลี่ยนไอคอน…
 workspace-header-move-to = ย้ายไป { $zone }
 workspace-header-move-earlier = ย้ายก่อน
 workspace-header-move-later = ย้ายหลัง

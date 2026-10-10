@@ -465,7 +465,6 @@ workspace-header-customize-menu = 自定义标题栏…
 
 workspace-header-title = 标题栏
 
-workspace-header-change-icon-menu = 更改图标…
 
 workspace-header-move-to = 移至{ $zone }
 

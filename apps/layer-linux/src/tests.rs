@@ -4833,9 +4833,7 @@ fn native_layer_panel_review() {
 }
 
 fn command(w: &Workspace, id: CommandId) -> gtk::Button {
-    if id == CommandId::ZenMode && let Some(button) = find_css(w.header.root.upcast_ref(), "capy-button") {
-        return button.downcast().unwrap();
-    }
+    if id == CommandId::ZenMode { return w.zen_capy.clone(); }
     for panel in &state(w).workspace.layout.panels {
         if let Some(tile) = panel
             .tiles()
@@ -5453,31 +5451,21 @@ fn native_zen_behaviors() {
                     "{label}: Capy clears native/recovery control {:?}", [x, y, width, height]);
             }
         }
-        let normal = find_css(w.header.root.upcast_ref(), "capy-button")
-            .and_then(|button| button.downcast::<gtk::Button>().ok()).filter(|button| button.is_mapped());
-        let expected = normal.as_ref().map(|button| capy_rects(button, w));
-        if let Some(expected) = expected {
-            assert_eq!(expected[0], expected_button, "{label}: normal/shared button");
-        }
-        let mut controls = Vec::new();
-        let mut child = w.header.root.first_child();
-        while let Some(widget) = child {
-            child = widget.next_sibling();
-            if widget.is_mapped() && widget.is_child_visible() && !widget.has_css_class("capy-item") {
-                controls.push(widget);
-            }
-        }
+        let expected = w.zen_capy.is_mapped().then(|| capy_rects(&w.zen_capy, w));
+        let controls: Vec<_> = (0..w.header.root.observe_children().n_items())
+            .filter_map(|i| w.header.root.observe_children().item(i).and_downcast::<gtk::Widget>())
+            .filter(|widget| widget.is_mapped() && widget.is_child_visible()).collect();
         let frames = Rc::new(std::cell::RefCell::new(Vec::new()));
         let clock = w.surface.frame_clock().unwrap();
         let signal = clock.connect_after_paint(glib::clone!(
             #[strong] frames,
-            #[strong] normal,
             #[strong] controls,
             #[weak] w,
             move |_| {
                 let zen = state(&w).workspace.zen_mode;
-                let button = if w.zen_capy.is_visible() { Some(&w.zen_capy) } else { normal.as_ref().filter(|_| !w.header.root.has_css_class("zen-hidden")) };
+                let button = w.zen_capy.is_visible().then_some(&w.zen_capy);
                 if let Some(button) = button {
+                    assert!(!button.has_css_class("selected-tool"), "Capy stays neutral throughout visibility changes");
                     assert!(button.parent().is_none_or(|parent| !parent.has_css_class("in-bar")), "Capy owns its surface throughout visibility changes");
                     let alpha = controls.iter().map(rendered_opacity).fold(0., f32::max);
                     frames.borrow_mut().push((zen, capy_rects(button, &w), rendered_opacity(button), alpha));
@@ -5488,7 +5476,6 @@ fn native_zen_behaviors() {
         w.chrome_event(ChromeEvent::Motion);
         pump(250);
         assert!(state(w).workspace.zen_mode, "{label}");
-        assert!(normal.as_ref().is_none_or(|button| !button.has_css_class("selected-tool")), "{label}: hidden Capy stays neutral");
         assert_eq!(w.zen_capy.is_visible(), show, "{label}");
         assert!(!w.header.root.can_target(), "{label}");
         for (slot, widget) in w.surface.imp().children.borrow().iter() {
@@ -5515,23 +5502,17 @@ fn native_zen_behaviors() {
         if show {
             assert!(frames.iter().any(|(zen, _, _, _)| *zen), "{label}: painted Zen frames");
         }
-        if expected.is_some() {
-            assert!(frames.iter().any(|(zen, _, _, _)| !*zen), "{label}: painted exit frames");
-        }
+        assert!(expected.is_none() || frames.iter().any(|(zen, _, _, _)| !*zen), "{label}: painted exit frames");
         for (zen, actual, opacity, _) in frames.iter() {
-            if let Some(expected) = expected {
-                assert_eq!(*actual, expected, "{label}: painted frame zen={zen}");
-            } else {
-                assert_eq!(actual[0], expected_button, "{label}: fallback frame");
-            }
+            assert_eq!(actual[0], expected_button, "{label}: shared bounds, zen={zen}");
+            if let Some(expected) = expected { assert_eq!(*actual, expected, "{label}: painted glyph, zen={zen}"); }
             assert!(*opacity >= 0.999, "{label}: effective rendered Capy opacity={opacity}, zen={zen}");
         }
         if gtk::Settings::default().is_some_and(|settings| settings.is_gtk_enable_animations()) {
             assert!(frames.iter().any(|(_, _, _, opacity)| *opacity > 0. && *opacity < 0.999), "{label}: non-Capy header controls still fade");
         }
         assert!(!state(w).workspace.zen_mode, "{label}");
-        assert!(normal.as_ref().is_none_or(|button| !button.has_css_class("selected-tool")), "{label}: revealed Capy stays neutral");
-        assert!(!w.zen_capy.is_visible(), "{label}");
+        assert_eq!(w.zen_capy.is_visible(), w.header.capy_visible(), "{label}");
         assert_eq!(state(w).workspace.layout, layout, "{label}: unchanged layout");
         assert_eq!(state(w).camera, camera, "{label}: unchanged camera");
     }

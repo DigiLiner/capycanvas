@@ -115,7 +115,7 @@ export async function checkParity({ call, evaluate, settle }) {
     await action({ type: "system_theme_changed", theme });
     await capture(theme);
     metrics[theme] = await evaluate(`(() => {
-      const selectors = ['#document-title','#zen-button','.header-menu > summary','.tool-groups .tool-choice-button','.tool-subtools .tool-choice-button[data-brush]','.size-controls','.size-controls .number-control','.size-button','.layer-row','.layer-row > button','.layer-name','.layer-thumbnail:not([hidden])','#layer-opacity','#view-info','.dock-group','.dock-tab'];
+      const selectors = ['#document-title','#zen-capy','.header-menu > summary','.tool-groups .tool-choice-button','.tool-subtools .tool-choice-button[data-brush]','.size-controls','.size-controls .number-control','.size-button','.layer-row','.layer-row > button','.layer-name','.layer-thumbnail:not([hidden])','#layer-opacity','#view-info','.dock-group','.dock-tab'];
       return Object.fromEntries(selectors.map(s=>[s,[...document.querySelectorAll(s)].map(n=>{const b=n.getBoundingClientRect(),c=getComputedStyle(n);return {bounds:[b.x,b.y,b.width,b.height],font:c.font,color:c.color,background:c.backgroundColor}})]));
     })()`);
     await click('[data-command="settings"]');
@@ -147,7 +147,7 @@ export async function checkParity({ call, evaluate, settle }) {
   const nativeHeader = nodes.filter((n) => (n.css.includes("chrome-control") || n.css.includes("capy-button")) && n.bounds[0] < 600)
     .sort((a, b) => a.bounds[0] - b.bounds[0]);
   const webHeader = [
-    ...metrics.dark["#zen-button"],
+    ...metrics.dark["#zen-capy"],
     ...metrics.dark[".header-menu > summary"].filter((n) => n.bounds[2] > 0),
   ];
   for (const header of [nativeHeader, webHeader]) {
@@ -463,7 +463,7 @@ export async function checkParity({ call, evaluate, settle }) {
   // No desktop input injection required: exercise host DOM listeners directly
   // for Zen/scroll, and the same shared actions used by native docking controls.
   await action({ type: "system_theme_changed", theme: "dark" });
-  await click("#zen-button");
+  await click("#zen-capy");
   // Read the synchronous listener result in the same task, before compositor
   // hover events from the real desktop can replace the test pointer position.
   const point = (x, y) =>
@@ -564,7 +564,7 @@ export async function checkParity({ call, evaluate, settle }) {
   assert.equal((await fitTiles()).fits, true);
   assert.deepEqual(
     await evaluate(`(() => {
-    const zen=document.querySelector('#zen-button').getBoundingClientRect();
+    const zen=document.querySelector('#zen-capy').getBoundingClientRect();
     const tile=document.querySelector('.toolbar-controls > .tile-button').getBoundingClientRect();
     return [zen.x, tile.x, zen.width, tile.width, zen.x+zen.width/2, tile.x+tile.width/2];
   })()`),

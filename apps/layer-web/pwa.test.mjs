@@ -207,7 +207,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
     await settle();
     assert.equal(await evaluate("document.documentElement.hasAttribute('data-touch')"), true);
   };
-  const settings = '#header [data-command="settings"]', menu = '.header-menu[data-menu="file"] > summary', zen = '[data-command="zen_mode"]';
+  const settings = '#header [data-command="settings"]', menu = '.header-menu[data-menu="file"] > summary', zen = '#zen-capy';
   for (const theme of ["light", "dark"]) {
     await evaluate(`layerApp.dispatch({type:'set_theme',theme:'${theme}'})`);
     await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 650, y: 450 });
@@ -231,7 +231,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
     await tap(menu);
     assert.equal(await evaluate("document.querySelector('.header-menu[data-menu=file]').open"), false);
     await tap(zen);
-    assert.equal(await evaluate(`document.querySelector('${zen}').getAttribute('aria-pressed')`), "false", "Capy keeps neutral header presentation in Zen");
+    assert.equal(await evaluate(`document.querySelector('${zen}').getAttribute('aria-pressed')`), "true", "The retained Capy preserves Zen toggle accessibility");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), true);
     await tap("#zen-capy");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), false);

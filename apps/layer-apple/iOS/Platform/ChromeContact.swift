@@ -44,17 +44,25 @@ private final class EditorContactView: UIView {
 
 private final class ChromeContacts: UIGestureRecognizer {
     var action: (CGPoint?, Bool) -> Bool = { _, _ in false }
-    private var held = Set<ObjectIdentifier>()
+    private var held = [ObjectIdentifier:UUID]()
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in touches where !(touch.view is CanvasView) {
-            if action(touch.location(in: view), true) { held.insert(ObjectIdentifier(touch)) }
+            if action(touch.location(in: view), true) { held[ObjectIdentifier(touch)] = UUID() }
         }
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        held.subtract(touches.map(ObjectIdentifier.init)); _ = action(nil, !held.isEmpty)
+        let retired = held.filter { key, _ in touches.contains { ObjectIdentifier($0) == key } }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for (key, owner) in retired where self.held[key] == owner { self.held.removeValue(forKey: key) }
+            _ = self.action(nil, !self.held.isEmpty)
+            if self.held.isEmpty && self.numberOfTouches == 0 { self.state = .failed }
+        }
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches { held.removeValue(forKey: ObjectIdentifier(touch)) }; _ = action(nil, !held.isEmpty)
         if event.allTouches?.allSatisfy({ $0.phase == .ended || $0.phase == .cancelled }) == true { state = .failed }
     }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { touchesEnded(touches, with: event) }
     override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
     func cancel() { held.removeAll(); _ = action(nil, false) }

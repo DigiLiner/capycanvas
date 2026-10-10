@@ -466,7 +466,6 @@ workspace-header-zone-center = По центру
 workspace-header-zone-right = Справа
 workspace-header-customize-menu = Настроить заголовок…
 workspace-header-title = Заголовок
-workspace-header-change-icon-menu = Изменить значок…
 workspace-header-move-to = Переместить: { $zone }
 workspace-header-move-earlier = Переместить раньше
 workspace-header-move-later = Переместить позже

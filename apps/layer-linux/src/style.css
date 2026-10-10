@@ -15,7 +15,6 @@ window, label, text { font-size: var(--ui-text-size); }
 .window-bar.header-medium, .zen-capy.header-medium { --header-radius: calc(24px * var(--corner-fit)); }
 .window-bar.header-large, .zen-capy.header-large { --header-radius: calc(30px * var(--corner-fit)); }
 .window-bar .header-tool { min-width: 0; min-height: 0; padding: 4px; border-radius: var(--header-radius); }
-.window-bar .header-tool.capy-button { padding: 0; }
 /* The live canvas is an app-owned Wayland subsurface, outside GTK's render
    tree. Use translucent fills: a GTK backdrop-filter cannot sample that canvas. */
 .window-bar .header-tool,
@@ -281,7 +280,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .brush-track trough, .brush-track highlight { min-height: 16px; min-width: 16px; border: none; background: transparent; box-shadow: none; }
 .brush-track slider { min-width: 10px; min-height: 26px; margin: -5px 0; border-radius: 4px; background: var(--capy-thumb); border: 1px solid alpha(currentColor, .6); box-shadow: none; }
 .vertical-component .brush-track slider { min-width: 26px; min-height: 10px; margin: 0 -5px; }
-.window-bar > :not(.capy-item), .workspace-status, .dock-panel { transition: opacity 180ms ease-out; }
+.window-bar > *, .workspace-status, .dock-panel { transition: opacity 180ms ease-out; }
 .zen-hidden:not(.window-bar), .window-bar.zen-hidden > * { opacity: 0; }
 .zen-capy { min-width: 36px; min-height: 36px; padding: 0; background: var(--glass-chip); border-radius: var(--header-radius); }
 /* Preferences are a native surface, not the canvas surround (especially light). */

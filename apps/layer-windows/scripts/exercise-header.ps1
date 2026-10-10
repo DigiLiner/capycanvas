@@ -70,7 +70,12 @@ function Check-Geometry {
         $p=Presentation
         if(!$p -or !$p.geometry.items.Count){return $false}
         foreach($item in $p.geometry.items){
-            $actual=$p.actual_items|Where-Object id -eq $item.id|Select-Object -First 1
+            if(!$p.editing -and $item.id -eq $p.geometry.capy_item){
+                $capy=Find 'zen-capy' -Visible;if(!$capy){return $false}
+                $bounds=$capy.Current.BoundingRectangle;$origin=(Control 'title-bar').Current.BoundingRectangle
+                $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+                $actual=@{bounds=@{x=($bounds.Left-$origin.Left)/$scale;y=($bounds.Top-$origin.Top)/$scale;width=$bounds.Width/$scale;height=$bounds.Height/$scale}}
+            }else{$actual=$p.actual_items|Where-Object id -eq $item.id|Select-Object -First 1}
             if(!$actual){return $false}
             foreach($axis in @('x','y','width','height')){
                 if([Math]::Abs($actual.bounds.$axis-$item.bounds.$axis) -gt 1){return $false}
@@ -487,12 +492,14 @@ function Check-Narrow {
 }
 
 function Check-ZenMatrix {
-    function ImageBounds($Button) {
+    function CapyImage($Button) {
         $image=$Button.FindFirst([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Image))
         if(!$image){throw 'Native Capy image bounds are unavailable'}
-        $image.Current.BoundingRectangle
+        $image
     }
+    function ImageBounds($Button) { (CapyImage $Button).Current.BoundingRectangle }
+    function CapyIdentity($Button) { [string]::Join(',', $Button.GetRuntimeId()) + ':' + [string]::Join(',', (CapyImage $Button).GetRuntimeId()) }
     function SameBounds($Before,$After,[string]$Label) {
         foreach($field in @('Left','Top','Width','Height')) {
             if([Math]::Abs($Before.$field-$After.$field) -gt 1){throw "$Label $field differs: $($Before.$field) / $($After.$field)"}
@@ -500,22 +507,23 @@ function Check-ZenMatrix {
     }
     function Check-CapyBounds([string]$Label,[switch]$Fallback) {
         $normalControl=$null
-        if($Fallback){Wait-Until {!(Find 'zen-button' -Visible)} 'Fallback retained a normal Capy'}
+        if($Fallback){Wait-Until {!(Find 'zen-capy' -Visible)} 'Fallback retained a normal Capy'}
         else {
-            $normalControl=Control 'zen-button' -Arranged
+            $normalControl=Control 'zen-capy' -Arranged
             $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
             $tile=@{small=36;medium=48;large=60}[(Header).size]*$scale
             if([Math]::Abs($normalControl.Current.BoundingRectangle.Width-$tile) -gt 1){throw "$Label normal Capy size differs"}
         }
         $normal=if($normalControl){$normalControl.Current.BoundingRectangle}else{$fallbackNormal}
         $glyph=if($normalControl){ImageBounds $normalControl}else{$fallbackGlyph}
+        $identity=if($normalControl){CapyIdentity $normalControl}else{$null}
         $layout=(Model).layout|ConvertTo-Json -Compress -Depth 70
         $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
         Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow} 'Native review did not regain foreground'
         if($normalControl){[CapyRowPointer]::Down('mouse',[int]($normal.Left+$normal.Width/2),[int]($normal.Top+$normal.Height/2));[CapyRowPointer]::Up()}
         else {(Control 'drawing-canvas').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x09)}
         Wait-Until {(Model).chrome_hidden} 'Zen did not activate'
-        if(Find 'zen-button' -Visible){throw 'Zen retained the normal Capy'}
+        if($identity -and (CapyIdentity (Control 'zen-capy')) -ne $identity){throw "$Label replaced native Capy button/image on entry"}
         SameBounds $normal (Control 'zen-capy').Current.BoundingRectangle "$Label button"
         SameBounds $glyph (ImageBounds (Control 'zen-capy')) "$Label glyph"
         Capture ('zen-bounds-'+($Label -replace '/','-'))
@@ -523,9 +531,10 @@ function Check-ZenMatrix {
         [CapyRowPointer]::Down('mouse',[int]($at.Left+$at.Width/2),[int]($at.Top+$at.Height/2));[CapyRowPointer]::Up()
         Wait-Until {!(Model).chrome_hidden -and !(Model).state.workspace.zen_mode} 'Capy did not leave Zen'
         if($normalControl){
-            SameBounds $normal (Control 'zen-button').Current.BoundingRectangle "$Label restored button"
-            SameBounds $glyph (ImageBounds (Control 'zen-button')) "$Label restored glyph"
-        }elseif(Find 'zen-button' -Visible){throw "$Label revealed a hidden normal Capy"}
+            if((CapyIdentity (Control 'zen-capy')) -ne $identity){throw "$Label replaced native Capy button/image on exit"}
+            SameBounds $normal (Control 'zen-capy').Current.BoundingRectangle "$Label restored button"
+            SameBounds $glyph (ImageBounds (Control 'zen-capy')) "$Label restored glyph"
+        }elseif(Find 'zen-capy' -Visible){throw "$Label revealed a hidden normal Capy"}
         if(((Model).layout|ConvertTo-Json -Compress -Depth 70) -ne $layout){throw "$Label changed workspace geometry"}
         Write-Output "PASS $Label native button/glyph bounds and restored layout"
     }
@@ -561,8 +570,8 @@ function Check-ZenMatrix {
     Invoke 'header-size-small';Invoke 'header-edit-done'
     Wait-Until {!(Model).header.editing -and (Header).size -eq 'small'} 'Small header did not settle'
     Start-Sleep -Milliseconds 300
-    $fallbackNormal=(Control 'zen-button').Current.BoundingRectangle
-    $fallbackGlyph=ImageBounds (Control 'zen-button')
+    $fallbackNormal=(Control 'zen-capy').Current.BoundingRectangle
+    $fallbackGlyph=ImageBounds (Control 'zen-capy')
     $capy=@(Entries|Where-Object {$_.item.kind -eq 'capy'})[0].id
     foreach($zone in @(1,2)){
         Edit-Header;Select-HeaderItem $capy
@@ -570,7 +579,7 @@ function Check-ZenMatrix {
         if($capy -notin (Header).zones[$zone].id){throw 'Capy did not reach the requested zone'}
         Invoke 'header-edit-done';Wait-Until {!(Model).header.editing} 'Header editor did not close'
         Start-Sleep -Milliseconds 300
-        $null=Control 'zen-button' -Arranged
+        $null=Control 'zen-capy' -Arranged
         Check-CapyBounds ('custom-zone-'+$zone)
     }
     Edit-Header;Select-HeaderItem $capy
@@ -578,7 +587,7 @@ function Check-ZenMatrix {
     Invoke 'header-edit-done';Wait-Until {!(Model).header.editing} 'Overflow header editor did not close'
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int](640*$scale)) -Height ([int](500*$scale))
-    Wait-Until {!(Find 'zen-button' -Visible)} 'Narrow fixture did not overflow Capy'
+    Wait-Until {!(Find 'zen-capy' -Visible)} 'Narrow fixture did not overflow Capy'
     Check-CapyBounds 'custom-narrow-overflow' -Fallback
     Edit-Header;Remove-HeaderItem $capy
     Invoke 'header-edit-done';Wait-Until {!(Model).header.editing} 'Removed-Capy header editor did not close'

@@ -1017,7 +1017,8 @@ fn native_header_spacing_visual() {
             assert_eq!(b.x() - item.x() - item.width(), gap, "last tile clears native close by one gap");
             assert_eq!(d.w.surface.width() as f32 - b.x() - b.width(), gap, "native close outer clearance");
             for entry in h.entries() {
-                let item = d.named(&format!("header-item-{}", entry.id));
+                let item = if entry.item == HeaderItem::Capy { d.w.zen_capy.clone().upcast() }
+                    else { d.named(&format!("header-item-{}", entry.id)) };
                 assert!(item.is_mapped(), "header item {} must be mapped", entry.id);
                 let b = item.compute_bounds(&d.w.surface).unwrap();
                 let picked =
@@ -1441,15 +1442,8 @@ fn native_header_cancel_caption_input() {
         }),
     });
     pump(250);
-    let capy = state(&d.w)
-        .workspace
-        .layout
-        .header
-        .entries()
-        .find(|e| e.item == HeaderItem::Capy)
-        .unwrap()
-        .id;
-    d.click_name(&format!("header-item-{capy}"));
+    let capy = d.w.zen_capy.clone().upcast::<gtk::Widget>();
+    d.click(&capy);
     d.input
         .perform(serde_json::json!([{ "point": [600.,400.] }]));
     assert!(state(&d.w).workspace.zen_mode && !d.w.header.root.can_target());
@@ -1458,8 +1452,7 @@ fn native_header_cancel_caption_input() {
         !d.w.header.root.can_target(),
         "Edge contacts keep chrome hidden"
     );
-    let zen_capy = d.w.zen_capy.clone().upcast::<gtk::Widget>();
-    d.click(&zen_capy);
+    d.click(&capy);
     assert!(!state(&d.w).workspace.zen_mode);
     // Close is native and cannot be removed by customization.
     let close = find_css(d.w.header.root.upcast_ref(), "close").unwrap();
