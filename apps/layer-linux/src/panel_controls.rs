@@ -1,15 +1,17 @@
 //! Native controls shared by compact panels and export previews.
 use adw::prelude::*;
 
-pub const SPACING: i32 = layer_ui::WORKSPACE_SPACING as i32;
+pub const SPACING: i32 = layer_ui::PANEL_GROUP_SPACING as i32;
+pub const CONTROL_SPACING: i32 = layer_ui::PANEL_CONTROL_SPACING as i32;
+pub const COMPOUND_SPACING: i32 = layer_ui::PANEL_COMPOUND_SPACING as i32;
 
 pub fn column() -> gtk::Box {
     gtk::Box::new(gtk::Orientation::Vertical, SPACING)
 }
 
 /// Native action/choice row using the same compact height as panel numbers.
-pub fn action_row() -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, SPACING);
+pub fn action_row(spacing: i32) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, spacing);
     row.add_css_class("panel-control-row");
     row
 }
@@ -110,8 +112,8 @@ pub fn segmented(name: &str, choices: &[(&str, &str)]) -> adw::ToggleGroup {
 
 /// Standard single-line label/control arrangement, also used for compact
 /// numeric controls. No panel-specific drawing, input handling or CSS.
-pub fn row(title: &str, control: &impl IsA<gtk::Widget>) -> gtk::Box {
-    let row = action_row();
+pub fn row(title: &str, control: &impl IsA<gtk::Widget>, spacing: i32) -> gtk::Box {
+    let row = action_row(spacing);
     let label = gtk::Label::new(Some(title));
     label.set_xalign(0.);
     label.set_width_chars(9);

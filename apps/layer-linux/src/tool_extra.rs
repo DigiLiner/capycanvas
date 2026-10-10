@@ -19,7 +19,7 @@ impl Drop for ExtraField {
 impl ExtraField {
     pub fn new(w: &Rc<Workspace>, option: &ToolOption, context: ToolbarContext) -> Self {
         if let ToolOption::Gradient(control)=option {
-            let editor=crate::effects::GradientEditor::new(w,control);
+            let editor=crate::effects::GradientEditor::new(w,control,crate::panel_controls::CONTROL_SPACING);
             editor.update_control(control);
             return Self {root:editor.root.clone(),gradient:Some(editor),buttons:Vec::new(),updating:Rc::new(Cell::new(false))};
         }
@@ -81,7 +81,7 @@ impl ExtraField {
             button.set_widget_name(&format!("tool-choice-{id}-{index}"));
         }
         let root = if *labeled {
-            let row = crate::panel_controls::row(label, &root);
+            let row = crate::panel_controls::row(label, &root, crate::panel_controls::CONTROL_SPACING);
             root.set_halign(gtk::Align::End);
             root.set_valign(gtk::Align::Center);
             if let Some(caption) = row.first_child().and_downcast::<gtk::Label>() { caption.set_wrap(true); }

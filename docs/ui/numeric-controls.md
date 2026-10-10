@@ -33,8 +33,10 @@ Every host shares the same numeric policy and editable values.
   from the slider hit area. Readouts use their text's natural width and retain
   the same right inset. Long expressions scroll within the field.
   Double-clicking a tool setting or property label restores its shared default.
-  Adjacent Tool Settings and Properties controls have a 2-pixel gap below that
-  hit area.
+  GTK Tool Settings uses the [panel spacing roles](README.md#compact-panel-spacing):
+  adjacent independent controls have a 4-pixel gap below that hit area; the
+  compound transform X/Y fields keep a 2-pixel gap. Properties retains its
+  2-pixel gap between adjacent numeric controls.
   Ordinary size, export and preview dialogs and brush value popovers use this
   same presentation. Layers opacity, toolbar tiles, view readouts, Curves point
   coordinates, tonal ranges and color controls keep their specialized layouts.

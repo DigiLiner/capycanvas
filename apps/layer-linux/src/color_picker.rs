@@ -20,7 +20,7 @@ pub struct Settings {
 }
 impl Settings {
     pub fn new() -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         root.set_widget_name("color-picker-settings");
         let source = crate::panel_controls::dropdown(&["Visible color", "Selected layer"]);
         source.set_widget_name("color-picker-source");
@@ -31,7 +31,7 @@ impl Settings {
         size.set_widget_name("color-picker-size");
         for (name, widget) in [("Source", &source), ("Sample size", &size)] {
             widget.update_property(&[gtk::accessible::Property::Label(name)]);
-            root.append(&crate::panel_controls::row(name,widget));
+            root.append(&crate::panel_controls::row(name,widget,crate::panel_controls::CONTROL_SPACING));
         }
         let owner: Rc<RefCell<Weak<Workspace>>> = Rc::default();
         let updating = Rc::new(Cell::new(false));

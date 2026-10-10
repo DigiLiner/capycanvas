@@ -122,10 +122,39 @@ parameters. Shared Properties copy identifies the layer name and localized type.
 GTK Tool Settings uses 24-pixel dropdowns, checkboxes, action buttons and joined
 choices, with 16-pixel icons. Numeric sliders keep their 36-pixel rows; tonal
 intervals, transform anchors and gradient stop strips keep their specialized
-layouts. Rows have 2-pixel gaps within groups and 6-pixel gaps between groups,
-inside one 8-pixel panel inset. Mutually exclusive action groups use labeled
+layouts. Independent controls have 4-pixel gaps horizontally and vertically,
+with 6-pixel gaps between logical groups and one 8-pixel panel inset.
+Mutually exclusive action groups use labeled
 dropdowns. Flip and quarter-turn actions sit in icon rows; Apply and Cancel sit
 together. Eyedropper labels sit beside their Source and Sample size dropdowns.
+
+### Compact panel spacing
+
+The shared panel spacing roles apply on both axes. GTK Tool Settings uses these
+roles in docks, floating panels and drawers:
+
+| Role | Gap | Use |
+| --- | --- | --- |
+| Joined parts | 0 px | Segmented choices and anchor grid cells share edges. |
+| Compound parts | 2 px | The anchor chooser and X/Y fields; the two X/Y fields. |
+| Independent controls | 4 px | Consecutive rows, buttons beside each other, label/control pairs and gradient editor parts. |
+| Logical groups | 6 px | Tool mode/actions section to settings; space before a group heading. |
+| Content inset | 8 px | Each edge of the panel body, applied once. |
+
+A row of independent buttons uses the same 4-pixel horizontal gap as the vertical
+gap to the next row in its group. Joined segments form one control; their shared
+edges do not set the gap to a separate control. Headings have 6 pixels before and
+4 pixels after, with no leading gap at the start of the settings section. Parent
+spacing and child margins together must equal the intended gap. Container
+boundaries do not create additional group spacing: Zoom Click, Drag and Center
+belong to one group, as do Gradient shape, stop editing and opacity.
+
+Toolbar tiles keep their shared 2-pixel or 4-pixel gaps and 36-pixel base size.
+Preferences and dialogs keep their larger section spacing. These contexts do not
+set the density of compact Tool Settings forms.
+
+### Properties
+
 Shared Properties pages choose which
 parameter controls are shown; hidden values remain active. Channel selection,
 automatic adjustment and sampling share one toolbar. Levels and Curves offer

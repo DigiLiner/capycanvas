@@ -8530,7 +8530,7 @@ fn native_panel_slider_input() {
         let value = find_css(size.upcast_ref(), "number-value").unwrap().compute_bounds(&size).unwrap();
         assert_eq!(size.width() as f32 - value.x() - value.width(), 0.);
         assert_eq!(value.y() + value.height(), bar.y() + bar.height(), "the readout aligns with the slider's bottom");
-        assert_eq!(opacity.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 2.);
+        assert_eq!(opacity.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 4.);
         assert!(find_css(size.upcast_ref(), "number-step").is_none());
         for value in [999., 1000.] {
             w.dispatch(UiAction::SetToolSetting { id: "size".into(), value });

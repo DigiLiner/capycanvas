@@ -871,7 +871,7 @@ fn native_gradient_color_completion_keeps_its_original_destination() {
         super::pointwise::configure_properties(&w);
         w.dispatch(UiAction::Effect {action:EffectAction::Insert {effect:"gradient_map".into()}});ready(&w);
         let old=state(&w).layer_properties.controls.into_iter().find(|c|c.key=="gradient").unwrap();
-        let editor=crate::effects::GradientEditor::new(&w,&old);editor.update_control(&old);
+        let editor=crate::effects::GradientEditor::new(&w,&old,crate::panel_controls::SPACING);editor.update_control(&old);
         let retained=gtk::Window::new();retained.set_application(Some(&app.0));retained.set_child(Some(&editor.root));retained.present();pump(100);
         named::<gtk::Button>(retained.upcast_ref(),"effect-gradient-color").emit_clicked();
         until(|| w.window.visible_dialog().is_some_and(|dialog|dialog.widget_name()=="edit-color-dialog" && dialog.is_mapped()),"deferred gradient color dialog");

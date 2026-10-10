@@ -19,7 +19,7 @@ impl Footer {
         status.add_css_class("dim-label");status.set_widget_name(&format!("{prefix}-status"));root.append(&status);
         let updating = Rc::new(Cell::new(false));
         let workspace = Rc::new(RefCell::new(Weak::<Workspace>::new()));
-        let buttons=crate::panel_controls::action_row();buttons.set_spacing(0);buttons.add_css_class("linked");root.append(&buttons);
+        let buttons=crate::panel_controls::action_row(0);buttons.add_css_class("linked");root.append(&buttons);
         let clipping = std::array::from_fn(|index| {
             let button = gtk::ToggleButton::new();button.add_css_class("flat");
             let name = if index == 0 {"shadows"} else {"highlights"};
@@ -73,7 +73,7 @@ impl Inspector {
         root.set_margin_top(6);root.set_margin_bottom(6);root.set_margin_start(6);root.set_margin_end(6);
         let source = crate::panel_controls::dropdown(&[]);source.set_widget_name(&format!("{prefix}-source"));source.set_hexpand(true);
         let channel = crate::panel_controls::dropdown(&[]);channel.set_widget_name(&format!("{prefix}-channel"));channel.set_hexpand(true);
-        let toolbar = crate::panel_controls::action_row();toolbar.set_homogeneous(true);toolbar.append(&source);toolbar.append(&channel);root.append(&toolbar);
+        let toolbar = crate::panel_controls::action_row(crate::panel_controls::SPACING);toolbar.set_homogeneous(true);toolbar.append(&source);toolbar.append(&channel);root.append(&toolbar);
         let chart = gtk::DrawingArea::builder().content_height(160).hexpand(true).build();chart.set_widget_name(&format!("{prefix}-chart"));
         let axis = [gtk::Label::builder().xalign(0.).hexpand(true).build(),gtk::Label::builder().xalign(1.).build()];
         if waveform {

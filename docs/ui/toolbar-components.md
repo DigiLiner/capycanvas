@@ -112,6 +112,9 @@ Choices with `labeled` put the shared label beside the bar, including Zoom Click
 and Drag. Hosts right-align the joined icon bar in its row; each segment
 is one small tile square (36×36 logical pixels) in Tool Options. GTK Tool Settings
 panels and their drawers use 24×24-pixel segments with 16-pixel icons.
+Joined segments share edges. Separate Tool Settings rows, including Zoom Click
+and Drag, use the same 4-pixel gap as independent buttons beside each other;
+see [panel spacing roles](README.md#compact-panel-spacing).
 Tooltips and accessibility labels retain each option's full name. The
 toolbar measures the label beside these segments and enters overflow as a whole.
 Panel captions wrap to fit narrow docks.

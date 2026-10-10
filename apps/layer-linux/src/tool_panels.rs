@@ -228,6 +228,7 @@ use std::{
 
 pub struct ToolSettings {
     pub root: gtk::Box,
+    settings: gtk::Box,
     form: gtk::Box,
     modes: gtk::Box,
     mode_container: gtk::Box,
@@ -249,9 +250,10 @@ impl ToolSettings {
         let localization = crate::launch_localization();
         let root = body();
         root.add_css_class("tool-settings");
-        let form = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        let settings = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
+        let form = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         let picker = crate::color_picker::Settings::new();
-        let mode_container=crate::panel_controls::column();
+        let mode_container=gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         let modes=gtk::Box::new(gtk::Orientation::Horizontal,0);
         modes.set_homogeneous(true);
         modes.set_widget_name("selection-mode-row");
@@ -267,12 +269,13 @@ impl ToolSettings {
         selection_actions.set_widget_name("selection-actions");
         mode_container.append(&selection_actions);
         root.append(&mode_container);
-        let extra=gtk::Box::new(gtk::Orientation::Vertical, 2);
-        root.append(&extra);
-        root.append(&form);
+        let extra=gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
+        settings.append(&extra);
+        settings.append(&form);
+        root.append(&settings);
         root.append(&picker.root);
         Self {
-            root, form, picker, extra, modes, mode_container, extra_fields:RefCell::default(), extra_context:Cell::new(None),
+            root, settings, form, picker, extra, modes, mode_container, extra_fields:RefCell::default(), extra_context:Cell::new(None),
             fields: RefCell::default(),
             headings: RefCell::default(),
             range: RefCell::default(),
@@ -295,7 +298,7 @@ impl ToolSettings {
             layer_ui::ToolOption::Action {state,..} if state.id==command.id => Some(item.label.clone()),
             _ => None,
         }).unwrap_or_else(|| command.label.clone());
-        self.form.set_visible(!picking);
+        self.settings.set_visible(!picking);
         self.extra.set_visible(!picking && state.tool_extra.iter().any(|option| !matches!(option, layer_ui::ToolOption::Choice { beside: Some(_), .. })));
         let mode_group=state.tool_actions.iter().find_map(|action| action.group().filter(|group| group.segmented()));
         self.mode_container.set_visible(!picking && mode_group.is_some());
@@ -393,14 +396,16 @@ impl ToolSettings {
                         title.add_css_class("heading");
                         title.add_css_class("dim-label");
                         title.set_xalign(0.0);
-                        title.set_margin_top(6);
+                        title.set_margin_top(if self.form.first_child().is_some() {
+                            crate::panel_controls::SPACING - crate::panel_controls::CONTROL_SPACING
+                        } else { 0 });
                         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
                         self.form.append(&title);
                         self.headings.borrow_mut().push((control.id, title));
                     }
                     if let Some((_, field)) = beside {
-                        let row = crate::panel_controls::action_row();
-                        let numbers = gtk::Box::new(gtk::Orientation::Vertical, 2);
+                        let row = crate::panel_controls::action_row(crate::panel_controls::COMPOUND_SPACING);
+                        let numbers = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::COMPOUND_SPACING);
                         numbers.set_hexpand(true);
                         row.append(&field.root); row.append(&numbers); self.form.append(&row);
                         grouped = Some(numbers);
@@ -450,7 +455,7 @@ impl ToolSettings {
                         dropdown.connect_selected_notify(glib::clone!(#[weak] workspace,move |dropdown| {
                             if !updating.get() && let Some(&command)=commands.get(dropdown.selected() as usize) { workspace.dispatch(UiAction::Invoke {command}); }
                         }));
-                        self.form.append(&crate::panel_controls::row(&group.localized_label(&workspace.localization()),&dropdown));
+                        self.form.append(&crate::panel_controls::row(&group.localized_label(&workspace.localization()),&dropdown,crate::panel_controls::CONTROL_SPACING));
                         dropdown.upcast()
                     };
                     actions.push((*action,command.label.clone(),dropdown));
@@ -519,7 +524,7 @@ impl ToolSettings {
                             icon.set_pixel_size(16);button.set_child(Some(&icon));button.add_css_class("tool-icon-action");
                         }
                         if action_row.as_ref().is_none_or(|(old,_)| *old!=pair) {
-                            let row=crate::panel_controls::action_row();self.form.append(&row);action_row=Some((pair,row));
+                            let row=crate::panel_controls::action_row(crate::panel_controls::CONTROL_SPACING);self.form.append(&row);action_row=Some((pair,row));
                         }
                         action_row.as_ref().unwrap().1.append(&widget);
                     } else { action_row=None;self.form.append(&widget); }
@@ -670,7 +675,7 @@ impl SizePanel {
 }
 
 fn body() -> gtk::Box {
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    let root = crate::panel_controls::column();
     let inset = layer_ui::PANEL_CONTENT_INSET as i32;
     root.set_margin_start(inset);
     root.set_margin_end(inset);

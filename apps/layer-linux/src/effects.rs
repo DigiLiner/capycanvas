@@ -925,7 +925,7 @@ impl EffectPanels {
                             Field::Curve(input)
                         }
                         PropertyKind::Gradient => {
-                            let input = GradientEditor::new(w, control);
+                            let input = GradientEditor::new(w, control, crate::panel_controls::SPACING);
                             self.body.append(&input.root);
                             Field::Gradient(input)
                         }

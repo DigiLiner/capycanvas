@@ -11,10 +11,126 @@ fn select_group(w: &Rc<Workspace>, id: &str, index: u32) {
     assert!(state(w).commands.iter().any(|item| item.id == command && item.selected), "{id} dispatches {command:?}");
 }
 
+fn assert_gap(panel: &gtk::Widget, before: &str, after: &str, gap: f32, horizontal: bool) {
+    let a = named::<gtk::Widget>(panel, before).compute_bounds(panel).unwrap();
+    let b = named::<gtk::Widget>(panel, after).compute_bounds(panel).unwrap();
+    let actual = if horizontal { b.x() - a.x() - a.width() } else { b.y() - a.y() - a.height() };
+    assert_eq!(actual, gap, "{before} → {after}: allocated gap");
+}
+
+fn assert_spacing(panel: &gtk::Widget, context: &str) {
+    let first = match context {
+        "painting" | "wet-mixing" => named::<gtk::Widget>(panel, "tool-setting-size"),
+        "fill" | "enclose-fill" => named::<gtk::Widget>(panel, "tool-setting-tolerance"),
+        "zoom" => named::<gtk::Widget>(panel, "tool-choice-bar-zoom-click").parent().unwrap(),
+        "eyedropper" => named::<gtk::Widget>(panel, "color-picker-source").parent().unwrap(),
+        "gradient" => named::<gtk::Widget>(panel, "tool-choice-bar-gradient-shape"),
+        "crop" => widgets(panel).find(|widget| widget.is_mapped() && widget.has_css_class("heading") && widget.has_css_class("dim-label")).unwrap(),
+        _ => named::<gtk::Widget>(panel, "selection-mode-row"),
+    };
+    let inset = first.compute_bounds(panel).unwrap();
+    assert_eq!(inset.y(), 8., "{context}: first row respects top inset");
+    assert_eq!(inset.x(), 8., "{context}: main row respects left inset");
+    assert_eq!(panel.width() as f32 - inset.x() - inset.width(), 8., "{context}: main row respects right inset");
+    if matches!(context, "auto-select" | "rectangle-select" | "polygon-select" | "selection-brush") {
+        let mode = if context == "selection-brush" { "tool-action-SelectionAdd" } else { "tool-action-SelectionNew" };
+        assert_gap(panel, mode, "selection-actions", 4., false);
+        let first_setting = match context {
+            "auto-select" => "tool-setting-tolerance",
+            "selection-brush" => "tool-setting-selection_brush_size",
+            _ => "tool-setting-selection_feather",
+        };
+        assert_gap(panel, "selection-actions", first_setting, 6., false);
+    }
+    match context {
+        "painting" | "wet-mixing" => {
+            assert_gap(panel, "tool-setting-size", "tool-setting-opacity", 4., false);
+            assert_gap(panel, "tool-setting-opacity", "tool-setting-flow", 4., false);
+        }
+        "fill" | "enclose-fill" | "auto-select" => {
+            assert_gap(panel, "tool-setting-gap_closing", "tool-setting-expansion", 4., false);
+            assert_gap(panel, "tool-setting-expansion", "tool-setting-smoothing", 4., false);
+        }
+        "tonal-presets" | "tonal-custom" => {
+            assert_gap(panel, "selection-mode-row", "tool-choice-bar-tonal-tones", 6., false);
+            let first = if context == "tonal-custom" { "tool-range-tonal" } else { "tool-setting-tonal_softness" };
+            assert_gap(panel, "tool-choice-bar-tonal-tones", first, 4., false);
+            if context == "tonal-custom" { assert_gap(panel, first, "tool-setting-tonal_softness", 4., false); }
+            assert_gap(panel, "tool-setting-tonal_softness", "tool-setting-selection_feather", 4., false);
+        }
+        "crop" => {
+            assert_gap(panel, "tool-setting-crop_width", "tool-setting-crop_height", 4., false);
+            assert_gap(panel, "tool-setting-crop_height", "tool-setting-crop_angle", 4., false);
+            assert_gap(panel, "tool-action-CropFitContent", "tool-action-group-crop-overlay", 4., false);
+            assert_gap(panel, "tool-action-group-crop-overlay", "tool-action-CropStraighten", 4., false);
+            assert_gap(panel, "tool-action-ApplyTransform", "tool-action-CancelTransform", 4., true);
+        }
+        "zoom" => {
+            assert_gap(panel, "tool-choice-bar-zoom-click", "tool-choice-bar-zoom-drag", 4., false);
+            assert_gap(panel, "tool-choice-bar-zoom-drag", "tool-action-CenterZoomClicks", 4., false);
+        }
+        "eyedropper" => assert_gap(panel, "color-picker-source", "color-picker-size", 4., false),
+        "gradient" => {
+            assert_gap(panel, "tool-choice-bar-gradient-shape", "gradient-interpolation", 4., false);
+            assert_gap(panel, "gradient-interpolation", "effect-gradient", 4., false);
+            assert_gap(panel, "effect-gradient", "effect-gradient-remove", 4., false);
+            assert_gap(panel, "effect-gradient-remove", "tool-setting-opacity", 4., false);
+            assert_gap(panel, "gradient-reverse", "effect-gradient-reset", 4., true);
+            assert_gap(panel, "effect-gradient-remove", "effect-gradient-color", 4., true);
+        }
+        "transform-free" | "transform-warp" => {
+            if context == "transform-warp" { assert_gap(panel, "selection-mode-row", "tool-action-TransformSnapping", 6., false); }
+            else {
+                let title = widgets(panel).find(|widget| widget.is_mapped() && widget.has_css_class("heading") && widget.has_css_class("dim-label")).unwrap();
+                let modes = named::<gtk::Widget>(panel, "selection-mode-row").compute_bounds(panel).unwrap();
+                assert_eq!(title.compute_bounds(panel).unwrap().y() - modes.y() - modes.height(), 6., "mode section ends six pixels before heading");
+            }
+            assert_gap(panel, "tool-action-TransformFlipHorizontal", "tool-action-TransformFlipVertical", 4., true);
+            assert_gap(panel, "tool-action-TransformFlipHorizontal", "tool-action-TransformRotateLeft", 4., false);
+            assert_gap(panel, "tool-action-TransformRotateLeft", "tool-action-TransformRotateRight", 4., true);
+            assert_gap(panel, "tool-action-TransformRotateLeft", "tool-action-ResetTransform", 4., false);
+            assert_gap(panel, "tool-action-ApplyTransform", "tool-action-CancelTransform", 4., true);
+            if context == "transform-free" {
+                assert_gap(panel, "tool-choice-bar-transform-reference", "tool-setting-transform_x", 2., true);
+                assert_gap(panel, "tool-setting-transform_x", "tool-setting-transform_y", 2., false);
+            }
+        }
+        _ => {}
+    }
+    for title in widgets(panel).filter(|widget| widget.is_mapped() && widget.has_css_class("heading") && widget.has_css_class("dim-label")) {
+        let bounds = title.compute_bounds(panel).unwrap();
+        if let Some(before) = title.prev_sibling().filter(|widget| widget.is_mapped()) {
+            let previous = before.compute_bounds(panel).unwrap();
+            assert_eq!(bounds.y() - previous.y() - previous.height(), 6., "{context}: section space before heading");
+        } else {
+            assert_eq!(title.compute_bounds(&title.parent().unwrap()).unwrap().y(), 0., "{context}: first heading has no extra top margin");
+            if context == "crop" { assert_eq!(bounds.y(), 8., "first section respects panel inset"); }
+        }
+        if let Some(after) = title.next_sibling().filter(|widget| widget.is_mapped()) {
+            assert_eq!(after.compute_bounds(panel).unwrap().y() - bounds.y() - bounds.height(), 4., "{context}: section space after heading");
+        }
+    }
+    for group in widgets(panel).filter(|widget| widget.is_mapped() && widget.has_css_class("selection-modes")) {
+        let mut buttons: Vec<_> = widgets(&group).filter(|widget| widget.is_mapped() && widget.is::<gtk::ToggleButton>()).collect();
+        buttons.sort_by(|a, b| {
+            let a = a.compute_bounds(&group).unwrap();
+            let b = b.compute_bounds(&group).unwrap();
+            a.y().total_cmp(&b.y()).then_with(|| a.x().total_cmp(&b.x()))
+        });
+        for pair in buttons.windows(2) {
+            let a = pair[0].compute_bounds(&group).unwrap();
+            let b = pair[1].compute_bounds(&group).unwrap();
+            if a.y() == b.y() { assert_eq!(b.x() - a.x() - a.width(), 0., "{context}: joined choices have no horizontal gap"); }
+            else if group.has_css_class("choice-grid") { assert_eq!(b.y() - a.y() - a.height(), 0., "reference grid has no vertical gap"); }
+        }
+    }
+}
+
 fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Theme, width: i32, reports: &mut Vec<serde_json::Value>) {
     pump(180);
     let panel = w.panel_widget(Panel::ToolSettings);
     capture_reference(w, output.join(format!("{context}-{theme:?}-{width}.png")).to_str().unwrap(), 1.);
+    assert_spacing(&panel, context);
     assert!(panel.measure(gtk::Orientation::Horizontal, -1).0 <= width, "{context}: minimum width fits {width}");
     for widget in widgets(&panel).filter(|widget| widget.is_mapped()) {
         let bounds = widget.compute_bounds(&panel).unwrap();
@@ -35,7 +151,7 @@ fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Th
             assert_eq!(allocated_height, height, "{context}: {}", widget.widget_name());
         }
     }
-    let controls: Vec<_> = widgets(&panel).filter(|widget| widget.is_mapped() && (widget.widget_name().starts_with("tool-") || widget.is::<gtk::SpinButton>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::DropDown>() || widget.is::<gtk::Button>() || widget.is::<gtk::MenuButton>() || widget.has_css_class("number-step"))).map(|widget| {
+    let controls: Vec<_> = widgets(&panel).filter(|widget| widget.is_mapped() && (widget.widget_name().starts_with("tool-") || widget.widget_name().starts_with("effect-gradient") || widget.has_css_class("heading") || widget.is::<gtk::SpinButton>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::DropDown>() || widget.is::<gtk::Button>() || widget.is::<gtk::MenuButton>() || widget.has_css_class("number-step"))).map(|widget| {
         let bounds = widget.compute_bounds(&panel).unwrap();
         json!({"name": widget.widget_name().as_str(), "type": widget.type_().name(), "x": bounds.x(), "y": bounds.y(), "width": bounds.width(), "height": bounds.height()})
     }).collect();

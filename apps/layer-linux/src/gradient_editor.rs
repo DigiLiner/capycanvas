@@ -10,8 +10,8 @@ pub(crate) struct GradientEditor {
     sync:Rc<dyn Fn()>,
 }
 impl GradientEditor {
-    pub fn new(w:&Rc<Workspace>,control:&layer_ui::PropertyControl)->Self {
-        let root=gtk::Box::new(gtk::Orientation::Vertical,6);
+    pub fn new(w:&Rc<Workspace>,control:&layer_ui::PropertyControl,spacing:i32)->Self {
+        let root=gtk::Box::new(gtk::Orientation::Vertical,spacing);
         root.add_css_class("gradient-editor");
         let bar=gradient_preview::GradientPreview::new();bar.set_widget_name("effect-gradient");bar.set_focusable(true);
         let value=Rc::new(RefCell::new(GradientDefinition::default()));
@@ -25,8 +25,8 @@ impl GradientEditor {
         let interpolation=crate::panel_controls::dropdown(&[]);interpolation.set_widget_name("gradient-interpolation");interpolation.set_hexpand(true);
         let reverse=crate::icons::button("layer-flip-horizontal-symbolic");reverse.set_widget_name("gradient-reverse");
         let bucket=crate::icons::button("layer-fill-symbolic");bucket.set_widget_name("effect-gradient-use-color");
-        let top=gtk::Box::new(gtk::Orientation::Horizontal,6);top.append(&interpolation);top.append(&reverse);top.append(&reset);
-        let stop=gtk::Box::new(gtk::Orientation::Horizontal,6);stop.append(&position);stop.append(&remove);stop.append(&color.widget);stop.append(&bucket);
+        let top=gtk::Box::new(gtk::Orientation::Horizontal,spacing);top.append(&interpolation);top.append(&reverse);top.append(&reset);
+        let stop=gtk::Box::new(gtk::Orientation::Horizontal,spacing);stop.append(&position);stop.append(&remove);stop.append(&color.widget);stop.append(&bucket);
         root.append(&top);root.append(&bar);root.append(&stop);
         w.on_localization(glib::clone!(#[weak] bar,#[weak] position,#[weak] remove,#[weak] reset,#[weak] bucket,#[upgrade_or] false,move |l| {
             let copy=layer_ui::NativeCopy::new(l).color;
@@ -132,7 +132,7 @@ pub(crate) struct GradientButton {
 }
 impl GradientButton {
     pub fn new(w:&Rc<Workspace>,control:&layer_ui::PropertyControl)->Self {
-        let editor=GradientEditor::new(w,control);
+        let editor=GradientEditor::new(w,control,crate::panel_controls::SPACING);
         editor.root.set_size_request(240,-1);
         let popover=gtk::Popover::new();popover.set_child(Some(&editor.root));
         w.watch_popover(&popover);
