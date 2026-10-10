@@ -172,37 +172,41 @@ and 33.33 ms. Dropped reports remained zero and thermal status remained 0.
 
 ## GTK panel slider diagnostic
 
-Measured 2026-10-10 with displayed-unit slider snapping and fixed decimals
-during fine value dragging and the shared unchanged-position guard, based on
-`1283022fd` after rebasing the platform ports, in a release build on NVIDIA
-RTX PRO 6000 Blackwell Max-Q/Vulkan 615.71.09. The private Mutter display is 1600 × 1000 at a requested
+Measured 2026-10-10 with bottom-aligned GTK values and shared whole-pixel value
+scrubbing above 1000 px, based on `80c3f8cfc` with the alignment and scrubbing
+changes, in a release build with Adwaita Sans 11 on NVIDIA RTX PRO 6000 Blackwell
+Max-Q/Vulkan 615.71.09. The private Mutter display is 1600 × 1000 at a requested
 120 Hz, with a 2048 × 1536 empty drawing. `native_panel_slider_motion` uses
 native mouse input at requested 4 ms intervals, warms each field, and records
 three six-second scrubs each of brush size, opacity and flow in both themes,
-for both slider and value handles. Each scrub traverses sixteen legs: 60% of the
-track, or 240 logical pixels for size values and 120 for opacity/flow values.
+for both slider and value handles. Size value runs start at 120 px and 1200 px.
+Each scrub traverses sixteen legs: 60% of the track, or 240 logical pixels for
+size values and 120 for opacity/flow values.
 This requests enough distinct values to exercise 120 Hz presentation.
 Only GTK presentations whose numeric value changed are counted. Whole-value
 slider steps can leave some presentations unchanged at the sampled value.
 
 | Theme / handle / field | Moving presentations/s | Interval p99 |
 | --- | --- | --- |
-| Light / Slider / Size | 117.37–119.51 | 8.913–16.589 ms |
-| Light / Slider / Opacity | 111.92–113.25 | 16.720–16.782 ms |
-| Light / Slider / Flow | 111.76–112.41 | 16.755–16.799 ms |
-| Light / Value / Size | 119.84–120.05 | 8.530–8.593 ms |
-| Light / Value / Opacity | 119.84–120.01 | 8.542–8.637 ms |
-| Light / Value / Flow | 119.61–119.84 | 8.563–8.637 ms |
-| Dark / Slider / Size | 118.52–119.18 | 8.758–16.500 ms |
-| Dark / Slider / Opacity | 110.93–112.76 | 16.796–16.815 ms |
-| Dark / Slider / Flow | 110.42–112.42 | 16.778–16.938 ms |
-| Dark / Value / Size | 119.84–120.01 | 8.514–8.607 ms |
-| Dark / Value / Opacity | 119.84–119.84 | 8.595–8.842 ms |
-| Dark / Value / Flow | 119.63–120.01 | 8.554–8.584 ms |
+| Light / Slider / Size | 117.39–119.18 | 8.546–9.009 ms |
+| Light / Slider / Opacity | 115.22–115.55 | 16.723–16.805 ms |
+| Light / Slider / Flow | 114.89–115.72 | 16.684–16.800 ms |
+| Light / Value / Size (120 px) | 119.84–120.01 | 8.490–8.706 ms |
+| Light / Value / Size (1200 px) | 118.52–119.35 | 8.676–10.636 ms |
+| Light / Value / Opacity | 119.84–119.84 | 8.538–8.559 ms |
+| Light / Value / Flow | 120.00–120.01 | 8.621–8.634 ms |
+| Dark / Slider / Size | 117.87–119.51 | 8.612–10.531 ms |
+| Dark / Slider / Opacity | 113.94–114.74 | 16.731–16.800 ms |
+| Dark / Slider / Flow | 114.08–115.72 | 16.694–16.777 ms |
+| Dark / Value / Size (120 px) | 119.84–120.00 | 8.543–8.566 ms |
+| Dark / Value / Size (1200 px) | 119.02–119.34 | 8.550–8.818 ms |
+| Dark / Value / Opacity | 119.83–120.00 | 8.589–8.606 ms |
+| Dark / Value / Flow | 119.41–120.01 | 8.547–8.608 ms |
 
 These are workstation diagnostics with a small drawing. They do not qualify
 any reference-tablet target.
-Raw records are in `artifacts/panel-sliders/port-web-rebase-gtk-motion-*.json`.
+Raw records, the measured source diff and executable hash are in
+`artifacts/gtk-pixel-scrub/`.
 
 The Web port's four five-second Hue slider diagnostics, at 640 and 1100 pixels
 in both themes on the same GPU, recorded host callback CPU p95 of 0.9–1.0 ms

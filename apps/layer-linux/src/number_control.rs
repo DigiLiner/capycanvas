@@ -690,7 +690,7 @@ impl NumberControl {
             stack.set_hhomogeneous(inline);
             stack.set_vhomogeneous(compact);
             stack.set_halign(gtk::Align::End);
-            stack.set_valign(gtk::Align::Center);
+            stack.set_valign(if panel { gtk::Align::End } else { gtk::Align::Center });
             stack.connect_visible_child_name_notify(glib::clone!(#[weak] control, move |stack| {
                 control.imp().editing.set(stack.visible_child_name().as_deref() == Some("entry"));
             }));
@@ -982,6 +982,10 @@ impl NumberControl {
             let text = self.imp().presented_text.borrow().clone();
             self.present_value(self.value(), text.as_deref());
         }
+    }
+    pub(crate) fn owns_native_key(focus: &gtk::Widget, key: gtk::gdk::Key) -> bool {
+        key == gtk::gdk::Key::Escape && focus.ancestor(Self::static_type()).and_downcast::<Self>()
+            .is_some_and(|control| control.imp().scrubbing.get())
     }
     fn spec(&self) -> &NumericControl {
         self.imp().spec.get().unwrap()

@@ -141,6 +141,7 @@ pub enum NumericSliderSnap {
 }
 
 const FRACTIONAL_PIXEL_LIMIT: f64 = 32.;
+const FRACTIONAL_PIXEL_SCRUB_LIMIT: f64 = 1000.;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NumericControl {
@@ -337,8 +338,12 @@ impl NumericControl {
         };
         (increment / self.scale).max(self.fine_resolution())
     }
-    fn quantized(&self, value: f64, slider: bool) -> f64 {
-        let resolution = if slider { self.slider_resolution(value) } else { self.fine_resolution() };
+    fn scrub_resolution(&self, value: f64) -> f64 {
+        if self.unit == "px" && (value * self.scale).abs() > FRACTIONAL_PIXEL_SCRUB_LIMIT {
+            self.fine_resolution().max(1. / self.scale)
+        } else { self.fine_resolution() }
+    }
+    fn quantized(&self, value: f64, resolution: f64) -> f64 {
         ((value / resolution).round() * resolution).clamp(self.min, self.max)
     }
     fn value_at_position(&self, position: f64) -> f64 {
@@ -347,12 +352,12 @@ impl NumericControl {
     }
     pub fn position_matches_value(&self, position: f64, value: f64) -> bool {
         self.check().is_ok() && position.is_finite() && value.is_finite()
-            && self.quantized(self.value_at_position(position), false)
-                == self.quantized(value.clamp(self.soft_min, self.soft_max), false)
+            && self.quantized(self.value_at_position(position), self.fine_resolution())
+                == self.quantized(value.clamp(self.soft_min, self.soft_max), self.fine_resolution())
     }
     pub fn values_equal(&self, left: f64, right: f64) -> bool {
         self.check().is_ok() && left.is_finite() && right.is_finite()
-            && self.quantized(left, false) == self.quantized(right, false)
+            && self.quantized(left, self.fine_resolution()) == self.quantized(right, self.fine_resolution())
     }
     pub fn resolve(&self, value: f64, operation: NumericOperation) -> Result<NumericValue, NumericError> {
         self.check()?;
@@ -361,6 +366,7 @@ impl NumericControl {
         }
         let formatting = matches!(operation, NumericOperation::Format);
         let slider = matches!(operation, NumericOperation::Position { .. });
+        let scrub = matches!(operation, NumericOperation::Scrub { .. });
         let same_position = (self.min..=self.max).contains(&value)
             && matches!(&operation, NumericOperation::Position { position } if self.position_matches_value(*position, value));
         let mut resolved = match operation {
@@ -394,7 +400,9 @@ impl NumericControl {
         // Formatting an externally supplied value must never change it.
         if same_position { resolved = value; }
         else if !formatting {
-            resolved = self.quantized(resolved, slider);
+            let resolution = if slider { self.slider_resolution(resolved) }
+                else if scrub { self.scrub_resolution(resolved) } else { self.fine_resolution() };
+            resolved = self.quantized(resolved, resolution);
         }
         let shown = if resolved == 0.0 {
             0.0
@@ -412,7 +420,10 @@ impl NumericControl {
         } else {
             format!("{edit} {}", self.unit)
         };
-        let scrub_text = if self.unit.is_empty() { fixed } else { format!("{fixed} {}", self.unit) };
+        let scrub_text = if self.unit == "px" && shown.abs() >= FRACTIONAL_PIXEL_SCRUB_LIMIT && shown.fract() == 0. {
+            edit.clone()
+        } else { fixed };
+        let scrub_text = if self.unit.is_empty() { scrub_text } else { format!("{scrub_text} {}", self.unit) };
         Ok(NumericValue {
             value: resolved,
             text,
@@ -560,6 +571,41 @@ mod tests {
         for (origin, pixels) in [(f64::NAN, 1.), (1., f64::INFINITY)] {
             assert_eq!(percent.resolve(1., NumericOperation::Scrub { origin, pixels }).unwrap_err(), NumericError::FiniteNumber);
         }
+    }
+    #[test]
+    fn large_pixel_scrubs_snap_to_integers_without_restricting_typed_fractions() {
+        let brush = NumericControl::brush_size();
+        for (origin, pixels, expected, readout) in [
+            (999., 2., 999.5, "999.5 px"),
+            (999., 4., 1000., "1000 px"),
+            (1000., 2., 1001., "1001 px"),
+            (1000., -2., 999.5, "999.5 px"),
+            (1200., 2., 1201., "1201 px"),
+            (1200., -2., 1200., "1200 px"),
+            (1200.5, 4., 1202., "1202 px"),
+            (1200.5, -4., 1200., "1200 px"),
+            (2047.5, 20., 2048., "2048 px"),
+        ] {
+            let result = brush.resolve(origin, NumericOperation::Scrub { origin, pixels }).unwrap();
+            assert_eq!(result.value, expected, "{origin} with {pixels}px motion");
+            assert_eq!(result.scrub_text, readout);
+            assert_eq!(brush.resolve(result.value, NumericOperation::Format).unwrap().scrub_text, readout);
+        }
+        for operation in [NumericOperation::Format, NumericOperation::Expression { text: "1200.5 px".into() }] {
+            let result = brush.resolve(1200.5, operation).unwrap();
+            assert_eq!(result.value, 1200.5);
+            assert_eq!(result.text, "1200.5 px");
+            assert_eq!(result.edit, "1200.5");
+        }
+        let mut scaled = NumericControl::number(-20., 20., 0.01, 3).unit("px");
+        scaled.scale = 100.;
+        for origin in [-12., 12.] {
+            let result = scaled.resolve(origin, NumericOperation::Scrub { origin, pixels: 2. * origin.signum() }).unwrap();
+            assert!((result.value - origin - 0.01 * origin.signum()).abs() < 1e-12);
+            assert_eq!(result.scrub_text, format!("{:.0} px", result.value * scaled.scale));
+        }
+        let degrees = NumericControl::number(-2000., 2000., 1., 1).unit("°");
+        assert_eq!(degrees.resolve(1200., NumericOperation::Scrub { origin: 1200., pixels: 2. }).unwrap().value, 1200.5);
     }
     #[test]
     fn endpoint_words_preserve_numeric_editing_and_slider_policy() {

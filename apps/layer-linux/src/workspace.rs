@@ -1513,7 +1513,8 @@ impl Workspace {
                 if this.command_bar.is_open() { return glib::Propagation::Proceed; }
                 if this.documents.key(&this, key, modifiers) { return glib::Propagation::Stop; }
                 if gtk::prelude::GtkWindowExt::focus(&this.window)
-                    .is_some_and(|focus| crate::color_library::owns_native_key(&focus, key) || crate::effects::owns_native_key(&focus, key, modifiers))
+                    .is_some_and(|focus| crate::number_control::NumberControl::owns_native_key(&focus, key)
+                        || crate::color_library::owns_native_key(&focus, key) || crate::effects::owns_native_key(&focus, key, modifiers))
                 {
                     return glib::Propagation::Proceed;
                 }

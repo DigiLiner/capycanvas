@@ -18,13 +18,14 @@ Every host shares the same numeric policy and editable values.
   600 logical pixels. Surrounding groups share the same width so labels align.
   Android uses 48 dp settings targets; GTK and web use 32-pixel settings tracks.
 - Titles stay on one line with ellipsis (desktop/web hover shows the full name).
-  Values align right and center against the full title/description block.
+  Values align right. Settings values center against the full title/description block.
   Stacked panel sliders sit just below the text, within a 36-pixel control.
   The 4-pixel track has a symmetric 16-pixel hit area starting just below the
   visible bottom of the label. Its left inset is 36 pixels; its fixed right
   inset reserves room for ordinary values and units: 76 pixels on GTK and
   72 pixels on the other hosts. Panels have no step buttons.
-  The value and its text editor center vertically across the label and slider.
+  GTK panel values and text editors align with the bottom of the slider hit area;
+  other hosts center them vertically across the label and slider.
   GTK panel readouts align shaped text within their allocated line width so
   units stay anchored when the digit count changes.
   The panel editor is 68 pixels wide on GTK and capped at 64 pixels on other hosts,
@@ -77,11 +78,13 @@ through 32 px, matching the brush-size threshold, then snap to whole pixels.
 Percentages keep tenths within five percentage points of either soft-range edge
 and snap to whole percentages elsewhere. Angles snap to whole degrees.
 Other units retain their declared resolution; whole-count fields stay integers.
-Text entry and fine scrubbing retain fractional values independently of slider
-snapping. Settled readouts omit trailing fractional zeroes. Panel value drags use
-the shared fixed-decimal `scrub_text` until release or cancellation, then restore
+Text entry retains fractional values independently of slider snapping. Fine
+scrubbing also keeps fractions, except pixel magnitudes above 1000 px snap to
+whole pixels. Settled readouts omit trailing fractional zeroes. Panel value drags
+use the shared fixed-decimal `scrub_text` until release or cancellation; whole
+pixel values of 1000 px or more omit the decimal during dragging. Release restores
 the settled readout without changing the value. Compact readouts keep at most
-one fractional digit, including for large pixel values.
+one fractional digit, including for manually entered large pixel values.
 
 `fasteval` (MIT) evaluates bounded mathematical expressions such as `85/2`,
 `sqrt(2)` and `pi`. Unit suffixes are accepted. Nonfinite values, string

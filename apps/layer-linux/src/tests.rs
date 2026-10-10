@@ -8536,7 +8536,7 @@ fn native_panel_slider_input() {
         assert_eq!(size.width() as f32 - bar.x() - bar.width(), 76.);
         let value = find_css(size.upcast_ref(), "number-value").unwrap().compute_bounds(&size).unwrap();
         assert_eq!(size.width() as f32 - value.x() - value.width(), 0.);
-        assert!((value.y() + value.height() / 2. - size.height() as f32 / 2.).abs() <= 1.);
+        assert_eq!(value.y() + value.height(), bar.y() + bar.height(), "the readout aligns with the slider's bottom");
         assert_eq!(opacity.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 2.);
         assert!(find_css(size.upcast_ref(), "number-step").is_none());
         for value in [999., 1000.] {
@@ -8653,8 +8653,46 @@ fn native_panel_value_scrub_input() {
                 assert_eq!(readout.text(), if field == &size { "120 px" } else { "60 %" },
                     "release trims the decimal zero without changing the value");
             }
+            edit_number(&size, "1200.5");
+            assert_eq!(size.value(), 1200.5, "typed large pixel values retain their fraction");
+            let display = find_css(size.upcast_ref(), "number-value").unwrap();
+            let readout = find_css(size.upcast_ref(), "number-readout").unwrap().downcast::<gtk::Label>().unwrap();
+            let from = screen_point(&display, &w.window, [0.5, 0.5]);
+            input.perform(serde_json::json!([contact(device, "move", from), contact(device, "down", from),
+                contact(device, "move", [from[0], from[1] - 20.])]));
+            for (dy, expected, text) in [(-20., 1206., "1206 px"), (-2., 1201., "1201 px"),
+                (4., 1200., "1200 px"), (20., 1196., "1196 px")] {
+                input.perform(serde_json::json!([contact(device, "move", [from[0], from[1] + dy])]));
+                assert_eq!(size.value(), expected, "{device} large pixel scrubs snap to whole pixels");
+                assert_eq!(readout.text(), text, "large whole-pixel readouts omit the decimal during dragging");
+                let bounds = display.compute_bounds(&size).unwrap();
+                let track = descendant::<gtk::Scale>(&size).unwrap().compute_bounds(&size).unwrap();
+                assert!(bounds.x() >= track.x() + track.width(), "whole-pixel readouts clear the slider");
+            }
+            let mut events = vec![contact(device, "up", [from[0], from[1] + 20.])];
+            if device == "pen" { events.push(serde_json::json!({ "pen": "leave" })); }
+            input.perform(serde_json::Value::Array(events));
+            assert_eq!(size.value(), 1196.);
+            assert!(!descendant::<gtk::Entry>(&size).unwrap().is_mapped());
+            w.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 1000. });
+            let from = screen_point(&display, &w.window, [0.5, 0.5]);
+            input.perform(serde_json::json!([contact(device, "move", from), contact(device, "down", from),
+                contact(device, "move", [from[0], from[1] - 20.]), contact(device, "move", [from[0], from[1] + 2.])]));
+            assert_eq!(size.value(), 999.5, "{device} fine fractions resume below the large-pixel threshold");
+            assert_eq!(readout.text(), "999.5 px");
+            let mut events = vec![contact(device, "up", [from[0], from[1] + 2.])];
+            if device == "pen" { events.push(serde_json::json!({ "pen": "leave" })); }
+            input.perform(serde_json::Value::Array(events));
         }
         if pen { continue; }
+        edit_number(&size, "1200.5");
+        let display = find_css(size.upcast_ref(), "number-value").unwrap();
+        let from = screen_point(&display, &w.window, [0.5, 0.5]);
+        input.perform(serde_json::json!([contact("mouse", "down", from), contact("mouse", "move", [from[0], from[1] - 20.])]));
+        assert!(display.has_focus(), "an active value scrub receives keyboard cancellation after text editing: {:?}", gtk::prelude::GtkWindowExt::focus(&w.window));
+        input.key(0xff1b);
+        input.perform(serde_json::json!([contact("mouse", "up", from)]));
+        assert_eq!(size.value(), 1200.5, "Escape restores a manually entered large fractional size");
         let precise = 0.1234567f32;
         w.dispatch(UiAction::SetLayerOpacity { id: None, opacity: precise });
         let display = find_css(opacity.upcast_ref(), "number-value").unwrap();
@@ -8710,13 +8748,16 @@ fn native_panel_slider_motion() {
         let field = named::<crate::number_control::NumberControl>(&w.panel_widget(Panel::ToolSettings), &format!("tool-setting-{id}"));
         let scale = descendant::<gtk::Scale>(&field).unwrap();
         let display = find_css(field.upcast_ref(), "number-value").unwrap();
-        for target in ["slider", "value"] {
+        for &target in if id == "size" { &["slider", "value", "value-large"][..] } else { &["slider", "value"][..] } {
+            let reset_value = || if target != "slider" { w.dispatch(UiAction::SetToolSetting { id: id.into(), value:
+                if target == "value-large" { 1200. } else if id == "size" { 120. } else { 0.5 } }); };
+            reset_value();
             let point = |position| if target == "slider" { screen_point(scale.upcast_ref(), &w.window, [position, 0.5]) }
                 else { let origin = screen_point(&display, &w.window, [0.5, 0.5]); [origin[0], origin[1] - (position - 0.2) / 0.6 * if id == "size" { 240. } else { 120. }] };
             input.perform(serde_json::json!([contact("mouse", "down", point(0.2)), contact("mouse", "move", point(0.8)), contact("mouse", "up", point(0.8))]));
             pump(200);
             for run in 0..3 {
-                if target == "value" { w.dispatch(UiAction::SetToolSetting { id: id.into(), value: if id == "size" { 120. } else { 0.5 } }); }
+                reset_value();
                 input.perform(serde_json::json!([contact("mouse", "down", point(0.2))]));
                 pump(100);
                 let timings = Rc::new(RefCell::new(Vec::new()));
@@ -8816,8 +8857,10 @@ fn native_number_controls() {
         let value = find_css(field.upcast_ref(), "number-value").unwrap();
         let lb = labels.compute_bounds(field).unwrap();
         let vb = value.compute_bounds(field).unwrap();
-        let center = if field.has_css_class("number-panel") { field.height() as f32 / 2. } else { lb.y() + lb.height() / 2. };
-        assert!((center - vb.y() - vb.height() / 2.0).abs() <= 1.0);
+        if field.has_css_class("number-panel") {
+            let bar = descendant::<gtk::Scale>(field).unwrap().compute_bounds(field).unwrap();
+            assert_eq!(vb.y() + vb.height(), bar.y() + bar.height(), "the readout aligns with the slider's bottom");
+        } else { assert!((lb.y() + lb.height() / 2. - vb.y() - vb.height() / 2.).abs() <= 1.); }
         assert!((vb.x() + vb.width() - field.width() as f32).abs() <= 1.0);
         assert!(!title.wraps());
         assert_eq!(title.ellipsize(), gtk::pango::EllipsizeMode::End);
@@ -8936,6 +8979,7 @@ fn native_number_controls() {
                 assert!(bounds.width() <= 68., "panel editor stays within its reserved space: {bounds:?}");
                 if draft.len() > 3 { assert_eq!(bounds.width(), 68., "long expressions use the wider panel editor"); }
                 assert_eq!(field.width() as f32 - bounds.x() - bounds.width(), 0., "panel editor stays flush with the right edge");
+                assert_eq!(bounds.y() + bounds.height(), track.y() + track.height(), "the editor aligns with the slider's bottom");
                 assert!(bounds.x() >= track.x() + track.width() + 8., "editor keeps an 8px gap from the slider hit area: {bounds:?}, {track:?}");
                 assert_eq!(slider.compute_bounds(field).unwrap(), track, "editing keeps the slider's bounds fixed");
                 assert_eq!(field.height(), 36, "editing preserves the compact row height");
