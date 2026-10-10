@@ -618,6 +618,10 @@ impl NumberControl {
             let value_label = gtk::Label::new(None);
             value_label.add_css_class("number-readout");
             value_label.set_xalign(if compact { 0.5 } else { 1.0 });
+            if panel {
+                value_label.set_justify(gtk::Justification::Right);
+                value_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            }
             if compact {
                 let face = gtk::Box::new(gtk::Orientation::Horizontal, 2);
                 face.set_halign(gtk::Align::Center);

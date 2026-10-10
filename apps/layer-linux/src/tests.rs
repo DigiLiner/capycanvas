@@ -8539,6 +8539,11 @@ fn native_panel_slider_input() {
         assert!((value.y() + value.height() / 2. - size.height() as f32 / 2.).abs() <= 1.);
         assert_eq!(opacity.compute_bounds(&panel).unwrap().y() - size.compute_bounds(&panel).unwrap().y() - size.height() as f32, 2.);
         assert!(find_css(size.upcast_ref(), "number-step").is_none());
+        for value in [999., 1000.] {
+            w.dispatch(UiAction::SetToolSetting { id: "size".into(), value });
+            pump(30);
+            capture_reference(&w, &format!("{output}/gtk-size-{value:.0}-{theme:?}.png"), 1.);
+        }
         for edge in [1. / scale.height() as f32, 1. - 1. / scale.height() as f32] {
             w.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 32. });
             let from = screen_point(scale.upcast_ref(), &w.window, [0.2, edge]);
@@ -8893,6 +8898,24 @@ fn native_number_controls() {
             window.add_css_class("light-theme");
         }
         pump(150);
+        let mut unit_anchor = None::<f32>;
+        for value in [999., 1000., 1000.1, 2047.9, 2048.] {
+            size.set_value(value);
+            pump(30);
+            let bounds = value_label.compute_bounds(&size).unwrap();
+            let layout = value_label.layout();
+            let raw = layout.copy();
+            raw.set_width(-1);
+            raw.set_ellipsize(gtk::pango::EllipsizeMode::None);
+            assert_eq!(value_label.width(), raw.pixel_size().0, "alignment preserves the readout's content width");
+            assert!(!layout.is_ellipsized(), "alignment keeps the full number and unit visible");
+            let text = value_label.text();
+            let position = layout.index_to_pos(text.rfind("px").unwrap() as i32);
+            let unit_x = bounds.x() + value_label.layout_offsets().0 as f32 + position.x() as f32 / gtk::pango::SCALE as f32;
+            if let Some(anchor) = unit_anchor {
+                assert!((unit_x - anchor).abs() < 0.01, "the unit stays anchored: {anchor} -> {unit_x}");
+            } else { unit_anchor = Some(unit_x); }
+        }
         crate::snapshot_window(&window, 1.0)
             .save_to_png(format!("{dir}/gtk-{theme}.png"))
             .unwrap();

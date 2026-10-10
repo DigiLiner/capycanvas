@@ -25,6 +25,8 @@ Every host shares the same numeric policy and editable values.
   inset reserves room for ordinary values and units: 76 pixels on GTK and
   72 pixels on the other hosts. Panels have no step buttons.
   The value and its text editor center vertically across the label and slider.
+  GTK panel readouts align shaped text within their allocated line width so
+  units stay anchored when the digit count changes.
   The panel editor is 68 pixels wide on GTK and capped at 64 pixels on other hosts,
   keeping at least an 8-pixel gap from the slider hit area. Long expressions
   scroll within the field.
