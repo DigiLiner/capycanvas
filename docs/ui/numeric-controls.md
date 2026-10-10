@@ -50,8 +50,11 @@ Every host shares the same numeric policy and editable values.
   inset. Text editing uses a rounded field; panel editors reserve their full
   width while editing, and other fields size to the value. Descriptions remain
   wrapped and can increase row height.
-  Panel labels have a 6-pixel left inset matching the value's right inset;
-  settings preserve the common label alignment with nonnumeric rows.
+  GTK Tool Settings labels align with the panel's 8-pixel content inset;
+  readouts and text editors use 6-pixel horizontal padding, including inline
+  fields. Standard panel labels elsewhere keep their 6-pixel left inset matching
+  the value's right inset; settings preserve the common label alignment with
+  nonnumeric rows.
 - Text commits on Enter/IME Done or focus loss. Escape cancels. Invalid
   expressions keep the previous value; typed finite results clamp to hard
   bounds. Refused text stays in the editor with its localized error. Pending

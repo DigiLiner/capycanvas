@@ -126,11 +126,54 @@ fn assert_spacing(panel: &gtk::Widget, context: &str) {
     }
 }
 
+#[allow(deprecated)]
+fn padding(widget: &impl IsA<gtk::Widget>) -> [i16; 4] {
+    let padding = widget.style_context().padding();
+    [padding.top(), padding.right(), padding.bottom(), padding.left()]
+}
+
+fn assert_margins(panel: &gtk::Widget, context: &str) {
+    let aligned = match context {
+        "eyedropper" => &["color-picker-source", "color-picker-size"][..],
+        "crop" => &["tool-action-group-crop-ratio", "tool-action-group-crop-overlay"][..],
+        "transform-warp" => &["tool-action-group-transform-warp-split", "tool-action-group-transform-warp-grid", "tool-action-group-transform-interpolation"][..],
+        _ => &[],
+    };
+    let mut column = None;
+    for name in aligned {
+        let dropdown = named::<gtk::Widget>(panel, name);
+        let bounds = dropdown.compute_bounds(panel).unwrap();
+        if let Some(x) = column { assert_eq!(bounds.x(), x, "{context}: adjacent dropdowns share a column"); }
+        column = Some(bounds.x());
+        let label = dropdown.parent().unwrap().first_child().and_downcast::<gtk::Label>().unwrap();
+        assert_eq!(label.compute_bounds(panel).unwrap().x(), 8., "{context}: dropdown caption aligns to outer rail");
+    }
+    if context == "zoom" {
+        for name in ["tool-choice-bar-zoom-click", "tool-choice-bar-zoom-drag"] {
+            let label = named::<gtk::Widget>(panel, name).parent().unwrap().first_child().and_downcast::<gtk::Label>().unwrap();
+            assert_eq!(label.compute_bounds(panel).unwrap().x(), 8., "Zoom caption aligns to outer rail");
+        }
+    }
+    for number in widgets(panel).filter_map(|widget| widget.downcast::<crate::number_control::NumberControl>().ok()).filter(|number| number.is_mapped()) {
+        let label = if number.has_css_class("number-inline") {
+            number.first_child().and_then(|row| row.first_child()).and_downcast::<gtk::Label>()
+        } else { find_css(number.upcast_ref(), "number-title").and_then(|widget| widget.downcast::<gtk::Label>().ok()) };
+        if let Some(label) = label.filter(|label| label.is_mapped()) {
+            assert_eq!(label.compute_bounds(panel).unwrap().x(), number.compute_bounds(panel).unwrap().x(), "{context}: {} caption has no extra indent", number.widget_name());
+        }
+        if let Some(readout) = find_css(number.upcast_ref(), "number-value").filter(|widget| widget.is_mapped()) {
+            let padding = padding(&readout);
+            assert_eq!([padding[3], padding[1]], [6, 6], "{context}: numeric readout uses six-pixel horizontal padding");
+        }
+    }
+}
+
 fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Theme, width: i32, reports: &mut Vec<serde_json::Value>) {
     pump(180);
     let panel = w.panel_widget(Panel::ToolSettings);
     capture_reference(w, output.join(format!("{context}-{theme:?}-{width}.png")).to_str().unwrap(), 1.);
     assert_spacing(&panel, context);
+    assert_margins(&panel, context);
     assert!(panel.measure(gtk::Orientation::Horizontal, -1).0 <= width, "{context}: minimum width fits {width}");
     for widget in widgets(&panel).filter(|widget| widget.is_mapped()) {
         let bounds = widget.compute_bounds(&panel).unwrap();
@@ -151,12 +194,38 @@ fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Th
             assert_eq!(allocated_height, height, "{context}: {}", widget.widget_name());
         }
     }
-    let controls: Vec<_> = widgets(&panel).filter(|widget| widget.is_mapped() && (widget.widget_name().starts_with("tool-") || widget.widget_name().starts_with("effect-gradient") || widget.has_css_class("heading") || widget.is::<gtk::SpinButton>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::DropDown>() || widget.is::<gtk::Button>() || widget.is::<gtk::MenuButton>() || widget.has_css_class("number-step"))).map(|widget| {
+    let controls: Vec<_> = widgets(&panel).filter(|widget| widget.is_mapped() && (widget.widget_name().starts_with("tool-") || widget.widget_name().starts_with("effect-gradient") || widget.has_css_class("heading") || widget.is::<gtk::Label>() || widget.is::<gtk::Entry>() || widget.is::<gtk::SpinButton>() || widget.is::<gtk::CheckButton>() || widget.is::<gtk::DropDown>() || widget.is::<gtk::Button>() || widget.is::<gtk::MenuButton>() || widget.has_css_class("number-step"))).map(|widget| {
         let bounds = widget.compute_bounds(&panel).unwrap();
-        json!({"name": widget.widget_name().as_str(), "type": widget.type_().name(), "x": bounds.x(), "y": bounds.y(), "width": bounds.width(), "height": bounds.height()})
+        json!({"name": widget.widget_name().as_str(), "type": widget.type_().name(), "text": widget.downcast_ref::<gtk::Label>().map(|label| label.text().to_string()), "x": bounds.x(), "y": bounds.y(), "width": bounds.width(), "height": bounds.height(), "padding": padding(&widget)})
     }).collect();
     reports.push(json!({"context": context, "theme": format!("{theme:?}"), "requested_width": width, "panel_width": panel.width(), "panel_height": panel.height(), "controls": controls}));
     std::fs::write(output.join("controls.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+}
+
+fn inline_edit(w: &Rc<Workspace>, output: &std::path::Path, context: &str, id: &str, theme: Theme, width: i32, reports: &mut Vec<serde_json::Value>) {
+    let panel = w.panel_widget(Panel::ToolSettings);
+    let number = named::<crate::number_control::NumberControl>(&panel, &format!("tool-setting-{id}"));
+    let readout = find_css(number.upcast_ref(), "number-value").unwrap().downcast::<gtk::Button>().unwrap();
+    let before = readout.compute_bounds(&panel).unwrap();
+    click(&readout);
+    pump(100);
+    let editor = find_css(number.upcast_ref(), "number-entry").unwrap().downcast::<gtk::Entry>().unwrap();
+    let editing = editor.compute_bounds(&panel).unwrap();
+    assert_eq!(editing.height(), 24., "{context}: inline editor preserves approved height");
+    assert_eq!(editing.x() + editing.width(), before.x() + before.width(), "{context}: editor keeps outer right edge");
+    let padding = padding(&editor);
+    assert_eq!([padding[3],padding[1]], [6,6], "{context}: editor and readout horizontal padding match");
+    assert!(editor.has_focus() || editor.root().unwrap().focus().is_some_and(|focus| focus.is_ancestor(&editor)), "inline editor retains focus");
+    let original = number.value();
+    editor.set_text(&format!("{}+1", editor.text()));
+    capture_reference(w, output.join(format!("inline-edit-{id}-{theme:?}-{width}.png")).to_str().unwrap(), 1.);
+    reports.push(json!({"context": context, "theme": format!("{theme:?}"), "requested_width": width, "inline_editor": id, "readout": [before.x(),before.y(),before.width(),before.height()], "editor": [editing.x(),editing.y(),editing.width(),editing.height()], "padding": padding}));
+    editor.emit_activate();
+    pump(100);
+    assert!(number.input_valid());
+    assert!(number.value() > original, "inline expression commits to shared state");
+    assert!(state(w).tool_settings.iter().any(|setting| setting.id == id && (setting.value as f64-number.value()).abs()<0.0001));
+    w.dispatch(UiAction::SetToolSetting { id: id.into(), value: original as f32 });
 }
 
 fn spin_edit(w: &Rc<Workspace>, id: &str, expression: &str, expected: f64, output: &std::path::Path, theme: Theme, width: i32) {
@@ -228,6 +297,7 @@ fn native_tool_controls_compact() {
                 if context == "tonal-presets" {
                     w.dispatch(UiAction::Tonal { action: layer_ui::TonalAction::Preset { index: 7 } });
                     capture(&w, &output, "tonal-custom", theme, width, &mut reports);
+                    inline_edit(&w, &output, "tonal-custom", "tonal_softness", theme, width, &mut reports);
                 }
                 if context == "crop" {
                     let dropdown = named::<gtk::DropDown>(&w.panel_widget(Panel::ToolSettings), "tool-action-group-crop-ratio");
@@ -254,6 +324,7 @@ fn native_tool_controls_compact() {
             pump(350);
             w.dispatch(UiAction::Invoke { command: CommandId::TransformFree });
             capture(&w, &output, "transform-free", theme, width, &mut reports);
+            inline_edit(&w, &output, "transform-free", "transform_x", theme, width, &mut reports);
             select_group(&w, "transform-interpolation", 0);
             w.dispatch(UiAction::Invoke { command: CommandId::TransformWarp });
             pump(350);

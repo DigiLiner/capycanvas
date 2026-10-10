@@ -112,12 +112,13 @@ pub fn segmented(name: &str, choices: &[(&str, &str)]) -> adw::ToggleGroup {
 
 /// Standard single-line label/control arrangement, also used for compact
 /// numeric controls. No panel-specific drawing, input handling or CSS.
-pub fn row(title: &str, control: &impl IsA<gtk::Widget>, spacing: i32) -> gtk::Box {
+pub fn row(title: &str, control: &impl IsA<gtk::Widget>, spacing: i32, labels: Option<&gtk::SizeGroup>) -> gtk::Box {
     let row = action_row(spacing);
     let label = gtk::Label::new(Some(title));
     label.set_xalign(0.);
     label.set_width_chars(9);
     label.set_mnemonic_widget(Some(control));
+    if let Some(labels) = labels { labels.add_widget(&label); }
     row.append(&label);
     control.set_hexpand(true);
     row.append(control);

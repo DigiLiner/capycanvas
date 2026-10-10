@@ -507,19 +507,19 @@ impl Form {
         for field in PrintProofControl::ALL {
             match field {
                 PrintProofControl::Profile => {
-                    let row = panel_controls::row(&field.localized_label(&w.localization()), &chooser.button, panel_controls::SPACING);
+                    let row = panel_controls::row(&field.localized_label(&w.localization()), &chooser.button, panel_controls::SPACING, None);
                     captions.push((field, row.first_child().and_downcast::<gtk::Label>().unwrap().downgrade()));
                     row.set_widget_name("proof-profile");
                     print.append(&row);
                     print.append(&chooser.error);
                 }
                 PrintProofControl::Simulation => {
-                    let row = panel_controls::row(&field.localized_label(&w.localization()), &simulation, panel_controls::SPACING);
+                    let row = panel_controls::row(&field.localized_label(&w.localization()), &simulation, panel_controls::SPACING, None);
                     captions.push((field, row.first_child().and_downcast::<gtk::Label>().unwrap().downgrade()));
                     print.append(&row);
                 }
                 PrintProofControl::Intent => {
-                    let row = panel_controls::row(&field.localized_label(&w.localization()), &intent, panel_controls::SPACING);
+                    let row = panel_controls::row(&field.localized_label(&w.localization()), &intent, panel_controls::SPACING, None);
                     captions.push((field, row.first_child().and_downcast::<gtk::Label>().unwrap().downgrade()));
                     print.append(&row);
                 }

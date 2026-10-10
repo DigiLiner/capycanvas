@@ -81,7 +81,7 @@ impl ExtraField {
             button.set_widget_name(&format!("tool-choice-{id}-{index}"));
         }
         let root = if *labeled {
-            let row = crate::panel_controls::row(label, &root, crate::panel_controls::CONTROL_SPACING);
+            let row = crate::panel_controls::row(label, &root, crate::panel_controls::CONTROL_SPACING, None);
             root.set_halign(gtk::Align::End);
             root.set_valign(gtk::Align::Center);
             if let Some(caption) = row.first_child().and_downcast::<gtk::Label>() { caption.set_wrap(true); }

@@ -141,6 +141,14 @@ roles in docks, floating panels and drawers:
 | Logical groups | 6 px | Tool mode/actions section to settings; space before a group heading. |
 | Content inset | 8 px | Each edge of the panel body, applied once. |
 
+Plain labels and headings align with the content's leading edge, without another
+label inset. Full-width controls and right-aligned fields end at its trailing
+edge. Related dropdown rows share a label column sized from their captions.
+Numeric readouts and their text editors use 6-pixel horizontal padding, including
+inline fields. Checkboxes and button captions retain the space for their
+indicators and icons; slider tracks and gradient handles retain their internal
+insets.
+
 A row of independent buttons uses the same 4-pixel horizontal gap as the vertical
 gap to the next row in its group. Joined segments form one control; their shared
 edges do not set the gap to a separate control. Headings have 6 pixels before and

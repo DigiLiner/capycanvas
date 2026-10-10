@@ -29,9 +29,10 @@ impl Settings {
         });
         let size = crate::panel_controls::dropdown(&sizes.each_ref().map(String::as_str));
         size.set_widget_name("color-picker-size");
+        let labels = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
         for (name, widget) in [("Source", &source), ("Sample size", &size)] {
             widget.update_property(&[gtk::accessible::Property::Label(name)]);
-            root.append(&crate::panel_controls::row(name,widget,crate::panel_controls::CONTROL_SPACING));
+            root.append(&crate::panel_controls::row(name,widget,crate::panel_controls::CONTROL_SPACING,Some(&labels)));
         }
         let owner: Rc<RefCell<Weak<Workspace>>> = Rc::default();
         let updating = Rc::new(Cell::new(false));

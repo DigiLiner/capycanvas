@@ -370,6 +370,7 @@ impl ToolSettings {
             let mut grouped = None::<gtk::Box>;
             let inline_labels=gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
             let inline_values=gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
+            let dropdown_labels=gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
             for control in controls {
                 if compact && control.id == "tonal_upper" { continue; }
                 if compact && control.id == "tonal_lower" {
@@ -455,7 +456,7 @@ impl ToolSettings {
                         dropdown.connect_selected_notify(glib::clone!(#[weak] workspace,move |dropdown| {
                             if !updating.get() && let Some(&command)=commands.get(dropdown.selected() as usize) { workspace.dispatch(UiAction::Invoke {command}); }
                         }));
-                        self.form.append(&crate::panel_controls::row(&group.localized_label(&workspace.localization()),&dropdown,crate::panel_controls::CONTROL_SPACING));
+                        self.form.append(&crate::panel_controls::row(&group.localized_label(&workspace.localization()),&dropdown,crate::panel_controls::CONTROL_SPACING,Some(&dropdown_labels)));
                         dropdown.upcast()
                     };
                     actions.push((*action,command.label.clone(),dropdown));
