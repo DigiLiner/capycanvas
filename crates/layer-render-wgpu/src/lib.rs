@@ -1209,7 +1209,7 @@ impl WgpuRasterizer {
         let uploads = Uploads::new(&device, 64 * 1024);
         let restore_uploads = Uploads::new(&device, 64 * 1024);
         let layer_masks =
-            layer_masks::MaskRenderer::new(&device, &style_layout, &target_layout, &texture_layout);
+            layer_masks::MaskRenderer::new(&device, &style_layout, &target_layout, &texture_layout, &advanced_texture_layout);
         let telemetry = telemetry::Telemetry::new(&device, &queue);
         let selection_clip = selection_clip::SelectionClip::new(&device);
         let scene_pipelines = scene::Pipelines::new(&device);
@@ -2210,6 +2210,7 @@ impl WgpuRasterizer {
         self.dab_upload.extend(packet.dabs.iter().copied().map(DabGpu::from));
         for batch in packet.dab_batches {
             let range = batch.first_dab as usize..(batch.first_dab + batch.dab_count) as usize;
+            dry_material::prepare_geometry(&batch.style, &mut self.dab_upload[range.clone()]);
             dry_material::prepare_colors(&batch.style, self.device.working_space(), &mut self.dab_upload[range.clone()]);
             dry_material::prepare_film(&batch.style, &mut self.dab_upload[range]);
         }
@@ -2242,6 +2243,15 @@ impl WgpuRasterizer {
             let batch = &packet.dab_batches[index];
             let block = if self.compute_dry_material(batch) { self.dry_material_block(batch) } else { 1 };
             let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device);
+            if batch.style.execution==BrushExecution::Dry && batch.style.contact.is_some_and(|c|c.dry.is_some())
+                && batch.style.rendering.accumulation==BrushAccumulation::Flow
+                && batch.style.rendering.blend_mode==BrushBlendMode::Normal
+                && !batch.style.alpha_locked && batch.style.selection.is_none() && batch.dab_count>0 {
+                let source=&packet.dabs[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize];
+                record.material_a[3]=f32::from(batch.style.mode==DabMode::Erase
+                    || source.iter().all(|d|d.color_rgba_linear[..3]==source[0].color_rgba_linear[..3]));
+                record.material_b[..3].copy_from_slice(&source[0].color_rgba_linear[..3]);
+            }
             record.color_mode = layer_color_parameters(packet.scene.color_mode(batch.target), self.document_color());
             record.color_mode[2] = f32::from(batch.style.blend_space == layer_core::BlendSpace::Perceptual);
             let offset = index * self.style_stride as usize;
@@ -3396,7 +3406,7 @@ impl CanvasRenderer for WgpuRasterizer {
         self.moving_pixels = pixels;
     }
     fn has_pending_work(&self) -> bool {
-        self.analysis_dirty || self.settling.is_some() || self.awaiting_meshes || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting()))
+        self.analysis_dirty || !self.transform_damage.is_empty() || !self.document_damage.is_empty() || self.settling.is_some() || self.awaiting_meshes || self.retouch.as_ref().is_some_and(|retouch| retouch.pending() && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting()))
             || self.navigator.pending()
             || self.moving_images_pending()
             || self.moving_decode.as_ref().is_some_and(|(_,queue)|queue.pending())
@@ -3497,7 +3507,7 @@ impl CanvasRenderer for WgpuRasterizer {
                 .transforms
                 .as_ref()
                 .map_or(0, paint_transform::PaintTransforms::storage_bytes)
-            + self.layer_masks.pages.values().chain(self.layer_masks.command_pages.values()).chain(self.layer_masks.snapshots.values().flat_map(|snapshot| snapshot.pages.values())).map(|p| texture_bytes(&p.texture)).sum::<u64>();
+            + self.layer_masks.pages.values().chain(self.layer_masks.preview_bases.values()).chain(self.layer_masks.command_pages.values()).chain(self.layer_masks.snapshots.values().flat_map(|snapshot| snapshot.pages.values())).map(|p| texture_bytes(&p.texture)).sum::<u64>();
         if let Some(scene) = &self.scene {
             t.effect_passes = scene.effect_passes;
             t.compiled_effects = scene.effects.compilations;
@@ -3706,6 +3716,7 @@ impl WgpuRasterizer {
             && packet.commit_rasters && !packet.composite_all && !packet.reset_layers && packet.restore_rasters.is_empty()
             && packet.dabs.is_empty() && packet.dab_batches.is_empty()
             && settled_commit.is_none() && self.transform_preview.is_none()
+            && self.transform_damage.is_empty() && self.document_damage.is_empty()
             && self.moving_layer.is_none() && self.moving_pixels.is_none()
             && self.artwork_frame.as_ref().is_some_and(|frame|
                 frame.view == packet.view && frame.same_artwork(packet))
@@ -3727,8 +3738,7 @@ impl WgpuRasterizer {
             // capture spare pool during loading, before the first stroke needs it.
             self.prepare_source_backing()?;
         }
-        self.transform_damage.clear();
-        self.document_damage.clear();
+
         let object_damage = (!analysis_dirty && !packet.reset_layers && packet.restore_rasters.is_empty()
             && packet.dabs.is_empty() && packet.dab_batches.is_empty()).then(|| {
             let old = self.artwork_frame.as_ref()?;
@@ -3977,10 +3987,13 @@ impl WgpuRasterizer {
                 .all(|batch| {
                     BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
                 });
+        let native_dry_preview = packet.dab_batches.iter()
+            .filter(|b|b.kind==DabBatchKind::Preview && b.dab_count!=0)
+            .all(|b|dry_material::native_dry_preview_eligible(&b.style));
         let mut preview_contribution=new_preview_from_persistent && self.scale_display.as_ref().is_some_and(|cache|
-            new_preview_layer.is_some_and(|id|cache.native_preview_input(packet,id)))
+                new_preview_layer.is_some_and(|id|cache.native_preview_input(packet,id)))
             && packet.dab_batches.iter().filter(|b|b.kind==DabBatchKind::Preview && b.dab_count!=0)
-                .all(|b|dry_material::display_preview_eligible(&b.style) && b.style.mode==DabMode::Paint
+                .all(|b|(dry_material::display_preview_eligible(&b.style) || dry_material::native_dry_preview_eligible(&b.style)) && b.style.mode==DabMode::Paint
                     && b.style.blend_space==packet.blend_space
                     && packet.scene.color_mode(b.target)==layer_core::color::LayerColorMode::FullColor);
         if preview_contribution {new_preview_requires_base=false;}
@@ -3988,7 +4001,7 @@ impl WgpuRasterizer {
             && packet.dab_batches.iter().filter(|b| b.kind == DabBatchKind::Preview && b.dab_count != 0)
                 .all(|b| dry_material::display_preview_eligible(&b.style)))
             .map_or(0, |cache| new_preview_layer.map_or(0, |id| cache.preview_level(self, packet, id, preview_contribution)));
-        preview_contribution &= preview_level>0;
+        preview_contribution &= preview_level>0 || native_dry_preview;
         if !preview_contribution && new_preview_from_persistent {new_preview_requires_base=true;}
         if packet.commit_rasters {
             self.preview_contribution=preview_contribution;
@@ -4020,7 +4033,7 @@ impl WgpuRasterizer {
 
         }
 
-        self.prepare_uploads(packet, &mut batch_tiles, &mut encoder)?;
+        self.prepare_uploads(FramePacket {dab_batches:original_batches,..packet}, &mut batch_tiles, &mut encoder)?;
         self.layer_masks.prepare(
             &self.device,
             &mut encoder,
@@ -4243,6 +4256,14 @@ impl WgpuRasterizer {
         let native_commit = match settled_commit { Some(frame) => Some(frame), None => self.encode_native_rasters(packet.scene, &mut encoder)? };
         if let Some(started) = started { cpu_phases[2] = started.elapsed().as_secs_f64() * 1000.; }
         if !packet.commit_rasters {
+            for (batch,tiles) in original_batches.iter().zip(&batch_tiles).filter(|(b,_)|b.kind!=DabBatchKind::Preview) {
+                self.transform_damage.extend(tiles.iter().map(|tile|(batch.target,page_rect(tile.coordinate))));
+                let finished:Vec<_>=self.stroke_finish_pages(batch).collect();
+                self.transform_damage.extend(finished.into_iter().map(|c|(batch.target,page_rect(c))));
+            }
+            if let Some(frame)=&native_commit {self.transform_damage.extend(frame.canonical_pages.iter().map(|&(id,c)|(id,page_rect(c))));}
+            self.transform_damage.sort_unstable_by_key(|&(id,rect)|(id,rect.min_x(),rect.min_y(),rect.max_x(),rect.max_y()));
+            self.transform_damage.dedup();
             self.uploads.finish(&encoder);
             self.telemetry.end(&mut encoder);
             self.metrics.command_passes += encoder.pass_count();
@@ -4510,6 +4531,8 @@ impl WgpuRasterizer {
         let canonical_pages = native_commit.as_ref().map_or(&[][..], |frame| &frame.canonical_pages[..]);
         if canonical_pages.iter().any(|(id,_)|!matches!(id,SourceTarget::Paint(_))) {self.changed_cells.as_mut().unwrap().force_all();}
         self.transform_damage.extend(canonical_pages.iter().map(|&(id,coordinate)|(id,page_rect(coordinate))));
+        self.transform_damage.sort_unstable_by_key(|&(id,rect)|(id,rect.min_x(),rect.min_y(),rect.max_x(),rect.max_y()));
+        self.transform_damage.dedup();
         let mut composite_tiles = (!reset && !packet.composite_all
             && (local_contacts || (dirty.is_empty()
                 && (!self.transform_damage.is_empty()
@@ -4583,6 +4606,7 @@ impl WgpuRasterizer {
             let published=match result {
                 Err(GpuRasterError::DeferredObjectWork)=> {
                     self.object_deferred=true;
+                    self.document_damage.clear();
                     self.document_damage.push(PixelRect::full(packet.document_extent));
                     self.uploads.finish(&encoder);
                     self.telemetry.phase_end(2,&mut encoder);self.telemetry.end(&mut encoder);
@@ -4676,6 +4700,8 @@ impl WgpuRasterizer {
         }
         self.submitted_context = Some(context);
         self.artwork_frame = Some(frame);
+        self.transform_damage.clear();
+        self.document_damage.clear();
         self.metrics.submissions = self.metrics.submissions.saturating_add(1);
         self.refresh_storage_metrics();
         performance_trace::counter(c"Capy renderer frames", self.metrics.submissions);
@@ -4714,18 +4740,24 @@ struct DabGpu {
     dab: Dab,
     // Rows of the midpoint nib metric. These depend on the contact, not pixels.
     metric: [f32; 4],
-    // World travel, firm-nib feed, incoming film ceiling, maximum pressure.
+    // Family-specific contact geometry and pigment-film bounds.
     invariants: [f32; 4],
+}
+
+fn midpoint_contact(mut dab:Dab)->Dab {
+    dab.radii=[(dab.previous[0]+dab.radii[0])*0.5,(dab.previous[1]+dab.radii[1])*0.5].map(|v|v.max(0.005));
+    let angle=[dab.previous[2]+dab.rotation[0],dab.previous[3]+dab.rotation[1]];
+    let length2=angle[0]*angle[0]+angle[1]*angle[1];
+    if length2>0.00001 {dab.rotation=angle.map(|v|v/length2.sqrt().max(0.00001));}
+    dab.previous=[dab.radii[0],dab.radii[1],dab.rotation[0],dab.rotation[1]];
+    dab
 }
 
 impl From<Dab> for DabGpu {
     fn from(dab: Dab) -> Self {
-        let axes = [(dab.previous[0] + dab.radii[0]) * 0.5,
-            (dab.previous[1] + dab.radii[1]) * 0.5].map(|v| v.max(0.005));
-        let angle = [dab.previous[2] + dab.rotation[0], dab.previous[3] + dab.rotation[1]];
-        let length2 = angle[0] * angle[0] + angle[1] * angle[1];
-        let rotation = if length2 > 0.00001 { angle.map(|v| v / length2.sqrt().max(0.00001)) }
-            else { dab.rotation };
+        let shape=midpoint_contact(dab);
+        let axes=shape.radii;
+        let rotation=shape.rotation;
         let travel = dab.motion[0].hypot(dab.motion[1]);
         Self { dab, metric: [rotation[0] / axes[0], rotation[1] / axes[0],
             -rotation[1] / axes[1], rotation[0] / axes[1]],
@@ -4902,7 +4934,7 @@ impl StyleGpu {
                 result.bristle_streak = bristles.streak_rgba_linear;
             }
             let paper = contact.paper * grain.map_or(1., |grain| grain.depth);
-            result.contact_a = [1.0, paper, contact.tip_bias, contact.edge_roughness];
+            result.contact_a = [1.0, paper, f32::from(contact.dry.is_some()), contact.edge_roughness];
             result.contact_b = [
                 contact.edge_scale,
                 contact.fibers,
@@ -4912,9 +4944,12 @@ impl StyleGpu {
             result.contact_c = [
                 contact.pressure_gain,
                 contact.depletion,
-                contact.tilt_shading,
+                0.,
                 f32::from(contact.linear_edge),
             ];
+            if let Some(dry) = contact.dry {
+                result.material_a = [dry.corner, dry.softness.recip(), dry.loading, 0.];
+            }
         }
         // This lane is unused by dry and composite shaders and avoids growing
         // every style upload solely for one material-stage lifecycle bit.
@@ -5286,22 +5321,24 @@ fn texture_switch(group: u32, count: usize, function: &str) -> String {
     shader + "default:{return vec4(0.);}}}\n"
 }
 
-fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pipelines {
-    let advanced_brush = {
+fn advanced_brush_shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule> {
         let device = device.clone();
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer textured dry brush shader"),
                 source: wgpu::ShaderSource::Wgsl(compose_wgsl(&[
                     &working_color::shader(&device),
-                    include_str!("advanced_brush.wgsl"),
+                    include_str!("brush_types.wgsl"), include_str!("advanced_brush.wgsl"),
                     include_str!("analytic_coverage.wgsl"), include_str!("brush_coverage.wgsl"),
-                    include_str!("contact.wgsl"),
+                    include_str!("contact.wgsl"), include_str!("relief.wgsl"),
                     include_str!("selection_clip.wgsl"),
                 ])),
             })
         })
-    };
+}
+
+fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pipelines {
+    let advanced_brush = advanced_brush_shader(device);
     let material_shader = dry_material::shader(device, dry_material::Target::Exact);
     let dry_material = dry_material::Pipelines::new(device, &layouts, &material_shader, dry_material::Target::Exact);
     let dry_display = dry_material::Pipelines::new(device, &layouts,

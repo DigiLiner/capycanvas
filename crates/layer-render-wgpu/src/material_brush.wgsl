@@ -625,6 +625,33 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
         );
     }
 
+    if MATERIAL_OPERATION == OP_DEPOSIT && contact_feature(64u,style.contact_a.z>0.5)
+        && contact_feature(8192u,style.material_a.w>0.5) {
+        let range = material_sources.header.zw;
+        let field = contact_field(world);
+        var dose = 0.0;
+        for (var offset = 0u; offset < range.y; offset += 1u) {
+            let dab = dabs[range.x+offset];
+            dose += brush_footprint(dab,world,field)*dab.flow*dab.color.a;
+        }
+        let remaining = exp(-6.0*dose);
+        var paint = dry_original(vec2<i32>(floor(fragment_position.xy)));
+        if style.operation.w != 0u { paint *= remaining; }
+        else if dose>0.0 {
+            let alpha=1.0-remaining;
+            let pigment=style.material_b.xyz;
+            if paint.a==0.0 || all(paint.rgb==pigment*paint.a) {
+                let coverage=alpha+paint.a*(1.0-alpha);
+                paint=vec4<f32>(pigment*coverage,coverage);
+            } else {
+                let destination=deposit_paint(paint);
+                paint=stored_paint(vec4<f32>(destination.rgb*(1.0-alpha)+dabs[range.x].color.rgb*alpha,
+                    alpha+destination.a*(1.0-alpha)));
+            }
+        }
+        return MaterialOutput(paint,vec4<f32>(0.0),vec4<f32>(0.0));
+    }
+
     var result = dry_original(vec2<i32>(floor(fragment_position.xy)));
     let state_coordinate = clamp(
         vec2<i32>(floor(fragment_position.xy)),
@@ -644,14 +671,9 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
         var ceiling = 1.0;
         if contact_feature(1u, style.contact_a.x > 0.5) && range.y > 0u {
             ceiling = dabs[range.x].invariants.z;
-            var density = 1.0;
-            if contact_feature(64u, style.contact_a.z > 0.0 || style.contact_c.z > 0.0) {
-                let bias = clamp(style.contact_a.z + style.contact_c.z, 0.0, 0.95);
-                density = mix(1.0, 1.6, bias);
-            }
-            var response = density;
-            if contact_feature(2u, style.contact_a.y > 0.0) {
-                let penetration = clamp(dabs[range.x].invariants.w * style.contact_c.x * density, 0.0, 1.0);
+            var response = 1.0;
+            if contact_feature(2u, style.contact_a.y > 0.0) && !contact_feature(64u,style.contact_a.z>0.5) {
+                let penetration = clamp(dabs[range.x].invariants.w * style.contact_c.x, 0.0, 1.0);
                 let threshold = 0.62 - penetration * 0.3;
                 let paper = smoothstep(threshold - 0.08, threshold + 0.08, tooth);
                 response *= mix(1.0, paper, style.contact_a.y);
@@ -691,16 +713,8 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
             coverage = contact_coverage_field(dab, world, field);
         }
         if coverage <= 0.0 { continue; }
-        var requested_alpha = clamp(
-            (dab.flow * dab.color.a) * coverage,
-            0.0,
-            1.0,
-        );
-        if contact_feature(1u, style.contact_a.x > 0.5) && !contact_uniform() {
-            let selected = brush_selection_at(world);
-            let unselected_coverage = coverage / max(selected, 0.000001);
-            requested_alpha = (1.0 - exp(-unselected_coverage * dab.flow * dab.color.a * 6.0)) * selected;
-        }
+        let selected = brush_selection_at(world);
+        let requested_alpha = brush_alpha(dab,coverage/max(selected,0.000001))*selected;
         if telescoped {
             stroke_coverage = max(stroke_coverage, requested_alpha);
             continue;
@@ -787,7 +801,7 @@ fn material_result(fragment_position: vec4<f32>) -> MaterialOutput {
         }
     }
     var result = paint_fragment(fragment_position);
-    if style.color.a > 0.5 {
+    if style.color.a > 0.5 && !contact_feature(8192u,false) {
         let world = render_target.origin_extent.xy + fragment_position.xy;
         var original: vec4<f32>;
         if MATERIAL_OPERATION == OP_DEPOSIT || MATERIAL_OPERATION == OP_COVERAGE || MATERIAL_OPERATION == OP_CLONE {
@@ -848,27 +862,32 @@ fn dry_block_result(id: vec2<u32>) -> MaterialOutput {
     return material_result(vec4<f32>(vec2<f32>(id * block) + 0.5 * f32(block), 0.0, 1.0));
 }
 
+fn cropped_color() -> bool {
+    return MATERIAL_OPERATION==OP_DEPOSIT && contact_feature(64u,style.contact_a.z>0.5) && !contact_uniform();
+}
+
 @compute @workgroup_size(32, 2)
-fn compute_display_color(@builtin(global_invocation_id) id: vec3<u32>) {
-    if any(id.xy >= textureDimensions(material_color_output)) { return; }
+fn copy_color(@builtin(global_invocation_id) id:vec3<u32>) {
+    if any(id.xy>=textureDimensions(material_color_output)) {return;}
+    let block=style.operation.z;
+    let bounds=material_sources.pages[0];
+    if all(id.xy>=bounds.xy/block) && all(id.xy*block<bounds.zw) {return;}
+    store_display_color(id.xy,dry_original(vec2<i32>(id.xy*block)));
+}
+
+@compute @workgroup_size(32, 2)
+fn compute_display_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let block=style.operation.z;
+    let cropped=cropped_color();
+    let bounds=material_sources.pages[0];
+    let id=vec3<u32>(invocation.xy+select(vec2<u32>(0u),bounds.xy/block,cropped),invocation.z);
+    if any(id.xy >= textureDimensions(material_color_output)) || (cropped && any(id.xy*block>=bounds.zw)) { return; }
     let result = dry_block_result(id.xy);
     store_display_color(id.xy,result.color);
 }
 
-fn dry_block_pixel(id: vec2<u32>, offset: vec2<u32>, result: MaterialOutput) -> MaterialOutput {
-    let block = style.operation.z;
-    let p = id * block + offset;
-    let bounds = material_sources.pages[0];
-    let centre = id * block + block / 2u;
-    if block == 1u || (all(p >= bounds.xy) && all(p < bounds.zw) && all(centre >= bounds.xy) && all(centre < bounds.zw)) {
-        return result;
-    }
-    return MaterialOutput(dry_original(vec2<i32>(p)),
-        vec4<f32>(textureLoad(stroke_coverage_texture, vec2<i32>(p), 0).r, 0.0, 0.0, 1.0), vec4<f32>(0.0));
-}
-
 fn saturated_dry_coverage(p: vec2<i32>) -> f32 {
-    if MATERIAL_IN_PLACE && style.operation.z == 1u && style.canvas_opacity.w < 0.5
+    if MATERIAL_IN_PLACE && style.canvas_opacity.w < 0.5
         && contact_uniform() && brush_normal() && !bristles_enabled() {
         return dry_coverage(p);
     }
@@ -876,41 +895,34 @@ fn saturated_dry_coverage(p: vec2<i32>) -> f32 {
 }
 
 @compute @workgroup_size(32, 2)
-fn compute_color(@builtin(global_invocation_id) id: vec3<u32>) {
-    let block = style.operation.z;
-    if any(id.xy * block >= vec2<u32>(256u)) { return; }
-    if saturated_dry_coverage(vec2<i32>(id.xy)) >= 1.0 { return; }
-    let result = dry_block_result(id.xy);
-    for (var y = 0u; y < block; y += 1u) {
-        for (var x = 0u; x < block; x += 1u) {
-            let pixel = dry_block_pixel(id.xy, vec2<u32>(x, y), result);
-            let p = vec2<i32>(id.xy * block + vec2<u32>(x, y));
-            if !MATERIAL_IN_PLACE || any(pixel.color != dry_original(p)) {
-                textureStore(material_color_output, p, pixel.color);
-                mark_changed_cell(vec2<u32>(p));
-            }
-        }
+fn compute_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let cropped=cropped_color();
+    let bounds=material_sources.pages[0];
+    let id=invocation.xy+select(vec2<u32>(0u),bounds.xy,cropped);
+    if any(id>=vec2<u32>(256u)) || (cropped && any(id>=bounds.zw)) {return;}
+    let p=vec2<i32>(id);
+    if saturated_dry_coverage(p)>=1.0 {return;}
+    let result=material_result(vec4<f32>(vec2<f32>(id)+0.5,0.0,1.0));
+    if !MATERIAL_IN_PLACE || any(result.color!=dry_original(p)) {
+        textureStore(material_color_output,p,result.color);
+        mark_changed_cell(id);
     }
 }
+
 @compute @workgroup_size(32, 2)
-fn compute_coverage(@builtin(global_invocation_id) id: vec3<u32>) {
-    let block = style.operation.z;
-    if any(id.xy * block >= vec2<u32>(256u)) { return; }
-    let coverage = saturated_dry_coverage(vec2<i32>(id.xy));
-    if coverage >= 1.0 {
-        textureStore(material_coverage_output, vec2<i32>(id.xy), vec4<f32>(coverage, 0.0, 0.0, 1.0));
+fn compute_coverage(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let id=invocation.xy;
+    if any(id>=vec2<u32>(256u)) {return;}
+    let p=vec2<i32>(id);
+    let coverage=saturated_dry_coverage(p);
+    if coverage>=1.0 {
+        textureStore(material_coverage_output,p,vec4<f32>(coverage,0.0,0.0,1.0));
         return;
     }
-    let result = dry_block_result(id.xy);
-    for (var y = 0u; y < block; y += 1u) {
-        for (var x = 0u; x < block; x += 1u) {
-            let pixel = dry_block_pixel(id.xy, vec2<u32>(x, y), result);
-            let p = vec2<i32>(id.xy * block + vec2<u32>(x, y));
-            if !MATERIAL_IN_PLACE || any(pixel.color != dry_original(p)) {
-                textureStore(material_color_output, p, pixel.color);
-                mark_changed_cell(vec2<u32>(p));
-            }
-            textureStore(material_coverage_output, p, pixel.coverage);
-        }
+    let result=material_result(vec4<f32>(vec2<f32>(id)+0.5,0.0,1.0));
+    if !MATERIAL_IN_PLACE || any(result.color!=dry_original(p)) {
+        textureStore(material_color_output,p,result.color);
+        mark_changed_cell(id);
     }
+    textureStore(material_coverage_output,p,result.coverage);
 }

@@ -86,6 +86,7 @@ fn native_alpha_reuse_preserves_noops_and_forced_authored_changes() {
 #[test]
 fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
     let extent=[517,259];
+    for preset in [DefaultBrushPreset::GPen,DefaultBrushPreset::Pencil,DefaultBrushPreset::PastelBlock,DefaultBrushPreset::Crayon] {
     for name in ["brightness_to_opacity","threshold"] {for blend in layer_core::BlendSpace::ALL {
         let mut doc=document_at(extent);
         composition_mut(&mut doc).blend=blend;
@@ -94,12 +95,21 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
         attach_filter(&mut doc,name);
         let mut frame=packet(doc.scene(),extent);
         frame.composite_all=false;frame.blend_space=blend;
-        frame.view.document_to_surface=[0.25,0.,0.,0.25,0.,0.];
+        let scale=if preset==DefaultBrushPreset::GPen {0.25}else{1.};
+        frame.view.document_to_surface=[scale,0.,0.,scale,0.,0.];
         let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         r.submit(frame).unwrap();
         let mut dab=crate::tests::test_dab([125.5,126.5],[0.031,0.13,0.29,0.63],0.8);
         dab.radii=[13.25,11.75];
-        let mut persistent=dab_batch(target,crate::layer_tests::preset_style(DefaultBrushPreset::GPen),dab.bounds());
+        let style=crate::layer_tests::preset_style(preset);
+        if let Some(dry)=style.contact.and_then(|c|c.dry) {
+            let relief=dry.pose(0.5).relief;
+            dab.previous=[dab.radii[0],dab.radii[1],1.,0.];
+            dab.motion=[4.,1.];
+            dab.contact=[0.7,relief[0],relief[1],relief[2]];
+            dab.previous_contact=dab.contact;
+        }
+        let mut persistent=dab_batch(target,style,dab.bounds());
         persistent.style.blend_space=blend;persistent.stroke_end=false;
         r.submit(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&persistent),..frame}).unwrap();
         dab.center=layer_core::Point {x:129.5,y:127.5};
@@ -107,10 +117,12 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
         r.submit(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&preview),..frame}).unwrap();
         r.wait_idle().unwrap();
         assert!(r.compact_preview_contribution(&preview),"{name} {blend:?} must exercise actual contribution execution");
-        let coverage=||r.paint_layers.iter().find(|p|p.id==target).unwrap().coverage_pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active();
+        if preset!=DefaultBrushPreset::GPen {assert_eq!(r.preview_level,0);assert!(!r.preview_requires_base);}
+        let coverage=||r.paint_layers.iter().find(|p|p.id==target).unwrap().coverage_pages.iter().find(|p|p.coordinate==[0,0]).map(|p|p.active());
+        let input=||coverage().unwrap_or_else(||r.paint_layers.iter().find(|p|p.id==target).unwrap().pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active());
         let key=( [r.dab_buffer.clone(),r.dry_records.binding().buffer.clone()],
-            std::array::from_fn(|i|if i==9 {coverage().view.clone()}else {r.empty_view.clone()}) );
-        coverage().material_input.get(key,||panic!("{name} {blend:?}: actual contribution must bind empty paint and committed coverage"));
+            std::array::from_fn(|i|if i==9 {coverage().map_or(&r.empty_scalar_view,|p|&p.view).clone()}else {r.empty_view.clone()}) );
+        input().material_input.get(key,||panic!("{preset:?} {name} {blend:?}: actual contribution must bind empty paint"));
         let actual=crate::layer_tests::page_bytes(&r,&r.preview_page([0,0]).unwrap().active().texture);
         let reference=create_page_surface(&r.device,&r.texture_layout,&r.sampler,[PAGE_SIZE>>r.preview_level;2],r.device.working_format(),"bound paint contribution oracle");
         let output=r.pipelines.dry_display.output(&r,&reference,None,target,[0,0]);
@@ -118,10 +130,10 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
         r.preview_contribution=false;
         let source=r.material_source_binding(0,&preview,std::slice::from_ref(&dab),[0,0],false,&mut encoder).unwrap();
         r.preview_contribution=true;
-        r.encode_dry_material_jobs(&mut encoder,0,&preview,&[(output,source,[0,0],false,0,false)]);
+        r.encode_dry_material_jobs(&mut encoder,0,&preview,&[(output,source,[0,0],false,0,false,PixelRect::full([PAGE_SIZE;2]))]);
         r.uploads.finish(&encoder);encoder.submit(&r.queue);r.wait_idle().unwrap();
         assert_eq!(actual,crate::layer_tests::page_bytes(&r,&reference.texture),"{name} {blend:?}: omitted original must preserve every prediction bit");
-        for (level,contribution,preset) in [(1,false,DefaultBrushPreset::GPen),(0,true,DefaultBrushPreset::GPen),(1,true,DefaultBrushPreset::CloneStamp)] {
+        if preset==DefaultBrushPreset::GPen {for (level,contribution,preset) in [(1,false,DefaultBrushPreset::GPen),(0,true,DefaultBrushPreset::GPen),(1,true,DefaultBrushPreset::CloneStamp)] {
             r.preview_level=level;r.preview_contribution=contribution;
             let mut fallback=preview.clone();fallback.style=crate::layer_tests::preset_style(preset);fallback.style.blend_space=blend;
             assert!(!r.compact_preview_contribution(&fallback));
@@ -133,8 +145,8 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
             let key=([r.dab_buffer.clone(),r.dry_records.binding().buffer.clone()],std::array::from_fn(|i|match i {4=>color.view.clone(),9=>coverage.view.clone(),_=>r.empty_view.clone()}));
             coverage.material_input.get(key,||panic!("{name} {blend:?}: fallback {level} {contribution} {preset:?} must retain paint and coverage"));
             r.uploads.finish(&encoder);encoder.submit(&r.queue);r.wait_idle().unwrap();
-        }
-    }}
+        }}
+    }}}
 }
 
 #[test]
@@ -694,6 +706,7 @@ fn native_alpha_reuse_zero_dab_terminal_edges_force_every_earlier_stroke_page() 
 
 #[test]
 fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
+    for preset in [DefaultBrushPreset::GPen,DefaultBrushPreset::Pencil,DefaultBrushPreset::PastelBlock] {
     for name in ["brightness_to_opacity","threshold"] {for blend in [layer_core::BlendSpace::Perceptual,layer_core::BlendSpace::Linear] {for level in [2,3] {
         let extent=[1029,517];let mut doc=document_at(extent);composition_mut(&mut doc).blend=blend;
         let target=source_at(&doc,0);attach_filter(&mut doc,name);
@@ -704,13 +717,20 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
         let mut reference=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         for backend in [&mut r,&mut reference] {backend.submit(frame).unwrap();}
         let mut dab=crate::tests::test_dab([125.5,127.5],[0.,0.,0.,1.],0.8);dab.radii=[24.,21.];
-        let mut style=crate::layer_tests::preset_style(DefaultBrushPreset::GPen);style.blend_space=blend;
+        let mut style=crate::layer_tests::preset_style(preset);style.blend_space=blend;
+        if let Some(dry)=style.contact.and_then(|c|c.dry) {
+            let relief=dry.pose(0.5).relief;
+            dab.previous=[dab.radii[0],dab.radii[1],1.,0.];dab.motion=[4.,1.];
+            dab.contact=[0.7,relief[0],relief[1],relief[2]];dab.previous_contact=dab.contact;
+        }
         let mut batch=dab_batch(target,style,dab.bounds());
         for backend in [&mut r,&mut reference] {backend.submit(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),..frame}).unwrap();}
         batch.kind=DabBatchKind::Preview;batch.stroke_start=false;
         let mut previous=None;
-        for (step,position) in [[133.5,127.5],[133.5,127.5],[143.5,133.5],[1023.5,513.5],[143.5,133.5]].into_iter().enumerate() {
-            dab.center=layer_core::Point {x:position[0],y:position[1]};batch.damage=dab.bounds();
+        for (step,position) in [[133.5,127.5],[133.5,127.5],[143.5,133.5],[143.5,133.5],[1023.5,513.5],[143.5,133.5]].into_iter().enumerate() {
+            dab.center=layer_core::Point {x:position[0],y:position[1]};
+            if step==3 {dab.radii=[12.,10.];dab.previous[..2].copy_from_slice(&dab.radii);}
+            batch.damage=dab.bounds();
             if step==1 {
                 let old=r.preview_page([0,0]).unwrap().primary.view.clone();
                 let stamp=r.preview_page([0,0]).unwrap().primary.preview.get();let contacts=r.preview_contact_tiles.clone();
@@ -727,13 +747,13 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
             assert_eq!(page.primary.preview.get(),Some((target,coordinate)));
             let cells=r.changed_cells.as_ref().unwrap();
             let flags=cells.buffer(target,coordinate).unwrap();
-            let tracked=step==1 || step==2;
+            let tracked=step==1 || step==2 || step==3;
             let expected=tracked.then(||flags.clone());
             page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,false,expected),||panic!("{name} {blend:?} level{level} step{step}: actual kernel/output binding must have expected tracking"));
             let data=pollster::block_on(crate::local_tone::read_buffer_async(&r.device,&r.queue,flags)).unwrap();
             let dirty=data[16..].chunks_exact(4).filter(|v|u32::from_le_bytes((*v).try_into().unwrap())!=0).count();
             if step==1 {assert_eq!(dirty,0,"identical retained prediction must leave every cell clear");assert_eq!(Some(page.primary.view.clone()),previous);}
-            if step==2 {assert!(dirty>0,"changed retained prediction must mark actual cells");}
+            if step==2 || step==3 {assert!(dirty>0,"changed retained prediction must mark actual cells");}
             if !tracked {assert!(cells.reusable(target,coordinate).is_none(),"cold/rebound output must force full native effect work");}
             let oracle=reference.preview_page(coordinate).unwrap();
             assert_eq!(crate::layer_tests::page_bytes(&r,&page.primary.texture),crate::layer_tests::page_bytes(&reference,&oracle.primary.texture));
@@ -743,7 +763,7 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
         r.submit(frame).unwrap();reference.submit(FramePacket {composite_all:true,..frame}).unwrap();
         assert!(r.preview_pages.is_empty());
         assert_pixels_equal(&display_pixels(&r),&display_pixels(&reference),r.scale_display.as_ref().unwrap().plan.size[0],(name,blend,level,"removed"));
-    }}}
+    }}}}
 }
 
 #[test]
@@ -780,4 +800,57 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
         let bytes=crate::layer_tests::page_bytes(&r,&texture);
         assert_eq!(&bytes[..16],new.into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>(),"tracked store must preserve exact RGBA32F");
     }
+}
+
+#[test]
+fn source_only_dry_updates_reach_the_next_prediction_and_display() {
+    let extent=[517,259];
+    for preset in [DefaultBrushPreset::Pencil,DefaultBrushPreset::PointyPencil,DefaultBrushPreset::ShadingPencil,DefaultBrushPreset::Charcoal,DefaultBrushPreset::Chalk,DefaultBrushPreset::PastelBlock,DefaultBrushPreset::Crayon] {for mode in [DabMode::Paint,DabMode::Erase] {for readonly in [false,true] {
+        let mut doc=document_at(extent);composition_mut(&mut doc).blend=layer_core::BlendSpace::Perceptual;
+        let target=source_at(&doc,0);
+        let mut view=crate::test_support::view(extent);view.document_to_surface=[0.25,0.,0.,0.25,0.,0.];
+        let frame=FramePacket {view,blend_space:layer_core::BlendSpace::Perceptual,composite_all:false,..packet(doc.scene(),extent)};
+        let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        let mut reference=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        if readonly {r.pipelines.dry_in_place=None;r.pipelines.dry_tracked=None;reference.pipelines.dry_in_place=None;reference.pipelines.dry_tracked=None;}
+        for backend in [&mut r,&mut reference] {backend.submit(frame).unwrap();}
+        let mut style=crate::layer_tests::preset_style(preset);style.mode=mode;style.blend_space=frame.blend_space;
+        let dry=style.contact.unwrap().dry.unwrap();let relief=dry.pose(0.85).relief;
+        let mut dab=crate::tests::test_dab([125.5,127.5],[0.031,0.13,0.29,0.63],0.8);
+        dab.radii=[32.,21.];dab.previous=[32.,21.,1.,0.];dab.motion=[4.,1.];
+        dab.contact=[0.7,relief[0],relief[1],relief[2]];dab.previous_contact=dab.contact;
+        let mut batch=dab_batch(target,style,dab.bounds());batch.stroke_end=false;
+        for backend in [&mut r,&mut reference] {backend.submit(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),..frame}).unwrap();}
+        batch.kind=DabBatchKind::Preview;batch.stroke_start=false;
+        for (step,position) in [[133.5,127.5],[133.5,127.5],[143.5,133.5],[143.5,133.5],[256.5,131.5],[143.5,133.5]].into_iter().enumerate() {
+            dab.center=layer_core::Point {x:position[0],y:position[1]};
+            if step==2 {dab.radii=[12.,10.];dab.previous[..2].copy_from_slice(&dab.radii);}
+            if step==3 {dab.radii=[40.,28.];dab.previous[..2].copy_from_slice(&dab.radii);dab.contact[0]=0.35;dab.previous_contact=dab.contact;}
+            batch.damage=dab.bounds();
+            if step==2 {
+                let mut committed=dab;committed.center=layer_core::Point {x:210.5,y:60.5};
+                let mut persistent=batch.clone();persistent.kind=DabBatchKind::Persistent;persistent.damage=committed.bounds();
+                for backend in [&mut r,&mut reference] {backend.submit(FramePacket {dabs:std::slice::from_ref(&committed),dab_batches:std::slice::from_ref(&persistent),commit_rasters:false,..frame}).unwrap();}
+            }
+            if step==3 {
+                let mut committed=dab;committed.center=layer_core::Point {x:211.5,y:61.5};
+                let mut persistent=batch.clone();persistent.kind=DabBatchKind::Persistent;persistent.first_dab=0;persistent.damage=committed.bounds();
+                let mut prediction=batch.clone();prediction.first_dab=1;
+                for (backend,cold) in [(&mut r,false),(&mut reference,true)] {
+                    backend.submit(FramePacket {dabs:&[committed,dab],dab_batches:&[persistent.clone(),prediction.clone()],composite_all:cold,..frame}).unwrap();
+                }
+            } else {
+                let current=FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),..frame};
+                r.submit(current).unwrap();reference.submit(FramePacket {composite_all:true,..current}).unwrap();
+            }
+            r.wait_idle().unwrap();reference.wait_idle().unwrap();
+            assert_eq!(r.preview_level,0,"must exercise full-native prediction");assert!(!r.preview_contribution);
+            for page in &r.preview_pages {
+                if !r.preview_contact_tiles.as_ref().unwrap().contains(&page.coordinate) {continue;}
+                let oracle=reference.preview_page(page.coordinate).unwrap();
+                assert_eq!(crate::layer_tests::page_bytes(&r,&page.primary.texture),crate::layer_tests::page_bytes(&reference,&oracle.primary.texture),"{preset:?} {mode:?} readonly={readonly} step{step} page{:?}",page.coordinate);
+            }
+            assert_pixels_equal(&display_pixels(&r),&display_pixels(&reference),r.scale_display.as_ref().unwrap().plan.size[0],(preset,mode,readonly,step));
+        }
+    }}}
 }

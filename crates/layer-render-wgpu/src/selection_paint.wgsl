@@ -41,14 +41,18 @@ fn paint(@builtin(global_invocation_id) id: vec3<u32>) {
         let index = id.y*256u+id.x*4u+sample;
         let base = before_at(p);
         var value = footprint[index];
-        let flowing = params.mode == 2u && params.uniform_stroke == 0u;
+        let dry_flow = contact_feature(64u,style.contact_a.z>0.5) && !contact_uniform();
+        let flowing = params.mode == 2u && params.uniform_stroke == 0u && !dry_flow;
         if params.fresh != 0u { value = select(0.,base,flowing); }
         let field = contact_field(p);
         for(var i=0u;i<params.count;i++) {
             let d = contacts.values[i];
             let coverage = brush_footprint(d,p,field);
-            let alpha = clamp(coverage*d.flow*d.color.a,0.,1.);
+            let alpha = brush_alpha(d,coverage);
             if flowing { value = mix(value,params.gray,alpha*params.opacity); }
+            else if dry_flow {
+                value += (1.-value)*alpha;
+            }
             else { value = max(value,alpha); }
         }
         var gray = params.gray;

@@ -23,8 +23,8 @@ contacts near the boundary, rather than a radial opacity fade.
 - **One analytic relief field per pose.** Predefined shapes and constrained
   profiles supply efficient evaluation and integrals. There is no arbitrary
   author code, separately authored support mask or pressure distribution map.
-- **Three poses.** Upright, writing and side shading have authored tilt angles,
-  dimensions, supported shape parameters and relief profiles.
+- **Three poses.** Fixed upright, writing and side keys have authored dimensions
+  and relief profiles within one brush-wide supported shape family.
 - **Three shared material controls.** Paper strength `S`, contact softness `W`
   and loading pressure response `Lambda` apply across all poses.
 - **Existing pigment and dynamics controls.** Brush size, pressure response,
@@ -110,27 +110,28 @@ policy. Neither zoom nor canvas rotation changes the material's tilt magnitude.
 
 ### Analytic relief
 
-An ellipse supplies a simple supported family:
+The implemented family uses an ellipse or a beveled block:
 
 ```text
-q = u*u + v*v
+ellipse: q = u*u + v*v
+block: edge = max(abs((u,v)) - face, 0) / rim
+       q = (edge.x + edge.y)^2
 support: q <= 1
 
-R(u,v) = (c2*q + c4*q*q) * (1 + b_skew*u)
+R(u,v) = r0 + c2*q + c4*q*q
 ```
 
-Use `c2 >= 0`, `c4 >= 0` and `abs(b_skew) <= 1`. The ellipse has `abs(u) <= 1`,
-so these constraints keep `R` nonnegative. `c2` gives a rounded rise away from
-the center; `c4` gives a flatter center with a steeper rim. `b_skew` provides
-directional asymmetry. This example has zero recess at its center. Other
-predefined profiles can supply their own field levels and support.
+Use nonnegative `r0`, `c2` and `c4`. `r0` sets the central recess, `c2` gives a
+rounded rise, and `c4` gives a flatter center with a steeper rim. These are field
+values, without a separate relief-depth multiplier. The block's flat face has
+constant recess; its bevel approximates a small rounded corner. The corner width
+is brush-wide and scales with the smaller semiaxis. Three fixed tilt keys at 0°,
+45° and 76.5° interpolate dimensions and coefficients; the pose editor is deferred.
+Directional skew, offsets and changes between different shape families are also
+deferred. Tilt azimuth and anisotropic dimensions provide the current alignment.
 
-These bounds ensure nonnegative recess, not an outward-monotone profile. Strong
-skew can lower recess again near one rim; profile limits must preserve the
-intended contact and taper.
-
-The constrained relief widget produces these coefficients from its preset and
-curve controls. They are the field definition itself. There is no additional
+A future constrained relief widget can produce these coefficients from presets
+and curve controls; built-in definitions currently provide them directly. They are the field definition itself. There is no additional
 `relief_strength * R` multiplier. The polynomial family is fixed in code; a
 freehand curve or expression does not become arbitrary executable shader math.
 
@@ -140,15 +141,17 @@ Circle and ellipse share one family naturally. Rectangle and rounded-block
 families need their own predefined support, profile and morph/integral rules.
 The ellipse equation does not promise that all other shapes use the same `q`.
 
-| Pose-editor control | What it defines |
+| Authoring quantity | Current definition |
 | --- | --- |
-| Tilt angle | Position of the upright, writing or side key. |
-| Supported contact shape | A predefined analytic family and its allowed morphs. |
-| Width and length | Positive dimensions relative to nominal brush size. |
-| Shape-specific geometry | Parameters such as corner rounding where supported. |
-| Relief profile | A constrained preset/curve producing field values and curvature. |
-| Profile asymmetry | Directional recess where the family supports it. |
-| Orientation and contact offset | Alignment and normalized position relative to the pen. |
+| Tilt key | Engine-fixed 0°, 45° and 76.5°. |
+| Contact shape | Brush-wide ellipse or beveled block. |
+| Width and length | Positive relative dimensions in each pose. |
+| Corner width | Brush-wide block rim fraction. |
+| Relief profile | Nonnegative `r0`, `c2`, `c4` in each pose. |
+| Alignment | Transformed stylus azimuth; no additional per-pose offset. |
+
+The pose editor is deferred. Key editing, directional skew and morphing across
+different shape families require their own authoring and integral decisions.
 
 `S`, `W` and `Lambda` are shared brush controls, not additional controls on these
 pose keys. Exact widget layout and shape-specific curve handles are not fixed by
@@ -282,21 +285,31 @@ one field that controls contact onset, cross-sectional taper and paper selection
 Geometry accounts for the long side of a pencil or the face of a pastel stick.
 
 **Choice and constants.** Translation, rotation and division by resolved radii
-put each shape in normalized local coordinates. For the example ellipse, `q=1`
-is its boundary. This is a coordinate convention. The `q` and `q*q` basis gives
-limited but useful curvature with polynomial evaluation. It avoids an arbitrary
-exponent while permitting a rounded rise or a flatter center. The skew bound
-`abs(b_skew)<=1` prevents the multiplicative asymmetry from making recess
-negative. No universal numerical values for `c2` and `c4` are prescribed.
+put each shape in normalized coordinates, with `q=1` at its boundary. The
+`r0 + c2*q + c4*q*q` basis provides onset and curvature without arbitrary
+exponents. A central recess is useful for a lifted shading face; it is part of
+the authored field rather than an additional strength parameter. Nonnegative
+coefficients keep recess monotone in `q` and permit its inverse through one
+quadratic root. No universal coefficient values are prescribed.
 
-Along a straight fixed-pose sweep, ellipse `q` is quadratic in the sweep
-coordinate. Without skew, the example relief is at most quartic; skew raises it
-by at most one degree. That bounds polynomial work, but boundary clipping and
-root finding still matter. Each admitted shape/profile family and parameter range
-needs its own efficient integral and supported bounds before it joins the
-authoring catalog.
+Along a fixed-pose straight sweep, `q` is quadratic within each admitted piece.
+Relief is at most quartic, and cubic contact is at most degree twelve. This bounds
+integration and clipping work. A stick uses the square of the sum of normalized
+excursions beyond its flat face. Its support is an octagon; four slab intersections
+provide the chord without circular corner roots. Only the small corners differ
+from a rounded rectangle. The flat face, outer dimensions and monotone rim retain
+the useful stick controls.
 
-**Alternatives.** A separately authored mask duplicates shape support. A separate
+**Alternatives.** Circular corner arcs were considered for sticks; they require
+quadratic boundary intersections without adding a necessary media control.
+Superellipse exponents introduce higher-degree pieces or numerical roots. A
+multiplicative directional skew `(c2*q+c4*q*q)*(1+b_skew*u)` keeps recess
+nonnegative when `abs(b_skew)<=1`, but can lose outward monotonicity and raises
+relief to degree five. Inverting that field for engagement needs more complex
+roots; it is deferred while elongated tilt poses provide the required shading
+behavior.
+
+A separately authored mask duplicates shape support. A separate
 pressure map supplies independent local transfer but adds a second field and
 can restore a spatial opacity gradient; the intended dry-media marks do not
 require it. An additional relief-strength multiplier duplicates the vertical
@@ -489,10 +502,25 @@ the field but increases work with path length. An exact integral through an
 arbitrarily moving/deforming shape is outside the fixed analytic-family
 contract. Resolve poses and bound changes with shared stroke segmentation.
 
+**Pixel footprint.** Point sampling aliases fine pencil contacts as they move
+between pixel rows. Filtering geometric exposure alone and then applying an
+exponential can overfill a partially covered pixel, because optical transfer is
+nonlinear. The fine-contact path averages optical alpha over the pixel footprint
+and converts it back to equivalent dose. A moving ellipse uses the pixel
+square's normal projection; a stationary tap uses two dimensions. Dense stamp
+subdivision is rejected because its cost grows with distance and can change dose
+with partitioning. Filtering is fully enabled below four pixels in minor radius,
+blends out by eight pixels, and is specialized away for large contacts. These are
+fixed approximation thresholds, not new brush controls.
+
 **Research basis.** The [existing contact engine](../../internals/contact-brush-engine.md)
 provides normalized swept exposure. The drawing-material papers motivate local
 deposition, not this particular chord normalization. Segment additivity is a
-mathematical requirement of the chosen integral, not an empirical claim.
+mathematical requirement of the chosen integral, not an empirical claim. The
+clipped seven-node Gauss–Legendre identity integrates the degree-twelve contact
+polynomial exactly; the [NIST quadrature reference](https://dlmf.nist.gov/3.5#v)
+gives its degree-thirteen exactness bound. The pixel-footprint approximation
+follows area coverage and optical averaging rather than a new physical law.
 
 ### 10. Dose and opacity: `alpha = 1-exp(-D)`
 
@@ -541,12 +569,12 @@ These are design goals, not empirical results or claims of a complete material
 simulation. Hard-pencil paper flattening, tip wear, powder transport and wax
 redistribution need history/state beyond a static paper field.
 
-The contract fixes the equations and ownership of controls. Material defaults
-for `S`, `W`, `Lambda`, pressure response and relief coefficients still need
-calibration. Supported shape/morph integrals, curve widget details and bounds
-must be implemented within this contract. Linear versus cubic contact remains
-open for the later benchmark; no change of editor interface is required to
-compare them. Bitmap relief and arbitrary contact math remain outside scope.
+The contract fixes the equations and ownership of controls. Built-in recipes
+author `S`, `W`, `Lambda`, pressure response and relief coefficients in the
+shared [preset definitions](../../../crates/layer-core/src/contact_presets.rs).
+The pose editor and curve widget remain deferred. Linear versus cubic contact
+remains open for the later benchmark; no change of editor interface is required
+to compare them. Bitmap relief and arbitrary contact math remain outside scope.
 
 ## External references
 

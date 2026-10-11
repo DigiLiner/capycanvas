@@ -232,7 +232,7 @@ const DEFINITIONS: &[Definition] = &[
         label: MessageId::TOOL_SETTING_HARDNESS,
         group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
         numeric: NumericControl::percent,
-        field: |b| (b.tip == BrushTip::AnalyticEllipse).then_some(&mut b.hardness),
+        field: |b| (b.tip == BrushTip::AnalyticEllipse && !b.contact.is_some_and(|c|c.dry.is_some())).then_some(&mut b.hardness),
     },
     Definition {
         id: "spacing",

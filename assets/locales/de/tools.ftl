@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Realistische Pinseltinte
 brush-preset-calligraphy-pen = Kalligrafiefeder
 brush-preset-chalk = Kreide
 brush-preset-charcoal = Kohle
+brush-preset-crayon = Wachsmalstift
 brush-preset-clone-stamp = Klonstempel
 brush-preset-dry-scumble = Trockenes Schummern
 brush-preset-dual-texture = Doppelte Textur

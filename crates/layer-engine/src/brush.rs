@@ -369,10 +369,6 @@ impl DabGenerator {
         self.last.map(|point| point.point.position)
     }
 
-    pub(crate) fn modeled_distance(&self) -> f32 {
-        self.last.map_or(0., |point| point.stroke_distance)
-    }
-
     /// Add one preview-only contact centered exactly at the requested endpoint
     /// without advancing the committed generator or its random sequence.
     pub(crate) fn append_terminal_copy(&self, endpoint: Point, output: &mut Vec<Dab>) -> Rect {
@@ -575,17 +571,20 @@ impl DabGenerator {
             + point.point.twist * brush.shape.follow_twist;
         let mut radii = [diameter * 0.5, diameter * 0.5 / aspect];
         let mut contact_tilt = tilt;
+        let mut dry_relief = None;
         if let Some(contact) = brush.contact {
             if let Some(bristles) = contact.bristles {
                 (rotation, radii, contact_tilt) = self.fan_pose(
                     point.point, tilt, tilt_direction, diameter, bristles, brush.angle_radians,
                 );
-            } else {
-                let spread = contact.tilt_spread * tilt * tilt;
-                radii[0] *= 1.0 + spread;
-                radii[1] *= 1.0 + spread * 0.18;
-                if contact.tilt_spread > 0.0 && tilt > 0.001 {
-                    rotation = tilt_direction + brush.angle_radians;
+            } else if let Some(dry) = contact.dry {
+                contact_tilt = (point.point.tilt[0].hypot(point.point.tilt[1]) / std::f32::consts::FRAC_PI_2).clamp(0., 1.);
+                let pose = dry.pose(contact_tilt);
+                radii[0] *= pose.radii[0];
+                radii[1] *= pose.radii[1];
+                dry_relief = Some(pose.relief);
+                if contact_tilt > 0.02 {
+                    rotation += tilt_direction * (1.-brush.shape.follow_tilt);
                 }
             }
         }
@@ -628,12 +627,12 @@ impl DabGenerator {
                     values.deform_strength.clamp(0.0, 1.0),
                 ],
                 previous: [0.0; 4],
-                contact: [
+                contact: dry_relief.map_or([
                     point.point.pressure,
                     contact_tilt,
                     point.stroke_distance / brush.diameter.max(0.01),
                     (self.stroke_seed & 65535) as f32,
-                ],
+                ], |r| [point.point.pressure, r[0], r[1], r[2]]),
                 previous_contact: [0.0; 4],
             },
             spacing: (finite_or(values.spacing, brush.spacing)
@@ -935,29 +934,26 @@ pub(crate) fn lock_dab_tail(dabs: &mut [Dab], modeled_endpoint: Point, target: P
     }
 }
 
-/// Width-only taper along predicted arc length. Coordinates use nominal brush
-/// diameters, matching each dab's recorded path distance. Keep both ends of a
-/// swept contact consistent; opacity, sensors and brush dynamics are unchanged.
-pub(crate) fn taper_prediction(dabs: &mut [Dab], start: f32, end: f32) {
-    if end <= start {
-        return;
-    }
+pub(crate) fn taper_prediction(dabs: &mut [Dab], origin: Point) {
+    let Some(first) = dabs.first() else { return };
+    let length: f32 = dabs.iter().map(|d| d.motion[0].hypot(d.motion[1])).sum();
+    let first_length = first.motion[0].hypot(first.motion[1]);
+    let start = ((origin.x-first.center.x+first.motion[0])*first.motion[0]
+        +(origin.y-first.center.y+first.motion[1])*first.motion[1])
+        / first_length.max(0.000001);
+    let start = start.clamp(0., first_length);
+    if length <= start { return; }
     let scale = |distance: f32| {
-        let t = ((distance - start) / (end - start)).clamp(0., 1.);
+        let t = ((distance - start) / (length - start)).clamp(0., 1.);
         1. - 0.25 * t * t * (3. - 2. * t)
     };
-    let last = dabs.len().saturating_sub(1);
-    for (index, dab) in dabs.iter_mut().enumerate() {
-        // A terminal copy inherits the preceding contact's sensor metadata,
-        // but is centered on the forecast endpoint and gets the full taper.
-        let size = if index == last {
-            0.75
-        } else {
-            scale(dab.contact[2])
-        };
+    let mut distance = 0.;
+    for dab in dabs {
+        let previous_size = scale(distance);
+        distance += dab.motion[0].hypot(dab.motion[1]);
+        let size = scale(distance);
         dab.radii[0] *= size;
         dab.radii[1] *= size;
-        let previous_size = scale(dab.previous_contact[2]);
         dab.previous[0] *= previous_size;
         dab.previous[1] *= previous_size;
     }
@@ -1411,6 +1407,25 @@ mod tests {
         assert!(sharp < soft);
         assert_eq!(taper_factors(100., Some(100.), 10., &brush).0, 0.);
         assert_eq!(taper_factors(90., Some(100.), 10., &brush).0, 1.);
+    }
+
+    #[test]
+    fn prediction_width_uses_geometry_independently_of_material_payload() {
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        let mut generator = DabGenerator::default();
+        let mut dabs = Vec::new();
+        for i in 0..4 { generator.append(point(i as f32*20., 1., i*4000), &brush, &mut dabs); }
+        generator.finish(&brush, &mut dabs);
+        let mut alternate = dabs.clone();
+        for d in &mut alternate { d.contact[2] = 19.; d.previous_contact[2] = 37.; }
+        taper_prediction(&mut dabs, Point::default());
+        taper_prediction(&mut alternate, Point::default());
+        for (a, b) in dabs.iter().zip(&alternate) {
+            assert_eq!(a.radii, b.radii);
+            assert_eq!(a.previous, b.previous);
+        }
+        assert!(dabs.first().unwrap().radii[0] > dabs.last().unwrap().radii[0]);
+        for pair in dabs.windows(2) { assert_eq!(pair[0].radii, [pair[1].previous[0], pair[1].previous[1]]); }
     }
 
     #[test]

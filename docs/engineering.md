@@ -47,7 +47,7 @@ have replaceable preview state. Real input replaces them; predictions don't
 become committed paint or saved artwork.
 
 The [brush guide](internals/brushes.md) covers input, execution and replay. The
-[contact model](internals/contact-brush-engine.md#model) and
+[contact model](internals/contact-brush-engine.md#dry-media) and
 [painterly paint state](reference/painterly-paint-state.md) describe the two
 families in more detail.
 

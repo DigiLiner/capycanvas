@@ -1,24 +1,3 @@
-struct Style {
-    color: vec4<f32>,
-    canvas_opacity: vec4<f32>,
-    grain: vec4<f32>,
-    flags: vec4<f32>,
-    edges: vec4<f32>,
-    material_a: vec4<f32>,
-    material_b: vec4<f32>,
-    operation: vec4<u32>,
-    deformation: vec4<f32>,
-    render_mode: vec4<f32>,
-    transport_a: vec4<f32>,
-    transport_b: vec4<f32>,
-    contact_a: vec4<f32>,
-    contact_b: vec4<f32>,
-    contact_c: vec4<f32>,
-    bristles: vec4<f32>,
-    bristle_streak: vec4<f32>,
-    color_mode: vec4<f32>,
-}
-
 @group(0) @binding(0)
 var<uniform> style: Style;
 
@@ -71,6 +50,7 @@ struct VertexOutput {
     @location(10) @interpolate(flat) previous_contact: vec4<f32>,
     @location(11) @interpolate(flat) geometry: vec4<f32>,
     @location(12) @interpolate(flat) motion: vec2<f32>,
+    @location(13) @interpolate(flat) cached_material: vec4<f32>,
 }
 
 @vertex
@@ -112,6 +92,10 @@ fn vertex_main(input: VertexInput) -> VertexOutput {
     if style.contact_a.x > 0.5 {
         output.material = input.metric;
         output.texture_sign = input.invariants.xy;
+        if style.contact_a.z>0.5 {
+            output.flow_hardness.y=input.invariants.z;
+            output.min_radius=input.invariants.w;
+        }
     }
     output.center = input.center;
     output.previous = input.previous;
@@ -119,17 +103,27 @@ fn vertex_main(input: VertexInput) -> VertexOutput {
     output.previous_contact = input.previous_contact;
     output.geometry = vec4<f32>(input.radii, input.rotation);
     output.motion = input.motion;
+    output.cached_material = input.material;
     return output;
 }
 
-@fragment
-fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+fn advanced_color(input: VertexOutput, opacity: f32) -> vec4<f32> {
     if style.contact_a.x > 0.5 {
-        let coverage = evolving_contact_prepared(input.world, input.center, input.geometry.xy, input.geometry.zw,
-            input.motion, input.previous, input.contact, input.previous_contact, input.flow_hardness.y,
-            contact_field(input.world), input.material, input.texture_sign);
+        let field = contact_field(input.world);
+        var coverage = 0.0;
+        if style.contact_a.z>0.5 {
+            let dab=Dab(input.center,input.geometry.xy,input.geometry.zw,input.motion,input.color,
+                input.flow_hardness.x,1.0,vec2<f32>(1.0),input.cached_material,input.previous,
+                input.contact,input.previous_contact,input.material,
+                vec4<f32>(input.texture_sign,input.flow_hardness.y,input.min_radius));
+            coverage=relief_contact(dab,input.world,field.y);
+        } else {
+            coverage=evolving_contact_prepared(input.world,input.center,input.geometry.xy,input.geometry.zw,
+                input.motion,input.previous,input.contact,input.previous_contact,input.flow_hardness.y,
+                field,input.material,input.texture_sign);
+        }
         if coverage <= 0.0 { discard; }
-        let alpha = (1.0 - exp(-coverage * input.flow_hardness.x * input.color.a * 6.0))
+        let alpha = (1.0 - exp(-coverage * input.flow_hardness.x * input.color.a * 6.0 * opacity))
             * brush_selection_at(input.world);
         return advanced_layer_color(vec4<f32>(input.color.rgb * alpha, alpha));
     }
@@ -181,4 +175,14 @@ fn advanced_layer_color(value:vec4<f32>)->vec4<f32> {
     if style.color_mode.x==0. {return value;}
     if style.color_mode.z!=0. {return working_encode(layer_color(working_decode(value),WORKING_LUMA,style.color_mode.x,style.color_mode.y));}
     return layer_color(value,WORKING_LUMA,style.color_mode.x,style.color_mode.y);
+}
+
+@fragment
+fn coverage_fragment(input: VertexOutput) -> @location(0) vec4<f32> {
+    return advanced_color(input,style.canvas_opacity.z);
+}
+
+@fragment
+fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return advanced_color(input,1.0);
 }

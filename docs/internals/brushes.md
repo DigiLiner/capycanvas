@@ -6,10 +6,10 @@ A brush has two jobs: decide where and how to place marks along a stroke, then
 evaluate those marks against the canvas. Capy Canvas keeps placement in the shared
 CPU engine and pixel work in the GPU renderer. Every platform uses both parts.
 
-The pencil, charcoal and ink presets now share a swept GPU contact model with
-stationary paper, pressure thresholds, directional shading and coherent ink
-coverage. See [Contact brush engine](contact-brush-engine.md) for
-the implementation, preset catalog, review samples and measured costs. The
+Solid dry media use analytic relief and stationary paper to decide where pigment
+contacts the canvas. Ink and textured paint share swept placement with their own
+material response. See [Contact brush engine](contact-brush-engine.md) for the
+implementation and [design decisions](../history/brushes/dry-media-contact.md). The
 [Bristle Paintbrush](../development/bristle-paintbrush.md) sweeps a fan of hairs
 through the same contact path.
 

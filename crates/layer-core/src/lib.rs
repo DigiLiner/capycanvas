@@ -20,7 +20,7 @@ pub mod binary_payload;
 mod image_metadata;
 pub use image_metadata::{ImageResolution, PhotoMetadata, ResolutionUnit};
 mod contact;
-pub use contact::{BrushBristles, BrushContact};
+pub use contact::{BrushBristles, BrushContact, BrushDryMedia, BrushDryPose};
 mod contact_presets;
 pub use contact_presets::CONTACT_BRUSH_PRESETS;
 mod effect_catalog;
@@ -1079,7 +1079,8 @@ impl BrushSnapshot {
             .min(MAX_BRUSH_SCATTER_DIAMETERS)
             .hypot(scatter[1].min(MAX_BRUSH_SCATTER_DIAMETERS))
             * diameter;
-        let contact_extent = self.contact.map_or(1.0, |c| (1.0 + c.tilt_spread) * 1.5);
+        let contact_extent = self.contact.and_then(|c| c.dry).map_or(1.5, |m|
+            m.poses.iter().flat_map(|p| p.radii).fold(1_f32, f32::max) * 1.5);
         shape_radius * contact_extent + scatter_radius + 2.0
     }
 

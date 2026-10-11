@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Inchiostro realistico a pennello
 brush-preset-calligraphy-pen = Penna calligrafica
 brush-preset-chalk = Gesso
 brush-preset-charcoal = Carboncino
+brush-preset-crayon = Pastello a cera
 brush-preset-clone-stamp = Timbro clone
 brush-preset-dry-scumble = Sfregazzo asciutto
 brush-preset-dual-texture = Doppia trama

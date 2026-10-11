@@ -53,7 +53,7 @@ impl SelectionPainter {
                 &include_str!("brush_textures.wgsl").replace("@group(3)", "@group(1)"),
                 include_str!("analytic_coverage.wgsl"),
                 include_str!("brush_coverage.wgsl"),
-                include_str!("contact.wgsl"),
+                include_str!("contact.wgsl"), include_str!("relief.wgsl"),
                 include_str!("bristle.wgsl"),
                 include_str!("brush_footprint.wgsl"),
                 &shader_source("before", 6),
@@ -260,7 +260,8 @@ impl SelectionPainter {
                 )),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-        let data: Vec<DabGpu> = update.dabs.iter().copied().map(DabGpu::from).collect();
+        let mut data: Vec<DabGpu> = update.dabs.iter().copied().map(DabGpu::from).collect();
+        dry_material::prepare_geometry(&update.style, &mut data);
         // Uniform storage is portable down to 16 KiB. Pad with an existing
         // valid contact; the count excludes unused records.
         let bytes = dab_bytes(&data).to_vec();

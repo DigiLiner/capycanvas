@@ -299,6 +299,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let size = 192;
         let extent = (1. / brush.aspect).max(1.);
         let (sin, cos) = brush.angle_radians.sin_cos();
+        let dry = brush.contact.and_then(|c|c.dry.map(|d|(c,d,d.pose(0.5))));
         let mut alpha = Vec::with_capacity((size * size) as usize);
         for y in 0..size {
             for x in 0..size {
@@ -306,9 +307,20 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let y = ((y as f32 + 0.5) / size as f32 * 2. - 1.) * extent;
                 let (u, v) = (x * cos + y * sin, (-x * sin + y * cos) * brush.aspect);
                 let world = [x * brush.diameter * 0.5, y * brush.diameter * 0.5];
-                let primary = coverage(mask, u, v, brush.hardness);
-                let value =
-                    primary * grain_coverage(brush.grain.as_ref().zip(grain_mask), [u, v], world);
+                let value = if let Some((contact, dry, pose)) = dry {
+                    let paper = brush.grain.as_ref().zip(grain_mask).map_or(0.5, |(grain, image)| {
+                        let (sin, cos) = grain.rotation_radians.sin_cos();
+                        let [a,b] = [world[0]/image.width as f32, world[1]/image.height as f32];
+                        sample(image,(a*cos-b*sin)*grain.scale,(a*sin+b*cos)*grain.scale)
+                    });
+                    let exposure = dry.deposition([u/pose.radii[0],v/pose.radii[1]],
+                        [pose.radii[0],pose.radii[1]/brush.aspect],pose.relief,contact.pressure_gain,
+                        paper,contact.paper*brush.grain.as_ref().map_or(0.,|g|g.depth));
+                    1.-(-6.*brush.flow*brush.color_rgba_linear[3]*exposure).exp()
+                } else {
+                    coverage(mask,u,v,brush.hardness)
+                        *grain_coverage(brush.grain.as_ref().zip(grain_mask),[u,v],world)
+                };
                 alpha.push((value * 255.).round() as u8);
             }
         }

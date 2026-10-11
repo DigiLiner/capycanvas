@@ -13,6 +13,9 @@ pub(super) struct BrushTile {
 fn contact_radius(dab: Dab, contact: &layer_core::BrushContact) -> f32 {
     let axes = [dab.radii[0], dab.radii[1], dab.previous[0], dab.previous[1]];
     let maximum = axes.into_iter().fold(0.005_f32, f32::max);
+    if let Some(dry) = contact.dry {
+        return maximum * if dry.corner > 0. { std::f32::consts::SQRT_2 } else { 1. } + 1.;
+    }
     let minimum = axes.into_iter().fold(f32::INFINITY, f32::min).max(0.005);
     let low_pressure = dab.contact[0].min(dab.previous_contact[0]).clamp(0., 1.);
     let high_pressure = dab.contact[0].max(dab.previous_contact[0]).clamp(0., 1.);
@@ -148,9 +151,10 @@ fn clip_polygon(polygon: &[[f64; 2]], (normal, limit): ([f64; 2], f64)) -> Vec<[
     output
 }
 
-fn contact_bounds(dab: Dab, radius: f32) -> layer_core::Rect {
+fn contact_bounds(mut dab: Dab, radius: f32, corner: f32) -> layer_core::Rect {
     if dab.previous[0] <= 0.0 {
-        return dab.bounds();
+        if corner == 0. { return dab.bounds(); }
+        dab.previous = [dab.radii[0], dab.radii[1], dab.rotation[0], dab.rotation[1]];
     }
     // Each interpolated ellipse is enclosed by the maximum endpoint axes.
     // Bound their support over the entire rotation arc, including interior
@@ -169,6 +173,22 @@ fn contact_bounds(dab: Dab, radius: f32) -> layer_core::Rect {
     );
     let expansion = (radius - 1.) / axes[0].max(axes[1]);
     let half = [0., std::f32::consts::FRAC_PI_2].map(|offset| {
+        if corner > 0. {
+            let rim = corner * axes[0].min(axes[1]);
+            let face = axes.map(|v| v-rim);
+            let support = |angle: f32| {
+                let (sin, cos) = (angle-offset).sin_cos();
+                face[0]*cos.abs()+face[1]*sin.abs()+rim
+            };
+            let mut maximum = support(lo).max(support(hi));
+            let peak = face[1].atan2(face[0]);
+            for angle in [peak, -peak] {
+                let base = offset+angle;
+                let next = base+((lo-base)/std::f32::consts::PI).ceil()*std::f32::consts::PI;
+                if next <= hi+0.00001 { maximum = face[0].hypot(face[1])+rim; }
+            }
+            return maximum+1.;
+        }
         let support = |angle: f32| {
             let (sin, cos) = (angle - offset).sin_cos();
             (axes[0] * cos).hypot(axes[1] * sin)
@@ -340,7 +360,10 @@ pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<Brus
     let contact = batch.style.contact.as_ref();
     let fan = contact.is_some_and(|c| c.bristles.is_some());
     let mut tiles = std::collections::BTreeMap::<_, BrushTile>::new();
-    for (index, dab) in dabs.iter().enumerate() {
+    for (index, original) in dabs.iter().enumerate() {
+        let shape=if batch.style.rendering.accumulation==BrushAccumulation::Flow
+            && contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.)) {midpoint_contact(*original)} else {*original};
+        let dab=&shape;
         let radius = contact.filter(|_| !fan).map_or(0., |contact| contact_radius(*dab, contact));
         let hull = (contact.is_some() && !fan && dab.previous[0] > 0.)
             .then(|| ContactHull::new(*dab, radius));
@@ -348,7 +371,7 @@ pub(super) fn plan(batch: &DabBatch, dabs: &[Dab], extent: [u32; 2]) -> Vec<Brus
         let footprint = if let Some(region) = &region {
             region.bounds
         } else if contact.is_some() {
-            contact_bounds(*dab, radius)
+            contact_bounds(*dab, radius, contact.and_then(|c| c.dry).map_or(0., |d| d.corner))
         } else {
             dab.bounds()
         };

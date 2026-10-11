@@ -86,7 +86,6 @@ fn evolving_contact_prepared(
     if radius > 1.45 { return 0.0; }
     let input = mix(previous_sensors, sensors, progress);
     let pressure = clamp(input.x, 0.0, 1.0);
-    let tilt = clamp(input.y, 0.0, 1.0);
     let aa = min(1.0 / max(min(axes.x, axes.y), 0.005), 1.0);
 
     var boundary = 1.0;
@@ -116,17 +115,9 @@ fn evolving_contact_prepared(
         let a = clamp(-integral_projected * travel, -reach, reach);
         let b = clamp((1.0 - integral_projected) * travel, -reach, reach);
         let parabolic = max(q * (b - a) - (b*b*b - a*a*a) / 3.0, 0.0);
-        let firmness = select(invariants.y, 0.0,
-            contact_feature(64u, style.contact_a.z > 0.0 || style.contact_c.z > 0.0));
+        let firmness = invariants.y;
         let hard_weight = firmness * 0.7;
         var integral = mix(parabolic, b - a, hard_weight);
-        if contact_feature(64u, style.contact_a.z > 0.0 || style.contact_c.z > 0.0) {
-            let a3 = a * a * a;
-            let b3 = b * b * b;
-            let quartic = max(q * q * (b - a) - (2.0 / 3.0) * q * (b3 - a3)
-                + (b3 * b * b - a3 * a * a) * 0.2, 0.0);
-            integral = mix(quartic, parabolic, hardness);
-        }
         let normalization = invariants.x / max(travel * 2.0 * sqrt(axes.x * axes.y), 0.000001);
         let section = 2.0 * reach * mix(q * (2.0 / 3.0), 1.0, hard_weight);
         let feed = mix(1.0, 1.0 / max(section, 0.001), firmness);
@@ -138,13 +129,9 @@ fn evolving_contact_prepared(
     }
     if coverage <= 0.0 { return 0.0; }
 
-    let bias = select(0.0, clamp(style.contact_a.z + style.contact_c.z * tilt, 0.0, 0.95),
-        contact_feature(64u, style.contact_a.z > 0.0 || style.contact_c.z > 0.0));
-    // The point side is -X in the stylus frame; the opposite side is soft.
-    let density = mix(1.0, clamp(0.8 - local.x * 0.8, 0.03, 1.6), bias);
     if contact_feature(2u, style.contact_a.y > 0.0) {
         let tooth = field.y;
-        let penetration = clamp(pressure * style.contact_c.x * density, 0.0, 1.0);
+        let penetration = clamp(pressure * style.contact_c.x, 0.0, 1.0);
         var contact = smoothstep(0.5 - penetration * 0.5, 0.85 - penetration * 0.35, tooth)
             * (0.3 + penetration * 0.7);
         if contact_uniform() {
@@ -153,7 +140,6 @@ fn evolving_contact_prepared(
         }
         coverage *= mix(1.0, contact, style.contact_a.y);
     }
-    coverage *= density;
 
     var load = 1.0;
     if contact_feature(32u, style.contact_c.y > 0.0) { load = exp(-style.contact_c.y * input.z); }

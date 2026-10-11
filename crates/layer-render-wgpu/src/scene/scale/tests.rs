@@ -1557,7 +1557,11 @@ fn native_predictions_match_exact_composition_before_layer_opacity_and_blending(
     occurrence_mut(&mut doc,0).opacity = 0.63;
     insert_occurrence(&mut doc, front, 0);
     let extent = doc.composition().size;
-    for target in [0, 1] {
+    for preset in [DefaultBrushPreset::GPen, DefaultBrushPreset::Pencil, DefaultBrushPreset::PointyPencil,
+        DefaultBrushPreset::ShadingPencil, DefaultBrushPreset::Charcoal, DefaultBrushPreset::Chalk,
+        DefaultBrushPreset::PastelBlock, DefaultBrushPreset::Crayon] {
+    let targets = [source_at(&doc,0), source_at(&doc,1)];
+    for target in targets {
         for mode in [layer_render::DabMode::Paint, layer_render::DabMode::Erase] {
             let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
             let mut exact = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
@@ -1570,10 +1574,20 @@ fn native_predictions_match_exact_composition_before_layer_opacity_and_blending(
             let original = display_pixels(&r);
             let mut dab = crate::tests::test_dab([253., 254.], [0.9, 0.02, 0.1, 0.7], 1.);
             dab.radii = [35.; 2];
-            let mut style = crate::layer_tests::preset_style(DefaultBrushPreset::GPen);
+            let mut style = crate::layer_tests::preset_style(preset);
+            if let Some(dry) = style.contact.and_then(|c| c.dry) {
+                let relief = dry.pose(0.5).relief;
+                dab.radii = [35., 19.];
+                dab.previous = [35., 19., 1., 0.];
+                dab.motion = [20., -8.];
+                dab.contact = [0.7, relief[0], relief[1], relief[2]];
+                dab.previous_contact = dab.contact;
+            }
             style.mode = mode;
             let batch = DabBatch { kind: DabBatchKind::Preview,
-                ..dab_batch(source_at(&doc,target), style, dab.bounds()) };
+                ..dab_batch(target, style, dab.bounds()) };
+            let mut oracle_batch = batch.clone();
+            if preset != DefaultBrushPreset::GPen { oracle_batch.style.selection = Some(Arc::new(layer_core::Selection::full())); }
             for prediction in [true, false] {
                 let stroke = FramePacket {
                     dabs: if prediction { std::slice::from_ref(&dab) } else { &[] },
@@ -1581,16 +1595,22 @@ fn native_predictions_match_exact_composition_before_layer_opacity_and_blending(
                     composite_all: false, ..frame
                 };
                 r.submit(stroke).unwrap();
-                exact.submit(stroke).unwrap();
+                exact.submit(FramePacket { dab_batches: if prediction { std::slice::from_ref(&oracle_batch) } else { &[] }, ..stroke }).unwrap();
                 let actual = display_pixels(&r);
                 let expected = pixels(&exact, crate::test_support::document_texture(&exact));
                 let error = quality(&actual, &expected, r.scale_display.as_ref().unwrap().plan);
-                assert!(error[2] < 1e-6, "target={target}, mode={mode:?}, preview={prediction}: {error:?}");
-                if prediction { assert_ne!(actual, original); }
+                assert!(error[2] < 1e-6, "{preset:?} target={target:?}, mode={mode:?}, preview={prediction}: {error:?}");
+                if prediction {
+                    assert_ne!(actual, original);
+                    assert_eq!(r.preview_level, 0);
+                    assert!(!r.preview_contribution, "{preset:?}/{mode:?} plain scene uses native underpaint");
+                    assert!(!exact.preview_contribution);
+                    assert!(r.preview_pages.iter().all(|p| p.primary.texture.width() == PAGE_SIZE));
+                }
                 else { assert_eq!(actual, original); }
             }
         }
-    }
+    }}
 }
 
 #[test]

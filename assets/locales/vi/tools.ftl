@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Mực cọ tự nhiên
 brush-preset-calligraphy-pen = Bút thư pháp
 brush-preset-chalk = Phấn
 brush-preset-charcoal = Than vẽ
+brush-preset-crayon = Bút sáp màu
 brush-preset-clone-stamp = Dấu sao chép
 brush-preset-dry-scumble = Cọ khô phủ mỏng
 brush-preset-dual-texture = Hai kết cấu

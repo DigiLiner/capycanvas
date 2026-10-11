@@ -168,7 +168,7 @@ fn preset_history(masked: bool) {
             time,
         );
         let expected = image(&mut live, time + 80_000_000);
-        assert_ne!(before, expected, "{preset:?} must leave a visible mark");
+        assert!(before != expected, "{preset:?} must leave a visible mark, masked={masked}");
         let archive = support::package_bytes(live.document());
         let decoded = support::reopen(&archive);
         let (mut reopened, _) = engine(&decoded);

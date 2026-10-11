@@ -222,7 +222,7 @@ extension XCTestCase {
             ("Pen", "Pen", ["G-Pen", "Rough G-Pen", "Blotty Ink", "Calligraphy Pen", "Antique Pen", "Realistic Pen", "Wet Ink", "Realistic Brushed Ink"]),
             ("Pen", "Marker", ["Marker"]),
             ("Pencil", "Pencil", ["Pencil", "Pointy Pencil", "Shading Pencil"]),
-            ("Pencil", "Pastel", ["Chalk", "Pastel Block", "Charcoal"]),
+            ("Pencil", "Pastel", ["Chalk", "Pastel Block", "Charcoal", "Crayon"]),
             ("Paint Brush", "Paint", ["Paintbrush", "Bristle Paintbrush", "Textured Flat", "Dry Scumble", "Transparent Glaze", "Opaque Gouache", "Multiply Glaze"]),
             ("Paint Brush", "Watercolor", ["Watercolor Wash", "Wet Watercolor"]),
             ("Paint Brush", "Oil paint", ["Loaded Oil", "Palette Knife", "Wet Round"]),

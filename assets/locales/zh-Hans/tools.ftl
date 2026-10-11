@@ -6,6 +6,7 @@ brush-preset-brushed-ink = 写实水墨
 brush-preset-calligraphy-pen = 书法笔
 brush-preset-chalk = 粉笔
 brush-preset-charcoal = 炭笔
+brush-preset-crayon = 蜡笔
 brush-preset-clone-stamp = 仿制图章
 brush-preset-dry-scumble = 干擦叠色
 brush-preset-dual-texture = 双重纹理

@@ -33,9 +33,19 @@
     p99 31.6–38.8 ms. Both targets remain open. The matched base with the same
     bounded command-pool cleanup reaches 87.0/s. See the
     [top-tier table](top-tier.md#current-g-pen-comparison).
-- **Complex brushes at 1024 px miss on every tier.**
-  - On the top tier all but Spray reach 76–118 updates/s, so most are close.
-  - On the mid tier they reach about 6–25, and on the low tier about 3–19.
+- **Most complex brushes at 1024 px remain unqualified.**
+  - The new Pastel Block side pose meets the measured native Mid and Top
+    rate/gap targets; the other poses remain unmeasured on those tiers.
+  - Earlier measurements of the other complex presets reach 76–118 updates/s
+    on Top, about 6–25 on Mid and 3–19 on Low. They need current measurements.
+- **Dry-media qualification remains incomplete.**
+  - The new Charcoal side pose reaches 89.67–90.59 fresh GPU updates/s at
+    1536 px on MovinkPad 11. Its slowest contact misses 90/s; p99 gaps pass.
+  - TCL Web Pencil, Charcoal and Pastel Block miss 60/s and 33.3 ms
+    fresh-gap limits at 1024 px in the measured side pose. See the
+    [low-tier table](low-tier.md#dry-media-contact-model).
+  - Passing native rows cover only their measured profiles and poses; other
+    dry presets remain unmeasured. Physical input-to-present latency is unmeasured.
 - **Liquify at 512 px** completes 28–74 updates/s on the top tier, 1.2–6.5 on
   the mid tier and 0.8–12 on the low tier.
 - **The retouching brushes at 512 px** (Clone Stamp, Healing and Spot Healing)

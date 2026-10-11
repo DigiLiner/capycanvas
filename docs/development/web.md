@@ -7,6 +7,15 @@ runs the same canvas renderer as the native clients. The finished app is static
 files and can be packaged as an installable, offline PWA
 ([Web packaging](web-packaging.md)).
 
+Canvas presentation uses a persistent GPU target with the shared renderer's damage
+tracking. After rendering, a GPU texture copy publishes that target to the browser's
+transient canvas texture. Reconfiguration invalidates presentation history; a change
+in size or format replaces the retained target. This avoids repainting the whole
+viewport for every pen update without depending on browser swapchain retention.
+`GPUCanvasConfiguration.usage` includes render attachment and copy destination,
+following the [WebGPU canvas contract](https://gpuweb.github.io/types/interfaces/GPUCanvasConfiguration.html).
+No canvas pixels are read or copied through JavaScript.
+
 ## Prerequisites
 
 ```bash

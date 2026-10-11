@@ -12,7 +12,7 @@ pub fn generate(directory: &Path) -> Result<(), Box<dyn Error>> {
                 continue;
             }
             if std::env::var_os("CAPY_CONTACT_PREVIEWS_ONLY").is_some()
-                && !matches!(choice.id, 1 | 2 | 25..=35)
+                && !layer_core::CONTACT_BRUSH_PRESETS.iter().any(|p| *p as u32 == choice.id)
             {
                 continue;
             }
@@ -56,7 +56,10 @@ fn stroke(canvas: &mut Canvas, offset: f32) -> Result<(), String> {
             y: 40.0 + (t * std::f32::consts::TAU).sin() * 10.0 + offset,
             pressure: 0.16 + 0.84 * (t * std::f32::consts::PI).sin().max(0.0).powf(0.65),
         };
-        let event = canvas.next_event(sample, phase(i, 121));
+        let mut event = canvas.next_event(sample, phase(i, 121));
+        if canvas.engine.brush().contact.is_some_and(|c| c.dry.is_some()) {
+            event.tilt_radians = [std::f32::consts::FRAC_PI_4, 0.];
+        }
         canvas.submit(&[event])?;
         if i % 8 == 0 || i == 120 {
             canvas.draw()?;

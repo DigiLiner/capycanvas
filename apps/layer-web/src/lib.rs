@@ -97,6 +97,7 @@ struct WebSurface {
     presenter: ViewportPresenter,
     presenter_color: layer_core::color::DocumentColor,
     blank_presented: bool,
+    retained_frame: Option<wgpu::Texture>,
     lost: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
@@ -488,7 +489,7 @@ impl WebApp {
             .resize_surface(surface.config.width, surface.config.height)
             .map_err(js)?;
         surface.surface.configure(renderer.device(), &surface.config);
-        surface.presenter.set_target_retention(false);
+        surface.presenter.set_target_retention(true);
         self.session
             .replace_renderer(AttachedRenderer(Some(Box::new(renderer))))
             .map_err(js)?;
@@ -513,9 +514,10 @@ impl WebGpu {
             .map_err(|error| gpu_error("renderer", error))?;
         let lost = std::sync::Arc::new(std::sync::Mutex::new(None));
         let (adapter, device, queue) = request_device(&instance, Some(&surface), Some(lost.clone())).await?;
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, width, height)
             .ok_or_else(|| gpu_error("renderer", "WebGPU canvas format unavailable"))?;
+        config.usage |= wgpu::TextureUsages::COPY_DST;
         let failure = lost.clone();
         device.set_device_lost_callback(move |reason, message| {
             gpu_diagnostics::report("canvas", "device_lost", format!("{reason:?}: {message}"));
@@ -542,6 +544,7 @@ impl WebGpu {
                 presenter,
                 presenter_color,
                 blank_presented: false,
+                retained_frame: None,
                 lost,
             },
         }.prepare().await?;
@@ -852,6 +855,9 @@ impl WebApp {
     pub fn renderer_stats(&self) -> Result<JsValue, JsValue> {
         serialize(&self.session.renderer_stats())
     }
+    pub fn consumed_paint_timestamp_ns(&self) -> u64 {
+        self.session.engine().metrics().last_consumed_paint_ns
+    }
     pub fn backdrop_frames(&self) -> Vec<f64> {
         self.surface.as_ref().filter(|_| self.gpu_ready()).map_or([0; 2], |s| s.presenter.backdrop_frames()).map(|v| v as f64).to_vec()
     }
@@ -1024,7 +1030,7 @@ impl WebApp {
             surface.config.width = width;
             surface.config.height = height;
             surface.surface.configure(gpu.device(), &surface.config);
-            surface.presenter.set_target_retention(false);
+            surface.presenter.set_target_retention(true);
         }
         serialize(&change)
     }
@@ -1170,10 +1176,11 @@ impl WebApp {
                 surface.presenter_color = gpu.document_color();
                 surface.color = color;
                 surface.surface.configure(gpu.device(), &surface.config);
-                surface.presenter.set_target_retention(false);
+                surface.presenter.set_target_retention(true);
             } else if surface.presenter_color != gpu.document_color() {
                 surface.presenter = ViewportPresenter::for_surface(gpu, surface.config.format, color).map_err(js)?;
                 surface.presenter_color = gpu.document_color();
+                surface.presenter.set_target_retention(true);
             }
             surface.presenter.set_proof(gpu, lut, enabled, gamut).map_err(js)?;
             surface.presenter.set_screen_check(gpu, screen_check);
@@ -1221,7 +1228,7 @@ impl WebApp {
                     .create_surface(wgpu::SurfaceTarget::Canvas(self.canvas.clone()))
                     .map_err(js)?;
                 surface.surface.configure(gpu.device(), &surface.config);
-                surface.presenter.set_target_retention(false);
+                surface.presenter.set_target_retention(true);
                 return serialize(&layer_ui::UiChange {
                     canvas_wake: true,
                     ..change
@@ -1229,7 +1236,7 @@ impl WebApp {
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 surface.surface.configure(gpu.device(), &surface.config);
-                surface.presenter.set_target_retention(false);
+                surface.presenter.set_target_retention(true);
                 return serialize(&layer_ui::UiChange {
                     canvas_wake: true,
                     ..change
@@ -1246,14 +1253,27 @@ impl WebApp {
                 return Err(js("WebGPU surface validation failed"));
             }
         };
-        surface.presenter
-            .present(
-                gpu,
-                &target.texture.create_view(&Default::default()),
-                view,
-                surround,
-            )
-            .map_err(js)?;
+        if surface.retained_frame.as_ref().is_none_or(|texture|
+            texture.width()!=surface.config.width || texture.height()!=surface.config.height
+                || texture.format()!=surface.config.format)
+        {
+            surface.retained_frame = Some(gpu.device().create_texture(&wgpu::TextureDescriptor {
+                label: Some("retained Web canvas"),
+                size: wgpu::Extent3d { width: surface.config.width, height: surface.config.height, depth_or_array_layers: 1 },
+                mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+                format: surface.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            }));
+            surface.presenter.set_target_retention(true);
+        }
+        let retained = surface.retained_frame.as_ref().unwrap();
+        surface.presenter.present(gpu, &retained.create_view(&Default::default()), view, surround).map_err(js)?;
+        let mut encoder = gpu.device().create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("publish retained Web canvas"),
+        });
+        encoder.copy_texture_to_texture(retained.as_image_copy(), target.texture.as_image_copy(), retained.size());
+        gpu.queue().submit([encoder.finish()]);
         gpu.queue().present(target);
         surface.blank_presented = true;
         self.screen_presented_ms = now_ms;

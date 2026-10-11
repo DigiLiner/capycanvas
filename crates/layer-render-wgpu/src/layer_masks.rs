@@ -47,19 +47,26 @@ pub(super) struct MaskRenderer {
     pub definitions: BTreeMap<SourceTarget, layer_core::authored::CoverageSource>,
     pub pages: BTreeMap<(SourceTarget, [u32; 2]), MaskPage>,
     pub command_pages: BTreeMap<(CommandCoverage, [u32; 2]), MaskPage>,
+    pub(super) preview_bases: BTreeMap<(SourceTarget, [u32; 2]), MaskPage>,
     command_definitions: BTreeMap<CommandCoverage, layer_core::CoverageSnapshot>,
     pub snapshots: BTreeMap<CommandCoverage, SnapshotMasks>,
-    pub(super) brush: [Deferred<wgpu::RenderPipeline>; 4],
+    pub(super) brush: [Deferred<wgpu::RenderPipeline>; 6],
     pub(super) initialize: Deferred<wgpu::RenderPipeline>,
     init_layout: wgpu::BindGroupLayout,
     empty_selection: wgpu::Buffer,
 }
 impl MaskRenderer {
+    pub(super) fn brush_index(style: &layer_render::DabStyle) -> usize {
+        let shape = if style.contact.is_some_and(|c| c.dry.is_some()) { 4 }
+            else { usize::from(matches!(style.tip, BrushTip::Mask(_)))*2 };
+        shape+usize::from(style.mode == DabMode::Erase)
+    }
     pub fn new(
         device: &PipelineDevice,
         style: &wgpu::BindGroupLayout,
         target: &wgpu::BindGroupLayout,
         texture: &wgpu::BindGroupLayout,
+        advanced_texture: &wgpu::BindGroupLayout,
     ) -> Self {
         let shader = {
             let device = device.clone();
@@ -84,6 +91,12 @@ impl MaskRenderer {
             bind_group_layouts: &[Some(style), Some(target), Some(texture)],
             immediate_size: 0,
         });
+        let contact_shader = advanced_brush_shader(device);
+        let contact = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mask relief contact layout"),
+            bind_group_layouts: &[Some(style), Some(target), Some(advanced_texture)],
+            immediate_size: 0,
+        });
         let brush = std::array::from_fn(|i| {
             let blend = wgpu::BlendComponent {
                 src_factor: if i % 2 == 0 {
@@ -98,18 +111,21 @@ impl MaskRenderer {
                 device.clone(),
                 analytic.clone(),
                 tip.clone(),
-                shader.clone(),
+                if i < 4 { shader.clone() } else { contact_shader.clone() },
             );
+            let contact = contact.clone();
             Deferred::pipeline(move |mode| {
                 brush_pipeline_format_recipe(
                     mode,
                     &device,
-                    if i < 2 { &analytic } else { &tip },
+                    if i < 2 { &analytic } else if i < 4 { &tip } else { &contact },
                     &shader,
                     if i < 2 {
                         "analytic_fragment"
-                    } else {
+                    } else if i < 4 {
                         "mask_fragment"
+                    } else {
+                        "coverage_fragment"
                     },
                     wgpu::BlendState {
                         color: blend,
@@ -173,6 +189,7 @@ impl MaskRenderer {
             definitions: BTreeMap::new(),
             pages: BTreeMap::new(),
             command_pages: BTreeMap::new(),
+            preview_bases: BTreeMap::new(),
             command_definitions: BTreeMap::new(),
             snapshots: BTreeMap::new(),
             brush,
@@ -225,6 +242,7 @@ impl MaskRenderer {
         regions: Option<&std::collections::HashMap<SourceTarget, PixelRect>>,
     ) -> Result<(), GpuRasterError> {
         let (scene, batches) = inputs;
+        self.pages.extend(mem::take(&mut self.preview_bases));
         if reset {
             self.pages.clear();
             self.command_pages.clear();
@@ -427,12 +445,21 @@ impl WgpuRasterizer {
             self.prepare_target_selection(encoder, &batch.style, self.target_extent(batch.target))?;
             let damage = batch_pixel_rect(batch, self.target_extent(batch.target));
             for coordinate in page_coordinates(damage) {
+                let key = (batch.target, coordinate);
+                if batch.kind == DabBatchKind::Preview && !self.layer_masks.preview_bases.contains_key(&key)
+                    && let Some(base) = self.layer_masks.pages.get(&key).cloned()
+                {
+                    let preview = MaskPage::new(&self.device);
+                    encoder.copy_texture_to_texture(base.texture.as_image_copy(), preview.texture.as_image_copy(),
+                        wgpu::Extent3d { width: PAGE_SIZE, height: PAGE_SIZE, depth_or_array_layers: 1 });
+                    self.layer_masks.preview_bases.insert(key, base);
+                    self.layer_masks.pages.insert(key, preview);
+                }
                 let Some(page) = self.layer_masks.pages.get(&(batch.target, coordinate)) else {
                     continue;
                 };
-                let texture_tip = matches!(batch.style.tip, BrushTip::Mask(_));
-                let pipeline = &self.layer_masks.brush[usize::from(texture_tip) * 2
-                    + usize::from(batch.style.mode == DabMode::Erase)];
+                let dry = batch.style.contact.is_some_and(|c| c.dry.is_some());
+                let pipeline = &self.layer_masks.brush[MaskRenderer::brush_index(&batch.style)];
                 let source = self.device.portable_blend().then(|| self.portable_blend.source(&self.device,&page.view,wgpu::TextureFormat::Rgba32Float));
                 let count = if source.is_some() { batch.dab_count } else { 1 };
                 for dab in 0..count {
@@ -456,7 +483,11 @@ impl WgpuRasterizer {
                     self.paint_target_binding(&batch.style),
                     &[self.layer_target_offset(batch.target, coordinate)],
                 );
-                if let BrushTip::Mask(id) = &batch.style.tip {
+                if dry {
+                    let key = Self::texture_set_key(&batch.style);
+                    pass.set_bind_group(2, &self.texture_sets.iter().find(|s| s.key == key)
+                        .expect("mask contact textures are prepared before encoding").bind_group, &[]);
+                } else if let BrushTip::Mask(id) = &batch.style.tip {
                     pass.set_bind_group(2, &self.mask(id)?.bind_group, &[]);
                 }
                 let start = batch.first_dab as u64 * mem::size_of::<DabGpu>() as u64;

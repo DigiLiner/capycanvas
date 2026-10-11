@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Реалистичная тушь кистью
 brush-preset-calligraphy-pen = Каллиграфическое перо
 brush-preset-chalk = Мел
 brush-preset-charcoal = Уголь
+brush-preset-crayon = Восковой мелок
 brush-preset-clone-stamp = Штамп
 brush-preset-dry-scumble = Сухая протирка
 brush-preset-dual-texture = Двойная текстура

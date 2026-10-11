@@ -1,4 +1,4 @@
-//! Native catalog activation, stylus input, presentation and history for all
+//! Native catalog activation, host pen events, presentation and history for all
 //! shared contact presets. Runs on an isolated Wayland/Vulkan desktop.
 use super::*;
 
@@ -20,7 +20,7 @@ fn native_contact_brushes() {
         "brush startup timed out",
     );
     w.dispatch(UiAction::SetTheme {
-        theme: Some(Theme::Light),
+        theme: Some(if std::env::var("CAPY_NATIVE_TEST_THEME").is_ok_and(|v| v == "dark") { Theme::Dark } else { Theme::Light }),
     });
     w.dispatch(UiAction::SetColor {
         rgba: [0.006, 0.006, 0.006, 1.],
@@ -33,6 +33,7 @@ fn native_contact_brushes() {
         .into()
     });
     std::fs::create_dir_all(&output).unwrap();
+    let mut committed = 0;
     for (row, preset) in layer_core::CONTACT_BRUSH_PRESETS
         .into_iter()
         .chain([layer_core::DefaultBrushPreset::Spray])
@@ -87,64 +88,65 @@ fn native_contact_brushes() {
         }
         eprintln!("brush_ready preset={preset:?} elapsed_ms={:.3}", prepare_started.elapsed().as_secs_f64() * 1000.);
         pump(100);
-        let camera = state(&w).camera;
-        for i in 0..=64 {
-            let t = i as f32 / 64.;
-            let column = if matches!(
-                preset,
-                layer_core::DefaultBrushPreset::Eraser | layer_core::DefaultBrushPreset::Spray
-            ) {
-                0
-            } else {
-                row / 11
-            };
-            let x = 200. + column as f32 * 900. + 700. * t;
-            let y = if preset == layer_core::DefaultBrushPreset::Spray {
-                1450.
-            } else {
-                210. + (row % 11) as f32 * 110.
-            } + (t * std::f32::consts::TAU).sin() * 16.;
-            let now = glib::monotonic_time() as u64 * 1000;
-            let phase = match i {
-                0 => PenPhase::Down,
-                64 => PenPhase::Up,
-                _ => PenPhase::Move,
-            };
-            w.input.send(
-                &w,
-                PenEvent {
-                    device_id: 94,
-                    timestamp_ns: now,
-                    pressure: (t * std::f32::consts::PI).sin().max(0.).powf(0.65),
-                    tilt_radians: if row < 4 { [0., 0.8] } else { [0.; 2] },
+        let dry = ui_session(&w).engine().configured_brush().contact
+            .as_ref().is_some_and(|contact| contact.dry.is_some());
+        let tilts: &[u32] = if dry { &[0, 45, 77] } else { &[0] };
+        for &tilt in tilts {
+            let camera = state(&w).camera;
+            let column = if matches!(preset, layer_core::DefaultBrushPreset::Eraser | layer_core::DefaultBrushPreset::Spray) { 0 } else { row / 13 };
+            let base_y = if preset == layer_core::DefaultBrushPreset::Spray { 1450. } else { 150. + (row % 13) as f32 * 100. };
+            let region = [180 + column as u32 * 900, (base_y - 65.) as u32, 740, 130];
+            let before = contact_pixels(&w, region);
+            for i in 0..=64 {
+                let t = i as f32 / 64.;
+                let x = 200. + column as f32 * 900. + 700. * t;
+                let y = base_y + (t * std::f32::consts::TAU).sin() * 16.;
+                let now = glib::monotonic_time() as u64 * 1000;
+                let phase = match i { 0 => PenPhase::Down, 64 => PenPhase::Up, _ => PenPhase::Move };
+                w.input.send(&w, PenEvent {
+                    device_id: 94, timestamp_ns: now,
+                    pressure: 0.15 + 0.85 * (t * std::f32::consts::PI).sin().max(0.).powf(0.65),
+                    tilt_radians: [0., (tilt as f32).to_radians()],
                     ..pen_event(&camera, [x, y], phase, now)
-                },
-            );
-            pump(5);
+                });
+                pump(5);
+            }
+            pump(180);
+            committed += 1;
+            let painted = contact_pixels(&w, region);
+            assert_ne!(before, painted, "{preset:?} tilt{tilt}: visible stroke");
+            assert!(!w.status.is_visible(), "{preset:?}: {}", w.status.text());
+            assert_eq!(ui_session(&w).engine().metrics().committed_strokes, committed,
+                "{preset:?}: GTK must commit exactly one stroke");
+            capture_reference(&w, &format!("{output}/{id:02}-{preset:?}-tilt{tilt}.png"), 1.);
+            w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+            pump(150);
+            assert!(ui_session(&w).engine().can_redo());
+            assert_eq!(contact_pixels(&w, region), before, "{preset:?} tilt{tilt}: exact Undo pixels");
+            w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+            pump(150);
+            assert!(!ui_session(&w).engine().can_redo());
+            assert_eq!(contact_pixels(&w, region), painted, "{preset:?} tilt{tilt}: exact Redo pixels");
+            eprintln!("contact preset={preset:?} tilt={tilt}: visible stroke, exact Undo/Redo passed");
         }
-        pump(180);
-        capture_reference(&w, &format!("{output}/{id:02}-{preset:?}.png"), 1.);
-        assert!(!w.status.is_visible(), "{preset:?}: {}", w.status.text());
-        assert_eq!(
-            ui_session(&w)
-                .engine()
-                .metrics()
-                .committed_strokes,
-            row as u64 + 1,
-            "{preset:?}: GTK must commit exactly one stroke"
-        );
     }
-    w.dispatch(UiAction::Invoke {
-        command: CommandId::Undo,
-    });
-    pump(150);
-    assert!(ui_session(&w).engine().can_redo());
-    w.dispatch(UiAction::Invoke {
-        command: CommandId::Redo,
-    });
-    pump(150);
-    assert!(!ui_session(&w).engine().can_redo());
     capture_reference(&w, &format!("{output}/all-contact-brushes.png"), 1.);
     w.window.close();
     pump(50);
+}
+
+fn contact_pixels(w: &Workspace, region: [u32; 4]) -> Vec<[f32; 4]> {
+    until(|| {
+        let gpu = w.gpu.borrow();
+        let engine = gpu.as_ref().unwrap().session.engine();
+        !engine.has_pending_document_edits() && engine.document().scene().targets()
+            .filter_map(|target| engine.document().target_raster(target))
+            .all(|raster| raster.try_data().is_some_and(|data| data.is_ok_and(|data| data.host_backed())))
+    }, "contact stroke capture timed out");
+    let gpu = w.snapshot_gpu().unwrap();
+    let project = w.gpu.borrow().as_ref().unwrap().session.capture_artwork().unwrap();
+    glib::MainContext::default().block_on(gtk::gio::spawn_blocking(move || {
+        let mut renderer = gpu.capture(project, Default::default()).unwrap();
+        renderer.read_region(region).unwrap()
+    })).unwrap()
 }

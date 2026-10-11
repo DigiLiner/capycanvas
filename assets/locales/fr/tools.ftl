@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Encre réaliste au pinceau
 brush-preset-calligraphy-pen = Plume calligraphique
 brush-preset-chalk = Craie
 brush-preset-charcoal = Fusain
+brush-preset-crayon = Crayon de cire
 brush-preset-clone-stamp = Tampon de duplication
 brush-preset-dry-scumble = Brossage à sec
 brush-preset-dual-texture = Double texture

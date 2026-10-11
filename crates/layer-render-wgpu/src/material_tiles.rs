@@ -226,6 +226,7 @@ impl WgpuRasterizer {
                     coverage_view.is_some(),
                     record_offset,
                     tracked_display,
+                    job.local,
                 ));
                 destination.preview.set(None);
                 if borrowed {

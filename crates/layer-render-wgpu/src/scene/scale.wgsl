@@ -32,7 +32,7 @@ fn reduce(@builtin(global_invocation_id) id: vec3<u32>) {
     let size = min(vec2<u32>(region.side), (remaining + step - 1u) / step);
     let dimensions = textureDimensions(source);
     let base_dimensions = textureDimensions(base);
-    if (region.flags & ~128u) == 0u && region.side % 2u == 0u && all(size == vec2(region.side))
+    if (region.flags & ~(128u|8u)) == 0u && region.side % 2u == 0u && all(size == vec2(region.side))
         && all((dimensions & (dimensions - 1u)) == vec2(0u))
         && all((base_dimensions & (base_dimensions - 1u)) == vec2(0u)) {
         var sum = vec4(0.);

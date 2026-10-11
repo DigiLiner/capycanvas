@@ -427,15 +427,20 @@ impl Scene {
                     (inputs.source, inputs.base, inputs.level > 0, inputs.over, inputs.empty)
                 };
                 let valid = page_rect(tile).intersect(PixelRect::full(extent));
-                changed = changed.union(valid);
-                let size =
-                    [valid.width(), valid.height()].map(|n| n.div_ceil(1 << level));
+                let side=1u32<<level;
+                let part=if placement.is_none() && phase==[0;2] {stale.get(&tile).copied().map_or(valid,|part|part.intersect(valid))} else {valid};
+                if part.is_empty() {for slot in scratch.into_iter().flatten() {self.free(slot);} continue;}
+                let low=[(part.min_x()-valid.min_x())/side,(part.min_y()-valid.min_y())/side];
+                let high=[(part.max_x()-valid.min_x()).div_ceil(side),(part.max_y()-valid.min_y()).div_ceil(side)];
+                changed=changed.union(PixelRect::new(valid.min_x()+low[0]*side,valid.min_y()+low[1]*side,
+                    (valid.min_x()+high[0]*side).min(valid.max_x()),(valid.min_y()+high[1]*side).min(valid.max_y())));
+                let size=[high[0]-low[0],high[1]-low[1]];
                 let origin = output_origin(tile, shift, plan);
                 let input_level = if reduced_preview { r.preview_level } else { 0 };
                 let mut values = [0; 20];
                 values[..8].copy_from_slice(&[
-                    origin[0],
-                    origin[1],
+                    origin[0]+low[0],
+                    origin[1]+low[1],
                     size[0],
                     size[1],
                     valid.width(),
@@ -445,6 +450,11 @@ impl Scene {
                         | if placement.is_some() { 128 } else { 0 }
                         | if blend_space == layer_core::BlendSpace::Perceptual { 2 } else { 0 },
                 ]);
+                if low!=[0;2] {
+                    values[7]|=8;
+                    values[14]=((origin[0]*values[6]) as f32).to_bits();
+                    values[15]=((origin[1]*values[6]) as f32).to_bits();
+                }
                 let reads = if values[7] & 4 != 0 { 0 } else { values[6].pow(2) * (1 + (values[7] & 1) + (values[7] >> 7 & 1)) };
                 r.metrics.display_reduction_reads += u64::from(size[0] * size[1] * reads);
                 self.jobs.push(Job::Reduce { binding: Commands::binding(r, &source, &base, output), values, size, kernel: Reduction::Pages });

@@ -6,6 +6,7 @@ brush-preset-brushed-ink = 墨筆
 brush-preset-calligraphy-pen = カリグラフィーペン
 brush-preset-chalk = チョーク
 brush-preset-charcoal = 木炭
+brush-preset-crayon = クレヨン
 brush-preset-clone-stamp = コピースタンプ
 brush-preset-dry-scumble = かすれ塗り
 brush-preset-dual-texture = 二重テクスチャ

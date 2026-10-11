@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Tinta de pincel realista
 brush-preset-calligraphy-pen = Pluma de caligrafía
 brush-preset-chalk = Tiza
 brush-preset-charcoal = Carboncillo
+brush-preset-crayon = Crayón
 brush-preset-clone-stamp = Tampón de clonar
 brush-preset-dry-scumble = Restregado en seco
 brush-preset-dual-texture = Textura doble

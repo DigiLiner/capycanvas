@@ -13,6 +13,7 @@ brush-preset-calligraphy-pen = Pena Kaligrafi
 brush-preset-chalk = Kapur
 
 brush-preset-charcoal = Arang
+brush-preset-crayon = Krayon
 
 brush-preset-clone-stamp = Stempel Klon
 

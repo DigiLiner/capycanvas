@@ -529,12 +529,18 @@ fn swept_contact_preview(mode: layer_core::color::LayerColorMode) {
         first.motion = [29., -17.];
         first.contact = [0.9, 0.7, 1., 0.3];
         first.previous_contact = [0.1, 0.2, 0., 0.3];
-        let mut last = first;
-        last.center = Point { x: 770., y: 790. };
-        last.motion = [-21., 31.];
         let mut stroke = batch(target(&document));
         stroke.stroke_id = StrokeId(2);
         stroke.style = preset_style(preset);
+        if let Some(dry) = stroke.style.contact.and_then(|c| c.dry) {
+            let current = dry.pose(0.7).relief;
+            let previous = dry.pose(0.2).relief;
+            first.contact = [0.9, current[0], current[1], current[2]];
+            first.previous_contact = [0.1, previous[0], previous[1], previous[2]];
+        }
+        let mut last = first;
+        last.center = Point { x: 770., y: 790. };
+        last.motion = [-21., 31.];
         stroke.dab_count = 2;
         stroke.damage = first.bounds().union(last.bounds());
         render(&mut r, &[base], &[base_batch.clone()], true);

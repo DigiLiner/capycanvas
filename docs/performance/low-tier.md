@@ -1446,7 +1446,41 @@ the binary and source snapshot are under `artifacts/layer-modes/rebased-build/`.
 
 Target: **60 completed updates/s** at the guaranteed size, on the 12 MP canvas.
 
-Except for G-Pen, Pencil and Eraser, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets.
+### Dry-media contact model
+
+Measured on 2026-10-11 with the optimized build based on `2bd956b2a`.
+Frozen production and benchmark-driver manifest SHA-256:
+`4057843e1184cbbd0adbef721c61d17ff37050428700b218eea7b8631a6a03a3`.
+Native APK SHA-256 `ca7b3aadfd5ea9004d23176f6620796e5b13c62c8fa19bf573456089cee0aef6`;
+native library SHA-256 `685494a0bbbed338bca5ccad82cae0b36bfc52218826baae4057c5eeebcca211`.
+Web Wasm SHA-256 `750177332f508607e15e93437650e6fed6ca8f6a1443083c708af05ff84265b6`.
+
+The 4248 × 2832 photo has an empty Full color paint layer above it at Fit,
+with the default workspace, Navigator, closed Stats and 16 ms prediction.
+Each warmed profile uses three six-second 200 Hz stylus contacts, pressure 1,
+77° side pose and a contained 60 × 10 surface-pixel ellipse. Thermal status
+is 0 before and after every profile. Native uses OS stylus input; Web uses CDP
+pen input. Rates count fresh input-bearing GPU completions; prediction and
+refinement completions do not qualify the gate. Web completion callbacks
+include browser scheduling delay. Neither measures physical screen scanout.
+
+| Host and profile | Fresh updates/s, three-run range | Worst fresh p99 gap | Input-to-GPU p99 range | Rate/gap gate |
+| --- | --- | --- | --- | --- |
+| Android Pencil 1024 px | 115.97–118.69 | 14.38 ms | 34.66–40.11 ms | Meets measured side pose |
+| Android Charcoal 1024 px | 84.93–85.73 | 17.02 ms | 46.06–49.81 ms | Meets measured side pose |
+| Android Pastel Block 1024 px | 69.72–70.00 | 20.91 ms | 54.90–60.33 ms | Meets measured side pose |
+| Web Pencil 1024 px | 23.74–25.72 | 127.60 ms | 168.20–190.50 ms | **Not met** |
+| Web Charcoal 1024 px | 25.27–25.89 | 115.80 ms | 149.80–228.80 ms | **Not met** |
+| Web Pastel Block 1024 px | 22.30–24.44 | 127.00 ms | 231.80–259.60 ms | **Not met** |
+
+Passing native rows qualify only these measured side profiles. Other poses and
+Pointy Pencil, Shading Pencil, Chalk and Crayon remain unmeasured on this tier.
+Raw contacts, thermal records and captures:
+`artifacts/dry-media-tcl/candidate49/{android,web}/`.
+
+### Retained-photo brush measurements
+
+Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets.
 
 - The older fixtures fit their 520 × 299 px ellipse to 339 × 299 px in the
   TCL's 754 px work area at 16.0% zoom. The current G-Pen row uses the 240 × 120 px semiaxes documented in
@@ -1463,17 +1497,18 @@ Except for G-Pen, Pencil and Eraser, measured on 2026-09-27 at `be5a7c38` with t
 | Antique Pen (30) | Simple | 1024 px | 37.5 updates/s (37.1–38.0); gap p99 79.9 ms | **Not met** |
 | Realistic Pen (31) | Simple | 1024 px | 28.3 updates/s (28.2–28.3); gap p99 63.4 ms | **Not met** |
 | Wet Ink (32) | Simple | 1024 px | 23.0 updates/s (22.9–23.1); gap p99 73.7 ms | **Not met** |
-| Pencil (2) | Simple | 1024 px | 11.1 fresh updates/s (11.08–11.36); completion gap p99 107.46–113.63 ms | **Not met** |
-| Pointy Pencil (25) | Simple | 1024 px | 15.2 updates/s (15.2–15.3); gap p99 96.7 ms | **Not met** |
-| Shading Pencil (26) | Simple | 1024 px | 58.3 updates/s (56.2–59.8); gap p99 58.0 ms | **Not met** |
-| Charcoal (27) | Simple | 1024 px | 14.2 updates/s (14.2–14.3); gap p99 114.0 ms | **Not met** |
-| Chalk (6) | Simple | 1024 px | 10.4 updates/s (10.3–10.5); gap p99 131.3 ms | **Not met** |
+| Pencil (2) | Simple | 1024 px | 115.97–118.69 fresh updates/s; fresh gap p99 ≤14.38 ms | Meets measured Android side pose; [dry media](#dry-media-contact-model) |
+| Pointy Pencil (25) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Shading Pencil (26) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Charcoal (27) | Simple | 1024 px | 84.93–85.73 fresh updates/s; fresh gap p99 ≤17.02 ms | Meets measured Android side pose; [dry media](#dry-media-contact-model) |
+| Chalk (6) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Crayon (43) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 1024 px | 29.9 fresh updates/s (29.71–29.95); completion gap p99 44.67–45.06 ms | **Not met** |
 | Airbrush (5) | Simple | 1024 px | 32.7 updates/s (32.4–33.1); gap p99 55.6 ms | **Not met** |
 | Marker (7) | Complex | 1024 px | 16.5 updates/s (16.5–16.6); gap p99 100.5 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 15.1 updates/s (15.0–15.1); gap p99 105.5 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 14.3 updates/s (14.2–14.4); gap p99 178.0 ms | **Not met** |
-| Pastel Block (17) | Complex | 1024 px | 13.4 updates/s (13.4–13.4); gap p99 136.0 ms | **Not met** |
+| Pastel Block (17) | Complex | 1024 px | 69.72–70.00 fresh updates/s; fresh gap p99 ≤20.91 ms | Meets measured Android side pose; [dry media](#dry-media-contact-model) |
 | Paintbrush (4) | Complex | 1024 px | 10.75 (10.74–10.96) fresh updates/s; completion-gap p99 350.01–385.67 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
 | Textured Flat (15) | Complex | 1024 px | 18.7 updates/s (18.6–18.8); gap p99 169.3 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 8.8 updates/s (8.7–9.0); gap p99 212.7 ms | **Not met** |

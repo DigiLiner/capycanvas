@@ -75,6 +75,52 @@ fn selection_paint_opacity_accumulates_between_contacts_but_not_within_one() {
 }
 
 #[test]
+fn dry_selection_contact_dose_survives_segment_and_update_partitioning() {
+    use layer_core::{BrushAccumulation, BrushDryMedia, BrushDryPose};
+    let mut r = renderer();
+    let mut id = 100;
+    for mode in [SelectionPaintMode::Add, SelectionPaintMode::Subtract, SelectionPaintMode::Gray] {
+        for (segments, chunk) in [(1, 1), (8, 8), (8, 1)] {
+            id += 1;
+            let before = if mode == SelectionPaintMode::Subtract { Selection::full() } else { Selection::empty() };
+            let mut paint = request(id, before, mode, 0.6);
+            paint.gray = 0.35;
+            paint.style = preset_style(layer_core::DefaultBrushPreset::Pencil);
+            paint.style.rendering.accumulation = BrushAccumulation::Flow;
+            let contact = paint.style.contact.as_mut().unwrap();
+            contact.paper = 0.;
+            contact.pressure_gain = 1.;
+            contact.dry = Some(BrushDryMedia { poses: [BrushDryPose { radii: [1.; 2], relief: [0.; 3] }; 3],
+                softness: 0.07, loading: 0., corner: 0. });
+            let contacts: Vec<_> = (1..=segments).map(|i| {
+                let mut d = paint.dabs[0];
+                d.center = Point { x: 20.5+88.*i as f32/segments as f32, y: 64.5 };
+                d.motion = [88./segments as f32, 0.];
+                d.previous = [12., 12., 1., 0.];
+                d.contact = [1., 0., 0., 0.];
+                d.previous_contact = d.contact;
+                d.flow = 0.4;
+                d
+            }).collect();
+            for contacts in contacts.chunks(chunk) {
+                paint.dabs = contacts.to_vec();
+                assert!(r.paint_selection(&paint).unwrap());
+            }
+            let result = receive(&mut r, paint);
+            let alpha = 1.-(-6_f64*0.4).exp();
+            let expected = match mode {
+                SelectionPaintMode::Add => alpha*0.6,
+                SelectionPaintMode::Subtract => 1.-alpha*0.6,
+                SelectionPaintMode::Gray => 0.35*alpha*0.6,
+            };
+            assert!((f64::from(value(&result, 64, 64))-expected*255.).abs() <= 1.,
+                "{mode:?} segments={segments} chunk={chunk}: scalar {} vs {}", value(&result, 64, 64), expected*255.);
+            assert_eq!(value(&result, 2, 2), if mode == SelectionPaintMode::Subtract { 255 } else { 0 });
+        }
+    }
+}
+
+#[test]
 fn selection_paint_overlay_is_coverage_scaled_and_excluded_from_artwork() {
     let mut r = renderer();
     let artwork = r.readback_srgb_rgba8().unwrap();

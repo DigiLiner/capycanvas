@@ -1,5 +1,6 @@
 // Pure brush coverage shared by artwork and scalar mask painting.
 fn brush_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
+    if contact_feature(64u,style.contact_a.z>0.5) { return relief_contact(dab,world,field.y); }
     if bristles_enabled() {
         let paint = bristle_paint(dab, world, field.y);
         return select(paint.opacity * paint.coverage, 0.0, paint.held);
@@ -34,4 +35,12 @@ fn brush_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
     }
     if coverage < style.edges.w { return 0.0; }
     return coverage;
+}
+
+fn brush_alpha(dab: Dab, coverage: f32) -> f32 {
+    let dose = coverage*dab.flow*dab.color.a;
+    if contact_feature(1u,style.contact_a.x>0.5) && !contact_uniform() {
+        return 1.0-exp(-6.0*dose);
+    }
+    return clamp(dose,0.0,1.0);
 }

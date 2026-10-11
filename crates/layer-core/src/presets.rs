@@ -60,18 +60,18 @@ pub enum DefaultBrushPreset {
     CloneStamp = 40,
     HealingBrush = 41,
     SpotHealingBrush = 42,
+    Crayon = 43,
 }
 
 /// Returns a complete immutable preset snapshot. Callers may override color,
 /// diameter, and opacity before beginning a stroke.
 pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
     match preset {
+        DefaultBrushPreset::Pencil | DefaultBrushPreset::PointyPencil | DefaultBrushPreset::ShadingPencil
+        | DefaultBrushPreset::Charcoal | DefaultBrushPreset::Chalk | DefaultBrushPreset::PastelBlock
+        | DefaultBrushPreset::Crayon => crate::contact_presets::dry_brush(preset),
         DefaultBrushPreset::BristlePaintbrush => crate::contact_presets::bristle_paintbrush(),
         DefaultBrushPreset::GPen
-        | DefaultBrushPreset::Pencil
-        | DefaultBrushPreset::PointyPencil
-        | DefaultBrushPreset::ShadingPencil
-        | DefaultBrushPreset::Charcoal
         | DefaultBrushPreset::RoughGPen
         | DefaultBrushPreset::CalligraphyPen
         | DefaultBrushPreset::AntiquePen
@@ -125,18 +125,6 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
                 ..BrushPath::default()
             },
             mappings: Arc::from([BrushMapping::pressure_size(), pressure_flow(0.08, 0.72)]),
-            ..BrushSnapshot::default()
-        },
-        DefaultBrushPreset::Chalk => BrushSnapshot {
-            contact: Some(crate::contact_presets::dry_material(preset)),
-            color_rgba_linear: [0.62, 0.12, 0.045, 1.0],
-            diameter: 110.0,
-            flow: 0.85,
-            hardness: 0.85,
-            spacing: 0.11,
-            seed: 0x4348_414c,
-            grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 3., 1., 0.17)),
-            mappings: Arc::from([BrushMapping::pressure_size(), pressure_flow(0.12, 0.72)]),
             ..BrushSnapshot::default()
         },
         DefaultBrushPreset::Marker => BrushSnapshot {
@@ -303,21 +291,6 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             },
             mappings: Arc::from([BrushMapping::pressure_size()]),
             ..Default::default()
-        },
-        DefaultBrushPreset::PastelBlock => BrushSnapshot {
-            contact: Some(crate::contact_presets::dry_material(preset)),
-            ..painter_brush(PainterBrushSpec {
-                diameter: 280.0,
-                aspect: 0.58,
-                flow: 0.85,
-                opacity: 0.78,
-                spacing: 0.14,
-                hardness: 0.9,
-                execution: BrushExecution::Dry,
-                grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 5.2, 1., -0.13)),
-                rendering: BrushRendering { accumulation: BrushAccumulation::Uniform, ..Default::default() },
-                wet_mix: BrushWetMix::default(),
-            })
         },
         DefaultBrushPreset::TransparentGlaze => BrushSnapshot {
             contact: Some(crate::contact_presets::dry_material(preset)),
@@ -632,15 +605,7 @@ mod tests {
             default_brush(preset).validate().unwrap();
         }
         for preset in [
-            DefaultBrushPreset::GPen,
-            DefaultBrushPreset::Pencil,
-            DefaultBrushPreset::Eraser,
-            DefaultBrushPreset::Paintbrush,
-            DefaultBrushPreset::Airbrush,
-            DefaultBrushPreset::Chalk,
-            DefaultBrushPreset::Marker,
             DefaultBrushPreset::Spray,
-            DefaultBrushPreset::DualTexture,
             DefaultBrushPreset::Smudge,
             DefaultBrushPreset::WetRound,
             DefaultBrushPreset::LiquifyPush,
@@ -653,10 +618,6 @@ mod tests {
             DefaultBrushPreset::HealingBrush,
             DefaultBrushPreset::SpotHealingBrush,
             DefaultBrushPreset::MultiplyGlaze,
-            DefaultBrushPreset::TexturedFlat,
-            DefaultBrushPreset::DryScumble,
-            DefaultBrushPreset::PastelBlock,
-            DefaultBrushPreset::TransparentGlaze,
             DefaultBrushPreset::OpaqueGouache,
             DefaultBrushPreset::WatercolorWash,
             DefaultBrushPreset::WetWatercolor,
@@ -665,6 +626,24 @@ mod tests {
             DefaultBrushPreset::NaturalBlender,
         ] {
             default_brush(preset).validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn dry_authoring_values_roundtrip_and_reject_undefined_contact_fields() {
+        let mut brush = default_brush(DefaultBrushPreset::Charcoal);
+        let bytes = serde_json::to_vec(&brush).unwrap();
+        let decoded: BrushSnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded, brush);
+        let model = brush.contact.unwrap().dry.unwrap();
+        assert_eq!(model.pose(0.), model.poses[0]);
+        assert_eq!(model.pose(0.5), model.poses[1]);
+        assert_eq!(model.pose(1.), model.poses[2]);
+        for (softness, relief) in [(0., 0.), (f32::NAN, 0.), (0.07, -0.01), (0.07, f32::INFINITY)] {
+            let dry = brush.contact.as_mut().unwrap().dry.as_mut().unwrap();
+            dry.softness = softness;
+            dry.poses[1].relief[0] = relief;
+            assert!(brush.validate().is_err());
         }
     }
 
@@ -681,7 +660,11 @@ mod tests {
             DefaultBrushPreset::NaturalBlender,
         ] {
             let brush = default_brush(preset);
-            assert_eq!(brush.tip, BrushTip::AnalyticEllipse, "{preset:?}");
+            if let Some(dry) = brush.contact.and_then(|c| c.dry) {
+                assert!(dry.corner > 0., "{preset:?}: flat stick contact");
+            } else {
+                assert_eq!(brush.tip, BrushTip::AnalyticEllipse, "{preset:?}");
+            }
             let grain = brush.grain.expect("painter preset must provide grain");
             assert_eq!(grain.behavior, BrushGrainBehavior::Canvas, "{preset:?}");
             assert!(

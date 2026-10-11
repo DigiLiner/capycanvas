@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Gerçekçi fırça mürekkebi
 brush-preset-calligraphy-pen = Hat kalemi
 brush-preset-chalk = Tebeşir
 brush-preset-charcoal = Kömür
+brush-preset-crayon = Mum boya
 brush-preset-clone-stamp = Klonlama damgası
 brush-preset-dry-scumble = Kuru sürtme
 brush-preset-dual-texture = Çift doku

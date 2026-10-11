@@ -1726,9 +1726,38 @@ the binary and source snapshot are under `artifacts/layer-modes/rebased-build/`.
 
 ## Brushes
 
+### Dry-media contact model
+
+Measured on 2026-10-11 with the optimized native build based on `2bd956b2a`.
+Frozen production and benchmark-driver manifest SHA-256:
+`4057843e1184cbbd0adbef721c61d17ff37050428700b218eea7b8631a6a03a3`.
+APK SHA-256 `25667af66a2c341a2ab1acc26f2eecbce1178728b45fbbe3ecb65dceaa5c86ea`;
+native library SHA-256 `685494a0bbbed338bca5ccad82cae0b36bfc52218826baae4057c5eeebcca211`.
+
+The tier photo has one empty Full color paint layer above it at Fit, with the
+default workspace, Navigator, closed Stats and 16 ms prediction. Each warmed
+profile uses three six-second 200 Hz stylus contacts, pressure 1, 77° side pose,
+and a contained 60 × 10 surface-pixel ellipse. Thermal status is 0 before and
+after every profile. Rates and gaps count the first GPU completion consuming
+each new input. Prediction/refinement completions are excluded from the gate;
+input-to-GPU observations below do not measure physical screen scanout.
+
+| Profile | Fresh updates/s | Input-to-GPU p99 range |
+| --- | --- | --- |
+| Pencil 2048 px | 180.92–187.93 | 66.35–77.76 ms |
+| Charcoal 2048 px | 141.30–143.38 | 85.37–98.28 ms |
+| Pastel Block 1024 px | 190.88–193.58 | 41.24–55.08 ms |
+
+All three measured side profiles pass the 120/s rate and fresh-gap gates.
+Other poses and Pointy Pencil, Shading Pencil, Chalk and Crayon remain
+unmeasured on this tier. These rows do not qualify the whole dry-media class.
+Raw contacts, thermal records and screenshots: `artifacts/dry-media-midtop/c49-top/android/`.
+
+### Retained-photo brush measurements
+
 Target: **120 completed updates/s** at the guaranteed size, on the 61 MP canvas.
 
-Except for G-Pen and Watercolor Wash, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.5% zoom.
+Except for G-Pen, Watercolor Wash and the current dry-media rows, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.5% zoom.
 
 **The 2026-09-22 G-Pen record used a different stroke.** It recorded 105.76
 updates/s for a 2000 px G-Pen.
@@ -1749,17 +1778,18 @@ are kept separate from the 10 s comparison table below.
 | Antique Pen (30) | Simple | 2048 px | 82.0 updates/s (81.7–82.2); gap p99 26.4 ms | **Not met** |
 | Realistic Pen (31) | Simple | 2048 px | 68.5 updates/s (68.0–68.8); gap p99 31.3 ms | **Not met** |
 | Wet Ink (32) | Simple | 2048 px | 54.6 updates/s (54.4–54.8); gap p99 36.1 ms | **Not met** |
-| Pencil (2) | Simple | 2048 px | 47.2 updates/s (47.0–47.2); gap p99 32.4 ms | **Not met** |
-| Pointy Pencil (25) | Simple | 2048 px | 47.0 updates/s (46.9–47.6); gap p99 32.0 ms | **Not met** |
-| Shading Pencil (26) | Simple | 2048 px | 89.0 updates/s (88.7–89.0); gap p99 19.4 ms | **Not met** |
-| Charcoal (27) | Simple | 2048 px | 52.0 updates/s (51.9–52.2); gap p99 31.7 ms | **Not met** |
-| Chalk (6) | Simple | 2048 px | 38.5 updates/s (38.2–38.8); gap p99 45.0 ms | **Not met** |
+| Pencil (2) | Simple | 2048 px | 180.92–187.93 fresh updates/s; fresh gap p99 ≤13.28 ms | Meets measured side pose; [dry media](#dry-media-contact-model) |
+| Pointy Pencil (25) | Simple | 2048 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Shading Pencil (26) | Simple | 2048 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Charcoal (27) | Simple | 2048 px | 141.30–143.38 fresh updates/s; fresh gap p99 ≤12.50 ms | Meets measured side pose; [dry media](#dry-media-contact-model) |
+| Chalk (6) | Simple | 2048 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Crayon (43) | Simple | 2048 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 2048 px | 49.7 updates/s (49.6–49.9); gap p99 46.0 ms | **Not met** |
 | Airbrush (5) | Simple | 2048 px | 59.7 updates/s (59.5–60.6); gap p99 30.9 ms | **Not met** |
 | Marker (7) | Complex | 1024 px | 103.5 updates/s (103.1–103.7); gap p99 20.7 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 117.8 updates/s (117.1–118.4); gap p99 17.0 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 112.5 updates/s (111.8–112.7); gap p99 18.3 ms | **Not met** |
-| Pastel Block (17) | Complex | 1024 px | 82.8 updates/s (82.1–82.8); gap p99 22.2 ms | **Not met** |
+| Pastel Block (17) | Complex | 1024 px | 190.88–193.58 fresh updates/s; fresh gap p99 ≤11.39 ms | Meets measured side pose; [dry media](#dry-media-contact-model) |
 | Paintbrush (4) | Complex | 1024 px | 90.58 (90.07–90.78) fresh updates/s; completion-gap p99 23.52–24.55 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
 | Textured Flat (15) | Complex | 1024 px | 109.2 updates/s (108.8–110.0); gap p99 19.0 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 87.7 updates/s (87.4–88.0); gap p99 22.7 ms | **Not met** |

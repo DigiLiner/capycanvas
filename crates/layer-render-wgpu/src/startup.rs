@@ -143,23 +143,42 @@ impl Requirements {
             self.compute.extend(r.selection_clip.pipelines().map(Clone::clone));
         }
         if mask {
-            let index = usize::from(matches!(style.tip, BrushTip::Mask(_))) * 2
-                + usize::from(style.mode == DabMode::Erase);
+            let index = layer_masks::MaskRenderer::brush_index(style);
             self.render.push(r.layer_masks.brush[index].clone());
             return;
         }
         let plan = BrushPassPlan::for_device(style, &r.device);
         if pointwise(style) && plan.direct.is_none() {
-            let kernels = &r.pipelines.dry_material;
-            self.compute.push(kernels.kernel(style, plan.material, plan.state.coverage).clone());
-            if preview { self.compute.push(kernels.kernel(style, plan.material, false).clone()); }
-            if preview && dry_material::display_preview_eligible(style) {
-                self.compute.push(r.pipelines.dry_display.kernel(style, plan.material, false).clone());
-                self.compute.push(r.pipelines.dry_display.contribution_kernel(style,plan.material).clone());
-                if let Some(tracked)=&r.pipelines.dry_display_tracked {self.compute.push(tracked.contribution_kernel(style,plan.material).clone());}
+            let aggregated=style.execution==BrushExecution::Dry
+                && style.contact.is_some_and(|c|c.dry.is_some())
+                && style.rendering.accumulation==BrushAccumulation::Flow;
+            let fine=style.contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.));
+            if aggregated && plan.material==MaterialOperation::Deposit {
+                if !plan.state.coverage || preview {self.compute.push(r.pipelines.dry_material.copy_kernel(false).clone());}
+                if preview && dry_material::native_dry_preview_eligible(style) {
+                    for contribution in [false,true] {
+                        self.compute.push(r.pipelines.dry_display.copy_kernel(contribution).clone());
+                        if let Some(tracked)=&r.pipelines.dry_display_tracked {
+                            self.compute.push(tracked.copy_kernel(contribution).clone());
+                        }
+                    }
+                }
             }
-            for in_place in r.pipelines.dry_in_place.iter().chain(&r.pipelines.dry_tracked) {
-                self.compute.push(in_place.kernel(style, plan.material, plan.state.coverage).clone());
+            for extra in [0,8192,16384,8192|16384].into_iter()
+                .filter(|extra| (*extra&8192==0 || aggregated) && (*extra&16384==0 || fine)) {
+                let kernels=&r.pipelines.dry_material;
+                self.compute.push(kernels.selected_kernel(style,plan.material,plan.state.coverage,extra).clone());
+                if preview {self.compute.push(kernels.selected_kernel(style,plan.material,false,extra).clone());}
+                if preview && (dry_material::display_preview_eligible(style) || dry_material::native_dry_preview_eligible(style)) {
+                    self.compute.push(r.pipelines.dry_display.selected_kernel(style,plan.material,false,extra).clone());
+                    self.compute.push(r.pipelines.dry_display.selected_kernel(style,plan.material,false,1024|extra).clone());
+                    if let Some(tracked)=&r.pipelines.dry_display_tracked {
+                        self.compute.push(tracked.selected_kernel(style,plan.material,false,1024|extra).clone());
+                    }
+                }
+                for in_place in r.pipelines.dry_in_place.iter().chain(&r.pipelines.dry_tracked) {
+                    self.compute.push(in_place.selected_kernel(style,plan.material,plan.state.coverage,extra).clone());
+                }
             }
         }
         if let Some(kind) = plan.direct {
@@ -767,7 +786,7 @@ mod gpu_tests {
         );
         for coverage in [false, true] {
             assert!(renderer.pipelines.dry_material
-                .kernel(&layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush), MaterialOperation::Coverage, coverage).ready(),
+                .selected_kernel(&layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush), MaterialOperation::Coverage, coverage,0).ready(),
                 "G-Pen commit and prediction kernels must be ready before input is enabled");
         }
         let unselected = [layer_core::DefaultBrushPreset::WatercolorWash,
@@ -887,18 +906,42 @@ mod gpu_tests {
         let mut renderer = crate::test_support::staged_renderer(&reference, color);
         let mut document = Document::new(layer_core::authored::PortableId::random(), 128, 128, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
         document.artwork.compositions.get_mut(document.artwork.root).unwrap().blend=layer_core::BlendSpace::Perceptual;
-        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Airbrush);
-        brush.rendering.accumulation = BrushAccumulation::Flow;
-        brush.rendering.wet_edge = 0.5;
-        renderer.prepare_startup(&document, &brush, false).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("compilation timed out"));
-        let style = layer_render::DabStyle { blend_space: document.composition().blend, ..layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush) };
-        let plan = BrushPassPlan::for_device(&style, &renderer.device);
-        assert!(plan.direct.is_none() && plan.material == MaterialOperation::Deposit);
-        let pipelines = &renderer.pipelines;
-        let commit = pipelines.dry_in_place.as_ref().unwrap_or(&pipelines.dry_material).kernel(&style, plan.material, plan.state.coverage);
-        assert!(commit.ready() && pipelines.dry_material.kernel(&style, plan.material, false).ready(), "the deposit kernels are ready before input");
+        for preset in [layer_core::DefaultBrushPreset::Airbrush,layer_core::DefaultBrushPreset::Pencil,
+            layer_core::DefaultBrushPreset::Charcoal,layer_core::DefaultBrushPreset::PastelBlock] {
+            let mut brush=layer_core::default_brush(preset);
+            if preset==layer_core::DefaultBrushPreset::Airbrush {
+                brush.rendering.accumulation=BrushAccumulation::Flow;
+                brush.rendering.wet_edge=0.5;
+            }
+            renderer.prepare_startup(&document,&brush,false).unwrap();
+            let deadline=std::time::Instant::now()+Duration::from_secs(30);
+            crate::test_support::wait_startup(&mut renderer,deadline,|progress|progress.brush_ready,format_args!("{preset:?} compilation timed out"));
+            let style=layer_render::DabStyle {blend_space:document.composition().blend,..layer_render::DabStyle::for_brush(&brush,StrokeTool::Brush)};
+            let plan=BrushPassPlan::for_device(&style,&renderer.device);
+            assert!(plan.direct.is_none() && plan.material==MaterialOperation::Deposit);
+            let p=&renderer.pipelines;
+            for kernels in [&p.dry_material,&p.dry_display].into_iter()
+                .chain(p.dry_in_place.iter()).chain(p.dry_tracked.iter()) {
+                assert!(kernels.selected_kernel(&style,plan.material,plan.state.coverage,0).ready(),"{preset:?} ordinary destination is ready");
+                if brush.contact.is_some_and(|c|c.dry.is_some()) {
+                    for extra in [8192,16384,8192|16384].into_iter().filter(|extra|
+                        *extra&16384==0 || brush.contact.unwrap().dry.unwrap().corner==0.) {
+                        assert!(kernels.selected_kernel(&style,plan.material,plan.state.coverage,extra).ready(),"{preset:?} actual batch variant {extra} is ready");
+                    }
+                }
+            }
+            if brush.contact.is_some_and(|c|c.dry.is_some()) {
+                assert!(p.dry_material.copy_kernel(false).ready());
+                for contribution in [false,true] {
+                    assert!(p.dry_display.copy_kernel(contribution).ready());
+                    if let Some(tracked)=&p.dry_display_tracked {assert!(tracked.copy_kernel(contribution).ready());}
+                }
+                assert!(p.dry_display.selected_kernel(&style,plan.material,false,1024|8192).ready(),"{preset:?} single-pigment contribution is ready");
+                if let Some(tracked)=&p.dry_display_tracked {
+                    assert!(tracked.selected_kernel(&style,plan.material,false,1024|8192).ready(),"{preset:?} tracked contribution is ready");
+                }
+            }
+        }
     }
 
     #[test]
@@ -914,8 +957,8 @@ mod gpu_tests {
             crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("{preset:?} compilation timed out"));
             let style = layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush);
             let pipelines = &renderer.pipelines;
-            let prediction = pipelines.dry_material.kernel(&style, MaterialOperation::Clone, false);
-            let commit = pipelines.dry_in_place.as_ref().unwrap_or(&pipelines.dry_material).kernel(&style, MaterialOperation::Clone, true);
+            let prediction = pipelines.dry_material.selected_kernel(&style, MaterialOperation::Clone, false,0);
+            let commit = pipelines.dry_in_place.as_ref().unwrap_or(&pipelines.dry_material).selected_kernel(&style, MaterialOperation::Clone, true,0);
             assert!(prediction.ready() && commit.ready(), "{preset:?} commit and prediction kernels are ready before input");
         }
     }

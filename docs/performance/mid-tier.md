@@ -536,13 +536,40 @@ Run ranges overlap; the samples do not establish a throughput change. This
 12 MP comparison on Huion does not qualify the 24 MP reference-tier targets.
 Reports: `artifacts/simplification-cleanup/performance/m28/`.
 
+### Dry-media contact model
+
+Measured on 2026-10-11 with the optimized native build based on `2bd956b2a`.
+Frozen production and benchmark-driver manifest SHA-256:
+`4057843e1184cbbd0adbef721c61d17ff37050428700b218eea7b8631a6a03a3`.
+APK SHA-256 `25667af66a2c341a2ab1acc26f2eecbce1178728b45fbbe3ecb65dceaa5c86ea`;
+native library SHA-256 `685494a0bbbed338bca5ccad82cae0b36bfc52218826baae4057c5eeebcca211`.
+
+The tier photo has one empty Full color paint layer above it at Fit, with the
+default workspace, Navigator, closed Stats and 16 ms prediction. Each warmed
+profile uses three six-second 200 Hz stylus contacts, pressure 1, 77° side pose,
+and a contained 60 × 10 surface-pixel ellipse. Thermal status is 0 before and
+after every profile. Rates and gaps count the first GPU completion consuming
+each new input. Prediction/refinement completions are excluded from the gate;
+input-to-GPU observations below do not measure physical screen scanout.
+
+| Profile | Fresh updates/s | Input-to-GPU p99 range |
+| --- | --- | --- |
+| Pencil 1536 px | 127.60–129.10 | 30.81–31.68 ms |
+| Charcoal 1536 px | 89.67–90.59 | 43.92–44.39 ms |
+| Pastel Block 1024 px | 145.96–146.32 | 28.20–29.44 ms |
+
+Charcoal misses the 90/s rate target in one contact; its fresh gaps pass.
+Other poses and Pointy Pencil, Shading Pencil, Chalk and Crayon remain
+unmeasured on this tier. These rows do not qualify the whole dry-media class.
+Raw contacts, thermal records and screenshots: `artifacts/dry-media-midtop/c49-mid/android/`.
+
 ### Retained-photo brush measurements
 
-Except for G-Pen, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.0% zoom.
+Except for G-Pen and the current dry-media rows, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.0% zoom.
 
 The older 2048 px simple-brush rows are above the 1536 px guarantee and do not
-classify performance at the guaranteed size. Only G-Pen is remeasured at 1536 px;
-the rest of the simple class remains unqualified there.
+classify performance at the guaranteed size. G-Pen, Pencil and Charcoal have current 1536 px measurements; the remaining
+simple brushes retain unqualified rows.
 
 | Brush (id) | Class | Size | Measured | Status |
 | --- | --- | --- | --- | --- |
@@ -552,17 +579,18 @@ the rest of the simple class remains unqualified there.
 | Antique Pen (30) | Simple | 2048 px | 16.2 updates/s (16.0–16.3); gap p99 171.2 ms | 1536 px unmeasured |
 | Realistic Pen (31) | Simple | 2048 px | 13.4 updates/s (13.4–13.5); gap p99 131.6 ms | 1536 px unmeasured |
 | Wet Ink (32) | Simple | 2048 px | 11.0 updates/s (10.9–11.1); gap p99 168.6 ms | 1536 px unmeasured |
-| Pencil (2) | Simple | 2048 px | 5.3 updates/s (5.3–5.4); gap p99 225.4 ms | 1536 px unmeasured |
-| Pointy Pencil (25) | Simple | 2048 px | 5.5 updates/s (5.4–5.5); gap p99 222.4 ms | 1536 px unmeasured |
-| Shading Pencil (26) | Simple | 2048 px | 14.6 updates/s (14.5–14.9); gap p99 89.2 ms | 1536 px unmeasured |
-| Charcoal (27) | Simple | 2048 px | 4.4 updates/s (4.3–4.4); gap p99 295.9 ms | 1536 px unmeasured |
-| Chalk (6) | Simple | 2048 px | 3.8 updates/s (3.7–3.8); gap p99 324.4 ms | 1536 px unmeasured |
+| Pencil (2) | Simple | 1536 px | 127.60–129.10 fresh updates/s; fresh gap p99 ≤11.25 ms | Meets measured side pose; [dry media](#dry-media-contact-model) |
+| Pointy Pencil (25) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Shading Pencil (26) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Charcoal (27) | Simple | 1536 px | 89.67–90.59 fresh updates/s; fresh gap p99 ≤16.13 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Chalk (6) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Crayon (43) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 2048 px | 7.1 updates/s (7.0–7.2); gap p99 174.5 ms | 1536 px unmeasured |
 | Airbrush (5) | Simple | 2048 px | 9.7 updates/s (9.7–9.9); gap p99 135.9 ms | 1536 px unmeasured |
 | Marker (7) | Complex | 1024 px | 22.7 updates/s (22.6–22.8); gap p99 84.3 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 20.1 updates/s (19.9–20.2); gap p99 90.2 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 19.6 updates/s (19.5–19.6); gap p99 136.3 ms | **Not met** |
-| Pastel Block (17) | Complex | 1024 px | 18.2 updates/s (18.2–18.4); gap p99 107.3 ms | **Not met** |
+| Pastel Block (17) | Complex | 1024 px | 145.96–146.32 fresh updates/s; fresh gap p99 ≤10.41 ms | Meets measured side pose; [dry media](#dry-media-contact-model) |
 | Paintbrush (4) | Complex | 1024 px | 24.74 (24.73–24.93) fresh updates/s; completion-gap p99 82.59–91.12 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
 | Textured Flat (15) | Complex | 1024 px | 25.5 updates/s (25.4–25.5); gap p99 107.0 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 14.0 updates/s (14.0–14.3); gap p99 144.9 ms | **Not met** |

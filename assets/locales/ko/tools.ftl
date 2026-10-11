@@ -6,6 +6,7 @@ brush-preset-brushed-ink = 사실적인 먹 붓
 brush-preset-calligraphy-pen = 캘리그래피 펜
 brush-preset-chalk = 분필
 brush-preset-charcoal = 목탄
+brush-preset-crayon = 크레용
 brush-preset-clone-stamp = 복제 도장
 brush-preset-dry-scumble = 마른 덧칠
 brush-preset-dual-texture = 이중 질감

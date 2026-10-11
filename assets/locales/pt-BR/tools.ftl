@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Tinta realista com pincel
 brush-preset-calligraphy-pen = Caneta de caligrafia
 brush-preset-chalk = Giz
 brush-preset-charcoal = Carvão vegetal
+brush-preset-crayon = Giz de cera
 brush-preset-clone-stamp = Carimbo de clonagem
 brush-preset-dry-scumble = Esfregaço seco
 brush-preset-dual-texture = Textura dupla

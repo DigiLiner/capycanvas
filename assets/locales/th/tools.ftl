@@ -6,6 +6,7 @@ brush-preset-brushed-ink = หมึกพู่กันสมจริง
 brush-preset-calligraphy-pen = ปากกาประดิษฐ์อักษร
 brush-preset-chalk = ชอล์ก
 brush-preset-charcoal = ถ่านวาดภาพ
+brush-preset-crayon = สีเทียน
 brush-preset-clone-stamp = ตราประทับสำเนา
 brush-preset-dry-scumble = ป้ายสีแห้ง
 brush-preset-dual-texture = พื้นผิวคู่

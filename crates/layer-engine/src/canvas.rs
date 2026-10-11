@@ -1735,12 +1735,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     brush.color_rgba_linear = [1.0, 1.0, 1.0, brush.color_rgba_linear[3]];
                     brush.color_dynamics = Default::default();
                     brush.execution = BrushExecution::Dry;
-                    brush.grain = None;
-                    // Retain contact geometry while disabling the removed paper material.
-                    if let Some(contact) = &mut brush.contact {
-                        contact.paper = 0.0;
+                    if !brush.contact.is_some_and(|c| c.dry.is_some()) {
+                        brush.grain = None;
+                        if let Some(contact) = &mut brush.contact { contact.paper = 0.; }
+                        brush.rendering = Default::default();
                     }
-                    brush.rendering = Default::default();
                     brush.transport = None;
                     brush.wet_mix = Default::default();
                     brush.deform = Default::default();
@@ -2154,7 +2153,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             generator.append(point, &active.brush, &mut self.dabs);
         }
         let predicted_dab_start = self.dabs.len();
-        let taper_start = generator.modeled_distance() / active.brush.diameter.max(0.01);
+        let taper_start = generator.modeled_position().unwrap_or(latest.position);
         let taper = estimate.source == TipSource::Engine;
         for point in active.prediction.preview_points(
             latest,
@@ -2184,7 +2183,6 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             taper_prediction(
                 &mut self.dabs[predicted_dab_start..],
                 taper_start,
-                generator.modeled_distance() / active.brush.diameter.max(0.01),
             );
         }
         if self.dabs.len() > start {

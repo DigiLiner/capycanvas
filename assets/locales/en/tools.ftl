@@ -6,6 +6,7 @@ brush-preset-brushed-ink = Realistic Brushed Ink
 brush-preset-calligraphy-pen = Calligraphy Pen
 brush-preset-chalk = Chalk
 brush-preset-charcoal = Charcoal
+brush-preset-crayon = Crayon
 brush-preset-clone-stamp = Clone Stamp
 brush-preset-dry-scumble = Dry Scumble
 brush-preset-dual-texture = Dual Texture
