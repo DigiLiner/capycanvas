@@ -3,9 +3,12 @@
 #include "WorkspaceGeometry.h"
 #include "WorkspaceShadow.h"
 #include "WorkspaceQuery.h"
+#include "LayersView.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
+#include <winrt/Windows.UI.ViewManagement.h>
 #include <chrono>
 #include <set>
+#include <cmath>
 
 using namespace CapyUi;
 namespace {
@@ -38,6 +41,21 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
     std::map<std::wstring,J> toolbarLayouts;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::vector<double> heights;
+    struct Inspector {
+        Grid root;
+        Canvas pages;
+        Button footer{nullptr};
+        TextBlock label{nullptr},summary{nullptr};
+        Image mark,chevron;
+        RotateTransform chevronRotation;
+        std::unique_ptr<PanelBody> properties;
+        J sizes,anchor;
+        hstring sizingKey,target;
+        double position=0,startPosition=0,targetPosition=0;
+        Clock::time_point started;
+        bool animating=false;
+    };
+    std::unique_ptr<Inspector> inspector;
     Clock::time_point started;
     bool closing=false,animating=false,dirty=true,busy=false,layingOut=false,disposed=false;
     uint64_t generation=0;
@@ -58,7 +76,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         AutomationProperties::SetAutomationId(frame,id==L"tool"?L"tool-drawer":hstring(L"column-drawer-"+id));
         AutomationProperties::SetName(frame,id==L"tool"?L"Tool drawer":L"Column drawer");
         workspace.Children().Append(shadow.Root());workspace.Children().Append(bridge);workspace.Children().Append(frame);
-        timer=frame.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(16));
+        timer=frame.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(8));
         timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->drive();});
         frame.LayoutUpdated([weak](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
         frame.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock())self->timer.Stop();});
@@ -69,9 +87,15 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         if(disposed)return;
         auto next=current.Size()?current.Stringify():hstring{};
         if(next!=modelKey){
+            bool pageChange=inspector&&current.HasKey(L"layer_properties")&&model.HasKey(L"layer_properties")&&flag(current,L"layer_properties")!=flag(model,L"layer_properties");
             from=object(geometry,L"placement");started=Clock::now();animating=true;
             modelKey=next;closing=!current.Size();if(!closing)model=current;
             ++generation;heights.assign(array(model,L"columns").Size(),0.);wake();
+            if(pageChange){
+                inspector->startPosition=inspector->position;inspector->targetPosition=flag(model,L"layer_properties")?1.:0.;inspector->started=started;inspector->animating=true;
+                if(flag(model,L"layer_properties")){auto layer=bodies.find(L"layers");if(layer!=bodies.end()&&layer->second.view&&layer->second.view->layers)inspector->anchor=layer->second.view->layers->scrollAnchor();}
+                animating=false;
+            }
         }
         if(layout!=layoutKey){layoutKey=layout;wake();}
 
@@ -79,6 +103,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         rebuild();
         for(auto const& column:columns)for(auto const& update:column.paintIcons)update();
         for(auto& [panel,body]:bodies)if(body.view)body.view->Apply(active(panel));
+        if(inspector&&model.HasKey(L"layer_properties")){inspector->properties->Apply(flag(model,L"layer_properties"));refreshInspector();if(inspectorSizingKey()!=inspector->sizingKey)wake();}
         frame.IsHitTestVisible(!closing);bridge.IsHitTestVisible(!closing);
 
     }
@@ -94,6 +119,33 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         if(busy)return;
 
         if(closing&&!object(geometry,L"placement").Size()){timer.Stop();closed();return;}
+        if(inspector&&model.HasKey(L"layer_properties")&&!closing&&!inspector->animating&&inspector->position==0&&inspector->anchor.Size()){
+            auto layer=bodies.at(L"layers").view->layers;
+            if(layer&&layer->restoreAnchor(inspector->anchor))inspector->anchor=J{};else dirty=true;
+        }
+        double pagePosition=inspector?inspector->position:0.,pageProgress=1.;bool pageComplete=false;
+        bool motion=Windows::UI::ViewManagement::UISettings().AnimationsEnabled();
+        if(inspector&&model.HasKey(L"layer_properties")&&!closing){
+            auto layer=bodies.find(L"layers");
+            if(layer!=bodies.end()&&layer->second.view){
+                auto request=inspectorSizingRequest();auto key=inspectorSizingKey(request);
+                if(key!=inspector->sizingKey){
+                    busy=true;auto serial=generation;
+                    if(!QueryWorkspace(data->query,request,[weak=weak_from_this(),serial,key](J reply){if(auto self=weak.lock()){
+                        self->busy=false;if(self->disposed||serial!=self->generation||!self->inspector)return;
+                        self->inspector->sizingKey=key;self->inspector->sizes=object(reply,L"result");self->wake();
+                    }}))busy=false;
+                    return;
+                }
+            }
+            if(inspector->animating){
+                pageProgress=motion?std::clamp(std::chrono::duration<double>(Clock::now()-inspector->started).count()/.2,0.,1.):1.;
+                pagePosition=inspector->startPosition+(inspector->targetPosition-inspector->startPosition)*(1.-std::pow(1.-pageProgress,3));
+                pageComplete=pageProgress>=1.;dirty=true;
+            }
+            auto sizes=array(inspector->sizes,L"heights");
+            if(sizes.Size()==2)heights={sizes.GetNumberAt(0)*(1.-pagePosition)+sizes.GetNumberAt(1)*pagePosition};
+        }
         // A tile body needs the shared wrapping geometry before native measurement.
         auto placements=array(object(geometry,L"placement"),L"columns"),models=array(model,L"columns");
         if(!closing)for(uint32_t i=0;i<std::min(placements.Size(),models.Size());++i){
@@ -120,16 +172,33 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 return;
             }
         }
-        if(!dirty&&!animating){dirty=false;timer.Stop();return;}
-        float progress=animating?std::clamp(std::chrono::duration<float>(Clock::now()-started).count()/.2f,0.f,1.f):1.f;
+        if(!dirty&&!animating&&!(inspector&&inspector->animating)){dirty=false;timer.Stop();return;}
+        float progress=animating&&motion?std::clamp(std::chrono::duration<float>(Clock::now()-started).count()/.2f,0.f,1.f):1.f;
+        auto endpoints=inspector?array(inspector->sizes,L"placements"):A{};
+        J endpoint;
+        if(endpoints.Size()==2){auto value=endpoints.GetAt(flag(model,L"layer_properties")?1:0);if(value.ValueType()==JsonValueType::Object)endpoint=value.GetObject();}
+        if(inspector&&model.HasKey(L"layer_properties")&&((!closing&&endpoint.Size())||closing&&from.Size())){
+            auto end=closing?from:endpoint;
+            auto fraction=inspector->animating?pageProgress:progress;
+            auto request=O({{L"from",from.Size()?V(from):JsonValue::CreateNullValue()},{L"to",end},{L"progress",N(1.-std::pow(1.-fraction,3))},{L"closing",B(closing)}});
+            std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_drawer_frame(data->localization.get(),to_string(request.Stringify()).c_str()),capy_string_free);
+            if(!raw)throw hresult_invalid_argument(L"Drawer frame failed");
+            geometry=J::Parse(to_hstring(raw.get()));inspector->position=pagePosition;
+            if(pageComplete)inspector->animating=false;
+            if(progress>=1)animating=false;
+            dirty=false;draw();rebuild();changed();
+            if(closing&&progress>=1){timer.Stop();closed();}
+            return;
+        }
         A measured;for(auto height:heights)measured.Append(N(height));
         auto request=O({{L"type",S(L"drawer")},{L"column",id==L"tool"?JsonValue::CreateNullValue():N(std::stoul(id))},
             {L"heights",measured},{L"progress",N(progress)},{L"from",from.Size()?V(from):JsonValue::CreateNullValue()},{L"closing",B(closing)}});
         auto serial=generation;busy=true;dirty=false;
-        if(!QueryWorkspace(data->query,request,[weak=weak_from_this(),serial,progress](J reply){
+        if(!QueryWorkspace(data->query,request,[weak=weak_from_this(),serial,progress,pagePosition,pageComplete](J reply){
             if(auto self=weak.lock()){
                 self->busy=false;if(self->disposed||serial!=self->generation)return;
                 self->geometry=object(reply,L"result");
+                if(self->inspector){self->inspector->position=pagePosition;if(pageComplete)self->inspector->animating=false;}
                 if(progress>=1)self->animating=false;
                 self->draw();self->rebuild();self->changed();
                 if(self->closing&&progress>=1){self->timer.Stop();self->closed();}
@@ -158,8 +227,9 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         auto key=O({{L"columns",signature},{L"tabs",object(model,L"tabs")},{L"headers",headers}}).Stringify();
         if(key==columnsKey){placeColumns();return;}
         columnsKey=key;
-        // Detach before reusing a retained body in another native parent.
-        for(auto& column:columns){column.stack.Children().Clear();remove(content,column.frame);}
+        if(inspector)inspector->pages.Children().Clear();
+        if(!model.HasKey(L"layer_properties"))inspector.reset();
+        for(auto& column:columns){column.stack.Children().Clear();column.scroll.Content(nullptr);column.frame.Children().Clear();remove(content,column.frame);}
         columns.clear();
         std::set<std::wstring> keep;
         auto tabs=object(model,L"tabs");auto weak=weak_from_this();
@@ -231,9 +301,18 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 body.view->Root().Width(width);body.view->Apply(true);column.stack.Children().Append(body.view->Root());
             }
             AutomationProperties::SetAutomationId(column.scroll,hstring(L"drawer-slot-"+id+L"-"+std::to_wstring(i)));
-            column.scroll.Content(column.stack);column.scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
-            column.scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);column.scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
-            Grid::SetRow(column.scroll,1);column.frame.Children().Append(column.scroll);
+            if(model.HasKey(L"layer_properties")){
+                column.stack.Children().Clear();
+                if(!inspector)initInspector();
+                inspector->pages.Children().Append(bodies.at(L"layers").view->Root());
+                inspector->pages.Children().Append(inspector->properties->Root());
+                Grid::SetRow(inspector->root,1);column.frame.Children().Append(inspector->root);
+            }else{
+                column.scroll.Content(column.stack);column.scroll.VerticalScrollMode(ScrollingScrollMode::Enabled);
+                column.scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);column.scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
+                column.scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+                Grid::SetRow(column.scroll,1);column.frame.Children().Append(column.scroll);
+            }
             content.Children().Append(column.frame);columns.push_back(std::move(column));
         }
         // Retain inactive tab bodies, including their native control state.
@@ -254,6 +333,16 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 }else if(panelId==L"layers"||panelId==L"adjustments"||body.view->navigator){
                     body.view->Root().Height(body.view->navigator?272.:480.);
                 }
+            }
+            if(inspector&&model.HasKey(L"layer_properties")){
+                auto total=num(placement,L"height"),footer=num(inspector->sizes,L"footer_height",49.),page=std::max(0.,total-footer);
+                inspector->root.Width(width);inspector->root.Height(total);inspector->footer.Height(std::max(0.,footer-1.));
+                inspector->pages.Width(width);inspector->pages.Height(page);
+                RectangleGeometry clip;clip.Rect({0,0,float(width),float(page)});inspector->pages.Clip(clip);
+                auto layers=bodies.at(L"layers").view->Root(),properties=inspector->properties->Root();
+                layers.Width(width);layers.Height(std::max(1.,page));Canvas::SetTop(layers,-inspector->position*page);
+                properties.Width(width);properties.Height(std::max(1.,page));Canvas::SetTop(properties,(1.-inspector->position)*page);
+                layers.IsHitTestVisible(!flag(model,L"layer_properties"));properties.IsHitTestVisible(flag(model,L"layer_properties"));
             }
         }
     }
@@ -277,6 +366,11 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         // still arranged. Never report those heights against the new model.
         if(disposed||layingOut||!frame.IsLoaded()||columns.empty()||columns.size()!=array(model,L"columns").Size())return;
         layingOut=true;
+        if(inspector&&model.HasKey(L"layer_properties")){
+            if(!inspector->animating&&inspector->position==0&&inspector->anchor.Size())wake();
+            if(inspectorSizingKey()!=inspector->sizingKey)wake();
+            paintBackground();changed();layingOut=false;return;
+        }
         double tabHeight=object(model,L"tabs").Size()?36.:0.;
         std::vector<double> next;for(auto const& column:columns)next.push_back(column.stack.ActualHeight()+tabHeight);
         bool differs=next.size()!=heights.size();
@@ -284,6 +378,38 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         if(differs){heights=std::move(next);wake();}
         paintBackground();changed();layingOut=false;
     }
+    void initInspector(){
+        inspector=std::make_unique<Inspector>();auto& v=*inspector;auto weak=weak_from_this();
+        v.properties=std::make_unique<PanelBody>(data,panels.at(L"properties"),J{},[weak]{if(auto self=weak.lock())self->wake();},gestures,true);
+        RowDefinition page;page.Height({1,GridUnitType::Star});v.root.RowDefinitions().Append(page);
+        RowDefinition footer;footer.Height({49,GridUnitType::Pixel});v.root.RowDefinitions().Append(footer);
+        v.root.Children().Append(v.pages);
+        v.footer=button(data,L"",[data=data]{data->dispatch(O({{L"type",S(L"customize")},{L"action",O({{L"type",S(L"toggle_layer_drawer_properties")}})}}));});
+        v.footer.MinWidth(0);v.footer.Padding({8,0,8,0});v.footer.BorderThickness({0});v.footer.CornerRadius({0,0,6,6});v.footer.HorizontalAlignment(HorizontalAlignment::Stretch);v.footer.HorizontalContentAlignment(HorizontalAlignment::Stretch);v.footer.Background(clear());v.footer.FontWeight(Windows::UI::Text::FontWeights::Normal());
+        Grid face;face.ColumnSpacing(6);for(int i=0;i<3;++i){ColumnDefinition col;col.Width({i==1?1.:24.,i==1?GridUnitType::Star:GridUnitType::Pixel});face.ColumnDefinitions().Append(col);}
+        v.mark=icon(L"properties",data->theme());v.mark.HorizontalAlignment(HorizontalAlignment::Center);v.mark.VerticalAlignment(VerticalAlignment::Center);face.Children().Append(v.mark);
+        StackPanel text;text.Spacing(1);text.VerticalAlignment(VerticalAlignment::Center);
+        v.label=label(data,L"");v.summary=label(data,L"");for(auto const& line:{v.label,v.summary}){line.MaxLines(1);line.TextTrimming(TextTrimming::CharacterEllipsis);}v.summary.Opacity(.55);text.Children().Append(v.label);text.Children().Append(v.summary);Grid::SetColumn(text,1);face.Children().Append(text);
+        v.chevron=icon(L"chevron-down",data->theme());v.chevron.HorizontalAlignment(HorizontalAlignment::Center);v.chevron.VerticalAlignment(VerticalAlignment::Center);v.chevron.RenderTransformOrigin({.5f,.5f});v.chevron.RenderTransform(v.chevronRotation);Grid::SetColumn(v.chevron,2);face.Children().Append(v.chevron);v.footer.Content(face);
+        Border strip;strip.BorderThickness({0,1,0,0});strip.BorderBrush(data->tint(L"text",41));strip.Child(v.footer);Grid::SetRow(strip,1);v.root.Children().Append(strip);
+        AutomationProperties::SetAutomationId(v.root,L"layer-inspector");AutomationProperties::SetAutomationId(v.footer,L"layer-properties-disclosure");AutomationProperties::SetAutomationId(v.label,L"layer-properties-disclosure-label");
+        v.position=flag(model,L"layer_properties")?1.:0.;refreshInspector();
+    }
+    void refreshInspector(){
+        auto& v=*inspector;auto view=object(data->state,L"layer_properties"),disclosure=object(view,L"disclosure");auto open=flag(model,L"layer_properties");
+        v.label.Text(str(disclosure,open?L"return_label":L"label"));v.summary.Text(open?L"":str(disclosure,L"summary"));v.summary.Visibility(v.summary.Text().empty()?Visibility::Collapsed:Visibility::Visible);
+        v.footer.IsEnabled(open||view.GetNamedValue(L"layer",JsonValue::CreateNullValue()).ValueType()!=JsonValueType::Null);
+        AutomationProperties::SetName(v.footer,v.label.Text());ToolTipService::SetToolTip(v.footer,box_value(v.label.Text()+(v.summary.Text().empty()?L"":L"\n"+v.summary.Text())));
+        setIcon(v.mark,L"properties",data->theme());setIcon(v.chevron,L"chevron-down",data->theme());v.chevronRotation.Angle(open?0.:180.);v.label.FontSize(data->textSize());v.summary.FontSize(data->textSize()*.9);
+        auto target=CapyLayers::epochOf(data)+L":"+to_hstring(num(view,L"layer",-1));if(v.target!=target){v.target=target;v.anchor=J{};}
+    }
+    J inspectorSizingRequest()const{
+        auto layer=bodies.find(L"layers");if(!inspector||layer==bodies.end()||!layer->second.view)return J{};
+        auto measurement=layer->second.view->ScrollMetrics();if(num(measurement,L"unit_height")<=0)measurement.Insert(L"unit_height",N(40));
+        return O({{L"type",S(L"layer_drawer_sizing")},{L"measurement",measurement},{L"properties_height",N(inspector->properties->ContentHeight())}});
+    }
+    hstring inspectorSizingKey(J const& request)const{return request.Stringify()+L":"+to_hstring(array(data->state,L"layers").Size())+L":"+layoutKey+L":"+object(model,L"anchor").Stringify();}
+    hstring inspectorSizingKey()const{return inspectorSizingKey(inspectorSizingRequest());}
     void paintBackground(){
         if(!frame.IsLoaded())return;
         auto bounds=object(object(geometry,L"placement"),L"bounds");float width=float(num(bounds,L"width")),height=float(num(bounds,L"height"));

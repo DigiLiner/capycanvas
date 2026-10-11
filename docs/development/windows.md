@@ -187,6 +187,9 @@ the shared row action. `exercise-layers.ps1 -Relationships` checks these interac
 and their undo history in both themes, alongside the existing pickup fixture variants.
 The default layers fixture closes with a focused opacity draft, reopens the same
 private profile, and verifies the saved draft and its clean Undo checkpoint.
+`exercise-layer-drawer.ps1 -Theme dark|light` checks the combined header drawer,
+the six-row floor and seventh-row growth, compact Properties, footer alignment,
+Lock/Unlock, Duplicate, Delete and Undo. The VM fixture is `layer-drawer`.
 
 Each imported image has one ordinary Object layer row. Its shared layer ID owns
 the thumbnail, selection, visibility, masks, locks, context menu and reordering.

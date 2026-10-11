@@ -67,6 +67,19 @@ derives its item count from each toolbar's saved panel configuration.
 expanded panels are described in [panel customization](panel-customization.md). `SetLayerOpacity` may omit `id` to
 target the live active layer instead of resolving it from a frontend snapshot.
 
+`ContentDrawer` uses one control factory for header and toolbar openers. Its
+columns compose Color with Palettes; Layers carries the Properties page state.
+`LayerDrawerSizing::pages` sets both page heights from native measurements.
+The native sizing query includes both placements. Android, Apple and Windows
+cache those endpoints and call stateless `drawer_frame` on their UI clocks;
+container, column and bridge geometry advance without a render-owner query
+per frame. Opener, workspace, viewport and content measurements invalidate the cache.
+Windows layout callbacks invalidate measurements; the native timer restores
+list anchors after those callbacks return.
+`LayerState::swipe_actions` publishes ordered, localized, enabled actions using
+document validation. Hosts forward those actions and retain native measurement,
+scroll positions, contact capture and animation timing.
+
 ## Docking
 
 `UiState.workspace` is the authoritative `WorkspaceState`: format version,

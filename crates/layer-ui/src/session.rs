@@ -3181,7 +3181,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 (LAYOUT, false)
             }
             UiAction::Customize { action } => {
-                let opening_drawer = matches!(action, CustomizationAction::ToggleHeaderDrawer {..} | CustomizationAction::ToggleToolDrawer {..});
                 if matches!(action, CustomizationAction::ToggleLayerDrawerProperties)
                     && !self.state.layer_properties.drawer_toggle_enabled(self.state.customization.drawer.as_ref()
                         .is_some_and(|drawer| drawer.layer_properties == Some(true))) {
@@ -3204,12 +3203,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                     viewport,
                 &self.state.localization,
                 )?;
-                if opening_drawer && self.state.platform == Platform::Gtk
-                    && self.managed_workspace.as_ref().map_or(self.state.workspace.layout.panel_group(Panel::Layers).is_none(), |w| w.id == "builtin:workspace:painter")
-                    && let Some(drawer) = self.state.customization.drawer.as_mut().filter(|d| d.columns == [vec![Panel::Layers]])
-                {
-                    drawer.layer_properties = Some(false);
-                }
                 if editing_header && self.state.workspace.zen_mode {
                     self.state.workspace.zen_mode = false;
                     changed |= LAYOUT;
@@ -5843,6 +5836,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             let l = scene.occurrence(id).expect("placed occurrence");
             let source = scene.source_target(id);
             let drawing = drawing_owner == Some(id) || self.selection_masks.target() == Some(layer_core::SelectionTarget::Saved(id));
+            let can_delete = doc.can_delete_layers(&if collapsed.contains(&id) {
+                scene.order().iter().copied().filter(|h| *h == id || layer_core::descends_from(scene, *h, Some(id))).collect()
+            } else { vec![id] });
             LayerState {
             id: occurrence_token(id),
             selection_layer: l.kind() == LayerKind::Selection,
@@ -5866,11 +5862,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if l.opacity < 1. { parts.push(format!("{}%", (l.opacity * 100.).round() as u32)); }
                 parts.join(" · ")
             },
-            can_delete: doc.can_delete_layers(&if collapsed.contains(&id) {
-                doc.scene().order().iter().copied().filter(|h| *h == id || layer_core::descends_from(doc.scene(), *h, Some(id))).collect()
-            } else { vec![id] }),
-            can_lock: LayerControls::for_layer(doc, id, l).edit_lock,
-            can_duplicate: !scene.parent(id).is_some_and(|parent| doc.is_locked(parent)),
+            can_delete,
+            swipe_actions: art_layers::swipe_actions(doc, id, l, can_delete, &self.state.localization),
             visible: doc.effective_visibility(id),
             visibility_blocked: l.is_artwork() && l.visible && !scene.visible(id),
             adjustment_effect: scene.effect(id).is_some_and(|fx| fx.program.kind == layer_core::EffectKind::Adjustment),
@@ -5948,7 +5941,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 id: 0, selection_layer: true, quick_mask: true, can_rename: false, has_thumbnail: true,
                 content_icon: Some("layer-selection-brush-symbolic".into()),
                 label: self.localization().text(MessageId::COMMAND_QUICK_MASK).to_string(), description: String::new(),
-                can_delete: true, can_lock: false, can_duplicate: false, visible: self.selection_masks.quick_visible,
+                can_delete: true, swipe_actions:vec![LayerSwipeAction {id:"delete", label:self.localization().text(MessageId::COMMON_DELETE), enabled:true, action:LayerAction::Delete {id:0}}], visible: self.selection_masks.quick_visible,
                 visibility_blocked: false, adjustment_effect: false,
                 opacity: 1., selected: true, mask_selected: false, content_selected: true, selection_icon: "layer-brush-symbolic",
                 load_selection_tooltip: "Finish Quick Mask and use it as the current selection",
@@ -15830,7 +15823,7 @@ mod tests {
                             &vec![400.; previous.columns.len()],
                         )
                         .unwrap();
-                    let mut next = ContentDrawer::for_tile(
+                    let next = ContentDrawer::for_tile(
                         &s.state.workspace.layout,
                         TileAnchor {
                             panel: Panel::Toolbar,
@@ -15864,9 +15857,6 @@ mod tests {
                         "Press retains the drawer until activation"
                     );
                     let change = activate(&mut s, tile);
-                    if next.columns == [vec![Panel::Color]] {
-                        next.columns[0].push(Panel::Palettes);
-                    }
                     assert_eq!(s.state.customization.drawer.as_ref().unwrap(), &next);
                     assert_ne!(change.regions & regions::CUSTOMIZATION, 0);
                     if tile != color {

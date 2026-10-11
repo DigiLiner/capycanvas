@@ -34,7 +34,7 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
         }else if(str(panel,L"id")==L"filter_types"&&shows(panel,L"filter_types")){
             root=FilterTypesPanel(data,bindings);
         }else if(str(panel,L"id")==L"layers"){
-            auto view=LayersPanel(data,bindings,&contentHeight,&scrollMetrics);root=view;
+            auto view=LayersPanel(data,bindings,&contentHeight,&scrollMetrics,&layers);root=view;
         }else if(str(panel,L"id")==L"palettes"){
             root=PalettesPanel(data,bindings,&contentHeight,&scrollMetrics);
         }else if(tileGeometry.Size()){
@@ -160,7 +160,7 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
             StackPanel content;content.Spacing(data->panelMetric(L"group_spacing"));auto panelId=str(panel,L"id");
             bool scope=panelId==L"histogram"||panelId==L"waveform";
             double inset=data->panelMetric(L"inset");
-            contentHeight=[content]{return content.ActualHeight();};
+            contentHeight=[content]{return content.DesiredSize().Height;};
             content.Padding(Thickness{inset,inset,inset,inset});
             if(panelId==L"proof"){content.VerticalAlignment(VerticalAlignment::Top);content.Children().Append(ProofPanel(data,bindings));}
             FrameworkElement fittedColor{nullptr};size_t visibleControls=0;

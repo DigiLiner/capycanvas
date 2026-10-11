@@ -423,10 +423,18 @@ pub struct LayerDrawerSizing {
 }
 impl LayerDrawerSizing {
     pub const MAX_HEIGHT_FRACTION: f32 = 0.85;
+    pub const FOOTER_HEIGHT: f32 = PropertyDisclosure::HEIGHT + 1.;
+    pub fn pages(measurement: crate::PanelScrollMeasurement, rows: usize, viewport_height: f32, properties_height: f32) -> [f32; 2] {
+        [None, Some(properties_height)].map(|properties_height| {
+            let mut sizing = Self::default();
+            sizing.update(measurement, rows, viewport_height, properties_height);
+            sizing.height()
+        })
+    }
     pub fn height(self) -> f32 { self.height }
     pub fn update(&mut self, measurement: crate::PanelScrollMeasurement, rows: usize, viewport_height: f32, properties_height: Option<f32>) -> bool {
         let limit = viewport_height * Self::MAX_HEIGHT_FRACTION;
-        let footer = PropertyDisclosure::HEIGHT + 1.;
+        let footer = Self::FOOTER_HEIGHT;
         let default = measurement.fixed_height + 6. * measurement.unit_height;
         let height = (properties_height.map_or(measurement.fixed_height + rows.max(6) as f32 * measurement.unit_height,
             |height| height.max(default)) + footer).min(limit);

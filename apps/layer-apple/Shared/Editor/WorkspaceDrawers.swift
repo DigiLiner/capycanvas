@@ -113,7 +113,9 @@ private struct WorkspaceContentDrawer: View {
                                 WorkspacePanelHeader(store: store, group: tabs.replacing("id", with: tabs["group"]), drawer: true)
                             }
                             GeometryReader { clip in
-                                EditorScrollView(.vertical, showsIndicators: false) {
+                                if !drawer.model["layer_properties"].isNull {
+                                    LayerInspector(store: store, drawer: drawer, width: bounds.rect.width, height: bounds.rect.height)
+                                } else { EditorScrollView(.vertical, showsIndicators: false) {
                                     VStack(spacing: 6) {
                                         ForEach(drawer.model["columns"][index].array.indices, id: \.self) { row in
                                             let panel = drawer.panel(drawer.model["columns"][index][row])
@@ -127,6 +129,7 @@ private struct WorkspaceContentDrawer: View {
                                         })
                                 }.environment(\.drawerColumn, UInt64(drawer.id))
                                     .environment(\.workspaceClip, clip.frame(in: .named("editor-workspace")))
+                                }
                             }
                         }.placed(bounds)
                     }
@@ -153,6 +156,65 @@ private struct WorkspaceContentDrawer: View {
         }
     }
 
+}
+
+private struct LayerInspector: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject var store: EditorStore
+    @ObservedObject var drawer: ContentDrawerPresentation
+    let width: CGFloat
+    let height: CGFloat
+    @State private var measurement = JSON(["fixed_height": 0, "unit_height": 40])
+    @State private var propertiesHeight: CGFloat = 0
+    @State private var footerHover = false
+    private var open: Bool { drawer.model["layer_properties"].bool }
+    private var footerHeight: CGFloat { drawer.layerSizes.isNull ? 49 : drawer.layerSizes["footer_height"].number }
+    private var sizingKey: String { JSON([measurement.raw, propertiesHeight, width, store.state["layers"].array.count, store.state["camera"]["viewport"].raw, drawer.sizingContext]).stableKey }
+    var body: some View {
+        let view = store.state["layer_properties"], disclosure = view["disclosure"]
+        let label = disclosure[open ? "return_label" : "label"].string
+        let summary = open ? "" : disclosure["summary"].string
+        let pageHeight = max(0, height - footerHeight), palette = EditorPalette(source: store.state["palette"])
+        VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                LayerPanel(store: store, panel: store.panel("layers"), drawerPagePosition: drawer.pagePosition)
+                    .environment(\.measuresWorkspacePanel, true)
+                    .frame(width: width, height: max(pageHeight, measurement["fixed_height"].number + measurement["unit_height"].number))
+                    .offset(y: -drawer.pagePosition * pageHeight).allowsHitTesting(!open).accessibilityHidden(open)
+                    .onPreferenceChange(PanelSizeFacts.self) { facts in
+                        let fixed = facts.filter { $0.key.panel == "layers" && $0.key.kind == .fixed }.values.reduce(0, +)
+                        let unit = facts.filter { $0.key.panel == "layers" && $0.key.kind == .unit }.values.max() ?? 40
+                        let next = JSON(["fixed_height": fixed, "unit_height": unit])
+                        if next.stableKey != measurement.stableKey { measurement = next }
+                    }
+                EditorScrollView(.vertical) {
+                    LayerPropertiesPanel(store: store).padding(8)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { propertiesHeight = $0 }
+                }.frame(width: width, height: pageHeight).offset(y: (1 - drawer.pagePosition) * pageHeight)
+                    .allowsHitTesting(open).accessibilityHidden(!open)
+            }.frame(height: pageHeight, alignment: .topLeading).contentShape(Rectangle()).clipped().accessibilityIdentifier("layer-properties-pages")
+            Rectangle().fill(palette["text"].opacity(0.16)).frame(height: 1).accessibilityHidden(true)
+            Button { store.customize(["type": "toggle_layer_drawer_properties"]) } label: {
+                HStack(spacing: 6) {
+                    SharedIcon(name: "properties").frame(width: 16, height: 16).frame(width: 24, height: 24)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(label).lineLimit(1).accessibilityIdentifier("layer-properties-disclosure-label")
+                        if !summary.isEmpty { Text(summary).font(.system(size: store.catalog["text_size_pt"].number * 0.9)).foregroundStyle(palette["text"].opacity(0.55)).lineLimit(1) }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    SharedIcon(name: "chevron-down").frame(width: 16, height: 16).rotationEffect(.degrees(open ? 0 : 180)).frame(width: 24, height: 24)
+                }.padding(.horizontal, 8).frame(height: footerHeight - 1).contentShape(Rectangle())
+            }.buttonStyle(EditorControlButtonStyle(active: footerHover, joinedEdge: "top"))
+                .onHover { footerHover = $0 }.disabled(!open && view["layer"].isNull).help([label, summary].filter { !$0.isEmpty }.joined(separator: "\n"))
+                .accessibilityIdentifier("layer-properties-disclosure")
+        }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onChange(of: reduceMotion, initial: true) { _, value in drawer.reduceMotion = value }
+            .task(id: sizingKey) {
+                let result: JSON = await withCheckedContinuation { c in
+                    store.query(["type": "layer_drawer_sizing", "measurement": measurement.raw, "properties_height": propertiesHeight]) { c.resume(returning: $0) }
+                }
+                if !Task.isCancelled { drawer.measureLayerPages(result) }
+            }
+    }
 }
 
 private struct DrawerPanelBody: View {

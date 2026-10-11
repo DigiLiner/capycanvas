@@ -824,17 +824,17 @@ impl LayerPanel {
                 let swipe = crate::swipe_row::SwipeRow::new(&root,
                     glib::clone!(#[weak] item, #[strong] owner, move || {
                         if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            action(&w, A::Delete { id: row.id });
+                            if let Some(model) = row.swipe_actions.iter().find(|model|model.id == "delete") { action(&w, model.action.clone()); }
                         }
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
                         if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            action(&w, A::Lock { id: row.id, value: !row.locked });
+                            if let Some(model) = row.swipe_actions.iter().find(|model|model.id == "lock") { action(&w, model.action.clone()); }
                         }
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
                         if let (Some(row), Some(w)) = (row_state(&item), owner.borrow().upgrade()) {
-                            action(&w, A::Duplicate { id: row.id });
+                            if let Some(model) = row.swipe_actions.iter().find(|model|model.id == "duplicate") { action(&w, model.action.clone()); }
                         }
                     }),
                     glib::clone!(#[weak] item, #[strong] owner, move || {
@@ -1501,7 +1501,7 @@ impl Row {
             self.mask_image.set_paintable(None::<&gdk::Paintable>);
         }
         self.root.set_widget_name(&format!("art-layer-{}", s.id));
-        self.swipe.set_actions(s, &copy.layer);
+        self.swipe.set_actions(s);
         let thumbnail = s.has_thumbnail && !s.adjustment_effect;
         self.effect_icon.set_visible(s.group || s.content_icon.is_some() && !s.selection_layer);
         self.content_image.set_visible(thumbnail);

@@ -286,6 +286,12 @@ pub unsafe extern "C" fn capy_apple_toolbar_ui(json: *const c_char) -> *mut c_ch
 /// # Safety
 /// `json` is readable NUL-terminated UTF-8 for this call.
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_drawer_frame(json: *const c_char) -> *mut c_char {
+    unsafe { stateless_json(json, "Missing drawer frame", layer_ui::drawer_frame) }
+}
+/// # Safety
+/// `json` is readable NUL-terminated UTF-8 for this call.
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_native_caption(json: *const c_char) -> *mut c_char {
     unsafe { stateless_json(json, "Missing caption request", |source| {
         let (localization, request) = control_request::<layer_ui::NativeCaption>(source)?;

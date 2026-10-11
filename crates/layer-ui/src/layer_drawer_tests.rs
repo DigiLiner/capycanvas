@@ -1,4 +1,33 @@
 #[test]
+fn layer_drawer_frames_resize_retained_pages_and_bridge_together() {
+    let from = DrawerPlacement {
+        bounds: Bounds {x:700., y:56., width:280., height:300.},
+        anchor: Bounds {x:800., y:12., width:36., height:36.},
+        direction: Edge::Bottom,
+        columns: vec![Bounds {x:0., y:0., width:280., height:300.}],
+    };
+    let to = DrawerPlacement {
+        bounds: Bounds {height:700., ..from.bounds},
+        columns: vec![Bounds {height:700., ..from.columns[0]}],
+        ..from.clone()
+    };
+    for (progress, height) in [(0.,300.), (0.25,400.), (0.5,500.), (1.,700.)] {
+        let frame = crate::drawer_frame(&serde_json::json!({"from":from,"to":to,"progress":progress}).to_string()).unwrap();
+        assert_eq!(frame["placement"]["bounds"]["height"], height);
+        assert_eq!(frame["placement"]["columns"][0]["height"], height);
+        assert_eq!(frame["connection"]["bounds"]["y"], 48.);
+        assert_eq!(frame["connection"]["bounds"]["height"], 8.);
+    }
+    let mid = crate::drawer_frame(&serde_json::json!({"from":from,"to":to,"progress":0.5}).to_string()).unwrap();
+    let reversed = crate::drawer_frame(&serde_json::json!({"from":mid["placement"],"to":from,"progress":0.5}).to_string()).unwrap();
+    assert_eq!(reversed["placement"]["bounds"]["height"], 400.);
+    assert_eq!(reversed["placement"]["columns"][0]["height"], 400.);
+    let closing = crate::drawer_frame(&serde_json::json!({"from":from,"to":from,"progress":1.,"closing":true}).to_string()).unwrap();
+    assert_eq!(closing["placement"]["bounds"]["height"], 0.);
+    assert!(closing["connection"].is_null());
+}
+
+#[test]
 fn layer_drawer_sizes_each_page_immediately_within_the_viewport() {
     let measurement = crate::PanelScrollMeasurement {fixed_height:100., unit_height:40.};
     let mut sizing = LayerDrawerSizing::default();
@@ -123,8 +152,7 @@ fn sketch_layer_drawer_properties_scope_and_dismissal() {
         let id = s.state.workspace.layout.header.entries().find(|e| e.item == HeaderItem::Tool {control:ToolbarControl::Panel {panel:Panel::Layers}}).unwrap().id;
         s.dispatch(UiAction::MeasureHeader {height:60.,items:vec![HeaderItemBounds {id,bounds:Bounds {x:800.,y:0.,width:40.,height:60.}}]}).unwrap();
         customize(&mut s, CustomizationAction::ToggleHeaderDrawer {id});
-        assert_eq!(s.state.customization.drawer.as_ref().unwrap().layer_properties, (platform == Platform::Gtk).then_some(false));
-        if platform != Platform::Gtk { continue }
+        assert_eq!(s.state.customization.drawer.as_ref().unwrap().layer_properties, Some(false));
         let layout = s.state.workspace.clone();
         let history = s.capture_workspace();
         customize(&mut s, CustomizationAction::ToggleLayerDrawerProperties);
@@ -153,7 +181,7 @@ fn sketch_layer_drawer_properties_scope_and_dismissal() {
         let id = s.state.workspace.layout.header.entries().find(|e| e.item == HeaderItem::Tool {control:ToolbarControl::Panel {panel:Panel::Layers}}).unwrap().id;
         s.dispatch(UiAction::MeasureHeader {height:60.,items:vec![HeaderItemBounds {id,bounds:Bounds {x:800.,y:0.,width:40.,height:60.}}]}).unwrap();
         customize(&mut s, CustomizationAction::ToggleHeaderDrawer {id});
-        assert_eq!(s.state.customization.drawer.as_ref().unwrap().layer_properties, None);
+        assert_eq!(s.state.customization.drawer.as_ref().unwrap().layer_properties, Some(false));
     }
 }
 
@@ -196,9 +224,12 @@ fn layer_swipe_actions_follow_parent_locks_and_undo() {
     for platform in Platform::ALL {
         let mut s = session(platform);
         let row = |s: &UiSession<Recorder>, id| s.state.layers.iter().find(|row| row.id == id).unwrap().clone();
-        assert!(row(&s, 1).can_lock && row(&s, 1).can_duplicate);
+        let enabled = |s: &UiSession<Recorder>, id, key| row(s, id).swipe_actions.iter().find(|action|action.id == key).is_some_and(|action|action.enabled);
+        assert_eq!(row(&s, 1).swipe_actions.iter().map(|action|action.id).collect::<Vec<_>>(), ["lock", "duplicate", "delete"]);
+        assert!(enabled(&s, 1, "lock") && enabled(&s, 1, "duplicate"));
         layer(&mut s, LayerAction::Lock { id:1, value:true });
-        assert!(row(&s, 1).can_lock && row(&s, 1).can_duplicate);
+        assert!(enabled(&s, 1, "lock") && enabled(&s, 1, "duplicate"));
+        assert_eq!(row(&s, 1).swipe_actions[0].label.as_ref(), "Unlock");
         assert!(!row(&s, 1).can_delete);
         layer(&mut s, LayerAction::Duplicate { id:1 });
         let copy = s.state.layer_properties.layer.unwrap();
@@ -212,13 +243,41 @@ fn layer_swipe_actions_follow_parent_locks_and_undo() {
         layer(&mut s, LayerAction::New { group:false, clipped:false });
         let child = s.state.layer_properties.layer.unwrap();
         layer(&mut s, LayerAction::Lock { id:group, value:true });
-        assert!(!row(&s, child).can_lock && !row(&s, child).can_duplicate);
-        assert!(row(&s, group).can_lock && row(&s, group).can_duplicate);
+        assert!(!enabled(&s, child, "lock") && !enabled(&s, child, "duplicate"));
+        assert!(enabled(&s, group, "lock") && enabled(&s, group, "duplicate"));
         assert!(s.dispatch(UiAction::Layer { action:LayerAction::Lock { id:child, value:false } }).is_err());
         assert!(s.dispatch(UiAction::Layer { action:LayerAction::Duplicate { id:child } }).is_err());
         invoke(&mut s, CommandId::Undo);
-        assert!(row(&s, child).can_lock && row(&s, child).can_duplicate);
+        assert!(enabled(&s, child, "lock") && enabled(&s, child, "duplicate"));
         invoke(&mut s, CommandId::QuickMask);
-        assert!(!row(&s, 0).can_lock && !row(&s, 0).can_duplicate && row(&s, 0).can_delete);
+        assert_eq!(row(&s, 0).swipe_actions.iter().map(|action|action.id).collect::<Vec<_>>(), ["delete"]);
+        assert!(enabled(&s, 0, "delete"));
+    }
+}
+
+#[test]
+fn combined_drawers_use_the_same_controls_on_any_toolbar() {
+    for platform in Platform::ALL {
+        for preset in [WorkspacePreset::Painter, WorkspacePreset::Illustrator, WorkspacePreset::Photographer] {
+            let mut layout = preset.layout(platform);
+            let controls = [ToolbarControl::Panel {panel:Panel::Layers}, ToolbarControl::Color, ToolbarControl::Panel {panel:Panel::Color}];
+            let panel = layout.add_toolbar(None, "Combined panels", &controls).unwrap();
+            let tiles = layout.panel(panel).unwrap().tiles().to_vec();
+            for tile in tiles {
+                layout.header.add(HeaderZone::Left, None, &[HeaderItem::Tool {control:tile.control}]).unwrap();
+                let id = layout.header.entries().filter(|entry|entry.item == HeaderItem::Tool {control:tile.control}).last().unwrap().id;
+                let header = ContentDrawer::for_header(&layout, id).unwrap();
+                let toolbar = ContentDrawer::for_tile(&layout, TileAnchor {panel, tile:tile.id}).unwrap();
+                assert_eq!(header.columns, toolbar.columns);
+                assert_eq!(header.layer_properties, toolbar.layer_properties);
+                if tile.control == controls[0] {
+                    assert_eq!(toolbar.layer_properties, Some(false));
+                    assert_eq!(toolbar.columns, [vec![Panel::Layers]]);
+                } else {
+                    assert_eq!(toolbar.columns, [vec![Panel::Color, Panel::Palettes]]);
+                    assert_eq!(toolbar.layer_properties, None);
+                }
+            }
+        }
     }
 }

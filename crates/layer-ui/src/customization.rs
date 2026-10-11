@@ -2162,9 +2162,6 @@ impl CustomizationState {
                     _ => unreachable!(),
                 };
                 drawer.configure_picker(layout);
-                if drawer.columns == [vec![Panel::Color]] {
-                    drawer.columns[0].push(Panel::Palettes);
-                }
                 if self
                     .drawer_placement(&drawer, layout, viewport, &vec![0.0; drawer.columns.len()])
                     .is_none()

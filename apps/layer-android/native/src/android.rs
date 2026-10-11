@@ -1480,6 +1480,15 @@ pub extern "system" fn Java_art_capycanvas_Native_nativeCaption(
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_art_capycanvas_Native_drawerFrame(
+    mut env: JNIEnv, _: JClass, request: JString,
+) -> jstring {
+    let result = read(&mut env, &request).and_then(|source| layer_ui::drawer_frame(&source))
+        .and_then(|frame| serde_json::to_string(&frame).map_err(error));
+    string(&mut env, result)
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentAppearance(
     mut env: JNIEnv, _: JClass, options: JString,
     language: JString,

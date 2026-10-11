@@ -121,6 +121,58 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
     }
     for(const[id,node]of connections)if(!live.has(id)){node.remove();connections.delete(id);}
   }
+  function layerInspector() {
+    const root=element("div","layer-inspector"),stage=element("div","layer-properties-pages");
+    const layers=contentPanel("layers"),properties=contentPanel("properties"),label=element("span","layer-properties-label"),summary=element("span","layer-properties-summary");
+    const text=element("span","layer-properties-text");text.append(label,summary);
+    const footer=button("",()=>send({type:"toggle_layer_drawer_properties"}),"layer-properties-disclosure");
+    const slot=glyph=>{const node=element("span","layer-properties-icon-slot");node.append(icon(glyph));return node;};
+    const chevron=slot("chevron-down");footer.append(slot("properties"),text,chevron);
+    footer.dataset.layerProperties="";stage.append(layers,properties);root.append(stage,footer);
+    let open=false,position=0,from=0,started=0,anchor,target;
+    const rows=layers.querySelector(".layer-rows");
+    const observer=new ResizeObserver(()=>{if(!animating){animating=true;requestAnimationFrame(animate);}});
+    for(const child of [layers.querySelector(".layer-header"),layers.querySelector(".layer-footer"),properties.firstElementChild])if(child)observer.observe(child);
+    root.refreshPanel=()=>{layers.refreshPanel();properties.refreshPanel();};
+    root.disposePanel=()=>{observer.disconnect();layers.disposePanel?.();properties.disposePanel?.();};
+    return {root,refresh(next) {
+      const view=state().layer_properties,editing=`${state().document_file.epoch}:${view.layer}`;
+      if(target!==editing){target=editing;anchor=null;}
+      if(open!==next) {
+        if(next) {
+          const bounds=rows.getBoundingClientRect(),row=[...rows.children].find(row=>row.getBoundingClientRect().bottom>bounds.top);
+          anchor=row?{id:row.querySelector(".layer-row")?.dataset.layer,offset:row.getBoundingClientRect().top-bounds.top}:null;
+        }
+        from=position;started=performance.now();open=next;
+      }
+      label.textContent=open?view.disclosure.return_label:view.disclosure.label;
+      summary.textContent=open?"":view.disclosure.summary;summary.hidden=!summary.textContent;
+      footer.title=[label.textContent,summary.textContent].filter(Boolean).join("\n");footer.setAttribute("aria-label",footer.title);
+      footer.disabled=!open&&view.layer==null;footer.classList.toggle("open",open);
+      layers.inert=open;properties.inert=!open;
+    },measure(now) {
+      const progress=matchMedia("(prefers-reduced-motion: reduce)").matches?1:Math.min(1,(now-started)/200);
+      position=from+((open?1:0)-from)*(1-(1-progress)**3);
+      const unit=rows.firstElementChild?.offsetHeight||40;
+      const fixed=layers.querySelector(".layer-header").offsetHeight+layers.querySelector(".layer-footer").offsetHeight;
+      const contents=properties.firstElementChild,style=getComputedStyle(contents);
+      const size=app.layer_drawer_sizing({measurement:{fixed_height:fixed,unit_height:unit},properties_height:contents.scrollHeight+parseFloat(style.marginTop)+parseFloat(style.marginBottom),viewport_height:workspace.clientHeight});
+      footer.style.height=`${size.footer_height}px`;
+      return {height:size.heights[0]*(1-position)+size.heights[1]*position,running:progress<1};
+    },layout() {
+      const height=stage.clientHeight;
+      layers.style.transform=`translateY(${-position*height}px)`;properties.style.transform=`translateY(${(1-position)*height}px)`;
+      if(position===0&&anchor) {
+        const row=rows.querySelector(`.layer-row[data-layer="${anchor.id}"]`)?.parentElement;
+        if(row)rows.scrollTop+=row.getBoundingClientRect().top-rows.getBoundingClientRect().top-anchor.offset;
+        anchor=null;
+      }
+      if(position===0) {
+        const row=rows.querySelector(`.layer-row[data-layer="${state().layer_tools.editing_layer?.id}"]`);
+        if(row&&target!==root.dataset.revealed){const delta=row.getBoundingClientRect().top-rows.getBoundingClientRect().top;if(delta<0)rows.scrollTop+=delta;else if(delta+row.offsetHeight>rows.clientHeight)rows.scrollTop+=delta+row.offsetHeight-rows.clientHeight;root.dataset.revealed=target;}
+      }
+    }};
+  }
   function dispose(record) {releaseTabs(record.root);customization.discardFields(record.root);for(const body of record.bodies)for(const child of body.children)child.disposePanel?.();record.bridge?.remove();record.shadow.remove();record.root.remove();}
   function refresh() {
     if(!resolved)return;
@@ -128,8 +180,8 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
     for(const drawer of [...state().customization.column_drawers,...(state().customization.drawer?[state().customization.drawer]:[])]) {
       const column=drawer.anchor.kind==="column"?drawer.anchor.column:null,id=column??"tool";
       live.add(id);
-      const {tool_set,...structure}=drawer;
-      let record=drawers.get(id);const key=JSON.stringify([structure,!!tool_set,drawer.columns.flat().map(id=>state().workspace.layout.panels.find(p=>p.id===id))]);
+      const {tool_set,layer_properties,...structure}=drawer;
+      let record=drawers.get(id);const key=JSON.stringify([structure,layer_properties!=null,!!tool_set,drawer.columns.flat().map(id=>state().workspace.layout.panels.find(p=>p.id===id))]);
       if(record?.key!==key) {
         // A new opener must move the body and connector together. Interpolating
         // from the old body leaves the new anchor disconnected during the move.
@@ -137,22 +189,25 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
         const from=record?.placement;if(record)dispose(record);
         const shadow=element("div","drawer-shadow");shadow.setAttribute("aria-hidden","true");workspace.append(shadow);
         const root=element("section","content-drawer");root.dataset.drawer=String(id);root.classList.toggle("picker-drawer",!!drawer.compact);root.setAttribute("aria-label","Panel drawer");workspace.append(root);
+        let inspector;
         const bodies=drawer.columns.map(ids=>{
           const body=element("div","drawer-column");
           for(const panel of ids) {
             const view=customization.view(panel),toolbarPanel=state().workspace.layout.panels.find(p=>p.id===panel)?.content.kind==="toolbar";
             let child;
-            if(toolbarPanel){child=toolbar(panel);child.dataset.drawerToolbar=panel;}
+            if(panel==="layers"&&layer_properties!=null){inspector=layerInspector();child=inspector.root;body.classList.add("layer-inspector-column");}
+            else if(toolbarPanel){child=toolbar(panel);child.dataset.drawerToolbar=panel;}
             else child=contentPanel(panel,drawer.columns.flat().includes("filter_types"),panel==="brushes"&&tool_set?()=>state().customization.drawer?.tool_set:null);
             body.append(child);
           }
           root.append(body);return body;
         });
-        record={key,root,shadow,bodies,column,drawer,from,started:performance.now()-(switching?160:0),placement:from};drawers.set(id,record);
+        record={key,root,shadow,bodies,column,drawer,inspector,from,started:performance.now()-(switching?160:0),placement:from};drawers.set(id,record);
       }
       record.drawer=drawer;
       record.closing=false;
       record.root.inert=false;
+      record.inspector?.refresh(layer_properties);
       for(const body of record.bodies)for(const child of body.children)child.refreshPanel?.();
     }
     for(const[id,r]of drawers)if(!live.has(id)&&!r.closing){r.closing=true;r.root.inert=true;r.from=r.placement;r.started=performance.now();}
@@ -173,7 +228,8 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
           [...strip.children].forEach((tile,i)=>customization.layoutTile(tile,geometry.tiles[i],strip.dataset.axis,geometry.tile_style));
         }
       }
-      const heights=r.bodies.map(body=>body.scrollHeight+(r.drawer.tabs?resolved.tab_bar_height:0));
+      const page=r.inspector?.measure(now);
+      const heights=r.bodies.map(body=>page?.height??body.scrollHeight+(r.drawer.tabs?resolved.tab_bar_height:0));
       const progress=matchMedia("(prefers-reduced-motion: reduce)").matches?1:Math.min(1,(now-r.started)/160);
       const result=app.drawer({viewport:[workspace.clientWidth,workspace.clientHeight],column:r.column,heights,progress,from:r.from??null,closing:!!r.closing});
       if(!result || (r.closing&&progress===1)){dispose(r);drawers.delete(id);continue;}
@@ -195,6 +251,7 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
 
       r.root.style.zIndex=r.column==null?"1900":"1800";
       r.placement.columns.forEach((bounds,i)=>place(r.bodies[i],bounds));
+      r.inspector?.layout();
       if(r.drawer.tabs) {
         let tabs=r.root.querySelector(":scope > .drawer-tabs");
         if(!tabs){
@@ -219,7 +276,7 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
         const x=Math.max(b.x,p.x),y=Math.max(b.y,p.y),right=Math.min(b.right,p.right),bottom=Math.min(b.bottom,p.bottom);
         if(right>x&&bottom>y)measurements.push({column:r.column,anchor:{panel:tile.parentElement.dataset.panel,tile:Number(tile.dataset.tile)},bounds:{x,y,width:right-x,height:bottom-y}});
       }
-      more ||= progress<1;
+      more ||= progress<1||!!page?.running;
     }
     openConnections();
     // Geometry is transient and Rust suppresses identical measurement updates.

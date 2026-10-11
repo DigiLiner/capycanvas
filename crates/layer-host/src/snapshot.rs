@@ -242,8 +242,7 @@ impl NativeHost {
                     .drawer
                     .iter()
                     .chain(&state.customization.column_drawers)
-                    .flat_map(|d| d.columns.iter().flatten())
-                    .copied(),
+                    .flat_map(|d| d.panels()),
             )
         {
             if !panel_ids.contains(&panel) {
@@ -396,6 +395,24 @@ mod tests {
         .unwrap();
         host.resize(2410, 1810, 2.).unwrap();
         host
+    }
+    #[test]
+    fn combined_layer_drawer_publishes_both_retained_panels() {
+        use layer_ui::{Bounds, CustomizationAction, HeaderItem, HeaderItemBounds, Panel, ToolbarControl, WorkspacePreset};
+        let mut host = host(Platform::Windows);
+        host.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Windows), ..Default::default()
+        })}).unwrap();
+        let has_properties = |snapshot:&Value| snapshot["panels"].as_array().unwrap().iter().any(|panel| panel["id"] == "properties");
+        assert!(!has_properties(&host.take_value().unwrap()));
+        let id = host.session.state().workspace.layout.header.entries().find(|entry| entry.item == HeaderItem::Tool {control:ToolbarControl::Panel {panel:Panel::Layers}}).unwrap().id;
+        host.dispatch(UiAction::MeasureHeader {height:60., items:vec![HeaderItemBounds {id,bounds:Bounds {x:800.,y:0.,width:40.,height:60.}}]}).unwrap();
+        host.dispatch(UiAction::Customize {action:CustomizationAction::ToggleHeaderDrawer {id}}).unwrap();
+        assert!(has_properties(&host.take_value().unwrap()), "Layers retains the hidden Properties body");
+        host.dispatch(UiAction::Customize {action:CustomizationAction::ToggleLayerDrawerProperties}).unwrap();
+        assert!(has_properties(&host.take_value().unwrap()), "Properties keeps the same panel projection");
+        host.dispatch(UiAction::Customize {action:CustomizationAction::CloseExpanded}).unwrap();
+        assert!(!has_properties(&host.take_value().unwrap()), "Closing retires the undocked panel projection");
     }
     #[test]
     fn picker_previews_use_the_color_panel_projection() {

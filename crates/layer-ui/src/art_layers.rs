@@ -189,6 +189,17 @@ impl LayerControls {
         }
     }
 }
+
+pub(super) fn swipe_actions(doc: &Document, id: OccurrenceHandle, layer: &Occurrence, can_delete: bool, l: &Localizer) -> Vec<crate::LayerSwipeAction> {
+    let token = occurrence_token(id);
+    vec![
+        crate::LayerSwipeAction {id:"lock", label:l.text(if layer.locked {MessageId::RESOURCES_LAYER_SWIPE_UNLOCK} else {MessageId::RESOURCES_LAYER_SWIPE_LOCK}),
+            enabled:LayerControls::for_layer(doc, id, layer).edit_lock, action:LayerAction::Lock {id:token, value:!layer.locked}},
+        crate::LayerSwipeAction {id:"duplicate", label:l.text(MessageId::RESOURCES_LAYER_MENU_DUPLICATE),
+            enabled:doc.validate_duplicate_layers(&[id]).is_ok(), action:LayerAction::Duplicate {id:token}},
+        crate::LayerSwipeAction {id:"delete", label:l.text(MessageId::COMMON_DELETE), enabled:can_delete, action:LayerAction::Delete {id:token}},
+    ]
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum LayerAction {
@@ -1289,8 +1300,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 A::Ungroup { .. } => doc.ungroup_layer_edit(handle).is_ok(),
                 A::DeleteSelected => self.can_delete_layer_rows(self.selected_layers()),
                 A::Delete { .. } => self.can_delete_layer_rows(&BTreeSet::from([handle])),
-                A::DuplicateSelected => doc.duplicate_layers_edit(&roots).is_ok(),
-                A::Duplicate { .. } => doc.duplicate_layers_edit(&[handle]).is_ok(),
+                A::DuplicateSelected => doc.validate_duplicate_layers(&roots).is_ok(),
+                A::Duplicate { .. } => doc.validate_duplicate_layers(&[handle]).is_ok(),
                 A::Select { .. } | A::ShowMask { .. } => true,
                 A::CopyMask { .. } => l.mask.is_some(),
                 A::PasteMask { .. } => {

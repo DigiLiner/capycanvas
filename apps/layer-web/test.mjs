@@ -14,6 +14,7 @@ import {checkToolbarComponents} from "./toolbar-components.test.mjs";
 import {checkToolVariations} from "./tool-variations.test.mjs";
 import {checkSelectionTools} from "./selection-tools.test.mjs";
 import {checkEncloseFill} from './enclose-fill-journey.test.mjs';
+import {checkLayerPropertiesDrawer} from "./layer-properties-drawer.test.mjs";
 import {checkFilterDrawer} from "./filter-drawer.test.mjs";
 import {checkFilterPreviews} from "./filter-previews.test.mjs";
 import {checkSpatialFilterWindows} from "./effects.test.mjs";
@@ -122,7 +123,7 @@ const cdp = await launchChrome(
     "--window-size=1440,1000",
   ],
   {
-    timeout: process.argv.some(x=>['--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--selection-tools","--color-mixing","--contact-brushes","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--pipeline-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending"].includes(x)) ? 180000 : 30000,
+    timeout: process.argv.some(x=>['--layer-properties-drawer','--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--selection-tools","--color-mixing","--contact-brushes","--layer-properties-drawer","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--pipeline-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending"].includes(x)) ? 180000 : 30000,
     onEvent: (event) => {
       if (
         event.method === "Runtime.consoleAPICalled" &&
@@ -325,6 +326,7 @@ try {
     [process.argv.includes("--numeric-controls"), () => checkNumericControls({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--color-panel"), () => checkColorPanel({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--color-editor"), () => checkColorEditor({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--layer-properties-drawer"), () => checkLayerPropertiesDrawer({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--filter-drawer"), () => checkFilterDrawer({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--filter-previews"), () => checkFilterPreviews({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--spatial-filter-windows"), () => checkSpatialFilterWindows({call,evaluate,settle,canvasPixels}), checkErrors],

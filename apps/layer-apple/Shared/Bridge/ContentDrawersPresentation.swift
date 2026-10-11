@@ -7,18 +7,27 @@ import SwiftUI
     @Published private(set) var model = JSON()
     @Published private(set) var geometry = JSON()
     @Published private(set) var interactive = false
+    @Published private(set) var pagePosition: CGFloat = 0
+    @Published private(set) var layerSizes = JSON()
     private weak var store: EditorStore?
     private var current = JSON()
     private var key = ""
+    private var layerSizesContext = ""
+    var sizingContext: String {
+        guard let store else { return "" }
+        return JSON([model["anchor"].raw, store.snapshot["layout"].raw, id == "tool" ? store.contentDrawers.tileRevision : 0]).stableKey
+    }
     private var heights: [Int: CGFloat] = [:]
     private var task: Task<Void, Never>?
+    var reduceMotion = false
     private struct Request {
         let token = UUID()
         let from: JSON
         let heights: [CGFloat]
         let closing: Bool
         let animate: Bool
-        let start = ProcessInfo.processInfo.systemUptime
+        let pageFrom: CGFloat?
+        let pageTo: CGFloat
     }
     private var latest: Request?
     private var bodies: [String: JSON] = [:]
@@ -33,46 +42,73 @@ import SwiftUI
         current = next
         if interactive != !next.isNull { interactive = !next.isNull }
         if !next.isNull {
-            if model.stableKey != next.stableKey { model = next; heights = [:] }
+            if model.stableKey != next.stableKey {
+                if model["columns"].stableKey != next["columns"].stableKey || model["tabs"].stableKey != next["tabs"].stableKey { heights = [:]; layerSizes = JSON() }
+                model = next
+            }
             for panel in store.snapshot["panels"].array { bodies[panel["id"].string] = panel }
         }
         let measured = model["columns"].array.indices.map { heights[$0] ?? 0 }
         let nextKey = JSON([next.raw, store.snapshot["layout"].raw,
-            measured, id == "tool" ? store.contentDrawers.tileRevision : 0]).stableKey
+            measured, layerSizes.raw, id == "tool" ? store.contentDrawers.tileRevision : 0]).stableKey
         guard key != nextKey else { return }; key = nextKey
+        let pageTo: CGFloat = model["layer_properties"].bool ? 1 : 0
+        let pageChange = !model["layer_properties"].isNull && !next.isNull && pagePosition != pageTo
         latest = Request(from: geometry["placement"], heights: measured, closing: next.isNull,
-            animate: changed)
-        // Coalesce changes while Rust owns a query. Cancelling a Swift task
-        // cannot cancel an already-queued native request, so do not enqueue a
-        // replacement until the current reply returns.
+            animate: changed || pageChange, pageFrom: pageChange ? pagePosition : nil, pageTo: pageTo)
         guard task == nil else { return }
         task = Task { [weak self] in
             let duration = max(0.001, store.catalog["panel_expansion_ms"].number / 1000)
             while !Task.isCancelled {
                 guard let self, let request = self.latest else { return }
-                let progress = request.animate ? min(1, (ProcessInfo.processInfo.systemUptime - request.start) / duration) : 1
-                let result: JSON = await withCheckedContinuation { continuation in
-                    store.query(["type": "drawer", "column": UInt64(self.id) as Any? ?? NSNull(),
-                        "heights": request.heights, "progress": progress, "from": request.from.raw, "closing": request.closing]) {
-                        continuation.resume(returning: $0)
+                let target: JSON
+                if request.closing { target = request.from }
+                else if !self.model["layer_properties"].isNull && self.layerSizesContext == self.sizingContext && !self.layerSizes["placements"].isNull {
+                    target = self.layerSizes["placements"][request.pageTo == 1 ? 1 : 0]
+                } else {
+                    target = await withCheckedContinuation { continuation in
+                        store.query(["type": "drawer", "column": UInt64(self.id) as Any? ?? NSNull(),
+                            "heights": request.heights, "progress": 1, "from": NSNull(), "closing": false]) {
+                            continuation.resume(returning: $0["placement"])
+                        }
                     }
                 }
                 guard !Task.isCancelled else { return }
                 guard self.latest?.token == request.token else { continue }
-                self.geometry = result; store.workspace.refreshChrome()
-                store.contentDrawers.source(self.id, geometry: result, anchor: self.model["anchor"])
-                if progress == 1 || result.isNull {
-                    self.task = nil
-                    if request.closing { store.contentDrawers.remove(self.id) }
-                    return
+                guard !target.isNull else { self.task = nil; if request.closing { store.contentDrawers.remove(self.id) }; return }
+                let start = ProcessInfo.processInfo.systemUptime
+                while !Task.isCancelled && self.latest?.token == request.token {
+                    let progress = request.animate && !self.reduceMotion ? min(1, (ProcessInfo.processInfo.systemUptime - start) / duration) : 1
+                    let eased = CGFloat(1 - pow(1 - progress, 3))
+                    let position = request.pageFrom.map { $0 + (request.pageTo - $0) * eased } ?? request.pageTo
+                    let result = Self.frame(["from": request.from.raw, "to": target.raw, "progress": eased, "closing": request.closing])
+                    self.geometry = result; self.pagePosition = position; store.workspace.refreshChrome()
+                    store.contentDrawers.source(self.id, geometry: result, anchor: self.model["anchor"])
+                    if progress == 1 {
+                        self.task = nil
+                        if request.closing { store.contentDrawers.remove(self.id) }
+                        return
+                    }
+                    do { try await Task.sleep(for: .milliseconds(8)) } catch { return }
                 }
-                do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
             }
         }
+    }
+    private static func frame(_ request: [String: Any]) -> JSON {
+        do {
+            let text = try JSON(request).encoded()
+            guard let response = text.withCString({ capy_apple_drawer_frame($0) }) else { return JSON() }
+            defer { capy_apple_string_free(response) }
+            return try JSON.decode(String(cString: response))
+        } catch { return JSON(["error": error.localizedDescription]) }
     }
     func measure(_ height: CGFloat, column: Int) {
         guard height.isFinite, abs((heights[column] ?? 0) - height) > 0.5 else { return }
         heights[column] = height; refresh(current)
+    }
+    func measureLayerPages(_ next: JSON) {
+        guard next.stableKey != layerSizes.stableKey || layerSizesContext != sizingContext else { return }
+        layerSizesContext = sizingContext; layerSizes = next; refresh(current)
     }
     func stop() { latest = nil; task?.cancel(); task = nil }
 }

@@ -118,8 +118,14 @@ impl LayerInspector {
         button.add_css_class("flat");
         button.add_css_class("layer-properties-disclosure");
         button.set_height_request(layer_ui::PropertyDisclosure::HEIGHT as i32);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        content.append(&crate::icons::image("layer-properties-symbolic"));
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, layer_ui::PANEL_GROUP_SPACING as i32);
+        let slot = |image: &gtk::Image, name: &str| {
+            let slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            slot.set_widget_name(name); slot.set_size_request(24, 24); slot.set_valign(gtk::Align::Center); slot.set_hexpand(false);
+            image.set_pixel_size(16); image.set_halign(gtk::Align::Center); image.set_hexpand(true);
+            slot.append(image); slot
+        };
+        content.append(&slot(&crate::icons::image("layer-properties-symbolic"), "layer-properties-icon-slot"));
         let text = gtk::Box::new(gtk::Orientation::Vertical, 1);
         text.set_hexpand(true);
         text.set_valign(gtk::Align::Center);
@@ -131,7 +137,7 @@ impl LayerInspector {
         text.append(&label); text.append(&summary); content.append(&text);
         let chevron = crate::icons::image("layer-chevron-down-symbolic");
         chevron.add_css_class("layer-properties-chevron");
-        chevron.set_pixel_size(16); content.append(&chevron);
+        content.append(&slot(&chevron, "layer-properties-chevron-slot"));
         button.set_child(Some(&content)); footer.append(&button);
         root.append(&stack); root.append(&footer);
         Self {root, pages, row_height:Cell::new(layer_ui::TILE_SIZE), target:Cell::new(None), anchor, restore:Rc::new(RefCell::new(None)), rows:Cell::new(0),
@@ -174,10 +180,9 @@ impl LayerInspector {
         if measurement.unit_height > 0. { self.row_height.set(measurement.unit_height); }
         else { measurement.unit_height = self.row_height.get(); }
         let properties_height = self.effects.properties.measure(gtk::Orientation::Vertical, width).1 as f32;
-        for (page, properties_height) in self.pages.iter().zip([None, Some(properties_height)]) {
-            let mut sizing = layer_ui::LayerDrawerSizing::default();
-            sizing.update(measurement, self.rows.get(), viewport_height, properties_height);
-            let height = (sizing.height() - layer_ui::PropertyDisclosure::HEIGHT - 1.).max(0.).round() as i32;
+        let heights = layer_ui::LayerDrawerSizing::pages(measurement, self.rows.get(), viewport_height, properties_height);
+        for (page, height) in self.pages.iter().zip(heights) {
+            let height = (height - layer_ui::LayerDrawerSizing::FOOTER_HEIGHT).max(0.).round() as i32;
             if page.imp().natural_height.replace(Some(height)) != Some(height) { page.queue_resize(); }
             let mut geometry = page.imp().geometry.borrow_mut();
             if geometry[0].width != width as f32 { geometry[0].width = width as f32; page.queue_allocate(); }

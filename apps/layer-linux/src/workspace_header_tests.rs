@@ -46,6 +46,7 @@ fn native_sketch_layer_properties_drawer() {
         assert!(!footer.has_css_class("heading"));
         let mut stack = d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
         layer_page_settled(&d,&stack,"initial Layers drawer");
+        layer_footer_alignment(&d);
         let bounds = d.w.drawer.placement().unwrap().bounds;
         let checkpoint = ui_session(&d.w).engine().checkpoint();
         let _warm = crate::snapshot(&d.w); pump(120);
@@ -59,13 +60,16 @@ fn native_sketch_layer_properties_drawer() {
             assert!(!summary.is_visible());
         }
         for close in ["footer", "escape", "outside"] {
+            let measurement=d.w.drawer.layers().unwrap().scroll_measurement(bounds.width as i32);
+            let properties=stack.child_by_name("properties").unwrap().first_child().unwrap().downcast::<gtk::ScrolledWindow>().unwrap().child().unwrap();
+            let expected=layer_ui::LayerDrawerSizing::pages(measurement,state(&d.w).layers.len(),d.w.surface.height() as f32,properties.measure(gtk::Orientation::Vertical,bounds.width as i32).1 as f32)[1];
             d.click(&footer);
             layer_page_settled(&d,&stack,"Properties before dismissal");
             assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties, Some(true));
             assert_eq!(stack.visible_child_name().as_deref(), Some("properties"));
             assert_eq!(label.text(), "All layers");
             assert!(!summary.is_visible());
-            assert!(d.w.drawer.placement().unwrap().bounds.height<=bounds.height);
+            assert!((d.w.drawer.placement().unwrap().bounds.height-expected).abs()<=1.,"native Properties follows shared page measurement");
             assert!(d.named("drawer-panel-Properties").is_mapped());
             assert!(!stack.child_by_name("layers").unwrap().is_child_visible());
             match close {
@@ -135,6 +139,7 @@ fn native_sketch_layer_properties_drawer() {
         pump(250);
         assert_eq!(label.text(), "Gaussian Blur");
         assert!(summary.is_visible());
+        layer_footer_alignment(&d);
         let original = summary.text().to_string();
         assert!(original.chars().any(|c| c.is_ascii_digit()));
         d.click(&footer);
@@ -188,14 +193,96 @@ fn native_sketch_layer_properties_drawer() {
         let _warm = crate::snapshot(&d.w); pump(120);
         crate::snapshot(&d.w).save_to_png(output.join(format!("properties-page-{theme:?}.png"))).unwrap();
         d.click_name(&opener);
-        for preset in [WorkspacePreset::Illustrator, WorkspacePreset::Photographer] {
-            d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout:preset.layout(Platform::Gtk),..WorkspaceState::default()})});
-            pump(200);
-            assert!(find_named(d.w.window.upcast_ref(), "layer-properties-disclosure").is_none_or(|footer|!footer.is_mapped()));
-        }
+
     }
     std::fs::write(output.join("properties-animation.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
     d.input.finish(); d.w.window.destroy(); pump(100);
+}
+
+fn layer_footer_alignment(d:&Driver) {
+    let footer=d.named("layer-properties-disclosure");
+    let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+    let layers=stack.child_by_name("layers").unwrap();
+    let leading=d.named("layer-properties-icon-slot");
+    let trailing=d.named("layer-properties-chevron-slot");
+    let label=d.named("layer-properties-disclosure-label");
+    let summary=d.named("layer-properties-disclosure-summary");
+    let bounds=|widget:&gtk::Widget|widget.compute_bounds(&d.w.surface).unwrap();
+    let center=|rect:gtk::graphene::Rect|[rect.x()+rect.width()*0.5,rect.y()+rect.height()*0.5];
+    let left=bounds(&leading); let right=bounds(&trailing);
+    assert_eq!([leading.width(),leading.height(),trailing.width(),trailing.height()],[24,24,24,24]);
+    for slot in [&leading,&trailing] {
+        let image=slot.first_child().unwrap();
+        assert_eq!(image.measure(gtk::Orientation::Horizontal,-1).1,16,"footer glyph uses compact icon size");
+        assert!((center(bounds(slot))[1]-center(bounds(&footer))[1]).abs()<=1.,"footer icon vertically centered");
+    }
+    assert!((bounds(&label).x()-left.x()-left.width()-layer_ui::PANEL_GROUP_SPACING).abs()<=1.,"shared compact icon/text gap");
+    if summary.is_visible() {assert!((bounds(&label).x()-bounds(&summary).x()).abs()<0.5);}
+    if stack.visible_child_name().as_deref()==Some("layers") {
+        let first=find_named(&layers,"layer-add-layer-symbolic").unwrap();
+        let last=find_named(&layers,"layer-actions").unwrap();
+        if (center(left)[0]-center(bounds(&first))[0]).abs()>1. {
+            if let Some(output)=std::env::var_os("LAYER_TEST_ARTIFACTS") {
+                crate::snapshot(&d.w).save_to_png(std::path::PathBuf::from(output).join("footer-alignment-failure.png")).unwrap();
+            }
+        }
+        assert!((center(left)[0]-center(bounds(&first))[0]).abs()<=1.,"disclosure leading icon aligns with Layers action bar: slot={left:?} action={:?} footer={:?}",bounds(&first),bounds(&footer));
+        assert!((center(right)[0]-center(bounds(&last))[0]).abs()<=1.,"disclosure chevron aligns with Layers action bar: slot={right:?} action={:?} footer={:?}",bounds(&last),bounds(&footer));
+    }
+    let text=label.parent().unwrap();
+    assert!((center(bounds(&text))[1]-center(bounds(&footer))[1]).abs()<=1.,"plain/summary text vertically centered");
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_layer_drawer_any_toolbar"]
+fn native_layer_drawer_any_toolbar() {
+    let mut d=Driver::new("art.capycanvas.LayerDrawerAnyToolbar");
+    let output=std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    let layers=ToolbarControl::Panel {panel:Panel::Layers};
+    for theme in [Theme::Light,Theme::Dark] {
+      d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+      for preset in [WorkspacePreset::Painter,WorkspacePreset::Illustrator,WorkspacePreset::Photographer] {
+        let mut layout=preset.layout(Platform::Gtk);
+        layout.header.zones=Default::default();
+        layout.header.add(HeaderZone::Left,None,&[HeaderItem::Menu,HeaderItem::Tool {control:layers}]).unwrap();
+        let toolbar=layout.add_toolbar(None,"Drawer audit",&[layers,ToolbarControl::Color,ToolbarControl::Panel {panel:Panel::Color}]).unwrap();
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout,..Default::default()})});
+        pump(250);
+        let header=d.named(&d.header_tool(layers));
+        let tile=ui_session(&d.w).panel_view(toolbar).unwrap().tiles.iter().find(|tile|tile.choice.control==layers).unwrap().id;
+        let tile=widgets(d.w.surface.upcast_ref()).find(|widget|widget.is_mapped() && widget.widget_name()==format!("tile-{tile}")).unwrap();
+        for (origin,opener) in [("header",header),("toolbar",tile)] {
+            d.click(&opener);
+            let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+            layer_page_settled(&d,&stack,"Layers combo from any native toolbar");
+            assert_eq!(state(&d.w).customization.drawer.unwrap().layer_properties,Some(false));
+            layer_footer_alignment(&d);
+            let footer=d.named("layer-properties-disclosure");
+            d.click(&footer); layer_page_settled(&d,&stack,"any-workspace Properties page");
+            assert_eq!(stack.visible_child_name().as_deref(),Some("properties"));
+            assert_eq!(d.named("layer-properties-disclosure-label").downcast::<gtk::Label>().unwrap().text(),"All layers");
+            layer_footer_alignment(&d);
+            d.input.key(0xff1b); layer_page_settled(&d,&stack,"Escape returns every-workspace Layers");
+            assert_eq!(stack.visible_child_name().as_deref(),Some("layers"));
+            layer_footer_alignment(&d);
+            let _warm=crate::snapshot(&d.w); pump(100);
+            crate::snapshot(&d.w).save_to_png(output.join(format!("footer-{theme:?}-{preset:?}-{origin}.png"))).unwrap();
+            d.click(&opener); wait_for_drawer_close(&d.w);
+        }
+        for control in [ToolbarControl::Color,ToolbarControl::Panel {panel:Panel::Color}] {
+            let id=ui_session(&d.w).panel_view(toolbar).unwrap().tiles.iter().find(|tile|tile.choice.control==control).unwrap().id;
+            let tile=widgets(d.w.surface.upcast_ref()).find(|widget|widget.is_mapped() && widget.widget_name()==format!("tile-{id}")).unwrap();
+            d.click(&tile);
+            let drawer=state(&d.w).customization.drawer.unwrap();
+            assert!(drawer.columns.iter().flatten().any(|panel|*panel==Panel::Color));
+            assert!(drawer.columns.iter().flatten().any(|panel|*panel==Panel::Palettes));
+            assert!(d.named("drawer-panel-Palettes").is_mapped());
+            d.click(&tile); wait_for_drawer_close(&d.w);
+        }
+      }
+    }
+    d.finish();
 }
 
 #[test]
@@ -3843,6 +3930,23 @@ fn native_sketch_layer_swipe_actions() { sketch_layer_swipe_actions("touch"); }
 #[ignore = "isolated native-input.js --tablet --native-test=native_sketch_layer_swipe_actions_pen"]
 fn native_sketch_layer_swipe_actions_pen() { sketch_layer_swipe_actions("pen"); }
 
+fn layer_swipe_view_matches(row:&crate::swipe_row::SwipeRow, model:&layer_ui::LayerState) {
+    let actions=row.delete_button().parent().unwrap();
+    let mut names=Vec::new();
+    let mut child=actions.first_child();
+    while let Some(widget)=child {
+        if widget.is_visible() {names.push(widget.widget_name().to_string());}
+        child=widget.next_sibling();
+    }
+    assert_eq!(names,model.swipe_actions.iter().map(|action|format!("layer-swipe-{}",action.id)).collect::<Vec<_>>(),"shared swipe action order");
+    for action in &model.swipe_actions {
+        let button=match action.id {"lock"=>row.lock_button(),"duplicate"=>row.duplicate_button(),"delete"=>row.delete_button(),_=>panic!("unknown native swipe action")};
+        assert_eq!(button.is_sensitive(),action.enabled);
+        assert_eq!(button.child().unwrap().downcast::<gtk::Label>().unwrap().text().as_str(),action.label.as_ref());
+        assert_eq!(button.tooltip_text().as_deref(),Some(action.label.as_ref()));
+    }
+}
+
 #[test]
 #[ignore = "isolated native-input.js --native-test=native_sketch_layer_swipe_motion"]
 fn native_sketch_layer_swipe_motion() {
@@ -3926,6 +4030,7 @@ fn sketch_layer_swipe_actions(device: &str) {
         open(&mut d);
         let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
         assert!(row.is_open());
+        layer_swipe_view_matches(&row,state(&d.w).layers.iter().find(|layer|layer.id==1).unwrap());
         let output=std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
         std::fs::create_dir_all(&output).unwrap();
         let _warm=crate::snapshot(&d.w); pump(120);
@@ -3938,6 +4043,7 @@ fn sketch_layer_swipe_actions(device: &str) {
         let p=d.point(row.lock_button().upcast_ref());
         d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
         assert!(state(&d.w).layers.iter().find(|l|l.id==1).unwrap().locked);
+        pump(150); assert!(!row.is_open(),"Lock closes action strip");
         open(&mut d);
         let row=d.named("art-layer-1").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
         assert!(row.lock_button().is_sensitive());
@@ -3946,6 +4052,7 @@ fn sketch_layer_swipe_actions(device: &str) {
         let p=d.point(row.lock_button().upcast_ref());
         d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
         assert!(!state(&d.w).layers.iter().find(|l|l.id==1).unwrap().locked);
+        pump(150); assert!(!row.is_open(),"Unlock closes action strip");
         assert_eq!(row.lock_button().child().unwrap().downcast::<gtk::Label>().unwrap().text(),"Lock");
         let count=state(&d.w).layers.len();
         open(&mut d);
@@ -3953,6 +4060,7 @@ fn sketch_layer_swipe_actions(device: &str) {
         let p=d.point(row.duplicate_button().upcast_ref());
         d.input.perform(serde_json::json!([contact(device,"down",p),contact(device,"up",p)]));
         assert_eq!(state(&d.w).layers.len(),count+1);
+        pump(150); assert!(!row.is_open(),"Duplicate closes action strip");
         d.input.perform(serde_json::json!([{"key":0xffe3,"down":true},{"key":0x7a,"down":true},{"key":0x7a,"down":false},{"key":0xffe3,"down":false}]));
         assert_eq!(state(&d.w).layers.len(),count);
         open(&mut d);
@@ -3978,6 +4086,7 @@ fn sketch_layer_swipe_actions(device: &str) {
         pump(180); assert!(!row.is_open(),"canceled contact closes actions");
         d.w.dispatch(UiAction::Invoke {command:CommandId::QuickMask}); pump(100);
         let row=d.named("art-layer-0").parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        layer_swipe_view_matches(&row,state(&d.w).layers.iter().find(|layer|layer.id==0).unwrap());
         assert!(!row.lock_button().is_visible()); assert!(!row.duplicate_button().is_visible());
         assert!(row.delete_button().is_sensitive());
         d.w.dispatch(UiAction::Invoke {command:CommandId::QuickMask});
@@ -3987,6 +4096,7 @@ fn sketch_layer_swipe_actions(device: &str) {
         let child=state(&d.w).layer_properties.layer.unwrap();
         d.w.dispatch(UiAction::Layer {action:layer_ui::LayerAction::Lock {id:group,value:true}}); pump(100);
         let row=d.named(&format!("art-layer-{child}")).parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+        layer_swipe_view_matches(&row,state(&d.w).layers.iter().find(|layer|layer.id==child).unwrap());
         assert!(!row.lock_button().is_sensitive()); assert!(!row.duplicate_button().is_sensitive());
         assert!(!row.delete_button().is_sensitive());
         let p=d.point(&d.named(&format!("art-layer-{child}")));

@@ -1,6 +1,48 @@
 import XCTest
 
 extension XCTestCase {
+    @MainActor func checkLayerPropertiesDrawer(in app: XCUIApplication, theme: String) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:painter"}}]"#
+        app.launch()
+        let canvas = app.descendants(matching: .any)["canvas"].firstMatch
+        expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
+        waitForExpectations(timeout: 30)
+        workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "header-tool-panel", "Layers")).firstMatch)
+        let footer = app.buttons["layer-properties-disclosure"], label = app.staticTexts["layer-properties-disclosure-label"]
+        XCTAssertTrue(footer.waitForExistence(timeout: 10))
+        let drawer = app.descendants(matching: .any)["tool-drawer"].firstMatch
+        var measuredHeight: CGFloat = 0, stableSince = Date()
+        expectation(for: NSPredicate { _, _ in
+            let height = drawer.frame.height
+            if abs(height - measuredHeight) > 0.5 { measuredHeight = height; stableSince = Date() }
+            return height > 200 && Date().timeIntervalSince(stableSince) > 0.3
+        }, evaluatedWith: drawer)
+        waitForExpectations(timeout: 10)
+        XCTAssertEqual(label.label, "Layer properties")
+        let floor = drawer.frame.height
+        for _ in 0..<6 {
+            let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
+            let before = rows.firstMatch.identifier
+            workspaceActivate(app.buttons["layer-New layer"])
+            expectation(for: NSPredicate { _, _ in rows.firstMatch.identifier != before }, evaluatedWith: rows.firstMatch)
+            waitForExpectations(timeout: 5)
+        }
+        expectation(for: NSPredicate { _, _ in drawer.frame.height > floor + 20 }, evaluatedWith: drawer)
+        waitForExpectations(timeout: 10)
+        let grown = drawer.frame.height
+        workspaceActivate(footer)
+        expectation(for: NSPredicate { _, _ in label.label == "All layers" && abs(drawer.frame.height - floor) <= 2 }, evaluatedWith: drawer)
+        waitForExpectations(timeout: 10)
+        attachEditor(in: app, name: "layer-properties-\(theme)")
+        workspaceActivate(footer)
+        expectation(for: NSPredicate { _, _ in label.label == "Layer properties" && abs(drawer.frame.height - grown) <= 2 }, evaluatedWith: drawer)
+        waitForExpectations(timeout: 10)
+        workspaceActivate(app.buttons["layer-New group"])
+        expectation(for: NSPredicate(format: "label == %@", "Group properties"), evaluatedWith: label)
+        waitForExpectations(timeout: 5)
+        attachEditor(in: app, name: "layer-properties-group-\(theme)")
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
     @MainActor func checkLayerControls(in container: XCUIElement) {
         #if os(macOS)
         let candidates = container.groups

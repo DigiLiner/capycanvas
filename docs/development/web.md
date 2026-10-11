@@ -343,6 +343,9 @@ only for submitted work; an idle queue can precede required pipeline readiness.
 effect links, hidden owners, group modes and normalized saved-selection drops.
 It checks narrow and wide panels in both themes; `--layers` includes this journey.
 Use `--layer-hold` and `--layer-swipes` for the related input paths.
+`--layer-properties-drawer` checks the combined Layers/Properties body in both
+themes, including native layer creation, sizing, overflow, scroll restoration,
+swipe actions, filter summaries and a custom toolbar opener.
 
 `--gradients` exercises the shared stop editor in Properties, Tool Settings and
 the toolbar popup, including mouse, pen and touch contacts, numeric edits,

@@ -312,7 +312,7 @@ impl Document {
         Ok((edit, imported))
     }
 
-    pub fn duplicate_layers_edit(&self, roots: &[OccurrenceHandle]) -> Result<(Edit, Vec<OccurrenceHandle>), DocumentError> {
+    pub fn validate_duplicate_layers(&self, roots: &[OccurrenceHandle]) -> Result<(), DocumentError> {
         if roots.is_empty() { return Err(invalid("Select layers first")); }
         let scene = self.scene();
         for h in roots {
@@ -320,6 +320,12 @@ impl Document {
             if scene.stack(*h).is_none() { return Err(DocumentError::MissingOccurrence(*h)); }
             if scene.parent(*h).is_some_and(|parent| self.is_locked(parent)) { return Err(invalid("The destination group is locked")); }
         }
+        Ok(())
+    }
+
+    pub fn duplicate_layers_edit(&self, roots: &[OccurrenceHandle]) -> Result<(Edit, Vec<OccurrenceHandle>), DocumentError> {
+        self.validate_duplicate_layers(roots)?;
+        let scene = self.scene();
         let selected_roots=self.layer_roots(&roots.iter().copied().collect());
         let roots = self.layer_roots(&self.relationship_roots(&selected_roots).into_iter().collect());
         let mut artwork = self.artwork.clone();

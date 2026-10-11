@@ -3,13 +3,18 @@ import SwiftUI
 struct LayerPanel: View {
     @ObservedObject var store: EditorStore
     let panel: JSON
+    var drawerPagePosition: CGFloat? = nil
     @StateObject private var interaction = LayerRowInteraction()
     @State private var popupID = UUID()
     @State private var filterMenu = JSON()
     @State private var filterPopupID = UUID()
+    @State private var scrollPosition = ScrollPosition()
+    @State private var scrollOffset: CGFloat = 0
+    @State private var retainedOffset: CGFloat?
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var view: JSON { store.state["layer_tools"] }
     private var current: JSON { view["editing_layer"] }
+    private var editingTarget: String { JSON([store.state["document_file"]["epoch"].raw, current["id"].raw]).stableKey }
     private var layers: [JSON] { store.state["layers"].array }
     private var rows: [LayerPanelRow] {
         layers.map { LayerPanelRow(layer: $0) }
@@ -41,12 +46,14 @@ struct LayerPanel: View {
                                         if interaction.menuSource == .row(row.id) { closeMenu() }
                                     }
                             }
-                        }.coordinateSpace(name: "layer-rows")
+                        }.scrollTargetLayout().coordinateSpace(name: "layer-rows")
                             .background(NativeReorderInput(model: interaction))
                             .onPreferenceChange(LayerRowFrames.self) { interaction.frames = $0 }
                             .overlay(alignment: .topLeading) { dragPreview }
                             .modifier(PanelBodyMeasurement(panel: "layers", part: "rows", kind: .scroll))
-                    }.overlayPreferenceValue(LayerRowFrames.self) { frames in
+                    }.scrollPosition($scrollPosition)
+                        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, next in scrollOffset = next }
+                        .overlayPreferenceValue(LayerRowFrames.self) { frames in
                         LayerConnections(store: store, frames: frames)
                     }.accessibilityIdentifier("layer-rows").modifier(LayerInputCheckOrder(layers: layers))
                 } else { Spacer(minLength: 0) }
@@ -54,6 +61,14 @@ struct LayerPanel: View {
             }
         }
             .onAppear { interaction.store = store }
+            .onChange(of: drawerPagePosition) { before, next in
+                if before == 0 && next != 0 { retainedOffset = scrollOffset }
+                if next == 0, let offset = retainedOffset { scrollPosition.scrollTo(y: offset); retainedOffset = nil }
+            }
+            .onChange(of: editingTarget) { _, _ in
+                retainedOffset = nil
+                if !current["id"].isNull { scrollPosition.scrollTo(id: current["id"].uint) }
+            }
             .onChange(of: filterMenu.isNull) { _, empty in store.workspace.popover(filterPopupID, open: !empty) }
             .onChange(of: interaction.menu.isNull) { _, empty in store.workspace.popover(popupID, open: !empty) }
             .onChange(of: store.state["revision"].uint) { _, _ in
@@ -241,21 +256,30 @@ private struct LayerSwipeRow<Content: View>: View {
     let layer: JSON
     @ViewBuilder var content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var width: CGFloat = 216
     private var offset: CGFloat { swipe.owner == owner && swipe.layer == layer["id"].uint ? swipe.offset : 0 }
     var body: some View {
         content().offset(x: -offset)
             .background(alignment: .trailing) {
                 if offset > 0 {
-                    Button {
-                        swipe.close(); store.layer(["op": "delete", "id": layer["id"].raw])
-                    } label: {
-                        Text(store.bootstrap["common"]["delete"].string).foregroundStyle(.white).frame(width: offset)
-                            .frame(maxHeight: .infinity).background(Color(red: 0.78, green: 0.16, blue: 0.16))
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(!layer["can_delete"].bool)
-                        .accessibilityIdentifier("layer-delete-\(layer["id"].uint)")
+                    let actions = layer["swipe_actions"].array
+                    let palette = EditorPalette(source: store.state["palette"])
+                    HStack(spacing: 0) {
+                        ForEach(actions.indices, id: \.self) { index in
+                            let model = actions[index], destructive = model["id"].string == "delete"
+                            Button { swipe.close(); store.layer(model["action"].object) } label: {
+                                Text(model["label"].string).lineLimit(1).foregroundStyle(destructive ? .white : palette["text"])
+                                    .padding(.horizontal, 4).frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(destructive ? Color(red: 0.78, green: 0.16, blue: 0.16) : palette["text"].opacity(model["id"].string == "duplicate" ? 0.24 : 0.16))
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain).disabled(!model["enabled"].bool).help(model["label"].string)
+                                .accessibilityIdentifier("layer-\(model["id"].string)-\(layer["id"].uint)")
+                        }
+                    }.frame(width: min(width, CGFloat(actions.count) * 72))
+                        .mask(alignment: .trailing) { Rectangle().frame(width: max(0, offset)) }
                 }
             }.clipped()
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .animation(swipe.tracking || reduceMotion ? nil : .easeOut(duration: 0.12), value: offset)
     }
 }

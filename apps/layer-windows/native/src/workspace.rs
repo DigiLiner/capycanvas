@@ -26,6 +26,7 @@ fn request(json: &str) -> Result<Value, String> {
             | "layer_drop"
             | "image_layer_drop"
             | "drawer"
+            | "layer_drawer_sizing"
             | "drawer_toolbar"
             | "expansion"
             | "renderer_stats"

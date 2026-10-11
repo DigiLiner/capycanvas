@@ -96,6 +96,26 @@ pub struct DrawerPlacement {
     pub columns: Vec<Bounds>,
 }
 
+pub fn drawer_frame(source: &str) -> Result<serde_json::Value, String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        from: Option<DrawerPlacement>,
+        to: DrawerPlacement,
+        progress: f32,
+        #[serde(default)]
+        closing: bool,
+    }
+    let request: Request = serde_json::from_str(source).map_err(|error| error.to_string())?;
+    let from = request.from.unwrap_or_else(|| request.to.closed());
+    let end = if request.closing { request.to.closed() } else { request.to };
+    let mut placement = end.interpolate_from(&from, request.progress);
+    for (column, start) in placement.columns.iter_mut().zip(&from.columns) {
+        *column = column.interpolate_from(*start, request.progress);
+    }
+    Ok(serde_json::json!({"connection": placement.connection(), "placement": placement}))
+}
+
 /// A tab-like bridge between the tile and drawer. The affine transform maps
 /// normalized (along-tile, toward-drawer) coordinates into connection-local
 /// coordinates; hosts can draw the same rectangle and two concave quarter arcs.
@@ -174,6 +194,7 @@ impl DrawerPlacement {
         })
     }
     pub fn connection(&self) -> Option<DrawerConnection> {
+        if self.bounds.width <= 0. || self.bounds.height <= 0. { return None; }
         let a = self.anchor;
         let b = self.bounds;
         let vertical = matches!(self.direction, Edge::Top | Edge::Bottom);
@@ -345,7 +366,7 @@ impl ToolbarControl {
                 Some(vec![vec![Panel::Brushes], vec![Panel::ToolSettings]])
             }
             Self::Brush { .. } => Some(vec![vec![Panel::Brushes], vec![Panel::ToolSettings]]),
-            Self::Color => Some(vec![vec![Panel::Color]]),
+            Self::Color | Self::Panel {panel:Panel::Color} => Some(vec![vec![Panel::Color, Panel::Palettes]]),
             Self::Opacity => Some(vec![vec![Panel::ToolSettings]]),
             Self::BrushSizeSlider | Self::BrushOpacitySlider => Some(vec![vec![Panel::ToolSettings]]),
             Self::ToolOptions { .. } => Some(vec![vec![Panel::Brushes], vec![Panel::ToolSettings]]),
@@ -360,21 +381,23 @@ impl ToolbarControl {
 }
 
 impl ContentDrawer {
+    pub fn panels(&self) -> impl Iterator<Item = Panel> + '_ {
+        self.columns.iter().flatten().copied().chain(self.layer_properties.map(|_| Panel::Properties))
+    }
+    fn for_control(control: ToolbarControl, anchor: DrawerAnchor) -> Result<Self, String> {
+        Ok(Self {
+            layer_properties: matches!(control, ToolbarControl::Panel {panel:Panel::Layers}).then_some(false),
+            anchor,
+            columns: control.drawer_columns().ok_or("This item has no tool drawer")?,
+            dismissal: DrawerDismissal::OutsideContact,
+            tabs: None, compact: false, tool_set: None,
+        })
+    }
     pub(crate) fn for_header(layout: &DockLayout, id: u32) -> Result<Self, String> {
         let HeaderItem::Tool { control } = layout.header.entry(id)?.item else {
             return Err("This item has no tool drawer".into());
         };
-        Ok(Self {
-            layer_properties: None,
-            anchor: DrawerAnchor::Header { id },
-            columns: control
-                .drawer_columns()
-                .ok_or("This item has no tool drawer")?,
-            dismissal: DrawerDismissal::OutsideContact,
-            tabs: None,
-            compact: false,
-            tool_set: None,
-        })
+        Self::for_control(control, DrawerAnchor::Header {id})
     }
     pub(crate) fn for_tile(layout: &DockLayout, anchor: TileAnchor) -> Result<Self, String> {
         let control = layout
@@ -384,15 +407,7 @@ impl ContentDrawer {
             .find(|t| t.id == anchor.tile)
             .ok_or("The tool no longer exists")?
             .control;
-        Ok(Self {
-            layer_properties: None,
-            anchor: anchor.into(),
-            columns: control.drawer_columns().ok_or("This tile has no drawer")?,
-            dismissal: DrawerDismissal::OutsideContact,
-            tabs: None,
-            compact: false,
-            tool_set: None,
-        })
+        Self::for_control(control, anchor.into())
     }
 
     pub(crate) fn for_column(
@@ -607,6 +622,7 @@ impl ContentDrawer {
         width = width.min(room.max(1.0));
         let height = heights.iter().copied().fold(TILE_SIZE, f32::max);
         let height = if self.layer_properties.is_some() { height.min(viewport[1] * crate::LayerDrawerSizing::MAX_HEIGHT_FRACTION) } else { height };
+        let fits_content = self.compact || self.layer_properties.is_some();
         let horizontal_x = if options.is_some() { anchor.x + anchor.width - width } else { anchor.x };
         let (x, y, height) = match direction {
             Edge::Bottom => {
@@ -617,11 +633,11 @@ impl ContentDrawer {
             }
             Edge::Top => {
                 let bottom = (anchor.y - WORKSPACE_SPACING).max(available.y + 1.0);
-                let height = (if self.compact { height } else { 800. }).min(available.height).min(bottom - available.y);
+                let height = (if fits_content { height } else { 800. }).min(available.height).min(bottom - available.y);
                 (horizontal_x, bottom - height, height)
             }
             Edge::Left | Edge::Right => {
-                let y = (if self.compact { anchor.y + anchor.height - height } else { anchor.y - 500.0 }).max(available.y);
+                let y = (if fits_content { anchor.y + anchor.height - height } else { anchor.y - 500.0 }).max(available.y);
                 let height = height
                     .max(anchor.y + anchor.height - y)
                     .min(available.y + available.height - y);
@@ -869,6 +885,26 @@ mod tests {
     }
 
     #[test]
+    fn layer_drawers_fit_their_pages_from_every_toolbar_edge() {
+        for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
+            let mut layout = DockLayout::default();
+            let panel = layout.add_toolbar(None, "Layers", &[ToolbarControl::Panel {panel:Panel::Layers}]).unwrap();
+            layout.move_panel(VIEWPORT, panel, DockTarget::Edge {edge, outer:false}).unwrap();
+            let tile = layout.panel(panel).unwrap().tiles()[0].id;
+            let drawer = ContentDrawer::for_tile(&layout, TileAnchor {panel, tile}).unwrap();
+            let normal = drawer.placement(&layout, VIEWPORT, &[300.]).unwrap();
+            assert_eq!(normal.bounds.height, 300., "{edge:?}");
+            assert!(normal.connection().is_some());
+            contained(&normal, VIEWPORT);
+            let grown = drawer.placement(&layout, VIEWPORT, &[10000.]).unwrap();
+            assert!(grown.bounds.height <= VIEWPORT[1] * crate::LayerDrawerSizing::MAX_HEIGHT_FRACTION);
+            contained(&grown, VIEWPORT);
+            let restored = drawer.placement(&layout, VIEWPORT, &[300.]).unwrap();
+            assert_eq!(restored.bounds, normal.bounds);
+        }
+    }
+
+    #[test]
     fn tile_drawers_fit_all_edges_and_content_changes() {
         for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
             let mut layout = DockLayout::default();
@@ -913,8 +949,9 @@ mod tests {
                         p.closed().bounds
                     );
                     assert_eq!(p.interpolate_from(&p.closed(), 1.0).bounds, p.bounds);
+                    assert!(p.closed().connection().is_none());
                     if viewport == VIEWPORT {
-                        for progress in [0.0, 0.1, 0.5, 1.0] {
+                        for progress in [0.1, 0.5, 1.0] {
                             let connection = p
                                 .interpolate_from(&p.closed(), progress)
                                 .connection()

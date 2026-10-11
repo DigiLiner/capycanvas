@@ -7,8 +7,11 @@
 #include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 #include <optional>
 
+namespace CapyLayers { struct LayersView; }
+
 winrt::Microsoft::UI::Xaml::FrameworkElement LayersPanel(
-    std::shared_ptr<CapyUi::WorkspaceData> const&,CapyUi::Bindings&,std::function<double()>* contentHeight=nullptr,std::function<CapyUi::J()>* scrollMetrics=nullptr);
+    std::shared_ptr<CapyUi::WorkspaceData> const&,CapyUi::Bindings&,std::function<double()>* contentHeight=nullptr,std::function<CapyUi::J()>* scrollMetrics=nullptr,
+    std::shared_ptr<CapyLayers::LayersView>* layerView=nullptr);
 namespace CapyLayers {
 using namespace CapyUi;
 inline J layerAction(J const& operation){return O({{L"type",S(L"layer")},{L"action",operation}});}
@@ -33,10 +36,14 @@ struct LayerRow : std::enable_shared_from_this<LayerRow> {
     hstring epoch;
     Border root;
     Grid body,swipeFrame;
-    Button swipeDelete{nullptr};
+    Grid swipeActions;
+    std::map<std::wstring,Button> swipeButtons;
+    hstring swipeKey;
     TranslateTransform swipeTransform;
     double swipeOffset=0;
     void swipe(double offset);
+    double revealWidth()const;
+    bool canSwipe()const;
     Button eye{nullptr},check{nullptr},content{nullptr},load{nullptr},mask{nullptr},link{nullptr},name{nullptr},grip{nullptr};
     Border indent,dropMark,contentSymbol,groupMode;
     Grid contentTile,maskTile;
@@ -89,6 +96,7 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     Bindings opacityBindings;
     hstring opacityKey,epoch;
     double opacityLayer=-1;
+    std::optional<double> revealTarget;
     std::vector<std::function<void(J,J)>> controls;
     Windows::Foundation::Collections::IObservableVector<Windows::Foundation::IInspectable> source{
         single_threaded_observable_vector<Windows::Foundation::IInspectable>()};
@@ -106,6 +114,9 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     void init();
     void refresh();
     void preview();
+    J scrollAnchor()const;
+    bool restoreAnchor(J const& anchor);
+    void revealEditing();
     void connections();
     void showMenu(J spec, FrameworkElement const& anchor);
     void layoutConnections();

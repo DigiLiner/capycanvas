@@ -1172,12 +1172,28 @@ body[data-theme="light"] #header { text-shadow:none; }
 .content-drawer :is(.filter-types,.filter-picker,.effect-properties) { margin:8px; }
 .color-action-property { display:flex; align-items:center; gap:var(--panel-control-spacing); }
 .drawer-column > .layers-panel { padding:8px; }
+.drawer-column.layer-inspector-column { overflow:hidden; }
+.layer-inspector { height:100%; display:flex; flex-direction:column; }
+.layer-properties-pages { flex:1; min-height:0; position:relative; overflow:hidden; }
+.layer-properties-pages > .panel { position:absolute; inset:0; height:100%; overflow:auto; }
+.layer-properties-pages > .layers-panel { overflow:hidden; }
+.layer-properties-disclosure { flex:none; width:100%; display:flex; align-items:center; gap:6px; padding:0 8px; border:0; border-top:1px solid var(--border); border-radius:0 0 var(--control-radius) var(--control-radius); font-weight:normal; }
+.layer-properties-icon-slot { width:24px; height:24px; flex:none; display:grid; place-items:center; }
+.layer-properties-icon-slot svg { width:16px; height:16px; }
+.layer-properties-disclosure:not(.open) > .layer-properties-icon-slot:last-child { transform:rotate(180deg); }
+.layer-properties-text { flex:1; min-width:0; display:flex; flex-direction:column; text-align:left; gap:1px; line-height:normal; }
+.layer-properties-label,.layer-properties-summary { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.layer-properties-summary { color:var(--muted); font-size:.9em; }
 
 .layer-swipe { position: relative; overflow: hidden; flex: none; --swipe: 0px; }
 .layer-swipe > .layer-row { transform: translateX(calc(-1 * var(--swipe))); touch-action: pan-y; }
 .layer-swipe.swipe-animating > .layer-row { transition: transform 150ms ease-out; }
-.panel button.layer-swipe-delete { position: absolute; inset: 0 0 0 auto; width: 72px; height: 100%; border: 0; border-radius: 0; color: white; background: #c62828; clip-path: inset(0 0 0 calc(72px - var(--swipe))); }
-.layer-swipe.swipe-animating > .layer-swipe-delete { transition: clip-path 150ms ease-out; }
+.layer-swipe-actions { position:absolute; inset:0 0 0 auto; display:flex; clip-path:inset(0 0 0 calc(100% - var(--swipe))); }
+.layer-swipe-actions[hidden] { display:none; }
+.panel .layer-swipe-actions button { flex:1 1 auto; min-width:0; height:100%; padding:0 4px; border:0; border-radius:0; background:color-mix(in srgb,var(--bg),var(--fg) 16%); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.panel .layer-swipe-actions button.layer-swipe-duplicate { background:color-mix(in srgb,var(--bg),var(--fg) 24%); }
+.panel .layer-swipe-actions button.layer-swipe-delete { color:white; background:#c62828; }
+.layer-swipe.swipe-animating > .layer-swipe-actions { transition:clip-path 150ms ease-out; }
 
 .selection-layer-load[hidden] { display:none; }
 .selection-menu-button { min-height:44px; padding:6px 12px; display:flex; gap:6px; align-items:center; justify-content:center; }

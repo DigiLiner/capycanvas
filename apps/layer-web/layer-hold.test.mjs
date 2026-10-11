@@ -256,8 +256,8 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
   const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await wait();};
   let targetId=1;
   const layer=()=>evaluate(`(()=>{const l=layerApp.state().layers.find(l=>Number(l.id)===${targetId});return{alpha_locked:l.alpha_locked,pass_through:l.pass_through,blend:l.blend_label}})()`);
-  const rect=()=>evaluate(`(()=>{const r=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
-  const revealed=()=>evaluate(`!document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]').parentElement.querySelector('.layer-swipe-delete').hidden`);
+  const rect=()=>evaluate(`(()=>{const r=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]').parentElement.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+  const revealed=()=>evaluate(`parseFloat(document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]').parentElement.style.getPropertyValue('--swipe'))>0`);
   const swipe=async(device,dx,{cancel=false,returnToStart=false}={})=>{
     const start=await rect();
     const input=async(type,x)=>{

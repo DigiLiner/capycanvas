@@ -323,6 +323,9 @@ manual save checkpoints and undo/redo after an actual process death.
   pinned preset leaves, selection family scope and Sketch drawer columns in both
   themes. Native drag capture respects panel stacking: a drawer blocks covered
   resize handles while its own controls remain interactive.
+  `#layerPropertiesDrawerUsesNativeSizingAndActions` checks the combined
+  Layers/Properties drawer from the header and a custom toolbar, immediate growth,
+  compact Properties, footer alignment and swipe action history in both themes.
 - `AndroidRasterTest`: document, file and GPU lifecycle.
   - `#encloseFillNativeContactsControlsAndHistory` uses Android stylus events
     with Reference source in both themes. It chooses the remembered Enclose
@@ -508,6 +511,11 @@ APK calls, so test-APK benchmarks use the unminified build.
   timing components. Vsync timestamps measure window-frame cadence, not actual
   screen-presentation times. Check dropped reports before comparing rates and
   exclude gaps between separate animation windows.
+- **Layers/Properties drawer and left swipe.** The same method accepts
+  `-e layerPropertiesBenchmark true` for repeated native footer transitions and
+  `-e layerSwipeDirection left` for the three-action strip. Supply the tier photo,
+  matching width/height and `-e layerBenchmarkTheme light|dark`. Each path primes
+  the controls and records three five-second moving windows.
 - **Grouped tool drawer scrolling.**
   `AndroidWorkspacePerformanceTest#groupedDrawerScrollFrameTiming` runs with
   `-e groupedToolBenchmark true -e photo <readable-tier-photo.jpg>`. It uses the

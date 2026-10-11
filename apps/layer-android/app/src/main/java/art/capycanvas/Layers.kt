@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -93,7 +94,7 @@ internal class LayerSwipe {
 }
 
 /** The native view translates the shared layer model; no layer policy lives here. */
-@Composable internal fun LayerPanel(host: CanvasHost, state: JSONObject, modifier: Modifier = Modifier, onContent: (PanelContentSize) -> Unit = {}) {
+@Composable internal fun LayerPanel(host: CanvasHost, state: JSONObject, modifier: Modifier = Modifier, listState: LazyListState = rememberLazyListState(), onContent: (PanelContentSize) -> Unit = {}) {
     val colors = LocalPalette.current
     val density = LocalDensity.current
     val view = state.getJSONObject("layer_tools")
@@ -108,8 +109,14 @@ internal class LayerSwipe {
         PanelContentSize(fixedHeight + layers.size * rowHeight, fixedHeight, rowHeight) else null
     SideEffect { measured?.let(onContent) }
     val currentLayers by rememberUpdatedState(layers)
-    val list = rememberLazyListState()
+    val list = listState
     val epoch = state.getJSONObject("document_file").optLong("epoch")
+    LaunchedEffect(epoch, active?.optLong("id")) {
+        val index = layers.indexOfFirst { it.optLong("id") == active?.optLong("id") }
+        val visible = list.layoutInfo.visibleItemsInfo.find { it.index == index }
+        if (index >= 0 && (visible == null || visible.offset < list.layoutInfo.viewportStartOffset
+            || visible.offset + visible.size > list.layoutInfo.viewportEndOffset)) list.scrollToItem(index)
+    }
     val images = remember(epoch) { mutableStateMapOf<String, ImageBitmap>() }
     val bounds = remember { mutableMapOf<Long, Rect>() }
     val thumbnails = remember { mutableStateMapOf<Long, LayerThumbnail>() }
@@ -299,13 +306,15 @@ internal class LayerSwipe {
     var maskBounds by remember { mutableStateOf(Rect.Zero) }
     val focused=LocalWindowInfo.current.isWindowFocused
     val swipe=host.layerSwipe
+    val swipeActions=layer.array("swipe_actions").objects()
+    val canSwipe=swipeActions.any { it.optBoolean("enabled") }
     val swipeOwner=remember { Any() }
     var rowBounds by remember { mutableStateOf(Rect.Zero) }
     val shift by animateFloatAsState(if(swipe.owner===swipeOwner) swipe.offset else 0f,
         tween(if(swipe.owner===swipeOwner && swipe.tracking) 0 else 150),label="Layer swipe")
     DisposableEffect(swipeOwner) { onDispose { if(swipe.owner===swipeOwner)swipe.close() } }
-    LaunchedEffect(focused,layer.optBoolean("can_delete")) {
-        if((!focused || !layer.optBoolean("can_delete")) && swipe.owner===swipeOwner)swipe.close()
+    LaunchedEffect(focused,canSwipe) {
+        if((!focused || !canSwipe) && swipe.owner===swipeOwner)swipe.close()
     }
     val density=LocalDensity.current.density
     var extendSelection by remember { mutableStateOf(false) }
@@ -367,7 +376,7 @@ internal class LayerSwipe {
                     if (!directDrag && !longPressed && moved && holdEligible) {
                         holdEligible=false
                         val delta=change.position-down.position
-                        val allowed=if(delta.x<0)row.getBoolean("can_delete") else swipeStart>0 || !row.isNull("right_swipe")
+                        val allowed=if(delta.x<0)row.array("swipe_actions").objects().any { it.optBoolean("enabled") } else swipeStart>0 || !row.isNull("right_swipe")
                         if(allowed && kotlin.math.abs(delta.x)>kotlin.math.abs(delta.y)) {
                             swiping=true; swipe.owner=swipeOwner; swipe.bounds=rowBounds; swipe.tracking=true
                             cancelContext()
@@ -376,7 +385,8 @@ internal class LayerSwipe {
                     if(swiping) {
                         change.consume()
                         val minimum=if(swipeStart==0f && !row.isNull("right_swipe"))-72*density else 0f
-                        swipe.offset=(swipeStart-(change.position.x-down.position.x)).coerceIn(minimum,72*density)
+                        val maximum=(row.array("swipe_actions").length()*72*density).coerceAtMost(size.width.toFloat())
+                        swipe.offset=(swipeStart-(change.position.x-down.position.x)).coerceIn(minimum,maximum)
                         if(!change.pressed) { released=true; break }
                         continue
                     }
@@ -389,7 +399,8 @@ internal class LayerSwipe {
                     if(swiping) {
                         val toggle=released && swipeStart==0f && swipe.offset<=-72*density*.4f
                         swipe.tracking=false
-                        if(released && swipe.offset>=72*density*.4f)swipe.offset=72*density else swipe.close()
+                        val threshold=if(swipeStart>0)swipeStart-72*density*.4f else 72*density*.4f
+                        if(released && swipe.offset>=threshold)swipe.offset=(latest.array("swipe_actions").length()*72*density).coerceAtMost(size.width.toFloat()) else swipe.close()
                         if(toggle)latest.objectOrNull("right_swipe")?.let { host.layer(it) }
                     }
                     if(dragging)drag(origin+down.position,true,true)
@@ -400,10 +411,18 @@ internal class LayerSwipe {
         }.combinedClickable(onClick={select()},onLongClick={openContext(false)}))
         ) {
         if(shift>0f) Box(Modifier.matchParentSize(),contentAlignment=Alignment.CenterEnd) {
-            Box(Modifier.width((shift/density).dp).fillMaxHeight().background(Color(0xffc62828))
-                .testTag("layer-delete-$id").clickable(enabled=layer.getBoolean("can_delete")) {
-                    swipe.close(); host.layer(obj("op" to "delete","id" to id))
-                },contentAlignment=Alignment.Center) { Text(host.bootstrap!!.getJSONObject("common").getString("delete"),color=Color.White,maxLines=1) }
+            Box(Modifier.width((shift/density).dp).fillMaxHeight().clipToBounds(),contentAlignment=Alignment.CenterEnd) {
+                Row(Modifier.width((swipeActions.size*72f).coerceAtMost(rowBounds.width/density).dp).fillMaxHeight()) {
+                    swipeActions.forEach { model ->
+                        val actionId=model.getString("id")
+                        val fill=when(actionId) {"delete"->Color(0xffc62828);"duplicate"->colors.text.copy(alpha=.24f);else->colors.text.copy(alpha=.16f)}
+                        Box(Modifier.weight(1f).fillMaxHeight().background(fill).padding(horizontal=4.dp)
+                            .testTag("layer-$actionId-$id").clickable(enabled=model.getBoolean("enabled")) {
+                                swipe.close(); host.layer(model.getJSONObject("action"))
+                            },contentAlignment=Alignment.Center) { Text(model.getString("label"),color=if(actionId=="delete")Color.White else colors.text,maxLines=1,overflow=TextOverflow.Ellipsis) }
+                    }
+                }
+            }
         }
         Row(Modifier.fillMaxWidth().heightIn(min=40.dp).offset { IntOffset(-shift.roundToInt(),0) }
             .background(if(layer.getBoolean("selected")) colors.active else Color.Transparent)

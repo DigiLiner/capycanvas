@@ -120,6 +120,12 @@ pub unsafe extern "C" fn capy_document_appearance(context: *const CapyLocalizati
         serde_json::to_value(options.appearance(localization)).map_err(|e| e.to_string())
     }) }
 }
+/// # Safety
+/// Both pointers remain readable for this call; the context remains immutable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_drawer_frame(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
+    unsafe { localized_json(context, input, |source, _| layer_ui::drawer_frame(source)) }
+}
 unsafe fn localized_json(context: *const CapyLocalization, input: *const c_char,
     resolve: impl FnOnce(&str, &layer_ui::Localizer) -> Result<serde_json::Value, String> + std::panic::UnwindSafe,
 ) -> *mut c_char {

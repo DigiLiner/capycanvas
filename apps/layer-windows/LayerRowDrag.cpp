@@ -157,7 +157,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         auto point=e.GetCurrentPoint(surface);
         if(!point.IsInContact()||point.Properties().IsRightButtonPressed()||point.Properties().IsBarrelButtonPressed())return;
         for(auto const& [element,row]:owner->rows)if(inside(original,row->root)){
-            if(row->renaming||inside(original,row->rename)||inside(original,row->swipeDelete)||!row->current())return;
+            if(row->renaming||inside(original,row->rename)||inside(original,row->swipeActions)||!row->current())return;
             source=row;id=row->id;epoch=row->epoch;pointer=e.Pointer();device=point.PointerDeviceType();
             grip=inside(original,row->grip);mask=inside(original,row->mask);initialSwipe=row->swipeOffset;
             for(auto const& [key,other]:owner->rows)if(other!=row)other->swipe(0);
@@ -229,7 +229,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         if(!dragging&&!swiping&&crossed(position)){
             if(device!=NativeInput::PointerDeviceType::Mouse&&!grip&&!held){
                 auto row=source.lock();double dx=position.X-origin.X,dy=position.Y-origin.Y;
-                if(row&&std::abs(dx)>std::abs(dy)&&((dx<0&&flag(row->model(),L"can_delete"))||(dx>0&&(initialSwipe>0||object(row->model(),L"right_swipe").Size())))){
+                if(row&&std::abs(dx)>std::abs(dy)&&((dx<0&&row->canSwipe())||(dx>0&&(initialSwipe>0||object(row->model(),L"right_swipe").Size())))){
                     if(!claim())return;
                     swiping=true;ignoreClick=true;suppressContext=true;hideMenu();
                     if(recognizing){recognizing=false;recognizer.CompleteGesture();}
@@ -253,7 +253,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         position=e.GetCurrentPoint(surface).Position();
         if(swiping){
             auto row=source.lock();auto operation=row&&row->swipeOffset<=-72*.4?object(row->model(),L"right_swipe"):J{};
-            if(row)row->swipe(row->swipeOffset>=72*.4?72:0);
+            if(row)row->swipe(row->swipeOffset>=(initialSwipe>0?initialSwipe-72*.4:72*.4)?row->revealWidth():0);
             swiping=false;e.Handled(true);clear(true);if(row&&operation.Size())row->action(operation);return;
         }
         if(dragging){

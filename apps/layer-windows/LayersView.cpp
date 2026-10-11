@@ -182,6 +182,7 @@ void LayersView::refresh(){
     if(auto text=str(active,L"blend_label");blendLabel.Text()!=text){blendLabel.Text(text);AutomationProperties::SetItemStatus(blend,text);}
     auto activeId=num(active,L"id",-1);auto nextKey=epoch+L":"+to_hstring(activeId);
     if(opacityKey!=nextKey){
+        revealTarget=activeId>=0?std::optional<double>(activeId):std::nullopt;
         opacityKey=nextKey;opacityLayer=activeId;opacityBindings.clear();
         auto weak=weak_from_this();auto generation=epoch;NumberPresentation presentation;
         presentation.title=[weak]{if(auto self=weak.lock())return self->data->caption(L"layers",L"opacity");return hstring();};
@@ -222,6 +223,7 @@ void LayersView::connections(){
 }
 void LayersView::layoutConnections(){
     if(!list.IsLoaded()||list.Visibility()!=Visibility::Visible)return;
+    revealEditing();
     auto layers=array(data->state,L"layers");std::map<double,std::pair<uint32_t,double>> order;
     for(uint32_t i=0;i<layers.Size();i++)order[num(layers.GetObjectAt(i),L"id")]={i,num(layers.GetObjectAt(i),L"depth")};
     std::map<double,Windows::Foundation::Rect> geometry;double column=0;uint32_t first=layers.Size(),last=0;
@@ -338,8 +340,47 @@ void LayersView::context(double id,bool mask,UIElement const& anchor,std::option
 }
 
 }
-FrameworkElement LayersPanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,std::function<double()>* contentHeight,std::function<J()>* scrollMetrics){
+namespace CapyLayers {
+void LayersView::revealEditing(){
+    if(!revealTarget||list.ActualHeight()<=0)return;
+    for(auto const& [key,row]:rows)if(row->id==*revealTarget&&row->current()&&row->root.IsLoaded()){
+        auto rect=row->root.TransformToVisual(list).TransformBounds({0,0,float(row->root.ActualWidth()),float(row->root.ActualHeight())});
+        if(rect.Height<=0)return;
+        double delta=rect.Y<0?rect.Y:std::max(0.,double(rect.Y+rect.Height)-list.ActualHeight());revealTarget.reset();
+        if(std::abs(delta)>.5){ScrollingScrollOptions options(ScrollingAnimationMode::Disabled,ScrollingSnapPointsMode::Ignore);list.ScrollTo(0,std::max(0.,list.VerticalOffset()+delta),options);}
+        return;
+    }
+    for(uint32_t i=0;i<source.Size();++i)if(unbox_value<double>(source.GetAt(i))==*revealTarget){repeater.GetOrCreateElement(i);return;}
+    revealTarget.reset();
+}
+J LayersView::scrollAnchor()const{
+    J anchor;double top=0;
+    for(auto const& [key,row]:rows)if(row->current()&&row->root.IsLoaded()){
+        auto rect=row->root.TransformToVisual(list).TransformBounds({0,0,float(row->root.ActualWidth()),float(row->root.ActualHeight())});
+        if(rect.Y+rect.Height>0&&rect.Y<list.ActualHeight()&&(!anchor.Size()||rect.Y<top)){top=rect.Y;anchor=O({{L"id",N(row->id)},{L"offset",N(rect.Y)}});}
+    }
+    return anchor;
+}
+bool LayersView::restoreAnchor(J const& anchor){
+    auto id=num(anchor,L"id",-1);
+    for(auto const& [key,row]:rows)if(row->id==id&&row->current()&&row->root.IsLoaded()){
+        auto rect=row->root.TransformToVisual(list).TransformBounds({0,0,float(row->root.ActualWidth()),float(row->root.ActualHeight())});
+        auto delta=rect.Y-num(anchor,L"offset");if(std::abs(delta)<.5)return true;
+        auto before=list.VerticalOffset();
+        auto target=std::clamp(before+delta,0.,std::max(0.,list.ExtentHeight()-list.ActualHeight()));
+        if(std::abs(target-before)<.5)return true;
+        ScrollingScrollOptions options(ScrollingAnimationMode::Disabled,ScrollingSnapPointsMode::Ignore);
+        list.ScrollTo(0,target,options);
+        return false;
+    }
+    auto layers=array(data->state,L"layers");
+    for(uint32_t i=0;i<layers.Size();++i)if(num(layers.GetObjectAt(i),L"id")==id){repeater.GetOrCreateElement(i).StartBringIntoView();return false;}
+    return true;
+}
+}
+FrameworkElement LayersPanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,std::function<double()>* contentHeight,std::function<J()>* scrollMetrics,std::shared_ptr<LayersView>* layerView){
     auto view=std::make_shared<LayersView>();view->data=data;view->init();bindings.emplace_back([view]{view->refresh();});
+    if(layerView)*layerView=view;
     if(scrollMetrics)*scrollMetrics=[weak=std::weak_ptr(view)]{
         if(auto view=weak.lock()){
             auto height=[](FrameworkElement const& item){return item.Visibility()==Visibility::Visible?item.ActualHeight():0.;};

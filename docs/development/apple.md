@@ -402,6 +402,9 @@ and `iOS/` sources; they have no runner script.
 
 Shared journeys are `check…` functions in `Shared/Tests`, called by `test…`
 methods in `Shared/Tests/EditorLaunchTests.swift`, compiled by both UI targets.
+`testLayerPropertiesDrawer` and `testLayerPropertiesDrawerDark` exercise the
+Layers header drawer, growth, compact Properties, All layers and Group properties
+in the native editor. They require an Apple SDK and a rendering-capable device.
 Platform-only journeys extend that class in `iOS/Tests` or `macOS/Tests`.
 
 XCTest journeys run through `xcodebuild test` with `-only-testing`. Use a fresh

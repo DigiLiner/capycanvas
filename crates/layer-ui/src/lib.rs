@@ -107,7 +107,7 @@ pub use header_drag::*;
 mod drawers;
 pub use drawers::{
     ColumnDrawerMeasurement, ContentDrawer, DrawerAnchor, DrawerConnection, DrawerDismissal,
-    DrawerPlacement, DrawerTabs, DrawerTileMeasurement, TileAnchor,
+    DrawerPlacement, DrawerTabs, DrawerTileMeasurement, TileAnchor, drawer_frame,
 };
 mod interaction;
 mod layout;
@@ -1256,6 +1256,14 @@ pub struct BrushState {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LayerSwipeAction {
+    pub id: &'static str,
+    pub label: std::sync::Arc<str>,
+    pub enabled: bool,
+    pub action: LayerAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct LayerState {
     pub id: u64,
     pub selection_layer: bool,
@@ -1266,8 +1274,7 @@ pub struct LayerState {
     pub label: String,
     pub description: String,
     pub can_delete: bool,
-    pub can_lock: bool,
-    pub can_duplicate: bool,
+    pub swipe_actions: Vec<LayerSwipeAction>,
     pub visible: bool,
     pub visibility_blocked: bool,
     pub adjustment_effect: bool,

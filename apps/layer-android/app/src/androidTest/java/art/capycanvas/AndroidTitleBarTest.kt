@@ -1430,10 +1430,13 @@ class AndroidTitleBarTest {
         val args=androidx.test.platform.app.InstrumentationRegistry.getArguments()
         val reorder=args.getString("layerReorderBenchmark")=="true"
         val selection=args.getString("layerSelectionBenchmark")=="true"
-        org.junit.Assume.assumeTrue(selection || reorder || args.getString("layerSwipeBenchmark")=="true")
+        val properties=args.getString("layerPropertiesBenchmark")=="true"
+        val discrete=selection || properties
+        val swipeDirection=if(args.getString("layerSwipeDirection")=="left") -1 else 1
+        org.junit.Assume.assumeTrue(discrete || reorder || args.getString("layerSwipeBenchmark")=="true")
         val width=args.getString("width")?.toInt() ?: 6000
         val height=args.getString("height")?.toInt() ?: 4000
-        val label=if(selection) "layer-selection" else if(reorder) "layer-reorder" else "layer-swipe"
+        val label=if(properties) "layer-properties" else if(selection) "layer-selection" else if(reorder) "layer-reorder" else "layer-swipe"
         val selectionInterval=args.getString("layerSelectionIntervalMs")?.toLong() ?: 150L
         require(selectionInterval>0)
         val theme=args.getString("layerBenchmarkTheme") ?: "dark"
@@ -1451,14 +1454,47 @@ class AndroidTitleBarTest {
             }
             if(!reorder)action(obj("type" to "layer","action" to obj("op" to "select","id" to owner,"mask" to false)))
         }
-        showSwipeLayers()
+        if(properties) {
+            resetPreset("builtin:workspace:painter")
+            tap("header-control-"+entries().first { it.getJSONObject("item").objectOrNull("control")?.optString("panel")=="layers" }.getInt("id"))
+            waitFor("benchmark layer inspector") { node("layer-inspector")!=null }
+        } else showSwipeLayers()
         action(obj("type" to "invoke","command" to "fit_canvas"))
         val id=state().getJSONObject("layer_tools").getJSONObject("editing_layer").getLong("id")
         if(selection)action(obj("type" to "layer","action" to obj("op" to "add_mask","id" to id,"replace" to false)))
+        var propertyContact:Pair<android.view.View,Offset>?=null
+        if(properties)instrumentation.runOnMainSync {
+            val target=checkNotNull(node("layer-properties-disclosure"))
+            propertyContact=target.first.view to target.second.boundsInRoot.center
+        }
         val frames=java.util.Collections.synchronizedList(mutableListOf<LongArray>())
         val thread=android.os.HandlerThread("$label-frames").apply { start() }
         lateinit var window: android.view.Window
         scenario.onActivity { window=it.window; window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        val measureGeometry=properties || (!discrete && !reorder)
+        val geometryFrames=mutableListOf<LongArray>()
+        var frameTime=0L
+        var collectGeometry=false
+        var geometryContent:SemanticsNode?=null
+        var geometryProperties:SemanticsNode?=null
+        var geometryInspector:SemanticsNode?=null
+        fun geometry():LongArray {
+            val position=checkNotNull(geometryContent).positionInRoot
+            return longArrayOf(frameTime,(position.x*1000).toLong(),(position.y*1000).toLong(),
+                ((geometryProperties?.positionInRoot?.y ?: 0f)*1000).toLong(),
+                ((geometryInspector?.boundsInRoot?.height ?: 0f)*1000).toLong())
+        }
+        val drawListener=android.view.ViewTreeObserver.OnDrawListener { if(measureGeometry && collectGeometry && frameTime!=0L)geometryFrames.add(geometry()) }
+        instrumentation.runOnMainSync {
+            if(measureGeometry) {
+                geometryContent=checkNotNull(node(if(properties)"layer-rows" else "layer-content-$id")).second
+                if(properties) {
+                    geometryProperties=checkNotNull(node("layer-properties")).second
+                    geometryInspector=checkNotNull(node("layer-inspector")).second
+                }
+                window.decorView.viewTreeObserver.addOnDrawListener(drawListener)
+            }
+        }
         val listener=android.view.Window.OnFrameMetricsAvailableListener { _,metrics,dropped ->
             frames.add(longArrayOf(metrics.getMetric(android.view.FrameMetrics.VSYNC_TIMESTAMP),
                 metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION),dropped.toLong(),
@@ -1475,9 +1511,9 @@ class AndroidTitleBarTest {
         tool=if(reorder) MotionEvent.TOOL_TYPE_MOUSE else MotionEvent.TOOL_TYPE_FINGER
         try {
             for(run in 0..3) {
-                if(!selection)down("layer-row-$id")
+                if(!discrete)down("layer-row-$id")
                 val start=point
-                if(!selection)event(MotionEvent.ACTION_MOVE,start+Offset((if(reorder) -24 else 24)*density,0f))
+                if(!discrete)event(MotionEvent.ACTION_MOVE,start+Offset((if(reorder) -24 else 24*swipeDirection)*density,0f))
                 if(reorder)waitFor("moving layer preview") { node("layer-drag-preview")!=null }
                 val done=java.util.concurrent.CountDownLatch(1)
                 val duration=if(run==0)1000L else 5000L
@@ -1486,26 +1522,39 @@ class AndroidTitleBarTest {
                 frames.clear()
                 lateinit var callback: android.view.Choreographer.FrameCallback
                 var selectedInterval=-1L
-                var observedMask=state().array("layers").objects().first { it.getLong("id")==id }.getBoolean("mask_selected")
+                fun selectedState()=if(properties)state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties")
+                    else state().array("layers").objects().first { it.getLong("id")==id }.getBoolean("mask_selected")
+                var observedMask=selectedState()
                 val transitions=mutableListOf<Long>()
                 instrumentation.runOnMainSync {
+                    geometryFrames.clear()
+                    if(measureGeometry) { frameTime=0L; geometryFrames.add(geometry()); collectGeometry=true }
                     val clock=android.view.Choreographer.getInstance()
-                    callback=android.view.Choreographer.FrameCallback {
+                    callback=android.view.Choreographer.FrameCallback { timestamp ->
+                        frameTime=timestamp
                         val elapsed=SystemClock.uptimeMillis()-begin
-                        if(elapsed>=duration)done.countDown()
+                        if(elapsed>=duration) { collectGeometry=false; done.countDown() }
                         else {
-                            if(selection) {
-                                val mask=state().array("layers").objects().first { it.getLong("id")==id }.getBoolean("mask_selected")
+                            if(discrete) {
+                                val mask=selectedState()
                                 if(mask!=observedMask) { observedMask=mask;transitions.add(System.nanoTime()) }
                                 val interval=elapsed/selectionInterval
                                 if(interval!=selectedInterval) {
                                     selectedInterval=interval
-                                    host.dispatch(obj("type" to "layer","action" to obj("op" to "select","id" to id,"mask" to (interval%2==0L))))
+                                    if(properties) {
+                                        val target=checkNotNull(propertyContact)
+                                        val center=target.second
+                                        val time=SystemClock.uptimeMillis()
+                                        for(kind in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                                            val contact=motion(MotionEvent.TOOL_TYPE_FINGER,kind,center,time,button)
+                                            try { target.first.dispatchTouchEvent(contact) } finally { contact.recycle() }
+                                        }
+                                    } else host.dispatch(obj("type" to "layer","action" to obj("op" to "select","id" to id,"mask" to (interval%2==0L))))
                                 }
                             } else {
                                 val cycle=(elapsed%1000)/500f
                                 val fraction=if(cycle<=1)cycle else 2-cycle
-                                val delta=if(reorder) Offset(-24*density,40*density*fraction) else Offset((24+40*fraction)*density,0f)
+                                val delta=if(reorder) Offset(-24*density,40*density*fraction) else Offset((24+40*fraction)*density*swipeDirection,0f)
                                 val move=motion(tool,MotionEvent.ACTION_MOVE,start+delta,downAt,button)
                                 try { checkNotNull(pressed).view.dispatchTouchEvent(move) } finally { move.recycle() }
                             }
@@ -1519,20 +1568,37 @@ class AndroidTitleBarTest {
                 val endNs=System.nanoTime()
                 SystemClock.sleep(200)
                 val received=synchronized(frames) { frames.toList() }
-                val rows=received.filter { it[0] in beginNs..endNs && (!selection || transitions.any { start -> it[0] in start..(start+200_000_000L) }) }
-                if(!selection)event(MotionEvent.ACTION_CANCEL)
+                var observedGeometry=listOf<LongArray>()
+                instrumentation.runOnMainSync { observedGeometry=geometryFrames.toList() }
+                val geometryByVsync=observedGeometry.associateBy { it[0] }
+                val samples=geometryByVsync.values.sortedBy { it[0] }
+                var previous:LongArray?=null
+                val moving=mutableSetOf<Long>()
+                for(sample in samples) {
+                    previous?.let { before -> if((1 until sample.size).any { sample[it]!=before[it] })moving.add(sample[0]) }
+                    previous=sample
+                }
+                val windowFrames=received.filter { it[0] in beginNs..endNs }.associateBy { it[0] }.values.sortedBy { it[0] }
+                val rows=windowFrames.filter { if(measureGeometry)it[0] in moving else !discrete || transitions.any { start -> it[0] in start..(start+200_000_000L) } }
+                if(!discrete)event(MotionEvent.ACTION_CANCEL)
                 idle()
-                if(selection)shot("$label-$run")
+                if(discrete)shot("$label-$run")
                 if(run>0) {
                     assertTrue("Moving frames were measured",rows.size>1)
+                    if(properties)assertTrue("Native footer contacts changed pages throughout the gesture",transitions.size>=duration/selectionInterval-2)
+                    if(measureGeometry)assertTrue("Draw geometry matches native frame timestamps",windowFrames.count { it[0] in geometryByVsync }>=windowFrames.size*.95)
                     val result=obj("run" to run,"duration_ms" to duration,"begin_ns" to beginNs,"end_ns" to endNs,
                         "width" to width,"height" to height,"photo" to args.getString("photo"),"motion" to label,"theme" to theme,
-                        "transitions_ns" to JSONArray(transitions),"selection_interval_ms" to (if(selection)selectionInterval else JSONObject.NULL),
-                        "animation_window_ms" to (if(selection)200 else JSONObject.NULL),
+                        "swipe_direction" to (if(swipeDirection<0) "left" else "right"),
+                        "transitions_ns" to JSONArray(transitions),"selection_interval_ms" to (if(discrete)selectionInterval else JSONObject.NULL),
+                        "animation_window_ms" to (if(discrete)200 else JSONObject.NULL),
                         "frame_columns" to JSONArray(listOf("vsync_ns","total_ns","dropped_reports","intended_vsync_ns",
                             "input_ns","animation_ns","layout_ns","draw_ns","sync_ns","command_ns","swap_ns")),
                         "dropped_reports" to received.sumOf { it[2] },
                         "received_frames" to JSONArray(received.map { JSONArray(it.toList()) }),
+                        "draw_geometry_columns" to JSONArray(listOf("vsync_ns","content_x_millipx","content_y_millipx","properties_y_millipx","inspector_height_millipx")),
+                        "draw_geometry" to JSONArray(observedGeometry.map { JSONArray(it.toList()) }),
+                        "moving_vsync_ns" to JSONArray(moving.sorted()),
                         "camera" to state().getJSONObject("camera"),
                         "layers" to state().array("layers"),"frames" to JSONArray(rows.map { JSONArray(it.toList()) }))
                     java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"$label-$run.json").writeText(result.toString())
@@ -1540,7 +1606,10 @@ class AndroidTitleBarTest {
                 }
             }
         } finally {
-            instrumentation.runOnMainSync { window.removeOnFrameMetricsAvailableListener(listener) }
+            instrumentation.runOnMainSync {
+                window.removeOnFrameMetricsAvailableListener(listener)
+                if(measureGeometry)window.decorView.viewTreeObserver.removeOnDrawListener(drawListener)
+            }
             thread.quitSafely()
         }
     }
@@ -1770,6 +1839,170 @@ class AndroidTitleBarTest {
             undo();assertTrue(order().contains(folder))
             for(id in checked)assertEquals(1,row(id).getInt("depth"))
             undo();assertEquals(before,order());assertEquals(checked,selection())
+        }
+        assertNull(host.actionError)
+    }
+
+    @Test fun layerPropertiesDrawerUsesNativeSizingAndActions() {
+        resetPreset("builtin:workspace:painter")
+        val opener="header-control-"+entries().first {
+            it.getJSONObject("item").objectOrNull("control")?.optString("panel")=="layers"
+        }.getInt("id")
+        val layoutMetrics=JSONArray()
+        fun observe(value:JSONObject) {
+            layoutMetrics.put(value)
+            java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"layer-properties-layout.json").writeText(layoutMetrics.toString())
+        }
+        fun actionCenter(key:String):Offset {
+            var result:Offset?=null
+            instrumentation.runOnMainSync {
+                val label=host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString(key)
+                result=checkNotNull(findNode({ it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label)==true })).second.boundsInRoot.center
+            }
+            return checkNotNull(result)
+        }
+        fun rows()=state().array("layers").objects()
+        fun selected()=state().getJSONObject("layer_properties").getLong("layer")
+        fun add()=action(obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false)))
+        fun height()=bounds("layer-inspector").height/density
+        var layerHomeY=0f
+        fun page(target:Float,open:Boolean,label:String) {
+            if(open)instrumentation.runOnMainSync { layerHomeY=checkNotNull(node("layer-rows")).second.positionInRoot.y }
+            val begin=SystemClock.uptimeMillis()
+            tap("layer-properties-disclosure")
+            waitFor(label) {
+                val inspector=checkNotNull(node("layer-inspector")).second
+                val content=checkNotNull(node(if(open)"layer-properties" else "layer-rows")).second
+                val expectedY=if(open)inspector.positionInRoot.y+8*density else layerHomeY
+                kotlin.math.abs(inspector.boundsInRoot.height/density-target)<=2f && kotlin.math.abs(content.positionInRoot.y-expectedY)<=1f
+            }
+            observe(obj("transition" to label,"tap_to_settled_ms" to (SystemClock.uptimeMillis()-begin),"height_dp" to height()))
+        }
+        fun swipe(id:Long,dx:Float,cancel:Boolean=false,reverse:Boolean=false) {
+            down("layer-row-$id");val start=point
+            for(i in 1..4)event(MotionEvent.ACTION_MOVE,start+Offset(dx*density*i/4,0f))
+            if(reverse)event(MotionEvent.ACTION_MOVE,start)
+            event(if(cancel)MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP);idle()
+        }
+        for(theme in listOf("light","dark")) {
+            action(obj("type" to "set_theme","theme" to theme))
+            tap(opener)
+            waitFor("layer inspector six-row geometry") { (node("layer-inspector")?.second?.boundsInRoot?.height ?: 0f)>=240*density }
+            idle()
+            val floor=height()
+            val before=rows().size
+            while(rows().size<7)add()
+            assertTrue("Seventh row grows drawer",height()>floor+20)
+            val grown=height()
+            val disclosure=bounds("layer-properties-disclosure")
+            val first=actionCenter("new_layer");val last=actionCenter("actions")
+            val firstSlot=bounds("layer-properties-icon-slot").center.x;val lastSlot=bounds("layer-properties-chevron-slot").center.x
+            val labelLeft=bounds("layer-properties-disclosure-label").left
+            observe(obj("theme" to theme,"floor_dp" to floor,"grown_dp" to grown,"density" to density,
+                "first_action_center_x" to first.x,"last_action_center_x" to last.x,"first_disclosure_slot_center_x" to firstSlot,"last_disclosure_slot_center_x" to lastSlot,
+                "label_left" to labelLeft,"expected_label_left" to (disclosure.left+38*density)))
+            assertEquals("First footer slot aligns with New Layer",first.x,firstSlot,1f)
+            assertEquals("Last footer slot aligns with Actions",last.x,lastSlot,1f)
+            assertEquals("Disclosure label follows 24 dp slot and 6 dp gap",disclosure.left+38*density,labelLeft,1f)
+            page(floor,true,"Raster Properties reaches floor")
+            waitFor("native properties page") { state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties") }
+            assertEquals("Raster properties use six-row floor",floor,height(),2f)
+            assertNotNull(node("layer-properties-disclosure-label"))
+            assertNotNull("Raster Properties offers Add Filter",node("properties-add-filter"))
+            shot("layer-properties-floor-$theme")
+            val id=selected()
+            page(grown,false,"All layers restores grown geometry")
+            assertEquals("All layers restores grown height",grown,height(),2f)
+            down("layer-properties-disclosure");event(MotionEvent.ACTION_UP)
+            SystemClock.sleep(70)
+            down("layer-properties-disclosure");event(MotionEvent.ACTION_UP)
+            idle()
+            assertEquals("Reversing transition restores native height",grown,height(),2f)
+            assertFalse(state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties"))
+            assertEquals(id,selected())
+            val footer=bounds("layer-properties-disclosure")
+            assertEquals("Disclosure spans drawer width",bounds("layer-inspector").width,footer.width,1f)
+            assertEquals("Disclosure sits at drawer bottom",bounds("layer-inspector").bottom,footer.bottom,1f)
+            tool=MotionEvent.TOOL_TYPE_FINGER
+            for(mode in 0..2) {
+                swipe(id,if(mode==0)-18f else -80f,cancel=mode==1,reverse=mode==2)
+                assertNull("Short, cancelled and reversed contacts close actions",node("layer-delete-$id"))
+            }
+            swipe(id,-80f)
+            for(action in listOf("lock","duplicate","delete"))assertNotNull("Revealed $action",node("layer-$action-$id"))
+            tap("layer-lock-$id")
+            assertTrue(rows().first { it.getLong("id")==id }.getBoolean("locked"))
+            swipe(id,-80f);tap("layer-lock-$id")
+            assertFalse(rows().first { it.getLong("id")==id }.getBoolean("locked"))
+            swipe(id,-80f);tap("layer-duplicate-$id")
+            assertEquals(8,rows().size)
+            action(obj("type" to "invoke","command" to "undo"));assertEquals(7,rows().size)
+            swipe(id,-80f);tap("layer-delete-$id")
+            assertEquals(6,rows().size);assertEquals(floor,height(),2f)
+            action(obj("type" to "invoke","command" to "undo"));assertEquals(7,rows().size)
+            assertEquals(grown,height(),2f)
+            while(rows().size<32)add()
+            val capped=height()
+            assertTrue("Layer drawer obeys viewport cap",capped<=bounds("workspace").height/density*.85f+2)
+            add();assertEquals("Rows beyond cap retain drawer height",capped,height(),2f)
+            val retained=selected()
+            page(floor,true,"Capped list Properties reaches floor")
+            assertEquals("Large layer list shrinks to Properties floor",floor,height(),2f)
+            page(capped,false,"Capped list returns to Layers")
+            assertEquals(retained,selected());assertEquals(capped,height(),2f)
+            while(rows().size>before)action(obj("type" to "layer","action" to obj("op" to "delete","id" to selected())))
+            shot("layer-properties-actions-$theme")
+            action(obj("type" to "layer","action" to obj("op" to "new","group" to true,"clipped" to false)))
+            val parent=selected()
+            page(floor,true,"Group Properties reaches floor")
+            assertNull("Group Properties omits Add Filter",node("properties-add-filter"))
+            page(floor,false,"Group Properties returns to Layers")
+            add();val child=selected()
+            swipe(child,-80f)
+            action(obj("type" to "layer","action" to obj("op" to "lock","id" to parent,"value" to true)))
+            assertTrue("Locked parent disables every child action",rows().first { it.getLong("id")==child }.array("swipe_actions").objects().none { it.getBoolean("enabled") })
+            val revision=state().getJSONObject("document_file").getLong("revision")
+            val count=rows().size
+            val inheritedLock=rows().first { it.getLong("id")==child }.getBoolean("locked")
+            swipe(child,-80f)
+            for(command in listOf("lock","duplicate","delete"))assertNull("Disabled parent prevents native $command reveal",node("layer-$command-$child"))
+            assertEquals("Disabled native swipe changes no artwork",revision,state().getJSONObject("document_file").getLong("revision"))
+            assertEquals(count,rows().size);assertEquals(inheritedLock,rows().first { it.getLong("id")==child }.getBoolean("locked"))
+            action(obj("type" to "layer","action" to obj("op" to "lock","id" to parent,"value" to false)))
+            action(obj("type" to "layer","action" to obj("op" to "delete","id" to parent)))
+            action(obj("type" to "invoke","command" to "quick_mask"))
+            waitFor("Quick Mask native row") { node("layer-row-0")!=null }
+            swipe(0,-80f)
+            assertNotNull(node("layer-delete-0"));assertNull(node("layer-lock-0"));assertNull(node("layer-duplicate-0"))
+            tap("layer-delete-0")
+            assertFalse("Native Delete removes Quick Mask",rows().any { it.getBoolean("quick_mask") })
+            action(obj("type" to "effect","action" to obj("op" to "insert","effect" to "curves")))
+            assertNull("Filter Properties omits Add Filter",node("properties-add-filter"))
+            assertEquals("Filter insertion opens Properties",true,state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties"))
+            shot("layer-properties-filter-$theme")
+            page(floor,false,"Filter Properties returns to Layers")
+            action(obj("type" to "layer","action" to obj("op" to "delete","id" to selected())))
+            tap(opener)
+        }
+        fun customize(value:JSONObject)=action(obj("type" to "customize","action" to value))
+        customize(obj("type" to "new_toolbar","group" to JSONObject.NULL))
+        customize(obj("type" to "picker_name","name" to "Layers verification"))
+        customize(obj("type" to "picker_select","control" to obj("kind" to "panel","panel" to "layers"),"selected" to true))
+        customize(obj("type" to "confirm_tools"))
+        val toolbar=snapshot().array("panels").objects().first { it.getString("title")=="Layers verification" }
+        val tile="tile-${toolbar.getString("id")}-${toolbar.array("tiles").getJSONObject(0).getInt("id")}"
+        for(theme in listOf("light","dark")) {
+            action(obj("type" to "set_theme","theme" to theme))
+            tap(tile)
+            waitFor("custom toolbar Layers combo") { (node("layer-inspector")?.second?.boundsInRoot?.height ?: 0f)>=240*density }
+            idle()
+            val floor=height()
+            page(floor,true,"Custom toolbar Properties reaches floor")
+            assertTrue(state().getJSONObject("customization").getJSONObject("drawer").getBoolean("layer_properties"))
+            assertEquals("Custom toolbar shares floor sizing",floor,height(),2f)
+            shot("layer-properties-custom-toolbar-$theme")
+            page(floor,false,"Custom toolbar Properties returns to Layers")
+            tap(tile)
         }
         assertNull(host.actionError)
     }

@@ -15,7 +15,7 @@ export async function checkFilterDrawer({call,evaluate,settle}) {
     await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click()`);
     const p=await point(selector);await event('down',p,device);await event('up',p,device);await settle();await pause();
   };
-  const swipe=async(selector,dx,dy,device)=>{const p=await point(selector);await event('down',p,device);for(let i=1;i<=6;i++)await event('move',{x:p.x+dx*i/6,y:p.y+dy*i/6},device);await event('up',{x:p.x+dx,y:p.y+dy},device);await settle();await pause();};
+  const swipe=async(selector,dx,dy,device)=>{const p=await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});const r=n.parentElement.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await event('down',p,device);for(let i=1;i<=6;i++)await event('move',{x:p.x+dx*i/6,y:p.y+dy*i/6},device);await event('up',{x:p.x+dx,y:p.y+dy},device);await settle();await pause();};
   const capture=async name=>{await mkdir('artifacts/filters-web',{recursive:true});const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`artifacts/filters-web/${name}.png`,Buffer.from(shot.data,'base64'));};
   console.log("Filter drawer: switching to Sketch");
   await evaluate(`layerApp.app.workspace_input(JSON.stringify({type:'switch',id:'builtin:workspace:painter'}));null`);
@@ -98,7 +98,7 @@ export async function checkFilterDrawer({call,evaluate,settle}) {
   for(const [id,device] of [[1,'pen'],[2,'touch']]) {
     await swipe(row(id),-90,0,device);
     const offset=()=>evaluate(`parseFloat(document.querySelector(${JSON.stringify(row(id))}).parentElement.style.getPropertyValue('--swipe'))`);
-    assert.equal(await offset(),72);
+    assert.equal(await offset(),await evaluate(`Math.min(document.querySelector(${JSON.stringify(row(id))}).parentElement.clientWidth,layerApp.state().layers.find(l=>Number(l.id)===${id}).swipe_actions.length*72)`));
     await swipe(row(id),90,0,device);assert.equal(await offset(),0);
     await swipe(row(id),-90,0,device);await capture(`delete-${id}`);
     // The action precedes its translated content in the retained row wrapper.

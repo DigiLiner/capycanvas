@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -35,6 +36,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
 import org.json.JSONArray
 import org.json.JSONObject
@@ -157,7 +163,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     val openColumns = snapshot.getJSONObject("layout").array("collapsed").objects().filter { it.objectOrNull("open") != null }
     BackHandler(models.isNotEmpty() || openColumns.isNotEmpty()) {
         if (models.isEmpty()) host.customize(obj("type" to "close_column", "column" to openColumns.last().getInt("id")))
-        else if (activeTool) host.customize(obj("type" to "close_expanded")) else models.values.lastOrNull()?.getJSONObject("anchor")?.let {
+        else if (activeTool) host.customize(obj("type" to if(models["tool"]?.optBoolean("layer_properties")==true) "toggle_layer_drawer_properties" else "close_expanded")) else models.values.lastOrNull()?.getJSONObject("anchor")?.let {
             host.customize(obj("type" to "toggle_column_drawer", "group" to it.getInt("group"), "panel" to it.getString("origin")))
         }
     }
@@ -176,34 +182,45 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
     var geometry by remember { mutableStateOf<JSONObject?>(null) }
     val placementKey = listOf("anchor", "columns", "dismissal", "tabs", "compact").map { model.opt(it) }.toString().takeIf { current != null }
     val tabHeight = if (tabs == null) 0f else 36f
+    val inspector = model.has("layer_properties")
+    val propertiesOpen = model.optBoolean("layer_properties")
+    var pagePosition by remember { mutableFloatStateOf(0f) }
+    var layerSizes by remember { mutableStateOf<JSONObject?>(null) }
+    var layerSizesContext by remember { mutableStateOf<String?>(null) }
     val columnId = id.toIntOrNull()
     val tileOrigins = if (id == "tool") dock.drawerTileRevision else 0
+    val sizingContext = listOf(model.getJSONObject("anchor").toString(), snapshot.getJSONObject("layout").toString(), tileOrigins).toString()
     var lastModel by remember { mutableStateOf<String?>(null) }
     var lastAnchor by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(placementKey, snapshot.getJSONObject("layout").toString(), heights.toList(), tileOrigins) {
+    LaunchedEffect(placementKey, snapshot.getJSONObject("layout").toString(), heights.toList(), tileOrigins, propertiesOpen, layerSizes?.toString()) {
         val from = geometry?.getJSONObject("placement")
         val anchor = current?.getJSONObject("anchor")?.toString()
-        // Changing opener moves the body and connector together, so the new
-        // button never has to join a drawer still positioned at the old one.
         val switching = anchor != null && lastAnchor != null && lastAnchor != anchor
-        val animate = !switching && lastModel != placementKey
+        val pageTarget = if(propertiesOpen) 1f else 0f
+        val pageFrom = pagePosition
+        val pageChange = inspector && current != null && pageFrom != pageTarget
+        val animate = pageChange || (!switching && lastModel != placementKey)
         lastModel = placementKey
-        // An outside contact can start closing just before another opener is clicked.
         if (anchor != null) lastAnchor = anchor
-        val start = withFrameNanos { it }
+        val target = if(current == null) from else layerSizes?.takeIf { inspector && layerSizesContext==sizingContext }?.array("placements")?.optJSONObject(if(propertiesOpen) 1 else 0)
+            ?: host.awaitQuery(obj("type" to "drawer", "column" to columnId, "heights" to JSONArray(heights.toList()),
+                "progress" to 1f, "from" to null, "closing" to false))?.objectOrNull("placement")
+        if(target == null) { if(current == null) closed(); return@LaunchedEffect }
+        val start = System.nanoTime()
+        val duration = 200_000_000f * (coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f)
         do {
-            val progress = if (!animate) 1f else ((withFrameNanos { it } - start) / 200_000_000f).coerceIn(0f, 1f)
-            geometry = host.awaitQuery(obj("type" to "drawer", "column" to columnId, "heights" to JSONArray(heights.toList()),
-                "progress" to progress, "from" to from, "closing" to (current == null)))
-            if (geometry?.objectOrNull("connection") != null)
-                geometry!!.getJSONObject("placement").let { placement ->
-                    val source = DockInteraction.DrawerSource(placement.getString("direction"),
-                        placement.getJSONObject("anchor").rect(), model.getJSONObject("anchor"))
-                    if (dock.drawerSources[id] != source) dock.drawerSources[id] = source
-                }
-            else dock.drawerSources.remove(id)
-            if (id == "tool") { dock.drawer = geometry; dock.refresh() }
-        } while (progress < 1f)
+            val progress = if (!animate || duration <= 0f) 1f else ((withFrameNanos { it } - start) / duration).coerceIn(0f, 1f)
+            val eased=1f-(1f-progress)*(1f-progress)*(1f-progress)
+            val position = if(pageChange) pageFrom+(pageTarget-pageFrom)*eased else pageTarget
+            val reply=JSONObject(Native.drawerFrame(obj("from" to from, "to" to target, "progress" to eased,
+                "closing" to (current == null)).toString()))
+            geometry=reply; pagePosition=position
+            if (reply.objectOrNull("connection") != null) reply.getJSONObject("placement").let { placement ->
+                val source=DockInteraction.DrawerSource(placement.getString("direction"),placement.getJSONObject("anchor").rect(),model.getJSONObject("anchor"))
+                if(dock.drawerSources[id]!=source)dock.drawerSources[id]=source
+            } else dock.drawerSources.remove(id)
+            if(id=="tool"){dock.drawer=reply;dock.refresh()}
+        } while(progress < 1f)
         if (current == null) closed()
     }
     DisposableEffect(dock, id) {
@@ -278,7 +295,10 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                         .clipToBounds().onGloballyPositioned { clip = it.boundsInRoot().translate(-dock.origin) }) {
                         CompositionLocalProvider(LocalDrawerColumn provides columnId, LocalDrawerClip provides clip,
                             LocalWorkspaceZ provides (200 + (columnId ?: 100)), LocalPanelOpening provides opening) {
-                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                            if(inspector) LayerInspector(host, host.snapshot?.getJSONObject("state") ?: snapshot.getJSONObject("state"), propertiesOpen,
+                                pagePosition, bounds.number("height"), layerSizes?.number("footer_height",49.0) ?: 49f,
+                                sizingContext) { layerSizesContext=sizingContext; layerSizes = it }
+                            else Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
                                 .onSizeChanged { heights[index] = it.height / dock.density + tabHeight }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 columns[index].values().forEach { panelId ->
                                     bodies[panelId.toString()]?.let { panel ->
@@ -294,6 +314,54 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable private fun LayerInspector(host: CanvasHost, state: JSONObject, open: Boolean, position: Float,
+    height: Float, footerHeight: Float, sizingContext: String, onSizes: (JSONObject) -> Unit) {
+    val density=androidx.compose.ui.platform.LocalDensity.current.density
+    val view=state.getJSONObject("layer_properties")
+    val disclosure=view.getJSONObject("disclosure")
+    val list=rememberLazyListState()
+    var measurement by remember { mutableStateOf(PanelContentSize(0f,0f,40f)) }
+    var propertiesHeight by remember { mutableFloatStateOf(0f) }
+    var anchor by remember { mutableStateOf<Pair<Int,Int>?>(null) }
+    var anchorTarget by remember { mutableStateOf<String?>(null) }
+    val target="${state.getJSONObject("document_file").optLong("epoch")}:${view.optLong("layer")}"
+    LaunchedEffect(open) {
+        if(open) { anchor=list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset; anchorTarget=target }
+    }
+    LaunchedEffect(position,target) {
+        if(position==0f && anchorTarget==target) anchor?.let { list.scrollToItem(it.first.coerceAtMost((state.array("layers").length()-1).coerceAtLeast(0)),it.second); anchor=null }
+        else if(anchorTarget!=target) anchor=null
+    }
+    LaunchedEffect(measurement,propertiesHeight,state.array("layers").length(),state.getJSONObject("camera").array("viewport").toString(),sizingContext) {
+        host.awaitQuery(obj("type" to "layer_drawer_sizing","measurement" to obj("fixed_height" to (measurement.fixedHeight ?: 0f),"unit_height" to measurement.unitHeight),
+            "properties_height" to propertiesHeight))?.let { onSizes(it) }
+    }
+    Column(Modifier.fillMaxSize().testTag("layer-inspector")) {
+        val pageHeight=(height-footerHeight).coerceAtLeast(0f)
+        Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().testTag("layer-properties-pages")) {
+            LayerPanel(host,state,Modifier.fillMaxWidth().requiredHeight(pageHeight.coerceAtLeast((measurement.fixedHeight ?: 0f)+measurement.unitHeight).dp)
+                .offset { IntOffset(0,(-position*pageHeight*density).roundToInt()) },listState=list) { measurement=it }
+            Column(Modifier.fillMaxWidth().height(pageHeight.dp).offset { IntOffset(0,((1f-position)*pageHeight*density).roundToInt()) }
+                .verticalScroll(rememberScrollState())) {
+                Box(Modifier.fillMaxWidth().padding(8.dp).onSizeChanged { propertiesHeight=it.height/density+16f }) { LayerPropertiesPanel(host,state) }
+            }
+        }
+        HorizontalDivider(thickness=1.dp,color=LocalPalette.current.text.copy(alpha=.16f))
+        val label=disclosure.getString(if(open)"return_label" else "label")
+        val summary=if(open)"" else disclosure.getString("summary")
+        Row(Modifier.fillMaxWidth().height((footerHeight-1f).dp).testTag("layer-properties-disclosure")
+            .clickable(enabled=open || !view.isNull("layer")) { host.customize(obj("type" to "toggle_layer_drawer_properties")) }
+            .padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(24.dp).testTag("layer-properties-icon-slot"),contentAlignment=Alignment.Center) { SharedIcon("properties",null,Modifier.size(16.dp)) }
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(1.dp)) {
+                Text(label,Modifier.testTag("layer-properties-disclosure-label"),maxLines=1,overflow=TextOverflow.Ellipsis)
+                if(summary.isNotEmpty())Text(summary,Modifier.testTag("layer-properties-disclosure-summary"),color=LocalPalette.current.secondary,fontSize=LocalTextStyle.current.fontSize*.9f,maxLines=1,overflow=TextOverflow.Ellipsis)
+            }
+            Box(Modifier.size(24.dp).testTag("layer-properties-chevron-slot"),contentAlignment=Alignment.Center) { SharedIcon("chevron-down",null,Modifier.size(16.dp).graphicsLayer { rotationZ=if(open)0f else 180f }) }
         }
     }
 }

@@ -129,7 +129,10 @@ Crop uses the existing [crop bar](canvas-action-bar.md#crop), while Clone and
 Healing retain their [retouching controls](../internals/brushes.md#clone-stamp).
 The retouching tools also remain available in Sketch's Sculpt drawer.
 
-GTK Sketch's Layers drawer has a fixed footer below a divider. Paint layers
+The Layers toolbar item opens a combined Layers/Properties drawer on every host,
+from the title bar or any toolbar in any workspace. It uses the same shared
+content-drawer composition as Brush Color's Color/Palettes pair.
+The Layers drawer has a fixed footer below a divider. Paint layers
 label it **Layer properties**, and groups use **Group properties**; filters and
 other targets use their localized type.
 An optional second line shows up to two useful filter values, using the same
@@ -139,7 +142,7 @@ The footer opens Properties upward inside the same drawer. It covers the layer
 controls, list and action bar while retaining their widgets and scroll position.
 While Properties is open, the footer says **All layers** and hides the summary.
 Tapping it or pressing Escape returns to Layers. The interior slide and container
-resize use the same native Stack transition, including reversals and disabled
+resize use the same native animation progress, including reversals and disabled
 animations. An outside canvas contact dismisses the drawer without painting.
 Adding a filter from this drawer opens its settings in the same body.
 The drawer reserves six layer rows and grows to fit additional listed rows,
@@ -154,13 +157,15 @@ Layers height and the first visible row's
 offset after native layout and paint, confirming it on the next frame. New
 selection or scroll input takes precedence;
 window changes clamp the restored position to the list's current limits.
-Window and text-size changes recompute both pages. GTK measures realized rows
-through its native measurement cache and keeps the virtual list and its
-asynchronous thumbnails. The bridge joins the drawer to centered title-bar
-buttons at every header size, and the footer's
+Window and text-size changes recompute both pages. Shared Rust sets the height
+limits from native control and row measurements. Bottom and side toolbar
+openers use the same content heights. Clients retain the scrolling
+list and asynchronous thumbnails. The footer uses 24-pixel icon slots with
+16-pixel glyphs and a six-pixel text gap; its icons align with the Layers action
+bar. The bridge joins the drawer to its opener, and the footer's
 top hover corners meet its divider squarely. Properties offers Add filter on raster
-and object layers; filter layers already have their settings. Paint and Photo retain
-their ordinary Properties presentation.
+and object layers; filter layers already have their settings. Paint and Photo
+retain their ordinary docked Properties panels.
 
 ## Workspace behavior
 

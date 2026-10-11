@@ -175,21 +175,37 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     name.ondblclick = e => { e.stopPropagation(); if(get().can_rename) send({ op: "begin_rename", id: get().id }); };
     menu(row, get); menu(mask.b, get, true);
     Object.assign(record, { load, eye, check, thumbnails, content, mask, link, name, text, meta, lock, grip });
-    const remove = button(()=>liveCopy(app,"bootstrap_view").common.delete, e => { e.stopPropagation(); send({ op: "delete", id: get().id }); }, "layer-swipe-delete");
-    root.append(remove, row);
+    const actions = element("div", "layer-swipe-actions"), actionButtons = new Map();
+    root.append(actions, row);
+    record.refreshSwipe = () => {
+      const ids = new Set(get().swipe_actions.map(action => action.id));
+      for (const [id, b] of actionButtons) if (!ids.has(id)) { b.remove(); actionButtons.delete(id); }
+      for (const model of get().swipe_actions) {
+        let b = actionButtons.get(model.id);
+        if (!b) {
+          b = button("", e => { e.stopPropagation(); const action = get().swipe_actions.find(action => action.id === model.id); if (action?.enabled) { record.closeSwipe(); send(action.action); } }, `layer-swipe-${model.id}`);
+          actionButtons.set(model.id, b);
+        }
+        b.textContent = b.title = model.label; b.setAttribute("aria-label", model.label); b.disabled = !model.enabled;
+        actions.append(b);
+      }
+      actions.style.width = `${revealWidth()}px`;
+    };
+    const revealWidth = () => Math.min(root.clientWidth || 216, get().swipe_actions.length * 72);
     let offset = 0, drag, suppressClick;
     const position = (value, animate = false) => {
       offset = value; root.classList.toggle("swipe-animating", animate);
       root.style.setProperty("--swipe", `${offset}px`);
-      remove.hidden = offset <= 0; remove.disabled = !get().can_delete;
+      actions.hidden = offset <= 0; actions.inert = offset <= 0;
       if (animate) connectionAnimationUntil = performance.now() + 180;
       scheduleConnections();
     };
     record.closeSwipe = () => position(0, true);
     position(0);
-    row.addEventListener("pointerdown", e => {
+    record.refreshSwipe();
+    root.addEventListener("pointerdown", e => {
       if (suppressClick) { row.removeEventListener("click", suppressClick, true); suppressClick = null; }
-      if (e.button || !e.isPrimary || e.target.closest("input") || (!get().can_drop_below && !get().can_delete && !get().right_swipe)) return;
+      if (e.button || !e.isPrimary || e.target.closest("input") || (!get().can_drop_below && !get().swipe_actions.some(action => action.enabled) && !get().right_swipe)) return;
       drag = { x: e.clientX, y: e.clientY, top: row.getBoundingClientRect().top, pointer: e.pointerId,
         waitForHold: e.pointerType !== "mouse" && !grip.contains(e.target), held: false, origin: offset };
       // Follow fast mouse exits before pickup without retargeting ordinary
@@ -212,14 +228,14 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       const dx = e.clientX-drag.x, dy = e.clientY-drag.y;
       if (drag.waitForHold && !drag.held) {
         if (!drag.swiping && Math.hypot(dx,dy) > 8) {
-          const allowed = dx < 0 ? get().can_delete : drag.origin > 0 || !!get().right_swipe;
+          const allowed = dx < 0 ? get().swipe_actions.some(action => action.enabled) : drag.origin > 0 || !!get().right_swipe;
           if (allowed && Math.abs(dx) > Math.abs(dy)) {
             drag.swiping = true; dismissContext(); row.setPointerCapture(e.pointerId);
           } else { finish({type:"pointercancel",pointerId:e.pointerId}); return; }
         }
         if (drag.swiping) {
           const minimum = drag.origin === 0 && get().right_swipe ? -72 : 0;
-          e.preventDefault(); position(Math.max(minimum,Math.min(72,drag.origin-dx)));
+          e.preventDefault(); position(Math.max(minimum,Math.min(revealWidth(),drag.origin-dx)));
         }
         return;
       }
@@ -281,7 +297,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       }
       if (previous.swiping) {
         const toggle = e.type === "pointerup" && offset <= -72*.4;
-        position(e.type === "pointerup" && offset >= 72*.4 ? 72 : 0, true);
+        const threshold = previous.origin > 0 ? previous.origin - 72*.4 : 72*.4;
+        position(e.type === "pointerup" && offset >= threshold ? revealWidth() : 0, true);
         if (toggle && get().right_swipe) send(get().right_swipe);
       }
       if (e.type !== "pointerup" && previous.held) dismissContext();
@@ -302,7 +319,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   const cancelDrags = () => { for (const r of records.values()) { r.cancelDrag(); r.closeSwipe(); } };
   const closeSwipes = e => { for (const r of records.values()) if (!r.root.contains(e.target)) r.closeSwipe(); };
   document.addEventListener("pointerdown", closeSwipes, true);
-  const closeOnClick = e => { if (!e.target.closest(".layer-swipe-delete")) for (const r of records.values()) r.closeSwipe(); };
+  const closeOnClick = e => { if (!e.target.closest(".layer-swipe-actions")) for (const r of records.values()) r.closeSwipe(); };
   document.addEventListener("click", closeOnClick);
   window.addEventListener("blur", cancelDrags);
   const cancelOnEscape = e => { if (!composingKey(e) && e.key === "Escape") cancelDrags(); };
@@ -350,7 +367,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       if(r.presentation===key)return;
       r.presentation=key;
       r.row.classList.toggle("selected", layer.selected);r.load.hidden=!layer.selection_layer;r.load.title=layer.load_selection_tooltip;r.load.setAttribute("aria-label",r.load.title);
-      if (!layer.can_delete && !layer.right_swipe) r.closeSwipe();
+      r.refreshSwipe();
+      if (!layer.swipe_actions.some(action => action.enabled) && !layer.right_swipe) r.closeSwipe();
       r.eye.replaceChildren(icon(layer.visible && !layer.visibility_blocked ? "eye" : "eye-hidden")); r.eye.style.opacity = layer.visibility_blocked ? .35 : 1;
       r.eye.title = r.eye.ariaLabel = layer.selection_layer?(layer.visible?copy.hide_selection:copy.show_selection):(layer.visible?copy.hide:copy.show);
       r.check.replaceChildren(icon(nameIcon(layer.selection_icon))); r.check.setAttribute("aria-pressed", String(layer.selected));

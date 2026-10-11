@@ -62,7 +62,7 @@ impl SwipeRow {
         let row: Self = glib::Object::new();
         let _ = row.imp().changed.set(Box::new(changed));
         row.set_overflow(gtk::Overflow::Hidden);
-        let copy = layer_ui::NativeCopy::new(crate::launch_localization()).layers;
+        let copy = layer_ui::CommonCopy::new(crate::launch_localization());
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         actions.add_css_class("layer-swipe-actions");
         let button = |name: &str, text: &str| {
@@ -72,13 +72,13 @@ impl SwipeRow {
             button.set_widget_name(name); button.add_css_class(name);
             actions.append(&button); button
         };
-        let lock_button = button("layer-swipe-lock", &copy.swipe_lock);
-        let duplicate_button = button("layer-swipe-duplicate", &copy.duplicate);
-        let delete_button = button("layer-swipe-delete", &copy.swipe_delete);
+        let lock_button = button("layer-swipe-lock", "");
+        let duplicate_button = button("layer-swipe-duplicate", "");
+        let delete_button = button("layer-swipe-delete", &copy.delete);
         delete_button.add_css_class("destructive-action");
-        lock_button.connect_clicked(move |_| lock());
-        duplicate_button.connect_clicked(move |_| duplicate());
-        delete_button.connect_clicked(move |_| remove());
+        for (button, action) in [(&lock_button, Box::new(lock) as Box<dyn Fn()>), (&duplicate_button, Box::new(duplicate)), (&delete_button, Box::new(remove))] {
+            button.connect_clicked(glib::clone!(#[weak] row, move |_| { row.reveal(false); action(); }));
+        }
         row.imp().lock.set(lock_button).unwrap();
         row.imp().duplicate.set(duplicate_button).unwrap();
         row.imp().delete.set(delete_button).unwrap();
@@ -146,22 +146,28 @@ impl SwipeRow {
         if let Some(a) = self.imp().animation.take() { a.pause(); }
         self.position(0.);
     }
-    pub fn set_actions(&self, state: &layer_ui::LayerState, copy: &layer_ui::native_copy::LayerCopy) {
-        for (button, label, enabled, visible) in [
-            (self.lock_button(), if state.locked { &copy.swipe_unlock } else { &copy.swipe_lock }, state.can_lock, !state.quick_mask),
-            (self.duplicate_button(), &copy.duplicate, state.can_duplicate, !state.quick_mask),
-            (self.delete_button(), &copy.swipe_delete, state.can_delete, true),
-        ] {
+    pub fn set_actions(&self, state: &layer_ui::LayerState) {
+        for (id, button) in [("lock", self.lock_button()), ("duplicate", self.duplicate_button()), ("delete", self.delete_button())] {
+            let model = state.swipe_actions.iter().find(|action| action.id == id);
+            button.set_visible(model.is_some());
+            let Some(model) = model else { continue; };
+            let label = &model.label;
             let child = button.child().and_downcast::<gtk::Label>().unwrap();
             if child.text().as_str() != label.as_ref() { child.set_label(label); }
             if button.tooltip_text().as_deref() != Some(label.as_ref()) {
                 button.set_tooltip_text(Some(label));
                 button.update_property(&[gtk::accessible::Property::Label(label)]);
             }
-            button.set_sensitive(enabled); button.set_visible(visible);
+            button.set_sensitive(model.enabled);
+        }
+        let mut previous: Option<&gtk::Button> = None;
+        for model in &state.swipe_actions {
+            let button = match model.id {"lock" => self.lock_button(), "duplicate" => self.duplicate_button(), _ => self.delete_button()};
+            self.imp().actions.get().unwrap().reorder_child_after(button, previous);
+            previous = Some(button);
         }
         self.imp().can_swipe_right.set(state.right_swipe.is_some());
-        if (!(state.can_delete || state.can_lock || state.can_duplicate) && self.is_open()) || (state.right_swipe.is_none() && self.imp().offset.get() < 0.) { self.reset(); }
+        if (!state.swipe_actions.iter().any(|action| action.enabled) && self.is_open()) || (state.right_swipe.is_none() && self.imp().offset.get() < 0.) { self.reset(); }
     }
     pub fn reveal(&self, open: bool) {
         if let Some(a) = self.imp().animation.take() { a.pause(); }

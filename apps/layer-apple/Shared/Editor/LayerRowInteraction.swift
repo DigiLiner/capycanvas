@@ -78,6 +78,7 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
     private var swipeOrigin = CGPoint.zero
     private var swipeStart: CGFloat = 0
     private var swipeMinimum: CGFloat = 0
+    private var swipeMaximum: CGFloat = 72
     private var contactLayer: UInt64?
     var frames: [UInt64: LayerRowFrame] = [:]
     var viewport: CGRect = .zero
@@ -132,10 +133,11 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
         let delta = CGPoint(x: point.x - contact.origin.x, y: point.y - contact.origin.y)
         let swipe = store.layerSwipe
         let start = swipe.owner == swipeOwner && swipe.layer == id ? swipe.offset : 0
-        let allowed = delta.x < 0 ? row["can_delete"].bool : start > 0 || !row["right_swipe"].isNull
+        let allowed = delta.x < 0 ? row["swipe_actions"].array.contains { $0["enabled"].bool } : start > 0 || !row["right_swipe"].isNull
         guard abs(delta.x) > abs(delta.y), allowed else { return false }
         swipeOrigin = contact.origin; swipeStart = start
         swipeMinimum = start == 0 && !row["right_swipe"].isNull ? -72 : 0
+        swipeMaximum = min(CGFloat(row["swipe_actions"].array.count) * 72, frame.root.width)
         contact.suppressActivation(); closeMenu()
         swipe.owner = swipeOwner; swipe.layer = id; swipe.bounds = frame.root; swipe.tracking = true
         moveSwipe(to: point)
@@ -143,14 +145,15 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
     }
     func moveSwipe(to point: CGPoint) {
         guard swiping, let swipe = store?.layerSwipe else { return }
-        swipe.offset = min(72, max(swipeMinimum, swipeStart - (point.x - swipeOrigin.x)))
+        swipe.offset = min(swipeMaximum, max(swipeMinimum, swipeStart - (point.x - swipeOrigin.x)))
     }
     func finishSwipe(cancelled: Bool) {
         guard swiping, let store, let id = store.layerSwipe.layer else { return }
         let swipe = store.layerSwipe, toggle = !cancelled && swipe.offset <= -72 * 0.4
         swipe.tracking = false
-        if cancelled || swipe.offset < 72 * 0.4 { swipe.close() }
-        else { swipe.offset = 72 }
+        let threshold = swipeStart > 0 ? swipeStart - 72 * 0.4 : 72 * 0.4
+        if cancelled || swipe.offset < threshold { swipe.close() }
+        else { swipe.offset = swipeMaximum }
         if toggle, let row = layers.first(where: { $0["id"].uint == id }), !row["right_swipe"].isNull {
             store.layer(row["right_swipe"].object)
         }
@@ -224,7 +227,7 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
         // Retire it on publication, without waiting for a native move or release.
         if contact.target != nil, !contact.validate() { cancel() }
         if let swipe = store?.layerSwipe, swipe.owner == swipeOwner,
-           !layers.contains(where: { $0["id"].uint == swipe.layer && ($0["can_delete"].bool || !$0["right_swipe"].isNull) }) { swipe.close() }
+           !layers.contains(where: { $0["id"].uint == swipe.layer && ($0["swipe_actions"].array.contains { $0["enabled"].bool } || !$0["right_swipe"].isNull) }) { swipe.close() }
         if let drag { move(drag.point, refresh: true) }
     }
     func cancel() {

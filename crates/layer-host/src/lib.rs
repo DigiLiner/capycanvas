@@ -830,6 +830,10 @@ impl NativeHost {
                 #[serde(default)]
                 closing: bool,
             },
+            LayerDrawerSizing {
+                measurement: layer_ui::PanelScrollMeasurement,
+                properties_height: f32,
+            },
             DrawerToolbar {
                 panel: layer_ui::Panel,
                 width: f32,
@@ -1043,6 +1047,13 @@ impl NativeHost {
                     let placement = end.interpolate_from(&from, progress);
                     json!({"connection": placement.connection(), "placement": placement})
                 }))
+            }
+            Query::LayerDrawerSizing {measurement, properties_height} => {
+                let state = self.session.state();
+                let heights = layer_ui::LayerDrawerSizing::pages(measurement, state.layers.len(), self.logical[1], properties_height);
+                let placements = heights.map(|height| state.customization.drawer.as_ref().and_then(|drawer|
+                    state.customization.drawer_placement(drawer, &state.workspace.layout, self.logical, &[height])));
+                json!({"heights": heights, "placements": placements, "footer_height": layer_ui::LayerDrawerSizing::FOOTER_HEIGHT})
             }
             Query::DrawerToolbar {
                 panel,

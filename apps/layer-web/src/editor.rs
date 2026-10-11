@@ -28,6 +28,13 @@ struct DrawerQuery {
     closing: bool,
 }
 
+#[derive(Deserialize)]
+struct LayerDrawerQuery {
+    measurement: layer_ui::PanelScrollMeasurement,
+    properties_height: f32,
+    viewport_height: f32,
+}
+
 #[wasm_bindgen]
 impl WebApp {
     pub fn application_menus(&self) -> Result<JsValue, JsValue> {
@@ -200,6 +207,13 @@ impl WebApp {
             let from = q.from.unwrap_or_else(|| end.closed());
             let placement = end.interpolate_from(&from, q.progress);
             json!({"connection":placement.connection(), "placement":placement})
+        }))
+    }
+    pub fn layer_drawer_sizing(&self, query: JsValue) -> Result<JsValue, JsValue> {
+        let q: LayerDrawerQuery = serde_wasm_bindgen::from_value(query).map_err(js)?;
+        serialize(&json!({
+            "heights": layer_ui::LayerDrawerSizing::pages(q.measurement, self.session.state().layers.len(), q.viewport_height, q.properties_height),
+            "footer_height": layer_ui::LayerDrawerSizing::FOOTER_HEIGHT,
         }))
     }
     pub fn drawer_toolbar(&self, panel: JsValue, width: f32) -> Result<JsValue, JsValue> {

@@ -79,11 +79,8 @@ bool LayerRow::loadThumbnail(bool isMask){
 }
 void LayerRow::init(){
     auto weak=weak_from_this();root.Child(swipeFrame);
-    swipeDelete=button(data,data->copyCommon(L"delete"),[weak]{if(auto self=weak.lock()){self->swipe(0);self->action(O({{L"op",S(L"delete")},{L"id",N(self->id)}}));}});
-    swipeDelete.HorizontalAlignment(HorizontalAlignment::Right);swipeDelete.VerticalAlignment(VerticalAlignment::Stretch);
-    swipeDelete.MinWidth(0);swipeDelete.Padding({0});swipeDelete.CornerRadius({0});swipeDelete.Background(fill({255,192,28,40}));swipeDelete.Foreground(fill({255,255,255,255}));
-    AutomationProperties::SetAutomationId(swipeDelete,L"layer-"+to_hstring(uint64_t(id))+L"-swipe-delete");
-    swipeFrame.Children().Append(swipeDelete);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);swipe(0);
+    swipeActions.HorizontalAlignment(HorizontalAlignment::Right);swipeActions.VerticalAlignment(VerticalAlignment::Stretch);
+    swipeFrame.Children().Append(swipeActions);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);swipe(0);
     swipeFrame.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock()){RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});self->swipeFrame.Clip(clip);}});
     root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();}});root.MinHeight(40);root.Padding({6,2,6,2});root.BorderThickness({0});
     root.BorderBrush(accent(data));body.ColumnSpacing(0);body.VerticalAlignment(VerticalAlignment::Center);
@@ -220,9 +217,13 @@ void LayerRow::init(){
     dropMark.IsHitTestVisible(false);dropMark.BorderBrush(accent(data));dropMark.Margin({-6,-2,-6,-2});
     Grid::SetColumnSpan(dropMark,12);body.Children().Append(dropMark);
 }
+double LayerRow::revealWidth()const{return std::min(std::max(1.,root.ActualWidth()),array(model(),L"swipe_actions").Size()*72.);}
+bool LayerRow::canSwipe()const{for(auto value:array(model(),L"swipe_actions"))if(flag(value.GetObject(),L"enabled"))return true;return false;}
 void LayerRow::swipe(double offset){
-    swipeOffset=std::clamp(offset,object(model(),L"right_swipe").Size()?-72.:0.,72.);swipeTransform.X(-swipeOffset);
-    swipeDelete.Width(std::max(0.,swipeOffset));swipeDelete.Visibility(swipeOffset>0?Visibility::Visible:Visibility::Collapsed);
+    swipeOffset=std::clamp(offset,object(model(),L"right_swipe").Size()?-72.:0.,revealWidth());swipeTransform.X(-swipeOffset);
+    auto width=revealWidth();swipeActions.Width(width);
+    RectangleGeometry clip;clip.Rect({float(width-std::max(0.,swipeOffset)),0,float(std::max(0.,swipeOffset)),float(root.ActualHeight())});swipeActions.Clip(clip);
+    swipeActions.Visibility(swipeOffset>0?Visibility::Visible:Visibility::Collapsed);
     if(auto view=owner.lock())view->connections();
 }
 void LayerRow::commit(bool cancel){
@@ -241,7 +242,27 @@ void LayerRow::highlight(int position, bool attachment){
 void LayerRow::refresh(){
     if(!current())return;auto layer=model();
     root.Background(flag(layer,L"selected")?selected(data):clear());
-    swipeDelete.IsEnabled(flag(layer,L"can_delete"));if((swipeOffset>0&&!flag(layer,L"can_delete"))||(swipeOffset<0&&!object(layer,L"right_swipe").Size())||renaming)swipe(0);
+    auto actions=array(layer,L"swipe_actions");
+    auto key=actions.Stringify()+L":"+to_hstring(data->textSize());
+    if(key!=swipeKey){swipeKey=key;
+    swipeActions.Children().Clear();swipeActions.ColumnDefinitions().Clear();
+    for(uint32_t i=0;i<actions.Size();++i){
+        auto model=actions.GetObjectAt(i);auto key=std::wstring(str(model,L"id"));
+        auto& pick=swipeButtons.try_emplace(key,nullptr).first->second;
+        if(!pick){auto weak=weak_from_this();pick=button(data,L"",[weak,key]{if(auto self=weak.lock())for(auto value:array(self->model(),L"swipe_actions")){
+            auto model=value.GetObject();if(str(model,L"id")==key&&flag(model,L"enabled")){self->swipe(0);self->action(object(model,L"action"));break;}
+        }});pick.MinWidth(0);pick.Padding({4,0,4,0});pick.CornerRadius({0});pick.VerticalAlignment(VerticalAlignment::Stretch);pick.HorizontalAlignment(HorizontalAlignment::Stretch);
+            TextBlock caption;caption.MaxLines(1);caption.TextTrimming(TextTrimming::CharacterEllipsis);caption.TextAlignment(TextAlignment::Center);pick.Content(caption);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+            AutomationProperties::SetAutomationId(pick,L"layer-"+to_hstring(uint64_t(id))+L"-swipe-"+hstring(key));}
+        pick.Content().as<TextBlock>().Text(str(model,L"label"));pick.IsEnabled(flag(model,L"enabled"));AutomationProperties::SetName(pick,str(model,L"label"));ToolTipService::SetToolTip(pick,box_value(str(model,L"label")));
+        pick.Background(key==L"delete"?fill({255,192,28,40}):data->tint(L"text",key==L"duplicate"?61:41));
+        pick.Foreground(key==L"delete"?fill({255,255,255,255}):data->brush(L"text"));
+        pick.FontSize(data->textSize());
+        ColumnDefinition column;column.Width({1,GridUnitType::Star});swipeActions.ColumnDefinitions().Append(column);
+        Grid::SetColumn(pick,i);swipeActions.Children().Append(pick);
+    }
+    }
+    if((swipeOffset>0&&!canSwipe())||(swipeOffset<0&&!object(layer,L"right_swipe").Size())||renaming)swipe(0);else swipe(swipeOffset);
     title.Text(str(layer,L"label"));AutomationProperties::SetName(name,str(layer,L"label"));
     auto nextTitle=str(layer,L"label");if(nextTitle!=captionTitle){captionTitle=nextTitle;AutomationProperties::SetName(root,data->caption(O({{L"type",S(L"layer_row")},{L"title",S(nextTitle)}})));}
     auto shown=flag(layer,L"visible")&&!flag(layer,L"visibility_blocked")?L"eye":L"eye-hidden";
