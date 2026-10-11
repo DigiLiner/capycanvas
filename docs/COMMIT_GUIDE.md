@@ -15,6 +15,8 @@ After cloning, install the local guards from the repository root:
 sh tools/git/install-hooks.sh
 ```
 
+On Windows, run shell commands from Git Bash.
+
 The installer shares the guards across linked worktrees. Run it again after the
 tracked hooks change. It refuses to replace unrelated hooks or override
 `core.hooksPath`; integrate the guards into existing hooks in that case. Do not

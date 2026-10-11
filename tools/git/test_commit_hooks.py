@@ -87,7 +87,7 @@ class CommitHooksTest(unittest.TestCase):
 
     def test_missing_message_fails_closed(self):
         result = self.run_command(
-            [str(self.repo / ".git/hooks/commit-msg"), "missing-message"],
+            ["sh", str(self.repo / ".git/hooks/commit-msg"), "missing-message"],
             cwd=self.repo, ok=False,
         )
         self.assertNotEqual(result.returncode, 0)

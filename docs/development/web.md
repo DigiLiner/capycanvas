@@ -178,6 +178,13 @@ node --test apps/layer-web/{run,package,frame,pointer,workspace-client,canvas-ba
 node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
+The launcher fixture uses Bash; `LAYER_TEST_BASH` selects its executable
+(default `/bin/bash`). On Windows, set it before the same Node commands:
+
+```powershell
+$env:LAYER_TEST_BASH = 'C:/Program Files/Git/bin/bash.exe'
+```
+
 `workspace-motion.sh web --numeric-controls` checks panel slider and editor
 geometry, complete readouts and unit alignment, large pixel scrubbing, typed
 fractions and cancellation in both themes. Mouse and touch use the private

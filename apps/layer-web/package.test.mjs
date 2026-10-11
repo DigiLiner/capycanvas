@@ -233,10 +233,13 @@ test("worker version covers every file and is stable across repeat builds", (t) 
   assert.ok(!readFileSync(join(dir, "sw.js"), "utf8").includes("__CAPY_"));
 });
 
-test("publication rejects symlinks and embedded private runtime paths", (t) => {
+test("publication rejects symbolic links", (t) => {
   const dir = fixture(t);
-  symlinkSync(join(dir, "index.html"), join(dir, "link"));
+  symlinkSync(process.platform === "win32" ? dir : join(dir, "index.html"), join(dir, "link"), process.platform === "win32" ? "junction" : "file");
   assert.throws(() => filesIn(dir), /Not a regular/);
+});
+
+test("runtime rejects embedded private paths and keys", () => {
   for (const text of ["/home/example/code/lib.rs", "/Users/example/src", "C:\\Users\\example\\src", "-----BEGIN PRIVATE KEY-----"])
     assert.throws(() => checkRuntime(Buffer.from(text), "fixture"), /Private path or key/);
   checkRuntime(Buffer.from("/cargo/registry/library.rs /capycanvas/crates/lib.rs"), "public");

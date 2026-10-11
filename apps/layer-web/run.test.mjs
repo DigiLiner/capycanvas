@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   mkdirSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +21,8 @@ test("browser journeys await their error check", async () => {
   await assert.rejects(runJourney([[true, async () => {}, async () => { throw failure; }]]), error => error === failure);
 });
 
+const shell = process.env.LAYER_TEST_BASH || "/bin/bash";
+const shellPath = path => process.platform === "win32" ? path.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, drive) => "/" + drive.toLowerCase()) : path;
 const launcher = fileURLToPath(new URL("run.sh", import.meta.url));
 for (const [name, installed, customHome, override, expected] of [
   ["Cargo default directory outside PATH", ["home"], false, null, "home"],
@@ -64,13 +65,13 @@ for (const [name, installed, customHome, override, expected] of [
     }
     executable(join(bin, "cargo"), "build");
     writeFileSync(join(bin, "python3"), '#!/bin/sh\nif [ "$1" = "-m" ]; then printf "serve\\n"; fi\n', { mode: 0o755 });
-    symlinkSync("/usr/bin/dirname", join(bin, "dirname"));
-    symlinkSync("/bin/bash", join(bin, "bash"));
+    writeFileSync(join(bin, "dirname"), '#!/bin/sh\nexec /usr/bin/dirname "$@"\n', { mode: 0o755 });
+    writeFileSync(join(bin, "bash"), '#!/bin/sh\nexec /bin/bash "$@"\n', { mode: 0o755 });
     for (const tool of installed) executable(locations[tool], tool);
-    const env = { HOME: home, PATH: bin };
-    if (customHome) env.CARGO_HOME = cargo;
-    if (override) env.LAYER_WASM_BINDGEN = locations[override] || override;
-    const result = spawnSync("/bin/bash", [launcher], {
+    const env = { HOME: shellPath(home), PATH: shellPath(bin) };
+    if (customHome) env.CARGO_HOME = shellPath(cargo);
+    if (override) env.LAYER_WASM_BINDGEN = locations[override] ? shellPath(locations[override]) : override;
+    const result = spawnSync(shell, [shellPath(launcher)], {
       env,
       encoding: "utf8",
     });
