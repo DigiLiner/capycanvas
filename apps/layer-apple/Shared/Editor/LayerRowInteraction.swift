@@ -45,12 +45,26 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
 
 /// One revealed native row per editor, including retained drawer instances.
 @MainActor final class LayerSwipe: ObservableObject {
+    private struct Row: Hashable { let owner: UUID; let layer: UInt64 }
+    @Published private var returning: [Row: UUID] = [:]
     @Published var owner: UUID?
     @Published var layer: UInt64?
     @Published var offset: CGFloat = 0
     @Published var tracking = false
     var bounds = CGRect.zero
-    func close() { owner = nil; layer = nil; offset = 0; tracking = false }
+    func atRest(owner: UUID, layer: UInt64) -> Bool {
+        returning[Row(owner: owner, layer: layer)] == nil && (self.owner != owner || self.layer != layer || offset == 0)
+    }
+    func close() {
+        let row = owner.flatMap { owner in layer.map { Row(owner: owner, layer: $0) } }
+        let token = UUID()
+        if let row, offset != 0 { returning[row] = token }
+        withAnimation(.easeOut(duration: 0.12), completionCriteria: .removed) {
+            owner = nil; layer = nil; offset = 0; tracking = false
+        } completion: {
+            if let row, self.returning[row] == token { self.returning.removeValue(forKey: row) }
+        }
+    }
     func contact(at point: CGPoint) { if owner != nil && !bounds.contains(point) { close() } }
 }
 
@@ -107,9 +121,11 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
         let id = row["id"].uint, currentEpoch = epoch
         contactLayer = id
         let mask = row["has_mask"].bool && frame.mask.contains(point)
-        let grip = frame.grip.contains(point)
+        let resting = store?.layerSwipe.atRest(owner: swipeOwner, layer: id) == true
+        let grip = resting && frame.grip.contains(point)
         return ReorderTarget(id: identity(id), surface: grip ? .handle : .row,
-            canDrag: row["can_drop_below"].bool && (grip || ThumbnailSelectionLoad.current() == nil),
+            canDrag: resting && row["can_drop_below"].bool && (grip || ThumbnailSelectionLoad.current() == nil),
+            dragDevices: grip ? [.mouse, .touch, .pen] : row["drag_from_body"].array.compactMap { ReorderDevice(rawValue: $0.string) },
             valid: { [weak self] _ in
                 guard let self else { return false }
                 return enabled && epoch == currentEpoch && renaming != id && layers.contains {

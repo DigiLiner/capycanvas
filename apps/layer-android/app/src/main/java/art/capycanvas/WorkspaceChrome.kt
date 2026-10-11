@@ -9,7 +9,6 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.rememberScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -298,7 +297,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                             if(inspector) LayerInspector(host, host.snapshot?.getJSONObject("state") ?: snapshot.getJSONObject("state"), propertiesOpen,
                                 pagePosition, bounds.number("height"), layerSizes?.number("footer_height",49.0) ?: 49f,
                                 sizingContext) { layerSizesContext=sizingContext; layerSizes = it }
-                            else Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                            else Column(Modifier.fillMaxWidth().panelScroll(rememberScrollState())
                                 .onSizeChanged { heights[index] = it.height / dock.density + tabHeight }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 columns[index].values().forEach { panelId ->
                                     bodies[panelId.toString()]?.let { panel ->
@@ -346,7 +345,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
             LayerPanel(host,state,Modifier.fillMaxWidth().requiredHeight(pageHeight.coerceAtLeast((measurement.fixedHeight ?: 0f)+measurement.unitHeight).dp)
                 .offset { IntOffset(0,(-position*pageHeight*density).roundToInt()) },listState=list) { measurement=it }
             Column(Modifier.fillMaxWidth().height(pageHeight.dp).offset { IntOffset(0,((1f-position)*pageHeight*density).roundToInt()) }
-                .verticalScroll(rememberScrollState())) {
+                .panelScroll(rememberScrollState())) {
                 Box(Modifier.fillMaxWidth().padding(8.dp).onSizeChanged { propertiesHeight=it.height/density+16f }) { LayerPropertiesPanel(host,state) }
             }
         }

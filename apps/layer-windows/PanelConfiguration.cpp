@@ -142,7 +142,7 @@ struct PanelConfiguration::Impl:std::enable_shared_from_this<Impl>{
     void init(){
         content.Padding({12,12,12,12});content.Spacing(12);root.Content(content);
         root.HorizontalScrollMode(ScrollingScrollMode::Disabled);root.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-        root.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+        root.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(root);
         AutomationProperties::SetAutomationId(root,L"panel-configuration-"+panelId);
         content.SizeChanged([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
     }

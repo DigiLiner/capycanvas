@@ -140,7 +140,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
         results=StackPanel();results.Spacing(2);sidebar.Children().Append(results);
         empty=description(data,data->caption(L"shortcuts",L"no_matching_preferences"));empty.Visibility(Visibility::Collapsed);empty.HorizontalAlignment(HorizontalAlignment::Center);empty.Margin({24,48,24,48});
         AutomationProperties::SetLiveSetting(empty,Automation::Peers::AutomationLiveSetting::Polite);sidebar.Children().Append(empty);
-        ScrollViewer navigationScroll;navigationScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);navigationScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);navigationScroll.HorizontalScrollMode(ScrollMode::Disabled);navigationScroll.Content(sidebar);
+        ScrollViewer navigationScroll;navigationScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);navigationScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);navigationScroll.HorizontalScrollMode(ScrollMode::Disabled);navigationScroll.Content(sidebar);mouseScrollbars(navigationScroll);
         Grid::SetRow(navigationScroll,1);side.Children().Append(navigationScroll);
         sidebarSurface=Border();sidebarSurface.Child(side);sidebarSurface.BorderThickness({0,0,1,0});body.Children().Append(sidebarSurface);
 
@@ -161,7 +161,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
         error=description(data,L"");error.Opacity(1);error.Margin({18,0,18,6});Grid::SetRow(error,1);
         AutomationProperties::SetLiveSetting(error,Automation::Peers::AutomationLiveSetting::Polite);pane.Children().Append(error);
         pages=StackPanel();pages.Spacing(16);pages.Padding({12,24,12,24});
-        scroller=ScrollViewer();scroller.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);scroller.Content(pages);Grid::SetRow(scroller,2);
+        scroller=ScrollViewer();scroller.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(scroller);scroller.Content(pages);Grid::SetRow(scroller,2);
         pane.Children().Append(scroller);body.Children().Append(pane);
         shortcutPage=std::make_unique<ShortcutPage>(data,overlay);
         bindings.emplace_back([this]{

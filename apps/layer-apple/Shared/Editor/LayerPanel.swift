@@ -33,7 +33,7 @@ struct LayerPanel: View {
                                 let thumbnailToken = "\(popupID):\(row.id)"
                                 Group {
                                     LayerSwipeRow(store: store, swipe: store.layerSwipe, owner: interaction.swipeOwner, layer: row.layer) {
-                                        LayerRow(store: store, layer: row.layer, previews: store.layerThumbnails, interaction: interaction)
+                                        LayerRow(store: store, swipe: store.layerSwipe, layer: row.layer, previews: store.layerThumbnails, interaction: interaction)
                                     }.modifier(PhotoDropTarget(store: store, row: row.id))
                                 }
                                     .modifier(LayerRowMeasurement(id: row.id))
@@ -85,7 +85,7 @@ struct LayerPanel: View {
         if let drag = interaction.drag,
            let row = rows.first(where: { $0.id == drag.id }) {
             Group {
-                LayerRow(store: store, layer: row.layer, previews: store.layerThumbnails, preview: true)
+                LayerRow(store: store, swipe: store.layerSwipe, layer: row.layer, previews: store.layerThumbnails, preview: true)
             }
                 .frame(width: drag.bounds.width)
                 .background(palette["panel"]).opacity(0.7).allowsHitTesting(false).accessibilityHidden(true)
@@ -325,6 +325,7 @@ private struct LayerRow: View {
     @Environment(\.editorPalette) private var surface
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: EditorStore
+    @ObservedObject var swipe: LayerSwipe
     let layer: JSON
     @ObservedObject var previews: LayerThumbnails
     var preview = false
@@ -366,7 +367,7 @@ private struct LayerRow: View {
                 }
             SharedIcon(name: layer["locked"].bool ? "lock" : "alpha-lock", size: 12)
                 .opacity(layer["locked"].bool || layer["alpha_locked"].bool ? 1 : 0)
-            if layer["can_drop_below"].bool {
+            if layer["can_drop_below"].bool && (preview || interaction.map { swipe.atRest(owner: $0.swipeOwner, layer: id) } == true) {
                 SharedIcon(name: "grip").opacity(0.6).frame(width: 16, height: 36)
                     .contentShape(Rectangle())
                     .modifier(LayerRowMeasurement(id: id, part: \.grip, enabled: !preview))

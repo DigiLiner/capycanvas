@@ -213,13 +213,13 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                 scrollMetrics=[] {return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
                 ScrollView scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
                 scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);
                 root=scroll;
             }else{
                 scrollMetrics=[] {return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
                 ScrollView scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
                 scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);root=scroll;
+                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);root=scroll;
             }
         }
     if(!scrollMetrics&&(contentHeight||navigator)&&str(panel,L"id")!=L"color"&&str(panel,L"id")!=L"proof"

@@ -120,10 +120,12 @@ class MainActivity : ComponentActivity() {
     }
     override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
         host.shaderInput()
+        PointerScrollbars.input(event)
         return super.dispatchTouchEvent(event)
     }
     override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
         host.shaderInput()
+        if (!event.isFromSource(android.view.InputDevice.SOURCE_JOYSTICK)) PointerScrollbars.input(event)
         if (event.isFromSource(android.view.InputDevice.SOURCE_JOYSTICK) && event.actionMasked == android.view.MotionEvent.ACTION_MOVE) {
             fun axis(axis: Int): Double {
                 val flat = event.device?.getMotionRange(axis, event.source)?.flat ?: 0f

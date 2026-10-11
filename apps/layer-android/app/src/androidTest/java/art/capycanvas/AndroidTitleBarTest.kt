@@ -1426,6 +1426,74 @@ class AndroidTitleBarTest {
         idle()
     }
 
+    @Test fun layerInputOwnership() {
+        host.newDocument(2048,1536)
+        repeat(2) { action(obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false))) }
+        showSwipeLayers()
+        fun order()=state().array("layers").objects().map { it.getLong("id") }
+        val id=order().first()
+        for(theme in listOf("light","dark")) for(pointer in listOf(MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_MOUSE)) {
+            action(obj("type" to "set_theme","theme" to theme));tool=pointer
+            val before=order()
+            if(pointer!=MotionEvent.TOOL_TYPE_MOUSE) {
+                down("layer-row-$id")
+                SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout().toLong()+150)
+                waitFor("layer body hold menu") { node("workspace-menu")!=null }
+                event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density))
+                assertNull("Held body cannot pick up",node("layer-drag-preview"))
+                event(MotionEvent.ACTION_CANCEL)
+                waitFor("held menu cancelled") { node("workspace-menu")==null }
+                assertEquals(before,order())
+            }
+            down(if(pointer==MotionEvent.TOOL_TYPE_MOUSE) "layer-row-$id" else "layer-grip-$id")
+            event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density))
+            waitFor("explicit layer pickup") { node("layer-drag-preview")!=null }
+            shot("layer-input-$theme-$pointer")
+            event(MotionEvent.ACTION_CANCEL);idle();assertEquals(before,order())
+            if(pointer!=MotionEvent.TOOL_TYPE_MOUSE) {
+                down("layer-row-$id");val start=point
+                for(i in 1..4)event(MotionEvent.ACTION_MOVE,start+Offset(-80*density*i/4,0f))
+                event(MotionEvent.ACTION_UP);idle()
+                assertNull("Revealed row hides grip",node("layer-grip-$id"))
+                assertNotNull(node("layer-delete-$id"))
+                tool=MotionEvent.TOOL_TYPE_MOUSE
+                down("layer-row-$id");event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density))
+                assertNull("Swiped row cannot pick up",node("layer-drag-preview"))
+                event(MotionEvent.ACTION_CANCEL);idle()
+                tool=pointer
+                down("layer-row-$id");val reverse=point
+                for(i in 1..4)event(MotionEvent.ACTION_MOVE,reverse+Offset(90*density*i/4,0f))
+                event(MotionEvent.ACTION_UP);idle()
+                waitFor("returned layer grip") { node("layer-grip-$id")!=null }
+                assertEquals(before,order())
+            }
+        }
+    }
+
+    @Test fun layerScrollbarsFollowNativePointer() {
+        host.newDocument(2048,1536)
+        repeat(18) { action(obj("type" to "layer","action" to obj("op" to "new","group" to false,"clipped" to false))) }
+        showSwipeLayers()
+        val id=state().array("layers").objects().first().getLong("id")
+        fun strip():List<Int> {
+            val area=screenBounds("layer-rows")
+            val image=instrumentation.uiAutomation.takeScreenshot()
+            return try { (area.top.toInt()+2 until area.bottom.toInt()-2).map { image.getPixel((area.right-4*density).toInt(),it) } }
+                finally { image.recycle() }
+        }
+        fun contact(pointer:Int) {
+            tool=pointer;down("layer-row-$id");event(MotionEvent.ACTION_CANCEL);idle()
+        }
+        for(theme in listOf("light","dark")) {
+            action(obj("type" to "set_theme","theme" to theme))
+            contact(MotionEvent.TOOL_TYPE_FINGER);val touch=strip();shot("layer-scrollbar-$theme-touch")
+            contact(MotionEvent.TOOL_TYPE_MOUSE);val mouse=strip();shot("layer-scrollbar-$theme-mouse")
+            assertTrue("Mouse shows native scrollbar",touch.zip(mouse).count { it.first!=it.second }>=20*density)
+            contact(MotionEvent.TOOL_TYPE_STYLUS);val pen=strip();shot("layer-scrollbar-$theme-pen")
+            assertEquals("Pen hides native scrollbar",touch,pen)
+        }
+    }
+
     @Test fun layerSwipeFrameTiming() {
         val args=androidx.test.platform.app.InstrumentationRegistry.getArguments()
         val reorder=args.getString("layerReorderBenchmark")=="true"
@@ -1712,7 +1780,13 @@ class AndroidTitleBarTest {
             action(obj("type" to "set_theme","theme" to theme));tool=pointer
             swipe(isolated,12f);assertFalse(row(isolated).getBoolean("pass_through"))
             swipe(isolated,60f,true);assertFalse(row(isolated).getBoolean("pass_through"))
-            swipe(isolated,-60f);assertNotNull(node("layer-delete-$isolated"))
+            swipe(isolated,-60f);assertNotNull(node("layer-delete-$isolated"));assertNull("Swiped row hides its grip",node("layer-grip-$isolated"))
+            val swipedOrder=order()
+            tool=MotionEvent.TOOL_TYPE_MOUSE
+            down("layer-row-$isolated");event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density))
+            assertNull("Swiped mouse body cannot pick up",node("layer-drag-preview"))
+            event(MotionEvent.ACTION_CANCEL);idle();assertEquals(swipedOrder,order())
+            tool=pointer
             swipe(isolated,90f);assertNull(node("layer-delete-$isolated"));assertFalse(row(isolated).getBoolean("pass_through"))
             swipe(isolated,60f);assertTrue(row(isolated).getBoolean("pass_through"));assertFalse(row(isolated).getBoolean("alpha_locked"))
             swipe(isolated,60f);assertFalse(row(isolated).getBoolean("pass_through"));assertEquals("Normal",row(isolated).getString("blend_label"))
@@ -1725,8 +1799,7 @@ class AndroidTitleBarTest {
             if(pointer!=MotionEvent.TOOL_TYPE_MOUSE) {
                 down("layer-row-$curves");event(MotionEvent.ACTION_MOVE,point+Offset(0f,24*density));event(MotionEvent.ACTION_UP);idle();assertEquals(before,order())
             }
-            down("layer-row-$curves")
-            if(pointer!=MotionEvent.TOOL_TYPE_MOUSE)SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout().toLong()+150)
+            down(if(pointer==MotionEvent.TOOL_TYPE_MOUSE) "layer-row-$curves" else "layer-grip-$curves")
             event(MotionEvent.ACTION_MOVE,point+Offset(-30*density,0f))
             waitFor("layer pickup") { node("layer-drag-preview")!=null }
             val target=if(thumbnail)bounds("layer-content-$isolated").center else bounds("layer-row-$through").let { Offset(it.center.x,it.bottom-2*density) }
@@ -1738,8 +1811,16 @@ class AndroidTitleBarTest {
         for(theme in listOf("light","dark")) for(pointer in listOf(MotionEvent.TOOL_TYPE_MOUSE,MotionEvent.TOOL_TYPE_FINGER,MotionEvent.TOOL_TYPE_STYLUS)) {
             action(obj("type" to "set_theme","theme" to theme));tool=pointer;select(curves)
             val before=order()
-            down("layer-row-$curves")
-            if(pointer!=MotionEvent.TOOL_TYPE_MOUSE)SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout().toLong()+150)
+            if(pointer!=MotionEvent.TOOL_TYPE_MOUSE) {
+                down("layer-row-$curves")
+                SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout().toLong()+150)
+                waitFor("layer body hold menu") { node("workspace-menu")!=null }
+                assertNull("Body hold never picks up a layer",node("layer-drag-preview"))
+                event(MotionEvent.ACTION_CANCEL)
+                waitFor("cancelled layer body menu") { node("workspace-menu")==null }
+                assertEquals(before,order())
+            }
+            down(if(pointer==MotionEvent.TOOL_TYPE_MOUSE) "layer-row-$curves" else "layer-grip-$curves")
             event(MotionEvent.ACTION_MOVE,point+Offset(-30*density,0f))
             waitFor("filter gap pickup") { node("layer-drag-preview")!=null }
             val target=bounds("layer-row-$base").let { Offset(it.right-64*density,it.top+2*density) }

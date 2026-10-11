@@ -104,7 +104,7 @@ void LayersView::init(){
     StackLayout layout;layout.Orientation(Orientation::Vertical);layout.Spacing(0);repeater.Layout(layout);repeater.ItemsSource(source);
     repeater.HorizontalCacheLength(.0);repeater.VerticalCacheLength(.5);
     list.Content(repeater);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
-    list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+    list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);
     AutomationProperties::SetAutomationId(list,L"layer-scroll-container");listFrame.Children().Append(list);
     connectionOverlay.IsHitTestVisible(false);AutomationProperties::SetAccessibilityView(connectionOverlay,Automation::Peers::AccessibilityView::Raw);
     listFrame.Children().Append(connectionOverlay);Grid::SetRow(listFrame,1);root.Children().Append(listFrame);
@@ -273,11 +273,7 @@ void LayersView::preview(){
     // Templates can create or replace the scroll provider after Loaded.
     if(auto presenter=list.ScrollPresenter();presenter&&AutomationProperties::GetAutomationId(presenter)!=L"layer-list"){
         AutomationProperties::SetAutomationId(presenter,L"layer-list");copyName(data,presenter,data->copyCaption(L"layers",L"title"));
-        // The pinned ScrollView template spans content across its auto-width
-        // scrollbar column. Reserve that column when it is visible so the
-        // native scrollbar cannot cover the row grip.
-        if(auto grid=VisualTreeHelper::GetParent(presenter).try_as<Grid>();grid&&grid.ColumnDefinitions().Size()==2)
-            Grid::SetColumnSpan(presenter,1);
+
     }
     std::vector<LayerThumbnail> visible;
     for(auto const& [element,row]:rows){

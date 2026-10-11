@@ -28,7 +28,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -344,7 +343,7 @@ private fun Modifier.paletteKeys(activate: () -> Unit, menu: (() -> Unit)?): Mod
                     }
                     Box(Modifier.fillMaxWidth().heightIn(min = cells.height(2).dp, max = naturalGrid.dp)
                         .onGloballyPositioned { geometry.viewport = it.boundsInRoot() }
-                        .verticalScroll(scroll).testTag("palette-swatches")) {
+                        .panelScroll(scroll).testTag("palette-swatches")) {
                         SwatchGrid(controller, view, swatches, cells, geometry, owner, covered)
                     }
                 }

@@ -109,7 +109,7 @@ struct ShortcutPage::Impl:std::enable_shared_from_this<Impl>{
         sheet.close=button(data,L"",[]{});sheet.close.Width(24);sheet.close.Height(24);sheet.close.CornerRadius({12,12,12,12});
         sheet.close.HorizontalAlignment(HorizontalAlignment::Right);sheet.close.VerticalAlignment(VerticalAlignment::Top);sheet.close.Margin({0,11,11,0});
         follow(data->copyCommon(L"close"),naming(sheet.close));sheet.frame.Children().Append(sheet.close);
-        ScrollViewer scroll;scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);Grid::SetRow(scroll,1);
+        ScrollViewer scroll;scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(scroll);Grid::SetRow(scroll,1);
         sheet.body.Spacing(18);sheet.body.Padding({12,0,12,24});scroll.Content(sheet.body);sheet.frame.Children().Append(scroll);
         overlay.Children().Append(sheet.frame);
     }

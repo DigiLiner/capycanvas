@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -162,7 +161,7 @@ private fun Modifier.workspaceRowInput(drag: WorkspaceRowInteraction, focused: B
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(colors.settingsCard)
         .testTag("workspace-rows").onGloballyPositioned { drag.area = Rect(it.positionInRoot(), it.size.toSize()) }
         .workspaceRowInput(drag, focused) { id, before -> edit(obj("type" to "move", "id" to id, "before" to before)) }) {
-        Column(Modifier.fillMaxSize().verticalScroll(scroll)) {
+        Column(Modifier.fillMaxSize().panelScroll(scroll)) {
             rows.forEachIndexed { index, row -> key(row.getString("id")) {
                 val id = row.getString("id")
                 val title = row.getString("title")

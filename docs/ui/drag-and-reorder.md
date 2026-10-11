@@ -51,6 +51,9 @@ their existing rules.
 Pen includes stylus contacts such as Apple Pencil. Do not infer mouse behavior
 from “not touch,” the absence of a touch sequence, or synthesized mouse events
 when the native API provides the original device type.
+Layer snapshots publish `drag_from_body` from Rust. Native clients use those
+device capabilities and latch pickup eligibility at the start of a contact;
+closing a swipe cannot turn that same contact into a reorder.
 
 GTK and Web mouse/pen feedback on hold-to-reorder tiles (including toolbar/drawer
 tiles and collapsed-column panel icons) is the regular pointer before pickup,
@@ -62,9 +65,12 @@ change the immediate pickup rule for handles and title/tab bars.
 
 - Pen drags scroll lists like touch on every host (GTK's shared pen scroller,
   Web `pen-scroll.js`, Android Compose); mouse drags never pan lists.
-- GTK scrollbars appear for mouse interaction. Pen and touch hide them and
+- Panel scrollbars appear for mouse interaction. Pen and touch hide them and
   leave the panel edge available to grab handles. Switching devices preserves
   the scroll position and viewport size.
+  Hosts classify native input before scrollbar pickup; promoted mouse events
+  retain their pen or touch identity. Web and Android use overlay thumbs;
+  GTK, AppKit, UIKit and WinUI retain their native scrollers.
 - A touch or pen swipe left across a layer row reveals **Lock** (or **Unlock**),
   **Duplicate** and **Delete**. A reverse swipe or an outside click closes it.
   Shared Rust supplies their order, labels and availability. They act on the swiped row and
@@ -199,6 +205,12 @@ The combined drawer runs GTK `--native-test=native_layer_drawer_any_toolbar`, We
 `AndroidTitleBarTest#layerPropertiesDrawerUsesNativeSizingAndActions` in both themes.
 Android `#layerSwipeFrameTiming` uses `-e layerPropertiesBenchmark true` for drawer transitions;
 the existing swipe benchmark accepts `-e layerSwipeDirection left` for the action strip.
+Android `#layerInputOwnership` and `#layerScrollbarsFollowNativePointer`, Web `--layer-hold`, Apple
+`tests/layer-row-input.swift` and Windows `exercise-layer-pickup.ps1` cover
+mouse body pickup, direct-contact handle pickup, stationary body menus,
+displaced handles, cancellation and Undo in both themes.
+Web `--layer-swipes` also closes and reopens a collapsed panel during a swipe
+return and checks that its resting rows can be picked up again.
 GTK `--native-test=native_layer_relationship_review` covers group-mode
 swipes, clipped owners, effect thumbnail drops, normalized gap feedback and
 relationship geometry in both themes at narrow and wide panel widths.

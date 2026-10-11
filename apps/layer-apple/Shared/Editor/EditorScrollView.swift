@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Native scroll behavior, including pen panning before a row hold wins.
 struct EditorScrollView<Content: View>: View {
     var axes: Axis.Set
     var showsIndicators: Bool
@@ -9,6 +8,6 @@ struct EditorScrollView<Content: View>: View {
         self.axes = axes; self.showsIndicators = showsIndicators; self.content = content()
     }
     var body: some View {
-        ScrollView(axes, showsIndicators: showsIndicators) { content.background(NativePenScroll().frame(width: 0, height: 0)) }
+        ScrollView(axes, showsIndicators: showsIndicators) { content.background(NativePenScroll(showsIndicators: showsIndicators, axes: axes).frame(width: 0, height: 0)) }
     }
 }

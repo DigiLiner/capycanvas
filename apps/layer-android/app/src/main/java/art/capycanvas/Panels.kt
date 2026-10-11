@@ -6,7 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -144,7 +143,7 @@ import kotlin.math.roundToInt
         SideEffect {
             if (displayedHeight > 0f) { onHeight(displayedHeight); onContent(measured) }
         }
-        Column(Modifier.fillMaxWidth().then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier).onGloballyPositioned {
+        Column(Modifier.fillMaxWidth().then(if (scrollable) Modifier.panelScroll(rememberScrollState()) else Modifier).onGloballyPositioned {
             contentHeight = it.size.height / density
             naturalHeight = contentHeight + (if (hasColor) deficits[0] else 0f) + (if (hasNavigator) deficits[1] else 0f)
         }.padding(panelMetrics().inset),
@@ -223,7 +222,7 @@ import kotlin.math.roundToInt
 }
 @Composable internal fun ConfigurePanel(host: CanvasHost, panel: JSONObject, onHeight: (Float) -> Unit = {}) {
     val density = LocalDensity.current.density
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).onSizeChanged { onHeight(it.height / density) }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxWidth().panelScroll(rememberScrollState()).onSizeChanged { onHeight(it.height / density) }.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(panel.getString("configuration_title"), fontWeight = FontWeight.Bold)
         Text(panel.getString("configuration_hint"), color = LocalPalette.current.secondary)
         panel.array("controls").objects().forEach { control ->

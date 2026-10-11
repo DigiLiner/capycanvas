@@ -93,7 +93,7 @@ struct WorkspaceDialogs::Impl:std::enable_shared_from_this<Impl>{
         repeater.ItemsSource(source);repeater.VerticalCacheLength(.5);repeater.HorizontalCacheLength(0);
         scroller.Content(repeater);scroller.HorizontalScrollMode(ScrollingScrollMode::Disabled);
         scroller.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-        scroller.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+        scroller.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroller);
         AutomationProperties::SetAutomationId(scroller,L"workspace-dialog-list");
         Grid::SetRow(scroller,3);body.Children().Append(scroller);
         error.TextWrapping(TextWrapping::Wrap);Grid::SetRow(error,4);body.Children().Append(error);

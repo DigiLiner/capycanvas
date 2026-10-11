@@ -350,7 +350,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         systemStatus=std::make_unique<HeaderStatus>(data,[weak=weak_from_this()]{if(auto self=weak.lock())self->schedule();});
         bank=Border();bank.Background(data->brush(L"panel"));bank.CornerRadius({8,8,8,8});bank.Padding({6,6,6,6});bankContent=Canvas();bankScroll=ScrollViewer();
         bankScroll.Content(bankContent);bankScroll.HorizontalScrollMode(ScrollMode::Disabled);bankScroll.VerticalScrollMode(ScrollMode::Enabled);
-        bankScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);bankScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        bankScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);bankScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(bankScroll);
         bank.Child(bankScroll);canvas.Children().Append(bank);Canvas::SetZIndex(bank,20);
         AutomationProperties::SetAutomationId(bank,L"header-editor");AutomationProperties::SetName(bank,data->caption(L"header",L"customize"));
         ghost=Border();ghost.IsHitTestVisible(false);ghost.Background(data->brush(L"panel"));ghost.CornerRadius({6,6,6,6});ghost.BorderThickness({1,1,1,1});

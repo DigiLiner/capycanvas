@@ -4,13 +4,13 @@ export function installPenScrolling() {
   let contact, suppressClick = false;
   document.addEventListener("pointerdown", e => {
     contact = null; suppressClick = false;
-    if (e.pointerType !== "pen" || e.button || !e.isPrimary ||
+    if ((e.pointerType !== "pen" && !(e.pointerType === "touch" && e.scrollbarContact)) || e.button || !e.isPrimary ||
         e.target.closest("input,textarea,select,[contenteditable=true]")) return;
     for (let node = e.target; node && node !== document.body; node = node.parentElement) {
       const style = getComputedStyle(node);
       if (style.touchAction === "none" || style.touchAction === "pan-x") return;
       if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(style.overflowY)) {
-        contact = { id: e.pointerId, target: e.target, node, x: e.clientX, y: e.clientY, top: node.scrollTop, panning: false };
+        contact = { id: e.pointerId, kind: e.pointerType, target: e.target, scrollbar: e.scrollbarContact, node, x: e.clientX, y: e.clientY, top: node.scrollTop, panning: false };
         break;
       }
     }
@@ -24,7 +24,7 @@ export function installPenScrolling() {
       if (e.defaultPrevented || Math.abs(dx) >= Math.abs(dy)) { contact = null; return; }
       // Retire pending row/menu holds just as native touch scrolling does.
       contact = null;
-      current.target.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: e.pointerId, pointerType: "pen" }));
+      current.target.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: e.pointerId, pointerType: current.kind }));
       current.panning = true; contact = current; suppressClick = true;
       current.node.setPointerCapture(e.pointerId);
     }
@@ -38,7 +38,7 @@ export function installPenScrolling() {
   };
   for (const event of ["pointerup", "pointercancel", "lostpointercapture"]) document.addEventListener(event, finish);
   document.addEventListener("gotpointercapture", e => {
-    if (contact?.id === e.pointerId && !contact.panning && e.target !== contact.target) contact = null;
+    if (contact?.id === e.pointerId && !contact.panning && e.target !== contact.target && e.target !== contact.scrollbar) contact = null;
   });
   document.addEventListener("workspace-context-claimed", () => { contact = null; });
   window.addEventListener("blur", () => { contact = null; });

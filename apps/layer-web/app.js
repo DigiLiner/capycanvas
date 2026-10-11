@@ -1,3 +1,4 @@
+import { addScrollbar } from "./scrollbars.js";
 import { brushSizeGrid } from "./brush-sizes.js";
 import init, { WebApp, WebGpu, configure_raster_worker, configure_gpu_diagnostics, automatic_tab_names } from "./pkg/layer_web.js";
 import { createRasterWorker } from "./raster-worker-client.js";
@@ -144,59 +145,9 @@ function numberField(control, label, onChange, inline = false, valueOnly = false
   if(read){Object.defineProperty(number,"localizedLabel",{set:next=>number.relabel(next)});bindCopy(number,read,"localizedLabel");}
   return number;
 }
-// Overlay scrollbars do not take width away from previews or tiles. Scrolling
-// itself stays in the browser; this one thumb also supports pointer dragging.
-// Read all dirty scrollbar geometry before changing any thumb. Mutation and
-// resize observers can report several panels in one update.
-const dirtyScrollbars = new Set();
-let scrollbarFrame;
-function queueScrollbar(read) {
-  dirtyScrollbars.add(read);
-  if (scrollbarFrame) return;
-  scrollbarFrame = requestAnimationFrame(() => {
-    scrollbarFrame = null;
-    const writes = [...dirtyScrollbars].map(read => read());
-    dirtyScrollbars.clear();
-    for (const write of writes) write();
-  });
-}
 function panelFrame(panel, scrollable = true) {
-  const frame = element("div", "panel-frame");
-  frame.append(panel);
-  if (!scrollable) return frame;
-  const thumb = element("div", "scroll-thumb");
-  thumb.setAttribute("aria-hidden", "true");
-  frame.append(thumb);
-  let origin;
-  const read = () => {
-    const visible = panel.clientHeight, total = panel.scrollHeight, top = panel.scrollTop;
-    const overflow = total - visible;
-    const height = total ? Math.max(28, visible ** 2 / total) : 0;
-    return () => {
-      thumb.hidden = !visible || overflow <= 1;
-      thumb.style.height = `${height}px`;
-      thumb.style.top = `${overflow > 0 ? (top / overflow) * (visible - height) : 0}px`;
-    };
-  };
-  const update = () => queueScrollbar(read);
-  panel.addEventListener("scroll", update);
-  new ResizeObserver(update).observe(panel);
-  new MutationObserver(update).observe(panel, {
-    childList: true,
-    subtree: true,
-  });
-  thumb.addEventListener("pointerdown", (e) => {
-    origin = [e.clientY, panel.scrollTop];
-    thumb.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-  thumb.addEventListener("pointermove", (e) => {
-    if (thumb.hasPointerCapture(e.pointerId))
-      panel.scrollTop =
-        origin[1] +
-        ((e.clientY - origin[0]) * (panel.scrollHeight - panel.clientHeight)) /
-          (panel.clientHeight - thumb.offsetHeight);
-  });
+  const frame = element("div", "panel-frame"); frame.append(panel);
+  if (scrollable) addScrollbar(panel, frame);
   return frame;
 }
 function commandButton(id, text) {
@@ -829,7 +780,7 @@ function buildPanels() {
     const panel = element("div", `panel ${name}-panel`);
     if (kind === "tiles") panel.classList.add("tile-panel");
     panels.set(name, panel);
-    panelFrame(panel, kind !== "tiles");
+    panelFrame(panel, kind !== "tiles" && name !== "layers");
   }
   panels.get("brushes").append(editor.control("brushes"));
   for (const [panel, control] of [["brush_sets","brush_sets"],["sculpt_sets","sculpt_sets"],["tools","tools"],["tool_settings","tool_settings"],["color","color_wheel"],["navigator","navigator"],["histogram","histogram"],["waveform","waveform"]])
@@ -1352,12 +1303,13 @@ function pointerStyle(e) {
   // Touch leaves :hover stuck until the next tap; track actual pointer input
   // instead of disabling hover for a whole device that may also have a pen/mouse.
   const touch = e.pointerType === "touch", root = document.documentElement;
+  root.toggleAttribute("data-mouse", e.pointerType === "mouse");
   if (root.hasAttribute("data-touch") !== touch) root.toggleAttribute("data-touch", touch);
 }
+for (const type of ["pointerdown", "pointermove"]) window.addEventListener(type, pointerStyle, true);
 window.addEventListener(
   "pointermove",
   (e) => {
-    pointerStyle(e);
     if (e.target.closest?.("dialog[open]")) return;
     if (!e.buttons) heldPointers.delete(e.pointerId);
     // A captured paint contact cannot reveal chrome. The canvas listener owns
@@ -1376,7 +1328,6 @@ document.addEventListener("pointerleave", () => {
 window.addEventListener(
   "pointerdown",
   (e) => {
-    pointerStyle(e);
     // Native DOM modals own their contacts. Workspace transitions deliberately
     // consume editor input, so forwarding a dialog contact would swallow its
     // buttons before the DOM click handler can run.

@@ -1,6 +1,7 @@
 import {liveCopy,bindCopy} from './localization.js';
 import { composingKey } from "./text-input.js";
 import { chooseColor } from "./color-editor.js";
+import { addScrollbar } from "./scrollbars.js";
 let thumbnailRequest=0n;
 const thumbnailPending=new Map();
 // Layer widgets only. Selection, references, hierarchy and menu policy are Rust.
@@ -60,6 +61,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   const connections = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   connections.classList.add("layer-connections"); connections.setAttribute("aria-hidden", "true");
   list.append(rows, connections);
+  addScrollbar(rows, list);
   const records = new Map();
   let documentEpoch, measurementKey;
   const menu = (node, getLayer, mask = false) => {
@@ -192,12 +194,22 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       actions.style.width = `${revealWidth()}px`;
     };
     const revealWidth = () => Math.min(root.clientWidth || 216, get().swipe_actions.length * 72);
-    let offset = 0, drag, suppressClick;
+    let offset = 0, drag, suppressClick, settling = false;
+    const atRest = () => offset === 0 && !settling;
+    record.refreshGrip = () => { grip.hidden = !get().can_drop_below || !atRest(); };
+    const settled = e => {
+      if (e.target !== row || e.propertyName !== "transform" || row.getAnimations().some(animation =>
+        animation.transitionProperty === "transform" && !["finished", "idle"].includes(animation.playState))) return;
+      settling = false; record.refreshGrip();
+    };
+    for (const type of ["transitionend", "transitioncancel"]) row.addEventListener(type, settled);
     const position = (value, animate = false) => {
+      settling = animate && (offset !== value || settling);
       offset = value; root.classList.toggle("swipe-animating", animate);
       root.style.setProperty("--swipe", `${offset}px`);
       actions.hidden = offset <= 0; actions.inert = offset <= 0;
       if (animate) connectionAnimationUntil = performance.now() + 180;
+      record.refreshGrip();
       scheduleConnections();
     };
     record.closeSwipe = () => position(0, true);
@@ -207,7 +219,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       if (suppressClick) { row.removeEventListener("click", suppressClick, true); suppressClick = null; }
       if (e.button || !e.isPrimary || e.target.closest("input") || (!get().can_drop_below && !get().swipe_actions.some(action => action.enabled) && !get().right_swipe)) return;
       drag = { x: e.clientX, y: e.clientY, top: row.getBoundingClientRect().top, pointer: e.pointerId,
-        waitForHold: e.pointerType !== "mouse" && !grip.contains(e.target), held: false, origin: offset };
+        canDrag: atRest() && get().can_drop_below && (grip.contains(e.target) || get().drag_from_body.includes(e.pointerType)),
+        direct: e.pointerType !== "mouse" && !grip.contains(e.target), held: false, origin: offset };
       // Follow fast mouse exits before pickup without retargeting ordinary
       // button clicks. Capture the row only once movement becomes a drag.
       window.addEventListener("pointermove", move, true);
@@ -226,7 +239,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     const move = e => {
       if (!drag || drag.pointer !== e.pointerId) return;
       const dx = e.clientX-drag.x, dy = e.clientY-drag.y;
-      if (drag.waitForHold && !drag.held) {
+      if (drag.direct) {
+        if (drag.held) return;
         if (!drag.swiping && Math.hypot(dx,dy) > 8) {
           const allowed = dx < 0 ? get().swipe_actions.some(action => action.enabled) : drag.origin > 0 || !!get().right_swipe;
           if (allowed && Math.abs(dx) > Math.abs(dy)) {
@@ -239,7 +253,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
         }
         return;
       }
-      if (!get().can_drop_below) return;
+      if (!drag.canDrag || !atRest() || !get().can_drop_below) return;
       if (!drag.ghost && Math.hypot(e.clientX-drag.x, e.clientY-drag.y) > 6) {
         dismissContext();
         row.setPointerCapture(e.pointerId); drag.ghost = row.cloneNode(true); drag.ghost.classList.add("layer-drag-preview");
@@ -395,7 +409,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       r.name.textContent = layer.label; r.name.title = layer.label;
       r.meta.textContent = layer.description;
       r.meta.hidden = !r.meta.textContent; r.lock.replaceChildren(icon(layer.locked ? "lock" : "alpha-lock")); r.lock.style.opacity = layer.locked || layer.alpha_locked ? 1 : 0;
-      r.grip.hidden = !layer.can_drop_below;
+      r.refreshGrip();
       if (view.rename_layer !== layer.id && r.entry) r.closeRename();
       if (view.rename_layer === layer.id && !r.entry) {
         const input = element("input", "layer-name-entry"); input.value = layer.label; input.maxLength = 128; r.entry = input; r.name.hidden = true; r.text.prepend(input);

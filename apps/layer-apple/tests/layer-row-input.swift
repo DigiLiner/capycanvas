@@ -5,7 +5,7 @@ import SwiftUI
 
 @main final class LayerRowInputChecks: NativeWorkspaceInputFixture {
     @MainActor static func order(_ store: EditorStore) -> [UInt64] { store.state["layers"].array.map { $0["id"].uint } }
-    @MainActor static func run(_ platform: UInt32) async throws {
+    @MainActor static func run(_ platform: UInt32, theme: ColorScheme) async throws {
         let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
         try await wait("Layer startup timed out") { order(store).count == 2 }
         let original = order(store)[0]
@@ -15,7 +15,7 @@ import SwiftUI
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Layer row input check"; window.isReleasedWhenClosed = false; window.animationBehavior = .none
         let panel = JSON(["controls": [["control": "layers", "visible_in_panel": true]]])
-        let host = NSHostingView(rootView: LayerPanel(store: store, panel: panel))
+        let host = NSHostingView(rootView: LayerPanel(store: store, panel: panel).environment(\.colorScheme, theme))
         window.contentView = host; window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         defer { window.contentView = nil; window.close() }
         try await drain(0.3); host.layoutSubtreeIfNeeded()
@@ -55,6 +55,27 @@ import SwiftUI
         try require(store.layerSwipe.offset == 72 && store.layerSwipe.layer == original && model.drag == nil && model.menu.isNull,
             "A pen row swipe reveals Delete without reordering or opening a menu")
         try require(order(store) == initial, "Revealing Delete does not edit the document")
+        try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "A displaced row hides its grip")
+        let displacedGrip = model.frames[original]!.grip
+        if displacedGrip != .zero, let target = model.source(at: CGPoint(x: displacedGrip.midX, y: displacedGrip.midY)) {
+            try require(target.surface != .handle && !target.canDrag, "A displaced grip cannot admit reorder")
+        }
+        store.layerSwipe.close()
+        try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "The grip stays hidden through swipe return")
+        try await wait("The returned row did not restore its grip") { store.layerSwipe.atRest(owner: model.swipeOwner, layer: original) }
+        for device: ReorderDevice in [.touch, .pen] {
+            guard let target = model.source(at: body(original)) else { throw HostFailure(message: "A resting body must admit context input") }
+            model.contact.prepare(target, device: device, origin: body(original))
+            model.contact.recognizeHold(openContext: true)
+            try await wait("A held direct-contact body did not open its menu") { !model.menu.isNull }
+            try require(!model.contact.move(to: body(added)) && !model.contact.dragging && model.drag == nil,
+                "Touch and pen body holds cannot reorder")
+            model.cancel(); model.closeMenu()
+        }
+        start = body(original)
+        try event(.leftMouseDown, at: start, marker: marker, number: 1015, tablet: true); try await drain(0.02)
+        try event(.leftMouseDragged, at: CGPoint(x: start.x - 90, y: start.y), marker: marker, number: 1016, tablet: true); try await drain(0.04)
+        try event(.leftMouseUp, at: CGPoint(x: start.x - 90, y: start.y), marker: marker, number: 1017, tablet: true); try await drain()
         let delete = CGPoint(x: model.frames[original]!.row.maxX - 24, y: model.frames[original]!.row.midY)
         try event(.leftMouseDown, at: delete, marker: marker, number: 1013)
         try event(.leftMouseUp, at: delete, marker: marker, number: 1014)
@@ -65,15 +86,24 @@ import SwiftUI
         try event(.leftMouseDown, at: start, marker: marker, number: 1, tablet: true); try await drain(0.02)
         try event(.leftMouseDragged, at: end, marker: marker, number: 2, tablet: true); try await drain(0.04)
         try event(.leftMouseUp, at: end, marker: marker, number: 3, tablet: true); try await drain()
-        try require(order(store) == initial && model.drag == nil, "Pen body motion cannot reorder before a hold")
+        try require(order(store) == initial && model.drag == nil, "Pen body motion cannot reorder")
         try event(.leftMouseDown, at: start, marker: marker, number: 4, tablet: true); try await drain(hold)
         try await wait("The held pen row did not retain its context menu") { !model.menu.isNull }
         try require(model.contact.held && model.contact.device == .pen,
             "The menu must retain the pen contact: key=\(window.isKeyWindow), held=\(model.contact.held), target=\(String(describing: model.contact.target?.id))")
         try event(.leftMouseDragged, at: end, marker: marker, number: 5, tablet: true); try await drain()
-        try require(model.contact.dragging && model.menu.isNull, "The same held contact must close the menu and drag the row")
+        try require(!model.contact.dragging && model.drag == nil && !model.menu.isNull, "A held pen row body keeps its menu without starting a reorder")
         try event(.leftMouseUp, at: end, marker: marker, number: 6, tablet: true)
-        try await wait("Pen body drop did not publish shared order") { order(store)[0] == original }
+        try await drain()
+        try require(order(store) == initial && model.drag == nil, "Releasing a held pen row body cannot reorder")
+        model.closeMenu()
+        start = CGPoint(x: model.frames[original]!.grip.midX, y: model.frames[original]!.grip.midY)
+        end = CGPoint(x: start.x, y: model.frames[added]!.row.minY + 2)
+        try event(.leftMouseDown, at: start, marker: marker, number: 1006, tablet: true); try await drain(0.02)
+        try event(.leftMouseDragged, at: end, marker: marker, number: 1007, tablet: true); try await drain()
+        try require(model.contact.dragging && !model.contact.requiresHold, "The pen grip reorders immediately")
+        try event(.leftMouseUp, at: end, marker: marker, number: 1008, tablet: true)
+        try await wait("Pen grip drop did not publish shared order") { order(store)[0] == original }
         let moved = order(store)
         try await store.apply(["type": "invoke", "command": "undo"])
         try require(order(store) == initial, "One Undo must restore the completed row move")
@@ -121,12 +151,12 @@ import SwiftUI
         model.openMenu(id: original, mask: false)
         try require(model.menu.isNull && model.menuSource == nil, "A removed row cannot open a menu")
         try require(store.failure == nil, store.failure ?? "")
-        note("PASS platform \(platform): actual covered-row rejection, layer pen hold/menu/drag, immediate mouse body and pen grip, drop/Undo/Redo/focus; shared Paper, rename, multiselection and removed-menu policies")
+        note("PASS platform \(platform): actual covered-row rejection, layer pen body hold/menu and grip drag, immediate mouse body and pen grip, drop/Undo/Redo/focus; shared Paper, rename, multiselection and removed-menu policies")
     }
     @MainActor static func main() {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
-            do { for platform: UInt32 in [0, 1] { try await run(platform) }; exit(0) }
+            do { for platform: UInt32 in [0, 1] { for theme: ColorScheme in [.light, .dark] { try await run(platform, theme: theme) } }; exit(0) }
             catch { note("FAIL: " + error.localizedDescription); exit(1) }
         }
         NSApp.run()

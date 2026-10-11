@@ -211,7 +211,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
   for (const theme of ["light", "dark"]) {
     await evaluate(`layerApp.dispatch({type:'set_theme',theme:'${theme}'})`);
     await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 650, y: 450 });
-    const idle = await background(settings), menuIdle = await background(menu);
+    const idle = await background(settings), menuIdle = await background(menu), zenIdle = await background(zen);
     await tap(settings);
     assert.equal(await evaluate("document.querySelector('#settings').open"), true);
     await evaluate("layerApp.dispatch({type:'close_settings'})");
@@ -236,7 +236,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
     await tap("#zen-capy");
     assert.equal(await evaluate("document.querySelector('#workspace').classList.contains('zen-hidden')"), false);
     assert.equal(await evaluate(`document.querySelector('${zen}').getAttribute('aria-pressed')`), "false");
-    assert.equal(await background(zen), idle, "Zen returns to its idle color when toggled off by touch");
+    assert.equal(await background(zen), zenIdle, "Zen returns to its idle color when toggled off by touch");
   }
   await call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 650, y: 450 });
   console.log("Touch controls: Settings, menus, Zen and mouse/pen switching passed in both themes");

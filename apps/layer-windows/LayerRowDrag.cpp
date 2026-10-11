@@ -21,6 +21,9 @@ void ownHolding(DependencyObject const& node){
 struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     std::weak_ptr<LayersView> view;
     Grid surface{nullptr};
+    weak_ref<UIElement> inputSurface;
+    event_token inputKey{};
+    PointerEventHandler inputMove{nullptr},inputUp{nullptr},inputCancel{nullptr};
     ScrollView list{nullptr};
     std::weak_ptr<LayerRow> source;
     Input::Pointer pointer{nullptr};
@@ -39,11 +42,11 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     double initialScroll=0,sourceOpacity=1,initialSwipe=0;
     bool swiping=false;
     HWND windowHandle=nullptr;
-    bool grip=false,mask=false,held=false,dragging=false,finishing=false;
+    bool grip=false,mask=false,held=false,dragging=false,finishing=false,pickup=false;
     bool releasing=false,recognizing=false,ignoreClick=false,suppressContext=false,busy=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     uint64_t generation=0,revision=0;
-    J lastRelease,lastCancel,lastCaptureLoss;
+    J lastRelease,lastCancel,lastCaptureLoss,lastMove;
     std::chrono::steady_clock::time_point tickAt;
     bool focus()const{return windowHandle&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==windowHandle&&!IsIconic(windowHandle);}
     bool crossed(Point at)const{return std::abs(at.X-origin.X)>slopX||std::abs(at.Y-origin.Y)>slopY;}
@@ -68,10 +71,14 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     void evidence(){
         if(!trace)return;
         auto owner=view.lock();
+        auto sourceRow=source.lock();
         auto value=O({{L"phase",S(finishing?L"finishing":dragging?L"dragging":held?L"held":pointer?L"pressed":L"idle")},
             {L"source",id>=0?N(id):JsonValue::CreateNullValue()},{L"generation",N(double(generation))},
             {L"device",S(device==NativeInput::PointerDeviceType::Mouse?L"mouse":device==NativeInput::PointerDeviceType::Pen?L"pen":L"touch")},
             {L"grip",B(grip)},{L"mask",B(mask)},{L"captured",B(owns(surface))},{L"ignore_click",B(ignoreClick)},
+            {L"pickup",B(pickup)},{L"initial_swipe",N(initialSwipe)},
+            {L"source_swipe",sourceRow?N(sourceRow->swipeOffset):JsonValue::CreateNullValue()},
+            {L"origin_x",N(origin.X)},{L"origin_y",N(origin.Y)},{L"pointer_x",N(position.X)},{L"pointer_y",N(position.Y)},
             {L"scroll_claimed",B(scrollInput.has_value())},{L"menu_open",B(owner&&owner->menuOpen)},
             {L"pointer_id",pointer?N(pointer.PointerId()):JsonValue::CreateNullValue()},
             {L"effect_owner",effectOwner>=0?N(effectOwner):JsonValue::CreateNullValue()},{L"can_drop",B(!placement.empty())},{L"position",S(placement)},
@@ -79,6 +86,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         if(lastRelease.Size())value.Insert(L"last_release",lastRelease);
         if(lastCancel.Size())value.Insert(L"last_cancel",lastCancel);
         if(lastCaptureLoss.Size())value.Insert(L"last_capture_loss",lastCaptureLoss);
+        if(lastMove.Size())value.Insert(L"last_move",lastMove);
         // ScrollView's outer container is absent from the control automation tree.
         if(auto presenter=list.ScrollPresenter())AutomationProperties::SetItemStatus(presenter,value.Stringify());
     }
@@ -160,6 +168,9 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             if(row->renaming||inside(original,row->rename)||inside(original,row->swipeActions)||!row->current())return;
             source=row;id=row->id;epoch=row->epoch;pointer=e.Pointer();device=point.PointerDeviceType();
             grip=inside(original,row->grip);mask=inside(original,row->mask);initialSwipe=row->swipeOffset;
+            auto kind=device==NativeInput::PointerDeviceType::Mouse?L"mouse":device==NativeInput::PointerDeviceType::Pen?L"pen":L"touch";
+            pickup=initialSwipe==0&&movable(row->model())&&grip;
+            if(initialSwipe==0&&movable(row->model()))for(auto value:array(row->model(),L"drag_from_body"))if(value.GetString()==kind)pickup=true;
             for(auto const& [key,other]:owner->rows)if(other!=row)other->swipe(0);
             origin=position=point.Position();initialScroll=list.VerticalOffset();windowHandle=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
             auto dpi=GetDpiForWindow(windowHandle);
@@ -167,7 +178,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
             for(auto node=original;node&&node!=surface;node=VisualTreeHelper::GetParent(node))
                 if(auto item=node.try_as<UIElement>())path.emplace_back(make_weak(item));
-            if(grip){row->swipe(0);ignoreClick=true;if(!claim())return;}
+            if(grip&&pickup){ignoreClick=true;if(!claim())return;}
             if(device!=NativeInput::PointerDeviceType::Mouse){recognizing=true;recognizer.ProcessDownEvent(point);}
             tickAt=std::chrono::steady_clock::now();timer.Start();evidence();return;
         }
@@ -222,6 +233,8 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         query();
     }
     void motion(PointerRoutedEventArgs const& e){
+        if(trace&&pointer){auto point=e.GetCurrentPoint(surface);lastMove=O({{L"pointer_id",N(e.Pointer().PointerId())},
+            {L"x",N(point.Position().X)},{L"y",N(point.Position().Y)}});}
         if(!pointer||pointer.PointerId()!=e.Pointer().PointerId()||finishing)return;
         if(!current()){cancel(L"source_invalid");return;}
         position=e.GetCurrentPoint(surface).Position();
@@ -237,10 +250,11 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             }
             if(swiping){if(auto row=source.lock())row->swipe(initialSwipe>0?std::max(0.,initialSwipe-(position.X-origin.X)):initialSwipe-(position.X-origin.X));e.Handled(true);return;}
             auto owner=view.lock();auto row=owner?panelRow(owner->data->state,id):J{};
-            if(!movable(row)){cancel(L"source_locked");return;}
+            auto sourceRow=source.lock();
+            if(!pickup||!movable(row)||!sourceRow||sourceRow->swipeOffset!=0)return;
             if(!claim())return;
             dragging=true;ignoreClick=true;suppressContext=true;hideMenu();
-            if(auto item=source.lock()){sourceOpacity=item->root.Opacity();item->root.Opacity(.55);}
+            sourceOpacity=sourceRow->root.Opacity();sourceRow->root.Opacity(.55);
         }
         if(swiping){if(auto row=source.lock())row->swipe(initialSwipe>0?std::max(0.,initialSwipe-(position.X-origin.X)):initialSwipe-(position.X-origin.X));e.Handled(true);}
         if(dragging){target();e.Handled(true);evidence();}
@@ -283,17 +297,40 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         }else if(finishing)query();
         evidence();
     }
+    void detachInput(){
+        if(auto root=inputSurface.get()){
+            root.PreviewKeyDown(inputKey);
+            root.RemoveHandler(UIElement::PointerMovedEvent(),box_value(inputMove));
+            root.RemoveHandler(UIElement::PointerReleasedEvent(),box_value(inputUp));
+            root.RemoveHandler(UIElement::PointerCanceledEvent(),box_value(inputCancel));
+        }
+        inputSurface={};
+    }
+    void attachInput(){
+        detachInput();if(!surface.XamlRoot())return;
+        auto root=surface.XamlRoot().Content();if(!root)return;
+        inputSurface=make_weak(root);
+        inputMove=PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->motion(e);});
+        inputUp=PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);});
+        inputCancel=PointerEventHandler([weak=weak_from_this()](auto&&,PointerRoutedEventArgs const& e){
+            if(auto self=weak.lock();self&&!self->releasing&&self->pointer&&self->pointer.PointerId()==e.Pointer().PointerId())self->cancel(L"pointer_canceled");
+        });
+        root.AddHandler(UIElement::PointerMovedEvent(),box_value(inputMove),true);
+        root.AddHandler(UIElement::PointerReleasedEvent(),box_value(inputUp),true);
+        root.AddHandler(UIElement::PointerCanceledEvent(),box_value(inputCancel),true);
+        inputKey=root.PreviewKeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
+            if(composingKey(e))return;
+            if(e.Key()==Windows::System::VirtualKey::Escape&&self->cancel(L"escape"))e.Handled(true);
+            else if(!self->pointer){self->rejected.reset();self->ignoreClick=false;self->suppressContext=false;}
+        }});
+    }
+    ~Impl(){detachInput();}
     void init(){
         recognizer.GestureSettings(NativeInput::GestureSettings::Hold);
         recognizer.Holding([weak=weak_from_this()](auto&&,NativeInput::HoldingEventArgs const& e){if(auto self=weak.lock())self->hold(e);});
         timer=surface.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(16));
         timer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->tick();});
         surface.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->down(e);})),true);
-        surface.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->motion(e);})),true);
-        surface.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);})),true);
-        surface.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,PointerRoutedEventArgs const& e){
-            if(auto self=weak.lock();self&&!self->releasing&&self->pointer&&self->pointer.PointerId()==e.Pointer().PointerId())self->cancel(L"pointer_canceled");
-        })),true);
         surface.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler([weak=weak_from_this()](auto&&,PointerRoutedEventArgs const& e){
             if(auto self=weak.lock();self&&!self->releasing&&self->pointer&&self->pointer.PointerId()==e.Pointer().PointerId()){
                 if(self->trace){
@@ -312,11 +349,9 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         })),true);
         list.ViewChanged([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock();self&&self->pointer&&!self->held&&!self->grip&&!self->dragging&&!self->swiping
             &&self->device!=NativeInput::PointerDeviceType::Mouse&&std::abs(self->list.VerticalOffset()-self->initialScroll)>.5)self->cancel(L"native_scroll");});
-        surface.PreviewKeyDown([weak=weak_from_this()](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock()){
-            if(e.Key()==Windows::System::VirtualKey::Escape&&self->cancel(L"escape"))e.Handled(true);
-            else if(!self->pointer){self->rejected.reset();self->ignoreClick=false;self->suppressContext=false;}
-        }});
-        surface.Unloaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->cancel(L"unloaded");});
+        surface.Loaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->attachInput();});
+        surface.Unloaded([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock()){self->cancel(L"unloaded");self->detachInput();}});
+        if(surface.IsLoaded())attachInput();
     }
 };
 LayerRowDrag::LayerRowDrag(std::shared_ptr<LayersView> const& view):impl(std::make_shared<Impl>()){

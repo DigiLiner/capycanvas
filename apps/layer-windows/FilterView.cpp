@@ -81,7 +81,7 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
         toggle.Content(icon(L"search",data->theme()));toggle.Height(data->panelMetric(L"control_height"));Grid::SetColumn(toggle,1);
         AutomationProperties::SetAutomationId(toggle,L"filter-search-toggle");header.Children().Append(toggle);root.Children().Append(header);
         list.Content(rows);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
-        list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+        list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);
         AutomationProperties::SetAutomationId(list,L"filter-list");rows.Spacing(2);Grid::SetRow(list,1);root.Children().Append(list);
         timer=root.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(200));
         timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->preview();});
@@ -173,7 +173,7 @@ FrameworkElement FilterTypesPanel(std::shared_ptr<WorkspaceData> const& data,Bin
     StackPanel choices;choices.Spacing(2);
     ScrollView scroll;scroll.Content(choices);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
     scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-    scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);root.Children().Append(scroll);
+    scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);root.Children().Append(scroll);
     auto cancel=button(data,data->copyCommon(L"cancel"),[data]{data->dispatch(O({{L"type",S(L"effect")},{L"action",O({{L"op",S(L"cancel_filter")}})}}));});
     cancel.HorizontalAlignment(HorizontalAlignment::Left);cancel.MinHeight(data->controlHeight());
     AutomationProperties::SetAutomationId(cancel,L"cancel-filter");Grid::SetRow(cancel,1);root.Children().Append(cancel);

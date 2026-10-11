@@ -40,51 +40,43 @@ export async function checkLayerHolding({call, evaluate, settle}) {
     for(let i=0;i<2;i++)await send({type:"layer",action:{op:"new",group:false,clipped:false}});
     const before=await order(),source=`#layer-rows .layer-row[data-layer="${before[0]}"]`;
     await send({type:"layer",action:{op:"add_mask",id:Number(before[0]),replace:false}});
-    for(const region of ["padding",".layer-name",".layer-thumbnail","mask",".layer-icon:first-child",".layer-icon:nth-child(2)",".layer-link",".layer-grip"]) {
-      const selector=region==="padding"?source:region==="mask"?`${source} [aria-label="Edit layer mask"]`:`${source} ${region}`;
-      for(const releaseOnly of [true,false]) {
+    for (const theme of ["light","dark"]) {
+      await send({type:"set_theme",theme});
+      for (const pointer of ["mouse","pen","touch"]) {
+        device=pointer;
         await evaluate("document.querySelector('.panel-context-menu').hidePopover()");
-        const r=await rect(selector),p={x:r.x+(region==="padding"?2:r.width/2),y:r.y+r.height/2};
-        const visible=await evaluate(`layerApp.state().layers.find(l=>String(l.id)===${JSON.stringify(before[0])}).visible`);
-        const maskBefore = await evaluate("layerApp.state().layer_tools.editing_layer.mask_selected");
-        await input("down",p);await wait(600);
-        assert.equal(await menu(),true,`${region}: hold opens menu`);
-        assert.equal(await evaluate("layerApp.state().layer_tools.editing_layer.mask_selected"),region==="mask" || maskBefore,"hold preserves editing target unless the mask menu is requested");
-        await input("move",{x:p.x+1,y:p.y});assert.equal(await menu(),true,"jitter retains menu");
-        if(releaseOnly){
-          await input("up");await wait(350);
-          assert.equal(await menu(),true,`${region}: release retains menu`);
-          assert.deepEqual(await order(),before);
-          assert.equal(await evaluate(`layerApp.state().layers.find(l=>String(l.id)===${JSON.stringify(before[0])}).visible`),visible,"hold must not click a row button");
-        }else{
-          const target=await rect(`#layer-rows .layer-row[data-layer="${before[1]}"]`);
-          await input("move",{x:target.x+target.width/2,y:target.y+target.height-3});
-          assert.equal(await menu(),false,`${region}: drag dismisses menu`);
-          assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1,`${region}: same contact starts reorder`);
-          await input("up");assert.notDeepEqual(await order(),before,`${region}: drop reorders`);
-          await send({type:"invoke",command:"undo"});assert.deepEqual(await order(),before,"one undo restores order");
-          await send({type:"invoke",command:"redo"});assert.notDeepEqual(await order(),before);
-          await send({type:"invoke",command:"undo"});
-        }
-      }
-    }
-    for(const mode of ["cancel-hold","cancel-drag","blur","mouse","pen"]) {
-      device=["mouse","pen"].includes(mode)?mode:"touch";
-      await evaluate("document.querySelector('.panel-context-menu').hidePopover()");
-      const r=await rect(`${source} .layer-name`);
-      await input("down",{x:r.x+r.width/2,y:r.y+r.height/2});await wait(600);
-      assert.equal(await menu(),device!=="mouse",`${mode}: only touch/pen holds open menus`);
-      if(mode!=="cancel-hold"){
+        const r=await rect(`${source} .layer-name`);
+        await input("down",{x:r.x+r.width/2,y:r.y+r.height/2});await wait(600);
+        assert.equal(await menu(),device!=="mouse",`${theme}/${device}: direct body hold opens menu`);
         const target=await rect(`#layer-rows .layer-row[data-layer="${before[1]}"]`);
         await input("move",{x:target.x+target.width/2,y:target.y+target.height-3});
-        assert.equal(await menu(),false);
+        assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),device==="mouse"?1:0,`${theme}/${device}: body pickup policy`);
+        await input("up");
+        if(device==="mouse") {
+          assert.notDeepEqual(await order(),before);
+          await send({type:"invoke",command:"undo"});
+        }
+        assert.deepEqual(await order(),before);
+        await evaluate("document.querySelector('.panel-context-menu').hidePopover()");
+        for (const cancel of [false,true]) {
+          const grip=await rect(`${source} .layer-grip`);
+          await input("down",{x:grip.x+grip.width/2,y:grip.y+grip.height/2});await wait(600);
+          assert.equal(await menu(),device!=="mouse",`${theme}/${device}: stationary direct grip hold opens menu`);
+          await input("move",{x:target.x+target.width/2,y:target.y+target.height-3});
+          assert.equal(await menu(),false,`${theme}/${device}: grip movement dismisses menu`);
+          assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1,`${theme}/${device}: grip reorders`);
+          if(cancel) {
+            await evaluate("window.dispatchEvent(new Event('blur'))");
+            await input(device==="touch"?"cancel":"up");
+          } else {
+            await input("up");assert.notDeepEqual(await order(),before);
+            await send({type:"invoke",command:"undo"});assert.deepEqual(await order(),before);
+            await send({type:"invoke",command:"redo"});assert.notDeepEqual(await order(),before);
+            await send({type:"invoke",command:"undo"});
+          }
+          assert.deepEqual(await order(),before);
+        }
       }
-      if(["mouse","pen"].includes(mode)) {await input("up");assert.notDeepEqual(await order(),before);await send({type:"invoke",command:"undo"});}
-      else if(mode==="blur") {await evaluate("window.dispatchEvent(new Event('blur'))");await input("up");}
-      else await input("cancel");
-      assert.deepEqual(await order(),before);
-      assert.equal(await menu(),false);
-      assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview,.layer-drop-before,.layer-drop-after,.layer-drop-into').length"),0);
     }
     const click = async (selector, modifiers = 0) => {
       const r = await rect(selector), p = {x:r.x+r.width/2,y:r.y+r.height/2};
@@ -218,12 +210,41 @@ export async function checkLayerHolding({call, evaluate, settle}) {
         assert.equal(await menu(),true,`${theme}/${width}: touch hold`);
         const target=await rect(`#layer-rows .layer-row[data-layer="${before[1]}"]`);
         await input('move',{x:target.x+target.width/2,y:target.y+target.height-3});
-        assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1);
+        assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),0,"body hold cannot become reorder");
         await input('cancel');assert.deepEqual(await order(),before);
       }
     }
     await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});await wait();
     await evaluate("for(let i=0;i<30;i++)layerApp.dispatch({type:'layer',action:{op:'new',group:false,clipped:false}});document.querySelector('#layer-rows').scrollTop=0;");await wait();
+    for (const theme of ["light","dark"]) {
+      await send({type:"set_theme",theme});
+      device="mouse";
+      const body=await rect("#layer-rows .layer-swipe:nth-child(4) .layer-name");
+      await input("move",{x:body.x+body.width/2,y:body.y+body.height/2});
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.layer-list > .scroll-thumb')).pointerEvents"),"auto","mouse scrollbar accepts input");
+      const thumb=await rect(".layer-list > .scroll-thumb");
+      await input("down",{x:thumb.x+thumb.width/2,y:thumb.y+thumb.height/2});
+      await input("move",{x:point.x,y:point.y+25});await input("up");
+      assert.ok(await evaluate("document.querySelector('#layer-rows').scrollTop")>20,`${theme}: mouse scrollbar scrolls layers`);
+      await evaluate("document.querySelector('#layer-rows').scrollTop=0");await wait();
+      for (const direct of ["pen","touch"]) {
+        device=direct;
+        await input("down",{x:thumb.x+thumb.width/2,y:thumb.y+thumb.height/2});
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.layer-list > .scroll-thumb')).pointerEvents"),"none",`${theme}/${direct}: first edge contact disables mouse scrollbar`);
+        const gripContact=await evaluate(`!!document.elementFromPoint(${point.x},${point.y})?.closest('.layer-grip')`);
+        const edgeOrder=await order();
+        await input("move",{x:point.x,y:point.y-85});
+        if(gripContact)assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1,`${theme}/${direct}: first edge grip contact reorders`);
+        else assert.ok(await evaluate("document.querySelector('#layer-rows').scrollTop")>20,`${theme}/${direct}: first edge body contact pans layers`);
+        assert.equal(await evaluate("[1,2].some(id=>document.querySelector('.layer-list > .scroll-thumb').hasPointerCapture(id))"),false,"direct contact never captures scrollbar");
+        if(gripContact){await evaluate("window.dispatchEvent(new Event('blur'))");await input(device==="touch"?"cancel":"up");}
+        else await input("up");
+        assert.deepEqual(await order(),edgeOrder,'first direct edge contact preserves order after pan or cancelled pickup');
+        await evaluate("document.querySelector('#layer-rows').scrollTop=0");await wait();
+        device="mouse";await input("move",{x:body.x+body.width/2,y:body.y+body.height/2});
+      }
+    }
+    device="touch";
     const scrollingOrder=await order(),r=await rect("#layer-rows .layer-swipe:nth-child(4) .layer-name");
     await input("down",{x:r.x+r.width/2,y:r.y+r.height/2});
     await input("move",{x:point.x,y:point.y-85});await input("up");await wait(650);
@@ -232,7 +253,7 @@ export async function checkLayerHolding({call, evaluate, settle}) {
     for (const deviceType of ["mouse","touch","pen"]) {
       device=deviceType;
       await evaluate("document.querySelector('#layer-rows').scrollTop=0");await wait();
-      const source = await rect("#layer-rows .layer-swipe:nth-child(2) .layer-name"), viewport = await rect("#layer-rows");
+      const source = await rect("#layer-rows .layer-swipe:nth-child(2) .layer-grip"), viewport = await rect("#layer-rows");
       await input("down",{x:source.x+source.width/2,y:source.y+source.height/2});
       if (device!=="mouse") await wait(600);
       await input("move",{x:viewport.x+viewport.width/2,y:viewport.y+viewport.height-8});
@@ -243,7 +264,7 @@ export async function checkLayerHolding({call, evaluate, settle}) {
       assert.equal(await evaluate("document.querySelector('#layer-rows').scrollTop"),stopped,"cancelled drag stops edge scrolling");
       assert.deepEqual(await order(),scrollingOrder);
     }
-  console.log("PASS: layer range/group/delete, checked drag, thumbnail squircles and outer editing borders, mask link, accessibility, edge scrolling, whole-row holds and undo/redo");
+  console.log("PASS: layer range/group/delete, checked drag, thumbnail squircles and outer editing borders, mask link, accessibility, edge scrolling, direct body menus, grip reorder and undo/redo");
   } finally {
     if(down)await input(device==="touch"?"cancel":"up");
     await evaluate("document.querySelector('.panel-context-menu').hidePopover()");
@@ -297,6 +318,7 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});
     for(const device of ['touch','pen']) {
+      await send({type:'layer',action:{op:'blend',id:targetId,value:1}});
       for(const options of [{dx:18},{dx:60,cancel:true},{dx:60,returnToStart:true}]) {
         await swipe(device,options.dx,options);assert.equal((await layer()).blend,'Multiply',`${device}: unfinished group swipe`);
       }
@@ -304,12 +326,12 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
       assert.equal(await evaluate(`!!document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"] .layer-group-pass-through')`),true);
       await send({type:'invoke',command:'undo'});assert.equal((await layer()).blend,'Multiply');
       await send({type:'invoke',command:'redo'});assert.equal((await layer()).pass_through,true);
-      await swipe(device,60);assert.equal((await layer()).blend,'Multiply','group swipe restores retained isolated blend');
+      await swipe(device,60);assert.equal((await layer()).blend,'Normal','disabling Pass Through selects Normal');
       await swipe(device,-60);assert.equal(await revealed(),true);
       await swipe(device,90);assert.equal(await revealed(),false);
-      assert.equal((await layer()).blend,'Multiply','closing group Delete does not change mode');
+      assert.equal((await layer()).blend,'Normal','closing group Delete does not change mode');
       await send({type:'layer',action:{op:'lock',id:targetId,value:true}});
-      await swipe(device,60);assert.equal((await layer()).blend,'Multiply','locked group has no right action');
+      await swipe(device,60);assert.equal((await layer()).blend,'Normal','locked group has no right action');
       await send({type:'layer',action:{op:'lock',id:targetId,value:false}});
     }
   }
@@ -318,6 +340,52 @@ export async function checkLayerSwipes({call, evaluate, settle}) {
   const effect=await evaluate('Number(layerApp.state().layer_tools.editing_layer.id)');
   await send({type:'layer',action:{op:'clip',id:effect,value:true}});
   assert.equal(await evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${targetId}).right_swipe??null`),null);
-  await swipe('touch',60);assert.equal((await layer()).blend,'Multiply','attached FX protect group isolation');
-  console.log('PASS: paint/group shared swipe actions, themes, touch/pen/mouse, retained Multiply, undo/redo, cancelled swipes, Delete closure, lock and attached-content protection');
+  await swipe('touch',60);assert.equal((await layer()).blend,'Normal','attached FX protect group isolation');
+  for(const theme of ['light','dark']) {
+    await send({type:'set_theme',theme});
+    await swipe('touch',-60);
+    assert.equal(await revealed(),true,'displaced row exposes Delete');
+    assert.equal(await evaluate(`document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"] .layer-grip').hidden`),true,'displaced row hides grip');
+    const p=await rect();
+    await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});
+    await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x,y:p.y+65,button:'left',buttons:1});
+    assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),0,'contact starting on displaced row cannot pick up');
+    await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y+65,button:'left',buttons:0,clickCount:1});
+    await wait();
+    if(await revealed())await swipe('touch',90);
+  }
+  const column=await evaluate("layerApp.app.layout(innerWidth,innerHeight).groups.find(g=>g.panels.includes('layers')).id");
+  for(const theme of ['light','dark']) {
+    await send({type:'set_theme',theme});
+    await swipe('touch',-60);
+    assert.equal(await revealed(),true,'swipe is open before panel lifecycle change');
+    const outside=await evaluate("(()=>{const r=document.querySelector('#document-title').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()");
+    await call('Input.dispatchMouseEvent',{type:'mousePressed',...outside,button:'left',buttons:1,clickCount:1});
+    const closing=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]');const result={transform:getComputedStyle(row).transform,animations:row.getAnimations().map(a=>a.transitionProperty)};layerApp.dispatch({type:'customize',action:{type:'set_column_collapsed',group:${column},collapsed:true}});return result;})()`);
+    assert.ok(closing.animations.includes('transform'),'panel collapses while swipe return transition is active');
+    await call('Input.dispatchMouseEvent',{type:'mouseReleased',...outside,button:'left',buttons:0,clickCount:1});
+    await wait();
+    await send({type:'customize',action:{type:'set_column_collapsed',group:column,collapsed:false}});
+    const reopened=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]');return{transform:new DOMMatrixReadOnly(getComputedStyle(row).transform).m41,gripHidden:row.querySelector('.layer-grip').hidden,width:row.getBoundingClientRect().width};})()`);
+    console.log('Swipe panel lifecycle',theme,{closing,reopened});
+    assert.ok(reopened.width>0,'reopened swipe row is visible');
+    assert.equal(reopened.transform,0,'reopened swipe row is visually at rest');
+    assert.equal(reopened.gripHidden,false,`${theme}: cancelled closing transition restores grip on reopen`);
+    for(const pointer of ['mouse','touch']) {
+      const points=await evaluate(`(()=>{const row=document.querySelector('#layer-rows .layer-row[data-layer="${targetId}"]'),source=row.querySelector('${pointer==='mouse'?'.layer-name':'.layer-grip'}').getBoundingClientRect(),target=document.querySelector('#layer-rows .layer-row[data-layer="1"]').getBoundingClientRect();return{source:{x:source.x+source.width/2,y:source.y+source.height/2},target:{x:target.x+target.width/2,y:target.bottom-2}};})()`);
+      if(pointer==='touch') {
+        await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...points.source}]});
+        await call('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{id:1,...points.target}]});
+      } else {
+        await call('Input.dispatchMouseEvent',{type:'mousePressed',...points.source,button:'left',buttons:1,clickCount:1});
+        await call('Input.dispatchMouseEvent',{type:'mouseMoved',...points.target,button:'left',buttons:1});
+      }
+      assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1,`${theme}/${pointer}: reopened resting row can pick up`);
+      await evaluate("window.dispatchEvent(new Event('blur'))");
+      if(pointer==='touch')await call('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+      else await call('Input.dispatchMouseEvent',{type:'mouseReleased',...points.target,button:'left',buttons:0,clickCount:1});
+      await wait();
+    }
+  }
+  console.log('PASS: paint/group shared swipe actions, themes, touch/pen/mouse, Pass Through to Normal, undo/redo, cancelled swipes, Delete closure, lock and attached-content protection');
 }

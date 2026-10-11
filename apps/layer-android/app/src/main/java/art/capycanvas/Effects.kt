@@ -98,7 +98,7 @@ private fun CanvasHost.effect(action: JSONObject) = dispatch(obj("type" to "effe
                 SharedIcon("search", picker.getString("search_label"))
             }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().onSizeChanged { width = it.width }.testTag("filter-list"),
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().mouseScrollbar(list).onSizeChanged { width = it.width }.testTag("filter-list"),
             state = list, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             var category: String? = null
             choices.forEach { choice ->

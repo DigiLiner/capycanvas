@@ -239,7 +239,7 @@ internal class LayerSwipe {
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                LazyColumn(Modifier.fillMaxSize().testTag("layer-rows"),state=list) {
+                LazyColumn(Modifier.fillMaxSize().mouseScrollbar(list).testTag("layer-rows"),state=list) {
                     for (layer in layers) {
                     item(key=layer.getLong("id")) {
                         val id=layer.getLong("id")
@@ -312,6 +312,9 @@ internal class LayerSwipe {
     var rowBounds by remember { mutableStateOf(Rect.Zero) }
     val shift by animateFloatAsState(if(swipe.owner===swipeOwner) swipe.offset else 0f,
         tween(if(swipe.owner===swipeOwner && swipe.tracking) 0 else 150),label="Layer swipe")
+    val atRest=shift==0f && (swipe.owner!==swipeOwner || swipe.offset==0f)
+    val resting by rememberUpdatedState(atRest)
+    var gripBounds by remember { mutableStateOf(Rect.Zero) }
     DisposableEffect(swipeOwner) { onDispose { if(swipe.owner===swipeOwner)swipe.close() } }
     LaunchedEffect(focused,canSwipe) {
         if((!focused || !canSwipe) && swipe.owner===swipeOwner)swipe.close()
@@ -346,7 +349,10 @@ internal class LayerSwipe {
                 contactActive=true
                 holdEligible=true
                 val row=latest
-                val directDrag=down.type==PointerType.Mouse || down.position.x>=size.width-20*density
+                val kind=when(down.type) { PointerType.Mouse -> "mouse"; PointerType.Stylus,PointerType.Eraser -> "pen"; else -> "touch" }
+                val handle=resting && gripBounds.contains(origin+down.position)
+                val directDrag=resting && row.getBoolean("can_drop_below") && (handle || kind in row.array("drag_from_body").values())
+                if(handle)down.consume()
                 val secondary=currentEvent.buttons.isSecondaryPressed
                 contactMenus=down.type!=PointerType.Mouse || secondary
                 var dragging=false
@@ -371,9 +377,7 @@ internal class LayerSwipe {
                     eventTime=change.uptimeMillis
                     if (!change.pressed && change.isConsumed) break
                     val moved=(change.position-down.position).getDistance()>viewConfiguration.touchSlop
-                    // Touch and pen keep native scrolling until a stationary
-                    // hold wins. Explicit grips and mouse bodies are immediate.
-                    if (!directDrag && !longPressed && moved && holdEligible) {
+                    if (kind!="mouse" && !handle && !longPressed && moved && holdEligible) {
                         holdEligible=false
                         val delta=change.position-down.position
                         val allowed=if(delta.x<0)row.array("swipe_actions").objects().any { it.optBoolean("enabled") } else swipeStart>0 || !row.isNull("right_swipe")
@@ -390,7 +394,7 @@ internal class LayerSwipe {
                         if(!change.pressed) { released=true; break }
                         continue
                     }
-                    if (!secondary && row.getBoolean("can_drop_below") && (directDrag || longPressed) && !dragging && change.pressed &&
+                    if (!secondary && latest.getBoolean("can_drop_below") && directDrag && resting && !dragging && change.pressed &&
                         moved) { dragging=true; holdEligible=false }
                     if (dragging) { change.consume(); drag(origin+change.position,!change.pressed,false); if(!change.pressed)dragging=false }
                     if (longPressed) change.consume()
@@ -537,7 +541,10 @@ internal class LayerSwipe {
             if(meta.isNotEmpty())Text(meta,color=colors.secondary,fontSize=LocalTextStyle.current.fontSize*.83333f,lineHeight=LocalTextStyle.current.lineHeight*.83333f,maxLines=1,overflow=TextOverflow.Ellipsis)
         }
         SharedIcon(if(layer.getBoolean("locked"))"lock" else "alpha-lock",null,Modifier.size(12.dp).alpha(if(layer.getBoolean("locked") || layer.getBoolean("alpha_locked"))1f else 0f))
-        SharedIcon("grip",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("move_layer"),Modifier.size(16.dp).alpha(if(layer.getBoolean("can_drop_below")) .6f else 0f))
+        if(layer.getBoolean("can_drop_below") && atRest) Box(Modifier.size(16.dp,32.dp).testTag("layer-grip-$id")
+            .onGloballyPositioned { gripBounds=it.boundsInRoot() },contentAlignment=Alignment.Center) {
+            SharedIcon("grip",host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("move_layer"),Modifier.size(16.dp).alpha(.6f))
+        }
         }
     }
 }

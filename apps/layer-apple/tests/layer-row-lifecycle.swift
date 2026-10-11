@@ -9,7 +9,7 @@ import QuartzCore
         try await drain()
     }
     @MainActor static func order(_ store: EditorStore) -> [UInt64] { store.state["layers"].array.map { $0["id"].uint } }
-    @MainActor static func run(_ platform: UInt32) async throws {
+    @MainActor static func run(_ platform: UInt32, theme: ColorScheme) async throws {
         let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
         try await wait("Initial layers did not load") { order(store).count == 2 }
         for _ in 0..<22 {
@@ -20,7 +20,7 @@ import QuartzCore
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Layer list lifecycle check"; window.isReleasedWhenClosed = false; window.animationBehavior = .none
         let panel = JSON(["controls": [["control": "layers", "visible_in_panel": true]]])
-        let host = NSHostingView(rootView: LayerPanel(store: store, panel: panel))
+        let host = NSHostingView(rootView: LayerPanel(store: store, panel: panel).environment(\.colorScheme, theme))
         window.contentView = host; window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         defer { window.contentView = nil; window.close() }
         try await drain(0.3)
@@ -36,15 +36,13 @@ import QuartzCore
         }
         try require(initial.count == 24 && scroll.documentView!.bounds.height > viewport().height * 2,
             "The fixture must overflow the actual native scroll view")
-        let start = body(first), origin = scroll.contentView.bounds.minY
+        let start = CGPoint(x: model.frames[first]!.grip.midX, y: model.frames[first]!.grip.midY), origin = scroll.contentView.bounds.minY
         try await send(.leftMouseDown, start, pen: true)
-        try await drain(try holdDuration(marker))
-        try await wait("The held layer menu did not appear") { !model.menu.isNull }
         try await send(.leftMouseDragged, CGPoint(x: start.x, y: viewport().maxY - 10), pen: true)
-        try await wait("Held layer edge scrolling did not retain its offscreen source") {
+        try await wait("Grip layer edge scrolling did not retain its offscreen source") {
             scroll.contentView.bounds.minY > origin + 120 && model.contact.target?.id.hasSuffix(":layer:\(first)") == true
         }
-        try require(model.contact.dragging && model.menu.isNull, "Scrolling the same pen contact must dismiss the menu")
+        try require(model.contact.dragging && model.menu.isNull, "A pen grip scrolls immediately without a menu")
         let drop = CGPoint(x: start.x, y: viewport().midY)
         try await send(.leftMouseDragged, drop, pen: true)
         guard let hint = model.drag, let target = hint.target else { throw HostFailure(message: "No measured layer drop hint after scrolling") }
@@ -56,7 +54,7 @@ import QuartzCore
         try require(order(store) == initial, "One Undo must restore the offscreen row move")
         try await edit(store, ["type": "invoke", "command": "redo"])
         try require(order(store) == expected, "Redo must restore the same scrolled row move")
-        note("PASS platform \(platform): native pen menu-to-drag, offscreen edge scrolling, indicated drop and Undo/Redo")
+        note("PASS platform \(platform): native immediate pen grip drag, offscreen edge scrolling, indicated drop and Undo/Redo")
 
         scroll.contentView.scroll(to: .zero); scroll.reflectScrolledClipView(scroll.contentView); try await drain()
         let removed = order(store)[0]
@@ -194,7 +192,7 @@ import QuartzCore
     @MainActor static func main() {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
-            do { for platform: UInt32 in [0, 1] { try await run(platform); try await hierarchy(platform) }; exit(0) }
+            do { for platform: UInt32 in [0, 1] { for theme: ColorScheme in [.light, .dark] { try await run(platform, theme: theme) }; try await hierarchy(platform) }; exit(0) }
             catch { note("FAIL: " + error.localizedDescription); exit(1) }
         }
         NSApp.run()

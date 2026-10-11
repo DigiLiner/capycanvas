@@ -3,21 +3,42 @@ import AppKit
 import ObjectiveC
 
 struct NativePenScroll: NSViewRepresentable {
-    func makeNSView(context: Context) -> PenScrollView { PenScrollView() }
-    func updateNSView(_ view: PenScrollView, context: Context) { view.attach() }
+    var showsIndicators = true
+    var axes: Axis.Set = .vertical
+    func makeNSView(context: Context) -> PenScrollView { let view = PenScrollView(); view.showsIndicators = showsIndicators; view.axes = axes; return view }
+    func updateNSView(_ view: PenScrollView, context: Context) { view.showsIndicators = showsIndicators; view.axes = axes; view.attach() }
 }
 
 /// Keep one recognizer for the scroll view's lifetime, including virtualized Lists.
 final class PenScrollView: NSView {
     private static var controllerKey: UInt8 = 0
+    var showsIndicators = true
+    var axes: Axis.Set = .vertical
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
     override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); attach() }
     override func layout() { super.layout(); attach() }
     func attach() {
-        guard let scroll = enclosingScrollView,
-              objc_getAssociatedObject(scroll, &Self.controllerKey) == nil else { return }
-        objc_setAssociatedObject(scroll, &Self.controllerKey, PenScrollController(scroll: scroll), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        guard let scroll = enclosingScrollView else { return }
+        let controller = objc_getAssociatedObject(scroll, &Self.controllerKey) as? PenScrollController ?? PenScrollController(scroll: scroll)
+        objc_setAssociatedObject(scroll, &Self.controllerKey, controller, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        controller.showsIndicators = showsIndicators; controller.axes = axes; controller.indicators()
     }
+}
+
+private final class ScrollPointerInput {
+    static let shared = ScrollPointerInput()
+    private(set) var mouse = false
+    let controllers = NSHashTable<PenScrollController>.weakObjects()
+    private var monitor: Any?
+    init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown, .scrollWheel, .tabletPoint, .tabletProximity]) { [weak self] event in
+            guard let self else { return event }
+            let next = event.type != .tabletPoint && event.type != .tabletProximity && event.subtype != .tabletPoint
+            if mouse != next { mouse = next; for controller in controllers.allObjects { controller.indicators() } }
+            return event
+        }
+    }
+    deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
 }
 
 /// AppKit supplies tablet identity and movement slop; mouse keeps native scrolling.
@@ -25,12 +46,23 @@ private final class PenScrollController: NSObject, NSGestureRecognizerDelegate {
     private weak var scroll: NSScrollView?
     private var origin = CGPoint.zero
     private var pan: NSPanGestureRecognizer!
+    var showsIndicators = true
+    var axes: Axis.Set = .vertical
     init(scroll: NSScrollView) {
         self.scroll = scroll
         super.init()
+        scroll.scrollerStyle = .overlay
+        ScrollPointerInput.shared.controllers.add(self)
         pan = NSPanGestureRecognizer(target: self, action: #selector(panned)); pan.delegate = self
         pan.delaysPrimaryMouseButtonEvents = true
         scroll.addGestureRecognizer(pan)
+    }
+    func indicators() {
+        guard let scroll else { return }
+        let horizontal = axes.contains(.horizontal) && showsIndicators && ScrollPointerInput.shared.mouse
+        let vertical = axes.contains(.vertical) && showsIndicators && ScrollPointerInput.shared.mouse
+        if scroll.hasHorizontalScroller != horizontal { scroll.hasHorizontalScroller = horizontal }
+        if scroll.hasVerticalScroller != vertical { scroll.hasVerticalScroller = vertical }
     }
     func gestureRecognizer(_ recognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
         guard event.type == .leftMouseDown, event.subtype == .tabletPoint, let scroll,

@@ -205,7 +205,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         body.Padding({20,20,20,20});body.ColumnSpacing(24);body.RowSpacing(14);
         for(FrameworkElement part:{FrameworkElement(title),FrameworkElement(left),FrameworkElement(head),FrameworkElement(values)})body.Children().Append(part);
         bodyGate.Content(body);bodyGate.IsTabStop(false);bodyGate.HorizontalContentAlignment(HorizontalAlignment::Stretch);bodyGate.VerticalContentAlignment(VerticalAlignment::Stretch);
-        bodyScroll.Content(bodyGate);bodyScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);bodyScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
+        bodyScroll.Content(bodyGate);bodyScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);bodyScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(bodyScroll);
         arrange(false);
     }
 

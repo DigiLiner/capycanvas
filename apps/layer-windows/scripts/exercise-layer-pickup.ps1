@@ -1,14 +1,26 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[ValidateSet('drawers')][string]$ColumnMode='drawers')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[ValidateSet('drawers')][string]$ColumnMode='drawers',[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
+if(!$PSBoundParameters.ContainsKey('Theme')){
+    foreach($theme in @('dark','light')){& $PSCommandPath -Executable $Executable -Device $Device -ColumnMode $ColumnMode -Theme $theme}
+    return
+}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='prefer-visible';$CapyPopups=$true
-Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
+if(!('CapyRowPointer' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')}
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/layer-pickup/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
 function Gesture {try{(Find 'layer-list').Current.ItemStatus|ConvertFrom-Json}catch{}}
+function Layer-Scrollbars {
+    $viewport=(Control 'layer-list').Current.BoundingRectangle
+    $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ScrollBar)
+    @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)|Where-Object {
+        $bounds=$_.Current.BoundingRectangle
+        !$_.Current.IsOffscreen -and !$bounds.IsEmpty -and $bounds.Height -gt $bounds.Width -and $bounds.X -ge $viewport.Right-30 -and $bounds.X -le $viewport.Right+5 -and $bounds.Y -ge $viewport.Y-5 -and $bounds.Bottom -le $viewport.Bottom+5
+    })
+}
 function Rows {
     @((Model).state.layers|ForEach-Object {[ordered]@{id=$_.id;depth=$_.depth;visible=$_.visible;mask_linked=$_.mask_linked;alpha_locked=$_.alpha_locked;pass_through=$_.pass_through;relationship=$_.relationship}})|ConvertTo-Json -Depth 8 -Compress
 }
@@ -94,8 +106,24 @@ function Pick-Up([string]$Id,[double]$Layer,[switch]$Grip) {
 function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[switch]$Cancel,[double]$Fraction=.6) {
     $before=Rows
     $to=Destination $Target $Fraction
+    if($Device -ne 'mouse' -and !$Grip){
+        Pick-Up $Id $Layer
+        Move-To $to
+        Start-Sleep -Milliseconds 150
+        if((Gesture).phase -eq 'dragging' -or (Rows) -ne $before){throw 'Held pen/touch row movement reordered without its handle'}
+        [CapyRowPointer]::Up()
+        Wait-Until {(Gesture).phase -eq 'idle'} 'Held row movement retained a contact'
+        if((Gesture).menu_open){Dismiss}
+        $Id="layer-$Layer-drag";$Grip=[switch]::new($true)
+        $to=Destination $Target $Fraction
+    }
+    $at=Point $Id
+    $to=Destination $Target $Fraction
+    $clientOrigin=[CapyRowPointer+Point]::new()
+    [CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$clientOrigin)|Out-Null
+    $script:contact=@{source=$Id;target=$Target;from=$at;to=$to;source_bounds=(Control $Id).Current.BoundingRectangle;target_bounds=(Control "layer-row-$Target").Current.BoundingRectangle;viewport_bounds=(Control 'layer-list').Current.BoundingRectangle;window_bounds=$root.Current.BoundingRectangle;client_origin=@{x=$clientOrigin.x;y=$clientOrigin.y};dpi=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)}
     if($Grip){
-        $at=Point $Id
+        $at=$script:contact.from
         # No UIA wait may accidentally satisfy the hold timeout.
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To $to
@@ -137,6 +165,8 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile';$env:CAPY_TRACE_UI='1'
+    [IO.Directory]::CreateDirectory($env:CAPY_STORAGE_DIR)|Out-Null
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError $stderr
     $null=$review.Handle
@@ -146,6 +176,13 @@ try {
     $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
     $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
     $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    Wait-Until {
+        $foreground=[CapyRowPointer]::GetForegroundWindow();$owner=[uint32]0
+        [CapyRowPointer]::GetWindowThreadProcessId($foreground,[ref]$owner)|Out-Null
+        $script:foregroundState=@{window=$foreground.ToInt64();process=$owner;expected_process=$review.Id;expected_window=$review.MainWindowHandle.ToInt64()}
+        if($owner -ne $review.Id){[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null}
+        $owner -eq $review.Id
+    } 'Owned layer review did not receive foreground input'
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     # Current Paint defaults retain Layers in an open collapsed-column stack.
     # Begin with a fully expanded column before the fixture tests collapse/expand.
@@ -194,7 +231,8 @@ try {
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x-90;y=$at.y};[CapyRowPointer]::Up()
         Wait-Until {$null -ne (Find "layer-$created-swipe-delete" -Visible)} 'Left swipe did not reveal Delete'
-        $at=Point "layer-$created-name"
+        if(Find "layer-$created-drag" -Visible){throw 'Displaced layer row retained its reorder handle'}
+        $at=Point "layer-row-$created"
         [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
         Move-To @{x=$at.x+110;y=$at.y};[CapyRowPointer]::Up()
         Wait-Until {$null -eq (Find "layer-$created-swipe-delete" -Visible)} 'Right swipe did not close Delete'
@@ -301,12 +339,27 @@ try {
     foreach($child in @('selection','content','mask','link')){
         Drag-Row ("layer-$created-"+$child) $created $paint
     }
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1780 -Height 1480
+    if(![CapyWindowExercise]::MoveWindow($review.MainWindowHandle,200,20,1780,1480,$true)){throw 'Owned layer review did not move clear of desktop edge gestures'}
+    $rowHeight=(Control "layer-row-$created").Current.BoundingRectangle.Height
+    Wait-Until {(Control 'layer-list').Current.BoundingRectangle.Height -ge $rowHeight*5} 'Layer viewport did not expose the group drop targets away from scrolling edges'
     Invoke 'layer-new-group'
     Wait-Until {
         $active=(Model).state.layer_tools.editing_layer
         $active.group -and $active.id -ne $created -and $null -ne (Find ("layer-"+$active.id+"-content"))
     } 'New group did not appear'
     $group=(Model).state.layer_tools.editing_layer.id
+    if($Device -eq 'mouse'){
+        $script:case='group-content-fast-exit'
+        $before=Rows
+        $at=Point "layer-$group-content";$to=Point 'drawing-canvas'
+        [CapyRowPointer]::Down('mouse',$at.x,$at.y);Start-Sleep -Milliseconds 35
+        Move-To $to
+        Wait-Until {(Gesture).phase -eq 'dragging' -and (Gesture).source -eq $group -and (Gesture).captured} 'Fast mouse exit from the group row lost its pickup'
+        [CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()
+        Wait-Until {(Gesture).phase -eq 'idle'} 'Fast mouse exit cancellation retained its contact'
+        if((Rows) -ne $before -or @((Model).state.layers|Where-Object id -eq $group)[0].collapsed){throw 'Fast mouse exit activated the group or changed layer order'}
+    }
     $script:case='group-content'
     Drag-Row "layer-$group-content" $group $paint
     if(@((Model).state.layers|Where-Object id -eq $group)[0].collapsed){throw 'Group content drag activated the collapse button'}
@@ -357,6 +410,16 @@ try {
         Wait-Until {(Gesture).phase -eq 'idle'} 'Native scrolling retained a reorder contact'
         if((Rows) -ne $before -or (Gesture).menu_open){throw 'Native scrolling changed the document or opened a menu'}
     }
+    $script:case='mouse-scrollbar-transition'
+    $viewport=(Control 'layer-list').Current.BoundingRectangle
+    [CapyRowPointer]::Hover([int]($viewport.Right-4),[int]($viewport.Y+$viewport.Height*.5))
+    Wait-Until {@(Layer-Scrollbars).Count -gt 0} 'Mouse did not show the native layer scrollbar'
+    $bar=@(Layer-Scrollbars)[0].Current.BoundingRectangle
+    $percent=$scroll.Current.VerticalScrollPercent
+    [CapyRowPointer]::Down('mouse',[int]($bar.X+$bar.Width*.5),[int]($bar.Y+$bar.Height*.8))
+    Start-Sleep -Milliseconds 35
+    [CapyRowPointer]::Up()
+    Wait-Until {[Math]::Abs($scroll.Current.VerticalScrollPercent-$percent) -gt .5} 'Mouse scrollbar interaction did not scroll the native list'
     $script:case='edge-scroll-retention'
     $scroll.SetScrollPercent(-1,0)
     Wait-Until {$scroll.Current.VerticalScrollPercent -lt .1} 'Native list did not return to its top'
@@ -366,6 +429,7 @@ try {
     $before=Rows
     [CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 35
     Move-To @{x=[int]($viewport.X+$viewport.Width*.5);y=[int]($viewport.Bottom-4)}
+    if($Device -ne 'mouse'){Wait-Until {@(Layer-Scrollbars).Count -eq 0} 'First direct handle contact retained the mouse scrollbar'}
     Wait-Until {(Gesture).phase -eq 'dragging' -and $scroll.Current.VerticalScrollPercent -gt 60} 'Accepted drag did not keep scrolling after its source left the viewport'
     if((Gesture).source -ne $latest -or !(Gesture).captured){throw 'Auto-scroll lost the original source or capture'}
     if($Device -eq 'mouse'){[CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()}else{[CapyRowPointer]::Cancel()}
@@ -377,19 +441,22 @@ try {
     Pick-Up "layer-$latest-name" $latest
     $held=Gesture
     $window=$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+    $visualState=$window.Current.WindowVisualState
     $window.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Minimized)
     try{
         Wait-Until {$g=Gesture;$g.phase -eq 'idle' -and !$g.menu_open -and $g.last_cancel.generation -ge $held.generation} 'Minimizing left the row contact or menu active'
         [CapyRowPointer]::Cancel()
     }finally{
         [CapyRowPointer]::Dispose()
-        $window.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
+        $window.SetWindowVisualState($visualState)
         $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
         [CapyRowPointer]::Initialize([uint32]$review.Id)
     }
     if((Rows) -ne $before){throw 'Minimizing committed the row gesture'}
     # Finish pointer arbitration before text input: the system touch keyboard
     # legitimately changes the HWND and viewport while opening or closing.
+    $null=Point 'layer-list'
+    $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
     $scroll.SetScrollPercent(-1,100)
     Wait-Until {$scroll.Current.VerticalScrollPercent -gt 99.9} 'Native list did not reveal its original rows'
     $script:case='rename-ownership'
@@ -411,10 +478,10 @@ try {
     [CapyRowPointer]::Dispose()
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires review'}
-    [pscustomobject]@{device=$Device;column_mode=$ColumnMode;short_click='passed';hold_release='passed';row_drag='passed';child_control_drag='passed';immediate_grip='passed';cancel='passed';one_step_undo_redo='passed';row_whitespace='passed';rename_ownership='passed';source_removal='passed';mask_and_selection_children='passed';group_content_and_into_drop='passed';keyboard_context='passed';edge_scroll_retention='passed';minimize_cancellation='passed';native_scroll=$(if($Device -eq 'mouse'){'not_applicable'}else{'passed'});floating_and_drawer_rows='passed';scope='OS-delivered synthetic input; physical-device and presentation-performance acceptance remain separate'}|ConvertTo-Json
+    [pscustomobject]@{device=$Device;theme=$Theme;column_mode=$ColumnMode;short_click='passed';hold_release='passed';row_drag=$(if($Device -eq 'mouse'){'passed'}else{'handle_only_passed'});child_control_drag=$(if($Device -eq 'mouse'){'passed'}else{'denied_passed'});immediate_grip='passed';cancel='passed';one_step_undo_redo='passed';row_whitespace='passed';rename_ownership='passed';source_removal='passed';mask_and_selection_children='passed';group_content_and_into_drop='passed';keyboard_context='passed';edge_scroll_retention='passed';minimize_cancellation='passed';native_scroll=$(if($Device -eq 'mouse'){'not_applicable'}else{'passed'});floating_and_drawer_rows='passed';scope='OS-delivered synthetic input; physical-device and presentation-performance acceptance remain separate'}|ConvertTo-Json
 }catch{
     $failure=$_
-    @{case=$script:case;error=$failure.ToString();gesture=(Gesture);rows=(Rows);workspace_presentation=(Workspace-Root).Current.ItemStatus}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
+    @{case=$script:case;error=$failure.ToString();contact=$script:contact;foreground=$script:foregroundState;gesture=(Gesture);rows=(Rows);workspace_presentation=$(try{(Workspace-Root).Current.ItemStatus}catch{$null})}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
     if($review -and !$review.HasExited){
         & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
     }
@@ -422,5 +489,6 @@ try {
 }finally{
     if($Device -eq 'mouse' -and [CapyRowPointer]::Active){try{[CapyRowPointer]::Key(0x1b)}catch{}}
     [CapyRowPointer]::Dispose()
+    if($review){$review.Refresh();if(!$review.HasExited){$review.Kill();if(!$review.WaitForExit(8000)){throw 'Owned layer review did not stop during fixture cleanup'}}}
     Exit-CapyEnvironment
 }

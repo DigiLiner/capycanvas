@@ -310,7 +310,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
             }else{
                 column.scroll.Content(column.stack);column.scroll.VerticalScrollMode(ScrollingScrollMode::Enabled);
                 column.scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);column.scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-                column.scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);
+                column.scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(column.scroll);
                 Grid::SetRow(column.scroll,1);column.frame.Children().Append(column.scroll);
             }
             content.Children().Append(column.frame);columns.push_back(std::move(column));

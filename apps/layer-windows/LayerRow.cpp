@@ -80,7 +80,7 @@ bool LayerRow::loadThumbnail(bool isMask){
 void LayerRow::init(){
     auto weak=weak_from_this();root.Child(swipeFrame);
     swipeActions.HorizontalAlignment(HorizontalAlignment::Right);swipeActions.VerticalAlignment(VerticalAlignment::Stretch);
-    swipeFrame.Children().Append(swipeActions);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);swipe(0);
+    swipeFrame.Children().Append(swipeActions);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);
     swipeFrame.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock()){RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});self->swipeFrame.Clip(clip);}});
     root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();}});root.MinHeight(40);root.Padding({6,2,6,2});root.BorderThickness({0});
     root.BorderBrush(accent(data));body.ColumnSpacing(0);body.VerticalAlignment(VerticalAlignment::Center);
@@ -216,11 +216,13 @@ void LayerRow::init(){
     mask.RightTapped([weak](auto&&,RightTappedRoutedEventArgs const& e){if(auto self=weak.lock();self&&self->contextAllowed())self->context(true,self->mask);e.Handled(true);});
     dropMark.IsHitTestVisible(false);dropMark.BorderBrush(accent(data));dropMark.Margin({-6,-2,-6,-2});
     Grid::SetColumnSpan(dropMark,12);body.Children().Append(dropMark);
+    swipe(0);
 }
 double LayerRow::revealWidth()const{return std::min(std::max(1.,root.ActualWidth()),array(model(),L"swipe_actions").Size()*72.);}
 bool LayerRow::canSwipe()const{for(auto value:array(model(),L"swipe_actions"))if(flag(value.GetObject(),L"enabled"))return true;return false;}
 void LayerRow::swipe(double offset){
     swipeOffset=std::clamp(offset,object(model(),L"right_swipe").Size()?-72.:0.,revealWidth());swipeTransform.X(-swipeOffset);
+    grip.Visibility(swipeOffset==0&&flag(model(),L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
     auto width=revealWidth();swipeActions.Width(width);
     RectangleGeometry clip;clip.Rect({float(width-std::max(0.,swipeOffset)),0,float(std::max(0.,swipeOffset)),float(root.ActualHeight())});swipeActions.Clip(clip);
     swipeActions.Visibility(swipeOffset>0?Visibility::Visible:Visibility::Collapsed);
@@ -317,7 +319,7 @@ void LayerRow::refresh(){
     AutomationProperties::SetAccessibilityView(lockImage,flag(layer,L"locked")||flag(layer,L"alpha_locked")?Automation::Peers::AccessibilityView::Content:Automation::Peers::AccessibilityView::Raw);
     body.ColumnDefinitions().GetAt(10).Width({flag(layer,L"can_drop_below")?14.:12.,GridUnitType::Pixel});
     body.ColumnDefinitions().GetAt(11).Width({flag(layer,L"can_drop_below")?16.:0.,GridUnitType::Pixel});
-    grip.Visibility(flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
+    grip.Visibility(swipeOffset==0&&flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
     grip.Opacity(flag(layer,L"can_drop_below")?.6:0);grip.IsEnabled(flag(layer,L"can_drop_below")&&!flag(layer,L"locked"));
     hstring details=str(layer,L"description");
     meta.Text(details);meta.Visibility(details.empty()?Visibility::Collapsed:Visibility::Visible);

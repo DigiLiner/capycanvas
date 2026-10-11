@@ -236,6 +236,21 @@ fn layer_pickup_requires_a_resting_row_and_a_handle_for_direct_contacts() {
 }
 
 #[test]
+fn serialized_layer_body_drag_devices_match_shared_pickup_policy() {
+    for platform in Platform::ALL {
+        let s = session(platform);
+        for row in &s.state.layers {
+            let serialized = serde_json::to_value(row).unwrap();
+            let devices = serialized["drag_from_body"].as_array().unwrap();
+            assert_eq!(devices, &if row.can_drop_below { vec![serde_json::json!("mouse")] } else { vec![] });
+            for kind in [crate::PointerKind::Mouse, crate::PointerKind::Touch, crate::PointerKind::Pen] {
+                assert_eq!(devices.contains(&serde_json::to_value(kind).unwrap()), row.can_drag(kind, false, true));
+            }
+        }
+    }
+}
+
+#[test]
 fn layer_swipe_actions_follow_parent_locks_and_undo() {
     for platform in Platform::ALL {
         let mut s = session(platform);

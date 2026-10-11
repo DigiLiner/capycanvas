@@ -3,7 +3,7 @@ import CoreGraphics
 
 /// Native adapters preserve the actual contact device. Pen is deliberately
 /// distinct from mouse, including AppKit's tablet-backed mouse events.
-enum ReorderDevice { case mouse, touch, pen }
+enum ReorderDevice: String { case mouse, touch, pen }
 enum ReorderSurface: Equatable {
     case tile, row, handle, headerEditor, control, swatch
     func requiresHold(_ device: ReorderDevice) -> Bool {
@@ -20,6 +20,7 @@ enum ReorderSurface: Equatable {
     let id: String
     let surface: ReorderSurface
     var canDrag = true
+    var dragDevices: [ReorderDevice] = [.mouse, .touch, .pen]
     let valid: (_ dragging: Bool) -> Bool
     var openContext: (() -> Void)?
     var closeContext: (() -> Void)?
@@ -63,7 +64,7 @@ enum ReorderSurface: Equatable {
     /// Called once native movement recognition wins. A pre-hold pan cannot
     /// admit a tile or a touch/pen row, even if an adapter calls it accidentally.
     @discardableResult func move(to point: CGPoint) -> Bool {
-        guard validate(), let target, target.canDrag, !requiresHold || held else { return false }
+        guard validate(), let target, target.canDrag, target.dragDevices.contains(device), !requiresHold || held else { return false }
         if !dragging {
             dragging = true; suppressClick = true
             target.closeContext?()

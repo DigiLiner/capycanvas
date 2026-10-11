@@ -83,6 +83,50 @@ inline Windows::Foundation::Uri asset(std::wstring const& relative){
     auto path=std::filesystem::path(std::wstring(executable,length)).parent_path()/L"Assets"/relative;
     return Windows::Foundation::Uri(L"file:///"+path.generic_wstring());
 }
+struct MouseScrollbars {
+    struct Entry { weak_ref<DependencyObject> node; std::function<void(bool)> show; };
+    std::vector<Entry> entries;
+    bool mouse=false;
+    HHOOK hook=nullptr;
+    static MouseScrollbars& current(){static thread_local MouseScrollbars value;return value;}
+    void input(bool next){
+        if(mouse==next)return;mouse=next;
+        std::erase_if(entries,[](auto const& entry){return !entry.node.get();});
+        for(auto const& entry:entries)entry.show(mouse);
+    }
+    static LRESULT CALLBACK message(int code,WPARAM action,LPARAM payload){
+        auto& self=current();
+        if(code>=0&&action==PM_REMOVE){
+            auto event=reinterpret_cast<MSG*>(payload);
+            if(event->message==WM_POINTERDOWN||event->message==WM_POINTERUPDATE||event->message==WM_POINTERENTER){
+                POINTER_INPUT_TYPE type;
+                if(GetPointerType(GET_POINTERID_WPARAM(event->wParam),&type))self.input(type==PT_MOUSE);
+            }else if(event->message==WM_MOUSEMOVE||event->message==WM_LBUTTONDOWN||event->message==WM_MOUSEWHEEL)
+                self.input((ULONG_PTR(GetMessageExtraInfo())&0xFFFFFF00)!=0xFF515700);
+        }
+        return CallNextHookEx(self.hook,code,action,payload);
+    }
+    MouseScrollbars(){hook=SetWindowsHookExW(WH_GETMESSAGE,message,nullptr,GetCurrentThreadId());}
+    ~MouseScrollbars(){if(hook)UnhookWindowsHookEx(hook);}
+};
+inline void mouseScrollbars(ScrollView const& scroll){
+    auto horizontal=scroll.HorizontalScrollBarVisibility(),vertical=scroll.VerticalScrollBarVisibility();
+    auto& mode=MouseScrollbars::current();auto weak=make_weak(scroll);
+    auto show=[weak,horizontal,vertical](bool mouse){if(auto value=weak.get()){
+        value.HorizontalScrollBarVisibility(mouse?horizontal:ScrollingScrollBarVisibility::Hidden);
+        value.VerticalScrollBarVisibility(mouse?vertical:ScrollingScrollBarVisibility::Hidden);
+    }};
+    mode.entries.push_back({make_weak(scroll.as<DependencyObject>()),show});show(mode.mouse);
+}
+inline void mouseScrollbars(ScrollViewer const& scroll){
+    auto horizontal=scroll.HorizontalScrollBarVisibility(),vertical=scroll.VerticalScrollBarVisibility();
+    auto& mode=MouseScrollbars::current();auto weak=make_weak(scroll);
+    auto show=[weak,horizontal,vertical](bool mouse){if(auto value=weak.get()){
+        value.HorizontalScrollBarVisibility(mouse||horizontal==ScrollBarVisibility::Disabled?horizontal:ScrollBarVisibility::Hidden);
+        value.VerticalScrollBarVisibility(mouse||vertical==ScrollBarVisibility::Disabled?vertical:ScrollBarVisibility::Hidden);
+    }};
+    mode.entries.push_back({make_weak(scroll.as<DependencyObject>()),show});show(mode.mouse);
+}
 inline void dragCursor(UIElement const& element,bool touch,bool dragging,bool held=false){
     using namespace Microsoft::UI::Input;
     auto target=element.as<IUIElementProtected>();
