@@ -172,16 +172,29 @@ fn row_drag(
     root: &gtk::Box,
     name: &gtk::Stack,
     handle: bool,
-    held: &Rc<Cell<bool>>,
     owner: &Rc<RefCell<Weak<Workspace>>>,
     context: &gtk::PopoverMenu,
 ) -> gtk::DragSource {
     let source = gtk::DragSource::new();
+    let contact = Rc::new(Cell::new(None));
     source.set_actions(gdk::DragAction::MOVE);
     source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    source.connect_begin(glib::clone!(#[weak] item, #[weak] root, #[strong] contact, move |source, _| {
+        let at_rest = root.parent().and_downcast::<crate::swipe_row::SwipeRow>().is_some_and(|row| row.is_at_rest());
+        let kind = crate::input::gesture_pointer_kind(source);
+        let admitted = row_state(&item).is_some_and(|row| row.can_drag(kind, handle, at_rest));
+        contact.set(admitted.then_some(kind));
+        if !admitted {
+            source.set_state(gtk::EventSequenceState::Denied);
+        } else if handle {
+            source.set_state(gtk::EventSequenceState::Claimed);
+        }
+    }));
+    source.connect_end(glib::clone!(#[strong] contact, move |_, _| contact.set(None)));
+    source.connect_cancel(glib::clone!(#[strong] contact, move |_, _| contact.set(None)));
     source.connect_prepare(glib::clone!(
         #[strong]
-        held,
+        contact,
         #[weak]
         item,
         #[weak]
@@ -195,23 +208,13 @@ fn row_drag(
         #[upgrade_or]
         None,
         move |source, x, y| {
-            if name.visible_child_name().as_deref() == Some("edit")
-                || (!handle
-                    && !held.get()
-                    && (source
-                        .current_event()
-                        .is_some_and(|e| e.device_tool().is_some())
-                        || source.current_event_device().is_some_and(|d| {
-                            matches!(
-                                d.source(),
-                                gdk::InputSource::Touchscreen | gdk::InputSource::Pen
-                            )
-                        })))
-            {
+            let kind = contact.get()?;
+            if name.visible_child_name().as_deref() == Some("edit") {
                 return None;
             }
             let row = row_state(&item)?;
-            if !row.can_drop_below {
+            let at_rest = root.parent().and_downcast::<crate::swipe_row::SwipeRow>().is_some_and(|row| row.is_at_rest());
+            if !row.can_drag(kind, handle, at_rest) {
                 return None;
             }
             let w = owner.borrow().upgrade()?;
@@ -691,18 +694,17 @@ impl LayerPanel {
                     }
                 ));
                 name_entry.add_controller(keys);
-                let held = Rc::new(Cell::new(false));
-                let drag = row_drag(item, &root, &name_stack, false, &held, &owner, &context);
-                root.add_controller(drag.clone());
-                grip.add_controller(row_drag(
+                let drag = row_drag(item, &root, &name_stack, false, &owner, &context);
+                root.add_controller(drag);
+                let grip_drag = row_drag(
                     item,
                     &root,
                     &name_stack,
                     true,
-                    &held,
                     &owner,
                     &context,
-                ));
+                );
+                grip.add_controller(grip_drag.clone());
                 for (widget, is_mask) in [
                     (root.clone().upcast::<gtk::Widget>(), false),
                     (mask.clone().upcast(), true),
@@ -728,19 +730,9 @@ impl LayerPanel {
                     ));
                     widget.add_controller(click);
                 }
-                let hold = gtk::GestureLongPress::new();
-                hold.set_touch_only(false); // Pen events are not touch sequences.
-                hold.set_propagation_phase(gtk::PropagationPhase::Capture);
-                hold.connect_begin(glib::clone!(
-                    #[strong]
-                    held,
-                    move |_, _| held.set(false)
-                ));
-                hold.connect_pressed(glib::clone!(
+                let hold_menu = glib::clone!(
                     #[strong]
                     context,
-                    #[strong]
-                    held,
                     #[weak]
                     item,
                     #[weak]
@@ -751,7 +743,7 @@ impl LayerPanel {
                     name_stack,
                     #[strong]
                     owner,
-                    move |g, x, y| {
+                    move |g: &gtk::GestureLongPress, x: f64, y: f64| {
                         if !crate::input::touch_or_pen(g) {
                             return;
                         }
@@ -764,19 +756,24 @@ impl LayerPanel {
                         let Some(w) = owner.borrow().upgrade() else {
                             return;
                         };
+                        let Some(point) = g.widget().and_then(|widget| widget.compute_point(&root,
+                            &gtk::graphene::Point::new(x as f32, y as f32))) else { return; };
                         let is_mask = root
-                            .pick(x, y, gtk::PickFlags::DEFAULT)
+                            .pick(point.x() as f64, point.y() as f64, gtk::PickFlags::DEFAULT)
                             .is_some_and(|picked| picked == mask || picked.is_ancestor(&mask));
-                        held.set(row.can_drop_below);
-                        // Grouping preserves the row DragSource while claiming
-                        // the held contact from scrolling and child buttons.
                         g.set_state(gtk::EventSequenceState::Claimed);
                         context.set_autohide(false);
-                        menu(&w, &context, root.upcast_ref(), row.id, is_mask, [x, y]);
+                        menu(&w, &context, root.upcast_ref(), row.id, is_mask, [point.x() as f64, point.y() as f64]);
                     }
-                ));
-                root.add_controller(hold.clone());
-                hold.group_with(&drag);
+                );
+                for widget in [root.clone().upcast::<gtk::Widget>(), grip.clone().upcast()] {
+                    let hold = gtk::GestureLongPress::new();
+                    hold.set_touch_only(false);
+                    hold.set_propagation_phase(gtk::PropagationPhase::Capture);
+                    hold.connect_pressed(hold_menu.clone());
+                    widget.add_controller(hold.clone());
+                    if widget == grip { hold.group_with(&grip_drag); }
+                }
                 let drop = gtk::DropTarget::new(String::static_type(), gdk::DragAction::MOVE);
                 drop.set_preload(true);
                 drop.connect_accept(|_, drop| !drop.formats().contain_mime_type("text/uri-list"));
@@ -848,7 +845,10 @@ impl LayerPanel {
                                 if row.swipe != *opened && row.swipe.is_open() { row.swipe.reveal(false); }
                             }
                         }
-                    }, glib::clone!(#[weak] connections, move || connections.queue_draw()));
+                    }, glib::clone!(#[weak] connections, #[weak] grip, move |row| {
+                        grip.set_child_visible(row.is_at_rest());
+                        connections.queue_draw();
+                    }));
                 item.set_child(Some(&swipe));
                 rows.borrow_mut().insert(
                     item.as_ptr() as usize,

@@ -1310,6 +1310,12 @@ pub struct LayerState {
     pub fill_color: Option<LayerFillColor>,
 }
 
+impl LayerState {
+    pub fn can_drag(&self, kind: PointerKind, handle: bool, at_rest: bool) -> bool {
+        self.can_drop_below && at_rest && (handle || kind == PointerKind::Mouse)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct LayerFillColor {
     pub key: String,

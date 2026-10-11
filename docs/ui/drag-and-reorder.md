@@ -16,7 +16,8 @@ descriptions do not override it.
 | Customize Title Bar: entire editable item or component-bank chip | Drag without a hold | Drag without a hold | Drag without a hold |
 | Grab handle, including a handle inside a tile or list row | Drag without a hold | Drag without a hold | Drag without a hold |
 | Title bar, panel/tab strip, individual workspace tab, unused draggable header space | Drag without a hold | Drag without a hold | Drag without a hold |
-| Reorderable list-row body, such as a layer row | Drag without a hold | Hold, then drag | Hold, then drag |
+| Other reorderable list-row bodies | Drag without a hold | Hold, then drag | Hold, then drag |
+| Layer-row body | Drag without a hold | Scroll or swipe; use the grab handle to reorder | Scroll or swipe; use the grab handle to reorder |
 
 “Without a hold” means no time delay is required: ordinary movement slop can
 distinguish a click from a drag. “Hold, then drag” requires a stationary hold to
@@ -61,6 +62,9 @@ change the immediate pickup rule for handles and title/tab bars.
 
 - Pen drags scroll lists like touch on every host (GTK's shared pen scroller,
   Web `pen-scroll.js`, Android Compose); mouse drags never pan lists.
+- GTK scrollbars appear for mouse interaction. Pen and touch hide them and
+  leave the panel edge available to grab handles. Switching devices preserves
+  the scroll position and viewport size.
 - A touch or pen swipe left across a layer row reveals **Lock** (or **Unlock**),
   **Duplicate** and **Delete**. A reverse swipe or an outside click closes it.
   Shared Rust supplies their order, labels and availability. They act on the swiped row and
@@ -70,6 +74,8 @@ change the immediate pickup rule for handles and title/tab bars.
   on a closed paint-layer row toggles alpha lock. Locked layers cannot toggle alpha
   lock. Release commits one undo step; a short or cancelled swipe changes nothing.
   Swiping right to close Delete does not also toggle alpha lock.
+  A displaced layer row hides its grab handle and cannot start a reorder until
+  it has returned to its resting position, including the closing animation.
 - Group rows use the same right swipe to toggle Pass Through, whether the
   folder is expanded or collapsed. Returning to isolation makes the group Normal.
   Locked groups and groups needed by clipping or attached effects
@@ -78,6 +84,8 @@ change the immediate pickup rule for handles and title/tab bars.
 - Before a touch/pen list-row hold wins, motion remains available to normal list
   scrolling and cancels the pending reorder hold. Lifting, cancellation, capture
   loss, focus loss, or invalidating the source also retires pending holds.
+  Layer-row bodies keep scrolling and swipe gestures; holding opens their context
+  menu without arming reordering. Their grab handles reorder immediately.
 - A plain drag on a tile must not reorder it before the hold, except on saved
   palette color tiles and the explicit title-bar customization surface. Preserve
   scrolling when its container scrolls; this convention does not add scrolling to toolbars

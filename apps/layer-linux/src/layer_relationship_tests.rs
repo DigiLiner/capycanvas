@@ -339,38 +339,85 @@ fn native_layer_relationship_review() {
     let mut input = RemoteInput::new().settle_ms(180).timeout_secs(15);
     input.ready();
     if std::env::var_os("LAYER_RELATIONSHIP_PEN").is_some() {
-        let before = revision();
-        relationship_swipe(&mut input, &w, "pen", base, 12., true);
-        assert_eq!(revision(), before, "short pen swipe creates no edit");
-        relationship_swipe(&mut input, &w, "pen", base, 60., false);
-        let controllers = swipe(base).observe_controllers();
-        let gesture = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::GestureDrag>()).unwrap();
-        gesture.set_state(gtk::EventSequenceState::Denied);
-        relationship_swipe(&mut input, &w, "pen", base, 0., true);
-        assert_eq!(revision(), before, "cancelled pen swipe creates no edit");
-        relationship_swipe(&mut input, &w, "pen", base, 60., true);
-        assert!(view(base).alpha_locked);
-        undo();
-        assert!(!view(base).alpha_locked);
-        let before_order = order();
-        let before_artwork = artwork_manifest(ui_session(&w).engine().document());
-        assert!(ui_session(&w).engine().can_redo());
-        let source = row(curves);
-        let start = point(&find_css(&source,"layer-name").unwrap(),[0.5,0.5]);
-        let end = [start[0],start[1]+30.];
-        input.perform(serde_json::json!([contact("pen","down",start),contact("pen","move",end),contact("pen","up",end)]));
-        assert_eq!(order(), before_order, "unheld pen body cannot reorder");
-        input.perform(serde_json::json!([contact("pen","down",start)]));
-        pump(800);
-        assert!(w.popovers.borrow().iter().filter_map(|p| p.upgrade()).any(|p| p.is_visible()), "native pen hold arms the row and opens its context menu");
-        let controllers = source.observe_controllers();
-        let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
-        assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&80f64,&18f64]).is_some());
-        input.perform(serde_json::json!([contact("pen","up",start)]));
-        input.key(65307);
-        assert_eq!(order(), before_order);
-        assert_eq!(artwork_manifest(ui_session(&w).engine().document()), before_artwork, "pen pickup without drag preserves the artwork");
-        assert!(ui_session(&w).engine().can_redo(), "pen pickup cannot consume the undone alpha-lock edit");
+        for theme in [Theme::Light, Theme::Dark] {
+            w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+            pump(180);
+            let before = revision();
+            relationship_swipe(&mut input, &w, "pen", base, 12., true);
+            assert_eq!(revision(), before, "short pen swipe creates no edit");
+            relationship_swipe(&mut input, &w, "pen", base, 60., false);
+            let controllers = swipe(base).observe_controllers();
+            let gesture = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::GestureDrag>()).unwrap();
+            gesture.set_state(gtk::EventSequenceState::Denied);
+            relationship_swipe(&mut input, &w, "pen", base, 0., true);
+            assert_eq!(revision(), before, "cancelled pen swipe creates no edit");
+            relationship_swipe(&mut input, &w, "pen", base, 60., true);
+            assert!(view(base).alpha_locked);
+            undo();
+            assert!(!view(base).alpha_locked);
+            let before_order = order();
+            let before_artwork = artwork_manifest(ui_session(&w).engine().document());
+            assert!(ui_session(&w).engine().can_redo());
+            let source = row(curves);
+            let start = point(&find_css(&source,"layer-name").unwrap(),[0.5,0.5]);
+            let end = [start[0],start[1]+30.];
+            input.perform(serde_json::json!([contact("pen","down",start),contact("pen","move",end),contact("pen","up",end)]));
+            assert_eq!(order(), before_order, "unheld pen body cannot reorder");
+            input.perform(serde_json::json!([contact("pen","down",start)]));
+            pump(800);
+            assert!(w.popovers.borrow().iter().filter_map(|p| p.upgrade()).any(|p| p.is_visible()), "native pen hold opens its context menu");
+            let controllers = source.observe_controllers();
+            let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+            assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&80f64,&18f64]).is_none(), "held pen body cannot reorder");
+            input.perform(serde_json::json!([contact("pen","up",start)]));
+            input.key(65307);
+            let grip = source.last_child().unwrap();
+            let start = point(&grip, [0.5, 0.5]);
+            let scroll = &w.layer_panel.list;
+            let bar = scroll.vscrollbar();
+            let mouse_hover = |input: &mut RemoteInput| input.perform(serde_json::json!([
+                {"point":[start[0]-8., start[1]]}, {"point":start}
+            ]));
+            mouse_hover(&mut input);
+            assert!(bar.can_target() && bar.opacity() == 1., "{theme:?}: mouse restores scrollbar input");
+            input.perform(serde_json::json!([contact("pen","move",start)]));
+            assert!(!bar.can_target() && bar.opacity() == 0., "{theme:?}: pen hover hides scrollbar");
+            mouse_hover(&mut input);
+            assert!(bar.can_target() && bar.opacity() == 1., "{theme:?}: mouse hover restores scrollbar");
+            let allocation = (scroll.width(), scroll.height(), scroll.vadjustment().value());
+            input.perform(serde_json::json!([contact("pen","down",start)]));
+            assert!(!bar.can_target() && bar.opacity() == 0., "{theme:?}: pen hides scrollbar before pickup");
+            assert_eq!((scroll.width(), scroll.height(), scroll.vadjustment().value()), allocation);
+            let picked = w.surface.pick(start[0] as f64, start[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+            assert!(picked == grip || picked.is_ancestor(&grip), "{theme:?}: pen reaches the grip");
+            let controllers = grip.observe_controllers();
+            let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+            assert_eq!(crate::input::gesture_pointer_kind(&drag), layer_ui::PointerKind::Pen);
+            let contact_state = unsafe {
+                use glib::translate::ToGlibPtr;
+                gtk::ffi::gtk_gesture_get_sequence_state(drag.upcast_ref::<gtk::Gesture>().to_glib_none().0, std::ptr::null_mut())
+            };
+            assert_eq!(contact_state, gtk::ffi::GTK_EVENT_SEQUENCE_CLAIMED);
+            assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&8f64,&8f64]).is_some(), "pen grip prepares immediate pickup");
+            input.perform(serde_json::json!([contact("pen","up",start)]));
+            assert_eq!(order(), before_order);
+            assert_eq!(artwork_manifest(ui_session(&w).engine().document()), before_artwork, "pen pickup without drag preserves the artwork");
+            assert!(ui_session(&w).engine().can_redo(), "pen pickup cannot consume the undone alpha-lock edit");
+        }
+        for _ in 0..30 { relationship_action(&w, A::New { group: false, clipped: false }); }
+        for theme in [Theme::Light, Theme::Dark] {
+            w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+            w.layer_panel.list.vadjustment().set_value(0.);
+            pump(180);
+            let before_order = order();
+            let source = row(before_order[3]);
+            let start = point(&find_css(&source, "layer-name").unwrap(), [0.5, 0.5]);
+            input.perform(serde_json::json!([contact("pen", "down", start),
+                contact("pen", "move", [start[0], start[1]-40.]),
+                contact("pen", "move", [start[0], start[1]-85.]), contact("pen", "up", start)]));
+            assert!(w.layer_panel.list.vadjustment().value() > 20., "{theme:?}: pen body scrolls overflowing list");
+            assert_eq!(order(), before_order, "pen body scrolling cannot reorder layers");
+        }
         input.finish();
         w.window.destroy();
         pump(100);

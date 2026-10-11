@@ -295,6 +295,14 @@ the private compositor's native mouse and keyboard delivery. Scroll callbacks
 without an event position use the native surface's pointer position and modifier
 state before converting to canvas coordinates.
 
+`native_layer_hold_input` checks mouse row pickup, immediate touch handle pickup,
+context menus without touch body reordering, swipe displacement and list
+scrolling in docked and floating panels in both themes. Scrollbar device changes
+are applied before GTK picks the contact target, so the first touch after mouse
+use can reach a handle.
+The pen branch of `native_layer_relationship_review` checks body scrolling,
+swipes and held context menus; run it with `LAYER_RELATIONSHIP_PEN=1` and `--tablet`.
+
 GTK has one battery source: the Linux kernel's power-supply files.
 `system_status::power::tests` cover its file parsing, device symlinks, live changes
 and peripheral exclusion without a window. Shared `layer-ui` tests cover the same

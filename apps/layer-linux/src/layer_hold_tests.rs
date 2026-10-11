@@ -43,11 +43,17 @@ fn native_layer_hold_input() {
             p.popdown();
             p.set_autohide(true);
         }
+        for swipe in widgets(w.layer_panel.root.upcast_ref()).filter_map(|node| node.downcast::<crate::swipe_row::SwipeRow>().ok()) {
+            swipe.reset();
+        }
         pump(120);
     };
     let mut input = RemoteInput::new().settle_ms(120);
     input.ready();
     pump(400);
+    for theme in [Theme::Light, Theme::Dark] {
+    w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+    pump(180);
     for touch in [false, true] {
         let device = if touch { "touch" } else { "mouse" };
         for handle in [false, true] {
@@ -61,14 +67,13 @@ fn native_layer_hold_input() {
             let start = [b.x() + b.width() / 2., b.y() + b.height() / 2.];
             let b = bounds(&row(before[1]));
             let target = [b.x() + b.width() / 2., b.y() + b.height() - 3.];
+            if handle {
+                let picked = w.surface.pick(start[0] as f64, start[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+                assert!(picked == node || picked.is_ancestor(&node), "{theme:?}/{device}: grip owns native hit target");
+            }
             let slop = gtk::Settings::default().unwrap().gtk_dnd_drag_threshold() as f32;
             let pickup = [start[0] - slop * 3., start[1]];
             let jitter = [start[0] - 2., start[1]];
-            input.perform(if touch {
-                serde_json::json!([{"touch":"down","point":start},{"touch":"move","point":jitter},{"touch":"move","point":pickup}])
-            } else {
-                serde_json::json!([{"point":start},{"down":true},{"point":jitter},{"point":pickup}])
-            });
             let controllers = if handle {
                 node.observe_controllers()
             } else {
@@ -77,6 +82,18 @@ fn native_layer_hold_input() {
             let drag = (0..controllers.n_items())
                 .find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>())
                 .unwrap();
+            if touch {
+                input.perform(serde_json::json!([{"touch":"down", "point":start}]));
+                if handle {
+                    assert_eq!(drag.sequence_state(&drag.last_updated_sequence().unwrap()), gtk::EventSequenceState::Claimed,
+                        "{theme:?}/{device}: grip contact is claimed before slop");
+                }
+            }
+            input.perform(if touch {
+                serde_json::json!([{"touch":"move","point":jitter},{"touch":"move","point":pickup}])
+            } else {
+                serde_json::json!([{"point":start},{"down":true},{"point":jitter},{"point":pickup}])
+            });
             assert_eq!(
                 drag.drag().is_some(),
                 handle || !touch,
@@ -185,29 +202,25 @@ fn native_layer_hold_input() {
                 let b = bounds(&row(before[1]));
                 let point = [b.x() + b.width() / 2., b.y() + b.height() - 3.];
                 input.perform(serde_json::json!([{"touch":"move", "point":point}]));
-                assert!(!menu.is_visible(), "{region}: drag closes menu");
-                input.perform(
-                    serde_json::json!([{"touch":"move", "point":[point[0]+1.,point[1]]}, {"touch":"up"}]),
-                );
-                assert_ne!(
-                    order(),
-                    before,
-                    "{region}: held row drops with same contact"
-                );
-                w.dispatch(UiAction::Invoke {
-                    command: CommandId::Undo,
-                });
-                pump(150);
-                assert_eq!(order(), before, "one undo restores order");
-                w.dispatch(UiAction::Invoke {
-                    command: CommandId::Redo,
-                });
-                pump(150);
-                assert_ne!(order(), before);
-                w.dispatch(UiAction::Invoke {
-                    command: CommandId::Undo,
-                });
-                pump(150);
+                if region == "grip" {
+                    assert!(!menu.is_visible(), "{theme:?}: held grip pickup closes menu");
+                    input.perform(serde_json::json!([{"touch":"move", "point":[point[0]+1.,point[1]]}, {"touch":"up"}]));
+                    assert_ne!(order(), before, "{theme:?}: held grip commits native reorder");
+                    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+                    pump(150);
+                    assert_eq!(order(), before, "one undo restores held grip reorder");
+                    w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+                    pump(150);
+                    assert_ne!(order(), before);
+                    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+                    pump(150);
+                } else {
+                    let controllers = source.observe_controllers();
+                    let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+                    assert!(drag.drag().is_none(), "{theme:?}/{region}: held body cannot start native reorder");
+                    input.perform(serde_json::json!([{"touch":"up"}]));
+                    assert_eq!(order(), before, "{theme:?}/{region}: hold movement changes no layer order");
+                }
             }
         }
     }
@@ -225,7 +238,7 @@ fn native_layer_hold_input() {
     assert_eq!(
         order(),
         before,
-        "Escape cancels held reorder without a history entry"
+        "Escape after body hold changes no layer order"
     );
     dismiss();
     let b = bounds(&find_css(&row(before[0]), "layer-name").unwrap());
@@ -248,6 +261,34 @@ fn native_layer_hold_input() {
     });
     pump(150);
     assert_eq!(order(), before);
+    let source = row(before[0]);
+    let swipe = source.parent().unwrap().downcast::<crate::swipe_row::SwipeRow>().unwrap();
+    let grip = source.last_child().unwrap();
+    let controllers = grip.observe_controllers();
+    let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+    swipe.reveal(true);
+    pump(180);
+    assert!(!swipe.is_at_rest());
+    assert!(!grip.is_child_visible(), "{theme:?}: swipe hides grip");
+    assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&8f64, &8f64]).is_none(),
+        "{theme:?}: displaced row refuses native drag preparation");
+    swipe.reveal(false);
+    assert!(!swipe.is_at_rest(), "closing animation retains displaced state");
+    assert!(!grip.is_child_visible(), "closing animation keeps grip hidden");
+    pump(180);
+    assert!(swipe.is_at_rest());
+    assert!(grip.is_child_visible(), "{theme:?}: restored row exposes grip");
+    let start = screen_point(&grip, &w.surface, [0.5, 0.5]);
+    input.perform(serde_json::json!([{"touch":"down", "point":start}]));
+    assert!(drag.emit_by_name::<Option<gdk::ContentProvider>>("prepare", &[&8f64, &8f64]).is_some(),
+        "{theme:?}: restored row permits drag preparation from native grip contact");
+    input.perform(serde_json::json!([{"touch":"up"}]));
+    swipe.reveal(true);
+    pump(180);
+    swipe.reset();
+    pump(30);
+    assert!(swipe.is_at_rest() && grip.is_child_visible(), "{theme:?}: cancelled swipe restores grip");
+    }
     let layer = |action| { w.dispatch(UiAction::Layer { action }); pump(150); };
     let checked = || state(&w).layers.iter().filter(|r| r.selected).map(|r| r.id).collect::<Vec<_>>();
     let check = |id| row(id).first_child().unwrap().next_sibling().unwrap();
@@ -325,10 +366,96 @@ fn native_layer_hold_input() {
         });
     }
     pump(300);
+    for floating in [false, true] {
+    for theme in [Theme::Light, Theme::Dark] {
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(layer_ui::WorkspaceState::default()) });
+    if floating {
+        w.dispatch(UiAction::MovePanel { panel: Panel::Layers, target: DockTarget::Float { position: [700., 200.] },
+            viewport: [w.surface.width() as f32, w.surface.height() as f32] });
+    }
+    pump(250);
+    w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+    pump(180);
     w.layer_panel.list.vadjustment().set_value(0.);
     pump(200);
     let scrolling_order = order();
-    let b = bounds(&find_css(&row(scrolling_order[3]), "layer-name").unwrap());
+    let bar = w.layer_panel.list.vscrollbar();
+    let bar_point = screen_point(&bar, &w.surface, [0.5, 0.1]);
+    input.perform(serde_json::json!([{"point":bar_point}]));
+    pump(180);
+    assert!(bar.can_target() && bar.opacity() == 1., "{theme:?}: mouse exposes scrollbar");
+    let thumb = widgets(&bar).find(|node| node.css_name() == "slider").expect("native scrollbar thumb");
+    let thumb_start = screen_point(&thumb, &w.surface, [0.5, 0.5]);
+    input.perform(serde_json::json!([{"point":thumb_start},{"down":true},{"point":[thumb_start[0],thumb_start[1]+60.]},{"down":false}]));
+    assert!(w.layer_panel.list.vadjustment().value() > 20., "{theme:?}: native mouse thumb scrolls overflowing list");
+    assert_eq!(order(), scrolling_order);
+    w.layer_panel.list.vadjustment().set_value(0.);
+    pump(180);
+    let source = row(scrolling_order[1]);
+    let grip = source.last_child().unwrap();
+    let gb = bounds(&grip);
+    let bb = bounds(&bar);
+    let left = gb.x().max(bb.x());
+    let right = (gb.x()+gb.width()).min(bb.x()+bb.width());
+    assert!(right > left, "{theme:?}: scrollbar overlaps grip edge");
+    let start = [(left+right)/2., gb.y()+gb.height()/2.];
+    assert!(bounds(w.layer_panel.list.upcast_ref()).contains_point(&gtk::graphene::Point::new(start[0],start[1])),
+        "{theme:?}/{floating}: grip contact lies within list viewport");
+    input.perform(serde_json::json!([{"point":start}]));
+    input.perform(serde_json::json!([{"touch":"down", "point":start}]));
+    assert!(!bar.can_target() && bar.opacity() == 0., "{theme:?}: first touch after mouse hides scrollbar");
+    let picked = w.surface.pick(start[0] as f64, start[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+    assert!(picked == grip || picked.is_ancestor(&grip), "{theme:?}: first touch picks grip through hidden scrollbar");
+    let controllers = grip.observe_controllers();
+    let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+    assert_eq!(drag.sequence_state(&drag.last_updated_sequence().unwrap()), gtk::EventSequenceState::Claimed,
+        "{theme:?}/{floating}: first edge touch is owned by grip source");
+    let slop = gtk::Settings::default().unwrap().gtk_dnd_drag_threshold() as f32;
+    input.perform(serde_json::json!([{"touch":"move", "point":[start[0]-slop*3.,start[1]]}]));
+    assert!(drag.drag().is_some(), "{theme:?}: overflowing list touch grip starts native DND");
+    let target = screen_point(&row(scrolling_order[2]), &w.surface, [0.5, 0.9]);
+    let viewport = bounds(w.layer_panel.list.upcast_ref());
+    let hint = ui_session(&w).layer_drop_preview(scrolling_order[1], scrolling_order[2], 0.9, layer_ui::LayerDropSurface::Row)
+        .expect("shared overflowing row drop is valid");
+    assert!(viewport.contains_point(&gtk::graphene::Point::new(target[0],target[1])),
+        "{theme:?}/{floating}: native drop point lies within list viewport");
+    input.perform(serde_json::json!([{"touch":"move","point":target},{"touch":"move","point":[target[0]+1.,target[1]]}]));
+    let target_row = row(hint.target);
+    let class = match hint.position {
+        layer_ui::LayerDropPosition::Above => "layer-drop-before",
+        layer_ui::LayerDropPosition::Below => "layer-drop-after",
+        layer_ui::LayerDropPosition::Into => "layer-drop-into",
+        layer_ui::LayerDropPosition::Attach => "layer-drop-attach",
+    };
+    assert!(target_row.has_css_class(class), "{theme:?}/{floating}: native hint matches shared normalized drop {hint:?}; source={:?}",
+        drag.drag().map(|drag|drag.selected_action()));
+    assert_eq!(drag.drag().unwrap().selected_action(), gdk::DragAction::MOVE,
+        "native compositor accepts overflowing grip drop");
+    input.perform(serde_json::json!([{"touch":"up"}]));
+    assert_ne!(order(), scrolling_order, "{theme:?}/{floating}: overflowing list touch grip commits reorder");
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(180);
+    assert_eq!(order(), scrolling_order);
+    w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+    pump(180);
+    assert_ne!(order(), scrolling_order, "overflowing grip reorder has one-step redo");
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(180);
+    let grip = row(scrolling_order[1]).last_child().unwrap();
+    let start = screen_point(&grip, &w.surface, [0.5, 0.5]);
+    let picked = w.surface.pick(start[0] as f64, start[1] as f64, gtk::PickFlags::DEFAULT).unwrap();
+    assert!(picked == grip || picked.is_ancestor(&grip), "{theme:?}/{floating}: cancelled drag starts on grip");
+    input.perform(serde_json::json!([{"touch":"down","point":start}]));
+    let controllers = grip.observe_controllers();
+    let drag = (0..controllers.n_items()).find_map(|i| controllers.item(i).and_downcast::<gtk::DragSource>()).unwrap();
+    assert_eq!(drag.sequence_state(&drag.last_updated_sequence().unwrap()), gtk::EventSequenceState::Claimed,
+        "{theme:?}/{floating}: cancel grip owns initial contact");
+    input.perform(serde_json::json!([{"touch":"move","point":[start[0]-2.,start[1]]},{"touch":"move","point":[start[0]-slop*3.,start[1]]}]));
+    assert!(drag.drag().is_some(), "{theme:?}/{floating}: cancel journey starts native touch grip DND");
+    input.perform(serde_json::json!([{"touch":"move","point":target},{"key":65307,"down":true},{"key":65307,"down":false},{"touch":"up"}]));
+    assert_eq!(order(), scrolling_order, "Escape cancels grip native DND");
+    assert!(ui_session(&w).engine().can_redo(), "cancelled grip DND preserves history");
+    let b = bounds(&find_css(&row(scrolling_order[1]), "layer-name").unwrap());
     let start = [b.x() + b.width() / 2., b.y() + b.height() / 2.];
     input.perform(
         serde_json::json!([{"touch":"down","point":start},{"touch":"move","point":[start[0],start[1]-40.]},{"touch":"move","point":[start[0],start[1]-85.]},{"touch":"up"}]),
@@ -347,6 +474,8 @@ fn native_layer_hold_input() {
             .any(|p| p.is_visible()),
         "scroll cancels the hold"
     );
+    }
+    }
     input.finish();
     w.window.destroy();
     pump(100);

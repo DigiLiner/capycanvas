@@ -220,6 +220,22 @@ fn layer_drawer_disclosure_uses_types_and_nonredundant_authored_values() {
 }
 
 #[test]
+fn layer_pickup_requires_a_resting_row_and_a_handle_for_direct_contacts() {
+    let s = session(Platform::Gtk);
+    let mut row = s.state.layers.iter().find(|row| row.id == 1).unwrap().clone();
+    for kind in [crate::PointerKind::Mouse, crate::PointerKind::Touch, crate::PointerKind::Pen] {
+        assert!(row.can_drag(kind, true, true));
+        assert_eq!(row.can_drag(kind, false, true), kind == crate::PointerKind::Mouse);
+        assert!(!row.can_drag(kind, false, false));
+        assert!(!row.can_drag(kind, true, false));
+    }
+    row.can_drop_below = false;
+    assert!(!row.can_drag(crate::PointerKind::Mouse, true, true));
+    assert!(!row.can_drag(crate::PointerKind::Touch, true, true));
+    assert!(!row.can_drag(crate::PointerKind::Pen, true, true));
+}
+
+#[test]
 fn layer_swipe_actions_follow_parent_locks_and_undo() {
     for platform in Platform::ALL {
         let mut s = session(platform);

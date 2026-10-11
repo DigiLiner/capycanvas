@@ -18,7 +18,7 @@ mod imp {
         pub admitted: Cell<bool>,
         pub can_swipe_right: Cell<bool>,
         pub animation: RefCell<Option<adw::TimedAnimation>>,
-        pub changed: OnceCell<Box<dyn Fn()>>,
+        pub changed: OnceCell<Box<dyn Fn(&super::SwipeRow)>>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for SwipeRow {
@@ -58,7 +58,7 @@ glib::wrapper! {
         @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 impl SwipeRow {
-    pub fn new(content: &impl IsA<gtk::Widget>, remove: impl Fn() + 'static, lock: impl Fn() + 'static, duplicate: impl Fn() + 'static, swipe_right: impl Fn() + 'static, opening: impl Fn(&Self) + 'static, changed: impl Fn() + 'static) -> Self {
+    pub fn new(content: &impl IsA<gtk::Widget>, remove: impl Fn() + 'static, lock: impl Fn() + 'static, duplicate: impl Fn() + 'static, swipe_right: impl Fn() + 'static, opening: impl Fn(&Self) + 'static, changed: impl Fn(&Self) + 'static) -> Self {
         let row: Self = glib::Object::new();
         let _ = row.imp().changed.set(Box::new(changed));
         row.set_overflow(gtk::Overflow::Hidden);
@@ -140,7 +140,7 @@ impl SwipeRow {
         self.imp().offset.set(offset);
         self.imp().actions.get().unwrap().set_child_visible(offset > 0.);
         self.queue_allocate();
-        if let Some(changed) = self.imp().changed.get() { changed(); }
+        if let Some(changed) = self.imp().changed.get() { changed(self); }
     }
     pub fn reset(&self) {
         if let Some(a) = self.imp().animation.take() { a.pause(); }
@@ -177,6 +177,7 @@ impl SwipeRow {
         *self.imp().animation.borrow_mut() = Some(animation);
     }
     pub fn is_open(&self) -> bool { self.imp().offset.get() > 0. }
+    pub fn is_at_rest(&self) -> bool { self.imp().offset.get() == 0. }
     pub fn delete_button(&self) -> &gtk::Button { self.imp().delete.get().unwrap() }
     pub fn lock_button(&self) -> &gtk::Button { self.imp().lock.get().unwrap() }
     pub fn duplicate_button(&self) -> &gtk::Button { self.imp().duplicate.get().unwrap() }

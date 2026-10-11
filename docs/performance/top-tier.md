@@ -119,7 +119,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Figure or ruler drag | 120 | | |
 | Layer opacity scrub | 120 | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Layer reorder drag | 120 | **Met.** Native UI 117.20–119.41 fps; moving-frame gap p99 8.38–16.67 ms | [Layer reorder and retained photo translation](#layer-reorder-and-retained-photo-translation), 2026-10-04 |
-| Layer row swipe | 120 | **Unqualified.** GTK desktop Lock/Duplicate/Delete reveal satisfies desktop criteria: 119.96–120.00 presents/s, p99 up to 9.097 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| Layer row swipe | 120 | **Unqualified.** GTK desktop Lock/Duplicate/Delete reveal: 119.60–120.03 presents/s, p99 up to 8.694 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
 | Layer thumbnail selection animation | 120 | **Not met.** Repeated content/mask selection 77.08–79.86 window frames/s; worst moving-frame gap p99 33.33 ms | [Layer thumbnail selection](#layer-thumbnail-selection), 2026-10-05 |
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
@@ -133,7 +133,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
 | Canvas action bar show, hide and move | 120 | **Not met.** UI frame p50/p95: 63.2/90.0 ms moving the bar, 23.0/34.6 ms show and hide (2048 × 1536) | Canvas-bar `ui-bar-move` and `ui-bar-show-hide`, 2026-09-27 |
 | Tool Options or panel content change | 120 | **Not met.** UI frame p50/p95 25.1/30.6 ms | Canvas-bar `ui-panel-change`, 2026-09-27 |
-| List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK with 1,000 layers misses desktop criteria: normal touch at scales 1/2 gives 89.49–116.48 presents/s, p99 up to 74.878 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| List scrolling: layers, brushes, filters | 120 | **Unqualified.** GTK with 1,000 layers misses desktop criteria: touch at scale 1 gives 97.24–109.99 presents/s, p99 up to 25.016 ms; reference tablet unmeasured | [GTK layer input diagnostic](#gtk-layer-input-diagnostic), 2026-10-10 |
 | Menu open and close | 120 | Application menu heading switching unmeasured on reference hardware. Selection-bar diagnostic: menu open adds no canvas frames; UI frame p50/p95 11.5/26.6 ms | Canvas-bar `selection-bar-menu-open`, 2026-09-27; [menu interaction](../ui/window-bar.md) needs presented-frame qualification |
 
 ## Layer thumbnail selection
@@ -260,6 +260,44 @@ qualification remains open.
 The raw presentation arrays are in `autoheight{1,2}/large-list-scroll.json`,
 `native_sketch_layer_properties_drawer/properties-animation.json` and
 `swipe-motion/swipe-animation.json`; the summary retains source and binary hashes.
+
+## GTK layer input diagnostic
+
+Measured 2026-10-10 on the `b5b9bfc48` working tree with GTK layer contact
+capture, hidden displaced-row handles and device-aware scrollbars. The release
+build uses NVIDIA RTX PRO 6000 Blackwell Max-Q/Vulkan 615.71.09 and an empty
+2048 × 1536 drawing. Native input runs on a private Mutter display at 120 Hz.
+These workstation results do not qualify a reference tablet or its tier canvas.
+Source diffs, executable hashes and raw arrays are in `artifacts/gtk-layer-input/`.
+
+The matched swipe runs use system GTK 4.22.5/libadwaita 1.9.4, a 1600 × 1000
+viewport and native touch input at requested 4 ms intervals. Each theme has
+three six-second motion windows. Rates pool unique completed presentations only
+while row geometry changes, excluding gaps between contacts; interval p99 uses
+nearest rank. Builds are idle during measurement. The runner's default 60 ms
+input cadence produces an input-limited diagnostic and is excluded here.
+
+| Layer swipe | Baseline presents/s | Changed presents/s | Baseline / changed maximum interval p99 |
+| --- | --- | --- | --- |
+| Light | 119.94–119.97 | 119.99–120.03 | 8.696 / 8.694 ms |
+| Dark | 119.64–119.96 | 119.60–119.99 | 8.769 / 8.644 ms |
+
+The bundled-runtime 1,000-layer touch scroll uses a 1100 × 1000 viewport at
+scale 1 and the same 4 ms input cadence, with three six-second gestures per
+theme. Only unique completed presentations where the scroll adjustment changes
+count. This is a current-only diagnostic without a matched scrolling baseline.
+Both rate and p99 miss the 120 Hz desktop criteria.
+
+| Touch scrolling | Presents/s, three runs | Maximum interval p99 |
+| --- | --- | --- |
+| Light | 101.91 / 108.41 / 109.93 | 24.915 ms |
+| Dark | 97.24 / 109.99 / 106.96 | 25.016 ms |
+
+Functional journeys use the bundled GTK 4.22.4 runtime. Both themes cover docked,
+floating and drawer layers, mouse scrollbar dragging, first touch at an overlapping
+scrollbar/handle, native reorder Undo/Redo and cancellation, displaced-row pickup
+refusal, pen hover, pen handle capture and touch/pen body scrolling. Pen events
+are injected; physical pen pickup and reference-tablet motion remain unverified.
 
 ## GTK panel slider diagnostic
 

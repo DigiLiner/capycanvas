@@ -112,22 +112,77 @@ pub(crate) fn localization_input_busy(window: &impl IsA<gtk::Window>) -> bool {
 
 /// Only direct touch/stylus contacts open menus on a primary-button hold.
 pub(crate) fn touch_or_pen(gesture: &impl IsA<gtk::Gesture>) -> bool {
-    // Long-press fires from a timer, outside current_event's dispatch lifetime.
-    gesture.last_event(gesture.last_updated_sequence().as_ref()).is_some_and(|event| {
-        event.device_tool().is_some()
-            || event.device().is_some_and(|device| {
-                matches!(
-                    device.source(),
-                    gdk::InputSource::Touchscreen | gdk::InputSource::Pen
-                )
-            })
-    })
+    gesture_pointer_kind(gesture) != PointerKind::Mouse
+}
+
+pub(crate) fn gesture_pointer_kind(gesture: &impl IsA<gtk::Gesture>) -> PointerKind {
+    gesture.last_event(gesture.last_updated_sequence().as_ref()).map_or(PointerKind::Mouse, |event| pointer_kind(&event))
+}
+
+fn pointer_kind(event: &gdk::Event) -> PointerKind {
+    if event.device_tool().is_some() || event.device().is_some_and(|d| d.source() == gdk::InputSource::Pen) {
+        PointerKind::Pen
+    } else if event.device().is_some_and(|d| d.source() == gdk::InputSource::Touchscreen) {
+        PointerKind::Touch
+    } else {
+        PointerKind::Mouse
+    }
+}
+
+fn scrollbar_input(scroll: &gtk::ScrolledWindow, mouse: bool) {
+    for bar in [scroll.hscrollbar(), scroll.vscrollbar()] {
+        bar.set_opacity(if mouse { 1. } else { 0. });
+        bar.set_can_target(mouse);
+    }
+}
+
+unsafe extern "C" fn scrollbar_input_before_dispatch(
+    _: *mut glib::gobject_ffi::GSignalInvocationHint,
+    count: u32,
+    values: *const glib::gobject_ffi::GValue,
+    _: glib::ffi::gpointer,
+) -> glib::ffi::gboolean {
+    use glib::translate::from_glib_borrow;
+    if count < 2 { return 1; }
+    let surface: glib::translate::Borrowed<gdk::Surface> = unsafe {
+        from_glib_borrow(glib::gobject_ffi::g_value_get_object(values) as *mut gdk::ffi::GdkSurface)
+    };
+    let event: glib::translate::Borrowed<gdk::Event> = unsafe {
+        from_glib_borrow(glib::gobject_ffi::g_value_get_pointer(values.add(1)) as *mut gdk::ffi::GdkEvent)
+    };
+    if !matches!(event.event_type(), gdk::EventType::MotionNotify | gdk::EventType::ButtonPress
+        | gdk::EventType::TouchBegin | gdk::EventType::ProximityIn | gdk::EventType::Scroll) { return 1; }
+    let Some(root) = gtk::Native::for_surface(&*surface).and_then(|native| native.upcast::<gtk::Widget>().root()) else { return 1; };
+    let root = root.upcast::<gtk::Widget>();
+    let mouse = pointer_kind(&event) == PointerKind::Mouse;
+    if root.has_css_class("mouse-scrollbars") == mouse { return 1; }
+    if mouse { root.add_css_class("mouse-scrollbars"); } else { root.remove_css_class("mouse-scrollbars"); }
+    crate::text_language::visit(&root, &mut |widget| {
+        if widget.has_css_class("capy-scroller") && let Some(scroll) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            scrollbar_input(scroll, mouse);
+        }
+    });
+    1
 }
 
 /// GTK's built-in kinetic scrolling only accepts touchscreen sequences. Give
 /// tablet contacts the same pre-hold scrolling path, using native slop and
 /// gesture arbitration so held rows and explicit handles keep their capture.
 pub(crate) fn pen_scroller(scroll: gtk::ScrolledWindow) -> gtk::ScrolledWindow {
+    static SCROLLBAR_INPUT: std::sync::Once = std::sync::Once::new();
+    SCROLLBAR_INPUT.call_once(|| unsafe {
+        let class = glib::gobject_ffi::g_type_class_ref(gdk::Surface::static_type().into_glib());
+        let signal = glib::subclass::SignalId::lookup("event", gdk::Surface::static_type()).unwrap();
+        glib::gobject_ffi::g_signal_add_emission_hook(signal.into_glib(), 0,
+            Some(scrollbar_input_before_dispatch), std::ptr::null_mut(), None);
+        glib::gobject_ffi::g_type_class_unref(class);
+    });
+    scroll.add_css_class("capy-scroller");
+    scrollbar_input(&scroll, false);
+    scroll.connect_map(|scroll| {
+        let mouse = scroll.root().is_some_and(|root| root.upcast::<gtk::Widget>().has_css_class("mouse-scrollbars"));
+        scrollbar_input(scroll, mouse);
+    });
     let drag = gtk::GestureDrag::new();
     drag.set_button(1);
     drag.set_propagation_phase(gtk::PropagationPhase::Capture);
