@@ -78,7 +78,6 @@ impl ProofPanel {
     fn with_model(model: Rc<Model>) -> Rc<Self> {
         let root = panel_controls::column();
         root.set_widget_name("proof-panel");
-        root.add_css_class("dock-panel");
         root.set_spacing(panel_controls::CONTROL_SPACING);
         root.set_vexpand(true);
         root.set_margin_top(layer_ui::PANEL_CONTENT_INSET as i32);

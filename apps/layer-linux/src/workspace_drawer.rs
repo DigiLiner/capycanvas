@@ -440,6 +440,7 @@ impl View {
                     }
                 };
                 let widget = body.widget();
+                if matches!(&body, Body::Histogram(_)) { margins(&widget, PANEL_CONTENT_INSET as i32); }
                 widget.set_widget_name(&format!("drawer-panel-{panel:?}"));
                 column.append(&widget);
                 bodies.push(body);

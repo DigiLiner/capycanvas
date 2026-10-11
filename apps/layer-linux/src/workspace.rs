@@ -1150,6 +1150,7 @@ impl Workspace {
         let proof_panel = crate::files::proof::ProofPanel::new();
         let histogram = crate::histogram::Inspector::new();
         let waveform = crate::histogram::Inspector::waveform();
+        for panel in [&histogram, &waveform] { margins(&panel.root, PANEL_CONTENT_INSET as i32); }
         status_bar.append(&proof.label);
         status_bar.append(&local_tone.label);
         let screen = crate::screen_view::ScreenView::new();

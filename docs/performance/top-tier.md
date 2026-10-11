@@ -125,9 +125,9 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps | `dc27e04d`, 2026-09-23 |
-| Panel or column resize | 120 | **Unqualified.** GTK desktop Color column 12.88–44.61, floating panel 39.63–100.58 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-04 |
-| Pen pressure utility and curve drag | 120 | **Unqualified.** GTK desktop panel 119.2–119.4 presents/s, p99 up to 8.66 ms; curve p99 up to 16.712 ms exceeds the strict two-frame budget; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
-| Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 72.85–120.01 presents/s, p99 up to 20.930 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| Panel or column resize | 120 | **Unqualified.** Current GTK desktop 1× SDR Color column 59.62–65.40, floating panel 118.29–118.96 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
+| Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
+| Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
@@ -216,34 +216,37 @@ widget count does not establish constant total memory use. Native painted-row
 checks preserve the visible layer ID and pixel offset after returning from
 Properties at both scales. Scrolling misses the desktop rate or interval limits.
 
-Properties transitions are remeasured on the `e5c2e8574` working tree with
-embedded panel backgrounds and shadows removed, in the same desktop setup.
+Properties transitions are remeasured on the `996cc49f3` working tree with
+GTK panel surfaces moved from reusable content to their owning containers,
+in the same desktop setup.
 The tester SHA-256 is
-`4f90602ad515494d51078ba6eca42a4a586d3b5fc48594af2490cb24de5bb7e2`;
+`c81218a51013d57652ada32b981130de1d63dd2405ba4d66fae2c2c8a886bbaf`;
 the app is
-`d204d232226ed7dcf4ede44a8b0dbe146b088a2049c9cec6634d9a68ca1a6d0a`.
+`9cbe1b296b1901f56e7dcd20a44a949d2fb80828d5e034d0401233ff6dcc4194`.
 Source hashes, native surface checks and presentation arrays are under
-`artifacts/layer-properties-shadow/`. The surface checks cover both themes,
-opaque and high glass, at both scales: embedded Properties and Adjustments
-have no background or shadow node; the outer drawer retains both its backdrop
-and shadow, and docked Properties retains its surface.
+`artifacts/panel-surface-ownership/`. The 476 native surface cases cover
+17 reusable panel types across docked, tabbed, floating, header, toolbar,
+column and configuration placements, in both themes with glass Off/High.
+Content has no panel background or shadow, normal previews add no duplicate
+fill, and owning containers retain their surfaces. Expanded preview and
+configuration columns have opaque fills with one combined shadow. Standalone
+monitors receive one inset; Properties' nested histogram receives none.
+Properties behavior and synchronized slide/resize checks pass at both scales.
 
 | Properties transition | Scale | Pooled presents/s | Interval p99 |
 | --- | --- | --- | --- |
-| Light / open | 1 | 116.50 | 15.569 ms |
-| Light / close | 1 | 120.01 | 8.517 ms |
-| Dark / open | 1 | 113.90 | 16.728 ms |
-| Dark / close | 1 | 117.93 | 15.223 ms |
-| Light / open | 2 | 100.32 | 19.088 ms |
-| Light / close | 2 | 75.47 | 16.813 ms |
-| Dark / open | 2 | 98.38 | 20.930 ms |
-| Dark / close | 2 | 72.85 | 16.805 ms |
+| Light / open | 1 | 115.96 | 16.420 ms |
+| Light / close | 1 | 119.86 | 8.645 ms |
+| Dark / open | 1 | 113.98 | 16.725 ms |
+| Dark / close | 1 | 117.89 | 16.631 ms |
+| Light / open | 2 | 100.59 | 18.297 ms |
+| Light / close | 2 | 74.57 | 16.818 ms |
+| Dark / open | 2 | 99.20 | 20.198 ms |
+| Dark / close | 2 | 73.10 | 16.796 ms |
 
-Matched runs with the original CSS yield 113.37–119.03 pooled presents/s at scale 1
-and 68.41–94.29 at scale 2, versus 113.90–120.01 and 72.85–100.32 with
-the fix. The scale-2 slowdown is present in both builds. The original tester
-SHA-256 is `d190e117d1e01641c47b9cb857c651526722e18be8f6da6e94b82c0c5b03451c`;
-paired rates and interval p99 are in `properties-pooled.json` in that artifact directory.
+These current-only transition measurements do not establish a speedup from
+the surface change. Raw timestamps are in `properties{1,2}/properties-animation.json`;
+pooled rates and interval p99 are in `properties-metrics.json`.
 
 Properties also misses the desktop criteria. The Lock/Duplicate/Delete strip
 meets those desktop criteria in every sampled gesture; reference-tablet
@@ -353,7 +356,41 @@ raw records and summaries are under `artifacts/color-overlap/pacing/`.
 
 ## GTK color panel resize
 
-Measured 2026-10-04 in a release build based on `48efaf593`, on AMD Ryzen
+Remeasured 2026-10-10 on the `996cc49f3` working tree with GTK panel surfaces
+owned by workspace containers, using the frozen tester and app identified in
+[GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic). Hardware and
+runtime versions are unchanged. The private Mutter display and maximized
+window are 1600 × 1000 logical/physical pixels at 120 Hz and scale 1. The
+fixture uses a 2048 × 1536 SDR drawing and default Low transparency.
+Each mouse/touch condition has three primed 6.6-second contacts. Only completed
+presentations with changed panel geometry count; interval p99 uses nearest rank.
+No builds or other GPU journeys run during motion.
+
+| Theme / input | Color column presents/s | Maximum interval p99 | Floating Color presents/s | Maximum interval p99 |
+| --- | --- | --- | --- | --- |
+| Light / mouse | 60.14–60.68 | 18.741 ms | 118.29–118.81 | 16.654 ms |
+| Light / touch | 61.10–65.40 | 24.914 ms | 118.36–118.96 | 16.629 ms |
+| Dark / mouse | 59.62–60.15 | 24.939 ms | 118.66–118.96 | 16.645 ms |
+| Dark / touch | 61.12–62.24 | 18.948 ms | 118.36–118.96 | 16.662 ms |
+
+Both theme journeys pass. All 24 contacts have zero field rebuilds and zero
+model refreshes during resize. Floating Color meets the desktop rate and gap
+criteria in these runs; the column misses both. This smaller workstation
+workload does not qualify the reference tablet. Current raw results are in
+`artifacts/panel-surface-ownership/color-resize-{light,dark}/gtk.json`, summarized
+in `color-resize-metrics.json`.
+
+Matched Light runs with the preserved `996cc49f3` production sources give
+58.98–59.65 presents/s for mouse column resize and 58.68–59.51 for touch,
+versus 60.14–60.68 and 61.10–65.40 with the surface change. Baseline floating
+resize gives 114.92–118.21 versus 118.29–118.96. The column misses desktop
+criteria in both builds. Baseline raw results are in
+`artifacts/panel-surface-ownership/baseline-color-light/gtk.json`;
+the combined summary preserves all three repetitions per condition. The
+baseline tester SHA-256 is
+`22464b59c8aae43b76003b5d35ed29472ed0616e39d011946ad356a055895dd6`.
+
+Earlier measurements on 2026-10-04 used a release build based on `48efaf593`, on AMD Ryzen
 Threadripper PRO 9995WX and NVIDIA RTX PRO 6000 Blackwell Max-Q/Vulkan
 615.71.09. The private Mutter display is 3200 × 2000 at 120 Hz. The
 `native_color_wheel_resize_input` and `native_hdr_color_wheel_resize_input`
@@ -2600,51 +2637,53 @@ establish no regression.
 Current per-gesture evidence: `artifacts/navigation-controls/zoom-audit-20261009/post-rebase-results.json`.
 ## GTK pen pressure utility
 
-Measured on 2026-10-10 UTC in the pen-pressure worktree based on `3332d9f90`,
-with release Rust, GTK 4.22.5 and an NVIDIA RTX PRO 6000 Blackwell Max-Q GPU
-(Vulkan, driver 615.71.09). The private Mutter display runs at 1100 × 800 and
-120 Hz, with a 256 × 256 F32 drawing at Fit and the default workspace. The
-pressure curve has three authored controls and no coordinate readouts. After
-the functional journey warms the controls, each theme runs three five-second
-panel drags and three curve drags. The panel follows a 200 × 100 logical-pixel
-ellipse; actual native allocations span x = 182–582 and y = 115–315, all snapped
-to device pixels. Each gesture observes 549–601 moving allocations. The curve
-handle follows a 4 × 20 logical-pixel ellipse inside the graph, changing both
-input and output. Its authored input spans 0.2341–0.2659 and output spans
-0.7826–1. Pointer positioning settles before
-each press, and the test verifies the native target hit. Presentation timestamps
-are restricted to observed moving-state windows; idle frames are excluded.
-Screen recording is disabled during measurement, and visual captures run
-separately. Other verification builds, VM tests and GPU journeys are stopped
-during these measurements.
+Remeasured on 2026-10-10 UTC on the `996cc49f3` working tree with GTK panel
+surfaces owned by their workspace containers, using the frozen tester and app
+identified in [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic).
+The private Mutter display and maximized window are 1600 × 1000 at 120 Hz,
+scale 1, on the same NVIDIA RTX PRO 6000 Blackwell Max-Q/Vulkan workstation.
+The fixture uses a 256 × 256 F32 drawing at Fit and default Low transparency;
+the utility itself remains opaque. These desktop results do not qualify the
+reference tablet or its 61 MP canvas.
+
+After the mouse, touch and injected-pen functional journey warms the controls,
+each theme runs three five-second panel drags and three curve drags. The
+utility follows a 200 × 100 logical-pixel ellipse; placement snaps to device
+pixels. The curve handle follows a 4 × 20 logical-pixel ellipse inside the
+graph, changing both authored input and output. The native target hit is
+checked before every press. Only completed presentations during observed
+moving native allocations or authored-control updates count. Idle intervals
+are excluded; interval p99 uses nearest rank. Screen recording, other GPU
+journeys and builds are stopped during measurement.
 
 | Motion | Light presents/s / maximum p99 gap | Dark presents/s / maximum p99 gap |
 | --- | --- | --- |
-| Utility frame | 115.22–119.41 / 16.713 ms | 108.98–119.40 / 25.020 ms |
-| Pressure curve | 119.21–119.60 / 8.620 ms | 113.83–120.00 / 16.820 ms |
+| Utility frame | 119.20–119.21 / 8.740 ms | 119.20–119.40 / 9.207 ms |
+| Pressure curve | 120.00 / 8.470 ms | 120.00 / 8.463 ms |
 
-Ten of twelve gestures meet the 114 presents/s floor. One dark utility-frame
-gesture and one dark curve gesture miss it. Seven of twelve gestures meet the
-strict 2000/120 = 16.6667 ms gap limit: one light utility-frame gesture, two dark
-utility-frame gestures, all three light curve gestures and one dark curve
-gesture. Both motions remain unqualified across themes. These desktop results
-do not qualify the reference tablet or its 61 MP canvas.
+All twelve current gestures meet the desktop 114 presents/s floor and strict
+2000/120 = 16.6667 ms gap limit. Matched Light runs with the preserved
+`996cc49f3` production sources give 112.62–119.41 presents/s and maximum p99
+24.994 ms for the utility, and 119.80–120.00 with maximum p99 8.466 ms for the
+curve. The preserved tester is the same one identified in the Color resize
+comparison. These small samples do not establish reference-device performance.
 
-Moving only the utility frame updates shared bounds without rebuilding the
-curve plot. GTK retains content and measurement, and presents pending placement
-through the existing workspace frame callback with a draw request. Opaque frame
-coverage prevents inner translucent controls from requesting canvas backdrops;
-the native journey verifies zero utility backdrop regions and separately checks
-opaque, faded and translucent synthetic surfaces. Both theme journeys pass.
+Moving the utility updates shared bounds without rebuilding the curve plot.
+GTK retains content and measurement, then presents pending placement through
+the workspace frame callback. The native journey verifies zero utility
+backdrop regions and separately checks opaque, faded and translucent synthetic
+surfaces. Both themes pass functional mouse, touch and injected-pen input;
+these paths do not establish physical pen behavior.
 
-Current raw reports, native positions and executable/source identity are in
-`artifacts/pressure-calibration/immediate-removal-checks/`. Earlier diagnostics
-remain in `artifacts/pressure-calibration/corrected-native-perf/` and
-`artifacts/pressure-calibration/revised-gtk/`. Their curve path went above the
-graph at the upper output bound; immediate drag-out removal now requires the
-inward path. Those results do not isolate the cost of this change or measure
-the current two-axis curve workload. The earlier 60 × 30 utility-frame path also
-had a geometric ceiling near 64 changed pixel positions/s on this display.
-Run
-`native_pressure_calibration --tablet` with `LAYER_PRESSURE_MOTION=1` and
+Current raw reports are in
+`artifacts/panel-surface-ownership/pressure8-{light,dark}/pressure-motion.json`;
+the matched Light baseline is in `baseline-pressure8/pressure-motion.json`.
+`pressure-metrics.json` retains all eighteen measured gestures. Extra probes
+at 4 ms input cadence record zero movement in both builds, so they provide
+no timing result. The documented 8 ms cadence passes in both builds; no input
+or fixture code is changed for those probes. Earlier measurements at
+1100 × 800 are in `artifacts/pressure-calibration/immediate-removal-checks/`
+and are not a matched comparison with this larger viewport.
+
+Run `native_pressure_calibration --tablet` with `LAYER_PRESSURE_MOTION=1` and
 `LAYER_NATIVE_EVENT_MS=8` to repeat the workload.

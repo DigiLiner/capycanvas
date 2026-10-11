@@ -69,8 +69,13 @@ target the live active layer instead of resolving it from a frontend snapshot.
 
 `ContentDrawer` uses one control factory for header and toolbar openers. Its
 columns compose Color with Palettes; Layers carries the Properties page state.
-The drawer owns the background and outer shadow; embedded panel bodies are
-transparent and have no panel shadow, in both opaque and glass modes.
+Reusable panel views contain controls and have no panel background or shadow.
+Dock groups, drawers and standalone workspace chrome own their surfaces. GTK
+assigns `dock-panel` only to those containers. Configuration expansion makes
+the root transparent; its preview and configuration columns own opaque fills
+with one combined shadow.
+Histogram views receive the panel inset where monitors are composed; the same
+view embedded in Properties adds no second inset.
 `LayerDrawerSizing::pages` sets both page heights from native measurements.
 The native sizing query includes both placements. Android, Apple and Windows
 cache those endpoints and call stateless `drawer_frame` on their UI clocks;

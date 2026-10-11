@@ -70,9 +70,6 @@ impl Inspector {
     fn create(waveform:bool) -> Rc<Self> {
         let prefix=if waveform {"waveform"} else {"histogram"};
         let root = gtk::Box::new(gtk::Orientation::Vertical,crate::panel_controls::CONTROL_SPACING);root.set_widget_name(&format!("{prefix}-panel"));
-        root.add_css_class("dock-panel");
-        let inset=layer_ui::PANEL_CONTENT_INSET as i32;
-        root.set_margin_top(inset);root.set_margin_bottom(inset);root.set_margin_start(inset);root.set_margin_end(inset);
         let source = crate::panel_controls::dropdown(&[]);source.set_widget_name(&format!("{prefix}-source"));source.set_hexpand(true);
         let channel = crate::panel_controls::dropdown(&[]);channel.set_widget_name(&format!("{prefix}-channel"));channel.set_hexpand(true);
         let toolbar = crate::panel_controls::action_row(crate::panel_controls::CONTROL_SPACING);toolbar.set_homogeneous(true);toolbar.append(&source);toolbar.append(&channel);root.append(&toolbar);
@@ -127,7 +124,6 @@ impl Inspector {
     pub fn refresh(&self,w:&Rc<Workspace>,state:&UiState) {self.refresh_view(w,state,if self.waveform {&state.waveform} else {&state.histogram});}
     pub fn refresh_tonal(&self,w:&Rc<Workspace>,state:&UiState) {
         self.refresh_view(w,state,&state.tonal_histogram);self.toolbar.set_visible(false);self.logarithmic.set_visible(false);self.chart.set_content_height(120);
-        self.root.set_margin_top(0);self.root.set_margin_bottom(0);self.root.set_margin_start(0);self.root.set_margin_end(0);
     }
     fn refresh_view(&self,w:&Rc<Workspace>,state:&UiState,view:&HistogramView) {
         *self.workspace.borrow_mut()=Rc::downgrade(w);self.updating.set(true);

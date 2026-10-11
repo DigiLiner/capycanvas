@@ -214,55 +214,146 @@ fn panel_shadow(node:&gtk::gsk::RenderNode) -> bool {
     false
 }
 
+fn surface_content(widget:&gtk::Widget) -> gtk::Widget {
+    let child=widget.downcast_ref::<gtk::ScrolledWindow>().and_then(|scroll|scroll.child())
+        .or_else(||widget.downcast_ref::<gtk::Viewport>().and_then(|viewport|viewport.child()));
+    child.map_or_else(||widget.clone(),|child|surface_content(&child))
+}
+
 #[test]
-#[ignore = "isolated native-input.js --native-test=native_layer_drawer_embedded_surfaces"]
-fn native_layer_drawer_embedded_surfaces() {
-    let mut d=Driver::new("art.capycanvas.LayerDrawerSurfaces");
+#[ignore = "isolated native-input.js --native-test=native_workspace_panel_surfaces_light"]
+fn native_workspace_panel_surfaces_light() {panel_surfaces(Theme::Light);}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_workspace_panel_surfaces_dark"]
+fn native_workspace_panel_surfaces_dark() {panel_surfaces(Theme::Dark);}
+
+fn panel_surfaces(theme:Theme) {
+    let mut d=Driver::new("art.capycanvas.PanelSurfaces");
     let output=std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
     std::fs::create_dir_all(&output).unwrap();
-    for theme in [Theme::Light,Theme::Dark] {
+    let panels=[Panel::Properties,Panel::Adjustments,Panel::ToolSettings,Panel::Color,Panel::Sizes,Panel::Histogram,Panel::Waveform,Panel::Navigator,Panel::Proof,Panel::Brushes,Panel::BrushSets,Panel::SculptSets,Panel::Tools,Panel::Palettes,Panel::Layers,Panel::FilterTypes,Panel::Stats];
+    d.w.dispatch(UiAction::Effect {action:layer_ui::EffectAction::Insert {effect:"curves".into()}}); pump(200);
+    let viewport=[d.w.surface.width() as f32,d.w.surface.height() as f32];
+    let mut reports=Vec::new();
       d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
       for transparency in [layer_ui::Transparency::Off,layer_ui::Transparency::High] {
         super::use_transparency(&d.w,transparency);
-        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
-            layout:WorkspacePreset::Painter.layout(Platform::Gtk),..Default::default()
-        })}); pump(250);
-        let opener=d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
-        d.click_name(&opener); d.click_name("layer-properties-disclosure");
-        let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
-        layer_page_settled(&d,&stack,"embedded Properties surfaces");
-        let _warm=crate::snapshot(&d.w); pump(100);
-        crate::snapshot(&d.w).save_to_png(output.join(format!("embedded-{theme:?}-{transparency:?}.png"))).unwrap();
-        let inner=find_css(&stack.child_by_name("properties").unwrap(),"effect-properties").unwrap();
-        assert!(inner.is_mapped());
-        assert!(panel_background(&inner).is_none(),"embedded Properties background and shadow absent: {theme:?}/{transparency:?}");
-        assert!(panel_background(&d.named("tool-drawer")).is_some(),"outer drawer keeps its backdrop");
-        assert!(panel_shadow(&panel_background(&d.named("drawer-shadow")).unwrap()),"outer drawer keeps its outset shadow");
-        d.click_name(&opener); wait_for_drawer_close(&d.w);
-        let mut layout=WorkspacePreset::Photographer.layout(Platform::Gtk);
-        layout.set_panel_visible(Panel::Properties,true).unwrap();
-        layout.select_tab(layout.panel_group(Panel::Properties).unwrap(),Panel::Properties).unwrap();
-        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout,..Default::default()})}); pump(300);
-        let docked:gtk::Widget=d.w.effects.properties.clone().upcast();
-        assert!(docked.is_mapped(),"ordinary docked Properties visible");
-        assert!(panel_background(&docked).is_some(),"ordinary docked Properties retains its surface");
-        let _warm=crate::snapshot(&d.w); pump(100);
-        crate::snapshot(&d.w).save_to_png(output.join(format!("docked-{theme:?}-{transparency:?}.png"))).unwrap();
-        let control=ToolbarControl::Panel {panel:Panel::Adjustments};
-        let mut layout=WorkspacePreset::Painter.layout(Platform::Gtk);
-        layout.header.zones=Default::default();
-        layout.header.add(HeaderZone::Left,None,&[HeaderItem::Menu,HeaderItem::Tool {control}]).unwrap();
-        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout,..Default::default()})}); pump(200);
-        let opener=d.header_tool(control); d.click_name(&opener); pump(100);
-        let drawer=d.named("tool-drawer");
-        let bodies:Vec<_>=widgets(&drawer).filter(|widget|widget.is_mapped() && widget!=&drawer && widget.has_css_class("dock-panel")).collect();
-        assert!(!bodies.is_empty(),"generic Adjustments drawer has embedded panel bodies");
-        for body in bodies {assert!(panel_background(&body).is_none(),"generic embedded panel owns no background or shadow");}
-        let _warm=crate::snapshot(&d.w); pump(100);
-        crate::snapshot(&d.w).save_to_png(output.join(format!("adjustments-{theme:?}-{transparency:?}.png"))).unwrap();
-        d.click_name(&opener); wait_for_drawer_close(&d.w);
+        for panel in panels {
+          for scope in ["docked","tabbed","floating","header","toolbar","column","configuration"] {
+            let mut layout=WorkspacePreset::Painter.layout(Platform::Gtk);
+            for hidden in panels {layout.set_panel_visible(hidden,false).unwrap();}
+            layout.set_panel_visible(panel,true).unwrap();
+            layout.move_panel(viewport,panel,DockTarget::Edge {edge:Edge::Right,outer:false}).unwrap();
+            let group=layout.panel_group(panel).unwrap();
+            let control=ToolbarControl::Panel {panel};
+            let mut toolbar=None;
+            match scope {
+                "tabbed" => {
+                    let other=if panel==Panel::Layers {Panel::Properties} else {Panel::Layers};
+                    layout.add_panel_to_group(other,group).unwrap(); layout.select_tab(group,panel).unwrap();
+                }
+                "floating" => {layout.move_panel(viewport,panel,DockTarget::Float {position:[360.,140.]}).unwrap();}
+                "header" => {
+                    layout.set_panel_visible(panel,false).unwrap(); layout.header.zones=Default::default();
+                    layout.header.add(HeaderZone::Left,None,&[HeaderItem::Menu,HeaderItem::Tool {control}]).unwrap();
+                }
+                "toolbar" => {
+                    layout.set_panel_visible(panel,false).unwrap(); toolbar=Some(layout.add_toolbar(None,"Surface audit",&[control]).unwrap());
+                }
+                "column" => {
+                    layout.set_column_collapsed(group,true,viewport).unwrap();
+                    let column=layout.collapsed_column_for_group(group).unwrap();
+                    let mut settings=layout.column_stack(column);settings.drawers=true;
+                    layout.column_stacks.retain(|stack|stack.column!=settings.column);
+                    layout.column_stacks.push(settings);
+                }
+                _ => (),
+            }
+            d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout,..Default::default()})}); pump(180);
+            let opener=match scope {
+                "header" => Some(d.named(&d.header_tool(control))),
+                "toolbar" => {
+                    let id=ui_session(&d.w).panel_view(toolbar.unwrap()).unwrap().tiles[0].id;
+                    Some(widgets(d.w.surface.upcast_ref()).find(|widget|widget.is_mapped() && widget.widget_name()==format!("tile-{id}")).unwrap())
+                }
+                "column" => {
+                    let column=state(&d.w).workspace.layout.collapsed_column_for_group(group).unwrap();
+                    Some(d.w.columns.button(column,panel).unwrap().clone().upcast())
+                }
+                _ => None,
+            };
+            if let Some(opener)=&opener {d.click(opener);pump(100);}
+            if scope=="configuration" {
+                d.w.dispatch(UiAction::Customize {action:CustomizationAction::ShowAllControls {panel}}); pump(300);
+                assert!(ui_session(&d.w).panel_view(panel).unwrap().expanded,"configuration model opens {panel:?}");
+            }
+            let drawer=matches!(scope,"header"|"toolbar"|"column");
+            let (content,owner)=if drawer {
+                let owner_name=if scope=="column" {
+                    let state=state(&d.w);
+                    assert!(state.customization.column_drawers.iter().any(|drawer|drawer.panels().any(|id|id==panel)),"column popup adopts {panel:?}");
+                    format!("column-drawer-{}",state.workspace.layout.collapsed_column_for_group(group).unwrap())
+                } else {"tool-drawer".into()};
+                let owner=widgets(d.w.surface.upcast_ref()).find(|widget|widget.is_mapped() && widget.widget_name()==owner_name).unwrap();
+                let name=format!("drawer-panel-{panel:?}");
+                let body=widgets(&owner).find(|widget|widget.is_mapped() && widget.widget_name()==name).unwrap_or_else(||panic!("mapped {name}: {scope}"));
+                (surface_content(&body),owner)
+            } else {
+                let content=surface_content(&d.w.panel_widget(panel));
+                let owner=d.w.groups.borrow().iter().find(|view|view.panels.contains(&panel)).unwrap().root.clone().upcast::<gtk::Widget>();
+                (content,owner)
+            };
+            assert!(content.is_mapped(),"{panel:?}/{scope} content mapped");
+            assert_eq!(content.pango_context().font_description(),owner.pango_context().font_description(),"{panel:?}/{scope} inherits owner typography");
+            let insets=|widget:&gtk::Widget|[widget.margin_start(),widget.margin_end(),widget.margin_top(),widget.margin_bottom()];
+            if matches!(panel,Panel::Histogram|Panel::Waveform) {
+                assert_eq!(insets(&content),[layer_ui::PANEL_CONTENT_INSET as i32;4],"standalone monitor composition owns its inset");
+            }
+            if let Some(histogram)=find_named(&content,"levels-histogram") {
+                assert_eq!(insets(&histogram),[0;4],"nested tonal histogram has no second content inset");
+            }
+            let _warm=crate::snapshot(&d.w); pump(80);
+            if matches!(panel,Panel::Properties|Panel::Color|Panel::Navigator) {
+                crate::snapshot(&d.w).save_to_png(output.join(format!("{panel:?}-{scope}-{theme:?}-{transparency:?}.png"))).unwrap();
+            }
+            assert!(panel_background(&content).is_none(),"reusable {panel:?}/{scope}/{theme:?}/{transparency:?} content has no surface");
+            for widget in widgets(&content) {
+                assert!(!widget.has_css_class("dock-panel"),"reusable {panel:?}/{scope} contains surface owner {}",widget.widget_name());
+            }
+            let expanded=scope=="configuration" && owner.has_css_class("expanded-panel");
+            if scope=="configuration" {assert!(expanded,"native configuration opens {panel:?}");}
+            if expanded {
+                assert!(panel_background(&owner).is_none(),"expanded owner delegates preview/configuration surfaces");
+                let preview=find_css(&owner,"panel-preview").unwrap();
+                assert!(panel_background(&preview).is_some(),"expanded preview retains surface");
+                let configuration=find_css(&owner,"panel-configuration").unwrap();
+                assert!(panel_background(&configuration).is_some(),"configuration retains surface");
+            } else {
+                if owner.has_css_class("tabbed") && transparency.enabled() {
+                    if drawer {assert!(panel_background(&owner).is_none(),"glass tabbed drawer root delegates its backdrop");}
+                    assert!(panel_background(&find_css(&owner,"panel-body").unwrap()).is_some(),"glass tabbed body chrome retains backdrop");
+                    assert!(panel_background(&find_css(&owner,"dock-tabs").unwrap()).is_some(),"glass tab strip retains backdrop");
+                } else {
+                    assert!(panel_background(&owner).is_some(),"{panel:?}/{scope} chrome retains background or shadow");
+                }
+                if !drawer {assert!(panel_shadow(&panel_background(&owner).unwrap()),"normal/tabbed/floating owner retains its external shadow");}
+                if let Some(preview)=find_css(&owner,"panel-preview") {
+                    assert!(panel_background(&preview).is_none(),"normal preview has no duplicate surface");
+                }
+            }
+            if drawer {
+                let shadow=widgets(d.w.surface.upcast_ref()).find(|widget|widget.is_mapped() && widget.widget_name()=="drawer-shadow").unwrap();
+                assert!(panel_shadow(&panel_background(&shadow).unwrap()),"drawer outer shadow retained");
+            }
+            let metrics:Vec<_>=widgets(&content).filter(|widget|widget.is_mapped() && !widget.widget_name().is_empty() && (widget.is::<gtk::Button>() || widget.is::<gtk::Entry>() || widget.is::<gtk::DropDown>())).map(|widget|serde_json::json!({"name":widget.widget_name().as_str(),"height":widget.measure(gtk::Orientation::Vertical,-1).1})).collect();
+            reports.push(serde_json::json!({"panel":format!("{panel:?}"),"scope":scope,"theme":format!("{theme:?}"),"transparency":format!("{transparency:?}"),"expanded":expanded,"control_metrics":metrics}));
+            std::fs::write(output.join("panel-surfaces.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
+            if let Some(opener)=opener {d.click(&opener);pump(200);}
+          }
+        }
       }
-    }
+    assert_eq!(reports.len(),17*7*2);
     d.finish();
 }
 

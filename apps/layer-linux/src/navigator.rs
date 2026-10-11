@@ -320,7 +320,6 @@ impl Navigator {
     pub fn new(images: &Rc<Overviews>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         root.set_widget_name("navigator-panel");
-        root.add_css_class("dock-panel");
         root.set_margin_start(8);
         root.set_margin_end(8);
         root.set_margin_top(8);

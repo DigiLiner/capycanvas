@@ -147,7 +147,6 @@ impl EffectPanels {
         filter_types.append(&cancel_filter);
         let adjustments = gtk::Box::new(gtk::Orientation::Vertical, 6);
         adjustments.add_css_class("filter-picker");
-        adjustments.add_css_class("dock-panel");
         let header = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
         header.add_css_class("filter-picker-header");
         header.set_visible(!split_picker);
@@ -177,7 +176,6 @@ impl EffectPanels {
         adjustments.append(&scroller);
         let properties = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         properties.add_css_class("effect-properties");
-        properties.add_css_class("dock-panel");
         let title = gtk::Label::new(None);
         title.set_xalign(0.);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);

@@ -670,7 +670,6 @@ impl SizePanel {
 
 fn body() -> gtk::Box {
     let root = crate::panel_controls::column();
-    root.add_css_class("dock-panel");
     let inset = layer_ui::PANEL_CONTENT_INSET as i32;
     root.set_margin_start(inset);
     root.set_margin_end(inset);

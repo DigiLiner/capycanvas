@@ -246,8 +246,8 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .choice-grid button:checked image { opacity: 1; }
 .dock-panel .size-preset { padding: 0; min-width: 0; min-height: 0; border: 0; border-radius: calc(var(--tile-radius) * var(--corner-fit)); font-weight: normal; }
 .toolbar-controls button.tile-button { min-width: 0; min-height: 0; padding: 0; margin: 0; }
-.dock-panel.expanded-panel, .content-drawer .dock-panel { background: transparent; box-shadow: none; }
-.panel-preview, .panel-configuration { background: var(--panel-bg); border-radius: var(--surface-radius); }
+.dock-panel.expanded-panel { --glass-panel: var(--panel-bg); --glass-strip: var(--tabbar-bg); --glass-tab: var(--panel-bg); --glass-selection: var(--selection-bg); background: transparent; box-shadow: none; }
+.expanded-panel > .panel-preview, .expanded-panel > .panel-configuration { background: var(--panel-bg); border-radius: var(--surface-radius); }
 .expanded-panel.configuration-right .panel-preview { border-bottom-right-radius: 0; }
 .expanded-panel.configuration-right .panel-configuration { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .expanded-panel.configuration-left .panel-preview { border-bottom-left-radius: 0; }
@@ -374,9 +374,8 @@ scale.interval-handle { padding: 0; margin: 0; min-width: 0; min-height: 0; }
 .transparency-choice button { background: none; }
 .transparency-preview { color: var(--panel-bg); }
 window.capy-workspace.glass .dock-panel { background: var(--glass-panel); }
-window.capy-workspace.glass .dock-panel.tabbed, window.capy-workspace.glass .content-drawer .dock-panel { background: transparent; }
-window.capy-workspace.glass .dock-panel.tabbed .panel-body, window.capy-workspace.glass .dock-panel.tabbed .panel-footer { background: var(--glass-panel); }
-window.capy-workspace.glass .panel-preview, window.capy-workspace.glass .panel-configuration { background: transparent; }
+window.capy-workspace.glass .dock-panel.tabbed, window.capy-workspace.glass .dock-panel.expanded-panel { background: transparent; }
+window.capy-workspace.glass .dock-panel.tabbed:not(.expanded-panel) .panel-body, window.capy-workspace.glass .dock-panel.tabbed:not(.expanded-panel) .panel-footer { background: var(--glass-panel); }
 window.capy-workspace.glass .dock-tabs { background: var(--glass-strip); }
 window.capy-workspace.glass .dock-tabs button.selected-tool { background: var(--glass-tab); }
 window.capy-workspace.glass .tab-joins { color: var(--glass-tab); }
