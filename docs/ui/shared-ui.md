@@ -69,6 +69,8 @@ target the live active layer instead of resolving it from a frontend snapshot.
 
 `ContentDrawer` uses one control factory for header and toolbar openers. Its
 columns compose Color with Palettes; Layers carries the Properties page state.
+The drawer owns the background and outer shadow; embedded panel bodies are
+transparent and have no panel shadow, in both opaque and glass modes.
 `LayerDrawerSizing::pages` sets both page heights from native measurements.
 The native sizing query includes both placements. Android, Apple and Windows
 cache those endpoints and call stateless `drawer_frame` on their UI clocks;

@@ -127,7 +127,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps | `dc27e04d`, 2026-09-23 |
 | Panel or column resize | 120 | **Unqualified.** GTK desktop Color column 12.88–44.61, floating panel 39.63–100.58 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-04 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** GTK desktop panel 119.2–119.4 presents/s, p99 up to 8.66 ms; curve p99 up to 16.712 ms exceeds the strict two-frame budget; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
-| Drawer open and close | 120 | **Unqualified.** GTK Properties misses desktop criteria: pooled 108.81–114.29 presents/s, p99 16.648–16.745 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 72.85–120.01 presents/s, p99 up to 20.930 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
@@ -216,12 +216,34 @@ widget count does not establish constant total memory use. Native painted-row
 checks preserve the visible layer ID and pixel offset after returning from
 Properties at both scales. Scrolling misses the desktop rate or interval limits.
 
-| Properties transition | Pooled presents/s | Interval p99 |
-| --- | --- | --- |
-| Light / open | 114.29 | 16.648 ms |
-| Light / close | 109.78 | 16.659 ms |
-| Dark / open | 112.22 | 16.703 ms |
-| Dark / close | 108.81 | 16.745 ms |
+Properties transitions are remeasured on the `e5c2e8574` working tree with
+embedded panel backgrounds and shadows removed, in the same desktop setup.
+The tester SHA-256 is
+`4f90602ad515494d51078ba6eca42a4a586d3b5fc48594af2490cb24de5bb7e2`;
+the app is
+`d204d232226ed7dcf4ede44a8b0dbe146b088a2049c9cec6634d9a68ca1a6d0a`.
+Source hashes, native surface checks and presentation arrays are under
+`artifacts/layer-properties-shadow/`. The surface checks cover both themes,
+opaque and high glass, at both scales: embedded Properties and Adjustments
+have no background or shadow node; the outer drawer retains both its backdrop
+and shadow, and docked Properties retains its surface.
+
+| Properties transition | Scale | Pooled presents/s | Interval p99 |
+| --- | --- | --- | --- |
+| Light / open | 1 | 116.50 | 15.569 ms |
+| Light / close | 1 | 120.01 | 8.517 ms |
+| Dark / open | 1 | 113.90 | 16.728 ms |
+| Dark / close | 1 | 117.93 | 15.223 ms |
+| Light / open | 2 | 100.32 | 19.088 ms |
+| Light / close | 2 | 75.47 | 16.813 ms |
+| Dark / open | 2 | 98.38 | 20.930 ms |
+| Dark / close | 2 | 72.85 | 16.805 ms |
+
+Matched runs with the original CSS yield 113.37–119.03 pooled presents/s at scale 1
+and 68.41–94.29 at scale 2, versus 113.90–120.01 and 72.85–100.32 with
+the fix. The scale-2 slowdown is present in both builds. The original tester
+SHA-256 is `d190e117d1e01641c47b9cb857c651526722e18be8f6da6e94b82c0c5b03451c`;
+paired rates and interval p99 are in `properties-pooled.json` in that artifact directory.
 
 Properties also misses the desktop criteria. The Lock/Duplicate/Delete strip
 meets those desktop criteria in every sampled gesture; reference-tablet

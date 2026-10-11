@@ -199,6 +199,73 @@ fn native_sketch_layer_properties_drawer() {
     d.input.finish(); d.w.window.destroy(); pump(100);
 }
 
+#[allow(deprecated)]
+fn panel_background(widget:&gtk::Widget) -> Option<gtk::gsk::RenderNode> {
+    let snapshot=gtk::Snapshot::new();
+    snapshot.render_background(&widget.style_context(),0.,0.,widget.width() as f64,widget.height() as f64);
+    snapshot.to_node()
+}
+
+fn panel_shadow(node:&gtk::gsk::RenderNode) -> bool {
+    if node.downcast_ref::<gtk::gsk::OutsetShadowNode>().is_some() {return true;}
+    if let Some(container)=node.downcast_ref::<gtk::gsk::ContainerNode>() {
+        return (0..container.n_children()).any(|index|panel_shadow(&container.child(index)));
+    }
+    false
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_layer_drawer_embedded_surfaces"]
+fn native_layer_drawer_embedded_surfaces() {
+    let mut d=Driver::new("art.capycanvas.LayerDrawerSurfaces");
+    let output=std::env::var_os("LAYER_TEST_ARTIFACTS").map(std::path::PathBuf::from).unwrap_or_else(||d.input.dir.clone());
+    std::fs::create_dir_all(&output).unwrap();
+    for theme in [Theme::Light,Theme::Dark] {
+      d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+      for transparency in [layer_ui::Transparency::Off,layer_ui::Transparency::High] {
+        super::use_transparency(&d.w,transparency);
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {
+            layout:WorkspacePreset::Painter.layout(Platform::Gtk),..Default::default()
+        })}); pump(250);
+        let opener=d.header_tool(ToolbarControl::Panel {panel:Panel::Layers});
+        d.click_name(&opener); d.click_name("layer-properties-disclosure");
+        let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
+        layer_page_settled(&d,&stack,"embedded Properties surfaces");
+        let _warm=crate::snapshot(&d.w); pump(100);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("embedded-{theme:?}-{transparency:?}.png"))).unwrap();
+        let inner=find_css(&stack.child_by_name("properties").unwrap(),"effect-properties").unwrap();
+        assert!(inner.is_mapped());
+        assert!(panel_background(&inner).is_none(),"embedded Properties background and shadow absent: {theme:?}/{transparency:?}");
+        assert!(panel_background(&d.named("tool-drawer")).is_some(),"outer drawer keeps its backdrop");
+        assert!(panel_shadow(&panel_background(&d.named("drawer-shadow")).unwrap()),"outer drawer keeps its outset shadow");
+        d.click_name(&opener); wait_for_drawer_close(&d.w);
+        let mut layout=WorkspacePreset::Photographer.layout(Platform::Gtk);
+        layout.set_panel_visible(Panel::Properties,true).unwrap();
+        layout.select_tab(layout.panel_group(Panel::Properties).unwrap(),Panel::Properties).unwrap();
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout,..Default::default()})}); pump(300);
+        let docked:gtk::Widget=d.w.effects.properties.clone().upcast();
+        assert!(docked.is_mapped(),"ordinary docked Properties visible");
+        assert!(panel_background(&docked).is_some(),"ordinary docked Properties retains its surface");
+        let _warm=crate::snapshot(&d.w); pump(100);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("docked-{theme:?}-{transparency:?}.png"))).unwrap();
+        let control=ToolbarControl::Panel {panel:Panel::Adjustments};
+        let mut layout=WorkspacePreset::Painter.layout(Platform::Gtk);
+        layout.header.zones=Default::default();
+        layout.header.add(HeaderZone::Left,None,&[HeaderItem::Menu,HeaderItem::Tool {control}]).unwrap();
+        d.w.dispatch(UiAction::RestoreWorkspace {workspace:Box::new(WorkspaceState {layout,..Default::default()})}); pump(200);
+        let opener=d.header_tool(control); d.click_name(&opener); pump(100);
+        let drawer=d.named("tool-drawer");
+        let bodies:Vec<_>=widgets(&drawer).filter(|widget|widget.is_mapped() && widget!=&drawer && widget.has_css_class("dock-panel")).collect();
+        assert!(!bodies.is_empty(),"generic Adjustments drawer has embedded panel bodies");
+        for body in bodies {assert!(panel_background(&body).is_none(),"generic embedded panel owns no background or shadow");}
+        let _warm=crate::snapshot(&d.w); pump(100);
+        crate::snapshot(&d.w).save_to_png(output.join(format!("adjustments-{theme:?}-{transparency:?}.png"))).unwrap();
+        d.click_name(&opener); wait_for_drawer_close(&d.w);
+      }
+    }
+    d.finish();
+}
+
 fn layer_footer_alignment(d:&Driver) {
     let footer=d.named("layer-properties-disclosure");
     let stack=d.named("layer-properties-stack").downcast::<gtk::Stack>().unwrap();
