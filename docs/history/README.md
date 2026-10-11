@@ -30,6 +30,8 @@ Progress notes, validation reports and other work records are not committed
 
 ## Design records
 
+- [Brush design records](brushes/README.md): accepted equations, authoring controls
+  and decision history for brush families, beginning with analytic dry media.
 - [Object layers: GA contract and long-term design](object-layer-ga-design.md):
   image objects, paint-grid constraints, scalable rendering, tools and format cleanup.
 - [Layer clipping and effect attachment](layer-clipping-and-effects.md): common

@@ -3,6 +3,9 @@
 [Editor internals](README.md)
 
 The design rationale is in the [research proposal](../history/dry-media-brush-design.md).
+The [accepted analytic dry-media design](../history/brushes/dry-media-contact.md)
+records the intended next model and authoring controls; the model below describes
+the current implementation.
 
 ## Model
 
