@@ -94,6 +94,7 @@ impl Cursor {
         &self,
         renderer: &R,
         tip: &BrushTip,
+        corner: f32,
         dabs: &[Dab],
         camera: &Camera,
         scale: f32,
@@ -171,6 +172,14 @@ impl Cursor {
                 b * dab.center.x + d * dab.center.y + ty,
             ];
             let [a, b, c, d, tx, ty] = transform;
+            if corner > 0. {
+                let rim = corner * dab.radii[0].min(dab.radii[1]);
+                let x = 1. - rim / dab.radii[0].max(0.005);
+                let y = 1. - rim / dab.radii[1].max(0.005);
+                view.contour([[-1.,-y],[-x,-1.],[x,-1.],[1.,-y],[1.,y],[x,1.],[-x,1.],[-1.,y]]
+                    .into_iter().map(|[x,y]|[a*x+c*y+tx,b*x+d*y+ty]), false);
+                continue;
+            }
             match tip {
                 BrushTip::AnalyticEllipse => {
                     let rx = a.hypot(b);

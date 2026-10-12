@@ -90,8 +90,9 @@ fn document_hsl_dynamics_match_independent_encoded_reference_vectors() {
                     }
                     assert_eq!(
                         dab.color_rgba_linear[3],
-                        brush.color_rgba_linear[3] * brush.opacity
+                        brush.color_rgba_linear[3]
                     );
+                    assert_eq!(layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush).opacity, brush.opacity);
                 }
             }
         }

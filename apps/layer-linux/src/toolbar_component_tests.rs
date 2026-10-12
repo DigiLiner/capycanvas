@@ -671,12 +671,12 @@ pub(super) fn drag(d: &mut Driver, device: &str, a: [f32; 2], b: [f32; 2], held:
 
 fn slider_gestures(d: &mut Driver, devices: &[&str]) {
     let size = component_id(d, ToolbarControl::BrushSizeSlider);
-    let opacity = component_id(d, ToolbarControl::BrushOpacitySlider);
+    let strength = component_id(d, ToolbarControl::BrushStrengthSlider);
     let initial = state(&d.w).workspace;
     for &device in devices {
         for (id, action) in [
             (size, UiAction::SetBrushSize { value: 5. }),
-            (opacity, UiAction::SetBrushOpacity { value: 0.1 }),
+            (strength, UiAction::SetBrushStrength { value: 0.1 }),
         ] {
             d.w.dispatch(action);
             pump(50);
@@ -709,7 +709,7 @@ fn slider_gestures(d: &mut Driver, devices: &[&str]) {
                 if id == size {
                     current.brush.diameter > 5.
                 } else {
-                    current.brush.opacity > 0.1
+                    current.tool_settings.iter().any(|f| f.id == "flow" && f.value > 0.1)
                 },
                 "{device}: immediate native slider edit"
             );
@@ -732,7 +732,7 @@ fn slider_gestures(d: &mut Driver, devices: &[&str]) {
         assert_eq!(state(&d.w).workspace, initial);
         // The value cap requires a hold with all three devices.
         let before = state(&d.w).workspace;
-        let handle = d.named(&format!("tile-{opacity}"));
+        let handle = d.named(&format!("tile-{strength}"));
         let target = d.named(&format!("tile-{size}"));
         let a = d.point(&handle);
         let b = d.point(&target);

@@ -32,3 +32,6 @@ fn dry_original(p: vec2<i32>) -> vec4<f32> {
 fn dry_coverage(p: vec2<i32>) -> f32 {
     return preview_average(stroke_coverage_texture, p).r;
 }
+fn dry_stroke_start(p: vec2<i32>) -> vec4<f32> {
+    return preview_average(reservoir_texture,p);
+}

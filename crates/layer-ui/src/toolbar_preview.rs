@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub struct SliderBookmarks {
     size: Vec<f32>,
     opacity: Vec<f32>,
+    strength: Vec<f32>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SliderBookmark {
@@ -22,19 +23,21 @@ impl SliderBookmarks {
         match binding {
             ToolbarNumericBinding::BrushSize => &self.size,
             ToolbarNumericBinding::BrushOpacity => &self.opacity,
+            ToolbarNumericBinding::BrushStrength => &self.strength,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), WorkspaceValidationError> {
         for binding in [
             ToolbarNumericBinding::BrushSize,
             ToolbarNumericBinding::BrushOpacity,
+            ToolbarNumericBinding::BrushStrength,
         ] {
             let values = self.values(&binding);
             if values.len() > 32 {
                 return Err("Too many slider bookmarks".into());
             }
             for &value in values {
-                binding.numeric().validate(value, match binding { ToolbarNumericBinding::BrushSize => MessageId::TOOL_SETTING_SIZE, ToolbarNumericBinding::BrushOpacity => MessageId::TOOL_SETTING_OPACITY })?;
+                binding.numeric().validate(value, binding.label())?;
             }
             if values.windows(2).any(|v| v[0] >= v[1]) {
                 return Err("Slider bookmarks must be sorted and unique".into());
@@ -60,6 +63,7 @@ impl SliderBookmarks {
         let values = match binding {
             ToolbarNumericBinding::BrushSize => &mut self.size,
             ToolbarNumericBinding::BrushOpacity => &mut self.opacity,
+            ToolbarNumericBinding::BrushStrength => &mut self.strength,
         };
         if let Some(i) = values.iter().position(|&v| v == value) {
             values.remove(i);
@@ -153,7 +157,7 @@ pub fn slider_preview_layout(
     if !extent.is_finite() || extent <= 0. {
         return Err("Invalid stamp extent".into());
     }
-    binding.numeric().validate(value, if binding == ToolbarNumericBinding::BrushOpacity { MessageId::TOOL_SETTING_OPACITY } else { MessageId::TOOL_SETTING_SIZE }).map_err(|reason| reason.message(localizer))?;
+    binding.numeric().validate(value, binding.label()).map_err(|reason| reason.message(localizer))?;
     let tile = style.size()[1];
     let icon = tile * 4. / 9.;
     let inset = (tile - icon) / 2.;
@@ -164,10 +168,10 @@ pub fn slider_preview_layout(
         180. + grown
     };
     let available = side - tile - 16.;
-    let opacity = binding == ToolbarNumericBinding::BrushOpacity;
+    let fitted = binding != ToolbarNumericBinding::BrushSize;
     // Size remains in document pixels. Oversized tips are clipped by the preview
     // viewport instead of making the largest sizes all look identical.
-    let diameter = if opacity {
+    let diameter = if fitted {
         available * 0.8
     } else {
         value * extent.clamp(0.02, 50.)
@@ -190,7 +194,7 @@ pub fn slider_preview_layout(
         },
         stamp: Bounds {
             x: (side - diameter) / 2.,
-            y: if opacity {
+            y: if fitted {
                 tile + (available - diameter) / 2.
             } else {
                 (side - diameter) / 2.
@@ -198,7 +202,7 @@ pub fn slider_preview_layout(
             width: diameter,
             height: diameter,
         },
-        viewport: if opacity {
+        viewport: if fitted {
             Bounds {
                 x: 8.,
                 y: tile,
@@ -213,12 +217,12 @@ pub fn slider_preview_layout(
                 height: side,
             }
         },
-        header_fade: if opacity { 0. } else { 65. * tile / TileStyle::Medium.size()[1] },
+        header_fade: if fitted { 0. } else { 65. * tile / TileStyle::Medium.size()[1] },
         header_fade_opacity: 0.5,
-        opacity: if opacity { value } else { 1. },
+        opacity: if binding == ToolbarNumericBinding::BrushOpacity { value } else { 1. },
         text: format!(
             "{}: {}",
-            localizer.text(if binding == ToolbarNumericBinding::BrushOpacity { MessageId::TOOL_SETTING_OPACITY } else { MessageId::TOOL_CONTROL_GROUP_SIZE }),
+            localizer.text(if binding == ToolbarNumericBinding::BrushSize { MessageId::TOOL_CONTROL_GROUP_SIZE } else { binding.label() }),
             binding.numeric().compact_text(value as f64)
         ),
     })

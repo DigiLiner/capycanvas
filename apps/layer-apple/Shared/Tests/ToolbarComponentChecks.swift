@@ -11,7 +11,7 @@ extension XCTestCase {
         let sliders = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "component-slider-"))
         expectation(for: NSPredicate(format: "count == 2"), evaluatedWith: sliders)
         waitForExpectations(timeout: 15)
-        let size = sliders.element(boundBy: 0), opacity = sliders.element(boundBy: 1)
+        let size = sliders.element(boundBy: 0), strength = sliders.element(boundBy: 1)
         func tap(_ element: XCUIElement, _ offset: CGVector) {
             let point = element.coordinate(withNormalizedOffset: offset)
             point.clickOrTap()
@@ -39,8 +39,8 @@ extension XCTestCase {
         tap(workspaceViewport(in: app), CGVector(dx: 0.6, dy: 0.6))
         expectation(for: NSPredicate(format: "exists == NO"), evaluatedWith: preview)
         waitForExpectations(timeout: 10)
-        let start = opacity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
-        let end = opacity.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        let start = strength.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+        let end = strength.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
         #if os(macOS)
         start.click(forDuration: 0.05, thenDragTo: end)
         #else

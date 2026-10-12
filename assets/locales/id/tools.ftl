@@ -239,7 +239,7 @@ tool-rulers-radial = Radial
 
 tool-rulers-straight = Lurus
 
-tool-setting-angle = Sudut
+tool-setting-angle = Sudut ujung
 
 tool-setting-bristle-load = Muatan cat
 
@@ -257,7 +257,6 @@ tool-setting-dry-flow = Rembesan kering
 
 tool-setting-edge-width = Lebar tepi
 
-tool-setting-flow = Aliran cat
 
 tool-setting-grain-depth = Kekuatan tekstur
 
@@ -334,3 +333,5 @@ zoom-tool-click-only = Klik saja
 zoom-tool-left-right = Kiri/kanan
 zoom-tool-up-down = Atas/bawah
 zoom-tool-center-on-click-tooltip = Pindahkan titik yang diklik ke tengah tampilan saat mengeklik untuk memperbesar atau memperkecil.
+tool-setting-contact-softness = Kelembutan kontak
+tool-setting-material-hardness = Kekerasan bahan

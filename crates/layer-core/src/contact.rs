@@ -23,6 +23,11 @@ pub struct BrushDryMedia {
 }
 
 impl BrushDryMedia {
+    pub fn extent(self) -> f32 {
+        self.poses.iter().map(|p| if self.corner > 0. { p.radii[0].hypot(p.radii[1]) }
+            else { p.radii[0].max(p.radii[1]) }).fold(0., f32::max)
+    }
+
     pub fn deposition(self, local: [f32; 2], axes: [f32; 2], relief: [f32; 3],
         pressure: f32, paper: f32, paper_strength: f32) -> f32 {
         let pressure = pressure.clamp(0.,1.);

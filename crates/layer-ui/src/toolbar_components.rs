@@ -39,13 +39,14 @@ impl ToolbarControl {
     pub fn is_component(self) -> bool {
         matches!(
             self,
-            Self::BrushSizeSlider | Self::BrushOpacitySlider | Self::ToolOptions { .. }
+            Self::BrushSizeSlider | Self::BrushOpacitySlider | Self::BrushStrengthSlider | Self::ToolOptions { .. }
         )
     }
     pub fn slider(self) -> Option<ToolbarNumericBinding> {
         match self {
             Self::BrushSizeSlider => Some(ToolbarNumericBinding::BrushSize),
             Self::BrushOpacitySlider => Some(ToolbarNumericBinding::BrushOpacity),
+            Self::BrushStrengthSlider => Some(ToolbarNumericBinding::BrushStrength),
             _ => None,
         }
     }
@@ -76,12 +77,20 @@ pub struct ToolbarComponentView {
 pub enum ToolbarNumericBinding {
     BrushSize,
     BrushOpacity,
+    BrushStrength,
 }
 impl ToolbarNumericBinding {
+    pub fn label(&self) -> MessageId {
+        match self {
+            Self::BrushSize => MessageId::TOOL_SETTING_SIZE,
+            Self::BrushOpacity => MessageId::TOOL_SETTING_OPACITY,
+            Self::BrushStrength => MessageId::TOOL_SETTING_STRENGTH,
+        }
+    }
     pub fn numeric(&self) -> NumericControl {
         match self {
             Self::BrushSize => NumericControl::brush_size(),
-            Self::BrushOpacity => NumericControl {
+            Self::BrushOpacity | Self::BrushStrength => NumericControl {
                 digits: 0,
                 resolution: 0.01,
                 ..NumericControl::percent()
@@ -98,12 +107,14 @@ impl ToolbarNumericBinding {
                 id: "opacity".into(),
                 value,
             },
+            Self::BrushStrength => UiAction::SetBrushStrength { value },
         }
     }
     pub fn field(&self, state: &UiState) -> Option<ToolSetting> {
         let id = match self {
             Self::BrushSize => "size",
             Self::BrushOpacity => "opacity",
+            Self::BrushStrength => state.tool_settings.iter().find(|f| f.id == "flow" || f.id == "strength")?.id,
         };
         state
             .tool_settings
@@ -263,6 +274,7 @@ impl UiState {
             UiAction::SetBrushOpacity { .. } => {
                 self.layer_tools.tool == LayerCanvasTool::Paint && !self.toolbar_context().operation
             }
+            UiAction::SetBrushStrength { .. } => ToolbarNumericBinding::BrushStrength.field(self).is_some(),
             UiAction::SetToolSetting { id, .. } | UiAction::ResetToolSetting { id } => {
                 self.tool_settings.iter().any(|f| f.id == id)
             }
@@ -514,7 +526,8 @@ pub fn tool_setting_icon(id: &str) -> &'static str {
         "size_jitter" => "size",
         "opacity" => "opacity",
         "flow" => "paint-flow",
-        "hardness" => "hardness",
+        "hardness" | "material_hardness" => "hardness",
+        "contact_softness" => "edge-width",
         "spacing" => "brush-spacing",
         "distance" => "ruler",
         "angle" | "transform_angle" => "angle",

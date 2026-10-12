@@ -212,6 +212,11 @@ impl DabGenerator {
         brush: &BrushSnapshot,
         output: &mut Vec<Dab>,
     ) -> Rect {
+        if brush.execution == layer_core::BrushExecution::Liquify {
+            if brush.deform.strength <= 0. { return Rect::EMPTY; }
+        } else if brush.flow <= 0. || brush.opacity <= 0. {
+            return Rect::EMPTY;
+        }
         let stabilized = self.stabilize(point, brush);
         let current = self.characterize(stabilized);
         let mut damage = Rect::EMPTY;
@@ -219,7 +224,9 @@ impl DabGenerator {
             let evaluated = self.evaluate(current, brush);
             self.emit_contacts(evaluated, brush, output, &mut damage);
             self.last = Some(current);
-            self.distance_until_next = spacing_for(evaluated.dab, evaluated.spacing);
+            if brush.contact.is_none() {
+                self.distance_until_next = spacing_for(evaluated.dab, evaluated.spacing);
+            }
             return damage;
         };
 
@@ -283,7 +290,8 @@ impl DabGenerator {
     ) {
         let start = self.last_evaluated.unwrap_or(last);
         let bristles = brush.contact.is_some_and(|c| c.bristles.is_some());
-        let radius = self.last_emitted_dab.map_or(brush.diameter * 0.5, |dab| {
+        let reference = brush.reference_diameter();
+        let radius = self.last_emitted_dab.map_or(reference * 0.5, |dab| {
             if bristles {
                 dab.radii[0].max(dab.radii[1])
             } else {
@@ -304,7 +312,7 @@ impl DabGenerator {
         // Its minor radius bounds the error without retaining a point list.
         let error2 = (traveled * traveled - dx * dx - dy * dy).max(0.) * 0.25;
         let pressure_change = (current.point.pressure - start.point.pressure).abs()
-            * brush.diameter * 0.5;
+            * reference * 0.5;
         let tilt_change = (current.point.tilt[0] - start.point.tilt[0])
             .hypot(current.point.tilt[1] - start.point.tilt[1]);
         let twist_change = (current.point.twist - start.point.twist + std::f32::consts::PI)
@@ -326,7 +334,7 @@ impl DabGenerator {
         // but committed ink must also advance when prediction is disabled.
         // Large, steady brushes retain coarse sampling rather than emitting at
         // the input rate. Pen-up flushes the final pending pose in finish().
-        if current.stroke_distance - start.stroke_distance >= (brush.diameter * 0.5).max(4.)
+        if current.stroke_distance - start.stroke_distance >= (reference * 0.5).max(4.)
             || pose_changed
         {
             let evaluated = self.evaluate(current, brush);
@@ -510,8 +518,8 @@ impl DabGenerator {
         let variant = self.next_random();
         let mut values = Registers {
             diameter: brush.diameter,
-            opacity: brush.opacity,
-            flow: brush.flow,
+            opacity: 1.,
+            flow: 1.,
             hardness: brush.hardness,
             spacing: brush.spacing,
             aspect: brush.aspect,
@@ -539,7 +547,7 @@ impl DabGenerator {
         let mut diameter = finite_or(values.diameter, brush.diameter)
             .clamp(brush.bounds.minimum_size, brush.bounds.maximum_size);
         let taper_reference = if brush.contact.is_some() {
-            brush.diameter
+            brush.reference_diameter()
         } else {
             diameter
         };
@@ -617,11 +625,11 @@ impl DabGenerator {
                     variant,
                     self.stroke_seed,
                 ),
-                flow: finite_or(values.flow, brush.flow).clamp(0.0, 1.0),
+                flow: brush.flow * finite_or(values.flow, 1.).clamp(0.0, 1.0),
                 hardness: finite_or(values.hardness, brush.hardness).clamp(0.0, 1.0),
                 texture_sign: [1.0, 1.0],
                 material: [
-                    values.grain_depth.clamp(0.0, 1.0),
+                    values.grain_depth.clamp(0.0, if brush.contact.is_some_and(|c| c.dry.is_some()) { 2. } else { 1. }),
                     values.pull.clamp(0.0, 1.0),
                     (values.deposit * charge).clamp(0.0, 1.0),
                     values.deform_strength.clamp(0.0, 1.0),
@@ -635,9 +643,9 @@ impl DabGenerator {
                 ], |r| [point.point.pressure, r[0], r[1], r[2]]),
                 previous_contact: [0.0; 4],
             },
-            spacing: (finite_or(values.spacing, brush.spacing)
+            spacing: if brush.contact.is_some_and(|c| c.dry.is_some()) { 0. } else { (finite_or(values.spacing, brush.spacing)
                 * (1.0 + signed_unit(hash32(variant ^ 0x7f4a_7c15)) * brush.path.spacing_jitter))
-                .max(0.005),
+                .max(0.005) },
             direction_radians: direction,
             values,
         }
@@ -693,6 +701,14 @@ impl DabGenerator {
             self.emit_fan(evaluated.dab, output, damage);
             return;
         }
+        if brush.contact.is_some_and(|c| c.dry.is_some()) {
+            let mut dab = evaluated.dab;
+            self.connect_contact(&mut dab);
+            include_dab(damage, dab);
+            self.last_emitted_dab = Some(dab);
+            output.push(dab);
+            return;
+        }
         let maximum = brush.shape.count.max(1);
         let minimum =
             ((maximum as f32 * (1.0 - brush.shape.count_jitter)).ceil() as u8).clamp(1, maximum);
@@ -746,23 +762,19 @@ impl DabGenerator {
                 self.stroke_seed,
             );
             if brush.contact.is_some() {
-                let previous = self.last_emitted_dab.unwrap_or(dab);
-                dab.previous = [
-                    previous.radii[0],
-                    previous.radii[1],
-                    previous.rotation[0],
-                    previous.rotation[1],
-                ];
-                dab.previous_contact = previous.contact;
-                dab.motion = [
-                    dab.center.x - previous.center.x,
-                    dab.center.y - previous.center.y,
-                ];
+                self.connect_contact(&mut dab);
             }
             include_dab(damage, dab);
             self.last_emitted_dab = Some(dab);
             output.push(dab);
         }
+    }
+
+    fn connect_contact(&self, dab: &mut Dab) {
+        let previous = self.last_emitted_dab.unwrap_or(*dab);
+        dab.previous = [previous.radii[0], previous.radii[1], previous.rotation[0], previous.rotation[1]];
+        dab.previous_contact = previous.contact;
+        dab.motion = [dab.center.x - previous.center.x, dab.center.y - previous.center.y];
     }
 
     fn emit_fan(&mut self, dab: Dab, output: &mut Vec<Dab>, damage: &mut Rect) {

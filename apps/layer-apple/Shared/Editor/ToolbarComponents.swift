@@ -59,7 +59,7 @@ private struct BrushSliderComponent: View {
     private var value: Double { field.isNull ? spec["min"].number : field["value"].number }
     private var label: String { field.isNull ? tile["label"].string : field["label"].string }
     private var setting: String {
-        field.isNull ? (tile["control"]["kind"].string == "brush_opacity_slider" ? "opacity" : "size") : field["id"].string
+        field.isNull ? (tile["control"]["kind"].string == "brush_size_slider" ? "size" : tile["control"]["kind"].string == "brush_opacity_slider" ? "opacity" : "strength") : field["id"].string
     }
     var body: some View {
         let item = toolbarItem(panel, tile)
@@ -78,7 +78,7 @@ private struct BrushSliderComponent: View {
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: item, surface: .tile, context: item))
                 .placed(layout[0])
             ToolbarSliderTrack(fill: shown["fill"].number, marks: marks,
-                opacity: tile["control"]["kind"].string == "brush_opacity_slider", vertical: vertical,
+                opacity: tile["control"]["kind"].string != "brush_size_slider", vertical: vertical,
                 enabled: !field.isNull, label: label, valueText: shown["text"].string,
                 palette: EditorPalette(source: store.state["palette"]),
                 contact: { down, moved in

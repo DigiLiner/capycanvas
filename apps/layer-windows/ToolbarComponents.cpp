@@ -258,8 +258,8 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
     void buildSlider(J const& tile){
         auto weak=weak_from_this();
         field=object(model,L"numeric");
-        opacity=str(control,L"kind")==L"brush_opacity_slider";
-        if(!field.Size())field=O({{L"id",S(opacity?L"opacity":L"size")},{L"label",S(str(tile,L"label"))},
+        opacity=str(control,L"kind")!=L"brush_size_slider";
+        if(!field.Size())field=O({{L"id",S(!opacity?L"size":str(control,L"kind")==L"brush_opacity_slider"?L"opacity":L"strength")},{L"label",S(str(tile,L"label"))},
             {L"numeric",toolbarUi(data->localization.get(),O({{L"type",S(L"slider_spec")},{L"control",control}})).GetObject()},{L"value",N(.5)}});
         spec=object(field,L"numeric");current=num(field,L"value");
         Field result;

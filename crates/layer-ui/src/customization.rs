@@ -474,6 +474,7 @@ impl ToolbarControl {
             Self::Size { .. } | Self::BrushSizeSlider => "size",
             Self::Color => "colors", Self::ColorPicker => "color-picker",
             Self::Opacity | Self::BrushOpacitySlider => "opacity",
+            Self::BrushStrengthSlider => "paint-flow",
             Self::ToolOptions { .. } => "settings", Self::Panel { panel } => panel.icon(), Self::Divider => "minus",
         }
     }
@@ -487,7 +488,7 @@ impl ToolbarControl {
                 value: tenths as f32 / 10.,
             },
             Self::Color | Self::Opacity | Self::Panel { .. } | Self::Divider
-            | Self::BrushSizeSlider | Self::BrushOpacitySlider | Self::ToolOptions { .. } => return None,
+            | Self::BrushSizeSlider | Self::BrushOpacitySlider | Self::BrushStrengthSlider | Self::ToolOptions { .. } => return None,
         })
     }
     pub fn validate(self) -> Result<(), String> {
@@ -1340,6 +1341,9 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
         ToolbarControl::BrushOpacitySlider => (
             localization.text(MessageId::WORKSPACE_TOOL_OPACITY_SLIDER).to_string(), localization.text(MessageId::WORKSPACE_TOOL_OPACITY_SLIDER_DESCRIPTION).to_string(), control.icon(),
         ),
+        ToolbarControl::BrushStrengthSlider => (
+            localization.text(MessageId::WORKSPACE_TOOL_STRENGTH_SLIDER).to_string(), localization.text(MessageId::WORKSPACE_TOOL_STRENGTH_SLIDER_DESCRIPTION).to_string(), control.icon(),
+        ),
         ToolbarControl::ToolOptions { .. } => (
             localization.text(MessageId::WORKSPACE_TOOL_OPTIONS).to_string(), localization.text(MessageId::WORKSPACE_TOOL_OPTIONS_DESCRIPTION).to_string(), control.icon(),
         ),
@@ -1382,7 +1386,7 @@ pub(crate) fn tool_catalog_localized(platform: Platform, localization: &Localize
         .map(|command| ToolbarControl::Command { command })
         .chain(ToolSlotId::ALL.into_iter().map(|slot|ToolbarControl::ToolSlot {slot}))
         .chain([ToolbarControl::Color, ToolbarControl::Opacity])
-        .chain([ToolbarControl::ColorPicker, ToolbarControl::BrushSizeSlider, ToolbarControl::BrushOpacitySlider, ToolbarControl::TOOL_OPTIONS])
+        .chain([ToolbarControl::ColorPicker, ToolbarControl::BrushSizeSlider, ToolbarControl::BrushOpacitySlider, ToolbarControl::BrushStrengthSlider, ToolbarControl::TOOL_OPTIONS])
         .chain([ToolbarControl::Divider])
         .chain(
             Panel::ALL

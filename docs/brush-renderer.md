@@ -17,13 +17,13 @@ is a fixed-size GPU record:
 | `rotation: f32x2` | Precomputed cosine and sine |
 | `motion: f32x2` | Document-space movement for destination-aware stages |
 | `color: f32x4` | Resolved linear per-contact color and alpha |
-| `flow: f32` | Per-contact alpha multiplier |
+| `flow: f32` | Resolved Strength, including relative pressure mappings |
 | `hardness: f32` | Analytic edge hardness |
 | `texture_sign: f32x2` | Pre-resolved horizontal and vertical tip flips |
 | `material: f32x4` | Grain depth, pull, remaining paint charge, and deform strength |
 
 Tip identity, execution class, shared texture transforms, paint/erase mode,
-layer, and conservative damage are stored once per contiguous batch. Brush
+layer, per-stroke Opacity ceiling, and conservative damage are stored once per contiguous batch. Brush
 properties are frozen at pen-down, and the deterministic seed is mixed with the
 stroke ID.
 
@@ -35,14 +35,19 @@ analytic elliptical coverage or samples a filterable `R8Unorm` tip. An explicit
 textured-dry pipeline handles moving/canvas grain without adding texture work to
 ordinary ink. Contacts outside the ellipse are discarded.
 
-Effective alpha is:
+Ordinary contact accumulation is:
 
 ```text
-tip coverage × brush opacity × dynamic flow × color alpha
+request = tip coverage × strength × color alpha
+canvas = (1 − request) × canvas
+       + request × ((1 − opacity) × stroke_start + opacity × source)
 ```
 
-Paint uses premultiplied source-over. Erase uses destination-out. Both use GPU
-fixed-function blending; no fragment shader reads the paint attachment.
+Paint uses premultiplied `source=(color,1)`; Erase substitutes zero. Partial
+Opacity retains immutable starting paint for touched pages, allowing later
+colors to replace earlier pigment within the same ceiling. Full-opacity
+Flow brushes retain their deposition path without extra stroke state. Swept
+dry media derive each request from their analytic optical-dose integral.
 
 Raster is incremental. A normal display frame processes only contacts generated
 from newly drained samples, applies the batch damage scissor, and keeps the
@@ -56,7 +61,9 @@ One contact primitive supports G‑Pen, pencil, eraser, paintbrush, airbrush,
 chalk, marker, scatter/spray, dual texture, blend, smudge, wet mix, and liquify.
 Sensor mappings control geometry, coverage, color, material transfer, and
 deformation. Dry flow configuration remains the exact zero-state fast path.
-Uniform accumulation adds stroke-ID-keyed R32Float coverage; loaded wet paint
+Full-opacity Uniform contact profiles, Uniform retouching, bristles and wet materials use
+stroke-ID-keyed R32Float coverage. Partial-opacity pointwise paint retains one
+immutable RGBA starting page per touched page; loaded wet paint
 uses the spatial GPU reservoir; and smudge uses ordered backtrace advection. Watercolor uses coverage
 plus same-layer pigment advection, with its edge derived live during composition
 and a separate sparse R32Float wetness channel, but no reservoir or drying
@@ -88,7 +95,8 @@ request it.
 ## Performance rules
 
 The live path has one contiguous contact upload and one small style-table upload.
-Shaders, pipelines, and samplers are prepared. Dry contact creates no resource;
+Shaders, pipelines, and samplers are prepared. Full-opacity Flow contact needs
+no stroke-state page;
 destination brushes build small neighborhood bind groups for touched sparse
 pages. Two generic material target variants plus one watercolor-state variant
 prevent an unused coverage feature from attaching and writing its state target. A single pass plan supplies the same attachment decision to page

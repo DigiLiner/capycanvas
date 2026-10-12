@@ -631,7 +631,7 @@ impl Component {
             root.imp().slider.set(true);
             root.imp()
                 .opacity
-                .set(*binding == ToolbarNumericBinding::BrushOpacity);
+                .set(*binding != ToolbarNumericBinding::BrushSize);
             root.add_css_class("brush-slider");
             scale.add_css_class("brush-track");
             Some(scale)

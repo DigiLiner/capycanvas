@@ -979,6 +979,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.cursor.view(
             self.engine.backend(),
             if selection_brush { &layer_core::BrushTip::AnalyticEllipse } else { &self.engine.brush().tip },
+            if selection_brush { 0. } else { self.engine.brush().contact.and_then(|c|c.dry).map_or(0.,|d|d.corner) },
             &dabs,
             &self.state.camera,
             scale,
@@ -3349,6 +3350,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.tools
                     .set_override(self.state.brush.preset, "opacity", value, &self.state.localization)?;
                 (BRUSH, false)
+            }
+            UiAction::SetBrushStrength { value } => {
+                let id = self.state.tool_settings.iter().find(|f| f.id == "flow" || f.id == "strength")
+                    .ok_or("Strength is not used by the selected tool")?.id;
+                return self.dispatch(UiAction::SetToolSetting { id: id.into(), value });
             }
             UiAction::SetColor { rgba } => {
                 if self.selection_masks.target().is_some() {
@@ -9194,7 +9200,7 @@ mod tests {
                 let size = id as f32 + 10.0;
                 s.dispatch(UiAction::SetBrushSize { value: size }).unwrap();
                 s.dispatch(UiAction::SetToolSetting {
-                    id: "spacing".into(),
+                    id: "angle".into(),
                     value: 0.23,
                 })
                 .unwrap();
@@ -9229,7 +9235,7 @@ mod tests {
                 s.dispatch(UiAction::SelectToolGroup { group }).unwrap();
                 assert_eq!(s.state.brush.preset, id);
                 assert_eq!(s.state.brush.diameter, size);
-                assert_eq!(s.engine.configured_brush().spacing, 0.23);
+                assert_eq!(s.engine.configured_brush().angle_radians, 0.23);
             }
         }
         invoke(&mut s, CommandId::Hand);

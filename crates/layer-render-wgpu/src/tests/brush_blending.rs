@@ -50,6 +50,24 @@ impl Canvas {
             .unwrap();
     }
 
+    fn stroke(&mut self, id: u64, brush: &layer_core::BrushSnapshot, dabs: &[Dab], chunk: usize, erase: bool) {
+        if dabs.is_empty() {return;}
+        let style=DabStyle::for_brush(brush,if erase {layer_core::StrokeTool::Eraser} else {layer_core::StrokeTool::Brush});
+        self.styled_stroke(id,style,dabs,chunk);
+    }
+
+    fn styled_stroke(&mut self,id:u64,mut style:DabStyle,dabs:&[Dab],chunk:usize) {
+        style.blend_space=self.space;
+        for (i,contacts) in dabs.chunks(chunk).enumerate() {
+            let damage=contacts.iter().fold(Rect::EMPTY,|r,d|r.union(d.bounds()));
+            let batch=DabBatch {stroke_id:StrokeId(id),dab_count:contacts.len() as u32,
+                stroke_start:i==0,stroke_end:(i+1)*chunk>=dabs.len(),
+                ..crate::test_support::dab_batch(self.base,style.clone(),damage)};
+            self.r.submit(FramePacket {dabs:contacts,dab_batches:std::slice::from_ref(&batch),
+                blend_space:self.space,..packet(self.document.scene(),self.extent)}).unwrap();
+        }
+    }
+
     fn fill(&mut self, target: SourceTarget, color: [f32; 4]) {
         let mut dab = test_dab([64., 64.], color, 1.);
         dab.radii = [200.; 2];
@@ -59,6 +77,10 @@ impl Canvas {
     /// The composite, as the document's blend space holds it.
     fn composite(&mut self) -> Vec<[f64; 4]> {
         self.r.submit(FramePacket { blend_space: self.space, ..packet(self.document.scene(), self.extent) }).unwrap();
+        self.pixels()
+    }
+
+    fn pixels(&self) -> Vec<[f64;4]> {
         crate::layer_tests::page_bytes(&self.r, crate::test_support::document_texture(&self.r))
             .chunks_exact(16)
             .map(|p| std::array::from_fn(|c| f64::from(f32::from_le_bytes(p[c * 4..][..4].try_into().unwrap()))))
@@ -498,4 +520,424 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
         }
         assert!(painted>16,"{name}: nonempty independent reference");println!("{name}: painted={painted} maximum_RGBA_error={maximum}");
     }
+}
+
+fn opacity_brushes() -> [(&'static str,layer_core::BrushSnapshot);3] {
+    use layer_core::DefaultBrushPreset as P;
+    let pencil=layer_core::default_brush(P::Pencil);
+    let mut uniform=layer_core::default_brush(P::GPen);
+    uniform.rendering.accumulation=BrushAccumulation::Uniform;
+    let mut analytic=uniform.clone();analytic.contact=None;analytic.grain=None;
+    analytic.rendering.accumulation=BrushAccumulation::Flow;analytic.hardness=1.;
+    analytic.mappings=Arc::from([]);
+    [("Pencil",pencil),("analytic",analytic),("Uniform G-Pen",uniform)].map(|(name,mut b)| {
+        b.diameter=64.;b.opacity=0.4;b.flow=1.;b.color_rgba_linear=[0.7,0.2,0.4,1.];(name,b)
+    })
+}
+
+fn opacity_contacts(brush:&layer_core::BrushSnapshot,retraces:usize)->Vec<Dab> {
+    use layer_core::{Stroke,StrokePoint,StrokeTool,authored::PaintHandle};
+    let points:Vec<StrokePoint>=(0..=retraces*2).map(|i|StrokePoint {
+        position:Point {x:if i%2==0 {32.5} else {95.5},y:64.5},pressure:1.,
+        tilt:[std::f32::consts::FRAC_PI_4,0.],twist:0.,elapsed_micros:i as u32*16_000,
+    }).collect();
+    let stroke=Stroke::new(StrokeId(7),SourceTarget::Paint(PaintHandle::from_index(1)),StrokeTool::Brush,brush.clone(),points).unwrap();
+    let mut dabs=Vec::new();layer_engine::DabGenerator::generate(&stroke,RgbSpace::Srgb,&mut dabs);
+    if brush.flow>0. && brush.opacity>0. {assert!(!dabs.is_empty());}dabs
+}
+
+#[test]
+fn engine_generated_opacity_caps_retraces_and_restarts_for_new_strokes() {
+    let center=(64*EXTENT[0]+64) as usize;
+    for (name,brush) in opacity_brushes() {for space in BlendSpace::ALL {
+        let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+        let dabs=opacity_contacts(&brush,64);
+        canvas.stroke(7,&brush,&dabs,dabs.len(),false);let once=canvas.composite();
+        for (i,p) in once.iter().enumerate() {assert!(p[3]<=0.40005,"{name}/{space:?}: pixel{i} exceeded stroke ceiling: {p:?}");}
+        assert!((once[center][3]-0.4).abs()<0.005,"{name}/{space:?}: repeated stroke reaches ceiling: {:?}",once[center]);
+        canvas.stroke(8,&brush,&dabs,dabs.len(),false);let twice=canvas.composite();
+        assert!((twice[center][3]-0.64).abs()<0.005,"{name}/{space:?}: separate strokes build beyond ceiling: {:?}",twice[center]);
+        let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+        canvas.fill(canvas.base,[0.1,0.6,0.3,0.6]);let before=canvas.composite();
+        canvas.stroke(7,&brush,&dabs,dabs.len(),false);let painted=canvas.composite();
+        assert!((painted[center][3]-0.76).abs()<0.005,"{name}/{space:?}: opacity is relative to existing paint: {:?}",painted[center]);
+        if space==BlendSpace::Linear {for c in 0..3 {
+            let expected=before[center][c]*0.6+f64::from(brush.color_rgba_linear[c])*0.4;
+            assert!((painted[center][c]-expected).abs()<0.005,"{name}: underpaint channel{c}: {:?}, expected{expected}",painted[center]);
+        }}
+        assert_eq!(painted[0],before[0],"{name}/{space:?}: distant underpaint");
+        let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+        canvas.fill(canvas.base,[0.1,0.6,0.3,0.6]);let before=canvas.composite();
+        canvas.stroke(7,&brush,&dabs,dabs.len(),true);let erased=canvas.composite();
+        for (i,(a,b)) in before.iter().zip(&erased).enumerate() {assert!(b[3]+0.00005>=a[3]*0.6,"{name}/{space:?}: erase exceeded ceiling at{i}: {a:?}->{b:?}");}
+        for c in 0..4 {assert!((erased[center][c]-before[center][c]*0.6).abs()<0.005,"{name}/{space:?}: erase channel{c}: {:?}",erased[center]);}
+        canvas.stroke(8,&brush,&dabs,dabs.len(),true);let erased_twice=canvas.composite();
+        assert!((erased_twice[center][3]-before[center][3]*0.36).abs()<0.005,"{name}/{space:?}: separate erases build: {:?}",erased_twice[center]);
+    }}
+}
+
+#[test]
+fn engine_generated_strength_changes_buildup_without_changing_opacity_ceiling() {
+    let center=(64*EXTENT[0]+64) as usize;
+    for (name,brush) in opacity_brushes() {
+        let render=|b:&layer_core::BrushSnapshot,retraces| {
+            let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+            let dabs=opacity_contacts(b,retraces);canvas.stroke(7,b,&dabs,dabs.len(),false);canvas.composite()
+        };
+        let mut weak=brush.clone();weak.flow=0.03;
+        let first_weak=render(&weak,1);let first_strong=render(&brush,1);
+        assert!(first_weak[center][3]+0.01<first_strong[center][3],"{name}: Strength changes buildup: {:?} vs {:?}",first_weak[center],first_strong[center]);
+        let built=render(&weak,128);
+        assert!((built[center][3]-0.4).abs()<0.005,"{name}: low Strength can reach the same ceiling: {:?}",built[center]);
+        let mut zero=brush.clone();zero.flow=0.;let empty=render(&zero,8);
+        assert!(empty.iter().all(|p|*p==[0.;4]),"{name}: zero Strength paints nothing");
+    }
+}
+
+#[test]
+fn engine_generated_opacity_ceiling_is_invariant_to_contact_batch_partition() {
+    for (name,brush) in opacity_brushes() {for space in BlendSpace::ALL {
+        let mut brush=brush.clone();brush.flow=0.07;let dabs=opacity_contacts(&brush,4);
+        let draw=|chunk| {
+            let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+            canvas.fill(canvas.base,[0.1,0.6,0.3,0.6]);canvas.stroke(7,&brush,&dabs,chunk,false);canvas.composite()
+        };
+        let separate=draw(1);let together=draw(dabs.len());
+        for (i,(a,b)) in separate.iter().zip(together).enumerate() {for c in 0..4 {
+            assert!((a[c]-b[c]).abs()<0.00002,"{name}/{space:?}: batch partition pixel{i} channel{c}: {a:?} vs {b:?}");
+        }}
+    }}
+}
+
+#[test]
+fn engine_generated_smudge_strength_zero_is_noop_and_opacity_bounds_retraces() {
+    let mut brush=layer_core::default_brush(layer_core::DefaultBrushPreset::Smudge);
+    brush.diameter=64.;brush.flow=1.;brush.wet_mix.attack=1.;brush.wet_mix.pull=1.;
+    brush.wet_mix.blur=0.;brush.wet_mix.mix_space=layer_core::ColorMixSpace::LinearRgb;
+    let draw=|strength:f32,opacity:f32,chunk:usize| {
+        let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+        canvas.fill(canvas.base,[0.,0.,0.,1.]);
+        canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([1066.,64.],[1.;4],1000.,1.));
+        let before=canvas.composite();let mut brush=brush.clone();brush.flow=strength;brush.opacity=opacity;
+        let dabs=opacity_contacts(&brush,8);canvas.stroke(7,&brush,&dabs,chunk.min(dabs.len()).max(1),false);
+        (before,canvas.composite())
+    };
+    for (strength,opacity) in [(0.,1.),(0.,0.4),(1.,0.)] {for chunk in [1,usize::MAX] {
+        let mut cursor=layer_engine::DabGenerator::default();let mut cursor_brush=brush.clone();
+        cursor_brush.flow=strength;cursor_brush.opacity=opacity;
+        let contacts=cursor.cursor_contacts(layer_core::StrokePoint {position:Point {x:64.5,y:64.5},
+            pressure:1.,tilt:[0.;2],twist:0.,elapsed_micros:0},&cursor_brush);
+        assert!(contacts.iter().any(|d|d.radii.iter().all(|r|*r>0.)),"zero brush keeps cursor geometry");
+        let (before,after)=draw(strength,opacity,chunk);
+        assert_eq!(before,after,"Smudge Strength={strength} Opacity={opacity} chunk={chunk}: noop");
+    }}
+    for chunk in [1,usize::MAX] {
+        let (before,full)=draw(1.,1.,chunk);let (_,limited)=draw(1.,0.4,chunk);
+        let mut largest_full=0f64;let mut largest_limited=0f64;
+        for (i,((before,full),limited)) in before.iter().zip(&full).zip(&limited).enumerate() {
+            assert!((limited[3]-before[3]).abs()<0.00002,"Smudge chunk={chunk}: opaque underpaint at{i}");
+            for c in 0..3 {
+                let full=(full[c]-before[c]).abs();let limited=(limited[c]-before[c]).abs();
+                largest_full=largest_full.max(full);largest_limited=largest_limited.max(limited);
+                assert!(limited<=0.40002,"Smudge chunk={chunk}: stroke budget pixel{i} channel{c}: {limited}");
+            }
+        }
+        assert!(largest_full>0.5,"Smudge chunk={chunk}: the uncapped stroke visibly moves underpaint ({largest_full})");
+        assert!(largest_limited>0.01 && largest_limited+0.1<largest_full,
+            "Smudge chunk={chunk}: partial Opacity preserves a smaller real effect ({largest_limited} vs {largest_full})");
+    }
+}
+
+#[test]
+fn engine_generated_partial_opacity_prediction_forks_and_preserves_committed_budget() {
+    let (_,mut brush)=opacity_brushes()[0].clone();brush.flow=0.08;
+    let dabs=opacity_contacts(&brush,2);let split=2;
+    let send=|canvas:&mut Canvas,contacts:&[Dab],kind,start,end| {
+        let mut style=DabStyle::for_brush(&brush,layer_core::StrokeTool::Brush);style.blend_space=canvas.space;
+        let damage=contacts.iter().fold(Rect::EMPTY,|r,d|r.union(d.bounds()));
+        let batch=DabBatch {stroke_id:StrokeId(7),dab_count:contacts.len() as u32,kind,stroke_start:start,stroke_end:end,
+            ..crate::test_support::dab_batch(canvas.base,style,damage)};
+        canvas.r.submit(FramePacket {dabs:contacts,dab_batches:std::slice::from_ref(&batch),
+            ..packet(canvas.document.scene(),canvas.extent)}).unwrap();
+    };
+    let mut preview=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+    let mut reference=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+    for canvas in [&mut preview,&mut reference] {send(canvas,&dabs[..split],DabBatchKind::Persistent,true,false);}
+    let committed=preview.pixels();assert!(committed.iter().any(|p|p[3]>0. && p[3]<0.39));
+    send(&mut preview,&dabs[split..],DabBatchKind::Preview,false,false);let predicted=preview.pixels();
+    send(&mut reference,&dabs[split..],DabBatchKind::Persistent,false,true);let expected=reference.pixels();
+    assert!(predicted.iter().zip(&committed).any(|(a,b)|a[3]>b[3]+0.0001),"prediction paints a real continuation");
+    for (i,(a,b)) in predicted.iter().zip(&expected).enumerate() {for c in 0..4 {
+        assert!((a[c]-b[c]).abs()<0.00002,"partial Opacity prediction pixel{i} channel{c}: {a:?} vs {b:?}");
+    }}
+    assert_eq!(preview.composite(),committed,"cancel prediction preserves committed pixels");
+    send(&mut preview,&dabs[split..],DabBatchKind::Persistent,false,true);
+    assert_eq!(preview.pixels(),expected,"prediction cannot consume the real stroke's budget");
+}
+
+#[test]
+fn engine_generated_opacity_keeps_later_opaque_pigment_changes_inside_the_stroke() {
+    use layer_core::{Stroke,StrokePoint,StrokeTool,authored::PaintHandle};
+    let (_,mut brush)=opacity_brushes()[1].clone();brush.spacing=0.1;
+    brush.color_rgba_linear=[1.,0.,0.,1.];brush.color_dynamics.stamp_hue_jitter=0.4;
+    let stroke=Stroke::new(StrokeId(7),SourceTarget::Paint(PaintHandle::from_index(1)),StrokeTool::Brush,brush.clone(),
+        [56.5,72.5].into_iter().enumerate().map(|(i,x)|StrokePoint {position:Point {x,y:64.5},
+            pressure:1.,tilt:[0.;2],twist:0.,elapsed_micros:i as u32*16_000}).collect::<Vec<_>>()).unwrap();
+    let mut generated=Vec::new();layer_engine::DabGenerator::generate(&stroke,RgbSpace::Srgb,&mut generated);
+    let first=*generated.iter().find(|d|coverage(d,[64,64])==1.).unwrap();
+    let last=*generated.iter().find(|d|coverage(d,[64,64])==1. && d.color_rgba_linear!=first.color_rgba_linear).unwrap();
+    for dab in [first,last] {assert_eq!(dab.flow*dab.color_rgba_linear[3],1.);}
+    let dabs=[first,last];let center=(64*EXTENT[0]+64) as usize;let mut rows=Vec::new();
+    for space in BlendSpace::ALL {for chunk in [1,2] {for background in [None,Some([0.1,0.6,0.3,0.6]),Some(first.color_rgba_linear)] {for opacity in [1f32,0.4,0.01,0.001] {
+        let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+        if let Some(color)=background {canvas.fill(canvas.base,color);}
+        let before=canvas.composite()[center];brush.opacity=opacity;
+        let mut style=DabStyle::for_brush(&brush,StrokeTool::Brush);assert_eq!(style.execution,BrushExecution::Dry);
+        style.wet_mix.dilution=1.;canvas.styled_stroke(7,style,&dabs,chunk);let actual=canvas.composite()[center];
+        let expected:[f64;4]=std::array::from_fn(|c|before[c]*(1.-f64::from(opacity))+
+            if c==3 {f64::from(opacity)} else {
+                let color=f64::from(last.color_rgba_linear[c]);
+                (if space==BlendSpace::Perceptual {RgbSpace::Srgb.encode(color)} else {color})*f64::from(opacity)
+            });
+        eprintln!("pigment-opacity background={background:?} opacity={opacity} first={:?} later={:?} actual={actual:?} expected={expected:?}",
+            first.color_rgba_linear,last.color_rgba_linear);
+        rows.push((space,chunk,background,opacity,actual,expected));
+        if chunk==1 && opacity==0.4 {
+            let mut preview=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+            if let Some(color)=background {preview.fill(preview.base,color);}
+            let send=|canvas:&mut Canvas,dab:&Dab,kind,start,end| {
+                let mut style=DabStyle::for_brush(&brush,StrokeTool::Brush);style.blend_space=space;style.wet_mix.dilution=1.;
+                let batch=DabBatch {stroke_id:StrokeId(7),dab_count:1,kind,stroke_start:start,stroke_end:end,
+                    ..crate::test_support::dab_batch(canvas.base,style,dab.bounds())};
+                canvas.r.submit(FramePacket {dabs:std::slice::from_ref(dab),dab_batches:std::slice::from_ref(&batch),
+                    blend_space:space,..packet(canvas.document.scene(),canvas.extent)}).unwrap();
+            };
+            send(&mut preview,&first,DabBatchKind::Persistent,true,false);let committed=preview.pixels();
+            send(&mut preview,&last,DabBatchKind::Preview,false,false);let predicted=preview.pixels();
+            for c in 0..4 {assert!((predicted[center][c]-actual[c]).abs()<0.00002,"{space:?}: pigment prediction {:?} vs {actual:?}",predicted[center]);}
+            assert_eq!(preview.composite(),committed,"{space:?}: cancel pigment prediction");
+            send(&mut preview,&last,DabBatchKind::Persistent,false,true);
+            assert_eq!(preview.pixels()[center],actual,"{space:?}: prediction preserves stroke-start underpaint");
+        }
+    }}}}
+    for (space,chunk,background,opacity,actual,expected) in rows {
+        for c in 0..4 {assert!((actual[c]-expected[c]).abs()<if space==BlendSpace::Linear {0.00001} else {0.004},
+            "{space:?} chunk={chunk}: later opaque pigment must repaint within the stroke without increasing its Opacity ceiling: background={background:?}, opacity={opacity}, channel{c}, actual={actual:?}, expected={expected:?}");}
+    }
+
+}
+
+#[test]
+fn engine_generated_bristle_partial_opacity_matches_full_stroke_group_composite() {
+    let mut brush=layer_core::default_brush(layer_core::DefaultBrushPreset::BristlePaintbrush);
+    brush.diameter=64.;brush.flow=0.3;brush.color_rgba_linear=[0.7,0.2,0.4,1.];
+    let dabs=opacity_contacts(&brush,4);
+    for chunk in [1,dabs.len()] {
+        let draw=|opacity| {
+            let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+            canvas.fill(canvas.base,[0.1,0.6,0.3,0.6]);let before=canvas.composite();
+            let mut brush=brush.clone();brush.opacity=opacity;canvas.stroke(7,&brush,&dabs,chunk,false);
+            (before,canvas.composite())
+        };
+        let (before,full)=draw(1.);let (_,limited)=draw(0.4);
+        assert!(full.iter().zip(&before).any(|(a,b)|(a[3]-b[3]).abs()>0.01),"Bristle paints a real stroke");
+        for (i,((b,g),f)) in before.iter().zip(&full).zip(&limited).enumerate() {for c in 0..4 {
+            let expected=b[c]*0.6+g[c]*0.4;
+            assert!((f[c]-expected).abs()<0.00002,"Bristle group Opacity chunk={chunk} pixel{i} channel{c}: {f:?} expected={expected} full={g:?} before={b:?}");
+        }}
+    }
+}
+
+#[test]
+fn partial_opacity_group_reference_covers_non_normal_blends_and_alpha_lock() {
+    let (_,mut brush)=opacity_brushes()[1].clone();brush.flow=0.3;
+    brush.color_dynamics.stamp_hue_jitter=0.4;let dabs=opacity_contacts(&brush,2);
+    assert!(dabs.iter().any(|d|d.color_rgba_linear!=dabs[0].color_rgba_linear));
+    for space in BlendSpace::ALL {for (mode,locked) in [(BrushBlendMode::Multiply,false),
+        (BrushBlendMode::Overlay,false),(BrushBlendMode::Normal,true)] {for chunk in [1,dabs.len()] {
+        let draw=|opacity| {
+            let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+            canvas.fill(canvas.base,[0.1,0.6,0.3,0.6]);let before=canvas.composite();
+            let mut style=DabStyle::for_brush(&brush,layer_core::StrokeTool::Brush);
+            style.opacity=opacity;style.alpha_locked=locked;style.rendering.blend_mode=mode;
+            canvas.styled_stroke(7,style,&dabs,chunk);(before,canvas.composite())
+        };
+        let (before,full)=draw(1.);let (_,limited)=draw(0.4);
+        assert!(full.iter().zip(&before).any(|(a,b)|(a[0]-b[0]).abs()>0.01),"{space:?}/{mode:?}: real pigment change");
+        for (i,((b,g),f)) in before.iter().zip(&full).zip(&limited).enumerate() {for c in 0..4 {
+            let expected=b[c]*0.6+g[c]*0.4;
+            assert!((f[c]-expected).abs()<0.00002,"{space:?}/{mode:?} locked={locked} chunk={chunk} pixel{i} channel{c}: {f:?} expected={expected} full={g:?} before={b:?}");
+            if locked && c==3 {assert!((f[c]-b[c]).abs()<0.00002,"alpha lock preserves partial underpaint");}
+        }}
+    }}}
+}
+
+#[test]
+fn partial_opacity_clone_matches_full_stroke_group_over_colored_translucent_source() {
+    let (_,mut brush)=opacity_brushes()[1].clone();brush.flow=0.3;let dabs=opacity_contacts(&brush,2);
+    for accumulation in [BrushAccumulation::Flow,BrushAccumulation::Uniform] {
+    for space in BlendSpace::ALL {for chunk in [1,dabs.len()] {
+        let draw=|opacity,offset| {
+            let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+            canvas.fill(canvas.base,[0.1,0.6,0.3,0.3]);
+            canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([20.,64.],[0.8,0.1,0.2,0.3],12.,1.));
+            canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([44.,64.],[0.1,0.2,0.9,0.8],12.,1.));
+            let before=canvas.composite();
+            assert!((before[64*128+20][3]-before[64*128+44][3]).abs()>0.2,"Clone source has varying alpha");
+            assert!((0..3).any(|c|(before[64*128+20][c]-before[64*128+44][c]).abs()>0.1),"Clone source has varying color");
+            let mut style=DabStyle::for_brush(&brush,layer_core::StrokeTool::Brush);style.opacity=opacity;
+            style.execution=BrushExecution::Clone;style.rendering.accumulation=accumulation;
+            style.retouch=Some(layer_core::Retouch {source:layer_core::RetouchSource::Editing,offset,
+                ..Default::default()});
+            canvas.styled_stroke(7,style,&dabs,chunk);(before,canvas.composite())
+        };
+        let (before,full)=draw(1.,[-48.,0.]);let (_,limited)=draw(0.4,[-48.,0.]);
+        assert!(full.iter().zip(&before).any(|(a,b)|(a[3]-b[3]).abs()>0.01),"{space:?}: Clone copies source alpha");
+        for (i,((b,g),f)) in before.iter().zip(&full).zip(&limited).enumerate() {for c in 0..4 {
+            let expected=b[c]*0.6+g[c]*0.4;
+            assert!((f[c]-expected).abs()<0.00002,"{accumulation:?}/{space:?}: Clone group chunk={chunk} pixel{i} channel{c}: {f:?} expected={expected} full={g:?} before={b:?}");
+        }}
+        let (before,empty)=draw(0.4,[-256.,0.]);
+        assert_eq!(before,empty,"{space:?}: transparent out-of-domain Clone source is a noop");
+    }}}
+}
+
+#[test]
+fn saturated_dry_retraces_preserve_exact_rgba_with_varying_pressure() {
+    use layer_core::{Stroke,StrokePoint,StrokeTool,authored::PaintHandle};
+    for preset in [layer_core::DefaultBrushPreset::Pencil,layer_core::DefaultBrushPreset::GPen] {
+    let mut brush=layer_core::default_brush(preset);
+    brush.diameter=64.;brush.flow=1.;brush.color_rgba_linear=[0.,1.,0.,1.];
+    let points=(0..9).map(|i|StrokePoint {position:Point {x:if i%2==0 {32.5} else {95.5},y:64.5},
+        pressure:[0.3,0.6,0.95][i%3],tilt:[std::f32::consts::FRAC_PI_4,0.],twist:0.,
+        elapsed_micros:i as u32*16_000}).collect::<Vec<_>>();
+    let stroke=Stroke::new(StrokeId(7),SourceTarget::Paint(PaintHandle::from_index(1)),StrokeTool::Brush,brush.clone(),points).unwrap();
+    let mut dabs=Vec::new();layer_engine::DabGenerator::generate(&stroke,RgbSpace::Srgb,&mut dabs);
+    assert!(dabs.iter().any(|d|d.contact[0]!=dabs[0].contact[0]),"{preset:?}: real contacts vary pressure");
+    for space in BlendSpace::ALL {for chunk in [1,dabs.len()] {for opacity in [1.,0.4] {for erase in [false,true] {
+        let mut canvas=Canvas::new(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None);
+        if !erase {canvas.fill(canvas.base,brush.color_rgba_linear);}
+        let before=canvas.composite();brush.opacity=opacity;
+        let mut style=DabStyle::for_brush(&brush,if erase {StrokeTool::Eraser} else {StrokeTool::Brush});
+        assert_eq!(style.execution,BrushExecution::Dry);style.wet_mix.dilution=1.;
+        canvas.styled_stroke(7,style,&dabs,chunk);let after=canvas.composite();
+        assert_eq!(after,before,"{preset:?}/{space:?}: saturated same-pigment/transparent erase Opacity={opacity} erase={erase} chunk={chunk}");
+    }}}}
+    }
+}
+
+#[test]
+fn partial_analytic_display_averages_current_and_stroke_start_over_the_same_footprint() {
+    let extent=[131,129];let pigment=[0.8f32,0.1,0.4,0.7];
+    for space in BlendSpace::ALL {
+        let mut canvas=Canvas::at(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None,extent);
+        let r=&mut canvas.r;
+        let convert=|mut p:[f64;4],encode:bool| {
+            if space==BlendSpace::Perceptual && p[3]>0. {for c in 0..3 {
+                p[c]=(if encode {RgbSpace::Srgb.encode(p[c]/p[3])} else {RgbSpace::Srgb.decode(p[c]/p[3])})*p[3];
+            }}p
+        };
+        let background=r.create_page_surface("varying translucent stroke start");
+        let current=r.create_page_surface("partially painted current pixels");
+        for opacity in [0.4f32,0.01,0.001] {for mode in [DabMode::Paint,DabMode::Erase] {
+            let mut b=Vec::new();let mut f=Vec::new();
+            for y in 0..PAGE_SIZE {for x in 0..PAGE_SIZE {
+                if x>=extent[0] || y>=extent[1] {b.push([0.;4]);f.push([0.;4]);continue;}
+                let a=if (x+y)%2==0 {0.2} else {0.8};
+                let original=[(0.1+0.3*f64::from(x%3))*a,(0.2+0.2*f64::from(y%3))*a,0.5*a,a];
+                let bg=convert(original,true);let source=if mode==DabMode::Erase {[0.;4]} else {
+                    [if space==BlendSpace::Perceptual {RgbSpace::Srgb.encode(0.8)} else {0.8},
+                    if space==BlendSpace::Perceptual {RgbSpace::Srgb.encode(0.1)} else {0.1},
+                    if space==BlendSpace::Perceptual {RgbSpace::Srgb.encode(0.4)} else {0.4},1.]};
+                let painted=convert(std::array::from_fn(|c|bg[c]*(1.-f64::from(opacity)*0.3)+source[c]*f64::from(opacity)*0.3),false);
+                b.push(original.map(|v|v as f32));f.push(painted.map(|v|v as f32));
+            }}
+            for (surface,pixels) in [(&background,&b),(&current,&f)] {
+                let bytes:Vec<_>=pixels.iter().flat_map(|p|p.iter().flat_map(|v|v.to_le_bytes())).collect();
+                crate::test_support::upload_page(r,&surface.texture,&bytes);
+            }
+            for block in [1u32,2,4] {
+                r.preview_level=block.trailing_zeros();r.preview_contribution=true;
+                let mut style=crate::layer_tests::preset_style(layer_core::DefaultBrushPreset::GPen);
+                style.opacity=opacity;style.mode=mode;style.blend_space=space;
+                assert!(crate::dry_material::display_preview_eligible(&style));
+                let mut dab=soft([64.5;2],pigment,200.,1.);dab.flow=0.25;
+                let mut batch=crate::test_support::dab_batch(canvas.base,style,Rect::from_extent(extent));batch.kind=DabBatchKind::Preview;
+                assert!(!r.compact_preview_contribution(&batch),"partial Opacity needs complete RGBA");
+                let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+                r.prepare_uploads(FramePacket {dabs:&[dab],dab_batches:std::slice::from_ref(&batch),..packet(canvas.document.scene(),extent)},&mut [Vec::new()],&mut encoder).unwrap();
+                r.prepare_dry_records(&batch,std::iter::once((PixelRect::full(extent),0..1,[0;16])),&mut encoder).unwrap();
+                let key=WgpuRasterizer::texture_set_key(&batch.style);r.ensure_texture_set(key).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
+                r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],extent,extent)));
+                let size=[PAGE_SIZE/block;2];let output=create_page_surface(&r.device,&r.texture_layout,&r.sampler,size,r.device.working_format(),"partial display reference output");
+                let sources=create_material_bind_group(&r.device,&r.material_layout,&[&current.view;9],&r.dab_buffer,&r.empty_scalar_view,&background.view,wgpu::BindingResource::Buffer(r.dry_records.binding()));
+                let binding=if block==1 {r.pipelines.dry_material.output(r,&output,None,canvas.base,[0;2])} else {r.pipelines.dry_display.output(r,&output,None,canvas.base,[0;2])};
+                let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+                r.encode_dry_material_jobs(&mut encoder,0,&batch,&[(binding,sources,[0;2],false,0,false,PixelRect::full(extent))]);encoder.submit(&r.queue);
+                let actual=crate::test_support::float_pixels(r,&output.texture);
+                for y in 0..size[1] {for x in 0..size[0] {
+                    let start=[x*block,y*block];let end=[(start[0]+block).min(extent[0]),(start[1]+block).min(extent[1])];
+                    let mut original=[0.;4];let mut painted=[0.;4];
+                    if start[0]<end[0] && start[1]<end[1] {
+                        for py in start[1]..end[1] {for px in start[0]..end[0] {let i=(py*PAGE_SIZE+px) as usize;
+                            for c in 0..4 {original[c]+=f64::from(b[i][c]);painted[c]+=f64::from(f[i][c]);}
+                        }}let n=f64::from((end[0]-start[0])*(end[1]-start[1]));for c in 0..4 {original[c]/=n;painted[c]/=n;}
+                    }
+                    let center=[start[0]+block/2,start[1]+block/2];let mut expected=painted;
+                    if center[0]<extent[0] && center[1]<extent[1] {
+                        let bg=convert(original,true);let old=convert(painted,true);
+                        let q=f64::from(dab.flow*dab.color_rgba_linear[3]);
+                        expected=convert(std::array::from_fn(|c| {
+                            let source=if mode==DabMode::Erase {0.} else if c==3 {1.} else if space==BlendSpace::Perceptual {RgbSpace::Srgb.encode(f64::from(pigment[c]))} else {f64::from(pigment[c])};
+                            old[c]*(1.-q)+(bg[c]*(1.-f64::from(opacity))+source*f64::from(opacity))*q
+                        }),false);
+                    }
+                    let a=actual[(y*size[0]+x) as usize];for c in 0..4 {assert!((f64::from(a[c])-expected[c]).abs()<0.000002,
+                        "{space:?}/{mode:?} O={opacity} block={block} ({x},{y}) channel{c}: {a:?} expected={expected:?}");}
+                }}
+            }
+        }}
+    }
+}
+
+#[test]
+fn partial_gpen_scaled_prediction_cancels_and_exact_queries_match_commit() {
+    for space in BlendSpace::ALL {for opacity in [0.4,0.001] {for erase in [false,true] {
+        let create=||Canvas::at(DocumentColor {depth:if space==BlendSpace::Linear {SampleDepth::F32} else {SampleDepth::U8},..Default::default()},space,None,[1024;2]);
+        let mut preview=create();let mut reference=create();
+        let send=|canvas:&mut Canvas,dabs:&[Dab],batches:&[DabBatch]| {
+            let mut frame=packet(canvas.document.scene(),canvas.extent);frame.composite_all=false;
+            frame.view.document_to_surface=[0.125,0.,0.,0.125,0.,0.];frame.view.width_px=128;frame.view.height_px=128;
+            canvas.r.submit(FramePacket {dabs,dab_batches:batches,blend_space:space,..frame}).unwrap();
+        };
+        for canvas in [&mut preview,&mut reference] {
+            canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([512.;2],[0.1,0.6,0.3,0.6],2000.,1.));
+            canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([480.,512.],[0.8,0.1,0.2,0.4],38.,1.));
+            canvas.paint(canvas.base,test_style(BrushExecution::Dry),soft([544.,512.],[0.1,0.2,0.9,0.8],27.,1.));
+        }
+        let mut style=crate::layer_tests::preset_style(layer_core::DefaultBrushPreset::GPen);
+        style.opacity=opacity;style.blend_space=space;style.mode=if erase {DabMode::Erase} else {DabMode::Paint};
+        let mut first=soft([500.,512.],[0.7,0.2,0.4,1.],110.,1.);first.flow=0.08;
+        let mut last=first;last.center.x=550.;last.flow=0.3;last.contact[0]=0.7;
+        let mut batch=DabBatch {stroke_id:StrokeId(7),dab_count:1,stroke_start:true,stroke_end:false,
+            ..crate::test_support::dab_batch(preview.base,style,first.bounds().union(last.bounds()))};
+        for canvas in [&mut preview,&mut reference] {send(canvas,&[first],std::slice::from_ref(&batch));}
+        let committed=preview.r.readback_srgb_rgba8().unwrap();
+        send(&mut preview,&[],&[]);let display_before=crate::scene::scale::tests::display_pixels(&preview.r);
+        batch.stroke_start=false;batch.kind=DabBatchKind::Preview;
+        send(&mut preview,&[last],std::slice::from_ref(&batch));
+        assert!(preview.r.preview_level>0,"partial G-Pen uses display-sized prediction");
+        assert!(!preview.r.preview_contribution,"partial Opacity prediction retains complete RGBA");
+        assert!(preview.r.preview_pages.iter().all(|p|p.active().texture.width()<PAGE_SIZE));
+        let predicted=crate::scene::scale::tests::display_pixels(&preview.r);
+        assert_ne!(predicted,display_before,"prediction makes a visible continuation");
+        let exact_prediction=preview.r.readback_srgb_rgba8().unwrap();assert_eq!(preview.r.preview_level,0);
+        send(&mut preview,&[],&[]);assert_eq!(preview.r.readback_srgb_rgba8().unwrap(),committed,"cancel prediction keeps committed pixels");
+        assert_eq!(crate::scene::scale::tests::display_pixels(&preview.r),display_before,"cancel prediction restores scaled scene");
+        batch.kind=DabBatchKind::Persistent;batch.stroke_end=true;
+        for canvas in [&mut preview,&mut reference] {send(canvas,&[last],std::slice::from_ref(&batch));}
+        let accepted=preview.r.readback_srgb_rgba8().unwrap();
+        assert_eq!(accepted,exact_prediction,"exact query replays the same contacts as commit");
+        assert_eq!(accepted,reference.r.readback_srgb_rgba8().unwrap(),"prediction cannot alter committed group background");
+    }}}
 }

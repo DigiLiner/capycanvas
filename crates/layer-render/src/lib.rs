@@ -97,7 +97,7 @@ pub struct Dab {
     pub rotation: [f32; 2],
     /// Document-space movement since the preceding primary contact.
     pub motion: [f32; 2],
-    /// Resolved straight linear document RGB; alpha includes per-contact opacity.
+    /// Resolved straight linear document RGB; alpha includes contact modulation.
     /// RGB coordinates use `CanvasRenderer::document_color().space`.
     pub color_rgba_linear: [f32; 4],
     pub flow: f32,
@@ -182,6 +182,8 @@ pub enum DabMode {
 /// instance record; color and texture identity are submitted only once.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DabStyle {
+    /// Maximum contribution of this stroke over its starting paint.
+    pub opacity: f32,
     pub alpha_locked: bool,
     pub selection: Option<std::sync::Arc<layer_core::Selection>>,
     pub tip: BrushTip,
@@ -203,6 +205,7 @@ pub struct DabStyle {
 impl DabStyle {
     pub fn for_brush(brush: &layer_core::BrushSnapshot, tool: layer_core::StrokeTool) -> Self {
         Self {
+            opacity: brush.opacity.clamp(brush.bounds.minimum_opacity, brush.bounds.maximum_opacity),
             alpha_locked: false,
             selection: None,
             tip: brush.tip.clone(),

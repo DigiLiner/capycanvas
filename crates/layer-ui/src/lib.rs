@@ -255,6 +255,7 @@ pub enum ToolbarControl {
     Opacity,
     BrushSizeSlider,
     BrushOpacitySlider,
+    BrushStrengthSlider,
     ToolOptions { #[serde(default)] style: ToolOptionsStyle },
     Panel { panel: Panel },
     Divider,
@@ -1538,6 +1539,9 @@ pub enum UiAction {
         value: f32,
     },
     SetBrushOpacity {
+        value: f32,
+    },
+    SetBrushStrength {
         value: f32,
     },
     SetColor {

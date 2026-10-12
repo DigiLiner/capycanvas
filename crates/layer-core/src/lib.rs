@@ -818,7 +818,7 @@ pub struct BrushSnapshot {
     /// Straight linear document RGB; coverage alpha is bounded independently.
     pub color_rgba_linear: [f32; 4],
     pub diameter: f32,
-    /// Constant alpha multiplier applied to every dab.
+    /// Maximum contribution of one stroke over the existing paint.
     pub opacity: f32,
     /// Analytic-tip edge hardness, applied independently to each emitted dab.
     /// Mask tips define their own coverage and ignore this value.
@@ -880,6 +880,10 @@ impl Default for BrushSnapshot {
 }
 
 impl BrushSnapshot {
+    pub fn reference_diameter(&self) -> f32 {
+        self.diameter * self.contact.and_then(|c| c.dry).map_or(1., |d| d.extent())
+    }
+
     pub fn validate(&self) -> Result<(), BrushError> {
         let base = [
             self.color_rgba_linear[0],
@@ -1056,7 +1060,7 @@ impl BrushSnapshot {
             return Err(BrushError::InvalidAdvanced);
         }
         if let Some(grain) = &self.grain {
-            validate_grain(grain)?;
+            validate_grain(grain, if self.contact.is_some_and(|c| c.dry.is_some()) { 2. } else { 1. })?;
         }
         Ok(())
     }
@@ -1149,7 +1153,7 @@ impl BrushSnapshot {
     }
 }
 
-fn validate_grain(grain: &BrushGrain) -> Result<(), BrushError> {
+fn validate_grain(grain: &BrushGrain, maximum_depth: f32) -> Result<(), BrushError> {
     let values = [
         grain.scale,
         grain.depth,
@@ -1158,7 +1162,7 @@ fn validate_grain(grain: &BrushGrain) -> Result<(), BrushError> {
     ];
     if values.iter().any(|value| !value.is_finite())
         || !(0.01..=64.0).contains(&grain.scale)
-        || !(0.0..=1.0).contains(&grain.depth)
+        || !(0.0..=maximum_depth).contains(&grain.depth)
         || !(0.0..=1.0).contains(&grain.offset_jitter)
     {
         return Err(BrushError::InvalidAdvanced);

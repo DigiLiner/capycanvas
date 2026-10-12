@@ -51,8 +51,8 @@ try {
     [CapyRowPointer]::Initialize([uint32]$review.Id)
 
     Switch-Workspace 'Sketch' 'builtin:workspace:painter'
-    $size=Tile 'brush_size_slider';$opacity=Tile 'brush_opacity_slider'
-    if(!$size -or !$opacity -or !$size.component -or !$opacity.component){throw 'Sketch lacks the shared brush sliders'}
+    $size=Tile 'brush_size_slider';$strength=Tile 'brush_strength_slider'
+    if(!$size -or !$strength -or !$size.component -or !$strength.component){throw 'Sketch lacks the shared brush sliders'}
     $band=@((Model).state.workspace.layout.bands)
     if($band.Count -ne 1 -or $band[0].edge -ne 'left' -or $band[0].alignment -ne 'center'){throw 'Sketch sliders are not docked in the centered left compact region'}
     Capture 'sketch-dark' -WithModel
@@ -88,15 +88,15 @@ try {
     [CapyRowPointer]::Key(0x1B);Start-Sleep -Milliseconds 200
     Write-Output "PASS: Tap keeps preview open, bookmark $marked px is stored and recalled by a nearby tap"
 
-    $opacityTrack="component-slider-$($opacity.id)"
+    $strengthTrack="component-slider-$($strength.id)"
     foreach($device in @('touch','pen')){
         Focus-Review
-        Press $device (Along (Box $opacityTrack) .9)
-        Wait-Until {(Brush).opacity -gt .8} "$device press did not set a high opacity"
-        Drag (Along (Box $opacityTrack) .9) (Along (Box $opacityTrack) .3);Release
-        Wait-Until {(Brush).opacity -lt .45} "$device drag did not lower opacity"
-        Wait-Until {$null -eq (Find "slider-bookmark-$($opacity.id)")} "$device preview stayed open after a drag"
-        Write-Output "PASS: $device opacity drag to $([Math]::Round((Brush).opacity,2))"
+        Press $device (Along (Box $strengthTrack) .9)
+        Wait-Until {(Tile 'brush_strength_slider').component.numeric.value -gt .8} "$device press did not set a high strength"
+        Drag (Along (Box $strengthTrack) .9) (Along (Box $strengthTrack) .3);Release
+        Wait-Until {(Tile 'brush_strength_slider').component.numeric.value -lt .45} "$device drag did not lower strength"
+        Wait-Until {$null -eq (Find "slider-bookmark-$($strength.id)")} "$device preview stayed open after a drag"
+        Write-Output "PASS: $device strength drag to $([Math]::Round((Tile 'brush_strength_slider').component.numeric.value,2))"
     }
 
     $layout=(Model).state.workspace.layout|ConvertTo-Json -Depth 40 -Compress

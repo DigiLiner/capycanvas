@@ -22,6 +22,14 @@ rendering behavior. Built-in definitions live in
 the editable settings.
 Preset constructors share liquify settings, painter mappings and canvas grain.
 
+Strength is the primary application control: pigment transfer for drawing,
+removal for erasing, mixing for smudging and deformation for Liquify. Painting
+settings retain the internal `flow` ID; Liquify retains `strength`. Opacity caps
+one stroke's contribution over its starting paint, rather than reducing pigment
+already present. A new stroke can build further. Liquify does not expose Opacity.
+Zero Strength emits no painting contacts while retaining the brush-size cursor.
+Pressure mappings scale the selected Strength instead of replacing it.
+
 *Dynamics* map a changing input to a brush property. Pressure might change size or
 opacity; tilt can change the shape or rotation of a mark. Input availability varies
 by device, but the mapping rules are shared. A stroke stores the settings it used,
@@ -35,7 +43,8 @@ its location, shape, color and other parameters are ready for the renderer.
 
 Distance-based placement avoids making the brush density depend directly on how
 many events a platform sends. Spacing, stabilization, taper and deterministic
-variation shape the resulting sequence. The random seed is tied to the brush and
+variation shape stamped brushes. Swept dry media use neither spacing nor size
+or rotation variation. The random seed is tied to the brush and
 stroke so replay can reproduce its variation.
 
 Dabs and shared style data are collected into batches. The renderer receives those
@@ -91,6 +100,10 @@ that preview. Predictions are not saved into the document. When the view is
 zoomed out so far that a 4×4 or 2×2 block of document pixels covers at most
 half a surface pixel, dry preview paint is evaluated once per block; committed
 paint is always evaluated per pixel.
+Partial-opacity analytic prediction averages both current paint and immutable
+stroke-start paint over the same display footprint, then writes its full RGBA
+result. It cannot use the full-opacity pigment-contribution shortcut. Paper
+texture predictions retain their full-resolution evaluator.
 
 Replay uses the stored real samples and brush snapshot. Any brush change should
 therefore be tested both while drawing and after undo/redo or reopening a project.

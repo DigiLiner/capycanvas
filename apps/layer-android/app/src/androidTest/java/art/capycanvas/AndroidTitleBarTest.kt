@@ -853,7 +853,7 @@ class AndroidTitleBarTest {
         val sliders = workspace.getJSONObject("layout").array("panels").objects()
             .first { it.getString("id") == bands[0].getJSONObject("root").array("panels").getString(0) }
             .getJSONObject("content").array("tiles").objects().map { it.getJSONObject("control").getString("kind") }
-        assertTrue("Compact brush sliders: $sliders", "brush_size_slider" in sliders && "brush_opacity_slider" in sliders)
+        assertTrue("Compact brush sliders: $sliders", "brush_size_slider" in sliders && "brush_strength_slider" in sliders)
         assertFalse(workspace.getJSONObject("layout").getJSONObject("canvas_info").getBoolean("visible"))
         val tools = entries().filter { it.getJSONObject("item").getString("kind") == "tool" }
         assertEquals(8, tools.size)

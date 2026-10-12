@@ -168,6 +168,35 @@ fn toolbar_components_edit_shared_parameters_and_reject_obsolete_contexts() {
         .is_err(),
         "replacing a document invalidates otherwise identical targets"
     );
+    use layer_core::DefaultBrushPreset as P;
+    let binding = ToolbarNumericBinding::BrushStrength;
+    for (preset, id) in [(P::Pencil,"flow"),(P::Paintbrush,"flow"),(P::Eraser,"flow"),
+        (P::Smudge,"flow"),(P::CloneStamp,"flow"),(P::HealingBrush,"flow"),
+        (P::SpotHealingBrush,"flow"),(P::LiquifyPush,"strength")] {
+        s.dispatch(UiAction::SelectBrush { id:preset as u32 }).unwrap();
+        let field=binding.field(s.state()).unwrap();
+        assert_eq!((field.id,field.label.as_ref()),(id,"Strength"),"{preset:?}");
+        let context=s.state().toolbar_context();
+        let opacity=s.engine.configured_brush().opacity;
+        for value in [0.37,0.] {
+            s.dispatch(UiAction::ToolbarEdit {context,action:Box::new(binding.action(value))}).unwrap();
+            assert_eq!(binding.field(s.state()).unwrap().value,value,"{preset:?}");
+            let brush=s.engine.configured_brush();
+            assert_eq!(if id=="strength" {brush.deform.strength} else {brush.flow},value,"{preset:?}");
+            assert_eq!(brush.opacity,opacity,"{preset:?}: Strength preserves Opacity");
+            assert_eq!(context,s.state().toolbar_context());
+        }
+        for value in [f32::NAN,-0.01,1.01] {
+            assert!(s.dispatch(UiAction::ToolbarEdit {context,action:Box::new(binding.action(value))}).is_err());
+            assert_eq!(binding.field(s.state()).unwrap().value,0.);
+        }
+    }
+    let context=s.state().toolbar_context();
+    invoke(&mut s,CommandId::Fill);
+    assert!(binding.field(s.state()).is_none());
+    for context in [context,s.state().toolbar_context()] {
+        assert!(s.dispatch(UiAction::ToolbarEdit {context,action:Box::new(binding.action(0.4))}).is_err());
+    }
 }
 
 #[test]
@@ -268,7 +297,7 @@ fn toolbar_component_defaults_round_trip_on_supported_hosts() {
                     .map(|t| t.control)
                     .collect::<Vec<_>>(),
                 [ToolbarControl::BrushSizeSlider,
-                    ToolbarControl::ColorPicker, ToolbarControl::BrushOpacitySlider,
+                    ToolbarControl::ColorPicker, ToolbarControl::BrushStrengthSlider,
                     ToolbarControl::Command { command: CommandId::Undo }, ToolbarControl::Command { command: CommandId::Redo }]
             );
         }
@@ -297,6 +326,51 @@ fn toolbar_component_defaults_round_trip_on_supported_hosts() {
             )
             .is_err()
     );
+}
+
+#[test]
+fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
+    use layer_core::DefaultBrushPreset as P;
+    let mut s=session(Platform::Gtk);
+    for (preset,diameter,poses,block) in [
+        (P::Pencil,36f64,[[0.65f64,0.65],[1.,0.65],[4.8,1.2]],false),
+        (P::PointyPencil,18.,[[0.55,0.55],[0.9,0.5],[5.,0.8]],false),
+        (P::ShadingPencil,64.,[[0.28,0.28],[1.,0.55],[2.6,0.8]],false),
+        (P::Charcoal,48.,[[0.65,0.65],[1.,0.65],[2.,0.8]],false),
+        (P::Chalk,36.,[[0.55,0.55],[1.,0.8],[1.6,0.85]],true),
+        (P::PastelBlock,64.,[[0.55,0.65],[1.,0.65],[1.8,0.75]],true),
+        (P::Crayon,32.,[[0.65,0.65],[1.,0.7],[2.6,0.85]],false),
+    ] {
+        s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
+        let fields=&s.state().tool_settings;
+        let mut ids=fields.iter().map(|f|f.id).collect::<Vec<_>>();ids.sort();
+        assert_eq!(ids,["angle","contact_softness","flow","grain_depth","material_hardness","opacity","size"],"{preset:?}");
+        assert_eq!(fields.iter().find(|f|f.id=="angle").unwrap().label.as_ref(),"Tip angle");
+        assert_eq!(fields.iter().find(|f|f.id=="grain_depth").unwrap().numeric.max,2.);
+        let brush=s.engine.configured_brush();let dry=brush.contact.unwrap().dry.unwrap();
+        assert_eq!(dry.poses[1].radii[0].max(dry.poses[1].radii[1]),1.,"{preset:?}: 45° long axis");
+        let extent=poses.iter().map(|p|if block {p[0].hypot(p[1])} else {p[0].max(p[1])}).fold(0f64,f64::max);
+        for (pose,expected) in dry.poses.iter().zip(poses) {for axis in 0..2 {
+            assert!((f64::from(brush.diameter*pose.radii[axis])-diameter*expected[axis]/extent).abs()<2e-5,
+                "{preset:?}: full-pressure footprint axis{axis}");
+        }}
+        for (id,value) in [("contact_softness",0.12),("material_hardness",0.65),("grain_depth",2.)] {
+            s.dispatch(UiAction::SetToolSetting {id:id.into(),value}).unwrap();
+        }
+        let brush=s.engine.configured_brush();let edited=brush.contact.unwrap().dry.unwrap();
+        assert_eq!((edited.softness,edited.loading),(0.12,0.65));
+        assert_eq!(edited.poses,dry.poses);assert_eq!(brush.grain.as_ref().unwrap().depth,2.);
+        let before=brush.clone();
+        for (id,value) in [("grain_depth",2.01),("contact_softness",0.),("contact_softness",0.81),
+            ("material_hardness",1.01),("spacing",0.2),("size_jitter",0.2),("rotation_jitter",0.2),("hardness",0.2)] {
+            assert!(s.dispatch(UiAction::SetToolSetting {id:id.into(),value}).is_err(),"{preset:?}/{id}");
+            assert_eq!(s.engine.configured_brush(),&before);
+        }
+    }
+    s.dispatch(UiAction::SelectBrush {id:P::GPen as u32}).unwrap();
+    for id in ["spacing","size_jitter","rotation_jitter","hardness"] {
+        assert!(s.state().tool_settings.iter().any(|f|f.id==id),"legacy contact {id}");
+    }
 }
 
 #[test]
@@ -950,6 +1024,16 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
     assert_eq!(view.bookmarks.len(), 1);
     assert_eq!(view.bookmarks[0].value, 64.);
     assert!(view.bookmarks[0].selected);
+    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37),(ToolbarControl::BrushOpacitySlider,0.73)] {
+        s.dispatch(control.slider().unwrap().action(value)).unwrap();
+        s.dispatch(UiAction::ToolbarEdit {context,
+            action:Box::new(UiAction::ToggleSliderBookmark {control})}).unwrap();
+    }
+    for (control,value) in [(control,64.),(ToolbarControl::BrushStrengthSlider,0.37),(ToolbarControl::BrushOpacitySlider,0.73)] {
+        let bookmarks=s.state().toolbar_component(control).unwrap().bookmarks;
+        assert_eq!(bookmarks.len(),1);assert_eq!(bookmarks[0].value,value);
+        assert!(bookmarks[0].selected);
+    }
     let saved = serde_json::to_string(&s.state().settings).unwrap();
     let settings: Settings = serde_json::from_str(&saved).unwrap();
     settings.validate().unwrap();
@@ -991,6 +1075,13 @@ fn slider_bookmarks_round_trip_follow_presets_and_reject_stale_editors() {
             .bookmarks
             .is_empty()
     );
+    for control in [ToolbarControl::BrushStrengthSlider,ToolbarControl::BrushOpacitySlider] {
+        assert!(s.state().toolbar_component(control).unwrap().bookmarks.is_empty());
+    }
+    s.dispatch(UiAction::SelectBrush {id:context.brush}).unwrap();
+    for (control,value) in [(ToolbarControl::BrushStrengthSlider,0.37),(ToolbarControl::BrushOpacitySlider,0.73)] {
+        assert_eq!(s.state().toolbar_component(control).unwrap().bookmarks[0].value,value);
+    }
 }
 
 #[test]
@@ -998,6 +1089,7 @@ fn slider_bookmark_taps_are_nearby_bounded_and_choose_the_closest_mark() {
     for (control, value, neighbor) in [
         (ToolbarControl::BrushSizeSlider, 64., 80.),
         (ToolbarControl::BrushOpacitySlider, 0.5, 0.54),
+        (ToolbarControl::BrushStrengthSlider, 0.5, 0.54),
     ] {
         let numeric = control.slider().unwrap().numeric();
         let fill = |v| numeric.resolve(v, NumericOperation::Format).unwrap().fill;

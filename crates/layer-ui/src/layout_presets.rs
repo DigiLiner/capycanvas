@@ -111,7 +111,7 @@ impl WorkspacePreset {
     fn painter_layout(platform: crate::Platform) -> DockLayout {
         use crate::CommandId::*;
         use ToolbarControl::{
-            BrushOpacitySlider, BrushSizeSlider, Color, ColorPicker, Divider, Opacity,
+            BrushSizeSlider, BrushStrengthSlider, Color, ColorPicker, Divider, Opacity,
         };
         let command = |command| ToolbarControl::Command { command };
         let drawer = |panel| ToolbarControl::Panel { panel };
@@ -166,14 +166,14 @@ impl WorkspacePreset {
             };
         }
         let panel = layout
-            .add_toolbar(None, "Brush controls", &[BrushSizeSlider, BrushOpacitySlider])
+            .add_toolbar(None, "Brush controls", &[BrushSizeSlider, BrushStrengthSlider])
             .expect("built-in brush controls");
         let config = layout.panels.iter_mut().find(|p| p.id == panel).unwrap();
         config.tile_style = TileStyle::Medium;
         let opacity = config
             .tiles()
             .iter()
-            .find(|t| t.control == BrushOpacitySlider)
+            .find(|t| t.control == BrushStrengthSlider)
             .unwrap()
             .id;
         layout

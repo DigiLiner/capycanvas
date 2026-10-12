@@ -58,7 +58,9 @@ pub(crate) fn dry_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
     };
     let extent = poses.iter().map(|p| if corner > 0. { p.radii[0].hypot(p.radii[1]) }
         else { p.radii[0].max(p.radii[1]) }).fold(0_f32, f32::max);
-    let poses = poses.map(|mut p| { p.radii = p.radii.map(|v| v / extent); p });
+    let writing = poses[1].radii[0].max(poses[1].radii[1]);
+    let diameter = diameter * writing / extent;
+    let poses = poses.map(|mut p| { p.radii = p.radii.map(|v| v / writing); p });
     let minimum_size = match preset {
         ShadingPencil => 0.65, Charcoal => 0.55, Chalk|PastelBlock|Crayon => 0.75, _ => 0.15,
     };

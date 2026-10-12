@@ -58,6 +58,10 @@ latencies have their own limits under [Responsiveness](responsiveness.md).
 **Brush sizes.**
 
 - Sizes are document-pixel diameters at pressure 1. The UI allows 0.5–2048 px.
+- For dry media, Size is the long axis of the 45° writing pose at pressure 1.
+  Report tilt and physical contact dimensions; other poses can exceed Size.
+  Comparisons with the former maximum-pose convention must convert the number
+  to preserve the physical footprint. They do not qualify the new nominal size.
 - "Guaranteed" means every diameter up to that size meets the tier rate, with the
   preset's default spacing and settings.
 - Above the guaranteed size a brush may run slower. It must still draw correctly,

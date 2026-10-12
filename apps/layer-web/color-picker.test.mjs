@@ -28,7 +28,7 @@ export async function checkColorPicker({call,evaluate,settle}) {
   const picker='button[aria-label="Color Picker"]';
   const tile=await buttonPoint(picker);
   const order=await evaluate(`(()=>{const layout=layerApp.state().workspace.layout;return layout.panels.find(p=>p.content.tiles?.some(t=>t.control.kind==='brush_size_slider')).content.tiles.map(t=>t.control.kind==='command'?t.control.command:t.control.kind)})()`);
-  assert.deepEqual(order,['brush_size_slider','color_picker','brush_opacity_slider','undo','redo']);
+  assert.deepEqual(order,['brush_size_slider','color_picker','brush_strength_slider','undo','redo']);
   await tap(tile);await settle();assert.equal((await state()).layer_tools.tool,'pick_visible');
   await tap(tile);await settle();
   await wait('layerApp.state().customization.drawer?.compact');

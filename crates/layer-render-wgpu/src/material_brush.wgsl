@@ -312,6 +312,41 @@ fn replenished_reservoir_alpha(carried: f32, pickup: f32, exchange: f32) -> f32 
     return max(carried, mix(carried, pickup, exchange));
 }
 
+fn stroke_increment(previous: f32, next: f32) -> f32 {
+    let opacity = style.canvas_opacity.z;
+    return clamp(working_ratio(opacity * (next - previous), 1.0 - opacity * previous), 0.0, 1.0);
+}
+
+fn grouped_opacity() -> bool {
+    return style.canvas_opacity.z < 1.0
+        && (MATERIAL_OPERATION == OP_DEPOSIT || MATERIAL_OPERATION == OP_COVERAGE || MATERIAL_OPERATION == OP_CLONE);
+}
+
+fn deposit_unchanged(paint: vec4<f32>, background: vec4<f32>, pigment: vec3<f32>) -> bool {
+    if grouped_opacity() {
+        let source = select(vec4<f32>(pigment,1.0),vec4<f32>(0.0),style.operation.w!=0u);
+        let limit_color = background*(1.0-style.canvas_opacity.z)+source*style.canvas_opacity.z;
+        if paint.a!=limit_color.a { return false; }
+        return all(paint==stored_paint(limit_color));
+    }
+    return (style.operation.w!=0u && all(paint==vec4<f32>(0.0)))
+        || (style.operation.w==0u && paint.a==1.0 && all(paint.rgb==style.material_b.xyz));
+}
+
+fn grouped_deposit(result: vec4<f32>, background: vec4<f32>, pigment: vec3<f32>, alpha: f32) -> vec4<f32> {
+    let opacity = style.canvas_opacity.z;
+    if opacity<=0.0 { return result; }
+    if style.operation.w != 0u {
+        return result * (1.0-alpha) + background * ((1.0-opacity)*alpha);
+    }
+    if brush_normal() {
+        let source = select(vec4<f32>(pigment,1.0),vec4<f32>(pigment*background.a,background.a),style.color.a>0.5);
+        return mix(result,background*(1.0-opacity)+source*opacity,alpha);
+    }
+    let full = (result-background*(1.0-opacity))/opacity;
+    return mix(background,source_over(full,pigment,alpha),opacity);
+}
+
 struct SmudgeTrace {
     coordinate: vec2<f32>,
     influence: f32,
@@ -329,7 +364,7 @@ fn trace_smudge(initial: vec2<f32>, first: u32, count: u32) -> SmudgeTrace {
         if coverage <= 0.0 { continue; }
         let contact = clamp(
             coverage * max(style.material_b.x, dab.material.y)
-                * mix(0.65, 1.0, dab.flow),
+                * dab.flow,
             0.0,
             0.9999,
         );
@@ -337,12 +372,13 @@ fn trace_smudge(initial: vec2<f32>, first: u32, count: u32) -> SmudgeTrace {
         let distance_steps = length(dab.motion) / (diameter * 0.04);
         optical_depth += -log(1.0 - contact) * distance_steps;
         let pull = clamp(dab.material.y, 0.0, 1.0);
-        coordinate -= dab.motion * pull * coverage;
+        coordinate -= dab.motion * pull * coverage * dab.flow;
     }
     return SmudgeTrace(coordinate, 1.0 - exp(-optical_depth));
 }
 
 fn mix_smudged_material(original: vec4<f32>, dragged: vec4<f32>, influence: f32) -> vec4<f32> {
+    if influence <= 0.0 { return original; }
     let original_color = select(
         working_unassociate(dragged),
         working_unassociate(original),
@@ -397,9 +433,7 @@ fn watercolor_fragment(
                 strongest_request = requested;
                 pigment_color = dab.color.rgb;
             }
-            if requested > stroke_coverage {
-                stroke_coverage = requested;
-            }
+            stroke_coverage += (1.0 - stroke_coverage) * requested;
         }
 
         let trace_delta = trace_coordinate - dab.center;
@@ -425,11 +459,7 @@ fn watercolor_fragment(
     );
     let deposited_wetness = prior_wetness
         + (1.0 - prior_wetness) * water_charge;
-    let coverage_increment = clamp(
-        working_ratio(stroke_coverage - prior_coverage, 1.0 - prior_coverage),
-        0.0,
-        1.0,
-    );
+    let coverage_increment = stroke_increment(prior_coverage, stroke_coverage);
     var result = original;
     if working_has_color(coverage_increment) && style.operation.w == 0u {
         let dragged = watercolor_canvas_sample(trace_coordinate, style.material_b.z);
@@ -448,7 +478,7 @@ fn watercolor_fragment(
         let prior_pigment = prior_coverage * paint_load;
         let next_pigment = stroke_coverage * paint_load;
         let pigment = clamp(
-            working_ratio(next_pigment - prior_pigment, 1.0 - prior_pigment),
+            stroke_increment(prior_pigment, next_pigment),
             0.0,
             1.0,
         );
@@ -559,16 +589,10 @@ fn wet_fragment(
             0.0,
             1.0,
         );
-        if contact_uniform() {
-            let next_coverage = max(stroke_coverage, source_alpha);
-            source_alpha = clamp(
-                working_ratio(next_coverage - stroke_coverage, 1.0 - stroke_coverage),
-                0.0,
-                1.0,
-            );
+        if contact_uniform() || style.canvas_opacity.z < 1.0 {
+            let next_coverage = stroke_coverage + (1.0 - stroke_coverage) * source_alpha;
+            source_alpha = stroke_increment(stroke_coverage, next_coverage);
             stroke_coverage = next_coverage;
-        } else if MATERIAL_OPERATION != OP_DEPOSIT {
-            stroke_coverage = max(stroke_coverage, source_alpha);
         }
         batch_color = batch_color * (1.0 - source_alpha) + deposit_color(paint_color) * source_alpha;
         batch_alpha = source_alpha + batch_alpha * (1.0 - source_alpha);
@@ -605,9 +629,17 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
         } else {
             dragged = blurred_canvas_sample(trace.coordinate, style.material_b.z);
         }
+        var influence = trace.influence;
+        var coverage = 0.0;
+        if style.canvas_opacity.z < 1.0 {
+            var previous = dry_coverage(vec2<i32>(floor(fragment_position.xy)));
+            if style.canvas_opacity.w > 0.5 { previous = 0.0; }
+            coverage = previous + (1.0 - previous) * influence;
+            influence = stroke_increment(previous, coverage);
+        }
         return MaterialOutput(
-            mix_smudged_material(original, dragged, trace.influence),
-            vec4<f32>(0.0),
+            mix_smudged_material(original, dragged, influence),
+            vec4<f32>(coverage, 0.0, 0.0, 1.0),
             vec4<f32>(0.0),
         );
     }
@@ -625,9 +657,17 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
         );
     }
 
-    if MATERIAL_OPERATION == OP_DEPOSIT && contact_feature(64u,style.contact_a.z>0.5)
+    if (MATERIAL_OPERATION == OP_DEPOSIT || MATERIAL_OPERATION == OP_COVERAGE) && contact_feature(64u,style.contact_a.z>0.5)
         && contact_feature(8192u,style.material_a.w>0.5) {
         let range = material_sources.header.zw;
+        var paint = dry_original(vec2<i32>(floor(fragment_position.xy)));
+        let grouped = grouped_opacity();
+        var background = vec4<f32>(0.0);
+        if grouped { background = deposit_paint(dry_stroke_start(vec2<i32>(floor(fragment_position.xy)))); }
+        if MATERIAL_OPERATION == OP_DEPOSIT && contact_feature(4096u,style.material_a.x>0.0)
+            && !grouped && deposit_unchanged(paint,background,dabs[range.x].color.rgb) {
+            return MaterialOutput(paint,vec4<f32>(0.0),vec4<f32>(0.0));
+        }
         let field = contact_field(world);
         var dose = 0.0;
         for (var offset = 0u; offset < range.y; offset += 1u) {
@@ -635,8 +675,9 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
             dose += brush_footprint(dab,world,field)*dab.flow*dab.color.a;
         }
         let remaining = exp(-6.0*dose);
-        var paint = dry_original(vec2<i32>(floor(fragment_position.xy)));
-        if style.operation.w != 0u { paint *= remaining; }
+        if grouped && dose>0.0 {
+            paint = stored_paint(grouped_deposit(deposit_paint(paint),background,dabs[range.x].color.rgb,1.0-remaining));
+        } else if style.operation.w != 0u { paint *= remaining; }
         else if dose>0.0 {
             let alpha=1.0-remaining;
             let pigment=style.material_b.xyz;
@@ -649,7 +690,12 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
                     alpha+destination.a*(1.0-alpha)));
             }
         }
-        return MaterialOutput(paint,vec4<f32>(0.0),vec4<f32>(0.0));
+        var coverage = 0.0;
+        if MATERIAL_OPERATION == OP_COVERAGE {
+            let prior = select(dry_coverage(vec2<i32>(floor(fragment_position.xy))),0.0,style.canvas_opacity.w>0.5);
+            coverage = 1.0-(1.0-prior)*remaining;
+        }
+        return MaterialOutput(paint,vec4<f32>(coverage,0.0,0.0,1.0),vec4<f32>(0.0));
     }
 
     var result = dry_original(vec2<i32>(floor(fragment_position.xy)));
@@ -662,29 +708,18 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
     if style.canvas_opacity.w > 0.5 {
         stroke_coverage = 0.0;
     }
-    // Fully covered incoming pixels cannot receive more uniform pigment.
-    // Keep this outside the contact loop: a loop-carried early break produces
-    // dark contact seams on Adreno for large, multi-contact batches.
     let range = material_sources.header.zw;
-    let tooth = contact_paper(world);
-    if contact_uniform() && brush_normal() && !bristles_enabled() {
-        var ceiling = 1.0;
-        if contact_feature(1u, style.contact_a.x > 0.5) && range.y > 0u {
-            ceiling = dabs[range.x].invariants.z;
-            var response = 1.0;
-            if contact_feature(2u, style.contact_a.y > 0.0) && !contact_feature(64u,style.contact_a.z>0.5) {
-                let penetration = clamp(dabs[range.x].invariants.w * style.contact_c.x, 0.0, 1.0);
-                let threshold = 0.62 - penetration * 0.3;
-                let paper = smoothstep(threshold - 0.08, threshold + 0.08, tooth);
-                response *= mix(1.0, paper, style.contact_a.y);
-            }
-            ceiling *= min(response, 1.0);
-        }
-        if stroke_coverage >= ceiling {
-            return MaterialOutput(result, vec4<f32>(stroke_coverage, 0.0, 0.0, 1.0), vec4<f32>(0.0));
-        }
+    let grouped = grouped_opacity();
+    var background = vec4<f32>(0.0);
+    if grouped { background = deposit_paint(dry_stroke_start(state_coordinate)); }
+    if !grouped && contact_uniform() && brush_normal() && !bristles_enabled() && stroke_coverage >= 1.0 {
+        return MaterialOutput(result, vec4<f32>(stroke_coverage, 0.0, 0.0, 1.0), vec4<f32>(0.0));
     }
-    let telescoped = MATERIAL_OPERATION == OP_CLONE && contact_uniform() && brush_normal();
+    if MATERIAL_OPERATION == OP_DEPOSIT && grouped && style.material_a.w>0.5
+        && deposit_unchanged(result,background,dabs[range.x].color.rgb) {
+        return MaterialOutput(result,vec4<f32>(0.0),vec4<f32>(0.0));
+    }
+    let telescoped = !grouped && MATERIAL_OPERATION == OP_CLONE && contact_uniform() && brush_normal();
     var clone_source = vec4<f32>(0.0);
     if MATERIAL_OPERATION == OP_CLONE && !telescoped {
         let source = clone_source_at(fragment_position.xy);
@@ -692,6 +727,7 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
     }
     var deposited = false;
     let first_coverage = stroke_coverage;
+    let tooth = contact_paper(world);
     let field = contact_field_with_paper(world, tooth);
     for (var offset = 0u; offset < range.y; offset += 1u) {
         let dab = dabs[range.x + offset];
@@ -716,36 +752,56 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
         let selected = brush_selection_at(world);
         let requested_alpha = brush_alpha(dab,coverage/max(selected,0.000001))*selected;
         if telescoped {
-            stroke_coverage = max(stroke_coverage, requested_alpha);
+            stroke_coverage = max(stroke_coverage,requested_alpha);
             continue;
         }
         var source_alpha = requested_alpha;
-        if contact_uniform() {
-            if repaint { stroke_coverage = 0.0; }
-            let next_coverage = max(stroke_coverage, requested_alpha);
+        if grouped {
+            if MATERIAL_OPERATION == OP_CLONE && contact_uniform() {
+                let next = max(stroke_coverage,requested_alpha);
+                source_alpha = clamp(working_ratio(clone_source.a*(next-stroke_coverage),
+                    1.0-clone_source.a*stroke_coverage),0.0,1.0);
+                stroke_coverage = next;
+            } else if bristles_enabled() && contact_uniform() {
+                if repaint { stroke_coverage = 0.0; }
+                let next = max(stroke_coverage,source_alpha);
+                source_alpha = clamp(working_ratio(next-stroke_coverage,1.0-stroke_coverage),0.0,1.0);
+                stroke_coverage = next;
+            } else {
+                if MATERIAL_OPERATION == OP_CLONE { source_alpha *= clone_source.a; }
+                stroke_coverage += (1.0-stroke_coverage)*source_alpha;
+            }
+        } else if contact_uniform() {
+            if repaint && style.canvas_opacity.z == 1.0 { stroke_coverage = 0.0; }
+            let next_coverage = select(stroke_coverage + (1.0 - stroke_coverage) * requested_alpha,
+                max(stroke_coverage, requested_alpha), MATERIAL_OPERATION == OP_CLONE
+                    || (bristles_enabled() && style.canvas_opacity.z == 1.0));
             if MATERIAL_OPERATION == OP_CLONE {
                 source_alpha = clamp(
-                    working_ratio(
-                        clone_source.a * (next_coverage - stroke_coverage),
-                        1.0 - clone_source.a * stroke_coverage,
-                    ),
+                    stroke_increment(clone_source.a * stroke_coverage, clone_source.a * next_coverage),
                     0.0,
                     1.0,
                 );
             } else {
                 source_alpha = clamp(
-                    working_ratio(next_coverage - stroke_coverage, 1.0 - stroke_coverage),
+                    stroke_increment(stroke_coverage, next_coverage),
                     0.0,
                     1.0,
                 );
             }
             stroke_coverage = next_coverage;
-        } else if MATERIAL_OPERATION == OP_COVERAGE {
-            stroke_coverage = max(stroke_coverage, requested_alpha);
-        } else if MATERIAL_OPERATION == OP_CLONE {
-            source_alpha *= clone_source.a;
+        } else {
+            if MATERIAL_OPERATION == OP_CLONE { source_alpha *= clone_source.a; }
+            if MATERIAL_OPERATION == OP_COVERAGE || style.canvas_opacity.z < 1.0 {
+                let next_coverage = stroke_coverage + (1.0 - stroke_coverage) * source_alpha;
+                source_alpha = stroke_increment(stroke_coverage, next_coverage);
+                stroke_coverage = next_coverage;
+            }
         }
-        if style.operation.w != 0u { result *= 1.0 - source_alpha; }
+        if grouped && source_alpha>0.0 {
+            if !deposited { deposited = true; result = deposit_paint(result); }
+            result = grouped_deposit(result,background,select(pigment,clone_source.rgb,MATERIAL_OPERATION==OP_CLONE),source_alpha);
+        } else if style.operation.w != 0u { result *= 1.0 - source_alpha; }
         else if source_alpha > 0.0 {
             if !deposited {
                 deposited = true;
@@ -761,7 +817,7 @@ fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
     if telescoped && stroke_coverage > first_coverage {
         let source = clone_source_at(fragment_position.xy);
         let alpha = clamp(
-            working_ratio(source.a * (stroke_coverage - first_coverage), 1.0 - source.a * first_coverage),
+            stroke_increment(source.a * first_coverage, source.a * stroke_coverage),
             0.0,
             1.0,
         );
@@ -887,7 +943,7 @@ fn compute_display_color(@builtin(global_invocation_id) invocation: vec3<u32>) {
 }
 
 fn saturated_dry_coverage(p: vec2<i32>) -> f32 {
-    if MATERIAL_IN_PLACE && style.canvas_opacity.w < 0.5
+    if !grouped_opacity() && MATERIAL_IN_PLACE && style.canvas_opacity.w < 0.5
         && contact_uniform() && brush_normal() && !bristles_enabled() {
         return dry_coverage(p);
     }

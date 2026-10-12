@@ -764,7 +764,7 @@ workspace-tool-color-picker-description = Pilih warna kanvas dengan cincin pembe
 
 workspace-tool-opacity = Opasitas kuas
 
-workspace-tool-opacity-description = Sesuaikan kekuatan kuas saat ini
+workspace-tool-opacity-description = Batasi opasitas setiap goresan
 
 workspace-tool-size-slider = Penggeser ukuran kuas
 
@@ -772,7 +772,7 @@ workspace-tool-size-slider-description = Sesuaikan ukuran kuas langsung di bilah
 
 workspace-tool-opacity-slider = Penggeser opasitas kuas
 
-workspace-tool-opacity-slider-description = Sesuaikan opasitas kuas langsung di bilah alat
+workspace-tool-opacity-slider-description = Batasi opasitas setiap goresan
 
 workspace-tool-options = Opsi Alat
 
@@ -1175,3 +1175,5 @@ workspace-unreadable-name = Ruang kerja tidak dapat dibaca
 
 workspace-backup-saved = Cadangan ruang kerja disimpan.
 workspace-tool-description-waveform = Periksa warna dan kecerahan dari kiri ke kanan
+workspace-tool-strength-slider = Penggeser kekuatan
+workspace-tool-strength-slider-description = Atur kekuatan alat langsung di bilah alat

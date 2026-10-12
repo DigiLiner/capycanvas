@@ -3,7 +3,7 @@
 [Workspace and UI](README.md) · [Panel contract](panel-customization.md) ·
 [Numeric controls](numeric-controls.md) · [Drag convention](drag-and-reorder.md)
 
-Toolbars support **Brush size slider**, **Brush opacity slider**, and
+Toolbars support **Brush size slider**, **Strength slider**, **Brush opacity slider**, and
 **Tool Options**. Add them through Add Tools like ordinary tiles. Each has a
 stable tile identity; the entire component moves, copies, removes, docks, and
 participates in workspace undo/redo as a single item.
@@ -12,7 +12,7 @@ They are not title-bar items.
 
 ## Included workspaces
 
-Sketch centers size and opacity in a compact toolbar on the left edge. Photo appends
+Sketch centers Size and Strength in a compact toolbar on the left edge. Photo appends
 Tool Options to its top commands toolbar, where it takes the remaining lane width.
 Paint uses neither. See [default workspaces](default-workspaces.md#arrangements).
 
@@ -20,13 +20,13 @@ Paint uses neither. See [default workspaces](default-workspaces.md#arrangements)
 
 Sliders occupy one lane and prefer four tiles of length, including tile gaps.
 They work horizontally or vertically; vertical values increase upward. They
-follow the active tool’s size and opacity settings and disable when unavailable.
+follow the active tool’s Size, Strength or Opacity setting and disable when unavailable.
 Multiple instances and existing panels share the same state and preset memory.
-Size tracks widen toward larger values; opacity tracks show transparency over
+Size tracks widen toward larger values; percentage tracks use a gradient over
 a checkerboard. Both orientations use equal end padding. Every host draws
 GTK's track: 6px end insets, rounded tapered ends, fills from the theme text
 color (22% for size; 8% base, 20% checker cells and a 0–65% gradient for
-opacity) and a 12×28px squircle thumb with a 60% text border. The tracks have no
+percentage controls) and a 12×28px squircle thumb with a 60% text border. The tracks have no
 persistent numeric readout. Dragging opens a rounded floating stamp preview
 beside the slider, updates it continuously, and
 closes it on release or cancellation. A tap keeps the preview open until an
@@ -37,7 +37,10 @@ and units are vertically centered beside it. The header fade scales with the
 tile (65px on medium tiles) from 50% panel color to transparent. Size uses
 the current tip at its document-pixel diameter, filling the popup to its rounded
 edges for oversized tips. A background fade keeps the header legible;
-opacity uses a fixed fitted stamp. The tip mask, aspect, rotation, hardness and
+Opacity uses a fixed fitted stamp with the selected alpha. Strength uses the
+fitted tip and value caption without applying Opacity to its preview: Strength
+controls deposition or tool action, while Opacity limits a stroke's contribution.
+The tip mask, aspect, rotation, hardness and
 grain texture come from the configured brush.
 
 The preview's plus button bookmarks the value for that brush preset; the minus
@@ -46,7 +49,8 @@ track, placed inside the wider handle when selected. Tapping near a mark
 recalls its exact value; dragging retains the full range without magnetic
 snapping. Bookmarks persist in application settings and appear in every copy
 of that slider. Size uses the shared logarithmic mapping and snaps to whole
-pixels above 32. Opacity uses whole percentages. Changes to brush values or
+pixels above 32. Strength and Opacity use whole percentages and separate bookmark
+collections. Changes to brush values or
 bookmarks do not create workspace-layout history entries.
 
 ## Contextual options

@@ -10,7 +10,7 @@ pub(super) struct DeferredEdit {
 }
 
 fn configures_brush(action: &UiAction) -> bool {
-    matches!(action, UiAction::SetBrushSize { .. } | UiAction::SetBrushOpacity { .. }
+    matches!(action, UiAction::SetBrushSize { .. } | UiAction::SetBrushOpacity { .. } | UiAction::SetBrushStrength { .. }
         | UiAction::SetColor { .. } | UiAction::Color { .. }
         | UiAction::SetToolSetting { .. } | UiAction::StepToolSetting { .. }
         | UiAction::ResetToolSetting { .. })

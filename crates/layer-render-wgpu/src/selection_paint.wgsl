@@ -41,16 +41,14 @@ fn paint(@builtin(global_invocation_id) id: vec3<u32>) {
         let index = id.y*256u+id.x*4u+sample;
         let base = before_at(p);
         var value = footprint[index];
-        let dry_flow = contact_feature(64u,style.contact_a.z>0.5) && !contact_uniform();
-        let flowing = params.mode == 2u && params.uniform_stroke == 0u && !dry_flow;
-        if params.fresh != 0u { value = select(0.,base,flowing); }
+        let flowing = params.uniform_stroke == 0u;
+        if params.fresh != 0u { value = 0.; }
         let field = contact_field(p);
         for(var i=0u;i<params.count;i++) {
             let d = contacts.values[i];
             let coverage = brush_footprint(d,p,field);
             let alpha = brush_alpha(d,coverage);
-            if flowing { value = mix(value,params.gray,alpha*params.opacity); }
-            else if dry_flow {
+            if flowing {
                 value += (1.-value)*alpha;
             }
             else { value = max(value,alpha); }
@@ -65,12 +63,11 @@ fn paint(@builtin(global_invocation_id) id: vec3<u32>) {
         }
         if params.enclosed != 0u {
             let area = enclosed_at(p) * gradient_alpha;
-            if flowing { value = mix(value,gray,area*params.opacity); }
-            else { value = max(value,area); }
+            value = max(value,area);
         }
         footprint[index] = value;
         var result = value;
-        if params.mode == 2u && !flowing { result = mix(base,gray,value*params.opacity); }
+        if params.mode == 2u { result = mix(base,gray,value*params.opacity); }
         if params.mode == 0u { result = base+(1.-base)*value*params.opacity; }
         if params.mode == 1u { result = base*(1.-value*params.opacity); }
         packed |= u32(round(clamp(result,0.,1.)*255.)) << (sample*8u);

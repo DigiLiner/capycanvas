@@ -29,8 +29,8 @@ impl<K: PartialEq> CachedBinding<K> {
 }
 
 /// A pointwise page's material inputs: the buffers, then the nine
-/// neighborhood slots and the stroke coverage it binds.
-pub(super) type MaterialInput = CachedBinding<([wgpu::Buffer; 2], [wgpu::TextureView; 10])>;
+/// neighborhood slots, stroke coverage and starting paint it binds.
+pub(super) type MaterialInput = CachedBinding<([wgpu::Buffer; 2], [wgpu::TextureView; 11])>;
 pub(super) type MaterialOutput =
     CachedBinding<(wgpu::Buffer, wgpu::TextureView, Option<wgpu::TextureView>, bool, Option<wgpu::Buffer>)>;
 

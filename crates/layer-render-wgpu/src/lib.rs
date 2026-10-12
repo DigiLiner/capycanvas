@@ -558,15 +558,20 @@ struct BrushPassPlan {
 
 impl BrushPassPlan {
     fn for_style(style: &layer_render::DabStyle) -> Self {
+        let grouped = pointwise(style) && style.opacity < 1.;
         let state = BrushStateTargets {
             // Watercolor's physical shader always reads/writes stroke coverage,
             // independently of the ordinary brush accumulation preference.
-            coverage: style.rendering.accumulation == BrushAccumulation::Uniform
+            coverage: (style.rendering.accumulation == BrushAccumulation::Uniform
+                && (!grouped || style.contact.is_some_and(|c| c.bristles.is_some())
+                    || matches!(style.execution, BrushExecution::Clone | BrushExecution::Heal | BrushExecution::SpotHeal)))
+                || (style.opacity < 1. && !grouped)
                 || style.rendering.edge_after_stroke
                 || style.execution == BrushExecution::Watercolor,
             watercolor_wetness: style.execution == BrushExecution::Watercolor,
         };
         let needs_destination = style.execution != BrushExecution::Dry
+            || grouped
             || style.alpha_locked
             || style.rendering.blend_mode != BrushBlendMode::Normal
             || state.coverage;
@@ -719,6 +724,7 @@ struct LayerPage {
     secondary: Option<PageSurface>,
     active_secondary: bool,
     primary_needs_clear: bool,
+    stroke_start: Option<(StrokeId, PageSurface)>,
 }
 
 struct PageSurface {
@@ -753,6 +759,14 @@ impl PageSurface {
 }
 
 impl LayerPage {
+    fn clear_stroke_start(&mut self) {
+        if self.stroke_start.take().is_some() {
+            for surface in std::iter::once(&self.primary).chain(self.secondary.as_ref()) {
+                surface.material_input.clear();
+                surface.material_in_place_input.clear();
+            }
+        }
+    }
     fn surface(&self, secondary: bool) -> &PageSurface {
         if secondary {
             self.secondary
@@ -1694,6 +1708,7 @@ impl WgpuRasterizer {
             secondary: None,
             active_secondary: false,
             primary_needs_clear: true,
+            stroke_start: None,
         }
     }
 
@@ -1793,6 +1808,24 @@ impl WgpuRasterizer {
             }
         });
         self.prepare_raw_neighborhood(batch.target, coordinate, offsets, preview, encoder)?;
+        if pointwise(&batch.style) && batch.style.opacity < 1. {
+            let committed_start = self.paint_layers.iter().find(|l| l.id == batch.target)
+                .and_then(|l| l.pages.iter().find(|p| p.coordinate == coordinate))
+                .and_then(|p| p.stroke_start.as_ref()).is_some_and(|(id, _)| *id == batch.stroke_id);
+            let page = if preview {
+                (!committed_start).then(|| self.preview_pages.iter_mut().find(|p| p.coordinate == coordinate)).flatten()
+            } else {
+                self.paint_layers.iter_mut().find(|l| l.id == batch.target)
+                    .and_then(|l| l.pages.iter_mut().find(|p| p.coordinate == coordinate))
+            };
+            if let Some(page) = page
+                && page.stroke_start.as_ref().is_none_or(|(id, _)| *id != batch.stroke_id) {
+                let start = create_page_surface(&self.device, &self.texture_layout, &self.sampler,
+                    [PAGE_SIZE; 2], self.device.working_format(), "stroke starting paint");
+                page.active().copy_to(&start, encoder);
+                page.stroke_start = Some((batch.stroke_id, start));
+            }
+        }
         let layer = self
             .paint_layers
             .iter()
@@ -1833,7 +1866,11 @@ impl WgpuRasterizer {
                 .active()
                 .view
         } else if pointwise(&batch.style) {
-            &self.empty_view
+            let start = layer.pages.iter().find(|p| p.coordinate == coordinate)
+                .and_then(|p| p.stroke_start.as_ref()).filter(|(id, _)| *id == batch.stroke_id)
+                .or_else(|| preview.then(|| self.preview_page(coordinate))
+                    .flatten().and_then(|p| p.stroke_start.as_ref()));
+            if batch.style.opacity<1. { start.map_or(views[4], |(_, start)| &start.view) } else { &self.empty_view }
         } else {
             &self.reservoir.active().view
         };
@@ -1856,7 +1893,7 @@ impl WgpuRasterizer {
             let cache = coverage_page.or_else(|| color_page.map(|p| p.active()))
                 .map(|p| if in_place { &p.material_in_place_input } else { &p.material_input })
                 .unwrap_or(&self.empty_material_input);
-            let bound = std::array::from_fn(|i| views.get(i).map_or(coverage, |view| *view).clone());
+            let bound = std::array::from_fn(|i| match i { 9 => coverage, 10 => auxiliary, _ => views[i] }.clone());
             Ok(cache.get(([self.dab_buffer.clone(), self.dry_records.binding().buffer.clone()], bound), create))
         } else { Ok(create()) }
     }
@@ -1994,12 +2031,13 @@ impl WgpuRasterizer {
                     // canvas state before composition reads it.
                     page.coordinate = coordinate;
                     page.active_secondary = false;
+                    page.clear_stroke_start();
                 } else {
                     let page = LayerPage {
                         coordinate,
                         primary: create_page_surface(&self.device, &self.texture_layout, &self.sampler,
                             [PAGE_SIZE >> self.preview_level; 2], self.device.working_format(), "prediction page"),
-                        secondary: None, active_secondary: false, primary_needs_clear: true,
+                        secondary: None, active_secondary: false, primary_needs_clear: true, stroke_start: None,
                     };
                     self.preview_pages.push(page);
                 }
@@ -2159,6 +2197,9 @@ impl WgpuRasterizer {
             .saturating_add(self.selection_previews.buffer.as_ref().map_or(0, |b|b.size()*2))
             .saturating_add(self.color_sampler.storage_bytes())
             .saturating_add(self.regions.as_ref().map_or(0, |r| r.storage_bytes()));
+        self.metrics.paint_state_storage_bytes += self.paint_layers.iter().flat_map(|l| &l.pages)
+            .chain(&self.preview_pages).filter_map(|p| p.stroke_start.as_ref())
+            .map(|(_, start)| start.storage_bytes()).sum::<u64>();
         self.metrics.paint_state_storage_bytes += self.changed_cells.as_ref().map_or(0, changed_cells::ChangedCells::storage_bytes);
         self.metrics.retouch_storage_bytes =
             self.retouch.as_ref().map_or(0, |retouch| retouch.storage_bytes());
@@ -2212,7 +2253,6 @@ impl WgpuRasterizer {
             let range = batch.first_dab as usize..(batch.first_dab + batch.dab_count) as usize;
             dry_material::prepare_geometry(&batch.style, &mut self.dab_upload[range.clone()]);
             dry_material::prepare_colors(&batch.style, self.device.working_space(), &mut self.dab_upload[range.clone()]);
-            dry_material::prepare_film(&batch.style, &mut self.dab_upload[range]);
         }
         for (batch, tiles) in packet.dab_batches.iter().zip(batch_tiles) {
             if batch.dab_count == 0 || !pointwise(&batch.style)
@@ -2243,8 +2283,7 @@ impl WgpuRasterizer {
             let batch = &packet.dab_batches[index];
             let block = if self.compute_dry_material(batch) { self.dry_material_block(batch) } else { 1 };
             let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device);
-            if batch.style.execution==BrushExecution::Dry && batch.style.contact.is_some_and(|c|c.dry.is_some())
-                && batch.style.rendering.accumulation==BrushAccumulation::Flow
+            if batch.style.execution==BrushExecution::Dry && !batch.style.contact.is_some_and(|c|c.bristles.is_some())
                 && batch.style.rendering.blend_mode==BrushBlendMode::Normal
                 && !batch.style.alpha_locked && batch.style.selection.is_none() && batch.dab_count>0 {
                 let source=&packet.dabs[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize];
@@ -3993,7 +4032,7 @@ impl WgpuRasterizer {
         let mut preview_contribution=new_preview_from_persistent && self.scale_display.as_ref().is_some_and(|cache|
                 new_preview_layer.is_some_and(|id|cache.native_preview_input(packet,id)))
             && packet.dab_batches.iter().filter(|b|b.kind==DabBatchKind::Preview && b.dab_count!=0)
-                .all(|b|(dry_material::display_preview_eligible(&b.style) || dry_material::native_dry_preview_eligible(&b.style)) && b.style.mode==DabMode::Paint
+                .all(|b|b.style.opacity==1. && (dry_material::display_preview_eligible(&b.style) || dry_material::native_dry_preview_eligible(&b.style)) && b.style.mode==DabMode::Paint
                     && b.style.blend_space==packet.blend_space
                     && packet.scene.color_mode(b.target)==layer_core::color::LayerColorMode::FullColor);
         if preview_contribution {new_preview_requires_base=false;}
@@ -4293,6 +4332,7 @@ impl WgpuRasterizer {
         if let Some(layer_id) = new_preview_layer {
             for page in &mut self.preview_pages {
                 page.active_secondary = false;
+                page.clear_stroke_start();
             }
             for page in &mut self.preview_coverage_pages {
                 page.active_secondary = false;
@@ -4869,7 +4909,7 @@ impl StyleGpu {
         let (grain_cos, grain_sin) = grain
             .map(|grain| (grain.rotation_radians.cos(), grain.rotation_radians.sin()))
             .unwrap_or((1.0, 0.0));
-        let mut result = Self::plain(extent, [0.0; 4], 1.0);
+        let mut result = Self::plain(extent, [0.0; 4], style.opacity);
         result.grain = [
             grain.map_or(1.0, |grain| grain.scale),
             grain.map_or(0.0, |grain| grain.depth),
@@ -4892,7 +4932,7 @@ impl StyleGpu {
             style.wet_mix.amount_of_paint,
             style.wet_mix.density,
             style.wet_mix.wetness,
-            style.wet_mix.dilution,
+            if style.execution == BrushExecution::Dry { 0. } else { style.wet_mix.dilution },
         ];
         result.material_b = [
             style.wet_mix.attack,
@@ -5123,7 +5163,7 @@ fn create_material_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let storage = wgpu::BufferBindingType::Storage { read_only: true };
     let entries = (0..12).map(|binding| match binding {
         9 => bindings::buffer(9, stages, storage, false, None),
-        _ => bindings::texture(binding, stages, binding == 4 || binding == 10),
+        _ => bindings::texture(binding, stages, binding == 4 || binding == 10 || binding == 11),
     })
     .chain([bindings::buffer(12, stages, wgpu::BufferBindingType::Uniform, true, NonZeroU64::new(160))])
     .collect::<Vec<_>>();
@@ -6146,6 +6186,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
 
     pub(crate) fn test_style(execution: BrushExecution) -> DabStyle {
         DabStyle {
+            opacity: 1.,
             alpha_locked: false,
             selection: None,
             tip: BrushTip::AnalyticEllipse,

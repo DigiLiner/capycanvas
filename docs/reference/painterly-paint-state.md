@@ -14,11 +14,12 @@ explicit stroke start/end boundaries. `layer-render-wgpu` owns every canvas
 sample, transfer, coverage update, reservoir exchange, watercolor wetness write,
 and edge operation.
 
-This milestone implements three bounded kinds of state:
+The renderer implements these bounded kinds of state:
 
 | State | Storage | Lifetime | Current use |
 | --- | --- | --- | --- |
 | Stroke coverage | two sparse R32Float 256×256 pages per touched color page | keyed to layer + stroke ID | uniform accumulation |
+| Starting paint | one immutable sparse RGBA page per touched color page | keyed to layer + stroke ID | partial-opacity pointwise paint, erase and retouch |
 | Watercolor wetness | one logical sparse R32Float channel, ping-ponged during updates; saved as U8/U16 tiles | persistent until merge | localized transport, material identity, and live edges |
 | Wet brush reservoir | two 64×64 RGBA8 textures | active wet stroke; reused | spatial carried RGB + paint amount for oils/gouache |
 
@@ -34,8 +35,8 @@ layer is therefore not classified as watercolor.
 `DabBatch` now includes `stroke_id`, `stroke_start`, and `stroke_end`. This is the
 only lifecycle contract needed by the renderer:
 
-- `stroke_start` initializes a wet reservoir when needed and lazily resets
-  coverage pages;
+- `stroke_start` initializes a wet reservoir when needed, releases starting-paint
+  pages and lazily resets coverage pages;
 - every persistent batch processes only newly emitted contacts; wet batches
   carry the reservoir forward, while smudge and liquify advance their own
   ordered canvas feedback;
@@ -57,9 +58,9 @@ contacts in submission order:
 
 ```text
 coverage       = tip × grain
-requested      = coverage × flow × opacity × density × attack × remaining_charge
-source alpha   = requested                                      (flow mode)
-source alpha   = alpha increment to max(stroke coverage, requested) (uniform mode)
+requested      = coverage × strength × color alpha × density × attack × remaining_charge
+next coverage  = coverage_so_far + (1-coverage_so_far) × requested
+source alpha   = opacity × (next coverage-coverage_so_far) / (1-opacity × coverage_so_far)
 pickup         = source(position - motion × pull), optionally blurred
 carried paint  = spatial reservoir sample (wet only)
 paint color    = mix(pickup, carried paint) in the brush's Color mixing space
@@ -98,17 +99,18 @@ channel stores water/membership. It never reads the composite or another layer
 and does not allocate a brush reservoir. Drying is explicit: merge the wet
 layer down and continue on a fresh layer.
 
-Each stroke uses uniform coverage, so overlapping contacts contribute only the
-increment required to reach the requested opacity. One motion-directed
+Each stroke retains accumulated coverage, so overlapping contacts contribute
+only the increment permitted by the stroke's Opacity ceiling. Strength changes
+pigment application without lowering that ceiling. One motion-directed
 backtrace samples the same layer as newly covered pixels arrive, mixes straight
 color in the brush's Color mixing space, preserves existing alpha, then deposits
-selected pigment. This gives same-layer wet interaction without repeated-dab
-darkening, alpha holes, or carried silhouettes.
+selected pigment. This gives same-layer wet interaction without alpha holes or
+carried silhouettes, while repeated passes build pigment within the ceiling.
 
 The built-in watercolor tip has a pinhole-free but deliberately varied
 low-frequency interior and a ragged perimeter. Deterministic random rotation
-and small symmetric size jitter are common contact settings available to every
-brush, not watercolor-only behavior.
+and small symmetric size jitter remain contact settings for stamped brushes.
+Swept dry media bypass both variations.
 The tip/texture contract remains general enough for a later contact compiler to
 select masks or transforms from direction, direction change, speed, pressure,
 tilt, or twist without changing the raster interface.
@@ -144,14 +146,19 @@ step, document-owned paper texture, or Gaussian blur.
 
 ## Uniform coverage and edges
 
-Uniform accumulation stores maximum requested coverage for the current stroke.
+Uniform accumulation stores raw contact coverage for the current stroke.
+Ordinary drawing contacts combine requests as `c1=c0+(1-c0)*request`; Uniform
+retouching and bristles retain their maximum-coverage response.
+Uniform retouching multiplies raw coverage by
+the sampled source alpha, so repeated contacts preserve source transparency.
 For a pixel with old coverage `c0` and new target `c1`, the source-over alpha is:
 
 ```text
 increment = (c1 - c0) / (1 - c0)
 ```
 
-This reaches `c1` without repeated overlaps darkening the stroke. Coverage
+This reaches `c1` without applying already accumulated coverage twice. Stroke
+Opacity limits the resulting contribution over the starting paint. Coverage
 pages remember their owning stroke ID and clear lazily when another stroke first
 touches them; there is no canvas-wide reset.
 

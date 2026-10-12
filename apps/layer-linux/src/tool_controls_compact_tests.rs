@@ -44,8 +44,8 @@ fn assert_spacing(panel: &gtk::Widget, context: &str) {
     }
     match context {
         "painting" | "wet-mixing" => {
-            assert_gap(panel, "tool-setting-size", "tool-setting-opacity", 4., false);
-            assert_gap(panel, "tool-setting-opacity", "tool-setting-flow", 4., false);
+            assert_gap(panel, "tool-setting-size", "tool-setting-flow", 4., false);
+            assert_gap(panel, "tool-setting-flow", "tool-setting-opacity", 4., false);
         }
         "fill" | "enclose-fill" | "auto-select" => {
             assert_gap(panel, "tool-setting-gap_closing", "tool-setting-expansion", 4., false);

@@ -287,7 +287,7 @@ impl SelectionPainter {
             },
             0,
             u32::from(update.style.rendering.accumulation == BrushAccumulation::Uniform),
-            update.opacity.to_bits(),
+            (update.opacity * update.style.opacity).to_bits(),
             update.gray.to_bits(),
             u32::from(update.enclosed.is_some()),
             0,

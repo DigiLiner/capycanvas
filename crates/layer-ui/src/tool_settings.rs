@@ -171,6 +171,17 @@ struct Definition {
     field: fn(&mut BrushSnapshot) -> Option<&mut f32>,
 }
 
+impl Definition {
+    fn numeric(&self, brush: &BrushSnapshot) -> NumericControl {
+        let mut numeric = (self.numeric)();
+        if self.id == "grain_depth" && brush.contact.is_some_and(|c| c.dry.is_some()) {
+            numeric.max = 2.;
+            numeric.soft_max = 2.;
+        }
+        numeric
+    }
+}
+
 pub(crate) fn mixes_color(b: &BrushSnapshot) -> bool {
     matches!(
         b.execution_class(),
@@ -214,18 +225,25 @@ const DEFINITIONS: &[Definition] = &[
         field: |b| Some(&mut b.diameter),
     },
     Definition {
+        id: "flow",
+        label: MessageId::TOOL_SETTING_STRENGTH,
+        group: None,
+        numeric: NumericControl::percent,
+        field: |b| (b.execution != BrushExecution::Liquify).then_some(&mut b.flow),
+    },
+    Definition {
+        id: "strength",
+        label: MessageId::TOOL_SETTING_STRENGTH,
+        group: None,
+        numeric: NumericControl::percent,
+        field: |b| (b.execution == BrushExecution::Liquify).then_some(&mut b.deform.strength),
+    },
+    Definition {
         id: "opacity",
         label: MessageId::TOOL_SETTING_OPACITY,
         group: None,
         numeric: NumericControl::percent,
-        field: |b| Some(&mut b.opacity),
-    },
-    Definition {
-        id: "flow",
-        label: MessageId::TOOL_SETTING_FLOW,
-        group: None,
-        numeric: NumericControl::percent,
-        field: |b| (b.execution != BrushExecution::Liquify).then_some(&mut b.flow),
+        field: |b| (b.execution != BrushExecution::Liquify).then_some(&mut b.opacity),
     },
     Definition {
         id: "hardness",
@@ -245,7 +263,7 @@ const DEFINITIONS: &[Definition] = &[
             soft_max: 1.0,
             ..NumericControl::percent()
         },
-        field: |b| Some(&mut b.spacing),
+        field: |b| (!b.contact.is_some_and(|c| c.dry.is_some())).then_some(&mut b.spacing),
     },
     Definition {
         id: "angle",
@@ -265,14 +283,31 @@ const DEFINITIONS: &[Definition] = &[
         label: MessageId::TOOL_SETTING_SIZE_JITTER,
         group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
         numeric: NumericControl::percent,
-        field: |b| Some(&mut b.shape.size_jitter),
+        field: |b| (!b.contact.is_some_and(|c| c.dry.is_some())).then_some(&mut b.shape.size_jitter),
     },
     Definition {
         id: "rotation_jitter",
         label: MessageId::TOOL_SETTING_ROTATION_JITTER,
         group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
         numeric: NumericControl::percent,
-        field: |b| Some(&mut b.shape.rotation_jitter),
+        field: |b| (!b.contact.is_some_and(|c| c.dry.is_some())).then_some(&mut b.shape.rotation_jitter),
+    },
+    Definition {
+        id: "contact_softness",
+        label: MessageId::TOOL_SETTING_CONTACT_SOFTNESS,
+        group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
+        numeric: || NumericControl {
+            min: 0.005, soft_min: 0.005, max: 0.8, soft_max: 0.2,
+            ..NumericControl::percent()
+        },
+        field: |b| b.contact.as_mut()?.dry.as_mut().map(|d| &mut d.softness),
+    },
+    Definition {
+        id: "material_hardness",
+        label: MessageId::TOOL_SETTING_MATERIAL_HARDNESS,
+        group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
+        numeric: NumericControl::percent,
+        field: |b| b.contact.as_mut()?.dry.as_mut().map(|d| &mut d.loading),
     },
     Definition {
         id: "grain_depth",
@@ -373,13 +408,6 @@ const DEFINITIONS: &[Definition] = &[
         field: |b| b.transport.as_mut().map(|t| &mut t.water_load),
     },
     Definition {
-        id: "strength",
-        label: MessageId::TOOL_SETTING_STRENGTH,
-        group: Some(MessageId::TOOL_SETTING_GROUP_LIQUIFY),
-        numeric: NumericControl::percent,
-        field: |b| (b.execution == BrushExecution::Liquify).then_some(&mut b.deform.strength),
-    },
-    Definition {
         id: "distortion",
         label: MessageId::TOOL_SETTING_DISTORTION,
         group: Some(MessageId::TOOL_SETTING_GROUP_LIQUIFY),
@@ -409,7 +437,7 @@ pub(crate) fn controls(brush: &BrushSnapshot, localizer: &Localizer) -> Vec<Tool
                 label: localizer.text(d.label),
                 label_id: d.label,
                 group: d.group.map(|id| localizer.text(id)).unwrap_or_else(|| Arc::from("")),
-                numeric: (d.numeric)(),
+                numeric: d.numeric(&brush),
                 value: *(d.field)(&mut brush)?,
             })
         })
@@ -437,7 +465,7 @@ pub(crate) fn edit_value(brush: &BrushSnapshot, id: &str, value: f32) -> Result<
         .iter()
         .find(|d| d.id == id)
         .ok_or("Unknown tool setting")?;
-    (d.numeric)().validate(value, d.label)?;
+    d.numeric(brush).validate(value, d.label)?;
     let mut next = brush.clone();
     *(d.field)(&mut next).ok_or("This setting is not used by the selected tool")? = value;
     next.validate().map_err(|e| e.to_string())?;

@@ -22,6 +22,7 @@ fn shader_destination(target: Target) -> String {
         @group(0) @binding(1) var material_color_output: texture_storage_2d<rgba32float, {access}>;
         fn dry_original(p: vec2<i32>) -> vec4<f32> {{ return textureLoad({original}); }}
         fn dry_coverage(p: vec2<i32>) -> f32 {{ return textureLoad(stroke_coverage_texture, p, 0).r; }}
+        fn dry_stroke_start(p: vec2<i32>) -> vec4<f32> {{ return textureLoad(reservoir_texture,p,0); }}
         fn store_display_color(pixel:vec2<u32>,color:vec4<f32>) {{textureStore(material_color_output,vec2<i32>(pixel),color);}}")
 }
 
@@ -85,31 +86,6 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
             d.dab.material=[-v[0],-v[1],scaled[0]+scaled[1],scaled[0]-scaled[1]]
                 .map(|v|if v.abs()<0.000001 {0.} else {v.recip()});
         }
-    }
-}
-
-/// Bound the incoming pigment film; the shader applies stationary paper per pixel.
-pub(super) fn prepare_film(style: &layer_render::DabStyle, dabs: &mut [DabGpu]) {
-    let Some(contact) = style.contact else { return };
-    if style.rendering.accumulation != BrushAccumulation::Uniform { return; }
-    let mut ceiling = dabs.iter()
-        .map(|d| (d.dab.flow * d.dab.color_rgba_linear[3]).clamp(0., 1.))
-        .fold(0_f32, f32::max);
-    if contact.depletion > 0. {
-        let distance = dabs.iter()
-            .map(|d| d.dab.contact[2].min(d.dab.previous_contact[2]))
-            .fold(f32::INFINITY, f32::min).max(0.);
-        let load = (-contact.depletion * distance).exp();
-        let factor = 1. - 0.85 * (1. - contact.fiber_strength) * (1. - load);
-        // Round upward for CPU/GPU exp and contraction differences.
-        ceiling = (ceiling * factor + 0.000002).min(1.);
-    }
-    let pressure = dabs.iter()
-        .map(|d| d.dab.contact[0].max(d.dab.previous_contact[0]))
-        .fold(0_f32, f32::max).clamp(0., 1.);
-    for dab in dabs {
-        dab.invariants[2] = ceiling;
-        dab.invariants[3] = pressure;
     }
 }
 
@@ -371,7 +347,7 @@ impl WgpuRasterizer {
 
     pub(super) fn compact_preview_contribution(&self, batch: &DabBatch) -> bool {
         batch.kind == DabBatchKind::Preview && self.preview_contribution
-            && batch.style.mode == DabMode::Paint
+            && batch.style.mode == DabMode::Paint && batch.style.opacity == 1.
             && ((self.preview_level > 0 && display_preview_eligible(&batch.style)) || native_dry_preview_eligible(&batch.style))
     }
 
@@ -463,7 +439,7 @@ pub(super) fn display_preview_eligible(style: &layer_render::DabStyle) -> bool {
 }
 
 pub(super) fn native_dry_preview_eligible(style: &layer_render::DabStyle) -> bool {
-    style.execution == BrushExecution::Dry && dry_material_compute_eligible(style)
+    style.execution == BrushExecution::Dry && style.opacity == 1. && dry_material_compute_eligible(style)
         && style.contact.is_some_and(|c| c.dry.is_some()) && contact_flags(style.contact) & !(67|2048|4096) == 0
         && style.rendering.accumulation == BrushAccumulation::Flow && !style.rendering.edge_after_stroke
         && !style.alpha_locked && style.selection.is_none()

@@ -102,11 +102,15 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
     key(context.toString()) {
         if (control.getString("kind") != "tool_options") {
             val field = model.objectOrNull("numeric")
-            val opacity = control.getString("kind") == "brush_opacity_slider"
+            val opacity = control.getString("kind") != "brush_size_slider"
             val spec = field?.getJSONObject("numeric") ?: remember(control.toString()) { toolbarUi(host.languageTag, obj("type" to "slider_spec", "control" to control)) }
             val value = field?.number("value") ?: spec.number("min")
             val label = field?.getString("label") ?: tile.getString("label")
-            val setting = field?.getString("id") ?: if (opacity) "opacity" else "size"
+            val setting = field?.getString("id") ?: when (control.getString("kind")) {
+                "brush_size_slider" -> "size"
+                "brush_opacity_slider" -> "opacity"
+                else -> "strength"
+            }
             val shown = formatted(host.languageTag, spec, value)
             val marks = model.array("bookmarks").objects()
             val geometry = remember(width, height, vertical) { JSONArray(Native.toolbarUi(obj("type" to "slider_layout", "width" to width,

@@ -19,7 +19,9 @@ Each dry brush has three built-in poses: upright, writing at 45°, and side cont
 at 76.5°. Cubic Hermite interpolation resolves the dimensions and relief coefficients
 between keys; endpoint poses clamp outside their range. Tilt azimuth rotates the
 contact. Pressure changes its size through the existing size mapping. Displayed
-size bounds the largest pose of each built-in dry brush.
+size is the long axis of the writing pose at full pressure. Other poses scale
+relative to that axis. The largest pose supplies a separate reference diameter
+for stroke retention and taper distances.
 
 The accepted design defines the [analytic relief](../history/brushes/dry-media-contact.md#analytic-relief)
 and [contact and loading equations](../history/brushes/dry-media-contact.md#contact-and-loading).
@@ -28,11 +30,15 @@ a narrow rising rim. There is no separate pressure map or support bitmap.
 
 Zero pressure deposits nothing. Increasing pressure recruits lower paper contacts
 and increases their transfer; maximum pressure need not reach every recessed area.
-`S`, `W` and `Lambda` belong to the brush. The existing Texture depth control
-scales the authored paper strength; zero removes height variation. Tilt changes the relief itself, including
+`S`, `W` and `Lambda` belong to the brush. Texture strength scales the authored
+paper strength from zero to twice the preset value. Contact softness edits `W`;
+Material hardness edits `Lambda`. Greater hardness reduces light-pressure
+loading while leaving full-pressure loading unchanged. Tilt changes the relief itself, including
 its interaction with paper, without additional per-pose paper or bite controls.
 The [decision record](../history/brushes/dry-media-contact.md) explains the constants,
 controls and rejected alternatives. The pose editor is not implemented.
+Dry media do not use stamp spacing, size variation or rotation variation; their
+contact path bypasses that math. Tip angle offsets the contact's orientation.
 
 Paper is an original cached 1024² R8 height texture. Sampling depends on document
 coordinates and authored grain scale/rotation, excluding stroke seed, tip size and
@@ -44,7 +50,7 @@ generated or uploaded during a stroke.
 [The generator](../../crates/layer-engine/src/brush.rs) retains input vertices when
 curvature, pressure, tilt or twist changes enough. Its geometric tolerance is
 0.25 document pixels or 1% of the previous minor radius, whichever is larger.
-Straight steady runs advance at half the nominal diameter, at least 4 px. Pen-up
+Straight steady runs advance at half the reference diameter, at least 4 px. Pen-up
 flushes the endpoint. Segmentation follows input, and prediction clones the same
 state; rendering cadence does not decide where contacts are retained.
 
@@ -85,13 +91,18 @@ They are an approximation to a continuously deforming contact, rather than an ex
 integral of arbitrary time-varying geometry. The same approximation applies during
 live drawing, prediction rollback and replay.
 
-Dose is `6*flow*color_alpha*exposure`. Source-over deposition with
-`alpha=1-exp(-dose)` adds optical depth across segments and repeated passes.
+Dose is `6*strength*color_alpha*exposure`. The internal `flow` field stores
+Strength. Raw coverage `A=1-exp(-dose)` adds optical depth across segments and
+repeated passes. The stroke contributes `opacity*A` over its starting paint.
 Unselected, unlocked normal batches with a single pigment sum their dose before
 one exponential and one blend. Erasing sums dose regardless of pigment color.
 Transparent paint and paint already carrying that same pigment also avoid a
 per-pixel color-space round trip; arbitrary underpaint retains the normal blend.
 Changing pigment colors, selections and locked alpha retain ordered deposition.
+Full-opacity normal beveled blocks skip contact evaluation when the stored
+pixel exactly equals their final stroke result. This comparison has no tolerance
+and changes neither contact eligibility nor partial pigment transfer. Ellipse,
+partial-opacity, coverage and after-stroke edge passes retain their evaluation.
 Read/write destinations update only the dirty rectangle. Readonly destinations
 first restore pixels outside that rectangle through a small copy kernel, then
 evaluate contact only inside it. All readonly copies finish in a separate compute
@@ -103,8 +114,14 @@ Shader preparation includes every reachable contact/profile/paper combination
 and its actual color and antialiasing variants before a stroke.
 
 Selections apply after this transfer. Empty contacts remain empty through subsequent
-passes with the same pose and pressure. Brush opacity remains the existing canvas
-opacity control.
+passes with the same pose and pressure. Opacity limits one stroke; pen-up resets
+the budget for the next stroke. Partial-opacity pointwise painting keeps the
+starting RGBA of touched pages. In the deposition color space, Normal paint uses
+`F_new=(1-q)*F_old+q*((1-O)*B+O*(color,1))`; Erase substitutes zero for the source.
+The starting paint `B` preserves existing pigment while allowing later colors
+to replace earlier colors at the ceiling. Prediction reads the same committed
+starting paint and stores its result separately. Full-opacity Flow strokes need
+no starting-paint copy or coverage state.
 
 The compact contact payload carries pressure and three relief coefficients in the
 existing contact lanes. Shared dabs remain 128 bytes; renderer records remain
@@ -119,7 +136,7 @@ Dry-flow prediction can render its full-resolution pigment contribution over a
 transparent GPU target, then combine it with the persistent paint. This uses the
 same paper samples and integral, avoiding reads of old paint during prediction.
 Fine grain remains at native resolution. Alpha lock, selections and other material
-responses retain their existing destination path.
+responses and partial-opacity strokes retain their existing destination path.
 
 Updates submitted without presentation keep their source damage pending until
 composition succeeds. Prediction can replace its own footprint without dropping
@@ -127,16 +144,15 @@ committed paint elsewhere on the same page.
 
 Artwork masks preserve dry-media paper and relief. Temporary mask contacts fork
 GPU pages from persistent coverage and retire on the next update; they cannot
-accumulate into the committed mask. Scalar selection painting accumulates dry
-optical coverage before applying its stroke opacity. Native mask painting includes
-its paint/erase opacity in each dose, preserving segment partitioning.
+accumulate into the committed mask. Selection and mask painting accumulate
+contact coverage before applying the stroke's paint/erase Opacity ceiling.
 
 ## Other contact media
 
 [The ink and paint evaluator](../../crates/layer-render-wgpu/src/contact.wgsl)
 projects the sweep in the nib's metric, avoiding scalloped edges on angled nibs.
-Ink retains the maximum requested coverage during a stroke and deposits only its
-increment. Boundary roughness uses stationary noise. Brushed ink uses coherent
+Ink combines contact requests as coverage union; Strength controls transfer and
+Opacity limits the stroke's contribution. Boundary roughness uses stationary noise. Brushed ink uses coherent
 strand gaps and declining ink supply; pooling follows the transverse profile.
 The [Bristle Paintbrush](../development/bristle-paintbrush.md) retains its hair fan
 and paint-loading evaluator. These responses are distinct from solid dry-media

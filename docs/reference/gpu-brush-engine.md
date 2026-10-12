@@ -21,7 +21,7 @@ The same packet and native UI boundary select all of them.
 
 Pencil, charcoal and the new ink family use the [swept contact
 model](../internals/contact-brush-engine.md). Graphite uses normalized flow
-deposition against fixed paper; ink uses per-stroke maximum coverage. These
+deposition against fixed paper; ink uses its analytic contact profile. These
 contacts carry the preceding pose and interpolate their footprint on the GPU.
 
 ## One semantic model, specialized GPU stages
@@ -31,14 +31,32 @@ smallest form of a step:
 
 ```text
 coverage = tip(position, size, aspect, rotation, hardness)
-alpha    = coverage × flow × opacity × color alpha
-canvas   = premultiplied source-over(canvas, color, alpha)
+request  = coverage × strength × color alpha
+source   = premultiplied(color, 1)
+canvas   = (1 − request) × canvas
+         + request × ((1 − opacity) × stroke_start + opacity × source)
 ```
 
-Erase uses destination-out with the same coverage. Analytic ellipses and R8 tip
+Erase substitutes zero for `source`, retaining `(1-opacity)` of the stroke's
+starting paint. Analytic ellipses and R8 tip
 textures differ only in how they produce coverage. Source-over runs in the
 document's blend space: on encoded values in a Perceptual document
 ([rendering](../internals/rendering.md#brushes-and-healing)).
+
+The internal `flow` field carries Strength. Dry swept contacts derive `request`
+from exponential optical transfer. Opacity is retained separately in `DabStyle`;
+partial-opacity pointwise strokes retain the starting RGBA of touched pages.
+This composite permits pigment changes after a pixel reaches its alpha ceiling.
+Normal paint and Erase use the direct recurrence above. Other blend modes
+recover the full stroke result, apply their blend, and reapply stroke Opacity.
+All arithmetic uses the deposition color space. Full-opacity Flow deposition
+needs neither starting-paint copies nor coverage state.
+Uniform retouching retains raw contact coverage independently of source alpha;
+source transparency limits the accumulated transfer before stroke Opacity is applied.
+Full-opacity beveled blocks and partial-opacity ordinary dry contacts skip
+contact work at an exact final RGBA value for normal constant-color batches.
+Variable colors, selections, locked alpha, bristles and coverage passes retain
+their existing evaluation.
 
 The current fixed-size `Dab` already carries geometry, motion, resolved color,
 coverage controls, and four material values. Dry shaders consume only the
@@ -191,8 +209,8 @@ canvas_new(x) = deposit(canvas_old(x), source(x), density × attack × a(x))
 Watercolor does not use the reservoir or a drying clock. A sparse wetness
 channel records water/material membership independently of pigment density and
 remains wet until an explicit merge.
-Uniform stroke-local coverage prevents overlapping contacts from building
-stripes; a motion-directed backtrace exchanges pigment only with RGBA on that
+Stroke-local accumulated coverage bounds pigment transfer; a motion-directed
+backtrace exchanges pigment only with RGBA on that
 same layer, preserves alpha, and deposits the selected color. Its live
 composite derives a bounded darker rim, lighter inner band, and faint outer
 bleed from the wetness boundary. Overlapping wet strokes do not create internal

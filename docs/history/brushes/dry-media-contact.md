@@ -25,10 +25,11 @@ contacts near the boundary, rather than a radial opacity fade.
   author code, separately authored support mask or pressure distribution map.
 - **Three poses.** Fixed upright, writing and side keys have authored dimensions
   and relief profiles within one brush-wide supported shape family.
-- **Three shared material controls.** Paper strength `S`, contact softness `W`
-  and loading pressure response `Lambda` apply across all poses.
+- **Three shared material controls.** Texture strength `S`, Contact softness `W`
+  and Material hardness `Lambda` apply across all poses.
 - **Existing pigment and dynamics controls.** Brush size, pressure response,
-  pressure-size response, flow, opacity and color retain their existing roles.
+  pressure-size response, Strength, Opacity and color complement material contact.
+  Strength scales transfer; Opacity caps one stroke over its starting paint.
 - **No separate relief strength or bite control.** The relief field contains its
   values directly. A fixed paper-relief coupling makes selectivity evolve with
   that field.
@@ -66,7 +67,7 @@ guarantee zero deposition at zero pressure.
 | `pressure_response` | Existing input calibration and brush pressure mapping; the simple approximation is a clamped gain. | Existing pressure controls; no new per-pose map. |
 | `p` | Effective pressure in `[0,1]`. | Calculated. |
 | `paper_height` | Paper height in `[0,1]`; larger values are peaks. Coordinates are stationary in document space. | Selected paper asset and its feature scale/orientation. |
-| `S` | Strength of paper-height variation; `S >= 0`. | Brush-wide Paper strength. |
+| `S` | Strength of paper-height variation; `S >= 0`. | Brush-wide Texture strength, relative to the preset's paper response. |
 | `h`, `d` | Adjusted height and centered paper depth. | Calculated. |
 | `R` | Nonnegative local recess in the model's normalized height units; smaller values engage sooner. | Analytic relief profile in each pose. |
 | `kappa` | Relief-dependent paper-selectivity coupling. | Engine constant `0.25`. |
@@ -74,7 +75,7 @@ guarantee zero deposition at zero pressure.
 | `W` | Positive engagement interval from first contact to full transfer. | Brush-wide Contact softness. |
 | `x` | Clamped local engagement, not radial position or pen pressure itself. | Calculated. |
 | `C` | Contact response in `[0,1]`. | Calculated; cubic engine transfer for this design. |
-| `Lambda` | Loading pressure response in `[0,1]`. | Brush-wide material control. |
+| `Lambda` | Loading pressure response in `[0,1]`. | Brush-wide Material hardness. |
 | `L` | Pigment loading conditional on contact. | Calculated. |
 | `0.5`, `3`, `2` | Height/approach normalization and cubic endpoint coefficients. | Engine constants. |
 
@@ -98,12 +99,12 @@ For resolved dimension ratios `(a,b)`, orientation `psi` and normalized offset
 `o`:
 
 ```text
-radii = brush_size * pressure_size_response(p) * (a,b)
+radii = 0.5 * brush_size * pressure_size_response(p) * (a,b)
 (u,v) = rotate(canvas_point - stroke_center, -psi) / radii - o
 ```
 
-The division is component-wise. `brush_size` is the nominal radius convention
-used by the engine; `a` and `b` are positive pose dimensions relative to it.
+The division is component-wise. `brush_size` is the long writing-pose axis at
+full pressure; `a` and `b` are positive pose dimensions relative to that axis.
 `psi` combines the transformed stylus direction with the authored orientation
 offset. The upright/absent-direction case uses a stable engine orientation
 policy. Neither zoom nor canvas rotation changes the material's tilt magnitude.
@@ -153,6 +154,12 @@ The ellipse equation does not promise that all other shapes use the same `q`.
 The pose editor is deferred. Key editing, directional skew and morphing across
 different shape families require their own authoring and integral decisions.
 
+Brush size is the long axis of the writing pose at full pressure. That pose's
+largest relative semiaxis is one; upright and side dimensions scale around it.
+The maximum pose extent remains a separate reference for path retention and
+taper distance. Size is geometric support, not the width of fully deposited
+pigment. Stamp spacing and size/rotation variation are absent from this model.
+
 `S`, `W` and `Lambda` are shared brush controls, not additional controls on these
 pose keys. Exact widget layout and shape-specific curve handles are not fixed by
 this mathematical contract.
@@ -167,7 +174,8 @@ length through that point:
 E = (1 / ell_full) * integral_over_I_segment(C * L) d_ell
 Delta_D = K * E
 D_new = D_old + Delta_D
-alpha = 1 - exp(-D_new)
+A = 1 - exp(-D_new)
+alpha_stroke = opacity * A
 ```
 
 The chord is normalized using geometric support, not the fragment length or the
@@ -175,10 +183,10 @@ number of engaged paper contacts. Empty/outside support contributes nothing.
 The stationary-tap limit evaluates `C*L` using the engine's tap exposure rule,
 without dividing by a zero chord.
 
-`E` is renderer exposure. `K` folds in existing flow, color opacity, directional
+`E` is renderer exposure. `K` folds in Strength, color alpha, directional
 feed and optical normalization; it is not another new editor control. `D` is a
 conceptual additive optical dose, not a requirement to store a new physical
-pigment layer in the artwork. `alpha` describes ordinary same-color flow
+pigment layer in the artwork. `A` describes ordinary same-color flow
 accumulation. Existing blending, selection and other accumulation modes retain
 their own renderer contracts.
 
@@ -454,9 +462,18 @@ contact saturated.
 loading. `Lambda=0` makes pressure act through engagement and existing geometry;
 `Lambda=1` makes per-contact loading equal to pressure. Intermediate values
 retain strong individual grains during light shading while allowing additional
-pressure buildup. The high-pressure endpoint is normalized to one because flow
+pressure buildup. The high-pressure endpoint is normalized to one because Strength
 already controls overall strength. The affine form is the unique straight line
 between `L(0)=1-Lambda` and `L(1)=1`, with one free parameter.
+
+The interface calls this **Material hardness**, with soft and hard endpoints.
+It approximates the ease of pigment release under light pressure, rather than
+wear, breakage or tip deformation. Softer graphite and charcoal commonly give
+stronger marks with a light touch; see [Faber-Castell's hardness guide](https://fabercastell.com/blogs/creativity-for-life/graphite-pencil-lead-degree-hardness)
+and [Nitram's shading guidance](https://nitramcharcoal.com/blogs/blog/basic-shading-techniques).
+The alternatives Pressure sensitivity and Pressure influence could imply that
+zero disables the separate contact and size responses. Material softness would
+require reversing the slider direction without changing the equation.
 
 For `0<=Lambda<=1`, loading is bounded, monotone and lies between `p` and `1`.
 Its slope is `Lambda`. The floor is conditional on contact, not a minimum stroke
@@ -525,7 +542,7 @@ follows area coverage and optical averaging rather than a new physical law.
 ### 10. Dose and opacity: `alpha = 1-exp(-D)`
 
 **Purpose.** Let repeated engaged passes deepen color smoothly while keeping
-opacity bounded. With nonnegative additive dose, `alpha` rises monotonically
+opacity bounded. With nonnegative additive dose, raw coverage rises monotonically
 toward one. A contact can become optically dark without requiring every nearby
 paper contact to engage.
 
@@ -540,6 +557,41 @@ flow, adding doses is equivalent to multiplying transmittances:
 
 This supports batched dose accumulation. It does not require per-pixel pigment
 mass, paper deformation or a new artwork storage representation.
+
+**Stroke ceiling.** Strength scales dose; Opacity limits the contribution of one
+stroke over its starting paint. For raw coverage `A`, the stroke contribution is
+`opacity*A`. Repeated passes can approach that ceiling; pen-up starts another
+budget, allowing subsequent strokes to build further. Painting with partial
+Opacity preserves existing coverage instead of lowering the layer's alpha.
+For a fixed pigment, incremental source alpha can be expressed as:
+
+```text
+A_new = A_old + (1-A_old)*request
+alpha_increment = opacity*(A_new-A_old)/(1-opacity*A_old)
+```
+
+That scalar-only implementation is rejected for pointwise painting: after
+coverage saturates, it prevents later pigment colors from replacing earlier
+colors. Retaining the stroke's starting paint `B` gives the general composite
+`F=(1-opacity)*B+opacity*G`, where `G` is the full-opacity stroke result over `B`.
+For Normal paint, a contact request `q` updates it directly:
+
+```text
+F_new = (1-q)*F_old + q*((1-opacity)*B + opacity*(color,1))
+```
+
+Erase uses zero in place of `(color,1)`. This form avoids division by Opacity and
+preserves color changes at the ceiling. Only touched GPU pages retain `B`;
+full-opacity Flow strokes need no extra state. More general brush blend modes
+recover `G`, apply the blend, then composite the stroke over `B` again.
+
+Applying Opacity to every deposit's dose is rejected because repeated passes
+then overcome it, making the control equivalent to Strength. Multiplying every
+segment's alpha independently also loses the intended stroke ceiling. A separate
+full-canvas stroke image is unnecessary: only touched pages need retained
+starting paint. Photoshop's
+[Opacity and Flow distinction](https://helpx.adobe.com/photoshop/using/painting-tools.html)
+motivates this digital control. It is separate from the dry-material contact law.
 
 **Alternatives.** Directly clipping a linear opacity sum saturates abruptly and
 does not preserve this compositing identity. Applying a nonlinear tone curve

@@ -27,6 +27,11 @@ impl WgpuRasterizer {
             .iter()
             .position(|layer| layer.id == batch.target)
             .ok_or(GpuRasterError::MissingPaintLayer(batch.target))?;
+        if !preview && batch.stroke_start {
+            for layer in &mut self.paint_layers {
+                for page in &mut layer.pages { page.clear_stroke_start(); }
+            }
+        }
         if !preview
             && batch.stroke_start
             && plan.reservoir

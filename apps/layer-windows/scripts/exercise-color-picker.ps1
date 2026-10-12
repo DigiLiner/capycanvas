@@ -116,7 +116,7 @@ try {
     foreach($panel in @((Model).panels)){if(@($panel.tiles|Where-Object {$_.control.kind -eq 'brush_size_slider'}).Count){
         $order=@($panel.tiles|ForEach-Object {if($_.control.kind -eq 'command'){$_.control.command}else{$_.control.kind}})
     }}
-    if(($order -join ',') -ne 'brush_size_slider,color_picker,brush_opacity_slider,undo,redo'){throw "Unexpected Sketch toolbar order: $($order -join ',')"}
+    if(($order -join ',') -ne 'brush_size_slider,color_picker,brush_strength_slider,undo,redo'){throw "Unexpected Sketch toolbar order: $($order -join ',')"}
 
     Key 0x49
     Wait-Until {(Tool) -eq 'pick_visible'} 'I did not start temporary picking'

@@ -115,7 +115,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     // The disabled slider's schema crosses the JSON-valued toolbar query;
     // restore the u32 precision before returning it to the typed numeric API.
     field = { ...field, numeric: { ...field.numeric, digits: Number(field.numeric.digits) } };
-    const row = element('div', `toolbar-slider ${field.id === 'opacity' ? 'opacity-track' : 'size-track'}`);
+    const row = element('div', `toolbar-slider ${field.id !== 'size' ? 'opacity-track' : 'size-track'}`);
     const cap = button('', show, 'toolbar-slider-cap'); cap.title = field.label; cap.setAttribute('aria-label', field.label);
     target(cap, item); draggable(cap, item);
     const track = element('div', 'number-track'), slider = element('input', 'number-slider');
@@ -224,7 +224,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
       const along = Math.max(0, (vertical ? trackBounds.height : trackBounds.width) - 4);
       place(track, vertical ? { ...trackBounds, x: (extent[0] - 28) / 2, y: trackBounds.y + 2, width: 28, height: along }
         : { ...trackBounds, x: trackBounds.x + 2, y: (extent[1] - 28) / 2, width: along, height: 28 });
-      track.style.setProperty('--track-shape', trackShape(along - 12, field.id === 'opacity' ? 8 : 2.5));
+      track.style.setProperty('--track-shape', trackShape(along - 12, field.id !== 'size' ? 8 : 2.5));
     }
     function trackShape(length, narrow) {
       if (length < 4) return 'none';
@@ -348,7 +348,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     const value = next.component;
     copyChanged = copyKey !== copy.more_options; copyKey = copy.more_options;
     const nextSchema = key([value.context, value.numeric && { ...fieldSemantic(value.numeric), value: 0 }, value.options.map(o => o.Gradient ? {Gradient:o.Gradient.gradient.destination} : o.Range ? {Range:{...semantic(o.Range),bounds:o.Range.bounds.map(f=>({...fieldSemantic(f),value:0}))}} : o.Numeric ? { Numeric: { ...fieldSemantic(o.Numeric), value: 0 } } : o.Choice ? { Choice: { ...semantic(o.Choice), items: o.Choice.items.map(i => ({ ...semantic(i), selected: false })) } } : { Action: { ...o.Action, state: { ...semantic(o.Action.state), selected: false, enabled: true } } })]);
-    const sliderField = () => value.numeric || { id: tile.control.kind === 'brush_size_slider' ? 'size' : 'opacity', label: next.label, numeric: app.toolbar_ui({ type: 'slider_spec', control: tile.control }), value: 0.5 };
+    const sliderField = () => value.numeric || { id: tile.control.kind === 'brush_size_slider' ? 'size' : tile.control.kind === 'brush_opacity_slider' ? 'opacity' : 'strength', label: next.label, numeric: app.toolbar_ui({ type: 'slider_spec', control: tile.control }), value: 0.5 };
     model = value;
     if (nextSchema !== schema) {
       closePopup(); fields.forEach(f => { f.dispose?.(); f.row.remove(); }); fields = []; schema = nextSchema;

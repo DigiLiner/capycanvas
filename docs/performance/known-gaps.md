@@ -22,27 +22,35 @@
       41,000–51,000 mappings. The G-Pen reaches about 11,000.
     - Android's default `vm.max_map_count` is 65,530.
 - **The simple-brush class remains unqualified.**
-  - On the mid tier, the 1536 px G-Pen completes 55.6 fresh updates/s (target 90)
-    on a contained path, with completion-gap p99 31.9–33.5 ms (limit 22.2 ms).
+  - On the current contained 60 × 10 path, 1536 px G-Pen reaches only
+    75.36–75.54 fresh updates/s on Mid (target 90), although its gap passes.
+    The preceding larger-path result was 55.6/s with p99 31.9–33.5 ms.
     Other simple brushes need measurements at 1536 px; their older 2048 px
     results are above the
     revised guarantee. See the [mid-tier measurement](mid-tier.md#g-pen-at-the-1536-px-guarantee).
-  - The low-tier 1024 px G-Pen measured stroke meets 60/s; other simple brushes
+  - The current low-tier 1024 px G-Pen measured stroke meets 60/s at both full
+    and partial Opacity; other simple brushes
     and stacked-photo drawing retain gaps. See the [low-tier table](low-tier.md#brushes).
-  - The top-tier 2048 px G-Pen reaches 87.6 fresh updates/s, with completion-gap
-    p99 31.6–38.8 ms. Both targets remain open. The matched base with the same
+  - Top 2048 px G-Pen passes on the current 60 × 10 path at 175.65–179.08/s;
+    this does not qualify the preceding larger path, which reached 87.6/s with
+    p99 31.6–38.8 ms. The matched base with the same
     bounded command-pool cleanup reaches 87.0/s. See the
-    [top-tier table](top-tier.md#current-g-pen-comparison).
+    [top-tier table](top-tier.md#dry-media-contact-model).
 - **Most complex brushes at 1024 px remain unqualified.**
-  - The new Pastel Block side pose meets the measured native Mid and Top
-    rate/gap targets; the other poses remain unmeasured on those tiers.
+  - Pastel Block at nominal Size 1024 meets the measured native Top writing
+    pose targets, but reaches only 88.16–88.67/s on Mid and 45.68–46.14/s on
+    Low. Its Low 77° side pose reaches 18.93–19.46/s; the gap target also fails.
   - Earlier measurements of the other complex presets reach 76–118 updates/s
     on Top, about 6–25 on Mid and 3–19 on Low. They need current measurements.
 - **Dry-media qualification remains incomplete.**
-  - The new Charcoal side pose reaches 89.67–90.59 fresh GPU updates/s at
-    1536 px on MovinkPad 11. Its slowest contact misses 90/s; p99 gaps pass.
-  - TCL Web Pencil, Charcoal and Pastel Block miss 60/s and 33.3 ms
-    fresh-gap limits at 1024 px in the measured side pose. See the
+  - Size now denotes the 45° writing-pose long axis. Pencil and Charcoal miss
+    their nominal-size rate targets on all three native tiers; Mid and Top
+    also miss their fresh-gap limits. Partial-opacity Pencil misses the rate
+    targets on all three tiers.
+  - Smaller, matched-footprint 77° rows preserve the preceding size convention
+    for comparison. They pass on Low and Top, while Mid Charcoal reaches only
+    86.30–86.63/s. These rows do not qualify the new nominal sizes.
+  - TCL Web remains unqualified; see the
     [low-tier table](low-tier.md#dry-media-contact-model).
   - Passing native rows cover only their measured profiles and poses; other
     dry presets remain unmeasured. Physical input-to-present latency is unmeasured.

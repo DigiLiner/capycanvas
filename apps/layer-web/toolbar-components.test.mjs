@@ -62,14 +62,14 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
   await checkSliderBookmarks({ call, evaluate, settle, click, gesture, rect, capture, send, slider });
   for (const device of ['mouse', 'touch', 'pen']) {
     const cap = await rect('[data-toolbar-component=brush_size_slider] .toolbar-slider-cap');
-    const opacity = await rect('[data-toolbar-component=brush_opacity_slider]');
+    const strength = await rect('[data-toolbar-component=brush_strength_slider]');
     const before = await evaluate('layerApp.state().brush.diameter');
     async function contact(type, p) {
       if (device === 'touch') await call('Input.dispatchTouchEvent', { type: { down: 'touchStart', move: 'touchMove', up: 'touchEnd' }[type], touchPoints: type === 'up' ? [] : [{ id: 1, ...p }] });
       else await call('Input.dispatchMouseEvent', { type: { down: 'mousePressed', move: 'mouseMoved', up: 'mouseReleased' }[type], ...p, button: 'left', buttons: type === 'up' ? 0 : 1, clickCount: 1, pointerType: device, force: type === 'up' ? 0 : .7 });
       await settle();
     }
-    const destination = { x: opacity.x + opacity.width / 2, y: opacity.y + opacity.height - 12 };
+    const destination = { x: strength.x + strength.width / 2, y: strength.y + strength.height - 12 };
     await contact('down', { x: cap.x + cap.width / 2, y: cap.y + cap.height / 2 });
     await evaluate('new Promise(r=>setTimeout(r,650))');
     assert.equal(await evaluate('document.querySelector(".panel-context-menu").matches(":popover-open")'), device !== 'mouse');
@@ -256,6 +256,10 @@ async function checkSliderBookmarks({ call, evaluate, settle, click, gesture, re
   const fade = await evaluate(`(()=>{const p=document.querySelector('${preview}'),style=p.closest('[data-toolbar-component]').dataset.tileStyle,g=layerApp.app.toolbar_ui({type:'slider_preview',control:{kind:'brush_size_slider'},style,value:3,length:0,extent:1}),c=p.querySelector('canvas'),r=c.width/c.getBoundingClientRect().width,ctx=c.getContext('2d'),alpha=y=>ctx.getImageData(c.width>>1,Math.round(y*r),1,1).data[3];return {style,presented:p.closest('.toolbar-controls').dataset.tileStyle,tile:layerApp.app.toolbar_ui({type:'style',style}).size[1],length:g.header_fade,opacity:g.header_fade_opacity,alpha:[0,g.header_fade/2,g.header_fade+4].map(alpha)}})()`);
   assert.equal(fade.style, fade.presented); assert.ok(Math.abs(fade.length - 65 * fade.tile / 54) < .01, `65px fade on medium tiles: ${JSON.stringify(fade)}`);
   assert.ok(Math.abs(fade.alpha[0]-255*fade.opacity)<8&&Math.abs(fade.alpha[1]-255*fade.opacity/2)<8&&fade.alpha[2]===0, `header fade follows the shared layout: ${JSON.stringify(fade)}`);
+  const panel = await evaluate("document.querySelector('[data-toolbar-component=brush_size_slider]').closest('[data-panel]').dataset.panel");
+  await send({type:'customize',action:{type:'insert_tools',panel,before:null}});
+  await send({type:'customize',action:{type:'picker_select',control:{kind:'brush_opacity_slider'},selected:true}});
+  await send({type:'customize',action:{type:'confirm_tools'}});
   await click('[data-toolbar-component=brush_opacity_slider] input.number-slider');
   const alpha = () => evaluate(`(()=>{const c=document.querySelector('${preview} canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data.reduce((n,v,i)=>n+(i%4===3?v:0),0)})()`);
   await send({type:'set_tool_setting',id:'opacity',value:1}); const full = await alpha();

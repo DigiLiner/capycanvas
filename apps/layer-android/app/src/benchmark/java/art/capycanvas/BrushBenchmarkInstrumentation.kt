@@ -52,6 +52,12 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             check(label.matches(Regex("[a-zA-Z0-9_-]+")))
             val preset = arguments.getString("preset", "1")!!.toInt()
             val size = arguments.getString("brushSize", "1000")!!.toDouble()
+            val strength = arguments.getString("strength")?.toDouble()
+            val opacity = arguments.getString("opacity")?.toDouble()
+            val tilt = arguments.getString("tilt")?.toFloat()
+            check(strength == null || strength in 0.0..1.0)
+            check(opacity == null || opacity in 0.0..1.0)
+            check(tilt == null || tilt in 0f..1.57f)
             val duration = arguments.getString("durationMs", "10000")!!.toInt()
             val repeats = arguments.getString("repeats", "3")!!.toInt()
             val memorySnapshots = arguments.getString("memorySnapshots") == "true"
@@ -366,6 +372,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val brushReadyNs = System.nanoTime()
             if (state().getJSONObject("brush").getString("tool") in setOf("clone", "heal", "spot_heal")) invoke("use_reference_below")
             action(obj("type" to "set_brush_size", "value" to size))
+            strength?.let { action(obj("type" to "set_brush_strength", "value" to it)) }
+            opacity?.let { action(obj("type" to "set_brush_opacity", "value" to it)) }
             arguments.getString("paintLoad")?.let {
                 val load = it.toDouble()
                 check(load in 0.0..1.0)
@@ -468,8 +476,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                     coords[0].x = (cx + (if (kind == "stationary") 0.0 else rx * cos(angle))).toFloat() + host.surfaceOrigin.x
                     coords[0].y = (cy + (if (kind == "stationary") 0.0 else ry * sin(angle))).toFloat() + host.surfaceOrigin.y
                     coords[0].pressure = if (phase == MotionEvent.ACTION_UP) 0f else if (kind == "pressure") (.55 + .45 * sin(t * 2 * PI)).toFloat() else 1f
-                    coords[0].setAxisValue(MotionEvent.AXIS_TILT, if (kind == "tilt") .9f else 0f)
-                    coords[0].orientation = if (kind == "tilt") .5f else 0f
+                    coords[0].setAxisValue(MotionEvent.AXIS_TILT, tilt ?: if (kind == "tilt") .9f else 0f)
+                    coords[0].orientation = if (tilt != null) (-PI/2).toFloat() else if (kind == "tilt") .5f else 0f
                     if (kind == "visual") {
                         coords[0].x = (cx - 560 + 1120 * progress).toFloat() + host.surfaceOrigin.x
                         coords[0].y = (cy + 140 * sin(progress * 3 * PI)).toFloat() + host.surfaceOrigin.y
@@ -514,6 +522,8 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 "warmup_idle_ms" to warmupIdleMs, "brush_selected_ns" to brushSelectedNs,
                 "brush_ready_ns" to brushReadyNs, "brush_ready_ms" to (brushReadyNs - brushSelectedNs) / 1e6,
                 "brush_size" to size, "mode" to mode, "prediction" to prediction, "speed" to speed,
+                "strength" to strength, "opacity" to opacity, "tilt" to tilt,
+                "orientation" to if (tilt != null) -PI/2 else if (mode == "tilt") .5 else 0.0,
                 "memory_snapshots" to memorySnapshots,
                 "stats_panel" to statsPanel,
                 "color_mode" to colorMode, "workload" to workload, "attachment_fixture" to attachmentFixture,
