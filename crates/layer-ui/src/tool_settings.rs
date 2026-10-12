@@ -146,12 +146,18 @@ pub struct ToolSetting {
     pub label: Arc<str>,
     #[serde(skip)]
     pub(crate) label_id: MessageId,
+    pub group_id: &'static str,
     pub group: Arc<str>,
     pub numeric: NumericControl,
     pub value: f32,
 }
 
 impl ToolSetting {
+    pub(crate) fn ungrouped(mut self) -> Self {
+        self.group_id = "";
+        self.group = "".into();
+        self
+    }
     pub fn tooltip_localized(&self, localizer: &Localizer) -> Arc<str> {
         match self.id {
             "tonal_lower" => localizer.text(MessageId::TOOL_SETTING_TONAL_LOWER_TOOLTIP),
@@ -179,6 +185,40 @@ impl Definition {
             numeric.soft_max = 2.;
         }
         numeric
+    }
+}
+
+fn primary(brush: &BrushSnapshot) -> &'static [&'static str] {
+    if brush.contact.is_some_and(|c| c.dry.is_some()) {
+        &["grain_depth", "material_hardness"]
+    } else if brush.contact.is_some_and(|c| c.bristles.is_some()) {
+        &["bristle_load", "bristle_scale"]
+    } else {
+        match brush.execution {
+            BrushExecution::Wet => &["paint", "pull"],
+            BrushExecution::Watercolor => &["water_load", "wet_edge"],
+            BrushExecution::Smudge => &["pull"],
+            BrushExecution::Liquify => &[],
+            _ => &["hardness"],
+        }
+    }
+}
+
+const GROUP_ORDER: &[MessageId] = &[
+    MessageId::TOOL_SETTING_GROUP_TIP,
+    MessageId::TOOL_SETTING_GROUP_MATERIAL,
+    MessageId::TOOL_SETTING_GROUP_TEXTURE,
+    MessageId::TOOL_SETTING_GROUP_BRISTLES,
+    MessageId::TOOL_SETTING_GROUP_MIXING,
+    MessageId::TOOL_SETTING_GROUP_WATERCOLOR,
+    MessageId::TOOL_SETTING_GROUP_BLEED,
+    MessageId::TOOL_SETTING_GROUP_LIQUIFY,
+    MessageId::TOOL_SETTING_GROUP_BLENDING,
+];
+
+pub(crate) fn group_order(id: &str) -> usize {
+    if id.is_empty() { 0 } else {
+        1 + GROUP_ORDER.iter().position(|g| g.key() == id).unwrap_or(GROUP_ORDER.len())
     }
 }
 
@@ -241,7 +281,7 @@ const DEFINITIONS: &[Definition] = &[
     Definition {
         id: "opacity",
         label: MessageId::TOOL_SETTING_OPACITY,
-        group: None,
+        group: Some(MessageId::TOOL_SETTING_GROUP_BLENDING),
         numeric: NumericControl::percent,
         field: |b| (b.execution != BrushExecution::Liquify).then_some(&mut b.opacity),
     },
@@ -293,19 +333,9 @@ const DEFINITIONS: &[Definition] = &[
         field: |b| (!b.contact.is_some_and(|c| c.dry.is_some())).then_some(&mut b.shape.rotation_jitter),
     },
     Definition {
-        id: "contact_softness",
-        label: MessageId::TOOL_SETTING_CONTACT_SOFTNESS,
-        group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
-        numeric: || NumericControl {
-            min: 0.005, soft_min: 0.005, max: 0.8, soft_max: 0.2,
-            ..NumericControl::percent()
-        },
-        field: |b| b.contact.as_mut()?.dry.as_mut().map(|d| &mut d.softness),
-    },
-    Definition {
         id: "material_hardness",
         label: MessageId::TOOL_SETTING_MATERIAL_HARDNESS,
-        group: Some(MessageId::TOOL_SETTING_GROUP_TIP),
+        group: Some(MessageId::TOOL_SETTING_GROUP_MATERIAL),
         numeric: NumericControl::percent,
         field: |b| b.contact.as_mut()?.dry.as_mut().map(|d| &mut d.loading),
     },
@@ -428,20 +458,33 @@ fn liquify(b: &BrushSnapshot, mode: LiquifyMode) -> bool {
 }
 
 pub(crate) fn controls(brush: &BrushSnapshot, localizer: &Localizer) -> Vec<ToolSetting> {
+    let primary = primary(brush);
     let mut brush = brush.clone();
-    DEFINITIONS
+    let mut controls = DEFINITIONS
         .iter()
-        .filter_map(|d| {
-            Some(ToolSetting {
+        .enumerate()
+        .filter_map(|(index, d)| {
+            let rank = match d.id {
+                "size" => Some(0),
+                "flow" | "strength" => Some(1),
+                id => primary.iter().position(|&p| p == id).map(|i| i + 2),
+            };
+            let group = if rank.is_some() { None } else { d.group };
+            let order = rank.map_or((1, group_order(group.map_or("", MessageId::key)), index),
+                |rank| (0, rank, 0));
+            Some((order, ToolSetting {
                 id: d.id,
                 label: localizer.text(d.label),
                 label_id: d.label,
-                group: d.group.map(|id| localizer.text(id)).unwrap_or_else(|| Arc::from("")),
+                group_id: group.map_or("", MessageId::key),
+                group: group.map(|id| localizer.text(id)).unwrap_or_else(|| Arc::from("")),
                 numeric: d.numeric(&brush),
                 value: *(d.field)(&mut brush)?,
-            })
+            }))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    controls.sort_unstable_by_key(|(order, _)| *order);
+    controls.into_iter().map(|(_, field)| field).collect()
 }
 
 pub(crate) fn edit(brush: &BrushSnapshot, id: &str, value: f32, localizer: &Localizer) -> Result<BrushSnapshot, String> {

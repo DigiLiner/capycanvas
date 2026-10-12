@@ -169,7 +169,7 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                 style.rendering.accumulation = BrushAccumulation::Flow;
                 style.contact = Some(BrushContact { pressure_gain: 1., dry: Some(BrushDryMedia {
                     poses: [BrushDryPose { radii: [1.; 2], relief: [0.; 3] }; 3],
-                    softness: 0.05, loading: 0., corner: 0.,
+                    softness: 0.05, loading: 0., corner: 0., relief_offset: 0.,
                 }), ..Default::default() });
                 let dabs: Vec<_> = [(0., 0.1), (0.15, 0.02), (0.65, 0.3), (1., 0.12)]
                     .into_iter().enumerate().map(|(i, (alpha, flow))| {
@@ -352,7 +352,7 @@ fn cropped_dry_dispatch_preserves_every_untouched_hdr_pixel() {
         let mut style=test_style(BrushExecution::Dry);
         style.mode=mode;style.blend_space=BlendSpace::Linear;style.rendering.accumulation=BrushAccumulation::Flow;
         style.contact=Some(BrushContact {pressure_gain:1.,dry:Some(BrushDryMedia {
-            poses:[BrushDryPose {radii:[1.;2],relief:[0.;3]};3],softness:0.05,loading:0.,corner:0.,
+            poses:[BrushDryPose {radii:[1.;2],relief:[0.;3]};3],softness:0.05,loading:0.,corner:0.,relief_offset:0.,
         }),..Default::default()});
         let mut dab=test_dab([64.5;2],source_color,0.2);
         dab.radii=[200.;2];dab.contact=[0.7,0.,0.,0.];dab.previous_contact=dab.contact;
@@ -413,7 +413,7 @@ fn cropped_display_restores_hdr_blocks_at_partial_document_edges() {
         let mut style=test_style(BrushExecution::Dry);style.mode=mode;style.blend_space=BlendSpace::Linear;
         style.rendering.accumulation=BrushAccumulation::Flow;
         style.contact=Some(BrushContact {pressure_gain:1.,dry:Some(BrushDryMedia {
-            poses:[BrushDryPose {radii:[1.;2],relief:[0.;3]};3],softness:0.05,loading:0.,corner:0.,
+            poses:[BrushDryPose {radii:[1.;2],relief:[0.;3]};3],softness:0.05,loading:0.,corner:0.,relief_offset:0.,
         }),..Default::default()});
         let mut dab=test_dab([64.5;2],color,0.2);dab.radii=[200.;2];
         dab.contact=[0.7,0.,0.,0.];dab.previous_contact=dab.contact;
@@ -592,6 +592,32 @@ fn engine_generated_strength_changes_buildup_without_changing_opacity_ceiling() 
         let mut zero=brush.clone();zero.flow=0.;let empty=render(&zero,8);
         assert!(empty.iter().all(|p|*p==[0.;4]),"{name}: zero Strength paints nothing");
     }
+    use layer_core::{Stroke,StrokePoint,StrokeTool,authored::PaintHandle};
+    let mut pencil=layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+    pencil.diameter=36.;pencil.opacity=1.;pencil.color_rgba_linear=[0.,0.,0.,1.];
+    let sweep=|strength| {
+        let mut brush=pencil.clone();brush.flow=strength;
+        let points:Vec<StrokePoint>=[16.5,112.5].into_iter().enumerate().map(|(i,x)|StrokePoint {
+            position:Point {x,y:64.5},pressure:1.,tilt:[std::f32::consts::FRAC_PI_4,0.],
+            twist:0.,elapsed_micros:i as u32*16_000,
+        }).collect();
+        let stroke=Stroke::new(StrokeId(7),SourceTarget::Paint(PaintHandle::from_index(1)),StrokeTool::Brush,brush.clone(),points).unwrap();
+        let mut dabs=Vec::new();layer_engine::DabGenerator::generate(&stroke,RgbSpace::Srgb,&mut dabs);
+        let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+        canvas.stroke(7,&brush,&dabs,dabs.len(),false);
+        (canvas.composite(),dabs)
+    };
+    let (empty,zero_contacts)=sweep(0.);
+    assert!(zero_contacts.is_empty() && empty.iter().all(|p|*p==[0.;4]),"Pencil: zero Strength endpoint");
+    let (middle,_)=sweep(0.75);let (full,full_contacts)=sweep(1.);
+    assert!(!full_contacts.is_empty() && full_contacts.iter().all(|d|d.flow==1.),"Pencil: full Strength keeps the original contact feed");
+    assert!((0.65..0.85).contains(&middle[center][3]),"Pencil: one black sweep at 75% Strength must retain visible tone: {:?}",middle[center]);
+    assert!(full[center][3]>0.95 && full[center][3]>middle[center][3]+0.1,"Pencil: full Strength retains its dark endpoint: {:?} vs {:?}",full[center],middle[center]);
+    assert!(middle.iter().chain(&full).all(|p|p[..3]==[0.;3]),"Pencil: black pigment stays black in premultiplied pixels");
+    pencil.flow=0.75;let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+    let dabs=opacity_contacts(&pencil,16);canvas.stroke(7,&pencil,&dabs,dabs.len(),false);let built=canvas.composite();
+    assert!(built[center][3]>0.98 && built[center][3]>middle[center][3]+0.1,"Pencil: calibrated Strength still builds on retracing: {:?} vs {:?}",built[center],middle[center]);
+    println!("Pencil black sweep: Strength75 alpha={}, Strength100 alpha={}, retraced Strength75 alpha={}",middle[center][3],full[center][3],built[center][3]);
 }
 
 #[test]

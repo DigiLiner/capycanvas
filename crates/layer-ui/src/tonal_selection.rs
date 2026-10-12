@@ -91,6 +91,7 @@ impl TonalOptions {
             id: "tonal_softness",
             label: localizer.text(MessageId::TOOL_CONTROL_TONAL_SELECTION_SOFTNESS),
             label_id: MessageId::TOOL_CONTROL_TONAL_SELECTION_SOFTNESS,
+            group_id: "",
             group: std::sync::Arc::from(""),
             value: self.softness,
             numeric: Self::softness_numeric(),
@@ -113,6 +114,7 @@ impl TonalOptions {
                     label: localizer.text(label),
                     label_id: label,
                     value,
+                    group_id: "",
                     group: std::sync::Arc::from(""),
                     numeric: numeric.clone(),
                 });

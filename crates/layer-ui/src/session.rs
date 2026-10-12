@@ -5524,7 +5524,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         c.label_id = MessageId::TOOL_CONTROL_LINE_WIDTH;
                         c.label = self.state.localization.text(c.label_id);
                     }
-                    c
+                    c.ungrouped()
                 })
                 .collect()
         } else if let LayerCanvasTool::Selection { kind } = self.layer_interaction.tool {
@@ -5539,7 +5539,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 controls.extend(
                     tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
                         .into_iter()
-                        .filter(|c| c.id == "opacity"),
+                        .filter(|c| c.id == "opacity")
+                        .map(ToolSetting::ungrouped),
                 );
             }
             controls
@@ -5550,14 +5551,15 @@ impl<R: CanvasRenderer> UiSession<R> {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
                 .into_iter()
                 .filter(|c| c.id == "opacity")
+                .map(ToolSetting::ungrouped)
                 .collect()
         } else {
             Vec::new()
         };
         if self.layer_interaction.tool.selection_tool().is_some() && !self.selection_brush_active() {
-            let mut edges=self.selection_tools.options.edge_controls(&self.state.localization);
+            let mut edges=self.selection_tools.options.edge_controls(&self.state.localization)
+                .into_iter().map(ToolSetting::ungrouped).collect::<Vec<_>>();
             for field in &mut edges {
-                field.group="".into();
                 if self.tonal_active() {field.label=self.state.localization.text(MessageId::TOOL_CONTROL_FEATHER);}
             }
             self.state.tool_settings.extend(edges);

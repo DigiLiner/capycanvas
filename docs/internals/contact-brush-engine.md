@@ -27,13 +27,20 @@ The accepted design defines the [analytic relief](../history/brushes/dry-media-c
 and [contact and loading equations](../history/brushes/dry-media-contact.md#contact-and-loading).
 Elliptical relief rises away from the point; beveled sticks have a flat face and
 a narrow rising rim. There is no separate pressure map or support bitmap.
+Pointy Pencil offsets the relief minimum toward the stylus tip while keeping its
+elliptical outline centered. Its bias follows stylus direction, including when
+integration coordinates rotate with stroke motion. Pastel Block is square
+upright and long and narrow on its side; its writing-pose size stays the reference.
 
 Zero pressure deposits nothing. Increasing pressure recruits lower paper contacts
 and increases their transfer; maximum pressure need not reach every recessed area.
-`S`, `W` and `Lambda` belong to the brush. Texture strength scales the authored
-paper strength from zero to twice the preset value. Contact softness edits `W`;
-Material hardness edits `Lambda`. Greater hardness reduces light-pressure
-loading while leaving full-pressure loading unchanged. Tilt changes the relief itself, including
+Texture strength scales the authored paper strength `S` from zero to twice the
+preset value. Engagement width `W` is fixed at `0.05` in all built-in dry brushes
+and is absent from their painting controls. Material hardness edits `Lambda`.
+Greater hardness reduces loading below effective pressure one; at effective
+pressure one, loading is always one. A preset pressure gain below one can keep
+the effective pressure below that endpoint even at full stylus pressure.
+Tilt changes the relief itself, including
 its interaction with paper, without additional per-pose paper or bite controls.
 The [decision record](../history/brushes/dry-media-contact.md) explains the constants,
 controls and rejected alternatives. The pose editor is not implemented.
@@ -91,8 +98,11 @@ They are an approximation to a continuously deforming contact, rather than an ex
 integral of arbitrary time-varying geometry. The same approximation applies during
 live drawing, prediction rollback and replay.
 
-Dose is `6*strength*color_alpha*exposure`. The internal `flow` field stores
-Strength. Raw coverage `A=1-exp(-dose)` adds optical depth across segments and
+Dose is `6*g(strength)*color_alpha*exposure`, where
+`g(s)=s/(8-7*s)` preserves zero and full Strength and reduces early saturation
+at intermediate settings. The configured `flow` field stores Strength; resolved
+dry contacts carry `g(strength)` in `Dab.flow`. This calibration runs on the CPU
+per contact. Raw coverage `A=1-exp(-dose)` adds optical depth across segments and
 repeated passes. The stroke contributes `opacity*A` over its starting paint.
 Unselected, unlocked normal batches with a single pigment sum their dose before
 one exponential and one blend. Erasing sums dose regardless of pigment color.
@@ -127,6 +137,8 @@ The compact contact payload carries pressure and three relief coefficients in th
 existing contact lanes. Shared dabs remain 128 bytes; renderer records remain
 160 bytes and style records 288 bytes. Relief evaluation adds no texture or
 per-pixel state; the readonly pass boundary does not wait on the CPU.
+Pointy's relief offset uses reserved style and contact lanes. Its integral clips
+against the centered physical support separately from the shifted relief field.
 
 Dry ellipse Flow tile bounds share the evaluator's midpoint geometry. Cached
 display levels reduce only their stale regions, rounded outward to complete

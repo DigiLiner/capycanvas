@@ -216,7 +216,7 @@ private extension ToolSettingsControls {
     var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     var settingGroups: [[JSON]] {
         settings.reduce(into: [[JSON]]()) { groups, item in
-            if let last = groups.last?.last, last["group"].string == item["group"].string { groups[groups.count - 1].append(item) }
+            if let last = groups.last?.last, last["group_id"].string == item["group_id"].string { groups[groups.count - 1].append(item) }
             else { groups.append([item]) }
         }
     }

@@ -169,9 +169,13 @@ import kotlinx.coroutines.withContext
                 }
             }
         }
-        state.array("tool_settings").objects().groupBy { it.getString("group") }.entries.forEachIndexed { index, (group, fields) ->
+        state.array("tool_settings").objects().fold(mutableListOf<MutableList<JSONObject>>()) { groups, field ->
+            if (groups.lastOrNull()?.last()?.getString("group_id") == field.getString("group_id")) groups.last().add(field)
+            else groups.add(mutableListOf(field))
+            groups
+        }.forEachIndexed { index, fields ->
             val choice = beside[fields.first().getString("id")]
-            val title = choice?.getString("label") ?: group
+            val title = choice?.getString("label") ?: fields.first().getString("group")
             if (title.isNotEmpty()) Text(title, Modifier.padding(top=if(index>0)2.dp else 0.dp), fontWeight = FontWeight.Bold, color = LocalPalette.current.secondary)
             if (choice == null) fields.forEach { fieldControl(it, false) }
             else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(metrics.compound)) {

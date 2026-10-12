@@ -29,6 +29,10 @@ one stroke's contribution over its starting paint, rather than reducing pigment
 already present. A new stroke can build further. Liquify does not expose Opacity.
 Zero Strength emits no painting contacts while retaining the brush-size cursor.
 Pressure mappings scale the selected Strength instead of replacing it.
+Analytic dry media calibrate that result as `s/(8-7*s)` per contact before optical
+transfer, preserving dark full-strength marks without early slider saturation.
+Shared [family settings profiles](../ui/toolbar-components.md#contextual-options)
+place frequently used controls first and group the remaining controls.
 
 *Dynamics* map a changing input to a brush property. Pressure might change size or
 opacity; tilt can change the shape or rotation of a mark. Input availability varies

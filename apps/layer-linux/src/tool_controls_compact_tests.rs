@@ -18,9 +18,44 @@ fn assert_gap(panel: &gtk::Widget, before: &str, after: &str, gap: f32, horizont
     assert_eq!(actual, gap, "{before} → {after}: allocated gap");
 }
 
+fn primary_fields(context: &str) -> Option<&'static [&'static str]> {
+    Some(match context {
+        "painting" => &["size", "flow", "hardness"],
+        "wet-mixing" => &["size", "flow", "paint", "pull"],
+        "watercolor" => &["size", "flow", "water_load", "wet_edge"],
+        "smudge" => &["size", "flow", "pull"],
+        "bristles" => &["size", "flow", "bristle_load", "bristle_scale"],
+        "liquify-push" | "liquify-twirl" | "liquify-pinch" | "liquify-crystals" => &["size", "strength"],
+        name if name.starts_with("dry-") => &["size", "flow", "grain_depth", "material_hardness"],
+        _ => return None,
+    })
+}
+
+fn assert_family(w: &Rc<Workspace>, panel: &gtk::Widget, context: &str) {
+    let settings = state(w).tool_settings;
+    let ids: Vec<_> = settings.iter().map(|field| field.id).collect();
+    let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+    assert_eq!(unique.len(), ids.len(), "{context}: each shared field occurs once");
+    assert_eq!(settings.iter().filter(|field| field.group_id.is_empty()).map(|field| field.id).collect::<Vec<_>>(), primary_fields(context).unwrap(), "{context}: primary family order");
+    let rendered: Vec<_> = widgets(panel).filter(|widget| widget.widget_name().starts_with("tool-setting-") && widget.is::<crate::number_control::NumberControl>()).map(|widget| widget.widget_name().trim_start_matches("tool-setting-").to_owned()).collect();
+    assert_eq!(rendered, ids, "{context}: scoped native fields match the current family exactly once");
+    assert!(!ids.contains(&"contact_softness"), "Contact softness is hidden");
+    if context.starts_with("dry-") {
+        assert_eq!(ids, ["size", "flow", "grain_depth", "material_hardness", "angle", "opacity"], "{context}: six dry fields");
+        for (id, group) in [("angle", "tool-setting-group-tip"), ("opacity", "tool-setting-group-blending")] {
+            let field = settings.iter().find(|field| field.id == id).unwrap();
+            assert_eq!(field.group_id, group, "{context}: stable secondary category");
+            let heading = named::<gtk::Widget>(panel, &format!("tool-setting-{id}")).prev_sibling().and_downcast::<gtk::Label>().unwrap();
+            assert!(heading.has_css_class("heading"));
+            assert_eq!(heading.text().as_str(), field.group.as_ref(), "{context}: published category heading");
+        }
+    }
+    if context.starts_with("liquify-") { assert!(!ids.contains(&"flow") && !ids.contains(&"opacity"), "Liquify has one Strength and no paint Opacity"); }
+}
+
 fn assert_spacing(panel: &gtk::Widget, context: &str) {
     let first = match context {
-        "painting" | "wet-mixing" => named::<gtk::Widget>(panel, "tool-setting-size"),
+        name if primary_fields(name).is_some() => named::<gtk::Widget>(panel, "tool-setting-size"),
         "fill" | "enclose-fill" => named::<gtk::Widget>(panel, "tool-setting-tolerance"),
         "zoom" => named::<gtk::Widget>(panel, "tool-choice-bar-zoom-click").parent().unwrap(),
         "eyedropper" => named::<gtk::Widget>(panel, "color-picker-source").parent().unwrap(),
@@ -43,9 +78,10 @@ fn assert_spacing(panel: &gtk::Widget, context: &str) {
         assert_gap(panel, "selection-actions", first_setting, 6., false);
     }
     match context {
-        "painting" | "wet-mixing" => {
-            assert_gap(panel, "tool-setting-size", "tool-setting-flow", 4., false);
-            assert_gap(panel, "tool-setting-flow", "tool-setting-opacity", 4., false);
+        name if primary_fields(name).is_some() => {
+            for pair in primary_fields(name).unwrap().windows(2) {
+                assert_gap(panel, &format!("tool-setting-{}", pair[0]), &format!("tool-setting-{}", pair[1]), 4., false);
+            }
         }
         "fill" | "enclose-fill" | "auto-select" => {
             assert_gap(panel, "tool-setting-gap_closing", "tool-setting-expansion", 4., false);
@@ -171,11 +207,15 @@ fn assert_margins(panel: &gtk::Widget, context: &str) {
 fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Theme, width: i32, reports: &mut Vec<serde_json::Value>) {
     pump(180);
     let panel = w.panel_widget(Panel::ToolSettings);
+    for field in state(w).tool_settings {
+        assert_eq!(field.group_id.is_empty(), field.group.is_empty(), "{context}: {} category identity matches its caption", field.id);
+    }
+    if primary_fields(context).is_some() { assert_family(w, &panel, context); }
     capture_reference(w, output.join(format!("{context}-{theme:?}-{width}.png")).to_str().unwrap(), 1.);
     assert_spacing(&panel, context);
     assert_margins(&panel, context);
     assert!(panel.measure(gtk::Orientation::Horizontal, -1).0 <= width, "{context}: minimum width fits {width}");
-    for widget in widgets(&panel).filter(|widget| widget.is_mapped()) {
+    for widget in widgets(&panel).filter(|widget| widget.is_mapped() && (widget.is::<gtk::Scrollbar>() || widget.ancestor(gtk::Scrollbar::static_type()).is_none())) {
         let bounds = widget.compute_bounds(&panel).unwrap();
         let allocated_height = bounds.height();
         assert!(bounds.x() >= -1. && bounds.x() + bounds.width() <= panel.width() as f32 + 1., "{context}: {} {} fits panel horizontally: {bounds:?}, panel {}", widget.widget_name(), widget.type_().name(), panel.width());
@@ -198,7 +238,7 @@ fn capture(w: &Rc<Workspace>, output: &std::path::Path, context: &str, theme: Th
         let bounds = widget.compute_bounds(&panel).unwrap();
         json!({"name": widget.widget_name().as_str(), "type": widget.type_().name(), "text": widget.downcast_ref::<gtk::Label>().map(|label| label.text().to_string()), "x": bounds.x(), "y": bounds.y(), "width": bounds.width(), "height": bounds.height(), "padding": padding(&widget)})
     }).collect();
-    reports.push(json!({"context": context, "theme": format!("{theme:?}"), "requested_width": width, "panel_width": panel.width(), "panel_height": panel.height(), "controls": controls}));
+    reports.push(json!({"context": context, "theme": format!("{theme:?}"), "requested_width": width, "panel_width": panel.width(), "panel_height": panel.height(), "fields": state(w).tool_settings, "controls": controls}));
     std::fs::write(output.join("controls.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
 }
 
@@ -226,6 +266,61 @@ fn inline_edit(w: &Rc<Workspace>, output: &std::path::Path, context: &str, id: &
     assert!(number.value() > original, "inline expression commits to shared state");
     assert!(state(w).tool_settings.iter().any(|setting| setting.id == id && (setting.value as f64-number.value()).abs()<0.0001));
     w.dispatch(UiAction::SetToolSetting { id: id.into(), value: original as f32 });
+}
+
+fn family_edit(w: &Rc<Workspace>, input: &mut RemoteInput, panel: &gtk::Widget, context: &str, id: &str, text: &str, value: f32) {
+    let number = named::<crate::number_control::NumberControl>(panel, &format!("tool-setting-{id}"));
+    let original = state(w).tool_settings.iter().find(|field| field.id == id).unwrap().value;
+    let readout = find_css(number.upcast_ref(), "number-value").unwrap();
+    input.click(screen_point(&readout, &w.window, [0.5, 0.5]));
+    let entry = find_css(number.upcast_ref(), "number-entry").unwrap().downcast::<gtk::Entry>().unwrap();
+    until(|| entry.is_mapped(), "family numeric editor opens");
+    assert!(entry.has_focus() || entry.root().unwrap().focus().is_some_and(|focus| focus.is_ancestor(&entry)), "{context}: numeric editor receives native focus");
+    let replace = |input: &mut RemoteInput, text: &str| {
+        input.perform(json!([{"key":0xffe3,"down":true},{"key":0x61,"down":true},{"key":0x61,"down":false},{"key":0xffe3,"down":false}]));
+        for character in text.chars() { input.key(character as u32); }
+    };
+    replace(input, text);
+    input.key(0xff0d);
+    until(|| state(w).tool_settings.iter().any(|field| field.id == id && (field.value-value).abs()<0.00001), "family numeric edit publishes exact stored units");
+    let committed = state(w).tool_settings.iter().find(|field| field.id == id).unwrap().value;
+    assert_eq!(named::<crate::number_control::NumberControl>(panel, &format!("tool-setting-{id}")), number, "{context}: editing retains native field identity");
+    assert_family(w, panel, context);
+    input.click(screen_point(&readout, &w.window, [0.5, 0.5]));
+    replace(input, if value == 0. { "37" } else { "0" });
+    assert_eq!(state(w).tool_settings.iter().find(|field| field.id == id).unwrap().value, committed, "{context}: draft does not publish before commit");
+    input.key(0xff1b);
+    assert!(!entry.is_mapped(), "{context}: Escape closes numeric editor");
+    assert_eq!(state(w).tool_settings.iter().find(|field| field.id == id).unwrap().value, committed, "{context}: Escape preserves the committed value");
+    w.dispatch(UiAction::SetToolSetting { id: id.into(), value: original });
+}
+
+fn family_overflow(w: &Rc<Workspace>, input: &mut RemoteInput, output: &std::path::Path, theme: Theme) {
+    let original = state(w).workspace;
+    let mut workspace = original.clone();
+    workspace.layout.set_panel_visible(Panel::ToolSettings, false).unwrap();
+    let toolbar = workspace.layout.add_toolbar(None, "Family controls", &[ToolbarControl::TOOL_OPTIONS]).unwrap();
+    let tile = workspace.layout.panel(toolbar).unwrap().tiles()[0].id;
+    workspace.layout.move_panel([w.surface.width() as f32, w.surface.height() as f32], toolbar, DockTarget::Float { position: [100., 100.] }).unwrap();
+    let group = workspace.layout.panel_group(toolbar).unwrap();
+    workspace.layout.fit_tab_groups.retain(|id| *id != group);
+    let floating = workspace.layout.floating.iter_mut().find(|item| item.root.id() == group).unwrap();
+    floating.width = 242.;
+    floating.height = Some(54.);
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
+    w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::Pencil as u32 });
+    pump(200);
+    let more = named::<gtk::Widget>(&w.window.clone().upcast(), &format!("tile-{tile}"));
+    assert!(more.is_mapped(), "narrow family options retain More");
+    assert!(widgets(&w.panel_widget(toolbar)).filter(|widget| widget.widget_name().starts_with("toolbar-setting-") && widget.is_mapped()).count() < 4, "narrow primary controls overflow instead of clipping");
+    input.click(screen_point(&more, &w.window, [0.5, 0.5]));
+    let drawer = named::<gtk::Widget>(&w.window.clone().upcast(), "drawer-panel-ToolSettings");
+    until(|| drawer.is_mapped(), "family options drawer opens");
+    assert_family(w, &drawer, "dry-pencil");
+    family_edit(w, input, &drawer, "dry-pencil", "opacity", "63", 0.63);
+    capture_reference(w, output.join(format!("dry-overflow-{theme:?}.png")).to_str().unwrap(), 1.);
+    w.dispatch(UiAction::Customize { action: CustomizationAction::CloseExpanded });
+    w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(original) });
 }
 
 fn spin_edit(w: &Rc<Workspace>, id: &str, expression: &str, expected: f64, output: &std::path::Path, theme: Theme, width: i32) {
@@ -280,11 +375,27 @@ fn native_tool_controls_compact() {
             floating.width = width as f32;
             floating.height = Some(760.);
             w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(workspace) });
-            for (context, preset) in [("painting", layer_core::DefaultBrushPreset::GPen), ("wet-mixing", layer_core::DefaultBrushPreset::WetRound)] {
+            use layer_core::DefaultBrushPreset::*;
+            for (context, preset) in [("painting", GPen), ("dry-pencil", Pencil), ("dry-pointy-pencil", PointyPencil), ("dry-shading-pencil", ShadingPencil), ("dry-charcoal", Charcoal), ("dry-chalk", Chalk), ("dry-pastel", PastelBlock), ("dry-crayon", Crayon), ("wet-mixing", WetRound), ("watercolor", WatercolorWash), ("smudge", NaturalBlender), ("bristles", BristlePaintbrush), ("liquify-push", LiquifyPush), ("liquify-twirl", LiquifyTwirl), ("liquify-pinch", LiquifyPinch), ("liquify-crystals", LiquifyCrystals)] {
                 w.dispatch(UiAction::SelectBrush { id: preset as u32 });
+                assert_eq!(state(&w).brush.preset, preset as u32);
                 capture(&w, &output, context, theme, width, &mut reports);
                 if context == "wet-mixing" { select_group(&w, "color-mixing", 1); select_group(&w, "color-mixing", 0); }
+                if width == 242 {
+                    let panel = w.panel_widget(Panel::ToolSettings);
+                    if context == "dry-pencil" {
+                        for (id, text, value) in [("size", "73", 73.), ("flow", "37", 0.37), ("grain_depth", "200", 2.), ("material_hardness", "40", 0.4), ("angle", "45", std::f32::consts::FRAC_PI_4), ("opacity", "63", 0.63)] {
+                            family_edit(&w, &mut input, &panel, context, id, text, value);
+                        }
+                        family_edit(&w, &mut input, &panel, context, "grain_depth", "0", 0.);
+                    }
+                    let zero = match context { "wet-mixing" => Some("paint"), "watercolor" => Some("water_load"), "smudge" => Some("pull"), "bristles" => Some("bristle_load"), "liquify-push" => Some("strength"), _ => None };
+                    if let Some(id) = zero { family_edit(&w, &mut input, &panel, context, id, "0", 0.); }
+                    let extra = match context { "painting" => Some(("hardness", "37", 0.37)), "wet-mixing" => Some(("pull", "63", 0.63)), "watercolor" => Some(("wet_edge", "37", 0.37)), "bristles" => Some(("bristle_scale", "125", 1.25)), _ => None };
+                    if let Some((id, text, value)) = extra { family_edit(&w, &mut input, &panel, context, id, text, value); }
+                }
             }
+            w.dispatch(UiAction::SelectBrush { id: WetRound as u32 });
             for (context, command) in [("fill", CommandId::Fill), ("enclose-fill", CommandId::EncloseFill), ("auto-select", CommandId::AutoSelect), ("rectangle-select", CommandId::RectangleSelect), ("polygon-select", CommandId::PolygonSelect), ("selection-brush", CommandId::SelectionBrush), ("tonal-presets", CommandId::TonalSelect), ("gradient", CommandId::Gradient), ("eyedropper", CommandId::Eyedropper), ("zoom", CommandId::Zoom), ("crop", CommandId::Crop)] {
                 w.dispatch(UiAction::Invoke { command });
                 if context == "tonal-presets" { w.dispatch(UiAction::Tonal { action: layer_ui::TonalAction::Preset { index: 4 } }); }
@@ -341,6 +452,7 @@ fn native_tool_controls_compact() {
             assert_eq!(split.root().unwrap().focus(), focus);
             w.dispatch(UiAction::Invoke { command: CommandId::CancelTransform });
         }
+        family_overflow(&w, &mut input, &output, theme);
     }
     std::fs::write(output.join("controls.json"), serde_json::to_vec_pretty(&reports).unwrap()).unwrap();
     input.finish();

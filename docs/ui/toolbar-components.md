@@ -58,7 +58,7 @@ bookmarks do not create workspace-layout history entries.
 Rust derives the ordered form from existing tool settings, subtools and actions:
 completion actions first, tool/variant choices, independent eyedropper sample
 size, tool-specific fields (including tonal presets and intervals), selection
-combination, sampling-source and brush Color mixing choices, numeric fields, then
+combination, sampling-source, family-ordered brush fields, then
 remaining actions/toggles. A tool switch changes the form,
 not the toolbar allocation or canvas size. Value changes retain native editors.
 GTK also presents shared list (single or multiple choice), text, and information
@@ -66,6 +66,26 @@ fields. Narrow bars use menu faces with native popover contents; their complete
 form remains available through overflow. Within one tool context, adding or
 removing fields retains compatible editors and open lists. A context change
 discards old editors and their action bindings.
+
+Brush forms share Size and Strength as their first numeric controls. Immutable
+brush capabilities and execution family choose the remaining primary controls;
+changing a value to zero does not change that layout. Dry media place Texture
+strength before Material hardness. Bristles promote Load and Scale, wet paint
+promotes Paint and Pull, watercolor promotes Water load and Wet edge, and smudge
+promotes Pull. Ordinary brushes promote Hardness when applicable. A promoted
+field appears once, without a category heading.
+
+Secondary categories follow a shared order: Tip, Material, Texture, Bristles,
+Mixing, Watercolor, Bleed, Liquify and Blending. Brush Color mixing joins the
+secondary Mixing category in Tool Options. Opacity belongs to Blending, after
+the material controls. Hosts use stable `group_id` values for category boundaries
+and schema identity, with localized `group` text only for headings. Dry media
+therefore show Size, Strength, Texture strength, Material hardness, then Tip angle
+under Tip and Opacity under Blending. Contact softness is hidden and fixed in the
+engine. Tool Settings and Tool Options consume the same numeric order.
+Shared projections that show a field alone, such as figure/fill Opacity or
+selection Feather, remove both its category ID and heading text. An empty
+heading cannot retain a category boundary.
 
 The [canvas action bar](canvas-action-bar.md) presents the same `ToolOption`
 actions and choices beside the object being edited. On the Web it builds them

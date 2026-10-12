@@ -748,6 +748,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 id,
                 label: localizer.text(label),
                 label_id: label,
+                group_id: group.key(),
                 group: localizer.text(group),
                 numeric,
                 value,

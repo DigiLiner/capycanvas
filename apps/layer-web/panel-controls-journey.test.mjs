@@ -33,6 +33,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
   const measure=selector=>evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(selector)});if(!root)throw Error(${JSON.stringify(selector)});const rect=n=>n.getBoundingClientRect().toJSON(),visible=n=>n.checkVisibility()&&n.getBoundingClientRect().width>0&&n.getBoundingClientRect().height>0;const panel=root.closest('.panel');const controls=[...root.querySelectorAll('button,select,input.number-entry,input.palette-entry,.number-control,.number-labels,h3,.toolbar-option-label,.picker-setting>span,.tool-action-choice>span,.property-row>span:first-child,.property-section')].filter(visible).map(n=>({tag:n.tagName,classes:n.className,id:n.dataset.toolSetting??n.dataset.toolAction??n.dataset.propertyKey??n.dataset.pickerSetting??'',rect:rect(n),paddingLeft:getComputedStyle(n).paddingLeft,paddingRight:getComputedStyle(n).paddingRight,radius:getComputedStyle(n).borderTopLeftRadius,shape:getComputedStyle(n).cornerShape,special:!!n.closest('.choice-grid,.gradient-stops,.curve-plot')||['property-color','proof-dial-reset','palette-tile','palette-toggle','palette-choice'].some(c=>n.classList.contains(c))}));const rows=[...root.querySelectorAll('.tool-action-row,.property-toolbar,.property-actions,.gradient-controls,.scope-toolbar,.curve-coordinates,.proof-modes,.palette-search-row')].filter(visible).map(n=>({classes:n.className,rect:rect(n),children:[...n.children].filter(visible).map(rect)}));return{root:rect(root),panel:rect(panel),controls,rows,fit:Number(getComputedStyle(root).getPropertyValue('--corner-fit')),labels:[...root.querySelectorAll('.number-panel .number-title,.picker-setting>span,.toolbar-option-label,.property-section')].filter(visible).map(rect),fields:[...root.querySelectorAll('.number-panel')].filter(visible).map(rect),numbers:[...root.querySelectorAll('.number-panel')].filter(visible).map(n=>{const value=n.querySelector('.number-value'),range=document.createRange();range.selectNodeContents(value);return{field:rect(n),track:rect(n.querySelector('.number-slider')),value:visible(value)?rect(value):null,glyph:visible(value)?range.getBoundingClientRect().toJSON():null}})}})()`);
   const capture=async(name,selector)=>{
     await wait('layerApp.app.brush_ready()');await settle();await evaluate('layerApp.app.wait_for_canvas()');await settle();
+    if(selector==='.tool-settings-control')for(const field of await evaluate('layerApp.state().tool_settings'))assert.equal(!field.group_id,!field.group,`${name} ${field.id} category identity matches its caption`);
     const geometry=await measure(selector),record={name,...geometry};reports.push(record);
     const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/${name}.png`,Buffer.from(shot.data,'base64'));
     for(const field of geometry.fields){near(field.x,geometry.panel.x+8,`${name} field leading inset`);near(field.right,geometry.panel.right-8,`${name} field trailing inset`);near(field.height,36,`${name} slider row`);}
@@ -59,13 +60,55 @@ export async function checkPanelControls({call,evaluate,settle}) {
     const p=await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
     for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...p,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();
   };
-  const key=async(name,vk)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:name,code:name,windowsVirtualKeyCode:vk});await settle();};
+  const key=async(name,vk,modifiers=0)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:name,code:name==='a'?'KeyA':name,windowsVirtualKeyCode:vk,modifiers});await settle();};
   const editor=async(name,selector)=>{
     await click(`${selector} .number-value`);
     const bounds=await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),e=n.querySelector('.number-entry'),r=e.getBoundingClientRect(),t=n.querySelector('.number-slider')?.getBoundingClientRect();return{width:r.width,height:r.height,bottom:r.bottom,right:r.right,field:n.getBoundingClientRect().toJSON(),gap:t?r.left-t.right:null,focused:document.activeElement===e}})()`);
     near(bounds.width,68,`${name} editor width`);near(bounds.bottom,bounds.field.bottom,`${name} editor bottom`);near(bounds.right,bounds.field.right,`${name} editor right`);near(bounds.height,24,`${name} editor height`);assert.equal(bounds.focused,true,`${name} native editor focus`);if(bounds.gap!==null)assert.ok(bounds.gap>=8-.1,`${name} editor/slider clearance`);
     await capture(`${name}-editing`,selector.startsWith('.tool')?'.tool-settings-control':'.effect-properties');await key('Escape',27);
   };
+  const dryPrimary=['size','flow','grain_depth','material_hardness'];
+  const family=async(name,primary,dry=false,selector='.tool-settings-control')=>{
+    const profile=await evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(selector)}),fields=layerApp.state().tool_settings;return{fields,rendered:[...root.querySelectorAll('[data-tool-setting]')].map(n=>n.dataset.toolSetting),headings:fields.filter(f=>f.group_id).map(f=>{const n=root.querySelector('[data-tool-setting="'+f.id+'"]'),heading=n.previousElementSibling;return{id:f.id,tag:heading?.tagName,text:heading?.textContent}}),rects:fields.filter(f=>!f.group_id).map(f=>root.querySelector('[data-tool-setting="'+f.id+'"]').getBoundingClientRect().toJSON())}})()`);
+    const ids=profile.fields.map(f=>f.id);
+    assert.equal(new Set(ids).size,ids.length,`${name} shared fields are unique`);
+    assert.deepEqual(profile.rendered,ids,`${name} scoped DOM matches the current family without stale or duplicate fields`);
+    assert.deepEqual(profile.fields.filter(f=>!f.group_id).map(f=>f.id),primary,`${name} primary family order`);
+    assert.ok(!ids.includes('contact_softness'),`${name} Contact softness is hidden`);
+    for(let i=1;i<profile.rects.length;i++)near(profile.rects[i].top-profile.rects[i-1].bottom,4,`${name} primary peer gap`);
+    if(dry){
+      assert.deepEqual(ids,[...dryPrimary,'angle','opacity'],`${name} six dry fields`);
+      for(const[id,group]of[['angle','tool-setting-group-tip'],['opacity','tool-setting-group-blending']]){
+        const field=profile.fields.find(f=>f.id===id),heading=profile.headings.find(h=>h.id===id);
+        assert.equal(field.group_id,group,`${name} stable ${id} category`);assert.equal(heading.tag,'H3',`${name} ${id} category heading`);assert.equal(heading.text,field.group,`${name} published category label`);
+      }
+    }
+    if(primary.includes('strength'))assert.ok(!ids.includes('flow')&&!ids.includes('opacity'),`${name} one Liquify Strength and no paint Opacity`);
+    reports.push({name,profile});
+  };
+  const numericEdit=async(name,id,text,value,primary,dry=false,root='.tool-settings-control')=>{
+    const selector=`${root} [data-tool-setting="${id}"]`,stored=()=>evaluate(`layerApp.state().tool_settings.find(f=>f.id===${JSON.stringify(id)}).value`),originalValue=await stored();
+    await evaluate(`window.panelControlsNumber=document.querySelector(${JSON.stringify(selector)})`);
+    await click(`${selector} .number-value`);
+    assert.equal(await evaluate(`document.activeElement===document.querySelector(${JSON.stringify(selector)}).querySelector('.number-entry')`),true,`${name} ${id} native editor focus`);
+    await key('a',65,2);await call('Input.insertText',{text});await key('Enter',13);
+    await wait(`Math.abs(layerApp.state().tool_settings.find(f=>f.id===${JSON.stringify(id)})?.value-${value})<.00001`);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)})===window.panelControlsNumber`),true,`${name} ${id} retains field identity`);
+    await family(`${name}-${id}-committed`,primary,dry,root);
+    await click(`${selector} .number-value`);await key('a',65,2);await call('Input.insertText',{text:value===0?'37':'0'});
+    assert.ok(Math.abs((await stored())-value)<.00001,`${name} ${id} draft does not publish`);
+    await key('Escape',27);
+    assert.ok(Math.abs((await stored())-value)<.00001,`${name} ${id} cancellation preserves the commit`);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(selector)}).querySelector('.number-entry').hidden`),true,`${name} ${id} Escape closes editor`);
+    await send({type:'set_tool_setting',id,value:originalValue});
+  };
+  const families=[
+    ...[['pencil',2],['pointy-pencil',25],['shading-pencil',26],['charcoal',27],['chalk',6],['pastel',17],['crayon',43]].map(([name,id])=>({name:`dry-${name}`,id,primary:dryPrimary,dry:true})),
+    {name:'wet-round',id:11,primary:['size','flow','paint','pull'],zero:'paint',edit:['pull','63',.63]},
+    {name:'watercolor',id:20,primary:['size','flow','water_load','wet_edge'],zero:'water_load',edit:['wet_edge','37',.37]},
+    {name:'bristles',id:35,primary:['size','flow','bristle_load','bristle_scale'],zero:'bristle_load',edit:['bristle_scale','125',1.25]},
+    ...[['twirl',13],['pinch',37],['crystals',39]].map(([name,id])=>({name:`liquify-${name}`,id,primary:['size','strength']})),
+  ];
   await wait('layerApp.startupTimes.complete!==null&&!layerApp.documents.busy()');
   await call('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});await settle();
   await send({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});
@@ -85,6 +128,18 @@ export async function checkPanelControls({call,evaluate,settle}) {
         if(tool==='crop')await wait(`!!document.querySelector('.tool-settings-control [data-tool-setting="crop_width"]')`);
         if(tool==='scale_rotate')await wait(`!!document.querySelector('.tool-settings-control [data-tool-action="transform_flip_horizontal"]')`);
         const name=`tool-${tool}-${current}-${width}`,geometry=await capture(name,'.tool-settings-control');
+        if(tool==='pen'){
+          const primary=['size','flow','hardness'];await family(name,primary);
+          if(width===242)await numericEdit(name,'hardness','37',.37,primary);
+        }
+        if(tool==='wet-mixing'){
+          const primary=['size','flow','pull'];await family(name,primary);
+          if(width===242)await numericEdit(name,'pull','0',0,primary);
+        }
+        if(tool==='liquify'){
+          const primary=['size','strength'];await family(name,primary);
+          if(width===242)await numericEdit(name,'strength','0',0,primary);
+        }
         if(tool==='zoom'){
           const rows=await evaluate(`(()=>{const root=document.querySelector('.tool-settings-control');return ['[data-toolbar-choice="zoom-click"]','[data-toolbar-choice="zoom-drag"]','[data-tool-action="center_zoom_clicks"]'].map(s=>root.querySelector(s).getBoundingClientRect().toJSON())})()`);
           for(let i=1;i<rows.length;i++)near(rows[i].top-rows[i-1].bottom,4,`${name} vertical peer gap`);
@@ -109,7 +164,41 @@ export async function checkPanelControls({call,evaluate,settle}) {
           await invoke('transform_warp');await wait(`!!document.querySelector('.tool-settings-control [data-tool-action-group="transform-warp-grid"]')`);await capture(`tool-warp-${current}-${width}`,'.tool-settings-control');
         }
       }
+      for(const spec of families){
+        await closeOperation();await send({type:'select_brush',id:spec.id});
+        assert.equal(await evaluate('layerApp.state().brush.preset'),spec.id,`${spec.name} active preset`);
+        const name=`tool-${spec.name}-${current}-${width}`;
+        await capture(name,'.tool-settings-control');await family(name,spec.primary,!!spec.dry);
+        if(width===242&&spec.name==='dry-pencil'){
+          for(const[id,text,value]of[['size','73',73],['flow','37',.37],['grain_depth','200',2],['material_hardness','40',.4],['angle','45',Math.PI/4],['opacity','63',.63],['grain_depth','0',0]])await numericEdit(name,id,text,value,spec.primary,true);
+        }
+        if(width===242&&spec.zero)await numericEdit(name,spec.zero,'0',0,spec.primary);
+        if(width===242&&spec.edit)await numericEdit(name,...spec.edit,spec.primary);
+      }
     }
+    const overflowWorkspace=await evaluate('layerApp.state().workspace');
+    await send({type:'customize',action:{type:'set_panel_visible',panel:'tool_settings',visible:false}});
+    if(!await evaluate('!!document.querySelector("[data-toolbar-component=tool_options]")')){
+      await send({type:'customize',action:{type:'insert_tools',panel:'toolbar',before:null}});
+      await send({type:'customize',action:{type:'picker_select',control:{kind:'tool_options'},selected:true}});
+      await send({type:'customize',action:{type:'confirm_tools'}});
+    }
+    for(const current of ['light','dark']){
+      await send({type:'set_theme',theme:current});await send({type:'select_brush',id:2});
+      await call('Emulation.setDeviceMetricsOverride',{width:680,height:1000,deviceScaleFactor:1,mobile:false});await settle();
+      const more='[data-toolbar-component=tool_options] > .toolbar-more';await wait(`document.querySelector(${JSON.stringify(more)})?.checkVisibility()`);
+      const inline=await evaluate(`(()=>{const root=document.querySelector('[data-toolbar-component=tool_options]');return [...root.querySelectorAll('[data-toolbar-setting]')].filter(n=>n.checkVisibility()).map(n=>n.dataset.toolbarSetting)})()`);
+      assert.ok(inline.length<6,`${current} narrow options overflow instead of clipping all six dry fields`);
+      await click(more);await wait('!!document.querySelector(".content-drawer[data-drawer=tool]")');
+      await evaluate('new Promise((resolve,reject)=>{let last="",stable=0;const end=performance.now()+30000;function poll(){const n=document.querySelector(".content-drawer[data-drawer=tool]");if(n&&!n.inert){const current=JSON.stringify(n.getBoundingClientRect().toJSON());stable=current===last?stable+1:0;last=current;if(stable>=3)return resolve()}if(performance.now()>end)return reject(Error("More drawer geometry did not settle"));requestAnimationFrame(poll)}poll()})');
+      const drawer='.content-drawer[data-drawer=tool] .tool-settings-control';
+      await family(`dry-overflow-${current}`,dryPrimary,true,drawer);
+      await numericEdit(`dry-overflow-${current}`,'opacity','63',.63,dryPrimary,true,drawer);
+      const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/dry-overflow-${current}.png`,Buffer.from(shot.data,'base64'));
+      await send({type:'customize',action:{type:'close_expanded'}});
+    }
+    await call('Emulation.setDeviceMetricsOverride',{width:1600,height:1000,deviceScaleFactor:1,mobile:false});
+    await send({type:'restore_workspace',workspace:overflowWorkspace});
     await closeOperation();await invoke('hand');await send({type:'customize',action:{type:'set_panel_visible',panel:'tool_settings',visible:false}});
     for(const width of [242,320])for(const current of ['light','dark']){
       await send({type:'set_theme',theme:current});await float('properties',width);
@@ -171,7 +260,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
       await click('.palettes-panel .palette-selector');await capture(`palette-chooser-${current}-${width}`,'.palettes-panel');
       await key('Escape',27);await send({type:'customize',action:{type:'set_panel_visible',panel:'palettes',visible:false}});
     }
-    console.log(`PASS: ${reports.length} panel geometry/capture cases, both themes at 242/320px, native editor focus/cancellation and matching peer gaps`);
+    console.log(`PASS: ${reports.length} panel geometry and family records, both themes at 242/320px, numeric commits/cancellation, grouped dry fields and toolbar overflow`);
   } finally {
     await writeFile(`${directory}/controls.json`,JSON.stringify(reports,null,2));
     await evaluate('window.showOpenFilePicker=panelControlsPicker');

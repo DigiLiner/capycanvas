@@ -277,7 +277,7 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
         if(picking(data->state))return refreshPicker();
         auto context=settingsContext(data->state);A schema;hstring previousGroup;
         for(auto value:array(data->state,L"tool_settings")){
-            auto item=value.GetObject();auto group=str(item,L"group");
+            auto item=value.GetObject();auto group=str(item,L"group_id");
             schema.Append(O({{L"id",S(str(item,L"id"))},{L"group_boundary",B(previousGroup!=group)},{L"numeric",object(item,L"numeric")}}));previousGroup=group;
         }
         auto actions=array(data->state,L"tool_actions");auto extra=array(data->state,L"tool_extra");
@@ -365,10 +365,10 @@ struct SettingsView : std::enable_shared_from_this<SettingsView> {
                     }});
                     continue;
                 }
-                if(group!=str(item,L"group")){
-                    group=str(item,L"group");numbers=nullptr;auto anchor=beside.find(id.c_str());
+                if(group!=str(item,L"group_id")){
+                    group=str(item,L"group_id");numbers=nullptr;auto anchor=beside.find(id.c_str());
                     if(!group.empty()||anchor!=beside.end()){
-                        auto heading=label(data,anchor!=beside.end()?str(anchor->second,L"label"):group,true);heading.Opacity(.55);heading.Margin({0,body.Children().Size()?2.:0.,0,0});body.Children().Append(heading);
+                        auto heading=label(data,anchor!=beside.end()?str(anchor->second,L"label"):str(item,L"group"),true);heading.Opacity(.55);heading.Margin({0,body.Children().Size()?2.:0.,0,0});body.Children().Append(heading);
                         auto specId=anchor!=beside.end()?str(anchor->second,L"id"):hstring();
                         fields.emplace_back([weak,heading,id,specId]{if(auto self=weak.lock()){
                             auto title=str(find(array(self->data->state,L"tool_settings"),L"id",id),L"group");

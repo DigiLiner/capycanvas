@@ -69,7 +69,7 @@ fn relief_partial(o: vec2<f32>, v: vec2<f32>, interval: vec2<f32>, gap: f32,
 
 fn relief_piece(o: vec2<f32>, v: vec2<f32>, ray: vec4<f32>, bounds: vec2<f32>, gap: f32,
     k: f32, profile: vec3<f32>, whole: bool) -> vec2<f32> {
-    let support = relief_range(ray,1.0,bounds);
+    let support = bounds;
     let full = support.y-support.x;
     if full <= 0.0 { return vec2<f32>(0.0); }
     let stroke = select(vec2<f32>(max(support.x,0.0),min(support.y,1.0)),support,whole);
@@ -116,6 +116,11 @@ fn relief_beveled_range(o:vec2<f32>,v:vec2<f32>,rim:vec2<f32>,inverse:vec4<f32>)
     return vec2<f32>(lo,max(lo,hi));
 }
 
+fn relief_origin(dab:Dab,origin:vec2<f32>)->vec2<f32> {
+    if contact_feature(32768u,style.contact_c.z!=0.0) {return origin+dab.material.yz;}
+    return origin;
+}
+
 fn relief_evaluate(dab: Dab, world: vec2<f32>, paper: f32, whole: bool) -> f32 {
     let relative = world-dab.center+dab.motion;
     let o = vec2<f32>(dot(relative,dab.metric.xy),dot(relative,dab.metric.zw));
@@ -138,7 +143,8 @@ fn relief_evaluate(dab: Dab, world: vec2<f32>, paper: f32, whole: bool) -> f32 {
     if !rounded {
         let nearest = o+v*select(progress,ray.x,whole);
         let q = dot(nearest,nearest);
-        if q > 1.0 || gap <= k*(profile.x+q*(profile.y+profile.z*q)) { return 0.0; }
+        if q > 1.0 { return 0.0; }
+        if !contact_feature(32768u,style.contact_c.z!=0.0) && gap <= k*(profile.x+q*(profile.y+profile.z*q)) { return 0.0; }
     }
     var sum = vec2<f32>(0.0);
     if dot(dab.motion,dab.motion) < 0.000001 {
@@ -150,9 +156,19 @@ fn relief_evaluate(dab: Dab, world: vec2<f32>, paper: f32, whole: bool) -> f32 {
             q = (edge.x+edge.y)*(edge.x+edge.y);
         }
         if q > 1.0 { return 0.0; }
+        if contact_feature(32768u,style.contact_c.z!=0.0) {
+            let point=relief_origin(dab,o);q=dot(point,point);
+        }
         sum = vec2<f32>(relief_transfer((gap-k*(profile.x+q*(profile.y+profile.z*q)))*style.material_a.y),1.0);
     } else if !rounded {
-        sum = relief_piece(o,v,ray,vec2<f32>(-1000000.0,1000000.0),gap,k,profile,whole);
+        let support=relief_range(ray,1.0,vec2<f32>(-1000000.0,1000000.0));
+        let origin=relief_origin(dab,o);
+        var field_ray=ray;
+        if contact_feature(32768u,style.contact_c.z!=0.0) {
+            field_ray=vec4<f32>(origin.x*dab.invariants.y,origin.y*origin.y,ray.z,ray.w);
+            if ray.z<0.00000001 {field_ray=vec4<f32>(0.0,dot(origin,origin),0.0,0.0);}
+        }
+        sum = relief_piece(origin,v,field_ray,support,gap,k,profile,whole);
     } else {
         var rim = dab.invariants.zw;
         if contact_uniform() {
@@ -199,21 +215,37 @@ fn relief_tap_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32)->f32 {
     let depth=0.5-clamp(0.5+style.contact_a.y*(paper-0.5),0.0,1.0);
     let gap=0.5*pressure-depth;
     let k=1.0+0.25*depth;
-    let outer=min(1.0,relief_inverse(gap/k,profile));
+    var outer=relief_inverse(gap/k,profile);
+    if !contact_feature(32768u,style.contact_c.z!=0.0) {outer=min(1.0,outer);}
     if outer<=0.0 {return 0.0;}
     let inner=min(outer,relief_inverse((gap-1.0/style.material_a.y)/k,profile));
     let loading=1.0-style.material_a.z+style.material_a.z*pressure;
     let dx=vec2<f32>(dab.metric.x,dab.metric.z);
     let dy=vec2<f32>(dab.metric.y,dab.metric.w);
     let relative=world-dab.center+dab.motion;
-    let origin=dx*relative.x+dy*relative.y;
+    let physical=dx*relative.x+dy*relative.y;
+    let origin=relief_origin(dab,physical);
     let a=origin+0.5*(dx+dy);
     let b=origin+0.5*(dx-dy);
     let c=origin-0.5*(dx+dy);
     let d=origin-0.5*(dx-dy);
-    if max(max(dot(a,a),dot(b,b)),max(dot(c,c),dot(d,d)))<=inner {return loading;}
+    var inside=max(max(dot(a,a),dot(b,b)),max(dot(c,c),dot(d,d)))<=inner;
+    if inside && contact_feature(32768u,style.contact_c.z!=0.0) {
+        let aa=physical+0.5*(dx+dy);let bb=physical+0.5*(dx-dy);
+        let cc=physical-0.5*(dx+dy);let dd=physical-0.5*(dx-dy);
+        inside=max(max(dot(aa,aa),dot(bb,bb)),max(dot(cc,cc),dot(dd,dd)))<=1.0;
+    }
+    if inside {return loading;}
     let half=sqrt(outer)*length(dx)/abs(dab.metric.x*dab.metric.w-dab.metric.y*dab.metric.z);
-    let vertical=vec2<f32>(max(-0.5,-relative.y-half),min(0.5,-relative.y+half));
+    var center_y=relative.y;
+    if contact_feature(32768u,style.contact_c.z!=0.0) {
+        center_y+=(dab.metric.x*dab.material.z-dab.metric.z*dab.material.y)/(dab.metric.x*dab.metric.w-dab.metric.y*dab.metric.z);
+    }
+    var vertical=vec2<f32>(max(-0.5,-center_y-half),min(0.5,-center_y+half));
+    if contact_feature(32768u,style.contact_c.z!=0.0) {
+        let physical_half=length(dx)/abs(dab.metric.x*dab.metric.w-dab.metric.y*dab.metric.z);
+        vertical=vec2<f32>(max(vertical.x,-relative.y-physical_half),min(vertical.y,-relative.y+physical_half));
+    }
     if vertical.y<=vertical.x {return 0.0;}
     var integral=vec2<f32>(0.0);
     for(var row=0u;row<8u;row+=1u) {
@@ -227,7 +259,9 @@ fn relief_tap_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32)->f32 {
         }
         let y=0.5*(vertical.x+vertical.y)+0.5*(vertical.y-vertical.x)*node*select(-1.0,1.0,row>=4u);
         let ray=relief_ray(origin+dy*y,dx);
-        let support=relief_range(ray,outer,vec2<f32>(-0.5,0.5));
+        var bounds=vec2<f32>(-0.5,0.5);
+        if contact_feature(32768u,style.contact_c.z!=0.0) {bounds=relief_range(relief_ray(physical+dy*y,dx),1.0,bounds);}
+        let support=relief_range(ray,outer,bounds);
         if support.y<=support.x {continue;}
         let full=relief_range(ray,inner,support);
         var sum=vec2<f32>(loading,1.0-exp(-dose*loading))*(full.y-full.x);
@@ -269,10 +303,17 @@ fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {
     let pressure=max(dab.previous_contact.x,dab.contact.x)*style.contact_c.x;
     let profile=min(dab.previous_contact.yzw,dab.contact.yzw);
     let depth=0.5-clamp(0.5+style.contact_a.y*(paper-0.5),0.0,1.0);
-    let limit=min(1.0,relief_inverse((0.5*clamp(pressure,0.0,1.0)-depth)/(1.0+0.25*depth),profile));
+    var limit=relief_inverse((0.5*clamp(pressure,0.0,1.0)-depth)/(1.0+0.25*depth),profile);
+    if !contact_feature(32768u,style.contact_c.z!=0.0) {limit=min(1.0,limit);}
     if limit<=0.0 {return 0.0;}
     var normal=normalize(dab.metric.zw);
-    var bounds=vec2<f32>(-sqrt(limit)-transverse,sqrt(limit)-transverse)/length(dab.metric.zw);
+    var field_transverse=transverse;
+    if contact_feature(32768u,style.contact_c.z!=0.0) {field_transverse+=dab.material.z;}
+    var bounds=vec2<f32>(-sqrt(limit)-field_transverse,sqrt(limit)-field_transverse)/length(dab.metric.zw);
+    if contact_feature(32768u,style.contact_c.z!=0.0) {
+        let physical=vec2<f32>(-1.0-transverse,1.0-transverse)/length(dab.metric.zw);
+        bounds=vec2<f32>(max(bounds.x,physical.x),min(bounds.y,physical.y));
+    }
     let a=max(abs(normal.x),abs(normal.y));
     let b=min(abs(normal.x),abs(normal.y));
     let half=0.5*(a+b);

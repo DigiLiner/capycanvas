@@ -32,34 +32,31 @@ pub const CONTACT_BRUSH_PRESETS: [DefaultBrushPreset; 24] = [
 pub(crate) fn dry_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
     use DefaultBrushPreset::*;
     let pose = |radii, relief| BrushDryPose { radii, relief };
-    let (diameter, flow, paper, scale, softness, loading, corner, gain, poses) = match preset {
-        Pencil => (36., 0.65, 1.1, 1.8, 0.07, 0.25, 0., 1., [
+    let (diameter, flow, paper, scale, loading, corner, gain, poses) = match preset {
+        Pencil => (36./4.8, 0.65, 1.1, 1.8, 0.80, 0., 1., [
             pose([0.65, 0.65], [0., 0.70, 0.]), pose([1., 0.65], [0., 0.5, 0.25]),
             pose([4.8, 1.2], [0.04, 0.25, 0.5])]),
-        PointyPencil => (18., 0.95, 0.9, 1.8, 0.055, 0.3, 0., 1., [
+        PointyPencil => (18.*0.9/5., 0.95, 0.9, 1.8, 0.90, 0., 1., [
             pose([0.55, 0.55], [0., 0.95, 0.]), pose([0.9, 0.5], [0., 0.8, 0.]),
             pose([5., 0.8], [0.05, 0.35, 0.45])]),
-        ShadingPencil => (64., 0.3, 1.35, 1.4, 0.055, 0.12, 0., 0.9, [
+        ShadingPencil => (64./2.6, 0.3, 1.35, 1.4, 0.70, 0., 0.9, [
             pose([0.28, 0.28], [0., 0.7, 0.]), pose([1., 0.55], [0.04, 0.3, 0.3]),
             pose([2.6, 0.8], [0.10, 0.08, 0.6])]),
-        Charcoal => (48., 0.8, 1.6, 1.1, 0.04, 0.1, 0., 0.85, [
+        Charcoal => (24., 0.8, 1.6, 1.1, 0.45, 0., 0.85, [
             pose([0.65, 0.65], [0.06, 0.5, 0.25]), pose([1., 0.65], [0.09, 0.15, 0.6]),
             pose([2., 0.8], [0.14, 0.07, 0.75])]),
-        Chalk => (36., 0.55, 1.4, 0.65, 0.045, 0.1, 0.24, 0.75, [
+        Chalk => (36./1.6_f32.hypot(0.85), 0.55, 1.4, 0.65, 0.70, 0.24, 0.75, [
             pose([0.55, 0.55], [0.09, 0.65, 0.]), pose([1., 0.8], [0.12, 0.65, 0.]),
             pose([1.6, 0.85], [0.16, 0.65, 0.])]),
-        PastelBlock => (64., 0.75, 1.45, 1., 0.035, 0.12, 0.3, 0.85, [
-            pose([0.55, 0.65], [0.08, 0.65, 0.]), pose([1., 0.65], [0.10, 0.65, 0.]),
-            pose([1.8, 0.75], [0.14, 0.65, 0.])]),
-        Crayon => (32., 0.55, 0.8, 1.3, 0.07, 0.4, 0., 1., [
+        PastelBlock => (64./1.95, 0.75, 1.45, 1., 0.40, 0.3, 0.85, [
+            pose([0.55, 0.55], [0.08, 0.65, 0.]), pose([1., 0.65], [0.10, 0.65, 0.]),
+            pose([3.2, 0.55], [0.14, 0.65, 0.])]),
+        Crayon => (32./2.6, 0.55, 0.8, 1.3, 0.75, 0., 1., [
             pose([0.65, 0.65], [0., 0.6, 0.15]), pose([1., 0.7], [0., 0.4, 0.3]),
             pose([2.6, 0.85], [0.03, 0.1, 0.6])]),
         _ => unreachable!(),
     };
-    let extent = poses.iter().map(|p| if corner > 0. { p.radii[0].hypot(p.radii[1]) }
-        else { p.radii[0].max(p.radii[1]) }).fold(0_f32, f32::max);
     let writing = poses[1].radii[0].max(poses[1].radii[1]);
-    let diameter = diameter * writing / extent;
     let poses = poses.map(|mut p| { p.radii = p.radii.map(|v| v / writing); p });
     let minimum_size = match preset {
         ShadingPencil => 0.65, Charcoal => 0.55, Chalk|PastelBlock|Crayon => 0.75, _ => 0.15,
@@ -69,7 +66,8 @@ pub(crate) fn dry_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         color_rgba_linear: [0.014, 0.013, 0.012, 1.],
         grain: Some(crate::presets::canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, scale, 1., 0.)),
         contact: Some(BrushContact { paper, pressure_gain: gain,
-            dry: Some(BrushDryMedia { poses, softness, loading, corner }), ..Default::default() }),
+            dry: Some(BrushDryMedia { poses, softness: 0.05, loading, corner,
+                relief_offset: if preset == PointyPencil { 0.35 } else { 0. } }), ..Default::default() }),
         rendering: BrushRendering { accumulation: BrushAccumulation::Flow, ..Default::default() },
         mappings: Arc::from([BrushMapping { output_scale: 1.-minimum_size, output_bias: minimum_size,
             ..BrushMapping::pressure_size() }]),

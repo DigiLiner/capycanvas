@@ -71,6 +71,8 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
         let m=d.metric;
         let v=[d.dab.motion[0]*m[0]+d.dab.motion[1]*m[1],d.dab.motion[0]*m[2]+d.dab.motion[1]*m[3]];
         if dry.corner==0. {
+            let offset = dry.relief_offset / (m[0]*m[0]+m[1]*m[1]);
+            let tip = [m[0]*offset,m[1]*offset];
             let speed=v[0].hypot(v[1]);
             let inverse=if speed*speed>=0.00000001 {speed.recip()} else {0.};
             if speed>0. {
@@ -78,6 +80,8 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
                 d.metric=[c*m[0]+s*m[2],c*m[1]+s*m[3],-s*m[0]+c*m[2],-s*m[1]+c*m[3]];
             }
             d.invariants=[speed,inverse,speed*speed,inverse*inverse];
+            d.dab.material[1]=d.metric[0]*tip[0]+d.metric[1]*tip[1];
+            d.dab.material[2]=d.metric[2]*tip[0]+d.metric[3]*tip[1];
         } else {
             let axes=[(d.dab.radii[0]+d.dab.previous[0])*0.5,(d.dab.radii[1]+d.dab.previous[1])*0.5].map(|x|x.max(0.005));
             let rim=dry.corner*axes[0].min(axes[1]);
@@ -135,6 +139,7 @@ pub(super) fn contact_flags(contact: Option<layer_core::BrushContact>) -> u32 {
         | (u32::from(c.bristles.is_some()) << 9)
         | (u32::from(c.dry.is_some_and(|d|d.poses.iter().any(|p|p.relief[2]>0.000001))) << 11)
         | (u32::from(c.dry.is_some_and(|d|d.corner>0.)) << 12)
+        | (u32::from(c.dry.is_some_and(|d|d.relief_offset!=0.)) << 15)
 }
 
 impl Pipelines {
@@ -230,10 +235,11 @@ impl Pipelines {
         for paper in [0,2] {for quartic in [0,2048] {for corner in [0,4096] {
             flags.insert(1|64|paper|quartic|corner);
         }}}
+        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|32768));
         flags.insert(0);
         flags.extend(flags.clone().into_iter().map(|flags| flags | 128));
         if matches!(target,Target::Display|Target::DisplayTracked) {
-            flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&!(67|2048|4096)==0).chain([0,1,128,129]).map(|f|f|1024));
+            flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&!(67|2048|4096|32768)==0).chain([0,1,128,129]).map(|f|f|1024));
         }
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|8192));
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|16384));
@@ -440,7 +446,7 @@ pub(super) fn display_preview_eligible(style: &layer_render::DabStyle) -> bool {
 
 pub(super) fn native_dry_preview_eligible(style: &layer_render::DabStyle) -> bool {
     style.execution == BrushExecution::Dry && style.opacity == 1. && dry_material_compute_eligible(style)
-        && style.contact.is_some_and(|c| c.dry.is_some()) && contact_flags(style.contact) & !(67|2048|4096) == 0
+        && style.contact.is_some_and(|c| c.dry.is_some()) && contact_flags(style.contact) & !(67|2048|4096|32768) == 0
         && style.rendering.accumulation == BrushAccumulation::Flow && !style.rendering.edge_after_stroke
         && !style.alpha_locked && style.selection.is_none()
 }

@@ -23,7 +23,7 @@ fn check_choice_items(s: &mut UiSession<Recorder>, id: &str) {
 #[test]
 fn language_refresh_retains_toolbar_editor_schema_and_action_context() {
     let mut s = session(Platform::Gtk);
-    for command in [CommandId::Pen, CommandId::Fill, CommandId::RectangleSelect, CommandId::Zoom] {
+    for command in [CommandId::Pen, CommandId::Pencil, CommandId::Brush, CommandId::Blend, CommandId::Fill, CommandId::RectangleSelect, CommandId::Zoom] {
         s.dispatch(UiAction::Invoke { command }).unwrap();
         let context = s.state().toolbar_context();
         let initial = s.state().tool_options();
@@ -202,23 +202,27 @@ fn toolbar_components_edit_shared_parameters_and_reject_obsolete_contexts() {
 #[test]
 fn toolbar_options_follow_tools_and_preserve_completion_actions() {
     let mut s = session(Platform::Gtk);
-    for tool in [
-        CommandId::Brush,
-        CommandId::Eraser,
-        CommandId::Fill,
-        CommandId::RectangleSelect,
-        CommandId::Gradient,
-        CommandId::Eyedropper,
-    ] {
-        s.dispatch(UiAction::Invoke { command: tool }).unwrap();
-        let options = s.state().tool_options();
-        for field in &s.state().tool_settings {
+    let check_fields = |state: &crate::UiState, tool: CommandId| {
+        let options = state.tool_options();
+        assert_eq!(options.iter().filter_map(|o| if let ToolOption::Numeric(f) = o { Some(f.id) } else { None })
+            .collect::<Vec<_>>(), state.tool_settings.iter().map(|f| f.id).collect::<Vec<_>>(), "{tool:?}: shared field order");
+        for field in &state.tool_settings {
+            assert_eq!(field.group_id.is_empty(), field.group.is_empty(), "{tool:?}/{}: heading identity", field.id);
+            if matches!(field.id, "opacity" | "selection_feather") && !matches!(tool, CommandId::Brush | CommandId::Eraser) {
+                assert!(field.group_id.is_empty(), "{tool:?}/{}: standalone setting", field.id);
+            }
             assert!(
                 options
                     .iter()
                     .any(|o| matches!(o, ToolOption::Numeric(f) if f == field))
             );
         }
+    };
+    for tool in [CommandId::Brush, CommandId::Eraser, CommandId::Fill,
+        CommandId::RectangleSelect, CommandId::Gradient, CommandId::Eyedropper] {
+        s.dispatch(UiAction::Invoke { command: tool }).unwrap();
+        check_fields(s.state(), tool);
+        let options = s.state().tool_options();
         for action in &s.state().tool_actions {
             assert!(options.iter().any(|o| match o {
                 ToolOption::Action { state, .. } => state.id == action.command,
@@ -230,7 +234,45 @@ fn toolbar_options_follow_tools_and_preserve_completion_actions() {
             }));
         }
     }
+    for tool in [CommandId::EncloseFill, CommandId::EllipseSelect, CommandId::PolygonSelect,
+        CommandId::Figure, CommandId::LassoFill, CommandId::Crop] {
+        invoke(&mut s, tool);
+        check_fields(s.state(), tool);
+        if tool == CommandId::Crop { invoke(&mut s, CommandId::CancelTransform); }
+    }
     invoke(&mut s, CommandId::Brush);
+    use layer_core::DefaultBrushPreset as P;
+    for (preset, primary) in [
+        (P::Pencil, vec!["size", "flow", "grain_depth", "material_hardness"]),
+        (P::GPen, vec!["size", "flow", "hardness"]),
+        (P::BristlePaintbrush, vec!["size", "flow", "bristle_load", "bristle_scale"]),
+        (P::WetRound, vec!["size", "flow", "paint", "pull"]),
+        (P::WatercolorWash, vec!["size", "flow", "water_load", "wet_edge"]),
+        (P::Smudge, vec!["size", "flow", "pull"]),
+        (P::LiquifyPush, vec!["size", "strength"]),
+    ] {
+        s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
+        let fields=s.state().tool_settings.clone();
+        assert_eq!(fields.iter().take(primary.len()).map(|f|f.id).collect::<Vec<_>>(),primary);
+        assert!(fields[..primary.len()].iter().all(|f|f.group_id.is_empty()));
+        let options=s.state().tool_options();
+        assert_eq!(options.iter().filter_map(|o|if let ToolOption::Numeric(f)=o {Some(f.id)} else {None})
+            .collect::<Vec<_>>(),fields.iter().map(|f|f.id).collect::<Vec<_>>());
+        for id in primary.iter().copied().filter(|id|*id!="size") {
+            let value=fields.iter().find(|f|f.id==id).unwrap().numeric.min as f32;
+            s.dispatch(UiAction::SetToolSetting {id:id.into(),value}).unwrap();
+        }
+        if preset==P::WetRound {
+            s.dispatch(UiAction::SetToolSetting {id:"dilution".into(),value:0.}).unwrap();
+            let options=s.state().tool_options();
+            let mixing=options.iter().position(|o|matches!(o,ToolOption::Choice {id:"color-mixing",..})).unwrap();
+            let last_primary=options.iter().position(|o|matches!(o,ToolOption::Numeric(f) if f.id=="pull")).unwrap();
+            let opacity=options.iter().position(|o|matches!(o,ToolOption::Numeric(f) if f.id=="opacity")).unwrap();
+            assert!(last_primary<mixing && mixing<opacity);
+        }
+        assert!(fields.iter().zip(&s.state().tool_settings).all(|(a,b)|a.id==b.id && a.group_id==b.group_id));
+    }
+    s.dispatch(UiAction::SelectBrush {id:P::Paintbrush as u32}).unwrap();
     let selection = rectangle([100., 100., 300., 300.]);
     s.fill_selection(selection).unwrap();
     s.frame(1, 1).unwrap();
@@ -338,30 +380,34 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         (P::ShadingPencil,64.,[[0.28,0.28],[1.,0.55],[2.6,0.8]],false),
         (P::Charcoal,48.,[[0.65,0.65],[1.,0.65],[2.,0.8]],false),
         (P::Chalk,36.,[[0.55,0.55],[1.,0.8],[1.6,0.85]],true),
-        (P::PastelBlock,64.,[[0.55,0.65],[1.,0.65],[1.8,0.75]],true),
+        (P::PastelBlock,64.,[[0.55,0.55],[1.,0.65],[3.2,0.55]],true),
         (P::Crayon,32.,[[0.65,0.65],[1.,0.7],[2.6,0.85]],false),
     ] {
         s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
         let fields=&s.state().tool_settings;
-        let mut ids=fields.iter().map(|f|f.id).collect::<Vec<_>>();ids.sort();
-        assert_eq!(ids,["angle","contact_softness","flow","grain_depth","material_hardness","opacity","size"],"{preset:?}");
+        let ids=fields.iter().map(|f|f.id).collect::<Vec<_>>();
+        assert_eq!(ids,["size","flow","grain_depth","material_hardness","angle","opacity"],"{preset:?}");
+        assert!(fields[..4].iter().all(|f|f.group_id.is_empty() && f.group.is_empty()));
+        assert_eq!(fields[4].group_id,MessageId::TOOL_SETTING_GROUP_TIP.key());
+        assert_eq!(fields[5].group_id,MessageId::TOOL_SETTING_GROUP_BLENDING.key());
         assert_eq!(fields.iter().find(|f|f.id=="angle").unwrap().label.as_ref(),"Tip angle");
         assert_eq!(fields.iter().find(|f|f.id=="grain_depth").unwrap().numeric.max,2.);
         let brush=s.engine.configured_brush();let dry=brush.contact.unwrap().dry.unwrap();
+        assert_eq!(dry.softness,0.05);
         assert_eq!(dry.poses[1].radii[0].max(dry.poses[1].radii[1]),1.,"{preset:?}: 45° long axis");
-        let extent=poses.iter().map(|p|if block {p[0].hypot(p[1])} else {p[0].max(p[1])}).fold(0f64,f64::max);
+        let extent=if preset==P::PastelBlock {1.95} else {poses.iter().map(|p|if block {p[0].hypot(p[1])} else {p[0].max(p[1])}).fold(0f64,f64::max)};
         for (pose,expected) in dry.poses.iter().zip(poses) {for axis in 0..2 {
             assert!((f64::from(brush.diameter*pose.radii[axis])-diameter*expected[axis]/extent).abs()<2e-5,
                 "{preset:?}: full-pressure footprint axis{axis}");
         }}
-        for (id,value) in [("contact_softness",0.12),("material_hardness",0.65),("grain_depth",2.)] {
+        for (id,value) in [("material_hardness",0.65),("grain_depth",2.)] {
             s.dispatch(UiAction::SetToolSetting {id:id.into(),value}).unwrap();
         }
         let brush=s.engine.configured_brush();let edited=brush.contact.unwrap().dry.unwrap();
-        assert_eq!((edited.softness,edited.loading),(0.12,0.65));
+        assert_eq!((edited.softness,edited.loading),(0.05,0.65));
         assert_eq!(edited.poses,dry.poses);assert_eq!(brush.grain.as_ref().unwrap().depth,2.);
         let before=brush.clone();
-        for (id,value) in [("grain_depth",2.01),("contact_softness",0.),("contact_softness",0.81),
+        for (id,value) in [("grain_depth",2.01),("contact_softness",0.12),
             ("material_hardness",1.01),("spacing",0.2),("size_jitter",0.2),("rotation_jitter",0.2),("hardness",0.2)] {
             assert!(s.dispatch(UiAction::SetToolSetting {id:id.into(),value}).is_err(),"{preset:?}/{id}");
             assert_eq!(s.engine.configured_brush(),&before);

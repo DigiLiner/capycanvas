@@ -20,6 +20,7 @@ pub struct BrushDryMedia {
     pub softness: f32,
     pub loading: f32,
     pub corner: f32,
+    pub relief_offset: f32,
 }
 
 impl BrushDryMedia {
@@ -37,8 +38,11 @@ impl BrushDryMedia {
             let rim = self.corner*axes[0].min(axes[1]);
             point = std::array::from_fn(|i| (point[i].abs()-(1.-rim/axes[i])).max(0.)/(rim/axes[i]));
         }
-        let q = if self.corner>0. { (point[0]+point[1]).powi(2) } else { point[0]*point[0]+point[1]*point[1] };
+        let mut q = if self.corner>0. { (point[0]+point[1]).powi(2) } else { point[0]*point[0]+point[1]*point[1] };
         if q > 1. { return 0.; }
+        if self.relief_offset != 0. {
+            q = (point[0]+self.relief_offset).powi(2)+point[1]*point[1];
+        }
         let recess = relief[0]+q*(relief[1]+relief[2]*q);
         let depth = 0.5-(0.5+paper_strength*(paper-0.5)).clamp(0.,1.);
         let x = ((0.5*pressure-recess-(1.+0.25*recess)*depth)/self.softness).clamp(0.,1.);
@@ -61,6 +65,8 @@ impl BrushDryMedia {
         if !(0.005..=0.8).contains(&self.softness)
             || !(0.0..=1.0).contains(&self.loading)
             || !(0.0..=1.0).contains(&self.corner)
+            || !self.relief_offset.is_finite() || self.relief_offset.abs() > 1.
+            || (self.corner > 0. && self.relief_offset != 0.)
             || self.poses.iter().any(|p| p.radii.iter().any(|v| !v.is_finite() || !(0.02..=8.).contains(v))
                 || p.relief.iter().any(|v| !v.is_finite() || !(0.0..=4.).contains(v)))
         {

@@ -25,8 +25,8 @@ contacts near the boundary, rather than a radial opacity fade.
   author code, separately authored support mask or pressure distribution map.
 - **Three poses.** Fixed upright, writing and side keys have authored dimensions
   and relief profiles within one brush-wide supported shape family.
-- **Three shared material controls.** Texture strength `S`, Contact softness `W`
-  and Material hardness `Lambda` apply across all poses.
+- **Two shared material controls.** Texture strength `S` and Material hardness
+  `Lambda` apply across all poses. Engagement width `W` is fixed at `0.05`.
 - **Existing pigment and dynamics controls.** Brush size, pressure response,
   pressure-size response, Strength, Opacity and color complement material contact.
   Strength scales transfer; Opacity caps one stroke over its starting paint.
@@ -72,7 +72,7 @@ guarantee zero deposition at zero pressure.
 | `R` | Nonnegative local recess in the model's normalized height units; smaller values engage sooner. | Analytic relief profile in each pose. |
 | `kappa` | Relief-dependent paper-selectivity coupling. | Engine constant `0.25`. |
 | `T` | Engagement threshold. | Calculated. |
-| `W` | Positive engagement interval from first contact to full transfer. | Brush-wide Contact softness. |
+| `W` | Positive engagement interval from first contact to full transfer. | Fixed `0.05`; absent from the painting controls. |
 | `x` | Clamped local engagement, not radial position or pen pressure itself. | Calculated. |
 | `C` | Contact response in `[0,1]`. | Calculated; cubic engine transfer for this design. |
 | `Lambda` | Loading pressure response in `[0,1]`. | Brush-wide Material hardness. |
@@ -95,12 +95,11 @@ orientation along the shortest angular path. Shape transitions use predefined
 morph rules within a supported family; an enum identifying a shape is not a
 quantity to interpolate.
 
-For resolved dimension ratios `(a,b)`, orientation `psi` and normalized offset
-`o`:
+For resolved dimension ratios `(a,b)` and orientation `psi`:
 
 ```text
 radii = 0.5 * brush_size * pressure_size_response(p) * (a,b)
-(u,v) = rotate(canvas_point - stroke_center, -psi) / radii - o
+(u,v) = rotate(canvas_point - stroke_center, -psi) / radii
 ```
 
 The division is component-wise. `brush_size` is the long writing-pose axis at
@@ -114,10 +113,11 @@ policy. Neither zoom nor canvas rotation changes the material's tilt magnitude.
 The implemented family uses an ellipse or a beveled block:
 
 ```text
-ellipse: q = u*u + v*v
+ellipse support: q0 = u*u + v*v
+ellipse relief: q = (u + delta)^2 + v*v
 block: edge = max(abs((u,v)) - face, 0) / rim
        q = (edge.x + edge.y)^2
-support: q <= 1
+support: q0 <= 1 for ellipses; q <= 1 for blocks
 
 R(u,v) = r0 + c2*q + c4*q*q
 ```
@@ -128,8 +128,12 @@ values, without a separate relief-depth multiplier. The block's flat face has
 constant recess; its bevel approximates a small rounded corner. The corner width
 is brush-wide and scales with the smaller semiaxis. Three fixed tilt keys at 0°,
 45° and 76.5° interpolate dimensions and coefficients; the pose editor is deferred.
-Directional skew, offsets and changes between different shape families are also
-deferred. Tilt azimuth and anisotropic dimensions provide the current alignment.
+Pointy Pencil uses `delta=0.35`, placing its shallowest relief toward the stylus-tip
+side, local negative X. Other built-ins use zero. The physical outline remains
+centered; the offset changes engagement within that outline. The renderer
+transforms this vector when aligning its integration coordinates with motion,
+so reversing stroke direction does not reverse the tip-side bias. Changes
+between different shape families remain deferred.
 
 A future constrained relief widget can produce these coefficients from presets
 and curve controls; built-in definitions currently provide them directly. They are the field definition itself. There is no additional
@@ -149,9 +153,10 @@ The ellipse equation does not promise that all other shapes use the same `q`.
 | Width and length | Positive relative dimensions in each pose. |
 | Corner width | Brush-wide block rim fraction. |
 | Relief profile | Nonnegative `r0`, `c2`, `c4` in each pose. |
+| Relief offset | Brush-wide ellipse offset; Pointy Pencil uses `0.35`, others zero. |
 | Alignment | Transformed stylus azimuth; no additional per-pose offset. |
 
-The pose editor is deferred. Key editing, directional skew and morphing across
+The pose editor is deferred. Key editing, further directional skew and morphing across
 different shape families require their own authoring and integral decisions.
 
 Brush size is the long axis of the writing pose at full pressure. That pose's
@@ -160,9 +165,9 @@ The maximum pose extent remains a separate reference for path retention and
 taper distance. Size is geometric support, not the width of fully deposited
 pigment. Stamp spacing and size/rotation variation are absent from this model.
 
-`S`, `W` and `Lambda` are shared brush controls, not additional controls on these
-pose keys. Exact widget layout and shape-specific curve handles are not fixed by
-this mathematical contract.
+`S` and `Lambda` are shared brush controls, not additional controls on these
+pose keys. `W` is a fixed engine choice. Shape-specific curve handles are not
+fixed by this mathematical contract.
 
 ### Swept exposure and pigment accumulation
 
@@ -172,6 +177,7 @@ length through that point:
 
 ```text
 E = (1 / ell_full) * integral_over_I_segment(C * L) d_ell
+g(s) = s / (8 - 7*s)                 s = selected Strength in [0,1]
 Delta_D = K * E
 D_new = D_old + Delta_D
 A = 1 - exp(-D_new)
@@ -183,8 +189,9 @@ number of engaged paper contacts. Empty/outside support contributes nothing.
 The stationary-tap limit evaluates `C*L` using the engine's tap exposure rule,
 without dividing by a zero chord.
 
-`E` is renderer exposure. `K` folds in Strength, color alpha, directional
-feed and optical normalization; it is not another new editor control. `D` is a
+`E` is renderer exposure. `K` folds in `6*g(s)`, color alpha and directional
+feed; it is not another new editor control. Resolve `g(s)` on the CPU after
+existing pressure mappings. `D` is a
 conceptual additive optical dose, not a requirement to store a new physical
 pigment layer in the artwork. `A` describes ordinary same-color flow
 accumulation. Existing blending, selection and other accumulation modes retain
@@ -293,7 +300,8 @@ one field that controls contact onset, cross-sectional taper and paper selection
 Geometry accounts for the long side of a pencil or the face of a pastel stick.
 
 **Choice and constants.** Translation, rotation and division by resolved radii
-put each shape in normalized coordinates, with `q=1` at its boundary. The
+put each shape in normalized coordinates, with the support field equal to one
+at its boundary. The
 `r0 + c2*q + c4*q*q` basis provides onset and curvature without arbitrary
 exponents. A central recess is useful for a lifted shading face; it is part of
 the authored field rather than an additional strength parameter. Nonnegative
@@ -307,6 +315,17 @@ excursions beyond its flat face. Its support is an octagon; four slab intersecti
 provide the chord without circular corner roots. Only the small corners differ
 from a rounded rectangle. The flat face, outer dimensions and monotone rim retain
 the useful stick controls.
+
+A shifted ellipse field supplies Pointy Pencil's directional engagement.
+`q=(u+delta)^2+v^2` places its shallow point toward negative X; the centered
+`q0=u^2+v^2` still bounds physical support. The built-in `delta=0.35` moves the
+minimum by 35% of the long semiaxis without moving the cursor outline. It is a
+recipe choice rather than a universal pencil constant. Increasing its magnitude
+strengthens asymmetry and can leave more of the opposite side empty. The shift
+retains a quadratic `q`, so existing clipped polynomial integrals still apply.
+Changing dose by a directional opacity gradient would weaken grains independently
+of engagement; a separate two-dimensional pressure map adds another authored
+field. Both are unnecessary for this directional contact effect.
 
 **Alternatives.** Circular corner arcs were considered for sticks; they require
 quadratic boundary intersections without adding a necessary media control.
@@ -392,12 +411,17 @@ full response at `A=T+W`. Since `A=0.5p`, the unclipped pressure interval is `2W
 **Choice and controls.** `W>0` prevents division by zero. Small `W` makes eligible
 contacts strengthen quickly; large `W` leaves more partial transfer. It does not
 change the empty set `A<=T`. `W` is artistically distinct from relief, which
-changes onset. It is therefore exposed as one brush-wide Contact softness
-control with a calibrated default. It is not another pose field or a pixel blur
-radius. This record does not prescribe a universal default or maximum.
+changes onset. The initial design exposed it as Contact softness. The painting
+interface now fixes it at `0.05` for every dry preset: eligible grains strengthen
+over an effective-pressure interval of `0.1`, while paper and relief govern
+contact loss. This favors distinct marks over a broad partial-transfer gradient.
+It is not another pose field or a pixel blur radius. The internal field remains
+part of the contact evaluator, allowing independent reference tests of its math.
 
-**Alternatives.** A universal hidden constant would be simpler, but independent
-engagement softness has a meaningful authoring role. Automatically choosing `W`
+**Alternatives.** Independent engagement softness has a meaningful material
+authoring role, but exposing that subtle distinction in the painting panel adds
+a control alongside the more useful Texture strength. Broader widths increase
+partial transfer without recruiting or removing contacts. Automatically choosing `W`
 from paper variance can counteract intentional paper-strength changes.
 Automatically choosing it from relief range/slope can counteract an intentional
 contact profile. Per-pixel or pressure-dependent widths add another varying
@@ -558,6 +582,24 @@ flow, adding doses is equivalent to multiplying transmittances:
 This supports batched dose accumulation. It does not require per-pixel pigment
 mass, paper deformation or a new artwork storage representation.
 
+**Strength calibration.** The normalized full-contact passage uses optical dose
+`6*g(s)`, with `g(s)=s/(8-7s)`. Direct `g(s)=s` gives approximately `0.989`
+coverage at Strength `0.75`, making much of the slider approach full black.
+The rational curve preserves zero and full Strength, increases monotonically,
+and gives dose approximately `1.636` at `0.75` before exposure and color alpha.
+The constant eight controls intermediate sensitivity, not contact density:
+increasing it weakens intermediate Strength while keeping the endpoints. It is
+an engine calibration, not another artist control or an exact opacity percentage.
+Its arithmetic runs once per resolved contact, without per-pixel work.
+
+Lowering the fixed optical normalization makes intermediate values gentler but
+also weakens the dark full-strength endpoint. A power curve preserves endpoints
+but its exponent sets an arbitrary low-end response. An exact logarithmic
+calibration can target a chosen single-pass alpha curve, but adds nonlinear
+evaluation and still needs an endpoint convention. The rational form supplies
+the required simple, bounded adjustment. It is a digital control choice; the
+transmittance reference motivates accumulation, not the constant eight.
+
 **Stroke ceiling.** Strength scales dose; Opacity limits the contribution of one
 stroke over its starting paint. For raw coverage `A`, the stroke contribution is
 `opacity*A`. Repeated passes can approach that ceiling; pen-up starts another
@@ -614,7 +656,7 @@ not adopt.
 | Normal pencil drawing | Pressure recruits a wider set of contacts and strengthens engaged peaks. | Writing profile, pressure-size response and `Lambda`. |
 | Light pencil shading | Sparse, individually visible grain instead of a uniformly pale radial fade. | Broad side profile, paper strength and modest loading pressure response. |
 | Charcoal line | Strong engaged grains with a distinct contact boundary. | Narrower geometry, paper asset and relief taper. |
-| Broad charcoal shading | Broad contact with interior tooth and increasing empty contacts toward its edges. | Side dimensions and rim relief; `W` governs partial transfer. |
+| Broad charcoal shading | Broad contact with interior tooth and increasing empty contacts toward its edges. | Side dimensions, rim relief and paper strength; fixed `W` keeps transfer narrow. |
 | Chalk, pastel or crayon face | A block or rounded face whose coverage and grain can range from broken to more uniform. | Shape family, flatter profile and paper strength. |
 
 These are design goals, not empirical results or claims of a complete material
@@ -622,7 +664,7 @@ simulation. Hard-pencil paper flattening, tip wear, powder transport and wax
 redistribution need history/state beyond a static paper field.
 
 The contract fixes the equations and ownership of controls. Built-in recipes
-author `S`, `W`, `Lambda`, pressure response and relief coefficients in the
+author `S`, `Lambda`, pressure response and relief coefficients in the
 shared [preset definitions](../../../crates/layer-core/src/contact_presets.rs).
 The pose editor and curve widget remain deferred. Linear versus cubic contact
 remains open for the later benchmark; no change of editor interface is required

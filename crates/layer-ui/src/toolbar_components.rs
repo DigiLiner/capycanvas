@@ -162,11 +162,11 @@ impl ToolOption {
         match (self, other) {
             (Self::Gradient(a),Self::Gradient(b))=>a.key==b.key && a.gradient.as_ref().map(|c|&c.destination)==b.gradient.as_ref().map(|c|&c.destination),
             (Self::Numeric(a), Self::Numeric(b)) => {
-                a.id == b.id && a.numeric == b.numeric
+                a.id == b.id && a.group_id == b.group_id && a.numeric == b.numeric
             }
             (Self::Range { id: a, bounds: p, .. }, Self::Range { id: b, bounds: q, .. }) => {
                 a == b && p.iter().zip(q.iter()).all(|(a, b)| {
-                    a.id == b.id && a.numeric == b.numeric
+                    a.id == b.id && a.group_id == b.group_id && a.numeric == b.numeric
                 })
             }
             (
@@ -365,6 +365,7 @@ impl UiState {
                 options.extend(choice("sample-size", self.localization.text(MessageId::TOOLBAR_SAMPLE_SIZE), false, samples));
             }
         }
+        let mut grouped_choices = Vec::new();
         for group in [
             ToolActionGroup::TransformMode,
             ToolActionGroup::TransformInterpolation,
@@ -380,9 +381,12 @@ impl UiState {
                 .filter_map(|a| self.commands.iter().find(|c| c.id == a.command))
                 .map(|c| c.choice_item(c.label.clone()))
                 .collect();
-            options.extend(choice(group.id(), group.localized_label(&self.localization), group.segmented(), items));
+            let option = choice(group.id(), group.localized_label(&self.localization), group.segmented(), items);
+            if group == ToolActionGroup::ColorMixing { grouped_choices.extend(option); }
+            else { options.extend(option); }
         }
         options.extend(self.tool_extra.iter().filter(|option| !matches!(option,ToolOption::Choice {id:"gradient-shape",..})).cloned());
+        let details = options.len();
         let mut fields = self.tool_settings.iter().peekable();
         while let Some(field) = fields.next() {
             if field.id == "tonal_lower" && fields.peek().is_some_and(|f| f.id == "tonal_upper") {
@@ -394,6 +398,15 @@ impl UiState {
             } else {
                 options.push(ToolOption::Numeric(field.clone()));
             }
+        }
+        if !grouped_choices.is_empty() {
+            options.extend(grouped_choices);
+            options[details..].sort_by_key(|option| crate::tool_settings::group_order(match option {
+                ToolOption::Numeric(field) => field.group_id,
+                ToolOption::Range { bounds, .. } => bounds[0].group_id,
+                ToolOption::Choice { id: "color-mixing", .. } => MessageId::TOOL_SETTING_GROUP_MIXING.key(),
+                _ => "",
+            }));
         }
         options.extend(
             self.tool_actions
@@ -527,7 +540,6 @@ pub fn tool_setting_icon(id: &str) -> &'static str {
         "opacity" => "opacity",
         "flow" => "paint-flow",
         "hardness" | "material_hardness" => "hardness",
-        "contact_softness" => "edge-width",
         "spacing" => "brush-spacing",
         "distance" => "ruler",
         "angle" | "transform_angle" => "angle",

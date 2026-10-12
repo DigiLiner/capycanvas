@@ -4989,6 +4989,7 @@ impl StyleGpu {
             ];
             if let Some(dry) = contact.dry {
                 result.material_a = [dry.corner, dry.softness.recip(), dry.loading, 0.];
+                result.contact_c[2] = dry.relief_offset;
             }
         }
         // This lane is unused by dry and composite shaders and avoids growing

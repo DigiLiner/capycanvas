@@ -63,6 +63,7 @@ impl SelectionBrushOptions {
             label_id: label,
             value,
             numeric,
+            group_id: "",
             group: std::sync::Arc::from(""),
         })
         .collect()

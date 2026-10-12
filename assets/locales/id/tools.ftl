@@ -266,6 +266,8 @@ tool-setting-group-bristles = Bulu
 
 tool-setting-group-liquify = Cairkan
 
+tool-setting-group-material = Bahan
+tool-setting-group-blending = Paduan
 tool-setting-group-mixing = Pencampuran
 
 tool-setting-group-texture = Tekstur
@@ -333,5 +335,4 @@ zoom-tool-click-only = Klik saja
 zoom-tool-left-right = Kiri/kanan
 zoom-tool-up-down = Atas/bawah
 zoom-tool-center-on-click-tooltip = Pindahkan titik yang diklik ke tengah tampilan saat mengeklik untuk memperbesar atau memperkecil.
-tool-setting-contact-softness = Kelembutan kontak
 tool-setting-material-hardness = Kekerasan bahan

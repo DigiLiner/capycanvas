@@ -137,8 +137,8 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
               onChange:(index,value)=>dispatch({type:'set_tool_setting',id:bounds[index].id,value})});
             body.append(range);continue;
           }
-          if(field.group!==group){
-            group=field.group;grouped=null;const extra=beside.get(field.id);
+          if(field.group_id!==group){
+            group=field.group_id;grouped=null;const extra=beside.get(field.id);
             if(group)body.append(element('h3','',()=>state().tool_extra.find(o=>o.Choice?.beside===field.id)?.Choice.label??state().tool_settings.find(f=>f.id===field.id)?.group??''));
             if(extra){const row=element('div','tool-position-group');grouped=element('div','tool-position-numbers');row.append(extra.bar,grouped);body.append(row);}
           }

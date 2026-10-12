@@ -538,51 +538,56 @@ Reports: `artifacts/simplification-cleanup/performance/m28/`.
 
 ### Dry-media contact model
 
-Measured on 2026-10-11 with the optimized brush-controls build based on
-`beac20d00`. Frozen source manifest SHA-256
-`f01955b95b3e3c463ed120c5589538a798b4ecf0fcbe6fe4b9734fa0000b6021`;
-APK SHA-256 `126440bad0be46109f6b2b264da427d86a260a9d72745b24d76bb5a1e5fbb431`.
-Final Pencil and G-Pen rows use source manifest
-`780dbc04cfdf0cdaba4bd5a2761fd19afd0d87dfe44821cc4bdb7e55c8ba2849`
-and APK `e1e4ccab8f48a05c8291b9d450944a897fc36da95b00347fd29b376f25b4739c`.
-The later correction affects Uniform retouching; dry-media kernels are unchanged.
+Measured on 2026-10-12 (UTC) with the optimized dry-settings build based on
+`f1c5d4397`. Frozen source manifest SHA-256
+`88cbf77abec45ef956da6e4b33c0e140dda13ff45232b416eaa06b937e3396f0`;
+APK SHA-256 `c28089aef41c096dd2f311bca466a386a5d495c3094934241ecdf1a9cfe0c9ad`.
+The paired baseline uses APK
+`e1e4ccab8f48a05c8291b9d450944a897fc36da95b00347fd29b376f25b4739c`.
 
 The tier photo has one empty Full color paint layer above it at Fit, with the
 default workspace, Navigator, closed Stats and 16 ms prediction. Each warmed
-profile uses three six-second 200 Hz stylus contacts, pressure 1,
-and a contained 60 × 10 surface-pixel ellipse. Thermal status is 0 before and
+profile uses three six-second 200 Hz stylus contacts, pressure 1, fixed 45° tilt
+and a contained 60 × 10 surface-pixel ellipse. Thermal status is zero before and
 after every profile. Rates and gaps count the first GPU completion consuming
-each new input. Prediction/refinement completions are excluded from the gate;
-input-to-GPU observations below do not measure physical screen scanout.
+each new input, excluding prediction/refinement completions. Input-to-GPU
+observations do not measure physical screen scanout.
 
-Size now means the full-pressure long axis at the 45° writing pose. Nominal
-rows test the guaranteed size using that convention. The 77° comparison rows
-use smaller Size values to preserve the previous maximum-pose footprint;
-they do not qualify the nominal guarantee. Strength is the preset value
-(Pencil 65%, Charcoal 80%, Pastel 75%); Opacity is 100% except where stated.
+Size denotes the full-pressure long axis at the 45° writing pose. Strength is
+the preset value: Pencil 65%, Pointy Pencil 95%, Charcoal 80%, Pastel 75%.
+Opacity and Texture strength are 100%. The current build fixes engagement width
+at 0.05, raises material-hardness defaults and calibrates resolved dry Strength
+as `s/(8-7*s)`. Identical UI Strength is therefore a behavior comparison, not a
+matched optical-dose comparison. The writing footprints are preserved; Pointy
+now has directional relief, and Pastel's side pose is longer.
 
-| Profile and Size | Fresh updates/s | Worst fresh p99 gap | Input-to-GPU p99 range | 90/s, 22.2 ms gate |
-| --- | --- | --- | --- | --- |
-| Pencil 1536 px, 45°, final build | 57.92–58.42 | 25.39 ms | 65.21–66.53 ms | **Not met** |
-| G-Pen 1536 px, 45°, Strength 100%, final build | 75.36–75.54 | 20.13 ms | 69.17–75.98 ms | **Rate not met** |
-| Charcoal 1536 px, 45° | 57.73–58.19 | 25.59 ms | 65.34–66.51 ms | **Not met** |
-| Pastel Block 1024 px, 45° | 88.16–88.67 | 16.79 ms | 45.72–49.17 ms | **Rate not met** |
-| Pencil 1536 px, 45°, Opacity 50% | 47.52–47.93 | 30.99 ms | 76.56–78.04 ms | **Not met** |
-| Pencil 320 px, 77°, matched footprint | 123.05–124.21 | 12.16 ms | 32.61–34.34 ms | Meets comparison profile |
-| Charcoal 768 px, 77°, matched footprint | 86.30–86.63 | 16.78 ms | 45.51–46.59 ms | **Rate not met** |
-| Pastel Block 525.128 px, 77°, matched footprint | 143.56–144.37 | 11.44 ms | 28.47–29.57 ms | Meets comparison profile |
+| Profile and Size | Baseline fresh updates/s | Current fresh updates/s | Current worst p99 gap | Current input-to-GPU p99 | 90/s, 22.2 ms gate |
+| --- | --- | --- | --- | --- | --- |
+| Pencil 1536 px, 45° | 58.31–58.90 | 58.29–58.97 | 25.44 ms | 64.26–64.95 ms | **Not met** |
+| Pointy Pencil 1536 px, 45° | 70.73–71.49 | 69.25–69.79 | 21.24 ms | 55.71–56.87 ms | **Rate not met** |
+| Charcoal 1536 px, 45° | 57.55–58.00 | 57.01–57.40 | 25.75 ms | 67.05–67.47 ms | **Not met** |
+| Pastel Block 1024 px, 45° | 88.41–88.96 | 82.78–83.40 | 17.05 ms | 45.84–47.93 ms | **Rate not met** |
 
-Pointy Pencil, Shading Pencil, Chalk and Crayon remain unmeasured on this tier.
-These rows do not qualify the whole dry-media class. Raw contacts, thermal
-records and screenshots: `artifacts/dry-media-midtop/controls4b-mid/android/`.
-Final bounded rows: `artifacts/dry-media-midtop/controls6-mid/android/`.
+Other tilt poses, partial Opacity, Shading Pencil, Chalk and Crayon are
+unmeasured on this build. Previous dry recipes do not qualify the changed
+materials or the longer Pastel side pose. Raw contacts, settings, thermal records
+and source proof are in `artifacts/dry-settings-midtop/`; combined results are
+`comparison-results.json`.
+
+The later publication rebuild changes only shared UI grouping and option order.
+Its 648 core, engine, renderer, color, host and workspace source files match
+the measured snapshot; see the [runtime proof scope](low-tier.md#dry-media-contact-model).
+
+G-Pen is unchanged by this build. Its preceding 2026-10-11 contained-path
+measurement is 75.36–75.54 fresh/s with p99 gap at most 20.13 ms; its rate remains below 90/s.
+That measurement uses the paired-baseline APK above.
 
 ### Retained-photo brush measurements
 
 Except for G-Pen and the current dry-media rows, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.0% zoom.
 
 The older 2048 px simple-brush rows are above the 1536 px guarantee and do not
-classify performance at the guaranteed size. G-Pen, Pencil and Charcoal have current 1536 px measurements; the remaining
+classify performance at the guaranteed size. G-Pen, Pencil, Pointy Pencil and Charcoal have current 1536 px measurements; the remaining
 simple brushes retain unqualified rows.
 
 | Brush (id) | Class | Size | Measured | Status |
@@ -594,10 +599,10 @@ simple brushes retain unqualified rows.
 | Antique Pen (30) | Simple | 2048 px | 16.2 updates/s (16.0–16.3); gap p99 171.2 ms | 1536 px unmeasured |
 | Realistic Pen (31) | Simple | 2048 px | 13.4 updates/s (13.4–13.5); gap p99 131.6 ms | 1536 px unmeasured |
 | Wet Ink (32) | Simple | 2048 px | 11.0 updates/s (10.9–11.1); gap p99 168.6 ms | 1536 px unmeasured |
-| Pencil (2) | Simple | 1536 px | 57.92–58.42 fresh updates/s; fresh gap p99 ≤25.39 ms | **Not met**, writing pose; [dry media](#dry-media-contact-model) |
-| Pointy Pencil (25) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
+| Pencil (2) | Simple | 1536 px | 58.29–58.97 fresh updates/s; fresh gap p99 ≤25.44 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Pointy Pencil (25) | Simple | 1536 px | 69.25–69.79 fresh updates/s; fresh gap p99 ≤21.24 ms | **Rate not met**; [dry media](#dry-media-contact-model) |
 | Shading Pencil (26) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
-| Charcoal (27) | Simple | 1536 px | 57.73–58.19 fresh updates/s; fresh gap p99 ≤25.59 ms | **Not met**, writing pose; [dry media](#dry-media-contact-model) |
+| Charcoal (27) | Simple | 1536 px | 57.01–57.40 fresh updates/s; fresh gap p99 ≤25.75 ms | **Not met**; [dry media](#dry-media-contact-model) |
 | Chalk (6) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Crayon (43) | Simple | 1536 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 2048 px | 7.1 updates/s (7.0–7.2); gap p99 174.5 ms | 1536 px unmeasured |
@@ -605,7 +610,7 @@ simple brushes retain unqualified rows.
 | Marker (7) | Complex | 1024 px | 22.7 updates/s (22.6–22.8); gap p99 84.3 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 20.1 updates/s (19.9–20.2); gap p99 90.2 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 19.6 updates/s (19.5–19.6); gap p99 136.3 ms | **Not met** |
-| Pastel Block (17) | Complex | 1024 px | 88.16–88.67 fresh updates/s; fresh gap p99 ≤16.79 ms | **Rate not met**, writing pose; [dry media](#dry-media-contact-model) |
+| Pastel Block (17) | Complex | 1024 px | 82.78–83.40 fresh updates/s; fresh gap p99 ≤17.05 ms | **Rate not met**; [dry media](#dry-media-contact-model) |
 | Paintbrush (4) | Complex | 1024 px | 24.74 (24.73–24.93) fresh updates/s; completion-gap p99 82.59–91.12 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
 | Textured Flat (15) | Complex | 1024 px | 25.5 updates/s (25.4–25.5); gap p99 107.0 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 14.0 updates/s (14.0–14.3); gap p99 144.9 ms | **Not met** |

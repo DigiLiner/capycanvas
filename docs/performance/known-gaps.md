@@ -38,22 +38,26 @@
     [top-tier table](top-tier.md#dry-media-contact-model).
 - **Most complex brushes at 1024 px remain unqualified.**
   - Pastel Block at nominal Size 1024 meets the measured native Top writing
-    pose targets, but reaches only 88.16–88.67/s on Mid and 45.68–46.14/s on
-    Low. Its Low 77° side pose reaches 18.93–19.46/s; the gap target also fails.
+    pose targets at 179.00–184.36/s, but reaches only 82.78–83.40/s on Mid and
+    42.23–42.43/s on Low. Its longer Low side pose reaches 12.82–13.62/s with
+    p99 gaps up to 100.99 ms despite fully contained support. Mid and Top side
+    poses remain unmeasured on this build.
   - Earlier measurements of the other complex presets reach 76–118 updates/s
     on Top, about 6–25 on Mid and 3–19 on Low. They need current measurements.
 - **Dry-media qualification remains incomplete.**
   - Size now denotes the 45° writing-pose long axis. Pencil and Charcoal miss
     their nominal-size rate targets on all three native tiers; Mid and Top
-    also miss their fresh-gap limits. Partial-opacity Pencil misses the rate
-    targets on all three tiers.
-  - Smaller, matched-footprint 77° rows preserve the preceding size convention
-    for comparison. They pass on Low and Top, while Mid Charcoal reaches only
-    86.30–86.63/s. These rows do not qualify the new nominal sizes.
+    also miss their fresh-gap limits. Pointy Pencil meets the measured Low
+    writing profile but misses the Mid and Top rates.
+  - Full-Strength Top Pencil has nearly unchanged throughput in a paired
+    comparison; the weaker default dose costs more. This does not establish one
+    cause or qualify the tier target. Partial Opacity and other tilt poses need
+    measurements on the changed recipes; earlier profiles do not qualify them.
   - TCL Web remains unqualified; see the
     [low-tier table](low-tier.md#dry-media-contact-model).
-  - Passing native rows cover only their measured profiles and poses; other
-    dry presets remain unmeasured. Physical input-to-present latency is unmeasured.
+  - Passing native rows cover only their measured profiles and poses; Shading
+    Pencil, Chalk and Crayon remain unmeasured. Physical input-to-present latency
+    is unmeasured.
 - **Liquify at 512 px** completes 28–74 updates/s on the top tier, 1.2–6.5 on
   the mid tier and 0.8–12 on the low tier.
 - **The retouching brushes at 512 px** (Clone Stamp, Healing and Spot Healing)

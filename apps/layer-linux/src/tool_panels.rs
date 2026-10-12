@@ -345,6 +345,7 @@ impl ToolSettings {
         let same_schema = same && !context_changed && fields.len() == controls.len()
             && fields.iter().zip(controls).all(|((old, _), next)| {
                 old.id == next.id
+                    && old.group_id == next.group_id
                     && old.numeric == next.numeric
             })
             && actions.len() == state.tool_actions.len()
@@ -387,13 +388,13 @@ impl ToolSettings {
                     self.range.replace(Some(range));
                     continue;
                 }
-                if group != control.group.as_ref() {
-                    group = control.group.as_ref();
+                if group != control.group_id {
+                    group = control.group_id;
                     grouped = None;
                     let extras = self.extra_fields.borrow();
                     let beside = extras.iter().find(|(option, _)| matches!(option, layer_ui::ToolOption::Choice { beside: Some(id), .. } if *id == control.id));
                     if !group.is_empty() {
-                        let title = gtk::Label::new(Some(beside.map_or(group, |(option, _)| match option { layer_ui::ToolOption::Choice { label, .. } => label.as_ref(), _ => group })));
+                        let title = gtk::Label::new(Some(beside.map_or(control.group.as_ref(), |(option, _)| match option { layer_ui::ToolOption::Choice { label, .. } => label.as_ref(), _ => control.group.as_ref() })));
                         title.add_css_class("heading");
                         title.add_css_class("dim-label");
                         title.set_xalign(0.0);

@@ -378,6 +378,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             id: "",
             label: localizer.text(label),
             label_id: label,
+            group_id: MessageId::TOOL_CONTROL_GROUP_SIZE.key(),
             group: localizer.text(MessageId::TOOL_CONTROL_GROUP_SIZE),
             numeric: NumericControl::number(1., limit, 1., 0).unit("px"),
             value: 0.,
@@ -393,7 +394,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         vec![
             tool_settings::ToolSetting { id: "crop_width", value: w, ..pixels(MessageId::TOOL_CONTROL_CROP_WIDTH) },
             tool_settings::ToolSetting { id: "crop_height", value: h, ..pixels(MessageId::TOOL_CONTROL_CROP_HEIGHT) },
-            tool_settings::ToolSetting { id: "crop_angle", label: localizer.text(MessageId::TOOL_CONTROL_CROP_STRAIGHTEN), label_id: MessageId::TOOL_CONTROL_CROP_STRAIGHTEN, group: std::sync::Arc::from(""), numeric: degrees, value: session.frame.angle },
+            tool_settings::ToolSetting { id: "crop_angle", label: localizer.text(MessageId::TOOL_CONTROL_CROP_STRAIGHTEN), label_id: MessageId::TOOL_CONTROL_CROP_STRAIGHTEN, group_id: "", group: std::sync::Arc::from(""), numeric: degrees, value: session.frame.angle },
         ]
     }
 

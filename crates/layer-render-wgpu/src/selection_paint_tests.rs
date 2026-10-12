@@ -91,7 +91,7 @@ fn dry_selection_contact_dose_survives_segment_and_update_partitioning() {
             contact.paper = 0.;
             contact.pressure_gain = 1.;
             contact.dry = Some(BrushDryMedia { poses: [BrushDryPose { radii: [1.; 2], relief: [0.; 3] }; 3],
-                softness: 0.07, loading: 0., corner: 0. });
+                softness: 0.07, loading: 0., corner: 0., relief_offset: 0. });
             let contacts: Vec<_> = (1..=segments).map(|i| {
                 let mut d = paint.dabs[0];
                 d.center = Point { x: 20.5+88.*i as f32/segments as f32, y: 64.5 };

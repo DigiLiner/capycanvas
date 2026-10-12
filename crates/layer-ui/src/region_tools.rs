@@ -92,6 +92,7 @@ impl RegionTools {
             id,
             label: localizer.text(label),
             label_id: label,
+            group_id: group.map_or("", MessageId::key),
             group: group.map(|id| localizer.text(id)).unwrap_or_else(|| std::sync::Arc::from("")),
             numeric,
             value,

@@ -43,8 +43,10 @@ textures differ only in how they produce coverage. Source-over runs in the
 document's blend space: on encoded values in a Perceptual document
 ([rendering](../internals/rendering.md#brushes-and-healing)).
 
-The internal `flow` field carries Strength. Dry swept contacts derive `request`
-from exponential optical transfer. Opacity is retained separately in `DabStyle`;
+The configured `flow` field carries Strength. Analytic dry media resolve it to
+`s/(8-7*s)` on the CPU before storing `Dab.flow`; other media retain their own
+transfer. Dry swept contacts derive `request` from exponential optical transfer.
+Opacity is retained separately in `DabStyle`;
 partial-opacity pointwise strokes retain the starting RGBA of touched pages.
 This composite permits pigment changes after a pixel reaches its alpha ceiling.
 Normal paint and Erase use the direct recurrence above. Other blend modes

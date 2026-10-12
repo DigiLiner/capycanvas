@@ -611,6 +611,10 @@ impl DabGenerator {
             .clamp(brush.bounds.minimum_opacity, brush.bounds.maximum_opacity);
         let charge = brush.wet_mix.charge
             * (-brush.wet_mix.charge_depletion * point.stroke_distance / diameter.max(0.01)).exp();
+        let mut flow = brush.flow * finite_or(values.flow, 1.).clamp(0.0, 1.0);
+        if brush.contact.is_some_and(|c| c.dry.is_some()) {
+            flow /= 8. - 7. * flow;
+        }
         EvaluatedDab {
             dab: Dab {
                 center,
@@ -625,7 +629,7 @@ impl DabGenerator {
                     variant,
                     self.stroke_seed,
                 ),
-                flow: brush.flow * finite_or(values.flow, 1.).clamp(0.0, 1.0),
+                flow,
                 hardness: finite_or(values.hardness, brush.hardness).clamp(0.0, 1.0),
                 texture_sign: [1.0, 1.0],
                 material: [
