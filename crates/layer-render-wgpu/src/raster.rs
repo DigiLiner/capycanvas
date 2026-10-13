@@ -876,12 +876,7 @@ impl WgpuRasterizer {
         // Stage GPU pages before publishing the revision. Keep only one decoded
         // tile on the CPU, rather than a second full decoded document. A failed
         // tile still leaves every live page (including removed pages) intact.
-        enum Replacement {
-            Color(LayerPage),
-            Mask([u32; 2], layer_masks::MaskPage),
-            Watercolor(WatercolorWetnessPage),
-        }
-        let mut replacements = Vec::new();
+        let (mut colors, mut masks, mut wetness) = (Vec::new(), Vec::new(), Vec::new());
         let mut native_batch = Vec::new();
         for (key, tile) in &data.tiles {
             if previous
@@ -897,33 +892,33 @@ impl WgpuRasterizer {
                     "Raster plane has the wrong pixel representation".into(),
                 ));
             }
-            let (replacement, texture) = match key.plane {
+            let texture = match key.plane {
                 RasterPlane::Color => {
                     let mut page = self.create_page(key.coordinate, "restored raster tile");
                     page.primary_needs_clear = false;
                     let texture = page.primary.texture.clone();
-                    (Replacement::Color(page), texture)
+                    colors.push(page);
+                    texture
                 }
                 RasterPlane::Mask => {
                     let page = layer_masks::MaskPage::new(&self.device);
                     let texture = page.texture.clone();
-                    (Replacement::Mask(key.coordinate, page), texture)
+                    masks.push((key.coordinate, page));
+                    texture
                 }
                 RasterPlane::WatercolorWetness => {
                     let primary = self.create_scalar_page_surface("restored watercolor wetness");
                     let secondary = self.create_scalar_page_surface("watercolor wetness companion");
                     let texture = primary.texture.clone();
-                    (
-                        Replacement::Watercolor(WatercolorWetnessPage {
-                            coordinate: key.coordinate,
-                            primary,
-                            secondary,
-                            active_secondary: false,
-                            primary_needs_clear: false,
-                            secondary_needs_clear: true,
-                        }),
-                        texture,
-                    )
+                    wetness.push(WatercolorWetnessPage {
+                        coordinate: key.coordinate,
+                        primary,
+                        secondary,
+                        active_secondary: false,
+                        primary_needs_clear: false,
+                        secondary_needs_clear: true,
+                    });
+                    texture
                 }
             };
             if key.plane == RasterPlane::Color {
@@ -934,7 +929,6 @@ impl WgpuRasterizer {
                     blob: &blob, working: &texture,
                 }])?;
             }
-            replacements.push(replacement);
         }
         self.restore_native_raster_batch(&mut native_batch)?;
         if let Some(index) = index {
@@ -966,22 +960,18 @@ impl WgpuRasterizer {
                     })
             });
         }
-        for replacement in replacements {
-            match replacement {
-                Replacement::Color(page) => {
-                    let pages = &mut self.paint_layers[index.unwrap()].pages;
-                    pages.retain(|p| p.coordinate != page.coordinate);
-                    pages.push(page);
-                }
-                Replacement::Mask(coordinate, page) => {
-                    self.layer_masks.pages.insert((target, coordinate), page);
-                }
-                Replacement::Watercolor(page) => {
-                    let pages = &mut self.paint_layers[index.unwrap()].watercolor_wetness_pages;
-                    pages.retain(|p| p.coordinate != page.coordinate);
-                    pages.push(page);
-                }
-            }
+        for page in colors {
+            let pages = &mut self.paint_layers[index.unwrap()].pages;
+            pages.retain(|p| p.coordinate != page.coordinate);
+            pages.push(page);
+        }
+        for (coordinate, page) in masks {
+            self.layer_masks.pages.insert((target, coordinate), page);
+        }
+        for page in wetness {
+            let pages = &mut self.paint_layers[index.unwrap()].watercolor_wetness_pages;
+            pages.retain(|p| p.coordinate != page.coordinate);
+            pages.push(page);
         }
         self.preview_pages.clear();
         self.preview_coverage_pages.clear();
