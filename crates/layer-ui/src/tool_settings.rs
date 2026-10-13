@@ -235,6 +235,7 @@ pub(crate) const COLOR_MIXING: &str = "color_mixing";
 pub(crate) const COLOR_MIXING_COMMANDS: [crate::CommandId; 3] =
     [crate::CommandId::ColorMixOklab, crate::CommandId::ColorMixLinear, crate::CommandId::ColorMixClassic];
 pub(crate) const NOT_MIXING: &str = "Choose a brush that mixes paint first";
+pub(crate) const SMOOTHING_SPEED: &str = "smoothing_speed";
 
 pub(crate) fn color_mixing(command: crate::CommandId) -> Option<ColorMixSpace> {
     use crate::CommandId::*;
@@ -248,6 +249,7 @@ pub(crate) fn color_mixing(command: crate::CommandId) -> Option<ColorMixSpace> {
 
 /// The stored value of a setting, including the Color mixing choice.
 pub(crate) fn value(brush: &BrushSnapshot, id: &str) -> Option<f32> {
+    if id == SMOOTHING_SPEED { return Some(f32::from(u8::from(brush.stabilization.adjust_by_speed))); }
     if id == COLOR_MIXING {
         return mixes_color(brush).then_some(f32::from(brush.wet_mix.mix_space as u8));
     }
@@ -451,6 +453,19 @@ const DEFINITIONS: &[Definition] = &[
         numeric: NumericControl::percent,
         field: |b| liquify(b, LiquifyMode::Push).then_some(&mut b.deform.momentum),
     },
+    Definition {
+        id: "smoothing_strength",
+        label: MessageId::TOOL_SETTING_SMOOTHING_STRENGTH,
+        group: Some(MessageId::TOOL_SETTING_GROUP_SMOOTHING),
+        numeric: || NumericControl {
+            mapping: crate::NumericMapping::Log,
+            log_offset: 0.00886269125382811,
+            step: 0.01, resolution: 0.01, digits: 0,
+            slider_snap: crate::NumericSliderSnap::Resolution,
+            ..NumericControl::percent().unit("")
+        },
+        field: |b| Some(&mut b.stabilization.strength),
+    },
 ];
 
 fn liquify(b: &BrushSnapshot, mode: LiquifyMode) -> bool {
@@ -492,6 +507,12 @@ pub(crate) fn edit(brush: &BrushSnapshot, id: &str, value: f32, localizer: &Loca
 }
 
 pub(crate) fn edit_value(brush: &BrushSnapshot, id: &str, value: f32) -> Result<BrushSnapshot, crate::WorkspaceValidationError> {
+    if id == SMOOTHING_SPEED {
+        if value != 0. && value != 1. { return Err("Unknown tool setting".into()); }
+        let mut next = brush.clone();
+        next.stabilization.adjust_by_speed = value == 1.;
+        return Ok(next);
+    }
     if id == COLOR_MIXING {
         let space = ColorMixSpace::ALL
             .into_iter()
@@ -619,6 +640,10 @@ mod tests {
             ("distortion", 0.5),
             ("momentum", 0.5),
             ("nope", 1.0),
+            ("smoothing_strength", f32::NAN),
+            ("smoothing_strength", -0.01),
+            ("smoothing_strength", 1.01),
+            (SMOOTHING_SPEED, 0.5),
             ("flow", f32::NAN),
             ("size", 3000.0),
         ] {

@@ -641,3 +641,4 @@ menu-paste-special = Inhalte einfügen
 menu-rotate-and-flip = Drehen und spiegeln
 menu-color-management = Farbverwaltung
 command-pen-pressure = Stiftdruck…
+command-smoothing-adjust-speed = Nach Geschwindigkeit anpassen

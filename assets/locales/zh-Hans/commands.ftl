@@ -637,3 +637,4 @@ menu-paste-special = 选择性粘贴
 menu-rotate-and-flip = 旋转和翻转
 menu-color-management = 色彩管理
 command-pen-pressure = 笔压…
+command-smoothing-adjust-speed = 按速度调整

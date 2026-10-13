@@ -29,6 +29,7 @@ fn fullscreen_prediction_with_wide_brushes_and_independent_clocks() {
                     .set_brush(BrushSnapshot {
                         diameter: width / zoom,
                         spacing: 0.1,
+                        stabilization: layer_core::BrushStabilization { strength: 0., ..Default::default() },
                         ..Default::default()
                     })
                     .unwrap();

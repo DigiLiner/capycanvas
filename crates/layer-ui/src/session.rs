@@ -2569,11 +2569,15 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::ColorMixOklab | CommandId::ColorMixLinear | CommandId::ColorMixClassic => {
                 tool_settings::mixes_color(self.engine.configured_brush())
             }
+            CommandId::SmoothingAdjustSpeed => {
+                self.smoothing_available()
+            }
             _ => true,
         };
         let selection = self.layer_interaction.tool.selection_tool();
         let selection_mode = self.effective_selection_mode();
         let selected = (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
+            || (id == CommandId::SmoothingAdjustSpeed && self.engine.configured_brush().stabilization.adjust_by_speed)
             || (id == CommandId::QuickMask && self.selection_masks.quick())
             || (id == CommandId::SelectionOutline && self.selection_tools.options.display.outline)
             || (id == CommandId::MaskOverlay && self.selection_tools.options.display.overlay)
@@ -4807,6 +4811,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.edit_brush(tool_settings::COLOR_MIXING, f32::from(space as u8))?;
                 Ok((BRUSH, false))
             }
+            CommandId::SmoothingAdjustSpeed => {
+                let value = f32::from(u8::from(!self.engine.configured_brush().stabilization.adjust_by_speed));
+                self.edit_brush(tool_settings::SMOOTHING_SPEED, value)?;
+                Ok((BRUSH | COMMANDS, false))
+            }
             CommandId::WarpSplitVertical | CommandId::WarpSplitHorizontal | CommandId::WarpSplitCross | CommandId::WarpSelectPoints | CommandId::WarpResetGrid => {
                 self.warp_command(command)?;
                 Ok((DOCUMENT | COMMANDS | BRUSH, true))
@@ -5404,6 +5413,12 @@ impl<R: CanvasRenderer> UiSession<R> {
         changed
     }
 
+    fn smoothing_available(&self) -> bool {
+        self.layer_interaction.tool == LayerCanvasTool::Paint && !self.operation.active() && !self.cropping()
+            && self.selection_masks.target().is_none()
+            && !matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_)))
+    }
+
     fn refresh_tools(&mut self) {
         self.selection_tools.options.tonal.adapt_to_document(self.engine.document().composition().color.depth.is_float());
         self.state.tool_actions = if self.content_bounds.baking() {
@@ -5475,6 +5490,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 })
                 .collect()
         };
+        if self.smoothing_available() {
+            self.state.tool_actions.push(ToolSettingAction { command: CommandId::SmoothingAdjustSpeed, checkable: true });
+        }
         self.sync_retouch();
         if matches!(self.layer_interaction.tool, LayerCanvasTool::EncloseFill { .. }) {
             self.state.tool_actions = [CommandId::SelectionVisible, CommandId::SelectionEditing, CommandId::SelectionReference]
@@ -5515,6 +5533,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.transform_controls()
         } else if self.layer_interaction.tool == LayerCanvasTool::Paint {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
+                .into_iter().filter(|control| control.id != "smoothing_strength" || self.smoothing_available()).collect()
         } else if let LayerCanvasTool::Figure { paint, .. } = self.layer_interaction.tool {
             tool_settings::controls(self.engine.configured_brush(), &self.state.localization)
                 .into_iter()
@@ -6436,6 +6455,7 @@ mod tests {
     include!("blend_menu_tests.rs");
     include!("clone_source_tests.rs");
     include!("color_mixing_tests.rs");
+    include!("smoothing_tests.rs");
     include!("blending_tests.rs");
     include!("retouch_layer_tests.rs");
 
@@ -9267,6 +9287,9 @@ mod tests {
     fn tool_switch_keeps_active_stroke_snapshot_and_restores_next_stroke_settings() {
         let mut s = session(Platform::Gtk);
         let original = s.engine.configured_brush().clone();
+        let mut active = original.clone();
+        let [a, b, ..] = s.state.camera.document_to_surface();
+        active.stabilization.input_scale = a.hypot(b);
         let enabled: Vec<_> = s.state.commands.iter().map(|c| c.enabled).collect();
         s.pen(event(&s, 1, PenPhase::Down, 1.0)).unwrap();
         s.frame(10_000_000, 18_000_000).unwrap();
@@ -9292,7 +9315,7 @@ mod tests {
                 .iter()
                 .any(|c| c.id == CommandId::Pen && c.selected)
         );
-        assert_eq!(s.engine.brush(), &original);
+        assert_eq!(s.engine.brush(), &active);
         assert_eq!(
             s.engine.configured_brush().execution_class(),
             layer_core::BrushExecution::Liquify
@@ -9380,6 +9403,9 @@ mod tests {
     fn tool_edits_preserve_other_parameters_and_the_live_stroke() {
         let mut s = session(Platform::Gtk);
         let original = s.engine.configured_brush().clone();
+        let mut active = original.clone();
+        let [a, b, ..] = s.state.camera.document_to_surface();
+        active.stabilization.input_scale = a.hypot(b);
         s.pen(event(&s, 1, PenPhase::Down, 1.0)).unwrap();
         s.frame(10_000_000, 18_000_000).unwrap();
         for (id, value) in [("flow", 0.35), ("spacing", 0.2), ("size_jitter", 0.3)] {
@@ -9398,7 +9424,7 @@ mod tests {
         assert_eq!(s.engine.configured_brush().spacing, 0.2);
         assert_eq!(s.engine.configured_brush().shape.size_jitter, 0.3);
         assert_eq!(s.engine.configured_brush().diameter, 40.0);
-        assert_eq!(s.engine.brush(), &original);
+        assert_eq!(s.engine.brush(), &active);
         s.pen(event(&s, 2, PenPhase::Up, 1.0)).unwrap();
         s.frame(20_000_000, 28_000_000).unwrap();
         assert_eq!(
@@ -9408,6 +9434,8 @@ mod tests {
         s.pen(event(&s, 3, PenPhase::Down, 1.0)).unwrap();
         s.pen(event(&s, 4, PenPhase::Up, 1.0)).unwrap();
         s.frame(40_000_000, 48_000_000).unwrap();
+        s.frame(41_000_000, 49_000_000).unwrap();
+        s.frame(73_000_000, 81_000_000).unwrap();
         assert_eq!(s.engine.metrics().committed_strokes, 2);
         assert_eq!(s.engine.configured_brush().flow, 0.35);
         assert_eq!(s.engine.configured_brush().diameter, 40.0);
@@ -16914,7 +16942,7 @@ mod tests {
                             y: b * tip.x + d * tip.y + y,
                         };
                         let tracks_policy = if uses_native {
-                            (tip.x - 703.2).abs() < 0.3 && (tip.y - 446.).abs() < 0.3
+                            (700. ..=703.2).contains(&tip.x) && (445.7 ..=449.).contains(&tip.y)
                         } else if milliseconds == 0. {
                             (tip.x - 700.).abs() < 0.3 && (tip.y - 450.).abs() < 0.3
                         } else {
@@ -17720,6 +17748,8 @@ mod tests {
         assert_eq!(app.state.commands, commands);
         app.pen(event(&app, 3, PenPhase::Up, 0.5)).unwrap();
         let change = app.frame(30_000_000, 38_000_000).unwrap();
+        assert_eq!(change.regions & regions::DOCUMENT, 0);
+        let change = app.frame(62_000_000, 70_000_000).unwrap();
         assert_ne!(change.regions & regions::DOCUMENT, 0);
         assert!(app.command(CommandId::Undo).enabled);
         for command in &app.state.commands {

@@ -173,3 +173,5 @@ zoom-tool-left-right = Sol/sağ
 zoom-tool-up-down = Yukarı/aşağı
 zoom-tool-center-on-click-tooltip = Yakınlaştırmak veya uzaklaştırmak için tıkladığınız noktayı görünümün merkezine taşır.
 tool-setting-material-hardness = Malzeme sertliği
+tool-setting-group-smoothing = Yumuşatma
+tool-setting-smoothing-strength = Güç

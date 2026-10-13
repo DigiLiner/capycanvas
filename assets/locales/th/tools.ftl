@@ -173,3 +173,5 @@ zoom-tool-left-right = ซ้าย/ขวา
 zoom-tool-up-down = ขึ้น/ลง
 zoom-tool-center-on-click-tooltip = ย้ายจุดที่คลิกไปไว้ตรงกลางมุมมองเมื่อคลิกเพื่อซูมเข้าหรือซูมออก
 tool-setting-material-hardness = ความแข็งของวัสดุ
+tool-setting-group-smoothing = ปรับเส้นให้เรียบ
+tool-setting-smoothing-strength = ความแรง

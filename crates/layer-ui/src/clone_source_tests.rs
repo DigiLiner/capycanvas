@@ -37,6 +37,7 @@ fn clone_joins_the_sculpting_tools_with_its_options_and_a_source_in_view() {
         CommandId::CloneFlipVertical,
         CommandId::CloneResetOffset,
         CommandId::CloneSourceArm,
+        CommandId::SmoothingAdjustSpeed,
     ]);
     let source = s.engine.clone_source().point.unwrap();
     let [x, y, width, height] = s.state.camera.work_area;
@@ -216,7 +217,7 @@ fn healing_brushes_join_the_retouching_tools_and_spot_healing_needs_no_disc() {
     assert_eq!(s.engine.configured_brush().execution, layer_core::BrushExecution::Heal);
     assert_eq!(UiSession::<Recorder>::tool_category(s.layer_interaction.tool, s.state.brush.tool), ToolCategory::Retouching);
     assert!(s.clone_disc().is_some(), "healing copies from the source disc");
-    assert_eq!(s.state.tool_actions.len(), 7);
+    assert_eq!(s.state.tool_actions.len(), 8);
     held_key(&mut s, "Alt_L", true, Modifiers::default());
     assert!(s.command(CommandId::CloneSourceArm).selected, "Alt sets the healing source");
     held_key(&mut s, "Alt_L", false, alt());
@@ -225,7 +226,7 @@ fn healing_brushes_join_the_retouching_tools_and_spot_healing_needs_no_disc() {
     assert_eq!(s.engine.configured_brush().execution, layer_core::BrushExecution::SpotHeal);
     assert!(s.clone_disc().is_none(), "spot healing has no disc");
     let actions: Vec<_> = s.state.tool_actions.iter().map(|a| a.command).collect();
-    assert_eq!(actions, [CommandId::SelectionReference, CommandId::SelectionEditing]);
+    assert_eq!(actions, [CommandId::SelectionReference, CommandId::SelectionEditing, CommandId::SmoothingAdjustSpeed]);
     assert!(s.command(CommandId::SelectionReference).enabled && s.command(CommandId::SelectionReference).selected);
     for command in [CommandId::CloneSourceArm, CommandId::CloneAligned, CommandId::CloneResetOffset] {
         assert!(!s.command(command).enabled);

@@ -638,3 +638,4 @@ menu-paste-special = Özel Yapıştır
 menu-rotate-and-flip = Döndür ve Çevir
 menu-color-management = Renk Yönetimi
 command-pen-pressure = Kalem basıncı…
+command-smoothing-adjust-speed = Hıza göre ayarla

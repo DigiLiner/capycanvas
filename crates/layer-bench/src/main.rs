@@ -393,11 +393,8 @@ impl Canvas {
         snapshot.opacity = brush.opacity;
         snapshot.color_rgba_linear = brush.color;
         snapshot.stabilization = BrushStabilization {
-            streamline: 0.0,
+            strength: 0.0,
             pressure_smoothing: 0.0,
-            stabilization: 0.0,
-            motion_filtering: 0.0,
-            expression: 1.0,
             ..snapshot.stabilization
         };
         self.engine.set_brush(snapshot).map_err(|e| e.to_string())?;

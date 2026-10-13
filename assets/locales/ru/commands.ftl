@@ -644,3 +644,4 @@ menu-paste-special = Специальная вставка
 menu-rotate-and-flip = Поворот и отражение
 menu-color-management = Управление цветом
 command-pen-pressure = Нажим пера…
+command-smoothing-adjust-speed = Учитывать скорость

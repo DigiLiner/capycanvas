@@ -1,15 +1,15 @@
-# Curve fit smoother: work in progress
+# Curve fit smoother
 
 [Brush design records](README.md)
 
-**Status: work in progress; not fully optimized.** This record describes the
+**Status: implemented; further quality tuning remains open.** This record describes the
 implementation snapshot at revision
 `27de272963752b22219b63b9bc2b4369b95d20be` on `pen-smoothing-comparison`.
 That implementation is separate from the accepted
 [full-horizon stabilization objective](stroke-stabilization.md). It does not
 solve that objective or establish an optimal approximation for any lag budget.
-The revision identifies the source snapshot; publication of this record does
-not imply that those implementation changes have landed on `main`.
+The production implementation retains the Curve fit and tail fixes from this
+snapshot. Exponential, Moving average and the algorithm selector are omitted.
 
 This is an algorithm design snapshot, not an empirical results log. Constants
 below are values in that source revision, not validated perceptual optima or
@@ -21,19 +21,17 @@ The following paths refer to the named revision:
 
 | Source | Responsibility |
 | --- | --- |
-| `crates/layer-engine/src/brush/smoothing.rs` | Strength, speed adjustment, interval estimation, algorithm dispatch and retained smoother state. |
+| `crates/layer-engine/src/brush/smoothing.rs` | Strength, speed adjustment, interval estimation and retained smoother state. |
 | `crates/layer-engine/src/brush/smoothing/curve.rs` | Positive polynomial kernel, clock interpolation, moment integrals, evaluation and derivative bounds. |
 | `crates/layer-engine/src/brush/smoothing/preview.rs` | Canonical real-input model, forecast continuation, displayed endpoint and pen-up settlement. |
 | `crates/layer-engine/src/brush.rs` | Adaptive curve evaluation between delivered samples, brush contacts and completion. |
 | `crates/layer-engine/src/canvas.rs` | Real/provisional stroke ownership, forecast acquisition, preview updates and contact completion. |
-| `crates/layer-core/src/lib.rs` | `BrushStabilization` and algorithm defaults. |
-| `crates/layer-ui/src/tool_settings.rs` | Shared strength, speed and algorithm controls. |
+| `crates/layer-core/src/lib.rs` | `BrushStabilization` and defaults. |
+| `crates/layer-ui/src/tool_settings.rs` | Shared strength and speed controls. |
 
-The snapshot offers Curve fit, Exponential and Moving average, with normalized
-strength `S` in `[0,1]`, displayed as 0–100. The default is Exponential at strength
-6 with Adjust by speed off. These are current snapshot settings, not defaults
-selected for the new reference objective. Slider travel is nonlinear, with
-strength 30 at 75% travel.
+Production offers Curve fit with normalized strength `S` in `[0,1]`, displayed as
+0–100, initially 6 with Adjust by speed off. These controls are independent of the
+reference objective. Slider travel is nonlinear, with strength 30 at 75% travel.
 
 Strength zero bypasses positional smoothing. Curve-model preview and its
 additional pen-up settlement are disabled at zero. Generic input/presentation
@@ -156,12 +154,13 @@ $$
 It also stops subdivision at intervals of at most one microsecond. This evaluates
 the continuous position field between low-rate samples instead of drawing only
 chords between filtered sample positions. Swept-contact simplification uses the
-same 0.05-unit path tolerance for enabled Curve fit.
+same surface-pixel tolerance for enabled Curve fit.
 
-Moment evaluation is bounded apart from ordered searches, but the whole path is
-not constant cost: support calibration and acceleration bounds scan relevant
-data; model cloning copies retained nodes; contact subdivision depends on the
-curve. These costs remain part of optimization work.
+Moment evaluation is bounded apart from ordered searches. Support calibration
+uses 28 fixed steps with a constant-work noise-gain formula. Acceleration bounds
+reuse cached slope lengths and scan only overlapping nodes. Model cloning copies
+retained nodes; contact subdivision depends on the curve. Preview uses the fitted
+position field directly while retaining sensor stabilization.
 
 ## Provisional curve and prediction
 

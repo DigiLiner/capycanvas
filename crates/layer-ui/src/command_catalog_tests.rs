@@ -511,6 +511,8 @@ fn disabled_reasons_stay_steady_during_a_canvas_contact() {
     }
     s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
     s.frame(3, 3).unwrap();
+    assert!(!s.state.commands[undo].enabled);
+    s.frame(62_000_000, 62_000_000).unwrap();
     assert!(s.state.commands[undo].enabled);
     assert_eq!(s.state.commands[undo].disabled_reason, None);
 }

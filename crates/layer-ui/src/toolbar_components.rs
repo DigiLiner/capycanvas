@@ -539,6 +539,7 @@ pub fn tool_setting_icon(id: &str) -> &'static str {
         "size_jitter" => "size",
         "opacity" => "opacity",
         "flow" => "paint-flow",
+        "smoothing_strength" => "edge-smooth",
         "hardness" | "material_hardness" => "hardness",
         "spacing" => "brush-spacing",
         "distance" => "ruler",

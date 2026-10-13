@@ -1986,3 +1986,51 @@ Zoom target. The earlier candidate pinch had a 50.05 ms gap run against
 baseline p99 33.35–33.55 ms; the comparison does not establish no regression.
 Evidence: `artifacts/navigation-controls/zoom-audit-20261009/comparison.json`;
 current build provenance: `artifacts/navigation-controls/zoom-audit-20261009/post-rebase-source-provenance.json`.
+
+## XP-Pen Web stabilization comparison
+
+Measured 2026-10-13 UTC on XP-Pen Magic Note Pad (MNP1095), Chrome WebGPU,
+with a 4248 × 2832 photo, an empty paint layer, Fit and the default Navigator.
+Both builds use `dev-perf`, which enables release optimization. The baseline is
+`9e6a17e4357bac0154bf3a96f87c5b1953b01ec2`, Wasm SHA-256
+`cb9a433d8dd854878f55b5a5d2f049df1743e421b89b0616438f7ea41411aba1`.
+The Curve fit build is identified by Wasm SHA-256
+`26b0084b6f3f4e546d94f03c8645cb498a49b2e63005367a3165aea7a1aa2573`.
+
+Each condition has three warmed five-second CDP pen contacts at nominal 200 Hz,
+with varying pressure and an 8 ms prediction horizon. Platform prediction is off.
+Values are medians across contacts. Each paired cell lists stroke preview
+**on / off**. Speed adjustment is off except at strength 100.
+
+| G-Pen diameter | Stabilization | Moving frame calls/s | GPU completion proxy/s | Frame CPU p99, ms |
+| --- | --- | --- | --- | --- |
+| 18 px | Baseline | 53.99 / 59.25 | 48.22 / 56.53 | 8.60 / 7.50 |
+| 18 px | 0 | 59.07 / 59.56 | 54.92 / 56.39 | 8.20 / 7.50 |
+| 18 px | 6 | 58.33 / 58.81 | 55.56 / 55.64 | 8.10 / 7.10 |
+| 18 px | 50 | 57.73 / 58.69 | 52.13 / 55.33 | 9.60 / 7.80 |
+| 18 px | 100 | 58.24 / 58.25 | 50.12 / 55.08 | 9.80 / 7.40 |
+| 1024 px | Baseline | 32.28 / 37.79 | 25.63 / 28.24 | 25.10 / 18.70 |
+| 1024 px | 0 | 38.83 / 40.45 | 26.87 / 29.21 | 18.50 / 15.30 |
+| 1024 px | 6 | 36.60 / 38.08 | 23.99 / 28.60 | 17.40 / 16.70 |
+| 1024 px | 100 | 34.62 / 38.12 | 28.36 / 27.26 | 20.90 / 16.40 |
+
+All 42 candidate contacts advance the committed paint revision, with no browser
+or measurement-hook errors and no new effect pipelines during drawing. HAL
+thermal status stays at zero; candidate CPU/GPU temperature rises from about
+37 °C to 45 °C. The 1024 px baseline loses its private USB port mappings after
+four contacts; its final two contacts run after reconnecting and reloading.
+Runs vary the trajectory phase and do not replay identical raw positions.
+
+The default strength remains close to disabled smoothing in these comparisons.
+Strong smoothing redraws a longer preview and generates more contacts. Caching
+slope lengths and restricting derivative-bound scans removes repeated work
+without changing the bounds or geometry tolerance. The earlier strength-100
+preview profile's frame CPU p99 is 36.2 ms; the optimized repeated comparison
+has a median of 9.8 ms at 18 px.
+
+Frame calls include frames waiting for GPU work. Completion callbacks measure
+asynchronous queue progress and include browser scheduling delay; they are not
+physical presentation or photon latency. These supplemental XP-Pen measurements
+**do not qualify the TCL 60 fps target**. Raw results and build provenance remain
+in `artifacts/curve-fit-production/xppen-candidate-optimized-summary.json` and its
+referenced reports.

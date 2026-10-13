@@ -554,26 +554,24 @@ impl Default for BrushPath {
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BrushStabilization {
-    pub streamline: f32,
+    pub strength: f32,
+    pub adjust_by_speed: bool,
+    pub input_scale: f32,
     pub pressure_smoothing: f32,
     /// Minimum time for modeled pressure to fall by one full unit. Its fall
     /// velocity eases with a 4 ms response to smooth repeated sensor values.
     /// Zero disables the limiter. Uses input time, independent of zoom and DPI.
     pub pressure_fall_micros: u32,
-    pub stabilization: f32,
-    pub motion_filtering: f32,
-    pub expression: f32,
 }
 
 impl Default for BrushStabilization {
     fn default() -> Self {
         Self {
-            streamline: 0.0,
+            strength: 0.06,
+            adjust_by_speed: false,
+            input_scale: 1.0,
             pressure_smoothing: 0.0,
             pressure_fall_micros: 0,
-            stabilization: 0.0,
-            motion_filtering: 0.0,
-            expression: 1.0,
         }
     }
 }
@@ -952,11 +950,8 @@ impl BrushSnapshot {
     fn validate_advanced(&self) -> Result<(), BrushError> {
         let unit = [
             self.path.spacing_jitter,
-            self.stabilization.streamline,
+            self.stabilization.strength,
             self.stabilization.pressure_smoothing,
-            self.stabilization.stabilization,
-            self.stabilization.motion_filtering,
-            self.stabilization.expression,
             self.shape.count_jitter,
             self.shape.size_jitter,
             self.shape.rotation_jitter,
@@ -1032,6 +1027,8 @@ impl BrushSnapshot {
             .iter()
             .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
             || self.stabilization.pressure_fall_micros > 1_000_000
+            || !self.stabilization.input_scale.is_finite()
+            || self.stabilization.input_scale <= 0.
             || finite_nonnegative
                 .iter()
                 .any(|value| !value.is_finite() || *value < 0.0)

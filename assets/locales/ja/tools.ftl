@@ -174,3 +174,5 @@ zoom-tool-left-right = 左右
 zoom-tool-up-down = 上下
 zoom-tool-center-on-click-tooltip = クリックして拡大・縮小するとき、クリックした位置を表示領域の中央に移動します。
 tool-setting-material-hardness = 画材の硬さ
+tool-setting-group-smoothing = 手ブレ補正
+tool-setting-smoothing-strength = 強さ

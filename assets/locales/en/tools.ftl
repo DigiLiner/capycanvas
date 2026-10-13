@@ -174,3 +174,5 @@ zoom-tool-left-right = Left/right
 zoom-tool-up-down = Up/down
 zoom-tool-center-on-click-tooltip = Move the clicked point to the center of the view when you click to zoom in or out.
 tool-setting-material-hardness = Material hardness
+tool-setting-group-smoothing = Smoothing
+tool-setting-smoothing-strength = Strength

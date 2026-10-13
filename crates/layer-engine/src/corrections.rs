@@ -48,10 +48,10 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         );
     }
 
-    pub(super) fn correct_input(&mut self, event: PenEvent) -> Result<(), EngineError<B::Error>> {
+    pub(super) fn correct_input(&mut self, event: PenEvent) -> Result<bool, EngineError<B::Error>> {
         let key = (event.device_id, event.sequence);
         let Some(mut estimate) = self.estimates.remove(&key) else {
-            return Ok(());
+            return Ok(false);
         };
         // All spatial/pressure policy belongs to the original observation.
         let mut point = to_stroke_point(event, estimate.transform, estimate.curve.clone(), 0);
@@ -123,7 +123,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         if event.flags.contains(SampleFlags::ESTIMATED) {
             self.estimates.insert(key, estimate);
         }
-        Ok(())
+        Ok(changed)
     }
 
     fn rebuild_corrected_active(&mut self) {

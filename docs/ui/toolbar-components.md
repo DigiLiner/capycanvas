@@ -76,7 +76,11 @@ promotes Pull. Ordinary brushes promote Hardness when applicable. A promoted
 field appears once, without a category heading.
 
 Secondary categories follow a shared order: Tip, Material, Texture, Bristles,
-Mixing, Watercolor, Bleed, Liquify and Blending. Brush Color mixing joins the
+Mixing, Watercolor, Bleed, Liquify, Blending and Smoothing. Smoothing has Strength
+from 0 to 100, default 6, and Adjust by speed. Each brush retains these choices;
+selection and coverage-mask tools omit them. Strength uses a logarithmic slider
+with 30 at 75% travel. Command search shows Smoothing › Strength to distinguish
+it from application Strength. Brush Color mixing joins the
 secondary Mixing category in Tool Options. Opacity belongs to Blending, after
 the material controls. Hosts use stable `group_id` values for category boundaries
 and schema identity, with localized `group` text only for headings. Dry media

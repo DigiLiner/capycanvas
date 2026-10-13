@@ -174,3 +174,5 @@ zoom-tool-left-right = Trái/phải
 zoom-tool-up-down = Lên/xuống
 zoom-tool-center-on-click-tooltip = Đưa điểm bạn nhấp vào giữa khung nhìn khi nhấp để phóng to hoặc thu nhỏ.
 tool-setting-material-hardness = Độ cứng chất liệu
+tool-setting-group-smoothing = Làm mượt
+tool-setting-smoothing-strength = Cường độ

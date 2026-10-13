@@ -20,11 +20,12 @@ pub struct SelectionStroke {
 impl SelectionStroke {
     pub fn new(
         id: u64,
-        brush: BrushSnapshot,
+        mut brush: BrushSnapshot,
         transform: ViewTransform,
         curve: PressureCurve,
         close_distance: Option<f32>,
     ) -> Self {
+        brush.stabilization.strength = 0.;
         let mut generator = DabGenerator::new(layer_core::color::RgbSpace::Srgb);
         generator.reset_for_stroke(StrokeId(id), &brush);
         let [a, b, c, d, _, _] = transform.surface_to_document;

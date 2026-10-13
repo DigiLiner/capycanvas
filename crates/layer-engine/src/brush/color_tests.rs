@@ -183,6 +183,8 @@ fn document_color_survives_generator_reset_clone_and_stroke_correction() {
         let mut b = Vec::new();
         generator.append(point(24.), &brush, &mut a);
         copy.append(point(24.), &brush, &mut b);
+        generator.finish(&brush, &mut a);
+        copy.finish(&brush, &mut b);
         assert_eq!(a, b);
         let stroke = Stroke::new(
             StrokeId(91),

@@ -301,6 +301,11 @@ Escape cancellation.
 `--selection-tools` checks mode-row alignment inside the active drawer and
 Photo command availability through the slots' published variant menus.
 
+`--smoothing` checks the Strength slider's 30-at-75% mapping and Adjust by speed
+in both themes, then draws pen contacts at strengths 0, 6, 50 and 100 with stroke
+preview on and off. It requires visible committed pixels and exact Undo/Redo.
+The same journey runs through `device.test.mjs` on a reserved tablet.
+
 `--language-switching` visits all shipped languages in light and dark themes,
 checks retained Preferences and dirty size-entry identity, focus and selection,
 rapid choices, browser language resolution and another same-profile tab.

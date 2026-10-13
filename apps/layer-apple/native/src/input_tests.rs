@@ -10,6 +10,7 @@ fn mac_manual_prediction_paints_ahead_of_pen_and_mouse_without_committing_the_ti
             );
             app.action(json!({"type":"select_brush","id":layer_core::DefaultBrushPreset::GPen as u32}));
             app.action(json!({"type":"set_brush_size","value":4}));
+            app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
             app.action(json!({"type":"set_color","rgba":[0,0,1,1]}));
             app.invoke("settings");
             app.action(json!({"type":"preferences","action":{"type":"edit","id":"hide_cursor_while_drawing","value":false}}));
@@ -72,6 +73,7 @@ fn project_adoption_preserves_native_prediction_and_manual_lookahead() {
             settings["prediction_ms"] = json!(64.);
             app.action(json!({"type":"restore_settings","settings":settings}));
             app.action(json!({"type":"set_brush_size","value":4}));
+            app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
             app.action(json!({"type":"set_color","rgba":[0,0,1,1]}));
             app.draw_until_idle();
             let project = ProjectJob::new(&app, true);
@@ -333,11 +335,13 @@ fn estimated_input_abi_matches_final_sensor_oracle_pixels_and_history_on_both_pl
                 unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(
                     native_renderer(),
                 );
+                app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
                 app.draw_frame();
                 app.stroke();
                 app.draw_until_idle();
                 let baseline = app.pixels();
                 app.action(json!({"type":"select_brush","id":brush as u32}));
+                app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
                 app.action(json!({"type":"set_color","rgba":[0.8,0.15,0.2,1]}));
                 app.draw_frame();
                 let revision = unsafe { capy_apple_camera_revision(app.0) };

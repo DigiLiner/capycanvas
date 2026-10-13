@@ -173,3 +173,5 @@ zoom-tool-left-right = Izquierda/derecha
 zoom-tool-up-down = Arriba/abajo
 zoom-tool-center-on-click-tooltip = Mueve el punto donde haces clic al centro de la vista al ampliar o reducir.
 tool-setting-material-hardness = Dureza del material
+tool-setting-group-smoothing = Suavizado
+tool-setting-smoothing-strength = Intensidad

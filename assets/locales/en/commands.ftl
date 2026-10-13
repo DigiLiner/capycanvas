@@ -641,3 +641,4 @@ menu-paste-special = Paste Special
 menu-rotate-and-flip = Rotate and Flip
 menu-color-management = Color Management
 command-pen-pressure = Pen pressure…
+command-smoothing-adjust-speed = Adjust by speed

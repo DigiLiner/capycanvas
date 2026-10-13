@@ -336,3 +336,5 @@ zoom-tool-left-right = Kiri/kanan
 zoom-tool-up-down = Atas/bawah
 zoom-tool-center-on-click-tooltip = Pindahkan titik yang diklik ke tengah tampilan saat mengeklik untuk memperbesar atau memperkecil.
 tool-setting-material-hardness = Kekerasan bahan
+tool-setting-group-smoothing = Penghalusan
+tool-setting-smoothing-strength = Kekuatan

@@ -11,6 +11,9 @@ use layer_core::{
 };
 use layer_render::Dab;
 
+mod smoothing;
+pub(crate) use smoothing::{CurveModel, PositionField, CurvePreview, pen_up_settlement_micros};
+
 const SPEED_FILTER_SECONDS: f32 = 0.015;
 const PRESSURE_FALL_RESPONSE_SECONDS: f32 = 0.004;
 const BARREL_TWIST_RESPONSE_SECONDS: f32 = 0.025;
@@ -68,6 +71,7 @@ pub struct DabGenerator {
     space: RgbSpace,
     last: Option<DynamicPoint>,
     stabilized_input: Option<StrokePoint>,
+    position_smoother: smoothing::PositionSmoother,
     pressure_fall_target: f32,
     bristle_azimuth: Option<f32>,
     barrel_twist: bool,
@@ -96,6 +100,7 @@ impl Default for DabGenerator {
             space: RgbSpace::Srgb,
             last: None,
             stabilized_input: None,
+            position_smoother: smoothing::PositionSmoother::default(),
             pressure_fall_target: 0.0,
             bristle_azimuth: None,
             barrel_twist: false,
@@ -163,6 +168,7 @@ impl DabGenerator {
     pub fn reset_for_stroke(&mut self, stroke_id: StrokeId, brush: &BrushSnapshot) {
         self.last = None;
         self.stabilized_input = None;
+        self.position_smoother = smoothing::PositionSmoother::default();
         self.pressure_fall_target = 0.0;
         self.bristle_azimuth = None;
         self.barrel_twist = false;
@@ -212,13 +218,73 @@ impl DabGenerator {
         brush: &BrushSnapshot,
         output: &mut Vec<Dab>,
     ) -> Rect {
+        self.append_with_field(point, brush, None, output)
+    }
+
+    pub(crate) fn preview_model(&self, brush: &BrushSnapshot, real: &[StrokePoint]) -> Option<CurveModel> {
+        self.position_smoother.preview_model(&brush.stabilization, real)
+    }
+
+    pub(crate) fn append_with_field(
+        &mut self,
+        point: StrokePoint,
+        brush: &BrushSnapshot,
+        field: Option<&dyn PositionField>,
+        output: &mut Vec<Dab>,
+    ) -> Rect {
         if brush.execution == layer_core::BrushExecution::Liquify {
             if brush.deform.strength <= 0. { return Rect::EMPTY; }
         } else if brush.flow <= 0. || brush.opacity <= 0. {
             return Rect::EMPTY;
         }
-        let stabilized = self.stabilize(point, brush);
-        let current = self.characterize(stabilized);
+        let previous = self.stabilized_input;
+        let position = field.map(|field| field.position(f64::from(point.elapsed_micros) * 1e-6));
+        let stabilized = self.stabilize(point, brush, position);
+        let mut damage = Rect::EMPTY;
+        if let Some(previous) = previous.filter(|previous| previous.elapsed_micros < point.elapsed_micros)
+            && brush.stabilization.strength > 0.
+        {
+            let begin = f64::from(previous.elapsed_micros) * 1e-6;
+            let end = f64::from(point.elapsed_micros) * 1e-6;
+            let tolerance = 0.05 / f64::from(brush.stabilization.input_scale).max(1e-6);
+            damage = damage.union(self.append_curve_interval(previous, stabilized, begin, end, field, tolerance, brush, output));
+        }
+        damage = damage.union(self.append_modeled(stabilized, brush, output));
+        self.position_smoother.retain_from(point.elapsed_micros);
+        damage
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_curve_interval(&mut self, previous: StrokePoint, current: StrokePoint, begin: f64, end: f64,
+        field: Option<&dyn PositionField>, tolerance: f64, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
+        let bound = field.map_or_else(|| self.position_smoother.acceleration_bound(begin, end),
+            |field| field.acceleration_bound(begin, end));
+        if (end - begin) <= 1e-6 || bound * (end - begin).powi(2) <= 8. * tolerance { return Rect::EMPTY; }
+        let middle = (begin + end) * 0.5;
+        let mut damage = self.append_curve_interval(previous, current, begin, middle, field, tolerance, brush, output);
+        let duration = current.elapsed_micros.saturating_sub(previous.elapsed_micros);
+        let fraction = if duration == 0 { 0. } else { ((middle * 1e6 - f64::from(previous.elapsed_micros)) / f64::from(duration)) as f32 };
+        let mut sample = interpolate_point(previous, current, fraction);
+        sample.position = field.map_or_else(|| self.position_smoother.curve_position(middle).unwrap(), |field| field.position(middle));
+        damage = damage.union(self.append_modeled(sample, brush, output));
+        damage.union(self.append_curve_interval(previous, current, middle, end, field, tolerance, brush, output))
+    }
+
+    pub(crate) fn append_continuation(&mut self, endpoint: StrokePoint, brush: &BrushSnapshot, field: &dyn PositionField, output: &mut Vec<Dab>) -> Rect {
+        let Some(previous) = self.stabilized_input else { return Rect::EMPTY; };
+        let begin = f64::from(previous.elapsed_micros) * 1e-6;
+        let end = f64::from(endpoint.elapsed_micros) * 1e-6;
+        if end <= begin { return Rect::EMPTY; }
+        let endpoint = StrokePoint { position: endpoint.position, ..previous };
+        let tolerance = 0.05 / f64::from(brush.stabilization.input_scale).max(1e-6);
+        let damage = self.append_curve_interval(previous, endpoint, begin, end, Some(field), tolerance, brush, output);
+        self.stabilized_input = Some(endpoint);
+        damage.union(self.append_modeled(endpoint, brush, output))
+    }
+
+    fn append_modeled(&mut self, point: StrokePoint, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
+        let current = self.characterize(point);
+
         let mut damage = Rect::EMPTY;
         let Some(last) = self.last else {
             let evaluated = self.evaluate(current, brush);
@@ -305,6 +371,9 @@ impl DabGenerator {
         } else {
             f64::from(tolerance)
         };
+        let path_tolerance = if brush.stabilization.strength > 0. {
+            path_tolerance.min(0.05 / f64::from(brush.stabilization.input_scale).max(1e-6))
+        } else { path_tolerance };
         let dx = f64::from(current.position().x) - f64::from(start.position().x);
         let dy = f64::from(current.position().y) - f64::from(start.position().y);
         // Every intervening vertex lies inside the ellipse whose focal points
@@ -356,6 +425,14 @@ impl DabGenerator {
     /// matters for a pointed lift: copying the preceding large dab rounds it off.
     /// A bristle fan then lifts off the paper.
     pub(crate) fn finish(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
+        let mut damage = Rect::EMPTY;
+        if let Some(model) = self.position_smoother.take_completion_model() {
+            damage = damage.union(self.append_continuation(model.endpoint(), brush, &model, output));
+        }
+        damage.union(self.finish_preview(brush, output))
+    }
+
+    pub(crate) fn finish_preview(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
         let Some(contact) = brush.contact else {
             return Rect::EMPTY;
         };
@@ -433,28 +510,20 @@ impl DabGenerator {
         }
     }
 
-    fn stabilize(&mut self, point: StrokePoint, brush: &BrushSnapshot) -> StrokePoint {
+    fn stabilize(&mut self, point: StrokePoint, brush: &BrushSnapshot, position: Option<Point>) -> StrokePoint {
+        let raw_distance = self.position_smoother.previous().map_or(0., |last|
+            (point.position.x - last.position.x).hypot(point.position.y - last.position.y));
+        let position = if let Some(position) = position {
+            self.position_smoother.observe(point);
+            position
+        } else { self.position_smoother.append(point, &brush.stabilization) };
         let Some(last) = self.stabilized_input else {
+            let point = StrokePoint { position, ..point };
             self.stabilized_input = Some(point);
             self.pressure_fall_target = point.pressure;
             return point;
         };
         let elapsed = point.elapsed_micros.saturating_sub(last.elapsed_micros) as f32 / 1_000_000.0;
-        let raw_distance =
-            (point.position.x - last.position.x).hypot(point.position.y - last.position.y);
-        let speed = if elapsed > 0.0 {
-            raw_distance / elapsed
-        } else {
-            0.0
-        };
-        let slow_motion = 1.0 - (speed / 1_500.0).clamp(0.0, 1.0);
-        let retained = (brush.stabilization.streamline * 0.72
-            + brush.stabilization.stabilization * 0.20
-            + brush.stabilization.motion_filtering * slow_motion * 0.24)
-            .clamp(0.0, 0.96);
-        let response = (1.0 - retained)
-            .powf(brush.stabilization.expression.max(0.05))
-            .clamp(0.04, 1.0);
         let pressure_response =
             (1.0 - brush.stabilization.pressure_smoothing * 0.92).clamp(0.04, 1.0);
         let mut pressure = last.pressure + (point.pressure - last.pressure) * pressure_response;
@@ -489,22 +558,19 @@ impl DabGenerator {
             self.pressure_fall_target = pressure;
         }
         let stabilized = StrokePoint {
-            position: Point {
-                x: last.position.x + (point.position.x - last.position.x) * response,
-                y: last.position.y + (point.position.y - last.position.y) * response,
-            },
+            position,
             pressure,
             tilt: [
-                last.tilt[0] + (point.tilt[0] - last.tilt[0]) * response,
-                last.tilt[1] + (point.tilt[1] - last.tilt[1]) * response,
+                point.tilt[0],
+                point.tilt[1],
             ],
             twist: mix_angle(
                 last.twist,
                 point.twist,
                 if self.barrel_twist && brush.contact.is_some_and(|c| c.bristles.is_some()) {
-                    response * (1.0 - (-elapsed / BARREL_TWIST_RESPONSE_SECONDS).exp())
+                    1.0 - (-elapsed / BARREL_TWIST_RESPONSE_SECONDS).exp()
                 } else {
-                    response
+                    1.
                 },
                 std::f32::consts::TAU,
             ),
@@ -950,7 +1016,8 @@ pub(crate) fn lock_dab_tail(dabs: &mut [Dab], modeled_endpoint: Point, target: P
     }
 }
 
-pub(crate) fn taper_prediction(dabs: &mut [Dab], origin: Point) {
+pub(crate) fn taper_prediction(dabs: &mut [Dab], origin: Point, amount: f32) {
+    if amount <= 0. { return; }
     let Some(first) = dabs.first() else { return };
     let length: f32 = dabs.iter().map(|d| d.motion[0].hypot(d.motion[1])).sum();
     let first_length = first.motion[0].hypot(first.motion[1]);
@@ -961,13 +1028,14 @@ pub(crate) fn taper_prediction(dabs: &mut [Dab], origin: Point) {
     if length <= start { return; }
     let scale = |distance: f32| {
         let t = ((distance - start) / (length - start)).clamp(0., 1.);
-        1. - 0.25 * t * t * (3. - 2. * t)
+        1. - 0.25 * amount * t * t * (3. - 2. * t)
     };
     let mut distance = 0.;
     for dab in dabs {
         let previous_size = scale(distance);
         distance += dab.motion[0].hypot(dab.motion[1]);
         let size = scale(distance);
+
         dab.radii[0] *= size;
         dab.radii[1] *= size;
         dab.previous[0] *= previous_size;
@@ -1051,6 +1119,16 @@ fn sensor_value(point: DynamicPoint, sensor: BrushSensor, variant: u32, index: u
         BrushSensor::StrokeDistance => point.stroke_distance,
         BrushSensor::StrokeTime => point.point.elapsed_micros as f32 / 1_000_000.0,
         BrushSensor::Random => hash_to_unit(variant ^ index.wrapping_mul(0x9e37_79b9)),
+    }
+}
+
+fn interpolate_point(a: StrokePoint, b: StrokePoint, t: f32) -> StrokePoint {
+    StrokePoint {
+        position: Point { x: mix(a.position.x, b.position.x, t), y: mix(a.position.y, b.position.y, t) },
+        pressure: mix(a.pressure, b.pressure, t),
+        tilt: [mix(a.tilt[0], b.tilt[0], t), mix(a.tilt[1], b.tilt[1], t)],
+        twist: mix_angle(a.twist, b.twist, t, std::f32::consts::TAU),
+        elapsed_micros: (f64::from(a.elapsed_micros) + f64::from(b.elapsed_micros.saturating_sub(a.elapsed_micros)) * f64::from(t)).round() as u32,
     }
 }
 
@@ -1302,10 +1380,35 @@ mod tests {
     }
 
     #[test]
+    fn a_long_straight_gap_does_not_tessellate_at_the_short_bend_rate() {
+        use std::cell::Cell;
+        struct Field { evaluations: Cell<usize> }
+        impl PositionField for Field {
+            fn position(&self, time: f64) -> Point {
+                self.evaluations.set(self.evaluations.get() + 1);
+                let u = (time / 0.004).clamp(0., 1.);
+                Point { x: (u.powi(3) * (10. + u * (-15. + u * 6.))) as f32, y: 0. }
+            }
+            fn acceleration_bound(&self, begin: f64, _: f64) -> f64 { if begin < 0.004 { 1e6 } else { 0. } }
+        }
+        let field = Field { evaluations: Cell::new(0) };
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+
+        brush.stabilization.strength = 1.;
+        let mut generator = DabGenerator::new(RgbSpace::Srgb);
+        let mut output = Vec::new();
+        generator.append_with_field(point(0., 1., 0), &brush, Some(&field), &mut output);
+        generator.append_with_field(point(1., 1., 1_000_000), &brush, Some(&field), &mut output);
+        assert!(field.evaluations.get() < 40, "{} field evaluations", field.evaluations.get());
+        assert_eq!(generator.modeled_position(), Some(Point { x: 1., y: 0. }));
+    }
+
+    #[test]
     fn contact_lift_closes_the_spacing_gap_and_replays_the_same_point() {
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         // Test explicit terminal pressure independently of pressure stabilization.
         brush.stabilization.pressure_fall_micros = 0;
+        brush.stabilization.strength = 0.;
         let stroke = Stroke::new(
             StrokeId(17),
             layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::from_index(1)),
@@ -1341,7 +1444,8 @@ mod tests {
             layer_core::DefaultBrushPreset::HealingBrush,
             layer_core::DefaultBrushPreset::SpotHealingBrush,
         ] {
-            let brush = layer_core::default_brush(preset);
+            let mut brush = layer_core::default_brush(preset);
+            brush.stabilization.strength = 0.;
             let points = vec![point(0., 0.5, 0), point(5., 0.5, 16_000), point(10., 0.5, 32_000), point(10., 0., 40_000)];
             let stroke =
                 Stroke::new(StrokeId(3), layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::from_index(1)), layer_core::StrokeTool::Brush, brush, points).unwrap();
@@ -1355,7 +1459,8 @@ mod tests {
 
     #[test]
     fn swept_input_does_not_expand_a_fast_light_stroke_into_stamps() {
-        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        brush.stabilization.strength = 0.;
         let mut generator = DabGenerator::default();
         let mut dabs = Vec::new();
         for (i, x) in [0., 200., 400., 600., 800.].into_iter().enumerate() {
@@ -1372,6 +1477,7 @@ mod tests {
     fn swept_simplification_retains_corners_pressure_extrema_and_large_brush_spacing() {
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         brush.stabilization.pressure_fall_micros = 0;
+        brush.stabilization.strength = 0.;
         let mut generator = DabGenerator::default();
         let mut dabs = Vec::new();
         generator.append(point(0., 0.1, 0), &brush, &mut dabs);
@@ -1434,8 +1540,8 @@ mod tests {
         generator.finish(&brush, &mut dabs);
         let mut alternate = dabs.clone();
         for d in &mut alternate { d.contact[2] = 19.; d.previous_contact[2] = 37.; }
-        taper_prediction(&mut dabs, Point::default());
-        taper_prediction(&mut alternate, Point::default());
+        taper_prediction(&mut dabs, Point::default(), 1.);
+        taper_prediction(&mut alternate, Point::default(), 1.);
         for (a, b) in dabs.iter().zip(&alternate) {
             assert_eq!(a.radii, b.radii);
             assert_eq!(a.previous, b.previous);
@@ -1606,7 +1712,7 @@ mod tests {
             if i == 20 {
                 assert!(dabs.is_empty(), "a pressed fan may still be a tap");
                 let mut preview = Vec::new();
-                generator.clone().finish(&brush, &mut preview);
+                generator.clone().finish_preview(&brush, &mut preview);
                 assert!(preview.len() > 1, "the preview shows it meanwhile");
             }
         }
@@ -1755,19 +1861,17 @@ mod tests {
     fn stabilization_filters_position_and_pressure_before_spacing() {
         let brush = BrushSnapshot {
             stabilization: layer_core::BrushStabilization {
-                streamline: 1.0,
+                strength: 1.0,
                 pressure_smoothing: 1.0,
                 pressure_fall_micros: 0,
-                stabilization: 0.5,
-                motion_filtering: 0.5,
-                expression: 1.0,
+                ..Default::default()
             },
             ..BrushSnapshot::default()
         };
         let mut generator = DabGenerator::default();
         generator.reset_for_stroke(StrokeId(9), &brush);
-        let first = generator.stabilize(point(0.0, 0.0, 0), &brush);
-        let second = generator.stabilize(point(100.0, 1.0, 10_000), &brush);
+        let first = generator.stabilize(point(0.0, 0.0, 0), &brush, None);
+        let second = generator.stabilize(point(100.0, 1.0, 10_000), &brush, None);
         assert_eq!(first.position.x, 0.0);
         assert!(second.position.x > 0.0 && second.position.x < 40.0);
         assert!(second.pressure > 0.0 && second.pressure < 0.1);
@@ -1779,12 +1883,13 @@ mod tests {
             for scale in [0.02, 1., 16.] {
                 for diameter in [18., 2048.] {
                     let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+                    brush.stabilization.strength = 0.;
                     brush.diameter = diameter;
                     let mut generator = DabGenerator::default();
-                    generator.stabilize(point(0., 0.6, 0), &brush);
+                    generator.stabilize(point(0., 0.6, 0), &brush, None);
                     for time in (interval..=16000).step_by(interval as usize) {
                         let raw = point(time as f32 * scale, 0., time);
-                        let modeled = generator.stabilize(raw, &brush);
+                        let modeled = generator.stabilize(raw, &brush, None);
                         assert_eq!(modeled.position, raw.position);
                         assert_eq!(modeled.elapsed_micros, raw.elapsed_micros);
                         let seconds = time as f32 / 1_000_000.;
@@ -1796,10 +1901,10 @@ mod tests {
                     assert!((end.pressure - 0.24628767).abs() < 0.00001);
                     // A same-position zero-pressure up cannot spend more time
                     // tapering ink that has already reached its endpoint.
-                    let up = generator.stabilize(point(end.position.x, 0., 20000), &brush);
+                    let up = generator.stabilize(point(end.position.x, 0., 20000), &brush, None);
                     assert_eq!(up.pressure, end.pressure);
                     let rebound =
-                        generator.stabilize(point(end.position.x + scale, 0.8, 24000), &brush);
+                        generator.stabilize(point(end.position.x + scale, 0.8, 24000), &brush, None);
                     assert!((rebound.pressure - 0.8).abs() < 0.000001);
                 }
             }
@@ -1808,14 +1913,15 @@ mod tests {
 
     #[test]
     fn steady_light_is_literal_gradual_falls_have_bounded_lag_and_new_contacts_reset() {
-        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        brush.stabilization.strength = 0.;
         let mut generator = DabGenerator::default();
         for light in [true, false] {
             generator.reset_for_stroke(StrokeId(1), &brush);
             for i in 0..=10 {
                 let pressure = if light { 0.04 } else { 0.6 - i as f32 * 0.04 };
                 let raw = point(i as f32, pressure, i * 8000);
-                let modeled = generator.stabilize(raw, &brush);
+                let modeled = generator.stabilize(raw, &brush, None);
                 assert_eq!(modeled.position, raw.position);
                 if light {
                     assert_eq!(modeled, raw);
@@ -1827,7 +1933,7 @@ mod tests {
         }
         generator.reset_for_stroke(StrokeId(2), &brush);
         let light_start = point(0., 0.03, 0);
-        assert_eq!(generator.stabilize(light_start, &brush), light_start);
+        assert_eq!(generator.stabilize(light_start, &brush, None), light_start);
     }
 
     #[test]
@@ -1850,6 +1956,45 @@ mod tests {
         let first = render();
         assert_eq!(first.len(), 11);
         assert_eq!(first, render());
+    }
+
+    #[test]
+    fn curve_completion_does_not_add_spray_time_or_change_release_sensors() {
+        let mut brush = BrushSnapshot {
+            path: layer_core::BrushPath { continuous_rate_hz: 100., ..Default::default() },
+            ..Default::default()
+        };
+
+        brush.stabilization.strength = 1.;
+        let mut generator = DabGenerator::default();
+        let mut dabs = Vec::new();
+        generator.reset_for_stroke(StrokeId(13), &brush);
+        generator.append(point(20., 0.7, 0), &brush, &mut dabs);
+        generator.append(point(20., 0.7, 100_000), &brush, &mut dabs);
+        generator.finish(&brush, &mut dabs);
+        assert_eq!(dabs.len(), 11);
+        assert_eq!(generator.last.unwrap().point.elapsed_micros, 100_000);
+
+        brush.path.continuous_rate_hz = 0.;
+        brush.stabilization.pressure_fall_micros = 50_000;
+        generator.reset_for_stroke(StrokeId(14), &brush);
+        dabs.clear();
+        generator.append(point(0., 0.7, 0), &brush, &mut dabs);
+        generator.append(point(100., 0.7, 4000), &brush, &mut dabs);
+        generator.append(point(100., 0., 5000), &brush, &mut dabs);
+        let previous = generator.stabilized_input.unwrap();
+        let speed = generator.filtered_speed;
+        generator.finish(&brush, &mut dabs);
+        let last = generator.last.unwrap().point;
+        assert_eq!(last.position.x, 100.);
+        assert_eq!(last.elapsed_micros, previous.elapsed_micros);
+        assert_eq!(last.pressure, previous.pressure);
+        assert_eq!(last.tilt, previous.tilt);
+        assert_eq!(last.twist, previous.twist);
+        assert_eq!(generator.filtered_speed, speed);
+        let completed = dabs.clone();
+        generator.finish(&brush, &mut dabs);
+        assert_eq!(dabs, completed);
     }
 
     #[test]

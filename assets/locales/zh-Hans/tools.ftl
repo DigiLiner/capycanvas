@@ -174,3 +174,5 @@ zoom-tool-left-right = 左右
 zoom-tool-up-down = 上下
 zoom-tool-center-on-click-tooltip = 点击放大或缩小时，将点击位置移到视图中央。
 tool-setting-material-hardness = 材料硬度
+tool-setting-group-smoothing = 笔画平滑
+tool-setting-smoothing-strength = 强度

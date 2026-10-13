@@ -1377,7 +1377,7 @@ fn guide_bar_anchors_to_the_selected_guide_under_ruler_and_move() {
 
     invoke(&mut s, CommandId::Brush);
     assert!(s.state.canvas_bar.is_none(), "painting tools leave the guide alone");
-    assert!(actions(&s).is_empty(), "guide actions leave Tool Options under unrelated tools");
+    assert_eq!(actions(&s), [CommandId::SmoothingAdjustSpeed]);
     invoke(&mut s, CommandId::Move);
     assert_eq!(s.state.canvas_bar.as_ref().map(|b| b.context.kind), Some(CanvasBarKind::Guide), "above the selection bar");
     assert_eq!(actions(&s), [CommandId::MoveLeaveCopy, CommandId::TransformSnapping, CommandId::ShowRulers, CommandId::SnapRulers, CommandId::DeleteRuler]);

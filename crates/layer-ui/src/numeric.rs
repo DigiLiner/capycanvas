@@ -147,6 +147,8 @@ const FRACTIONAL_PIXEL_SCRUB_LIMIT: f64 = 1000.;
 pub struct NumericControl {
     pub kind: NumericKind,
     pub mapping: NumericMapping,
+    #[serde(default)]
+    pub log_offset: f64,
     /// Hard bounds for typed input. Sliders use the soft bounds.
     pub min: f64,
     pub max: f64,
@@ -178,6 +180,7 @@ impl NumericControl {
                 NumericKind::Slider
             },
             mapping: NumericMapping::Linear,
+            log_offset: 0.,
             min,
             max,
             soft_min: min,
@@ -272,6 +275,7 @@ impl NumericControl {
             self.step,
             self.resolution,
             self.scale,
+            self.log_offset,
         ]
         .into_iter()
         .all(f64::is_finite)
@@ -284,11 +288,12 @@ impl NumericControl {
             || self.scale <= 0.0
             || self.digits > 9
             || self.unit.len() > 16
+            || self.mapping != NumericMapping::Log && self.log_offset != 0.
         {
             return Err(NumericError::InvalidDefinition);
         }
         match self.mapping {
-            NumericMapping::Log if self.soft_min <= 0.0 => {
+            NumericMapping::Log if self.soft_min + self.log_offset <= 0.0 => {
                 return Err(NumericError::PositiveLogarithmicBounds);
             }
             NumericMapping::Power { exponent }
@@ -298,7 +303,9 @@ impl NumericControl {
             }
             _ => (),
         }
-        if !self.mapped(self.soft_min).is_finite() || !self.mapped(self.soft_max).is_finite() {
+        let mapped_min = self.mapped(self.soft_min);
+        let mapped_max = self.mapped(self.soft_max);
+        if !mapped_min.is_finite() || !mapped_max.is_finite() || mapped_min >= mapped_max {
             return Err(NumericError::InvalidMappedRange);
         }
         Ok(())
@@ -306,14 +313,14 @@ impl NumericControl {
     fn mapped(&self, value: f64) -> f64 {
         match self.mapping {
             NumericMapping::Linear => value,
-            NumericMapping::Log => value.ln(),
+            NumericMapping::Log => (value + self.log_offset).ln(),
             NumericMapping::Power { exponent } => value.signum() * value.abs().powf(exponent),
         }
     }
     fn unmapped(&self, value: f64) -> f64 {
         match self.mapping {
             NumericMapping::Linear => value,
-            NumericMapping::Log => value.exp(),
+            NumericMapping::Log => value.exp() - self.log_offset,
             NumericMapping::Power { exponent } => value.signum() * value.abs().powf(1.0 / exponent),
         }
     }
@@ -718,25 +725,22 @@ mod tests {
     }
     #[test]
     fn nonlinear_mapping_uses_the_same_curve_for_position_and_fill() {
-        for mapping in [
-            NumericMapping::Log,
-            NumericMapping::Power { exponent: 2.0 },
-            NumericMapping::Power { exponent: 0.5 },
+        for (mapping, log_offset, min, expected) in [
+            (NumericMapping::Log, 0., 1., 10.),
+            (NumericMapping::Log, 1., 0., 101f64.sqrt() - 1.),
+            (NumericMapping::Power { exponent: 2.0 }, 0., 1., 5000.5f64.sqrt()),
+            (NumericMapping::Power { exponent: 0.5 }, 0., 1., 30.25),
         ] {
             let spec = NumericControl {
                 mapping,
+                log_offset,
                 kind: NumericKind::Slider,
-                ..NumericControl::number(1.0, 100.0, 1.0, 6)
+                ..NumericControl::number(min, 100.0, 1.0, 6)
             };
             let result = spec
                 .resolve(1.0, NumericOperation::Position { position: 0.5 })
                 .unwrap();
             assert!((result.fill - 0.5).abs() < 1e-6);
-            let expected = match mapping {
-                NumericMapping::Log => 10.0,
-                NumericMapping::Power { exponent: 2.0 } => 5000.5f64.sqrt(),
-                _ => 30.25,
-            };
             assert!((result.value - expected).abs() < 1e-6);
             assert_eq!(
                 spec.resolve(10.0, NumericOperation::Step { steps: 1.0 })
@@ -744,6 +748,20 @@ mod tests {
                     .value,
                 11.0
             );
+        }
+    }
+    #[test]
+    fn logarithmic_offsets_reject_invalid_domains() {
+        for (mapping, log_offset, min) in [
+            (NumericMapping::Log, 0., 0.),
+            (NumericMapping::Log, 1., -1.),
+            (NumericMapping::Log, f64::NAN, 0.),
+            (NumericMapping::Log, f64::INFINITY, 0.),
+            (NumericMapping::Log, 1e308, 0.),
+            (NumericMapping::Linear, 1., 0.),
+        ] {
+            let spec = NumericControl { mapping, log_offset, ..NumericControl::number(min, 100., 1., 0) };
+            assert!(spec.resolve(min, NumericOperation::Format).is_err());
         }
     }
     #[test]

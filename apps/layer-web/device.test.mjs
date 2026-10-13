@@ -40,6 +40,7 @@ import {checkMoveSelection} from "./move-selection-journey.test.mjs";
 import {checkClone,checkHeal} from "./clone-journey.test.mjs";
 import {checkRetouchLayers} from "./retouch-layers-journey.test.mjs";
 import {checkPenRendering} from "./pen-rendering.test.mjs";
+import {checkSmoothing} from "./smoothing.test.mjs";
 import {checkPrediction} from "./prediction.test.mjs";
 // Run against an already forwarded Android Chrome endpoint. No profile reset,
 // browser flags or device settings are changed by this harness.
@@ -119,6 +120,7 @@ try {
       await checkPenRendering({call,evaluate,settle});
       await checkPrediction({call,evaluate,settle});
     }, checkErrors],
+    [process.argv.includes("--smoothing"), () => checkSmoothing({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--drawing-tabs-recovery"), () => checkDrawingTabRecovery({cdp,call,evaluate,settle}), checkErrors],
     [process.argv.includes("--drawing-tabs"), () => checkDrawingTabs({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--hdr-performance"), () => measureHdr({call,evaluate,settle}), checkErrors],

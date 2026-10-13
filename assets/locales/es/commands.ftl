@@ -641,3 +641,4 @@ menu-paste-special = Pegado especial
 menu-rotate-and-flip = Girar y voltear
 menu-color-management = Gestión del color
 command-pen-pressure = Presión del lápiz…
+command-smoothing-adjust-speed = Ajustar por velocidad

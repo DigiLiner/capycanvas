@@ -174,3 +174,5 @@ zoom-tool-left-right = Влево/вправо
 zoom-tool-up-down = Вверх/вниз
 zoom-tool-center-on-click-tooltip = При щелчке для увеличения или уменьшения перемещает точку щелчка в центр области просмотра.
 tool-setting-material-hardness = Твёрдость материала
+tool-setting-group-smoothing = Сглаживание
+tool-setting-smoothing-strength = Сила

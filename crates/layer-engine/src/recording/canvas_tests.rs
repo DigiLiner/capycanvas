@@ -4,6 +4,9 @@
 #[cfg(feature = "prediction-bench")]
 fn recorded_production_queries_replay_exactly() {
     let (mut input, mut engine) = engine("recording", 512, 512);
+    let mut brush = engine.configured_brush().clone();
+    brush.stabilization.strength = 0.;
+    engine.set_brush(brush).unwrap();
     engine
         .set_instant_feedback(InstantFeedbackConfig {
             ..Default::default()

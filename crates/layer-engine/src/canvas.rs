@@ -5,7 +5,7 @@
 //! queue halves may also run sequentially on one event loop.
 
 use crate::brush::{
-    DabGenerator, dabs_cover_point, damage_for_dabs, lock_dab_tail, taper_prediction,
+    DabGenerator, CurvePreview, dabs_cover_point, damage_for_dabs, lock_dab_tail, pen_up_settlement_micros, taper_prediction,
 };
 use crate::feedback::{
     FeedbackConfigError, InstantFeedbackConfig, MAX_FINALIZATION_LAG_MICROS, PredictionState,
@@ -112,6 +112,8 @@ struct ActiveStroke {
     /// The Clone source as this stroke found it, before anchoring it.
     clone_start: Option<CloneSource>,
     barrel_twist: bool,
+    curve_preview: CurvePreview,
+    preview_taper: bool,
 }
 
 #[derive(Clone)]
@@ -145,6 +147,8 @@ pub struct CanvasEngine<B: CanvasRenderer> {
     dab_generator: DabGenerator,
     finalized_real_points: usize,
     active_stroke: Option<ActiveStroke>,
+    pending_up: Option<(PenEvent, u32)>,
+    frame_clock_ns: Option<u64>,
     completed_stroke: Option<Stroke>,
     completed_at: Option<web_time::Instant>,
     completed_before: Option<layer_core::raster::RasterRevision>,
@@ -226,6 +230,8 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             dab_generator,
             finalized_real_points: 0,
             active_stroke: None,
+            pending_up: None,
+            frame_clock_ns: None,
             completed_stroke: None,
             completed_at: None,
             completed_before: None,
@@ -277,7 +283,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     pub fn capture_session(&self, session_generation: u64) -> Result<layer_core::package::session::EditorCapture, DocumentError> {
         let Self {editor,settings:_,used_colors:_,recording:_,backend:_,input:_,queued_contacts:_,contact_settings:_,
             view:_,transforms:_,clone_stroke:_,retouch_points:_,prepared_retouch:_,builder:_,dab_generator:_,
-            finalized_real_points:_,active_stroke:_,completed_stroke:_,completed_at:_,completed_before:_,
+            finalized_real_points:_,active_stroke:_,pending_up:_,frame_clock_ns:_,completed_stroke:_,completed_at:_,completed_before:_,
             completed_clone_start:_,restore_rasters:_,pending_frame:_,rebuild_completed:_,estimates:_,
             pending_smudge_dabs:_,dabs:_,batches:_,transform_preview:_,transform_selection:_,selection_display:_,
             scene_preview:_,rebuild_all:_,composite_all:_,raster_dirty:_,animation_origin_ns:_,animation_time:_,
@@ -384,7 +390,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     pub fn raster_backing_pending(&self) -> bool {
-        self.pending_frame.is_some() || self.backend.has_pending_submission()
+        self.pending_up.is_some() || self.pending_frame.is_some() || self.backend.has_pending_submission()
             || self.batches.iter().any(|batch| matches!(batch.kind, DabBatchKind::RasterOperation(_)))
     }
 
@@ -869,7 +875,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     /// Readbacks must follow the frame that applies document edits, not capture
     /// old GPU pixels under the new document revision.
     pub fn has_pending_document_edits(&self) -> bool {
-        self.pending_frame.is_some()
+        self.pending_up.is_some() || self.pending_frame.is_some()
             || self.backend.has_pending_submission()
             || self.rebuild_all
             || self.rebuild_completed
@@ -1286,7 +1292,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn flush_pending_edits(&mut self) -> Result<(), DocumentError> {
-        if self.backend.has_pending_submission() {
+        if self.pending_up.is_some() || self.backend.has_pending_submission() {
             return Err(DocumentError::InvalidLayerOperation("Raster backing is busy; retry the edit"));
         }
         if self.pending_frame.is_some()
@@ -1313,7 +1319,8 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     /// Drain platform input, encode the newest incremental work, and return without
-    /// waiting for GPU completion or presentation.
+    /// waiting for GPU completion or presentation. Untimed calls publish pending
+    /// pen-up boundaries; timed calls animate their settlement.
     pub fn render_frame(&mut self) -> Result<(), EngineError<B::Error>> {
         self.render_frame_inner(None, None)
     }
@@ -1340,6 +1347,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         timestamp_ns: Option<u64>,
         presentation_timestamp_ns: Option<u64>,
     ) -> Result<(), EngineError<B::Error>> {
+        self.frame_clock_ns = timestamp_ns;
         let view = self.view();
         self.backend.poll_pending(view).map_err(EngineError::Backend)?;
         if !self.backend.can_submit() {
@@ -1472,6 +1480,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn append_continuous(&mut self, timestamp_ns: u64) {
+        if self.pending_up.is_some() { return; }
         let Some(active) = self.active_stroke.as_ref() else {
             return;
         };
@@ -1518,6 +1527,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn advance_finalized_prefix(&mut self) {
+        if self.pending_up.is_some() { return; }
         let Some(active) = self.active_stroke.as_ref() else {
             return;
         };
@@ -1580,9 +1590,10 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         while self.input.pop().is_some() {}
         self.queued_contacts.clear();
         self.contact_settings = None;
-        if self.has_active_stroke() {
+        if self.active_stroke.is_some() {
             self.cancel_active();
         }
+        self.pending_up = None;
         self.completed_stroke = None;
         self.completed_before = None;
         self.completed_at = None;
@@ -1628,6 +1639,22 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn process_input(&mut self) -> Result<(), EngineError<B::Error>> {
+        if let Some((up, _)) = self.pending_up {
+            for _ in 0..INPUT_BATCH {
+                if !self.input.peek().is_some_and(|event| event.phase == PenPhase::Hover || event.flags.contains(SampleFlags::CORRECTION)) { break; }
+                if self.input.peek().is_some_and(|event| event.flags.contains(SampleFlags::CORRECTION)) && !self.backend.can_capture_raster() { break; }
+                let event = self.input.pop().unwrap();
+                self.process_captured_event(event)?;
+            }
+            let ready = self.pending_up.unwrap().1;
+            let now = self.builder.elapsed_micros_at(self.frame_clock_ns.unwrap_or(up.timestamp_ns)).unwrap_or(ready);
+            let duration = pen_up_settlement_micros(&self.active_stroke.as_ref().unwrap().brush.stabilization);
+            let interrupted = self.input.peek().is_some_and(|event| event.phase != PenPhase::Hover && !event.flags.contains(SampleFlags::CORRECTION));
+            if (self.frame_clock_ns.is_none() || now.saturating_sub(ready) >= duration || interrupted) && self.backend.can_capture_raster() {
+                self.process_captured_event(up)?;
+            }
+            return Ok(());
+        }
         for _ in 0..INPUT_BATCH {
             if self.input.peek().is_some_and(|e| {
                 e.phase == PenPhase::Up || e.flags.contains(SampleFlags::CORRECTION)
@@ -1657,12 +1684,19 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn process_event(&mut self, event: PenEvent) -> Result<(), EngineError<B::Error>> {
-        self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+        if event.phase != PenPhase::Up || self.pending_up.is_none() || event.flags.contains(SampleFlags::CORRECTION) {
+            self.metrics.input_events = self.metrics.input_events.saturating_add(1);
+        }
         if matches!(event.phase, PenPhase::Down | PenPhase::Move) && !event.flags.contains(SampleFlags::PREDICTED) {
             self.metrics.last_consumed_paint_ns = self.metrics.last_consumed_paint_ns.max(event.timestamp_ns);
         }
         if event.flags.contains(SampleFlags::CORRECTION) {
-            return self.correct_input(event);
+            let changed = self.correct_input(event)?;
+            if changed && let Some((_, ready)) = &mut self.pending_up {
+                let now = self.builder.elapsed_micros_at(self.frame_clock_ns.unwrap_or(event.timestamp_ns)).unwrap();
+                *ready = now;
+            }
+            return Ok(());
         }
         let mut transform = self
             .transforms
@@ -1723,6 +1757,9 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 }
                 let id = self.editor.allocate_stroke_id();
                 let mut brush = self.settings.brush.clone();
+                if brush.stabilization.strength > 0. {
+                    brush.stabilization.input_scale = self.view.document_to_surface[0].hypot(self.view.document_to_surface[1]).max(f32::EPSILON);
+                }
                 if !matches!(
                     event.tool,
                     ToolKind::Pen | ToolKind::Brush | ToolKind::Pencil | ToolKind::Airbrush
@@ -1744,6 +1781,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     brush.wet_mix = Default::default();
                     brush.deform = Default::default();
                     feedback.enabled = false;
+                    brush.stabilization.strength = 0.;
                     if inverted {
                         tool = if tool == StrokeTool::Brush {
                             StrokeTool::Eraser
@@ -1784,6 +1822,8 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     replay_after_contact: false,
                     clone_start: None,
                     barrel_twist: event.flags.contains(SampleFlags::BARREL_TWIST),
+                    curve_preview: CurvePreview::default(),
+                    preview_taper: false,
                 };
                 self.active_stroke = Some(active);
                 self.recording.begin(
@@ -1819,8 +1859,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     .active_stroke
                     .as_ref()
                     .expect("set above")
-                    .feedback
-                    .enabled
+                    .feedback.enabled
                 {
                     self.append_real_dab(point, self.builder.real_points().len() - 1, false);
                 }
@@ -1842,8 +1881,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                         .active_stroke
                         .as_ref()
                         .expect("checked above")
-                        .feedback
-                        .enabled
+                        .feedback.enabled
                 {
                     let point = *self
                         .builder
@@ -1857,16 +1895,23 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 if self.active_stroke.is_none() {
                     return Ok(());
                 }
-                self.builder.push(event, transform, self.settings.pressure.clone());
-                self.record_builder_sample(event);
-                self.track_estimate(event, transform);
+                if self.pending_up.take().is_none() {
+                    self.builder.push(event, transform, self.settings.pressure.clone());
+                    self.record_builder_sample(event);
+                    self.track_estimate(event, transform);
+                    let active = self.active_stroke.as_ref().unwrap();
+                    if self.frame_clock_ns.is_some() && pen_up_settlement_micros(&active.brush.stabilization) > 0 && active.curve_preview.is_present() {
+                        let now = self.builder.elapsed_micros_at(self.frame_clock_ns.unwrap_or(event.timestamp_ns)).unwrap();
+                        self.pending_up = Some((event, now));
+                        return Ok(());
+                    }
+                }
                 if !event.flags.contains(SampleFlags::PREDICTED) {
                     if self
                         .active_stroke
                         .as_ref()
                         .expect("checked above")
-                        .feedback
-                        .enabled
+                        .feedback.enabled
                     {
                         self.finalize_active_tail();
                     } else {
@@ -1948,6 +1993,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         if active.style.execution == BrushExecution::Smudge {
             self.dab_generator
                 .append(point, &active.brush, &mut self.pending_smudge_dabs);
+            if terminal { self.dab_generator.finish(&active.brush, &mut self.pending_smudge_dabs); }
             self.flush_smudge_chunks(false);
             return;
         }
@@ -2094,7 +2140,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             // limiting needs no retained input window or endpoint prediction.
             self.dab_generator
                 .clone()
-                .finish(&active.brush, &mut self.dabs);
+                .finish_preview(&active.brush, &mut self.dabs);
             self.push_active_preview(start);
             return;
         }
@@ -2132,57 +2178,86 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             now_elapsed,
             requested_elapsed,
         );
-        let estimate = active.prediction.estimate_for(
-            self.builder.real_points(),
-            self.builder.predicted_points(),
-            requested_elapsed,
-            now_elapsed,
-            self.view.document_to_surface,
-            active.feedback,
-        );
-        let Some(estimate) = estimate else {
-            self.push_active_preview(start);
-            return;
-        };
+        let ending = self.pending_up.map(|(_, ready)| ready);
+        let estimate = if ending.is_none() {
+            active.prediction.estimate_for(self.builder.real_points(), self.builder.predicted_points(),
+                requested_elapsed, now_elapsed, self.view.document_to_surface, active.feedback)
+        } else { None };
+        let predicted: Vec<_> = if ending.is_none() {
+            let points = estimate.filter(|_| active.feedback.enabled).map_or_else(Vec::new, |estimate| {
+                active.prediction.preview_points(latest, self.builder.predicted_points(), estimate, self.view.document_to_surface).collect()
+            });
+            active.preview_taper = estimate.is_some_and(|estimate| estimate.source == TipSource::Engine);
+            points
+        } else { Vec::new() };
+        let has_field = if let Some(model) = self.dab_generator.preview_model(&active.brush, self.builder.real_points()) {
+            if let Some(ready) = ending {
+                active.curve_preview.land(now_elapsed, ready, model);
+            } else {
+                active.curve_preview.observe(now_elapsed, model, &active.brush.stabilization, &predicted);
+            }
+            active.curve_preview.is_present()
+        } else { false };
+        let field = has_field.then_some(&active.curve_preview as &dyn crate::brush::PositionField);
         let prediction_start = self.dabs.len();
         let mut generator = self.dab_generator.clone();
         for point in self.builder.real_points()[self.finalized_real_points..]
-            .iter()
-            .copied()
+            .iter().copied()
         {
-            generator.append(point, &active.brush, &mut self.dabs);
+            generator.append_with_field(point, &active.brush, field, &mut self.dabs);
         }
+        if has_field {
+            let extra_start = self.dabs.len();
+            let taper_start = generator.modeled_position().unwrap_or(latest.position);
+            if let Some(point) = active.curve_preview.endpoint(latest) {
+                generator.append_continuation(point, &active.brush, &active.curve_preview, &mut self.dabs);
+            }
+            generator.finish_preview(&active.brush, &mut self.dabs);
+            if active.preview_taper {
+                taper_prediction(&mut self.dabs[extra_start..], taper_start,
+                    active.curve_preview.taper_amount());
+            }
+            if ending.is_none() && let Some(estimate) = estimate {
+                match estimate.source {
+                    TipSource::Platform => self.metrics.platform_prediction_frames = self.metrics.platform_prediction_frames.saturating_add(1),
+                    TipSource::Engine => self.metrics.engine_prediction_frames = self.metrics.engine_prediction_frames.saturating_add(1),
+                    TipSource::Real => {},
+                }
+            }
+            self.push_active_preview(start);
+            return;
+        }
+        if !active.feedback.enabled || estimate.is_none() {
+            generator.finish_preview(&active.brush, &mut self.dabs);
+            self.push_active_preview(start);
+            return;
+        }
+        let estimate = estimate.unwrap();
         let predicted_dab_start = self.dabs.len();
         let taper_start = generator.modeled_position().unwrap_or(latest.position);
         let taper = estimate.source == TipSource::Engine;
-        for point in active.prediction.preview_points(
-            latest,
-            self.builder.predicted_points(),
-            estimate,
-            self.view.document_to_surface,
-        ) {
-            generator.append(point, &active.brush, &mut self.dabs);
+        for point in predicted {
+            generator.append_with_field(point, &active.brush, field, &mut self.dabs);
         }
         // Flush the actual swept endpoint just as finalization does. Coverage
         // by an earlier, wider contact is not the final pressure/pose.
-        generator.finish(&active.brush, &mut self.dabs);
+        generator.finish_preview(&active.brush, &mut self.dabs);
 
         let modeled_endpoint = generator.modeled_position().unwrap_or(latest.position);
         let endpoint = estimate.point.position;
-        lock_dab_tail(
-            &mut self.dabs[prediction_start..],
-            modeled_endpoint,
-            endpoint,
-        );
-        if (taper && self.dabs.last().is_none_or(|dab| dab.center != endpoint))
-            || !dabs_cover_point(&self.dabs[start..], endpoint)
-        {
-            generator.append_terminal_copy(endpoint, &mut self.dabs);
+        if active.brush.stabilization.strength == 0. {
+            lock_dab_tail(&mut self.dabs[prediction_start..], modeled_endpoint, endpoint);
+            if (taper && self.dabs.last().is_none_or(|dab| dab.center != endpoint))
+                || !dabs_cover_point(&self.dabs[start..], endpoint)
+            {
+                generator.append_terminal_copy(endpoint, &mut self.dabs);
+            }
         }
         if taper {
             taper_prediction(
                 &mut self.dabs[predicted_dab_start..],
                 taper_start,
+                1.,
             );
         }
         if self.dabs.len() > start {
@@ -2372,6 +2447,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 
     fn cancel_active(&mut self) {
+        self.pending_up = None;
         self.recording.end(true);
         self.dabs.clear();
         self.batches.clear();
@@ -3268,6 +3344,7 @@ mod tests {
             assert_eq!(canvas.document(), &document);
             assert_eq!(canvas.checkpoint(), checkpoint);
             canvas.render_frame_at(96_000_000).unwrap();
+            canvas.render_frame_at(128_000_000).unwrap();
             assert!(canvas.backend().saw_reset);
             assert!(!canvas.has_active_stroke() && !canvas.has_pending_input());
             assert_eq!(canvas.metrics().committed_strokes, 2);
@@ -4188,6 +4265,7 @@ mod tests {
                     let (mut input, mut engine) = engine("rapid lift", 1024, 512);
                     let mut brush = default_brush(DefaultBrushPreset::GPen);
                     brush.diameter = samples[0][6];
+                    brush.stabilization.strength = 0.;
                     engine.set_brush(brush).unwrap();
                     engine
                         .set_instant_feedback(InstantFeedbackConfig {
@@ -4280,8 +4358,10 @@ mod tests {
             ToolKind::Eraser,
         ] {
             let (mut input, mut engine) = engine("release tools", 128, 128);
+            let mut brush = default_brush(DefaultBrushPreset::GPen);
+            brush.stabilization.strength = 0.;
             engine
-                .set_brush(default_brush(DefaultBrushPreset::GPen))
+                .set_brush(brush)
                 .unwrap();
             engine
                 .set_instant_feedback(InstantFeedbackConfig {
@@ -4405,6 +4485,7 @@ mod tests {
                             input.push(e).unwrap();
                             engine.render_frame_at(3_000_000).unwrap();
                         }
+                        engine.render_frame().unwrap();
                         let stroke = engine.completed_stroke.as_ref().unwrap();
                         let mut expected = Vec::new();
                         DabGenerator::generate(stroke, space, &mut expected);
@@ -5378,6 +5459,7 @@ mod tests {
 
         let next_brush = BrushSnapshot {
             diameter: 40.0,
+            stabilization: layer_core::BrushStabilization { strength: 1., adjust_by_speed: true, ..Default::default() },
             ..BrushSnapshot::default()
         };
         engine.set_brush(next_brush).unwrap();
@@ -5386,6 +5468,312 @@ mod tests {
 
         let stroke = engine.completed_stroke.as_ref().unwrap();
         assert_eq!(stroke.brush.diameter, BrushSnapshot::default().diameter);
+        assert_eq!(stroke.brush.stabilization, BrushSnapshot::default().stabilization);
+    }
+
+    #[test]
+    fn smoothing_committed_ink_matches_replay_across_delivery_cadences() {
+
+            for feedback in [false, true] {
+                let mut reference = None;
+                for cadence in [1, 7, 256] {
+                    let (mut input, mut engine) = engine("smoothing replay", 1024, 512);
+                    let mut brush = default_brush(DefaultBrushPreset::GPen);
+                    brush.diameter = 8.;
+                    brush.stabilization.strength = 0.5;
+
+                    brush.stabilization.adjust_by_speed = true;
+                    engine.set_brush(brush).unwrap();
+                    engine.set_instant_feedback(InstantFeedbackConfig { enabled: feedback, use_platform_prediction: false, ..Default::default() }).unwrap();
+                    let mut prefix = Vec::new();
+                    for i in 0..180 {
+                        let mut sample = event(i + 1, if i == 0 { PenPhase::Down } else if i == 179 { PenPhase::Up } else { PenPhase::Move }, 100. + i as f32 * 2.);
+                        sample.timestamp_ns = 1_000_000_000 + i * 4_000_000;
+                        sample.surface_position.y = 100. + (i as f32 * 0.04).sin() * 30.;
+                        input.push(sample).unwrap();
+                        if i % cadence == 0 || i == 179 {
+                            engine.render_frame_for(sample.timestamp_ns, sample.timestamp_ns + 8_000_000).unwrap();
+                            assert!(engine.backend.persistent.starts_with(&prefix), "Curve fit: committed prefix is immutable");
+                            prefix = engine.backend.persistent.clone();
+                        }
+                    }
+                    if engine.pending_up.is_some() {
+                        let now = 1_000_000_000 + 179 * 4_000_000 + u64::from(pen_up_settlement_micros(&engine.settings.brush.stabilization)) * 1000;
+                        engine.render_frame_for(now, now + 8_000_000).unwrap();
+                    }
+                    let stroke = engine.completed_stroke.as_ref().unwrap();
+                    assert_eq!(stroke.points.len(), 180);
+                    assert_eq!(stroke.points.last().unwrap().position.x, 458.);
+                    let mut restored = stroke.clone();
+                    restored.brush = serde_json::from_slice(&serde_json::to_vec(&stroke.brush).unwrap()).unwrap();
+                    assert_eq!(restored, *stroke);
+                    let mut replay = Vec::new();
+                    DabGenerator::generate(&restored, engine.document().composition().color.space, &mut replay);
+                    assert_eq!(engine.backend.persistent, replay, "Curve fit, feedback={feedback}, cadence={cadence}");
+                    assert!(engine.backend.preview.is_empty());
+                    if let Some(reference) = &reference { assert_eq!(reference, &replay); } else { reference = Some(replay); }
+                }
+            }
+
+    }
+
+    #[test]
+    fn recorded_curve_preview_has_no_hook_and_pen_up_matches_replay() {
+        use crate::brush::PositionField;
+        use crate::recording::{Event, Record};
+        let records = crate::recording::read(include_bytes!("../tests/data/wacom-pro-27.capystrokes").as_slice()).unwrap();
+        let begin = records.iter().position(|r| matches!(r, Record::Begin { id: 49, .. })).unwrap();
+        let first = records[..begin].iter().rposition(|r| matches!(r, Record::Raw { event, .. } if event.phase == PenPhase::Down)).unwrap();
+        let (mut input, mut engine) = engine("recorded curve tail", 8192, 8192);
+        let mut brush = default_brush(DefaultBrushPreset::GPen);
+        brush.diameter = 8.;
+        brush.stabilization.strength = 1.;
+        brush.stabilization.adjust_by_speed = false;
+        engine.set_brush(brush).unwrap();
+        let mut start = 0;
+        let mut last_time = 0;
+        let mut policy = crate::recording::Policy { config: InstantFeedbackConfig::default(), transform: [1.,0.,0.,1.,0.,0.] };
+        let mut checked = false;
+        for record in &records[first..] {
+            match record {
+                Record::Raw { event, transform, pressure, .. } => {
+                    engine.set_view(ViewState { width_px: 8192, height_px: 8192, document_to_surface: policy.transform }, *transform);
+                    engine.set_pressure_curve(pressure.clone().into());
+                    last_time = event.timestamp_ns;
+                    input.push(*event).unwrap();
+                }
+                Record::Begin { policy: recorded, .. } | Record::Predictor(Event::Policy(recorded)) => {
+                    if let Record::Begin { timestamp_ns, .. } = record { start = *timestamp_ns; }
+                    policy = *recorded;
+                    policy.config.enabled = true;
+                    policy.config.use_platform_prediction = false;
+                    policy.config.prediction_horizon_micros = 8000;
+                    engine.set_instant_feedback(policy.config).unwrap();
+                }
+                Record::Predictor(Event::Query(query, now, _)) => {
+                    let clock = start + u64::from(*now) * 1000;
+                    engine.render_frame_for(clock, clock + 8_000_000).unwrap();
+                    if *query == 427 {
+                        let latest = *engine.builder.real_points().last().unwrap();
+                        let preview = &engine.active_stroke.as_ref().unwrap().curve_preview;
+                        let end = preview.endpoint(latest).unwrap().elapsed_micros;
+                        let y = |time| { let p = preview.position(time); policy.transform[1] * p.x + policy.transform[3] * p.y };
+                        let mut previous = y(f64::from(latest.elapsed_micros) * 1e-6);
+                        let mut reversal = 0.;
+                        for i in 1..=256 {
+                            let time = (f64::from(latest.elapsed_micros) + f64::from(end - latest.elapsed_micros) * i as f64 / 256.) * 1e-6;
+                            let next = y(time);
+                            reversal += (previous - next).max(0.);
+                            previous = next;
+                        }
+                        assert!(reversal < 0.2, "recorded preview hook: {reversal} physical pixels");
+                        checked = true;
+                    }
+                }
+                Record::End { cancelled, interrupted } => {
+                    assert!(!cancelled && !interrupted);
+                    engine.render_frame_for(last_time, last_time + 8_000_000).unwrap();
+                    let clock = last_time + 100_000_000;
+                    engine.render_frame_for(clock, clock + 8_000_000).unwrap();
+                    break;
+                }
+                _ => (),
+            }
+        }
+        assert!(checked);
+        assert!(engine.pending_up.is_none());
+        let stroke = engine.completed_stroke.as_ref().unwrap();
+        let endpoint = stroke.points.last().unwrap().position;
+        let rendered = engine.backend.persistent.last().unwrap().center;
+        assert!((rendered.x - endpoint.x).hypot(rendered.y - endpoint.y) < 0.001);
+        let mut replay = Vec::new();
+        DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
+        assert_eq!(engine.backend.persistent, replay);
+        assert!(engine.backend.preview.is_empty());
+    }
+
+    #[test]
+    fn smoothing_strength_reduces_preview_reach_on_the_fitted_curve() {
+        use crate::brush::PositionField;
+        let mut offsets = Vec::new();
+        for strength in [0.06, 0.5, 1.] {
+            let (mut input, mut engine) = engine("initial preview tracking", 2048, 512);
+            let mut brush = default_brush(DefaultBrushPreset::GPen);
+            brush.diameter = 8.;
+
+            brush.stabilization.strength = strength;
+            engine.set_brush(brush).unwrap();
+            engine.set_instant_feedback(InstantFeedbackConfig { use_platform_prediction: false, prediction_horizon_micros: 8000, ..Default::default() }).unwrap();
+            let mut tips = Vec::new();
+            for i in 0..100 {
+                let mut sample = event(i + 1, if i == 0 { PenPhase::Down } else { PenPhase::Move }, 100. + i as f32 * 2.);
+                sample.timestamp_ns = 1_000_000_000 + i * 4_000_000;
+                input.push(sample).unwrap();
+                engine.render_frame_for(sample.timestamp_ns, sample.timestamp_ns + 8_000_000).unwrap();
+                if i > 30 {
+                    let active = engine.active_stroke.as_ref().unwrap();
+                    let source = active.curve_preview.endpoint(*engine.builder.real_points().last().unwrap()).unwrap().elapsed_micros;
+                    let tip = active.curve_preview.position(f64::from(source) * 1e-6);
+                    assert!(tip.x <= sample.surface_position.x + 4.01, "strength={strength}, tip={tip:?}, pen={:?}", sample.surface_position);
+                    tips.push(tip);
+                }
+            }
+            offsets.push(tips.last().unwrap().x - 298.);
+        }
+        assert!(offsets[0] > 0. && offsets[1] < 0. && offsets[2] < offsets[1], "{offsets:?}");
+    }
+
+    #[test]
+    fn disabling_prediction_publishes_curve_fit_without_a_smoothing_wait() {
+
+            for strength in [0.06, 0.3, 1.] {
+                let (mut input, mut engine) = engine("no prediction wait", 1024, 512);
+                let mut brush = default_brush(DefaultBrushPreset::GPen);
+
+                brush.stabilization.strength = strength;
+                engine.set_brush(brush).unwrap();
+                engine.set_instant_feedback(InstantFeedbackConfig { enabled: false, ..Default::default() }).unwrap();
+                for i in 0..50 {
+                    let mut sample = event(i + 1, if i == 0 { PenPhase::Down } else if i == 49 { PenPhase::Up } else { PenPhase::Move }, 100. + i as f32 * 4.);
+                    sample.timestamp_ns = 1_000_000_000 + i * 4_000_000;
+                    input.push(sample).unwrap();
+                    engine.render_frame_for(sample.timestamp_ns, sample.timestamp_ns + 8_000_000).unwrap();
+                    assert!(engine.pending_up.is_none());
+                    if let Some(active) = engine.active_stroke.as_ref() {
+                        assert!(!active.feedback.enabled);
+                        assert!(!active.curve_preview.is_present());
+                        assert!(engine.dab_generator.modeled_position().is_some());
+                    }
+                }
+                assert_eq!(engine.metrics.committed_strokes, 1);
+                assert!(engine.backend.preview.is_empty());
+                let mut replay = Vec::new();
+                DabGenerator::generate(engine.completed_stroke.as_ref().unwrap(), engine.document().composition().color.space, &mut replay);
+                assert_eq!(engine.backend.persistent, replay);
+            }
+
+    }
+
+    fn settling_stroke() -> (InputProducer<PenEvent>, CanvasEngine<RecordingRenderer>, PenEvent) {
+        let (mut input, mut engine) = engine("settling", 2048, 512);
+        let mut brush = default_brush(DefaultBrushPreset::GPen);
+        brush.diameter = 8.;
+        brush.stabilization.strength = 1.;
+
+        engine.set_brush(brush).unwrap();
+        engine.set_instant_feedback(InstantFeedbackConfig { use_platform_prediction: false, ..Default::default() }).unwrap();
+        let mut last = event(1, PenPhase::Down, 100.);
+        for index in 0..200 {
+            last = PenEvent { sequence: index + 1, timestamp_ns: 1_000_000_000 + index * 4_000_000,
+                phase: if index == 0 { PenPhase::Down } else { PenPhase::Move },
+                surface_position: Point { x: 100. + index as f32 * 4., y: 100. }, ..last };
+            input.push(last).unwrap();
+            engine.render_frame_for(last.timestamp_ns, last.timestamp_ns + 8_000_000).unwrap();
+        }
+        let committed = engine.backend.persistent.clone();
+        last.phase = PenPhase::Up;
+        last.surface_position.y += 30.;
+        last.flags = SampleFlags::ESTIMATED;
+        last.sequence += 1;
+        last.timestamp_ns += 1_000_000;
+        input.push(last).unwrap();
+        engine.render_frame_for(last.timestamp_ns, last.timestamp_ns + 8_000_000).unwrap();
+        assert!(engine.pending_up.is_some());
+        assert_eq!(engine.backend.persistent, committed);
+        (input, engine, last)
+    }
+
+    #[test]
+    fn pen_up_lands_on_final_ink_before_publishing_its_raster_boundary() {
+        let (_, mut engine, up) = settling_stroke();
+        let final_point = engine.builder.real_points().last().unwrap().position;
+        let mut distances = Vec::new();
+        for milliseconds in [0, 8, 16, 24, 31] {
+            engine.render_frame_for(up.timestamp_ns + milliseconds * 1_000_000, up.timestamp_ns + milliseconds * 1_000_000).unwrap();
+            let latest = *engine.builder.real_points().last().unwrap();
+            let point = engine.active_stroke.as_ref().unwrap().curve_preview.endpoint(latest).map_or(final_point, |point| point.position);
+            distances.push((point.x - final_point.x).hypot(point.y - final_point.y));
+            assert_eq!(engine.metrics.committed_strokes, 0);
+            assert!(!engine.backend.preview.is_empty());
+            assert_eq!(engine.builder.real_points().len(), 201);
+        }
+        assert!(distances[0] > 0.001);
+        assert!(distances[3] < distances[2] && distances[4] < distances[3], "late landing: {distances:?}");
+        assert!(distances[3] - distances[4] < distances[2] - distances[3], "late corrections shrink: {distances:?}");
+        assert!(distances[4] < distances[0] * 0.02);
+        let landing_radii = engine.backend.preview.last().unwrap().radii;
+        engine.render_frame_for(up.timestamp_ns + 32_000_000, up.timestamp_ns + 32_000_000).unwrap();
+        assert!(!engine.has_active_stroke());
+        assert!(engine.backend.preview.is_empty());
+        assert_eq!(engine.metrics.committed_strokes, 1);
+        let final_radii = engine.backend.persistent.last().unwrap().radii;
+        for axis in 0..2 { assert!((landing_radii[axis] / final_radii[axis] - 1.).abs() < 0.001, "publication width seam: {landing_radii:?} -> {final_radii:?}"); }
+        let stroke = engine.completed_stroke.as_ref().unwrap();
+        assert_eq!(stroke.points.len(), 201);
+        let mut replay = Vec::new();
+        DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
+        assert_eq!(engine.backend.persistent, replay);
+    }
+
+    #[test]
+    fn following_contact_does_not_wait_for_the_pen_up_settling_deadline() {
+        let (mut input, mut engine, up) = settling_stroke();
+        let mut down = up;
+        down.phase = PenPhase::Down;
+        down.sequence += 1;
+        down.timestamp_ns += 2_000_000;
+        down.surface_position.y += 20.;
+        input.push(down).unwrap();
+        engine.render_frame_for(down.timestamp_ns, down.timestamp_ns + 8_000_000).unwrap();
+        assert_eq!(engine.metrics.committed_strokes, 1);
+        assert!(engine.has_pending_input());
+        assert!(engine.pending_up.is_none());
+        engine.render_frame_for(down.timestamp_ns, down.timestamp_ns + 8_000_000).unwrap();
+        assert!(engine.has_active_stroke());
+        assert_eq!(engine.builder.real_points().len(), 1);
+        assert_eq!(engine.builder.real_points()[0].position, down.surface_position);
+        assert!(!engine.backend.preview.is_empty());
+        assert!(engine.metrics.input_events == 202);
+    }
+
+    #[test]
+    fn untimed_frames_publish_a_settling_stroke_when_capture_capacity_returns() {
+        let (_, mut engine, _) = settling_stroke();
+        engine.backend_mut().capture_blocked = true;
+        engine.render_frame().unwrap();
+        assert!(engine.pending_up.is_some());
+        assert_eq!(engine.metrics.committed_strokes, 0);
+        engine.backend_mut().capture_blocked = false;
+        engine.render_frame().unwrap();
+        assert!(engine.pending_up.is_none());
+        assert_eq!(engine.metrics.committed_strokes, 1);
+        assert_eq!(engine.completed_stroke.as_ref().unwrap().points.len(), 201);
+    }
+
+    #[test]
+    fn only_changed_sensor_corrections_restart_pen_up_settlement() {
+        for correction_kind in 0..3 {
+            let (mut input, mut engine, up) = settling_stroke();
+            let original_ready = engine.pending_up.unwrap().1;
+            let mut correction = up;
+            correction.flags = SampleFlags::CORRECTION;
+            if correction_kind == 0 { correction.sequence += 100; }
+            if correction_kind == 2 { correction.surface_position.y += 30.; }
+            input.push(correction).unwrap();
+            engine.render_frame_at(up.timestamp_ns + 20_000_000).unwrap();
+            assert_eq!(engine.builder.real_points().len(), 201);
+            assert_eq!(engine.pending_up.unwrap().1, original_ready + if correction_kind == 2 { 20_000 } else { 0 });
+            engine.render_frame_at(up.timestamp_ns + 32_000_000).unwrap();
+            if correction_kind == 2 {
+                assert_eq!(engine.metrics.committed_strokes, 0);
+                engine.render_frame_at(up.timestamp_ns + 52_000_000).unwrap();
+            }
+            assert_eq!(engine.metrics.committed_strokes, 1);
+            let stroke = engine.completed_stroke.as_ref().unwrap();
+            let mut replay = Vec::new();
+            DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
+            assert_eq!(engine.backend.persistent, replay);
+        }
     }
 
     #[test]
@@ -5403,6 +5791,7 @@ mod tests {
             engine
                 .set_brush(BrushSnapshot {
                     diameter: 4.,
+                    stabilization: layer_core::BrushStabilization { strength: 0., ..Default::default() },
                     ..Default::default()
                 })
                 .unwrap();
@@ -5475,6 +5864,7 @@ mod tests {
             .set_brush(BrushSnapshot {
                 diameter: 2.,
                 spacing: 0.1,
+                stabilization: layer_core::BrushStabilization { strength: 0., ..Default::default() },
                 ..Default::default()
             })
             .unwrap();
@@ -5542,6 +5932,7 @@ mod tests {
                 BrushSnapshot::default()
             };
             brush.diameter = 10.;
+            brush.stabilization.strength = 0.;
             engine.set_brush(brush).unwrap();
             let mut last = event(1, PenPhase::Down, 20.);
             for i in 0..41 {
@@ -5614,7 +6005,7 @@ mod tests {
                 diameter: 8.0,
                 spacing: 0.08,
                 stabilization: layer_core::BrushStabilization {
-                    streamline: 0.85,
+                    strength: 0.,
                     ..layer_core::BrushStabilization::default()
                 },
                 ..BrushSnapshot::default()
@@ -5636,10 +6027,7 @@ mod tests {
             .unwrap();
 
         assert!(!engine.backend().preview.is_empty());
-        assert!(dabs_cover_point(
-            &engine.backend().preview,
-            layer_core::Point { x: 52.0, y: 16.0 }
-        ));
+        assert!(dabs_cover_point(&engine.backend().preview, Point { x: 52., y: 16. }));
         assert_eq!(engine.metrics().platform_prediction_frames, 1);
 
         let mut up = event(4, PenPhase::Up, 28.0);
@@ -5661,6 +6049,9 @@ mod tests {
     fn native_lift_prediction_uses_raw_pressure_and_never_changes_commit_or_next_contact() {
         for floor in [0., 0.5] {
             let (mut producer, mut engine) = engine("lift", 128, 128);
+            let mut brush = engine.settings.brush.clone();
+            brush.stabilization.strength = 0.;
+            engine.set_brush(brush).unwrap();
             engine.set_pressure_curve(layer_core::PressureResponse::try_from(vec![[0., floor], [1., 1.]]).unwrap().into());
             let mut inputs = Vec::new();
             for (i, pressure) in [0.8, 0.6, 0.4, 0.2].into_iter().enumerate() {
@@ -5802,6 +6193,7 @@ mod tests {
                         .render_frame_at(events.last().unwrap().timestamp_ns)
                         .unwrap();
                 }
+                engine.render_frame().unwrap();
                 let stroke = engine.completed_stroke.as_ref().unwrap();
                 let mut replay = Vec::new();
                 DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
@@ -5839,6 +6231,7 @@ mod tests {
         let (mut producer, mut engine) = engine("active-smudge-rebuild", 256, 256);
         let mut brush = default_brush(DefaultBrushPreset::NaturalBlender);
         brush.diameter = 40.0;
+        brush.stabilization.strength = 0.;
         engine.set_brush(brush).unwrap();
         engine
             .set_instant_feedback(InstantFeedbackConfig {

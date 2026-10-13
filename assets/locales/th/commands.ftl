@@ -637,3 +637,4 @@ menu-paste-special = วางแบบพิเศษ
 menu-rotate-and-flip = หมุนและพลิก
 menu-color-management = การจัดการสี
 command-pen-pressure = แรงกดปากกา…
+command-smoothing-adjust-speed = ปรับตามความเร็ว

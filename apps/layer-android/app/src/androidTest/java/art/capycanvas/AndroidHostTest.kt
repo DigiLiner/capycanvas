@@ -4177,10 +4177,11 @@ class AndroidHostTest {
     }
 
     @Test fun palmDoesNotPanWhilePenDrawsAndEraserWorks() {
+        action(obj("type" to "set_color", "rgba" to JSONArray(listOf(0, 0, 0, 1))))
         val pen = androidx.compose.ui.geometry.Offset(0.45f, 0.5f)
         val palm = androidx.compose.ui.geometry.Offset(0.6f, 0.6f)
         val hover = androidx.compose.ui.geometry.Offset(0.7f, 0.3f)
-        val camera = state().getJSONObject("camera").toString()
+        val camera = jsonValue(state().getJSONObject("camera"))
         val tools = listOf(MotionEvent.TOOL_TYPE_STYLUS, MotionEvent.TOOL_TYPE_FINGER)
         canvasEvent(MotionEvent.ACTION_DOWN, listOf(pen), MotionEvent.TOOL_TYPE_STYLUS)
         canvasEvent(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), listOf(pen, palm), MotionEvent.TOOL_TYPE_STYLUS, pointerTools = tools)
@@ -4188,7 +4189,7 @@ class AndroidHostTest {
         canvasEvent(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), listOf(pen, palm), MotionEvent.TOOL_TYPE_STYLUS, pointerTools = tools)
         canvasEvent(MotionEvent.ACTION_UP, listOf(pen), MotionEvent.TOOL_TYPE_STYLUS)
         waitState { it.array("commands").objects().first { c -> c.getString("id") == "undo" }.getBoolean("enabled") }
-        assertEquals("Palm contact must not move the camera", camera, state().getJSONObject("camera").toString())
+        assertEquals("Palm contact must not move the camera", camera, jsonValue(state().getJSONObject("camera")))
         // The cursor is presentation, not pigment: move it out of the sampled
         // area before both captures (its size changes for the eraser).
         canvasEvent(MotionEvent.ACTION_HOVER_MOVE, listOf(hover), MotionEvent.TOOL_TYPE_STYLUS)

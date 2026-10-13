@@ -174,3 +174,5 @@ zoom-tool-left-right = 좌우
 zoom-tool-up-down = 상하
 zoom-tool-center-on-click-tooltip = 클릭하여 확대하거나 축소할 때 클릭한 위치를 화면 중앙으로 이동합니다.
 tool-setting-material-hardness = 재료 경도
+tool-setting-group-smoothing = 선 보정
+tool-setting-smoothing-strength = 강도

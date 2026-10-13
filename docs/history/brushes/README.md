@@ -14,7 +14,7 @@ features have shipped. Current behavior belongs in the
 | --- | --- |
 | Dry media: pencil, charcoal, chalk, pastel and crayon | [Analytic relief and paper contact](dry-media-contact.md) |
 | Shared stroke stabilization | [Full-horizon reference objective](stroke-stabilization.md) |
-| Curve-fit implementation candidate | [Work-in-progress algorithm snapshot](curve-fit-work-in-progress.md) |
+| Curve-fit stabilization | [Implemented curve model and open tuning](curve-fit-work-in-progress.md) |
 
 The earlier [pencil, charcoal and ink redesign](../dry-media-brush-design.md)
 provides broader context for stroke generation and the existing contact engine.

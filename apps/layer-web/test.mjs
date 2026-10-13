@@ -38,6 +38,7 @@ import {checkZen} from "./zen.test.mjs";
 import {checkIcons} from "./icons.test.mjs";
 import {checkPrediction} from "./prediction.test.mjs";
 import {checkPenRendering} from "./pen-rendering.test.mjs";
+import {checkSmoothing} from "./smoothing.test.mjs";
 import {checkTooltips} from "./tooltips.test.mjs";
 import {checkColumnStacks} from "./column-stacks.test.mjs";
 import {checkLayoutDrops} from "./layout-drops.test.mjs";
@@ -380,8 +381,10 @@ try {
     [process.argv.includes("--contact-brushes"), () => checkContactBrushes({call,evaluate,settle},process.env.LAYER_BRUSH_PHOTO_URL), checkErrors],
     [process.argv.includes("--pen"), async () => {
       await checkPenRendering({call, evaluate, settle});
+      await checkSmoothing({call, evaluate, settle});
       await checkPrediction({call, evaluate, settle});
     }, checkErrors],
+    [process.argv.includes("--smoothing"), () => checkSmoothing({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--prediction"), () => checkPrediction({call, evaluate, settle}), checkErrors],
     [packageHost && !process.argv.includes("--preferences") && !process.argv.includes("--parity") && !process.argv.includes("--smoke"), () => checkPwa({ call, evaluate, settle, canvasPixels, host: packageHost, storageOnly: process.argv.includes("--package-offline") }), checkErrors],
     [process.argv.includes("--language-switching"), () => checkLiveLanguage({call,evaluate,settle}), checkErrors],

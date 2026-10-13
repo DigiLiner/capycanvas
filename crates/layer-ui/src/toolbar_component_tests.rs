@@ -386,7 +386,7 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
         let fields=&s.state().tool_settings;
         let ids=fields.iter().map(|f|f.id).collect::<Vec<_>>();
-        assert_eq!(ids,["size","flow","grain_depth","material_hardness","angle","opacity"],"{preset:?}");
+        assert_eq!(ids,["size","flow","grain_depth","material_hardness","angle","opacity","smoothing_strength"],"{preset:?}");
         assert!(fields[..4].iter().all(|f|f.group_id.is_empty() && f.group.is_empty()));
         assert_eq!(fields[4].group_id,MessageId::TOOL_SETTING_GROUP_TIP.key());
         assert_eq!(fields[5].group_id,MessageId::TOOL_SETTING_GROUP_BLENDING.key());

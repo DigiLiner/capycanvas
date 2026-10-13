@@ -641,3 +641,4 @@ menu-paste-special = Collage spécial
 menu-rotate-and-flip = Rotation et retournement
 menu-color-management = Gestion des couleurs
 command-pen-pressure = Pression du stylet…
+command-smoothing-adjust-speed = Ajuster selon la vitesse

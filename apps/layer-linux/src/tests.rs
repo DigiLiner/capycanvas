@@ -14581,3 +14581,5 @@ fn native_genuine_language_composition() {
     drop(active);
     app.quit();
 }
+
+mod smoothing_tests;
