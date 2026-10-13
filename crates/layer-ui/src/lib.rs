@@ -228,6 +228,18 @@ pub struct BrushSizePreset {
     pub label: String,
     pub preview_diameter: f32,
 }
+pub(crate) fn step_brush_size(value: f32, steps: f32) -> Option<f32> {
+    let steps = steps.round();
+    if !steps.is_finite() { return None; }
+    if steps == 0. { return Some(value); }
+    let index = if steps > 0. {
+        BRUSH_SIZES.partition_point(|&size| size <= value) as f32 + steps - 1.
+    } else {
+        BRUSH_SIZES.partition_point(|&size| size < value) as f32 + steps
+    };
+    let bounds = NumericControl::brush_size();
+    Some(if index < 0. { bounds.min as f32 } else { BRUSH_SIZES.get(index as usize).copied().unwrap_or(bounds.max as f32) })
+}
 pub fn brush_size_presets() -> impl Iterator<Item = BrushSizePreset> {
     BRUSH_SIZES.iter().map(|&value| BrushSizePreset {
         value, label: value.to_string(), preview_diameter: value.clamp(1., TILE_SIZE - 4.),

@@ -103,7 +103,8 @@ Tool, brush and mode keys work on tap and while held: a tap switches, and holdin
 the key while drawing returns to the previous tool or mode on release. Modes are
 Paint with transparency and the view and ruler toggles such as Snap to rulers.
 Relative step bindings use the setting's own numeric step and bounds and repeat
-while held.
+while held. Brush size steps through the brush size presets instead, so each
+press changes it by a similar proportion at any size.
 
 The shortcuts page lists categories, with one search line that also accepts a
 pressed chord, a tool filter and an All actions / With shortcuts / Customized

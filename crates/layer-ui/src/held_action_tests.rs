@@ -184,7 +184,6 @@ fn sampling_rearms_while_the_hold_continues() {
 #[test]
 fn relative_steps_follow_the_tool_setting_bounds() {
     let mut s = session(Platform::Gtk);
-    let size = s.state.brush.diameter;
     let step = |s: &mut UiSession<Recorder>, key: &str, repeat: bool| {
         s.input(UiInput::Key {
             key: key.into(),
@@ -196,20 +195,22 @@ fn relative_steps_follow_the_tool_setting_bounds() {
         })
         .unwrap()
     };
-    step(&mut s, "]", false);
-    step(&mut s, "]", true);
-    assert!(s.state.brush.diameter > size);
-    held_key(&mut s, "]", false, Modifiers::default());
-    step(&mut s, "[", false);
-    step(&mut s, "[", true);
-    held_key(&mut s, "[", false, Modifiers::default());
-    assert!((s.state.brush.diameter - size).abs() < 1e-3);
-    for _ in 0..10_000 {
-        step(&mut s, "[", true);
+    s.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 13. }).unwrap();
+    let mut sizes = Vec::new();
+    for (key, presses) in [("]", 3), ("[", 4)] {
+        for press in 0..presses {
+            step(&mut s, key, press > 0);
+            sizes.push(s.state.brush.diameter);
+        }
+        held_key(&mut s, key, false, Modifiers::default());
     }
-    let setting = s.state.tool_settings.iter().find(|c| c.id == "size").unwrap();
-    assert_eq!(s.state.brush.diameter, setting.numeric.min as f32);
-    held_key(&mut s, "[", false, Modifiers::default());
+    assert_eq!(sizes, [15., 17., 20., 17., 15., 12., 10.], "size keys step through the brush size presets");
+    let setting = s.state.tool_settings.iter().find(|c| c.id == "size").unwrap().clone();
+    for (key, steps, bound) in [("[", BRUSH_SIZES.len(), setting.numeric.min), ("]", 2 * BRUSH_SIZES.len(), setting.numeric.max)] {
+        for _ in 0..steps { step(&mut s, key, true); }
+        assert_eq!(s.state.brush.diameter, bound as f32);
+        held_key(&mut s, key, false, Modifiers::default());
+    }
     invoke(&mut s, CommandId::Hand);
     let before = s.state.clone();
     assert!(step(&mut s, "[", false).handled);

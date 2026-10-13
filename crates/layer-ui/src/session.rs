@@ -3491,10 +3491,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                     .iter()
                     .find(|c| c.id == id)
                     .ok_or("This setting is not used by the selected tool")?;
-                let value = setting
-                    .numeric
-                    .resolve(setting.value as f64, NumericOperation::Step { steps: steps as f64 }).map_err(|reason| reason.message(&self.state.localization))?
-                    .value as f32;
+                let value = if setting.numeric == NumericControl::brush_size() {
+                    step_brush_size(setting.value, steps).ok_or(NumericError::InvalidStep)
+                } else {
+                    setting.numeric.resolve(setting.value as f64, NumericOperation::Step { steps: steps as f64 }).map(|resolved| resolved.value as f32)
+                }.map_err(|reason| reason.message(&self.state.localization))?;
                 return self.dispatch(UiAction::SetToolSetting { id, value });
             }
             UiAction::SetToolSetting { id, value } => {
