@@ -1379,6 +1379,7 @@ mod tests {
         host.dispatch(choose).unwrap();
         host.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Tool { tool: layer_ui::LayerCanvasTool::Move } }).unwrap();
         assert!(!host.paint_ready(), "the first mask needs shaders the drawing did not use before");
+        host.dispatch(UiAction::SetZoom { zoom: 1. }).unwrap();
         let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
         let contact = |host: &mut NativeHost, id: u64, path: &[([f64; 2], f64)]| {
             let records: Vec<f64> = path.iter().enumerate().flat_map(|(step, ([x, y], phase))| {
@@ -1479,12 +1480,7 @@ mod tests {
         let layer = layer_ui::occurrence_token(host.session.engine().document().working.occurrence.unwrap());
         let original = thumbnail(&mut host, &clock, 1, layer);
         for attempt in 0..4u64 {
-            let start = clock.get();
-            let records: Vec<f64> = (0..42u64).flat_map(|i| {
-                let phase = if i == 0 { 1. } else if i == 41 { 3. } else { 2. };
-                [256. + i as f64 * 5., 240. + 24. * (i as f64 / 6.).sin(), 1., 0., 0., 0., 0., (start + i * 1_000_000) as f64, phase]
-            }).collect();
-            pointer(&mut host, 77, 1, 0, &records, false).unwrap();
+            stroke(&mut host, clock.get()).unwrap();
             let painted = thumbnail(&mut host, &clock, 10 + attempt * 2, layer);
             assert_ne!(painted, original, "the stroke changes the thumbnail");
             host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
@@ -1499,6 +1495,16 @@ mod tests {
             view_revision: host.session.state().camera.revision,
             barrel_twist: false,
         })
+    }
+    fn stroke(host: &mut NativeHost, start: u64) -> Result<(), String> {
+        let [width, height] = host.session.engine().document().composition().size.map(|v| v as f32);
+        let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
+        let records: Vec<f64> = (0..42u64).flat_map(|i| {
+            let phase = match i { 0 => 1., 41 => 3., _ => 2. };
+            let at = surface.map(Point { x: width * (0.25 + i as f32 / 82.), y: height * (0.5 + 0.1 * (i as f32 / 6.).sin()) });
+            [f64::from(at.x), f64::from(at.y), 1., 0., 0., 0., 0., (start + i * 1_000_000) as f64, phase]
+        }).collect();
+        pointer(host, 77, 1, 0, &records, false)
     }
 
     #[test]
@@ -2357,16 +2363,7 @@ mod tests {
             }
         }
         assert!(!published(&mut host).1, "background compiles are still pending");
-        let view_revision = host.session.state().camera.revision;
-        let records: Vec<f64> = (0..42u32)
-            .flat_map(|i| {
-                let phase = match i { 0 => 1., 41 => 3., _ => 2. };
-                [250. + f64::from(i) * 3., 240. + 20. * (f64::from(i) / 6.).sin(), 1., 0., 0., 0., 0.,
-                    (clock.get() + u64::from(i) * 1_000_000) as f64, phase]
-            })
-            .collect();
-        host.pointer_batch(PointerBatch { id: 77, tool: 1, button: 0, records: &records, predicted: false, view_revision, barrel_twist: false })
-            .unwrap();
+        stroke(&mut host, clock.get()).unwrap();
         for _ in 0..8 {
             frame(&mut host, true);
         }
