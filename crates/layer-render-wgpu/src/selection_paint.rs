@@ -51,11 +51,7 @@ impl SelectionPainter {
         let shader = Deferred::wgsl(device, "incremental selection coverage", compose_wgsl(&[
                 include_str!("brush_types.wgsl"),
                 &include_str!("brush_textures.wgsl").replace("@group(3)", "@group(1)"),
-                include_str!("analytic_coverage.wgsl"),
-                include_str!("brush_coverage.wgsl"),
-                include_str!("contact.wgsl"), include_str!("relief.wgsl"),
-                include_str!("bristle.wgsl"),
-                include_str!("brush_footprint.wgsl"),
+                &crate::dry_material::coverage_source(u32::MAX),
                 &shader_source("before", 6),
                 &shader_source("enclosed", 7),
                 &working_color::shader(device),

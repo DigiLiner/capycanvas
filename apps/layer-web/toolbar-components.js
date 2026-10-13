@@ -4,7 +4,10 @@ import { bindCopy, liveCopy } from './localization.js';
 import {gradientButton} from './gradient.js';
 const key = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? String(v) : v);
 const semantic = ({label, tooltip, disabled_reason, ...value}) => value;
-const fieldSemantic = ({group, ...value}) => semantic(value);
+const fieldSemantic = ({group, numeric, ...value}) => {
+  const {endpoint_labels, ...rules} = numeric;
+  return {...semantic(value), numeric: rules};
+};
 
 export function actionField({ element, button, icon }, spec, send, { label, ariaDisabled = false, explain, checkbox = false } = {}) {
   const check = spec.checkable && (checkbox || !spec.state.icon);
@@ -88,7 +91,7 @@ export function choiceField({ app, element, button, icon, openPopup, closePopup 
 
 // Retained DOM controls. Rust owns the field schema, edit context, numeric math,
 // and fitting; this adapter reports native font/control measurements.
-export function createToolbarComponent({ app, tile, view, element, button, icon, dispatch, draggable, target, place, panel }) {
+export function createToolbarComponent({ app, tile, view, element, button, icon, dispatch, draggable, target, place, panel, rasterWorker }) {
   const root = element('div', 'tile-button tool-tile toolbar-component');
   root.dataset.tile = tile.id; root.dataset.toolbarComponent = tile.control.kind;
   const item = { kind: 'tile', panel, tile: tile.id };
@@ -122,7 +125,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     slider.type = 'range'; slider.min = 0; slider.max = 1; slider.step = 'any'; slider.setAttribute('aria-label', field.label);
     const marks = element('div', 'toolbar-slider-marks'), thumb = element('div', 'toolbar-slider-thumb');
     track.append(slider, thumb, marks); row.append(cap, track); more.hidden = true;
-    let current = field.value, fill = 0, contact, stamp, canvas, caption, bookmark, preview;
+    let current = field.value, fill = 0, contact, stamp, canvas, caption, bookmark, preview, previewFrame, previewBusy=false, previewDirty=false;
     const format = () => app.number_input({ control: field.numeric, value: current, operation: { type: 'format' } });
     function change(value) { send(context, { type: 'set_tool_setting', id: field.id, value }); }
     function position(e) {
@@ -137,12 +140,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
     function show() {
       if (!model.numeric) return;
       if (!popup || popup !== preview || !popup.isConnected) {
-        stamp = app.toolbar_stamp(context);
-        const image = document.createElement('canvas'); image.width = image.height = stamp.size;
-        const pixels = image.getContext('2d', { willReadFrequently: true }).createImageData(stamp.size, stamp.size);
-        // A neutral ink stamp stays legible in both themes, independent of paint color.
-        stamp.alpha.forEach((alpha, i) => { pixels.data[i * 4] = pixels.data[i * 4 + 1] = pixels.data[i * 4 + 2] = 255; pixels.data[i * 4 + 3] = alpha; });
-        image.getContext('2d', { willReadFrequently: true }).putImageData(pixels, 0, 0); stamp.image = image;
+        stamp?.image.close(); stamp = undefined;
         closePopup(); preview = popup = element('div', 'toolbar-brush-preview panel'); popup.popover = 'manual';
         caption = element('span', 'toolbar-preview-caption');
         bookmark = button('', () => { send(context, { type: 'toggle_slider_bookmark', control: tile.control }); }, 'toolbar-preview-bookmark');
@@ -153,11 +151,36 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
         });
       }
       if (!popup.matches(':popover-open')) popup.showPopover();
-      paintPreview();
+      paintPreview(); refreshPreview();
+    }
+    async function refreshPreview() {
+      cancelAnimationFrame(previewFrame);
+      if (!popup || popup !== preview || !popup.isConnected) return;
+      if (previewBusy) { previewDirty=true; return; }
+      previewBusy=true; previewDirty=false;
+      const opened=preview;
+      try {
+        const next = app.toolbar_stamp(context, stamp?.request_id);
+        if (next?.alpha.length && next.request_id !== stamp?.request_id) {
+          const image=await rasterWorker({operation:'alpha-image',metadata:{size:next.size},buffers:[next.alpha]});
+          if (popup!==opened || !opened.isConnected) { image.close(); return; }
+          stamp?.image.close(); stamp = {...next, image};
+          canvas.dataset.previewRequest = String(next.request_id);
+          paintPreview();
+        }
+        if (popup!==opened || !opened.isConnected) return;
+        previewFrame = requestAnimationFrame(refreshPreview);
+      } catch (error) { console.error(error); if(popup===opened)closePopup(); }
+      finally {
+        previewBusy=false;
+        if (previewDirty && popup && popup===preview && popup.isConnected) {
+          cancelAnimationFrame(previewFrame); previewFrame=requestAnimationFrame(refreshPreview);
+        }
+      }
     }
     function paintPreview() {
       if (!popup || popup !== preview) return;
-      const geometry = app.toolbar_ui({ type: 'slider_preview', control: tile.control, style: tileStyle, value: current, length: Math.max(...extent), extent: stamp.extent });
+      const geometry = app.toolbar_ui({ type: 'slider_preview', control: tile.control, style: tileStyle, value: current, length: Math.max(...extent), extent: stamp?.extent || 1 });
       popup.style.width = popup.style.height = `${geometry.side}px`; popup.style.setProperty('--tile-radius', `${geometry.radius}px`);
       for (const [node, b] of [[caption, geometry.caption], [bookmark, geometry.bookmark]]) Object.assign(node.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.width}px`, height: `${b.height}px` });
       bookmark.style.setProperty('--preview-icon', `${geometry.icon}px`);
@@ -176,7 +199,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
       if (canvas.width !== pixels || canvas.height !== pixels) canvas.width = canvas.height = pixels;
       const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.resetTransform(); ctx.clearRect(0, 0, pixels, pixels); ctx.scale(ratio, ratio);
       ctx.save(); ctx.beginPath(); const viewport = geometry.viewport; ctx.rect(viewport.x, viewport.y, viewport.width, viewport.height); ctx.clip();
-      ctx.globalAlpha = geometry.opacity; const b = geometry.stamp; ctx.drawImage(stamp.image, b.x, b.y, b.width, b.height);
+      ctx.globalAlpha = geometry.opacity; const b = geometry.stamp; if (stamp) ctx.drawImage(stamp.image, b.x, b.y, b.width, b.height);
       ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-in'; ctx.fillStyle = getComputedStyle(root).color; ctx.fillRect(0, 0, side, side); ctx.restore();
       if (geometry.header_fade) {
         const fade = ctx.createLinearGradient(0, 0, 0, geometry.header_fade), background = getComputedStyle(popup).backgroundColor;
@@ -193,7 +216,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
         const line = element('span', 'toolbar-slider-mark'); line.classList.toggle('selected', mark.selected);
         line.style.setProperty('--position', mark.selected ? fill : mark.fill); return line;
       }));
-      track.style.setProperty('--position', fill); paintPreview();
+      track.style.setProperty('--position', fill); paintPreview(); refreshPreview();
     }
     slider.addEventListener('pointerdown', e => {
       if (e.button || slider.disabled || contact) return;
@@ -232,7 +255,7 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
       return `path('M ${point(0, -narrow)} L ${point(length - 3, -8)} C ${point(length + 1, -8)} ${point(length + 1, 8)} ${point(length - 3, 8)} `
         + `L ${point(0, narrow)} C ${point(-3, narrow)} ${point(-3, -narrow)} ${point(0, -narrow)} Z')`;
     }
-    update(); return { row, update, orient, dispose() { closePopup(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); window.removeEventListener('blur', blur); } };
+    update(); return { row, update, orient, dispose() { closePopup(); stamp?.image.close(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); window.removeEventListener('blur', blur); } };
   }
   function numeric(field, context) {
     const row = element('div', 'toolbar-option toolbar-numeric');

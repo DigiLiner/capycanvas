@@ -11,8 +11,9 @@ is 4248 × 2832.
 
 ## Operations
 
-Native required-only shader startup and first-use tool preparation are unmeasured
-on this reference device. Web diagnostics are recorded under
+Native full required-only startup remains unmeasured; selected dry-brush
+preparation is measured under [dry media](#dry-shader-preparation).
+Web diagnostics are recorded under
 [shared shader preparation](#shared-shader-preparation). Earlier idle-catalog
 measurements describe their named builds. See
 [startup preparation](responsiveness.md#demand-driven-startup) for the Apple
@@ -77,7 +78,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 
 | Operation | Target | Measured | Source |
 | --- | --- | --- | --- |
-| Native startup and first-use shader preparation | [Latency limits](responsiveness.md) | Unmeasured with required-only startup on this reference device | [Apple diagnostic](responsiveness.md#demand-driven-startup); no tier qualification |
+| Native startup and first-use shader preparation | [Latency limits](responsiveness.md) | Full startup unmeasured; first dry selection Pencil 35.53 s, Pointy 35.04 s, Chalk 13.82 s after photo startup | [Dry preparation](#dry-shader-preparation); cold first use remains slow |
 | Web startup, fresh origins | [Latency limits](responsiveness.md) | Brush readiness median 26.806 → 22.211 s; complete 29.360 → 24.785 s. First canvas essentially unchanged | [Shared shader preparation](#shared-shader-preparation); default-canvas latency diagnostic |
 | Exact histogram, Web, 12 MP | [Latency limits](responsiveness.md) | First request 24.288 → 21.362 s; repeated median 14.717 → 12.103 s. Exact counts match | [Shared shader preparation](#shared-shader-preparation); latency only |
 | Levels Auto, Web, 12 MP | [Latency limits](responsiveness.md) | Median 13.229 → 10.861 s; all controls and resulting exact histograms match | [Shared shader preparation](#shared-shader-preparation); latency only |
@@ -1448,61 +1449,91 @@ Target: **60 completed updates/s** at the guaranteed size, on the 12 MP canvas.
 
 ### Dry-media contact model
 
-Measured on 2026-10-12 (UTC) with the optimized dry-settings build based on
-`f1c5d4397`. Frozen source manifest SHA-256
-`88cbf77abec45ef956da6e4b33c0e140dda13ff45232b416eaa06b937e3396f0`;
-APK SHA-256 `c28089aef41c096dd2f311bca466a386a5d495c3094934241ecdf1a9cfe0c9ad`.
-Web Wasm SHA-256 `69ebef487c7a332a26c00677e4058d56e4ead9d91535c58eb2f64a0b806cbec1`.
-The paired baseline uses APK
+Measured on 2026-10-13 UTC, based on `cbc74b304`, with calibrated material
+pressure, restored Material hardness and compile-time aggregate specialization.
+Optimized APK SHA-256
+`66f517b7c867a83caee591780226ff36591bf246bb3b3fd6ba04ccd7239d6020`,
+JNI `7de0e1d01ae832bcb4bd91b0ed7157052f24d3668439edbdc299c50d54c7e49b`;
+frozen source `04adb5a414d5fee9148980b56487e9d211e1dcb7b497185ee8faab955f287eda`.
+Web Wasm `d5021a7bdcf1e784b28c3935fc75d372ed3a75a56a036b6083fe2e71838cd0cf`,
+source `0952df064126eb924d5c2cc9d502645e6c3b53358d35cc9c2a051e2e7d1035b1`.
+Production matches between these builds. Final source changes only trailing
+WGSL whitespace and tests/docs after measurement.
+
+The 4248 × 2832 tier photo has one empty Full color paint layer above it at Fit,
+with the default workspace, Navigator, closed Stats and 16 ms prediction. Each
+warmed profile uses three six-second 200 Hz pen contacts at physical pressure
+one and an explicitly verified contained 60 × 10 surface-pixel ellipse. Each
+contact starts on fresh paint after Undo. Thermal status is zero before/after.
+Size is 1024 px, the writing-pose full-pressure long axis. Strength, Opacity and
+Texture strength are 100%; Material hardness is Pencil 90%, Pointy 95%, Charcoal
+55% and Pastel 50%. Smoothing retains its default 6%.
+
+Native counts nonempty GPU-completed canvas updates inside each input window;
+fresh input rates equal these counts in every measured contact. Web counts the
+first asynchronous GPU completion consuming a new paint timestamp. Browser
+scheduling is included; physical scanout is unmeasured. Gap values are the worst
+per-contact p99, excluding idle intervals between contacts. Native and Web runs
+do not overlap.
+
+| Host and profile, Size 1024 px | Current updates/s across three contacts | Worst contact p99 gap | 60/s, 33.3 ms gate |
+| --- | --- | --- | --- |
+| Android Pencil, 45° | 30.46–30.94 | 43.26 ms | **Not met** |
+| Android Pastel Block, 45° | 21.27–23.43 | 59.95 ms | **Not met** |
+| Android Pointy Pencil, 45° | 39.91–40.41 | 33.05 ms | **Not met** |
+| Android Charcoal, 45° | 28.92–29.12 | 45.10 ms | **Not met** |
+| Android Pastel Block, 77° | 3.32–3.44 | 483.20 ms | **Not met** |
+| Web Pencil, 45° | 21.77–22.30 | 112.60 ms | **Not met** |
+| Web Pastel Block, 45° | 17.67–17.95 | 98.20 ms | **Not met** |
+| Web Pointy Pencil, 45° | 23.45–24.43 | 109.50 ms | **Not met** |
+| Web Charcoal, 45° | 21.79–22.62 | 102.60 ms | **Not met** |
+| Web Pastel Block, 77° | 2.95–6.40 | 451.60 ms | **Not met** |
+
+All current profiles miss the rate; native Pointy's gap meets 33.3 ms.
+Native input-to-GPU p99 maxima are Pencil 113.16 ms, Pointy 91.57 ms,
+Charcoal 120.30 ms, Pastel writing 161.78 ms and Pastel side 1230.37 ms.
+Side Pastel spans 3276.8 × 563.2 document pixels and fits fully inside the photo
+on this contained path. Web side captures retain three pending tail callbacks
+in two contacts; these fall outside the input window and do not increase its rate.
+Earlier broad-path probes use different trajectories and are diagnostic only.
+
+Separate same-APK native diagnostics set Smoothing to 0% using the visible
+control and verify zero in all post-contact states. Pencil reaches 54.80–55.52/s,
+with worst gap 26.88 ms and input-to-GPU p99 78.56 ms: the rate still misses.
+Pastel writing reaches 45.02–45.35/s, gap 36.69 ms and input-to-GPU p99 90.24 ms;
+both rate and gap miss. These isolate substantial Curve fit work; the current
+qualification rows keep default 6%. Other tilts, partial Opacity, Shading Pencil,
+Chalk and Crayon at guaranteed sizes remain unmeasured.
+Raw contacts, actual settings, thermal records, corrections and source/binary
+proof are under `artifacts/dry-pressure-balance/tcl/final-qualified/`.
+
+#### Dry shader preparation
+
+Actual foreground Web first-selection readiness improves from Pencil 38.55 to
+14.80 s, Pointy 28.71 to 11.43 s, and Chalk 12.49 to 4.73 s. Other dry families
+reuse prepared variants in 181–274 ms; repeated selections take 164–254 ms
+without new pipelines. Traces retain actual shader sources and asynchronous
+pipeline callbacks. Device driver caches remain intact, so these are fresh
+application pipelines, not cold driver-cache measurements. The before source
+and identities are under `artifacts/dry-pressure-balance/tcl/shader-latency/`.
+
+Native selected-brush probes, after photo/global startup is primed, measure
+Pencil 35.53 s, Pointy 35.04 s and Chalk 13.82 s; other first probes take
+30–106 ms, repeats 28–140 ms. All fourteen probes finish within their 60 s
+fixture gate. First-use waits remain substantial; this does not qualify an
+instant-selection or startup latency target.
+
+All seven intended-size native dry strokes have nonempty pixels and exact
+Undo/Redo in both themes. The canonical Strength popup also passes both themes
+on Web and native. These functional checks do not qualify nominal-size FPS.
+
+Earlier G-Pen contained-path measurements use APK
 `e1e4ccab8f48a05c8291b9d450944a897fc36da95b00347fd29b376f25b4739c`
 and Wasm `80a2c1245d7c536a48718a4d3e8c36143190e6f736c476e83165188bf676f7a4`.
-
-The 4248 × 2832 photo has an empty Full color paint layer above it at Fit,
-with the default workspace, Navigator, closed Stats and 16 ms prediction.
-Each warmed profile uses three six-second 200 Hz stylus contacts, pressure one,
-and a contained 60 × 10 surface-pixel ellipse. Thermal status is zero before and
-after every profile. Native uses OS stylus input; Web uses CDP pen input.
-Rates count fresh input-bearing GPU completions, excluding prediction/refinement.
-Web asynchronous completion observations include browser scheduling delay.
-Neither measures physical screen scanout. Native and Web runs do not overlap.
-
-Size means the full-pressure long axis at the 45° writing pose. Strength is the
-preset value: Pencil 65%, Pointy Pencil 95%, Charcoal 80%, Pastel 75%.
-Opacity and Texture strength are 100%. The changed build fixes engagement width
-at 0.05, raises material-hardness defaults and resolves Strength as `s/(8-7*s)`.
-Identical UI values therefore compare the intended changed behavior, with a
-weaker optical dose; they do not isolate kernel cost. Writing footprints are
-preserved, Pointy has directional relief, and Pastel's side pose is longer.
-
-| Host, profile and Size | Baseline fresh updates/s | Current fresh updates/s | Current worst p99 gap | Current input-to-GPU p99 | 60/s, 33.3 ms gate |
-| --- | --- | --- | --- | --- | --- |
-| Android Pencil 1024 px, 45° | 58.04–58.67 | 58.87–59.63 | 25.98 ms | 66.12–73.38 ms | **Rate not met** |
-| Android Pointy Pencil 1024 px, 45° | 71.08–71.53 | 70.08–70.35 | 22.11 ms | 57.62–58.71 ms | Meets measured writing pose |
-| Android Charcoal 1024 px, 45° | 58.08–59.02 | 57.86–58.09 | 26.05 ms | 67.42–69.84 ms | **Rate not met** |
-| Android Pastel Block 1024 px, 45° | 45.80–46.26 | 42.23–42.43 | 34.11 ms | 84.99–88.74 ms | **Not met** |
-| Web Pencil 1024 px, 45° | 20.29–22.46 | 21.56–25.25 | 120.00 ms | 179.50–272.50 ms | **Not met** |
-| Web Pointy Pencil 1024 px, 45° | 19.95–25.05 | 24.12–26.57 | 116.60 ms | 169.20–270.80 ms | **Not met** |
-| Web Charcoal 1024 px, 45° | 23.19–24.41 | 24.63–25.27 | 115.10 ms | 189.50–243.80 ms | **Not met** |
-| Web Pastel Block 1024 px, 45° | 20.97–23.39 | 22.63–22.96 | 149.71 ms | 225.50–248.70 ms | **Not met** |
-| Android Pastel Block 1024 px, 77° | — | 12.82–13.62 | 100.99 ms | 251.70–264.21 ms | **Not met** |
-
-The side Pastel contact is 3276.8 × 563.2 document pixels. Its full swept and
-prediction/antialiasing bounds fit inside the photo; clipping does not explain
-its result. Pencil at nominal Size 1024 and 77° exceeds the tier canvas and
-remains unqualified. Other tilt poses, partial Opacity, Shading Pencil, Chalk
-and Crayon are unmeasured on this changed recipe. Earlier dry profiles do not
-qualify the new contact/dose behavior. Raw data, thermal and containment proof:
-`artifacts/dry-settings-tcl/candidate1/`; combined `performance-results.json`.
-
-The later publication rebuild corrects only shared UI grouping and option order.
-All 648 core, engine, renderer, color, host and workspace source files match the
-measured snapshot; `candidate3/runtime-equality-proof.json` records that scope.
-
-G-Pen is unchanged. Its preceding 2026-10-11 contained-path measurement uses the
-baseline APK/Wasm above. Android reaches 82.95–83.91 fresh/s at Opacity 100%
-and 71.48–71.99 at 50%, with p99 gaps at most 20.44 and 25.55 ms; both measured
-profiles meet 60/s. Web reaches 19.46–23.07 and 21.72–23.39 fresh/s respectively,
-with p99 gaps at most 137.20 and 130.70 ms; neither meets the gate.
+Android reaches 82.95–83.91 fresh/s at Opacity 100% and 71.48–71.99 at 50%,
+with p99 gaps at most 20.44 and 25.55 ms. Web reaches 19.46–23.07 and
+21.72–23.39/s, with gaps at most 137.20 and 130.70 ms. These earlier builds
+predate Curve fit and do not qualify the current binary.
 
 ### Retained-photo brush measurements
 
@@ -1516,7 +1547,7 @@ Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 
 | Brush (id) | Class | Size | Measured | Status |
 | --- | --- | --- | --- | --- |
 | G-Pen (1) | Simple | 1024 px | 59.71 (59.45–59.80) fresh updates/s; completion-gap p99 27.17–29.62 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
-| G-Pen (1), brush controls | Simple | 1024 px | 82.95–83.91 fresh updates/s; fresh gap p99 ≤20.44 ms, contained 60 × 10 path | Meets measured Android profile; [current controls](#dry-media-contact-model) |
+| G-Pen (1), brush controls | Simple | 1024 px | 82.95–83.91 fresh updates/s; fresh gap p99 ≤20.44 ms, contained 60 × 10 path | Earlier measured Android profile; [earlier controls](#dry-media-contact-model) |
 | G-Pen (1), M3 BUILD32 | Simple | 1024 px | Both orders: 64.295–65.713 fresh updates/s; fresh gap p99 24.960–27.643 ms, Linear | Meets this stroke; common response excess repeats: forward **+1.007 ms**, reverse **+1.192/+1.778 ms**; presentation unmeasured; [BUILD32](#build32-g-pen-comparison) |
 | G-Pen (1), M3 BUILD28 | Simple | 1024 px | BUILD28: 64.926–65.173 fresh updates/s; fresh gap p99 25.959–27.596 ms, Linear | Meets this stroke and matched CPU/response bounds; presentation unmeasured; [BUILD28](#build28-g-pen-comparison) |
 | Rough G-Pen (28) | Simple | 1024 px | 25.6 updates/s (25.5–25.7); gap p99 69.5 ms | **Not met** |
@@ -1524,10 +1555,10 @@ Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 
 | Antique Pen (30) | Simple | 1024 px | 37.5 updates/s (37.1–38.0); gap p99 79.9 ms | **Not met** |
 | Realistic Pen (31) | Simple | 1024 px | 28.3 updates/s (28.2–28.3); gap p99 63.4 ms | **Not met** |
 | Wet Ink (32) | Simple | 1024 px | 23.0 updates/s (22.9–23.1); gap p99 73.7 ms | **Not met** |
-| Pencil (2) | Simple | 1024 px | 58.87–59.63 fresh updates/s; fresh gap p99 ≤25.98 ms | **Rate not met**; [dry media](#dry-media-contact-model) |
-| Pointy Pencil (25) | Simple | 1024 px | 70.08–70.35 fresh updates/s; fresh gap p99 ≤22.11 ms | Meets measured Android writing pose; [dry media](#dry-media-contact-model) |
+| Pencil (2) | Simple | 1024 px | 30.46–30.94 fresh updates/s; fresh gap p99 ≤43.26 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Pointy Pencil (25) | Simple | 1024 px | 39.91–40.41 fresh updates/s; fresh gap p99 ≤33.05 ms | **Not met**; [dry media](#dry-media-contact-model) |
 | Shading Pencil (26) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
-| Charcoal (27) | Simple | 1024 px | 57.86–58.09 fresh updates/s; fresh gap p99 ≤26.05 ms | **Rate not met**; [dry media](#dry-media-contact-model) |
+| Charcoal (27) | Simple | 1024 px | 28.92–29.12 fresh updates/s; fresh gap p99 ≤45.10 ms | **Not met**; [dry media](#dry-media-contact-model) |
 | Chalk (6) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Crayon (43) | Simple | 1024 px | Current contact model unmeasured | Unqualified; [dry media](#dry-media-contact-model) |
 | Eraser (3) | Simple | 1024 px | 29.9 fresh updates/s (29.71–29.95); completion gap p99 44.67–45.06 ms | **Not met** |
@@ -1535,7 +1566,7 @@ Except for G-Pen, Eraser and the current dry-media rows, measured on 2026-09-27 
 | Marker (7) | Complex | 1024 px | 16.5 updates/s (16.5–16.6); gap p99 100.5 ms | **Not met** |
 | Blotty Ink (33) | Complex | 1024 px | 15.1 updates/s (15.0–15.1); gap p99 105.5 ms | **Not met** |
 | Realistic Brushed Ink (34) | Complex | 1024 px | 14.3 updates/s (14.2–14.4); gap p99 178.0 ms | **Not met** |
-| Pastel Block (17) | Complex | 1024 px | 42.23–42.43 fresh updates/s; fresh gap p99 ≤34.11 ms | **Not met**; [dry media](#dry-media-contact-model) |
+| Pastel Block (17) | Complex | 1024 px | 21.27–23.43 fresh updates/s; fresh gap p99 ≤59.95 ms | **Not met**; [dry media](#dry-media-contact-model) |
 | Paintbrush (4) | Complex | 1024 px | 10.75 (10.74–10.96) fresh updates/s; completion-gap p99 350.01–385.67 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
 | Textured Flat (15) | Complex | 1024 px | 18.7 updates/s (18.6–18.8); gap p99 169.3 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 8.8 updates/s (8.7–9.0); gap p99 212.7 ms | **Not met** |

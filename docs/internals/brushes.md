@@ -29,8 +29,9 @@ one stroke's contribution over its starting paint, rather than reducing pigment
 already present. A new stroke can build further. Liquify does not expose Opacity.
 Zero Strength emits no painting contacts while retaining the brush-size cursor.
 Pressure mappings scale the selected Strength instead of replacing it.
-Analytic dry media calibrate that result as `s/(8-7*s)` per contact before optical
-transfer, preserving dark full-strength marks without early slider saturation.
+Analytic dry media use that result to scale calibrated material pressure, with
+unit pigment feed before optical transfer. Strength changes contact recruitment
+and conditional loading, rather than independently fading the pigment dose.
 Shared [family settings profiles](../ui/toolbar-components.md#contextual-options)
 place frequently used controls first and group the remaining controls.
 

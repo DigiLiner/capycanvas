@@ -44,6 +44,13 @@ import androidx.compose.ui.window.PopupProperties
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
+import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.graphics.ImageBitmap
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 internal fun toolbarUi(language: String, request: JSONObject) = JSONObject(Native.toolbarUi(request.toString(), language))
 private fun formatted(language: String, control: JSONObject, value: Float, units: Boolean = true) = toolbarUi(language, obj("type" to "number",
@@ -117,11 +124,27 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
                 "height" to height, "axis" to if (vertical) "vertical" else "horizontal").toString(), host.languageTag)) }
             var preview by remember { mutableStateOf(false) }
             var stamp by remember { mutableStateOf<JSONObject?>(null) }
-            DisposableEffect(preview) {
-                var active = true
-                if (preview) host.query(obj("type" to "toolbar_stamp", "context" to context)) { if (active) stamp = it as? JSONObject }
-                else stamp = null
-                onDispose { active = false }
+            var stampImage by remember { mutableStateOf<ImageBitmap?>(null) }
+            LaunchedEffect(preview) {
+                if (!preview) { stamp = null; stampImage = null; return@LaunchedEffect }
+                while (isActive) {
+                    val next = suspendCancellableCoroutine<JSONObject?> { continuation ->
+                        host.query(obj("type" to "toolbar_stamp", "context" to context,
+                            "known_request" to stamp?.optLong("request_id"))) { reply ->
+                            if (continuation.isActive) continuation.resume(reply as? JSONObject)
+                        }
+                    }
+                    if (next?.optJSONArray("alpha")?.length()?.let { it > 0 } == true) {
+                        val image = withContext(Dispatchers.Default) {
+                            val alpha = next.getJSONArray("alpha"); val size = next.getInt("size")
+                            android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ALPHA_8).apply {
+                                copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(ByteArray(alpha.length()) { alpha.getInt(it).toByte() }))
+                            }.asImageBitmap()
+                        }
+                        stampImage = image; stamp = next
+                    }
+                    delay(16)
+                }
             }
             Box(modifier) {
                 Box(Modifier.placed(geometry.getJSONObject(0), density).dragSource(dock, item, holdToDrag = true)
@@ -135,7 +158,7 @@ private fun formatted(language: String, control: JSONObject, value: Float, units
                     edit(obj("type" to "set_tool_setting", "id" to setting, "value" to next.toFloat()))
                 }
                 if (preview && field != null) stamp?.let { brush ->
-                    BrushSliderPreview(brush, control, style, value, maxOf(width, height), vertical, marks.any { it.getBoolean("selected") },
+                    BrushSliderPreview(brush, stampImage ?: return@let, control, style, value, maxOf(width, height), vertical, marks.any { it.getBoolean("selected") },
                         dismiss = { preview = false }, bookmark = { edit(obj("type" to "toggle_slider_bookmark", "control" to control)) })
                 }
             }
@@ -541,16 +564,12 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
 }
 
 
-@Composable private fun BrushSliderPreview(stamp: JSONObject, control: JSONObject, style: String, value: Float, length: Float,
+@Composable private fun BrushSliderPreview(stamp: JSONObject, bitmap: ImageBitmap, control: JSONObject, style: String, value: Float, length: Float,
     vertical: Boolean, selected: Boolean, dismiss: () -> Unit, bookmark: () -> Unit) {
     val host = LocalCanvasHost.current
     val density = LocalDensity.current.density
     val colors = LocalPalette.current
     val layout = toolbarUi(host.languageTag, obj("type" to "slider_preview", "control" to control, "style" to style, "value" to value, "length" to length, "extent" to stamp.number("extent")))
-    val bitmap = remember(stamp) {
-        val alpha = stamp.array("alpha"); val size = stamp.getInt("size")
-        android.graphics.Bitmap.createBitmap(IntArray(alpha.length()) { (alpha.getInt(it) shl 24) or 0x00ffffff }, size, size, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
-    }
     val provider = remember(vertical, density) { object : PopupPositionProvider {
         override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection, popupContentSize: IntSize): IntOffset {
             val gap = (8*density).toInt(); val p = popupContentSize; val a = anchorBounds

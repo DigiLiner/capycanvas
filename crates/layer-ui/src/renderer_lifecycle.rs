@@ -341,6 +341,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.cancel_effect_analyses();
         let previous = self.engine.replace_backend(renderer).map_err(error)?;
         self.renderer_generation = self.renderer_generation.wrapping_add(1);
+        self.brush_stamps.invalidate();
         self.input_pending = self.engine.has_pending_input();
         self.refresh_file_state();
         self.sync_renderer_telemetry();

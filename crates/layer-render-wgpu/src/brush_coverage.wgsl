@@ -2,14 +2,6 @@
 // aware materials. Both shader bodies provide `brush_sampler` and the brush
 // textures consumed here.
 
-fn rotate(point: vec2<f32>, cosine: f32, sine: f32) -> vec2<f32> {
-    return vec2<f32>(
-        point.x * cosine - point.y * sine,
-        point.x * sine + point.y * cosine,
-    );
-}
-
-
 fn tip_coverage(
     analytic: bool,
     texture: texture_2d<f32>,

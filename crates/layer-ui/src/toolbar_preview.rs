@@ -1,8 +1,7 @@
-//! Brush-slider bookmarks and small, on-demand tip previews. The raster is
-//! generated once when an editor opens; motion only changes scale and alpha.
+//! Brush-slider bookmarks and asynchronous contact previews.
 use crate::*;
-use layer_core::{BrushGrain, BrushGrainBehavior, BrushTip};
-use layer_render::{CanvasRenderer, HostImage};
+use layer_core::{BrushSnapshot, Stroke, StrokeId, StrokePoint, StrokeTool, Point};
+use layer_render::{CanvasRenderer, BrushStampRequest, DabStyle};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -219,7 +218,7 @@ pub fn slider_preview_layout(
         },
         header_fade: if fitted { 0. } else { 65. * tile / TileStyle::Medium.size()[1] },
         header_fade_opacity: 0.5,
-        opacity: if binding == ToolbarNumericBinding::BrushOpacity { value } else { 1. },
+        opacity: 1.,
         text: format!(
             "{}: {}",
             localizer.text(if binding == ToolbarNumericBinding::BrushSize { MessageId::TOOL_CONTROL_GROUP_SIZE } else { binding.label() }),
@@ -228,110 +227,90 @@ pub fn slider_preview_layout(
     })
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct BrushStamp {
+    pub request_id: u64,
+    pub pending: bool,
     pub size: u32,
     /// The square footprint's diameter relative to the nominal brush diameter.
     pub extent: f32,
+    #[serde(serialize_with = "stamp_alpha")]
     pub alpha: Vec<u8>,
 }
-fn sample(mask: HostImage<'_>, u: f32, v: f32) -> f32 {
-    // Match the repeating, bilinear brush sampler, including grain seams.
-    let x = u * mask.width as f32 - 0.5;
-    let y = v * mask.height as f32 - 0.5;
-    let pixel = |x: i32, y: i32| {
-        mask.bytes[(y.rem_euclid(mask.height as i32) as u32 * mask.stride
-            + x.rem_euclid(mask.width as i32) as u32) as usize] as f32
-            / 255.
-    };
-    let (a, b) = (x - x.floor(), y - y.floor());
-    let (x, y) = (x.floor() as i32, y.floor() as i32);
-    (pixel(x, y) * (1. - a) + pixel(x + 1, y) * a) * (1. - b)
-        + (pixel(x, y + 1) * (1. - a) + pixel(x + 1, y + 1) * a) * b
+fn stamp_alpha<S:serde::Serializer>(alpha:&[u8],serializer:S)->Result<S::Ok,S::Error> {
+    serializer.serialize_bytes(alpha)
 }
-fn coverage(mask: Option<HostImage<'_>>, u: f32, v: f32, hardness: f32) -> f32 {
-    let radius = u.hypot(v);
-    if radius >= 1. {
-        0.
-    } else if let Some(mask) = mask {
-        sample(mask, u * 0.5 + 0.5, v * 0.5 + 0.5)
-    } else {
-        ((1. - radius) / (1. - hardness).max(2. / 192.)).clamp(0., 1.)
-    }
+#[derive(Default)]
+pub(crate) struct StampRequests {
+    next: u64,
+    flight: Option<(u64, ToolbarContext, BrushSnapshot, f32)>,
+    ready: Option<(ToolbarContext, BrushSnapshot, BrushStamp)>,
 }
-fn grain_coverage(
-    grain: Option<(&BrushGrain, HostImage<'_>)>,
-    local: [f32; 2],
-    world: [f32; 2],
-) -> f32 {
-    let Some((grain, mask)) = grain else {
-        return 1.;
-    };
-    let [u, v] = if grain.behavior == BrushGrainBehavior::Canvas {
-        world.map(|v| v / 256.)
-    } else {
-        local.map(|v| v * 0.5)
-    };
-    let (sin, cos) = grain.rotation_radians.sin_cos();
-    let alpha = sample(
-        mask,
-        (u * cos - v * sin) * grain.scale + 0.5,
-        (u * sin + v * cos) * grain.scale + 0.5,
-    );
-    1. - grain.depth + grain.depth * alpha
+impl StampRequests {
+    pub(crate) fn invalidate(&mut self) { self.flight=None; self.ready=None; }
 }
+
 impl<R: CanvasRenderer> UiSession<R> {
-    pub fn toolbar_stamp(&self, context: ToolbarContext) -> Result<BrushStamp, String> {
-        if context != self.state().toolbar_context() {
-            return Err("Obsolete brush preview".into());
-        }
-        let brush = self.engine().configured_brush();
-        let renderer = self.engine().backend();
-        let mask = match &brush.tip {
-            BrushTip::AnalyticEllipse => None,
-            BrushTip::Mask(id) => Some(renderer.tip_mask(id).ok_or("Brush tip is unavailable")?),
+    pub(crate) fn stamp_request(&self) -> Result<(BrushStampRequest, f32), String> {
+        let brush = self.engine().configured_brush().clone();
+        let point = StrokePoint { position: Point {x:0.,y:0.}, pressure: 1.,
+            tilt: [std::f32::consts::FRAC_PI_4, 0.], twist: 0., elapsed_micros: 0 };
+        let target = self.engine().document().working.target.unwrap_or(layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::INVALID));
+        let resolve = |brush| -> Result<Vec<layer_render::Dab>, String> {
+            let stroke = Stroke::new(StrokeId(1), target, StrokeTool::Brush, brush,
+                std::sync::Arc::<[StrokePoint]>::from([point])).map_err(|e| e.to_string())?;
+            let mut dabs = Vec::new();
+            layer_engine::DabGenerator::generate(&stroke,
+                self.engine().document().composition().color.space, &mut dabs);
+            Ok(dabs)
         };
-        let grain_mask = brush
-            .grain
-            .as_ref()
-            .map(|g| {
-                renderer
-                    .tip_mask(&g.asset)
-                    .ok_or("Brush grain is unavailable")
-            })
-            .transpose()?;
-        let size = 192;
-        let extent = (1. / brush.aspect).max(1.);
-        let (sin, cos) = brush.angle_radians.sin_cos();
-        let dry = brush.contact.and_then(|c|c.dry.map(|d|(c,d,d.pose(0.5))));
-        let mut alpha = Vec::with_capacity((size * size) as usize);
-        for y in 0..size {
-            for x in 0..size {
-                let x = ((x as f32 + 0.5) / size as f32 * 2. - 1.) * extent;
-                let y = ((y as f32 + 0.5) / size as f32 * 2. - 1.) * extent;
-                let (u, v) = (x * cos + y * sin, (-x * sin + y * cos) * brush.aspect);
-                let world = [x * brush.diameter * 0.5, y * brush.diameter * 0.5];
-                let value = if let Some((contact, dry, pose)) = dry {
-                    let paper = brush.grain.as_ref().zip(grain_mask).map_or(0.5, |(grain, image)| {
-                        let (sin, cos) = grain.rotation_radians.sin_cos();
-                        let [a,b] = [world[0]/image.width as f32, world[1]/image.height as f32];
-                        sample(image,(a*cos-b*sin)*grain.scale,(a*sin+b*cos)*grain.scale)
-                    });
-                    let exposure = dry.deposition([u/pose.radii[0],v/pose.radii[1]],
-                        [pose.radii[0],pose.radii[1]/brush.aspect],pose.relief,contact.pressure_gain,
-                        paper,contact.paper*brush.grain.as_ref().map_or(0.,|g|g.depth));
-                    1.-(-6.*brush.flow*brush.color_rgba_linear[3]*exposure).exp()
-                } else {
-                    coverage(mask,u,v,brush.hardness)
-                        *grain_coverage(brush.grain.as_ref().zip(grain_mask),[u,v],world)
-                };
-                alpha.push((value * 255.).round() as u8);
+        let dabs = resolve(brush.clone())?;
+        let mut geometry = brush.clone(); geometry.flow = 1.; geometry.opacity = 1.;
+        geometry.color_rgba_linear[3] = 1.;
+        let geometry = resolve(geometry)?;
+        let radius = geometry.iter().fold((brush.diameter*0.5).max(0.005), |radius, dab| {
+            let bounds = dab.bounds();
+            radius.max(bounds.min.x.abs()).max(bounds.min.y.abs())
+                .max(bounds.max.x.abs()).max(bounds.max.y.abs())
+        });
+        let bounds = layer_core::Rect { min: Point {x:-radius,y:-radius}, max: Point {x:radius,y:radius} };
+        let shape_only = self.state().brush.tool == Tool::Eraser
+            || matches!(brush.execution, layer_core::BrushExecution::Smudge|layer_core::BrushExecution::Liquify)
+            || crate::tools::is_retouching(self.state().brush.tool);
+        let shape_strength = shape_only.then(|| ToolbarNumericBinding::BrushStrength.field(self.state()).map_or(1., |f| f.value));
+        Ok((BrushStampRequest { style: DabStyle::for_brush(&brush, StrokeTool::Brush), dabs, bounds, shape_strength },
+            2.*radius/brush.diameter.max(0.01)))
+    }
+
+    pub fn toolbar_stamp(&mut self, context: ToolbarContext, known_request: Option<u64>) -> Result<Option<BrushStamp>, String> {
+        if context != self.state().toolbar_context() { return Err("Obsolete brush preview".into()); }
+        let mut delivered = None;
+        while let Some(result) = self.renderer_mut().take_brush_stamp() {
+            let image = result.map_err(|e| { self.brush_stamps.flight=None; e.to_string() })?;
+            if self.brush_stamps.flight.as_ref().is_some_and(|(id,_,_,_)|*id==image.request_id) {
+                let (id,owner,brush,extent)=self.brush_stamps.flight.take().unwrap();
+                if owner == context {
+                    let metadata = BrushStamp { request_id:id, pending:false,
+                        size:image.width, extent, alpha:Vec::new() };
+                    self.brush_stamps.ready = Some((owner, brush, metadata.clone()));
+                    delivered = Some(BrushStamp { alpha:image.bytes, ..metadata });
+                }
             }
         }
-        Ok(BrushStamp {
-            size,
-            extent,
-            alpha,
-        })
+        let brush = self.engine().configured_brush().clone();
+        let current = self.brush_stamps.ready.as_ref().is_some_and(|(owner, b, stamp)|
+            *owner == context && *b == brush &&
+            (known_request == Some(stamp.request_id) || delivered.as_ref().is_some_and(|d| d.request_id == stamp.request_id)));
+        if self.brush_stamps.flight.is_none() && !current {
+            let (request, extent) = self.stamp_request()?;
+            let id = self.brush_stamps.next.wrapping_add(1);
+            if self.renderer_mut().request_brush_stamp(id, &request).map_err(|e|e.to_string())? {
+                self.brush_stamps.next = id;
+                self.brush_stamps.flight = Some((id, context, brush, extent));
+            }
+        }
+        Ok(delivered.or_else(|| self.brush_stamps.ready.as_ref()
+            .filter(|(owner, _, _)| *owner == context).map(|(_, _, stamp)| stamp.clone()))
+            .map(|mut stamp| { stamp.pending = !current; stamp }))
     }
 }

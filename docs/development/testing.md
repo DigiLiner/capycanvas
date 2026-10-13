@@ -363,7 +363,30 @@ time does not establish a frame rate. Offscreen GPU numbers from
 machine but never replace a measurement on the tier's device. Regenerate bundled
 brush previews with `cargo run --locked --release -p layer-bench -- --brush-previews`.
 
+## Brush slider previews
+
+The shared `slider_stamp` tests validate completed contact plans for every built-in
+preset, consume-once buffer ownership, metadata polling and stale request handling.
+Renderer `brush_stamp` compares GPU masks with canonical coverage, including dry
+pressure-dependent contact and loading, texture, soft edges and completed bristle taps. GTK
+`native_toolbar_strength_preview_input` and Web `--toolbar-components`
+exercise retained popups, live Strength and texture updates, bookmarks and unchanged
+artwork/history in both themes. Android's
+`materialHardnessAndCanonicalStampsFollowNativeControls` covers the native controls
+and popup. Windows' native `toolbar_stamp_returns_alpha_bytes_and_rejects_stale_context`
+checks the asynchronous packet boundary.
+
 ## Known failures on main
+
+- Shared host failures reproduced on the preserved unmodified `beac20d007`
+  baseline: `a_layer_thumbnail_returns_the_same_bytes_after_a_stroke_is_undone`
+  reads identical checker pixels before and after the stroke;
+  `input_held_for_shaders_keeps_saving_waiting_until_it_is_delivered_or_cancelled`
+  reports a held-drag coordinate of `169.9999791283384, 99.99999999999999`.
+  Apple `apple_header_joins_adjacent_icon_controls_into_painter_bars` expects
+  `["capy"]` where the projection returns `["menu","tool","tool","tool"]`.
+  Fixture bodies and complete failure output match that baseline; keep their
+  assertions when checking brush changes.
 
 These fail on `main` independently of your change. Don't chase them unless they
 are your task, and remove an entry when you fix it.

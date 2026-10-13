@@ -158,6 +158,7 @@ enum Command {
     EffectValidation(layer_render::EffectValidationRequest),
     Telemetry(bool),
     Thumbnail(u64, layer_render::ThumbnailTarget),
+    BrushStamp(u64, layer_render::BrushStampRequest),
     Analysis(layer_core::ArtworkQuery, mpsc::Sender<Result<layer_render_wgpu::effect_analysis::Job, String>>),
     AcceptAnalysis(layer_render_wgpu::effect_analysis::Candidate),
     RetainAnalyses(Vec<OccurrenceHandle>),
@@ -197,6 +198,7 @@ enum Reply {
     SelectionPaint(u64, Result<layer_render::SelectionPaintResult, String>),
     EffectValidation(layer_render::EffectValidationResult),
     Thumbnail(ReadbackImage),
+    BrushStamp(Result<ReadbackImage, String>),
     ThumbnailCancelled(u64),
     ColorSample(Result<layer_render::ColorSample, String>),
     FilterPreviews(u64, Result<layer_render::FilterPreviewImage, String>),
@@ -290,6 +292,7 @@ pub struct RenderWorker {
     awaiting_color_adoption: Option<u64>,
     brush_sources: HashMap<AssetId, BrushSource>,
     thumbnails: VecDeque<ReadbackImage>,
+    brush_stamps: VecDeque<Result<ReadbackImage, String>>,
     cancelled_thumbnails: VecDeque<u64>,
     color_sample: Option<Result<layer_render::ColorSample, String>>,
     color_sample_pending: bool,
@@ -495,6 +498,7 @@ impl RenderWorker {
             awaiting_color_adoption: None,
             brush_sources: HashMap::new(),
             thumbnails: VecDeque::new(),
+            brush_stamps: VecDeque::new(),
             cancelled_thumbnails: VecDeque::new(),
             color_sample: None,
             color_sample_pending: false,
@@ -598,6 +602,7 @@ impl RenderWorker {
                     Reply::DisplayHeadroom(headroom, encoding) => { self.display_headroom = headroom; self.display_encoding = encoding; },
                     Reply::Screen(color) => self.screen_color = color,
                     Reply::ScreenClipped(generation, clipped) => if generation == self.screen_generation { self.screen_clipped = clipped },
+                    Reply::BrushStamp(image) => self.brush_stamps.push_back(image),
                 Reply::Error(error) => { self.snapshot_gpu = None; return Err(error); },
                     _ => (),
                 }
@@ -636,6 +641,7 @@ impl RenderWorker {
                     self.effect_validation = Some(result);
                 }
                 Reply::Thumbnail(image) => self.thumbnails.push_back(image),
+                Reply::BrushStamp(image) => self.brush_stamps.push_back(image),
                 Reply::ThumbnailCancelled(id) => self.cancelled_thumbnails.push_back(id),
                 Reply::ColorSample(color) => {
                     self.color_sample = Some(color);
@@ -688,6 +694,7 @@ impl RenderWorker {
         // Unconsumed initialization replies also own a device handle.
         for reply in self.replies.try_iter() { drop(reply); }
         self.thumbnails.clear();
+        self.brush_stamps.clear();
         self.filter_previews.clear();
         self.color_sample = None;
         self.region = None;
@@ -890,6 +897,14 @@ impl CanvasRenderer for RenderWorker {
     fn take_thumbnail(&mut self) -> Option<Result<ReadbackImage, Self::Error>> {
         self.thumbnails.pop_front().map(Ok)
     }
+    fn request_brush_stamp(&mut self, id:u64, request:&layer_render::BrushStampRequest) -> Result<bool,Self::Error> {
+        self.send(Command::BrushStamp(id,request.clone()))?;
+        Ok(true)
+    }
+    fn take_brush_stamp(&mut self) -> Option<Result<ReadbackImage,Self::Error>> {
+        if self.ready().is_err() { return Some(Err(BackendError("GPU worker failed"))); }
+        self.brush_stamps.pop_front().map(|result|result.map_err(|_|BackendError("Brush preview failed")))
+    }
     fn request_effect_analysis(&mut self, query: layer_core::ArtworkQuery) -> Result<bool, Self::Error> {
         if self.analysis_job.is_some() || self.analysis_candidate.is_some() { return Ok(false); }
         let (sender, receiver) = mpsc::channel();
@@ -979,11 +994,6 @@ impl CanvasRenderer for RenderWorker {
     type Error = BackendError;
     fn tip_outline(&self, asset: &AssetId) -> Option<&TipOutline> {
         self.brush_sources.get(asset).map(|source| &source.outline)
-    }
-    fn tip_mask(&self, asset: &AssetId) -> Option<HostImage<'_>> {
-        let source = &self.brush_sources.get(asset)?.image;
-        Some(HostImage { width: source.extent[0], height: source.extent[1],
-            stride: source.extent[0], format: source.format, bytes: &source.bytes })
     }
     fn resize_surface(&mut self, _: u32, _: u32) -> Result<(), Self::Error> {
         Ok(())
@@ -1158,6 +1168,8 @@ impl Worker {
         let mut selection_generation = 0;
         let mut region_generation = 0;
         let mut pending_thumbnails = VecDeque::new();
+        let mut pending_stamp = None;
+        let mut stamp_flight = false;
         let mut last_canvas_frame = std::time::Instant::now();
         let mut filter_preview_generation = 0;
         let mut document_drawn = false;
@@ -1248,6 +1260,19 @@ impl Worker {
                     .send(Reply::Thumbnail(image.map_err(error)?))
                     .map_err(error)?;
             }
+            if let Some(image) = self.renderer.take_brush_stamp() {
+                stamp_flight = false;
+                reply.send(Reply::BrushStamp(image.map_err(error))).map_err(error)?;
+            }
+            if !stamp_flight && pending_frames.is_empty()
+                && let Some((id,request)) = pending_stamp.as_ref()
+            {
+                match self.renderer.request_brush_stamp(*id,request) {
+                    Ok(true) => { pending_stamp=None; stamp_flight=true; },
+                    Ok(false) => (),
+                    Err(failure) => { pending_stamp=None; reply.send(Reply::BrushStamp(Err(error(failure)))).map_err(error)?; },
+                }
+            }
             if let Some(color) = self.renderer.take_color_sample() {
                 reply
                     .send(Reply::ColorSample(color.map_err(error)))
@@ -1295,6 +1320,7 @@ impl Worker {
                 || self.renderer.effect_validation_pending()
                 || self.renderer.filter_previews_pending()
                 || self.pending_present
+                || stamp_flight || pending_stamp.is_some()
                 || self.renderer.thumbnails_pending()
                 || !pending_thumbnails.is_empty()
                 || self.renderer.color_sample_pending()
@@ -1506,6 +1532,7 @@ impl Worker {
                             .map_err(error)?;
                     }
                 }
+                Command::BrushStamp(id, request) => { pending_stamp=Some((id,request)); }
                 Command::Thumbnail(id, target) => {
                     pending_thumbnails.push_back((id, target));
                 }

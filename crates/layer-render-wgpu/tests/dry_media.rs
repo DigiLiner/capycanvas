@@ -103,9 +103,13 @@ fn relief_q(position: [f64; 2], brush: &BrushSnapshot) -> f64 {
     u*u+v*v
 }
 
-fn resolved_dry_flow(brush: &BrushSnapshot) -> f64 {
-    let flow = f64::from(brush.flow);
-    flow/(8.-7.*flow)
+fn material_pressure(pressure: f64, brush: &BrushSnapshot) -> f64 {
+    (pressure*f64::from(brush.contact.unwrap().pressure_gain)).clamp(0., 1.)*f64::from(brush.flow)
+}
+
+fn material_response(pressure:f64, brush:&BrushSnapshot)->(f64,f64) {
+    let hardness=f64::from(brush.contact.unwrap().dry.unwrap().loading);
+    (pressure,1.-hardness+hardness*pressure)
 }
 
 fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
@@ -113,7 +117,8 @@ fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
     let dry = contact.dry.unwrap();
     let profile = dry.poses[0].relief.map(f64::from);
     let height = if y % 16 < 8 { 1. } else { 0. };
-    let pressure = (pressure*f64::from(contact.pressure_gain)).clamp(0., 1.);
+    let pressure = material_pressure(pressure, brush);
+    let (contact_pressure,loading)=material_response(pressure,brush);
     let d = 0.5 - (0.5 + f64::from(contact.paper) * (height - 0.5)).clamp(0., 1.);
     let mut chord = 0.;
     let mut deposition = 0.;
@@ -126,11 +131,11 @@ fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
             relief_q([x, y as f64-128.], brush)
         };
         let recess = profile[0] + profile[1]*relief_q + profile[2]*relief_q*relief_q;
-        let x = ((0.5*pressure - recess - (1. + 0.25*recess)*d) / f64::from(dry.softness)).clamp(0., 1.);
-        deposition += x*x*(3.-2.*x) * (1.-f64::from(dry.loading)*(1.-pressure));
+        let x = ((0.5*contact_pressure - recess - (1. + 0.25*recess)*d) / f64::from(dry.softness)).clamp(0., 1.);
+        deposition += x*x*(3.-2.*x) * loading;
     }
     if chord == 0. { return 0; }
-    ((1. - (-6.*resolved_dry_flow(brush)*f64::from(brush.opacity*brush.color_rgba_linear[3])*deposition/chord).exp())*255.).round() as u8
+    ((1. - (-6.*f64::from(brush.opacity*brush.color_rgba_linear[3])*deposition/chord).exp())*255.).round() as u8
 }
 
 #[test]
@@ -171,7 +176,7 @@ fn swept_contact_matches_independent_quadrature_for_ellipse_and_rounded_block() 
                         if angle > 0. {
                             for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses { pose.radii = [1.2, 0.6]; }
                         }
-                        let image = line(brush.clone(), pressure, 0., Run::default());
+                        let image = line(brush.clone(), pressure, if *offset==0. {0.} else {0.5}, Run::default());
                         for y in 84..173 {
                             let actual = image.rgba[(y * 256 + 128)*4 + 3];
                             let expected = reference_alpha(y, pressure as f64, &brush);
@@ -190,15 +195,15 @@ fn swept_contact_matches_independent_quadrature_for_ellipse_and_rounded_block() 
 fn pointy_tip_contrast_tracks_stylus_pose_when_motion_reverses() {
     let mut brush = default_brush(DefaultBrushPreset::PointyPencil);
     brush.diameter = 24.;
-    brush.flow = 0.3;
+    assert_eq!(brush.flow,1.);
     brush.mappings = Arc::from([]);
     brush.grain = None;
     brush.contact.as_mut().unwrap().paper = 0.;
     for (tilt, vertical, distance) in [
         ([0., 0.], true, 3),
-        ([0.5*std::f32::consts::FRAC_PI_2, 0.], true, 6),
-        ([0.85*std::f32::consts::FRAC_PI_2, 0.], true, 30),
-        ([0., 0.85*std::f32::consts::FRAC_PI_2], false, 30),
+        ([0.5*std::f32::consts::FRAC_PI_2, 0.], true, 8),
+        ([0.85*std::f32::consts::FRAC_PI_2, 0.], true, 43),
+        ([0., 0.85*std::f32::consts::FRAC_PI_2], false, 43),
     ] {
         let mut tip_and_back = Vec::new();
         for reverse in [false, true] {
@@ -214,8 +219,24 @@ fn pointy_tip_contrast_tracks_stylus_pose_when_motion_reverses() {
             };
             let alpha = |(x, y): (usize, usize)| image.rgba[(y*256+x)*4+3];
             let result = (alpha(tip), alpha(back));
-            assert!(result.0 > result.1.saturating_add(12),
-                "tilt={tilt:?} vertical={vertical} reverse={reverse}: tip/back alpha={result:?}");
+            if tilt==[0.;2] {
+                assert!(result.0.abs_diff(result.1)<=2,"upright contact has no directional offset: {result:?}");
+            } else {
+                assert!(result.0 > result.1.saturating_add(12),
+                    "tilt={tilt:?} vertical={vertical} reverse={reverse}: tip/back alpha={result:?}");
+            }
+            if tilt!=[0.;2] && !reverse {
+                let mut previous=brush.clone();previous.contact.as_mut().unwrap().dry.as_mut().unwrap().relief_offset=0.35;
+                let old=paint(previous,Run::default(),|t| {
+                    let travel=48.5+160.*t;let position=if vertical {[128.5,travel]}else{[travel,128.5]};
+                    (position,0.65,tilt)
+                });
+                let old_alpha=|(x,y):(usize,usize)|old.rgba[(y*256+x)*4+3];
+                let old_contrast=i16::from(old_alpha(tip))-i16::from(old_alpha(back));
+                let contrast=i16::from(result.0)-i16::from(result.1);
+                assert!(contrast>old_contrast,"stronger Pointy offset must improve tip/heel contrast: tilt={tilt:?} old={old_contrast} new={contrast}");
+                println!("Pointy tilt={tilt:?}: old contrast={old_contrast}, strengthened contrast={contrast}");
+            }
             tip_and_back.push(result);
         }
         assert!(tip_and_back[0].0.abs_diff(tip_and_back[1].0) <= 5,
@@ -227,10 +248,10 @@ fn pointy_tip_contrast_tracks_stylus_pose_when_motion_reverses() {
     let (sin, cos) = brush.angle_radians.sin_cos();
     let rotated = paint(brush, Run::default(), |t| {
         let travel = 160.*t-80.;
-        ([128.5-travel*sin, 128.5+travel*cos], 0.65, [0.; 2])
+        ([128.5-travel*sin, 128.5+travel*cos], 0.65, [std::f32::consts::FRAC_PI_4,0.])
     });
     let alpha = |x: usize, y: usize| rotated.rgba[(y*256+x)*4+3];
-    let (dx, dy) = ((3.*cos).round() as usize, (3.*sin).round() as usize);
+    let (dx, dy) = ((8.*cos).round() as usize, (8.*sin).round() as usize);
     let tip = alpha(128-dx, 128-dy);
     let back = alpha(128+dx, 128+dy);
     assert!(tip > back.saturating_add(12),
@@ -277,6 +298,7 @@ fn dry_exposure_preserves_path_partition_cadence_and_masks() {
 fn every_dry_medium_preserves_committed_pressure_and_tilt_with_prediction_and_zoom() {
     for preset in PRESETS {
         let mut brush = default_brush(preset);
+        brush.stabilization.strength = 0.;
         brush.diameter = 90.;
         let path = |t: f32| ([32.5 + 192.*t, 128.5 + 20.*(t*std::f32::consts::TAU).sin()],
             0.15 + 0.8*(t*std::f32::consts::PI).sin(),
@@ -308,6 +330,53 @@ fn pressure_recruits_contacts_without_forcing_the_rim_or_zero_force_to_paint() {
             if pressure == 1. { assert!(recruited > 0, "{preset:?}: pressure must recruit empty contacts"); }
             previous = image.rgba;
         }
+    }
+    for (corner,offset) in [(0.,0.),(0.35,0.),(0.,0.35)] {
+        let mut brush=analytic(corner,1.4);brush.flow=0.4;
+        brush.contact.as_mut().unwrap().pressure_gain=0.85;
+        let dry=brush.contact.as_mut().unwrap().dry.as_mut().unwrap();dry.relief_offset=offset;
+        for pose in &mut dry.poses {pose.radii=[1.,0.65];}
+        let reduced=line(brush.clone(),0.8,0.75,Run::default());
+        let mut reference=brush.clone();reference.flow=1.;reference.contact.as_mut().unwrap().pressure_gain=1.;
+        let low=line(reference.clone(),0.272,0.75,Run::default());
+        reduced.assert_near(&low,2,&format!("Strength scales clamped material pressure only: corner={corner} offset={offset}"));
+        let full=line(reference.clone(),1.,0.75,Run::default());
+        let lost=full.rgba.chunks_exact(4).zip(reduced.rgba.chunks_exact(4)).filter(|(a,b)|a[3]>0 && b[3]==0).count();
+        assert!(lost>0,"corner={corner} offset={offset}: reduced Strength removes eligible contacts, not just their pigment dose");
+        println!("Strength pressure control: corner={corner} offset={offset} lost_contacts={lost} material_pressure=0.272");
+        for y in 88..169 {
+            let expected=reference_alpha(y,0.8,&brush);let actual=reduced.rgba[(y*256+128)*4+3];
+            assert!(actual.abs_diff(expected)<=2,"Strength pressure quadrature corner={corner} offset={offset} y={y}: GPU {actual}, expected {expected}");
+        }
+        brush.flow=0.;let empty=line(brush,0.8,0.75,Run::default());
+        assert!(empty.rgba.chunks_exact(4).all(|p|p[3]==0),"corner={corner} offset={offset}: Strength zero");
+    }
+    for hardness in [0.,0.5,1.] {
+        let mut brush=analytic(0.,1.4);brush.flow=0.3;
+        brush.contact.as_mut().unwrap().pressure_gain=0.85;
+        brush.contact.as_mut().unwrap().dry.as_mut().unwrap().loading=hardness;
+        let low=line(brush.clone(),0.8,0.,Run::default());
+        for y in 88..169 {
+            let actual=low.rgba[(y*256+128)*4+3];let expected=reference_alpha(y,0.8,&brush);
+            assert!(actual.abs_diff(expected)<=2,"hardness={hardness} y={y}: GPU{actual} independent{expected}");
+        }
+        brush.flow=0.8;let high=line(brush.clone(),0.8,0.,Run::default());
+        let mut recruited=0;let mut empty=0;
+        for (a,b) in low.rgba.chunks_exact(4).zip(high.rgba.chunks_exact(4)) {
+            assert!(b[3]>=a[3],"hardness={hardness}: material pressure loses contact");
+            recruited+=usize::from(a[3]==0 && b[3]>0);
+            empty+=usize::from(b[3]==0);
+        }
+        assert!(recruited>0 && empty>0,"hardness={hardness}: pressure recruits contacts while recessed paper stays empty");
+    }
+    for (preset,prior_gain) in [(DefaultBrushPreset::Pencil,1.),(DefaultBrushPreset::PointyPencil,1.),(DefaultBrushPreset::ShadingPencil,0.9),(DefaultBrushPreset::Crayon,1.)] {
+        let mut current=default_brush(preset);current.flow=1.;
+        let mut prior=current.clone();prior.flow=0.7;prior.contact.as_mut().unwrap().pressure_gain=prior_gain;
+        for pressure in [0.25,0.7,1.] {for tilt in [0.,0.5,0.85] {
+            let actual=line(current.clone(),pressure,tilt,Run::default());
+            let expected=line(prior.clone(),pressure,tilt,Run::default());
+            actual.assert_near(&expected,2,&format!("{preset:?}: maximum matches prior70 pressure={pressure} tilt={tilt}"));
+        }}
     }
     let image = line(analytic(0., 0.), 1., 0., Run::default());
     assert!(image.rgba[(128*256+128)*4+3] > 0);
@@ -391,7 +460,8 @@ fn fine_contact_alpha_matches_independent_pixel_area_for_rotated_sweeps() {
         let radius = f64::from(diameter)*0.5;
         let half = radius*((normal[0]*c+normal[1]*s).powi(2)
             +0.25*(-normal[0]*s+normal[1]*c).powi(2)).sqrt();
-        let alpha = 1.-(-6.*resolved_dry_flow(&brush)*0.85).exp();
+        let (_,loading) = material_response(material_pressure(0.5, &brush),&brush);
+        let alpha = 1.-(-6.*loading).exp();
         for y in 120..137 { for x in 120..137 {
             let expected = (255.*alpha*strip_pixel_area([x, y], center, normal, half)).round() as u8;
             let actual = image.rgba[(y*256+x)*4+3];
@@ -412,14 +482,14 @@ fn fine_stationary_contact_matches_independent_two_dimensional_pixel_integration
         let mut brush=analytic(0.,paper);brush.diameter=diameter;brush.angle_radians=angle;
         brush.contact.as_mut().unwrap().dry.as_mut().unwrap().relief_offset=offset;
         for pose in &mut brush.contact.as_mut().unwrap().dry.as_mut().unwrap().poses {pose.relief=relief;}
-        let image=paint(brush.clone(),Run {samples:2,..Default::default()},|_|(center,pressure,[0.;2]));
+        let image=paint(brush.clone(),Run {samples:2,..Default::default()},|_|(center,pressure,if offset==0. {[0.;2]}else{[std::f32::consts::FRAC_PI_4,0.]}));
         let material=brush.contact.unwrap();let dry=material.dry.unwrap();
         for y in 124..133 {for x in 124..133 {
             let height=if y%16<8 {1.} else {0.};
             let depth=0.5-(0.5+f64::from(paper)*(height-0.5)).clamp(0.,1.);
-            let p=f64::from(pressure);
-            let dose=6.*resolved_dry_flow(&brush)*f64::from(brush.opacity*brush.color_rgba_linear[3]);
-            let loading=1.-f64::from(dry.loading)*(1.-p);
+            let p=material_pressure(f64::from(pressure), &brush);
+            let dose=6.*f64::from(brush.opacity*brush.color_rgba_linear[3]);
+            let (contact_pressure,loading)=material_response(p,&brush);
             let mut alpha=0.;
             for sy in 0..256 {for sx in 0..256 {
                 let q=contact_q([x as f64+(sx as f64+0.5)/256.-f64::from(center[0]),
@@ -429,7 +499,7 @@ fn fine_stationary_contact_matches_independent_two_dimensional_pixel_integration
                     x as f64+(sx as f64+0.5)/256.-f64::from(center[0]),
                     y as f64+(sy as f64+0.5)/256.-f64::from(center[1])], &brush) };
                 let recess=f64::from(relief[0])+relief_q*(f64::from(relief[1])+f64::from(relief[2])*relief_q);
-                let t=((0.5*p-recess-(1.+0.25*recess)*depth)/f64::from(dry.softness)).clamp(0.,1.);
+                let t=((0.5*contact_pressure-recess-(1.+0.25*recess)*depth)/f64::from(dry.softness)).clamp(0.,1.);
                 alpha+=1.-(-dose*loading*t*t*(3.-2.*t)).exp();
             }}
             let expected=(255.*alpha/65536.).round() as u8;

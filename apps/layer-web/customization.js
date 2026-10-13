@@ -6,7 +6,7 @@ import { colorButton, pickerButtonAction, updatePaintPairIcon } from './color-co
 // widgets and animation, not catalogs, validation, selection or docking policy.
 export function createCustomization({ app, catalog, state, paintPair, workspace, panels, groups,
   element, button, icon, numberField, panelFrame,
-  dispatch, draggable, grip, place, updateZen, editor }) {
+  dispatch, draggable, grip, place, updateZen, editor, rasterWorker }) {
   const send = (action) => dispatch({ type: "customize", action });
   const views = new Map(), fields = new Map(), panelViewKeys = new WeakMap();
   const tileResize = new ResizeObserver(entries => {
@@ -280,7 +280,7 @@ export function createCustomization({ app, catalog, state, paintPair, workspace,
     for(const row of node.querySelectorAll("[data-control]")) row.disposeEditor?.();
   }
   function tileWidget(panel, view, tile) {
-    if (tile.component) return createToolbarComponent({ app, tile, view, element, button, icon, dispatch, draggable, target, place, panel });
+    if (tile.component) return createToolbarComponent({ app, tile, view, element, button, icon, dispatch, draggable, target, place, panel, rasterWorker });
     const root = element("div", "tile-button tool-tile"); root.dataset.tile = tile.id;
     const item = { kind: "tile", panel, tile: tile.id };
     if (tile.control.kind === "divider") {

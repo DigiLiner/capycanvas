@@ -17,7 +17,7 @@ is a fixed-size GPU record:
 | `rotation: f32x2` | Precomputed cosine and sine |
 | `motion: f32x2` | Document-space movement for destination-aware stages |
 | `color: f32x4` | Resolved linear per-contact color and alpha |
-| `flow: f32` | Resolved pigment feed; analytic dry media calibrate Strength as `s/(8-7*s)` after pressure mappings |
+| `flow: f32` | Resolved pigment feed; analytic dry media use one and carry Strength-scaled pressure in contact |
 | `hardness: f32` | Analytic edge hardness |
 | `texture_sign: f32x2` | Pre-resolved horizontal and vertical tip flips |
 | `material: f32x4` | Grain depth, pull, remaining paint charge, and deform strength |

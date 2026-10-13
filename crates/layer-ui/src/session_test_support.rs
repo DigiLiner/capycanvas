@@ -209,12 +209,6 @@ impl CanvasRenderer for Recorder {
             })
         })
     }
-    fn tip_mask(&self, asset: &AssetId) -> Option<HostImage<'_>> {
-        (asset == &AssetId::from("preview-test")).then_some(HostImage {
-            width: 4, height: 4, stride: 4, format: layer_render::PixelFormat::R8Unorm,
-            bytes: &[255,255,255,255,255,0,0,255,255,0,0,255,255,255,255,255],
-        })
-    }
     fn resize_surface(&mut self, _: u32, _: u32) -> Result<(), Self::Error> {
         Ok(())
     }

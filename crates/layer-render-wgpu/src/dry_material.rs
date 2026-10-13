@@ -41,11 +41,45 @@ pub(super) fn shader_source(space: layer_core::color::RgbSpace, target: Target, 
         concat!(include_str!("changed_cells.wgsl"), "\n@group(0) @binding(3) var<storage,read_write> changed_cells:ChangedCells;")
     } else { "fn mark_changed_cell(pixel:vec2<u32>) {}" };
     compose_wgsl(&[
-        &working_color::source(space), include_str!("blend_modes.wgsl"), &shader_destination(target), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"), material,
-        include_str!("brush_footprint.wgsl"),
-        tracking, include_str!("analytic_coverage.wgsl"), include_str!("brush_coverage.wgsl"),
-        include_str!("contact.wgsl"), include_str!("relief.wgsl"), include_str!("bristle.wgsl"), include_str!("selection_clip.wgsl"),
+        &working_color::source(space), include_str!("blend_modes.wgsl"), &shader_destination(target), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"),
+        include_str!("material_common.wgsl"), include_str!("material_clone.wgsl"),
+        include_str!("material_pointwise.wgsl"), include_str!("material_transport.wgsl"),
+        include_str!("material_contact.wgsl"), material, include_str!("material_compute.wgsl"),
+        tracking, &coverage_source(u32::MAX), include_str!("selection_clip.wgsl"),
     ])
+}
+
+pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
+    if flags!=u32::MAX && flags&64!=0 {
+        compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("contact_field.wgsl"),
+            include_str!("relief.wgsl"),include_str!("dry_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
+    } else {
+        compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("analytic_coverage.wgsl"),
+            include_str!("brush_coverage.wgsl"),include_str!("contact_field.wgsl"),
+            include_str!("contact.wgsl"),include_str!("relief.wgsl"),include_str!("bristle.wgsl"),
+            include_str!("brush_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
+    }
+}
+
+pub(super) fn specialize_contact(source: Cow<'static,str>, flags:u32)->Cow<'static,str> {
+    if flags==u32::MAX {return source;}
+    source.replace("override CONTACT_FLAGS: u32 = 4294967295u;",
+        &format!("const CONTACT_FLAGS: u32 = {flags}u;")).into()
+}
+
+fn kernel_source(space:layer_core::color::RgbSpace,target:Target,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
+    let tracking=if matches!(target,Target::Tracked|Target::DisplayTracked) {
+        concat!(include_str!("changed_cells.wgsl"),"\n@group(0) @binding(3) var<storage,read_write> changed_cells:ChangedCells;")
+    } else {"fn mark_changed_cell(pixel:vec2<u32>) {}"};
+    let leaf=if flags!=u32::MAX && flags&64!=0 {include_str!("dry_material_contact.wgsl")} else {include_str!("material_contact.wgsl")};
+    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_modes.wgsl"),
+        &shader_destination(target),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),
+        include_str!("retouch_sample.wgsl"),include_str!("material_common.wgsl"),include_str!("material_clone.wgsl"),
+        include_str!("material_pointwise.wgsl"),leaf,
+        "fn material_result(p:vec4<f32>)->MaterialOutput {return pointwise_material_result(p);}",
+        include_str!("material_compute.wgsl"),tracking,&coverage_source(flags),include_str!("selection_clip.wgsl")]);
+    specialize_contact(source,flags)
+        .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32)).into()
 }
 
 /// Dry dabs carry their color in the space they lay over paint in: the
@@ -71,7 +105,7 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
         let m=d.metric;
         let v=[d.dab.motion[0]*m[0]+d.dab.motion[1]*m[1],d.dab.motion[0]*m[2]+d.dab.motion[1]*m[3]];
         if dry.corner==0. {
-            let offset = dry.relief_offset / (m[0]*m[0]+m[1]*m[1]);
+            let offset = dry.relief_offset * d.dab.material[3] / (m[0]*m[0]+m[1]*m[1]);
             let tip = [m[0]*offset,m[1]*offset];
             let speed=v[0].hypot(v[1]);
             let inverse=if speed*speed>=0.00000001 {speed.recip()} else {0.};
@@ -98,10 +132,8 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
 const OPERATIONS: [MaterialOperation; 3] = [MaterialOperation::Deposit, MaterialOperation::Coverage, MaterialOperation::Clone];
 type Kernels = [Deferred<wgpu::ComputePipeline>; 2 * OPERATIONS.len()];
 
-fn kernel_constants(target: Target, operation: MaterialOperation, flags: u32) -> [(&'static str, f64); 3] {
+fn kernel_constants(target: Target, flags: u32) -> [(&'static str, f64); 1] {
     [
-        ("MATERIAL_OPERATION", operation as u32 as f64),
-        ("CONTACT_FLAGS", f64::from(flags)),
         if matches!(target, Target::Display | Target::DisplayTracked) {
             ("MATERIAL_PREVIEW_CONTRIBUTION", f64::from(flags != u32::MAX && flags & 1024 != 0))
         } else {
@@ -187,12 +219,19 @@ impl Pipelines {
                 })
         });
         let make_kernels = |flags: u32| {
+            let shaders=OPERATIONS.map(|operation| {
+                let device=device.for_recipe();
+                Deferred::new(move||device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label:Some("layer specialized contact shader"),
+                    source:wgpu::ShaderSource::Wgsl(kernel_source(device.working_space(),target,flags,operation)),
+                }))
+            });
             std::array::from_fn(|index| {
                 let layout = pipeline_layouts[index % 2].clone();
                 let entry = if matches!(target, Target::Display | Target::DisplayTracked) { "compute_display_color" }
                     else if index % 2 == 0 { "compute_color" } else { "compute_coverage" };
                 let label = format!("dry material {target:?} {entry} operation={} contact={flags:#x}", OPERATIONS[index / 2] as u32);
-                let (device, shader) = (device.for_recipe(), shader.clone());
+                let (device, shader) = (device.for_recipe(), shaders[index/2].clone());
                 Deferred::pipeline(move |mode| {
                     mode.compute(
                         &device,
@@ -202,7 +241,7 @@ impl Pipelines {
                             module: &shader,
                             entry_point: Some(entry),
                             compilation_options: wgpu::PipelineCompilationOptions {
-                                constants: &kernel_constants(target, OPERATIONS[index / 2], flags),
+                                constants: &kernel_constants(target, flags),
                                 ..Default::default()
                             },
                             cache: None,
@@ -432,7 +471,7 @@ impl WgpuRasterizer {
     }
 }
 
-fn dry_material_compute_eligible(style: &layer_render::DabStyle) -> bool {
+pub(super) fn dry_material_compute_eligible(style: &layer_render::DabStyle) -> bool {
     pointwise(style) && style.rendering.blend_mode == BrushBlendMode::Normal
 }
 
@@ -457,9 +496,18 @@ mod tests {
 
     #[test]
     fn pipeline_overrides_are_used_by_the_entry_point() {
-        for target in [Target::Exact, Target::InPlace, Target::Tracked, Target::Display, Target::DisplayTracked] {
-            let source = shader_source(Default::default(), target, include_str!("material_brush.wgsl"));
+        let mut families=std::collections::BTreeSet::from([0,u32::MAX]);
+        for preset in layer_core::CONTACT_BRUSH_PRESETS {
+            let flags=contact_flags(layer_core::default_brush(preset).contact);
+            families.extend([flags,flags|128,flags|8192,flags|16384,flags|8192|16384]);
+        }
+        for target in [Target::Exact, Target::InPlace, Target::Tracked, Target::Display, Target::DisplayTracked] {for &flags in &families {for operation in OPERATIONS {
+            let source = kernel_source(Default::default(),target,flags,operation);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
+            assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
+            if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
+            assert!(!module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("MATERIAL_OPERATION")));
+            assert!(source.contains(&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32)));
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module).unwrap();
             let entries: &[&str] = if matches!(target, Target::Display | Target::DisplayTracked) {
@@ -477,13 +525,11 @@ mod tests {
                 used.entry_points.retain(|e| e.name == entry);
                 assert_eq!(used.entry_points.len(), 1);
                 naga::compact::compact(&mut used, naga::compact::KeepUnused::No);
-                for operation in OPERATIONS {
-                    for (name, _) in kernel_constants(target, operation, u32::MAX) {
-                        assert!(used.overrides.iter().any(|(_, value)| value.name.as_deref() == Some(name)),
-                            "{target:?}/{entry} supplies unused override {name}");
-                    }
+                for (name, _) in kernel_constants(target, flags) {
+                    assert!(used.overrides.iter().any(|(_, value)| value.name.as_deref() == Some(name)),
+                        "{target:?}/{entry}/{operation:?} supplies unused override {name}");
                 }
             }
-        }
+        }}}
     }
 }

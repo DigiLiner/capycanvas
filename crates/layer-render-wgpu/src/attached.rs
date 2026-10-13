@@ -204,11 +204,12 @@ impl CanvasRenderer for AttachedRenderer {
     fn take_thumbnail(&mut self) -> Option<Result<ReadbackImage, Self::Error>> {
         self.0.as_mut()?.take_thumbnail()
     }
+    fn request_brush_stamp(&mut self,id:u64,request:&layer_render::BrushStampRequest)->Result<bool,Self::Error> {
+        self.gpu()?.request_brush_stamp(id,request)
+    }
+    fn take_brush_stamp(&mut self)->Option<Result<ReadbackImage,Self::Error>> {self.0.as_mut()?.take_brush_stamp()}
     fn tip_outline(&self, id: &AssetId) -> Option<&TipOutline> {
         self.0.as_ref()?.tip_outline(id)
-    }
-    fn tip_mask(&self, id: &AssetId) -> Option<HostImage<'_>> {
-        self.0.as_ref()?.tip_mask(id)
     }
     fn resize_surface(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
         if let Some(gpu) = &mut self.0 {

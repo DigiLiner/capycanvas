@@ -2202,14 +2202,6 @@ fn slider_preview_gestures(d: &mut Driver, devices: &[&str]) {
     let id = component_id(d, ToolbarControl::BrushSizeSlider);
     for &device in devices {
         let context = state(&d.w).toolbar_context();
-        let stamp =
-            ui_session(&d.w)
-                .toolbar_stamp(context);
-        assert!(
-            stamp.is_ok(),
-            "{device}: preview assets ready: {:?}",
-            stamp.err()
-        );
         let scale = d.named(&format!("component-slider-{id}"));
         let center = d.point(&scale);
         let p = [center[0], center[1] - 23.];
@@ -2461,4 +2453,84 @@ fn tonal_toolbar_range_input(pen: bool) {
     old.set_value(-9.); pump(80);
     assert!(state(&d.w).host_error.is_none(), "retired range cannot send stale edits");
     d.finish();
+}
+
+#[test]
+#[ignore = "private Mutter: --native-test=native_toolbar_strength_preview_input"]
+fn native_toolbar_strength_preview_input() {
+    let mut d=Driver::new("art.capycanvas.ToolbarStrengthPreview");
+    restore(&d,WorkspacePreset::Painter);
+    let history=|d:&Driver| {let s=ui_session(&d.w);let e=s.engine();(e.document().revision,e.can_undo(),e.can_redo(),e.metrics().committed_strokes)};
+    let before=history(&d);let mut reports=Vec::new();let mut defaults=Vec::new();
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        for (id,name,loading) in [(2,"Pencil",0.9),(25,"Pointy",0.95),(26,"ShadingPencil",0.85),(27,"Charcoal",0.55),(6,"Chalk",0.15),(17,"Pastel",0.5),(43,"Crayon",0.9)] {
+            d.w.dispatch(UiAction::SelectBrush {id});pump(80);let s=state(&d.w);
+            let ids=s.tool_settings.iter().map(|f|f.id).collect::<Vec<_>>();assert_eq!(ids,["size","flow","grain_depth","material_hardness","angle","opacity","smoothing_strength"]);
+            let smoothing=s.tool_settings.last().unwrap();assert_eq!(smoothing.group_id,"tool-setting-group-smoothing");assert_eq!((smoothing.numeric.min,smoothing.numeric.max,smoothing.numeric.scale),(0.,1.,100.));
+            assert_eq!(s.tool_settings.iter().find(|f|f.id=="flow").unwrap().value,1.,"{name}: default Strength100");
+            let material=s.tool_settings.iter().find(|f|f.id=="material_hardness").unwrap();assert_eq!(material.label.as_ref(),"Material hardness");assert_eq!((material.numeric.max,material.numeric.scale),(1.,100.));assert!((material.value-loading).abs()<1e-6,"{name}: authored Material hardness default");
+            defaults.push(serde_json::json!({"theme":format!("{theme:?}"),"brush":name,"preset":id,"fields":s.tool_settings}));
+            d.capture_canvas(&format!("default-{name}-{theme:?}.png"));
+        }
+    }
+    for theme in [Theme::Light,Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
+        for (id,name) in [(2,"Pencil"),(25,"Pointy"),(43,"Crayon"),(3,"Eraser"),(10,"Smudge")] {
+            d.w.dispatch(UiAction::SelectBrush {id});
+            for (field,value) in [("size",64.),("opacity",1.),("flow",0.25)] {d.w.dispatch(UiAction::SetToolSetting {id:field.into(),value});}
+            d.w.dispatch(UiAction::Customize {action:CustomizationAction::CloseExpanded});pump(250);
+            let tile=component_id(&d,ToolbarControl::BrushStrengthSlider);
+            d.click_name(&format!("tile-{tile}"));
+            let popup=descendant::<gtk::Popover>(&d.named(&format!("tile-{tile}")).parent().unwrap())
+                .filter(|p|p.widget_name()=="brush-slider-preview")
+                .or_else(||find_named(d.w.window.upcast_ref(),"brush-slider-preview").and_then(|p|p.downcast::<gtk::Popover>().ok())).unwrap();
+            until(||popup.is_mapped(),"Strength popup mapped");
+            let area=popup.child().and_downcast::<gtk::Overlay>().unwrap().child().unwrap();
+            let mut low=Vec::new();let delivered=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||until(||{low=slider_stamp_pixels(&area);low.iter().any(|&v|v>0)},"GPU Strength stamp delivered")));
+            if let Err(failure)=delivered {
+                capture_popover(&popup,d.input.dir.join(format!("failed-strength-{name}-{theme:?}.png")).to_str().unwrap());
+                let probe={let mut s=ui_session_mut(&d.w);let context=s.state().toolbar_context();s.toolbar_stamp(context,None)};
+                let diagnostic=serde_json::json!({"brush":name,"theme":format!("{theme:?}"),"area":[area.width(),area.height()],"mapped":area.is_mapped(),"alpha":low,"published":state(&d.w),"stamp_probe_after_timeout":probe});
+                std::fs::write(d.input.dir.join("failed-strength.json"),serde_json::to_vec_pretty(&diagnostic).unwrap()).unwrap();
+                std::panic::resume_unwind(failure);
+            }
+            let low_sum:u64=low.iter().map(|&v|v as u64).sum();
+            capture_popover(&popup,d.input.dir.join(format!("strength-{name}-25-{theme:?}.png")).to_str().unwrap());
+            d.w.dispatch(UiAction::SetToolSetting {id:"flow".into(),value:1.});
+            let mut full=Vec::new();until(||{full=slider_stamp_pixels(&area);full.iter().map(|&v|v as u64).sum::<u64>()>low_sum},"Strength refreshes the existing popup image");
+            assert!(popup.is_mapped());assert_eq!(popup.child().and_downcast::<gtk::Overlay>().unwrap().child().unwrap(),area,"value updates retain popup canvas");
+            let full_sum:u64=full.iter().map(|&v|v as u64).sum();assert!(full_sum>low_sum,"{name}: Strength changes rendered alpha");
+            assert!(full.iter().any(|&v|v>0&&v<255),"{name}: textured or soft contact edge");
+            capture_popover(&popup,d.input.dir.join(format!("strength-{name}-100-{theme:?}.png")).to_str().unwrap());
+            if id==25 {
+                let width=area.width() as usize;let points=full.iter().enumerate().filter(|(_,v)|**v>8).map(|(i,_)|[i%width,i/width]).collect::<Vec<_>>();
+                let span=|axis|points.iter().map(|p|p[axis]).max().unwrap()-points.iter().map(|p|p[axis]).min().unwrap()+1;
+                let x=span(0);let y=span(1);assert!(x.max(y) as f32/x.min(y) as f32>1.1,"default Pointy at45 has an elongated contact: {x}x{y}");
+            }
+            if id==2 || id==43 {
+                let depth=state(&d.w).tool_settings.iter().find(|f|f.id=="grain_depth").unwrap().value;
+                d.w.dispatch(UiAction::SetToolSetting {id:"grain_depth".into(),value:0.});
+                let mut flat=Vec::new();until(||{flat=slider_stamp_pixels(&area);flat.len()==full.len()&&flat.iter().zip(&full).filter(|(a,b)|a!=b).count()>50},"paper texture changes the open GPU stamp");
+                d.w.dispatch(UiAction::SetToolSetting {id:"grain_depth".into(),value:depth});
+                until(||slider_stamp_pixels(&area)==full,"restored texture reproduces exact GPU stamp");
+            }
+            d.w.dispatch(UiAction::SetToolSetting {id:"flow".into(),value:0.});
+            until(||{let p=slider_stamp_pixels(&area);!p.is_empty()&&p.iter().all(|&v|v==0)},"Strength zero clears the popup contact");
+            assert_eq!(history(&d),before,"popup work leaves artwork and Undo/Redo unchanged");
+            capture_popover(&popup,d.input.dir.join(format!("strength-{name}-0-{theme:?}.png")).to_str().unwrap());
+            reports.push(serde_json::json!({"theme":format!("{theme:?}"),"brush":name,"preset":id,"low_alpha_sum":low_sum,"full_alpha_sum":full_sum,"zero_empty":true,"history_unchanged":true,"fields":state(&d.w).tool_settings}));
+            d.input.key(0xff1b);until(||!popup.is_mapped(),"Escape retires Strength preview");
+        }
+    }
+    let output=std::env::var("LAYER_TEST_ARTIFACTS").unwrap_or_else(|_|d.input.dir.to_string_lossy().into_owned());
+    std::fs::create_dir_all(&output).unwrap();std::fs::write(std::path::Path::new(&output).join("dry-defaults.json"),serde_json::to_vec_pretty(&defaults).unwrap()).unwrap();std::fs::write(std::path::Path::new(&output).join("strength-preview-results.json"),serde_json::to_vec_pretty(&reports).unwrap()).unwrap();d.finish();
+}
+
+fn slider_stamp_pixels(area:&gtk::Widget)->Vec<u8> {
+    let width=area.width() as usize;let height=area.height() as usize;if width==0||height==0{return Vec::new();}
+    let snapshot=gtk::Snapshot::new();let parent=area.parent().unwrap();parent.snapshot_child(area,&snapshot);
+    let Some(node)=snapshot.to_node() else {return vec![0;width*height];};
+    let texture=area.native().unwrap().renderer().unwrap().render_texture(node,Some(&gtk::graphene::Rect::new(0.,0.,width as f32,height as f32)));
+    let mut bytes=vec![0;width*height*4];texture.download(&mut bytes,width*4);bytes.chunks_exact(4).map(|p|p[3]).collect()
 }

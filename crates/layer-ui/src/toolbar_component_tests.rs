@@ -374,14 +374,14 @@ fn toolbar_component_defaults_round_trip_on_supported_hosts() {
 fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
     use layer_core::DefaultBrushPreset as P;
     let mut s=session(Platform::Gtk);
-    for (preset,diameter,poses,block) in [
-        (P::Pencil,36f64,[[0.65f64,0.65],[1.,0.65],[4.8,1.2]],false),
-        (P::PointyPencil,18.,[[0.55,0.55],[0.9,0.5],[5.,0.8]],false),
-        (P::ShadingPencil,64.,[[0.28,0.28],[1.,0.55],[2.6,0.8]],false),
-        (P::Charcoal,48.,[[0.65,0.65],[1.,0.65],[2.,0.8]],false),
-        (P::Chalk,36.,[[0.55,0.55],[1.,0.8],[1.6,0.85]],true),
-        (P::PastelBlock,64.,[[0.55,0.55],[1.,0.65],[3.2,0.55]],true),
-        (P::Crayon,32.,[[0.65,0.65],[1.,0.7],[2.6,0.85]],false),
+    for (preset,diameter,poses,block,loading,gain) in [
+        (P::Pencil,36f64,[[0.65f64,0.65],[1.,0.65],[4.8,1.2]],false,0.90,0.7),
+        (P::PointyPencil,18.,[[0.55,0.55],[0.9,0.5],[5.,0.8]],false,0.95,0.7),
+        (P::ShadingPencil,64.,[[0.28,0.28],[1.,0.55],[2.6,0.8]],false,0.85,0.63),
+        (P::Charcoal,48.,[[0.65,0.65],[1.,0.65],[2.,0.8]],false,0.55,0.85),
+        (P::Chalk,36.,[[0.55,0.55],[1.,0.8],[1.6,0.85]],true,0.15,0.75),
+        (P::PastelBlock,64.,[[0.55,0.55],[1.,0.65],[3.2,0.55]],true,0.50,0.85),
+        (P::Crayon,32.,[[0.65,0.65],[1.,0.7],[2.6,0.85]],false,0.90,0.7),
     ] {
         s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
         let fields=&s.state().tool_settings;
@@ -392,7 +392,13 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
         assert_eq!(fields[5].group_id,MessageId::TOOL_SETTING_GROUP_BLENDING.key());
         assert_eq!(fields.iter().find(|f|f.id=="angle").unwrap().label.as_ref(),"Tip angle");
         assert_eq!(fields.iter().find(|f|f.id=="grain_depth").unwrap().numeric.max,2.);
+        let material=fields.iter().find(|f|f.id=="material_hardness").unwrap();
+        assert_eq!(material.label.as_ref(),"Material hardness");
+        assert_eq!((material.numeric.min,material.numeric.max,material.numeric.scale),(0.,1.,100.));
+        assert!(material.numeric.endpoint_labels.is_none());
         let brush=s.engine.configured_brush();let dry=brush.contact.unwrap().dry.unwrap();
+        assert_eq!((brush.flow,dry.loading,brush.contact.unwrap().pressure_gain),(1.,loading,gain),"{preset:?}: authored defaults");
+        assert_eq!(material.value,loading);
         assert_eq!(dry.softness,0.05);
         assert_eq!(dry.poses[1].radii[0].max(dry.poses[1].radii[1]),1.,"{preset:?}: 45° long axis");
         let extent=if preset==P::PastelBlock {1.95} else {poses.iter().map(|p|if block {p[0].hypot(p[1])} else {p[0].max(p[1])}).fold(0f64,f64::max)};
@@ -1196,12 +1202,7 @@ fn slider_bookmark_taps_are_nearby_bounded_and_choose_the_closest_mark() {
 }
 
 #[test]
-fn slider_preview_geometry_opacity_and_tip_raster_are_shared() {
-    let s = session(Platform::Gtk);
-    let stamp = s.toolbar_stamp(s.state().toolbar_context()).unwrap();
-    assert_eq!(stamp.alpha.len(), (stamp.size * stamp.size) as usize);
-    assert!(stamp.alpha.iter().any(|&a| a > 0));
-    assert_eq!(stamp.alpha[0], 0);
+fn slider_preview_geometry_and_embedded_opacity_are_shared() {
     let size = slider_preview_layout(
         ToolbarControl::BrushSizeSlider,
         TileStyle::Small,
@@ -1226,7 +1227,7 @@ fn slider_preview_geometry_opacity_and_tip_raster_are_shared() {
      &Localizer::shared(UiLanguage::English))
     .unwrap();
     assert_eq!(opacity.text, "Opacity: 42 %");
-    assert_eq!(opacity.opacity, 0.42);
+    assert_eq!(opacity.opacity, 1.);
     assert_eq!(
         opacity.stamp,
         slider_preview_layout(
@@ -1291,31 +1292,189 @@ fn slider_preview_geometry_opacity_and_tip_raster_are_shared() {
 }
 
 #[test]
-fn slider_stamp_preserves_mask_holes_and_brush_grain() {
+fn slider_stamp_plan_uses_completed_writing_contact_and_tool_strength() {
+    use layer_core::DefaultBrushPreset as P;
     let mut s = session(Platform::Gtk);
-    let mut brush = layer_core::BrushSnapshot { aspect: 1., angle_radians: 0., ..Default::default() };
+    for preset in [P::Pencil,P::PointyPencil,P::ShadingPencil,P::Charcoal,P::Chalk,P::PastelBlock,P::Crayon] {
+        s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
+        let brush = s.engine.configured_brush().clone();
+        let pose = brush.contact.unwrap().dry.unwrap().poses[1];
+        let (full, extent) = s.stamp_request().unwrap();
+        assert!(!full.dabs.is_empty(), "{preset:?}: completed contact");
+        assert_eq!(full.shape_strength,None);
+        for strength in [0.,0.37,1.] {
+            let mut edited=brush.clone();edited.flow=strength;edited.opacity=0.42;
+            s.engine.set_brush(edited).unwrap();
+            let (request, actual_extent)=s.stamp_request().unwrap();
+            assert_eq!((request.bounds,actual_extent),(full.bounds,extent),"{preset:?}: zero Strength retains geometry");
+            assert_eq!(request.style.opacity,0.42);
+            assert_eq!(request.style.contact.unwrap().pressure_gain,brush.contact.unwrap().pressure_gain);
+            assert_eq!(request.dabs.len(),if strength==0. {0} else {full.dabs.len()});
+            for dab in request.dabs {
+                assert_eq!(dab.center,Point{x:0.,y:0.});
+                assert_eq!(dab.motion,[0.;2]);
+                assert_eq!(dab.radii,pose.radii.map(|r|r*brush.diameter*0.5));
+                assert_eq!(dab.contact[1..],pose.relief);
+                assert!((dab.contact[0]-brush.contact.unwrap().pressure_gain*strength).abs()<1e-6);
+                assert_eq!((dab.flow,dab.material[3]),(1.,1.));
+            }
+        }
+    }
+    for (preset,shape_only) in [(P::Paintbrush,false),(P::Eraser,true),(P::Smudge,true),
+        (P::CloneStamp,true),(P::HealingBrush,true),(P::SpotHealingBrush,true),(P::LiquifyPush,true)] {
+        s.dispatch(UiAction::SelectBrush {id:preset as u32}).unwrap();
+        for strength in [0.,0.37] {
+            s.dispatch(ToolbarNumericBinding::BrushStrength.action(strength)).unwrap();
+            let (request,extent)=s.stamp_request().unwrap();
+            assert_eq!(request.shape_strength,shape_only.then_some(strength),"{preset:?}");
+            assert!(extent.is_finite() && extent>0. && request.bounds.max.x>request.bounds.min.x);
+        }
+    }
+}
+
+#[test]
+fn slider_stamp_plan_accepts_every_builtin_tool_context() {
+    let mut s=session(Platform::Gtk);
+    let choices=brush_catalog().collect::<Vec<_>>();
+    assert_eq!(choices.len(),43);
+    for choice in choices {
+        s.dispatch(UiAction::SelectBrush{id:choice.id}).unwrap();
+        assert_eq!((s.state().toolbar_context().brush,s.state().brush.tool),(choice.id,choice.group.tool()));
+        let brush=s.engine.configured_brush();brush.validate().unwrap();
+        let strength=ToolbarNumericBinding::BrushStrength.field(s.state()).unwrap().value;
+        assert!(strength>0.,"{}: default Strength",choice.label);
+        let (request,extent)=s.stamp_request().unwrap();
+        assert!(!request.bounds.is_empty() && extent.is_finite() && extent>0.,"{}: footprint",choice.label);
+        assert!([request.bounds.min.x,request.bounds.min.y,request.bounds.max.x,request.bounds.max.y]
+            .into_iter().all(f32::is_finite),"{}: finite bounds",choice.label);
+        assert!(!request.dabs.is_empty() && request.dabs.len()<=64,"{}: {} contacts",choice.label,request.dabs.len());
+        assert!((0.0..=1.0).contains(&request.style.opacity));
+        assert_eq!((request.style.tip,request.style.execution),(brush.tip.clone(),brush.execution_class()));
+        let shape_only=matches!(choice.group.tool(),Tool::Eraser|Tool::Blend|Tool::Liquify|Tool::Clone|Tool::Heal|Tool::SpotHeal);
+        assert_eq!(request.shape_strength,shape_only.then_some(strength),"{}: tool semantics",choice.label);
+        for dab in request.dabs {
+            assert!(dab.radii.into_iter().all(|r|r>0.));
+            assert!([dab.center.x,dab.center.y,dab.flow,dab.hardness].into_iter()
+                .chain(dab.radii).chain(dab.rotation).chain(dab.motion).chain(dab.color_rgba_linear)
+                .chain(dab.texture_sign).chain(dab.material).chain(dab.previous).chain(dab.contact)
+                .chain(dab.previous_contact).all(f32::is_finite),"{}: finite contact",choice.label);
+        }
+    }
+}
+
+struct StampRecorder {
+    inner: Recorder,
+    requests: Vec<(u64,layer_render::BrushStampRequest)>,
+    reply: Option<Result<layer_render::ReadbackImage,layer_render::BackendError>>,
+    accepts: bool,
+    error: bool,
+}
+impl Default for StampRecorder {
+    fn default()->Self {Self{inner:Recorder::default(),requests:Vec::new(),reply:None,accepts:true,error:false}}
+}
+impl StampRecorder {
+    fn complete(&mut self,id:u64,value:u8)->*const u8 {
+        let bytes=vec![value;4];let pointer=bytes.as_ptr();
+        self.reply=Some(Ok(layer_render::ReadbackImage{request_id:id,width:2,height:2,stride:2,bytes}));pointer
+    }
+}
+impl CanvasRenderer for StampRecorder {
+    type Error=layer_render::BackendError;
+    fn resize_surface(&mut self,w:u32,h:u32)->Result<(),Self::Error>{self.inner.resize_surface(w,h)}
+    fn prepare_asset(&mut self,id:&AssetId,image:layer_render::HostImage<'_>)->Result<(),Self::Error>{self.inner.prepare_asset(id,image)}
+    fn release_asset(&mut self,id:&AssetId){self.inner.release_asset(id)}
+    fn submit(&mut self,packet:layer_render::FramePacket<'_>)->Result<(),Self::Error>{self.inner.submit(packet)}
+    fn request_brush_stamp(&mut self,id:u64,request:&layer_render::BrushStampRequest)->Result<bool,Self::Error>{
+        if self.error {return Err(layer_render::BackendError("stamp request failed"));}
+        self.requests.push((id,request.clone()));Ok(self.accepts)
+    }
+    fn take_brush_stamp(&mut self)->Option<Result<layer_render::ReadbackImage,Self::Error>>{self.reply.take()}
+}
+
+#[test]
+fn slider_stamp_coalesces_full_brush_keys_and_rejects_stale_owners() {
+    let mut s=UiSession::blank(StampRecorder::default(),[1000,1000],Platform::Gtk).unwrap();
+    let context=s.state().toolbar_context();
+    assert!(s.toolbar_stamp(context,None).unwrap().is_none());
+    let first=s.renderer_mut().requests[0].0;
+    let pixels=s.renderer_mut().complete(first,7);
+    let ready=s.toolbar_stamp(context,None).unwrap().unwrap();
+    assert!(!ready.pending);
+    assert_eq!(ready.alpha.as_ptr(),pixels,"GPU reply allocation moves to the client");
+    assert_eq!((ready.request_id,ready.size,ready.alpha.as_slice()),(first,2,&[7;4][..]));
+    let unchanged=s.toolbar_stamp(context,Some(first)).unwrap().unwrap();
+    assert_eq!((unchanged.request_id,unchanged.size,unchanged.extent),(first,ready.size,ready.extent));
+    assert!(!unchanged.pending && unchanged.alpha.is_empty(),"completed pixels are delivered once");
+    assert_eq!(s.renderer_mut().requests.len(),1);
+    let mut brush=s.engine.configured_brush().clone();
+    brush.tip=layer_core::BrushTip::Mask(AssetId::from("preview-test"));
     s.engine.set_brush(brush.clone()).unwrap();
-    let context = s.state().toolbar_context();
-    let plain = s.toolbar_stamp(context).unwrap();
-    let center = (plain.size * plain.size / 2 + plain.size / 2) as usize;
-    assert_eq!(plain.alpha[center], 255);
-    brush.tip = layer_core::BrushTip::Mask(AssetId::from("preview-test"));
+    let pending=s.toolbar_stamp(context,Some(first)).unwrap().unwrap();
+    assert!(pending.pending && pending.alpha.is_empty());
+    assert_eq!(pending.request_id,first);
+    assert_eq!(s.renderer_mut().requests[1].1.style.tip,brush.tip);
+    let second=s.renderer_mut().requests[1].0;
+    brush.tip=layer_core::BrushTip::AnalyticEllipse;
+    brush.grain=Some(layer_core::BrushGrain{asset:AssetId::from("preview-test"),
+        behavior:layer_core::BrushGrainBehavior::Moving,scale:1.,depth:1.,rotation_radians:0.,offset_jitter:0.});
     s.engine.set_brush(brush.clone()).unwrap();
-    let mask = s.toolbar_stamp(context).unwrap();
-    assert_eq!(mask.alpha[center], 0, "the tip's hole survives the preview");
-    assert!(mask.alpha.iter().any(|&a| a > 0));
-    brush.tip = layer_core::BrushTip::AnalyticEllipse;
-    brush.grain = Some(layer_core::BrushGrain {
-        asset: AssetId::from("preview-test"),
-        behavior: layer_core::BrushGrainBehavior::Moving,
-        scale: 1.,
-        depth: 1.,
-        rotation_radians: 0.,
-        offset_jitter: 0.,
-    });
-    s.engine.set_brush(brush).unwrap();
-    let grain = s.toolbar_stamp(context).unwrap();
-    assert_eq!(grain.alpha[center], 0);
-    assert!(grain.alpha.iter().any(|&a| a > 0));
-    assert_ne!(grain.alpha, plain.alpha);
+    assert!(s.toolbar_stamp(context,Some(first)).unwrap().unwrap().pending);
+    assert_eq!(s.renderer_mut().requests.len(),2,"one request in flight");
+    s.renderer_mut().complete(second,11);
+    let pending=s.toolbar_stamp(context,Some(first)).unwrap().unwrap();
+    assert!(pending.pending);
+    assert_eq!(pending.alpha.as_slice(),&[11;4]);
+    assert_eq!(s.renderer_mut().requests[2].1.style.grain,brush.grain);
+    let third=s.renderer_mut().requests[2].0;
+    s.dispatch(UiAction::SelectBrush{id:layer_core::DefaultBrushPreset::Charcoal as u32}).unwrap();
+    let next=s.state().toolbar_context();
+    assert_ne!(next,context);
+    s.renderer_mut().complete(third,19);
+    assert_eq!(s.toolbar_stamp(context,Some(second)).err().unwrap(),"Obsolete brush preview");
+    assert!(s.toolbar_stamp(next,None).unwrap().is_none(),"old context never presents its completed image");
+    let fourth=s.renderer_mut().requests.last().unwrap().0;
+    s.renderer_mut().complete(fourth,23);
+    assert!(!s.toolbar_stamp(next,None).unwrap().unwrap().pending);
+    s.replace_renderer(StampRecorder::default()).unwrap();
+    assert!(s.toolbar_stamp(next,Some(fourth)).unwrap().is_none(),"replacement GPU discards cached pixels");
+    assert_eq!(s.renderer_mut().requests.len(),1);
+    assert!(s.renderer_mut().requests[0].0>fourth,"replacement does not reuse request identity");
+}
+
+#[test]
+fn slider_stamp_retries_admission_errors_and_mismatched_replies() {
+    let mut s=UiSession::blank(StampRecorder{accepts:false,..Default::default()},[1000,1000],Platform::Gtk).unwrap();
+    let context=s.state().toolbar_context();
+    for _ in 0..2 {assert!(s.toolbar_stamp(context,None).unwrap().is_none());}
+    assert_eq!(s.renderer_mut().requests.iter().map(|r|r.0).collect::<Vec<_>>(),[1,1]);
+    s.renderer_mut().accepts=true;s.renderer_mut().error=true;
+    assert_eq!(s.toolbar_stamp(context,None).err().unwrap(),"stamp request failed");
+    s.renderer_mut().error=false;
+    assert!(s.toolbar_stamp(context,None).unwrap().is_none());
+    s.renderer_mut().reply=Some(Err(layer_render::BackendError("stamp readback failed")));
+    assert_eq!(s.toolbar_stamp(context,None).err().unwrap(),"stamp readback failed");
+    assert!(s.toolbar_stamp(context,None).unwrap().is_none());
+    let id=s.renderer_mut().requests.last().unwrap().0;
+    assert_eq!(id,2);
+    let in_flight=s.renderer_mut().requests.len();
+    s.renderer_mut().complete(id-1,29);
+    assert!(s.toolbar_stamp(context,None).unwrap().is_none(),"mismatched reply is never cached");
+    assert_eq!(s.renderer_mut().requests.len(),in_flight,"old reply cannot replace the active request");
+    s.renderer_mut().complete(id,31);
+    let ready=s.toolbar_stamp(context,None).unwrap().unwrap();
+    assert!(!ready.pending);
+    assert_eq!((ready.request_id,s.renderer_mut().requests.len()),(id,in_flight));
+    assert_eq!(ready.alpha.as_slice(),&[31;4]);
+    assert!(s.toolbar_stamp(context,Some(id)).unwrap().unwrap().alpha.is_empty());
+    let count=s.renderer_mut().requests.len();
+    let reopened=s.toolbar_stamp(context,None).unwrap().unwrap();
+    assert!(reopened.pending && reopened.alpha.is_empty(),"reopened popup needs a new image");
+    assert_eq!(s.renderer_mut().requests.len(),count+1);
+    let new_id=s.renderer_mut().requests.last().unwrap().0;
+    s.renderer_mut().complete(new_id,37);
+    let current=s.toolbar_stamp(context,Some(id)).unwrap().unwrap();
+    assert!(!current.pending && current.alpha==[37;4]);
+    let missed=s.toolbar_stamp(context,Some(id)).unwrap().unwrap();
+    assert!(missed.pending && missed.alpha.is_empty(),"client with a missed result retries");
+    assert_eq!(s.renderer_mut().requests.len(),count+2);
 }

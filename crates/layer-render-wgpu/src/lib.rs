@@ -46,6 +46,7 @@ mod source_access;
 mod material_sources;
 mod brush_tiles;
 mod dry_material;
+mod brush_stamp;
 mod changed_cells;
 mod material_tiles;
 mod bindings;
@@ -929,6 +930,7 @@ pub struct WgpuRasterizer {
     #[cfg(test)]
     test: TestHooks,
     thumbnails: thumbnails::Thumbnails,
+    brush_stamps: Option<brush_stamp::BrushStamps>,
     ui_preview_space: layer_core::color::RgbSpace,
     ui_rendition: Option<layer_core::color::hdr::SdrRendition>,
     ui_preview_pipeline: Option<Deferred<wgpu::RenderPipeline>>,
@@ -1310,6 +1312,7 @@ impl WgpuRasterizer {
             evaluated_object_revision: None,
             composite_damage: PixelRect::EMPTY,
             thumbnails: thumbnails::Thumbnails::new(),
+            brush_stamps: None,
             ui_preview_space: layer_core::color::RgbSpace::Srgb,
             ui_rendition: None,
             ui_preview_pipeline: None,
@@ -3566,6 +3569,10 @@ impl CanvasRenderer for WgpuRasterizer {
     fn take_thumbnail(&mut self) -> Option<Result<ReadbackImage, Self::Error>> {
         self.thumbnails.take()
     }
+    fn request_brush_stamp(&mut self,id:u64,request:&layer_render::BrushStampRequest)->Result<bool,Self::Error> {
+        self.start_brush_stamp(id,request)
+    }
+    fn take_brush_stamp(&mut self)->Option<Result<ReadbackImage,Self::Error>> {self.poll_brush_stamp()}
     fn request_effect_analysis(&mut self, query: layer_core::ArtworkQuery) -> Result<bool, Self::Error> {
         if self.analysis_job.is_some() || self.analysis_candidate.is_some() { return Ok(false); }
         self.analysis_job = Some(effect_analysis::Job::start(self.snapshot_gpu(), query).map_err(GpuRasterError::Effect)?);
@@ -3651,11 +3658,6 @@ impl CanvasRenderer for WgpuRasterizer {
             let [width, height, stride] = mask.extent;
             layer_render::mask_outline(width, height, stride, &mask.source)
         }))
-    }
-    fn tip_mask(&self, asset: &AssetId) -> Option<HostImage<'_>> {
-        let mask = self.mask(asset).ok()?;
-        let [width, height, stride] = mask.extent;
-        Some(HostImage { width, height, stride, format: PixelFormat::R8Unorm, bytes: &mask.source })
     }
     type Error = GpuRasterError;
 
@@ -4989,6 +4991,7 @@ impl StyleGpu {
             ];
             if let Some(dry) = contact.dry {
                 result.material_a = [dry.corner, dry.softness.recip(), dry.loading, 0.];
+                result.contact_c[0] = 1.;
                 result.contact_c[2] = dry.relief_offset;
             }
         }
@@ -5370,6 +5373,7 @@ fn advanced_brush_shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule
                 source: wgpu::ShaderSource::Wgsl(compose_wgsl(&[
                     &working_color::shader(&device),
                     include_str!("brush_types.wgsl"), include_str!("advanced_brush.wgsl"),
+                    include_str!("brush_math.wgsl"), include_str!("contact_field.wgsl"),
                     include_str!("analytic_coverage.wgsl"), include_str!("brush_coverage.wgsl"),
                     include_str!("contact.wgsl"), include_str!("relief.wgsl"),
                     include_str!("selection_clip.wgsl"),

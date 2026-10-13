@@ -8,6 +8,16 @@ async function execute({id,request}) {
   let instance;
   const retire=()=>outputs.size===0 && (instance?.memory.buffer.byteLength || 0)>256*1024*1024;
   try {
+    if (request.operation === 'alpha-image') {
+      const {size}=request.metadata, alpha=request.buffers[0];
+      if (!Number.isInteger(size) || size<1 || size>192 || alpha.length!==size*size) throw Error('Invalid brush preview');
+      const pixels=new ImageData(size,size);
+      for(let i=0;i<alpha.length;i++) {
+        pixels.data[i*4]=pixels.data[i*4+1]=pixels.data[i*4+2]=255; pixels.data[i*4+3]=alpha[i];
+      }
+      const result=await createImageBitmap(pixels);
+      self.postMessage({id,result},[result]); return;
+    }
     // These operations only touch IndexedDB. Recovery discovery must not
     // download/instantiate the image codec before listing a few keys.
     if (!request.operation.startsWith('restart-store-'))

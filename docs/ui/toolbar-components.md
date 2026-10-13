@@ -37,11 +37,24 @@ and units are vertically centered beside it. The header fade scales with the
 tile (65px on medium tiles) from 50% panel color to transparent. Size uses
 the current tip at its document-pixel diameter, filling the popup to its rounded
 edges for oversized tips. A background fade keeps the header legible;
-Opacity uses a fixed fitted stamp with the selected alpha. Strength uses the
-fitted tip and value caption without applying Opacity to its preview: Strength
-controls deposition or tool action, while Opacity limits a stroke's contribution.
-The tip mask, aspect, rotation, hardness and
-grain texture come from the configured brush.
+Opacity and Strength use a fitted contact patch rendered by the canonical GPU
+coverage evaluator at full physical pen pressure and the writing tilt pose. The
+configured brush supplies shape, relief, paper texture, Strength and Opacity.
+Dry Strength changes the material pressure, so fewer paper contacts appear at
+lower values. Eraser, smudge, liquify and retouching tools show their shape and
+soft edge filled at the selected Strength. They do not need a destination image.
+
+The shared session owns one asynchronous preview request and coalesces value
+changes. Clients retain the latest completed image while the next is pending.
+Each 192-square alpha mask is delivered once; subsequent queries carry its
+request ID and return metadata. A reopened or missing client image requests a
+new mask. Context and renderer changes reject old results. Preview rendering
+never changes artwork, stroke history or the document's painting resources.
+Mask-to-image conversion runs on host workers. GTK takes ownership of the alpha
+buffer directly; Web receives an ImageBitmap from its image-preparation worker.
+Windows workers fill an unpublished bitmap buffer; the UI publishes the completed
+image.
+Idle metadata polling neither redraws the popup nor submits more GPU work.
 
 The preview's plus button bookmarks the value for that brush preset; the minus
 button removes an existing mark. Marks are short lines perpendicular to the
@@ -86,7 +99,10 @@ the material controls. Hosts use stable `group_id` values for category boundarie
 and schema identity, with localized `group` text only for headings. Dry media
 therefore show Size, Strength, Texture strength, Material hardness, then Tip angle
 under Tip and Opacity under Blending. Contact softness is hidden and fixed in the
-engine. Tool Settings and Tool Options consume the same numeric order.
+engine. Material hardness controls the pressure response of pigment loading.
+Stable numeric rules retain editors across language changes; localized endpoint
+labels do not form part of schema identity. Tool Settings and Tool Options
+consume the same numeric order.
 Shared projections that show a field alone, such as figure/fill Opacity or
 selection Feather, remove both its category ID and heading text. An empty
 heading cannot retain a category boundary.
@@ -184,11 +200,9 @@ The bar stacks on narrow side toolbars and moves into overflow as a whole.
   font measurement; Rust fits each complete field into the lane.
   Editors retain their original context token, and measurements are cached across
   value-only updates. The standalone slider uses the same shared cap/track geometry.
-- `toolbar_preview.rs` owns bookmark validation, hit policy, and stamp geometry.
-  A small raster is requested only when opening the popup, from immutable CPU
-  tip assets through `CanvasRenderer::tip_mask`; dragging only scales and fades it.
-  GTK hands reference-counted brush sources across its render-worker boundary
-  alongside cursor outlines, including startup and document-color adoption.
+- `toolbar_preview.rs` owns bookmark validation, hit policy and completed contact
+  plans. `CanvasRenderer` carries asynchronous stamp requests and readbacks; hosts
+  retain the resulting image until a newer request completes.
 - Numeric values, native measurements and overflow visibility are not saved in
   toolbar configuration. Typed component kinds, horizontal text/icon mode, slider visibility, and ordinary
   tile IDs persist. Preferences participate in workspace undo/redo.

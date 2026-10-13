@@ -702,7 +702,7 @@ impl NativeHost {
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case")]
         enum Query {
-            ToolbarStamp { context: layer_ui::ToolbarContext },
+            ToolbarStamp { context: layer_ui::ToolbarContext, #[serde(default)] known_request: Option<u64> },
             ImageLayerDrop { target: u64, fraction: f32 },
             DocumentColor,
             Requests,
@@ -875,7 +875,7 @@ impl NativeHost {
             },
             Query::ExportProfileCaptionsCopy { captions } => json!(captions.iter().map(|caption| caption.message(self.session.localization())).collect::<Vec<_>>()),
             Query::ExportMetadataCopy { format, keep } => json!(layer_ui::ExportMetadataView::localized_for(format, keep, self.session.localization())),
-            Query::ToolbarStamp { context } => json!(self.session.toolbar_stamp(context)?),
+            Query::ToolbarStamp { context, known_request } => json!(self.session.toolbar_stamp(context, known_request)?),
             Query::ApplicationMenu { menu } => json!(self.session.application_menu(menu)),
             Query::ApplicationMenuHover { open, hovered } => json!(layer_ui::ApplicationMenu::switches_on_hover(open, hovered)),
             Query::ApplicationLink { link } => json!(link.url()),

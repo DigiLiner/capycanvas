@@ -66,10 +66,13 @@ pub fn engine(document: Document) -> (Engine, InputProducer<PenEvent>) {
     (engine, producer)
 }
 
-pub fn image(engine: &mut Engine, time: u64) -> Image {
+pub fn image(engine: &mut Engine, mut time: u64) -> Image {
     engine.render_frame_at(time).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while engine.has_pending_document_edits() {
+        assert!(std::time::Instant::now() < deadline, "document edits did not settle");
         std::thread::yield_now();
+        time += 16_000_000;
         engine.render_frame_at(time).unwrap();
     }
     let size = engine.document().composition().size;

@@ -28,22 +28,26 @@ class Element extends FakeElement {
   querySelector(selector){return this.querySelectorAll(selector)[0]??null;}
   getBoundingClientRect(){return {x:10,y:10,right:110,bottom:110,width:100,height:100};}
   showPopover(){this.open=true;}
-  getContext(){return {createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(){},resetTransform(){},clearRect(){},scale(){},save(){},beginPath(){},rect(){},clip(){},drawImage(){},fillRect(){},restore(){},measureText:text=>({width:text.length*6})};}
+  getContext(){return {resetTransform(){},clearRect:()=>{this.drawnImage=undefined;},scale(){},save(){},beginPath(){},rect(){},clip(){},drawImage:image=>{this.drawnImage=image;this.drawCount=(this.drawCount??0)+1;},fillRect(){},restore(){},measureText:text=>({width:text.length*6})};}
 }
 function harness(t,standalone=false){
-  const globals=['document','window','getComputedStyle','innerWidth','innerHeight','devicePixelRatio'],original=Object.fromEntries(globals.map(key=>[key,globalThis[key]])),doc={createTextNode:nodeValue=>({nodeType:3,nodeValue:String(nodeValue)}),addEventListener(){},removeEventListener(){}};
-  doc.createElement=tag=>new Element(tag,doc);Object.assign(globalThis,{document:doc,window:{addEventListener(){},removeEventListener(){}},innerWidth:1000,innerHeight:800,devicePixelRatio:1,getComputedStyle:()=>({color:'#fff',backgroundColor:'#333',fontWeight:'400',fontSize:'12px',fontFamily:'sans'})});
+  const globals=['document','window','getComputedStyle','innerWidth','innerHeight','devicePixelRatio','requestAnimationFrame','cancelAnimationFrame'],original=Object.fromEntries(globals.map(key=>[key,globalThis[key]])),doc={createTextNode:nodeValue=>({nodeType:3,nodeValue:String(nodeValue)}),addEventListener(){},removeEventListener(){}};
+  const frames=new Map();let frameId=0;
+  doc.createElement=tag=>new Element(tag,doc);Object.assign(globalThis,{document:doc,window:{addEventListener(){},removeEventListener(){}},innerWidth:1000,innerHeight:800,devicePixelRatio:1,requestAnimationFrame:callback=>{frames.set(++frameId,callback);return frameId;},cancelAnimationFrame:id=>frames.delete(id),getComputedStyle:()=>({color:'#fff',backgroundColor:'#333',fontWeight:'400',fontSize:'12px',fontFamily:'sans'})});
   let root;t.after(()=>{root?.disposeComponent();for(const[key,value]of Object.entries(original))if(value===undefined)delete globalThis[key];else globalThis[key]=value;});
-  let language='en',stamps=0,layouts=0,expressions=0;const actions=[],numeric={kind:'slider',min:0,max:100,soft_min:0,soft_max:100,scale:1,step:1,digits:0};
+  let language='en',stamps=0,layouts=0,expressions=0;const actions=[],stampQueries=[],workerRequests=[],numeric={kind:'slider',min:0,max:100,soft_min:0,soft_max:100,scale:1,step:1,digits:0};
+  let stampReply=(_,known)=>({request_id:1n,pending:false,size:1,alpha:new Uint8Array(known===1n?[]:[255]),extent:1});
+  let workerReply=async request=>({alpha:request.buffers[0],closed:0,close(){this.closed++;}});
+  const rasterWorker=request=>{assert.equal(request.operation,'alpha-image');assert.deepEqual(request.metadata,{size:1});assert.equal(request.buffers.length,1);assert.ok(request.buffers[0] instanceof Uint8Array);workerRequests.push(request);return workerReply(request);};
   const formatted=value=>({value,text:String(value),edit:String(value),fill:value/100});
-  const app={native_caption:request=>{assert.equal(request.type,'numeric_error');assert.equal(request.reason.reason,'invalid_expression');return`${language}:invalid`;},catalog:()=>({native_copy:{tool_controls:Object.fromEntries(['more_options','remove_bookmark','bookmark_value'].map(key=>[key,`${language}:${key}`]))}}),numeric_labels:label=>({edit:`${language}:edit:${label}`,decrease:'-',increase:'+'}),number_input:request=>formatted(request.value),toolbar_stamp:()=>{stamps++;return{size:1,alpha:[255],extent:[1,1]};},toolbar_ui:request=>{
+  const app={native_caption:request=>{assert.equal(request.type,'numeric_error');assert.equal(request.reason.reason,'invalid_expression');return`${language}:invalid`;},catalog:()=>({native_copy:{tool_controls:Object.fromEntries(['more_options','remove_bookmark','bookmark_value'].map(key=>[key,`${language}:${key}`]))}}),numeric_labels:label=>({edit:`${language}:edit:${label}`,decrease:'-',increase:'+'}),number_input:request=>formatted(request.value),toolbar_stamp:(context,known)=>{stampQueries.push({context,known});const next=stampReply(context,known);if(next?.alpha.length)stamps++;return next;},toolbar_ui:request=>{
     if(request.type==='choice_style'){assert.equal(request.labeled,true);return{size:[36,36],icon:16};}if(request.type==='options_layout'){layouts++;return{more:{},fields:language==='en'?request.sizes.map(()=>({width:100,height:30})):request.sizes.map(()=>null)};}if(request.type==='style')return{size:[100,30],labeled:true,gap:4};if(request.type==='numeric_info')return{samples:['0','100'],icon:'size'};if(request.type==='number'){if(request.request.operation.type==='expression'){expressions++;throw{numeric_error:{reason:'invalid_expression'},message:`${language}:invalid`};};return formatted(request.request.value);}if(request.type==='slider_preview')return{side:100,radius:4,caption:{},bookmark:{},icon:16,text:'5 px',viewport:{x:0,y:0,width:100,height:100},opacity:1,stamp:{x:0,y:0,width:100,height:100}};
     throw Error(request.type);
   }};
   const element=(tag,cls,text)=>{const node=doc.createElement(tag);node.className=cls??'';if(text!=null)node.textContent=text;return node;},button=(text,action,cls)=>{const node=element('button',cls,text);node.addEventListener('click',action);return node;},icon=name=>element('svg',name);
   const tile=()=>({id:'test',label:`${language}:slider`,control:{kind:standalone?'brush_size_slider':'tool_options'},component:{context:{type:'brush'},numeric:standalone?{id:'size',label:`${language}:size`,group:`${language}:group`,numeric,value:5}:null,bookmarks:[{value:5,fill:.05,selected:true}],options:standalone?[]:[{Numeric:{id:'size',label:`${language}:size`,group:`${language}:group`,numeric,value:5}},{Choice:{id:'mode',label:`${language}:mode`,items:[{label:`${language}:first`,icon:'a',selected:true,action:{type:'set_name',name:'literal label',label:'literal English user content'}},{label:`${language}:second`,icon:'b',selected:false,action:{type:'set_name',name:'literal second'}}]}},{Action:{checkable:false,state:{id:'run',icon:'run',label:`${language}:run`,tooltip:`${language}:help`,enabled:true,selected:false}}}]}});
-  root=createToolbarComponent({app,tile:tile(),view:{tile_style:'small'},element,button,icon,dispatch:action=>actions.push(action),draggable(){},target(){},place(){},panel:'tools'});
-  return {app,root,tile,doc,actions,expressions:()=>expressions,layouts:()=>layouts,stamps:()=>stamps,switch(tag){language=tag;refreshCopy(app);root.updateComponent(tile());}};
+  root=createToolbarComponent({app,tile:tile(),view:{tile_style:'small'},element,button,icon,dispatch:action=>actions.push(action),draggable(){},target(){},place(){},panel:'tools',rasterWorker});
+  return {app,root,tile,doc,actions,stampQueries,workerRequests,expressions:()=>expressions,layouts:()=>layouts,stamps:()=>stamps,stampReply(fn){stampReply=fn;},workerReply(fn){workerReply=fn;},async flush(){for(let i=0;i<4;i++)await Promise.resolve();},pendingFrames:()=>frames.size,frame(){const callbacks=[...frames.values()];frames.clear();callbacks.forEach(callback=>callback());},switch(tag){language=tag;refreshCopy(app);root.updateComponent(tile());}};
 }
 
 test('toolbar caption publication retains dirty numeric editors, option popup rows and literal action payloads',t=>{
@@ -60,10 +64,60 @@ test('an open toolbar number popup retains its draft, selection and native edito
   number.valueButton.click();entry.value='12é雪 invalid';entry.dispatch('input');entry.focus();entry.setSelectionRange(2,6);h.switch('de');assert.ok(h.root.querySelector('.toolbar-editor-popover')===popup);assert.ok(popup.querySelector('.number-control')===number);assert.equal(entry.value,'12é雪 invalid');assert.deepEqual([entry.selectionStart,entry.selectionEnd],[2,6]);assert.equal(h.doc.activeElement,entry);assert.equal(entry.getAttribute('aria-label'),'de:size');assert.equal(number.valueButton.getAttribute('aria-label'),'de:edit:de:size');assert.deepEqual(h.actions,[]);
 });
 
-test('toolbar bookmark preview keeps its native popup and stamp while captions follow current shared copy',t=>{
-  const h=harness(t,true),cap=h.root.querySelector('.toolbar-slider-cap');cap.click();const popup=h.root.querySelector('.toolbar-brush-preview'),bookmark=popup.querySelector('.toolbar-preview-bookmark'),slider=h.root.querySelector('.number-slider');
+test('toolbar bookmark preview keeps its native popup and stamp while captions follow current shared copy',async t=>{
+  const h=harness(t,true),cap=h.root.querySelector('.toolbar-slider-cap');cap.click();await h.flush();const popup=h.root.querySelector('.toolbar-brush-preview'),bookmark=popup.querySelector('.toolbar-preview-bookmark'),slider=h.root.querySelector('.number-slider');
   assert.equal(bookmark.title,'en:remove_bookmark');h.switch('ru');assert.equal(h.root.querySelector('.toolbar-brush-preview'),popup);assert.equal(popup.querySelector('.toolbar-preview-bookmark'),bookmark);assert.equal(h.root.querySelector('.number-slider'),slider);assert.equal(h.stamps(),1);assert.equal(bookmark.title,'ru:remove_bookmark');assert.equal(bookmark.getAttribute('aria-label'),'ru:remove_bookmark');assert.equal(h.root.querySelector('.toolbar-more').title,'ru:more_options');assert.equal(cap.title,'ru:size');assert.equal(slider.getAttribute('aria-label'),'ru:size');assert.deepEqual(h.actions,[]);
   const next=h.tile();next.component.bookmarks[0].selected=false;h.root.updateComponent(next);assert.equal(bookmark.title,'ru:bookmark_value');bookmark.click();assert.equal(h.actions[0].action.type,'toggle_slider_bookmark');
+});
+
+test('toolbar preview polls ready and pending stamps, retains bitmaps and forwards BigInt identities',async t=>{
+  const h=harness(t,true);let reply=null;h.stampReply(()=>reply);
+  h.root.querySelector('.toolbar-slider-cap').click();
+  const popup=h.root.querySelector('.toolbar-brush-preview'),canvas=popup.querySelector('canvas');
+  assert.equal(canvas.drawnImage,undefined);assert.equal(h.pendingFrames(),1);assert.equal(h.stamps(),0);
+  reply={request_id:1n,pending:false,size:1,alpha:new Uint8Array([191]),extent:1};h.frame();await h.flush();
+  const first=canvas.drawnImage;
+  assert.equal(first.alpha,reply.alpha);assert.equal(canvas.dataset.previewRequest,'1');assert.equal(h.pendingFrames(),1,'ready previews keep polling');
+  reply={...reply,pending:true,alpha:new Uint8Array()};h.root.updateComponent(h.tile());
+  assert.equal(canvas.drawnImage,first,'old image remains visible during the next GPU request');assert.equal(h.pendingFrames(),1);
+  h.frame();assert.equal(canvas.drawnImage,first);assert.equal(h.pendingFrames(),1);assert.equal(h.stamps(),1);
+  let prepared;h.workerReply(request=>new Promise(resolve=>{prepared=()=>resolve({alpha:request.buffers[0],closed:0,close(){this.closed++;}});}));
+  reply={request_id:2n,pending:false,size:1,alpha:new Uint8Array([63]),extent:2};h.frame();
+  assert.equal(canvas.drawnImage,first,'old bitmap remains visible while the worker prepares its replacement');assert.equal(first.closed,0);
+  prepared();await h.flush();
+  const second=canvas.drawnImage;
+  assert.notEqual(second,first);assert.equal(first.closed,1);assert.equal(second.alpha,reply.alpha);assert.equal(canvas.dataset.previewRequest,'2');assert.equal(h.pendingFrames(),1);
+  reply={...reply,alpha:new Uint8Array()};h.root.updateComponent(h.tile());
+  assert.equal(canvas.drawnImage,second,'metadata does not rebuild an image');assert.equal(h.stamps(),2);assert.equal(h.workerRequests.length,2);
+  assert.deepEqual(h.stampQueries.map(query=>query.known),[undefined,undefined,1n,1n,1n,2n]);
+  assert.ok(h.stampQueries.every(query=>query.context.type==='brush'));assert.deepEqual(h.actions,[],'GPU polling never edits document history');
+  const draws=canvas.drawCount;
+  for(let i=0;i<2;i++){h.frame();assert.equal(h.pendingFrames(),1);assert.equal(canvas.drawCount,draws,'idle metadata does not repaint the settled popup');}
+  assert.equal(canvas.drawnImage,second);assert.equal(h.workerRequests.length,2,'idle metadata does not request another bitmap');
+  reply={request_id:3n,pending:false,size:1,alpha:new Uint8Array([31]),extent:2};h.frame();prepared();await h.flush();
+  const third=canvas.drawnImage;
+  assert.notEqual(third,second);assert.equal(canvas.dataset.previewRequest,'3','brush changes arrive without a tile-view update');assert.equal(canvas.drawCount,draws+1);
+  assert.equal(second.closed,1);assert.equal(h.workerRequests.length,3);assert.equal(h.stampQueries.at(-1).known,2n);
+  const queried=h.stampQueries.length;h.root.disposeComponent();h.frame();
+  assert.equal(h.stampQueries.length,queried,'closed popup does not poll');assert.equal(h.pendingFrames(),0);assert.equal(third.closed,1);assert.deepEqual(h.actions,[]);
+});
+
+test('toolbar preview coalesces bitmap work and closes stale results across reopen and disposal',async t=>{
+  const h=harness(t,true),jobs=[],cap=h.root.querySelector('.toolbar-slider-cap');
+  h.workerReply(()=>new Promise(resolve=>jobs.push(resolve)));
+  h.stampReply(()=>({request_id:BigInt(h.stampQueries.length),pending:false,size:1,alpha:new Uint8Array([127]),extent:1}));
+  cap.click();const old=h.root.querySelector('.toolbar-brush-preview');
+  h.root.updateComponent(h.tile());h.root.updateComponent(h.tile());
+  assert.equal(jobs.length,1);assert.equal(h.stampQueries.length,1,'one bitmap preparation in flight');
+  old.remove();cap.click();const opened=h.root.querySelector('.toolbar-brush-preview');assert.notEqual(opened,old);
+  const stale={closed:0,close(){this.closed++;}};jobs[0](stale);await h.flush();
+  assert.equal(stale.closed,1);assert.equal(opened.querySelector('canvas').drawnImage,undefined);assert.equal(h.pendingFrames(),1,'reopen resumes after the old promise');
+  h.frame();assert.equal(jobs.length,2);assert.equal(h.stampQueries[1].known,undefined);
+  const image={closed:0,close(){this.closed++;}};jobs[1](image);await h.flush();
+  assert.equal(opened.querySelector('canvas').drawnImage,image);assert.equal(image.closed,0);
+  opened.remove();cap.click();assert.equal(image.closed,1,'reopening retires the displayed bitmap');assert.equal(jobs.length,3);
+  h.root.disposeComponent();const retired={closed:0,close(){this.closed++;}};jobs[2](retired);await h.flush();
+  assert.equal(retired.closed,1,'result arriving after disposal is closed');assert.equal(h.pendingFrames(),0);assert.deepEqual(h.actions,[]);
 });
 
 

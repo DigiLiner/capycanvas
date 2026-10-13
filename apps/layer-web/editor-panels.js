@@ -99,7 +99,7 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
         }
         sampler.source.value=String(picker.layer);sampler.size.value=String(picker.sample_width);return;
       }
-      const next = JSON.stringify([owner,s.tool_settings.map(f=>[f.id,f.numeric,f.group_id]),s.tool_actions.map(a=>[a.command,a.checkable]),s.tool_extra.map(o=>o.Choice?[o.Choice.id,o.Choice.items.map(i=>[i.icon,i.action])]:["gradient",o.Gradient.gradient.destination])],(_,v)=>typeof v==='bigint'?String(v):v);
+      const next = JSON.stringify([owner,s.tool_settings.map(f=>[f.id,f.numeric,f.group_id]),s.tool_actions.map(a=>[a.command,a.checkable]),s.tool_extra.map(o=>o.Choice?[o.Choice.id,o.Choice.items.map(i=>[i.icon,i.action])]:["gradient",o.Gradient.gradient.destination])],(k,v)=>k==='endpoint_labels'?undefined:typeof v==='bigint'?String(v):v);
       if (next !== key) {
         const previousBody=root.querySelector('.tool-settings-body'),focused=document.activeElement;
         const retainedChoice=previousBody?.contains(focused)&&focused.matches('select[data-tool-action-group]')?focused:null;

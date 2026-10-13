@@ -172,6 +172,13 @@ pub struct NumericControl {
     pub endpoint_labels: Option<[String; 2]>,
 }
 impl NumericControl {
+    pub fn same_rules(&self, other: &Self) -> bool {
+        (self.kind, &self.mapping, self.min, self.max, self.soft_min, self.soft_max, self.step)
+            == (other.kind, &other.mapping, other.min, other.max, other.soft_min, other.soft_max, other.step)
+            && (self.resolution, self.slider_snap, self.digits, self.scale, &self.unit, self.default_value)
+                == (other.resolution, other.slider_snap, other.digits, other.scale, &other.unit, other.default_value)
+    }
+
     pub fn number(min: f64, max: f64, step: f64, digits: u32) -> Self {
         Self {
             kind: if digits == 0 && (max - min) / step <= 64.0 {

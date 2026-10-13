@@ -115,6 +115,7 @@ pub struct Dab {
     /// Zero radii select the legacy isolated-dab behavior.
     pub previous: [f32; 4],
     /// Pressure, tilt amount, distance in nominal diameters, and stroke seed.
+    /// Analytic dry media carry Strength-scaled material pressure and relief.
     /// A bristle fan carries the height of its rolled edge in place of tilt.
     pub contact: [f32; 4],
     /// The preceding contact's sensor values, for interpolation on the GPU.
@@ -324,6 +325,14 @@ pub struct ReadbackImage {
     pub height: u32,
     pub stride: u32,
     pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct BrushStampRequest {
+    pub style: DabStyle,
+    pub dabs: Vec<Dab>,
+    pub bounds: layer_core::Rect,
+    pub shape_strength: Option<f32>,
 }
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
@@ -819,10 +828,6 @@ pub trait CanvasRenderer {
     fn tip_outline(&self, _asset: &AssetId) -> Option<&TipOutline> {
         None
     }
-    /// Immutable R8 brush source for small UI stamps; never reads back the GPU.
-    fn tip_mask(&self, _asset: &AssetId) -> Option<HostImage<'_>> {
-        None
-    }
 
     fn resize_surface(&mut self, width: u32, height: u32) -> Result<(), Self::Error>;
     fn prepare_asset(&mut self, asset: &AssetId, image: HostImage<'_>) -> Result<(), Self::Error>;
@@ -835,6 +840,8 @@ pub trait CanvasRenderer {
     fn take_thumbnail(&mut self) -> Option<Result<ReadbackImage, Self::Error>> {
         None
     }
+    fn request_brush_stamp(&mut self, _id: u64, _request: &BrushStampRequest) -> Result<bool, Self::Error> { Ok(false) }
+    fn take_brush_stamp(&mut self) -> Option<Result<ReadbackImage, Self::Error>> { None }
     fn request_effect_analysis(&mut self, _query: layer_core::ArtworkQuery) -> Result<bool, Self::Error> { Ok(false) }
     fn take_effect_analysis(&mut self) -> Option<Result<(), Self::Error>> { None }
     fn accept_effect_analysis(&mut self) -> Result<(), Self::Error> { Ok(()) }

@@ -588,7 +588,16 @@ fn engine_generated_strength_changes_buildup_without_changing_opacity_ceiling() 
         let first_weak=render(&weak,1);let first_strong=render(&brush,1);
         assert!(first_weak[center][3]+0.01<first_strong[center][3],"{name}: Strength changes buildup: {:?} vs {:?}",first_weak[center],first_strong[center]);
         let built=render(&weak,128);
-        assert!((built[center][3]-0.4).abs()<0.005,"{name}: low Strength can reach the same ceiling: {:?}",built[center]);
+        if brush.contact.is_some_and(|c|c.dry.is_some()) {
+            let lost=first_strong.iter().zip(&first_weak).filter(|(a,b)|a[3]>0. && b[3]==0.).count();
+            assert!(lost>0,"{name}: lower material pressure removes eligible contacts");
+            assert!(first_strong.iter().zip(&built).any(|(a,b)|a[3]>0. && b[3]==0.),"{name}: repeated low Strength still leaves ineligible contacts empty");
+            for (i,after) in built.iter().enumerate() {
+                assert!(after[3]<=0.40005,"{name}: low Strength retrace exceeds Opacity at{i}");
+            }
+        } else {
+            assert!((built[center][3]-0.4).abs()<0.005,"{name}: low Strength can reach the same ceiling: {:?}",built[center]);
+        }
         let mut zero=brush.clone();zero.flow=0.;let empty=render(&zero,8);
         assert!(empty.iter().all(|p|*p==[0.;4]),"{name}: zero Strength paints nothing");
     }
@@ -609,14 +618,27 @@ fn engine_generated_strength_changes_buildup_without_changing_opacity_ceiling() 
     };
     let (empty,zero_contacts)=sweep(0.);
     assert!(zero_contacts.is_empty() && empty.iter().all(|p|*p==[0.;4]),"Pencil: zero Strength endpoint");
-    let (middle,_)=sweep(0.75);let (full,full_contacts)=sweep(1.);
+    let (middle,middle_contacts)=sweep(0.75);let (full,full_contacts)=sweep(1.);
     assert!(!full_contacts.is_empty() && full_contacts.iter().all(|d|d.flow==1.),"Pencil: full Strength keeps the original contact feed");
-    assert!((0.65..0.85).contains(&middle[center][3]),"Pencil: one black sweep at 75% Strength must retain visible tone: {:?}",middle[center]);
-    assert!(full[center][3]>0.95 && full[center][3]>middle[center][3]+0.1,"Pencil: full Strength retains its dark endpoint: {:?} vs {:?}",full[center],middle[center]);
+    assert_eq!(middle_contacts.len(),full_contacts.len());
+    let mut reference_contacts=full_contacts.clone();
+    for ((middle,full),reference) in middle_contacts.iter().zip(&full_contacts).zip(&mut reference_contacts) {
+        assert_eq!(middle.flow,1.,"Pencil: Strength never scales pigment feed");
+        assert_eq!(middle.radii,full.radii,"Pencil: Strength does not change physical pen geometry");
+        assert_eq!(middle.previous,full.previous);assert_eq!(middle.rotation,full.rotation);
+        reference.contact[0]*=0.75;reference.previous_contact[0]*=0.75;
+    }
+    let mut reference_brush=pencil.clone();reference_brush.flow=1.;
+    let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
+    canvas.stroke(7,&reference_brush,&reference_contacts,reference_contacts.len(),false);let reference=canvas.composite();
+    for (i,(a,b)) in middle.iter().zip(&reference).enumerate() {for c in 0..4 {
+        assert!((a[c]-b[c]).abs()<0.00002,"Pencil: Strength equals pressure-only reference pixel{i} channel{c}: {a:?} vs {b:?}");
+    }}
+    assert!(full[center][3]>0.95,"Pencil: full Strength retains its original endpoint: {:?}",full[center]);
     assert!(middle.iter().chain(&full).all(|p|p[..3]==[0.;3]),"Pencil: black pigment stays black in premultiplied pixels");
     pencil.flow=0.75;let mut canvas=Canvas::new(DocumentColor {depth:SampleDepth::F32,..Default::default()},BlendSpace::Linear,None);
     let dabs=opacity_contacts(&pencil,16);canvas.stroke(7,&pencil,&dabs,dabs.len(),false);let built=canvas.composite();
-    assert!(built[center][3]>0.98 && built[center][3]>middle[center][3]+0.1,"Pencil: calibrated Strength still builds on retracing: {:?} vs {:?}",built[center],middle[center]);
+    assert!(built[center][3]>0.98,"Pencil: eligible contacts still build on retracing: {:?}",built[center]);
     println!("Pencil black sweep: Strength75 alpha={}, Strength100 alpha={}, retraced Strength75 alpha={}",middle[center][3],full[center][3],built[center][3]);
 }
 

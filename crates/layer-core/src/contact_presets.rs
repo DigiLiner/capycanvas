@@ -33,25 +33,25 @@ pub(crate) fn dry_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
     use DefaultBrushPreset::*;
     let pose = |radii, relief| BrushDryPose { radii, relief };
     let (diameter, flow, paper, scale, loading, corner, gain, poses) = match preset {
-        Pencil => (36./4.8, 0.65, 1.1, 1.8, 0.80, 0., 1., [
+        Pencil => (36./4.8, 1., 1.1, 1.8, 0.90, 0., 0.7, [
             pose([0.65, 0.65], [0., 0.70, 0.]), pose([1., 0.65], [0., 0.5, 0.25]),
             pose([4.8, 1.2], [0.04, 0.25, 0.5])]),
-        PointyPencil => (18.*0.9/5., 0.95, 0.9, 1.8, 0.90, 0., 1., [
+        PointyPencil => (18.*0.9/5., 1., 0.9, 1.8, 0.95, 0., 0.7, [
             pose([0.55, 0.55], [0., 0.95, 0.]), pose([0.9, 0.5], [0., 0.8, 0.]),
             pose([5., 0.8], [0.05, 0.35, 0.45])]),
-        ShadingPencil => (64./2.6, 0.3, 1.35, 1.4, 0.70, 0., 0.9, [
+        ShadingPencil => (64./2.6, 1., 1.35, 1.4, 0.85, 0., 0.63, [
             pose([0.28, 0.28], [0., 0.7, 0.]), pose([1., 0.55], [0.04, 0.3, 0.3]),
             pose([2.6, 0.8], [0.10, 0.08, 0.6])]),
-        Charcoal => (24., 0.8, 1.6, 1.1, 0.45, 0., 0.85, [
+        Charcoal => (24., 1., 1.6, 1.1, 0.55, 0., 0.85, [
             pose([0.65, 0.65], [0.06, 0.5, 0.25]), pose([1., 0.65], [0.09, 0.15, 0.6]),
             pose([2., 0.8], [0.14, 0.07, 0.75])]),
-        Chalk => (36./1.6_f32.hypot(0.85), 0.55, 1.4, 0.65, 0.70, 0.24, 0.75, [
+        Chalk => (36./1.6_f32.hypot(0.85), 1., 1.4, 0.65, 0.15, 0.24, 0.75, [
             pose([0.55, 0.55], [0.09, 0.65, 0.]), pose([1., 0.8], [0.12, 0.65, 0.]),
             pose([1.6, 0.85], [0.16, 0.65, 0.])]),
-        PastelBlock => (64./1.95, 0.75, 1.45, 1., 0.40, 0.3, 0.85, [
+        PastelBlock => (64./1.95, 1., 1.45, 1., 0.50, 0.3, 0.85, [
             pose([0.55, 0.55], [0.08, 0.65, 0.]), pose([1., 0.65], [0.10, 0.65, 0.]),
             pose([3.2, 0.55], [0.14, 0.65, 0.])]),
-        Crayon => (32./2.6, 0.55, 0.8, 1.3, 0.75, 0., 1., [
+        Crayon => (32./2.6, 1., 0.8, 1.3, 0.90, 0., 0.7, [
             pose([0.65, 0.65], [0., 0.6, 0.15]), pose([1., 0.7], [0., 0.4, 0.3]),
             pose([2.6, 0.85], [0.03, 0.1, 0.6])]),
         _ => unreachable!(),
@@ -67,7 +67,7 @@ pub(crate) fn dry_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         grain: Some(crate::presets::canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, scale, 1., 0.)),
         contact: Some(BrushContact { paper, pressure_gain: gain,
             dry: Some(BrushDryMedia { poses, softness: 0.05, loading, corner,
-                relief_offset: if preset == PointyPencil { 0.35 } else { 0. } }), ..Default::default() }),
+                relief_offset: if preset == PointyPencil { 0.65 } else { 0. } }), ..Default::default() }),
         rendering: BrushRendering { accumulation: BrushAccumulation::Flow, ..Default::default() },
         mappings: Arc::from([BrushMapping { output_scale: 1.-minimum_size, output_bias: minimum_size,
             ..BrushMapping::pressure_size() }]),

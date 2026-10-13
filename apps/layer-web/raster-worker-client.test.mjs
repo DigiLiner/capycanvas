@@ -10,7 +10,7 @@ function fixture(module) {
   globalThis.clearTimeout=globalThis.clearInterval=id=>timers.delete(id);
   globalThis.Worker=class {
     constructor(){this.messages=[];this.terminated=false;workers.push(this);}
-    postMessage(message){assert.equal(this.terminated,false);if(this.postError)throw this.postError;this.messages.push(message);}
+    postMessage(message,transfer){assert.equal(this.terminated,false);if(this.postError)throw this.postError;this.messages.push(message);(this.transfers??=[]).push(transfer);}
     terminate(){this.terminated=true;}
     reply(result,extra={}){this.onmessage({data:{id:this.messages.at(-1).id,result,...extra}});}
     error(){this.onerror({preventDefault(){},message:'worker failed'});}
@@ -154,8 +154,8 @@ test('failed saves release archive workers and checkpoints reuse their cache own
   const begin=f.run(request('restart-begin'));f.workers[1].reply([]);assert.deepEqual(await begin,[]);assert.equal(f.workers.length,2);
 }));
 
-for(const operation of ['image-decode','nearest-coordinates'])test(`${operation} failure leaves file and compression workers usable`,()=>withFixture(async f=>{
-  const image=f.run(request(operation)),file=f.run(request('fingerprint')),encode=f.run(request('encode'));
+for(const operation of ['image-decode','nearest-coordinates','alpha-image'])test(`${operation} failure leaves file and compression workers usable`,()=>withFixture(async f=>{
+  const image=f.run(request(operation,operation==='alpha-image'?{metadata:{size:2},buffers:[new Uint8Array(4)]}:{})),file=f.run(request('fingerprint')),encode=f.run(request('encode'));
   assert.equal(f.workers.length,3);
   const refused=assert.rejects(image,{message:'image decode failed'});
   f.workers[0].reply(undefined,{error:'image decode failed'});await refused;
@@ -163,4 +163,13 @@ for(const operation of ['image-decode','nearest-coordinates'])test(`${operation}
   assert.equal(await file,'file');assert.equal(await encode,'encoded');
   const retry=f.run(request(operation==='image-decode'?'nearest-coordinates':'image-decode'));
   f.workers[0].reply('prepared');assert.equal(await retry,'prepared');
+}));
+
+test('brush alpha transfers to image preparation and returns caller-owned bitmap',()=>withFixture(async f=>{
+  const alpha=new Uint8Array([0,127,255,31]);
+  const pending=f.run(request('alpha-image',{metadata:{size:2},buffers:[alpha]})),worker=f.workers[0];
+  assert.equal(worker.messages[0].request.buffers[0],alpha);assert.deepEqual(worker.transfers[0],[alpha.buffer]);
+  const bitmap={closed:0,close(){this.closed++;}};worker.reply(bitmap);assert.equal(await pending,bitmap);assert.equal(bitmap.closed,0);
+  const next=f.run(request('image-decode'));assert.equal(f.workers.length,1);worker.reply('image');assert.equal(await next,'image');
+  bitmap.close();assert.equal(bitmap.closed,1);
 }));

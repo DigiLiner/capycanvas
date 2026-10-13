@@ -1791,7 +1791,7 @@ try {
   buildHeader();
   buildPanels();
   paintPairView = app.paint_pair();
-  customization = createCustomization({ app, catalog, state: () => state, paintPair: () => paintPairView, workspace, panels, groups,
+  customization = createCustomization({ app, rasterWorker, catalog, state: () => state, paintPair: () => paintPairView, workspace, panels, groups,
     element, button, icon, numberField, panelFrame,
     dispatch, draggable, grip, place, updateZen, editor });
   workspaceChrome = createWorkspaceChrome({app,state:()=>state,workspace,element,button,icon,place,dispatch,customization,editor,panelFrame,panels,draggable,grip,contentPanel,tabLabel,automaticTabs,releaseTabs});

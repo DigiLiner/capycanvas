@@ -1908,6 +1908,196 @@ class AndroidInteractionTest {
 
     }
 
+    @Test fun selectedDryShaderCompilationColdAndWarm() {
+        val directory=File(instrumentation.targetContext.getExternalFilesDir(null),"validation/shader-latency").apply { mkdirs() }
+        val rows=JSONArray()
+        fun observe(phase: String, preset: Int, selected: Boolean) {
+            val start=SystemClock.elapsedRealtimeNanos()
+            val samples=JSONArray()
+            var last=""
+            var ready=false
+            if(selected) action(obj("type" to "select_brush","id" to preset))
+            while(SystemClock.elapsedRealtimeNanos()-start<60_000_000_000L) {
+                val current=snapshot()
+                val flags=obj("gpu_ready" to current.optBoolean("gpu_ready"),"canvas_ready" to current.optBoolean("canvas_ready"),
+                    "brush_ready" to current.optBoolean("brush_ready"),"shaders_ready" to current.optBoolean("shaders_ready"),
+                    "error" to current.opt("error"),"host_error" to current.opt("host_error"))
+                if(flags.toString()!=last) {
+                    last=flags.toString()
+                    samples.put(obj("boot_ns" to SystemClock.elapsedRealtimeNanos(),"flags" to flags))
+                }
+                if(current.optBoolean("brush_ready")) { ready=true; break }
+                SystemClock.sleep(100)
+            }
+            rows.put(obj("phase" to phase,"preset" to preset,"start_boot_ns" to start,"end_boot_ns" to SystemClock.elapsedRealtimeNanos(),
+                "ready" to ready,"timeout_ms" to 60000,"flags" to samples,"brush" to state().getJSONObject("brush")))
+            File(directory,"selected-dry-compilation.json").writeText(rows.toString(2))
+            instrumentation.sendStatus(0,android.os.Bundle().apply { putString("stream","SHADER_STAGE $phase preset=$preset ready=$ready") })
+        }
+        observe("initial0",0,false)
+        for(phase in listOf("cold-selection","warm-selection")) {
+            for(preset in listOf(2,25,26,27,6,17,43)) observe(phase,preset,true)
+        }
+    }
+
+    @Test fun materialHardnessAndCanonicalStampsFollowNativeControls() {
+        waitFor("global shader preparation before warmed controls",300_000) { snapshot().optBoolean("shaders_ready") }
+        switchToolbarWorkspace("painter")
+        action(obj("type" to "set_color", "rgba" to JSONArray(listOf(0,0,0,1))))
+        val strength = toolbarComponent("brush_strength_slider")
+        val size = toolbarComponent("brush_size_slider")
+        val reports = JSONArray()
+        fun fields() = state().array("tool_settings").objects()
+        fun value(id: String) = fields().first { it.getString("id") == id }.number("value")
+        fun ready(preset: Int) {
+            try { waitFor("current brush $preset",60_000) { snapshot().optBoolean("brush_ready") } }
+            catch(error: AssertionError) {
+                val directory=File(instrumentation.targetContext.getExternalFilesDir(null),"validation/toolbar-components").apply {mkdirs()}
+                val captured=JSONObject().put("snapshot",JSONObject(snapshot().toString()))
+                val done=java.util.concurrent.CountDownLatch(1)
+                instrumentation.runOnMainSync { host.query(obj("type" to "renderer_stats")) { reply -> captured.put("renderer_stats",reply);done.countDown() } }
+                captured.put("stats_callback_received",done.await(15,java.util.concurrent.TimeUnit.SECONDS))
+                File(directory,"failure-brush-$preset.json").writeText(captured.toString(2));captureToolbar("failure-brush-$preset")
+                throw error
+            }
+        }
+        fun number(id: String, text: String) {
+            popupInput = false
+            val panel = bounds("panel-body-tool_settings")
+            repeat(5) {
+                if (exists("number-value-$id") && bounds("number-value-$id").height > 5*density &&
+                    bounds("number-value-$id").bottom < panel.bottom-4*density) return@repeat
+                tool = MotionEvent.TOOL_TYPE_FINGER
+                event(MotionEvent.ACTION_DOWN, panel.center + Offset(0f,panel.height*.3f))
+                event(MotionEvent.ACTION_MOVE, panel.center - Offset(0f,panel.height*.3f)); event(MotionEvent.ACTION_UP); settle()
+            }
+            tool = MotionEvent.TOOL_TYPE_MOUSE
+            tap(bounds("number-value-$id").center)
+            waitFor("native editor $id") { exists("number-Material hardness") }
+            instrumentation.sendStringSync(text)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER); settle()
+            waitFor("native value $id=$text") { kotlin.math.abs(value(id)-text.toFloat()/100) < .00001f }
+        }
+        for (theme in listOf("light", "dark")) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            for (preset in listOf(2,25,26,27,6,17,43,3,10)) {
+                action(obj("type" to "select_brush", "id" to preset))
+                for (field in fields()) action(obj("type" to "reset_tool_setting", "id" to field.getString("id")))
+                instrumentation.sendStatus(0,android.os.Bundle().apply {putString("stream","MATERIAL_STAGE $theme preset=$preset before-popup")})
+                tool = MotionEvent.TOOL_TYPE_FINGER
+                tap(bounds("slider-cap-${strength.second}").center)
+                popupInput = true
+                try { waitFor("canonical GPU popup $theme/$preset",60_000) { exists("brush-slider-preview") } }
+                catch(error: AssertionError) {
+                    val directory=File(instrumentation.targetContext.getExternalFilesDir(null),"validation/toolbar-components").apply {mkdirs()}
+                    File(directory,"failure-popup-$theme-$preset.json").writeText(snapshot().toString(2))
+                    captureToolbar("failure-popup-$theme-$preset");throw error
+                }
+                for (setting in listOf(0f,.25f,.75f,1f)) {
+                    action(obj("type" to "set_tool_setting", "id" to "flow", "value" to setting))
+                    waitFor("published Strength $setting") { value("flow") == setting }
+                    SystemClock.sleep(500); settle()
+                    assertTrue("retained asynchronous stamp $theme/$preset/$setting",exists("brush-slider-preview"))
+                    captureToolbar("material-$theme-$preset-strength-$setting")
+                    val popup=bounds("brush-slider-preview"); val origin=IntArray(2)
+                    instrumentation.runOnMainSync { owner.view.getLocationOnScreen(origin) }
+                    reports.put(obj("theme" to theme,"preset" to preset,"strength" to setting,
+                        "popup_bounds_screen" to JSONArray(listOf(popup.left+origin[0],popup.top+origin[1],popup.right+origin[0],popup.bottom+origin[1])),
+                        "screenshot" to "material-$theme-$preset-strength-$setting.png","fields" to JSONArray(fields())))
+                }
+                if (theme == "light" && preset == 25) {
+                    action(obj("type" to "set_tool_setting", "id" to "flow", "value" to .65))
+                    val frames=java.util.Collections.synchronizedList(mutableListOf<LongArray>())
+                    val draws=java.util.Collections.synchronizedList(mutableListOf<Long>())
+                    val measuring=java.util.concurrent.atomic.AtomicBoolean(false)
+                    val thread=android.os.HandlerThread("pressure-popup-metrics").apply { start() }
+                    val listener=android.view.Window.OnFrameMetricsAvailableListener { _,metrics,dropped ->
+                        if(measuring.get()) frames.add(longArrayOf(metrics.getMetric(android.view.FrameMetrics.VSYNC_TIMESTAMP),
+                            metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION),metrics.getMetric(android.view.FrameMetrics.GPU_DURATION),dropped.toLong()))
+                    }
+                    instrumentation.runOnMainSync { activity.window.addOnFrameMetricsAvailableListener(listener,android.os.Handler(thread.looper)) }
+                    val motionReports=JSONArray()
+                    try {
+                        for(run in 0..3) {
+                            val slider=bounds("component-slider-${strength.second}")
+                            tool=MotionEvent.TOOL_TYPE_FINGER
+                            event(MotionEvent.ACTION_DOWN,slider.center)
+                            waitFor("moving stamp",60_000) { exists("brush-slider-preview") }
+                            val popup=tagged("brush-slider-preview")!!.first.view
+                            val draw=android.view.ViewTreeObserver.OnDrawListener { if(measuring.get()) draws.add(System.nanoTime()) }
+                            instrumentation.runOnMainSync { popup.viewTreeObserver.addOnDrawListener(draw) }
+                            frames.clear();draws.clear();val inputs=JSONArray()
+                            val start=System.nanoTime();val duration=if(run==0)1_000_000_000L else 6_000_000_000L
+                            measuring.set(run!=0)
+                            while(System.nanoTime()-start<duration) {
+                                val time=System.nanoTime();val y=(60*density*kotlin.math.sin((time-start)/1e9*3.2)).toFloat()
+                                event(MotionEvent.ACTION_MOVE,slider.center+Offset(0f,y))
+                                inputs.put(JSONArray(listOf(time,slider.center.x,slider.center.y+y)))
+                                SystemClock.sleep(5)
+                            }
+                            val end=System.nanoTime();measuring.set(false)
+                            instrumentation.runOnMainSync { if(popup.viewTreeObserver.isAlive) popup.viewTreeObserver.removeOnDrawListener(draw) }
+                            event(MotionEvent.ACTION_UP);settle()
+                            if(run!=0)motionReports.put(obj("run" to run,"start_ns" to start,"end_ns" to end,"inputs" to inputs,
+                                "activity_window_frames" to JSONArray(synchronized(frames) { frames.map { JSONArray(it.toList()) } }),
+                                "popup_draw_ns" to JSONArray(synchronized(draws) { draws.toList() }),"strength_after" to value("flow")))
+                        }
+                    } finally {
+                        instrumentation.runOnMainSync { activity.window.removeOnFrameMetricsAvailableListener(listener) }
+                        thread.quitSafely()
+                    }
+                    reports.put(obj("diagnostic" to "Debug functional blank-document UI motion; not release GPU completion or scanout qualification",
+                        "nominal_input_hz" to 200,"warmup_seconds" to 1,"moving_contacts" to motionReports))
+                }
+                tap(bounds("workspace").center)
+                waitFor("dismiss native stamp") { !exists("brush-slider-preview") }
+                popupInput = false
+                if (preset == 25 || preset == 27) {
+                    customize(obj("type" to "set_panel_visible", "panel" to "tool_settings", "visible" to true))
+                    action(obj("type" to "select_panel_tab", "group" to group("tool_settings").getInt("id"), "panel" to "tool_settings"))
+                    waitFor("Material hardness field") { fields().any { it.getString("id")=="material_hardness" } }
+                    assertEquals("Material hardness",fields().first { it.getString("id")=="material_hardness" }.getString("label"))
+                    for (hardness in listOf("0","50","100")) {
+                        number("material_hardness",hardness)
+                        captureToolbar("material-$theme-$preset-hardness-$hardness")
+                        reports.put(obj("theme" to theme,"preset" to preset,"native_hardness_percent" to hardness.toInt(),"fields" to JSONArray(fields())))
+                    }
+                }
+                customize(obj("type" to "close_expanded"))
+                instrumentation.runOnMainSync {
+                    val keyboard=activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                    keyboard.hideSoftInputFromWindow(activity.window.decorView.windowToken,0)
+                    activity.window.decorView.clearFocus()
+                }
+                settle()
+                action(obj("type" to "select_brush", "id" to 1))
+                action(obj("type" to "set_brush_size", "value" to 1024))
+                waitFor("seed ready",60_000) { snapshot().optBoolean("brush_ready") }
+                val area=state().getJSONObject("camera").array("work_area")
+                val center=Offset((area.getDouble(0)+area.getDouble(2)/2).toFloat(),(area.getDouble(1)+area.getDouble(3)/2).toFloat())
+                tool=MotionEvent.TOOL_TYPE_STYLUS
+                action(obj("type" to "select_brush", "id" to preset))
+                for(field in fields()) action(obj("type" to "reset_tool_setting","id" to field.getString("id")))
+                val defaultBrush=JSONObject(state().getJSONObject("brush").toString())
+                ready(preset)
+                if (preset == 3 || preset == 10) continue
+                val before=state().getJSONObject("document_file").getLong("revision")
+                event(MotionEvent.ACTION_DOWN,center-Offset(65f,-12f));event(MotionEvent.ACTION_MOVE,center+Offset(65f,12f));event(MotionEvent.ACTION_UP);settle()
+                waitFor("$preset authored paint") { state().getJSONObject("document_file").getLong("revision")>before }
+                captureToolbar("material-$theme-$preset-painted")
+                reports.put(obj("theme" to theme,"preset" to preset,"intended_brush" to defaultBrush,
+                    "physical_pressure" to .7,"tilt_radians" to 0,"screenshot" to "material-$theme-$preset-painted.png"))
+                action(obj("type" to "invoke", "command" to "undo"));captureToolbar("material-$theme-$preset-undo")
+                action(obj("type" to "invoke", "command" to "redo"));captureToolbar("material-$theme-$preset-redo")
+                action(obj("type" to "invoke", "command" to "undo"))
+            }
+        }
+        File(instrumentation.targetContext.getExternalFilesDir(null),"validation/toolbar-components/material-hardness.json").writeText(reports.toString(2))
+        action(obj("type" to "reset_tool_setting", "id" to "flow"))
+        action(obj("type" to "select_brush", "id" to 2))
+        assertTrue(exists("component-slider-${size.second}"))
+    }
+
     @Test fun tonalRangePanelsAndToolbarAcrossDevices() {
         waitFor("document commands ready",120_000) {
             state().array("commands").objects().any { it.optString("id")=="open_document" && it.optBoolean("enabled") }

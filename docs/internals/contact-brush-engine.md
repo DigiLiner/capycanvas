@@ -32,14 +32,22 @@ elliptical outline centered. Its bias follows stylus direction, including when
 integration coordinates rotate with stroke motion. Pastel Block is square
 upright and long and narrow on its side; its writing-pose size stays the reference.
 
-Zero pressure deposits nothing. Increasing pressure recruits lower paper contacts
+Material pressure is `Strength*clamp(pen_pressure*pressure_gain,0,1)`, resolved
+on the CPU after Strength mappings. Pencil and Pointy Pencil use gain `0.7`;
+Shading Pencil uses `0.63`, and Crayon `0.7`. Their maximum response equals the
+preceding gains at Strength 70% with the same Material hardness; the Strength
+field is unscaled. Physical pen
+pressure still drives dimensions.
+Zero pressure or Strength deposits nothing. Increasing material pressure recruits lower paper contacts
 and increases their transfer; maximum pressure need not reach every recessed area.
 Texture strength scales the authored paper strength `S` from zero to twice the
 preset value. Engagement width `W` is fixed at `0.05` in all built-in dry brushes
-and is absent from their painting controls. Material hardness edits `Lambda`.
-Greater hardness reduces loading below effective pressure one; at effective
-pressure one, loading is always one. A preset pressure gain below one can keep
-the effective pressure below that endpoint even at full stylus pressure.
+and is absent from their painting controls. Material hardness is `loading=0..1`,
+displayed as 0–100%. It blends pressure-independent and pressure-proportional
+pigment loading; contact always responds to material pressure. Pencils and Crayon
+use high defaults, Charcoal and Pastel Block medium, and Chalk low. All seven dry
+presets default Strength to 100%. A preset pressure gain below one keeps material
+pressure below one even at full stylus pressure.
 Tilt changes the relief itself, including
 its interaction with paper, without additional per-pose paper or bite controls.
 The [decision record](../history/brushes/dry-media-contact.md) explains the constants,
@@ -57,6 +65,9 @@ generated or uploaded during a stroke.
 [The generator](../../crates/layer-engine/src/brush.rs) retains input vertices when
 curvature, pressure, tilt or twist changes enough. Its geometric tolerance is
 0.25 document pixels or 1% of the previous minor radius, whichever is larger.
+Active Curve fit further limits path error to 0.05 logical screen pixels,
+converted through the input scale. Its curve subdivision and predicted tail
+share that bound; this can increase retained work for broad contacts.
 Straight steady runs advance at half the reference diameter, at least 4 px. Pen-up
 flushes the endpoint. Segmentation follows input, and prediction clones the same
 state; rendering cadence does not decide where contacts are retained.
@@ -98,12 +109,13 @@ They are an approximation to a continuously deforming contact, rather than an ex
 integral of arbitrary time-varying geometry. The same approximation applies during
 live drawing, prediction rollback and replay.
 
-Dose is `6*g(strength)*color_alpha*exposure`, where
-`g(s)=s/(8-7*s)` preserves zero and full Strength and reduces early saturation
-at intermediate settings. The configured `flow` field stores Strength; resolved
-dry contacts carry `g(strength)` in `Dab.flow`. This calibration runs on the CPU
-per contact. Raw coverage `A=1-exp(-dose)` adds optical depth across segments and
-repeated passes. The stroke contributes `opacity*A` over its starting paint.
+Dose is `6*color_alpha*exposure`. The configured `flow` field stores Strength;
+resolved dry contacts carry unit `Dab.flow` and Strength-scaled material pressure
+in `Dab.contact[0]`. The renderer uses unit gain for these resolved contacts,
+so calibration is not applied twice. Strength does not
+multiply pigment dose separately. Raw coverage `A=1-exp(-dose)` adds optical depth
+across segments and repeated passes. The stroke contributes `opacity*A` over
+its starting paint.
 Unselected, unlocked normal batches with a single pigment sum their dose before
 one exponential and one blend. Erasing sums dose regardless of pigment color.
 Transparent paint and paint already carrying that same pigment also avoid a
@@ -122,6 +134,17 @@ previews preserve block averages and partial document edges. Tracked previews
 compare final pixels, avoiding changes caused by intermediate restoration.
 Shader preparation includes every reachable contact/profile/paper combination
 and its actual color and antialiasing variants before a stroke.
+
+Pointwise deposition and transported materials share their compositing helpers
+but compile separate dependency sets. Dry contact modules omit bristle and
+neighborhood transport code; legacy brushes retain those evaluators. Contact
+features and material operation are module constants, so unrelated branches do
+not enter the device compiler. Aggregate and ordered deposition share one
+contact loop, selected by the existing batch marker. They compile separate
+variants so ordered compositing does not increase the fast path's register
+requirements. The small-contact antialiasing variant also remains separate. Normal pointwise brushes
+prepare their compute kernels without also compiling the unused render fallback.
+Other blend modes retain that fallback.
 
 Selections apply after this transfer. Empty contacts remain empty through subsequent
 passes with the same pose and pressure. Opacity limits one stroke; pen-up resets

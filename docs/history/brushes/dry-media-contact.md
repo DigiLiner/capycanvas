@@ -25,11 +25,11 @@ contacts near the boundary, rather than a radial opacity fade.
   author code, separately authored support mask or pressure distribution map.
 - **Three poses.** Fixed upright, writing and side keys have authored dimensions
   and relief profiles within one brush-wide supported shape family.
-- **Two shared material controls.** Texture strength `S` and Material hardness
-  `Lambda` apply across all poses. Engagement width `W` is fixed at `0.05`.
+- **Two shared material controls.** Texture strength `S` and Material hardness `Lambda`
+  apply across all poses. Engagement width `W` is fixed at `0.05`.
 - **Existing pigment and dynamics controls.** Brush size, pressure response,
   pressure-size response, Strength, Opacity and color complement material contact.
-  Strength scales transfer; Opacity caps one stroke over its starting paint.
+  Strength scales material pressure; Opacity caps one stroke over its starting paint.
 - **No separate relief strength or bite control.** The relief field contains its
   values directly. A fixed paper-relief coupling makes selectivity evolve with
   that field.
@@ -43,7 +43,8 @@ contacts near the boundary, rather than a radial opacity fade.
 At one canvas point inside the resolved analytic shape:
 
 ```text
-p = clamp(pressure_response(stylus_pressure), 0, 1)
+p_pen = clamp(input_pressure(stylus_pressure), 0, 1)
+p = Strength * clamp(pressure_gain * p_pen, 0, 1)
 
 h = clamp(0.5 + S * (paper_height - 0.5), 0, 1)
 d = 0.5 - h
@@ -64,8 +65,12 @@ guarantee zero deposition at zero pressure.
 | Quantity | Meaning and source | Authoring location |
 | --- | --- | --- |
 | `stylus_pressure` | Normalized device pressure. | Device input. |
-| `pressure_response` | Existing input calibration and brush pressure mapping; the simple approximation is a clamped gain. | Existing pressure controls; no new per-pose map. |
-| `p` | Effective pressure in `[0,1]`. | Calculated. |
+| `input_pressure` | Existing device calibration and input smoothing. | Input processing. |
+| `pressure_gain` | Preset material approach gain, clamped before Strength multiplication. | Brush material definition; no per-pose map. |
+| `p_pen` | Calibrated physical pressure in `[0,1]`; controls pressure-driven dimensions. | Calculated. |
+| Pencil/crayon calibration | Pencil, Pointy Pencil and Crayon approach gain `0.7`; Shading Pencil `0.63`. These are 70% of their preceding gains, so maximum Strength matches the preceding 70% with the same Material hardness. | Brush definitions, independent of the Strength field and size mappings. |
+| `Strength` | Material-pressure multiplier in `[0,1]`, after existing Strength mappings. | Painting control; stable `flow` ID. |
+| `p` | Strength-scaled material pressure in `[0,1]`; drives contact and loading. | Calculated on the CPU per contact. |
 | `paper_height` | Paper height in `[0,1]`; larger values are peaks. Coordinates are stationary in document space. | Selected paper asset and its feature scale/orientation. |
 | `S` | Strength of paper-height variation; `S >= 0`. | Brush-wide Texture strength, relative to the preset's paper response. |
 | `h`, `d` | Adjusted height and centered paper depth. | Calculated. |
@@ -75,9 +80,28 @@ guarantee zero deposition at zero pressure.
 | `W` | Positive engagement interval from first contact to full transfer. | Fixed `0.05`; absent from the painting controls. |
 | `x` | Clamped local engagement, not radial position or pen pressure itself. | Calculated. |
 | `C` | Contact response in `[0,1]`. | Calculated; cubic engine transfer for this design. |
-| `Lambda` | Loading pressure response in `[0,1]`. | Brush-wide Material hardness. |
+| `Lambda` | Loading pressure response in `[0,1]`. | Brush-wide Material hardness; stable `material_hardness` setting ID and authored `loading` field. |
 | `L` | Pigment loading conditional on contact. | Calculated. |
 | `0.5`, `3`, `2` | Height/approach normalization and cubic endpoint coefficients. | Engine constants. |
+
+### Built-in material defaults
+
+These are recipe choices in the shared brush definitions. All seven presets start
+at Strength 100%; other brush families retain their own defaults.
+
+| Preset | Material hardness `Lambda` | Approach gain |
+| --- | --- | --- |
+| Pencil | 0.90 | 0.70 |
+| Pointy Pencil | 0.95 | 0.70 |
+| Shading Pencil | 0.85 | 0.63 |
+| Charcoal | 0.55 | 0.85 |
+| Chalk | 0.15 | 0.75 |
+| Pastel Block | 0.50 | 0.85 |
+| Crayon | 0.90 | 0.70 |
+
+Higher pencil/crayon hardness makes light contact release less pigment. Powdery
+charcoal/pastel retain more pigment at light contact; Chalk retains the strongest
+loading floor. Relief and paper still determine which locations can engage.
 
 ### Tilt and contact coordinates
 
@@ -98,7 +122,7 @@ quantity to interpolate.
 For resolved dimension ratios `(a,b)` and orientation `psi`:
 
 ```text
-radii = 0.5 * brush_size * pressure_size_response(p) * (a,b)
+radii = 0.5 * brush_size * pressure_size_response(p_pen) * (a,b)
 (u,v) = rotate(canvas_point - stroke_center, -psi) / radii
 ```
 
@@ -128,7 +152,8 @@ values, without a separate relief-depth multiplier. The block's flat face has
 constant recess; its bevel approximates a small rounded corner. The corner width
 is brush-wide and scales with the smaller semiaxis. Three fixed tilt keys at 0°,
 45° and 76.5° interpolate dimensions and coefficients; the pose editor is deferred.
-Pointy Pencil uses `delta=0.35`, placing its shallowest relief toward the stylus-tip
+Pointy Pencil uses `delta=0.65*smoothstep(0,1,clamp(theta/theta_1,0,1))`,
+placing its shallowest relief toward the stylus-tip
 side, local negative X. Other built-ins use zero. The physical outline remains
 centered; the offset changes engagement within that outline. The renderer
 transforms this vector when aligning its integration coordinates with motion,
@@ -153,7 +178,7 @@ The ellipse equation does not promise that all other shapes use the same `q`.
 | Width and length | Positive relative dimensions in each pose. |
 | Corner width | Brush-wide block rim fraction. |
 | Relief profile | Nonnegative `r0`, `c2`, `c4` in each pose. |
-| Relief offset | Brush-wide ellipse offset; Pointy Pencil uses `0.35`, others zero. |
+| Relief offset | Pointy Pencil ramps from zero upright to `0.65` by the writing pose; others zero. |
 | Alignment | Transformed stylus azimuth; no additional per-pose offset. |
 
 The pose editor is deferred. Key editing, further directional skew and morphing across
@@ -177,7 +202,6 @@ length through that point:
 
 ```text
 E = (1 / ell_full) * integral_over_I_segment(C * L) d_ell
-g(s) = s / (8 - 7*s)                 s = selected Strength in [0,1]
 Delta_D = K * E
 D_new = D_old + Delta_D
 A = 1 - exp(-D_new)
@@ -189,9 +213,10 @@ number of engaged paper contacts. Empty/outside support contributes nothing.
 The stationary-tap limit evaluates `C*L` using the engine's tap exposure rule,
 without dividing by a zero chord.
 
-`E` is renderer exposure. `K` folds in `6*g(s)`, color alpha and directional
-feed; it is not another new editor control. Resolve `g(s)` on the CPU after
-existing pressure mappings. `D` is a
+`E` is renderer exposure. `K` folds in the fixed optical normalization six,
+color alpha and directional feed; it is not another editor control. Strength
+enters only through material pressure, not through `K`. Dry contacts carry unit
+pigment feed; their pressure gain is already resolved on the CPU. `D` is a
 conceptual additive optical dose, not a requirement to store a new physical
 pigment layer in the artwork. `A` describes ordinary same-color flow
 accumulation. Existing blending, selection and other accumulation modes retain
@@ -211,7 +236,7 @@ the current cubic is not declared universally optimal.
 
 ### 1. Pressure to approach: `A = 0.5p`
 
-**Purpose.** Convert effective pen pressure into a normalized approach distance
+**Purpose.** Convert Strength-scaled material pressure into a normalized approach distance
 that recruits paper peaks before valleys. The pressure response is brush-wide;
 there is no authored two-dimensional pressure map inside the tip.
 
@@ -318,8 +343,13 @@ the useful stick controls.
 
 A shifted ellipse field supplies Pointy Pencil's directional engagement.
 `q=(u+delta)^2+v^2` places its shallow point toward negative X; the centered
-`q0=u^2+v^2` still bounds physical support. The built-in `delta=0.35` moves the
-minimum by 35% of the long semiaxis without moving the cursor outline. It is a
+`q0=u^2+v^2` still bounds physical support. The built-in maximum `delta=0.65` moves the
+minimum by 65% of the long semiaxis without moving the cursor outline. The shift
+ramps with normalized tilt using the same cubic smoothstep, reaching its maximum
+by the writing pose. Upright contact stays symmetric. A smaller `0.35` shift
+left too little separation between tip-side and heel-side engagement for the
+intended directional pencil. A constant shift would make even upright contact
+asymmetric. It is a
 recipe choice rather than a universal pencil constant. Increasing its magnitude
 strengthens asymmetry and can leave more of the opposite side empty. The shift
 retains a quadratic `q`, so existing clipped polynomial integrals still apply.
@@ -486,23 +516,23 @@ contact saturated.
 loading. `Lambda=0` makes pressure act through engagement and existing geometry;
 `Lambda=1` makes per-contact loading equal to pressure. Intermediate values
 retain strong individual grains during light shading while allowing additional
-pressure buildup. The high-pressure endpoint is normalized to one because Strength
-already controls overall strength. The affine form is the unique straight line
+pressure buildup. The material-pressure endpoint is normalized to one; full loading is reached
+only when calibrated pressure and Strength both reach one, unless `Lambda=0`
+makes loading constant. The affine form is the unique straight line
 between `L(0)=1-Lambda` and `L(1)=1`, with one free parameter.
 
-The interface calls this **Material hardness**, with soft and hard endpoints.
-It approximates the ease of pigment release under light pressure, rather than
-wear, breakage or tip deformation. Softer graphite and charcoal commonly give
-stronger marks with a light touch; see [Faber-Castell's hardness guide](https://fabercastell.com/blogs/creativity-for-life/graphite-pencil-lead-degree-hardness)
-and [Nitram's shading guidance](https://nitramcharcoal.com/blogs/blog/basic-shading-techniques).
-The alternatives Pressure sensitivity and Pressure influence could imply that
-zero disables the separate contact and size responses. Material softness would
-require reversing the slider direction without changing the equation.
+The painting control is **Material hardness**, with `Lambda` from zero to one.
+Contact stays pressure-sensitive throughout. Higher hardness makes pigment loading
+more dependent on pressure; lower hardness retains strong individual grains at
+light contact. Pencils and crayon default high, charcoal and pastel medium, and
+chalk low. These are artistic material responses, not a measured hardness scale.
 
-For `0<=Lambda<=1`, loading is bounded, monotone and lies between `p` and `1`.
-Its slope is `Lambda`. The floor is conditional on contact, not a minimum stroke
-opacity. Multiplication by `C=0` still deposits nothing. Increased loading can
-darken an engaged grain without filling a genuinely empty contact.
+A two-way Pressure balance control was considered and rejected. Its second half
+froze contact pressure toward a full-pressure reference while retaining pigment
+sensitivity. It added a second response regime without a useful painting control.
+A separate density control would duplicate the pressure effect expected from
+Strength. Scaling pigment dose by Strength independently was rejected: it
+weakens existing grains without recruiting or releasing paper contacts.
 
 **Alternatives.** Constant loading and pure `p` are retained as endpoints of the
 family. `(1-Lambda)+Lambda*p*p` cheaply delays loading until firmer pressure and
@@ -582,25 +612,32 @@ flow, adding doses is equivalent to multiplying transmittances:
 This supports batched dose accumulation. It does not require per-pixel pigment
 mass, paper deformation or a new artwork storage representation.
 
-**Strength calibration.** The normalized full-contact passage uses optical dose
-`6*g(s)`, with `g(s)=s/(8-7s)`. Direct `g(s)=s` gives approximately `0.989`
-coverage at Strength `0.75`, making much of the slider approach full black.
-The rational curve preserves zero and full Strength, increases monotonically,
-and gives dose approximately `1.636` at `0.75` before exposure and color alpha.
-The constant eight controls intermediate sensitivity, not contact density:
-increasing it weakens intermediate Strength while keeping the endpoints. It is
-an engine calibration, not another artist control or an exact opacity percentage.
-Its arithmetic runs once per resolved contact, without per-pixel work.
+**Strength as material pressure.** Strength multiplies calibrated pen pressure
+before contact and loading: `p=Strength*clamp(pressure_gain*p_pen,0,1)`. Reducing Strength lowers approach,
+recruits fewer paper locations and reduces loading through the same response as
+lower pressure. Physical pressure still drives contact dimensions and tilt still
+selects relief. At fixed geometry and effective pressure, Strength and pen
+pressure therefore produce the same material response. Pressure gain is clamped
+before Strength multiplication; the GPU style uses unit gain for these resolved
+contacts. This avoids applying calibration twice.
 
-Lowering the fixed optical normalization makes intermediate values gentler but
-also weakens the dark full-strength endpoint. A power curve preserves endpoints
-but its exponent sets an arbitrary low-end response. An exact logarithmic
-calibration can target a chosen single-pass alpha curve, but adds nonlinear
-evaluation and still needs an endpoint convention. The rational form supplies
-the required simple, bounded adjustment. It is a digital control choice; the
-transmittance reference motivates accumulation, not the constant eight.
+The former direct pigment-feed multiplier, including `g(s)=s/(8-7s)`, is rejected
+for dry media: it lightens existing contacts without changing their eligibility.
+Applying both pressure scaling and that feed reduction adds a second intensity
+response. A separate Strength-to-contact coupling control is unnecessary because
+Strength shares the material-pressure response. Balancing contact loss against
+pigment loading is selected by Material hardness within that response.
+The present multiplier is linear, bounded and resolved once
+per contact, with no additional per-pixel operation or integral degree.
 
-**Stroke ceiling.** Strength scales dose; Opacity limits the contribution of one
+The three pencil recipes and Crayon calibrate their upper material response through
+`pressure_gain`, rather than scaling stored Strength. Multiplying their preceding
+gain by 0.7 makes new Strength 100% equal to prior Strength 70% at every physical
+pressure with the same Material hardness. Loading, paper eligibility and optical
+dose match at the same geometry. The seven dry presets default Strength to 100%;
+physical pressure-size curves stay unchanged.
+
+**Stroke ceiling.** Strength controls material pressure; Opacity limits the contribution of one
 stroke over its starting paint. For raw coverage `A`, the stroke contribution is
 `opacity*A`. Repeated passes can approach that ceiling; pen-up starts another
 budget, allowing subsequent strokes to build further. Painting with partial
@@ -652,7 +689,7 @@ not adopt.
 
 | Scenario | Intended behavior | Primary authoring decisions |
 | --- | --- | --- |
-| Heavy pencil outlines | Concentrated contact, dark buildup, with optional surviving tooth and edge gaps. | Upright/writing geometry and relief; loading and flow. |
+| Heavy pencil outlines | Concentrated contact, dark buildup, with optional surviving tooth and edge gaps. | Upright/writing geometry and relief; loading and Strength. |
 | Normal pencil drawing | Pressure recruits a wider set of contacts and strengthens engaged peaks. | Writing profile, pressure-size response and `Lambda`. |
 | Light pencil shading | Sparse, individually visible grain instead of a uniformly pale radial fade. | Broad side profile, paper strength and modest loading pressure response. |
 | Charcoal line | Strong engaged grains with a distinct contact boundary. | Narrower geometry, paper asset and relief taper. |
@@ -664,7 +701,7 @@ simulation. Hard-pencil paper flattening, tip wear, powder transport and wax
 redistribution need history/state beyond a static paper field.
 
 The contract fixes the equations and ownership of controls. Built-in recipes
-author `S`, `Lambda`, pressure response and relief coefficients in the
+author `S`, Material hardness, pressure response and relief coefficients in the
 shared [preset definitions](../../../crates/layer-core/src/contact_presets.rs).
 The pose editor and curve widget remain deferred. Linear versus cubic contact
 remains open for the later benchmark; no change of editor interface is required

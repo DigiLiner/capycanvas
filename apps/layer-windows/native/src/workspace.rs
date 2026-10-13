@@ -1,4 +1,4 @@
-//! CPU-only queries for native workspace projections.
+//! Native workspace projections and asynchronous preview packets.
 use crate::previews::CapyPreview;
 use layer_host::NativeHost;
 use serde_json::{Value, json};
@@ -53,17 +53,18 @@ fn request(json: &str) -> Result<Value, String> {
 #[derive(serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum StampQuery {
-    ToolbarStamp { context: layer_ui::ToolbarContext },
+    ToolbarStamp { context: layer_ui::ToolbarContext, #[serde(default)] known_request: Option<u64> },
     Scopes { #[serde(default)] size: Option<[u32; 2]> },
 }
 
 pub fn query(host: &mut NativeHost, json: &str) -> Result<CapyPreview, String> {
     match serde_json::from_str(json) {
-        Ok(StampQuery::ToolbarStamp { context }) => return match host.session.toolbar_stamp(context) {
-            Ok(stamp) => CapyPreview::packet(
-                json!({"result":{"size":stamp.size,"extent":stamp.extent},"error":null}),
+        Ok(StampQuery::ToolbarStamp { context, known_request }) => return match host.session.toolbar_stamp(context, known_request) {
+            Ok(Some(stamp)) => CapyPreview::packet(
+                json!({"result":{"size":stamp.size,"extent":stamp.extent,"request_id":stamp.request_id,"pending":stamp.pending},"error":null}),
                 stamp.alpha,
             ),
+            Ok(None) => CapyPreview::packet(json!({"result":null,"error":null}), Vec::new()),
             Err(error) => CapyPreview::packet(json!({"result":null,"error":error}), Vec::new()),
         },
         Ok(StampQuery::Scopes { size }) => return crate::scopes::query(host.session.state(), size),
@@ -142,13 +143,22 @@ mod tests {
     #[test]
     fn toolbar_stamp_returns_alpha_bytes_and_rejects_stale_context() {
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        let gpu=layer_render_wgpu::WgpuRasterizer::new_native_headless(
+            host.session.engine().document().composition().color).unwrap();
+        host.session.replace_renderer(layer_host::Renderer(Some(gpu.into()))).unwrap();
         let context = host.session.state().toolbar_context();
-        let packet = query(
-            &mut host,
-            &json!({"type":"toolbar_stamp","context":context}).to_string(),
-        )
-        .unwrap();
-        let owned = Box::into_raw(Box::new(packet));
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(15);
+        let owned=loop {
+            let packet=query(&mut host,&json!({"type":"toolbar_stamp","context":context}).to_string()).unwrap();
+            let owned=Box::into_raw(Box::new(packet));
+            let reply:Value=unsafe {serde_json::from_slice(std::ffi::CStr::from_ptr(
+                crate::previews::capy_preview_metadata(owned)).to_bytes()).unwrap()};
+            assert!(reply["error"].is_null(),"{reply}");
+            if !reply["result"].is_null() && reply["result"]["pending"]==false {break owned;}
+            unsafe {crate::previews::capy_preview_free(owned);}
+            assert!(std::time::Instant::now()<deadline,"GPU toolbar stamp did not complete: {reply}");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
         unsafe {
             let json = std::ffi::CStr::from_ptr(crate::previews::capy_preview_metadata(owned));
             let reply: Value = serde_json::from_slice(json.to_bytes()).unwrap();

@@ -831,9 +831,9 @@ impl WebApp {
         // Preserve numbers when a returned numeric spec is sent back to Rust.
         js_sys::JSON::parse(&serde_json::to_string(&result).map_err(js)?)
     }
-    pub fn toolbar_stamp(&self, context: JsValue) -> Result<JsValue, JsValue> {
+    pub fn toolbar_stamp(&mut self, context: JsValue, known_request: Option<u64>) -> Result<JsValue, JsValue> {
         let context = serde_wasm_bindgen::from_value(context).map_err(js)?;
-        serialize(&self.session.toolbar_stamp(context).map_err(js)?)
+        serialize(&self.session.toolbar_stamp(context, known_request).map_err(js)?)
     }
     pub fn preferences(&self) -> Result<JsValue, JsValue> {
         serialize(&self.session.preferences())

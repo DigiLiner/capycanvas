@@ -404,6 +404,10 @@ struct BrushPreview {
     label: gtk::Label,
     bookmark: gtk::Button,
     selected: Cell<Option<bool>>,
+    request: Cell<Option<u64>>,
+    extent: Cell<f32>,
+    image: RefCell<Option<gtk::cairo::ImageSurface>>,
+    poll: RefCell<Option<glib::SourceId>>,
 }
 
 pub(crate) enum Field {
@@ -794,6 +798,7 @@ impl Component {
 
     fn close_preview(&self) {
         if let Some(preview) = self.preview.take() {
+            if let Some(poll)=preview.poll.take() { poll.remove(); }
             preview.popover.popdown();
             preview.popover.unparent();
         }
@@ -801,24 +806,6 @@ impl Component {
     fn show_preview(self: &Rc<Self>, w: &Rc<Workspace>) {
         if self.preview.borrow().is_none() {
             let Some(context) = self.context.get() else {
-                return;
-            };
-            let stamp = w
-                .gpu
-                .borrow()
-                .as_ref()
-                .and_then(|g| g.session.toolbar_stamp(context).ok());
-            let Some(stamp) = stamp else {
-                return;
-            };
-            let pixels: Vec<u8> = stamp.alpha.iter().flat_map(|&a| [a, a, a, a]).collect();
-            let Ok(image) = gtk::cairo::ImageSurface::create_for_data(
-                pixels,
-                gtk::cairo::Format::ARgb32,
-                stamp.size as i32,
-                stamp.size as i32,
-                stamp.size as i32 * 4,
-            ) else {
                 return;
             };
             let area = gtk::DrawingArea::new();
@@ -881,7 +868,10 @@ impl Component {
                 #[weak]
                 w,
                 move |area, cr, _, _| {
-                    let Ok(layout) = component.preview_layout(stamp.extent, &w.localization()) else {
+                    let Some(preview)=component.preview.borrow().clone() else { return; };
+                    let image=preview.image.borrow();
+                    let Some(image)=image.as_ref() else { return; };
+                    let Ok(layout) = component.preview_layout(preview.extent.get(), &w.localization()) else {
                         return;
                     };
                     let b = layout.stamp;
@@ -903,8 +893,8 @@ impl Component {
                     cr.clip();
                     cr.translate(b.x as f64, b.y as f64);
                     cr.scale(
-                        b.width as f64 / stamp.size as f64,
-                        b.height as f64 / stamp.size as f64,
+                        b.width as f64 / image.width() as f64,
+                        b.height as f64 / image.height() as f64,
                     );
                     cr.set_source_rgba(
                         ink.red() as f64,
@@ -912,7 +902,7 @@ impl Component {
                         ink.blue() as f64,
                         layout.opacity as f64,
                     );
-                    let _ = cr.mask_surface(&image, 0., 0.);
+                    let _ = cr.mask_surface(image, 0., 0.);
                     let _ = cr.restore();
                     if layout.header_fade > 0. {
                         let [r, g, b] = component
@@ -952,7 +942,39 @@ impl Component {
                 label,
                 bookmark,
                 selected: Cell::new(None),
+                request: Cell::new(None),
+                extent: Cell::new(1.),
+                image: RefCell::new(None),
+                poll: RefCell::new(None),
             })));
+        }
+        if let Some(preview)=self.preview.borrow().clone() {
+            if preview.poll.borrow().is_none() {
+                let source=glib::timeout_add_local(std::time::Duration::from_millis(16), glib::clone!(
+                    #[weak(rename_to=component)] self,
+                    #[weak] w,
+                    #[upgrade_or] glib::ControlFlow::Break,
+                    move || {
+                        let Some(preview)=component.preview.borrow().clone() else { return glib::ControlFlow::Break; };
+                        let Some(context)=component.context.get() else { return glib::ControlFlow::Break; };
+                        let result=w.gpu.borrow_mut().as_mut().and_then(|g|
+                            g.session.toolbar_stamp(context,preview.request.get()).ok()).flatten();
+                        if let Some(stamp)=result {
+                            if !stamp.alpha.is_empty() {
+                                if let Ok(image)=gtk::cairo::ImageSurface::create_for_data(stamp.alpha,
+                                    gtk::cairo::Format::A8,stamp.size as i32,stamp.size as i32,stamp.size as i32) {
+                                    preview.request.set(Some(stamp.request_id));
+                                    preview.extent.set(stamp.extent);
+                                    preview.image.replace(Some(image));
+                                    component.update_preview(&w.localization());
+                                }
+                            }
+                        }
+                        glib::ControlFlow::Continue
+                    }
+                ));
+                preview.poll.replace(Some(source));
+            }
         }
         self.update_preview(&w.localization());
         let preview = self.preview.borrow().clone();
@@ -974,7 +996,7 @@ impl Component {
         let Some(preview) = self.preview.borrow().clone() else {
             return;
         };
-        let Ok(layout) = self.preview_layout(1., localization) else {
+        let Ok(layout) = self.preview_layout(preview.extent.get(), localization) else {
             return;
         };
         preview.area.set_content_width(layout.side as i32);

@@ -29,26 +29,6 @@ impl BrushDryMedia {
             else { p.radii[0].max(p.radii[1]) }).fold(0., f32::max)
     }
 
-    pub fn deposition(self, local: [f32; 2], axes: [f32; 2], relief: [f32; 3],
-        pressure: f32, paper: f32, paper_strength: f32) -> f32 {
-        let pressure = pressure.clamp(0.,1.);
-        if pressure <= 0. { return 0.; }
-        let mut point = local;
-        if self.corner > 0. {
-            let rim = self.corner*axes[0].min(axes[1]);
-            point = std::array::from_fn(|i| (point[i].abs()-(1.-rim/axes[i])).max(0.)/(rim/axes[i]));
-        }
-        let mut q = if self.corner>0. { (point[0]+point[1]).powi(2) } else { point[0]*point[0]+point[1]*point[1] };
-        if q > 1. { return 0.; }
-        if self.relief_offset != 0. {
-            q = (point[0]+self.relief_offset).powi(2)+point[1]*point[1];
-        }
-        let recess = relief[0]+q*(relief[1]+relief[2]*q);
-        let depth = 0.5-(0.5+paper_strength*(paper-0.5)).clamp(0.,1.);
-        let x = ((0.5*pressure-recess-(1.+0.25*recess)*depth)/self.softness).clamp(0.,1.);
-        x*x*(3.-2.*x)*(1.-self.loading+self.loading*pressure)
-    }
-
     pub fn pose(self, tilt: f32) -> BrushDryPose {
         let (i, t) = if tilt < 0.5 { (0, tilt * 2.) } else { (1, (tilt - 0.5) / 0.35) };
         let t = t.clamp(0., 1.);

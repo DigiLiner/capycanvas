@@ -1,8 +1,9 @@
 # Pencil, charcoal and ink brush redesign
 
 Research and design proposal, 2026-09-13. The audit below describes the engine
-before this work. The implemented follow-up and measurements are recorded in
-[Contact brush engine](../internals/contact-brush-engine.md).
+before this work. Dry media now follow the accepted
+[analytic relief design](brushes/dry-media-contact.md). Current implementation
+belongs in the [contact engine guide](../internals/contact-brush-engine.md).
 
 The proposed change preserves shared Rust input processing and the sparse wgpu
 renderer while replacing the contact, deposition and ending behavior of these

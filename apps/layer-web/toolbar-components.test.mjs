@@ -60,6 +60,7 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
   assert.ok(Math.abs(centered.track.y-centered.root.y-(centered.root.bottom-centered.track.bottom))<2, 'equal slider end padding');
   await capture('sketch-sliders');
   await checkSliderBookmarks({ call, evaluate, settle, click, gesture, rect, capture, send, slider });
+  await checkToolbarStrengthPreviews({call,evaluate,settle});
   for (const device of ['mouse', 'touch', 'pen']) {
     const cap = await rect('[data-toolbar-component=brush_size_slider] .toolbar-slider-cap');
     const strength = await rect('[data-toolbar-component=brush_strength_slider]');
@@ -216,10 +217,12 @@ export async function checkToolbarComponents({ call, evaluate, settle }) {
 
 async function checkSliderBookmarks({ call, evaluate, settle, click, gesture, rect, capture, send, slider }) {
   const preview = '.toolbar-brush-preview:popover-open';
+  const stampReady=async old=>evaluate('new Promise((resolve,reject)=>{const end=performance.now()+20000;function poll(){const id=document.querySelector(".toolbar-brush-preview:popover-open canvas")?.dataset.previewRequest;if(id'+(old?'&&id!=='+JSON.stringify(old):'')+')return resolve();if(performance.now()>end)return reject(Error("GPU popup refresh"));setTimeout(poll,20)}poll()})');
   assert.equal(await evaluate(`document.querySelectorAll('[data-toolbar-component=brush_size_slider] .number-value').length`), 0);
   for (const device of ['mouse', 'touch', 'pen']) {
     await click(slider, device, { x: 0, y: -23 });
     assert.ok(await evaluate(`!!document.querySelector('${preview}')`), `${device}: tap retains preview`);
+    await evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+20000;function poll(){if(document.querySelector('${preview} canvas')?.dataset.previewRequest)return resolve();if(performance.now()>end)return reject(Error('GPU tip preview delivery'));setTimeout(poll,20)}poll()})`);
     const value = await evaluate('layerApp.state().brush.diameter');
     assert.ok(await evaluate(`(()=>{const c=document.querySelector('${preview} canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4===3&&v>0)})()`), 'preview paints the actual tip');
     await click(`${preview} .toolbar-preview-bookmark`, device);
@@ -245,14 +248,15 @@ async function checkSliderBookmarks({ call, evaluate, settle, click, gesture, re
     assert.equal(await evaluate(`!!document.querySelector('${preview}')`), false, `${device}: outside dismiss`);
   }
   await send({type:'set_tool_setting',id:'size',value:2048});
-  await click('[data-toolbar-component=brush_size_slider] .toolbar-slider-cap');
+  await click('[data-toolbar-component=brush_size_slider] .toolbar-slider-cap');await stampReady();
   assert.ok(await evaluate(`(()=>{const c=document.querySelector('${preview} canvas'),w=c.width,h=c.height,p=c.getContext('2d').getImageData(0,0,w,h).data;return [[1,h>>1],[w-2,h>>1],[w>>1,h-2]].every(([x,y])=>p[(y*w+x)*4+3]>0)})()`), 'large size stamp reaches every popup edge');
   for (const theme of ['light','dark']) {
     await send({type:'set_theme',theme});
     assert.ok(await evaluate(`(()=>{const p=document.querySelector('${preview}'),c=p.querySelector('canvas'),bg=getComputedStyle(p).backgroundColor.match(/[\\d.]+/g).slice(0,3).map(Number),ctx=c.getContext('2d'),pixel=y=>ctx.getImageData(c.width>>1,y,1,1).data,distance=y=>bg.reduce((n,v,i)=>n+Math.abs(v-pixel(y)[i]),0);return distance(4)<distance(20)&&distance(20)<distance(48)})()`), `${theme}: header fades gradually from the top using the current background`);
     await capture(`size-edge-fill-${theme}`);
   }
-  await send({type:'set_tool_setting',id:'size',value:3});
+  const largeRequest=await evaluate(`document.querySelector('${preview} canvas').dataset.previewRequest`);
+  await send({type:'set_tool_setting',id:'size',value:3});await stampReady(largeRequest);
   const fade = await evaluate(`(()=>{const p=document.querySelector('${preview}'),style=p.closest('[data-toolbar-component]').dataset.tileStyle,g=layerApp.app.toolbar_ui({type:'slider_preview',control:{kind:'brush_size_slider'},style,value:3,length:0,extent:1}),c=p.querySelector('canvas'),r=c.width/c.getBoundingClientRect().width,ctx=c.getContext('2d'),alpha=y=>ctx.getImageData(c.width>>1,Math.round(y*r),1,1).data[3];return {style,presented:p.closest('.toolbar-controls').dataset.tileStyle,tile:layerApp.app.toolbar_ui({type:'style',style}).size[1],length:g.header_fade,opacity:g.header_fade_opacity,alpha:[0,g.header_fade/2,g.header_fade+4].map(alpha)}})()`);
   assert.equal(fade.style, fade.presented); assert.ok(Math.abs(fade.length - 65 * fade.tile / 54) < .01, `65px fade on medium tiles: ${JSON.stringify(fade)}`);
   assert.ok(Math.abs(fade.alpha[0]-255*fade.opacity)<8&&Math.abs(fade.alpha[1]-255*fade.opacity/2)<8&&fade.alpha[2]===0, `header fade follows the shared layout: ${JSON.stringify(fade)}`);
@@ -262,11 +266,60 @@ async function checkSliderBookmarks({ call, evaluate, settle, click, gesture, re
   await send({type:'customize',action:{type:'confirm_tools'}});
   await click('[data-toolbar-component=brush_opacity_slider] input.number-slider');
   const alpha = () => evaluate(`(()=>{const c=document.querySelector('${preview} canvas');return c.getContext('2d').getImageData(0,0,c.width,c.height).data.reduce((n,v,i)=>n+(i%4===3?v:0),0)})()`);
-  await send({type:'set_tool_setting',id:'opacity',value:1}); const full = await alpha();
-  await send({type:'set_tool_setting',id:'opacity',value:.5}); const half = await alpha();
+  await stampReady();const originalRequest=await evaluate(`document.querySelector('${preview} canvas').dataset.previewRequest`);
+  await send({type:'set_tool_setting',id:'opacity',value:1});await stampReady(originalRequest);const full = await alpha();
+  const fullRequest=await evaluate(`document.querySelector('${preview} canvas').dataset.previewRequest`);
+  await send({type:'set_tool_setting',id:'opacity',value:.5});await stampReady(fullRequest);const half = await alpha();
   assert.ok(half/full > .48 && half/full < .52, 'preview opacity follows the value once');
   await capture('opacity-preview');
   await send({type:'invoke', command:'eraser'});
   assert.equal(await evaluate(`!!document.querySelector('${preview}')`), false, 'tool switch closes old preview');
   await send({type:'invoke', command:'brush'});
+}
+
+
+export async function checkToolbarStrengthPreviews({call,evaluate,settle}) {
+  const dir=process.env.LAYER_TEST_ARTIFACTS||'/tmp/capy-toolbar-web';await mkdir(dir,{recursive:true});const reports=[],defaults=[];
+  const wait=condition=>evaluate('new Promise((resolve,reject)=>{const end=performance.now()+30000;function poll(){if('+condition+')return resolve();if(performance.now()>end)return reject(Error('+JSON.stringify(condition)+'));setTimeout(poll,20)}poll()})');
+  const send=async action=>{await evaluate('layerApp.dispatch('+JSON.stringify(action)+')');await settle();};
+  const click=async selector=>{const point=await evaluate('(()=>{const r=document.querySelector('+JSON.stringify(selector)+').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...point,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();};
+  const preview='.toolbar-brush-preview:popover-open',canvas=preview+' canvas';
+  const alpha=()=>evaluate('(()=>{const c=document.querySelector('+JSON.stringify(canvas)+');return Array.from(c.getContext("2d").getImageData(0,0,c.width,c.height).data).filter((_,i)=>i%4===3)})()');
+  const ready=async previous=>{await wait('!!document.querySelector('+JSON.stringify(canvas)+')?.dataset.previewRequest'+(previous?'&&document.querySelector('+JSON.stringify(canvas)+').dataset.previewRequest!=='+JSON.stringify(previous):''));await settle();};
+  const request=()=>evaluate('document.querySelector('+JSON.stringify(canvas)+').dataset.previewRequest');
+  const capture=async name=>{const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(dir+'/'+name+'.png',Buffer.from(shot.data,'base64'));};
+  const history=()=>evaluate('(()=>{const s=layerApp.state();return{revision:String(layerApp.app.gpu_diagnostics().session.revision),undo:s.commands.find(c=>c.id==="undo").enabled,redo:s.commands.find(c=>c.id==="redo").enabled}})()');
+  await evaluate('(()=>{window.__stampCopies=[];const copy=GPUCommandEncoder.prototype.copyBufferToBuffer;window.__originalStampCopy=copy;GPUCommandEncoder.prototype.copyBufferToBuffer=function(...a){if(a[0]?.label==="brush stamp output"&&a[2]?.label==="brush stamp readback")__stampCopies.push({source:a[0].label,target:a[2].label,bytes:Number(a[4])});return copy.apply(this,a)}})()');
+  await evaluate('layerApp.app.workspace_input(JSON.stringify({type:"switch",id:"builtin:workspace:painter"}));null');
+  await wait('JSON.parse(layerApp.app.workspace_view()).id==="builtin:workspace:painter"&&!JSON.parse(layerApp.app.workspace_view()).busy');
+  await send({type:'invoke',command:'brush'});await wait('!!document.querySelector("[data-toolbar-component=brush_strength_slider] .toolbar-slider-cap")');
+  await wait('layerApp.app.document_park_ready()');const before=await history();const initial=await evaluate('(()=>{const s=layerApp.state();return{preset:s.brush.preset,fields:s.tool_settings.map(f=>({id:f.id,value:f.value}))}})()');
+  try {
+    for(const theme of ['light','dark']) {
+      await send({type:'set_theme',theme});
+      for(const spec of [{id:2,name:'Pencil',loading:.9},{id:25,name:'Pointy',loading:.95},{id:26,name:'ShadingPencil',loading:.85},{id:27,name:'Charcoal',loading:.55},{id:6,name:'Chalk',loading:.15},{id:17,name:'Pastel',loading:.5},{id:43,name:'Crayon',loading:.9}]) {
+        await send({type:'select_brush',id:spec.id});const fields=await evaluate('layerApp.state().tool_settings');assert.deepEqual(fields.map(f=>f.id),['size','flow','grain_depth','material_hardness','angle','opacity','smoothing_strength']);const smoothing=fields.at(-1);assert.equal(smoothing.group_id,'tool-setting-group-smoothing');assert.deepEqual([smoothing.numeric.min,smoothing.numeric.max,smoothing.numeric.scale],[0,1,100]);assert.equal(fields.find(f=>f.id==='flow').value,1,spec.name+' defaultStrength100');const material=fields.find(f=>f.id==='material_hardness');assert.equal(material.label,'Material hardness');assert.equal(material.numeric.max,1);assert.equal(material.numeric.scale,100);assert.ok(Math.abs(material.value-spec.loading)<1e-6,spec.name+' authoredMaterial hardness');defaults.push({theme,...spec,fields});await capture('default-'+spec.name+'-'+theme);
+      }
+      await writeFile(dir+'/dry-defaults.json',JSON.stringify(defaults,null,2));
+    }
+    for(const theme of ['light','dark']) {
+      await send({type:'set_theme',theme});
+      for(const spec of [{id:2,name:'Pencil'},{id:25,name:'Pointy'},{id:43,name:'Crayon'},{id:3,name:'Eraser'},{id:10,name:'Smudge'}]) {
+        await send({type:'select_brush',id:spec.id});for(const [id,value] of [['size',64],['opacity',1],['flow',.25]])await send({type:'set_tool_setting',id,value});
+        await send({type:'customize',action:{type:'close_expanded'}});await click('[data-toolbar-component=brush_strength_slider] .toolbar-slider-cap');await ready();
+        await evaluate('window.__strengthPopup=document.querySelector(".toolbar-brush-preview:popover-open");window.__strengthCanvas=__strengthPopup.querySelector("canvas");null');
+        const low=await alpha(),lowSum=low.reduce((n,v)=>n+v,0);assert.ok(lowSum>0,theme+' '+spec.name+': contact visible');const lowRequest=await request();await capture('strength-'+spec.name+'-25-'+theme);
+        await send({type:'set_tool_setting',id:'flow',value:1});await ready(lowRequest);const full=await alpha(),fullSum=full.reduce((n,v)=>n+v,0);const fullRequest=await request();
+        assert.ok(fullSum>lowSum,theme+' '+spec.name+': Strength changes actual popup alpha');assert.equal(await evaluate('document.querySelector(".toolbar-brush-preview:popover-open")===__strengthPopup&&__strengthPopup.querySelector("canvas")===__strengthCanvas'),true,'value updates retain native popup/canvas');
+        assert.ok(full.some(v=>v>0&&v<255),theme+' '+spec.name+': textured or soft edge');const idleCopies=await evaluate('__stampCopies.length');await evaluate('new Promise(resolve=>{let frames=0;function frame(){if(++frames===8)resolve();else requestAnimationFrame(frame)}requestAnimationFrame(frame)})');assert.equal(await evaluate('__stampCopies.length'),idleCopies,'unchanged open popup polls metadata without extra GPU image jobs');await capture('strength-'+spec.name+'-100-'+theme);
+        if(spec.id===25){const width=await evaluate('document.querySelector('+JSON.stringify(canvas)+').width'),points=full.flatMap((v,i)=>v>8?[[i%width,Math.floor(i/width)]]:[]),span=axis=>Math.max(...points.map(p=>p[axis]))-Math.min(...points.map(p=>p[axis]))+1,x=span(0),y=span(1);assert.ok(Math.max(x,y)/Math.min(x,y)>1.1,'default Pointy45 elongated contact '+x+'x'+y);}
+        if(spec.id===2||spec.id===43){const depth=await evaluate('layerApp.state().tool_settings.find(f=>f.id==="grain_depth").value');await send({type:'set_tool_setting',id:'grain_depth',value:0});await ready(fullRequest);const flat=await alpha();assert.ok(flat.reduce((n,v,i)=>n+(v!==full[i]),0)>50,'actual paper texture changes GPU popup contact');const flatRequest=await request();await send({type:'set_tool_setting',id:'grain_depth',value:depth});await ready(flatRequest);assert.deepEqual(await alpha(),full,'restored paper parameter reproduces exact popup mask');}
+        const oldRequest=await request();await send({type:'set_tool_setting',id:'flow',value:0});await ready(oldRequest);assert.ok((await alpha()).every(v=>v===0),theme+' '+spec.name+': Strength zero clears contact');assert.deepEqual(await history(),before,'preview leaves artwork and Undo/Redo unchanged');await capture('strength-'+spec.name+'-0-'+theme);
+        reports.push({theme,...spec,lowSum,fullSum,lowRequest,fullRequest,zeroEmpty:true,historyUnchanged:true});await writeFile(dir+'/strength-preview-results.json',JSON.stringify(reports,null,2));
+        for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await settle();assert.equal(await evaluate('!!document.querySelector(".toolbar-brush-preview:popover-open")'),false,'Escape retires popup');
+      }
+    }
+    const copies=await evaluate('__stampCopies');assert.ok(copies.length>=30,'actual asynchronous GPU stamp copies');assert.ok(copies.every(c=>c.bytes===192*192),'bounded192² GPU alpha readback');await writeFile(dir+'/strength-preview-gpu-copies.json',JSON.stringify(copies,null,2));
+  } finally {await evaluate('GPUCommandEncoder.prototype.copyBufferToBuffer=__originalStampCopy');}
+  await send({type:'select_brush',id:initial.preset});for(const field of initial.fields)await send({type:'set_tool_setting',...field});await send({type:'invoke',command:'brush'});console.log('PASS: both-theme GPU Strength previews refresh, texture restores, Pointy45 and shape-only Eraser/Smudge, zero and unchanged artwork/history');
 }

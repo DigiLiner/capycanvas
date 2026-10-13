@@ -115,14 +115,30 @@ private struct BrushSliderComponent: View {
     private func openPreview() {
         guard !field.isNull else { return }
         let context = model["context"]
-        if session.stamp == nil || session.context != context.stableKey {
-            let request = UUID(); session.request = request
-            store.query(["type": "toolbar_stamp", "context": context.raw]) { reply in
-                guard session.request == request, let image = SliderPreviewSession.image(reply) else { return }
-                session.stamp = (image, reply["extent"].number); session.context = context.stableKey
-                session.open = true; refreshPreview()
+        session.close(store.workspace.sliderPreview)
+        session.context = context.stableKey
+        session.stamp = nil; session.knownRequest = nil; session.open = true
+        let request = UUID(); session.request = request
+        session.task = Task { @MainActor in
+            while !Task.isCancelled && session.open && session.request == request {
+                var query: [String: Any] = ["type": "toolbar_stamp", "context": context.raw]
+                if let known = session.knownRequest { query["known_request"] = known }
+                let reply: JSON = await withCheckedContinuation { continuation in
+                    store.query(query) { continuation.resume(returning: $0) }
+                }
+                guard !Task.isCancelled && session.request == request else { return }
+                if !reply["alpha"][0].isNull {
+                    let image = await Task.detached(priority: .utility) { SliderStampImage(image: SliderPreviewSession.image(reply)) }.value.image
+                    guard !Task.isCancelled && session.request == request else { return }
+                    if let image {
+                        session.stamp = (image, reply["extent"].number)
+                        session.knownRequest = reply["request_id"].uint
+                        refreshPreview()
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(16))
             }
-        } else { session.open = true; refreshPreview() }
+        }
     }
     private func refreshPreview() {
         guard session.open, let stamp = session.stamp else { return }
@@ -138,27 +154,27 @@ private struct BrushSliderComponent: View {
     }
 }
 
+private struct SliderStampImage: @unchecked Sendable { let image: CGImage? }
+
 @MainActor private final class SliderPreviewSession: ObservableObject {
     let id = UUID()
     var open = false
     var request: UUID?
+    var knownRequest: UInt64?
+    var task: Task<Void, Never>?
     var context = ""
     var stamp: (image: CGImage, extent: Double)?
     func close(_ preview: ToolbarSliderPreview) {
-        request = nil
+        request = nil; task?.cancel(); task = nil
         if open { open = false; preview.close(id) }
     }
-    static func image(_ reply: JSON) -> CGImage? {
+    nonisolated static func image(_ reply: JSON) -> CGImage? {
         let side = Int(reply["size"].uint), alpha = reply["alpha"].array
         guard side > 0, alpha.count == side * side else { return nil }
-        var bytes = [UInt8](repeating: 0, count: side * side * 4)
-        for (index, value) in alpha.enumerated() {
-            let a = UInt8(clamping: Int(value.uint))
-            bytes[index * 4] = a; bytes[index * 4 + 1] = a; bytes[index * 4 + 2] = a; bytes[index * 4 + 3] = a
-        }
+        let bytes = alpha.map { UInt8(clamping: Int($0.uint)) }
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
-        return CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+        return CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: side,
+            space: nil, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.alphaOnly.rawValue),
             provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }

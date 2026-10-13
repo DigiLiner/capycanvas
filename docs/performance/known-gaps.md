@@ -37,27 +37,33 @@
     bounded command-pool cleanup reaches 87.0/s. See the
     [top-tier table](top-tier.md#dry-media-contact-model).
 - **Most complex brushes at 1024 px remain unqualified.**
-  - Pastel Block at nominal Size 1024 meets the measured native Top writing
-    pose targets at 179.00–184.36/s, but reaches only 82.78–83.40/s on Mid and
-    42.23–42.43/s on Low. Its longer Low side pose reaches 12.82–13.62/s with
-    p99 gaps up to 100.99 ms despite fully contained support. Mid and Top side
+  - Pastel Block at nominal Size 1024 meets the current native Top writing
+    pose targets at 173.74–175.88 fresh updates/s, but reaches only
+    51.93–52.17/s on Mid and 21.27–23.43/s on Low. Its longer Low side pose
+    reaches 3.32–3.44/s with p99 gaps up to 483.20 ms despite fully contained support. Mid and Top side
     poses remain unmeasured on this build.
   - Earlier measurements of the other complex presets reach 76–118 updates/s
     on Top, about 6–25 on Mid and 3–19 on Low. They need current measurements.
 - **Dry-media qualification remains incomplete.**
-  - Size now denotes the 45° writing-pose long axis. Pencil and Charcoal miss
-    their nominal-size rate targets on all three native tiers; Mid and Top
-    also miss their fresh-gap limits. Pointy Pencil meets the measured Low
-    writing profile but misses the Mid and Top rates.
-  - Full-Strength Top Pencil has nearly unchanged throughput in a paired
-    comparison; the weaker default dose costs more. This does not establish one
-    cause or qualify the tier target. Partial Opacity and other tilt poses need
-    measurements on the changed recipes; earlier profiles do not qualify them.
+  - Size denotes the 45° writing-pose long axis. Current Strength 100%, Material
+    hardness and default Smoothing 6% profiles miss the nominal Pencil, Pointy
+    and Charcoal rate targets on all native tiers. Only native Low Pointy's
+    gap meets its limit. Current native Pencil reaches 30.46–30.94/s on Low,
+    26.28–26.29/s on Mid and 61.57–61.93/s on Top.
+  - Compile-time aggregate specialization restores substantial throughput
+    relative to the matched runtime branch. Same-APK Pencil Smoothing 0%
+    diagnostics reach 54.80–55.52/s on Low, 50.91–51.63/s on Mid and
+    83.51–86.23/s on Top, still below nominal rates. This isolates Curve fit
+    work without attributing all remaining cost to it. Partial Opacity and
+    other tilts remain unmeasured; earlier recipes do not qualify them.
   - TCL Web remains unqualified; see the
     [low-tier table](low-tier.md#dry-media-contact-model).
   - Passing native rows cover only their measured profiles and poses; Shading
     Pencil, Chalk and Crayon remain unmeasured. Physical input-to-present latency
     is unmeasured.
+  - First dry-brush selection remains slow despite the source refactor: TCL
+    Web Pencil takes 14.80 s and native takes 35.53 s, with driver caches retained.
+    Cached selection is quick; that does not qualify first-use latency.
 - **Liquify at 512 px** completes 28–74 updates/s on the top tier, 1.2–6.5 on
   the mid tier and 0.8–12 on the low tier.
 - **The retouching brushes at 512 px** (Clone Stamp, Healing and Spot Healing)

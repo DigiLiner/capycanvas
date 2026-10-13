@@ -183,7 +183,7 @@ impl Requirements {
         }
         if let Some(kind) = plan.direct {
             self.render.push(r.pipelines.direct[kind as usize].clone());
-        } else {
+        } else if !dry_material::dry_material_compute_eligible(style) {
             let kind = MaterialPipelineKind::for_attachments(
                 plan.state.watercolor_wetness,
                 plan.state.coverage,
@@ -924,8 +924,8 @@ mod gpu_tests {
                 .chain(p.dry_in_place.iter()).chain(p.dry_tracked.iter()) {
                 assert!(kernels.selected_kernel(&style,plan.material,plan.state.coverage,0).ready(),"{preset:?} ordinary destination is ready");
                 if brush.contact.is_some_and(|c|c.dry.is_some()) {
-                    for extra in [8192,16384,8192|16384].into_iter().filter(|extra|
-                        *extra&16384==0 || brush.contact.unwrap().dry.unwrap().corner==0.) {
+                    for extra in [8192,16384,8192|16384].into_iter()
+                        .filter(|extra|*extra&16384==0 || brush.contact.unwrap().dry.unwrap().corner==0.) {
                         assert!(kernels.selected_kernel(&style,plan.material,plan.state.coverage,extra).ready(),"{preset:?} actual batch variant {extra} is ready");
                     }
                 }

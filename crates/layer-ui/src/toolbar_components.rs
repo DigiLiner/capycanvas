@@ -162,11 +162,11 @@ impl ToolOption {
         match (self, other) {
             (Self::Gradient(a),Self::Gradient(b))=>a.key==b.key && a.gradient.as_ref().map(|c|&c.destination)==b.gradient.as_ref().map(|c|&c.destination),
             (Self::Numeric(a), Self::Numeric(b)) => {
-                a.id == b.id && a.group_id == b.group_id && a.numeric == b.numeric
+                a.id == b.id && a.group_id == b.group_id && a.numeric.same_rules(&b.numeric)
             }
             (Self::Range { id: a, bounds: p, .. }, Self::Range { id: b, bounds: q, .. }) => {
                 a == b && p.iter().zip(q.iter()).all(|(a, b)| {
-                    a.id == b.id && a.group_id == b.group_id && a.numeric == b.numeric
+                    a.id == b.id && a.group_id == b.group_id && a.numeric.same_rules(&b.numeric)
                 })
             }
             (
