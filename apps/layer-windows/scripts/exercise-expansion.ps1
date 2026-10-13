@@ -192,6 +192,8 @@ try{
     $restored=[Drawing.Bitmap]::new((Join-Path $run 'navigator-after.png'))
     try{$pixel=$restored.GetPixel($occlusion.x,$occlusion.y);if($pixel.R -gt 245 -and $pixel.G -gt 245 -and $pixel.B -gt 245){throw 'Closing configuration did not restore the lower native panel'}}
     finally{$restored.Dispose()}
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1500 -Height 1000
+    Start-Sleep -Milliseconds 400
     $configuration=Configure 'sizes'
     Invoke 'settings-button'
     $preferences=Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)
