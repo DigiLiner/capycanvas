@@ -15,7 +15,7 @@ use layer_host::{
 };
 use layer_ui::UiSession;
 
-pub(crate) type Window = DocumentWindow<UiSession<Renderer>>;
+pub(crate) type Window = DocumentWindow<Box<UiSession<Renderer>>>;
 impl App {
     pub(crate) fn document_retired(&mut self) {
         self.tone.clear();

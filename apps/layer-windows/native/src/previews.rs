@@ -297,7 +297,7 @@ mod tests {
         document.apply(edit).unwrap();
         let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-        host.session = layer_ui::UiSession::new(layer_host::Renderer(Some(gpu.into())), document, [64, 48], layer_ui::Platform::Windows).unwrap();
+        *host.session = layer_ui::UiSession::new(layer_host::Renderer(Some(gpu.into())), document, [64, 48], layer_ui::Platform::Windows).unwrap();
         let epoch = host.session.state().document_file.epoch;
         let id = layer_ui::occurrence_token(layer);
         let menu = |host: &mut NativeHost, json: serde_json::Value| -> serde_json::Value {

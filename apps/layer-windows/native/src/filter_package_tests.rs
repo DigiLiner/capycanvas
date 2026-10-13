@@ -79,7 +79,7 @@ fn property_wire_keeps_section_identity_and_choice_indices_with_equal_labels() {
         &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
     insert_effect(&mut project,"Literal filter name",effect);
     let mut native = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-    native.session = layer_ui::UiSession::from_project(layer_host::Renderer(None), project,
+    *native.session = layer_ui::UiSession::from_project(layer_host::Renderer(None), project,
         None, [64, 48], layer_ui::Platform::Windows).unwrap();
     let wire = serde_json::to_value(&native.session.state().layer_properties).unwrap();
     let controls = wire["controls"].as_array().unwrap();
@@ -240,7 +240,7 @@ fn delayed_catalog_import_survives_document_replacement() {
     .unwrap();
     let epoch = native.session.state().document_file.epoch;
     replacement.inherit_window_state(&native.session).unwrap();
-    drop(std::mem::replace(&mut native.session, replacement));
+    drop(std::mem::replace(&mut *native.session, replacement));
     assert_ne!(native.session.state().document_file.epoch, epoch);
     service.poll(&mut native);
     assert_eq!(service.status.phase,"waiting_for_canvas");
@@ -285,7 +285,7 @@ fn d3d12_file_packages_update_catalog_without_rewriting_live_filters() {
     )
     .unwrap();
     let mut native = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-    native.session = layer_ui::UiSession::from_project(
+    *native.session = layer_ui::UiSession::from_project(
         layer_host::Renderer(Some(gpu.into())),
         layer_ui::new_drawing(64, 48, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),
         None,

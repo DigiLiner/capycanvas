@@ -15,14 +15,6 @@ pub trait Parked {
     fn session(&self) -> &UiSession<Renderer>;
     fn session_mut(&mut self) -> &mut UiSession<Renderer>;
 }
-impl Parked for UiSession<Renderer> {
-    fn session(&self) -> &UiSession<Renderer> {
-        self
-    }
-    fn session_mut(&mut self) -> &mut UiSession<Renderer> {
-        self
-    }
-}
 impl Parked for Box<UiSession<Renderer>> {
     fn session(&self) -> &UiSession<Renderer> {
         self
@@ -349,7 +341,7 @@ impl<P: Parked> DocumentWindow<P> {
         let tiles = host.session.park_document()?;
         let retired = self.retire_gpu(host);
         self.documents.exchange_with(target, tiles, |next| {
-            std::mem::swap(&mut host.session, next.session_mut());
+            std::mem::swap(&mut *host.session, next.session_mut());
             exchange(next);
         }).map_err(|reason| reason.message(host.session.localization()))?;
         self.changed(host);
@@ -425,7 +417,7 @@ impl<P: Parked> DocumentWindow<P> {
         let retired = self.retire_gpu(host);
         let closed = self.documents.close_selected().map(|mut next| {
             next.session_mut().inherit_parked_viewport(&host.session);
-            std::mem::swap(&mut host.session, next.session_mut());
+            std::mem::swap(&mut *host.session, next.session_mut());
             exchange(&mut next);
             next
         });
@@ -470,7 +462,7 @@ impl<P: Parked> DocumentWindow<P> {
         candidate: &mut Option<Box<UiSession<Renderer>>>,
         open: OpenAdoption,
         begin_commit: impl FnOnce() -> bool,
-        park: impl FnOnce(UiSession<Renderer>) -> P,
+        park: impl FnOnce(Box<UiSession<Renderer>>) -> P,
     ) -> Result<Option<Box<WgpuRasterizer>>, String> {
         self.adopt_prepared(host, candidate, open, false, begin_commit, park)
     }
@@ -481,7 +473,7 @@ impl<P: Parked> DocumentWindow<P> {
         candidate: &mut Option<Box<UiSession<Renderer>>>,
         open: OpenAdoption,
         begin_commit: impl FnOnce() -> bool,
-        park: impl FnOnce(UiSession<Renderer>) -> P,
+        park: impl FnOnce(Box<UiSession<Renderer>>) -> P,
     ) -> Result<Option<Box<WgpuRasterizer>>, String> {
         self.adopt_prepared(host, candidate, open, true, begin_commit, park)
     }
@@ -492,7 +484,7 @@ impl<P: Parked> DocumentWindow<P> {
         candidates: &mut Vec<(u64, Box<UiSession<Renderer>>)>,
         selected: u64,
         stamp: layer_ui::SessionStamp,
-        mut park: impl FnMut(UiSession<Renderer>) -> P,
+        mut park: impl FnMut(Box<UiSession<Renderer>>) -> P,
     ) -> Result<Vec<Box<WgpuRasterizer>>, String> {
         host.require_document_owner()?;
         if self.documents.order().len() != 1 || !host.session.can_replace_startup_session(&stamp) {
@@ -542,13 +534,13 @@ impl<P: Parked> DocumentWindow<P> {
         for (id, incoming) in iter {
             let tiles = current.retained_document_tiles();
             if let Some(renderer) = current.renderer_mut().0.take() { retired.push(renderer); }
-            restored.append(park(*current), tiles, host.session.localization());
+            restored.append(park(current), tiles, host.session.localization());
             restored.restore_identity(id).expect("validated restored identity");
             current = incoming;
         }
         restored.restore_order(&order, selected).expect("validated restored membership");
         if let Some(renderer) = self.retire_gpu(host) { retired.push(renderer); }
-        let outgoing = std::mem::replace(&mut host.session, *current);
+        let outgoing = std::mem::replace(&mut host.session, current);
         self.documents = restored;
         self.changed(host);
         drop(outgoing);
@@ -559,7 +551,7 @@ impl<P: Parked> DocumentWindow<P> {
         &mut self,
         host: &mut NativeHost,
         candidates: &mut Vec<(u64, Box<UiSession<Renderer>>)>,
-        mut park: impl FnMut(UiSession<Renderer>) -> P,
+        mut park: impl FnMut(Box<UiSession<Renderer>>) -> P,
     ) -> Result<(SessionIdentityMap, Vec<Box<WgpuRasterizer>>), String> {
         host.require_document_owner()?;
         if !host.session.can_park_document() || self.documents.selected() == 0 {
@@ -598,9 +590,9 @@ impl<P: Parked> DocumentWindow<P> {
             let tiles = candidate.retained_document_tiles();
             if let Some(renderer) = candidate.renderer_mut().0.take() { retired.push(renderer); }
             let id = if self.documents.order().contains(&old) {
-                self.documents.append_parked(park(*candidate), tiles, host.session.localization())
+                self.documents.append_parked(park(candidate), tiles, host.session.localization())
             } else {
-                self.documents.append_parked_with_id(old, park(*candidate), tiles, host.session.localization())
+                self.documents.append_parked_with_id(old, park(candidate), tiles, host.session.localization())
                     .unwrap_or_else(|_| unreachable!("validated restored identity"));
                 old
             };
@@ -615,7 +607,7 @@ impl<P: Parked> DocumentWindow<P> {
         host: &mut NativeHost,
         candidate: &mut Option<Box<UiSession<Renderer>>>,
         id: u64,
-        park: impl FnOnce(UiSession<Renderer>) -> P,
+        park: impl FnOnce(Box<UiSession<Renderer>>) -> P,
     ) -> Result<(u64, Option<Box<WgpuRasterizer>>), String> {
         host.require_document_owner()?;
         let next = candidate.as_mut().ok_or("Project preparation is incomplete")?;
@@ -647,9 +639,9 @@ impl<P: Parked> DocumentWindow<P> {
         let mut next = candidate.take().unwrap();
         let retired = next.renderer_mut().0.take();
         let id = if self.documents.order().contains(&id) {
-            self.documents.append_parked(park(*next), tiles, host.session.localization())
+            self.documents.append_parked(park(next), tiles, host.session.localization())
         } else {
-            self.documents.append_parked_with_id(id, park(*next), tiles, host.session.localization())
+            self.documents.append_parked_with_id(id, park(next), tiles, host.session.localization())
                 .unwrap_or_else(|_| unreachable!("validated restored identity"));
             id
         };
@@ -666,7 +658,7 @@ impl<P: Parked> DocumentWindow<P> {
         open: OpenAdoption,
         restored: bool,
         begin_commit: impl FnOnce() -> bool,
-        park: impl FnOnce(UiSession<Renderer>) -> P,
+        park: impl FnOnce(Box<UiSession<Renderer>>) -> P,
     ) -> Result<Option<Box<WgpuRasterizer>>, String> {
         host.require_document_owner()?;
         let next = candidate
@@ -709,7 +701,7 @@ impl<P: Parked> DocumentWindow<P> {
         }
         let tiles = host.session.park_document()?;
         let retired = self.retire_gpu(host);
-        let outgoing = std::mem::replace(&mut host.session, *candidate.take().unwrap());
+        let outgoing = std::mem::replace(&mut host.session, candidate.take().unwrap());
         self.documents.append(park(outgoing), tiles, host.session.localization());
         self.changed(host);
         Ok(retired)
@@ -736,13 +728,13 @@ mod tests {
     use layer_ui::{LayerAction, UiAction, UiInput};
     use std::time::{Duration, Instant};
 
-    type Window = DocumentWindow<UiSession<Renderer>>;
+    type Window = DocumentWindow<Box<UiSession<Renderer>>>;
 
     fn host() -> NativeHost {
         let document = layer_core::Document::new(layer_core::authored::PortableId::random(), 64, 48, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
         let gpu = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
-        host.session = UiSession::new(Renderer(Some(gpu.into())), document, [64, 48], layer_ui::Platform::Mac).unwrap();
+        *host.session = UiSession::new(Renderer(Some(gpu.into())), document, [64, 48], layer_ui::Platform::Mac).unwrap();
         host.session.set_document_replacement(false);
         settle(&mut host);
         host

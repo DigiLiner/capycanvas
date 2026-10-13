@@ -136,7 +136,7 @@ fn d3d12_windows_hdr_documents_delivery_history_cancellation_and_recovery() {
         paint_mut(&mut project,0).base = Some(layer_core::PaintBase::new((Arc::new(source.finish().unwrap())).into()));
         let (gpu, mut state) = hdr_renderer(color);
         let mut host = NativeHost::new(Platform::Windows).unwrap();
-        host.session = UiSession::from_project(gpu, project, None, [128, 96], Platform::Windows).unwrap();
+        *host.session = UiSession::from_project(gpu, project, None, [128, 96], Platform::Windows).unwrap();
         host.session.set_document_replacement(true);
         host.document_adopted();
         settle(&mut host);

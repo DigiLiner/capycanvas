@@ -240,7 +240,7 @@ mod tests {
         crate::test_support::composition_mut(&mut document).color.depth = SampleDepth::F32;
         let gpu = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
-        host.session =
+        *host.session =
             UiSession::new(Renderer(Some(gpu.into())), document.clone(), [32, 24], layer_ui::Platform::Mac).unwrap();
         let mut tone = ToneService::new(None);
         settle(&mut tone, &mut host);
@@ -262,7 +262,7 @@ mod tests {
         let mut replacement =
             UiSession::new(Renderer(Some(renderer.into())), document, [32, 24], layer_ui::Platform::Mac).unwrap();
         replacement.inherit_window_state(&host.session).unwrap();
-        host.session = replacement;
+        *host.session = replacement;
         assert!(tone.current(&host).is_none());
         assert!(tone.tick(&host).unwrap());
         assert!(tone.guide.is_none());

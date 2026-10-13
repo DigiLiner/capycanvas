@@ -5,7 +5,7 @@ use layer_host::window::{Activation, OpenAdoption, TabRequest};
 use serde_json::Value;
 
 pub(super) struct Parked {
-    pub session: UiSession<Renderer>,
+    pub session: Box<UiSession<Renderer>>,
 }
 impl layer_host::window::Parked for Parked {
     fn session(&self) -> &UiSession<Renderer> {
@@ -111,7 +111,7 @@ impl DocumentService {
         };
         self.document_retired(host)?;
         if let Some(closed) = closed {
-            self.worker.retire(Box::new(closed.session));
+            self.worker.retire(closed.session);
         }
         self.activate(host, activation);
         Ok(())
@@ -358,7 +358,7 @@ impl DocumentService {
         {
             let prepared=self.prepared_close.take().ok_or("The drawing close is not prepared")?;
             let (activation,closed)=self.window.commit_close(host,prepared,|_|{});
-            self.document_retired(host)?;if let Some(closed)=closed{self.worker.retire(Box::new(closed.session));}self.activate(host,activation);
+            self.document_retired(host)?;if let Some(closed)=closed{self.worker.retire(closed.session);}self.activate(host,activation);
             self.close_next = false;
         }
         if self.idle()

@@ -669,7 +669,7 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
         let fingerprint_location = location.clone();
         let open = OpenAdoption { epoch: task.epoch, revision: task.revision, location };
         let retired = app.window.adopt(&mut app.host, candidate, open,
-            || unsafe { capy_project_begin_commit(task) } >= 0, Box::new)?;
+            || unsafe { capy_project_begin_commit(task) } >= 0, |session| session)?;
         app.document_retired();
         if let (Some(location), Some(fingerprint)) = (fingerprint_location, state.fingerprint.clone()) {
             app.host.session.record_destination_fingerprint(&location, fingerprint)?;

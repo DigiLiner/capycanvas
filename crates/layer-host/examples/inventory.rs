@@ -20,7 +20,7 @@ fn apple_host(platform: Platform) -> NativeHost {
 fn workspace_host(platform: Platform, preset: WorkspacePreset) -> NativeHost {
     let mut host = NativeHost::new(platform).unwrap();
     let [width, height] = layer_ui::DEFAULT_DOCUMENT_EXTENT;
-    host.session = UiSession::from_project(
+    *host.session = UiSession::from_project(
         Renderer::default(),
         layer_ui::new_drawing(width, height, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),
         None,

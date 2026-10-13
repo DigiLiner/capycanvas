@@ -266,7 +266,7 @@ mod tests {
         crate::test_support::composition_mut(&mut document).color.depth = SampleDepth::F32;
         let gpu = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
-        host.session = UiSession::new(
+        *host.session = UiSession::new(
             Renderer(Some(gpu.into())),
             document,
             [8, 6],
@@ -351,7 +351,7 @@ mod tests {
         crate::test_support::hide_paper(&mut document);
         let gpu = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
-        host.session = UiSession::new(Renderer(Some(gpu.into())), document, [8, 6], layer_ui::Platform::Mac).unwrap();
+        *host.session = UiSession::new(Renderer(Some(gpu.into())), document, [8, 6], layer_ui::Platform::Mac).unwrap();
         let pixel = |x: u32, y: u32| [(x * 30) as u8, (y * 40) as u8, 200, if x < 4 { 255 } else { 0 }];
         let interpretation = SourceInterpretation {
             channels: SourceChannels::Rgba,

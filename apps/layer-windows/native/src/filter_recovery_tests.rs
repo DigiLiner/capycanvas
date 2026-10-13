@@ -17,7 +17,7 @@ impl Fixture {
     fn new() -> Self {
         let (renderer, device) = renderer();
         let mut native = NativeHost::new(Platform::Windows).unwrap();
-        native.session = UiSession::from_project(
+        *native.session = UiSession::from_project(
             renderer,
             layer_ui::new_drawing(64, 48, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),
             None,

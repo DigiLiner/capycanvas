@@ -54,7 +54,7 @@ pub struct PointerBatch<'a> {
 }
 
 pub struct NativeHost {
-    pub session: UiSession<Renderer>,
+    pub session: Box<UiSession<Renderer>>,
     /// Number of drawings owned by the window, for shared header geometry.
     pub document_count: usize,
     /// Configure before publishing UI; hosts tag these preview values to match.
@@ -159,7 +159,7 @@ impl NativeHost {
         localization: std::sync::Arc<layer_ui::Localizer>,
     ) -> Result<Self, String> {
         let catalog = Box::new(layer_ui::ui_catalog_localized(&localization));
-        let session = UiSession::blank_localized(Renderer::default(), [1, 1], platform, localization)?;
+        let session = UiSession::blank_localized(Renderer::default(), [1, 1], platform, localization).map(Box::new)?;
         Ok(Self {
             session,
             ui_color: UiColor::Mapped,
@@ -1257,7 +1257,7 @@ mod tests {
         let reference = layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let gpu = GpuContext::of(&reference).rasterizer(Default::default(), &RendererOptions::default(), true).unwrap();
         let mut host = NativeHost::new(platform).unwrap();
-        host.session = UiSession::from_project(Renderer(Some(gpu.into())), document, None, [640, 480], platform).unwrap();
+        *host.session = UiSession::from_project(Renderer(Some(gpu.into())), document, None, [640, 480], platform).unwrap();
         host.startup = Default::default();
         host.resize(640, 480, 1.).unwrap();
         (reference, host)
@@ -1534,7 +1534,7 @@ mod tests {
     fn layer_drop_query_preserves_surface_normalized_target_and_epoch() {
         use layer_ui::{EffectAction,LayerAction,Platform};
         let mut host=NativeHost::new(Platform::Android).unwrap();
-        host.session=UiSession::new(Renderer::default(),layer_ui::new_drawing(32,32,&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),[1,1],Platform::Android).unwrap();
+        *host.session=UiSession::new(Renderer::default(),layer_ui::new_drawing(32,32,&layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),[1,1],Platform::Android).unwrap();
         let rows=&host.session.state().layers;let ink=rows[0].id;let paper=rows[1].id;
         host.dispatch(UiAction::Layer{action:LayerAction::New{group:false,clipped:false}}).unwrap();
         let id=host.session.state().layers.iter().find(|row|row.editing).unwrap().id;
@@ -1575,7 +1575,7 @@ mod tests {
         let reference=layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let gpu=GpuContext::of(&reference).rasterizer(Default::default(),&RendererOptions::default(),true).unwrap();
         let mut host=NativeHost::new(layer_ui::Platform::Android).unwrap();
-        host.session=UiSession::from_project(Renderer(Some(gpu.into())),document,None,[640,480],layer_ui::Platform::Android).unwrap();
+        *host.session=UiSession::from_project(Renderer(Some(gpu.into())),document,None,[640,480],layer_ui::Platform::Android).unwrap();
         let id=layer_ui::occurrence_token(layer);
         let before=host.session.engine().document().working.clone();
         let menu=host.query(json!({"type":"layer_menu","id":id,"mask":false})).unwrap();
@@ -2455,7 +2455,7 @@ mod tests {
         let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         assert_ne!(gpu.adapter().get_info().device_type, wgpu::DeviceType::Cpu);
         let mut host = NativeHost::new(layer_ui::Platform::Mac).unwrap();
-        host.session = UiSession::from_project(
+        *host.session = UiSession::from_project(
             Renderer(Some(gpu.into())),
             layer_ui::new_drawing(64, 48, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),
             None,

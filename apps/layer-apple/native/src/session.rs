@@ -407,12 +407,12 @@ pub unsafe extern "C" fn capy_apple_session_adopt(app: *mut CapyApple, task: *mu
         a.window.documents.reserve_identities(&reserved)?;
         if job.restored {
             if !replace {
-                let (_, retired) = a.window.append_restored_sessions(&mut a.host, &mut job.candidates, Box::new)?;
+                let (_, retired) = a.window.append_restored_sessions(&mut a.host, &mut job.candidates, |session| session)?;
                 job.retired = retired;
             } else {
                 let active = job.active;
                 let stamp = job.stamp.clone();
-                job.retired = a.window.restore_sessions(&mut a.host, &mut job.candidates, active, stamp, Box::new)?;
+                job.retired = a.window.restore_sessions(&mut a.host, &mut job.candidates, active, stamp, |session| session)?;
             }
             a.document_retired();
             a.metal.document_changed();

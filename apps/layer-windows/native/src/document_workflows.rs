@@ -1045,11 +1045,11 @@ mod tests {
         write_document(&project,std::fs::File::create(&master).unwrap())
             .unwrap();
         let mut host = NativeHost::new(Platform::Windows).unwrap();
-        host.session =
+        *host.session =
             UiSession::from_project(Renderer(Some(gpu.into())), project, None, [48, 36], Platform::Windows).unwrap();
         let environment = crate::documents::recovery_environment(&host.session).unwrap();
         let candidate=crate::documents::prepare_package(environment, master, &Default::default()).unwrap();
-        host.session = *candidate;
+        host.session = candidate;
         host.session.set_document_replacement(true);
         host.document_adopted();
         settle(&mut host);

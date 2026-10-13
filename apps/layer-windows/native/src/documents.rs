@@ -1145,7 +1145,7 @@ mod tests {
         });
         // Completed host-backed pixels stay saveable with no GPU at any point.
         // Actual admitted pointer batches are covered by the native loss fixture.
-        f.host.session =
+        *f.host.session =
             UiSession::from_project(Renderer(None), project, None, [256, 256], Platform::Windows).unwrap();
         f.host.session.set_document_replacement(true);
         f.host.dispatch(UiAction::SetLayerOpacity{id:None,opacity:0.8}).unwrap();
@@ -1485,7 +1485,7 @@ mod gpu_tests {
         assert!(gpu.adapter().get_info().device_type != wgpu::DeviceType::Cpu || layer_render_wgpu::software_adapter_tests());
         let project = layer_ui::new_drawing(63, 47, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
         let mut host = NativeHost::new(Platform::Windows).unwrap();
-        host.session =
+        *host.session =
             UiSession::from_project(Renderer(Some(gpu.into())), project, None, [31, 29], Platform::Windows).unwrap();
         host.session.set_document_replacement(true);
         host.resize(31, 29, 1.).unwrap();
@@ -1546,7 +1546,7 @@ mod gpu_tests {
         assert_eq!(gpu.adapter().get_info().backend, wgpu::Backend::Dx12);
         assert!(gpu.adapter().get_info().device_type != wgpu::DeviceType::Cpu || layer_render_wgpu::software_adapter_tests());
         let mut host = NativeHost::new(Platform::Gtk).unwrap();
-        host.session = UiSession::from_project(
+        *host.session = UiSession::from_project(
             Renderer(Some(gpu.into())),
             layer_ui::new_drawing(64, 48, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(),
             None,

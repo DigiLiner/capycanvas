@@ -87,7 +87,7 @@ mod tests {
         let gpu = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
         let mut host = NativeHost::new(layer_ui::Platform::Gtk).unwrap();
         let extent = [document.composition().size[0], document.composition().size[1]];
-        host.session = UiSession::new(Renderer(Some(gpu.into())), document, extent, layer_ui::Platform::Gtk).unwrap();
+        *host.session = UiSession::new(Renderer(Some(gpu.into())), document, extent, layer_ui::Platform::Gtk).unwrap();
         host
     }
 
