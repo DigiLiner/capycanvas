@@ -9,7 +9,7 @@ use windows::{
                 Common::DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, CreateDXGIFactory1,
                 IDXGIFactory1, IDXGIOutput6,
             },
-            Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
+            Gdi::{HMONITOR, MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
         },
     },
     core::Interface,
@@ -70,15 +70,48 @@ impl Display {
 }
 /// A SwapChainPanel composition chain has no HWND association. Enumerate DXGI
 /// outputs and match the native window's monitor, including another adapter.
-/// Recreating the factory refreshes HDR toggles, docking and display topology.
-pub(crate) fn probe(window: usize) -> Display {
-    let read = || -> Result<Display, String> {
-        if window == 0 {
-            return Err("Display window is unavailable".into());
+/// Outputs are enumerated again only when the window changes monitor or the
+/// factory stops being current, as it does for HDR toggles, docking and display
+/// topology changes.
+#[derive(Default)]
+pub(crate) struct DisplayProbe {
+    factory: Option<IDXGIFactory1>,
+    monitor: Option<HMONITOR>,
+    display: Display,
+}
+impl DisplayProbe {
+    pub(crate) fn poll(&mut self, window: usize) -> &Display {
+        self.poll_monitor((window != 0).then(|| unsafe {
+            MonitorFromWindow(HWND(window as *mut _), MONITOR_DEFAULTTONEAREST)
+        }))
+    }
+    fn poll_monitor(&mut self, monitor: Option<HMONITOR>) -> &Display {
+        let current = self
+            .factory
+            .as_ref()
+            .is_some_and(|factory| unsafe { factory.IsCurrent() }.as_bool());
+        if current && monitor.is_some() && monitor == self.monitor && self.display.error.is_none() {
+            return &self.display;
         }
-        let monitor =
-            unsafe { MonitorFromWindow(HWND(window as *mut _), MONITOR_DEFAULTTONEAREST) };
-        let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.map_err(|e| e.to_string())?;
+        if !current {
+            self.factory = None;
+        }
+        self.monitor = monitor;
+        self.display = self.read().unwrap_or_else(|error| Display {
+            error: Some(error),
+            ..Default::default()
+        });
+        &self.display
+    }
+    fn read(&mut self) -> Result<Display, String> {
+        let monitor = self.monitor.ok_or("Display window is unavailable")?;
+        let factory = match self.factory.clone() {
+            Some(factory) => factory,
+            None => self
+                .factory
+                .insert(unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }.map_err(|e| e.to_string())?)
+                .clone(),
+        };
         let mut a = 0;
         while let Ok(adapter) = unsafe { factory.EnumAdapters1(a) } {
             a += 1;
@@ -104,16 +137,13 @@ pub(crate) fn probe(window: usize) -> Display {
             }
         }
         Err("No current DXGI output; showing the saved SDR appearance".into())
-    };
-    read().unwrap_or_else(|error| Display {
-        error: Some(error),
-        ..Default::default()
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::{Foundation::POINT, Graphics::Gdi::{MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint}};
     #[test]
     fn live_output_changes_and_invalid_reports_fall_back_without_changing_artwork() {
         for (hdr, peak, expected) in [
@@ -146,6 +176,19 @@ mod tests {
             Display::default().encoding(wgpu::TextureFormat::Rgba16Float),
             SdrSurfaceColor::ExtendedLinearSrgb
         );
-        assert!(probe(0).error.is_some());
+        assert!(DisplayProbe::default().poll(0).error.is_some());
+    }
+    #[test]
+    fn unchanged_outputs_reuse_the_factory_and_display() {
+        let monitor = unsafe { MonitorFromPoint(POINT::default(), MONITOR_DEFAULTTOPRIMARY) };
+        let mut probe = DisplayProbe::default();
+        let first = probe.poll_monitor(Some(monitor)).clone();
+        let factory = probe.factory.as_ref().map(Interface::as_raw);
+        assert!(factory.is_some());
+        for _ in 0..3 {
+            assert_eq!(probe.poll_monitor(Some(monitor)), &first);
+            assert_eq!(probe.factory.as_ref().map(Interface::as_raw), factory, "a current factory is reused");
+        }
+        assert!(probe.poll_monitor(None).error.is_some());
     }
 }

@@ -61,6 +61,7 @@ pub struct CapyHost {
     window: usize,
     display: crate::display::Display,
     display_checked: Option<std::time::Instant>,
+    display_probe: crate::display::DisplayProbe,
     test_display: Option<crate::display::Display>,
     presenter_key: Option<(layer_core::color::DocumentColor, layer_render_wgpu::SdrSurfaceColor)>,
     target: Option<wgpu::SurfaceTexture>,
@@ -146,6 +147,7 @@ impl CapyHost {
             window: 0,
             display: Default::default(),
             display_checked: None,
+            display_probe: Default::default(),
             test_display: None,
             presenter_key: None,
             target: None,
@@ -208,7 +210,7 @@ impl CapyHost {
     fn poll_services(&mut self) -> Result<(), String> {
         if self.display_checked.is_none_or(|at| at.elapsed() >= std::time::Duration::from_millis(500)) {
             self.display_checked = Some(std::time::Instant::now());
-            let display = self.test_display.clone().unwrap_or_else(|| crate::display::probe(self.window));
+            let display = self.test_display.clone().unwrap_or_else(|| self.display_probe.poll(self.window).clone());
             if display != self.display {
                 self.display = display;
                 self.native.dirty = true;
