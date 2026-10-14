@@ -10,7 +10,11 @@ struct Envelope {descriptor:SessionTransferDescriptor,chunks:Vec<usize>}
 async fn wait_capture(capture:&EditorCapture)->Result<(),JsValue> {
     let start=js_sys::Date::now();
     loop {
-        if capture.retained_tiles().try_blobs().map_err(js)?.is_some(){return Ok(());}
+        if let Some(blobs)=capture.retained_tiles().try_blobs().map_err(js)? {
+            let mut ready=true;
+            for blob in blobs {ready &=blob.compressed_ready().map_err(js)?;}
+            if ready {return Ok(());}
+        }
         if js_sys::Date::now()-start>30_000. {return Err(js("Drawing checkpoint backing timed out"));}
         documents::yield_browser().await?;
     }

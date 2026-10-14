@@ -212,7 +212,7 @@ workspace.append(dropIndicator);
 
 function dispatch(action) {
   try {
-    if(documents?.busy()&&!['complete_request','measure_panels','measure_titlebar','measure_workspace_bottom','measure_column_drawers','measure_drawer_tiles','measure_column_scroll'].includes(action.type))return;
+    if(documents?.interactionBusy()&&!['complete_request','measure_panels','measure_titlebar','measure_workspace_bottom','measure_column_drawers','measure_drawer_tiles','measure_column_scroll'].includes(action.type))return;
     if (action.type === "measure_column_drawers" && workspaceGesture) workspaceGesture.hits = null;
     if (["move_panel", "move_group", "move_tile", "double_click_panel_handle", "reset_column_width"].includes(action.type))
       action = {

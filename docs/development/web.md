@@ -84,7 +84,9 @@ same preparation worker for bounded F64 coordinate batches; the receiving owner
 validates and uploads packed coordinates without performing geometry loops on
 input. Package writes stream
 to private OPFS output jobs and return a Blob for picker/download publication;
-completion closes that job. Unsupported files keep their original Blob and show shared
+completion closes that job. Editor actions resume when the shared request finishes;
+browser cleanup retains its ownership guards until checkpoint and output cleanup
+finish. Unsupported files keep their original Blob and show shared
 package status, available outputs and an optional preview with Copy Original and
 Export Preview Image. Preview export refuses the original file handle. The
 manual-save worker retains its output job and storage lock until publication
@@ -100,7 +102,9 @@ schedule shared checkpoint intervals; unchanged stamps skip preparation and writ
 The retained checkpoint worker reuses immutable payloads, and prepares session
 metadata and validates disk bytes away from the input thread. Live session transfer
 uses shared history records and bounded resource chunks without replaying history
-on the browser thread.
+on the browser thread. Before packing a checkpoint, the browser polls compressed
+backing for every live, undo and redo tile without blocking its event loop; published
+tile descriptors alone do not mean disk bytes are ready.
 Export profile payloads use the same immutable resource inventory and worker delta
 cache; stamps and transfer metadata retain references instead of inline ICC bytes.
 

@@ -571,7 +571,8 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
       }
     }
     return tabs.key(event);
-  },allowNativePaste,select,close,openFiles,busy:()=>changing||batching||closing||active.size>0,showSelector:tabs.showSelector,
+  },allowNativePaste,select,close,openFiles,busy:()=>changing||batching||closing||active.size>0,
+    interactionBusy:()=>changing||batching||closing||active.size>0&&app.state().requests.some(request=>active.has(request.id)),showSelector:tabs.showSelector,
     mountProof:proof.mount,localize(){for(const form of openDialogs)form.localize?.();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,refresh(){
     proof.sync();tabs.refresh();
     const requests=new Set(app.state().requests.map(request=>request.id));
