@@ -4,8 +4,8 @@
 
 A texture program describes a paper or canvas surface as one WGSL function:
 height in micrometers at a position in millimeters on a repeating tile. The app
-bakes the function once per drawing resolution into a single-channel texture
-that brushes read. Built-in programs are entries in the existing
+bakes the function at the drawing's pixel density into a single-channel texture
+that brushes read one texel per pixel. Built-in programs are entries in the existing
 [filter catalog](../../assets/filters/manifest.json) with `kind: "texture"`, so
 they reuse its parameter declarations, labels, WGSL modules, naga validation and
 saved-value contract.
@@ -183,22 +183,25 @@ program.
 
 ## The bake
 
-1. **Size.** For each axis, `texels = round(period × Size × pixels per mm)`,
-   where Size and pixels per millimeter come from the Paper layer
-   ([resolution model](paper.md#resolution-and-scale)). The program's period is
-   stretched to that whole number of pixels, by under half a pixel per tile.
-   Texel `i` covers document pixels `i + k × texels`, so a brush reads the texel
-   at the document pixel modulo the tile. Above 4096 texels on an axis, the bake
-   uses 4096 and brushes magnify bilinearly.
-2. **Probe.** The program is evaluated at 65,536 positions chosen by a fixed
+1. **Size.** The Paper's mapping gives drawing pixels per paper millimeter on
+   each axis ([resolution model](paper.md#resolution-and-scale)). For each
+   axis, `texels = round(period × pixels per millimeter)`; an imported image
+   uses its physical size as the period. The period is stretched to that whole
+   number of pixels, by under half a pixel per tile. Texel `i` covers document
+   pixels `i + k × texels` and is evaluated at the paper position of its
+   document pixel, so the mapping's offset is baked in and a brush reads the
+   texel at the document pixel modulo the tile. Above 4096 texels on an axis,
+   the bake uses 4096 and brushes magnify bilinearly.
+2. **Probe.** The source is evaluated at 65,536 positions chosen by a fixed
    hash. The values are read back asynchronously and their 0.5th and 99.5th
    percentiles become `low` and `high`; `relief = high − low` micrometers.
 3. **Bake.** Fragment draws fill an R8Unorm texture in 256 × 256 pages, one page
    group per submission, so no submission runs long. Each texel evaluates the
-   program once, at its center plus a Gaussian offset with σ = 0.5 texel drawn
-   from a hash of the texel, and stores `(h − low) / (high − low)` clamped to
-   `[0, 1]`. Positions are wrapped into `[0, period)` first; evaluating far
-   outside the tile loses f32 precision.
+   source once, at its center plus a Gaussian offset drawn from a hash of the
+   texel, and stores `(h − low) / (high − low)` clamped to `[0, 1]`. The offset
+   is σ = 0.5 texel for programs; for images it depends on the shrink factor
+   ([imported images](#imported-images)). Positions are wrapped into
+   `[0, period)` first; evaluating far outside the tile loses f32 precision.
 4. **Publish.** The texture and its relief replace the previous paper in the
    brush binding. Brushes scale their paper strength by `relief / 100 µm`.
 
@@ -227,10 +230,22 @@ without that rule it would break into dots.
 
 An imported paper is a gray `capy.image/1` with a physical resolution
 ([library](paper.md#paper-library)). The bake reads it through a built-in
-`image` program: the nearest image texel at the jittered position when the
-image is denser than the drawing, bilinear when it is sparser. The probe and
-normalization are the same. An imported image has no measured relief, so it
-uses the 100 µm reference.
+`image` program. With `m` image samples per drawing pixel:
+
+| Shrink factor | Each texel |
+| --- | --- |
+| `m ≤ 1` | Bilinear interpolation, with no offset. At exactly 1, with the image grid on the pixel grid, each texel is an exact copy of one image sample. |
+| `1 < m < 2` | The nearest image sample at an offset with σ = 0.5 × (m − 1) drawing pixel. |
+| `m ≥ 2` | The nearest image sample at an offset with σ = 0.5 drawing pixel: the moiré-free, histogram-preserving shrink. |
+
+A program is a continuous surface, so its offset never discards detail. An
+image near 1:1 would lose exact samples to the full offset, which is why the
+offset grows only as the image shrinks. An image at its own resolution in a
+drawing of the same paper resolution, at Size 100%, is copied exactly; that
+includes an image without a resolution in a 300 ppi drawing.
+
+The probe and normalization are the same as for programs. An imported image
+has no measured relief, so it uses the 100 µm reference.
 
 ## Validation and tests
 

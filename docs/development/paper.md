@@ -28,7 +28,7 @@ the library, rendering, saved data and the order of work.
 1. **New drawing.** The dialog shows Width, Height and Resolution (300 ppi by
    default) beside the existing presets, Background and Blending. The drawing
    starts with a Paper layer under an empty layer. Its texture is the last
-   paper chosen in any drawing, at the size the paper was made for.
+   paper chosen in any drawing, at its real size.
 2. **Choose a paper.** Tapping the Paper layer opens Properties: Color, a
    Texture tile and Size. The Texture tile opens a picker with the papers in
    this drawing, the built-in papers and imported papers.
@@ -41,37 +41,56 @@ the library, rendering, saved data and the order of work.
 5. **Import a paper.** Import… in the picker accepts an image file, adds it to
    the library and applies it.
 6. **Resize, crop, rotate or flip the image.** The tooth stays attached to the
-   marks already drawn.
+   marks already drawn, and Size reports its new scale.
 
 ## Resolution and scale
 
-Only two places show resolution, and the Paper layer has a single scale control.
+Resolution is set in two places and paper scale in one, and each number means
+the same thing in every drawing.
 
-- **A drawing has one resolution.** New drawing sets it and Image Size changes
-  it. A drawing without one, such as a photo with no resolution metadata, is
-  treated as 300 ppi, and Image Size shows 300 for it instead of today's 72.
-- **Every texture has an intended physical size.** Programs define their
-  features in millimeters. An imported image uses the resolution in its file,
-  or 300 ppi when it has none, so an image without metadata appears one image
-  pixel per drawing pixel in a new drawing.
-- **Size 100% is the intended size** at the drawing's resolution when the
-  Paper layer was made. New drawings and Layer › New › Paper start at 100%.
-  Double-clicking the Size label returns to 100%.
-- **Size is the only scale control.** Choosing another texture keeps Size, so
-  an artist who likes larger tooth keeps it across papers. Brushes have no
-  texture scale.
-- **Resampling keeps the paper on the marks.** Image Size, crop, rotate and
-  flip transform the paper with the image. Changing only the resolution moves
-  nothing: the drawing, its marks and its paper print larger or smaller
-  together.
-- **Brush sizes stay in pixels.**
+- **Resolution belongs to the drawing.** New drawing sets it, 300 ppi by
+  default and kept in saved new-drawing presets, and Image Size changes it.
+  Nothing else shows or asks for one.
+- **Paper resolution.** Paper uses the drawing's resolution, except that a
+  missing resolution or one below 150 ppi counts as 300 ppi. Cameras,
+  screenshots and screen software write 72 or 96 ppi by default; nobody prints
+  paper that coarse. Image Size shows 300 for a drawing without a resolution.
+- **Texture resolution.** Programs define their features in millimeters. An
+  imported image uses the resolution in its file under the same rule, so a
+  600 dpi scan keeps its real size, and an image saved at 72 ppi or without a
+  resolution maps one image pixel to one drawing pixel in a 300 ppi drawing.
+- **Size compares the paper with the real sheet.** 100% means the texture
+  appears at its real size when the drawing prints at its paper resolution. A
+  new drawing or Paper layer starts at 100%; double-clicking the Size label
+  returns to 100%; choosing another texture keeps the Size.
+- **Image commands keep the paper on the marks.** Crop, Image Size, rotation
+  and flips move and scale the paper with the pixels, and Size reports the
+  result. Changing only the resolution changes no pixels; Size then reports how
+  the texture compares with real paper at the new print size.
+- **Size is one number.** After a resize with different horizontal and
+  vertical factors, Size shows their geometric mean, and changing it makes the
+  paper uniform again. The slider covers 25–400% on a logarithmic scale;
+  typing accepts 1–10,000%, and image commands may leave Size outside the
+  slider's range.
+- **Brushes have no texture scale,** and brush sizes stay in pixels.
+
+| Action | Paper on the canvas | Size shows |
+| --- | --- | --- |
+| New drawing at 300 ppi | Real size | 100% |
+| New drawing at 72 ppi | Real size at 300 ppi | 100% |
+| Open a photo saved at 72 ppi, or with no resolution | Real size at 300 ppi | 100% |
+| Image Size to 200%, resolution unchanged | Grows with the marks | 200% |
+| Resolution from 300 to 600 ppi only | Unchanged | 50% |
+| Crop, rotate or flip | Moves with the marks | Unchanged |
+| Copy a Paper from a 300 ppi drawing into a 600 ppi drawing | Same pixels | 50% |
+| Set Size to 100% after any of these | Real size at the paper resolution | 100% |
 
 | Control | Where it lives |
 | --- | --- |
 | Resolution | New drawing and Image Size |
-| Paper color, texture and scale | Paper layer Properties |
+| Paper color, texture and Size | Paper layer Properties |
 | How strongly a brush catches tooth | Texture strength in Tool Settings |
-| Imported paper resolution | Taken from the file, never asked |
+| Imported paper resolution | Read from the file, never asked |
 
 ## Paper layer
 
@@ -86,11 +105,14 @@ thumbnails and color editing come from the general layer rules.
 | --- | --- | --- |
 | `color` | Color | Opaque. Declared as the program's constant color, so Paper keeps the startup background, clear folding and color thumbnails of Solid Color. |
 | `texture` | Texture (new) | A built-in program with its values, or an imported image. Defaults to the last paper chosen, or Cartridge. |
-| `size` | Number, % | 25–400, logarithmic slider, default 100. |
 
-Paper has a spatial reference whose frame is physical: inserting it maps
-inches to drawing pixels at the drawing's resolution. Crop, Image Size,
-rotation and flips compose that mapping, as they do for Gradient Fill
+Paper's spatial reference maps paper millimeters to drawing pixels, and it is
+the only stored scale. Size is a Paper property read from it: the mapping's
+pixels per millimeter divided by the paper resolution's, and editing Size
+rewrites the mapping's scale about the document origin. Inserting a Paper sets
+the scale to the paper resolution, with the paper's origin at the document
+origin. Crop, Image Size, rotation and flips compose the mapping, as they do
+for Gradient Fill
 ([canvas geometry](../../crates/layer-core/src/canvas_geometry.rs)), so the
 tooth follows the marks. Image Rotate offers only quarter turns and flips, so
 the baked tile always stays aligned with the pixel grid.
@@ -109,7 +131,7 @@ constant backdrop in the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 - **Appearance does not change tooth.** Visibility, opacity, blending, masks
   and clipping affect only how Paper looks. A Transparent background hides the
   Paper but keeps its tooth.
-- **No Paper below** uses the default paper at 100%.
+- **No Paper below** uses the default paper at 100% of the paper resolution.
 - **The stroke keeps its paper.** It is resolved at pen-down and held with the
   stroke's view and brush settings, so queued contacts are unaffected by later
   edits.
@@ -202,7 +224,8 @@ Import runs on a worker and never on a UI thread.
 
 1. Decode the image through the existing open path and convert it to
    luminance; light is high.
-2. Take the resolution from the file, or 300 ppi.
+2. Read the resolution from the file under the
+   [paper resolution rule](#resolution-and-scale).
 3. Make the edges meet. When opposite edges differ, a band along each edge is
    cross-faded with the opposite edge in a variance-preserving blend (Heitz and
    Neyret's histogram-preserving blending operator, HPG 2018), which keeps the
@@ -253,7 +276,7 @@ rows are added to the [performance targets](../PERFORMANCE_TARGETS.md).
 
 | Record | Change |
 | --- | --- |
-| `paper` built-in effect, version 1 | Values `color`, `texture` and `size`, with the physical spatial reference. |
+| `paper` built-in effect, version 1 | Values `color` and `texture`. The spatial reference maps paper millimeters to drawing pixels and holds the scale shown as Size. |
 | Effect value kind `texture` | `{"kind": "texture", "value": {"builtin": "watercolor", "version": 1, "values": {...}}}` or `{"kind": "texture", "value": {"image": {"ref": "..."}}}`. |
 | `capy.image/1` | An imported paper is a `gray` image with a required resolution, read as data without profile conversion, as the [package contract](../reference/capy-package.md) plans for image inputs. |
 | `capy.composition/2` | New drawings write their resolution. |
@@ -271,7 +294,7 @@ UI is built and reviewed on GTK before it is ported, as the
 | Step | Work | Done when |
 | --- | --- | --- |
 | 1 | Bake executor, `texture` program kind and `tx_` library; today's contact paper as a program; brushes read the baked tile in document pixels; CPU generators deleted | Dry-media fixtures match within tolerance; periodicity tests pass; the bake runs on GTK, Web, Android, Apple and Windows; dry-media rows match the control |
-| 2 | Resolution in New drawing and Image Size; `paper` effect, `texture` value kind and physical spatial reference; `Document::new` creates Paper; nearest-Paper query; brushes follow Paper with relief scaling | Journeys 1, 4 and 6 pass on GTK in light and dark themes; recalibrated fixtures reviewed |
+| 2 | Resolution in New drawing and Image Size with the paper resolution rule; `paper` effect, `texture` value kind and physical spatial reference; `Document::new` creates Paper; nearest-Paper query; brushes follow Paper with relief scaling | Journeys 1, 4 and 6 pass on GTK in light and dark themes; recalibrated fixtures reviewed |
 | 3 | The eight programs and fourteen presets, the picker and the Size preview | Statistics and moiré tests pass; journeys 2 and 3 pass on GTK; bake rows recorded on each tier |
 | 4 | Import, the paper library and embedding | An imported paper survives save, reopen on another machine and Add to Library |
 | 5 | Web, then Android, Apple and Windows | Each host passes the journeys in both themes |
@@ -307,8 +330,9 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | Which paper a stroke uses | Nearest Paper at or below the target | One Paper per drawing needs pinning and refusals across every structural command. |
 | Texture parameters in Properties | Presets only | The simpler option wins for now. Presets with Size cover the papers artists choose between; exposing parameters adds controls, text and frozen ranges for every program. |
 | Size preview on the canvas | Overlay while editing | Thumbnails alone. A thumbnail cannot show scale relative to the drawing, which is the judgement Size exists for. |
-| Scale model | Physical frame with Size relative to intent | Scale in pixels. A pixel scale changes the paper's look with every resolution and needs a per-paper guess at creation; the physical frame makes 100% correct by default. |
-| Resolution controls | New drawing and Image Size | A resolution field on Paper or on import. Two places that already exist are where painters expect it. |
+| Scale model | One stored scale, read as Size against the paper resolution | A Size value stored relative to the resolution when the Paper was made: after resampling to 200% it would still read 100%, and resetting it would do nothing. A Size tied live to the current resolution: changing only the resolution would rescale the tooth under the marks already drawn. A scale in pixels: the same paper would look different at every resolution and 100% could not mean real size. |
+| Low resolutions | Below 150 ppi counts as 300 | Using the value as written. Photos, screenshots and web images carry 72 or 96 ppi by default, which would make tooth four times too fine and imported textures four times too large. |
+| Resolution controls | New drawing and Image Size | A resolution field on Paper or on import. New drawing and Image Size are where painting and photo apps put resolution, and a second field would let the paper disagree with the drawing. |
 | App-wide library | Yes, small | Imports stored only in drawings. Every new drawing would need the file imported again, and new drawings could not start on a chosen paper. |
 | Seamless import | Variance-preserving edge blend | Requiring tileable images. Most scans are not tileable, and the seam grid shows in every shaded area. |
 | Brush textures | Every grain brush follows Paper | Keeping bundled grains per brush. That keeps five grain fields, the CPU generators and textures that ignore the chosen paper. |
