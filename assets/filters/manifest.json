@@ -2087,6 +2087,35 @@
     },
     {
       "category": "fill",
+      "icon": "paper",
+      "program": {
+        "abi": 5,
+        "entry": "capy_paper",
+        "constant_color": "color",
+        "id": "paper",
+        "resolution": "display",
+        "kind": "generator",
+        "label": {"message":"resources-filter-paper"},
+        "parameters": [
+          {
+            "default": {"kind":"color","value":{"space":"Srgb","rgba":[1,1,1,1]}},
+            "key": "color",
+            "kind": {"kind":"color"},
+            "opaque": true,
+            "label": {"message":"resources-parameter-paper-color"}
+          },
+          {
+            "default": {"kind":"texture","value":{"program":"drawing"}},
+            "key": "texture",
+            "kind": {"kind":"texture"},
+            "label": {"message":"resources-parameter-paper-texture"}
+          }
+        ],
+        "wgsl": ["color.wgsl","paper.wgsl"]
+      }
+    },
+    {
+      "category": "fill",
       "icon": "gradient",
       "program": {
         "abi": 5,

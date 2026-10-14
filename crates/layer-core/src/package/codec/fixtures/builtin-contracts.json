@@ -383,5 +383,49 @@
     "temperature":{"dimension":"scalar","kind":{"kind":"number","max":1000.0,"min":-1000.0},"opaque":false},
     "tint":{"dimension":"scalar","kind":{"kind":"number","max":800.0,"min":-800.0},"opaque":false}
   }},
-  "brightness_to_opacity": {"version":1,"kind":"adjustment","alpha":"filter","space":"blending","time":false,"constraints":[],"parameters":{}}
+  "brightness_to_opacity": {"version":1,"kind":"adjustment","alpha":"filter","space":"blending","time":false,"constraints":[],"parameters":{}},
+  "paper": {"version":1,"kind":"generator","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "color":{"dimension":"scalar","kind":{"kind":"color"},"opaque":true},
+    "texture":{"dimension":"scalar","kind":{"kind":"texture"},"opaque":false}
+  }},
+  "watercolor": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "felt":{"dimension":"scalar","kind":{"kind":"number","max":5.0,"min":0.4000000059604645},"opaque":false},
+    "pressing":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "drawing": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "finish":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "tooth":{"dimension":"scalar","kind":{"kind":"number","max":1.0,"min":0.10000000149011612},"opaque":false}
+  }},
+  "laid": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "chain":{"dimension":"scalar","kind":{"kind":"number","max":50.0,"min":10.0},"opaque":false},
+    "laid":{"dimension":"scalar","kind":{"kind":"number","max":2.0,"min":0.5},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "honeycomb": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "pitch":{"dimension":"scalar","kind":{"kind":"number","max":3.0,"min":0.5},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "sanded": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "grit":{"dimension":"scalar","kind":{"kind":"number","max":0.10000000149011612,"min":0.012000000104308128},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "washi": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "density":{"dimension":"scalar","kind":{"kind":"number","max":2.0,"min":0.0},"opaque":false},
+    "fiber":{"dimension":"scalar","kind":{"kind":"number","max":25.0,"min":2.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "strands":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false}
+  }},
+  "handmade": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "amount":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "size":{"dimension":"scalar","kind":{"kind":"number","max":20.0,"min":2.0},"opaque":false}
+  }},
+  "canvas": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "irregularity":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "priming":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "threads":{"dimension":"scalar","kind":{"kind":"number","max":30.0,"min":8.0},"opaque":false}
+  }}
 }

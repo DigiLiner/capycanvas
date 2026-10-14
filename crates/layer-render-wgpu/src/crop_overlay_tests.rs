@@ -69,3 +69,32 @@ fn the_crop_shield_darkens_encoding_and_linear_surfaces_alike() {
         }
     }
 }
+
+#[test]
+fn paper_relief_shades_only_the_canvas_and_leaves_no_trace() {
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let document = paint_document([128; 2], "artwork");
+    submit(&mut r, document.scene(), &[dab([0.8, 0.6, 0.2, 1.])], &[batch(placement::target(&document))], true);
+    let camera = ViewState { document_to_surface: [0.5, 0., 0., 0.5, 32., 32.], ..view() };
+    let texture = target(&r, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    let mut present = |r: &WgpuRasterizer| {
+        presenter.present(r, &texture.create_view(&Default::default()), camera, [0.2, 0.3, 0.4, 1.]).unwrap();
+        page_bytes(r, &texture)
+    };
+    let baseline = present(&r);
+    let paper = layer_core::paper::PaperBinding { surface: std::sync::Arc::new(layer_core::paper::PaperSurface {
+        texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone(),
+        mapping: layer_core::paper::reference([128; 2], [300.; 2]).mapping,
+    }), target_offset: [0; 2] };
+    r.set_paper_overlay(Some(layer_render::PaperOverlay { paper, opacity: 1. }));
+    let shaded = present(&r);
+    let pixel = |pixels: &[u8], x: usize, y: usize| -> [u8; 4] { pixels[(y * 128 + x) * 4..][..4].try_into().unwrap() };
+    let changed = (34..94).flat_map(|y| (34..94).map(move |x| (x, y))).filter(|&(x, y)| pixel(&shaded, x, y) != pixel(&baseline, x, y)).count();
+    assert!(changed > 1200, "the relief shades the canvas: {changed} pixels");
+    for (x, y) in [(10, 10), (120, 120), (10, 120)] {
+        assert_eq!(pixel(&shaded, x, y), pixel(&baseline, x, y), "the surround is unshaded");
+    }
+    r.set_paper_overlay(None);
+    assert_eq!(present(&r), baseline, "no overlay, no relief");
+}

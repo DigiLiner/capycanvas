@@ -250,6 +250,7 @@ impl WebApp {
         let brush = self.session.engine().configured_brush().clone();
         let photo_policy = self.session.state().settings.photo_open;
         let admission = self.documents.admission(&self.session.retained_document_tiles());
+        let new_paper = self.session.new_drawing_paper();
         let new_options: layer_ui::NewDocumentOptions =
             if options.is_undefined() || options.is_null() {
                 layer_ui::NewDocumentOptions {
@@ -289,7 +290,7 @@ impl WebApp {
                     )
                     .await?
                 }
-                None => artwork_transfer::Opened::Editable {document:layer_ui::ImportedDocument::new(new_options.project(&localization).map_err(js)?,layer_ui::ImportSource::Master),fallback:None},
+                None => artwork_transfer::Opened::Editable {document:layer_ui::ImportedDocument::new(new_options.project_on(new_paper,&localization).map_err(js)?,layer_ui::ImportSource::Master),fallback:None},
             };
             check_cancelled()?;
             let (mut imported,fallback)=match imported {

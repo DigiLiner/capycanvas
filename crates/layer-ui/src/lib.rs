@@ -37,10 +37,11 @@ pub use document_tabs::{DocumentTabDrag, DocumentTabHit, DocumentTabSlide, Docum
 mod document_sessions;
 pub use document_sessions::{DocumentSessionError, DocumentTransportRefusal, document_storage_retained, document_recovery_unavailable, DocumentAdmission, DocumentBudget, DocumentSessions, DocumentTabLabel, ParkedDocument, RetainedClipboard};
 mod document_creation;
-pub use document_creation::{BlendingChoice, DocumentBackground, NewDocumentAction, NewDocumentBlending, NewDocumentOptions, NewDocumentPreset, NewDocumentPresetId, NewDocumentPresetView, NewDocumentSettings, NewDocumentError, NewDocumentForm, NewDocumentText, NewDocumentAppearance};
+pub use document_creation::{BlendingChoice, DocumentBackground, MAX_NEW_DOCUMENT_RESOLUTION, NewDocumentAction, NewDocumentBlending, NewDocumentOptions, NewDocumentPreset, NewDocumentPresetId, NewDocumentPresetView, NewDocumentSettings, NewDocumentError, NewDocumentForm, NewDocumentText, NewDocumentAppearance};
 mod document_workflow;
 pub use document_workflow::{CandidateIdentity, ColorWorkflow, ColorPreparation, SourceWorkflow};
 
+pub mod paper_library;
 pub mod profile_library;
 pub mod proof_workflow;
 pub mod proof_panel;
@@ -138,7 +139,7 @@ pub use session::{
     DEFAULT_DOCUMENT_EXTENT,
     DocumentColorOperation, DocumentIdleReason, ExportRepeat, DocumentHostError, DocumentHostErrorCopy, HostRequestFailure, DocumentExport, DocumentFileState, DocumentLocation, DocumentRequest, EffectAction, FilterCategoryChoice,
     FilterLoadState, FilterPickerAction, FilterPickerState, LayerPropertiesView, PropertyDisclosure, LayerDrawerSizing,
-    MAX_NEW_DOCUMENT_DIMENSION, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
+    MAX_NEW_DOCUMENT_DIMENSION, PaperPickerView, PaperTileView, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
 };
 pub use stats::{StatRow, StatsView};
 

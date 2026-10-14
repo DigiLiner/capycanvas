@@ -177,6 +177,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.state.revision = self.state.revision.max(previous.state.revision);
         self.next_request = self.next_request.max(previous.next_request);
         self.inherit_notice_ids(previous);
+        self.papers.inherit(&previous.papers);
         self.apply_settings(previous.state.settings.clone())?;
         // View orientation/zoom belongs to this drawing; display size and scale
         // belong to the window and may have changed while this editor slept.

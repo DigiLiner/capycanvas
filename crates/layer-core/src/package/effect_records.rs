@@ -7,10 +7,12 @@ use std::{collections::BTreeSet, sync::Arc};
 pub trait ResourceWriter {
     fn code(&mut self, source: &Resource<str>) -> Result<Value, String>;
     fn lut(&mut self, resource: &Lut3d) -> Result<Value, String>;
+    fn image(&mut self, image: &crate::authored::Image) -> Result<Value, String>;
 }
 pub trait ResourceReader {
     fn code(&mut self, reference: &Value) -> DecodeResult<Resource<str>>;
     fn lut(&mut self, reference: &Value) -> DecodeResult<Arc<Lut3d>>;
+    fn image(&mut self, reference: &Value) -> DecodeResult<crate::authored::Image>;
 }
 fn unsupported(name: &str) -> DecodeError { DecodeError::Unsupported(format!("Unsupported effect {name}")) }
 fn bounded(value: &Value, maximum: usize) -> DecodeResult<&[Value]> {
@@ -38,7 +40,8 @@ fn encode_label(value: &ResourceLabel) -> Value {
 fn kind_name(kind: &EffectParameterKind) -> &'static str {
     match kind { EffectParameterKind::Number {..} => "number", EffectParameterKind::Toggle => "toggle",
         EffectParameterKind::Choice {..} => "choice", EffectParameterKind::Color => "color",
-        EffectParameterKind::Curve => "curve", EffectParameterKind::Gradient => "gradient", EffectParameterKind::Lut3d => "lut3d" }
+        EffectParameterKind::Curve => "curve", EffectParameterKind::Gradient => "gradient", EffectParameterKind::Lut3d => "lut3d",
+        EffectParameterKind::Texture => "texture" }
 }
 fn encode_value(value: &EffectValue, kind: &EffectParameterKind, writer: &mut impl ResourceWriter) -> Result<Value, String> {
     let payload = match value {
@@ -56,6 +59,11 @@ fn encode_value(value: &EffectValue, kind: &EffectParameterKind, writer: &mut im
             }).collect::<Result<Vec<_>,String>>()?,"interpolation":values::encode_mix_space(*interpolation)})
         },
         EffectValue::Lut3d(None) => Value::Null, EffectValue::Lut3d(Some(resource)) => writer.lut(resource)?,
+        EffectValue::Texture(TextureSource::Program(texture)) => {
+            let id=&texture.program.id;
+            json!({"builtin":id,"version":builtin_version(id),"values":encode_values(&texture.program,&texture.values,writer)?})
+        },
+        EffectValue::Texture(TextureSource::Image(image)) => json!({"image":writer.image(image)?}),
     };
     Ok(json!({"kind":kind_name(kind),"value":payload}))
 }
@@ -71,7 +79,7 @@ fn builtin_version(id: &str) -> u32 {
 fn decode_value(value: &Value, kind: &EffectParameterKind, reader: &mut impl ResourceReader) -> DecodeResult<EffectValue> {
     let fields = object(value, &["kind", "value"])?;
     let tag = string(required(fields, "kind")?)?;
-    if !["number","toggle","choice","color","curve","gradient","lut3d"].contains(&tag) { return Err(unsupported(tag)); }
+    if !["number","toggle","choice","color","curve","gradient","lut3d","texture"].contains(&tag) { return Err(unsupported(tag)); }
     if tag != kind_name(kind) { return Err("Effect value kind mismatch".into()); }
     let value = required(fields, "value")?;
     Ok(match kind {
@@ -95,6 +103,19 @@ fn decode_value(value: &Value, kind: &EffectParameterKind, reader: &mut impl Res
             gradient.validate()?;EffectValue::Gradient(gradient)
         },
         EffectParameterKind::Lut3d => EffectValue::Lut3d(if value.is_null() {None} else {Some(reader.lut(value)?)}),
+        EffectParameterKind::Texture => {
+            let texture=if value.get("image").is_some() {
+                TextureSource::Image(reader.image(required(object(value,&["image"])?,"image")?)?)
+            } else {
+                let fields=object(value,&["builtin","version","values"])?;
+                let id=string(required(fields,"builtin")?)?;
+                let program=crate::bundled_texture_catalog().get(id).ok_or_else(||unsupported("texture program"))?.program();
+                if u32_value(required(fields,"version")?)?!=builtin_version(id) {return Err(unsupported("texture program version"));}
+                TextureSource::Program(EffectInstance {values:decode_values(&program,required(fields,"values")?,reader)?,program})
+            };
+            texture.validate()?;
+            EffectValue::Texture(texture)
+        },
     })
 }
 fn encode_kind(kind: &EffectParameterKind) -> Value {
@@ -106,7 +127,8 @@ fn encode_kind(kind: &EffectParameterKind) -> Value {
         EffectParameterKind::Choice {options} => json!({"kind":"choice","options":options.iter().map(|option| match option {
             EffectOption::Literal(value) => json!(value), EffectOption::Labeled {value,label} => json!({"value":value,"label":encode_label(label)})
         }).collect::<Vec<_>>()}),
-        EffectParameterKind::Toggle|EffectParameterKind::Color|EffectParameterKind::Curve|EffectParameterKind::Gradient|EffectParameterKind::Lut3d=>json!({"kind":kind_name(kind)}),
+        EffectParameterKind::Toggle|EffectParameterKind::Color|EffectParameterKind::Curve|EffectParameterKind::Gradient|EffectParameterKind::Lut3d
+            |EffectParameterKind::Texture=>json!({"kind":kind_name(kind)}),
     }
 }
 fn decode_kind(value: &Value) -> DecodeResult<EffectParameterKind> {
@@ -176,6 +198,7 @@ pub fn encode_program(program: &Arc<EffectProgram>, writer: &mut impl ResourceWr
         return Ok(json!({"builtin":program.id,"version":builtin_version(&program.id)}));
     }
     if !program.literal_labels() { return Err("Custom filters require literal labels".into()); }
+    if program.parameters.iter().any(|p| p.kind==EffectParameterKind::Texture) { return Err("Paper textures are built in".into()); }
     let EffectProgram {id,label,kind,alpha,space,wgsl,entry,passes,time,lookups,auxiliary,parameters:program_parameters,constraints,..}=program.as_ref();
     text(&json!(id)).map_err(|error|error.to_string())?;
     EffectInstance::new(program.clone()).validate().map_err(str::to_string)?;
@@ -191,7 +214,7 @@ pub fn encode_program(program: &Arc<EffectProgram>, writer: &mut impl ResourceWr
         parameters.insert(key.to_string(),Value::Object(fields));
     }
     let mut data=json!({"key":id,"contract":"capy.filter/1","label":encode_label(label),
-        "kind":match kind {EffectKind::Adjustment=>"adjustment",EffectKind::Generator=>"generator"},
+        "kind":match kind {EffectKind::Adjustment=>"adjustment",EffectKind::Generator=>"generator",EffectKind::Texture=>return Err("Texture programs are built in".into())},
         "code":encode_code(wgsl,writer)?,"entry":entry,"parameters":parameters,
         "slots":program_parameters.iter().map(|p| &p.key).collect::<Vec<_>>()});
     match alpha {EffectAlpha::Preserve=>{},EffectAlpha::Filter=>{data["alpha"]=json!("filter");}}
@@ -285,7 +308,7 @@ pub fn decode_program(value: &Value, reader: &mut impl ResourceReader) -> Decode
     let program=Arc::new(EffectProgram {abi:EFFECT_ABI,id:text(required(fields,"key")?)?,label:label(required(fields,"label")?)?,kind,alpha,space,resolution:EffectResolution::Native,
         wgsl:decode_code(required(fields,"code")?,reader)?,entry:text(required(fields,"entry")?)?,passes:passes.into(),
         time:fields.get("time").map(boolean).transpose()?.unwrap_or(false),lookups:lookups.into(),
-        constant_color:None,
+        constant_color:None,period:None,
         auxiliary:fields.get("auxiliary").map(decode_auxiliary).transpose()?,pages:Arc::default(),parameters:parameters.into(),constraints:constraints.into()});
     EffectInstance::new(program.clone()).validate()?;
     Ok(program)
@@ -322,7 +345,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     #[derive(Default)]
-    struct Resources { code: BTreeMap<String,Resource<str>>, luts: BTreeMap<String,Arc<Lut3d>> }
+    struct Resources { code: BTreeMap<String,Resource<str>>, luts: BTreeMap<String,Arc<Lut3d>>, images: BTreeMap<String,crate::authored::Image> }
     impl ResourceWriter for Resources {
         fn code(&mut self, source: &Resource<str>) -> Result<Value,String> {
             let id=source.id().to_string(); self.code.insert(id.clone(),source.clone()); Ok(json!({"ref":id}))
@@ -330,6 +353,10 @@ mod tests {
         fn lut(&mut self, resource: &Lut3d) -> Result<Value,String> {
             let id=resource.resource().ok_or("Missing LUT storage")?.id().to_string();
             self.luts.entry(id.clone()).or_insert_with(||Arc::new(resource.clone())); Ok(json!({"ref":id}))
+        }
+        fn image(&mut self, image: &crate::authored::Image) -> Result<Value,String> {
+            let id=image.id().to_string();
+            self.images.entry(id.clone()).or_insert_with(||image.clone()); Ok(json!({"ref":id}))
         }
     }
     impl ResourceReader for Resources {
@@ -341,6 +368,10 @@ mod tests {
             let id=string(required(object(reference,&["ref"])?,"ref")?)?;
             self.luts.get(id).cloned().ok_or_else(||"Missing LUT resource".into())
         }
+        fn image(&mut self, reference: &Value) -> DecodeResult<crate::authored::Image> {
+            let id=string(required(object(reference,&["ref"])?,"ref")?)?;
+            self.images.get(id).cloned().ok_or_else(||"Missing image".into())
+        }
     }
     fn fixture() -> Arc<EffectProgram> {
         crate::effect_catalog::custom_program("exposure")
@@ -348,7 +379,7 @@ mod tests {
     #[test]
     fn builtin_data_contracts_are_keyed_and_independent_of_shader_layout() {
         let mut actual=Map::new();
-        for filter in crate::bundled_effect_catalog().filters() {
+        for filter in crate::bundled_effect_catalog().filters().iter().chain(crate::bundled_texture_catalog().filters()) {
             let program=filter.program();
             let parameters:Map<_,_>=program.parameters.iter().map(|p| {
                 let mut kind=if let EffectParameterKind::Choice {options}=&p.kind {
@@ -453,6 +484,10 @@ mod tests {
         for filter in crate::bundled_effect_catalog().filters() {
             let definition=crate::effect_catalog::custom_program(filter.id());
             let mut resources=Resources::default();
+            if definition.parameters.iter().any(|p| p.kind==EffectParameterKind::Texture) {
+                assert!(encode_program(&definition,&mut resources).is_err());
+                continue;
+            }
             let encoded=encode_program(&definition,&mut resources).unwrap();
             let decoded=decode_program(&encoded,&mut resources).unwrap();
             for field in ["abi","pages","resolution","constant_color"] {assert!(encoded.get(field).is_none());}

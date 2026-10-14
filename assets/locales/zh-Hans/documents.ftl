@@ -110,6 +110,7 @@ documents-error-device-file = 请选择此设备上的文件
 documents-error-filename = 请选择文件名
 documents-error-project-writer = 项目写入失败
 documents-error-no-drawing = 没有可打开的绘画
+documents-error-resolution = 请选择 1 至{ $maximum } ppi 的分辨率
 documents-open-photos-filter = 绘画和照片
 
 documents-delivery-clipboard-unavailable = 此浏览器无法粘贴图像。请使用“将图像导入为图层”。

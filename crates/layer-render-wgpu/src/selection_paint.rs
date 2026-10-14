@@ -234,8 +234,7 @@ impl SelectionPainter {
         } else {
             self.active.as_ref().unwrap().before.clone()
         };
-        let key = WgpuRasterizer::texture_set_key(&update.style);
-        r.ensure_texture_set(key.clone())?;
+        let key = r.ensure_texture_set(&update.style)?;
         let textures = r
             .texture_sets
             .iter()
@@ -253,6 +252,7 @@ impl SelectionPainter {
                     0,
                     update.dabs.len() as u32,
                     &r.device,
+                    r.paper_style(&update.style),
                 )),
                 usage: wgpu::BufferUsages::UNIFORM,
             });

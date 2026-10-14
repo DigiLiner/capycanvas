@@ -1,0 +1,703 @@
+{
+ "format": 2,
+ "categories": [
+  {
+   "id": "paper",
+   "label": "Paper"
+  }
+ ],
+ "filters": [
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "watercolor",
+    "kind": "texture",
+    "label": "Watercolor",
+    "period": 128,
+    "entry": "capy_watercolor",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_watercolor.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "felt",
+      "label": "Felt",
+      "default": {
+       "kind": "number",
+       "value": 1.0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.4,
+       "max": 5,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "pressing",
+      "label": "Pressing",
+      "default": {
+       "kind": "number",
+       "value": 45
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "hot_press",
+     "label": {
+      "message": "resources-paper-hot-press"
+     },
+     "values": {
+      "felt": {
+       "kind": "number",
+       "value": 2.0
+      },
+      "pressing": {
+       "kind": "number",
+       "value": 85
+      }
+     }
+    },
+    {
+     "id": "cold_press",
+     "label": {
+      "message": "resources-paper-cold-press"
+     },
+     "values": {}
+    },
+    {
+     "id": "rough",
+     "label": {
+      "message": "resources-paper-rough"
+     },
+     "values": {
+      "felt": {
+       "kind": "number",
+       "value": 3.0
+      },
+      "pressing": {
+       "kind": "number",
+       "value": 5
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "drawing",
+    "kind": "texture",
+    "label": "Drawing",
+    "period": 64,
+    "entry": "capy_drawing",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_drawing.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "tooth",
+      "label": "Tooth",
+      "default": {
+       "kind": "number",
+       "value": 0.35
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.1,
+       "max": 1,
+       "step": 0.01,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "finish",
+      "label": "Finish",
+      "default": {
+       "kind": "number",
+       "value": 35
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "drawing_paper",
+     "label": {
+      "message": "resources-paper-drawing-paper"
+     },
+     "values": {}
+    },
+    {
+     "id": "bristol",
+     "label": {
+      "message": "resources-paper-bristol"
+     },
+     "values": {
+      "tooth": {
+       "kind": "number",
+       "value": 0.2
+      },
+      "finish": {
+       "kind": "number",
+       "value": 90
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "laid",
+    "kind": "texture",
+    "label": "Laid",
+    "period": 175,
+    "entry": "capy_laid",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_laid.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "laid",
+      "label": "Laid lines",
+      "default": {
+       "kind": "number",
+       "value": 1.0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.5,
+       "max": 2,
+       "step": 0.05,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "chain",
+      "label": "Chain lines",
+      "default": {
+       "kind": "number",
+       "value": 25
+      },
+      "kind": {
+       "kind": "number",
+       "min": 10,
+       "max": 50,
+       "step": 0.5,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "ingres",
+     "label": {
+      "message": "resources-paper-ingres"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "honeycomb",
+    "kind": "texture",
+    "label": "Honeycomb",
+    "period": 64,
+    "entry": "capy_honeycomb",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_honeycomb.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "pitch",
+      "label": "Pitch",
+      "default": {
+       "kind": "number",
+       "value": 1.1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.5,
+       "max": 3,
+       "step": 0.05,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "pastel_paper",
+     "label": {
+      "message": "resources-paper-pastel-paper"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "sanded",
+    "kind": "texture",
+    "label": "Sanded",
+    "period": 64,
+    "entry": "capy_sanded",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_sanded.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "grit",
+      "label": "Grit",
+      "default": {
+       "kind": "number",
+       "value": 0.035
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.012,
+       "max": 0.1,
+       "step": 0.001,
+       "decimals": 3,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "sanded_pastel",
+     "label": {
+      "message": "resources-paper-sanded-pastel"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "washi",
+    "kind": "texture",
+    "label": "Washi",
+    "period": 175,
+    "entry": "capy_washi",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_washi.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "fiber",
+      "label": "Fiber length",
+      "default": {
+       "kind": "number",
+       "value": 10
+      },
+      "kind": {
+       "kind": "number",
+       "min": 2,
+       "max": 25,
+       "step": 0.5,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "density",
+      "label": "Fibers",
+      "default": {
+       "kind": "number",
+       "value": 0.4
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 2,
+       "step": 0.05,
+       "decimals": 2,
+       "unit": "/mm²"
+      }
+     },
+     {
+      "key": "strands",
+      "label": "Strands",
+      "default": {
+       "kind": "number",
+       "value": 0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "washi",
+     "label": {
+      "message": "resources-paper-washi"
+     },
+     "values": {}
+    },
+    {
+     "id": "unryu",
+     "label": {
+      "message": "resources-paper-unryu"
+     },
+     "values": {
+      "density": {
+       "kind": "number",
+       "value": 0.3
+      },
+      "strands": {
+       "kind": "number",
+       "value": 100
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "handmade",
+    "kind": "texture",
+    "label": "Handmade",
+    "period": 175,
+    "entry": "capy_handmade",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_handmade.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "amount",
+      "label": "Inclusions",
+      "default": {
+       "kind": "number",
+       "value": 50
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "size",
+      "label": "Inclusion size",
+      "default": {
+       "kind": "number",
+       "value": 6
+      },
+      "kind": {
+       "kind": "number",
+       "min": 2,
+       "max": 20,
+       "step": 0.5,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "handmade_paper",
+     "label": {
+      "message": "resources-paper-handmade-paper"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "canvas",
+    "kind": "texture",
+    "label": "Canvas",
+    "period": 64,
+    "entry": "capy_canvas",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_canvas.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "threads",
+      "label": "Threads",
+      "default": {
+       "kind": "number",
+       "value": 13
+      },
+      "kind": {
+       "kind": "number",
+       "min": 8,
+       "max": 30,
+       "step": 0.5,
+       "decimals": 1,
+       "unit": "/cm"
+      }
+     },
+     {
+      "key": "irregularity",
+      "label": "Irregularity",
+      "default": {
+       "kind": "number",
+       "value": 50
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "priming",
+      "label": "Priming",
+      "default": {
+       "kind": "number",
+       "value": 70
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "canvas",
+     "label": {
+      "message": "resources-paper-canvas"
+     },
+     "values": {}
+    },
+    {
+     "id": "linen",
+     "label": {
+      "message": "resources-paper-linen"
+     },
+     "values": {
+      "threads": {
+       "kind": "number",
+       "value": 20
+      },
+      "irregularity": {
+       "kind": "number",
+       "value": 40
+      },
+      "priming": {
+       "kind": "number",
+       "value": 60
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

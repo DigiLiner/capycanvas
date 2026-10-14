@@ -26,7 +26,7 @@ fn image_size_scales_down_with_constrained_proportions_in_one_undo_step() {
     invoke(&mut s, CommandId::ImageSize);
     let view = image_size_view(&s);
     assert_eq!((view.title.as_ref(), view.values, view.unit), ("Image Size", [1000., 800.], CanvasSizeUnit::Pixels));
-    assert_eq!((view.constrain, view.resample, view.resolution), (true, ImageResample::Automatic, 72.));
+    assert_eq!((view.constrain, view.resample, view.resolution), (true, ImageResample::Automatic, 300.));
     assert_eq!(view.resamples.iter().map(|r| r.label.as_ref()).collect::<Vec<_>>(), ["Automatic", "Bicubic", "Lanczos", "Bilinear", "Nearest neighbor"]);
     assert!(!view.can_apply);
     assert_eq!(view.message, "Current size: 1000 × 800 px");
@@ -91,19 +91,19 @@ fn image_size_in_percent_with_free_proportions_and_a_chosen_filter() {
 fn image_size_changes_only_the_resolution_or_both_in_one_step() {
     let mut s = crop_session();
     invoke(&mut s, CommandId::ImageSize);
-    image_size(&mut s, ImageSizeAction::Resolution { value: 300. });
+    image_size(&mut s, ImageSizeAction::Resolution { value: 240. });
     let view = image_size_view(&s);
     assert!(view.can_apply);
-    assert_eq!(view.message, "Only the resolution changes, to 300 ppi");
+    assert_eq!(view.message, "Only the resolution changes, to 240 ppi");
     assert!(s.dispatch(UiAction::ImageSize { action: ImageSizeAction::Resolution { value: 0. } }).is_err());
     image_size(&mut s, ImageSizeAction::Apply);
     s.frame(20, 20).unwrap();
     let doc = s.engine.document();
     assert_eq!(doc.composition().size, [1000, 800]);
-    assert_eq!(doc.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
+    assert_eq!(doc.composition().resolution, Some(layer_core::ImageResolution::ppi(240)));
     assert!(s.renderer_mut().pending_operations.is_empty(), "no pixel work");
     invoke(&mut s, CommandId::ImageSize);
-    assert_eq!(image_size_view(&s).resolution, 300.);
+    assert_eq!(image_size_view(&s).resolution, 240.);
     image_size(&mut s, ImageSizeAction::Resolution { value: 150.4 });
     image_size(&mut s, ImageSizeAction::Width { value: 2000. });
     image_size(&mut s, ImageSizeAction::Apply);
@@ -113,7 +113,7 @@ fn image_size_changes_only_the_resolution_or_both_in_one_step() {
     assert_eq!(doc.composition().resolution, Some(layer_core::ImageResolution::ppi(150)), "whole pixels per inch");
     invoke(&mut s, CommandId::Undo);
     let doc = s.engine.document();
-    assert_eq!((doc.composition().size, doc.composition().resolution), ([1000, 800], Some(layer_core::ImageResolution::ppi(300))), "one step");
+    assert_eq!((doc.composition().size, doc.composition().resolution), ([1000, 800], Some(layer_core::ImageResolution::ppi(240))), "one step");
 }
 
 #[test]

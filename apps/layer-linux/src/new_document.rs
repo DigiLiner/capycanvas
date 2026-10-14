@@ -13,6 +13,7 @@ struct Form {
     preset: adw::ComboRow,
     width: adw::SpinRow,
     height: adw::SpinRow,
+    resolution: adw::SpinRow,
     background: adw::ComboRow,
     space: adw::ComboRow,
     depth: adw::ComboRow,
@@ -34,12 +35,14 @@ impl Form {
             },
             background: view.backgrounds.get(self.background.selected() as usize).map_or(view.options.background, |choice| choice.0),
             blend_space: self.blend_space.get(),
+            resolution: self.resolution.value() as u32,
         }
     }
     fn populate(&self, options: NewDocumentOptions) {
         self.updating.set(true);
         self.width.set_value(f64::from(options.extent[0]));
         self.height.set_value(f64::from(options.extent[1]));
+        self.resolution.set_value(f64::from(options.resolution));
         let view = self.view.borrow();
         self.space.set_selected(view.spaces.iter().position(|choice| choice.0 == options.color.space).unwrap() as u32);
         self.depth.set_selected(view.depths.iter().position(|choice| choice.0 == options.color.depth).unwrap() as u32);
@@ -121,8 +124,8 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
         row
     };
     let preset = combo(&projection.text.preset, "new-document-preset", &[&projection.text.custom]);
-    let dimension = |title: &str, name: &str| {
-        let row = adw::SpinRow::with_range(1., f64::from(MAX_NEW_DOCUMENT_DIMENSION), 1.);
+    let dimension = |title: &str, name: &str, maximum: u32| {
+        let row = adw::SpinRow::with_range(1., f64::from(maximum), 1.);
         row.set_title(title);
         row.set_widget_name(name);
         row.set_snap_to_ticks(true);
@@ -131,8 +134,10 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
         group.add(&row);
         row
     };
-    let width = dimension(&projection.text.width, "new-document-width");
-    let height = dimension(&projection.text.height, "new-document-height");
+    let width = dimension(&projection.text.width, "new-document-width", MAX_NEW_DOCUMENT_DIMENSION);
+    let height = dimension(&projection.text.height, "new-document-height", MAX_NEW_DOCUMENT_DIMENSION);
+    let resolution = dimension(&projection.text.resolution, "new-document-resolution", MAX_NEW_DOCUMENT_RESOLUTION);
+    resolution.add_suffix(&gtk::Label::new(Some("ppi")));
     let background = combo(
         &projection.text.background,
         "new-document-background",
@@ -210,6 +215,7 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
         preset,
         width,
         height,
+        resolution,
         background,
         space,
         depth,
@@ -235,6 +241,7 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
         form.preset.set_title(&view.text.preset);
         form.width.set_title(&view.text.width);
         form.height.set_title(&view.text.height);
+        form.resolution.set_title(&view.text.resolution);
         form.background.set_title(&view.text.background);
         form.space.set_title(&view.text.space);
         form.depth.set_title(&view.text.depth);
@@ -258,7 +265,7 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
     }));
     form.presets(&settings, selected);
     form.populate(settings.defaults);
-    for row in [&form.width, &form.height] {
+    for row in [&form.width, &form.height, &form.resolution] {
         row.connect_value_notify(glib::clone!(
             #[weak]
             form,
@@ -411,7 +418,8 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
         return Ok(None);
     }
     let options = form.options();
-    let project = options.project(&form.localization.borrow())?;
+    let paper = w.gpu.borrow().as_ref().map_or_else(|| settings.paper(), |gpu| gpu.session.new_drawing_paper());
+    let project = options.project_on(paper, &form.localization.borrow())?;
     if remember.is_active() {
         w.dispatch(UiAction::NewDocumentPreferences {
             action: NewDocumentAction::Remember { options, name: String::new(), defaults: true },

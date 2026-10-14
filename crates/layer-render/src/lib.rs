@@ -85,6 +85,12 @@ pub struct CropOverlay {
     pub dim: f32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaperOverlay {
+    pub paper: layer_core::paper::PaperBinding,
+    pub opacity: f32,
+}
+
 /// Fully resolved brush contact consumed directly by a GPU renderer.
 /// Pressure curves, filtering, spacing, and randomness have already been
 /// evaluated by `layer-engine`.
@@ -191,6 +197,7 @@ pub struct DabStyle {
     pub mode: DabMode,
     pub execution: BrushExecution,
     pub grain: Option<BrushGrain>,
+    pub paper: Option<layer_core::paper::PaperBinding>,
     pub rendering: BrushRendering,
     pub wet_mix: BrushWetMix,
     pub transport: Option<BrushTransport>,
@@ -215,7 +222,8 @@ impl DabStyle {
                 layer_core::StrokeTool::Eraser => DabMode::Erase,
             },
             execution: brush.execution_class(),
-            grain: brush.grain.clone(),
+            grain: brush.grain,
+            paper: None,
             rendering: brush.rendering,
             wet_mix: brush.wet_mix,
             transport: brush.transport.clone(),
@@ -809,6 +817,7 @@ pub trait CanvasRenderer {
     fn set_quick_mask_thumbnail(&mut self, _selection: Option<&layer_core::Selection>) {}
     fn set_selection_overlay(&mut self, _overlay: Option<SelectionOverlay>) {}
     fn set_crop_overlay(&mut self, _overlay: Option<CropOverlay>) {}
+    fn set_paper_overlay(&mut self, _overlay: Option<PaperOverlay>) {}
     fn set_clipping_preview(&mut self, _shadows: bool, _highlights: bool) {}
     fn set_telemetry_enabled(&mut self, _enabled: bool) {}
     fn telemetry(&self) -> RendererTelemetry {

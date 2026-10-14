@@ -21,20 +21,3 @@ fn tip_coverage(
     // silhouette rejection and in ordered destination-contact loops on WebGPU.
     return textureSampleLevel(texture, brush_sampler, uv, 0.0).r;
 }
-
-fn grain_uv(
-    local: vec2<f32>,
-    world: vec2<f32>,
-    parameters: vec4<f32>,
-    canvas_locked: bool,
-    seed: vec2<f32>,
-    offset_jitter: f32,
-) -> vec2<f32> {
-    let coordinate = select(local * 0.5, world / 256.0, canvas_locked);
-    let random_offset = vec2<f32>(
-        fract(sin(dot(seed, vec2<f32>(12.9898, 78.233))) * 43758.5453),
-        fract(sin(dot(seed, vec2<f32>(39.3467, 11.135))) * 24634.6345),
-    ) - vec2<f32>(0.5);
-    return rotate(coordinate, parameters.z, parameters.w) * parameters.x
-        + vec2<f32>(0.5) + random_offset * offset_jitter;
-}

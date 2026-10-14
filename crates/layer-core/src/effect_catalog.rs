@@ -9,21 +9,26 @@ use std::{
 
 include!(concat!(env!("OUT_DIR"), "/filter_resources.rs"));
 
+fn bundled_package(manifest: &str) -> EffectCatalog {
+    let read = |name: &str| {
+        FILTER_RESOURCES
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, source)| Arc::from(*source))
+            .ok_or_else(|| format!("Missing filter resource: {name}"))
+    };
+    EffectPackage::parse(&read(manifest).unwrap())
+        .unwrap()
+        .resolve(read)
+        .expect("valid bundled effect resources")
+}
 pub fn bundled_effect_catalog() -> &'static EffectCatalog {
     static CATALOG: std::sync::OnceLock<EffectCatalog> = std::sync::OnceLock::new();
-    CATALOG.get_or_init(|| {
-        let read = |name: &str| {
-            FILTER_RESOURCES
-                .iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, source)| Arc::from(*source))
-                .ok_or_else(|| format!("Missing filter resource: {name}"))
-        };
-        EffectPackage::parse(&read("manifest.json").unwrap())
-            .unwrap()
-            .resolve(read)
-            .expect("valid bundled effect resources")
-    })
+    CATALOG.get_or_init(|| bundled_package("manifest.json"))
+}
+pub fn bundled_texture_catalog() -> &'static EffectCatalog {
+    static CATALOG: std::sync::OnceLock<EffectCatalog> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(|| bundled_package("textures.json"))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +71,16 @@ pub struct EffectDefinition {
     pub icon: Arc<str>,
     #[serde(default)]
     pub preview: BTreeMap<Arc<str>, EffectValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<TexturePreset>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TexturePreset {
+    pub id: Arc<str>,
+    pub label: ResourceLabel,
+    #[serde(default)]
+    pub values: BTreeMap<Arc<str>, EffectValue>,
 }
 impl EffectDefinition {
     pub fn id(&self) -> &str {
@@ -81,8 +96,14 @@ impl EffectDefinition {
         EffectView::new(&self.program, values)
     }
     pub fn preview(&self) -> Result<EffectInstance, String> {
+        self.with_values(&self.preview)
+    }
+    pub fn preset(&self, preset: &TexturePreset) -> Result<EffectInstance, String> {
+        self.with_values(&preset.values)
+    }
+    fn with_values(&self, values: &BTreeMap<Arc<str>, EffectValue>) -> Result<EffectInstance, String> {
         let mut instance = EffectInstance::new(self.program.clone());
-        for (key, value) in &self.preview {
+        for (key, value) in values {
             instance.set(key, value.clone()).map_err(str::to_string)?;
         }
         instance.validate().map_err(str::to_string)?;
@@ -233,6 +254,10 @@ impl EffectCatalog {
                 if matches!(mode,EffectInstallMode::Add) || filter != *builtin { return Err(format!("Reserved built-in filter ID: {}", filter.id())); }
                 continue;
             }
+            if filter.program.kind == crate::EffectKind::Texture || !filter.presets.is_empty()
+                || filter.program.parameters.iter().any(|p| p.kind == crate::EffectParameterKind::Texture) {
+                return Err("Texture programs are built in".into());
+            }
             if !filter.program.literal_labels() { return Err("Custom filters require literal labels".into()); }
             if let Some(old) = candidate.filters.iter_mut().find(|f| f.id() == filter.id()) {
                 if matches!(mode, EffectInstallMode::Add) {
@@ -280,6 +305,13 @@ impl EffectCatalog {
                 .validate()
                 .map_err(str::to_string)?;
             f.preview()?;
+            let mut presets = HashSet::new();
+            for preset in &f.presets {
+                if f.program.kind != crate::EffectKind::Texture || !id(&preset.id) || !preset.label.valid(160) || !presets.insert(&preset.id) {
+                    return Err("Invalid or duplicate texture preset".into());
+                }
+                f.preset(preset)?;
+            }
         }
         Ok(())
     }
@@ -339,12 +371,12 @@ mod tests {
                 }
             }
         }
-        assert_eq!(opaque,9);
+        assert_eq!(opaque,10);
     }
     #[test]
     fn all_definitions_load_from_disk_and_share_module_storage() {
         let catalog = disk_catalog();
-        assert_eq!(catalog.filters().len(), 53);
+        assert_eq!(catalog.filters().len(), 54);
         assert_eq!(catalog.filters(), bundled_effect_catalog().filters());
         let mut shared = std::collections::HashMap::<crate::authored::Resource<str>,crate::authored::Resource<str>>::new();
         for filter in catalog.filters() {
@@ -385,7 +417,7 @@ mod tests {
             .stage(custom.clone(), EffectInstallMode::Add)
             .unwrap();
         assert!(original.get("user:custom").is_none());
-        assert_eq!(added.filters().len(), 54);
+        assert_eq!(added.filters().len(), 55);
         Arc::make_mut(&mut custom.filters[0].program).label = "Updated kernel".into();
         let replaced = added
             .stage(custom.clone(), EffectInstallMode::Replace)
@@ -411,10 +443,10 @@ mod tests {
         Arc::make_mut(&mut added.program).id = "user:new_kernel".into();
         resources.filters.push(added);
         let merged = original.stage(resources, EffectInstallMode::Merge).unwrap();
-        assert_eq!(merged.filters().len(), 54);
+        assert_eq!(merged.filters().len(), 55);
         assert!(merged.get("user:new_kernel").is_some());
         assert_eq!(merged.filters()[0],original.filters()[0]);
-        assert_eq!(original.filters().len(), 53);
+        assert_eq!(original.filters().len(), 54);
         assert_ne!(original.filters()[0].label(), &ResourceLabel::from("Updated filter"));
     }
     #[test]

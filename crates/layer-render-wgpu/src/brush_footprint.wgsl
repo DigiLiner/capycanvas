@@ -22,16 +22,8 @@ fn brush_footprint(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
     );
     if coverage <= 0.0 { return 0.0; }
     if style.flags.y > 0.5 {
-        let uv = grain_uv(
-            local,
-            world,
-            style.grain,
-            style.flags.z > 0.5,
-            dab.center,
-            style.flags.w,
-        );
-        coverage *= mix(1.0, textureSampleLevel(grain_texture, brush_sampler, uv, 0.0).r,
-            clamp(dab.material.x, 0.0, 1.0));
+        coverage *= mix(1.0, textureSampleLevel(grain_texture, brush_sampler, paper_uv(world), 0.0).r,
+            clamp(dab.material.x * style.flags.z, 0.0, 1.0));
     }
     if coverage < style.edges.w { return 0.0; }
     return coverage;

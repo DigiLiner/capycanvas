@@ -62,6 +62,7 @@ pub(crate) struct Recorder {
     pub(crate) preparing_filter_previews: bool,
     pub(crate) max_dimension: Option<u32>,
     pub(crate) crop_overlay: Option<layer_render::CropOverlay>,
+    pub(crate) paper_overlay: Option<layer_render::PaperOverlay>,
     pub(crate) frame_scene: Option<SceneSnapshot>,
     pub(crate) evaluation: EvaluationContext,
     pub(crate) rebuilds: usize,
@@ -90,6 +91,7 @@ impl CanvasRenderer for Recorder {
         if self.reject_image_affines {Err(BackendError("Image sampling request is unsupported"))}else {Ok(())}
     }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
+    fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) { self.paper_overlay = overlay; }
     fn set_telemetry_enabled(&mut self, enabled: bool) {
         self.telemetry_enabled = enabled;
     }

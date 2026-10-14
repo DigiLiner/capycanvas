@@ -110,6 +110,7 @@ documents-error-device-file = 請選擇此裝置上的檔案
 documents-error-filename = 請選擇檔案名稱
 documents-error-project-writer = 專案寫入失敗
 documents-error-no-drawing = 沒有可開啟的繪畫
+documents-error-resolution = 請選擇 1 至{ $maximum } ppi 的解析度
 documents-open-photos-filter = 繪畫與照片
 
 documents-delivery-clipboard-unavailable = 此瀏覽器無法貼上影像。請使用「將影像匯入為圖層」。

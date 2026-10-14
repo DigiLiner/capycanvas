@@ -67,6 +67,7 @@ impl From<Arc<str>> for EffectShader {
 pub enum EffectKind {
     Adjustment,
     Generator,
+    Texture,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +131,8 @@ pub struct EffectProgram {
     /// WGSL source with an entry function matching the ABI.
     pub wgsl: EffectShader,
     pub entry: Arc<str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub period: Option<f32>,
     /// Ordered image passes. Each reads the previous pass and original input
     /// through fx_sample/fx_original; only the last applies layer properties.
     #[serde(default)]
@@ -221,7 +224,7 @@ impl EffectProgram {
         if crate::bundled_effect_catalog().get(&self.id).is_none_or(|builtin| builtin.program().as_ref() != self) {
             return true;
         }
-        !self.passes.is_empty() || matches!(self.id.as_ref(), "vignette" | "film_grain" | "crosshatch" | "iridescence" | "gradient_fill")
+        !self.passes.is_empty() || matches!(self.id.as_ref(), "vignette" | "film_grain" | "crosshatch" | "iridescence" | "gradient_fill" | "paper")
     }
 
     pub fn analysis(&self) -> Option<EffectAnalysisKind> {
@@ -314,6 +317,85 @@ pub enum EffectParameterKind {
     Curve,
     Gradient,
     Lut3d,
+    Texture,
+}
+
+pub const MAX_PAPER_IMAGE_EXTENT: u32 = 4096;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextureSource {
+    Program(EffectInstance),
+    Image(crate::authored::Image),
+}
+impl TextureSource {
+    pub fn program(&self) -> Option<&EffectInstance> {
+        match self { Self::Program(instance) => Some(instance), Self::Image(_) => None }
+    }
+    pub fn period(&self) -> Option<[f64; 2]> {
+        match self {
+            Self::Program(instance) => instance.program.period.map(|v| [f64::from(v); 2]),
+            Self::Image(image) => {
+                let ppi = image.resolution?.pixels_per_inch();
+                Some([0, 1].map(|axis| f64::from(image.extent[axis]) / ppi[axis] * 25.4))
+            }
+        }
+    }
+    pub fn validate(&self) -> Result<(), &'static str> {
+        match self {
+            Self::Program(instance) => {
+                if crate::bundled_texture_catalog().get(&instance.program.id)
+                    .is_none_or(|builtin| !Arc::ptr_eq(&builtin.program, &instance.program) && builtin.program != instance.program) {
+                    return Err("Paper textures must be built-in texture programs");
+                }
+                instance.validate()
+            }
+            Self::Image(image) => {
+                let interpretation = &image.interpretation;
+                if interpretation.channels != crate::color::source::SourceChannels::Gray
+                    || interpretation.depth != crate::color::SampleDepth::U8
+                    || image.resolution.is_none()
+                    || image.extent.iter().any(|v| *v > MAX_PAPER_IMAGE_EXTENT)
+                    || image.validate().is_err()
+                {
+                    return Err("Paper images are 8-bit gray with a resolution");
+                }
+                Ok(())
+            }
+        }
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TextureSourceData {
+    program: Arc<str>,
+    #[serde(default)]
+    values: Vec<EffectValue>,
+}
+#[derive(Serialize)]
+struct TextureImageData {
+    image: crate::authored::PortableId,
+}
+impl Serialize for TextureSource {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Program(instance) => TextureSourceData { program: instance.program.id.clone(), values: instance.values.clone() }.serialize(serializer),
+            Self::Image(image) => TextureImageData { image: image.id() }.serialize(serializer),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for TextureSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = TextureSourceData::deserialize(deserializer)?;
+        let program = crate::bundled_texture_catalog().get(&data.program)
+            .ok_or_else(|| serde::de::Error::custom("Unknown texture program"))?.program();
+        let mut instance = EffectInstance::new(program);
+        if !data.values.is_empty() {
+            instance.values = data.values;
+        }
+        let source = Self::Program(instance);
+        source.validate().map_err(serde::de::Error::custom)?;
+        Ok(source)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -327,6 +409,7 @@ pub enum EffectValue {
     Curve(Vec<[f32; 2]>),
     Gradient(GradientDefinition),
     Lut3d(Option<Arc<crate::Lut3d>>),
+    Texture(TextureSource),
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectInstance {
@@ -467,6 +550,19 @@ impl<'a> EffectView<'a> {
         }
     }
     pub fn validate(&self) -> Result<(), &'static str> {
+        if (self.program.kind == EffectKind::Texture) != self.program.period.is_some() {
+            return Err("Texture programs and only texture programs declare a period");
+        }
+        if self.program.kind == EffectKind::Texture
+            && (self.program.period.is_none_or(|period| !(8.0..=400.0).contains(&period))
+                || self.program.constant_color.is_some() || self.program.time || !self.program.passes.is_empty()
+                || !self.program.lookups.is_empty() || self.program.auxiliary.is_some()
+                || self.program.resolution != EffectResolution::Native
+                || self.program.parameters.iter().any(|p| !matches!(p.kind,
+                    EffectParameterKind::Number {..} | EffectParameterKind::Toggle | EffectParameterKind::Choice {..})))
+        {
+            return Err("Invalid texture program");
+        }
         if let Some(key) = &self.program.constant_color
             && (self.program.kind != EffectKind::Generator || self.program.time
                 || !self.program.passes.is_empty() || !self.program.lookups.is_empty()
@@ -645,6 +741,7 @@ impl<'a> EffectView<'a> {
                 EffectValue::Curve(points) => data.extend(curve_parameters(points)),
                 EffectValue::Gradient(stops) => data.extend(stops.parameters(space)?),
                 EffectValue::Lut3d(resource) => data.push([f32::from(resource.is_some()),0.,0.,0.]),
+                EffectValue::Texture(_) => data.push([0.; 4]),
             }
         }
         let directory = data.len();
@@ -812,6 +909,7 @@ impl EffectParameter {
             (EffectParameterKind::Gradient, EffectValue::Gradient(s)) => s.validate().is_ok(),
             (EffectParameterKind::Lut3d, EffectValue::Lut3d(resource)) => resource.as_ref().is_none_or(|r|
                 r.validate_descriptor().is_ok() && RgbSpace::ALL.into_iter().any(|space| r.accepts(space))),
+            (EffectParameterKind::Texture, EffectValue::Texture(texture)) => texture.validate().is_ok(),
             _ => false,
         };
         if valid {

@@ -1793,6 +1793,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 let mut style = DabStyle::for_brush(&brush, tool);
                 style.alpha_locked = alpha_locked;
                 style.blend_space = if is_mask { layer_core::BlendSpace::Linear } else { self.document().composition().blend };
+                style.paper = style.grain.is_some().then(|| self.document().paper_binding(target));
                 style.retouch = self.settings.retouch.map(|source| Retouch::for_target(self.document(), target, source));
                 style.selection = self.document().working.selection.as_ref().map(|selection| {
                     std::sync::Arc::new(selection.translated(layer_core::offsets::point(self.document().target_offset(target).map(|v| -v))))
@@ -1948,6 +1949,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 stroke.material_updates = active.material_updates.into();
                 stroke.selection = active.style.selection.clone();
                 stroke.retouch = active.style.retouch.clone();
+                stroke.paper = active.style.paper.clone();
                 self.completed_stroke = Some(stroke);
                 self.completed_at = Some(web_time::Instant::now());
                 self.completed_before = Some(active.before);
@@ -2318,6 +2320,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             style.blend_space = stroke.blend_space;
             style.selection = stroke.selection.clone();
             style.retouch = stroke.retouch.clone();
+            style.paper = stroke.paper.clone();
             let mut generator = DabGenerator::new(self.document().composition().color.space);
             generator.reset_for_replay(stroke);
             let mut started = false;

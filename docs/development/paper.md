@@ -6,11 +6,11 @@ Paper gives a drawing a surface. A Paper layer holds the sheet's color and its
 texture; every brush that reacts to tooth reads the height of the paper under
 the layer it paints on. Textures come from built-in
 [texture programs](texture-programs.md) or from imported images, and a small
-paper library lets artists choose, import and reuse them. Brush-owned grain
-textures are removed.
+paper library lets artists choose, import and reuse them. Brushes own no grain
+textures.
 
-This plan covers what artists see, the resolution model, the layer, brushes,
-the library, rendering, saved data and the order of work.
+This guide covers what artists see, the resolution model, the layer, brushes,
+the library, rendering, saved data and what each host has.
 
 ## Scope
 
@@ -128,12 +128,11 @@ for Gradient Fill
 tooth follows the marks. Image Rotate offers only quarter turns and flips, so
 the baked tile always stays aligned with the pixel grid.
 
-`Document::new` creates a white Paper instead of a white Solid Color. One scene
-query, the nearest Paper at or below a target, replaces the three ways code
-finds the paper today: the first constant-color fill in
-[document creation](../../crates/layer-ui/src/document_creation.rs), position 1
-in [photo projects](../../crates/layer-color/src/photo_project.rs) and the
-constant backdrop in the [GTK opener](../../apps/layer-linux/src/files/open.rs).
+`Document::new` creates a white Paper. One scene query, the nearest Paper at or
+below a target, finds the paper for
+[document creation](../../crates/layer-ui/src/document_creation.rs),
+[photo projects](../../crates/layer-color/src/photo_project.rs), whose Paper is
+hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 
 ### Which paper a stroke uses
 
@@ -162,37 +161,35 @@ constant backdrop in the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 
 Flatten and Merge Visible keep the bottom root Paper as a separate layer, as
 Procreate keeps its background color; everything above it merges. Merging into
-any other Paper bakes it into paint, as today.
+any other Paper bakes it into paint, as for any fill.
 
 ## Brushes
 
-- **Every grain brush follows the paper.** Today every grain-using preset uses
-  canvas-fixed grain, and no preset uses moving grain. `BrushGrain` in
-  [`layer-core`](../../crates/layer-core/src/lib.rs) shrinks to its Texture
-  strength; its asset, behavior, scale, rotation and offset jitter are removed,
-  together with the CPU paper generators in
-  [`builtin_masks.rs`](../../crates/layer-render-wgpu/src/builtin_masks.rs).
-  Watercolor transport fields and mask tips are unchanged. Transparent Glaze
-  loses its inert grain.
+- **Every grain brush follows the paper.** `BrushGrain` in
+  [`layer-core`](../../crates/layer-core/src/lib.rs) holds only Texture
+  strength; brushes have no grain asset, scale, rotation, offset jitter or
+  moving grain, and [`builtin_masks.rs`](../../crates/layer-render-wgpu/src/builtin_masks.rs)
+  has no CPU paper generators. Watercolor transport fields and mask tips are
+  separate from paper. Transparent Glaze has no grain.
 - **Relief scales tooth.** Dry media use
   `S = contact paper × Texture strength × relief / 100 µm` in the
   [contact model](../history/brushes/dry-media-contact.md); the multiplicative
-  grain of wet and stamp brushes scales by the same factor. A 100 µm paper
-  behaves like today's calibration.
-- **Brushes read the paper in document pixels.** `contact_paper` and
-  `grain_uv` add the target layer's offset and read the tile texel at the
-  document pixel. Today paper is read in layer-local pixels, so a moved layer
-  shifts its tooth.
-- **Recalibration.** The first phase bakes today's contact-paper recipe through
-  the new path to prove an unchanged look. The default Drawing paper is then
-  tuned so a 300 ppi drawing keeps the current pencil and charcoal character,
-  and the dry-media fixtures are reviewed.
+  grain of wet and stamp brushes scales by the same factor.
+- **Brushes read the paper in document pixels.** `paper_uv` in
+  [`contact_field.wgsl`](../../crates/layer-render-wgpu/src/contact_field.wgsl)
+  adds the target layer's offset, so moving a layer does not shift its tooth.
+- **Calibration.** Drawing paper gives every dry-media brush the tooth contrast
+  of the single built-in paper that preceded Paper, so a 300 ppi drawing keeps
+  its pencil, charcoal, chalk, pastel and crayon character. The other papers
+  were tuned against it with every dry-media brush at three pressures. Program
+  heights are tooth depths: a pencil reaches about 30–50 µm below the paper's
+  middle, so deeper valleys stay white at any pressure.
 - **Previews.** Toolbar strength and slider previews read the active drawing's
   paper; their cache key gains the paper's bake key. Catalog swatches are
   rendered on the default paper.
 
 Per-brush textures stay out of the first version. They would need non-numeric
-tool overrides (today `ToolMemory` stores only numbers per setting), library
+tool overrides (`ToolMemory` stores only numbers per setting), library
 references from brush settings and a fallback when a texture is deleted. The
 Paper layer already gives every brush the surface a painter chose; a
 deliberately stylized brush texture is the remaining case.
@@ -209,16 +206,18 @@ deliberately stylized brush texture is the remaining case.
 
 Imported images are stored once by SHA-256 of their samples in a `papers`
 folder of the data root, named in [`StorageRoots`](../../crates/layer-host/src/storage.rs)
-and listed in the [storage guide](../internals/storage.md). Names and order
-live in the workspace database beside the color library; Web uses IndexedDB.
-The library allows 64 imported papers and 256 MiB. As in the
-[ICC profile library](../../crates/layer-ui/src/profile_library.rs), papers over
-a limit stay listed and removable, and the shared action transport carries no
-file paths.
+and listed in the [storage guide](../internals/storage.md), with their previews
+and an index of names and order beside them
+([`papers.rs`](../../crates/layer-host/src/papers.rs)). The library allows 64
+imported papers and 256 MiB; papers over a limit stay listed and removable. The
+image's identity in a drawing comes from the same hash, so a reopened drawing
+still finds its paper in the library. Hosts that have paper storage report the
+library to the session ([`paper_library.rs`](../../crates/layer-ui/src/paper_library.rs));
+a host without it shows only the built-in papers and no Import.
 
 New drawings use the paper last chosen in the picker. That is remembered with
-the other new-drawing state, not offered as a setting. If it was deleted, the
-default paper is used.
+the other new-drawing state, not offered as a setting; an imported paper is
+read when the library loads. If it was deleted, the default paper is used.
 
 ### Picker
 
@@ -227,12 +226,14 @@ built-in papers (Hot press, Cold press, Rough, Drawing paper, Bristol, Ingres,
 Pastel paper, Sanded pastel, Washi, Unryu, Handmade paper, Canvas and Linen),
 then imported papers, then Import…. When the selected Paper
 uses an embedded image that is not in the library, that paper comes first with
-Add to Library. Tiles show each paper under raking light at a fixed scale with
-its name, rendered off the frame path from its bake, like
-[filter previews](../../crates/layer-ui/src/filter_previews.rs). Choosing a
-tile applies it. Imported papers take their names from their files; Rename
-and Delete sit in their context menu, as for palettes. There is no separate
-library panel.
+Add to Library. Tiles show 16 mm of each paper under raking light with its
+name. Built-in previews are made from their bakes by a test and ship with the
+app ([texture programs](texture-programs.md#validation-and-tests)); an imported
+paper's preview is made from its image when it is imported. Choosing a tile
+applies it; choosing an imported paper that is not in memory reads it on a
+worker first. Imported papers take their names from their files; Rename and
+Delete sit in their context menu, as for palettes, and Add to Library sits in
+the drawing's own paper's menu. There is no separate library panel.
 
 ### Importing a paper
 
@@ -242,12 +243,13 @@ Import runs on a worker and never on a UI thread.
    luminance; light is high.
 2. Read the resolution from the file under the
    [paper resolution rule](#resolution-and-scale).
-3. Make the edges meet. When opposite edges differ, a band along each edge is
-   cross-faded with the opposite edge in a variance-preserving blend (Heitz and
-   Neyret's histogram-preserving blending operator, HPG 2018), which keeps the
-   height histogram and so the pencil tone.
-4. Limit each side to 4096 samples with the jittered resampler, adjusting the
+3. Limit each side to 4096 samples with the jittered resampler, adjusting the
    recorded resolution so the physical size is unchanged.
+4. Make the edges meet. When opposite edges differ, the first tenth of each
+   axis is cross-faded with the band past its end in a variance-preserving
+   blend (Heitz and Neyret's histogram-preserving blending operator, HPG 2018),
+   which keeps the height histogram and so the pencil tone, and that band is
+   dropped.
 5. Store the result and apply it to the selected Paper.
 
 Requiring seamless images would be simpler, but most scans are not, and a seam
@@ -262,11 +264,10 @@ with Add to Library; adding it reuses an equal stored image.
 ## Rendering and performance
 
 - **The canvas is unaffected.** Paper composites as a constant color, so
-  startup, composition and its cost stay as for Solid Color today.
+  startup, composition and its cost are those of Solid Color.
 - **Bakes run off the frame path.** The [bake](texture-programs.md#the-bake)
   is GPU work in 256 × 256 pages, scheduled at brush priority by the compiler
-  path. It replaces today's CPU generation of contact paper, which on Web runs
-  inside one browser task.
+  path, never on the CPU or in a browser task.
 - **Bakes are cached in memory** by program, version, values and tile size,
   shared between drawings and released when unused. A rebake follows a change
   of texture, Size, Image Size or orientation, not a crop or a resolution-only
@@ -275,18 +276,23 @@ with Add to Library; adding it reuses an equal stored image.
   waits behind on a tablet.
 - **Strokes wait for their paper** as they wait for shaders. The first frame
   does not.
-- **Brush cost is unchanged.** Brushes still read the paper once per pixel; the
-  per-batch uniform gains the tile size and relief, and no shader variant is
-  added.
-- **The paper preview** is an overlay in the presentation pass, like the
-  [crop overlay](../internals/rendering.md), drawn while Scale changes and for
-  a moment after a paper is chosen.
+- **Brush cost follows tooth contrast.** Brushes read the paper once per pixel,
+  with its tile size and relief in the per-batch uniform and no extra shader
+  variant. Dry media on Drawing paper run as fast as before Paper; rougher
+  papers cost them a few percent more per update
+  ([top tier](../performance/top-tier.md#paper)).
+- **The paper preview** is a separate draw in the presentation pass with its
+  own bind group, so the canvas shader and camera are unchanged. It shades the
+  Paper's baked tile by its slope, white facing the light and black away from
+  it, while Scale changes and for 1.2 s after a paper is chosen, then fades out
+  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)).
 - **Memory** is one byte per texel: 2.3 MB for a 128 mm watercolor tile at
   300 ppi, 4.3 MB for a 175 mm laid or washi tile, and at most 16 MB.
 
-Every phase that changes brush sampling measures the dry-media rows against a
-matched control by the [measuring rules](../performance/measuring.md). Bake
-rows are added to the [performance targets](../PERFORMANCE_TARGETS.md).
+Every change to brush sampling measures the dry-media rows against a matched
+control by the [measuring rules](../performance/measuring.md). Bake time counts
+toward canvas readiness in [responsiveness](../performance/responsiveness.md);
+it is measured on desktop only.
 
 ## Saved data
 
@@ -302,18 +308,13 @@ gain `paper` and each texture program. Brush presets are not stored in
 drawings, so removing grain fields changes no file. Drawings made before Paper
 keep their Solid Color.
 
-## Order of work
+## Status
 
-UI is built and reviewed on GTK before it is ported, as the
-[UI rules](../ui/README.md) require.
-
-| Step | Work | Done when |
-| --- | --- | --- |
-| 1 | Bake executor, `texture` program kind and `tx_` library; today's contact paper as a program; brushes read the baked tile in document pixels; CPU generators deleted | Dry-media fixtures match within tolerance; periodicity tests pass; the bake runs on GTK, Web, Android, Apple and Windows; dry-media rows match the control |
-| 2 | Resolution in New drawing and Image Size with the paper resolution rule; `paper` effect, `texture` value kind and physical spatial reference; `Document::new` creates Paper; nearest-Paper query; brushes follow Paper with relief scaling | Journeys 1, 4 and 6 pass on GTK in light and dark themes; recalibrated fixtures reviewed |
-| 3 | The eight programs and thirteen presets, the picker and the paper preview | Statistics and moiré tests pass; journeys 2 and 3 pass on GTK; bake rows recorded on each tier |
-| 4 | Import, the paper library and embedding | An imported paper survives save, reopen on another machine and Add to Library |
-| 5 | Web, then Android, Apple and Windows | Each host passes the journeys in both themes |
+| Area | State |
+| --- | --- |
+| Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
+| GTK | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview. `native_paper_picker_relief_and_scale` walks it in both themes. |
+| Web, Android, Apple, Windows | Build and paint on Paper. Until ported after GTK review, Texture is a list of built-in papers, Scale is a slider and there is no library or Import. |
 
 ## Measurements
 
@@ -361,3 +362,6 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | Brush textures | Every grain brush follows Paper | Keeping bundled grains per brush. That keeps five grain fields, the CPU generators and textures that ignore the chosen paper. |
 | Per-brush textures | Later | They need typed overrides and library references for a minority case. |
 | Disk cache for bakes | None | The simpler option wins while bakes stay within the shader preparation they wait behind. |
+| Picker previews | Shipped for built-in papers, made at import for imported ones | Rendering previews on the GPU at run time. It needs a request and readback path on every host for images that never change between releases; a test keeps the shipped previews equal to their bakes. |
+| Library index | A small index file beside the papers | The workspace database. Papers are app-wide, not per workspace, and the index keeps the folder self-contained. |
+| Tile actions | Rename, Delete and Add to Library in each tile's menu | Buttons in the picker. They would show for every paper while applying to one. |

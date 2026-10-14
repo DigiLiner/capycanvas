@@ -56,14 +56,13 @@ impl BrushStamps {
         };
         if self.pipelines.len()==8 {self.pipelines.remove(0);}
         self.pipelines.push((flags,pipeline.clone()));
-        if !r.background_pipeline_ready(&pipeline) {return Ok(false);}
-        let key=WgpuRasterizer::texture_set_key(&request.style);
-        r.ensure_texture_set(key.clone())?;
+        if !r.background_pipeline_ready(&pipeline) || !r.paper_ready(&request.style, startup::OTHER)? {return Ok(false);}
+        let key=r.ensure_texture_set(&request.style)?;
         let mut dabs:Vec<DabGpu>=request.dabs.iter().copied().map(DabGpu::from).collect();
         dry_material::prepare_geometry(&request.style,&mut dabs);
         let mut contacts=dab_bytes(&dabs).to_vec();
         contacts.resize(64*mem::size_of::<DabGpu>(),0);
-        let style=StyleGpu::for_brush([192;2],&request.style,0,request.dabs.len() as u32,&r.device);
+        let style=StyleGpu::for_brush([192;2],&request.style,0,request.dabs.len() as u32,&r.device,r.paper_style(&request.style));
         let params=[request.bounds.min.x.to_bits(),request.bounds.min.y.to_bits(),
             request.bounds.max.x.to_bits(),request.bounds.max.y.to_bits(),request.dabs.len() as u32,
             u32::from(request.shape_strength.is_some()),request.shape_strength.unwrap_or(1.).to_bits(),0];

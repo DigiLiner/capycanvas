@@ -1,13 +1,11 @@
 use crate::{
     AssetId, BrushAccumulation, BrushBlendMode, BrushColorDynamics, BrushCombine, BrushContact, BrushCurve,
-    BrushDeform, BrushExecution, BrushGrain, BrushGrainBehavior, BrushMapping, BrushPath,
+    BrushDeform, BrushExecution, BrushGrain, BrushMapping, BrushPath,
     BrushRendering, BrushSensor, BrushShape, BrushSnapshot, BrushStabilization, BrushTarget, BrushTip, BrushTransport,
     BrushWetMix, ColorMixSpace, LiquifyMode,
 };
 use std::sync::Arc;
 
-pub const PAPER_GRAIN_TEXTURE_ASSET: &str = "builtin:brush-grain/paper-v1";
-pub const CONTACT_PAPER_TEXTURE_ASSET: &str = "builtin:brush-grain/contact-paper-v1";
 pub const WATERCOLOR_TIP_TEXTURE_ASSET: &str = "builtin:brush-tip/watercolor-ragged-v1";
 pub const WATERCOLOR_TRANSPORT_LONG_NARROW_ASSET: &str = "builtin:brush-transport/long-narrow-v1";
 pub const WATERCOLOR_TRANSPORT_LONG_BROAD_ASSET: &str = "builtin:brush-transport/long-broad-v1";
@@ -99,7 +97,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             flow: 1.0,
             spacing: 0.20,
             aspect: 0.68,
-            grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 1.5, 1., 0.)),
+            grain: Some(paper_grain(1.)),
             rendering: BrushRendering {
                 accumulation: BrushAccumulation::Uniform,
                 ..Default::default()
@@ -171,7 +169,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             flow: 0.7,
             spacing: 0.16,
             aspect: 0.72,
-            grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 2.4, 1., 0.)),
+            grain: Some(paper_grain(1.)),
             mappings: Arc::from([BrushMapping::pressure_size(), direction_rotation()]),
             ..BrushSnapshot::default()
         },
@@ -260,7 +258,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
                 spacing: 0.16,
                 hardness: 0.97,
                 execution: BrushExecution::Dry,
-                grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 1.7, 1., 0.08)),
+                grain: Some(paper_grain(1.)),
                 rendering: BrushRendering { accumulation: BrushAccumulation::Uniform, ..Default::default() },
                 wet_mix: BrushWetMix::default(),
             })
@@ -274,7 +272,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             spacing: 0.22,
             hardness: 0.52,
             execution: BrushExecution::Dry,
-            grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 3.4, 1., 0.21)),
+            grain: Some(paper_grain(1.)),
             rendering: BrushRendering {
                 accumulation: BrushAccumulation::Uniform,
                 alpha_threshold: 0.08,
@@ -302,7 +300,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
                 spacing: 0.08,
                 hardness: 0.68,
                 execution: BrushExecution::Dry,
-                grain: Some(canvas_grain(CONTACT_PAPER_TEXTURE_ASSET, 1.9, 1., 0.0)),
+                grain: Some(paper_grain(1.)),
                 rendering: BrushRendering { accumulation: BrushAccumulation::Uniform, ..Default::default() },
                 wet_mix: BrushWetMix::default(),
             })
@@ -315,7 +313,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             spacing: 0.05,
             hardness: 0.54,
             execution: BrushExecution::Wet,
-            grain: Some(canvas_grain(PAPER_GRAIN_TEXTURE_ASSET, 2.2, 0.48, 0.04)),
+            grain: Some(paper_grain(0.48)),
             rendering: BrushRendering::default(),
             wet_mix: wet_mix(0.78, 0.12, 0.035, 0.18, 0.16, 0.22),
         }),
@@ -389,7 +387,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             spacing: 0.055,
             hardness: 0.48,
             execution: BrushExecution::Wet,
-            grain: Some(canvas_grain(PAPER_GRAIN_TEXTURE_ASSET, 1.15, 0.72, 0.03)),
+            grain: Some(paper_grain(0.72)),
             rendering: BrushRendering::default(),
             wet_mix: wet_mix(0.72, 0.38, 0.060, 0.22, 0.28, 0.12),
         }),
@@ -401,7 +399,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             spacing: 0.19,
             hardness: 0.32,
             execution: BrushExecution::Wet,
-            grain: Some(canvas_grain(PAPER_GRAIN_TEXTURE_ASSET, 0.82, 0.86, -0.05)),
+            grain: Some(paper_grain(0.86)),
             rendering: BrushRendering::default(),
             wet_mix: wet_mix(0.82, 0.88, 0.025, 0.16, 0.18, 0.08),
         }),
@@ -413,7 +411,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
             spacing: 0.04,
             hardness: 0.66,
             execution: BrushExecution::Smudge,
-            grain: Some(canvas_grain(PAPER_GRAIN_TEXTURE_ASSET, 1.6, 0.36, 0.08)),
+            grain: Some(paper_grain(0.36)),
             rendering: BrushRendering::default(),
             wet_mix: wet_mix(0.0, 0.94, 0.040, 0.86, 0.0, 0.20),
         }),
@@ -499,17 +497,8 @@ fn watercolor_brush(spec: PainterBrushSpec, transport: BrushTransport) -> BrushS
     brush
 }
 
-pub(crate) fn canvas_grain(asset: &'static str, scale: f32, depth: f32, rotation: f32) -> BrushGrain {
-    BrushGrain {
-        asset: AssetId::from(asset),
-        behavior: BrushGrainBehavior::Canvas,
-        scale,
-        depth,
-        rotation_radians: rotation,
-        // A canvas-locked texture must stay fixed between adjacent contacts;
-        // per-dab offsets expose the stamp footprint instead of paper grain.
-        offset_jitter: 0.0,
-    }
+pub(crate) fn paper_grain(depth: f32) -> BrushGrain {
+    BrushGrain { depth }
 }
 
 fn wet_mix(
@@ -666,15 +655,7 @@ mod tests {
                 assert_eq!(brush.tip, BrushTip::AnalyticEllipse, "{preset:?}");
             }
             let grain = brush.grain.expect("painter preset must provide grain");
-            assert_eq!(grain.behavior, BrushGrainBehavior::Canvas, "{preset:?}");
-            assert!(
-                matches!(
-                    grain.asset.0.as_ref(),
-                    PAPER_GRAIN_TEXTURE_ASSET | CONTACT_PAPER_TEXTURE_ASSET
-                ),
-                "{preset:?}"
-            );
-            assert_eq!(grain.offset_jitter, 0.0, "{preset:?}");
+            assert!(grain.depth > 0.0, "{preset:?}");
         }
     }
 

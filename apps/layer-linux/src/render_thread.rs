@@ -151,6 +151,7 @@ enum Command {
     CancelSelectionPaint(u64),
     SelectionOverlay(Option<layer_render::SelectionOverlay>),
     CropOverlay(Option<layer_render::CropOverlay>),
+    PaperOverlay(Option<layer_render::PaperOverlay>),
     ClippingPreview(bool,bool),
     QuickMaskThumbnail(Option<layer_core::Selection>),
     Region(u64, layer_render::RegionRequest),
@@ -274,6 +275,7 @@ pub struct RenderWorker {
     selection_paint: Option<Result<layer_render::SelectionPaintResult, String>>,
     selection_overlay: Option<layer_render::SelectionOverlay>,
     crop_overlay: Option<layer_render::CropOverlay>,
+    paper_overlay: Option<layer_render::PaperOverlay>,
     clipping_preview:[bool;2],
     quick_thumbnail: Option<layer_core::Selection>,
     pub(super) clock: Arc<crate::wayland::FrameClock>,
@@ -479,6 +481,7 @@ impl RenderWorker {
             selection_paint: None,
             selection_overlay: None,
             crop_overlay: None,
+            paper_overlay: None,
             clipping_preview:[false;2],
             quick_thumbnail: None,
             clock,
@@ -574,6 +577,10 @@ impl RenderWorker {
             Box::new((document, brush, transform)),
         ))
         .map_err(error)
+    }
+    #[cfg(test)]
+    pub(super) fn has_paper_overlay(&self) -> bool {
+        self.paper_overlay.is_some()
     }
     pub(super) fn paint_ready(
         &self,
@@ -825,6 +832,12 @@ impl CanvasRenderer for RenderWorker {
         if self.crop_overlay != overlay {
             let _ = self.send(Command::CropOverlay(overlay));
             self.crop_overlay = overlay;
+        }
+    }
+    fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
+        if self.paper_overlay != overlay {
+            let _ = self.send(Command::PaperOverlay(overlay.clone()));
+            self.paper_overlay = overlay;
         }
     }
     fn request_region(
@@ -1479,6 +1492,7 @@ impl Worker {
                     self.renderer.cancel_region();
                 }
                 Command::CropOverlay(overlay) => self.renderer.set_crop_overlay(overlay),
+                Command::PaperOverlay(overlay) => self.renderer.set_paper_overlay(overlay),
                 Command::ClippingPreview(shadows,highlights) => self.renderer.set_clipping_preview(shadows,highlights),
                 Command::Region(generation, request) => {
                     region_generation = generation;

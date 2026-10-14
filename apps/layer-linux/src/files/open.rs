@@ -43,7 +43,7 @@ pub(super) async fn prepare(
         let metadata = (*project.artwork.metadata).clone();
         let names = layer_core::DocumentNames {
             paint: project.scene().order().first().and_then(|h| project.scene().occurrence(*h)).map_or_else(|| "Photo".into(), |o| o.name.clone()),
-            paper: project.scene().constant_backdrop().first().and_then(|h| project.scene().occurrence(*h)).map(|o| o.name.clone()).unwrap_or_default(),
+            paper: layer_core::paper::paper_occurrence(project.scene(), None).and_then(|h| project.scene().occurrence(h)).map(|o| o.name.clone()).unwrap_or_default(),
         };
         let Some(source) = interpret_window(window, workspace, source, policy, working, localization).await? else { return Ok(None); };
         imported.project = gio::spawn_blocking(move || policy.photo_project(source, metadata, names))

@@ -1415,8 +1415,7 @@ fn slider_stamp_coalesces_full_brush_keys_and_rejects_stale_owners() {
     assert_eq!(s.renderer_mut().requests[1].1.style.tip,brush.tip);
     let second=s.renderer_mut().requests[1].0;
     brush.tip=layer_core::BrushTip::AnalyticEllipse;
-    brush.grain=Some(layer_core::BrushGrain{asset:AssetId::from("preview-test"),
-        behavior:layer_core::BrushGrainBehavior::Moving,scale:1.,depth:1.,rotation_radians:0.,offset_jitter:0.});
+    brush.grain=Some(layer_core::BrushGrain{depth:0.5});
     s.engine.set_brush(brush.clone()).unwrap();
     assert!(s.toolbar_stamp(context,Some(first)).unwrap().unwrap().pending);
     assert_eq!(s.renderer_mut().requests.len(),2,"one request in flight");
@@ -1425,6 +1424,8 @@ fn slider_stamp_coalesces_full_brush_keys_and_rejects_stale_owners() {
     assert!(pending.pending);
     assert_eq!(pending.alpha.as_slice(),&[11;4]);
     assert_eq!(s.renderer_mut().requests[2].1.style.grain,brush.grain);
+    let paper=s.engine.document().paper(None);
+    assert_eq!(s.renderer_mut().requests[2].1.style.paper.as_ref().map(|paper|paper.surface.as_ref()),Some(&paper));
     let third=s.renderer_mut().requests[2].0;
     s.dispatch(UiAction::SelectBrush{id:layer_core::DefaultBrushPreset::Charcoal as u32}).unwrap();
     let next=s.state().toolbar_context();

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NewDocumentError {
     CanvasSize,
+    Resolution,
     CanvasUnavailable,
     PresetUnavailable,
     PresetLimit,
@@ -24,6 +25,11 @@ impl NewDocumentError {
                 let mut args = FluentArgs::new();
                 args.set("maximum", MAX_NEW_DOCUMENT_DIMENSION);
                 return localization.format(MessageId::DOCUMENTS_ERROR_CANVAS_SIZE, &args);
+            }
+            Self::Resolution => {
+                let mut args = FluentArgs::new();
+                args.set("maximum", MAX_NEW_DOCUMENT_RESOLUTION);
+                return localization.format(MessageId::DOCUMENTS_ERROR_RESOLUTION, &args);
             }
             Self::CanvasUnavailable => MessageId::DOCUMENTS_ERROR_CANVAS_UNAVAILABLE,
             Self::PresetUnavailable => MessageId::DOCUMENTS_ERROR_PRESET_UNAVAILABLE,
@@ -51,10 +57,16 @@ pub struct NewDocumentOptions {
     /// Settings from before this field read with the new-document default.
     #[serde(default = "perceptual")]
     pub blend_space: BlendSpace,
+    #[serde(default = "print_resolution")]
+    pub resolution: u32,
 }
 fn perceptual() -> BlendSpace {
     BlendSpace::Perceptual
 }
+fn print_resolution() -> u32 {
+    layer_core::paper::DEFAULT_PAPER_PPI as u32
+}
+pub const MAX_NEW_DOCUMENT_RESOLUTION: u32 = 10_000;
 impl Default for NewDocumentOptions {
     fn default() -> Self {
         Self {
@@ -62,6 +74,7 @@ impl Default for NewDocumentOptions {
             color: DocumentColor::default(),
             background: DocumentBackground::White,
             blend_space: BlendSpace::Perceptual,
+            resolution: print_resolution(),
         }
     }
 }
@@ -74,9 +87,15 @@ impl NewDocumentOptions {
         {
             return Err(NewDocumentError::CanvasSize);
         }
+        if !(1..=MAX_NEW_DOCUMENT_RESOLUTION).contains(&self.resolution) {
+            return Err(NewDocumentError::Resolution);
+        }
         Ok(())
     }
     pub fn project(self, localization: &Localizer) -> Result<Document, String> {
+        self.project_on(layer_core::paper::default_texture(), localization)
+    }
+    pub fn project_on(self, paper: layer_core::TextureSource, localization: &Localizer) -> Result<Document, String> {
         self.validate().map_err(|error| error.message(localization))?;
         let mut document = Document::new(layer_core::authored::PortableId::random(), self.extent[0], self.extent[1], layer_core::DocumentNames {
             paint: localization.text(MessageId::DOCUMENTS_CURRENT_INK),
@@ -85,7 +104,10 @@ impl NewDocumentOptions {
         let composition = document.artwork.compositions.get_mut(document.artwork.root).unwrap();
         composition.color = self.color;
         composition.blend = self.blend_space.for_depth(self.color.depth);
-        let paper = document.scene().order().iter().copied().find(|handle| document.scene().effect(*handle).is_some_and(|effect| effect.constant_color().is_some())).unwrap();
+        composition.resolution = Some(layer_core::ImageResolution::ppi(self.resolution));
+        document.fit_papers_to_resolution();
+        document.set_paper_texture(paper);
+        let paper = layer_core::paper::paper_occurrence(document.scene(), None).expect("new drawings have paper");
         document.artwork.occurrences.get_mut(paper).unwrap().visible = self.background == DocumentBackground::White;
         Ok(document)
     }
@@ -172,6 +194,8 @@ impl NewDocumentPreset {
 pub struct NewDocumentSettings {
     pub defaults: NewDocumentOptions,
     pub presets: Vec<NewDocumentPreset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paper: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -222,6 +246,10 @@ impl NewDocumentSettings {
         }
         Ok(())
     }
+    pub fn paper(&self) -> layer_core::TextureSource {
+        self.paper.as_deref().and_then(layer_core::paper::built_in_paper)
+            .map_or_else(layer_core::paper::default_texture, |paper| paper.texture.clone())
+    }
     pub fn save(&mut self, name: &str, options: NewDocumentOptions) -> Result<(), NewDocumentError> {
         let mut next = self.clone();
         next.presets.push(NewDocumentPreset {
@@ -264,6 +292,7 @@ pub struct NewDocumentText {
     pub defaults_title: Arc<str>,
     pub width: Arc<str>,
     pub height: Arc<str>,
+    pub resolution: Arc<str>,
     pub preset: Arc<str>,
     pub custom: Arc<str>,
     pub background: Arc<str>,
@@ -287,6 +316,7 @@ impl NewDocumentText {
             defaults_title: localization.text(MessageId::DOCUMENTS_DEFAULTS_TITLE),
             width: localization.text(MessageId::DOCUMENTS_WIDTH),
             height: localization.text(MessageId::DOCUMENTS_HEIGHT),
+            resolution: localization.text(MessageId::RESOURCES_SIZE_RESOLUTION),
             preset: localization.text(MessageId::DOCUMENTS_PRESET_LABEL),
             custom: localization.text(MessageId::DOCUMENTS_CUSTOM_PRESET),
             background: localization.text(MessageId::DOCUMENTS_BACKGROUND_LABEL),
@@ -494,6 +524,26 @@ mod tests {
         assert_eq!(form["blending"]["linear_only"], serde_json::json!(["F16", "F32"]));
     }
     #[test]
+    fn new_drawings_start_on_the_remembered_paper_at_real_size() {
+        let mut settings = NewDocumentSettings::default();
+        let options = NewDocumentOptions { extent: [600, 400], resolution: 150, ..Default::default() };
+        let surface = |settings: &NewDocumentSettings| options.project_on(settings.paper(), &english()).unwrap().paper(None);
+        let drawing = surface(&settings);
+        assert_eq!(drawing.texture, layer_core::paper::default_texture());
+        assert!((drawing.mapping.0[0] - 150. / 25.4).abs() < 1e-12);
+        settings.paper = Some("rough".into());
+        assert_eq!(surface(&settings).texture, layer_core::paper::built_in_paper("rough").unwrap().texture);
+        settings.paper = Some("deleted".into());
+        assert_eq!(surface(&settings).texture, layer_core::paper::default_texture());
+        assert_eq!(NewDocumentOptions { resolution: 0, ..options }.validate(), Err(NewDocumentError::Resolution));
+        let older: NewDocumentOptions = serde_json::from_value({
+            let mut value = serde_json::to_value(options).unwrap();
+            value.as_object_mut().unwrap().remove("resolution");
+            value
+        }).unwrap();
+        assert_eq!(older.resolution, 300);
+    }
+    #[test]
     fn creation_preserves_independent_depth_space_and_background() {
         for space in RgbSpace::ALL {
             for depth in [SampleDepth::U8, SampleDepth::U16] {
@@ -503,9 +553,11 @@ mod tests {
                         color: DocumentColor { space, depth },
                         background,
                         blend_space: BlendSpace::Perceptual,
+                        resolution: 600,
                     };
                     let project = options.project(&english()).unwrap();
                     assert_eq!(project.composition().color, options.color);
+                    assert_eq!(project.composition().resolution, Some(layer_core::ImageResolution::ppi(600)));
                     assert_eq!(
                         project.scene().order().iter().find_map(|handle| project.scene().effect(*handle)?.constant_color().map(|_| project.scene().occurrence(*handle).unwrap().visible)).unwrap(),
                         background == DocumentBackground::White

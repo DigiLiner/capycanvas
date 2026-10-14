@@ -75,6 +75,7 @@ pub struct ViewportPresenter {
     corner_radius: f32,
     picker: crate::present_picker::Picker,
     cursor_pipeline: crate::Deferred<wgpu::RenderPipeline>,
+    paper: PaperRelief,
     cursor_icons: wgpu::BindGroup,
     cursor_buffer: wgpu::Buffer,
     cursor_vertices: Vec<CursorSegment>,
@@ -99,6 +100,26 @@ pub struct ViewportPresenter {
     overviews: Vec<[f32; 24]>,
     overviews_changed: bool,
     standalone_overview: bool,
+}
+
+const PAPER_RELIEF_OPACITY: f32 = 0.6;
+const PAPER_RELIEF_GAIN: f32 = 1.5;
+
+struct PaperRelief {
+    layout: wgpu::BindGroupLayout,
+    pipeline: crate::Deferred<wgpu::RenderPipeline>,
+    uniform: wgpu::Buffer,
+    drawn: Option<(wgpu::TextureView, [f32; 8], wgpu::BindGroup)>,
+}
+impl PaperRelief {
+    fn wanted(&self, renderer: &WgpuRasterizer) -> Option<(wgpu::TextureView, [f32; 8])> {
+        let (view, grain, opacity) = renderer.paper_overlay_tile()?;
+        (self.pipeline.ready() || renderer.startup.is_none())
+            .then(|| (view.clone(), [grain[0], grain[1], grain[2], grain[3], opacity * PAPER_RELIEF_OPACITY, PAPER_RELIEF_GAIN, 0., 0.]))
+    }
+    fn changed(&self, renderer: &WgpuRasterizer) -> bool {
+        self.wanted(renderer).as_ref().map(|(view, data)| (view, data)) != self.drawn.as_ref().map(|(view, data, _)| (view, data))
+    }
 }
 
 impl ViewportPresenter {
@@ -364,6 +385,7 @@ impl ViewportPresenter {
         let Some(startup) = &renderer.startup else { return true; };
         let mut ready = startup.compiler.require(self.pipeline.iter().chain([&self.cursor_pipeline]), crate::startup::DOCUMENT);
         ready &= startup.compiler.require(self.overview_pipeline.iter().chain(self.picker.pipeline.iter()), crate::startup::BRUSH);
+        startup.compiler.require([&self.paper.pipeline], crate::startup::OTHER);
         if let Some(backdrop) = &self.backdrop { ready &= startup.compiler.require(backdrop.pipelines(), crate::startup::DOCUMENT); }
         startup.compiler.start();
         ready
@@ -541,6 +563,22 @@ impl ViewportPresenter {
                 attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32, 3 => Float32, 4 => Float32],
             }),
             format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING));
+        let paper_layout = crate::bindings::layout(device, "paper relief", &[
+            crate::bindings::buffer(1, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, None),
+            crate::bindings::texture(2, wgpu::ShaderStages::FRAGMENT, true),
+        ]);
+        let paper_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("paper relief"), bind_group_layouts: &[Some(&layout), Some(&paper_layout)], immediate_size: 0,
+        });
+        let paper = PaperRelief {
+            pipeline: surface_pipeline(device, "paper relief", &paper_pipeline_layout, &shader, ["vs_main", "paper_fragment"], None,
+                format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+            uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("paper relief"), size: 32, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+            }),
+            layout: paper_layout,
+            drawn: None,
+        };
         let cursor_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("cursor segments"),
             size: 256 * std::mem::size_of::<CursorSegment>() as u64,
@@ -612,6 +650,7 @@ impl ViewportPresenter {
             corner_radius: 0.0,
             picker: Default::default(),
             cursor_pipeline,
+            paper,
             cursor_icons,
             cursor_buffer,
             cursor_vertices: Vec::with_capacity(256),
@@ -777,6 +816,7 @@ impl ViewportPresenter {
             || previous.proof != self.proof_options
             || previous.screen != self.screen_options
             || self.overlays_changed
+            || self.paper.changed(renderer)
             || self.picker.changed()
             || self.camera_data.is_none_or(|old| old[62..64] != renderer.clipping_preview.map(f32::from))
             || (!self.overviews.is_empty() && previous.navigator_revision != renderer.navigator.revision)
@@ -925,6 +965,24 @@ impl ViewportPresenter {
         let det = a * d - b * c;
         if !det.is_finite() || det.abs() < 1.0e-12 {
             return Ok(());
+        }
+        if self.paper.changed(renderer) {
+            self.history.valid = false;
+            self.paper.drawn = match self.paper.wanted(renderer) {
+                Some((tile, data)) => {
+                    let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_ne_bytes()).collect();
+                    self.uploads.write(encoder, &self.paper.uniform, &bytes)?;
+                    let group = match &self.paper.drawn {
+                        Some((drawn, _, group)) if *drawn == tile => group.clone(),
+                        _ => device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("paper relief"), layout: &self.paper.layout, entries: &[
+                            wgpu::BindGroupEntry { binding: 1, resource: self.paper.uniform.as_entire_binding() },
+                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&tile) },
+                        ] }),
+                    };
+                    Some((tile, data, group))
+                }
+                None => None,
+            };
         }
         let inverse = selection
             .map_or(layer_core::Affine::IDENTITY, |(s, _)| {
@@ -1250,6 +1308,11 @@ impl ViewportPresenter {
                     pass.draw(0..3, 0..1);
                 }
                 pass.set_scissor_rect(repaint.min_x(), repaint.min_y(), repaint.width(), repaint.height());
+                if let Some((_, _, group)) = &self.paper.drawn {
+                    pass.set_pipeline(&self.paper.pipeline);
+                    pass.set_bind_group(1, group, &[]);
+                    pass.draw(0..3, 0..1);
+                }
                 self.picker.draw(&mut pass);
                 if !self.cursor_vertices.is_empty() {
                     pass.set_pipeline(&self.cursor_pipeline);

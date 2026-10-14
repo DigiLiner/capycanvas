@@ -55,10 +55,13 @@ controls and rejected alternatives. The pose editor is not implemented.
 Dry media do not use stamp spacing, size variation or rotation variation; their
 contact path bypasses that math. Tip angle offsets the contact's orientation.
 
-Paper is an original cached 1024² R8 height texture. Sampling depends on document
-coordinates and authored grain scale/rotation, excluding stroke seed, tip size and
-position. Existing brush assets also accept uploaded height textures. No bitmap is
-generated or uploaded during a stroke.
+Paper is the nearest [Paper layer](../development/paper.md) at or below the
+stroke's layer, resolved at pen-down and kept with the stroke. Its texture is
+baked once into an R8 tile with one texel per document pixel; sampling depends
+only on document coordinates, so moving a layer leaves the tooth on the
+drawing. The paper strength is `paper × Texture strength × relief / 100 µm`.
+No bitmap is generated or uploaded during a stroke; a stroke waits for its
+paper's bake as it waits for shaders.
 
 ## Swept deposition
 

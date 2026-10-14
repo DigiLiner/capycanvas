@@ -44,6 +44,10 @@ pub fn workspaces() -> Option<&'static std::path::Path> {
     static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     PATH.get_or_init(|| roots().map(StorageRoots::workspaces).and_then(active)).as_deref()
 }
+pub fn papers() -> Option<&'static std::path::Path> {
+    static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| roots().map(StorageRoots::papers)).as_deref()
+}
 pub fn sessions() -> Option<&'static std::path::Path> {
     static PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     PATH.get_or_init(|| roots().map(StorageRoots::sessions).and_then(active)).as_deref()

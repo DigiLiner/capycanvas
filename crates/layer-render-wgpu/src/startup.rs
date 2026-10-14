@@ -244,9 +244,14 @@ struct ShaderBrushKey {
     erase: BrushPassPlan,
     dry_material: u32,
 }
+fn brush_style(document: &Document, brush: &BrushSnapshot, tool: StrokeTool) -> layer_render::DabStyle {
+    let mut style = layer_render::DabStyle::for_brush(brush, tool);
+    style.paper = style.grain.and(document.working.target).map(|target| document.paper_binding(target));
+    style
+}
 impl ShaderBrushKey {
-    fn new(brush: &BrushSnapshot) -> Self {
-        let mut style = layer_render::DabStyle::for_brush(brush, StrokeTool::Brush);
+    fn new(document: &Document, brush: &BrushSnapshot) -> Self {
+        let mut style = brush_style(document, brush, StrokeTool::Brush);
         let paint = BrushPassPlan::for_style(&style);
         style.mode = DabMode::Erase;
         let erase = BrushPassPlan::for_style(&style);
@@ -352,7 +357,7 @@ impl WgpuRasterizer {
     ) -> bool {
         self.startup.as_ref().is_some_and(|s| {
             s.document_key.as_ref().is_none_or(|key| !key.matches(document))
-                || s.brush.as_ref() != Some(&ShaderBrushKey::new(brush))
+                || s.brush.as_ref() != Some(&ShaderBrushKey::new(document, brush))
                 || s.transform != transform
         })
     }
@@ -477,9 +482,12 @@ impl WgpuRasterizer {
                 alpha_locked: locked,
                 selection: document.working.selection.clone().map(Arc::new),
                 blend_space: if document.working.target.is_some_and(SourceTarget::is_coverage) { layer_core::BlendSpace::Linear } else { document.composition().blend },
-                ..layer_render::DabStyle::for_brush(brush, tool)
+                ..brush_style(document, brush, tool)
             };
             startup.masks.style(&startup.compiler, &style, BRUSH);
+            if let Some(binding) = style.grain.and(style.paper.as_ref()) {
+                self.papers.require(&self.device, Some(&startup.compiler), binding, BRUSH)?;
+            }
             current.style(self, &style, document.working.target.is_some_and(SourceTarget::is_coverage), true);
         }
         // Live transforms do not change document revision or brush settings.
@@ -497,7 +505,7 @@ impl WgpuRasterizer {
         }
         current.enqueue(&startup.compiler, BRUSH);
         startup.current = current;
-        startup.brush = Some(ShaderBrushKey::new(brush));
+        startup.brush = Some(ShaderBrushKey::new(document, brush));
         startup.transform = transform;
         startup.compiler.start();
         self.startup = Some(startup);
@@ -509,6 +517,10 @@ impl WgpuRasterizer {
             for (id, (width, height, pixels)) in masks {
                 self.upload_mask(&id, width, height, width, &pixels)?;
             }
+            self.papers.advance(&self.device, &self.queue, false)?;
+        }
+        if let (Some(startup), Some(overlay)) = (&self.startup, &self.paper_overlay) {
+            self.papers.require(&self.device, Some(&startup.compiler), &overlay.paper, OTHER)?;
         }
         let Some(startup) = &mut self.startup else {
             return Ok(StartupProgress::COMPLETE);
@@ -545,7 +557,7 @@ impl WgpuRasterizer {
         #[cfg(target_arch = "wasm32")]
         let canvas_ready = canvas_ready && startup.compiler.ready_through(DOCUMENT);
         let brush_ready =
-            canvas_ready && startup.current.ready() && startup.masks.ready_through(BRUSH);
+            canvas_ready && startup.current.ready() && startup.masks.ready_through(BRUSH) && self.papers.ready_through(BRUSH);
         #[cfg(target_arch = "wasm32")]
         let brush_ready = brush_ready && startup.compiler.ready_through(BRUSH);
         startup.finished = brush_ready
@@ -608,17 +620,18 @@ mod tests {
     }
     #[test]
     fn brush_shader_key_ignores_color_and_size_but_tracks_pipeline_changes() {
+        let document = Document::new(layer_core::authored::PortableId::random(), 64, 64, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
-        let key = ShaderBrushKey::new(&brush);
+        let key = ShaderBrushKey::new(&document, &brush);
         brush.color_rgba_linear = [8., 0.25, 0.5, 1.];
         brush.diameter *= 2.;
-        assert!(key == ShaderBrushKey::new(&brush));
+        assert!(key == ShaderBrushKey::new(&document, &brush));
         brush.rendering.accumulation = if brush.rendering.accumulation == BrushAccumulation::Uniform {
             BrushAccumulation::Flow
         } else {
             BrushAccumulation::Uniform
         };
-        assert!(key != ShaderBrushKey::new(&brush));
+        assert!(key != ShaderBrushKey::new(&document, &brush));
     }
     #[test]
     fn shader_document_reuses_raster_and_parameter_edits_but_tracks_new_dependencies() {

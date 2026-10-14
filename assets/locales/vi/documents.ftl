@@ -110,6 +110,7 @@ documents-error-device-file = Chọn tệp trên thiết bị này
 documents-error-filename = Chọn tên tệp
 documents-error-project-writer = Không thể ghi dự án
 documents-error-no-drawing = Không có bản vẽ để mở
+documents-error-resolution = Chọn độ phân giải từ 1 đến { $maximum } ppi
 documents-open-photos-filter = Bản vẽ và ảnh
 
 documents-delivery-clipboard-unavailable = Trình duyệt này không hỗ trợ dán ảnh. Hãy dùng Nhập ảnh thành lớp.

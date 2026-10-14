@@ -83,11 +83,13 @@ enum Field {
     Color(Rc<crate::color_editor::ColorButton>),
     Curve(CurveEditor),
     Gradient(GradientEditor),
+    Paper(Rc<crate::paper_picker::PaperPicker>),
 }
 impl Field {
     fn widget(&self) -> &gtk::Widget {
         match self {
             Self::Number(input) => input.upcast_ref(), Self::Toggle(input) => input.upcast_ref(), Self::Choice(input) => input.upcast_ref(),
+            Self::Paper(input) => input.button.upcast_ref(),
             Self::Color(input) => input.widget.upcast_ref(), Self::Curve(input) => input.area.upcast_ref(), Self::Gradient(input) => input.root.upcast_ref(),
         }
     }
@@ -882,6 +884,17 @@ impl EffectPanels {
                             self.append_property_row(index, &control.label, &input);
                             Field::Toggle(input)
                         }
+                        PropertyKind::Choice { .. } if control.paper.is_some() => {
+                            let act = glib::clone!(#[weak] w, move |action: EffectAction| match action {
+                                EffectAction::RenamePaper { id, name } => {
+                                    glib::MainContext::default().spawn_local(async move { crate::files::paper::rename(&w, id, name).await });
+                                }
+                                action => w.dispatch(UiAction::Effect { action }),
+                            });
+                            let input = crate::paper_picker::PaperPicker::new(move |index| dispatch(EffectValue::Choice(index)), act);
+                            self.append_property_row(index, &control.label, &input.button);
+                            Field::Paper(input)
+                        }
                         PropertyKind::Choice { options } => {
                             let input = crate::panel_controls::dropdown(
                                 &options.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
@@ -960,6 +973,7 @@ impl EffectPanels {
                 (Field::Number(i), EffectValue::Number(v)) => i.set_value(*v as f64),
                 (Field::Toggle(i), EffectValue::Toggle(v)) => i.set_active(*v),
                 (Field::Choice(i), EffectValue::Choice(v)) => i.set_selected(*v),
+                (Field::Paper(i), EffectValue::Choice(v)) => i.update(c.paper.as_ref().expect("shared paper picker"), *v, &c.label),
                 (Field::Color(i), EffectValue::Color(c)) => {
                     i.set_color(*c, w.view_color())
                 }

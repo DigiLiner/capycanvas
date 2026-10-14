@@ -113,7 +113,8 @@ mod merge_checks {
         let mut s = stacked();
         let upper = s.engine.document().working.occurrence.unwrap();
         invoke(&mut s, CommandId::FlattenImage);
-        assert_eq!(s.engine.document().scene().order().len(), 1, "nothing hidden: flattens at once");
+        assert_eq!(s.engine.document().scene().order().len(), 2, "nothing hidden: flattens at once above the Paper");
+        assert!(layer_core::paper::paper_occurrence(s.engine.document().scene(), None).is_some(), "the drawing keeps its Paper");
         assert!(s.engine.undo().unwrap());
         s.dispatch(UiAction::Layer { action: LayerAction::Visibility { id: occurrence_token(upper), value: false } }).unwrap();
         invoke(&mut s, CommandId::FlattenImage);
@@ -129,7 +130,7 @@ mod merge_checks {
         assert_eq!(german.actions[0].label, CommandId::FlattenImage.localized_label(s.localization()).as_ref());
         assert_eq!(s.engine.document().scene().order().len(), 3, "nothing changes before it is accepted");
         s.dispatch(UiAction::Notice { id: notice.id, accept: true, action: Some(NoticeActionId::Flatten) }).unwrap();
-        assert_eq!(named(&s).len(), 1);
+        assert_eq!(named(&s).len(), 2);
         assert!(s.engine.document().scene().occurrence(upper).is_none(), "the hidden layer is discarded");
     }
 

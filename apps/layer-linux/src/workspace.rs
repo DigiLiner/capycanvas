@@ -2576,6 +2576,7 @@ impl Workspace {
                 match GpuCanvas::with_project_localized(area, this.initial_project.borrow_mut().take(), this.localization(), this.initial_settings.borrow_mut().take()) {
                     Ok(gpu) => {
                         *this.gpu.borrow_mut() = Some(gpu);
+                        crate::files::paper::load_library(&this);
                         this.fullscreen_changed(this.window.is_fullscreen());
                         this.refresh(regions::ALL);
                         this.workspaces.start(&this);

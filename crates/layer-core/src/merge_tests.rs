@@ -208,11 +208,12 @@ fn merge_visible_keeps_hidden_layers_and_releases_their_clipping() {
         occurrence_mut(&mut doc, name).visible = false;
     }
     occurrence_mut(&mut doc, "Top").blend = LayerBlend::Multiply;
-    assert_eq!(baked(&doc, MergeKind::Visible), ["Top", "Base", "Bottom", "Paper"]);
+    assert_eq!(baked(&doc, MergeKind::Visible), ["Top", "Base", "Bottom"], "the bottom Paper stays the drawing's surface");
     merged(&mut doc, MergeKind::Visible);
-    assert_eq!(names(&doc), ["Hidden clip", "Hidden", "Paper"]);
+    assert_eq!(names(&doc), ["Hidden clip", "Hidden", "Bottom", "Paper"]);
+    assert!(crate::paper::is_paper(&doc.scene().effect_application(id(&doc, "Paper")).unwrap().program));
     assert!(!occurrence(&doc, "Hidden clip").attachment.is_clip());
-    assert_eq!(doc.scene().occurrence(doc.working.occurrence.unwrap()).unwrap().name.as_ref(), "Paper");
+    assert_eq!(doc.scene().occurrence(doc.working.occurrence.unwrap()).unwrap().name.as_ref(), "Bottom");
     let mut doc = document(&["Clip", "Base"]);
     occurrence_mut(&mut doc, "Clip").attachment = crate::Attachment::Clip;
     refresh(&mut doc);
@@ -235,7 +236,7 @@ fn flatten_bakes_fill_layers_and_keeps_selection_layers() {
     assert_eq!(doc.flatten_discards(), 2);
     let before = doc.clone();
     let undo = merged(&mut doc, MergeKind::Flatten);
-    assert_eq!(names(&doc), ["Saved", "Paper"]);
+    assert_eq!(names(&doc), ["Visible", "Saved", "Paper"]);
     assert_eq!(doc.target_extent(doc.working.target.unwrap()), doc.composition().size);
     doc.apply(undo).unwrap();
     restored(&before, &doc);

@@ -25,6 +25,8 @@ mod color_editor;
 mod proof;
 #[path = "effect_color_tests.rs"]
 mod effect_color;
+#[path = "paper_tests.rs"]
+mod paper;
 #[path = "export_resize_tests.rs"]
 mod export_resize;
 #[path = "new_photo_tests.rs"]

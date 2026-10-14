@@ -25,6 +25,7 @@ mod contact_presets;
 pub use contact_presets::CONTACT_BRUSH_PRESETS;
 mod effect_catalog;
 mod effects;
+pub mod paper;
 mod gradient;
 pub mod lut3d;
 pub use lut3d::Lut3d;
@@ -91,8 +92,7 @@ pub use color_history::{ColorTransition, PreparedColorTransition};
 pub use project::{ProjectAsset, ProjectAssetFormat, ProjectLimits};
 
 pub use presets::{
-    CONTACT_PAPER_TEXTURE_ASSET, DefaultBrushPreset,
-    PAPER_GRAIN_TEXTURE_ASSET,
+    DefaultBrushPreset,
     WATERCOLOR_TIP_TEXTURE_ASSET, WATERCOLOR_TRANSPORT_LONG_BROAD_ASSET,
     WATERCOLOR_TRANSPORT_LONG_NARROW_ASSET, WATERCOLOR_TRANSPORT_SHORT_BROAD_ASSET,
     WATERCOLOR_TRANSPORT_SHORT_NARROW_ASSET, default_brush,
@@ -484,14 +484,6 @@ pub enum BrushAccumulation {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
-pub enum BrushGrainBehavior {
-    #[default]
-    Moving,
-    Canvas,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[repr(u8)]
 pub enum ColorMixSpace {
     #[default]
     #[serde(rename = "LinearRgb")]
@@ -635,16 +627,9 @@ impl Default for BrushShape {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BrushGrain {
-    pub asset: AssetId,
-    pub behavior: BrushGrainBehavior,
-    /// Repeats per brush diameter for moving grain, or per 256 document pixels
-    /// for canvas grain.
-    pub scale: f32,
     pub depth: f32,
-    pub rotation_radians: f32,
-    pub offset_jitter: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1151,17 +1136,7 @@ impl BrushSnapshot {
 }
 
 fn validate_grain(grain: &BrushGrain, maximum_depth: f32) -> Result<(), BrushError> {
-    let values = [
-        grain.scale,
-        grain.depth,
-        grain.rotation_radians,
-        grain.offset_jitter,
-    ];
-    if values.iter().any(|value| !value.is_finite())
-        || !(0.01..=64.0).contains(&grain.scale)
-        || !(0.0..=maximum_depth).contains(&grain.depth)
-        || !(0.0..=1.0).contains(&grain.offset_jitter)
-    {
+    if !(0.0..=maximum_depth).contains(&grain.depth) {
         return Err(BrushError::InvalidAdvanced);
     }
     Ok(())
@@ -1218,6 +1193,7 @@ pub struct Stroke {
     pub retouch: Option<Retouch>,
     /// How its dabs lay over paint, captured at contact start.
     pub blend_space: BlendSpace,
+    pub paper: Option<paper::PaperBinding>,
 }
 
 impl Stroke {
@@ -1268,6 +1244,7 @@ impl Stroke {
             selection: None,
             retouch: None,
             blend_space: BlendSpace::Linear,
+            paper: None,
         })
     }
 }
@@ -1322,8 +1299,7 @@ impl Document {
                 Occurrence::new(OccurrenceContent::Paint(paint), names.paint),
             )
             .expect("new occurrence store");
-        let mut fill = EffectInstance::new(bundled_effect_catalog().get("solid_color").unwrap().program());
-        fill.set("color", EffectValue::Color(color::RgbColor::WHITE)).expect("valid fill color");
+        let fill = EffectInstance::new(bundled_effect_catalog().get(paper::PAPER_PROGRAM).unwrap().program());
         let effect = artwork.effects.insert(PortableId::random(), EffectApplication::new(fill.program, fill.values, [width, height])).expect("new effect store");
         let paper = artwork
             .occurrences
@@ -2106,13 +2082,13 @@ impl<'a> RootInventory<'a> {
         }
     }
     fn values(&mut self, values: &'a [EffectValue]) {
-        self.resources.extend(values.iter().filter_map(|v| {
-            if let EffectValue::Lut3d(Some(r)) = v {
-                Some(r)
-            } else {
-                None
+        for value in values {
+            match value {
+                EffectValue::Lut3d(Some(r)) => self.resources.push(r),
+                EffectValue::Texture(TextureSource::Image(image)) => self.image(image),
+                _ => {}
             }
-        }));
+        }
     }
     fn program(&mut self, program: &'a Arc<EffectProgram>) {
         self.programs.push(program);

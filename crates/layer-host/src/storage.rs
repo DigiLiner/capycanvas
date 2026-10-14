@@ -69,6 +69,9 @@ impl StorageRoots {
     pub fn workspaces(&self) -> PathBuf {
         self.data.join("workspaces")
     }
+    pub fn papers(&self) -> PathBuf {
+        self.data.join("papers")
+    }
     pub fn sessions(&self) -> PathBuf {
         self.state.join("sessions")
     }
@@ -97,6 +100,7 @@ mod tests {
             roots.export_presets(),
             roots.color_profiles(),
             roots.workspaces(),
+            roots.papers(),
             roots.sessions(),
             roots.file_dialogs(),
             roots.shaders(),

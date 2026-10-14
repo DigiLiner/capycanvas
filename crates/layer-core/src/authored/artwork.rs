@@ -121,9 +121,10 @@ impl EffectSpatialReference {
 }
 impl EffectApplication {
     pub fn new(program: Arc<EffectProgram>, values: Vec<EffectValue>, size: [u32; 2]) -> Self {
-        let spatial = program.uses_spatial_reference().then_some(EffectSpatialReference {
-            mapping: super::Affine64::default(),
-            extent: size.map(f64::from),
+        let spatial = program.uses_spatial_reference().then(|| if crate::paper::is_paper(&program) {
+            crate::paper::reference(size, [crate::paper::DEFAULT_PAPER_PPI; 2])
+        } else {
+            EffectSpatialReference { mapping: super::Affine64::default(), extent: size.map(f64::from) }
         });
         Self { program, values, spatial }
     }

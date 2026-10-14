@@ -110,6 +110,7 @@ documents-error-device-file = Eine Datei auf diesem Gerät auswählen
 documents-error-filename = Einen Dateinamen wählen
 documents-error-project-writer = Projekt konnte nicht geschrieben werden
 documents-error-no-drawing = Keine Zeichnung zum Öffnen
+documents-error-resolution = Eine Auflösung von 1 bis { $maximum } ppi wählen
 documents-open-photos-filter = Zeichnungen und Fotos
 
 documents-delivery-clipboard-unavailable = Bilder können in diesem Browser nicht eingefügt werden. Bild als Ebene importieren verwenden.

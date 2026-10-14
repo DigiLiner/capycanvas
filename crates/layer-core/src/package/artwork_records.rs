@@ -122,12 +122,12 @@ fn decode_image(identity:PortableId,value:&Value,reader:&mut ResourceReader<'_>)
     }
     let source=SourceImage {extent,interpretation,tiles,resolution:data.get("resolution").map(v::parse_resolution).transpose()?}; source.validate()?; let image=Image::with_id(identity,Arc::new(source)); reader.images.insert(identity,(value.clone(),image.clone())); Ok(image)
 }
-fn encode_image(image:&Image,resources:&mut ResourceInventory)->Result<Value,String> {
+pub(super) fn encode_image(image:&Image,resources:&mut ResourceInventory)->Result<Value,String> {
     let data=encode_image_samples(image,resources)?;
     let value=record(image.id(),"capy.image/1",data);
     resources.image(image.id(),value)
 }
-fn image_reference(value:&Value,reader:&mut ResourceReader<'_>)->DecodeResult<Image> {
+pub(super) fn image_reference(value:&Value,reader:&mut ResourceReader<'_>)->DecodeResult<Image> {
     let identity=reference_id(value)?;
     if let Some((_,image))=reader.images.get(&identity) {return Ok(image.clone());}
     let record=reader.manifest.objects.get(&identity).ok_or("Missing immutable image")?;

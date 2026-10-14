@@ -392,10 +392,12 @@ A `"kind":"generator"` program ignores its input and supplies color and coverage
 The Fill category's Solid Color (`solid_color`, the color's alpha is coverage)
 and Gradient Fill (`gradient_fill`: Linear, Radial or Reflected, Angle counterclockwise from
 the x axis, Scale and Center, with stops evaluated as in Gradient Map)
-are generators. Layer › New inserts them with a reveal-all mask, or the
-selection as the mask, so painting edits the mask; Solid Color starts from the
-current color. New documents use a white Solid Color fill named Paper on the
-bottom, without a mask. It has no special layer role or restrictions.
+are generators, and so is Paper (`paper`: an opaque Color and a Texture, the
+surface brushes touch; see [Paper](../development/paper.md)). Layer › New
+inserts them with a reveal-all mask, or the selection as the mask, so painting
+edits the mask; Solid Color starts from the current color and Paper from white
+and the paper last chosen. New documents use a white Paper on the bottom,
+without a mask.
 
 A static pointwise generator can declare `"constant_color":"color"`, naming a
 Color parameter whose tagged RGB and alpha define its entire output. It must

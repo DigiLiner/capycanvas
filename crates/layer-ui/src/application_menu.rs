@@ -126,7 +126,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(crate) fn fill_layer_items(&self) -> Vec<ContextMenuItem> {
         let enabled = self.effect_insert_enabled();
         let dodge_burn = self.command(CommandId::NewDodgeBurnLayer);
-        [(MessageId::MENU_SOLID_COLOR_FILL, "solid_color"), (MessageId::MENU_GRADIENT_FILL, "gradient_fill")]
+        [(MessageId::MENU_SOLID_COLOR_FILL, "solid_color"), (MessageId::MENU_GRADIENT_FILL, "gradient_fill"), (MessageId::RESOURCES_FILTER_PAPER, "paper")]
             .into_iter()
             .filter(|(_, id)| self.effect_catalog.get(id).is_some())
             .map(|(label, id)| ContextMenuItem {

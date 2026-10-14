@@ -219,6 +219,7 @@ documents-error-filename = Pilih nama berkas
 documents-error-project-writer = Penulisan proyek gagal
 
 documents-error-no-drawing = Tidak ada gambar untuk dibuka
+documents-error-resolution = Pilih resolusi dari 1 hingga { $maximum } ppi
 
 documents-open-photos-filter = Gambar dan foto
 

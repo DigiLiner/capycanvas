@@ -12,7 +12,7 @@ saves goes wherever they choose, never into these folders.
 | Kind | Stores | Lifetime |
 | --- | --- | --- |
 | Config | Preferences (`settings.json`), export presets | Kept; backed up. Reading never fails; unreadable fields keep their defaults. |
-| Data | Workspaces, toolbars, palettes and tool memory (`workspaces/`), imported color profiles (`color-profiles/`) | Kept; backed up. Never deleted automatically. |
+| Data | Workspaces, toolbars, palettes and tool memory (`workspaces/`), imported color profiles (`color-profiles/`), imported papers (`papers/`) | Kept; backed up. Never deleted automatically. |
 | State | Restartable editing sessions, including drawings never saved to a file (`sessions/`); GTK's last folder per file dialog (`file-dialogs/`) | Kept on this device; not backed up. |
 | Cache | Startup pipeline cache (`shaders/`); the latest copied image other apps paste from (`clipboard/`) | Regenerated or replaced; the platform may clear it. |
 | Temp | Copies of opened `.capy` files, parked drawing tabs, pasted images being read | Gone when the app stops. |
@@ -29,6 +29,13 @@ app's `tmp` itself.
 The workspace store holds the painter's palettes and custom workspaces. Startup
 replaces it only when this build cannot read it, and keeps a copy of the old
 store first; see [workspace ownership](workspace-ownership.md#startup-always-adopts-a-workspace).
+
+The paper library keeps each imported paper as `<id>.png`, a gray PNG named by
+the SHA-256 of its samples, with its picker preview in `<id>.preview` and names
+and order in `index.json`
+([`papers.rs`](../../crates/layer-host/src/papers.rs)). A lost preview is
+rebuilt from its PNG. Drawings embed the papers they use, so deleting a paper
+changes no drawing.
 
 ## Folders on each platform
 

@@ -269,6 +269,7 @@ fn transparent_offcanvas_photo_does_not_expand_paper_coverage() {
     assert_eq!(bounds(&renderer, &document, ContentScope::All), rect(0., 0., 128., 96.));
     assert_eq!(bounds(&renderer, &document, ContentScope::Visible), rect(0., 0., 128., 96.));
     let paper = document.scene().order()[1];
+    crate::tests::native_effects::solid_color(&mut document, paper);
     crate::tests::native_effects::set_effect(&mut document, paper, "color", layer_core::EffectValue::Color(
         layer_core::color::RgbColor { rgba: [1., 1., 1., 0.], ..layer_core::color::RgbColor::WHITE }));
     for scope in [ContentScope::Canvas, ContentScope::Visible, ContentScope::All] {

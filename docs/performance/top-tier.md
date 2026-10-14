@@ -1778,6 +1778,41 @@ sustained frame rates. Other tilts and partial Opacity remain unmeasured.
 Raw current profiles, matched controls, diagnostic captures and source/binary
 proof are under `artifacts/dry-defaults-final/midtop/`.
 
+### Paper
+
+Measured on 2026-10-14 (UTC) on movinkpad14, against a matched control built
+at `7d6dd662e`, the commit before Paper (APK
+`e5668201831fe4585f291c52ae69af76a951b5e4f69716c095ff767ac6a09955`). The Paper
+build is the commit that adds this section (APK
+`22eca42a44bef031f90cd9f9cbbdc9962d6f71ae3f160e3cb4c0100a1aa64371`, JNI
+`307ee52df5adb4c14e8c6fbc53c173ef80718a682cd88c365d306ac7c3650b68`).
+
+Each run imports the tier photo, so strokes use the default Drawing paper, and
+paints into one empty layer above it at Fit with Stats closed and 16 ms
+prediction. Each warmed profile has three six-second 200 Hz contacts at
+pressure one along a 60 × 10 surface-pixel ellipse with the preset's own tilt
+and settings; this is not the 45° writing pose above. Five control runs and two
+Paper runs alternate; thermal status is zero before and after every run.
+
+| Brush and Size | Control completed updates/s | Paper completed updates/s | Paper / control | Control gap p99 | Paper gap p99 |
+| --- | --- | --- | --- | --- | --- |
+| Pencil 2048 px | 93.46–94.65 | 96.01–96.38 | 1.022 | 16.67 ms | 15.99 ms |
+| Charcoal 2048 px | 90.18–91.97 | 90.23–91.01 | 0.992 | 17.79 ms | 18.02 ms |
+| Pastel Block 1024 px | 294.90–300.02 | 291.61–301.87 | 1.001 | 11.21 ms | 11.06 ms |
+| Paintbrush 1024 px | 126.82–127.86 | 127.21–128.51 | 1.005 | 15.35 ms | 15.48 ms |
+
+Each value is the median of a run's three contacts; ranges span runs, ratios
+compare run means and gaps are mean run p99s. Pastel Block and Paintbrush have
+four control runs. Control runs differ by up to 2.0%, so no row regresses.
+
+Dry-media cost follows tooth contrast rather than the Paper code path. Drawing
+paper with 20% more contrast measured Pencil 0.983 and Charcoal 0.976 of the
+same control, and with 1.9 times the contrast 0.94 for both; caching the
+paper binding per surface changed neither. Drawing paper therefore keeps the
+earlier paper's contrast. The mid tier was not measured because its tablet was
+behind a secure lock screen, and tablet bake times are not measured. Raw runs
+are under `artifacts/paper-perf/top/`.
+
 ### Retained-photo brush measurements
 
 Target: **120 completed updates/s** at the guaranteed size, on the 61 MP canvas.

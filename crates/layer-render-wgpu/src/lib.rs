@@ -23,8 +23,8 @@ use pixel_rect::{DocRect, PixelRect, page_coordinates, page_rect, pixel_rect};
 
 use layer_core::{
     AssetId, BrushAccumulation, BrushBlendMode, BrushExecution,
-    BrushGrainBehavior, BrushTip,
-    LiquifyMode, PAPER_GRAIN_TEXTURE_ASSET,
+    BrushTip,
+    LiquifyMode,
     StrokeId, WATERCOLOR_TIP_TEXTURE_ASSET, WATERCOLOR_TRANSPORT_LONG_BROAD_ASSET,
     WATERCOLOR_TRANSPORT_LONG_NARROW_ASSET, WATERCOLOR_TRANSPORT_SHORT_BROAD_ASSET,
     WATERCOLOR_TRANSPORT_SHORT_NARROW_ASSET,
@@ -38,6 +38,7 @@ use layer_render::{
 use std::{borrow::Cow, fmt, mem, num::NonZeroU64, sync::{Arc, mpsc}, time::Duration};
 
 mod builtin_masks;
+mod paper;
 mod bristle_table;
 #[cfg(test)]
 mod kernel_spirv;
@@ -892,6 +893,7 @@ pub struct WgpuRasterizer {
     selection_painter: Option<selection_paint::SelectionPainter>,
     selection_overlay: Option<layer_render::SelectionOverlay>,
     crop_overlay: Option<layer_render::CropOverlay>,
+    paper_overlay: Option<layer_render::PaperOverlay>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
     selection_paint_revision: u64,
@@ -974,6 +976,7 @@ pub struct WgpuRasterizer {
     preview_contribution: bool,
     preview_level: u32,
     masks: Vec<MaskAsset>,
+    papers: paper::Papers,
     texture_sets: Vec<TextureSet>,
     sampler: wgpu::Sampler,
     brush_sampler: wgpu::Sampler,
@@ -1226,6 +1229,7 @@ impl WgpuRasterizer {
         let restore_uploads = Uploads::new(&device, 64 * 1024);
         let layer_masks =
             layer_masks::MaskRenderer::new(&device, &style_layout, &target_layout, &texture_layout, &advanced_texture_layout);
+        let papers = paper::Papers::new(&device);
         let telemetry = telemetry::Telemetry::new(&device, &queue);
         let selection_clip = selection_clip::SelectionClip::new(&device);
         let scene_pipelines = scene::Pipelines::new(&device);
@@ -1250,6 +1254,7 @@ impl WgpuRasterizer {
             selection_painter: None,
             selection_overlay: None,
             crop_overlay: None,
+            paper_overlay: None,
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
             selection_paint_revision: 0,
@@ -1334,6 +1339,7 @@ impl WgpuRasterizer {
             preview_contribution: false,
             preview_level: 0,
             masks: Vec::with_capacity(8),
+            papers,
             texture_sets: Vec::with_capacity(16),
             sampler,
             brush_sampler,
@@ -1556,11 +1562,7 @@ impl WgpuRasterizer {
             BrushTip::AnalyticEllipse => white.clone(),
             BrushTip::Mask(id) => id.clone(),
         };
-        let grain = style
-            .grain
-            .as_ref()
-            .map(|grain| grain.asset.clone())
-            .unwrap_or_else(|| white.clone());
+        let grain = style.grain.and(style.paper.as_ref()).and_then(paper::PaperTile::id_for).unwrap_or_else(|| white.clone());
         if style.contact.is_some_and(|c| c.bristles.is_some()) {
             return TextureSetKey {
                 primary: AssetId::from(bristle_table::HAIRS_ASSET),
@@ -1579,13 +1581,47 @@ impl WgpuRasterizer {
         }
     }
 
-    fn ensure_texture_set(&mut self, key: TextureSetKey) -> Result<(), GpuRasterError> {
-        if self.texture_sets.iter().any(|set| set.key == key) {
-            return Ok(());
+    fn prepare_paper(&mut self, style: &layer_render::DabStyle, priority: u8) -> Result<(), GpuRasterError> {
+        let (Some(_), Some(binding)) = (style.grain, &style.paper) else { return Ok(()) };
+        let compiler = self.startup.as_ref().map(|startup| &startup.compiler);
+        self.papers.require(&self.device, compiler, binding, priority)?;
+        if self.startup.is_none() {
+            self.papers.advance(&self.device, &self.queue, true)?;
         }
-        let primary = &self.mask(&key.primary)?.view;
-        let grain = &self.mask(&key.grain)?.view;
-        let transport = &self.mask(&key.transport)?.view;
+        Ok(())
+    }
+
+    fn paper_ready(&mut self, style: &layer_render::DabStyle, priority: u8) -> Result<bool, GpuRasterError> {
+        self.prepare_paper(style, priority)?;
+        Ok(style.grain.and(style.paper.as_ref()).and_then(paper::PaperTile::id_for).is_none_or(|id| self.papers.view(&id).is_some()))
+    }
+
+    fn paper_style(&self, style: &layer_render::DabStyle) -> ([f32; 4], f32) {
+        style.grain.and(style.paper.as_ref()).and_then(|binding| {
+            let tile = paper::PaperTile::new(&binding.surface).ok()?;
+            Some((tile.grain(binding), self.papers.relief(&tile.id(&binding.surface))?))
+        }).unwrap_or(([1., 1., 0., 0.], 1.))
+    }
+
+    fn paper_overlay_tile(&self) -> Option<(&wgpu::TextureView, [f32; 4], f32)> {
+        let overlay = self.paper_overlay.as_ref()?;
+        let tile = paper::PaperTile::new(&overlay.paper.surface).ok()?;
+        Some((self.papers.view(&tile.id(&overlay.paper.surface))?, tile.grain(&overlay.paper), overlay.opacity))
+    }
+
+    fn texture_view(&self, id: &AssetId) -> Result<&wgpu::TextureView, GpuRasterError> {
+        self.papers.view(id).map_or_else(|| self.mask(id).map(|mask| &mask.view), Ok)
+    }
+
+    fn ensure_texture_set(&mut self, style: &layer_render::DabStyle) -> Result<TextureSetKey, GpuRasterError> {
+        self.prepare_paper(style, startup::BRUSH)?;
+        let key = Self::texture_set_key(style);
+        if self.texture_sets.iter().any(|set| set.key == key) {
+            return Ok(key);
+        }
+        let primary = self.texture_view(&key.primary)?;
+        let grain = self.texture_view(&key.grain)?;
+        let transport = self.texture_view(&key.transport)?;
         let bind_group = create_advanced_texture_bind_group(
             &self.device,
             &self.advanced_texture_layout,
@@ -1600,11 +1636,11 @@ impl WgpuRasterizer {
             "layer conductance texture binding",
         );
         self.texture_sets.push(TextureSet {
-            key,
+            key: key.clone(),
             bind_group,
             transport_bind_group,
         });
-        Ok(())
+        Ok(key)
     }
 
     /// Whether warp meshes draw without compiling on this thread, asking the
@@ -1637,7 +1673,7 @@ impl WgpuRasterizer {
                     "liquify reconstruct snapshot",
                 ));
             }
-            self.ensure_texture_set(Self::texture_set_key(&batch.style))?;
+            self.ensure_texture_set(&batch.style)?;
         }
         Ok(())
     }
@@ -2285,7 +2321,7 @@ impl WgpuRasterizer {
         for index in 0..packet.dab_batches.len() {
             let batch = &packet.dab_batches[index];
             let block = if self.compute_dry_material(batch) { self.dry_material_block(batch) } else { 1 };
-            let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device);
+            let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device, self.paper_style(&batch.style));
             if batch.style.execution==BrushExecution::Dry && !batch.style.contact.is_some_and(|c|c.bristles.is_some())
                 && batch.style.rendering.blend_mode==BrushBlendMode::Normal
                 && !batch.style.alpha_locked && batch.style.selection.is_none() && batch.dab_count>0 {
@@ -3520,6 +3556,14 @@ impl CanvasRenderer for WgpuRasterizer {
     }
     fn set_selection_overlay(&mut self, overlay: Option<layer_render::SelectionOverlay>) { self.selection_overlay = overlay; }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
+    fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
+        if self.startup.is_none() && let Some(overlay) = &overlay
+            && self.papers.require(&self.device, None, &overlay.paper, startup::OTHER)
+                .and_then(|_| self.papers.advance(&self.device, &self.queue, true)).is_err() {
+            return;
+        }
+        self.paper_overlay = overlay;
+    }
     fn set_clipping_preview(&mut self, shadows: bool, highlights: bool) { self.clipping_preview = [shadows, highlights]; }
     fn set_telemetry_enabled(&mut self, enabled: bool) {
         self.telemetry.enabled = enabled;
@@ -4899,30 +4943,22 @@ impl StyleGpu {
         result
     }
 
-    fn brush(extent: [u32; 2], batch: &DabBatch, block: u32, device: &PipelineDevice) -> Self {
-        let mut style = Self::for_brush(extent, &batch.style, batch.first_dab, batch.dab_count, device);
+    fn brush(extent: [u32; 2], batch: &DabBatch, block: u32, device: &PipelineDevice, paper: ([f32; 4], f32)) -> Self {
+        let mut style = Self::for_brush(extent, &batch.style, batch.first_dab, batch.dab_count, device, paper);
         style.canvas_opacity[3] = f32::from(batch.stroke_start);
         style.operation[2] = block;
         style
     }
 
-    fn for_brush(extent: [u32; 2], style: &layer_render::DabStyle, first: u32, count: u32, device: &PipelineDevice) -> Self {
+    fn for_brush(extent: [u32; 2], style: &layer_render::DabStyle, first: u32, count: u32, device: &PipelineDevice, (paper, relief): ([f32; 4], f32)) -> Self {
         let grain = style.grain.as_ref();
-        let (grain_cos, grain_sin) = grain
-            .map(|grain| (grain.rotation_radians.cos(), grain.rotation_radians.sin()))
-            .unwrap_or((1.0, 0.0));
         let mut result = Self::plain(extent, [0.0; 4], style.opacity);
-        result.grain = [
-            grain.map_or(1.0, |grain| grain.scale),
-            grain.map_or(0.0, |grain| grain.depth),
-            grain_cos,
-            grain_sin,
-        ];
+        result.grain = paper;
         result.flags = [
             f32::from(matches!(style.tip, BrushTip::AnalyticEllipse)),
             f32::from(grain.is_some()),
-            f32::from(grain.is_some_and(|grain| grain.behavior == BrushGrainBehavior::Canvas)),
-            grain.map_or(0.0, |grain| grain.offset_jitter),
+            relief,
+            0.0,
         ];
         result.edges = [
             style.rendering.wet_edge,
@@ -4975,7 +5011,7 @@ impl StyleGpu {
                 result.bristles = [1., bristles.texture_scale, bristles.load, bristles.splay];
                 result.bristle_streak = bristles.streak_rgba_linear;
             }
-            let paper = contact.paper * grain.map_or(1., |grain| grain.depth);
+            let paper = contact.paper * grain.map_or(1., |grain| grain.depth) * relief;
             result.contact_a = [1.0, paper, f32::from(contact.dry.is_some()), contact.edge_roughness];
             result.contact_b = [
                 contact.edge_scale,
@@ -5913,35 +5949,6 @@ fn dab_bytes(dabs: &[DabGpu]) -> &[u8] {
     unsafe { std::slice::from_raw_parts(dabs.as_ptr().cast::<u8>(), mem::size_of_val(dabs)) }
 }
 
-/// Original paper-height recipe, generated once and cached/uploaded as R8.
-/// Fine tooth survives light pressure; broader fibers avoid white-noise grain.
-fn procedural_contact_paper() -> Vec<u8> {
-    let mut pixels = Vec::with_capacity(1024 * 1024);
-    for y in 0..1024 {
-        for x in 0..1024 {
-            let u = (x as f32 + 0.5) / 1024.;
-            let v = (y as f32 + 0.5) / 1024.;
-            let tooth = periodic_value_noise(u, v, 640, 640, 0x124f_4139);
-            let fibers = periodic_value_noise(u, v, 360, 180, 0x823a_5421);
-            let structure = periodic_value_noise(u, v, 72, 72, 0x3ae2_9141);
-            let height = 0.12 + 0.76 * (tooth * 0.64 + fibers * 0.26 + structure * 0.1);
-            pixels.push((height.clamp(0., 1.) * 255.).round() as u8);
-        }
-    }
-    pixels
-}
-
-fn procedural_paper_grain() -> Vec<u8> {
-    procedural_grain(|x, y| {
-        let coarse = periodic_value_noise(x, y, 8, 8, 0x7a31_24ed);
-        let medium = periodic_value_noise(x, y, 24, 24, 0x93d8_5f17);
-        let fine = periodic_value_noise(x, y, 64, 64, 0xc142_9b63);
-        let fibers = periodic_value_noise(x, y, 48, 12, 0x5f6a_d209);
-        (0.18 + 0.82 * (coarse * 0.18 + medium * 0.34 + fine * 0.32 + fibers * 0.16))
-            .clamp(0.0, 1.0)
-    })
-}
-
 fn procedural_watercolor_tip() -> Vec<u8> {
     procedural_grain(|x, y| {
         let centered_x = x * 2.0 - 1.0;
@@ -6198,6 +6205,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
             mode: DabMode::Paint,
             execution,
             grain: None,
+            paper: None,
             rendering: BrushRendering::default(),
             wet_mix: BrushWetMix::default(),
             transport: None,
@@ -6270,6 +6278,7 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
         document.artwork.occurrences.get_mut(paper).unwrap().opacity = 0.25;
         frame(&mut r, &document, &[], &[]);
         assert!(preview(&mut r, layer_render::ThumbnailTarget::Occurrence(paper)).chunks_exact(4).all(|p| p == [255, 0, 0, 255]), "thumbnail shows the fill content without its layer opacity");
+        native_effects::solid_color(&mut document, paper);
         native_effects::set_effect(&mut document, paper, "color", layer_core::EffectValue::Color(
             layer_core::color::RgbColor { rgba: [1., 1., 1., 0.], ..layer_core::color::RgbColor::WHITE }));
         frame(&mut r, &document, &[], &[]);

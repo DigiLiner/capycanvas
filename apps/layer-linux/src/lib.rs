@@ -35,6 +35,7 @@ mod range_control;
 mod palette_grid;
 mod panel_controls;
 mod panel_tabs;
+mod paper_picker;
 mod proof_dial;
 mod local_tone_view;
 mod preferences;

@@ -7,6 +7,7 @@ mod header;
 mod snapshot;
 mod model_update;
 pub mod open;
+pub mod papers;
 pub mod scene;
 pub mod storage;
 pub mod tasks;

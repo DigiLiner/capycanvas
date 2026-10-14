@@ -35,10 +35,11 @@ same group, or its attached effect owner. Groups, maskless generators, locked ba
 selection layers refuse with a reason (`Document::try_drawing_target`). An empty
 stack stays valid.
 
-New documents contain an empty paint layer above a white Solid Color fill named
-Paper. The fill starts without a mask and follows ordinary layer rules: it can
+New documents contain an empty paint layer above a white [Paper](../development/paper.md)
+fill. The fill starts without a mask and follows ordinary layer rules: it can
 be renamed, moved, grouped, duplicated, hidden, deleted or merged. Add a mask to
-paint on it. Its thumbnail shows its color and alpha over the checkerboard.
+paint on it. Its thumbnail shows its color over the checkerboard. Flatten and
+Merge Visible keep the bottom Paper as a separate layer.
 
 Paint layers, object layers and groups are positioned only by signed integer
 offsets that accumulate through their parents; a mask adds its own offset, plus

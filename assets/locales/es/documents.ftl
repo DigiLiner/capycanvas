@@ -110,6 +110,7 @@ documents-error-device-file = Elige un archivo de este dispositivo
 documents-error-filename = Elige un nombre de archivo
 documents-error-project-writer = Falló la escritura del proyecto
 documents-error-no-drawing = No hay ningún dibujo para abrir
+documents-error-resolution = Elige una resolución entre 1 y { $maximum } ppi
 documents-open-photos-filter = Dibujos y fotos
 
 documents-delivery-clipboard-unavailable = Este navegador no permite pegar imágenes. Usa Importar imagen como capa.

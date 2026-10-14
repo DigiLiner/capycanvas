@@ -142,7 +142,7 @@ pub use renderer_lifecycle::ThumbnailRequests;
 pub use document_files::*;
 pub use effects::{
     GradientDestination, GradientEdit, GradientControls, AdjustmentChoice, EffectAction, FilterCategoryChoice, FilterPickerAction, FilterPickerState,
-    LayerPropertiesView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
+    LayerPropertiesView, PaperPickerView, PaperTileView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
 };
 pub use filter_loading::FilterLoadState;
 
@@ -246,6 +246,8 @@ pub struct UiSession<R: CanvasRenderer> {
     navigation: navigation::Navigation,
     navigator_drag: Option<[f32; 2]>,
     effect_gesture: Option<effects::EffectGesture>,
+    paper_preview: effects::PaperPreview,
+    papers: crate::paper_library::PaperLibrary,
     object_motion: Option<object_motion::ObjectMotion>,
     property_editor:effects::PropertyEditorState,
     sdr_gesture: Option<layer_core::color::hdr::SdrRendition>,
@@ -439,6 +441,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             navigation: Default::default(),
             navigator_drag: None,
             effect_gesture: None,
+            paper_preview: Default::default(),
+            papers: Default::default(),
             object_motion: None,
             property_editor:Default::default(),
             sdr_gesture: None,
@@ -2998,9 +3002,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if !continuing_effect_gesture {
                     self.require_idle()?;
                 }
+                let paper = self.state.settings.new_document.paper.clone();
                 self.effect_action(action)?;
                 self.refresh_document();
-                (DOCUMENT | LAYOUT, true)
+                save_settings = self.state.settings.new_document.paper != paper;
+                (DOCUMENT | LAYOUT | if save_settings { SETTINGS } else { 0 }, true)
             }
             UiAction::Selection { action } => {
                 if matches!(
@@ -4453,6 +4459,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn wants_continuous_frames(&self) -> bool {
         self.effect_analyses.busy() || (self.histogram.demand && !self.histogram.settled) || (self.tonal_histogram.demand && !self.tonal_histogram.settled)
             || self.interaction.axes.active()
+            || self.paper_preview.active()
             || self.engine.wants_continuous_frames()
             || self.pending_filters.is_some()
             || self.targeted_curve_busy()
@@ -4482,6 +4489,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.finish_tool_slot_request(tool_before) {changed|=regions::CUSTOMIZATION;}
         self.sync_selection_overlay();
         self.sync_crop_overlay();
+        self.sync_paper_preview(now_ns);
         self.sync_moving_pixels();
         let clone_source = self.engine.clone_source();
         self.engine
@@ -5957,7 +5965,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             mask_id: l.mask.as_ref().map(|m| layer_core::authored::SourceTarget::Coverage(m.source).wire_id()),
         }};
         self.state.layer_tools.editing_layer = doc.working.occurrence.filter(|id| doc.scene().occurrence(*id).is_some()).map(layer_state);
-        self.state.layer_properties = effects::properties(doc, self.state.settings.selection_painting, self.localization());
+        self.state.layer_properties = effects::properties(doc, self.state.settings.selection_painting, &self.papers, self.localization());
         self.state.layer_tools.controls = doc.working.occurrence.and_then(|id| doc.scene().occurrence(id).map(|l| art_layers::LayerControls::for_layer(doc, id, l))).unwrap_or_default();
         self.state.layers = doc.ordered_layers().iter().copied().filter(|id| !self.layer_interaction.hidden_by_group(doc, *id)).map(layer_state).collect();
         self.state.layer_tools.attachment = crate::layer_relationships::attachment_control(doc, doc.working.occurrence, self.localization());
@@ -6454,6 +6462,7 @@ mod tests {
     include!("image_size_tests.rs");
     include!("image_geometry_tests.rs");
     include!("curve_session_tests.rs");
+    include!("paper_session_tests.rs");
     include!("clipboard_tests.rs");
     include!("blend_menu_tests.rs");
     include!("clone_source_tests.rs");
@@ -10420,7 +10429,7 @@ mod tests {
         assert!(controls.opacity && controls.mask && controls.blend && controls.edit_lock);
         let row = s.state.layers.iter().find(|l| l.id == 2).unwrap();
         assert!(row.has_thumbnail);
-        assert_eq!(row.content_icon.as_deref(), Some("layer-fill-symbolic"));
+        assert_eq!(row.content_icon.as_deref(), Some("layer-paper-symbolic"));
         assert_eq!(s.engine.document().try_drawing_target(), Err(layer_core::DrawingRefusal::Fill));
         layer(&mut s, LayerAction::Drop { id: 2, target: 1, fraction: 0., surface: LayerDropSurface::Row, });
         assert_eq!(s.state.layers[0].id, 2);

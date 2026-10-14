@@ -110,6 +110,7 @@ documents-error-device-file = Выберите файл на этом устро
 documents-error-filename = Выберите имя файла
 documents-error-project-writer = Не удалось записать проект
 documents-error-no-drawing = Нет рисунка для открытия
+documents-error-resolution = Выберите разрешение от 1 до { $maximum } ppi
 documents-open-photos-filter = Рисунки и фотографии
 
 documents-delivery-clipboard-unavailable = Вставка изображения недоступна в этом браузере. Используйте импорт изображения как слоя.

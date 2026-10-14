@@ -140,16 +140,8 @@ fn advanced_color(input: VertexOutput, opacity: f32) -> vec4<f32> {
     }
 
     if style.flags.y > 0.5 {
-        let uv = grain_uv(
-            input.local,
-            input.world,
-            style.grain,
-            style.flags.z > 0.5,
-            input.center,
-            style.flags.w,
-        );
-        let grain = textureSampleLevel(grain_texture, brush_sampler, uv, 0.0).r;
-        coverage *= mix(1.0, grain, clamp(input.material.x, 0.0, 1.0));
+        let grain = textureSampleLevel(grain_texture, brush_sampler, paper_uv(input.world), 0.0).r;
+        coverage *= mix(1.0, grain, clamp(input.material.x * style.flags.z, 0.0, 1.0));
     }
 
     let edge_width = clamp(style.edges.z, 0.0001, 1.0);

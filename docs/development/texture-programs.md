@@ -5,12 +5,13 @@
 A texture program describes a paper or canvas surface as one WGSL function:
 height in micrometers at a position in millimeters on a repeating tile. The app
 bakes the function at the drawing's pixel density into a single-channel texture
-that brushes read one texel per pixel. Built-in programs are entries in the existing
-[filter catalog](../../assets/filters/manifest.json) with `kind: "texture"`, so
-they reuse its parameter declarations, labels, WGSL modules, naga validation and
-saved-value contract.
+that brushes read one texel per pixel. Built-in programs live in their own
+catalog, [`textures.json`](../../assets/filters/textures.json), written in the
+filter package format with `kind: "texture"`, so they reuse its parameter
+declarations, WGSL modules, naga validation and saved-value contract without
+appearing among filters.
 
-This plan defines the program contract, the `tx_` library, the bake and one
+This guide defines the program contract, the `tx_` library, the bake and one
 program for each of ten reference surfaces. [Paper](paper.md) covers the layer,
 brushes, resolution model and library that use the result.
 
@@ -20,14 +21,16 @@ brushes, resolution model and library that use the result.
   antialiasing, normalization and upload belong to the bake, so a program never
   sees pixels.
 - **Physical units.** Positions and lengths are millimeters and the result is
-  micrometers. The bake keeps the absolute relief, which is what makes a rough
+  micrometers of tooth: the depth a drawing tip feels, not the sheet's full
+  profile. The bake keeps the absolute relief, which is what makes a rough
   sheet rougher than a hot-pressed one under the same brush.
 - **Periodic by construction.** Every library operator rounds its feature size
   to a whole number of repeats across the tile, so any composition of operators
   tiles without a seam.
-- **Describe what the tip touches.** A drawing tip rides over slow undulation.
-  Keep features longer than about 5 mm to a few micrometers; formation clouds
-  and cockling are not tooth.
+- **Describe what the tip touches.** A drawing tip follows slow undulation, so
+  features longer than about 5 mm get no more than a few micrometers; formation
+  clouds and cockling are not tooth. A large-scale term makes whole patches of
+  the sheet unreachable and shows as blotches in every stroke.
 - **Only what the surfaces need.** There are no stages, buffers, image inputs or
   user programs. Each was checked against the ten surfaces below; see
   [decisions](#decisions).
@@ -44,37 +47,36 @@ brushes, resolution model and library that use the result.
     "abi": 5,
     "id": "watercolor",
     "kind": "texture",
-    "label": {"message": "resources-texture-watercolor"},
+    "label": "Watercolor",
     "period": 128,
     "entry": "capy_watercolor",
-    "wgsl": ["texture_library.wgsl", "watercolor.wgsl"],
+    "wgsl": ["texture_library.wgsl", "texture_watercolor.wgsl"],
     "parameters": [
-      {"key": "felt", "default": {"kind": "number", "value": 1.0},
-       "kind": {"kind": "number", "min": 0.4, "max": 5, "step": 0.1, "decimals": 1, "unit": "mm"},
-       "label": {"message": "resources-parameter-watercolor-felt"}},
-      {"key": "pressing", "default": {"kind": "number", "value": 45},
-       "kind": {"kind": "number", "min": 0, "max": 100, "step": 1, "decimals": 0, "unit": "%"},
-       "label": {"message": "resources-parameter-watercolor-pressing"}},
-      {"key": "seed", "dimension": "count", "default": {"kind": "number", "value": 1},
-       "kind": {"kind": "number", "min": 0, "max": 16777215, "step": 1, "decimals": 0, "unit": ""},
-       "label": {"message": "resources-parameter-texture-variation"}}
+      {"key": "felt", "label": "Felt", "default": {"kind": "number", "value": 1.0},
+       "kind": {"kind": "number", "min": 0.4, "max": 5, "step": 0.1, "decimals": 1, "unit": "mm"}},
+      {"key": "pressing", "label": "Pressing", "default": {"kind": "number", "value": 45},
+       "kind": {"kind": "number", "min": 0, "max": 100, "step": 1, "decimals": 0, "unit": "%"}},
+      {"key": "seed", "label": "Variation", "dimension": "count", "default": {"kind": "number", "value": 1},
+       "kind": {"kind": "number", "min": 0, "max": 16777215, "step": 1, "decimals": 0, "unit": ""}}
     ]
   },
   "presets": [
-    {"id": "hot_press", "label": {"message": "resources-paper-hot-press"}, "values": {"felt": 2.0, "pressing": 85}},
-    {"id": "cold_press", "label": {"message": "resources-paper-cold-press"}, "values": {"felt": 1.0, "pressing": 45}},
-    {"id": "rough", "label": {"message": "resources-paper-rough"}, "values": {"felt": 3.0, "pressing": 5}}
+    {"id": "hot_press", "label": {"message": "resources-paper-hot-press"},
+     "values": {"felt": {"kind": "number", "value": 2.0}, "pressing": {"kind": "number", "value": 85}}},
+    {"id": "cold_press", "label": {"message": "resources-paper-cold-press"}, "values": {}},
+    {"id": "rough", "label": {"message": "resources-paper-rough"},
+     "values": {"felt": {"kind": "number", "value": 3.0}, "pressing": {"kind": "number", "value": 5}}}
   ]
 }
 ```
 
 | Field | Rule |
 | --- | --- |
-| `kind` | `"texture"`. The filter picker, Layer › New and command search list only adjustments and generators. |
+| `kind` | `"texture"`. Only the texture catalog may hold texture programs; nothing lists it among filters. |
 | `period` | Tile edge in millimeters, 8 to 400. Choose at least five to ten repeats of the largest feature. |
 | `entry`, `wgsl` | As for filters. Programs list `texture_library.wgsl` before their own module. |
-| `parameters` | Number, Toggle and Choice, with `scalar` or `count` dimension. Units are display labels such as `mm`, `%` or `/cm`. A seed is a count from 0 to 16777215 labelled Variation. |
-| `presets` | Entry-level `{id, label, values}` items. Omitted keys take their defaults. Presets are library items; drawings store program values, not preset IDs. |
+| `parameters` | Number, Toggle and Choice, with `scalar` or `count` dimension. Units are display labels such as `mm`, `%` or `/cm`. A seed is a count from 0 to 16777215 labelled Variation. Program and parameter labels are literal: nothing shows them yet. |
+| `presets` | Entry-level `{id, label, values}` items with typed values and translated labels. Omitted keys take their defaults. Each preset is one built-in paper; drawings store program values, not preset IDs. |
 | Rejected | `passes`, `lookups`, `auxiliary`, `time`, `resolution`, `constant_color`, pixel dimensions and image parameters. |
 
 ### Entry point
@@ -251,19 +253,28 @@ has no measured relief, so it uses the 100 µm reference.
 
 - **Catalog load:** the same naga validation as filters, with `tx_period`,
   `tx_texel` and `fx_parameter` supplied by the bake wrapper. Rejected fields,
-  periods outside 8 to 400 mm, unsupported parameter kinds and source over the
-  filter size limit fail the package.
+  periods outside 8 to 400 mm and unsupported parameter kinds fail the package,
+  and every preset must validate against its program.
 - **Built-in limits:** 4096 texels per axis; cellular operators search 3 × 3
   cells; `tx_fibers` draws at most 64 fibers per cell; `tx_fbm` stops at eight
   octaves.
-- **Periodicity:** a headless GPU test evaluates two adjacent tiles without the
-  offset and requires equal heights within f32 tolerance for every preset.
-- **Statistics:** a fixed-value test per preset checks relief, mean and skew
-  against recorded tolerances.
-- **Moiré:** a Scale sweep for laid, honeycomb and canvas requires blurred
-  coverage to stay flat.
-- **Cost:** bake time per preset at 1024², 2048² and 4096² on each tier's
-  reference hardware, recorded in the [performance targets](../PERFORMANCE_TARGETS.md).
+- **Seams and relief:** a headless GPU test bakes every preset, requires its
+  wrap to be no rougher than its interior and orders the watercolor and drawing
+  presets by relief.
+- **Previews:** the [picker](paper.md#picker) previews of the built-in papers
+  are made from their bakes. `write_built_in_paper_previews` in
+  [`paper.rs`](../../crates/layer-render-wgpu/src/paper.rs) regenerates
+  [`paper_previews.gray`](../../assets/filters/paper_previews.gray), and
+  `built_in_paper_previews_match_their_bakes` fails when a program changes
+  without them.
+- **Brushes:** the dry-media tests paint on a striped image paper, so contact
+  is checked against an exact, known height field. The ignored
+  [`paper_gallery`](../../crates/layer-render-wgpu/tests/paper_gallery.rs) test
+  paints every dry-media brush at three pressures on each paper at real size
+  and writes one PNG per paper to `GALLERY_DIR` (`GALLERY_PAPERS` picks papers by
+  ID); tune programs against it.
+- **Cost:** bake time per preset on each tier's reference hardware belongs in
+  the [performance targets](../PERFORMANCE_TARGETS.md).
 
 ## Saved data
 
@@ -274,9 +285,9 @@ data version, as `fx_noise` belongs to its filters. Texture programs are
 artistic surfaces: improving a built-in's appearance keeps its ID and version,
 while a change of parameter meaning needs a new version.
 
-Custom texture programs are a development feature. They load through
-`CAPY_FILTERS_DIR`, live only in private sessions and are refused by portable
-save, exactly like [custom filters](../internals/session-recovery.md#private-custom-programs).
+Texture programs are built in. Installing custom filters refuses a package
+with a texture program, a texture preset or a texture parameter, so no drawing
+can depend on a texture another installation lacks.
 
 ## Decisions
 
@@ -291,15 +302,18 @@ the app simpler to use.
 | Normalization | Probe percentiles in the bake | Each program normalizes itself. Every parameter change would then shift the paper's contrast, and Texture strength would mean something different on each paper. The probe adds about 2% to a 2048² bake. |
 | Relief | Programs return micrometers | Normalized height only, plus a separate relief setting. Hot press, cold press and rough would then feel the same under a pencil unless the artist adjusted each brush. Returning physical units costs nothing and needs no extra control. |
 | Sampling | One jittered sample per texel | See [one jittered sample per texel](#one-jittered-sample-per-texel). |
-| User programs | Development only | Portable user programs need a portable contract for custom code, shared with custom filters. That design is separate from Paper. |
+| User programs | Built-in only | Development loading through custom filters. A drawing that names a custom texture would then lose its paper anywhere else; portable user programs need a contract for custom code shared with custom filters, which is separate from Paper. |
+| Catalog | A texture catalog beside the filter manifest | Texture entries in the filter manifest. Every filter list, search and installer would then have to skip them. |
 
 ## Reference surfaces
 
-Eight programs cover ten surfaces; presets are listed with each. Their relief
-values are estimates until the surfaces are measured ([measurements](paper.md#measurements)).
-A prototype of the library and these programs compiled with naga 30, tiled
-exactly and baked each 300 ppi tile in under 4 ms on an NVIDIA RTX PRO 6000;
-mobile bake times are not measured.
+Eight programs cover ten surfaces; presets are listed with each. Their
+amplitudes are tooth depths tuned by eye, not measurements
+([measurements](paper.md#measurements)). Drawing paper has the height spread of
+the paper the app had before Paper, so each dry-media brush keeps its tooth
+contrast; the other papers were tuned against it in the
+[paper gallery](#validation-and-tests). Each 300 ppi tile bakes in under 4 ms
+on an NVIDIA RTX PRO 6000; mobile bake times are not measured.
 
 ### Hot-press, cold-press and rough watercolor
 
@@ -307,8 +321,9 @@ All three come off a cylinder mould and take their relief from woolen felts.
 Rough is never rolled, cold press passes cold rollers and hot press passes hot
 rollers, which flatten the felt peaks
 ([Jackson's Art](https://www.jacksonsart.com/a-guide-to-paper)). One program
-models the felt as warped cells with a pressing plateau; fine cotton fibers
-dominate once pressing has erased the felt.
+models the felt as warped cell mounds that pressing flattens to a plateau, with
+fine grain and cotton fibers on top; once pressing has erased the felt, the
+grain and fibers remain.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -328,10 +343,10 @@ fn capy_watercolor(p: vec2f, b: u32) -> f32 {
     let cells = tx_cells(q, vec2f(felt), 0.9, seed + 1u);
     let mounds = 1.0 - cells.x * cells.x;
     let tooth = tx_fbm(p, vec2f(0.3 * felt), 3u, seed + 2u);
-    let cloud = tx_fbm(p, vec2f(15.0), 3u, seed + 3u);
-    let pressed = tx_smin(mounds + 0.3 * tooth + 0.15 * cloud, mix(1.3, 0.3, pressing), 0.25);
+    let pressed = tx_smin(mounds, mix(1.2, 0.4, pressing), mix(0.25, 0.6, pressing)) + 0.35 * tooth;
+    let grain = tx_fbm(p, vec2f(0.25), 3u, seed + 3u);
     let fibers = tx_fibers(p, 1.0, 0.02, 2.0, 0.0, 0.0, 0.4, seed + 4u);
-    return mix(300.0, 15.0, pressing) * pressed + 12.0 * fibers;
+    return mix(120.0, 10.0, pressing) * pressed + mix(16.0, 4.0, pressing) * grain + 10.0 * fibers;
 }
 ```
 
@@ -359,9 +374,8 @@ fn capy_drawing(p: vec2f, b: u32) -> f32 {
     let seed = u32(fx_parameter(b, 2u).x);
     let grain = tx_fbm(p, vec2f(1.3 * tooth, tooth), 4u, seed);
     let fibers = tx_fibers(p, 2.0, 0.03, 3.0, 0.0, 0.5, 0.2, seed + 1u);
-    let cloud = tx_fbm(p, vec2f(6.0), 3u, seed + 2u);
-    let calendered = tx_smin(grain + 0.6 * fibers + 0.2 * cloud, mix(0.8, -0.1, finish), 0.3);
-    return mix(50.0, 12.0, finish) * calendered;
+    let calendered = tx_smin(grain + 0.6 * fibers, mix(0.8, -0.1, finish), 0.3);
+    return mix(83.0, 20.0, finish) * calendered;
 }
 ```
 
@@ -387,12 +401,11 @@ fn capy_laid(p: vec2f, b: u32) -> f32 {
     let laid = fx_parameter(b, 0u).x;
     let chain = fx_parameter(b, 1u).x;
     let seed = u32(fx_parameter(b, 2u).x);
-    let wires = tx_lines(p, laid, 0.04, 0.5 * laid, 0.04, seed);
+    let wires = tx_lines(p, laid, 0.04, laid, 0.04, seed);
     let chains = tx_lines(p.yx, chain, 0.06, 0.6, 0.15, seed + 1u);
     let shadow = exp(-pow(chains.y / 3.0, 2.0));
     let felt = tx_fbm(tx_warp(p, 0.3, vec2f(1.5), seed + 2u), vec2f(0.7), 4u, seed + 3u);
-    let cloud = tx_fbm(p, vec2f(10.0), 3u, seed + 4u);
-    return 16.0 * wires.x * (1.0 - chains.x) - 8.0 * chains.x + 5.0 * shadow + 9.0 * felt + 5.0 * cloud;
+    return 12.0 * wires.x * (1.0 - chains.x) - 8.0 * chains.x + 5.0 * shadow + 10.0 * felt;
 }
 ```
 
@@ -432,7 +445,7 @@ fn capy_honeycomb(p: vec2f, b: u32) -> f32 {
         }
     }
     let felt = tx_fbm(p, vec2f(0.3 * pitch), 3u, seed + 2u);
-    return 40.0 * (1.0 - dimple) + 6.0 * felt;
+    return 30.0 * (1.0 - dimple) + 8.0 * felt;
 }
 ```
 
@@ -459,8 +472,8 @@ fn capy_sanded(p: vec2f, b: u32) -> f32 {
     let grains = tx_cells(p, vec2f(1.5 * grit), 1.0, seed);
     let size = 0.6 + 0.8 * grains.z;
     let grain = size * tx_thread(grains.x, 0.6 * size);
-    let binder = tx_fbm(p, vec2f(5.0), 4u, seed + 1u);
-    return 40.0 * grain + 8.0 * binder;
+    let binder = tx_fbm(p, vec2f(0.5), 3u, seed + 1u);
+    return 22.0 * tx_smin(1.3 * grain, 0.75, 0.2) + 6.0 * binder;
 }
 ```
 
@@ -489,11 +502,10 @@ fn capy_washi(p: vec2f, b: u32) -> f32 {
     let density = fx_parameter(b, 1u).x;
     let strands = fx_parameter(b, 2u).x / 100.0;
     let seed = u32(fx_parameter(b, 3u).x);
-    let cloud = tx_fbm(tx_warp(p, 2.0, vec2f(12.0), seed), vec2f(12.0), 4u, seed + 1u);
     let pulp = tx_fbm(p, vec2f(0.5), 3u, seed + 2u);
     let fibers = tx_fibers(p, fiber, 0.03, density, 0.0, 0.0, 0.5, seed + 3u);
     let swirl = tx_fibers(tx_warp(p, 6.0, vec2f(30.0), seed + 4u), 4.0 * fiber, 0.3, 0.01 * strands, 0.0, 0.0, 1.0, seed + 5u);
-    return 4.0 * cloud + 10.0 * pulp + 20.0 * fibers + 30.0 * swirl;
+    return 10.0 * pulp + 8.0 * fibers + 12.0 * swirl;
 }
 ```
 
@@ -502,8 +514,9 @@ fn capy_washi(p: vec2f, b: u32) -> f32 {
 Inclusions are mixed into the vat or sprinkled on and covered with a thin
 second layer of pulp before the sheet air-dries
 ([Atlas of Making](https://atlasofmaking.kenjiliu.com/papers/leaf-paper)).
-Each sparse cell may hold one petal or seed; offsetting its signed distance
-drapes pulp past its edge.
+Irregular, warped pulp gives the uneven surface; each sparse cell may hold one
+petal or seed, and offsetting its signed distance drapes pulp past its edge.
+Inclusions stay low so that pencil reaches the pulp around them.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -518,8 +531,7 @@ fn capy_handmade(p: vec2f, b: u32) -> f32 {
     let amount = fx_parameter(b, 0u).x / 100.0;
     let size = fx_parameter(b, 1u).x;
     let seed = u32(fx_parameter(b, 2u).x);
-    let cloud = tx_fbm(tx_warp(p, 1.5, vec2f(15.0), seed), vec2f(20.0), 3u, seed + 1u);
-    let felt = tx_fbm(p, vec2f(0.8), 4u, seed + 2u);
+    let felt = tx_fbm(tx_warp(p, 0.8, vec2f(3.0), seed), vec2f(1.6), 5u, seed + 2u);
     let g = tx_grid(vec2f(3.0 * size));
     let c = tx_cell(g, p);
     var lump = 0.0;
@@ -536,7 +548,7 @@ fn capy_handmade(p: vec2f, b: u32) -> f32 {
         }
     }
     let fibers = tx_fibers(p, 2.5, 0.03, 2.0, 0.0, 0.0, 0.4, seed + 5u);
-    return 4.0 * cloud + 12.0 * felt + 40.0 * lump + 10.0 * fibers;
+    return 34.0 * felt + 14.0 * lump + 10.0 * fibers;
 }
 ```
 
@@ -548,7 +560,7 @@ varies more than the warp
 gesso coats follow the weave and later coats level it
 ([Golden](https://goldenartistcolors.com/resources/black-and-white-gesso)). The
 program levels the weave toward its own disc average, which fills the hollows
-first.
+first. Finer threads make a shallower weave.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -575,6 +587,6 @@ fn capy_canvas(p: vec2f, b: u32) -> f32 {
     }
     let ground = mix(weave, max(weave, level + 0.2), priming);
     let skin = tx_fbm(p, vec2f(0.4), 3u, seed + 1u);
-    return mix(500.0, 120.0, priming) * ground + 8.0 * priming * skin;
+    return mix(500.0, 120.0, priming) * 13.0 / threads * ground + 8.0 * priming * skin;
 }
 ```

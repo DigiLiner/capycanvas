@@ -281,6 +281,7 @@ fn case(depth: SampleDepth, path: Path, space: BlendSpace) -> Case {
         Path::Layer | Path::Clip | Path::Effect => 0,
         Path::Folded | Path::ImageComposition => 1,
     };
+    super::native_effects::solid_color(&mut document, paper);
     super::native_effects::set_effect(&mut document, paper, "color", layer_core::EffectValue::Color(
         layer_core::color::RgbColor::from_linear(RgbSpace::Srgb, background).unwrap()));
     document.artwork.occurrences.get_mut(paper).unwrap().visible = background[3] > 0.;

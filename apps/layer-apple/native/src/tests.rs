@@ -443,7 +443,7 @@ fn property_edits_and_gestures_preserve_exact_metal_history_on_both_platforms() 
             app.draw_frame();
             if target == "paper" {
                 let document = unsafe { &*app.0 }.host.session.engine().document();
-                let paper = *document.scene().order().iter().find(|handle| document.scene().effect(**handle).is_some_and(|effect| effect.program.id.as_ref() == "solid_color")).unwrap();
+                let paper = layer_core::paper::paper_occurrence(document.scene(), None).unwrap();
                 let id = layer_ui::occurrence_token(paper);
                 app.action(json!({"type":"select_layer","id":id}));
             } else if target != "paint" {

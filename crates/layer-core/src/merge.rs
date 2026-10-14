@@ -293,11 +293,13 @@ impl Document {
                 }
             }
             MergeKind::Visible | MergeKind::Flatten | MergeKind::Stamp => {
+                let paper = scene.children(None).last().copied().filter(|h| kind != MergeKind::Stamp
+                    && scene.effect_application(*h).is_some_and(|application| crate::paper::is_paper(&application.program)));
                 let roots: Vec<_> = scene
                     .children(None)
                     .iter()
                     .copied()
-                    .filter(|h| scene.occurrence(*h).is_some_and(|o| o.is_artwork()))
+                    .filter(|h| Some(*h) != paper && scene.occurrence(*h).is_some_and(|o| o.is_artwork()))
                     .collect();
                 let visible: Vec<_> = roots
                     .iter()

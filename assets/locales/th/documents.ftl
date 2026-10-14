@@ -109,6 +109,7 @@ documents-error-device-file = เลือกไฟล์บนอุปกร�
 documents-error-filename = เลือกชื่อไฟล์
 documents-error-project-writer = เขียนโครงการไม่สำเร็จ
 documents-error-no-drawing = ไม่มีภาพวาดให้เปิด
+documents-error-resolution = เลือกความละเอียดตั้งแต่ 1 ถึง { $maximum } ppi
 documents-open-photos-filter = ภาพวาดและภาพถ่าย
 documents-delivery-clipboard-unavailable = วางภาพในเบราว์เซอร์นี้ไม่ได้ ใช้นำเข้าภาพเป็นเลเยอร์
 documents-delivery-clipboard-too-large = ภาพในคลิปบอร์ดใหญ่กว่า 512 MiB

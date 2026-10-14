@@ -350,6 +350,7 @@ fn native_new_presets_and_profiled_photo_master() {
         },
         background: DocumentBackground::Transparent,
         blend_space: layer_core::BlendSpace::Perceptual,
+        resolution: 300,
     };
     click(&named::<gtk::Button>(w.window.visible_dialog().unwrap().upcast_ref(), "new-document-save-preset"));
     pump(100);

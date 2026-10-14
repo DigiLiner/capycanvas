@@ -1,7 +1,7 @@
 mod support;
 use layer_core::*;
 use layer_engine::{InstantFeedbackConfig, ViewTransform};
-use layer_render::{CanvasRenderer, HostImage, PixelFormat, ViewState};
+use layer_render::ViewState;
 use std::sync::Arc;
 
 const EXTENT: [u32; 2] = [256; 2];
@@ -9,12 +9,11 @@ const PRESETS: [DefaultBrushPreset; 7] = [DefaultBrushPreset::Pencil,
     DefaultBrushPreset::PointyPencil, DefaultBrushPreset::ShadingPencil,
     DefaultBrushPreset::Charcoal, DefaultBrushPreset::Chalk,
     DefaultBrushPreset::PastelBlock, DefaultBrushPreset::Crayon];
-const PAPER: &str = "test:dry-contact-paper";
 
 #[derive(Clone, Copy)]
-struct Run { samples: u64, cadence: u64, feedback: bool, scale: f32, mask: bool }
+struct Run { samples: u64, cadence: u64, feedback: bool, scale: f32, mask: bool, offset: [i64; 2] }
 impl Default for Run {
-    fn default() -> Self { Self { samples: 64, cadence: 4, feedback: false, scale: 1., mask: false } }
+    fn default() -> Self { Self { samples: 64, cadence: 4, feedback: false, scale: 1., mask: false, offset: [0; 2] } }
 }
 
 fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f32, [f32; 2])) -> support::Image {
@@ -22,6 +21,9 @@ fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f3
         DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
     let paper = support::named_occurrence(&document, "Paper");
     document.artwork.occurrences.get_mut(paper).unwrap().visible = false;
+    striped_paper(&mut document, paper);
+    let ink = document.working.occurrence.unwrap();
+    document.artwork.occurrences.get_mut(ink).unwrap().offset = run.offset;
     if run.mask {
         let owner = document.working.occurrence.unwrap();
         let mut mask = CoverageSnapshot::reveal_all(document.artwork.coverage.next_handle(), EXTENT, [0; 2]);
@@ -33,11 +35,6 @@ fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f3
         brush.color_rgba_linear = [1.; 4];
     }
     let (mut engine, mut input) = support::engine(document);
-    if brush.grain.as_ref().is_some_and(|g| g.asset.0.as_ref() == PAPER) {
-        let heights: Vec<_> = (0..256).map(|y| if y % 16 < 8 { 255 } else { 0 }).collect();
-        engine.backend_mut().prepare_asset(&AssetId::from(PAPER), HostImage { width: 1, height: 256,
-            stride: 1, format: PixelFormat::R8Unorm, bytes: &heights }).unwrap();
-    }
     engine.set_view(ViewState {
         width_px: EXTENT[0], height_px: EXTENT[1],
         document_to_surface: [run.scale, 0., 0., run.scale, 0., 0.],
@@ -61,6 +58,20 @@ fn paint(mut brush: BrushSnapshot, run: Run, pose: impl Fn(f32) -> ([f32; 2], f3
     support::image(&mut engine, time)
 }
 
+fn striped_paper(document: &mut Document, paper: authored::OccurrenceHandle) {
+    use color::source::{SourceBuilder, SourceChannels, SourceInterpretation};
+    let interpretation = SourceInterpretation { channels: SourceChannels::Gray, depth: color::SampleDepth::U8,
+        profile: Default::default(), profile_assumed: false };
+    let mut builder = SourceBuilder::new([1, 256], interpretation, 1 << 20).unwrap();
+    for y in 0..256 { builder.push_row(&[if y % 16 < 8 { 255 } else { 0 }]).unwrap(); }
+    let mut source = builder.finish().unwrap();
+    source.resolution = Some(ImageResolution::ppi(300));
+    let effect = document.scene().effect_handle(paper).unwrap();
+    let application = document.artwork.effects.get_mut(effect).unwrap();
+    let index = application.program.parameters.iter().position(|p| p.key.as_ref() == "texture").unwrap();
+    application.values[index] = EffectValue::Texture(TextureSource::Image(Image::new(Arc::new(source))));
+}
+
 fn line(brush: BrushSnapshot, pressure: f32, tilt: f32, run: Run) -> support::Image {
     paint(brush, run, |t| ([32.5 + 192. * t, 128.5], pressure,
         [tilt * std::f32::consts::FRAC_PI_2, 0.]))
@@ -72,8 +83,6 @@ fn analytic(corner: f32, paper: f32) -> BrushSnapshot {
     brush.flow = 0.3;
     brush.color_rgba_linear = [0., 0., 0., 1.];
     brush.mappings = Arc::from([]);
-    brush.grain.as_mut().unwrap().asset = AssetId::from(PAPER);
-    brush.grain.as_mut().unwrap().scale = 1.;
     let contact = brush.contact.as_mut().unwrap();
     contact.paper = paper;
     contact.pressure_gain = 1.;
@@ -394,6 +403,14 @@ fn paper_contacts_stay_at_document_coordinates_when_a_stroke_starts_elsewhere() 
         first.crop([110, 88], [35, 81]).assert_near(&second.crop([110, 88], [35, 81]), 2,
             &format!("stationary paper corner={corner}"));
     }
+}
+
+#[test]
+fn paper_stays_on_the_drawing_when_the_layer_moves() {
+    let brush = analytic(0., 1.4);
+    let still = line(brush.clone(), 0.55, 0., Run::default());
+    let moved = line(brush, 0.55, 0., Run { offset: [5, 3], ..Default::default() });
+    still.crop([40, 88], [160, 81]).assert_near(&moved.crop([40, 88], [160, 81]), 2, "paper under a moved layer");
 }
 
 #[test]

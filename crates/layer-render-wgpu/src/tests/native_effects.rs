@@ -62,6 +62,12 @@ pub(crate) fn set_effect(document: &mut Document, occurrence: OccurrenceHandle, 
     let handle = document.scene().effect_handle(occurrence).unwrap();
     document.artwork.effects.get_mut(handle).unwrap().values = draft.values;
 }
+pub(crate) fn solid_color(document: &mut Document, occurrence: OccurrenceHandle) {
+    let program = layer_core::bundled_effect_catalog().get("solid_color").unwrap().program();
+    let handle = document.scene().effect_handle(occurrence).unwrap();
+    let values = EffectInstance::new(program.clone()).values;
+    *document.artwork.effects.get_mut(handle).unwrap() = EffectApplication::new(program, values, document.composition().size);
+}
 pub(crate) fn mask(document: &mut Document, owner: OccurrenceHandle, default: f32) {
     let coverage = document.artwork.coverage.next_handle();
     let mut snapshot = layer_core::CoverageSnapshot::reveal_all(coverage,document.composition().size,Default::default());

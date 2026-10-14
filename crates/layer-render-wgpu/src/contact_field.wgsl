@@ -24,10 +24,13 @@ fn contact_noise(p: vec2<f32>) -> f32 {
         mix(contact_hash(cell + vec2<f32>(0.0, 1.0)), contact_hash(cell + vec2<f32>(1.0)), u.x), u.y);
 }
 
+fn paper_uv(world: vec2<f32>) -> vec2<f32> {
+    return (world + style.grain.zw) / style.grain.xy;
+}
+
 fn contact_paper(world: vec2<f32>) -> f32 {
     if contact_feature(2u, style.contact_a.y > 0.0) {
-        let uv = rotate(world / vec2<f32>(textureDimensions(grain_texture)), style.grain.z, style.grain.w) * style.grain.x;
-        return textureSampleLevel(grain_texture, brush_sampler, uv, 0.0).r;
+        return textureSampleLevel(grain_texture, brush_sampler, paper_uv(world), 0.0).r;
     }
     return 1.0;
 }

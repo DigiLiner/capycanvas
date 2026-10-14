@@ -13,6 +13,7 @@ mod properties;
 mod color;
 pub(crate) mod proof;
 mod place;
+pub(crate) mod paper;
 pub(crate) mod clipboard;
 pub(crate) mod drop;
 pub(crate) mod profile;
@@ -210,6 +211,7 @@ impl Workspace {
                                     crate::preferences::export_keymap(&w, name, text).await
                                 }
                                 HostRequestKind::ImportKeymap => crate::preferences::import_keymap(&w).await,
+                                HostRequestKind::Paper { request } => paper::run(&w, request).await,
                                 HostRequestKind::Document { .. } | HostRequestKind::Workspace { .. } => {
                                     unreachable!()
                                 }

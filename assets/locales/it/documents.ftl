@@ -109,6 +109,7 @@ documents-error-device-file = Scegli un file su questo dispositivo
 documents-error-filename = Scegli un nome file
 documents-error-project-writer = Scrittura del progetto non riuscita
 documents-error-no-drawing = Nessun disegno da aprire
+documents-error-resolution = Scegli una risoluzione da 1 a { $maximum } ppi
 documents-open-photos-filter = Disegni e foto
 documents-delivery-clipboard-unavailable = Non è possibile incollare immagini in questo browser. Usa Importa immagine come livello.
 documents-delivery-clipboard-too-large = L'immagine negli appunti supera 512 MiB

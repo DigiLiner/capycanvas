@@ -835,6 +835,7 @@ pub enum HostRequestKind {
     SaveSettings { settings: Box<Settings> },
     ExportKeymap { name: String, text: String },
     ImportKeymap,
+    Paper { request: crate::paper_library::PaperRequest },
 }
 
 fn cursor_label(value: CursorMode, localizer: &Localizer) -> String {

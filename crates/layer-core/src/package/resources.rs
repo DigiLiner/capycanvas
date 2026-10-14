@@ -382,6 +382,9 @@ impl super::effect_records::ResourceWriter for ResourceInventory {
         let resource=self.insert(ResourceEntry {kind:"capy.lut3d/1",data:json!({"size":lut.size(),"domain":lut.domain()}),raw_encoding:"capy.rgb-f32/1",payload:Payload::Bytes(payload.clone())})?;
         Ok(json!({"resource":resource,"title":lut.title()}))
     }
+    fn image(&mut self, image: &crate::authored::Image) -> Result<Value, String> {
+        super::artwork_records::encode_image(image,self)
+    }
 }
 impl super::effect_records::ResourceReader for ResourceReader<'_> {
     fn code(&mut self, value: &Value) -> DecodeResult<Resource<str>> {
@@ -418,6 +421,9 @@ impl super::effect_records::ResourceReader for ResourceReader<'_> {
         let lut=Arc::new(Lut3d::from_resource(size,bounds,title,bytes).map_err(|e|self.backing.fail(e.into()))?);
         lut.validate_gpu_domain().map_err(|e|DecodeError::Unsupported(e.into()))?;
         self.luts.insert(id,lut.clone()); Ok(lut)
+    }
+    fn image(&mut self, value: &Value) -> DecodeResult<crate::authored::Image> {
+        super::artwork_records::image_reference(value,self)
     }
 }
 impl super::selection_records::SelectionResourceWriter for ResourceInventory {

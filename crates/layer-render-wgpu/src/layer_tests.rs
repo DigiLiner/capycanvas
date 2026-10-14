@@ -204,6 +204,7 @@ pub(crate) fn preset_style(preset: layer_core::DefaultBrushPreset) -> DabStyle {
         },
         execution: brush.execution,
         grain: brush.grain,
+        paper: None,
         rendering: brush.rendering,
         wet_mix: brush.wet_mix,
         transport: brush.transport,

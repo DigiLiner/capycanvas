@@ -184,7 +184,7 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                     ..packet(canvas.document.scene(), EXTENT) }, &mut [Vec::new()], &mut encoder).unwrap();
                 r.prepare_target_selection(&mut encoder, &batch.style, EXTENT).unwrap();
                 r.prepare_dry_records(&batch, std::iter::once((PixelRect::full(EXTENT), 0..dabs.len() as u32, [0; 16])), &mut encoder).unwrap();
-                let key = WgpuRasterizer::texture_set_key(&batch.style); r.ensure_texture_set(key.clone()).unwrap();
+                let key=r.ensure_texture_set(&batch.style).unwrap();
                 r.uploads.finish(&encoder);
                 encoder.submit(&r.queue);
                 r.queue.write_buffer(&r.target_buffer, 0, target_bytes(&TargetGpu::new([0; 2], EXTENT, EXTENT)));
@@ -361,7 +361,7 @@ fn cropped_dry_dispatch_preserves_every_untouched_hdr_pixel() {
         r.prepare_uploads(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),
             ..packet(canvas.document.scene(),EXTENT)},&mut [Vec::new()],&mut encoder).unwrap();
         r.prepare_dry_records(&batch,std::iter::once((dirty,0..1,[0;16])),&mut encoder).unwrap();
-        let key=WgpuRasterizer::texture_set_key(&batch.style);r.ensure_texture_set(key).unwrap();
+        r.ensure_texture_set(&batch.style).unwrap();
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
         r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],EXTENT,EXTENT)));
         for inplace in [false,true] {
@@ -422,7 +422,7 @@ fn cropped_display_restores_hdr_blocks_at_partial_document_edges() {
         r.prepare_uploads(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),
             ..packet(canvas.document.scene(),extent)},&mut [Vec::new()],&mut encoder).unwrap();
         r.prepare_dry_records(&batch,std::iter::once((dirty,0..1,[0;16])),&mut encoder).unwrap();
-        let key=WgpuRasterizer::texture_set_key(&batch.style);r.ensure_texture_set(key).unwrap();
+        r.ensure_texture_set(&batch.style).unwrap();
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
         r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],extent,extent)));
         let size=[PAGE_SIZE/block;2];
@@ -498,7 +498,7 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
         r.prepare_uploads(FramePacket {dabs:&[dab],dab_batches:std::slice::from_ref(&batch),..packet(canvas.document.scene(),extent)},&mut [Vec::new()],&mut encoder).unwrap();
         r.prepare_dry_records(&batch,std::iter::once((PixelRect::full([256;2]),0..1,[0;16])),&mut encoder).unwrap();
-        let key=WgpuRasterizer::texture_set_key(&style);r.ensure_texture_set(key.clone()).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
+        let key=r.ensure_texture_set(&style).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
         let marker=mem::offset_of!(StyleGpu,material_a)+12;
         let aggregate=f32::from_ne_bytes(r.style_upload[marker..marker+4].try_into().unwrap())>0.5&&style.contact.unwrap().dry.is_some();
         let fine=style.contact.unwrap().dry.is_some_and(|d|d.corner==0.)&&(0..2).any(|i|0.5*(dab.radii[i]+dab.previous[i])<8.);
@@ -915,7 +915,7 @@ fn partial_analytic_display_averages_current_and_stroke_start_over_the_same_foot
                 let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
                 r.prepare_uploads(FramePacket {dabs:&[dab],dab_batches:std::slice::from_ref(&batch),..packet(canvas.document.scene(),extent)},&mut [Vec::new()],&mut encoder).unwrap();
                 r.prepare_dry_records(&batch,std::iter::once((PixelRect::full(extent),0..1,[0;16])),&mut encoder).unwrap();
-                let key=WgpuRasterizer::texture_set_key(&batch.style);r.ensure_texture_set(key).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
+                r.ensure_texture_set(&batch.style).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
                 r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],extent,extent)));
                 let size=[PAGE_SIZE/block;2];let output=create_page_surface(&r.device,&r.texture_layout,&r.sampler,size,r.device.working_format(),"partial display reference output");
                 let sources=create_material_bind_group(&r.device,&r.material_layout,&[&current.view;9],&r.dab_buffer,&r.empty_scalar_view,&background.view,wgpu::BindingResource::Buffer(r.dry_records.binding()));

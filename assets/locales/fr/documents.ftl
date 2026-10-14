@@ -110,6 +110,7 @@ documents-error-device-file = Choisir un fichier sur cet appareil
 documents-error-filename = Choisir un nom de fichier
 documents-error-project-writer = Échec de l’écriture du projet
 documents-error-no-drawing = Aucun dessin à ouvrir
+documents-error-resolution = Choisir une résolution de 1 à { $maximum } ppi
 documents-open-photos-filter = Dessins et photos
 
 documents-delivery-clipboard-unavailable = Le collage d’images n’est pas disponible dans ce navigateur. Utiliser Importer une image comme calque.

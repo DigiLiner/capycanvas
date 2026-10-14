@@ -110,6 +110,7 @@ documents-error-device-file = Bu cihazdan bir dosya seçin
 documents-error-filename = Bir dosya adı seçin
 documents-error-project-writer = Proje yazıcısı başarısız oldu
 documents-error-no-drawing = Açılacak çizim yok
+documents-error-resolution = 1 ile { $maximum } ppi arasında bir çözünürlük seçin
 documents-open-photos-filter = Çizimler ve fotoğraflar
 
 documents-delivery-clipboard-unavailable = Bu tarayıcıda görüntü yapıştırılamıyor. Görüntüyü katman olarak içe aktarın.

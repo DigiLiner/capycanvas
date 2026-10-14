@@ -20,7 +20,7 @@ captured for a stroke. It includes the tip, spacing, sensor mappings, color and
 rendering behavior. Built-in definitions live in
 [`presets.rs`](../../crates/layer-core/src/presets.rs); shared tool controls expose
 the editable settings.
-Preset constructors share liquify settings, painter mappings and canvas grain.
+Preset constructors share liquify settings, painter mappings and paper grain. Grain brushes read the drawing's [Paper](../development/paper.md); a preset sets only how strongly it catches the tooth.
 
 Strength is the primary application control: pigment transfer for drawing,
 removal for erasing, mixing for smudging and deformation for Liquify. Painting

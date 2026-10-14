@@ -109,6 +109,7 @@ documents-error-device-file = 이 기기의 파일을 선택하세요.
 documents-error-filename = 파일 이름을 지정하세요.
 documents-error-project-writer = 프로젝트를 저장하지 못했습니다.
 documents-error-no-drawing = 열 그림이 없습니다.
+documents-error-resolution = 해상도를 1~{ $maximum } ppi로 설정하세요.
 documents-open-photos-filter = 그림 및 사진
 
 documents-photo-name = 사진

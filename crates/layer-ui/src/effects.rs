@@ -4,9 +4,13 @@ use super::*;
 pub(crate) mod curves;
 #[path = "effects/gradient.rs"]
 mod gradient;
+#[path = "effects/paper.rs"]
+mod paper;
 pub use gradient::{GradientDestination,GradientEdit,GradientControls};
+pub use paper::{PaperPickerView,PaperTileView};
 pub use curves::{CurveAxis,CurveAxisView,CurveControls,CurveCoordinateControl,CurveDomain};
 pub(super) use curves::PropertyEditorState;
+use crate::paper_library::PaperRequest;
 use layer_core::{Edit, EffectInstance, EffectParameterKind, EffectValue, ResourceLabel, authored::{ EffectApplication, EffectBaseline, EffectHandle, Occurrence, OccurrenceContent, OccurrenceHandle, RecordChange, SceneScope, SelectionHandle, SourceTarget}};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -305,6 +309,10 @@ pub enum EffectAction {
         remove: bool,
     },
     Gradient {target:GradientDestination,edit:GradientEdit},
+    ImportPaper { layer: u64 },
+    AddPaper { layer: u64 },
+    RenamePaper { id: String, name: String },
+    DeletePaper { id: String },
 }
 impl EffectAction {
     pub(super) fn property_owner(&self)->Option<(u64,u64)> {
@@ -451,7 +459,7 @@ pub(super) fn property_disclosure(doc: &Document, view: &LayerPropertiesView, l:
         l.text(MessageId::RESOURCES_LAYER_TYPE_MASK).to_string()
     } else { match layer.map(|layer| layer.kind()) {
         Some(LayerKind::Group) => l.text(MessageId::RESOURCES_LAYER_GROUP_PROPERTIES).to_string(),
-        Some(LayerKind::Effect | LayerKind::Selection) => view.layer_type.clone(),
+        Some(LayerKind::Effect | LayerKind::Selection) => if view.layer_type.is_empty() { view.name.clone() } else { view.layer_type.clone() },
         Some(LayerKind::Object) => l.text(MessageId::RESOURCES_LAYER_TYPE_IMAGE).to_string(),
         _ => l.text(MessageId::RESOURCES_LAYER_PROPERTIES).to_string(),
     }};
@@ -509,6 +517,7 @@ pub struct PropertyPageView { pub id:String, pub label:String }
 pub struct PropertyControl {
     pub curve:Option<CurveControls>,
     pub gradient:Option<GradientControls>,
+    pub paper:Option<PaperPickerView>,
     pub page:Option<String>,
     pub plot: Vec<[f32; 2]>,
     pub key: String,
@@ -525,7 +534,7 @@ pub struct PropertyControl {
 impl PropertyControl {
     pub(super) fn new(key: &str, label: &str, kind: PropertyKind, value: EffectValue, default: EffectValue) -> Self {
         Self {
-            curve:None,gradient:None,
+            curve:None,gradient:None,paper:None,
             page:None,
             plot: Vec::new(),
             key: key.into(),
@@ -604,7 +613,7 @@ fn control(layer: u64, p: &layer_core::EffectParameter, value: EffectValue, l: &
         EffectParameterKind::Color => PropertyKind::Color {opaque:p.opaque},
         EffectParameterKind::Curve => PropertyKind::Curve,
         EffectParameterKind::Gradient => PropertyKind::Gradient,
-        EffectParameterKind::Lut3d => return None,
+        EffectParameterKind::Lut3d | EffectParameterKind::Texture => return None,
     };
     let plot = if let EffectValue::Curve(points) = &value {
         (0..=128)
@@ -641,7 +650,7 @@ pub(super) fn effect_edit(document: &Document, occurrence: OccurrenceHandle, dra
     let (handle, original) = effect_application(document, occurrence).ok_or("Missing adjustment")?;
     let mut application = original.clone();
     if application.program != draft.program {
-        application = EffectApplication::new(draft.program, draft.values, document.composition().size);
+        application = EffectApplication::in_composition(draft.program, draft.values, document.composition());
     } else {
         application.values = draft.values;
     }
@@ -661,7 +670,7 @@ const LAYER_COLOR_MODES: [layer_core::color::LayerColorMode; 3] = [
     layer_core::color::LayerColorMode::Grayscale,
     layer_core::color::LayerColorMode::TwoTone,
 ];
-pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBehavior, l: &Localizer) -> LayerPropertiesView {
+pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBehavior, papers: &crate::paper_library::PaperLibrary, l: &Localizer) -> LayerPropertiesView {
     let scene = doc.scene();
     let Some((handle, layer)) = doc.working.occurrence.and_then(|handle| scene.occurrence(handle).map(|layer| (handle, layer))) else {
         return LayerPropertiesView::default();
@@ -679,7 +688,8 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
         args.set("type", layer_type.as_ref());
         l.format(MessageId::RESOURCES_PROPERTIES_LAYER_TITLE, &args)
     } else { layer.name.to_string() };
-    let header = LayerPropertiesView { title, name: layer.name.to_string(), layer_type: layer_type.to_string(), ..Default::default() };
+    let layer_type = if layer_type.as_ref() == layer.name.as_ref() { String::new() } else { layer_type.to_string() };
+    let header = LayerPropertiesView { title, name: layer.name.to_string(), layer_type, ..Default::default() };
     let token = occurrence_token(handle);
     if scene.effect(handle).is_some() && property_effect(doc, handle).is_none() {
         return LayerPropertiesView {layer: Some(token), enabled: !doc.is_locked(handle), ..header};
@@ -688,6 +698,7 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
         let properties = doc.working.selection_overlays.properties.get(&selection).cloned().unwrap_or_default();
         let mut view = super::selection_properties::properties(token, &header.name, &properties, painting, !doc.is_locked(handle), l);
         view.title = header.title;
+        view.layer_type = header.layer_type;
         return view;
     }
     let mut controls = Vec::new();
@@ -704,6 +715,9 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
                 .filter(|(p,_)|p.visible_when.as_ref().is_none_or(|condition|effect.value(&condition.key)==Some(&condition.value)))
                 .filter_map(|(p, v)| control(token, p, v.clone(), l)),
         );
+        if layer_core::paper::is_paper(program) {
+            controls.extend(paper::controls(token, application, doc, papers, l));
+        }
         if effect.program.id.as_ref() == "curves" {
             if let (Some(space), Some(EffectValue::Number(stops))) = (effect.choice("domain"), effect.value("hdr_stops")) {
                 curve_white = layer_core::hdr_curve_white(space, *stops);
@@ -861,6 +875,7 @@ impl PropertyBaseline {
         }
     }
 }
+pub(super) use paper::PaperPreview;
 pub(super) struct EffectGesture {
     original: PropertyBaseline,
     key: String,
@@ -868,6 +883,12 @@ pub(super) struct EffectGesture {
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
+    pub(super) fn sync_paper_preview(&mut self, now_ns: u64) {
+        let dragging = self.effect_gesture.as_ref().filter(|gesture| gesture.key == paper::SCALE).map(|gesture| gesture.original.occurrence());
+        if let Some(overlay) = self.paper_preview.update(self.engine.document(), dragging, now_ns) {
+            self.engine.backend_mut().set_paper_overlay(overlay);
+        }
+    }
     pub(super) fn cancel_effect_gesture(&mut self) -> Result<bool, String> {
         if let Some(original)=self.layer_interaction.gradient_before.take() {self.layer_interaction.gradient=original;self.refresh_document();return Ok(true);}
         if let Some((_, old)) = self.selection_masks.quick_property_gesture.take() {
@@ -998,6 +1019,62 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.property_editor.accepts(layer,epoch) && self.state.layer_properties.layer==Some(layer)
             && self.state.layer_properties.controls.iter().any(|control|control.key==key && matches!(control.kind,PropertyKind::Curve))
     }
+    pub fn new_drawing_paper(&self) -> layer_core::TextureSource {
+        self.state.settings.new_document.paper.as_deref().and_then(|id| self.papers.image(id))
+            .map_or_else(|| self.state.settings.new_document.paper(), |image| layer_core::TextureSource::Image(image.clone()))
+    }
+    fn paper_layer(&self, layer: u64) -> Result<(OccurrenceHandle, EffectApplication), String> {
+        let handle = occurrence_handle(layer)?;
+        let document = self.engine.document();
+        let application = document.scene().effect_application(handle).filter(|application| layer_core::paper::is_paper(&application.program))
+            .ok_or_else(|| self.state.localization.text(MessageId::RESOURCES_ERROR_INVALID_LAYER_PROPERTY).to_string())?;
+        if document.is_locked(handle) { return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string()); }
+        Ok((handle, application.clone()))
+    }
+    fn apply_paper_texture(&mut self, layer: u64, texture: layer_core::TextureSource) -> Result<(), String> {
+        let (handle, application) = self.paper_layer(layer)?;
+        let edited = paper::with_texture(&application, texture)?;
+        if edited == application { return Ok(()); }
+        self.state.settings.new_document.paper = paper::choice(&edited, &self.papers);
+        let document = self.engine.document();
+        let effect = document.scene().effect_handle(handle).ok_or("Missing adjustment")?;
+        self.paper_preview.show(handle);
+        self.layer_edit(Edit::Effect(RecordChange::replace(&document.artwork.effects, effect, Some(edited)).map_err(str::to_string)?))
+    }
+    pub fn paper_image(&self, layer: u64) -> Option<Arc<layer_core::color::source::SourceImage>> {
+        let (_, application) = self.paper_layer(layer).ok()?;
+        application.values.iter().find_map(|value| match value {
+            EffectValue::Texture(layer_core::TextureSource::Image(image)) => Some(image.storage().clone()),
+            _ => None,
+        })
+    }
+    pub fn set_paper_library(&mut self, entries: Vec<crate::paper_library::PaperEntry>) -> Result<UiChange, String> {
+        let remembered = self.state.settings.new_document.paper.clone()
+            .filter(|id| entries.iter().any(|entry| entry.id == *id) && self.papers.image(id).is_none());
+        self.papers.set_entries(entries);
+        if let Some(id) = remembered {
+            self.request(HostRequestKind::Paper { request: PaperRequest::Load { id } })?;
+        }
+        self.refresh_document();
+        Ok(self.changed(regions::DOCUMENT | regions::HOST, false))
+    }
+    pub fn paper_loaded(&mut self, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
+        let image = self.papers.keep(id, image).ok_or("Invalid paper")?;
+        if let Some(pending) = self.papers.pending.take_if(|pending| pending.id == id) && pending.epoch == self.state.document_file.epoch {
+            self.require_idle()?;
+            self.apply_paper_texture(pending.layer, layer_core::TextureSource::Image(image))?;
+        }
+        self.refresh_document();
+        Ok(self.changed(regions::DOCUMENT | regions::SETTINGS, true))
+    }
+    pub fn paper_imported(&mut self, layer: u64, entries: Vec<crate::paper_library::PaperEntry>, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
+        self.papers.set_entries(entries);
+        let image = self.papers.keep(id, image).ok_or("Invalid paper")?;
+        self.require_idle()?;
+        self.apply_paper_texture(layer, layer_core::TextureSource::Image(image))?;
+        self.refresh_document();
+        Ok(self.changed(regions::DOCUMENT | regions::SETTINGS, true))
+    }
     fn insert_effect(&mut self, effect: Arc<str>, destination: Option<(OccurrenceHandle, u64)>) -> Result<(), String> {
         if let Some((owner, epoch)) = destination {
             if epoch != self.state.document_file.epoch { return Ok(()); }
@@ -1029,12 +1106,14 @@ impl<R: CanvasRenderer> UiSession<R> {
         let depth = doc.composition().color.depth;
         let mut instance = EffectInstance::new(catalog.program());
         if depth.is_float() && instance.program.id.as_ref() == "curves" { instance.set_choice("domain", "log_hdr").map_err(str::to_string)?; }
-        if generator && let Some(color) = instance.program.parameters.iter().find(|parameter| parameter.kind == EffectParameterKind::Color) {
+        if layer_core::paper::is_paper(&instance.program) {
+            instance.set(paper::TEXTURE, EffectValue::Texture(self.new_drawing_paper())).map_err(str::to_string)?;
+        } else if generator && let Some(color) = instance.program.parameters.iter().find(|parameter| parameter.kind == EffectParameterKind::Color) {
             instance.set(&color.key.clone(), EffectValue::Color(self.state.colors.definition())).map_err(str::to_string)?;
         }
         let mut edits = Vec::new();
         let mut operations = Vec::new();
-        let application = EffectApplication::new(instance.program, instance.values, doc.composition().size);
+        let application = EffectApplication::in_composition(instance.program, instance.values, doc.composition());
         let effect_handle = if replacing {
             let handle = scene.effect_handle(current.unwrap()).ok_or("Missing adjustment")?;
             edits.extend(doc.effect_edits(vec![RecordChange::replace(&doc.artwork.effects, handle, Some(application)).map_err(str::to_string)?]).map_err(|error|error.to_string())?);
@@ -1109,6 +1188,20 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let Some(layer_core::EffectAuxiliary::Lut3d {resource,..}) = &effect.program.auxiliary else {return Ok(());};
                 return self.request_document(DocumentRequest::ImportLookup {target: LookupTarget {document:self.engine.document().artwork.id,activation:self.state.document_file.epoch,layer,epoch,key:resource.to_string()}});
             }
+            EffectAction::ImportPaper { layer } => {
+                self.paper_layer(layer)?;
+                return self.request(HostRequestKind::Paper { request: PaperRequest::Import { layer } });
+            }
+            EffectAction::AddPaper { layer } => {
+                self.paper_layer(layer)?;
+                let name = self.state.document_file.title().to_string();
+                return self.request(HostRequestKind::Paper { request: PaperRequest::Add { layer, name } });
+            }
+            EffectAction::RenamePaper { id, name } => {
+                let name = crate::paper_library::paper_name(&name).ok_or_else(|| self.state.localization.text(MessageId::RESOURCES_PAPER_NAME_REQUIRED).to_string())?;
+                return self.request(HostRequestKind::Paper { request: PaperRequest::Rename { id, name } });
+            }
+            EffectAction::DeletePaper { id } => return self.request(HostRequestKind::Paper { request: PaperRequest::Delete { id } }),
             EffectAction::TargetCurve {layer,epoch}=>return self.start_targeted_curve(layer,epoch),
             EffectAction::AutoLevels {layer,epoch}=>return self.start_auto_levels(layer,epoch),
             EffectAction::Calibrate { layer, epoch, role } => return self.start_calibration(layer, epoch, role),
@@ -1206,7 +1299,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             EffectAction::UseCurrentColor { layer, ref key }
             | EffectAction::Number { layer, ref key, .. }
             | EffectAction::Reset { layer, ref key } => {
-                let view = properties(self.engine.document(), self.state.settings.selection_painting, &self.state.localization);
+                let view = properties(self.engine.document(), self.state.settings.selection_painting, &self.papers, &self.state.localization);
                 if view.layer != Some(layer) {
                     return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_SELECT_PROPERTY_LAYER).to_string());
                 }
@@ -1301,6 +1394,24 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if document.is_locked(handle) {
                     return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string());
                 }
+                if let Some((effect, application)) = effect_application(document, handle)
+                    && let Some(edited) = paper::edited(application, document, &self.papers, &key, &value, &self.state.localization) {
+                    let edited = match edited? {
+                        paper::PaperEdit::Applied(edited) => edited,
+                        paper::PaperEdit::Load(paper) => {
+                            self.papers.pending = Some(crate::paper_library::PendingPaper { id: paper.clone(), layer: id, epoch: self.state.document_file.epoch });
+                            return self.request(HostRequestKind::Paper { request: PaperRequest::Load { id: paper } });
+                        }
+                    };
+                    if edited == *application { return Ok(()); }
+                    let chosen = paper::choice(&edited, &self.papers);
+                    if self.effect_gesture.is_none() { self.paper_preview.show(handle); }
+                    let edit = Edit::Effect(RecordChange::replace(&document.artwork.effects, effect, Some(edited)).map_err(str::to_string)?);
+                    if self.effect_gesture.is_some() { self.engine.preview_edit(edit).map_err(error)?; }
+                    else { self.layer_edit(edit)?; }
+                    if key == paper::TEXTURE { self.state.settings.new_document.paper = chosen; }
+                    return Ok(());
+                }
                 let original = document.scene().effect(handle).ok_or("Missing adjustment")?;
                 let mut draft = effect_draft(document, handle)?;
                 draft.set(&key, value).map_err(str::to_string)?;
@@ -1323,14 +1434,14 @@ mod resource_tests {
     #[test]
     fn properties_titles_identify_nonpaint_layers_without_repeating_matching_names() {
         for (language, fill_type, group_type, selection_type, paper_title) in [
-            (UiLanguage::English, "Solid Color", "Group", "Selection", "Paper (Solid Color)"),
-            (UiLanguage::Japanese, "単色", "グループ", "選択範囲", "Paper（単色）"),
+            (UiLanguage::English, "Paper", "Group", "Selection", "Paper"),
+            (UiLanguage::Japanese, "用紙", "グループ", "選択範囲", "Paper（用紙）"),
         ] {
             let l = Localizer::shared(language);
             let mut doc = Document::new(layer_core::authored::PortableId::random(), 32, 32, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
             let fill = occurrence_handle(2).unwrap();
             doc.apply(doc.select_occurrence_edit(fill).unwrap()).unwrap();
-            assert_eq!(properties(&doc, Default::default(), &l).title, paper_title);
+            assert_eq!(properties(&doc, Default::default(), &Default::default(), &l).title, paper_title);
             for (kind, name, expected) in [
                 (LayerKind::Paint, "Paper", "Paper"),
                 (LayerKind::Object, "Photographs", "Photographs"),
@@ -1357,16 +1468,17 @@ mod resource_tests {
                     }
                 };
                 *selected.artwork.occurrences.get_mut(fill).unwrap() = layer_core::authored::Occurrence::new(content, name);
-                let view = properties(&selected, Default::default(), &l);
+                let view = properties(&selected, Default::default(), &Default::default(), &l);
                 assert_eq!(view.title, expected);
                 assert_eq!(view.name, name);
-                assert_eq!(view.layer_type.as_str(), match kind {
+                let layer_type = match kind {
                     LayerKind::Paint => if language == UiLanguage::English { "Paint layer" } else { "ペイントレイヤー" },
                     LayerKind::Object => "",
                     LayerKind::Effect => fill_type,
                     LayerKind::Group => group_type,
                     LayerKind::Selection => selection_type,
-                });
+                };
+                assert_eq!(view.layer_type.as_str(), if layer_type == name { "" } else { layer_type }, "the type line never repeats the name");
             }
         }
     }

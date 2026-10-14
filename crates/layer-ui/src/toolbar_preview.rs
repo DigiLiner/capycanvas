@@ -243,16 +243,23 @@ fn stamp_alpha<S:serde::Serializer>(alpha:&[u8],serializer:S)->Result<S::Ok,S::E
 #[derive(Default)]
 pub(crate) struct StampRequests {
     next: u64,
-    flight: Option<(u64, ToolbarContext, BrushSnapshot, f32)>,
-    ready: Option<(ToolbarContext, BrushSnapshot, BrushStamp)>,
+    flight: Option<(u64, ToolbarContext, PreviewKey, f32)>,
+    ready: Option<(ToolbarContext, PreviewKey, BrushStamp)>,
 }
 impl StampRequests {
     pub(crate) fn invalidate(&mut self) { self.flight=None; self.ready=None; }
 }
+type PreviewKey = (BrushSnapshot, Option<std::sync::Arc<layer_core::paper::PaperSurface>>);
 
 impl<R: CanvasRenderer> UiSession<R> {
-    pub(crate) fn stamp_request(&self) -> Result<(BrushStampRequest, f32), String> {
+    fn preview_key(&self) -> PreviewKey {
         let brush = self.engine().configured_brush().clone();
+        let document = self.engine().document();
+        let paper = brush.grain.is_some().then(|| std::sync::Arc::new(document.paper(document.working.target)));
+        (brush, paper)
+    }
+    pub(crate) fn stamp_request(&self) -> Result<(BrushStampRequest, f32), String> {
+        let (brush, paper) = self.preview_key();
         let point = StrokePoint { position: Point {x:0.,y:0.}, pressure: 1.,
             tilt: [std::f32::consts::FRAC_PI_4, 0.], twist: 0., elapsed_micros: 0 };
         let target = self.engine().document().working.target.unwrap_or(layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::INVALID));
@@ -278,8 +285,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             || matches!(brush.execution, layer_core::BrushExecution::Smudge|layer_core::BrushExecution::Liquify)
             || crate::tools::is_retouching(self.state().brush.tool);
         let shape_strength = shape_only.then(|| ToolbarNumericBinding::BrushStrength.field(self.state()).map_or(1., |f| f.value));
-        Ok((BrushStampRequest { style: DabStyle::for_brush(&brush, StrokeTool::Brush), dabs, bounds, shape_strength },
-            2.*radius/brush.diameter.max(0.01)))
+        let mut style = DabStyle::for_brush(&brush, StrokeTool::Brush);
+        style.paper = paper.map(|surface| layer_core::paper::PaperBinding { surface, target_offset: [0; 2] });
+        Ok((BrushStampRequest { style, dabs, bounds, shape_strength }, 2.*radius/brush.diameter.max(0.01)))
     }
 
     pub fn toolbar_stamp(&mut self, context: ToolbarContext, known_request: Option<u64>) -> Result<Option<BrushStamp>, String> {
@@ -288,25 +296,25 @@ impl<R: CanvasRenderer> UiSession<R> {
         while let Some(result) = self.renderer_mut().take_brush_stamp() {
             let image = result.map_err(|e| { self.brush_stamps.flight=None; e.to_string() })?;
             if self.brush_stamps.flight.as_ref().is_some_and(|(id,_,_,_)|*id==image.request_id) {
-                let (id,owner,brush,extent)=self.brush_stamps.flight.take().unwrap();
+                let (id,owner,key,extent)=self.brush_stamps.flight.take().unwrap();
                 if owner == context {
                     let metadata = BrushStamp { request_id:id, pending:false,
                         size:image.width, extent, alpha:Vec::new() };
-                    self.brush_stamps.ready = Some((owner, brush, metadata.clone()));
+                    self.brush_stamps.ready = Some((owner, key, metadata.clone()));
                     delivered = Some(BrushStamp { alpha:image.bytes, ..metadata });
                 }
             }
         }
-        let brush = self.engine().configured_brush().clone();
-        let current = self.brush_stamps.ready.as_ref().is_some_and(|(owner, b, stamp)|
-            *owner == context && *b == brush &&
+        let key = self.preview_key();
+        let current = self.brush_stamps.ready.as_ref().is_some_and(|(owner, k, stamp)|
+            *owner == context && *k == key &&
             (known_request == Some(stamp.request_id) || delivered.as_ref().is_some_and(|d| d.request_id == stamp.request_id)));
         if self.brush_stamps.flight.is_none() && !current {
             let (request, extent) = self.stamp_request()?;
             let id = self.brush_stamps.next.wrapping_add(1);
             if self.renderer_mut().request_brush_stamp(id, &request).map_err(|e|e.to_string())? {
                 self.brush_stamps.next = id;
-                self.brush_stamps.flight = Some((id, context, brush, extent));
+                self.brush_stamps.flight = Some((id, context, key, extent));
             }
         }
         Ok(delivered.or_else(|| self.brush_stamps.ready.as_ref()

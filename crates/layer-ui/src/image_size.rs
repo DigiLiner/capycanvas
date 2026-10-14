@@ -8,8 +8,7 @@ use std::sync::Arc;
 use layer_core::Edit;
 use layer_core::{CanvasGeometry, ImageResolution, Interpolation};
 
-/// The resolution shown for a document that declares none.
-const DEFAULT_PPI: f64 = 72.;
+const DEFAULT_PPI: f64 = layer_core::paper::DEFAULT_PAPER_PPI;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -186,7 +186,7 @@ fn fill_color_lock_history_and_blocked_cursor_share_document_policy() {
     let controls = s.state.layer_tools.controls;
     assert!(controls.edit_lock);
     assert!(controls.opacity && controls.blend && controls.mask && !controls.alpha_lock);
-    assert_eq!(s.state.layer_properties.controls.len(), 1);
+    assert_eq!(s.state.layer_properties.controls.iter().map(|control| control.key.as_str()).collect::<Vec<_>>(), ["color", "texture", "scale"]);
     let revision = s.state.layers.iter().find(|layer| layer.id == 2).unwrap().paint_revision;
     s.dispatch(UiAction::SetColor { rgba: [0.08, 0.1, 0.15, 1.] }).unwrap();
     let color = s.state.colors.definition();
@@ -218,7 +218,7 @@ fn layer_thumbnails_and_type_icons_are_independent_on_every_host() {
         assert!(paint.content_icon.is_none());
         let paper = s.state.layers.iter().find(|l| l.id == 2).unwrap();
         assert!(paper.has_thumbnail);
-        assert_eq!(paper.content_icon.as_deref(), Some("layer-fill-symbolic"));
+        assert_eq!(paper.content_icon.as_deref(), Some("layer-paper-symbolic"));
         insert_effect(&mut s, "gradient_fill");
         let fill = s.state.layer_tools.editing_layer.as_ref().unwrap();
         assert!(fill.has_thumbnail);

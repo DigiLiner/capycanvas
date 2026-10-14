@@ -132,7 +132,7 @@ fn saved_artwork_retains_authored_values_resources_and_current_builtin_controls(
 fn saved_numeric_bounds_remain_accepted_independently_of_slider_ranges() {
     let contracts:Value=serde_json::from_str(include_str!("fixtures/builtin-contracts.json")).unwrap();
     for (id,contract) in contracts.as_object().unwrap() {
-        let builtin=crate::bundled_effect_catalog().get(id).unwrap();
+        let builtin=crate::bundled_effect_catalog().get(id).or_else(||crate::bundled_texture_catalog().get(id)).unwrap();
         for (key,saved) in contract["parameters"].as_object().unwrap() {
             if saved["kind"]["kind"]!="number" {continue;}
             let parameter=builtin.program.parameters.iter().find(|p|p.key.as_ref()==key).unwrap();
@@ -192,4 +192,28 @@ fn saved_reduced_color_layers_keep_modes_channel_counts_and_samples() {
         assert_eq!(a.raster.wait_data().unwrap().tiles.keys().collect::<Vec<_>>(), b.raster.wait_data().unwrap().tiles.keys().collect::<Vec<_>>());
         for (key, tile) in &a.raster.wait_data().unwrap().tiles { assert_eq!(tile.wait_backing().unwrap().decode().unwrap(), b.raster.wait_data().unwrap().tiles[key].wait_backing().unwrap().decode().unwrap()); }
     }
+}
+
+#[test]
+fn saved_papers_keep_their_textures_scale_and_image_samples() {
+    let check = |artwork: &Artwork| {
+        let papers: Vec<_> = artwork.effects.iter().filter(|(_, _, e)| crate::paper::is_paper(&e.program)).map(|(_, _, e)| e.clone()).collect();
+        assert_eq!(papers.len(), 2);
+        let texture = |e: &crate::EffectApplication| e.values.iter().find_map(|v| match v { EffectValue::Texture(t) => Some(t.clone()), _ => None }).unwrap();
+        let rough = papers.iter().find(|e| matches!(texture(e), crate::TextureSource::Program(_))).unwrap();
+        assert_eq!(texture(rough), crate::paper::built_in_paper("rough").unwrap().texture);
+        assert!((crate::paper::scale(&rough.spatial.unwrap(), [300.; 2]) - 1.5).abs() < 1e-12);
+        let toned = papers.iter().find(|e| matches!(texture(e), crate::TextureSource::Image(_))).unwrap();
+        let crate::TextureSource::Image(image) = texture(toned) else { unreachable!() };
+        assert_eq!(image.id(), PortableId::from_bytes([9; 16]));
+        assert_eq!((image.extent, image.resolution), ([5, 3], Some(crate::ImageResolution::ppi(600))));
+        let mut rows = image.rows();
+        let mut row = vec![0; 5];
+        rows.read(2, &mut row).unwrap();
+        assert_eq!(row, [2, 52, 102, 152, 202]);
+        assert!((crate::paper::scale(&toned.spatial.unwrap(), [300.; 2]) - 1.).abs() < 1e-12);
+    };
+    let artwork = editable(include_bytes!("fixtures/papers.capy").to_vec());
+    check(&artwork);
+    check(&editable(serialize(&prepare(&artwork, false))));
 }

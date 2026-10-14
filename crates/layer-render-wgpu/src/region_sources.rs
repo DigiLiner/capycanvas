@@ -734,6 +734,7 @@ mod tests {
         document.artwork.compositions.get_mut(document.artwork.root).unwrap().blend = BlendSpace::Linear;
         let fill = document.scene().children(None)[1];
         let color = layer_core::color::RgbColor::from_linear(layer_core::color::RgbSpace::Srgb, [0.5,0.25,0.75,0.5]).unwrap();
+        crate::tests::native_effects::solid_color(&mut document, fill);
         let mut effect = effect_draft(&document, fill);
         effect.set("color", EffectValue::Color(color)).unwrap();
         set_effect(&mut document, fill, effect);

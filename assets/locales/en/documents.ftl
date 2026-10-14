@@ -110,6 +110,7 @@ documents-error-device-file = Choose a file on this device
 documents-error-filename = Choose a filename
 documents-error-project-writer = Project writer failed
 documents-error-no-drawing = No drawing to open
+documents-error-resolution = Choose a resolution from 1 to { $maximum } ppi
 documents-open-photos-filter = Drawings and photos
 
 documents-delivery-clipboard-unavailable = Image paste is unavailable in this browser. Use Import Image as Layer.

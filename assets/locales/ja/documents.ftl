@@ -109,6 +109,7 @@ documents-error-device-file = このデバイス上のファイルを選んで�
 documents-error-filename = ファイル名を指定してください。
 documents-error-project-writer = 作品の保存処理に失敗しました。
 documents-error-no-drawing = 開く作品がありません。
+documents-error-resolution = 解像度は1から{ $maximum } ppiの間で指定してください。
 documents-open-photos-filter = 作品と写真
 
 documents-photo-name = 写真
