@@ -62,6 +62,10 @@ and how parity is checked.
 - [Illustration filters proposal](illustration-filters-proposal.md) defines the
   filter gaps, artist controls, researched GPU approaches, package extensions and
   coordination with the object-layer design.
+- [Paper](paper.md) defines the Paper layer, the drawing resolution model, how
+  brushes read paper, the paper library, saved data and the order of work.
+- [Texture programs](texture-programs.md) defines the WGSL language for paper
+  surfaces, its bake and programs for ten reference surfaces.
 - [Photo editing roadmap](photo-editing-roadmap.md) collects deferred inspection,
   presets, export, masking, retouching and host qualification work. Current
   measurements and remaining targets belong in the
