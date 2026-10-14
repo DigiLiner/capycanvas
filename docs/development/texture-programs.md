@@ -183,7 +183,7 @@ program.
 
 ## The bake
 
-1. **Size.** The Paper's mapping gives drawing pixels per paper millimeter on
+1. **Tile size.** The Paper's mapping gives drawing pixels per paper millimeter on
    each axis ([resolution model](paper.md#resolution-and-scale)). For each
    axis, `texels = round(period × pixels per millimeter)`; an imported image
    uses its physical size as the period. The period is stretched to that whole
@@ -241,7 +241,7 @@ An imported paper is a gray `capy.image/1` with a physical resolution
 A program is a continuous surface, so its offset never discards detail. An
 image near 1:1 would lose exact samples to the full offset, which is why the
 offset grows only as the image shrinks. An image at its own resolution in a
-drawing of the same paper resolution, at Size 100%, is copied exactly; that
+drawing of the same paper resolution, at Scale 100%, is copied exactly; that
 includes an image without a resolution in a 300 ppi drawing.
 
 The probe and normalization are the same as for programs. An imported image
@@ -260,7 +260,7 @@ has no measured relief, so it uses the 100 µm reference.
   offset and requires equal heights within f32 tolerance for every preset.
 - **Statistics:** a fixed-value test per preset checks relief, mean and skew
   against recorded tolerances.
-- **Moiré:** a Size sweep for laid, honeycomb and canvas requires blurred
+- **Moiré:** a Scale sweep for laid, honeycomb and canvas requires blurred
   coverage to stay flat.
 - **Cost:** bake time per preset at 1024², 2048² and 4096² on each tier's
   reference hardware, recorded in the [performance targets](../PERFORMANCE_TARGETS.md).
@@ -345,12 +345,12 @@ slightly stretched fine tooth, partly aligned fibers and a calender plateau.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
-| `tooth` | mm | 0.1–1 | 0.3 |
-| `finish` | % | 0–100 | 20 |
+| `tooth` | mm | 0.1–1 | 0.35 |
+| `finish` | % | 0–100 | 35 |
 | `seed` | count | 0–16777215 | 1 |
 
-Presets: Bristol vellum (`tooth` 0.3, `finish` 20), Bristol smooth (0.2, 90),
-Cartridge (0.35, 35). Period 64 mm.
+Presets: Drawing paper (`tooth` 0.35, `finish` 35), Bristol (0.2, 90). Period
+64 mm.
 
 ```wgsl
 fn capy_drawing(p: vec2f, b: u32) -> f32 {
@@ -410,7 +410,7 @@ between them.
 | `pitch` | mm | 0.5–3 | 1.1 |
 | `seed` | count | 0–16777215 | 1 |
 
-Preset: Pastel honeycomb. Period 64 mm.
+Preset: Pastel paper. Period 64 mm.
 
 ```wgsl
 fn capy_honeycomb(p: vec2f, b: u32) -> f32 {
@@ -480,7 +480,7 @@ coordinates, which bends them along the warp field.
 | `strands` | % | 0–100 | 0 |
 | `seed` | count | 0–16777215 | 1 |
 
-Presets: Kozo (`fiber` 10, `density` 0.4, `strands` 0), Unryu (10, 0.3, 100).
+Presets: Washi (`fiber` 10, `density` 0.4, `strands` 0), Unryu (10, 0.3, 100).
 Period 175 mm.
 
 ```wgsl
@@ -511,7 +511,7 @@ drapes pulp past its edge.
 | `size` | mm | 2–20 | 6 |
 | `seed` | count | 0–16777215 | 1 |
 
-Preset: Handmade with petals. Period 175 mm.
+Preset: Handmade paper. Period 175 mm.
 
 ```wgsl
 fn capy_handmade(p: vec2f, b: u32) -> f32 {
@@ -557,8 +557,8 @@ first.
 | `priming` | % | 0–100 | 70 |
 | `seed` | count | 0–16777215 | 1 |
 
-Presets: Primed cotton (`threads` 13, `irregularity` 50, `priming` 70), Raw
-linen (16, 60, 0). Period 64 mm.
+Presets: Canvas (`threads` 13, `irregularity` 50, `priming` 70), Linen (20, 40,
+60). Period 64 mm.
 
 ```wgsl
 fn capy_canvas(p: vec2f, b: u32) -> f32 {
