@@ -59,6 +59,9 @@ and how parity is checked.
 
 ## Work in progress
 
+- [GPU capability fallbacks](gpu-fallbacks.md) gives every optional GPU feature
+  that is currently a hard requirement a fallback, and records which devices
+  lack each one.
 - [Illustration filters proposal](illustration-filters-proposal.md) defines the
   filter gaps, artist controls, researched GPU approaches, package extensions and
   coordination with the object-layer design.
