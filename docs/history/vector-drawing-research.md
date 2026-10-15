@@ -7,6 +7,10 @@ Research date: **2026-09-25**. Source baseline: **`796f7f5b`**.
 Research and proposed direction for future vector support. Recommendations and
 milestones below describe potential work, not implemented capabilities.
 
+The design in [Vector layers: research, code audit and design](vector-layers-research.md)
+settles where this record and its companion study disagreed, and audits both
+against later code.
+
 ## Recommendation in brief
 
 Build an **artist-oriented vector layer containing editable strokes and filled paths**, integrated with the existing raster layers. Make freehand drawing, intersection trimming, line-weight correction, enclosed-region fill, and ordinary path editing work together. Use **SVG for exchanging finished geometry**, and extend **`.capy` for preserving editable stroke input and brush definitions**.

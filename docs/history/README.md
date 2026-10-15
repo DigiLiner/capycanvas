@@ -20,7 +20,8 @@ Progress notes, validation reports and other work records are not committed
 - [PSD import and layer styles](psd-and-layer-styles-research.md): PhotoCraft reuse,
   compatibility gaps, style compositing and the proposed owner badge and Properties UI.
 - [Vector drawing and editing](vector-drawing-research.md).
-- [Vector layers: tool subset, stroke storage and new-artist journey](vector-layers-research.md),
+- [Vector layers: research, code audit and design](vector-layers-research.md):
+  the object model, file format, rendering and tools for vector lines and fills,
   with its [source reports](vector-layers-research).
 - [Layers: illustration workflows and panel design](layers-research.md).
 - [Professional illustration and manga gaps](illustration-manga-gap-audit.md):

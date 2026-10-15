@@ -1,13 +1,24 @@
-# Vector layers: tool subset, stroke storage and new-artist journey
+# Vector layers: research, code audit and design
 
 [Technical documentation](../README.md) · [Design and validation history](README.md)
 
-Research date: **2026-09-25**. Source baseline: **`796f7f5b`**.
+Research date: **2026-09-25**, source baseline **`796f7f5b`**. Code audit and
+design: **2026-10-14**, source baseline **`15f01f80e`**.
 
-Research and proposed direction for future vector support. Recommendations and
-phases below describe potential work, not implemented capabilities.
+This record holds the research behind vector layers and the design chosen after
+auditing the code. It describes intended work, not implemented capabilities.
 
-This report combines eight research streams. Their full write-ups, with every source URL, are in [`vector-layers-research/`](vector-layers-research):
+- **Evidence:** sections 2.1 and 3–5 are research from the first date.
+- **Design:** sections 1, 2.2 and 6–9 are the audited design. They replace the
+  earlier recommendation, which proposed three things:
+  - replaying recorded samples through the brush engine;
+  - a `VectorIndex` beside `SelectionIndex`;
+  - a raster cache persisted in the file.
+
+The first releases cover vector lines and fills as an illustrator expects them.
+Brush-textured paths come later and build on the same item model (section 7.9).
+
+The research combines eight streams. Their full write-ups, with every source URL, are in [`vector-layers-research/`](vector-layers-research):
 
 | # | Stream | File |
 |---|---|---|
@@ -18,85 +29,62 @@ This report combines eight research streams. Their full write-ups, with every so
 | 5 | Artist experience with vector drawing (tutorials, Reddit, CSP TIPS, pain points) | [05-artist-experience-drawing.md](vector-layers-research/05-artist-experience-drawing.md) |
 | 6 | Artist experience with path editors (curricula, beginner struggles, makers/Cricut) | [06-artist-experience-path-editors.md](vector-layers-research/06-artist-experience-path-editors.md) |
 | 7 | Rust ecosystem and algorithms (licenses, measured wasm sizes, complexity) | [07-rust-feasibility.md](vector-layers-research/07-rust-feasibility.md) |
-| 8 | Capy Canvas codebase assessment (file:line references at `796f7f5b`) | [08-codebase-assessment.md](vector-layers-research/08-codebase-assessment.md) |
+| 8 | Capy Canvas codebase assessment (file:line references at `796f7f5b`; superseded by section 6) | [08-codebase-assessment.md](vector-layers-research/08-codebase-assessment.md) |
 
 **Caveats on the evidence**
 - **Web-search cap:** every stream ran out of web searches (200 per session) partway through, and later facts came from direct page fetches, crate sources and cloned repos.
 - **Blocked Adobe and Inkscape manuals:** some behavior of Illustrator's and Affinity's tools, and some shortcuts, come from general product knowledge; the source files mark these **[K]** or "unverified".
 - **Reddit coverage:** Reddit threads came from an archive API, so we saw post text and some top comments, not full discussions.
 - **Counts and rankings:** the popularity figures and the wishlist are tallies across roughly 140 sources, not a survey.
+- **Code audit:** the 2026-10-14 audit read the code at `15f01f80e`; it built and ran nothing. File:line references in section 6 apply to that baseline.
 
-**Relationship to the other vector research record.** [Vector drawing and editing research](vector-drawing-research.md) is an independent study of the same question, from the same day and the same source baseline. The two agree on:
-- an editable centerline plus width profile as the stroke model, with immutable brush definitions embedded in the document;
-- SVG with filled outlines as the exchange format;
-- no usable cross-application standard for replaying brush strokes;
-- trim, width correction, fill and easy selection before Bézier handles;
-- the stale-documentation finding.
+**Relationship to the other vector research record.** [Vector drawing and editing research](vector-drawing-research.md) is an independent study from the same day and source baseline. The two records disagreed on four decisions. The design settles them:
 
-They differ on four decisions that should be settled together:
-
-| Decision | This record | [vector-drawing-research.md](vector-drawing-research.md) |
+| Decision | Settled as | Agrees with |
 |---|---|---|
-| Brushes on vector layers | Every dry and contact brush, including textured ones, replayed by the existing stamp engine from the start; only canvas-reading brushes excluded | Start with three geometric brushes (monoline, pressure ink, chisel); keep textured and wet painting on raster layers |
-| Authoritative stroke data | Recorded samples, until the user edits nodes; width edits stored as adjustments over the original pressure, so a brush swap re-derives width | Resolved width profile and fitted path; samples kept as optional provenance |
-| Fallback for readers without the brush engine | The saved layer pixels; outlines computed on demand (optional solid-stroke outlines later, open question 8) | A saved portable appearance per object (filled paths, or images where required) |
-| Text | Deferred to Phase 4 | Basic editable text before claiming logo and sticker coverage |
+| Brushes on vector layers | Solid round pens only at first (G-Pen and a new Monoline preset). Brush-textured paths are a later item kind; canvas-reading brushes never apply | [vector-drawing-research.md](vector-drawing-research.md) |
+| Authoritative stroke data | A fitted cubic Bézier path plus a width profile. Recorded samples are not stored | [vector-drawing-research.md](vector-drawing-research.md) |
+| Fallback for readers without vector support | Nothing extra in the file. Object-layer content keeps no saved raster cache; older readers preserve the package and show its preview | Neither; follows the [object-layer GA contract](object-layer-ga-design.md) |
+| Text | Deferred; lines and fills do not need it | This record |
 
 ---
 
 ## 1. Executive summary
 
-**Recommendation in one paragraph.** Build **one vector layer type** whose basic object is an **editable centerline stroke**:
-- recorded pen samples, or a Bézier curve;
-- a width profile;
-- a paint, which is either one of our existing brushes (rendered by the stamp engine) or a solid color.
+**Decision.** A Vector layer is an ordinary Object layer whose content is one
+**vector object**. The vector object owns an ordered list of **paths**:
+- Each path is a compound cubic Bézier path with one **style** (an optional fill and an optional stroke) and an optional **width profile**.
+- Shape tools, the Path tool and freehand pens all create this one item type.
+- The file stores the paths, never their outlines or rendered pixels.
 
-Add **closed shapes** as the second object type, for fills, merged shapes, imported SVG and cut files. Store the vectors as the source of truth and keep the layer's existing raster tiles as the render cache.
+**The design in brief**
+- **Layer model:** no layer per path, no container record and no second layer hierarchy.
+  - Rows, masks, effects, opacity, blend, clipping, clipboard and Rasterize Layer stay those of Object layers.
+  - Path selection inside the layer is working state.
+- **File:** one `capy.vector-object/1` record per layer holds a style table and references immutable binary `capy.vector-items/1` chunks of F64 geometry.
+  - Readers without vector support preserve such files; the test `unknown_drawable_children_preserve_the_complete_package` already shows the mechanism.
+- **Rendering:** one new GPU coverage kernel with exact-area antialiasing and nonzero or even-odd fill rules, fed by CPU curve flattening and stroke expansion.
+  - It also replaces the selection contour filler and the Figure distance-field shapes.
+  - Layers render at native density first; crisp zoom is the next renderer milestone.
+- **Tools:** the Clip Studio families Capy already uses.
+  - On vector layers, Figure (U) makes editable shapes and a new Path variant.
+  - Move (O) selects paths, and a new Edit Points tool (A) edits anchors and handles.
+  - G-Pen and Monoline draw vector lines, the Eraser cuts paths and Fill colors shapes.
+  - Raster-only tools refuse with the existing notice.
+- **Smoothing:** freehand vector lines use the preset's existing stabilizer, the global pressure curve, the pressure fall limiter and rulers unchanged. They are fitted to Béziers at pen-up.
+- **Foundation:**
+  - Brush paths, groups, live shapes, booleans, gradients and text are later item kinds or style additions.
+  - Each later addition is a new record version that older readers preserve.
 
-`.capy` files store **the original strokes, not filled outlines**:
-- the recorded samples;
-- a copy of each brush embedded in the file;
-- width edits as a separate adjustment that leaves raw pressure untouched;
-- an engine version per stroke.
-
-Outlines are computed only for export, merge/subtract and hit-testing (section 7.2).
-
-Ship the **drawing side first**, with the Clip Studio Paint (CSP) inking experience as the bar to meet. Then add path editing (curvature pen, node editing, merge/Shape Builder, outline stroke, offset), and join the two with conversion commands. Export SVG and PDF as filled outlines that any app can read. Embed our own stroke data under a private namespace so Capy Canvas can reopen and edit its own SVGs losslessly.
-
-**Main findings**
-
-1. **Vector means two different things to users.** Illustrators and comic artists mean *editable ink*. Designers, makers and print customers mean a *scalable file* (SVG/PDF for Cricut, laser cutters, logos). Most frustration comes from products that promise both and deliver one:
-   - Fresco has scalable-looking lines that can't be edited and no SVG export.
-   - CSP has great editable ink, but its SVG export drops line width.
-   - Krita has SVG shapes that don't use its brush engine.
-
-   No product we studied does both well. That is the opening for us.
-2. **The editable-centerline model (CSP, Concepts, OpenToonz, SAI, Blender Grease Pencil) is the one that can serve both worlds.** Change the brush, width or color after drawing, erase up to an intersection, and reshape strokes. From that model you can still *compute* outlines for export and for merge/subtract. The filled-outline model used by Fresco and Illustrator's Blob Brush can't go back the other way. Fresco users' most common complaint is that they can't edit strokes after drawing them.
-3. **The one feature artists name most is "erase up to intersection" / "vector trim".** It appeared in about 30 of roughly 140 sources and is the biggest "aha" in every popular inking tutorial. Next come editing strokes with the same brushes as raster (about 20), filling flats against the ink with no gaps (about 18), adjusting line width after drawing (about 16), and stabilization with hold-to-snap (about 14).
-4. **Path editors all converge on the same core set**:
-   - Select (V), node edit (A), pen (P) with click-for-corner and drag-for-curve, shape primitives, fill and stroke.
-   - The four merge operations (union, subtract, intersect, exclude), clipping, align and snapping, a smoothed pencil, "outline stroke", and SVG.
-
-   Courses teach **shapes and merging before the Bézier pen**: Adobe's own book has the Curvature tool in lesson 6 and the Pen tool in lesson 7. Shape Builder is the single most-loved feature. Bézier handles are the biggest beginner complaint.
-5. **No widely used standard exists for replayable brush strokes.**
-   - **W3C InkML (2011)** is the only vendor-neutral format and Microsoft Office uses it for ink, but its brush model is just a tip shape and no painting app reads it.
-   - **Wacom's Universal Ink Model** and **Android's Jetpack Ink protobufs** can describe real brushes, but each is one vendor's format tied to one engine.
-   - **Apple's PencilKit** format is opaque.
-
-   Every painting app uses a private format, and Procreate stores no strokes at all. **SVG has no variable-width stroke, and nothing is on track to add one**, so everyone exports pressure strokes as filled outlines. The practical answer is our own format inside `.capy`, embedded in SVG for round-trip. InkML import/export is an optional extra for ink tools.
-6. **Feasibility is good for drawing and moderate for path editing.**
-   - **Drawing:** our engine can already rebuild any stroke from its raw samples, a frozen `BrushSnapshot` and a deterministic seed. It uses this only for the most recent stroke, then discards the data (`crates/layer-engine/src/brush.rs:270-279`, and the determinism tests at `canvas.rs:3093-3180`). Vector drawing is mostly persistence, re-rendering only the changed region, eraser geometry and UI.
-   - **Path editing:** this needs new dependencies:
-     - **kurbo** for geometry;
-     - **i_overlay** and **linesweeper** for merge and subtract;
-     - **vello_cpu** for filling shapes;
-     - **usvg** for SVG import and **krilla** for PDF export.
-
-     All are MIT/Apache. Together they add about 0.55 MB compressed to the web build, measured against 6.8 MB today; the PDF crates would load only on demand.
-   - **Risks:**
-     - merge/subtract on curves is still early-beta in Rust;
-     - vello's GPU renderers need wgpu 29, but we vendor wgpu 30.0.1;
-     - Android GPU cost if we re-render too much.
+**What changed since the research**
+1. **An Object layer holds exactly one object.** Commit `3e809895b` (2026-10-08) removed the object-layer collection record and child rows. The GA design's route of mixing vectors into "the existing ordered object list" no longer exists, so the vector object owns its items.
+2. **`project_storage.rs` and `SelectionIndex` are gone** (`b3f6f8e51`). Binary data lives in typed resource records.
+3. **Object-layer caches are derived renderer data,** never authored artwork. Persisting a raster cache for vector layers would contradict the GA contract.
+4. **The CPU never processes canvas pixels** ([architecture](../architecture.md#cpu-and-gpu-responsibilities)). That rules out vello_cpu, tiny-skia and vello_hybrid, which computes strip coverage on the CPU. Full vello pins its own wgpu version and writes RGBA8, unlike Capy's RGBA32F premultiplied pipeline.
+5. **No path filler fits.** Nothing fills paths with nonzero winding and good antialiasing, and the display never requests more than native density.
+6. **Strokes are still not persisted, and two guides disagree with the code:**
+   - [`docs/internals/brushes.md`](../internals/brushes.md) (lines 40 and 136) still describes stored strokes and replay.
+   - [`docs/architecture.md`](../architecture.md) (lines 20–21) still describes object collections.
 
 ---
 
@@ -121,13 +109,23 @@ Two further variants:
 
 ### 2.2 What that means for us
 
-Model A is the right basic object, and it naturally covers the editor side too:
-- **A pen-tool path is a centerline stroke** whose source is a Bézier curve instead of recorded samples. Its paint can be a solid stroke (the designer's case) or one of our brushes (CSP's "stroke path with brush").
-- **A drawn stroke becomes an editable Bézier** by curve fitting (kurbo). Once the user edits its nodes, the fitted curve becomes the truth.
-- **"Convert line to shape"** (Illustrator's Outline Stroke / Expand) turns any stroke into a closed **shape** using a variable-width outline. That feeds merge/subtract, Shape Builder, cut files and SVG.
-- **Shapes** (closed regions with a fill and an optional outline) also come from shape tools, merge results, fills and SVG/PDF import.
+Model A, the centerline, is what makes re-brushing, trimming and width editing
+possible. Model B, the outline, is what makes export and merging exact. Capy
+takes the hybrid row:
 
-This follows the Inkscape and Wacom pattern: editable source plus computed geometry. It is also the precedent that makes "best of both worlds" work, not two separate subsystems.
+- **A path is the centerline.**
+  - A pen path or shape authors its cubic Bézier geometry directly.
+  - A freehand line is fitted to Béziers at pen-up.
+- **Width is a profile along the path**, not baked into an outline. Thickening, tapering, restyling and a later brush swap therefore still work.
+- **Outlines are derived** for rendering, hit-testing, SVG export of variable-width strokes, merging and Convert Stroke to Shape.
+- **Shapes are paths with a fill.** Open and closed paths, compound paths with holes, merge results and imported SVG are the same item.
+- **Recorded samples are not kept.**
+  - Samples would let a later brush re-derive pressure dynamics other than width.
+  - Against that, they multiply stored data and need a replay contract the [object-layer design](object-layer-ga-design.md) declined to freeze. They also stop describing the line after its first node edit.
+  - Brush paths (section 7.9) start from the path and its width profile instead.
+
+This follows the Inkscape and Wacom pattern of an editable source plus computed
+geometry. Drawing and editing share one model instead of two subsystems.
 
 ---
 
@@ -354,332 +352,436 @@ Tutorials for this reach 180K–370K views. The complaints: *"522 nodes where a 
 
 ---
 
-## 6. Feasibility in Capy Canvas
+## 6. Code audit at `15f01f80e`
 
-### 6.1 What we already have (verified against the code)
+This audit replaces the earlier feasibility section, whose references described
+`796f7f5b`. In this section, a path written without its crate is relative to
+the crate named in the finding: `layer-core` for the model and format,
+`layer-render-wgpu/src` for rendering.
 
-- **Deterministic stroke replay.** `DabGenerator::generate(&Stroke, …)` (`crates/layer-engine/src/brush.rs:270-279`) rebuilds dabs from raw samples plus a `BrushSnapshot`.
-  - Samples store position, mapped pressure, tilt, twist and time.
-  - Randomness is `mix_seed(brush.seed, stroke_id)`: integer hashes, exact on every platform.
-  - Tests assert live dabs equal replayed dabs on real Wacom captures (`canvas.rs:3093-3180`).
-  - It is used only to re-render the latest stroke, then discarded. `Stroke` is documented as *"Never part of document persistence or undo history"* (`crates/layer-core/src/lib.rs:1202-1222`).
-- **A pipeline for generated content.** Figures and fills are queued as `pending_operations`, rendered by the GPU and read back into immutable tile revisions (`canvas.rs:768-830`). A vector-layer rebuild can take the same route and get caching, undo, saving and GPU recovery for free.
-- **A file format with room for it.** `.capy` stores JSON metadata plus deduplicated LZ4 blobs, and `SelectionIndex` already pulls binary data out of the JSON. A `VectorIndex` would copy that pattern (`crates/layer-core/src/project_storage.rs`).
-- **A fill tool that already does most of what CSP-style flats need.** The Region fill supports **Reference layers**, **Close gaps** and **expansion** (`crates/layer-ui/src/region_tools.rs:46-100`, `tools.rs:438-441`).
-- **Other reusable pieces:**
-  - Figure tools (line/rect/ellipse, `crates/layer-core/src/figures.rs`), which could become live vector shapes.
-  - Selection contours with a GPU even/odd filler.
-  - Screen-resolution overlay contracts for handles and path previews.
-  - `Arc`-shared history.
-  - Real pen-capture fixtures in `artifacts/strokes` and `artifacts/pen-traces`.
+### 6.1 Object layers and layer kinds
 
-### 6.2 What's missing
+| Finding | Evidence | Consequence |
+|---|---|---|
+| An Object layer's content is one image object | `OccurrenceContent::Objects(ImageObjectHandle)` (`crates/layer-core/src/authored/artwork.rs:47-48`); `ImageObject { image, affine, interpolation }` (`authored/objects.rs:217-221`) | Vector content becomes a sibling object type behind the same content alternative |
+| The collection design was removed | `34bc831bd` added `capy.object-layer/1` with `children`, and `ea680ff29` exposed child rows. `3e809895b` removed both (net −2,011 lines) so that layers reuse ordinary layer selection, properties, masks, clipboard and history | Do not restore a container record. The vector object owns its items internally, a type-specific hierarchy that [GA design §12](object-layer-ga-design.md#12-long-term-end-state-and-extension-stress-tests) allows |
+| Kind checks are many and partly invisible to the compiler | `OccurrenceContent::Objects`: 37 non-test lines in 18 files. `LayerKind::Object`: 32 lines in 14 files. `matches!` lists such as `authored/occurrence_edits.rs:131,155,297` would silently miss a new kind | Keep `LayerKind::Object` and make the object handle an enum, so that image-only reads stop compiling |
+| Picking is a rectangle test | `object_contains` does an inverse-affine point-in-rectangle test and ignores alpha (`authored/object_edits.rs:36`). Picking runs only under Move and Transform (`crates/layer-ui/src/object_editing.rs:112-117`) | Path hit-testing is new core code |
+| Object bounds have five separate formulas | Core: `merge.rs:120-133`, `authored/object_edits.rs:7-25`. Renderer: `crates/layer-render-wgpu/src/scene/objects.rs:42`, `scene/object_spatial.rs:17`, `snapshot/bounds.rs:86` | One bounds function per object kind replaces all five |
 
-- **Geometry:** no curve geometry anywhere in `Cargo.lock` (no kurbo, lyon, usvg, vello). No path renderer with good anti-aliasing and nonzero winding; the selection filler is even/odd only, with 4 samples.
-- **Model and tools:** no vector object model or layer kind, and no path tools.
-- **Formats:** no SVG or PDF import/export, and no text stack.
-- **Versioning:** no engine or renderer version tag on strokes.
-- **Display resolution:** display is capped at document resolution, because composition runs in document space. Crisp vector display at any zoom would need view-space composition, which is a deep change (see open question 2).
-- **Stale docs:** the README (`README.md:149-151`), `docs/internals/documents.md` and `docs/reference/gpu-brush-engine.md:262` say strokes are persisted and replayed. The code says otherwise. Fix these before designing on top of them.
+### 6.2 File format
 
-### 6.3 Recommended technology stack (all allowed by `deny.toml`)
+| Finding | Evidence | Consequence |
+|---|---|---|
+| Registry and wiring | 17 record kinds, each in both portable and private contexts (`package/registry.rs:30-48`). The image object touches 46 sites in 10 files: registry, manifest, topology, artwork, record adapters, `Edit`, roots and history accounting, session, session transfer, transfer and authored scene. Exhaustive destructuring finds most of them; the hard-coded type strings in `package/artwork_records.rs` and `_ =>` arms do not | Expect about the same footprint for a vector object, plus a resource kind |
+| Unknown object types are preserved | An unknown referenced type under `objects` opens as Preserved, and Copy Original returns identical bytes (`unknown_drawable_children_preserve_the_complete_package`, `package/codec/admission.rs:206`) | Older readers keep vector files intact without new code |
+| A list under `objects` is invalid | `package/manifest.rs:110` expects one object reference; an array becomes `DecodeError::Invalid`, which older readers report as damaged | Never widen `objects` into a list |
+| Binary resource precedent | `capy.lut3d/1` stores a little-endian F32 block under raw encoding `capy.rgb-f32/1`, optionally wrapped in `capy.lz4-bytes/1`, and bounds the decoded size before allocation (`package/resources.rs:380-424`). Payloads carry local slot indices, never Capy IDs | Model path geometry on it. No existing resource kind fits paths |
+| Selection contours are inline JSON | F32 points under `shape.contours` (`package/selection_records.rs:56-95`) | Fine for a few contours, not for artwork |
+| Admission limits | 65,536 object records, 262,144 evaluation edges, 262,144 resources, 64 MiB and 4,194,304 JSON nodes of metadata, 4,096 occurrences. Resource bindings consume no evaluation edges | One record per path exhausts the record limit at about 6,000 strokes in each of 10 layers. Inline JSON points cap a document near 1.4 million points |
+| History sharing | `Store` shares records by `Arc`, but `RecordChange<T>` holds `T` by value. Selection contours are charged per inner `Arc` (`history_budget.rs:137-151`) | Precedent for sharing unchanged paths between undo states |
+| Session cost | Private sessions re-encode each changed record's complete JSON (`package/session_transfer.rs:38-43`). Only tile indexes are chunked, 64 entries each (`package/session.rs:86-99`) | Keep the vector record's JSON small and chunk its geometry |
 
-| Role | Crate | License | Maturity | wasm size (gzip)¹ |
-|---|---|---|---|---|
-| Geometry: fitting, stroking, offset, simplify, nearest, arc length | **kurbo 0.13** | MIT/Apache | Stable; Graphite, vello and usvg use it | 36 KB |
-| Spatial index | **rstar 0.13** | MIT/Apache | Stable | 14 KB |
-| Robust polygon ops, clip/slice, **variable-width outline** | **i_overlay 9.0** | MIT/Apache | Stable core, integer-deterministic; variable stroke is **6 days old** | 61 KB |
-| Merge/subtract on curves | **linesweeper 0.4** | MIT/Apache | **Early beta**; GitHub archived (moved to Radicle); Graphite uses it but reported crashes | 74 KB |
-| Fill rendering of shapes and paths | **vello_cpu 0.2** (then vello_hybrid) | MIT/Apache | Most mature vello renderer; no wgpu coupling | 126 KB with simd128 |
-| SVG import | **usvg 0.48** (no text at first) | MIT/Apache | Mature | 158 KB |
-| PDF export | **krilla 0.8** (lazy-loaded on web) | MIT/Apache | Typst's backend; PDF/A | 416 KB |
-| PDF/AI import (later) | hayro 0.7 | MIT/Apache | Early; returns kurbo paths | 1.38 MB (lazy) |
-| Image tracing (later) | visioncortex 0.9 (vtracer core) | MIT/Apache | Outline tracing only | — |
-| Gap closing and region code to port | OpenToonz `tl2lautocloser`, `tcomputeregions` | BSD-3 | Reference implementation | — |
+### 6.3 Rendering
 
-¹ Measured in isolated wasm size-test builds (opt-level z, LTO, stripped). The core set (kurbo + i_overlay + linesweeper + vello_cpu + usvg + rstar) is about **554 KB gzip**. The web build doesn't enable `simd128` today; enabling it more than halves vello_cpu.
+| Finding | Evidence | Consequence |
+|---|---|---|
+| Two object leaves | Native `object_tile` (`scene/objects.rs:264`) and display `Compositor::objects` (`scene/scale.rs:1403`). Masks, effects and clipping are applied above them by the generic `owner_image` (`scene/stack.rs:118`) | A new kind dispatches only at these leaves and at thumbnails |
+| Any density can be evaluated, but none above native is requested | `ObjectWindow { origin, side: f64, size }` composes any density into the sampling map (`scene/objects.rs:94`). `display_mips::view_level` never goes below level 0 (`display_mips.rs:19`) | A path rasterizer can honor any density now. Crisp zoom needs above-native plan levels |
+| No suitable filler | The selection contour filler counts edge crossings with `atomicXor` at 2×2 samples, even/odd only (`selection_clip_init.wgsl:7-69`). Figures are single-sample distance fields for line, rectangle and ellipse (`scene.wgsl:64-118`). There is no MSAA, no nonzero filler, no stroke-to-outline code and no geometry crate in `Cargo.lock` | Build one coverage kernel (7.5) |
+| Damage is per object | `edited_damage` (`scene/objects.rs:49-78`) damages whole old and new object rectangles from `image.extent`. It falls back to compositing everything when order changes. The "spatial index" is a per-owner bounds map (`scene/object_spatial.rs:24-47`) | A vector object needs damage per item and a real index inside each layer |
+| Object layers switch off document-wide optimizations | Any object layer turns off batching and idle refinement for the whole document (`scene/scale/refinement.rs:25,96,105`, `scene/scale/hierarchy.rs:55`) | Key these on pending image work first, or every vector document loses refinement |
 
-**Don't link or copy:**
-- potrace, autotrace, Rnote, Krita, Inkscape and Blender (GPL);
-- lib2geom (LGPL/MPL);
-- mupdf (AGPL);
-- clipper2-rust (BSL-1.0, not on the allowlist).
+### 6.4 Input, smoothing and brushes
 
-Rnote (a Rust ink app) is the closest architecture to study, but GPL rules out reusing its code.
-
-### 6.4 Rendering strategy
-
-- **Textured and brush strokes:** replay through the existing contact-placement and stamp engine, clipped to the damaged region. Split pieces keep the parent seed and an **arc-length phase**, so texture and jitter don't shift after an erase (CSP gets this wrong). PencilKit (`renderState.grainOffset`) and Wacom UIM (`ts/tf`) do this.
-- **Solid pressure strokes** (G-pen, monoline): optionally one analytic **tapered-capsule SDF quad per segment**, MAX-blended into the per-stroke coverage buffer the engine already keeps. That uses far fewer primitives than dabs.
-- **Shapes and filled paths:** vello_cpu into dirty tiles first. vello_hybrid comes later, once the wgpu 29 vs 30 mismatch is resolved.
-- **Cache:** the layer's raster pages. Invalidate by `old ∪ new bounds` through the R-tree and re-render only intersecting objects in z-order. During drags, freeze the "below" and "above" layers and render only the moving selection.
-- **Persist the raster cache in `.capy`.** Files then open fast and **look identical even after brush-engine changes**. Only regions the user edits are re-rendered with the current engine. This is our answer to appearance drift (Blender 4.5 shipped an unversioned change that alters old files). Also tag each stroke with an `engine_version`. Section 7.2 covers the full storage policy.
-- **Exclude brushes that read the canvas** (smudge, wet mix, watercolor, liquify). They depend on stroke order and existing pixels. CSP excludes them too.
-
-### 6.5 Main risks
-
-| Risk | Mitigation |
+| Finding | Evidence |
 |---|---|
-| Merge/subtract robustness on real artwork | Put booleans behind a trait with two backends: linesweeper, and flatten → i_overlay (integer) → refit with kurbo as the default and fallback. Fuzz both, apply time and size limits, never run on the input path, and store results in history instead of recomputing them |
-| wgpu 29 (vello) vs vendored wgpu 30.0.1 | Start with vello_cpu. Port or wait for vello_hybrid |
-| Android GPU cost (wide brushes already measured at about 49 ms GPU per update) | Strictly incremental re-rendering; below/above caches during drags; SDF fast path for solid pens |
-| Memory and file size of raw samples | Quantize and delta-encode the channels (Jetpack Ink's `CodedNumericRun` and tldraw's Float16 deltas are the precedents), store them in the binary blob store, never in JSON arrays. Estimated around 10 B per point vs about 50 B in JSON |
-| Cross-platform floating-point drift in replay | Persist the raster cache and derived geometry; use i_overlay's integer mode where results must be bit-exact |
-| Editing speed- or time-dependent strokes (airbrush) | Resample with interpolated time, or restrict those strokes to transform, recolor and delete |
-| About 169 `LayerKind` equality checks that a new kind silently falls through | Audit each one as part of adding the kind |
-| Web bundle size | Lazy-load a separate import/export wasm (PDF, text); enable `simd128` |
+| Samples | `PenEvent` (`crates/layer-engine/src/input.rs:66`) becomes `StrokePoint` (`crates/layer-core/src/lib.rs:273`) in layer-local coordinates, after the global pressure curve and ruler projection. `StrokeBuilder` keeps predicted points apart, and `finish()` returns only real ones |
+| Smoothing | `PositionSmoother` (`crates/layer-engine/src/brush/smoothing.rs:12`) integrates a causal kernel over the input. Its strength and adjust-by-speed come from the preset's `BrushStabilization` (`crates/layer-core/src/lib.rs:548`); the input scale is captured from zoom at pen-down. It runs before placement in `append_with_field` (`crates/layer-engine/src/brush.rs:228`). Pen-up extends the curve to the held final point instead of drawing a catch-up chord |
+| Other input shaping | A pressure fall limiter (80 ms for contact pens, about 34 ms for G-Pen), prediction with late correction within 2 s, and Straight, Parallel and Radial rulers. There is no pull-string stabilizer, hold-to-snap or shape assist |
+| Centerline already exists | For contact pens, `append_swept` (`crates/layer-engine/src/brush.rs:349`) emits a simplified, smoothed, variable-width centerline: the natural input for fitting. `PositionField` (`crates/layer-engine/src/brush/smoothing/preview.rs:4`) lets the dab generator follow any position field, which is the hook for brush paths |
+| Strokes are transient | `Stroke` is "Never part of document persistence or undo history" (`crates/layer-core/src/lib.rs:1172`). The last stroke is kept for two seconds of corrections, then dropped |
+| Brush classes | Solid: G-Pen, Calligraphy Pen, Marker. Textured dry and contact: the pencils, Charcoal, Crayon, Chalk and Pastel Block, the Rough, Antique, Realistic, Wet, Blotty and Brushed inks, the paintbrushes, Airbrush and Spray. Canvas-reading: Smudge, Natural Blender, the wet paints, watercolors, Liquify, Clone and the healing brushes |
+
+### 6.5 Layers UI and tools
+
+| Finding | Evidence | Consequence |
+|---|---|---|
+| Rows are flag-driven | `LayerState` (`crates/layer-ui/src/lib.rs:1284`) carries flags, not a row kind. A `content_icon` on a row that has a thumbnail draws a corner badge on every host. No host reads the `object` flag | A vector badge costs no host code |
+| Creation | The shared New submenu (`crates/layer-ui/src/art_layers.rs:1527`) uses `LayerAction::New { group, clipped }`. The layer-panel footers are hand-written on all five hosts | Add New Vector Layer to the shared submenu, not to the footers |
+| Tools | `LayerCanvasTool` (`art_layers.rs:59`) has no path or text tool. Figure is Line, Rectangle or Ellipse, painted destructively into paint, with no handles before or after commit (`crates/layer-core/src/figures.rs:8`, `crates/layer-ui/src/figures.rs:86-109`). Tool options use shared `ToolOption` kinds; hosts have no per-tool code | New tools that use existing option kinds cost almost nothing per host |
+| Gestures | Non-paint tools go through `layer_pen` (`art_layers.rs:1601`). Fingers drag canvas objects only where `object_touch_hit` (`crates/layer-ui/src/session.rs:5618`) says so | Anchors and paths need touch hit targets there, or fingers navigate |
+| Overlays | Shared `CursorSegment` primitives (`crates/layer-render/src/lib.rs:59`) offer lines, square handles and triangles. There is no round marker, and curves must be flattened | Anchor and handle display is a shared renderer change |
+| Refusal | `LayerKind::Object => Err(DrawingRefusal::Object)` (`crates/layer-core/src/layers.rs:595`). The text in `assets/locales/en/objects.ftl:7-8` reads "holds placed images, not paint" | Vector layers need their own wording in all 15 locales |
+| Colors and properties | Foreground, background and transparent color slots; Figure's Both mode already strokes with the foreground and fills with the background. The Properties drawer has Number, Toggle, Choice and Color kinds (`crates/layer-ui/src/effects.rs:575-582`) | Path style needs no new widget |
+| Shortcuts | P cycles the ink pens, O is Move, U is Figure and Shift+U is Ruler. Single A, V, K, L, N, T, Y and X are free in the Capy keymap. The Photoshop and Affinity presets put Move on V (`crates/layer-ui/src/keymaps.rs`) | "Pen" and P are taken. The Bézier tool needs another name |
+| Localization | 15 locales × 12 Fluent domains | Every new string lands in all 180 catalogs |
+
+### 6.6 Dependencies
+
+Measured sizes and licenses come from stream 7; decisions are from this design.
+
+| Role | Crate | License | wasm size (gzip)¹ | Decision |
+|---|---|---|---|---|
+| Geometry: fitting, nearest point, arc length, flattening, offset | **kurbo 0.13** | MIT/Apache | 36 KB | Adopt in V0, after `cargo deny` and a wasm size check |
+| Spatial index | rstar 0.13 | MIT/Apache | 14 KB | Not needed at first: bins per 256-pixel tile match the renderer's tiles |
+| Robust polygon operations, integer mode | **i_overlay 9.0** | MIT/Apache | 61 KB | Adopt with merge in V2; refit results with kurbo |
+| Merge on curves | linesweeper 0.4 | MIT/Apache | 74 KB | Not at first: early beta, and Graphite reported crashes |
+| Fill rendering | vello_cpu, vello_hybrid | MIT/Apache | 126 KB | Rejected: both compute pixel coverage on the CPU |
+| SVG import | **usvg 0.48** | MIT/Apache | 158 KB | V2 |
+| PDF export | krilla 0.8 | MIT/Apache | 416 KB, lazy | Later |
+| PDF/AI import; image trace | hayro 0.7; visioncortex 0.9 | MIT/Apache | 1.38 MB lazy; — | Later |
+| Gap closing and regions to port | OpenToonz `tl2lautocloser`, `tcomputeregions` | BSD-3 | — | With vector region fill |
+
+¹ Isolated wasm size-test builds (opt-level z, LTO, stripped), measured for stream 7.
+
+**Don't link or copy:** potrace, autotrace, Rnote, Krita, Inkscape and Blender
+(GPL); lib2geom (LGPL/MPL); mupdf (AGPL); clipper2-rust (BSL-1.0, not on the
+allowlist).
 
 ---
 
-## 7. Recommendation
+## 7. Design
 
-### 7.1 Product principles
+### 7.1 Principles
 
-1. **Drawing first; the editor side builds on it.** Our users are painters and comic artists. The first release should beat CSP's inking loop. Path tools come next, using the same objects.
-2. **Vector should never be worse than raster at the five things beginners reach for first:** a smooth pen, the eraser, fill, resize, and undo. Each must work on a vector layer, and never fail with an error or create invisible artifacts.
-3. **Same brushes, still editable.** Vector strokes render with our brush engine, textures included. Not SVG-only shapes (Krita's mistake), and not outline blobs (Fresco's mistake).
-4. **Make results satisfying before handles appear.** Shapes, merging, trimming and bending come before Bézier handles, following both curricula.
-5. **Name operations in plain language and show state:**
-   - "Convert line to shape", not "Expand Appearance".
-   - "Merge", "Cut out", "Border".
-   - Show open/closed, point count and "line vs shape" on the selection.
-6. **Be honest about export.** Warn when textured strokes will be rasterized or flattened.
+1. **Lines and fills first, as an illustrator expects.** Paths stay paths, strokes stay strokes, and shapes stay editable until Rasterize Layer.
+2. **One item type.** Shapes, pen paths, freehand lines, merge results and imports are all paths. Behavior differs by tool, not by parallel object kinds.
+3. **Vector content is an object type, not a layer hierarchy** (6.1).
+4. **Authored geometry, derived pixels.** The file stores neither outlines nor rendered pixels of vector content.
+5. **Never worse than raster at what beginners try first.** Drawing, erasing, filling, resizing and undo all work on a vector layer, with no error and no invisible artifacts.
+6. **Plain names.** Vector layer, Path, Edit Points, Make Compound Path, Convert Stroke to Shape.
 
-### 7.2 What `.capy` stores: strokes, not outlines
-
-**Decision.** For strokes, the source of truth is the **original stroke**:
-- the recorded samples;
-- the brush it was drawn with, embedded in the file;
-- a seed and texture phase;
-- width adjustments;
-- an engine version.
-
-Filled outlines are **derived**: computed for SVG/PDF export, merge/subtract, "Convert line to shape" and hit-testing, and never stored in `.capy` in v1. The layer's rendered pixels are still saved, as the display cache and as the fallback for anything that can't run the brush engine. Shapes (merge results, converted lines, fills, imported SVG) have no centerline, so their outline geometry *is* their source of truth.
-
-**Why outlines can't be the source of truth once we support width editing**
-- **Width belongs to the centerline:** `width(s) = brush_size × dynamics(pressure(s), tilt, speed) × adjustments(s)`.
-  - With only an outline, thickening means pushing both sides outward and resolving collisions at overlaps, loops and tight curves.
-  - Recovering the centerline from an outline means computing a medial axis, which is lossy and fragile.
-  - This is the Fresco trap: its outline-based vectors can't be re-thickened, re-brushed or recolored, and that is its users' most common complaint.
-- **Every other editing feature needs the centerline too:** brush swap, erase-to-intersection, nudge/pinch, control points and re-texturing after a cut.
-- **Strokes are also smaller.** Quantized, delta-coded samples cost about 10 B per point. A pressure outline has anchors along both sides, and Fresco files show thousands of anchors per drawing.
-
-**How width edits are stored**
-- **Raw pressure is never rewritten.** Width edits are a separate adjustment on the stroke:
-  - a whole-stroke `width_scale`;
-  - a `fixed_width` flag that ignores the brush's size dynamics;
-  - a sparse `width_profile` of knots `(s, factor)` over the source stroke's arc-length parameter;
-  - optional start/end taper overrides.
-- **Mapping to tools:**
-  - Thicken/Thin/Scale tools and the local width brush add or edit knots.
-  - "Fixed width" sets the flag.
-  - Redraw-width with pen pressure replaces knots over a range.
-  - Clip Studio Paint works the same way (per-point width factors on top of the brush size), and so does Illustrator (width points kept apart from the path).
-- **Width edits survive later edits:**
-  - Swapping the brush later still evaluates the *original* pressure through the new brush's dynamics, and the user's adjustments still apply on top.
-  - Knots use the source stroke's parameter, so erase-splitting a stroke into `(source, t0..t1)` pieces needs no remapping.
-- **Asymmetric width** (Illustrator's Alt-drag one side) can't be drawn by centered stamp dabs. Support it only on Curve strokes with Solid paint (`w_left`/`w_right` knots). For brush strokes, offer "Convert line to shape" instead.
-
-**The "an editor without the brush" concern, case by case**
-
-| Case | Answer |
-|---|---|
-| The user edits or deletes a brush preset, or opens the file on a device without their custom brush | **Embed brushes in the file**, not references to the library. `VectorContent` carries a deduplicated table of full `BrushSnapshot`s (the engine already freezes one per stroke) plus their tip and grain assets by content digest (already embedded in projects today). Library edits never change existing strokes. Offer an explicit "Update strokes to the current brush" or relink command. Precedents: CSP stores the brush per stroke, Jetpack Ink embeds brush families with textures, Wacom UIM embeds brush definitions |
-| A future Capy Canvas changes or retires the engine code that drew a stroke | The file opens pixel-identical, because the saved raster cache is what's displayed. Each stroke carries `engine_version`. Only strokes the user edits are re-rendered, and so is anything else in the cleared region, because the rebuild re-renders every stroke in that area. Re-render with the recorded engine version while its code still ships. After a version is retired, show once, "This stroke will be redrawn with the current brush engine", on first edit. Never silently change the look on open. Map retired brushes forward the way Jetpack Ink does (`min_version` plus fallback brush families) |
-| A different application | Other apps don't read native painting formats (`.clip`, `.procreate`, `.kra` paint layers). They exchange SVG, PDF, PSD and PNG. **Outlines belong in those exports** (section 7.6), which compute them from the strokes and can embed our private stroke data for round-trip. Any tool that reads the `.capy` tile format already gets full-quality pixels |
-| A future lightweight or third-party `.capy` reader that wants vectors but has no brush engine | **Not in v1.** If needed later, persist outlines for **Solid-paint strokes only**. They are exact, deterministic and cheap to store. For textured brush strokes an outline is lossy anyway, and the pixels are the better fallback (open question 8) |
-
-**Summary of what is stored**
-
-| Data | Stored in `.capy`? | Role |
-|---|---|---|
-| Samples (x, y, t, pressure, tilt/azimuth, twist; quantized and delta-coded), seed, phase, `engine_version` | Yes (binary `VectorIndex` blobs) | Source of truth for drawn strokes |
-| Embedded brush table (full `BrushSnapshot`s plus tip/grain assets by digest) | Yes (deduplicated) | Makes the file self-contained |
-| Width adjustments (scale, fixed-width flag, knots, taper overrides) | Yes | Source of truth for width edits |
-| Curve source (Bézier + width knots) for pen paths and node-edited strokes | Yes | Source of truth once the user edits nodes |
-| Shapes (outline path, fill rule, fill/outline paint, origin) | Yes | Source of truth for closed shapes |
-| Layer raster pages | Yes (as today) | Display cache; fallback for any reader |
-| Per-stroke filled outlines | No (computed on demand) | Export, merge/subtract, Convert line to shape, hit-testing |
-| Fitted curves for control-point display | No, until the user edits nodes | Editing aid |
-
-### 7.3 Data model (shared Rust, `layer-core`)
+### 7.2 Layer model
 
 ```text
-LayerKind::Vector
-Layer { raster: RasterRevision  /* persisted render cache */,
-        vector: Arc<VectorContent> /* source of truth */ }
-
-VectorContent { objects: Vec<Arc<VectorObject>> /* z-order */,
-                brushes: dedup table of BrushSnapshot + tip/grain asset digests /* embedded, self-contained */ }
-  index: rstar R-tree (rebuilt on load, never saved)
-
-VectorObject::Stroke {
-    id, transform: Affine, bounds,
-    source: Samples { channels: x,y,t,pressure,tilt/azimuth,twist (quantized, delta-coded blob),
-                      tool_type, seed, phase, engine_version }
-          | Curve   { path: BezPath, width_knots: [(t, w_left, w_right)], opacity_knots },
-    range: t0..t1,                    // piece of the source after erase-splitting
-    width: WidthAdjust { scale, fixed_width, profile: [(s, factor)], taper_start, taper_end },
-    fitted: Option<Curve>,            // derived for control-point editing; becomes truth after a node edit
-    paint: Brush { brush: index into brushes, color }   // stamp engine
-         | Solid { color, cap, join, dash }             // SDF / vello_cpu
-    // no stored outline: computed on demand (7.2)
-}
-VectorObject::Shape {
-    id, transform, bounds, path: BezPath, fill_rule,
-    fill: Option<Paint>, outline: Option<StrokeStyle>,
-    origin: Drawn | ShapeTool{params} | Merge | Fill{seed_point, gap} | Imported | ConvertedFromStroke
-}
+Stack entry → Occurrence (name, visibility, opacity, blend, mask, effects, integer offset)
+                └ content: objects → VectorObject
+                                       ├ styles: [Style]                 shared within the layer
+                                       └ items:  [Chunk] → [Path]        front to back
+Path    { id: u64, style, subpaths: [Subpath], width: Option<WidthProfile> }
+Subpath { anchors: [Anchor], closed: bool }
+Anchor  { point, in_handle, out_handle, kind: Corner | Smooth | Symmetric }
 ```
 
-- **Undo:** `ReplaceLayer` with `Arc`-shared object lists, plus the pending raster revision. Charge history by `Arc` identity (as selections already are), not by re-serializing the layer.
-- **Erase:** splitting keeps the same sample source. A piece is `(source, t0..t1)` with the same seed and phase, so what remains renders identically and undo is cheap.
-- **File format:** add a `VectorIndex` (the `SelectionIndex` pattern) and bump the format version. Brush snapshots are deduplicated and textures are already content-addressed.
-- **Hosts** only capture input and render view models. Hit-testing, erasing, fitting, merging, fills, serialization and history all live in Rust. This is the split AGENTS.md requires for shared validation and history.
+- **Handles:** `OccurrenceContent::Objects` holds an `ObjectHandle`, which is either `Image(ImageObjectHandle)` or `Vector(VectorObjectHandle)`.
+  - `LayerKind::Object` remains, and a derived object kind drives tool routing and UI text.
+  - Image-only reads (`.image`, interpolation, sampling preflight) stop compiling and are fixed one by one.
+- **No retained transform on the vector object:**
+  - Geometry is in the layer's local pixels, and the occurrence keeps its integer offset.
+  - Move, scale, rotate and flip rewrite the coordinates of the affected paths, which is exact for Béziers, as one undo step.
+  - With Scale Strokes on, stroke widths scale by √|det|. Illustrator works the same way.
+  - The file has one coordinate system and no hidden transform.
+- **One vector object per layer, many paths per object:**
+  - The layer is the isolation and cache boundary, and it holds thousands of paths.
+  - Several vector layers are fine. Each one counts toward the 4,096-occurrence admission.
+- **Path identity:**
+  - Each path has a stable layer-local `u64` ID. It is assigned at creation, kept through edits and undo, and renewed on duplicate and paste.
+  - Like ruler IDs, it is owned by the record type, not a portable record ID.
+  - It anchors working selection, history and future references such as gap fills or symbols.
+- **Working state:**
+  - `WorkingState` gains the selected paths of the current vector layer and, while editing points, the selected anchors.
+  - Selection is not an undo step, but Undo and Redo select the paths they restore. Delete repairs it.
+  - Portable saves omit it; private sessions keep it. Selecting a path makes its layer the current layer.
+- **Undo:**
+  - `Edit::RecordChange<VectorObject>` replaces the record.
+  - Paths live in immutable chunks of at most 64 (`Arc<[Arc<Path>]>`), and an edit copies only the chunks it touches.
+  - History charges chunks by `Arc` identity, as it charges selection contours today.
+- **Later content in the same layer:** images, groups and text become further item kinds inside the vector object, not a second container (7.9).
 
-### 7.4 Toolset: the smallest set that covers most needs
+### 7.3 Paths and appearance
 
-**Phase 1 — "Ink": vector drawing that matches CSP's inking loop**
+**Geometry**
 
-| Tool / behavior | Details and defaults |
-|---|---|
-| **Vector layer** | Shown in Add Layer **next to** Paint at the top level, with an icon and subtitle (see 7.5). All dry and contact brushes work; brushes that read the canvas are hidden or disabled with an explanation |
-| **Draw** | Existing pens and stabilizer; add **hold-to-straighten/snap** (Procreate QuickShape, CSP 5.0 Smart Shapes) |
-| **Vector eraser** | Three visible modes: **Trim to intersection (default)**, Cut touched part, Whole line. *The eraser on a vector layer always edits geometry and never creates transparent strokes.* An option to use intersections from all vector layers. Hold Shift (or the pen's eraser end) for vector erase |
-| **Select lines** | Tap or lasso to select strokes. A selection bar shows **Pen / Size / Color / Opacity** (one-tap brush swap for one line or all lines). Move/scale/rotate/flip with a **"scale line width"** toggle (on by default) |
-| **Line width** | Whole-stroke width scale and "fixed width" (Phase 1). A local thicken/thin brush (Phase 2) |
-| **Fill flats** | Fill on a vector layer is never an error. It offers "Fill on a new color layer below (uses this ink)". Reuse the Region fill with **Reference layers + Close gaps + expansion** (already implemented). Add "fill to the centerline", so the fill tucks under the line with no halos |
-| **Export** | PNG as today, plus **SVG (outlines)** and **PDF** (see 7.6) |
-
-**Phase 2 — "Reshape": editing without handles**
-
-- **Grab to reshape** (Concepts' Nudge / CSP's Pinch): displace samples with a falloff, so no fitting is needed. Option to fix the ends.
-- **Local width brush** (thicken, thin, scale), and editable **start/end taper**.
-- **Simplify** (whole stroke or a local brush) with a visible point count.
-- **Control points** from fitting (kurbo `fit_to_bezpath`, with corner detection): move/add/delete, corner↔smooth, split, per-point width and opacity.
-- **Redraw over a line** to replace a segment (Illustrator Pencil's "edit selected paths", CSP Redraw).
-- **Connect lines**, and a **magnet that is off by default** (it causes "squiggly overlaps").
-- **Curve tool** (click points, previewed live), the SAI/CSP curve that artists ask for.
-- **Comic helpers:** make panel borders and balloons vector shapes; speed and focus lines via the existing rulers.
-
-**Phase 3 — "Shapes & paths": the editor side**
-
-- **Shapes:** rect (per-corner radius), ellipse, polygon, star, line. Extend the Figure tools so they create *live* shapes with editable parameters.
-- **Pen:** a **curvature pen by default** (click points; the next segment is previewed; auto-smooth nodes; double-tap for a corner), and a classic Bézier pen with Illustrator's modifiers for experienced users.
-- **Node tool:** move anchors and handles, marquee/lasso nodes, add or delete-and-heal, corner/smooth/symmetric, **drag a segment to bend it** (Figma Bend), snap handles to horizontal/vertical, snap points to extrema. On touch, on-screen modifier chips replace Alt and Shift.
-- **Merge:** union, subtract, intersect, exclude, divide, plus **Shape Builder** (drag across regions to merge, Alt/Option to delete). Make them *just work*:
-  - auto-ungroup;
-  - auto-outline strokes, keeping round caps;
-  - holes come out right, with fill rules never shown to beginners;
-  - on failure, a plain-language reason with a **Fix** button.
-- **Convert line to shape** (variable-width outline via i_overlay, then refit), **Offset/Border** (welded, with rounded corners, for stickers), **Join/Cut/Close**.
-- **Vector region fill** (Illustrator Live Paint / Toonz style): faces from stroke **centerlines** plus auto-close gap segments. The fill is stored as a static Shape under the ink. A live-updating version is XL; defer it.
-- **SVG import** (usvg, no text at first).
-- **Cut-ready check and export presets** (7.6).
-
-**Phase 4 — extensions (in rough priority order)**
-
-- Image trace (visioncortex), with a detail slider and live point count.
-- Width profiles (save and apply).
-- Live corners.
-- Text and text-to-outlines (parley + skrifa), then text on path.
-- PDF/AI import (hayro, lazy-loaded).
-- DXF export.
-- Brushes along a path as a first-class option.
-- vello_hybrid on the GPU.
-- Time-lapse replay export (our strokes make this nearly free).
-- InkML import/export.
-- **Zoom-crisp display** for vector layers (open question 2).
-- Centerline tracing of line art (XL).
-
-Deliberately **not** in scope: mesh gradients, a node graph, Figma-style vector networks, CMYK/spot color, and live effect stacks. They are niche for our audience and expensive.
-
-### 7.5 The new-artist journey
-
-**Naming and placement**
-- **Keep the name "Vector layer".** Every tutorial and search term uses it: CSP, Fresco, Krita, Affinity and Illustrator all do. Add a subtitle, **"Editable lines & shapes — trim, reshape, resize"**.
-  - The drawing-experience study proposed "Ink layer". That name reads well, but it disconnects people from the tutorials they will follow (open question 1).
-- Put **Paint** and **Vector** side by side at the top of Add Layer, with icons. Show a small "editable" badge on inking pens in the brush picker.
-- **Never auto-create a layer per stroke** (ibisPaint drew backlash for this). The one exception: when the user picks an inking pen while on a sketch layer, offer once, "Ink on a new vector layer?", with "Always" and "Never" options.
-
-**The first hour (guided and skippable; each step is a real result)**
-
-| Minutes | Moment | What we show |
+| Element | Representation | Reason |
 |---|---|---|
-| 0–3 | First stroke on a vector layer | A toast: *"These lines stay editable"*, with three 3-second loops: trim an overlap, thicken a line, swap the pen |
-| 3–10 | Clean-up | Trim-to-intersection is the default eraser mode. A one-time coach mark when the eraser first crosses an intersection. The satisfying "zap" |
-| 10–15 | Re-skin | Tap a line and use the selection bar's Pen / Size / Color. Then "Select all → swap pen" on the whole layer |
-| 15–25 | Flats | The first fill attempt creates a color layer below the ink, with close-gap on and the fill tucked under the lines. No error dialog |
-| 25–35 | Shapes and merge (makers and logos) | Circle, rounded rect and star, then Shape Builder, then Border → a sticker or badge |
-| 35–45 | Bend, don't handle | Drag a curve directly; the curvature pen for a logo. Handles stay hidden until requested |
-| 45–60 | Make it real | Export presets: **Print PDF**, **Sticker (PNG + cut-line SVG)**, **Cricut/Silhouette SVG**, **Laser SVG/DXF**. A cut-ready check lists issues, each with a Fix button |
+| Anchor | Point plus in and out handle offsets, F64 in layer pixels. A zero offset is a retracted handle. The segment between two anchors is the cubic `(p0, p0+out0, p1+in1, p1)`, and a line when both handles are retracted | Matches node editors; maps one-to-one to SVG and PDF `C`/`L` commands; exact under affine maps |
+| Anchor kind | Corner (independent handles), Smooth (collinear handles, independent lengths), Symmetric (mirrored handles) | Editing intent that handle positions cannot recover; Inkscape keeps `sodipodi:nodetypes` for the same reason |
+| Subpath | One or more anchors and a `closed` flag that adds the closing segment. A single-anchor subpath is a dot, drawn only with round or square caps | Covers lines, outlines and dots |
+| Path | One or more subpaths with one style. A compound path is a path with several subpaths; holes come from the fill rule | Merge results, letters with counters and imported SVG need no other type |
+| Other curve types | Quadratics become cubics exactly. Arcs and ellipses become cubics split finely enough to stay within 1/64 pixel | One segment type for editing, rendering and export |
+| Precision | F64 in memory and in the file | Image-object affines are F64 already; F32 would drift after repeated transforms on 61 MP canvases |
 
-Offer an optional **touch-friendly pen-tool practice** later. bezier.method.ac, the popular pen-tool game, needs a keyboard.
+**Appearance**
 
-**Starter templates**
-- **Comic page:** Sketch (blue, 30%), Ink (vector), Flats (refers to Ink), Shade (Multiply, clipped), Frames (vector), Text.
-- **Sticker / cut file:** a monoline vector ink preset plus the SVG export preset.
-- **Webtoon:** a long canvas plus panels.
+- **Style:**
+  - A style is an optional fill and an optional stroke.
+  - A path with neither is valid: it is selectable, shows as an outline while selected and acts as construction geometry.
+- **Fill:** a portable color and a rule, nonzero or even-odd.
+- **Stroke:**
+  - A portable color, a width in layer pixels, a cap (butt, round or square), a join (miter, round or bevel) and a miter limit.
+  - The stroke is centered on the path and painted over the fill, as SVG does.
+  - Frozen wire defaults follow SVG (butt, miter, 4, nonzero), so export needs no attributes for them. Tool defaults are separate: pens use round caps and joins.
+  - Inside and outside alignment comes later; it needs offsetting.
+- **Width profile:**
+  - Optional. It is a list of knots `(segment, t, factor)` ordered along the path.
+  - Width is the style width times the factor, interpolated linearly between knots and held constant beyond the ends.
+  - Knots are anchor-relative, so moving an anchor leaves widths in place.
+  - Splitting a segment remaps its knots exactly. Deleting an anchor reparameterizes the merged segment.
+  - Changing the style width scales the whole profile, as Illustrator does.
+  - Widths are symmetric for now; Illustrator's one-sided widths come later.
+- **Opacity and blend:**
+  - There is no per-path opacity, blend or effect at first; layers provide them, and color alpha covers translucent paths.
+  - The [GA scope rule](object-layer-ga-design.md#3-ga-state-and-deliberately-deferred-work) defers per-object opacity, blend and effects.
+- **Colors:**
+  - Colors are portable colors, converted into the working space at evaluation as effect colors are.
+  - Coverage blends in the composition's blend domain. In Linear documents, antialiased dark hairlines therefore render slightly lighter than in browsers (open question 7).
+- **Derived data, never stored:** flattened segments, stroke outlines, bounds, tile bins and hit-test data.
 
-**Defaults that prevent the classic mistakes**
-- Pressure is on with a G-pen-like default. A one-tap **Monoline** preset (pressure off, round caps) serves stickers, logos and Cricut.
-- Stabilizer is moderate (around CSP's 20–30), and hold-to-snap is on.
-- Scaling a selection scales line width by default, with the toggle visible.
-- An open path gets only a stroke, and closing it adds a fill. Open endpoints are highlighted, with an "auto-close within N px" option.
-- Merging with strokes, groups or text automatically converts them first. Holes are created correctly, and fill rules and winding are never shown to beginners.
-- Every compound action (trace + expand + merge, fill + new layer) is **one undo step**.
-- Performance: simplify on commit, and cache per tile. Hatching must not lag, because lag feeds the "vector is slow" folklore.
-- Don't claim "sharp at any zoom" until we render at view resolution. Claim "resize without quality loss", which *is* true because we re-render from the vectors.
+### 7.4 File format
 
-**Drag and touch rules.** Dragging vector objects, nodes and handles on the canvas is direct manipulation. `docs/internals/input.md` exempts it from the hold-to-drag convention, but touch and pen affordances still need designing: larger hit targets, modifier chips, and handles that appear only when requested. Any list or panel UI we add (for example, an object list) must follow `docs/ui/drag-and-reorder.md`.
+The occurrence content `{"objects":{"ref":…}}` names either an image object or
+a vector object.
 
-### 7.6 Interop plan
+```json
+{"id":"…","type":"capy.vector-object/1","data":{
+  "styles":[
+    {"fill":{"color":{"rgba":[0.92,0.33,0.2,1]}}},
+    {"stroke":{"color":{"rgba":[0,0,0,1]},"width":6,"cap":"round","join":"round"}}
+  ],
+  "items":[{"ref":"…"},{"ref":"…"}]
+}}
+```
 
-**Export**
-1. **SVG "Capy editable"** (the default):
-   - SVG 1.1 syntax, presentation attributes, no `<style>`, `width`/`height` in mm, and a `viewBox`.
-   - One filled `<path>` per stroke (the variable-width outline, simplified to 2–3 decimals).
-   - Layers as `<g inkscape:groupmode="layer">`.
-   - A private `xmlns:capy` namespace carries stroke IDs, brush references and samples (compressed, in `<metadata>`), plus a geometry fingerprint. On re-import, we restore full strokes only when the visible geometry still matches the fingerprint. Otherwise another app edited the art, so we import what's visible and offer "restore original strokes". This avoids Inkscape's overwrite trap.
-2. **SVG "Plain"**: the same file without private data.
-3. **SVG "Cut / Plot"** (and later DXF):
-   - Choose **centerlines** (`fill=none`, one color per operation) or **welded outlines**.
-   - No clip, mask, gradient, image or text.
-   - Erasers and clips applied as real geometry.
-4. **PDF** via krilla: outlines, blend modes, soft masks and ICC color. It's the right target for wide-gamut documents, since SVG effectively means sRGB. Optionally embed the private stroke data for round-trip.
+Each `items` entry references a `capy.vector-items/1` resource. Its `data`
+gives the path count; its payload uses a raw little-endian layout encoding,
+optionally wrapped in `capy.lz4-bytes/1` like LUTs.
 
-**Textured strokes can't be expressed in SVG.** Offer three options:
-- a solid outline (the default; lossy but universal, and what Concepts does);
-- the outline clipping an embedded raster of the stroke;
-- flagging them in the export dialog.
+**Payload layout.** The exact layout belongs in the
+[package contract](../reference/capy-package.md) when implemented. The design
+fixes its content:
+- **Per path:** the `u64` ID, a `u32` style index, the subpath count and the width knots (`u32` segment, F64 `t`, F64 factor).
+- **Per subpath:** the anchor count and the closed flag.
+- **Per anchor:** a `u8` kind, then the point and both handle offsets as F64 pairs.
+- **Never:** Capy IDs inside the payload.
 
-**Import**
-- **SVG** via usvg. Paths become Shapes; stroked paths become solid Strokes with a Curve source. Filters and masks are rasterized or refused with a notice. Read our `capy:` data in a second pass with roxmltree.
-- **PDF and PDF-compatible AI** via hayro, later.
-- **Ink formats** later, all cheap to add: InkML (Office/OneNote), PencilKit (through the Apple host API), ISF (through the Windows host), Excalidraw, tldraw and Xournal++ JSON/XML.
-- **Don't build around a stroke-interchange standard.** Consider borrowing Jetpack Ink's input encoding (struct-of-arrays, delta-coded, optional channels, `min_version`) for our own `VectorIndex`.
+**Rules**
+- **Order:** paths are front to back across `items` and within each chunk, matching `capy.stack/1`.
+- **Validation:**
+  - Style indices in range, finite values, `t` in `[0,1]`, factors ≥ 0 and ordered knots.
+  - Path IDs unique within the layer, positive stroke widths, nonempty chunks with the declared count, and decoded size bounded before allocation.
+  - Malformed data is Invalid. Unknown style fields, item layouts or encodings are Unsupported and preserve the package, following the existing rule.
+- **Writers:**
+  - Writers deduplicate styles and omit unused ones.
+  - Chunk membership stays stable across edits, so unchanged chunks keep their resource IDs and encoded bytes when saved again.
+- **Chunks of up to 64 paths:**
+  - One resource per layer would rewrite the whole layer in session history on every edit.
+  - One resource per path costs about 200 bytes of resource JSON per path.
+  - 64 matches the session's 64-entry tile-index chunks.
+- **No record per path:** the limits in 6.2 rule it out, and every edit would walk every path record.
+- **Older readers:**
+  - A file with vector layers opens there as Preserved: read-only, showing its preview, with Copy Original.
+  - That is the package contract's documented trade, and the format reserves no fields to avoid it.
+- **Evolution:**
+  - Once released, `capy.vector-object/1` and `capy.vector-items/1` keep their meaning.
+  - New item kinds (group, image, live shape, brush path, text) and style additions (dashes, gradients, per-path opacity) are new type versions. Each has a fixed-file test, and older readers preserve files that use it.
+- **Evaluation meaning:** the package contract's evaluation table gains these definitions, with an F64 reference renderer like `object_sampling_reference.rs`, so that renderer changes keep the authored meaning:
+  - coverage as the exact area of the filled region in each pixel;
+  - stroke geometry: offset curves, SVG joins, caps and miter limit;
+  - the flattening error bound;
+  - width interpolation.
+- **Fixtures:**
+  - A generator next to `crates/layer-color/examples/object_fixture.rs` and a fixed `vector-objects.capy`.
+  - Coverage: open, closed and compound paths, both fill rules, every cap and join, a width profile, a dot, an empty layer and a full chunk.
+  - Codec tests for round trip, Preserved for unknown fields and Invalid for malformed data; `session_tests` coverage; new render-contract rows in `authored-renders.tsv`.
 
-### 7.7 Phasing and sizes
+### 7.5 Rendering
 
-| Phase | Scope | Size (S/M/L/XL) | Unlocks |
-|---|---|---|---|
-| **0. Groundwork** | Fix stale docs; add kurbo + rstar after `cargo deny` and a wasm size check; `VectorContent` model with the embedded brush table and width adjustments (7.2); `VectorIndex` in the file format; identity-based history accounting; `engine_version` on strokes | M | Everything |
-| **1. Ink** | `LayerKind::Vector` (audit about 169 kind checks); persist strokes at pen-up (`canvas.rs:1427-1490`); regional rebuild; 3-mode vector eraser; select, recolor, re-brush and transform; whole-stroke width; fill into a new layer using Reference + Close gaps; SVG and PDF outline export; UI on all six hosts | L | The CSP inking loop on Linux; scalable line art |
-| **2. Reshape** | Nudge/pinch, local width brush, tapers, simplify, fitting plus control points, redraw, connect, curve tool, hold-to-snap | L | "Correct instead of redraw" (also an accessibility win) |
-| **3. Shapes & paths** | Live shapes, curvature and Bézier pens, node tool with bend, merge + Shape Builder (dual backend), convert line to shape, offset/border, vector region fill, SVG import, cut-ready check and presets, GPU/vello_cpu path filling with nonzero winding | L–XL | Logos, stickers, cut files, painter → vector without other apps |
-| **4. Extensions** | Trace, text, PDF import, DXF, width profiles, live corners, time-lapse, InkML, vello_hybrid, zoom-crisp display | L–XL each | Depth |
+**Coverage kernel**
+- **CPU side (geometry only):**
+  - Flattens curves into line segments within 1/8 output pixel.
+  - Expands strokes into closed outlines with joins, caps, the miter limit and the width profile.
+  - Rebases each 256-pixel window in F64, then uploads F32 segments.
+- **GPU side:**
+  - Accumulates exact signed area and cover per pixel in fixed point. Integer atomics make the result deterministic.
+  - Prefix-sums each row and maps winding to coverage with the nonzero or even-odd rule.
+  - Writes premultiplied RGBA32F in the working space: each path's fill, then its stroke, source-over in item order inside the isolated layer.
+- **Known limit:** area accumulation over-covers edge pixels where a stroke outline overlaps itself, such as at tight inner joins. Skia and vello accept the same limit; fixtures must bound it.
+- **It replaces two existing renderers** (replace, don't layer):
+  - **Selection contour filler:** keeps its even-odd meaning with better antialiasing.
+  - **Figure distance fields:** on a Paint layer, a Figure becomes a path rasterized into the paint source through the same kernel.
+  - Selection and figure render baselines are regenerated in the same change.
 
-The per-feature sizes in [07-rust-feasibility.md](vector-layers-research/07-rust-feasibility.md) §13 back these up. Most tools are S–M. The large items (L) are brush-stroke capture and replay, fitting plus control points, the pen tool, hardening merge on real art, PDF import and text on path. Live-updating fills and centerline tracing are XL.
+**Integration**
+- **Leaves:** dispatch at `object_tile`, `Compositor::objects` and thumbnails. Masks, effects and clipping above the leaf are unchanged.
+- **Caches and damage:**
+  - Flattened segments are cached per path, keyed by the path's `Arc` identity and tolerance level.
+  - Tile bins (256-pixel tile → path indices) are derived on load and updated incrementally.
+  - Layer results are cached per window, as object results are today.
+  - Edits diff old and new paths by `Arc` identity. Damage is the union of the changed paths' old and new bounds: hull plus stroke reach, including miters, plus 1 pixel. Reordering damages only the reordered paths' bounds. Vector edits never fall back to compositing everything.
+- **Prerequisite:** key the document-wide refinement and batching opt-outs (6.3) on pending image work before vector layers ship.
+- **Live feedback:**
+  - A path under construction, or a freehand line in progress, is a provisional item in the engine, not an authored record.
+  - The same kernel renders it in the layer's stack position and damages only the changed tail. Prediction extends the tail as it does for brushes.
+  - At pen-up or Finish, the fitted path replaces it in the same submission.
+  - The [instant stroke feedback](../reference/instant-stroke-feedback.md) budget applies.
+  - Drawing live through the G-Pen contact renderer instead was rejected: a vector layer has no paint target, and the edge would change at pen-up.
+- **Drags:**
+  - Moving selected paths re-renders the damaged windows from cached segments with the transient transform applied.
+  - If that misses the tier rate, split the layer into below, moving and above caches during the drag.
+- **Density:**
+  - Vector layers compose at native density, as image objects do.
+  - The editing overlay (outlines of selected paths, anchors and handles) is drawn at screen resolution, so editing precision does not depend on density.
+  - Crisp zoom (V3) adds above-native plan levels for object content in both evaluators. Paint and spatial effects keep native boundaries ([GA design §9.1](object-layer-ga-design.md#91-authored-source-versus-evaluated-result)), and image objects benefit too.
+  - Until then, Capy claims "resize without quality loss", not "sharp at any zoom".
+- **Overlay markers:** `CursorSegment` gains a round marker for handle ends and hollow and filled squares for unselected and selected anchors. This is a shared renderer change.
+- **Picking (CPU, F64):**
+  - Tile bins give candidates, tested front to back.
+  - A stroke hits within half its width plus a screen-pixel tolerance, using the view scale.
+  - A fill hits where its winding is inside under the path's rule.
+- **Memory:** all work is windowed and bounded, with no full-layer intermediates.
+
+### 7.6 Tools and interaction
+
+**Creating a vector layer**
+- **Name:** keep "Vector layer". Clip Studio, Fresco, Krita, Affinity and Illustrator all use it, so it matches the tutorials people search for.
+- **Creation:**
+  - New Vector Layer joins the shared New submenu and command search, with no new footer button on the five hosts.
+  - The row shows a vector badge on its thumbnail.
+  - Rasterize Layer turns it into paint, as for image objects.
+- **Figure tools follow the layer kind:**
+  - On a Paint layer they paint pixels as today, through the path kernel. This includes the new Path variant, which rasterizes its stroke and fill at Finish, as Clip Studio's curve figure does.
+  - On a Vector layer they keep editable paths.
+  - On an image Object layer, the refusal notice also offers New Vector Layer.
+
+**Tools on a vector layer**
+
+| Tool (key) | Behavior | Notes |
+|---|---|---|
+| **Move** (O; V in the Photoshop and Affinity presets) | Click selects the frontmost path under the pointer in any visible, unlocked vector layer and makes that layer current. Shift toggles a path. Dragging on empty canvas marquee-selects paths in the current layer. Dragging moves; the existing Scale–Rotate frame scales and rotates. Alt duplicates, arrow keys nudge and Delete deletes. Double-click or Enter opens Edit Points; Escape leaves it | Extends object picking with path hit-testing and selecting individual paths. Marquee is new: image objects have none. Tool options gain Scale Strokes, on by default |
+| **Edit Points** (A; a new variant in the Move slot) | Click or marquee anchors. Drag anchors, handles or a segment to bend it. Alt-drag a handle to break symmetry. Double-click an anchor to switch corner and smooth. Click a segment to add an anchor. Delete removes anchors and heals the curve. Shift constrains to 45° | On touch, on-screen modifier chips replace Alt and Shift. Anchors join `object_touch_hit` |
+| **Figure** (U): Line, Rectangle, Ellipse, Polygon, Star, **Path** | Creates an editable path using the tool's paint mode (Outline, Fill or Both) and line width. The foreground color strokes and the background fills, as Figure's Both mode does today. Rectangle takes a corner radius and Polygon and Star a point count at creation | Path: click for a corner, drag for a smooth anchor. Alt breaks the handle, Shift constrains, clicking the first anchor closes and clicking an open end of a selected path continues it. Enter or Finish ends, Backspace removes the last anchor and Escape cancels. The polygon canvas bar (Remove Last Point · Cancel · Finish) is reused |
+| **Ink pens** (P) | G-Pen and Monoline draw vector lines (7.7). Other presets refuse with the notice | |
+| **Eraser** (E) | Touched Part (default) splits paths where the eraser covers the centerline. Whole Path deletes every path it touches. A cut closed path becomes open; its fill still closes implicitly, as in SVG and Illustrator's Path Eraser | Subtracting from fills comes with merge (V2); trimming to intersections with the ink tools (V4) |
+| **Fill** (F) | Clicking inside a path's fill, or inside a closed path, sets its fill to the current color. Clicking elsewhere fills a new Paint layer below, using this layer as the reference with Close Gaps (the existing region fill) | Gives Clip Studio's flats workflow, with no error |
+| **Lasso Fill** | Creates a filled closed path from the lasso | |
+| Brushes, retouching, gradients, Smudge, Liquify, selection painting | Refuse with the object notice, reworded for vector layers, offering New Paint Layer and Rasterize Layer | |
+
+**Commands**
+- **Arrange within the layer:** Bring to Front, Bring Forward, Send Backward, Send to Back. Keys are chosen together with the keymap presets.
+- **Path commands:** Make Compound Path, Release Compound Path, Join, Close Path, Split at Point and Reverse Path Direction.
+- **Copy, Cut, Paste and Duplicate:**
+  - They act on selected paths within and across vector layers.
+  - Pasting paths onto a layer that is not a vector layer creates a vector layer above it.
+  - External copies publish PNG as today, and SVG once export exists.
+- **Properties for selected paths:**
+  - Fill (color, rule) and Stroke (color, width, cap, join, miter limit), using the existing Color, Number, Choice and Toggle kinds. A toggle per section removes the fill or the stroke.
+  - Mixed values show as mixed, and each gesture is one undo step.
+- **Snapping:** Move snaps to rulers and the canvas as it does today. Snapping to anchors and paths comes in V2.
+
+### 7.7 Freehand lines, smoothing and brushes
+
+**Pipeline**
+1. **Input is unchanged:** `PenEvent` to `StrokePoint`, the global pressure curve and rulers.
+2. **Smoothing is unchanged:**
+   - The preset's stabilizer strength and adjust-by-speed, the pressure fall limiter, prediction and late correction.
+   - No new smoother and no separate "fidelity" setting: the stabilizer slider is that control.
+3. **Centerline:**
+   - The engine records the vertices `append_swept` keeps. Each has its evaluated width (pressure mapping, taper and size bounds) and its arc length.
+   - This is the same smoothed centerline the G-Pen draws today.
+4. **Fitting at pen-up, and incrementally on the finalized prefix:**
+   - Detect corners by angle and curvature, then fit cubic Béziers to each corner-free run with kurbo, within 0.25 screen pixels at the zoom captured at pen-down.
+   - Fit width knots by simplifying in arc length and width, within 0.25 pixels. Drop the profile when width stays constant within that tolerance.
+   - Anchors inside runs are Smooth; anchors at corners are Corner.
+5. **Result:**
+   - An open path whose stroke uses the foreground color, a width equal to the brush size, round caps and joins, and the fitted profile.
+   - Taper becomes end knots. Brush opacity becomes stroke color alpha.
+   - A late correction refits and amends the same edit.
+6. **Exact input:** Path and shape construction use exact positions with Shift constraints, without smoothing.
+
+**Which brushes draw vector lines**
+- **Rule:** a preset draws vector lines when its mark is a solid round nib.
+  - That means contact execution, a round tip, source-over deposit and no grain, roughness, jitter, scatter, color dynamics, wet mixing or smudge.
+  - The predicate lives in shared Rust, so it also admits custom brushes, and it widens as brush paths support more.
+- **First release:** G-Pen (pressure sets width) and a new Monoline preset (fixed width, round caps).
+- **Later, with brush paths:**
+  - Calligraphy Pen and Marker, whose width depends on direction and needs a nib model.
+  - Textured pens, pencils and dry media, and Airbrush and Spray.
+  - Until then they refuse on vector layers with the notice offering New Paint Layer.
+- **Never:** Smudge, blenders, wet paints, watercolors, Liquify, Clone and the healing brushes. They read canvas pixels and depend on stroke order.
+- **The pen's eraser end** uses the vector eraser.
+- **Hold-to-snap shapes** are absent today. Adding them as a shared feature for both layer kinds would give vector layers editable shapes for free.
+
+### 7.8 Export and import
+
+- **Raster export** is unchanged: canonical document-grid composition.
+- **SVG export (V2):**
+  - Constant-width strokes export as SVG strokes, with exact caps, joins and miter limit.
+  - Variable-width strokes export as filled outlines, and fills keep `fill-rule`.
+  - Paint layers export as embedded PNG.
+  - Layer opacity and blend export where SVG 1.1 expresses them and are flagged otherwise. Masks and effects use an explicit raster fallback with a notice.
+  - Physical size comes from the composition resolution, otherwise 96 pixels per inch, with a `viewBox`.
+  - Later additions:
+    - A private `capy:` namespace for round trips, whose geometry fingerprint restores Capy data only when the visible geometry is unchanged.
+    - Cut and plot presets with the maker semantics of section 5.2.
+- **SVG import and paste (V2):**
+  - usvg produces paths and styles.
+  - Content without a supported meaning (filters, text, or gradients before they exist) is rasterized or refused with a notice.
+- **PDF export and import** come later (krilla, hayro).
+
+### 7.9 Foundation for later work
+
+| Later feature | Built on | New pieces |
+|---|---|---|
+| **Brush paths** (textured strokes on vector layers) | The path and its width profile drive `DabGenerator` through `PositionField`; width knots supply size | A new item kind with an embedded `BrushSnapshot` and its tip and grain resources, a seed, and an arc-length texture phase so that cuts do not shift texture. Optional pressure channel for brushes whose other dynamics use pressure. Rendered by the stamp engine into the layer's windows |
+| Trim to intersection, Width tool, Simplify, grab to reshape | Intersections of flattened centerlines via tile bins; width-profile edits | Ink cleanup tools (V4) |
+| Merge (union, subtract, intersect, exclude), Shape Builder, Convert Stroke to Shape, Offset | i_overlay on flattened outlines, refit with kurbo; results are ordinary paths | V2 |
+| Groups, live shapes, images inside vector layers, text | New item kinds in the next chunk version | Group transform and selection rules; text shaping and fonts |
+| Dashes, linear and radial gradients, per-path opacity and blend | Style additions | Gradient handles on canvas |
+| Vector region fill (Live Paint) | Faces from centerlines plus gap closing, stored as paths under the ink | OpenToonz-style region code |
+| Crisp zoom | The density-independent `ObjectWindow` | Above-native plan levels (V3) |
+| Image trace, PDF import, DXF export | Paths | Importers and exporters |
+
+### 7.10 Journeys to qualify
+
+- **Badge (illustrator):**
+  1. New Vector Layer, then a circle, a rounded rectangle and a star from Figure.
+  2. Recolor them from Properties.
+  3. Bend a segment and add an anchor in Edit Points.
+  4. Make a compound path with a hole.
+  5. Undo and redo throughout, then save, reopen and Rasterize Layer.
+- **Logo trace:**
+  1. Place a sketch as an image layer.
+  2. Trace it with Path on a vector layer, closing and continuing paths.
+  3. Join two ends and reverse a path.
+- **Inking:**
+  1. Sketch on paint.
+  2. Ink with G-Pen on a vector layer at moderate stabilization.
+  3. Cut overshoots with the eraser, select lines and change their color and width.
+  4. Fill flats onto a new Paint layer below.
+  5. Zoom in and edit anchors on a fitted line.
+- **Refusals:** a textured brush, Smudge and a gradient on a vector layer each show the notice and its actions, never an invisible stroke.
+
+Run each journey on GTK, Web, Android, Apple and Windows in light and dark
+themes, after the GTK review, using the image-object journeys of
+[Object layers](../ui/image-objects.md#ownership-and-verification) as templates.
 
 ---
 
-## 8. Open questions for the team
+## 8. Phasing
 
-1. **Name:** "Vector layer" with a descriptive subtitle (recommended, because it matches the tutorials people search for) or "Ink layer" (friendlier, but disconnected from existing tutorials)?
-2. **Display resolution:** is document-resolution rendering acceptable for v1? CSP does the same, and it causes "why pixelated?" threads. The alternative is composing vector layers at view resolution when zoomed in. A limited version is feasible: only for layers with Normal blend and no effects above them.
-3. **Fill model:** is raster flats referencing the ink (reuses the existing tool; the CSP norm) enough for v1, with vector region fills in Phase 3? Or do makers need vector fills in Phase 1?
-4. **Raw samples after node edits:** keep them forever as a record of the original input, which costs file size? Or drop them once the edited curve becomes the truth?
-5. **Maker scope:** how far do we go (DXF, cut-ready check, Cricut presets)? The audience is large, and the evidence suggests yes.
-6. **Path renderer:** port vello_hybrid to wgpu 30, wait for upstream, or extend our own GPU crossing-count filler with nonzero winding and more samples?
-7. **Merge/subtract risk:** do we accept linesweeper (beta) behind a polygon fallback? Or ship polygon-only merge first and add curve-exact results later?
-8. **Vector fallback for other readers:** is the saved pixel cache a sufficient fallback for readers without the brush engine? Or should `.capy` also store exact outlines for Solid-paint strokes, so lightweight or third-party readers get vectors? (Recommendation: pixels only in v1; see 7.2.)
+| Milestone | Scope | Exit |
+|---|---|---|
+| **V0. Foundation** (no UI) | kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. Damage per path, tile bins, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control |
+| **V1. Lines and fills** | New Vector Layer and its badge; Move path selection, marquee, transforms and arrange; Edit Points; Figure shapes and Path on both layer kinds; Properties style; G-Pen and Monoline vector lines; the vector eraser; Fill and Lasso Fill on vector layers; compound, join, close, split and reverse; copy and paste; refusal text; all hosts and catalogs | The 7.10 journeys pass on every host in both themes. Path drag, anchor drag, freehand latency and pan and zoom over a 5,000-path layer are measured on all three tiers |
+| **V2. Organize and exchange** | Groups, merge, Convert Stroke to Shape, Offset, dashes, linear and radial gradients, align and distribute, anchor snapping, an eraser that subtracts from fills, SVG export, import and paste | SVG round trip through Inkscape and a browser; merge fuzzing under time and size limits |
+| **V3. Crisp zoom** (can start after V0) | Above-native density for object content in both evaluators | Pan and zoom rows hold their tier rates with vector and image layers |
+| **V4. Ink cleanup and brush paths** | Trim to intersection, Width tool, Simplify, reshape, brush paths | Brush-path replay equals live drawing, extending the existing determinism tests |
+
+Qualification extends the [GA workloads](object-layer-ga-design.md#143-performance-qualification):
+many small strokes in one layer, one path with 50,000 anchors, active anchor and
+path drags, high zoom, newly exposed regions and mixed paint and vector stacks.
+Counts are workload inputs, not limits.
+
+---
+
+## 9. Open questions
+
+1. **Figures on Paint layers.** Should they keep painting pixels (consistent with Clip Studio), or offer once to start a Vector layer?
+2. **Select All.** With Move or Edit Points on a vector layer, should Select All select paths, as in Illustrator? Today it always acts on the pixel selection.
+3. **Path key.** Path sits in the Figure slot (U), without a single key in the Capy keymap. Should the Photoshop and Affinity presets bind it to P?
+4. **Width knots.** Anchor-relative knots are chosen. Prototype node editing on fitted lines to confirm them against arc-length knots.
+5. **Miter limit.** Should new strokes default to 4 (SVG) or 10 (Illustrator)? Either is a tool default, not a wire default.
+6. **Crisp zoom.** Should V3 land before V1 ships, given how much illustrators zoom while editing anchors?
+7. **Hairlines in Linear documents.** Accept slightly lighter antialiased edges than browsers show, or add a per-layer perceptual option later?
+8. **Maker scope.** How far should cut-file presets and the cut-ready check go once SVG export exists?
