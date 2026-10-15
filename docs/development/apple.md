@@ -202,8 +202,11 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   glass shine. Preserve native keyboard and accessibility conventions.
 - **OS presentation.** macOS top-level menus use the OS menu bar; the header keeps
   its title, Zen and other controls over the live canvas. Zen clears native window
-  controls. iPad menus use the same command catalog in-app; native iPadOS window
-  controls provide full screen, so the shared Fullscreen command is unavailable.
+  controls. Remove the designated native Help submenu by identity after launch
+  and main-menu insertion, retaining an unattached help menu alongside the empty
+  Help command group. iPad menus use the same command catalog in-app; native
+  iPadOS window controls provide full screen, so the shared Fullscreen command is
+  unavailable.
 - **Independent publications.** Handle small `layer-host` packets such as
   `{command_search, revision}` in `EditorSnapshotState.receive` without promoting
   the content revision or refreshing retained panels and thumbnails.

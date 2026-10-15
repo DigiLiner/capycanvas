@@ -433,8 +433,8 @@ extension XCTestCase {
         workspaceActivate(app.buttons["settings-done"])
     }
 
-    @MainActor func checkAboutAndApplicationMenus(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"}]"#
+    @MainActor func checkAboutAndApplicationMenus(in app: XCUIApplication, theme: String = "light") {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
         app.launch()
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch
         XCTAssertTrue(canvas.waitForExistence(timeout: 30))
@@ -490,6 +490,17 @@ extension XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["preference-source_code"].firstMatch.waitForExistence(timeout: 5))
         workspaceActivate(done)
         XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        #if os(macOS)
+        for id in ["illustrator", "painter", "illustrator"] {
+            let workspace = app.buttons["workspace-switch-builtin:workspace:" + id]
+            XCTAssertTrue(workspace.waitForExistence(timeout: 10))
+            workspaceActivate(workspace)
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: workspace)
+            waitForExpectations(timeout: 10)
+            XCTAssertFalse(app.menuBars.menuBarItems["Help"].exists,
+                "Changing workspace must retain the absent native Help menu")
+        }
+        #endif
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 

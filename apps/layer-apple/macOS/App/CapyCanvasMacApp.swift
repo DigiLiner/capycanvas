@@ -27,10 +27,29 @@ private struct MacEditorScene: View {
 }
 
 @MainActor private final class PersistenceTermination: NSObject, NSApplicationDelegate {
-    private var sleepObservers: [NSObjectProtocol] = []
+    private var observers: [NSObjectProtocol] = []
+    private let helpMenu = NSMenu()
+    private func removeHelpMenu() {
+        let app = NSApplication.shared
+        guard app.helpMenu !== helpMenu || helpMenu.supermenu != nil else { return }
+        if let menu = app.helpMenu, let parent = menu.supermenu {
+            let index = parent.indexOfItem(withSubmenu: menu)
+            if index >= 0 { parent.removeItem(at: index) }
+        }
+        app.helpMenu = helpMenu
+    }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        removeHelpMenu()
         let center = NSWorkspace.shared.notificationCenter
-        sleepObservers = [
+        observers = [
+            NotificationCenter.default.addObserver(forName: NSMenu.didAddItemNotification, object: nil, queue: .main) { [weak self] notification in
+                guard let menu = notification.object as? NSMenu else { return }
+                DispatchQueue.main.async { [weak self, weak menu] in
+                    guard let menu, menu === NSApplication.shared.mainMenu,
+                        NSApplication.shared.helpMenu?.supermenu === menu else { return }
+                    self?.removeHelpMenu()
+                }
+            },
             center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated { EditorStore.suspendWorkspaces() }
             },

@@ -105,6 +105,7 @@ final class EditorLaunchTests: XCTestCase {
     }
 
     @MainActor func testAboutAndApplicationMenus() { checkAboutAndApplicationMenus(in: editorCaptureApplication()) }
+    @MainActor func testAboutAndApplicationMenusDark() { checkAboutAndApplicationMenus(in: editorCaptureApplication(), theme: "dark") }
 
     @MainActor func testApplicationLinkHandoff() { checkApplicationLinkHandoff(in: editorCaptureApplication()) }
 
