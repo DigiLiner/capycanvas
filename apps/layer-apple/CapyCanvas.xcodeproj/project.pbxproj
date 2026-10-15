@@ -1996,6 +1996,23 @@
 			"inputPaths" = (
 			);
 			"outputPaths" = (
+				"$(SRCROOT)/Generated/SharedAssets.xcassets",
+				"$(SRCROOT)/Generated/licenses",
+				"$(SRCROOT)/Generated/AppNames/en.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/ja.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/zh-Hans.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/zh-Hant.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/ko.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/es.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/pt-BR.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/id.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/fr.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/de.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/ru.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/th.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/vi.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/tr.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/it.lproj/InfoPlist.strings",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 			"alwaysOutOfDate" = "1";
@@ -3269,6 +3286,23 @@
 			"inputPaths" = (
 			);
 			"outputPaths" = (
+				"$(SRCROOT)/Generated/SharedAssets.xcassets",
+				"$(SRCROOT)/Generated/licenses",
+				"$(SRCROOT)/Generated/AppNames/en.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/ja.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/zh-Hans.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/zh-Hant.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/ko.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/es.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/pt-BR.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/id.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/fr.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/de.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/ru.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/th.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/vi.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/tr.lproj/InfoPlist.strings",
+				"$(SRCROOT)/Generated/AppNames/it.lproj/InfoPlist.strings",
 			);
 			"runOnlyForDeploymentPostprocessing" = "0";
 			"alwaysOutOfDate" = "1";

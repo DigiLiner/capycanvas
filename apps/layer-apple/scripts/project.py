@@ -69,8 +69,9 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
         elif (name.startswith("Shared/") or name.startswith(platform + "/")) and "/Tests/" not in name:
             builds.append(obj(scheme + name, "PBXBuildFile", fileRef=ref))
     phases = [obj(scheme + "prepare", "PBXShellScriptBuildPhase", buildActionMask=2147483647,
-        files=[], inputPaths=[], outputPaths=[], runOnlyForDeploymentPostprocessing=0,
-        alwaysOutOfDate=1, name="Generate shared resources", shellPath="/bin/bash",
+        files=[], inputPaths=[], outputPaths=["$(SRCROOT)/Generated/SharedAssets.xcassets", "$(SRCROOT)/Generated/licenses",
+            *[f"$(SRCROOT)/Generated/AppNames/{tag}.lproj/InfoPlist.strings" for tag in names]],
+        runOnlyForDeploymentPostprocessing=0, alwaysOutOfDate=1, name="Generate shared resources", shellPath="/bin/bash",
         shellScript='/usr/bin/python3 "$SRCROOT/scripts/prepare.py"\n'),
         obj(scheme + "rust", "PBXShellScriptBuildPhase", buildActionMask=2147483647,
         files=[], inputPaths=[], outputPaths=[], runOnlyForDeploymentPostprocessing=0,
