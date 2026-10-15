@@ -256,19 +256,19 @@ extension XCTestCase {
     @MainActor func checkNumericSettingsDone(in app: XCUIApplication) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"settings"},{"type":"preferences","action":{"type":"page","page":"canvas"}}]"#
         app.launch()
-        let value = app.buttons["number-value-Pan speed"]
-        let entry = app.textFields["number-entry-Pan speed"]
+        let value = app.buttons["number-value-Scroll pan speed"]
+        let entry = app.textFields["number-entry-Scroll pan speed"]
         XCTAssertTrue(value.waitForExistence(timeout: 20)); workspaceActivate(value)
         XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.typeText("1 + 0.25")
         workspaceActivate(app.buttons["settings-done"])
         XCTAssertTrue(entry.waitForNonExistence(timeout: 5))
         workspaceActivate(app.buttons["settings-button"])
         let search = app.textFields["settings-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10)); workspaceActivate(search); search.typeText("Pan speed")
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); workspaceActivate(search); search.typeText("Scroll pan speed")
         #if os(iOS)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         #endif
-        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pan speed")).firstMatch
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Scroll pan speed")).firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5)); workspaceActivate(result)
         #if os(iOS)
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "Opening a search result must dismiss the keyboard")

@@ -580,43 +580,64 @@ extension XCTestCase {
             XCTAssertTrue(element.waitForExistence(timeout: 15))
             element.clickOrTap()
         }
-        func replace(_ field: XCUIElement, _ text: String) {
-            activate(field)
-            #if os(macOS)
-            field.typeKey("a", modifierFlags: .command)
-            field.typeText(text)
-            #else
-            let count = (field.value as? String)?.count ?? 0
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: count) + text)
-            #endif
-        }
         let width = app.textFields["new-document-width"]
         let height = app.textFields["new-document-height"]
-        let create = app.buttons["new-document-create"]
+        let create = app.buttons["new-document-create"], resolution = app.textFields["new-document-resolution"]
+        XCTAssertTrue(resolution.waitForExistence(timeout: 15))
+        #if os(iOS)
+        let initialTitle = editorDocumentTitle(in: app)
+        let initialDescription = initialTitle.value as? String ?? initialTitle.label
+        XCTAssertFalse(initialDescription.isEmpty)
+        #endif
+        XCTAssertEqual(resolution.value as? String, "300")
+        let form = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        form.name = "new-drawing-resolution"; form.lifetime = .keepAlways; add(form)
+        replaceEditorText(resolution, with: "600", in: app)
+        #if os(macOS)
+        activate(app.descendants(matching: .any)["new-document-preset"].firstMatch)
+        activate(app.menuItems["Wide color"].firstMatch)
+        #else
+        dismissEditorKeyboard(in: app)
+        let preset = app.buttons["new-document-preset"].firstMatch
+        XCTAssertTrue(preset.isHittable, preset.debugDescription)
+        activate(preset)
+        activate(app.buttons["Wide color"].firstMatch)
+        #endif
+        XCTAssertEqual(resolution.value as? String, "300", "Selecting a preset restores its resolution")
+        replaceEditorText(resolution, with: "0", in: app); XCTAssertFalse(create.isEnabled)
+        replaceEditorText(resolution, with: "10001", in: app); XCTAssertFalse(create.isEnabled)
+        replaceEditorText(resolution, with: "600", in: app); XCTAssertTrue(create.isEnabled)
         XCTAssertTrue(app.descendants(matching: .any)["new-document-blending"].waitForExistence(timeout: 15), "New Document offers Blending")
         expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Like Photoshop and Clip Studio Paint", "Like Photoshop and Clip Studio Paint"),
             evaluatedWith: app.staticTexts["new-document-blending-note"])
         waitForExpectations(timeout: 10)
-        replace(width, "0")
+        replaceEditorText(width, with: "0", in: app)
         XCTAssertFalse(create.isEnabled, "Invalid dimensions must not allocate a canvas")
-        replace(width, "63"); replace(height, "47")
+        replaceEditorText(width, with: "63", in: app); replaceEditorText(height, with: "47", in: app)
         XCTAssertEqual(width.value as? String, "63")
         XCTAssertEqual(height.value as? String, "47")
-        activate(create)
         #if os(iOS)
-        // The floating number pad consumes the outside tap. If the form remains
-        // after dismissal settles, activate Create with the pad out of the way.
-        if !create.waitForNonExistence(timeout: 2) { activate(create) }
+        dismissEditorKeyboard(in: app)
+        XCTAssertTrue(create.isHittable, create.debugDescription)
         #endif
+        activate(create)
         let title = editorDocumentTitle(in: app)
         expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Untitled · 63 × 47", "Untitled · 63 × 47"), evaluatedWith: title)
         waitForExpectations(timeout: 30)
+        editorMenu(in: app, menu: "Image", id: "image_size", label: "Image Size…")
+        let ppi = app.textFields["number-entry-image-size-resolution"], sizeApply = app.buttons["image-size-apply"]
+        XCTAssertTrue(ppi.waitForExistence(timeout: 15))
+        XCTAssertEqual(ppi.value as? String, "600 ppi")
+        XCTAssertFalse(sizeApply.isEnabled, "Inspecting the created resolution has no pending document edit")
+        let size = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        size.name = "created-drawing-resolution"; size.lifetime = .keepAlways; add(size)
+        activate(app.buttons["image-size-cancel"])
+        XCTAssertTrue(sizeApply.waitForNonExistence(timeout: 10))
         #if os(macOS)
         // Exercise the editor action through its shortcut, never system-menu coordinates.
         app.typeKey("e", modifierFlags: [.command, .shift])
         #else
-        activate(app.descendants(matching: .any)["menu-File"].firstMatch)
-        activate(app.buttons["command-export_document"])
+        editorMenu(in: app, menu: "File", id: "export_document", label: "Export…")
         #endif
         chooseExportDestination(in: app)
         // Files also exposes a non-button Cancel element with stale bounds.
@@ -634,10 +655,11 @@ extension XCTestCase {
             "Export cancellation must retain the drawing")
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         #if os(iOS)
-        activate(app.descendants(matching: .any)["menu-File"].firstMatch)
-        activate(app.buttons["command-close_document"])
+        editorMenu(in: app, menu: "File", id: "close_document", label: "Close")
         expectation(for: NSPredicate { _, _ in
-            [.runningBackground, .runningBackgroundSuspended, .notRunning].contains(app.state)
+            let restored = self.editorDocumentTitle(in: app)
+            return app.state == .runningForeground &&
+                (restored.label == initialDescription || restored.value as? String == initialDescription)
         }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
         #endif

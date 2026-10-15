@@ -184,6 +184,14 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   `HeaderItem::available_on`, `Platform` capabilities and `layout_presets.rs`.
   Enable Apple gates with the presentation and shared platform tests. Compare
   `WorkspacePreset::layout(platform)` before and after for every preset/platform.
+- **New drawings.** Present Resolution using the shared creation form's bounds,
+  unit and label, and retain it when selecting or saving presets.
+  Resolve creation appearance from the current shared options and language
+  before constructing its bound pickers.
+  On iPad, use the native numeric text adapter for dimensions and resolution so
+  every edit reaches the form before keyboard dismissal or Create.
+  `testNewDrawingAndExportCancellation` and its Dark variant check preset
+  restoration, rejected bounds and the created document's resolution.
 - **Menus.** Use `EditorActionMenu` and `editorPopover`, with one
   `EditorPopoverHost` at the editor or sheet root outside clipped panels. Adapt
   existing presenters for reproduced native integration needs. Avoid speculative
@@ -402,6 +410,8 @@ and `iOS/` sources; they have no runner script.
 
 Shared journeys are `check…` functions in `Shared/Tests`, called by `test…`
 methods in `Shared/Tests/EditorLaunchTests.swift`, compiled by both UI targets.
+Dismiss the iPad keyboard before activating controls it covers.
+
 `testLayerPropertiesDrawer` and `testLayerPropertiesDrawerDark` exercise the
 Layers header drawer, growth, compact Properties, All layers and Group properties
 in the native editor. They require an Apple SDK and a rendering-capable device.

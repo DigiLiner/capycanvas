@@ -96,7 +96,7 @@ fn apple_header_capture_cancels_on_resize_blur_and_source_replacement() {
 }
 
 #[test]
-fn apple_header_joins_adjacent_icon_controls_into_painter_bars() {
+fn apple_header_keeps_capy_separate_from_adjacent_icon_bars() {
     for platform in [0, 1] {
         let app = App::new(platform);
         let policy = unsafe { &*app.0 }.host.session.state().platform;
@@ -113,9 +113,13 @@ fn apple_header_joins_adjacent_icon_controls_into_painter_bars() {
         };
         let bars = view["bars"].as_array().unwrap();
         let groups: Vec<_> = bars.iter().map(kinds).collect();
-        assert_eq!(groups[0], ["capy"]);
+        let capy = view["capy_item"].as_u64().unwrap();
+        assert!(bars.iter().all(|bar| !bar["items"].as_array().unwrap().contains(&json!(capy))));
+        let item = view["items"].as_array().unwrap().iter().find(|item| item["id"] == capy).unwrap();
+        assert_eq!(view["zen_button"], item["bounds"]);
+        assert_eq!(groups.len(), 2);
         assert_eq!(groups.last().unwrap(), &["tool"; 5]);
         let menu = if platform == 0 { vec!["menu"] } else { vec![] };
-        assert_eq!(groups[1], [menu, vec!["tool"; 3]].concat());
+        assert_eq!(groups[0], [menu, vec!["tool"; 3]].concat());
     }
 }

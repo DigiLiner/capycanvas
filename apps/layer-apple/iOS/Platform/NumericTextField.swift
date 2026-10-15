@@ -12,15 +12,18 @@ struct NumericTextField: UIViewRepresentable {
     let identifier: String
     let submit: (_ returnToCanvas: Bool) -> Bool
     let cancel: () -> Void
-    let step: (Int) -> Void
+    var step: ((Int) -> Void)? = nil
     var placeholder: String?
     var alignment: NSTextAlignment = .right
     var returnKey: UIReturnKeyType = .done
     var selectsReplacedText = false
+    var borderStyle: UITextField.BorderStyle = .none
+    var keyboardType: UIKeyboardType = .default
     @Environment(\.isEnabled) private var enabled
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIView(context: Context) -> Field {
         let field = Field()
+        field.text = text
         field.borderStyle = .none
         field.autocorrectionType = .no; field.spellCheckingType = .no
         field.autocapitalizationType = .none; field.smartDashesType = .no; field.smartQuotesType = .no
@@ -32,10 +35,11 @@ struct NumericTextField: UIViewRepresentable {
     func updateUIView(_ field: Field, context: Context) {
         context.coordinator.parent = self
         if field.markedTextRange == nil && field.text != text {
-            field.text = text
-            if selectsReplacedText && field.isFirstResponder { field.selectAll(nil) }
+            context.coordinator.updateText(field)
         }
         if field.textAlignment != alignment { field.textAlignment = alignment }
+        if field.borderStyle != borderStyle { field.borderStyle = borderStyle }
+        if field.keyboardType != keyboardType { field.keyboardType = keyboardType }
         if field.returnKeyType != returnKey { field.returnKeyType = returnKey }
         if field.placeholder != placeholder ?? label { field.placeholder = placeholder ?? label }
         let font = UIFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .regular)
@@ -63,7 +67,20 @@ struct NumericTextField: UIViewRepresentable {
     }
     final class Coordinator: NSObject, UITextFieldDelegate {
         var parent: NumericTextField
+        private var textUpdatePending = false
         init(_ parent: NumericTextField) { self.parent = parent }
+        func updateText(_ field: UITextField) {
+            guard !textUpdatePending else { return }
+            textUpdatePending = true
+            DispatchQueue.main.async { [weak field] in
+                self.textUpdatePending = false
+                guard let field, field.markedTextRange == nil else { return }
+                let text = self.parent.text
+                guard field.text != text else { return }
+                field.text = text
+                if self.parent.selectsReplacedText && field.isFirstResponder { field.selectAll(nil) }
+            }
+        }
         @objc func changed(_ field: UITextField) { parent.text = field.text ?? "" }
         func textFieldDidBeginEditing(_ textField: UITextField) {
             if !parent.focused { parent.focused = true }
@@ -83,13 +100,15 @@ struct NumericTextField: UIViewRepresentable {
             interfaceLanguage.isEmpty ? super.textInputContextIdentifier : "capy.numeric.\(interfaceLanguage)"
         }
         var cancel: () -> Void = {}
-        var step: (Int) -> Void = { _ in }
+        var step: ((Int) -> Void)?
         var submit: (Bool) -> Bool = { _ in true }
         override var keyCommands: [UIKeyCommand]? {
             guard markedTextRange == nil else { return super.keyCommands }
-            let commands = [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(cancelEdit)),
-                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(increase)),
-                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(decrease))]
+            var commands = [UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(cancelEdit))]
+            if step != nil {
+                commands += [UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(increase)),
+                    UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(decrease))]
+            }
             commands.forEach { $0.wantsPriorityOverSystemBehavior = true }
             return commands + (super.keyCommands ?? [])
         }
@@ -100,11 +119,12 @@ struct NumericTextField: UIViewRepresentable {
             super.pressesBegan(presses, with: event)
         }
         override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-            if markedTextRange == nil && [#selector(cancelEdit), #selector(increase), #selector(decrease)].contains(action) { return true }
+            if [#selector(increase), #selector(decrease)].contains(action) { return markedTextRange == nil && step != nil }
+            if action == #selector(cancelEdit) { return markedTextRange == nil }
             return super.canPerformAction(action, withSender: sender)
         }
         @objc private func cancelEdit() { cancel() }
-        @objc private func increase() { step(1) }
-        @objc private func decrease() { step(-1) }
+        @objc private func increase() { step?(1) }
+        @objc private func decrease() { step?(-1) }
     }
 }

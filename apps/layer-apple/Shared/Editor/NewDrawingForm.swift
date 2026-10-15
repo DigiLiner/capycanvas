@@ -17,25 +17,31 @@ struct NewDrawingForm: View {
     let error: String?
     let busy: Bool
     let completion: (NewDrawingChoice?) -> Void
-    @State private var appearance: JSON
     @State private var options: JSON
     @State private var width: String
     @State private var height: String
+    @State private var resolution: String
     @State private var presetName = ""
     @State private var useAsDefaults = false
+    #if os(iOS)
+    @State private var focusedDimension: String?
+    #endif
     init(spec: JSON, error: String? = nil, busy: Bool = false, completion: @escaping (NewDrawingChoice?) -> Void) {
         self.spec = spec; self.error = error; self.busy = busy; self.completion = completion
         let options = spec["creation"]["options"]
         _options = State(initialValue: options)
-        _appearance = State(initialValue: JSON())
         _width = State(initialValue: String(options["extent"][0].uint))
         _height = State(initialValue: String(options["extent"][1].uint))
+        _resolution = State(initialValue: String(options["resolution"].uint))
     }
     private var selectedOptions: JSON? {
         guard let width = UInt32(width.trimmingCharacters(in: .whitespacesAndNewlines)),
             let height = UInt32(height.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let resolution = UInt32(resolution.trimmingCharacters(in: .whitespacesAndNewlines)),
+            Double(resolution) >= spec["creation"]["resolution"]["min"].number,
+            Double(resolution) <= spec["creation"]["resolution"]["max"].number,
             [width, height].allSatisfy({ $0 >= spec["minimum"].uint && $0 <= spec["maximum"].uint }) else { return nil }
-        return options.replacing("extent", with: JSON([width, height]))
+        return options.replacing("extent", with: JSON([width, height])).replacing("resolution", with: JSON(resolution))
     }
     private var presets: [JSON] { spec["creation"]["presets"].array }
     private var text: JSON { spec["creation"]["text"] }
@@ -44,6 +50,7 @@ struct NewDrawingForm: View {
             guard let chosen = presets.first(where: { $0["id"].stableKey == id }) else { return }
             options = chosen["options"]
             width = String(options["extent"][0].uint); height = String(options["extent"][1].uint)
+            resolution = String(options["resolution"].uint)
         })
     }
     private func color(_ field: String) -> Binding<String> {
@@ -52,7 +59,8 @@ struct NewDrawingForm: View {
         })
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        let appearance = NativeTextContext.appearance(options, language: interfaceLanguage)
+        return VStack(alignment: .leading, spacing: 18) {
             Text(spec["title"].string).font(.headline)
             EditorScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -68,6 +76,13 @@ struct NewDrawingForm: View {
                         GridRow {
                             Text(spec["labels"][1].string)
                             dimension($height, label: spec["labels"][1].string, id: "new-document-height")
+                        }
+                        GridRow {
+                            Text(text["resolution"].string)
+                            HStack {
+                                dimension($resolution, label: text["resolution"].string, id: "new-document-resolution")
+                                Text(spec["creation"]["resolution"]["unit"].string)
+                            }
                         }
                     }
                     FormPicker(text["background"].string, selection: Binding(get: { options["background"].string }, set: {
@@ -107,15 +122,11 @@ struct NewDrawingForm: View {
                     .keyboardShortcut(.defaultAction).disabled(selectedOptions == nil)
                     .accessibilityIdentifier("new-document-create")
             }
-        }.onAppear { appearance = NativeTextContext.appearance(options, language: interfaceLanguage) }
-            .onChange(of: interfaceLanguage) { _, _ in appearance = NativeTextContext.appearance(options, language: interfaceLanguage) }
-            .onChange(of: options.stableKey) { _, _ in appearance = NativeTextContext.appearance(options, language: interfaceLanguage) }.disabled(busy).padding(24).frame(minWidth: 320, idealWidth: 400, maxWidth: 500,
+        }.disabled(busy).padding(24).frame(minWidth: 320, idealWidth: 400, maxWidth: 500,
             minHeight: 440, idealHeight: 540)
     }
     private func create() {
         #if os(iOS)
-        // UIKit can still hold marked text when a button closes the form.
-        // Commit it before reading SwiftUI's bound preset name and dimensions.
         UIApplication.shared.sendAction(#selector(UITextInput.unmarkText), to: nil, from: nil, for: nil)
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         DispatchQueue.main.async { completeCreation() }
@@ -128,11 +139,21 @@ struct NewDrawingForm: View {
             completion(NewDrawingChoice(options: options, presetName: presetName, useAsDefaults: useAsDefaults))
         }
     }
-    private func dimension(_ value: Binding<String>, label: String, id: String) -> some View {
+    @ViewBuilder private func dimension(_ value: Binding<String>, label: String, id: String) -> some View {
+        #if os(iOS)
+        NumericTextField(label: label, text: value, focused: Binding(get: { focusedDimension == id }, set: {
+            if $0 { focusedDimension = id }
+            else if focusedDimension == id { focusedDimension = nil }
+        }), fontSize: UIFont.preferredFont(forTextStyle: .body).pointSize, color: .primary, identifier: id,
+            submit: { submit in
+                guard submit else { return true }
+                guard !busy, selectedOptions != nil else { return false }
+                create(); return true
+            }, cancel: { if !busy { completion(nil) } }, placeholder: "", alignment: .left,
+            borderStyle: .roundedRect, keyboardType: .numberPad)
+        #else
         TextField("", text: value).textFieldStyle(.roundedBorder)
             .accessibilityLabel(label).accessibilityIdentifier(id)
-            #if os(iOS)
-            .keyboardType(.numberPad)
-            #endif
+        #endif
     }
 }

@@ -278,6 +278,7 @@ pub struct NewDocumentPresetView {
 #[derive(Serialize)]
 pub struct NewDocumentForm {
     pub options: NewDocumentOptions,
+    pub resolution: crate::NumericControl,
     pub text: NewDocumentText,
     pub selected: Option<NewDocumentPresetId>,
     pub backgrounds: Vec<(DocumentBackground, Arc<str>)>,
@@ -382,6 +383,8 @@ impl NewDocumentSettings {
         let selected = presets.iter().find(|preset| preset.options == self.defaults).map(|preset| preset.id);
         NewDocumentForm {
             options: self.defaults,
+            resolution: crate::NumericControl { unit: "ppi".into(),
+                ..crate::NumericControl::number(1., f64::from(MAX_NEW_DOCUMENT_RESOLUTION), 1., 0) },
             text: NewDocumentText::new(localization), selected,
             backgrounds: vec![(DocumentBackground::White, localization.text(MessageId::DOCUMENTS_WHITE)),
                 (DocumentBackground::Transparent, localization.text(MessageId::DOCUMENTS_TRANSPARENT))],
@@ -522,6 +525,13 @@ mod tests {
         assert_eq!(form["blending"]["choices"][0]["description"], "Like Photoshop and Clip Studio Paint");
         assert_eq!(form["blending"]["float_reason"], "Float documents blend in linear light");
         assert_eq!(form["blending"]["linear_only"], serde_json::json!(["F16", "F32"]));
+        assert_eq!(form["resolution"]["min"], 1.);
+        assert_eq!(form["resolution"]["max"], f64::from(MAX_NEW_DOCUMENT_RESOLUTION));
+        assert_eq!(form["resolution"]["unit"], "ppi");
+        for resolution in [1, MAX_NEW_DOCUMENT_RESOLUTION] {
+            assert_eq!(NewDocumentOptions { resolution, ..Default::default() }.validate(), Ok(()));
+        }
+        assert_eq!(NewDocumentOptions { resolution: MAX_NEW_DOCUMENT_RESOLUTION + 1, ..Default::default() }.validate(), Err(NewDocumentError::Resolution));
     }
     #[test]
     fn new_drawings_start_on_the_remembered_paper_at_real_size() {

@@ -12,11 +12,23 @@ extension XCTestCase {
         }
         workspaceActivate(bar.descendants(matching: .menuItem)[label].firstMatch)
         #else
-        let button = app.buttons["menu-" + menu]
-        XCTAssertTrue(button.waitForExistence(timeout: 5))
-        // Keep artwork checks below the simulator's reserved window-control edge.
-        button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
-        XCTAssertEqual(button.value as? String, "Expanded", "Open the requested \(menu) menu")
+        let button = app.buttons["menu-" + menu], compact = app.buttons["application-menus"]
+        let available = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in button.exists || compact.exists }, object: app)
+        guard XCTWaiter.wait(for: [available], timeout: 5) == .completed else {
+            let blocked = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+            blocked.name = "editor-menu-unavailable"; blocked.lifetime = .keepAlways; add(blocked)
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "editor-menu-unavailable-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            XCTFail("The editor must expose \(menu) directly or through Menus")
+            return
+        }
+        if button.exists {
+            button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
+            XCTAssertEqual(button.value as? String, "Expanded", "Open the requested \(menu) menu")
+        } else {
+            workspaceActivate(compact)
+            workspaceActivate(app.buttons["menu-action-" + menu].firstMatch)
+        }
         if let submenu { workspaceActivate(app.buttons[submenu].firstMatch) }
         let item = app.buttons["command-" + id]
         workspaceActivate(item)

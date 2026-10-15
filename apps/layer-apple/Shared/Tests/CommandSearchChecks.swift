@@ -1,7 +1,7 @@
 import XCTest
 
 extension XCTestCase {
-    @MainActor func checkCommandSearch(in app: XCUIApplication) {
+    @MainActor func checkCommandSearch(in app: XCUIApplication, fromMenu: Bool = false) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"}]"#
         app.launch(); capturePaintEditor(in: app)
         let field = app.textFields["command-search"], detail = app.staticTexts["command-detail"]
@@ -14,7 +14,8 @@ extension XCTestCase {
         }
         func key(_ key: XCUIKeyboardKey) { app.typeKey(key.rawValue, modifierFlags: []) }
         func open(_ letter: String = "k", shift: Bool = false) {
-            app.typeKey(letter, modifierFlags: shift ? [.command, .shift] : .command)
+            if fromMenu { editorMenu(in: app, menu: "Edit", id: "search_commands", label: "Search Commands…") }
+            else { app.typeKey(letter, modifierFlags: shift ? [.command, .shift] : .command) }
             focused()
         }
         func focused() {

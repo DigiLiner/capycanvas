@@ -46,9 +46,9 @@ extension XCTestCase {
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
         XCTAssertFalse(keyboard.frame.intersects(entry.frame), "Layer opacity must stay above the keyboard")
+        attachEditor(in: app, name: "layer-opacity-draft-switch")
         XCTAssertFalse(keyboard.frame.intersects(original.frame), "Layer switching must stay available while editing")
         XCTAssertEqual(entry.value as? String, "7 +")
-        attachEditor(in: app, name: "layer-opacity-draft-switch")
         #endif
         workspaceActivate(original); expect("42")
         XCTAssertFalse(entry.exists, "An unfinished draft must not move to another layer")
@@ -203,8 +203,7 @@ extension XCTestCase {
             app.menuBars.menuBarItems["View"].click()
             app.menuItems["Fit canvas"].firstMatch.click()
             #else
-            workspaceActivate(app.buttons["menu-View"])
-            workspaceActivate(app.buttons["command-fit_canvas"])
+            editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
             #endif
         }
         #if os(macOS)
