@@ -56,6 +56,7 @@ pub(crate) struct Surface {
     presentation_switches: u64,
     last_presentation_switch_ns: u64,
     navigation_latency: u32,
+    ink_present_mode: wgpu::PresentMode,
     _instance: wgpu::Instance,
     _window: Window,
 }
@@ -73,6 +74,10 @@ impl Surface {
         self.surface.configure(gpu.device(), &self.config);
         self.presenter.set_target_retention(self.config.present_mode == wgpu::PresentMode::SharedDemandRefresh);
         Ok(())
+    }
+    fn present_with(&mut self, mode: wgpu::PresentMode) {
+        self.config.present_mode = mode;
+        self.config.desired_maximum_frame_latency = if mode == wgpu::PresentMode::Fifo { self.navigation_latency } else { 1 };
     }
 }
 
@@ -402,8 +407,8 @@ impl App {
                     label: Some("Capy Canvas Android"),
                     required_features: adapter.features()
                         & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE
-                            | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE
-                            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+                            | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
+                        | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
                     required_limits: limits,
                     memory_hints: layer_render_wgpu::memory_hints(),
                     ..Default::default()
@@ -433,11 +438,7 @@ impl App {
             .get_default_config(gpu.adapter(), width, height)
             .ok_or("The Vulkan device cannot present to this surface")?;
         let caps = surface.get_capabilities(gpu.adapter());
-        if !caps.present_modes.contains(&wgpu::PresentMode::SharedDemandRefresh) {
-            return Err("This Android GPU driver does not support front-buffer rendering. Capy Canvas requires Vulkan shared presentation with present fences.".into());
-        }
-        config.present_mode = wgpu::PresentMode::SharedDemandRefresh;
-        config.desired_maximum_frame_latency = 1;
+        let ink_present_mode = if caps.present_modes.contains(&wgpu::PresentMode::SharedDemandRefresh) { wgpu::PresentMode::SharedDemandRefresh } else { wgpu::PresentMode::Fifo };
         // Instrumentation can inspect the actual retained HDR/SDR surface;
         // Android PixelCopy cannot read an acquired shared buffer.
         if self.profiling { config.usage |= wgpu::TextureUsages::COPY_SRC; }
@@ -481,9 +482,11 @@ impl App {
             presentation_switches: 0,
             last_presentation_switch_ns: 0,
             navigation_latency,
+            ink_present_mode,
             _instance: instance,
             _window: window,
         };
+        surface.present_with(ink_present_mode);
         surface.configure(gpu, [width, height])?;
         self.surface = Some(surface);
         self.sync_hdr_display();
@@ -561,16 +564,13 @@ impl App {
             let present_mode = if surface.last_view.is_some_and(|previous| previous != view) {
                 wgpu::PresentMode::Fifo
             } else if paint_start != surface.last_paint_start {
-                wgpu::PresentMode::SharedDemandRefresh
+                surface.ink_present_mode
             } else {
                 surface.config.present_mode
             };
             if surface.config.present_mode != present_mode {
                 if surface.completed_frames.load(Ordering::Acquire) < surface.submitted_frames { return Ok(true); }
-                surface.config.present_mode = present_mode;
-                surface.config.desired_maximum_frame_latency = if present_mode == wgpu::PresentMode::Fifo {
-                    surface.navigation_latency
-                } else { 1 };
+                surface.present_with(present_mode);
                 let switch_started = std::time::Instant::now();
                 surface.configure(gpu, [view.width_px, view.height_px])?;
                 surface.last_presentation_switch_ns = switch_started.elapsed().as_nanos() as u64;

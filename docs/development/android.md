@@ -4,9 +4,9 @@
 
 The Android client uses Kotlin and Jetpack Compose for the editor UI. A Rust JNI
 bridge connects it to `NativeHost`, and the shared Vulkan renderer presents into
-a `SurfaceView`. The canvas needs Vulkan shared-demand presentation with
-swapchain-maintenance present fences; a driver without them shows a canvas
-initialization error instead of a canvas.
+a `SurfaceView`. Ink uses Vulkan shared-demand presentation when the driver has
+swapchain-maintenance present fences, and buffered FIFO presentation otherwise
+([Android presentation](../platforms/README.md#android-presentation)).
 
 The app uses no Google Play services. Distribution APKs must also omit Play's
 injected installer and licence checks; the [release workflow](releasing.md#android-apk)

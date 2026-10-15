@@ -32,8 +32,8 @@ feature allows and approximate only where an exact result costs too much.
 | --- | --- | --- |
 | Float32 filtering (`FLOAT32_FILTERABLE`) | Apple A12–A16 iPads (Apple's Metal feature tables grant it to Apple9 and later and only some Apple7/8 devices; an iPad mini 6 reports it missing), the iOS simulator, Adreno 6xx/7xx on Qualcomm drivers older than 512.700, Adreno 4xx/5xx, PowerVR, Samsung Xclipse | Texel-load sampling; see [Float32 filtering](#float32-filtering) |
 | Float32 blending (`FLOAT32_BLENDABLE`) | Every Mali generation, including the low- and mid-tier reference tablets; Adreno 5xx | Works through the slow `portable_blend` path |
-| Android shared presentation (`SharedDemandRefresh`) | Probably Android 10–13, which lack the platform swapchain extension the mode needs; `minSdk` is 29 | Startup fails: "This Android GPU driver does not support front-buffer rendering…" |
-| Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | Android and Windows request the feature without checking the format, so in-place dry-media pipelines can fail validation at startup |
+| Android shared presentation (`SharedDemandRefresh`) | Probably Android 10–13, which lack the platform swapchain extension the mode needs; `minSdk` is 29 | Buffered FIFO presentation; see [Android presentation](#android-presentation) |
+| Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | Windows requests the feature without checking the format, so in-place dry-media pipelines can fail validation at startup |
 | Wayland mailbox presentation | Unknown | The GTK host refuses to start |
 | Timestamp queries, pipeline cache | Many mobile GPUs, Metal, Web | Already optional |
 | Large textures (`max_texture_dimension_2d`) | 8192 on Web and some PowerVR | Already adaptive: the canvas size is capped |
@@ -98,18 +98,19 @@ so one merge equals blending each dab in turn:
 
 ## Android presentation
 
-When the surface has no `SharedDemandRefresh`, present through the buffered FIFO
-path the canvas already uses while the camera moves (`android.rs`), instead of
-failing. Pen latency rises by about one frame and ink cannot tear. Stroke
-prediction continues to hide part of that latency. The alternative, raising
-`minSdk` to 34, removes Android 10–13 from the Play Store; keep it only if the
-buffered path cannot meet the low tier.
+When the surface has no `SharedDemandRefresh`, the Android host presents ink
+through the buffered FIFO path the canvas already uses while the camera moves
+(`android.rs`) and never switches modes. Pen latency rises by about one frame and
+ink cannot tear. Stroke prediction continues to hide part of that latency.
+Remaining work: verify on an Android 13 tablet and measure pen latency on the low
+tier. The alternative, raising `minSdk` to 34, removes Android 10–13 from the
+Play Store; keep it only if the buffered path cannot meet the low tier.
 
 ## Smaller fixes
 
-- **Read-write storage:** every host requests in-place features through
-  `native_tiles::native_in_place_features`, which checks the formats; the copy
-  path already serves devices without them.
+- **Read-write storage:** Android requests in-place features through
+  `native_tiles::native_in_place_features`, which checks the formats; Windows
+  should too. The copy path already serves devices without them.
 - **Wayland:** fall back to FIFO when mailbox is unavailable, and drop the GTK
   host's Float32 checks once both fallbacks exist.
 - **Timestamps:** selection refinement sizes its chunks from GPU timestamps;
@@ -146,7 +147,8 @@ storage range. The validator stays as the backstop.
 1. **Diagnostics** from the previous section.
 2. **Float32 blending accumulation.** Measure mask painting and composition on
    the low- and mid-tier tablets before and after.
-3. **Android buffered presentation.** Verify on an Android 13 tablet.
+3. **Android buffered presentation.** Verify on an Android 13 tablet and
+   measure the low tier.
 4. **Read-write storage, Wayland, timestamps and memory.**
 5. **Numeric robustness** of working-page writes.
 6. **A-series tier qualification** of the Float32 filtering fallback.

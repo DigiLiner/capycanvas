@@ -91,8 +91,9 @@ Buffered frames retain their acquired image until the existing completion
 callback is polled, then present it on the next canvas tick. The canvas owner can
 receive input and actions while the GPU works. Surface retirement discards any
 held image before releasing the swapchain.
-Each switch resets damage history, so its first frame is a full redraw. There is
-no buffered fallback: a driver without shared presentation fails to initialize.
+Each switch resets damage history, so its first frame is a full redraw. A driver
+without shared presentation or present fences presents ink through FIFO too, about
+one frame later, and never switches.
 The swapchain is pre-rotated to the display's native orientation, and the
 changes to wgpu's HAL are listed in [vendor/README.md](../../vendor/README.md).
 
