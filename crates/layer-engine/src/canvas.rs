@@ -1233,12 +1233,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
 
     pub fn apply_edit(&mut self, mut edit: Edit) -> Result<(), DocumentError> {
         self.require_renderer_color(edit.resulting_color(self.document().composition().color))?;
-        fn source_operations(edit: &mut Edit, document: &Document, batches: &mut Vec<DabBatch>) {
+        fn source_operations(edit: &mut Edit, document: &Document, batches: &mut Vec<DabBatch>, replacements: &mut Vec<SourceTarget>) {
             let (target, domain, raster, operations) = match edit {
                 Edit::Batch(edits) => {
-                    for edit in edits { source_operations(edit, document, batches); }
+                    for edit in edits { source_operations(edit, document, batches, replacements); }
                     return;
                 }
+                Edit::SetRaster { target, .. } => { replacements.push(*target); return; }
                 Edit::Paint(change) => {
                     let Some(source) = change.value.as_mut() else { return; };
                     (SourceTarget::Paint(change.handle), source.domain, &mut source.raster, &mut source.operations)
@@ -1263,10 +1264,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                         damage: operation.bounds(domain),
                     });
                 }
-            }
+            } else { replacements.push(target); }
         }
         let mut operation_batches = Vec::new();
-        source_operations(&mut edit, self.document(), &mut operation_batches);
+        let mut replacements = Vec::new();
+        source_operations(&mut edit, self.document(), &mut operation_batches, &mut replacements);
         self.flush_pending_edits()?;
         self.end_corrections();
         fn rebuild_needed(document: &Document, edit: &Edit) -> bool {
@@ -1284,6 +1286,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let rebuild = rebuild_needed(self.document(), &edit);
         let changes_composite = edit.changes_image(self.editor.document());
         self.editor.perform(edit)?;
+        for (target, raster) in &mut self.restore_rasters {
+            if replacements.contains(target)
+                && let Some(current) = self.editor.document().target_raster(*target)
+                && current.try_data().is_some_and(|data| data.is_ok()) { *raster = current.clone(); }
+        }
         self.batches.extend(operation_batches);
         self.transform_preview = None;
         self.rebuild_all |= rebuild;
@@ -3994,6 +4001,52 @@ mod tests {
             engine.render_frame().unwrap();
             assert!(engine.backend().restored_rasters.is_empty(), "the restored input is submitted once");
         }
+    }
+
+    #[test]
+    fn canvas_remap_replaces_a_queued_history_restore_before_rendering() {
+        use layer_core::raster::{RasterData, RasterPlane, RasterRevision, RasterTile, TileBlob, TileKey};
+        use layer_core::{CanvasGeometry, ImageOrientation, RecordChange};
+        use layer_core::color::{SampleDepth, source::{SourceBuilder, SourceChannels, SourceInterpretation}};
+        let (_, mut engine) = engine("queued canvas restore", 512, 256);
+        let target = engine.document().working.target.unwrap();
+        let SourceTarget::Paint(handle) = target else { unreachable!() };
+        let descriptor = engine.document().composition().color.paint_descriptor();
+        let tile = RasterTile::backed(TileBlob::encode(descriptor, &vec![255; descriptor.byte_len([256; 2]).unwrap()]).unwrap());
+        let mut source = active_paint(engine.document()).clone();
+        let mut photo = SourceBuilder::new([512, 256], SourceInterpretation {
+            channels: SourceChannels::Rgba, depth: SampleDepth::U8, profile: Default::default(), profile_assumed: false,
+        }, 1024 * 1024).unwrap();
+        for _ in 0..256 { photo.push_row(&[255; 512 * 4]).unwrap(); }
+        source.base = Some(layer_core::authored::PaintBase::new(std::sync::Arc::new(photo.finish().unwrap()).into()));
+        source.raster = RasterRevision::backed(RasterData {
+            tiles: [(TileKey { plane: RasterPlane::Color, coordinate: [1, 0] }, tile)].into(),
+            ..Default::default()
+        });
+        engine.apply_edit(Edit::Paint(RecordChange::replace(&engine.document().artwork.paint, handle, Some(source)).unwrap())).unwrap();
+        engine.render_frame().unwrap();
+        let original = engine.document().target_raster(target).unwrap().identity();
+        for (index, orientation) in [ImageOrientation::FlipHorizontal, ImageOrientation::RotateRight].into_iter().enumerate() {
+            let geometry = CanvasGeometry::orient(engine.document().composition().size, orientation);
+            let plan = engine.canvas_geometry_plan(&geometry).unwrap();
+            let remap = plan.remap_plan(engine.document()).unwrap();
+            let results = remap.run(&engine.document().artwork, &Default::default(), &std::sync::atomic::AtomicBool::new(false)).unwrap();
+            engine.apply_canvas_plan(plan.with_remapped(results).unwrap(), Vec::new()).unwrap();
+            if index == 0 {
+                engine.render_frame().unwrap();
+                assert!(engine.undo().unwrap());
+                assert_eq!(engine.restore_rasters.iter().map(|(id, raster)| (*id, raster.identity())).collect::<Vec<_>>(), [(target, original)]);
+            }
+        }
+        assert_eq!(active_paint(engine.document()).domain, [256, 512]);
+        let raster = engine.document().target_raster(target).unwrap();
+        let current = raster.identity();
+        assert_ne!(current, original);
+        let data = raster.try_data().unwrap().unwrap();
+        assert!(data.tiles.contains_key(&TileKey { plane: RasterPlane::Color, coordinate: [0, 1] }));
+        assert!(!data.tiles.contains_key(&TileKey { plane: RasterPlane::Color, coordinate: [1, 0] }));
+        engine.render_frame().unwrap();
+        assert_eq!(engine.backend().restored_rasters, [(target, current)]);
     }
 
     #[test]

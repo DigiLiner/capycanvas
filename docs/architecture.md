@@ -54,6 +54,8 @@ action against the resulting document. Delayed contacts keep their captured view
 and brush settings. Camera navigation stays available;
 document activation and renderer replacement retire queued input. Hosts forward
 Undo and Redo without waiting for raster capture themselves.
+An accepted ready raster replacement updates any queued history restore for its
+target. Pending raster operations retain the earlier revision they need to replay.
 
 Android, Apple and Windows use `NativeHost`, in `layer-host`, to share session and
 renderer integration. GTK and web integrate `UiSession` directly. The host layer
