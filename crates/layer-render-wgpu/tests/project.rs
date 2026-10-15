@@ -59,7 +59,9 @@ fn source_backed_save_reopen_preserves_original_and_edited_tiles() {
     let project = document;
     let (mut live, mut input) = engine_at_scale(&project, 0.125);
     let original = image(&mut live, 0);
-    draw(&mut live, &mut input, DefaultBrushPreset::GPen, [1., 0., 0., 0.5], 100., 1_000_000);
+    let mut brush = default_brush(DefaultBrushPreset::GPen);
+    brush.stabilization.strength = 0.;
+    draw(&mut live, &mut input, brush.clone(), [1., 0., 0., 0.5], 100., 1_000_000);
     let painted = image(&mut live, 100_000_000);
     assert!(painted != original);
     let archive = support::package_bytes(live.document());
@@ -77,22 +79,21 @@ fn source_backed_save_reopen_preserves_original_and_edited_tiles() {
     assert_eq!(restored.iter().zip(&painted).enumerate().find(|(_, (a,b))| a != b), None);
     // Exact paint is independent of the display level used while drawing.
     let (mut fine, mut input) = engine(&project);
-    draw(&mut fine, &mut input, DefaultBrushPreset::GPen, [1., 0., 0., 0.5], 100., 1_000_000);
+    draw(&mut fine, &mut input, brush, [1., 0., 0., 0.5], 100., 1_000_000);
     assert_eq!(image(&mut fine, 100_000_000), painted);
 }
 fn image(engine: &mut Engine, time: u64) -> Vec<u8> {
-    engine.render_frame_at(time).unwrap();
+    support::settle(engine, time);
     engine.backend_mut().readback_srgb_rgba8().unwrap()
 }
 fn draw(
     engine: &mut Engine,
     input: &mut InputProducer<PenEvent>,
-    preset: DefaultBrushPreset,
+    mut brush: BrushSnapshot,
     color: [f32; 4],
     y: f32,
     start: u64,
 ) {
-    let mut brush = default_brush(preset);
     brush.diameter = 56.;
     brush.color_rgba_linear = color;
     engine.set_brush(brush).unwrap();
@@ -162,7 +163,7 @@ fn preset_history(masked: bool) {
         draw(
             &mut live,
             &mut input,
-            preset,
+            default_brush(preset),
             [0.03, 0.02, 0.01, 0.8],
             40. + (index % 4) as f32 * 52.,
             time,

@@ -78,6 +78,7 @@ fn paint_at(
             support::drain_input(&mut engine, time, true);
         }
     }
+    if until >= samples { support::settle(&mut engine, time); }
     engine.backend_mut().readback_srgb_rgba8().unwrap()
 }
 
@@ -396,6 +397,7 @@ fn bristle_pen_down_leaves_an_imprint_no_denser_than_the_stroke() {
 fn a_zoomed_out_preview_commits_the_same_paint() {
     let mut brush = default_brush(DefaultBrushPreset::BristlePaintbrush);
     brush.diameter = 120.;
+    brush.stabilization.strength = 0.;
     let stroke = |scale| paint_at(brush.clone(), [512; 2], scale, 80, 80, 4, true, |t| {
         let a = t * 4.;
         Pose { position: [256. + a.cos() * 150., 256. + a.sin() * 110.], pressure: 0.3 + 0.6 * (t * 3.).sin().abs(),
