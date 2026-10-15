@@ -474,10 +474,12 @@ fn finite_radius_default_tablet_view_admits_reduced_composition_with_reserved_sc
 #[test]
 fn finite_radius_effects_admit_large_reduced_windows_and_global_effects_keep_full_bounds() {
     let mut doc = document_at([65, 33]);
+    let paint = primary_paint(&doc);
     blur_chain(&mut doc);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     for extent in [[6000, 4000], [9504, 6336]] {
         composition_mut(&mut doc).size=extent;
+        doc.artwork.paint.get_mut(paint).unwrap().domain=extent;
         let mut frame = packet(doc.scene(), extent);
         frame.view.width_px = 960;
         frame.view.height_px = 640;

@@ -1398,7 +1398,7 @@ impl Evaluator<'_> {
         self.scene.reduce_color_pages(self.commands, self.r, packet, self.encoder,
             handle, local_plan, &view, &pages, Some(placement), [0; 2], &BTreeMap::new())?;
         let material = Target { view, slot: Some(Slot::Cache(slot)), plan }.value();
-        self.draw(material, value, layer_core::LayerBlend::Normal, 128 | 16384, None)
+        self.draw(material, value, layer_core::LayerBlend::Normal, 128, None)
     }
     fn objects(&mut self,content:&object_spatial::Content,moving:bool,output:Option<Target>)->Result<Value,GpuRasterError> {
         self.commands.flush(self.r,self.encoder)?;

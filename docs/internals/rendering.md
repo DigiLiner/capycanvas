@@ -32,6 +32,9 @@ image extent at its base offset inside the paint domain. `SceneView::local_exten
 these domains in [`authored/scene.rs`](../../crates/layer-core/src/authored/scene.rs).
 The composition frame is a window over those pixels; changing the canvas does not
 discard pixels outside it. Retained pixels count toward tile and byte limits.
+Reduced composition reads transparent pixels beyond each color or preview
+texture's physical bounds, including partial edge cells of shifted sources.
+Coverage sources retain their authored outside value through source placement.
 
 `Rect::from_extent` gives the local pixel bounds used by geometry, merges and sampling.
 

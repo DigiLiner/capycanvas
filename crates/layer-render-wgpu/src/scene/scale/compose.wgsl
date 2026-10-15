@@ -1,27 +1,25 @@
+fn composition_pixel(image:texture_2d<f32>,p:vec2<i32>)->vec4<f32> {
+    if any(p<vec2(0)) || any(p>=vec2<i32>(textureDimensions(image))) {return vec4(0.);}
+    return textureLoad(image,p,0);
+}
 @compute @workgroup_size(8, 8)
 fn compose(@builtin(global_invocation_id) id: vec3<u32>) {
     if any(id.xy >= region.size) { return; }
     let p = vec2<i32>(region.origin + id.xy);
     var below = region.paper;
     if (region.flags & 2u) != 0u {
-        below = textureLoad(base, p + region.base_origin, 0);
+        below = composition_pixel(base, p + region.base_origin);
         if (region.flags & 512u) != 0u {
-            let preview = textureLoad(base_preview, p + region.base_origin, 0);
+            let preview = composition_pixel(base_preview, p + region.base_origin);
             below = preview + below * (1. - preview.a);
         }
         if (region.flags & 2048u) != 0u { below = working_encode(below); }
         if region.opacity.z!=1. {below *= region.opacity.z;}
     }
     let coordinate = p + region.source_origin;
-    var color = textureLoad(source, coordinate, 0);
-    if (region.flags & 16384u) != 0u {
-        color = vec4<f32>(0.0);
-        if all(coordinate >= vec2<i32>(0)) && all(coordinate < vec2<i32>(textureDimensions(source))) {
-            color = textureLoad(source, coordinate, 0);
-        }
-    }
+    var color = composition_pixel(source, coordinate);
     if (region.flags & 256u) != 0u {
-        let preview = textureLoad(source_preview, p + region.source_origin, 0);
+        let preview = composition_pixel(source_preview, p + region.source_origin);
         color = preview + color * (1. - preview.a);
     }
     if (region.flags & 1024u) != 0u { color = working_encode(color); }
