@@ -426,7 +426,7 @@ fn cropped_display_restores_hdr_blocks_at_partial_document_edges() {
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
         r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],extent,extent)));
         let size=[PAGE_SIZE/block;2];
-        let output=create_page_surface(&r.device,&r.texture_layout,&r.sampler,size,r.device.working_format(),"stale display HDR output");
+        let output=create_page_surface(&r.device,&r.float_texture_layout,&r.sampler,size,r.device.working_format(),"stale display HDR output");
         let stale:Vec<_>=(0..size[0]*size[1]).flat_map(|_|[9f32,-7.,3.,0.9].into_iter().flat_map(f32::to_le_bytes)).collect();
         r.queue.write_texture(output.texture.as_image_copy(),&stale,wgpu::TexelCopyBufferLayout {
             offset:0,bytes_per_row:Some(size[0]*16),rows_per_image:Some(size[1]),
@@ -917,7 +917,7 @@ fn partial_analytic_display_averages_current_and_stroke_start_over_the_same_foot
                 r.prepare_dry_records(&batch,std::iter::once((PixelRect::full(extent),0..1,[0;16])),&mut encoder).unwrap();
                 r.ensure_texture_set(&batch.style).unwrap();r.uploads.finish(&encoder);encoder.submit(&r.queue);
                 r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],extent,extent)));
-                let size=[PAGE_SIZE/block;2];let output=create_page_surface(&r.device,&r.texture_layout,&r.sampler,size,r.device.working_format(),"partial display reference output");
+                let size=[PAGE_SIZE/block;2];let output=create_page_surface(&r.device,&r.float_texture_layout,&r.sampler,size,r.device.working_format(),"partial display reference output");
                 let sources=create_material_bind_group(&r.device,&r.material_layout,&[&current.view;9],&r.dab_buffer,&r.empty_scalar_view,&background.view,wgpu::BindingResource::Buffer(r.dry_records.binding()));
                 let binding=if block==1 {r.pipelines.dry_material.output(r,&output,None,canvas.base,[0;2])} else {r.pipelines.dry_display.output(r,&output,None,canvas.base,[0;2])};
                 let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());

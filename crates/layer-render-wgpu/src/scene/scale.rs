@@ -109,16 +109,16 @@ impl Pipelines {
             device,
             "display composition inputs",
             &[
-                crate::bindings::texture(0, wgpu::ShaderStages::COMPUTE, true),
-                crate::bindings::texture(1, wgpu::ShaderStages::COMPUTE, true),
+                crate::bindings::float_texture(0, wgpu::ShaderStages::COMPUTE, device),
+                crate::bindings::float_texture(1, wgpu::ShaderStages::COMPUTE, device),
                 crate::bindings::storage_texture(
                     2,
                     wgpu::ShaderStages::COMPUTE,
                     wgpu::TextureFormat::Rgba32Float,
                     wgpu::StorageTextureAccess::WriteOnly,
                 ),
-                crate::bindings::texture(3, wgpu::ShaderStages::COMPUTE, true),
-                crate::bindings::texture(4, wgpu::ShaderStages::COMPUTE, true),
+                crate::bindings::float_texture(3, wgpu::ShaderStages::COMPUTE, device),
+                crate::bindings::float_texture(4, wgpu::ShaderStages::COMPUTE, device),
                 crate::bindings::sampler(5, wgpu::ShaderStages::COMPUTE, wgpu::SamplerBindingType::Filtering),
             ],
         );
@@ -130,7 +130,7 @@ impl Pipelines {
         let shader = Deferred::wgsl(
             device,
             "display resolution composition",
-            compose_wgsl(&[&working_color::shader(device), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")]),
+            compose_wgsl(&[&working_color::shader(device), device.float_sampling_wgsl(), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")]),
         );
         Self {
             records: records_layout,

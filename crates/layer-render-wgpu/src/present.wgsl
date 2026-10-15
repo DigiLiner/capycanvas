@@ -73,7 +73,7 @@ fn detail_point(p: vec2<f32>) -> vec4<f32> {
     let scale = f32(cache.scale);
     let q = vec2(mip_coordinate(p.x, extent.x, scale), mip_coordinate(p.y, extent.y, scale));
     if any(q < vec2<f32>(cache.window.xy)) || any(q > vec2<f32>(cache.window.zw - 1u)) { return coarse_point(p); }
-    return textureSampleLevel(moved, linear_sampler, (q - vec2<f32>(cache.window.xy) + .5) / vec2<f32>(textureDimensions(moved)), 0.);
+    return sample_float(moved, linear_sampler, (q - vec2<f32>(cache.window.xy) + .5) / vec2<f32>(textureDimensions(moved)), 0.);
 }
 fn placed_at(p:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>,linear:bool)->vec4<f32> {
     let span=abs(dx)+abs(dy);
@@ -129,7 +129,7 @@ fn grid_artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     let extent = camera.offset_document.zw;
     let q = vec2(mip_coordinate(p.x, extent.x, next_scale), mip_coordinate(p.y, extent.y, next_scale));
     let origin = vec2<f32>(cache.window.xy) * (scale / next_scale);
-    let reduced = textureSampleLevel(kept, linear_sampler, (q - origin + .5) / vec2<f32>(textureDimensions(kept)), 0.);
+    let reduced = sample_float(kept, linear_sampler, (q - origin + .5) / vec2<f32>(textureDimensions(kept)), 0.);
     return mix(detail_point(p), reduced, clamp(log2(footprint / scale), 0., 1.));
 }
 // Linear premultiplied artwork from the composite, which holds the
@@ -470,12 +470,12 @@ fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     let size = vec2<f32>(textureDimensions(navigator));
     let uv = (q + .5) / size;
     let footprint = fwidth(v.uv);
-    var sample = canvas_linear(textureSampleLevel(navigator, linear_sampler, uv, 0.));
+    var sample = canvas_linear(sample_float(navigator, linear_sampler, uv, 0.));
     if max(footprint.x * size.x, footprint.y * size.y) > 4. {
         sample = vec4(0.);
         for (var y = 0u; y < 4u; y++) { for (var x = 0u; x < 4u; x++) {
             let offset = (vec2(f32(x), f32(y)) + .5) / 4. - .5;
-            sample += canvas_linear(textureSampleLevel(navigator, linear_sampler, uv + offset * footprint, 0.)) / 16.;
+            sample += canvas_linear(sample_float(navigator, linear_sampler, uv + offset * footprint, 0.)) / 16.;
         }}
     }
     let paint = proof_artwork(sample, point);

@@ -7,7 +7,7 @@ fn border_sample(image:texture_2d<f32>,linear_sampler:sampler,extent:vec2<f32>,o
     let size=vec2<f32>(textureDimensions(image));
     if any(q<=vec2(-.5)) || any(q>=size+.5) {return vec4(outside);}
     if all(q>=vec2(.5)) && all(q<=floor(extent)-.5) {
-        return textureSampleLevel(image,linear_sampler,q/size,0.);
+        return sample_float(image,linear_sampler,q/size,0.);
     }
     let s=clamp(q-.5,vec2(-2.),size+1.);
     let base=vec2<i32>(floor(s));
@@ -21,14 +21,14 @@ fn mip_sample(image:texture_2d<f32>,linear_sampler:sampler,extent:vec2<f32>,outs
     let size=vec2<f32>(textureDimensions(image,lod));
     let last=ceil(edge)-1.;let fraction=edge-last;let previous=last-.5;
     let adjusted=select(q,previous+(q-previous)/((fraction+1.)*.5),q>previous);
-    return textureSampleLevel(image,linear_sampler,clamp(adjusted,vec2(.5),last+.5)/size,f32(lod));
+    return sample_float(image,linear_sampler,clamp(adjusted,vec2(.5),last+.5)/size,f32(lod));
 }
 fn pyramid_sample(image:texture_2d<f32>,linear_sampler:sampler,extent:vec2<f32>,outside:f32,q:vec2<f32>,lod:f32,max_lod:f32)->vec4<f32> {
     let level=clamp(lod,0.,max_lod);let low=u32(floor(level));let weight=fract(level);
     if any(q<vec2(0.)) || any(q>=extent) {return vec4(outside);}
     let side=exp2(ceil(level));
     if all(q<=(floor(extent/side)-.5)*side) {
-        return textureSampleLevel(image,linear_sampler,q/vec2<f32>(textureDimensions(image)),level);
+        return sample_float(image,linear_sampler,q/vec2<f32>(textureDimensions(image)),level);
     }
     let a=mip_sample(image,linear_sampler,extent,outside,q,low);
     if weight<0.00001 {return a;}
@@ -41,10 +41,10 @@ fn area_sample(image:texture_2d<f32>,linear_sampler:sampler,extent:vec2<f32>,out
     var sum:vec4<f32>;
     if all(low>=vec2(.5)) && all(high<=floor(extent)-.5) {
         let size=vec2<f32>(textureDimensions(image));
-        sum=textureSampleLevel(image,linear_sampler,a/size,0.)
-            +textureSampleLevel(image,linear_sampler,b/size,0.)
-            +textureSampleLevel(image,linear_sampler,c/size,0.)
-            +textureSampleLevel(image,linear_sampler,d/size,0.);
+        sum=sample_float(image,linear_sampler,a/size,0.)
+            +sample_float(image,linear_sampler,b/size,0.)
+            +sample_float(image,linear_sampler,c/size,0.)
+            +sample_float(image,linear_sampler,d/size,0.);
     } else {
         sum=border_sample(image,linear_sampler,extent,outside,a)+border_sample(image,linear_sampler,extent,outside,b)+border_sample(image,linear_sampler,extent,outside,c)+border_sample(image,linear_sampler,extent,outside,d);
     }

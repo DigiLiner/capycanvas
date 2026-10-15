@@ -603,7 +603,7 @@ fn zero_coverage_export_and_navigator_return_black_without_mutating_the_artwork(
     // RGB. Exact artwork readback must ignore the corrupted display cache.
     let encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     let view = texture.create_view(&Default::default());
-    let binding = create_texture_bind_group(&r.device, &r.texture_layout, &view, &r.sampler, "hidden RGB output oracle");
+    let binding = create_texture_bind_group(&r.device, &r.float_texture_layout, &view, &r.sampler, "hidden RGB output oracle");
     let (tx, rx) = std::sync::mpsc::channel();
     r.submit_ui_readback(encoder, &binding, [1; 2], 42, move |image| {
         tx.send(image).unwrap();

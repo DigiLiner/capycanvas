@@ -42,7 +42,7 @@ impl WgpuRasterizer {
             };
             let binding = create_texture_bind_group(
                 &self.device,
-                &self.texture_layout,
+                &self.float_texture_layout,
                 &source.view,
                 &self.sampler,
                 "exact readback tile",

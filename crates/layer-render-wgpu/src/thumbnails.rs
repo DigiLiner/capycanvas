@@ -72,12 +72,11 @@ impl WgpuRasterizer {
         self.ui_preview_pipeline = (space != layer_core::color::RgbSpace::Srgb).then(|| {
             let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("managed UI image conversion"),
-                source: wgpu::ShaderSource::Wgsl(format!("{}\n{}",
-                    view_color::shader(self.device.working_space(), space), include_str!("export.wgsl")).into()),
+                source: wgpu::ShaderSource::Wgsl(crate::export_shader_source(&self.device, space)),
             });
             let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("managed UI image layout"),
-                bind_group_layouts: &[Some(&self.texture_layout)], immediate_size: 0,
+                bind_group_layouts: &[Some(&self.float_texture_layout)], immediate_size: 0,
             });
             fullscreen_pipeline(&self.device, &layout, &shader, "fragment_main", None, EXPORT_FORMAT, "managed UI image")
         });
@@ -342,7 +341,7 @@ impl PreviewPipeline {
         let records = bounds.records.clone();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("content-framed thumbnails"),
-            source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", crate::view_color::hdr_shader(device.working_space(), layer_core::color::RgbSpace::Srgb), BoundsPipeline::shader()).into()),
+            source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", crate::view_color::hdr_shader(device.working_space(), layer_core::color::RgbSpace::Srgb), BoundsPipeline::shader(device)).into()),
         });
         let layout = |bounds| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -493,7 +492,7 @@ impl PreviewPipeline {
                 contents: &bytes,
                 usage: wgpu::BufferUsages::UNIFORM,
             });
-        let result = create_page_surface(&r.device, &r.texture_layout, &r.sampler, [32, 32],
+        let result = create_page_surface(&r.device, &r.float_texture_layout, &r.sampler, [32, 32],
             r.device.working_format(), "layer thumbnail");
         PreparedPreview { id:target, revision: (r.artwork_revision, r.selection_paint_revision),
             rendition: r.ui_rendition_parameters(), measure: if full { sources.len() } else { 1 },
@@ -652,9 +651,9 @@ pub(super) struct BoundsPipeline {
     sampler: wgpu::Sampler,
 }
 impl BoundsPipeline {
-    fn shader() -> String {
-        format!("{}\n{}\n{}", include_str!("selection_clip.wgsl").replace("@binding(1)", "@binding(3)"),
-            include_str!("area_sample.wgsl"), include_str!("thumbnails.wgsl"))
+    fn shader(device: &PipelineDevice) -> String {
+        format!("{}\n{}\n{}\n{}", include_str!("selection_clip.wgsl").replace("@binding(1)", "@binding(3)"),
+            device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("thumbnails.wgsl"))
     }
     pub fn new(device: &PipelineDevice) -> Arc<Self> {
         device.bounds_pipeline.get_or_init(|| Arc::new(Self::build(device))).clone()
@@ -667,7 +666,7 @@ impl BoundsPipeline {
         let records = crate::bindings::layout(device, "content bounds page", &[
             crate::bindings::buffer(0, wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,
                 wgpu::BufferBindingType::Uniform, true, NonZeroU64::new(80)),
-            crate::bindings::texture(1, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, true),
+            crate::bindings::float_texture(1, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::sampler(2, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
             crate::bindings::buffer(3, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Storage { read_only: true }, false, NonZeroU64::new(48)),
         ]);
@@ -675,7 +674,7 @@ impl BoundsPipeline {
             label: Some("content bounds reduction"),
             source: wgpu::ShaderSource::Wgsl(format!("{}\n{}",
                 crate::view_color::hdr_shader(device.working_space(), layer_core::color::RgbSpace::Srgb),
-                BoundsPipeline::shader()).into()),
+                BoundsPipeline::shader(device)).into()),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("content bounds reduction"), bind_group_layouts: &[Some(&write), Some(&records)], immediate_size: 0,

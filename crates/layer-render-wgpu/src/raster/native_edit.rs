@@ -307,9 +307,7 @@ impl WgpuRasterizer {
         queue: wgpu::Queue,
         color: DocumentColor,
     ) -> Result<Self, GpuRasterError> {
-        let device = device
-            .require_float32()?
-            .with_working_space(color.space).with_depth(color.depth);
+        let device = device.with_working_space(color.space).with_depth(color.depth);
         let mut r = Self::from_wgpu_inner(adapter, device, queue, Initialization::Interactive)?;
         r.startup.as_mut().unwrap().host_catalog_pending = !cfg!(target_arch = "wasm32");
         r.initialize_native(color)?;
@@ -320,7 +318,11 @@ impl WgpuRasterizer {
     /// Dab RGB values are linear coordinates in `color.space`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new_native_headless(color: DocumentColor) -> Result<Self, GpuRasterError> {
-        let mut r = pollster::block_on(Self::headless(color.space, Initialization::Headless))?;
+        Self::native_headless_without(color, wgpu::Features::empty())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn native_headless_without(color: DocumentColor, omitted: wgpu::Features) -> Result<Self, GpuRasterError> {
+        let mut r = pollster::block_on(Self::headless(color.space, Initialization::Headless, omitted))?;
         r.initialize_native(color)?;
         Ok(r)
     }
@@ -331,9 +333,7 @@ impl WgpuRasterizer {
         queue: wgpu::Queue,
         color: DocumentColor,
     ) -> Result<Self, GpuRasterError> {
-        let device = device
-            .require_float32()?
-            .with_working_space(color.space).with_depth(color.depth);
+        let device = device.with_working_space(color.space).with_depth(color.depth);
         let mut r = Self::from_wgpu_inner(adapter, device, queue, Initialization::Snapshot)?;
         r.initialize_native(color)?;
         Ok(r)

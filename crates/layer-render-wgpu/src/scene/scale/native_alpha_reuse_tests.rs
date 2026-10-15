@@ -124,7 +124,7 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
             std::array::from_fn(|i|if i==9 {coverage().map_or(&r.empty_scalar_view,|p|&p.view).clone()}else {r.empty_view.clone()}) );
         input().material_input.get(key,||panic!("{preset:?} {name} {blend:?}: actual contribution must bind empty paint"));
         let actual=crate::layer_tests::page_bytes(&r,&r.preview_page([0,0]).unwrap().active().texture);
-        let reference=create_page_surface(&r.device,&r.texture_layout,&r.sampler,[PAGE_SIZE>>r.preview_level;2],r.device.working_format(),"bound paint contribution oracle");
+        let reference=create_page_surface(&r.device,&r.float_texture_layout,&r.sampler,[PAGE_SIZE>>r.preview_level;2],r.device.working_format(),"bound paint contribution oracle");
         let output=r.pipelines.dry_display.output(&r,&reference,None,target,[0,0]);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
         r.preview_contribution=false;
@@ -509,7 +509,7 @@ fn native_alpha_reuse_untracked_materials_have_no_writable_cell_binding() {
         (Target::DisplayTracked,"tracked display",r.pipelines.dry_display_tracked.as_ref().unwrap()),
         (Target::Tracked, "tracked", r.pipelines.dry_tracked.as_ref().unwrap()),
     ] {
-        let source = crate::dry_material::shader_source(r.device.working_space(), target, include_str!("../../material_brush.wgsl"));
+        let source = crate::dry_material::shader_source(r.device.working_space(), r.device.float_sampling_wgsl(), target, include_str!("../../material_brush.wgsl"));
         let module = naga::front::wgsl::parse_str(&source).unwrap();
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&module).unwrap();
         let writable: Vec<_> = module.global_variables.iter().filter_map(|(_, variable)| {
@@ -785,7 +785,7 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
         let components=new.map(|v|format!("bitcast<f32>({}u)",v.to_bits())).join(",");
         let material=format!("{}\n@compute @workgroup_size(1) fn comparison_test() {{store_display_color(vec2<u32>(0u),vec4<f32>({components}));}}",include_str!("../../material_brush.wgsl"));
         let shader=r.device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("actual tracked display compare helper"),
-            source:wgpu::ShaderSource::Wgsl(crate::dry_material::shader_source(r.device.working_space(),crate::dry_material::Target::DisplayTracked,&material))});
+            source:wgpu::ShaderSource::Wgsl(crate::dry_material::shader_source(r.device.working_space(),r.device.float_sampling_wgsl(),crate::dry_material::Target::DisplayTracked,&material))});
         let pipeline=r.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {label:Some("tracked one-pixel bit compare"),layout:None,module:&shader,entry_point:Some("comparison_test"),compilation_options:Default::default(),cache:None});
         let binding=r.device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("tracked one-pixel actual output"),layout:&pipeline.get_bind_group_layout(0),entries:&[
             wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::Buffer(wgpu::BufferBinding {buffer:&r.style_buffer,offset:0,size:NonZeroU64::new(mem::size_of::<StyleGpu>() as u64)})},

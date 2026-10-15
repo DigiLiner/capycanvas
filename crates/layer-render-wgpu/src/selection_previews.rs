@@ -313,7 +313,7 @@ impl WgpuRasterizer {
         );
         let result = create_page_surface(
             &self.device,
-            &self.texture_layout,
+            &self.float_texture_layout,
             &self.sampler,
             [32, 32],
             self.device.working_format(),

@@ -37,6 +37,9 @@ pub(super) type MaterialOutput =
 pub(super) fn texture(binding: u32, visibility: wgpu::ShaderStages, filterable: bool) -> wgpu::BindGroupLayoutEntry {
     texture_of(binding, visibility, wgpu::TextureSampleType::Float { filterable }, wgpu::TextureViewDimension::D2)
 }
+pub(super) fn float_texture(binding: u32, visibility: wgpu::ShaderStages, device: &super::PipelineDevice) -> wgpu::BindGroupLayoutEntry {
+    texture(binding, visibility, device.float32_filterable())
+}
 pub(super) fn texture_of(
     binding: u32,
     visibility: wgpu::ShaderStages,

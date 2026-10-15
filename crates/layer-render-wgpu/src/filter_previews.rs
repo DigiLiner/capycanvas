@@ -674,7 +674,7 @@ impl FilterPreviews {
         let image_height = height * self.rendering.len() as u32;
         let binding = create_texture_bind_group(
             &r.device,
-            &r.texture_layout,
+            &r.float_texture_layout,
             &atlas.1,
             &r.sampler,
             "filter preview export",

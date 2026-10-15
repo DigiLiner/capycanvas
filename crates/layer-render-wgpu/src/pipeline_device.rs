@@ -105,13 +105,11 @@ impl PipelineDevice {
     pub fn scalar_format(&self) -> wgpu::TextureFormat {
         wgpu::TextureFormat::R32Float
     }
-    pub fn require_float32(self) -> Result<Self, super::GpuRasterError> {
-        if !self.features().contains(wgpu::Features::FLOAT32_FILTERABLE) {
-            return Err(super::GpuRasterError::Color(
-                "This device cannot sample Float32 working tiles".into(),
-            ));
-        }
-        Ok(self)
+    pub fn float32_filterable(&self) -> bool {
+        self.features().contains(wgpu::Features::FLOAT32_FILTERABLE)
+    }
+    pub fn float_sampling_wgsl(&self) -> &'static str {
+        float_sampling_wgsl(self.float32_filterable())
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub fn cached(
@@ -178,4 +176,7 @@ impl PipelineDevice {
             cache.finish();
         }
     }
+}
+pub(crate) fn float_sampling_wgsl(filterable: bool) -> &'static str {
+    if filterable { include_str!("float_sample_filtered.wgsl") } else { include_str!("float_sample_texels.wgsl") }
 }

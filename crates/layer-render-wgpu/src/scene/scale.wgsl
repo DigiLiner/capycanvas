@@ -39,9 +39,9 @@ fn reduce(@builtin(global_invocation_id) id: vec3<u32>) {
         for (var y = 1u; y < region.side; y += 2u) {
             for (var x = 1u; x < region.side; x += 2u) {
                 let p = vec2<f32>(start + vec2(x, y));
-                var value = textureSampleLevel(source, area_sampler, p / vec2<f32>(dimensions), 0.);
+                var value = sample_float(source, area_sampler, p / vec2<f32>(dimensions), 0.);
                 if (region.flags & 128u) != 0u {
-                    value -= textureSampleLevel(base, area_sampler, p / vec2<f32>(base_dimensions), 0.);
+                    value -= sample_float(base, area_sampler, p / vec2<f32>(base_dimensions), 0.);
                 }
                 sum += value;
             }
@@ -90,10 +90,10 @@ fn phased_load(page: u32, texel: vec2<i32>) -> vec4<f32> {
 }
 fn phased_sample(page: u32, texel: vec2<f32>) -> vec4<f32> {
     switch page {
-        case 0u: { return textureSampleLevel(source, area_sampler, texel / vec2<f32>(textureDimensions(source)), 0.); }
-        case 1u: { return textureSampleLevel(base, area_sampler, texel / vec2<f32>(textureDimensions(base)), 0.); }
-        case 2u: { return textureSampleLevel(source_preview, area_sampler, texel / vec2<f32>(textureDimensions(source_preview)), 0.); }
-        default: { return textureSampleLevel(base_preview, area_sampler, texel / vec2<f32>(textureDimensions(base_preview)), 0.); }
+        case 0u: { return sample_float(source, area_sampler, texel / vec2<f32>(textureDimensions(source)), 0.); }
+        case 1u: { return sample_float(base, area_sampler, texel / vec2<f32>(textureDimensions(base)), 0.); }
+        case 2u: { return sample_float(source_preview, area_sampler, texel / vec2<f32>(textureDimensions(source_preview)), 0.); }
+        default: { return sample_float(base_preview, area_sampler, texel / vec2<f32>(textureDimensions(base_preview)), 0.); }
     }
 }
 // Level pixels lie `opacity.xy` pixels after the layer's own, so a level page

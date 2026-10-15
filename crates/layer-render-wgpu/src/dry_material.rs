@@ -31,17 +31,17 @@ pub(super) fn shader(device: &PipelineDevice, target: Target) -> Deferred<wgpu::
     Deferred::new(move || {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("layer destination brush shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_source(device.working_space(), target, include_str!("material_brush.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(shader_source(device.working_space(), device.float_sampling_wgsl(), target, include_str!("material_brush.wgsl"))),
         })
     })
 }
 
-pub(super) fn shader_source(space: layer_core::color::RgbSpace, target: Target, material: &str) -> Cow<'static, str> {
+pub(super) fn shader_source(space: layer_core::color::RgbSpace, float_sampling: &str, target: Target, material: &str) -> Cow<'static, str> {
     let tracking = if matches!(target,Target::Tracked|Target::DisplayTracked) {
         concat!(include_str!("changed_cells.wgsl"), "\n@group(0) @binding(3) var<storage,read_write> changed_cells:ChangedCells;")
     } else { "fn mark_changed_cell(pixel:vec2<u32>) {}" };
     compose_wgsl(&[
-        &working_color::source(space), include_str!("blend_modes.wgsl"), &shader_destination(target), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"),
+        &working_color::source(space), include_str!("blend_modes.wgsl"), float_sampling, &shader_destination(target), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"),
         include_str!("material_common.wgsl"), include_str!("material_clone.wgsl"),
         include_str!("material_pointwise.wgsl"), include_str!("material_transport.wgsl"),
         include_str!("material_contact.wgsl"), material, include_str!("material_compute.wgsl"),
@@ -67,12 +67,12 @@ pub(super) fn specialize_contact(source: Cow<'static,str>, flags:u32)->Cow<'stat
         &format!("const CONTACT_FLAGS: u32 = {flags}u;")).into()
 }
 
-fn kernel_source(space:layer_core::color::RgbSpace,target:Target,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
+fn kernel_source(space:layer_core::color::RgbSpace,float_sampling:&str,target:Target,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
     let tracking=if matches!(target,Target::Tracked|Target::DisplayTracked) {
         concat!(include_str!("changed_cells.wgsl"),"\n@group(0) @binding(3) var<storage,read_write> changed_cells:ChangedCells;")
     } else {"fn mark_changed_cell(pixel:vec2<u32>) {}"};
     let leaf=if flags!=u32::MAX && flags&64!=0 {include_str!("dry_material_contact.wgsl")} else {include_str!("material_contact.wgsl")};
-    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_modes.wgsl"),
+    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_modes.wgsl"),float_sampling,
         &shader_destination(target),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),
         include_str!("retouch_sample.wgsl"),include_str!("material_common.wgsl"),include_str!("material_clone.wgsl"),
         include_str!("material_pointwise.wgsl"),leaf,
@@ -223,7 +223,7 @@ impl Pipelines {
                 let device=device.for_recipe();
                 Deferred::new(move||device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label:Some("layer specialized contact shader"),
-                    source:wgpu::ShaderSource::Wgsl(kernel_source(device.working_space(),target,flags,operation)),
+                    source:wgpu::ShaderSource::Wgsl(kernel_source(device.working_space(),device.float_sampling_wgsl(),target,flags,operation)),
                 }))
             });
             std::array::from_fn(|index| {
@@ -501,8 +501,8 @@ mod tests {
             let flags=contact_flags(layer_core::default_brush(preset).contact);
             families.extend([flags,flags|128,flags|8192,flags|16384,flags|8192|16384]);
         }
-        for target in [Target::Exact, Target::InPlace, Target::Tracked, Target::Display, Target::DisplayTracked] {for &flags in &families {for operation in OPERATIONS {
-            let source = kernel_source(Default::default(),target,flags,operation);
+        for target in [Target::Exact, Target::InPlace, Target::Tracked, Target::Display, Target::DisplayTracked] {for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
+            let source = kernel_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),target,flags,operation);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
             if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
@@ -530,6 +530,6 @@ mod tests {
                         "{target:?}/{entry}/{operation:?} supplies unused override {name}");
                 }
             }
-        }}}
+        }}}}
     }
 }

@@ -56,6 +56,7 @@ fn deferred_transforms_present_rotated_views_and_navigators_without_intermediate
         } else { presenter.present(r, &target, view, [1.; 4]).unwrap(); }
         pixels(r, &texture)
     };
+    for omitted in [wgpu::Features::empty(), wgpu::Features::FLOAT32_FILTERABLE] {
     for patterned in [false, true] {
     for space in layer_core::BlendSpace::ALL {
     for (selected, opacity) in [(false, 1.), (true, 0.71)] {
@@ -66,7 +67,8 @@ fn deferred_transforms_present_rotated_views_and_navigators_without_intermediate
              if (x / 13 + y / 17) % 2 == 0 { 40 } else { 220 },
              if (x / 2 + y / 3) % 2 == 0 { 40 } else { 220 }, 255])).into())); }
         occurrence_mut(&mut doc,0).opacity = opacity;
-        let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        let mut r = WgpuRasterizer::native_headless_without(doc.composition().color, omitted).unwrap();
+        assert_eq!(r.device.float32_filterable(), omitted.is_empty());
         let mut exact = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         exact.test.reference = true;
         let mut frame = packet(doc.scene(), extent);
@@ -137,13 +139,13 @@ fn deferred_transforms_present_rotated_views_and_navigators_without_intermediate
                 let prior_p99 = prior_errors[prior_errors.len()*99/100];
                 assert!(if overview { mean < 0.06 && p99 < 0.25 } else {
                     (mean < 0.004 && p99 < 0.04) || (mean <= prior_mean * 1.05 + 0.0001 && p99 <= prior_p99 + 0.01) },
-                    "patterned={patterned} {space:?} selected={selected} overview={overview} camera={camera:?}: mean={mean} p99={p99}; prior={prior_mean}/{prior_p99}");
+                    "omitted={omitted:?} patterned={patterned} {space:?} selected={selected} overview={overview} camera={camera:?}: mean={mean} p99={p99}; prior={prior_mean}/{prior_p99}");
                 if !overview && !patterned && space == layer_core::BlendSpace::Linear {
-                    assert!(mean < 0.004 && p99 < 0.04, "linear area error: mean={mean} p99={p99}");
+                    assert!(mean < 0.004 && p99 < 0.04, "omitted={omitted:?} linear area error: mean={mean} p99={p99}");
                 }
             }
         }
-    }}}
+    }}}}
 }
 
 #[test]

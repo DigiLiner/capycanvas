@@ -347,7 +347,7 @@ impl SourceThumbnails {
         ]);
         let result = create_page_surface(
             &r.device,
-            &r.texture_layout,
+            &r.float_texture_layout,
             &r.sampler,
             [32, 32],
             r.device.working_format(),

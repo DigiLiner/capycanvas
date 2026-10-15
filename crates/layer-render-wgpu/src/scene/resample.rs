@@ -34,7 +34,7 @@ pub(crate) struct Resample {
 impl Resample {
     pub fn new(device: &PipelineDevice) -> Self {
         let layout = crate::bindings::layout(device, "display resample", &[
-            crate::bindings::texture(0, wgpu::ShaderStages::COMPUTE, true),
+            crate::bindings::float_texture(0, wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::storage_texture(
                 1,
                 wgpu::ShaderStages::COMPUTE,
@@ -48,7 +48,7 @@ impl Resample {
                 false,
                 wgpu::BufferSize::new(UNIFORM_BYTES),
             ),
-            crate::bindings::texture(3, wgpu::ShaderStages::COMPUTE, true),
+            crate::bindings::float_texture(3, wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::sampler(4, wgpu::ShaderStages::COMPUTE, wgpu::SamplerBindingType::Filtering),
         ]);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -56,12 +56,12 @@ impl Resample {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let shader = Deferred::wgsl(device, "display resample", compose_wgsl(&[&crate::working_color::shader(device), include_str!("../area_sample.wgsl"), include_str!("../mapped_sample.wgsl"), include_str!("../display_resample.wgsl")]));
+        let shader = Deferred::wgsl(device, "display resample", compose_wgsl(&[&crate::working_color::shader(device), device.float_sampling_wgsl(), include_str!("../area_sample.wgsl"), include_str!("../mapped_sample.wgsl"), include_str!("../display_resample.wgsl")]));
         let mesh_layout = crate::bindings::layout(device, "mesh resample", &[
-            crate::bindings::texture(0, wgpu::ShaderStages::FRAGMENT, true),
+            crate::bindings::float_texture(0, wgpu::ShaderStages::FRAGMENT, device),
             crate::bindings::buffer(2, wgpu::ShaderStages::VERTEX_FRAGMENT, wgpu::BufferBindingType::Uniform,
                 false, wgpu::BufferSize::new(UNIFORM_BYTES)),
-            crate::bindings::texture(3, wgpu::ShaderStages::FRAGMENT, true),
+            crate::bindings::float_texture(3, wgpu::ShaderStages::FRAGMENT, device),
             crate::bindings::sampler(4, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
         ]);
         let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

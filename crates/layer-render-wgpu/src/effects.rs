@@ -334,8 +334,8 @@ impl Effects {
         }
         let visibility=wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
         let sources = crate::bindings::layout(&r.device, "effect sources", &[
-            crate::bindings::texture(0,visibility,true),
-            crate::bindings::texture(1,visibility,true),
+            crate::bindings::float_texture(0,visibility,&r.device),
+            crate::bindings::float_texture(1,visibility,&r.device),
             crate::bindings::sampler(2,visibility,wgpu::SamplerBindingType::Filtering),
         ]);
         let layout = crate::bindings::layout(&r.device, "effect parameters", &[crate::bindings::buffer(
@@ -346,11 +346,11 @@ impl Effects {
             NonZeroU64::new(16),
         ), crate::bindings::buffer(1, visibility, wgpu::BufferBindingType::Storage {read_only: true}, false, NonZeroU64::new(16))]);
         let masks = crate::bindings::layout(&r.device, "effect mask inputs",
-            &(0..MASK_SLOTS).map(|i| crate::bindings::texture(i as u32, visibility, true))
+            &(0..MASK_SLOTS).map(|i| crate::bindings::float_texture(i as u32, visibility, &r.device))
                 .chain([crate::bindings::buffer(MASK_SLOTS as u32,wgpu::ShaderStages::FRAGMENT,
                     wgpu::BufferBindingType::Storage {read_only:true},false,NonZeroU64::new(20))]).collect::<Vec<_>>());
         let outputs:Vec<_>=(1..=MASK_SLOTS).map(|count|crate::bindings::layout(&r.device,"pointwise effect destination",
-            &(0..count).map(|i|crate::bindings::texture(i as u32,wgpu::ShaderStages::COMPUTE,true))
+            &(0..count).map(|i|crate::bindings::float_texture(i as u32,wgpu::ShaderStages::COMPUTE,&r.device))
                 .chain([crate::bindings::storage_texture(count as u32,wgpu::ShaderStages::COMPUTE,
                     wgpu::TextureFormat::Rgba32Float,wgpu::StorageTextureAccess::WriteOnly)]).collect::<Vec<_>>())).collect();
         let pipeline_layout = r.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

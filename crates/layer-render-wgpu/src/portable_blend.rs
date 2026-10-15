@@ -215,14 +215,8 @@ mod tests {
             WgpuRasterizer::headless_instance().request_adapter(&Default::default()),
         )
         .unwrap();
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::FLOAT32_FILTERABLE,
-            ..Default::default()
-        }))
-        .unwrap();
-        let device = PipelineDevice::from(device)
-            .require_float32()
-            .unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let device = PipelineDevice::from(device);
         assert!(device.portable_blend());
         let a = Renderer::new(&device);
         let b = Renderer::new(&device);

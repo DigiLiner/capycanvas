@@ -473,8 +473,10 @@ cancellation and exact Undo/Redo pixels in both themes.
   `CAPY_STORAGE_DIR` name, kept across its relaunches, so journeys never touch
   the installation's data. Do not create an `XCUIApplication` for the editor
   any other way.
-- The iOS simulator lacks Float32 filtering, so journeys that render the canvas
-  need a physical iPad. UIKit component checks still run on the simulator.
+- The iOS simulator lacks Float32 filtering, so its canvas exercises the
+  [texel-load fallback](../internals/rendering.md#optional-float32-features)
+  that A12–A16 iPads use. Hardware filtering, Pencil and timing need a
+  physical iPad.
 - On a physical iPad, keep the device awake and unlocked and turn on
   **Settings → Developer → Enable UI Automation**; Developer Mode alone does not
   enable the UI runner.

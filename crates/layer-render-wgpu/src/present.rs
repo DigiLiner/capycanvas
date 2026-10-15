@@ -448,7 +448,7 @@ impl ViewportPresenter {
                 true,
                 wgpu::BufferSize::new(CAMERA_SIZE),
             ),
-            crate::bindings::texture(1, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, true),
+            crate::bindings::float_texture(1, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::sampler(
                 2,
                 wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
@@ -461,7 +461,7 @@ impl ViewportPresenter {
                 false,
                 None,
             ),
-            crate::bindings::texture(4, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, true),
+            crate::bindings::float_texture(4, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::buffer(
                 5,
                 wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
@@ -469,8 +469,8 @@ impl ViewportPresenter {
                 false,
                 std::num::NonZeroU64::new(32),
             ),
-            crate::bindings::texture(6, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, true),
-            crate::bindings::texture(13, wgpu::ShaderStages::FRAGMENT, true),
+            crate::bindings::float_texture(6, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device),
+            crate::bindings::float_texture(13, wgpu::ShaderStages::FRAGMENT, device),
             crate::bindings::buffer(
                 7,
                 wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
@@ -524,7 +524,7 @@ impl ViewportPresenter {
                     crate::view_color::hdr_shader(device.working_space(), color.primaries()),
                     concat!(include_str!("float_number.wgsl"), "\n", include_str!("guide_luminance.wgsl"), "\n", include_str!("hdr_view.wgsl")),
                     concat!(include_str!("tetrahedron.wgsl"), "\n", include_str!("proof_view.wgsl")),
-                    concat!(include_str!("area_sample.wgsl"), "\n", include_str!("mapped_sample.wgsl"), "\n", include_str!("present.wgsl")).replace("resample.", "camera.mapped."),
+                    [device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("mapped_sample.wgsl"), include_str!("present.wgsl")].join("\n").replace("resample.", "camera.mapped."),
                     include_str!("present_screen.wgsl")
                 )
                 .into(),

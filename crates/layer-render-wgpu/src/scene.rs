@@ -2230,14 +2230,14 @@ impl Pipelines {
             NonZeroU64::new(144),
         )]);
         let layout = crate::bindings::layout(device, "scene sources", &[
-            texture_entry(0),
-            texture_entry(1),
+            texture_entry(0, device),
+            texture_entry(1, device),
             crate::bindings::sampler(
                 2,
                 wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                 wgpu::SamplerBindingType::Filtering,
             ),
-            texture_entry(3),
+            texture_entry(3, device),
         ]);
         let shader = Deferred::new({
             let device = device.clone();
@@ -2271,9 +2271,9 @@ impl Pipelines {
         }).collect::<Vec<_>>().try_into().ok().unwrap();
         let constant = {
             let inputs = crate::bindings::layout(device, "scene normal stack inputs", &[
-                texture_entry(0), texture_entry(1),
+                texture_entry(0, device), texture_entry(1, device),
                 crate::bindings::sampler(2, wgpu::ShaderStages::COMPUTE, wgpu::SamplerBindingType::Filtering),
-                texture_entry(3),
+                texture_entry(3, device),
             ]);
             let output = crate::bindings::layout(device, "scene constant backdrop output", &[crate::bindings::storage_texture(
                 0,
@@ -2305,12 +2305,8 @@ impl Pipelines {
 fn direct_effect_mask(scene: SceneView<'_>, handle: OccurrenceHandle) -> bool {
     scene.mask(handle).is_none_or(|(use_, _)| !use_.enabled || scene.target_offset(SourceTarget::Coverage(use_.source)) == [0; 2])
 }
-fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
-    crate::bindings::texture(
-        binding,
-        wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
-        true,
-    )
+fn texture_entry(binding: u32, device: &PipelineDevice) -> wgpu::BindGroupLayoutEntry {
+    crate::bindings::float_texture(binding, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, device)
 }
 fn uniform_binding(
     device: &wgpu::Device,

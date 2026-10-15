@@ -30,7 +30,7 @@ feature allows and approximate only where an exact result costs too much.
 
 | Capability | Missing on | Current behaviour |
 | --- | --- | --- |
-| Float32 filtering (`FLOAT32_FILTERABLE`) | Apple A12–A16 iPads (Apple's Metal feature tables grant it to Apple9 and later and only some Apple7/8 devices; an iPad mini 6 reports it missing), the iOS simulator, Adreno 6xx/7xx on Qualcomm drivers older than 512.700, Adreno 4xx/5xx, PowerVR, Samsung Xclipse | Startup fails: "This device cannot sample Float32 working tiles" |
+| Float32 filtering (`FLOAT32_FILTERABLE`) | Apple A12–A16 iPads (Apple's Metal feature tables grant it to Apple9 and later and only some Apple7/8 devices; an iPad mini 6 reports it missing), the iOS simulator, Adreno 6xx/7xx on Qualcomm drivers older than 512.700, Adreno 4xx/5xx, PowerVR, Samsung Xclipse | Texel-load sampling; see [Float32 filtering](#float32-filtering) |
 | Float32 blending (`FLOAT32_BLENDABLE`) | Every Mali generation, including the low- and mid-tier reference tablets; Adreno 5xx | Works through the slow `portable_blend` path |
 | Android shared presentation (`SharedDemandRefresh`) | Probably Android 10–13, which lack the platform swapchain extension the mode needs; `minSdk` is 29 | Startup fails: "This Android GPU driver does not support front-buffer rendering…" |
 | Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | Android and Windows request the feature without checking the format, so in-place dry-media pipelines can fail validation at startup |
@@ -51,31 +51,16 @@ against the same ceilings on every device.
 
 ## Float32 filtering
 
-The renderer stores pages, masks and display images as `Rgba32Float` and
-`R32Float` and samples them with a linear sampler in the viewport
-(`present.wgsl`, `area_sample.wgsl`, `mapped_sample.wgsl`), display reduction
-(`scene/scale.wgsl`), transforms (`display_resample.wgsl`), export, thumbnails
-and dry-media previews. Brush tips, grain and paper are 8-bit and filter on
-every device.
+Devices without Float32 filtering read Float32 images through texel loads; the
+[rendering guide](../internals/rendering.md#optional-float32-features) describes
+the rule. Remaining work:
 
-**Fallback: a texel sampler with the same interface.** One WGSL helper,
-`sample_float(texture, sampler, uv, level)`, replaces each Float32 filtered
-sample. Capable devices get `textureSampleLevel`. Other devices get a version that
-loads the four neighbouring texels with `textureLoad` and interpolates them with
-clamp-to-edge addressing, and interpolates two levels for a fractional level of
-detail. `PipelineDevice` chooses the source when shaders are assembled, and
-Float32 bindings declare `filterable` from the same report.
-
-- **Results:** interpolation in full Float32 precision. Hardware filtering
-  quantizes its weights, so the two paths differ far below one 8-bit step. Stored
-  artwork is unchanged.
-- **Cost:** a filtered tap becomes four cached loads. Display reduction samples
-  exact 2×2 corners, so it reads the same texels either way. The heaviest case is
-  the edge of a perspective or mesh-warped layer, up to 64 trilinear taps per
-  pixel.
-- **If an A-series tier misses its target:** share texels between the four taps
-  of an area sample (9 loads instead of 16) before considering approximations.
-  Keeping display images in `Rgba16Float` on these devices would restore hardware
+- Measure the A-series tier on its reference hardware. The texel path costs most
+  where `pyramid_sample` interpolates two levels, at the edge of a perspective or
+  mesh-warped layer.
+- If that tier misses its target, share texels between the four taps of an area
+  sample (9 loads instead of 16) before considering approximations. Keeping
+  display images in `Rgba16Float` on these devices would restore hardware
   filtering and halve bandwidth for display-only data, at the cost of format
   conversions where display images are copied.
 
@@ -158,15 +143,13 @@ storage range. The validator stays as the backstop.
 
 ## Order of work
 
-1. **Float32 filtering.** Unblocks A-series iPads and their Safari, older
-   Adreno, PowerVR and Xclipse. Verify on the iOS simulator, which lacks the
-   feature, and on M-series iPads for the hardware path.
-2. **Diagnostics** from the previous section.
-3. **Float32 blending accumulation.** Measure mask painting and composition on
+1. **Diagnostics** from the previous section.
+2. **Float32 blending accumulation.** Measure mask painting and composition on
    the low- and mid-tier tablets before and after.
-4. **Android buffered presentation.** Verify on an Android 13 tablet.
-5. **Read-write storage, Wayland, timestamps and memory.**
-6. **Numeric robustness** of working-page writes.
+3. **Android buffered presentation.** Verify on an Android 13 tablet.
+4. **Read-write storage, Wayland, timestamps and memory.**
+5. **Numeric robustness** of working-page writes.
+6. **A-series tier qualification** of the Float32 filtering fallback.
 
 ## Not yet verified
 

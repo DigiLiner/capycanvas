@@ -61,7 +61,7 @@ struct Vertex { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f3
     }
     if any(v.uv < vec2<f32>(0.)) || any(v.uv > vec2<f32>(1.)) { discard; }
     if any(vec2<f32>(record.tile.xy) + v.uv * 256. * f32(max(record.options.z, 1u)) >= vec2<f32>(record.tile.zw)) { discard; }
-    let raw = textureSample(pixels, sampling, v.uv);
+    let raw = sample_float(pixels, sampling, v.uv, 0.);
     if record.options.x == 1u {
         let gray = select(raw.r, 1.-raw.r, record.options.y == 1u);
         return vec4<f32>(gray, gray, gray, 1.);

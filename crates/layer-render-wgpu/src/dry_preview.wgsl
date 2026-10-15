@@ -19,7 +19,7 @@ fn preview_average(source: texture_2d<f32>, p: vec2<i32>) -> vec4<f32> {
         for (var x = 0; x < size.x; x += 2) {
             let footprint = min(vec2<i32>(2), size - vec2<i32>(x, y));
             let center = vec2<f32>(start + vec2<i32>(x, y)) + 0.5 * vec2<f32>(footprint);
-            sum += textureSampleLevel(source, brush_sampler, center / vec2<f32>(textureDimensions(source)), 0.)
+            sum += sample_float(source, brush_sampler, center / vec2<f32>(textureDimensions(source)), 0.)
                 * f32(footprint.x * footprint.y);
         }
     }

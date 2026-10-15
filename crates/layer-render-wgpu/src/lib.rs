@@ -982,6 +982,7 @@ pub struct WgpuRasterizer {
     brush_sampler: wgpu::Sampler,
     style_layout: wgpu::BindGroupLayout,
     texture_layout: wgpu::BindGroupLayout,
+    float_texture_layout: wgpu::BindGroupLayout,
     advanced_texture_layout: wgpu::BindGroupLayout,
     target_layout: wgpu::BindGroupLayout,
     material_layout: wgpu::BindGroupLayout,
@@ -1063,7 +1064,7 @@ impl WgpuRasterizer {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    async fn headless(space: layer_core::color::RgbSpace, initialization: Initialization) -> Result<Self, GpuRasterError> {
+    async fn headless(space: layer_core::color::RgbSpace, initialization: Initialization, omitted: wgpu::Features) -> Result<Self, GpuRasterError> {
         let instance = Self::headless_instance();
         let indexed_adapter = std::env::var("LAYER_GPU_INDEX")
             .ok()
@@ -1094,8 +1095,8 @@ impl WgpuRasterizer {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("layer canvas device"),
-                required_features: (adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | blendable))
-                    | wgpu::Features::FLOAT32_FILTERABLE
+                required_features: (adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+                    | wgpu::Features::FLOAT32_FILTERABLE | blendable) & !omitted)
                     | native_tiles::native_in_place_features(&adapter),
                 required_limits: limits,
                 memory_hints: memory_hints(),
@@ -1106,7 +1107,7 @@ impl WgpuRasterizer {
 
         Self::from_wgpu_inner(
             adapter,
-            PipelineDevice::from(device).require_float32()?.with_working_space(space),
+            PipelineDevice::from(device).with_working_space(space),
             queue,
             initialization,
         )
@@ -1142,7 +1143,8 @@ impl WgpuRasterizer {
             ..Default::default()
         });
         let style_layout = create_style_layout(&device);
-        let texture_layout = create_texture_layout(&device);
+        let texture_layout = create_texture_layout(&device, true);
+        let float_texture_layout = create_texture_layout(&device, device.float32_filterable());
         let advanced_texture_layout = create_advanced_texture_layout(&device);
         let target_layout = create_target_layout(&device);
         let material_layout = create_material_layout(&device);
@@ -1187,7 +1189,7 @@ impl WgpuRasterizer {
         let reservoir = BrushReservoir {
             primary: create_page_surface(
                 &device,
-                &texture_layout,
+                &float_texture_layout,
                 &sampler,
                 [RESERVOIR_SIZE, RESERVOIR_SIZE],
                 device.working_format(),
@@ -1195,7 +1197,7 @@ impl WgpuRasterizer {
             ),
             secondary: create_page_surface(
                 &device,
-                &texture_layout,
+                &float_texture_layout,
                 &sampler,
                 [RESERVOIR_SIZE, RESERVOIR_SIZE],
                 device.working_format(),
@@ -1216,6 +1218,7 @@ impl WgpuRasterizer {
             PipelineLayouts {
                 style: &style_layout,
                 texture: &texture_layout,
+                float_texture: &float_texture_layout,
                 advanced_texture: &advanced_texture_layout,
                 target: &target_layout,
                 material: &material_layout,
@@ -1345,6 +1348,7 @@ impl WgpuRasterizer {
             brush_sampler,
             style_layout,
             texture_layout,
+            float_texture_layout,
             advanced_texture_layout,
             target_layout,
             material_layout,
@@ -1754,7 +1758,7 @@ impl WgpuRasterizer {
     fn create_page_surface(&self, label: &'static str) -> PageSurface {
         create_page_surface(
             &self.device,
-            &self.texture_layout,
+            &self.float_texture_layout,
             &self.sampler,
             [PAGE_SIZE, PAGE_SIZE],
             self.device.working_format(),
@@ -1765,7 +1769,7 @@ impl WgpuRasterizer {
     fn create_scalar_page_surface(&self, label: &'static str) -> PageSurface {
         create_page_surface(
             &self.device,
-            &self.texture_layout,
+            &self.float_texture_layout,
             &self.sampler,
             [PAGE_SIZE, PAGE_SIZE],
             self.device.scalar_format(),
@@ -1859,7 +1863,7 @@ impl WgpuRasterizer {
             };
             if let Some(page) = page
                 && page.stroke_start.as_ref().is_none_or(|(id, _)| *id != batch.stroke_id) {
-                let start = create_page_surface(&self.device, &self.texture_layout, &self.sampler,
+                let start = create_page_surface(&self.device, &self.float_texture_layout, &self.sampler,
                     [PAGE_SIZE; 2], self.device.working_format(), "stroke starting paint");
                 page.active().copy_to(&start, encoder);
                 page.stroke_start = Some((batch.stroke_id, start));
@@ -2074,7 +2078,7 @@ impl WgpuRasterizer {
                 } else {
                     let page = LayerPage {
                         coordinate,
-                        primary: create_page_surface(&self.device, &self.texture_layout, &self.sampler,
+                        primary: create_page_surface(&self.device, &self.float_texture_layout, &self.sampler,
                             [PAGE_SIZE >> self.preview_level; 2], self.device.working_format(), "prediction page"),
                         secondary: None, active_secondary: false, primary_needs_clear: true, stroke_start: None,
                     };
@@ -5164,9 +5168,9 @@ fn create_style_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     )])
 }
 
-fn create_texture_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+fn create_texture_layout(device: &wgpu::Device, filterable: bool) -> wgpu::BindGroupLayout {
     bindings::layout(device, "layer sampled texture layout", &[
-        bindings::texture(0, wgpu::ShaderStages::FRAGMENT, true),
+        bindings::texture(0, wgpu::ShaderStages::FRAGMENT, filterable),
         bindings::sampler(1, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
     ])
 }
@@ -5198,12 +5202,13 @@ fn create_target_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     ])
 }
 
-fn create_material_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+fn create_material_layout(device: &PipelineDevice) -> wgpu::BindGroupLayout {
     let stages = wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
     let storage = wgpu::BufferBindingType::Storage { read_only: true };
     let entries = (0..12).map(|binding| match binding {
         9 => bindings::buffer(9, stages, storage, false, None),
-        _ => bindings::texture(binding, stages, binding == 4 || binding == 10 || binding == 11),
+        4 | 10 | 11 => bindings::float_texture(binding, stages, device),
+        _ => bindings::texture(binding, stages, false),
     })
     .chain([bindings::buffer(12, stages, wgpu::BufferBindingType::Uniform, true, NonZeroU64::new(160))])
     .collect::<Vec<_>>();
@@ -5376,12 +5381,17 @@ fn create_page_surface(
 struct PipelineLayouts<'a> {
     style: &'a wgpu::BindGroupLayout,
     texture: &'a wgpu::BindGroupLayout,
+    float_texture: &'a wgpu::BindGroupLayout,
     advanced_texture: &'a wgpu::BindGroupLayout,
     target: &'a wgpu::BindGroupLayout,
     material: &'a wgpu::BindGroupLayout,
     edge: &'a wgpu::BindGroupLayout,
     watercolor: &'a wgpu::BindGroupLayout,
     transport: &'a wgpu::BindGroupLayout,
+}
+
+fn export_shader_source(device: &PipelineDevice, space: layer_core::color::RgbSpace) -> Cow<'static, str> {
+    compose_wgsl(&[&view_color::shader(device.working_space(), space), device.float_sampling_wgsl(), include_str!("export.wgsl")])
 }
 
 fn compose_wgsl(parts: &[&str]) -> Cow<'static, str> {
@@ -5473,7 +5483,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         Deferred::new(move || {
             device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("layer export shader"),
-                source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", view_color::shader(device.working_space(), layer_core::color::RgbSpace::Srgb), include_str!("export.wgsl")).into()),
+                source: wgpu::ShaderSource::Wgsl(export_shader_source(&device, layer_core::color::RgbSpace::Srgb)),
             })
         })
     };
@@ -5528,7 +5538,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         });
     let export_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("layer export pipeline layout"),
-        bind_group_layouts: &[Some(layouts.texture)],
+        bind_group_layouts: &[Some(layouts.float_texture)],
         immediate_size: 0,
     });
     let paint_blend = wgpu::BlendState {

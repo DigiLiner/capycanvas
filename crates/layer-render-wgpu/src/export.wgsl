@@ -25,7 +25,7 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let premultiplied = textureSample(source_texture, source_sampler, input.uv);
+    let premultiplied = sample_float(source_texture, source_sampler, input.uv, 0.);
     let straight_rgb = view_straight(premultiplied);
     return vec4<f32>(straight_rgb, premultiplied.a);
 }
