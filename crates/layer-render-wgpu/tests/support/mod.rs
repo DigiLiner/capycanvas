@@ -66,7 +66,7 @@ pub fn engine(document: Document) -> (Engine, InputProducer<PenEvent>) {
     (engine, producer)
 }
 
-pub fn image(engine: &mut Engine, mut time: u64) -> Image {
+pub fn settle(engine: &mut Engine, mut time: u64) {
     engine.render_frame_at(time).unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while engine.has_pending_document_edits() {
@@ -75,6 +75,10 @@ pub fn image(engine: &mut Engine, mut time: u64) -> Image {
         time += 16_000_000;
         engine.render_frame_at(time).unwrap();
     }
+}
+
+pub fn image(engine: &mut Engine, time: u64) -> Image {
+    settle(engine, time);
     let size = engine.document().composition().size;
     let rgba = engine.backend_mut().readback_srgb_rgba8().unwrap();
     Image { size, rgba }
@@ -97,6 +101,7 @@ pub fn draw_with_brush(engine: &mut Engine, input: &mut InputProducer<PenEvent>,
             Point { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t })).unwrap();
         drain_input(engine, timestamp_ns, false);
     }
+    settle(engine, start + 9 * 8_000_000);
 }
 
 pub fn pen_sample(index: u64, last: u64, timestamp_ns: u64, surface_position: Point) -> PenEvent {

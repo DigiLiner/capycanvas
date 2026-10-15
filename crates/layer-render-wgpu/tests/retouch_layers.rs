@@ -187,7 +187,9 @@ fn a_large_separation_yields_without_publishing_partial_rasters() {
     insert(&mut engine, plan);
     engine.render_frame_at(1).unwrap();
     assert!(engine.has_pending_document_edits(), "a bake must yield between bounded regions");
-    assert!(!engine.can_undo(), "an incomplete bake cannot enter undo");
+    assert!(engine.can_undo());
+    assert!(engine.raster_backing_pending());
+    assert!(engine.undo().is_err());
     for id in targets {
         assert!(engine.document().target_raster(id).unwrap().try_data().is_none(),
             "partial pixels must not become saveable");

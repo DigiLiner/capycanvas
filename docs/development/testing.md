@@ -156,6 +156,9 @@ budget and coordinate mapping. Pen fixtures override the shared event's timestam
 and pressure where their cadence differs.
 Integration pen fixtures share sample construction and input draining; callers
 retain pressure axes, sequence numbers, cadence and GPU-wait policy.
+Completed-stroke fixtures settle `has_pending_document_edits` before reading
+pixels or starting another document edit; draining input alone does not publish
+delayed pen-up work. Live-preview fixtures retain their unfinished contact.
 Retouch replay fixtures keep each brush's path and pen-up position. Check source
 readiness and healing counts after replay settles, before collecting result pages.
 Mesh fixtures pass a previously constructed projective map to `MeshMap::fit`.

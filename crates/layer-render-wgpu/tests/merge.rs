@@ -165,15 +165,33 @@ fn merge_visible_and_flatten_in(space: BlendSpace) {
     stroke(&mut engine, &mut input, "Hidden", [0., 0., 0., 1.], Point { x: 0., y: 0. }, Point { x: 380., y: 250. }, 3_000_000_000);
     edit(&mut engine, "Hidden", |o| o.visible = false);
     let original = image(&mut engine, 4_000_000_000);
+    let paper = id(&engine, "Paper");
+    let paper_occurrence = engine.document().scene().occurrence(paper).unwrap().clone();
+    let paper_application = engine.document().scene().effect_application(paper).unwrap().clone();
+    assert!(layer_core::paper::is_paper(&paper_application.program));
+    let assert_paper = |engine: &Engine| {
+        assert_eq!(engine.document().scene().occurrence(paper), Some(&paper_occurrence));
+        assert_eq!(engine.document().scene().effect_application(paper), Some(&paper_application));
+    };
     merge(&mut engine, MergeKind::Visible);
     image(&mut engine, 5_000_000_000).assert_near(&original, TOLERANCE, "merge visible");
     assert!(engine.document().scene().occurrence(hidden).is_some(), "hidden layers stay");
+    assert_paper(&engine);
     assert!(engine.undo().unwrap());
-    merge(&mut engine, MergeKind::Flatten);
-    image(&mut engine, 6_000_000_000).assert_near(&original, TOLERANCE, "flatten");
-    assert_eq!(engine.document().scene().order().len(), 1, "flatten replaces all artwork, including the fill");
+    let flattened = merge(&mut engine, MergeKind::Flatten);
+    let flattened_image = image(&mut engine, 6_000_000_000);
+    flattened_image.assert_near(&original, TOLERANCE, "flatten");
+    assert_eq!(engine.document().scene().order(), &[flattened, paper]);
+    assert!(engine.document().scene().paint_source(flattened).is_some());
+    assert!(engine.document().scene().occurrence(hidden).is_none());
+    assert_paper(&engine);
     assert!(engine.undo().unwrap());
     image(&mut engine, 6_100_000_000).assert_eq(&original, "undo");
+    assert_paper(&engine);
+    assert!(engine.redo().unwrap());
+    image(&mut engine, 6_200_000_000).assert_eq(&flattened_image, "redo flatten");
+    assert_eq!(engine.document().scene().order(), &[flattened, paper]);
+    assert_paper(&engine);
 }
 
 #[test]

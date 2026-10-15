@@ -248,7 +248,9 @@ fn settling_preserves_sources_while_navigation_and_queued_paint_wait_for_publica
         }
         assert!(engine.backend().has_pending_submission());
         assert!(!engine.backend().can_submit());
-        assert!(!engine.can_undo());
+        assert!(engine.can_undo());
+        assert!(engine.raster_backing_pending());
+        assert!(engine.undo().is_err());
         let root = engine.document().target_raster(TARGET).unwrap().clone();
         assert!(root.try_data().is_none());
         engine.set_brush(BrushSnapshot { diameter: 8., ..default_brush(DefaultBrushPreset::GPen) }).unwrap();
