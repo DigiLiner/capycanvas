@@ -160,7 +160,7 @@ class AndroidPredictionTest {
         val location = IntArray(2)
         scenario.onActivity { canvas = find(it.window.decorView)!!; canvas.getLocationOnScreen(location) }
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        fun pixels(name: String): Int {
+        fun pixels(name: String): IntArray {
             val presented = CountDownLatch(1)
             compose.runOnIdle { canvas.postOnAnimation { canvas.postOnAnimation { presented.countDown() } } }
             assertTrue(presented.await(5, TimeUnit.SECONDS))
@@ -169,16 +169,16 @@ class AndroidPredictionTest {
             File(directory, "prediction-$name.png").outputStream().use {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
-            var dark = 0
-            for (y in location[1] + canvas.height * 3 / 10 until location[1] + canvas.height * 7 / 10 step 2)
-                for (x in location[0] + canvas.width * 3 / 10 until location[0] + canvas.width * 7 / 10 step 2) {
-                    val c = bitmap.getPixel(x, y)
-                    if (Color.red(c) < 100 && Color.green(c) < 100 && Color.blue(c) < 100) dark++
-                }
+            val samples = (location[1] + canvas.height * 3 / 10 until location[1] + canvas.height * 7 / 10 step 2).flatMap { y ->
+                (location[0] + canvas.width * 3 / 10 until location[0] + canvas.width * 7 / 10 step 2).map { x -> bitmap.getPixel(x, y) }
+            }.toIntArray()
             bitmap.recycle()
-            return dark
+            return samples
         }
         val before = pixels("stroke-before")
+        fun changed(name: String) = pixels(name).let { after ->
+            after.indices.count { i -> listOf(Color::red, Color::green, Color::blue).any { kotlin.math.abs(it(after[i]) - it(before[i])) > 60 } }
+        }
         val down = SystemClock.uptimeMillis()
         for (i in 0..24) {
             val coords = MotionEvent.PointerCoords().apply {
@@ -197,13 +197,13 @@ class AndroidPredictionTest {
         fun commandEnabled(id: String) = host.snapshot!!.getJSONObject("state").array("commands").objects()
             .any { it.getString("id") == id && it.getBoolean("enabled") }
         waitFor { commandEnabled("undo") }
-        val painted = pixels("stroke-painted")
-        assertTrue("Pen input deposits visible pixels", painted > before + 100)
+        val painted = changed("stroke-painted")
+        assertTrue("Pen input deposits visible pixels", painted > 100)
         compose.onNodeWithContentDescription("Undo").performClick()
         waitFor { commandEnabled("redo") }
-        assertTrue("Undo removes committed ink and leaves no predicted tail", pixels("stroke-undo") < before + (painted - before) / 10)
+        assertTrue("Undo removes committed ink and leaves no predicted tail", changed("stroke-undo") < painted / 10)
         compose.onNodeWithContentDescription("Redo").performClick()
         waitFor { commandEnabled("undo") }
-        assertTrue("Replay restores the real stroke", pixels("stroke-redo") >= before + (painted - before) * 9 / 10)
+        assertTrue("Replay restores the real stroke", changed("stroke-redo") >= painted * 9 / 10)
     }
 }
