@@ -134,7 +134,15 @@ class DevicesTest(unittest.TestCase):
              "connectionProperties": {"pairingState": "paired"}},
             {"hardwareProperties": {"deviceType": "iPad", "reality": "physical", "udid": "UNPAIRED0001"},
              "connectionProperties": {"pairingState": "unpaired"}},
-            {"hardwareProperties": {"deviceType": "iPad", "reality": "simulated", "udid": "SIM0001"},
+            {"hardwareProperties": {"deviceType": "iPad", "isProductionFused": True, "productType": "iPad13,16", "udid": "IPAD0002"},
+             "connectionProperties": {"pairingState": "paired"}},
+            {"hardwareProperties": {"deviceType": "iPad", "udid": "UNKNOWN0001"},
+             "connectionProperties": {"pairingState": "paired"}},
+            {"hardwareProperties": {"deviceType": "iPad", "isProductionFused": False, "udid": "NONFUSED0001"},
+             "connectionProperties": {"pairingState": "paired"}},
+            {"hardwareProperties": {"deviceType": "iPad", "reality": None, "isProductionFused": True, "udid": "NULL0001"},
+             "connectionProperties": {"pairingState": "paired"}},
+            {"hardwareProperties": {"deviceType": "iPad", "reality": "simulated", "isProductionFused": True, "udid": "SIM0001"},
              "connectionProperties": {"pairingState": "paired"}},
         ]}}
         xcrun = self.state / "xcrun"
@@ -143,23 +151,28 @@ class DevicesTest(unittest.TestCase):
         self.environment["PATH"] = str(self.state) + os.pathsep + os.environ["PATH"]
         output = self.devices("alpha", "--platform", "apple", "list").stdout
         self.assertRegex(output, r"ipad\s+iPad16,6\s+no tier\s+IPAD0001\s+free")
+        self.assertRegex(output, r"ipad\s+iPad13,16\s+no tier\s+IPAD0002\s+free")
+        self.assertNotIn("UNKNOWN0001", output)
+        self.assertNotIn("NONFUSED0001", output)
+        self.assertNotIn("NULL0001", output)
         self.assertNotIn("PHONE0001", output)
         self.assertNotIn("UNPAIRED0001", output)
         self.assertNotIn("SIM0001", output)
-        refused = self.devices("alpha", "--platform", "apple", "run", "ipad", "--", "true")
+        refused = self.devices("alpha", "--platform", "apple", "run", "IPAD0002", "--", "true")
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("Reserve ipad", refused.stderr)
-        reserved = self.devices("alpha", "--platform", "apple", "reserve", "ipad")
+        reserved = self.devices("alpha", "--platform", "apple", "reserve", "IPAD0002")
         self.assertEqual(reserved.returncode, 0, reserved.stderr)
-        refused = self.devices("beta", "--platform", "apple", "run", "IPAD0001", "--", "true")
+        refused = self.devices("beta", "--platform", "apple", "run", "IPAD0002", "--", "true")
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("reserved by alpha", refused.stderr)
         probe = "import os; print(os.environ['CAPY_APPLE_DEVICE_ID'], os.environ['CAPY_APPLE_BUNDLE_ID'])"
-        result = self.devices("alpha", "--platform", "apple", "run", "ipad", "--", sys.executable, "-c", probe)
+        result = self.devices("alpha", "--platform", "apple", "run", "IPAD0002", "--", sys.executable, "-c", probe)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "IPAD0001 art.capycanvas.alpha")
-        self.devices("alpha", "--platform", "apple", "release", "ipad")
-        self.assertIn("free", self.devices("beta", "--platform", "apple", "list").stdout)
+        self.assertEqual(result.stdout.strip(), "IPAD0002 art.capycanvas.alpha")
+        self.devices("alpha", "--platform", "apple", "release", "IPAD0002")
+        self.assertRegex(self.devices("beta", "--platform", "apple", "list").stdout,
+                         r"ipad\s+iPad13,16\s+no tier\s+IPAD0002\s+free")
 
     def test_ambiguous_device_names_require_a_serial(self):
         devices = load_module()

@@ -76,7 +76,8 @@ def attached(platform="android"):
         for record in listing["result"]["devices"]:
             hardware = record.get("hardwareProperties", {})
             connection = record.get("connectionProperties", {})
-            if (hardware.get("deviceType") != "iPad" or hardware.get("reality") != "physical"
+            if (hardware.get("deviceType") != "iPad" or not (hardware.get("reality") == "physical"
+                    or ("reality" not in hardware and hardware.get("isProductionFused") is True))
                     or connection.get("pairingState") != "paired"):
                 continue
             serial = hardware.get("udid")

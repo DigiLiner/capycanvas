@@ -110,14 +110,17 @@ Rust bridge tests run.
 Use `--platform apple` with the same reservation tool. It discovers paired
 physical iPads through Xcode's `devicectl` and shares the reservation and command
 locks used by the Android runner. When several iPads are paired, select one by
-its serial.
+its serial. Partial hardware metadata can omit `reality`; discovery accepts that
+case only when `isProductionFused` is true. Explicit simulated devices remain
+excluded.
 
 ```bash
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple list
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple reserve ipad
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple run ipad -- \
+CAPY_TEST_IPAD=serial-from-list
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple reserve "$CAPY_TEST_IPAD"
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple run "$CAPY_TEST_IPAD" -- \
   sh -c 'xcrun devicectl device info details --device "$CAPY_APPLE_DEVICE_ID"'
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple release ipad
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer tools/devices/devices.py --platform apple release "$CAPY_TEST_IPAD"
 ```
 
 Apple commands require a current reservation. The runner exports
