@@ -1,7 +1,8 @@
 
 override CONTACT_FLAGS: u32 = 4294967295u;
+override CONTACT_ABSENT: u32 = 0u;
 fn contact_feature(bit: u32, dynamic: bool) -> bool {
-    return select((CONTACT_FLAGS & bit) != 0u, dynamic, CONTACT_FLAGS == 4294967295u);
+    return (CONTACT_ABSENT & bit) == 0u && select((CONTACT_FLAGS & bit) != 0u, dynamic, CONTACT_FLAGS == 4294967295u);
 }
 
 fn contact_uniform() -> bool {

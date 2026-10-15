@@ -458,6 +458,11 @@ impl MaterialOperation {
         Self::Watercolor,
         Self::Clone,
     ];
+
+    fn constants(self) -> [(&'static str, f64); 2] {
+        let dry = matches!(self, Self::Deposit | Self::Coverage);
+        [("MATERIAL_OPERATION", self as u32 as f64), ("CONTACT_ABSENT", f64::from(u32::from(!dry) << 6))]
+    }
 }
 
 /// What a material pass reads besides its destination page.
@@ -5642,7 +5647,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
                 &shader,
                 "fragment_main",
                 &targets,
-                &[("MATERIAL_OPERATION", operation as u32 as f64)],
+                &operation.constants(),
                 label,
             )
         })
@@ -5666,7 +5671,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                &[("MATERIAL_OPERATION", operation as u32 as f64)],
+                &operation.constants(),
                 "gather distant material samples",
             )
         })

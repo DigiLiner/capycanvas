@@ -1033,6 +1033,7 @@ impl BrushSnapshot {
             || !(0.25..=4.0).contains(&self.taper.tip_sharpness)
             || self.shape.count > MAX_BRUSH_STAMP_COUNT
             || transport_invalid
+            || self.contact.is_some_and(|c| c.dry.is_some()) && self.execution != BrushExecution::Dry
             || self.bounds.minimum_size < 0.01
             || self.bounds.maximum_size > MAX_BRUSH_DIAMETER
             || self.bounds.minimum_size > self.bounds.maximum_size

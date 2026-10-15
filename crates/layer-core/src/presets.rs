@@ -634,6 +634,9 @@ mod tests {
             dry.poses[1].relief[0] = relief;
             assert!(brush.validate().is_err());
         }
+        let mut smudging = default_brush(DefaultBrushPreset::Charcoal);
+        smudging.execution = BrushExecution::Smudge;
+        assert!(smudging.validate().is_err());
     }
 
     #[test]

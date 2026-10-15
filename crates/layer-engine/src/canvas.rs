@@ -5,7 +5,7 @@
 //! queue halves may also run sequentially on one event loop.
 
 use crate::brush::{
-    DabGenerator, CurvePreview, dabs_cover_point, damage_for_dabs, lock_dab_tail, pen_up_settlement_micros, taper_prediction,
+    DabGenerator, CurvePreview, damage_for_dabs, lock_dab_tail, pen_up_settlement_micros, taper_prediction,
 };
 use crate::feedback::{
     FeedbackConfigError, InstantFeedbackConfig, MAX_FINALIZATION_LAG_MICROS, PredictionState,
@@ -2222,6 +2222,9 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 generator.append_continuation(point, &active.brush, &active.curve_preview, &mut self.dabs);
             }
             generator.finish_preview(&active.brush, &mut self.dabs);
+            if let Some(endpoint) = generator.modeled_position() {
+                generator.reach_endpoint(endpoint, start, active.preview_taper, &mut self.dabs);
+            }
             if active.preview_taper {
                 taper_prediction(&mut self.dabs[extra_start..], taper_start,
                     active.curve_preview.taper_amount());
@@ -2256,11 +2259,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let endpoint = estimate.point.position;
         if active.brush.stabilization.strength == 0. {
             lock_dab_tail(&mut self.dabs[prediction_start..], modeled_endpoint, endpoint);
-            if (taper && self.dabs.last().is_none_or(|dab| dab.center != endpoint))
-                || !dabs_cover_point(&self.dabs[start..], endpoint)
-            {
-                generator.append_terminal_copy(endpoint, &mut self.dabs);
-            }
+            generator.reach_endpoint(endpoint, start, taper, &mut self.dabs);
         }
         if taper {
             taper_prediction(
@@ -2635,6 +2634,7 @@ mod tests {
     include!("canvas_fullscreen_tests.rs");
     include!("recording/canvas_tests.rs");
     use super::*;
+    use crate::brush::dabs_cover_point;
     fn assert_authored_eq(left: &layer_core::authored::Artwork, right: &layer_core::authored::Artwork) {
         assert_eq!(left.id, right.id);
         assert_eq!(left.root, right.root);
@@ -5677,6 +5677,24 @@ mod tests {
             offsets.push(tips.last().unwrap().x - 298.);
         }
         assert!(offsets[0] > 0. && offsets[1] < 0. && offsets[2] < offsets[1], "{offsets:?}");
+    }
+
+    #[test]
+    fn smoothed_preview_of_a_spaced_brush_follows_the_pen() {
+        let (mut input, mut engine) = engine("spaced smoothing preview", 1600, 1000);
+        let mut brush = default_brush(DefaultBrushPreset::LiquifyPinch);
+        brush.diameter = 300.;
+        brush.stabilization.strength = 0.06;
+        engine.set_brush(brush).unwrap();
+        engine.set_instant_feedback(InstantFeedbackConfig { use_platform_prediction: false, ..Default::default() }).unwrap();
+        for i in 0..120 {
+            let mut sample = event(i + 1, if i == 0 { PenPhase::Down } else { PenPhase::Move }, 480. + i as f32 * 1.78);
+            sample.timestamp_ns = 1_000_000_000 + i * 4_166_667;
+            input.push(sample).unwrap();
+            engine.render_frame_for(sample.timestamp_ns, sample.timestamp_ns + 8_333_333).unwrap();
+            let tip = engine.backend.preview.last().map(|dab| dab.center.x);
+            assert!(i < 30 || tip.is_some_and(|x| (x - sample.surface_position.x).abs() < 15.), "sample {i}: preview tip {tip:?}, pen {}", sample.surface_position.x);
+        }
     }
 
     #[test]

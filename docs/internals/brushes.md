@@ -76,7 +76,9 @@ evaluation tolerance in surface pixels.
 
 Committed geometry depends on real samples, regardless of whether stroke preview
 is enabled. Preview continues that same curve with reduced prediction lead at
-high strengths. On pen-up, the curve completes through its held endpoint;
+high strengths, and ends with a contact at the curve's endpoint, as it does
+without smoothing, so widely spaced brushes such as Liquify and Smudge follow
+the pen every frame. On pen-up, the curve completes through its held endpoint;
 an enabled preview lands over 32 ms before publication. With preview off, or
 strength zero, there is no additional preview settlement wait. Live drawing and
 replay use the same completion path, including Smudge.

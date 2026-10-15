@@ -90,7 +90,8 @@ of the unclipped contact field. Blocks split at their four inner face boundaries
 quadratic pieces. Flat pieces have constant contact. Neither shape uses rotated stamps.
 
 Brush recipes specialize ellipse versus block and whether any pose has quartic
-relief. Fully engaged intervals return their length directly. Blocks find the
+relief. Only Dry brushes may carry this contact, so the Smudge, wet, watercolor,
+Liquify and Clone passes compile without it. Fully engaged intervals return their length directly. Blocks find the
 full chord by intersecting four pairs of parallel planes, then split only the
 portion traversed by the current segment. Segments wholly inside the flat face
 use its constant contact directly.

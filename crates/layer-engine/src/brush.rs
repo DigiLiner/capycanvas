@@ -454,11 +454,15 @@ impl DabGenerator {
         self.last.map(|point| point.point.position)
     }
 
-    /// Add one preview-only contact centered exactly at the requested endpoint
-    /// without advancing the committed generator or its random sequence.
-    pub(crate) fn append_terminal_copy(&self, endpoint: Point, output: &mut Vec<Dab>) -> Rect {
+    /// Unless the preview from `start` already reaches the endpoint, add one
+    /// preview-only contact centered exactly there without advancing the
+    /// committed generator or its random sequence.
+    pub(crate) fn reach_endpoint(&self, endpoint: Point, start: usize, exact: bool, output: &mut Vec<Dab>) {
+        if !(exact && output.last().is_none_or(|dab| dab.center != endpoint)) && dabs_cover_point(&output[start..], endpoint) {
+            return;
+        }
         let Some(mut dab) = self.last_emitted_dab else {
-            return Rect::EMPTY;
+            return;
         };
         let modeled = if dab.previous[0] > 0.0 {
             dab.previous = [dab.radii[0], dab.radii[1], dab.rotation[0], dab.rotation[1]];
@@ -469,10 +473,7 @@ impl DabGenerator {
         };
         dab.center = endpoint;
         dab.motion = [endpoint.x - modeled.x, endpoint.y - modeled.y];
-        let mut damage = Rect::EMPTY;
-        include_dab(&mut damage, dab);
         output.push(dab);
-        damage
     }
 
     fn characterize(&mut self, point: StrokePoint) -> DynamicPoint {
