@@ -528,7 +528,9 @@ python3 apps/layer-apple/scripts/test-property-audit.py "$TMPDIR/capy-inventory.
 
 Passing the audit establishes catalog coverage, not working native workflows.
 The inventory restores editing memory before each tool path and compares all
-authored filter values, including values hidden by conditional controls. Property
+authored filter values, including values hidden by conditional controls. Projected
+control readbacks retain their published types; Undo, Redo and rejected locked
+edits also compare the complete authored effect and spatial mapping. Property
 schema comparisons exclude curve and gradient interaction epochs while retaining
 their action targets. Run its regression checks with
 `cargo test --locked -p layer-host --example inventory`.

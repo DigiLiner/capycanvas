@@ -49,6 +49,7 @@
     "mac": "partial: all shipped filter/paint/paper/group schemas and edit/history/reset routes through the shared Apple owner; native Filters/menu and property slider history/cancellation checks pass in both presets; grouped editor filter, inline opacity, curve/gradient insertion-selection, dragging, removal/reset and sampled artwork history workflows pass; exact Metal property/history pixels pass in both configurations; AppKit component checks cover retired layer/gradient-stop fields, document-epoch mismatch rejection, insertion at a reused stop index, Remove/repeated Reset and unchanged history in both presets; actual property opacity context-menu Reset with idle/valid/invalid drafts, error removal and one-step Undo/Redo passes; remaining native, document and physical workflows stay open"
   },
   "preference_kinds": {
+    "action": "Shared/Settings/SettingsView.swift",
     "switch": "Shared/Settings/SettingsView.swift",
     "choice": "Shared/Settings/SettingsView.swift",
     "swatches": "Shared/Settings/SettingsView.swift",

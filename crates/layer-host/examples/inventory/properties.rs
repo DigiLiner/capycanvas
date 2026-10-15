@@ -25,6 +25,17 @@ fn values(host: &NativeHost) -> Value {
     )
 }
 
+fn application(host: &NativeHost) -> Option<layer_core::authored::EffectApplication> {
+    let document = host.session.engine().document();
+    document.working.occurrence.and_then(|handle| document.scene().effect_application(handle)).cloned()
+}
+
+fn control_values(host: &NativeHost) -> Value {
+    let mut values = values(host);
+    for control in &host.session.state().layer_properties.controls { values[&control.key] = json!(control.value); }
+    values
+}
+
 fn lock_action(value: &Value) -> Option<Value> {
     match value {
         Value::Object(object) => {
@@ -87,39 +98,40 @@ fn round_trip(host: &mut NativeHost, control: &Value) -> Result<Value, String> {
     let key = control["key"].as_str().unwrap();
     let action = json!({"type":"effect", "action":{"op":"set", "layer":layer, "key":key,
         "value":{"kind":control["kind"]["kind"], "value":changed_value(control)?}}});
-    let before = values(host);
+    let before = values(host); let before_application = application(host); let before_controls = control_values(host);
     dispatch(host, action.clone())?;
-    let edited = values(host);
-    if before[key] == edited[key] {
+    let edited = values(host); let edited_application = application(host); let edited_controls = control_values(host);
+    if before_controls[key] == edited_controls[key] {
         return Err("The proposed edit did not change a value".into());
     }
     let mut expected = before.clone();
-    expected[key] = edited[key].clone();
-    if edited != expected {
+    if let Some(value) = edited.get(key) { expected[key] = value.clone(); }
+    let mut expected_controls = before_controls.clone(); expected_controls[key] = edited_controls[key].clone();
+    if edited != expected || edited_controls != expected_controls {
         return Err("The edit changed an unrelated property".into());
     }
     host.dispatch(UiAction::Invoke {
         command: CommandId::Undo,
     })?;
-    if values(host) != before {
+    if values(host) != before || application(host) != before_application || control_values(host) != before_controls {
         return Err("Undo did not restore every property".into());
     }
     host.dispatch(UiAction::Invoke {
         command: CommandId::Redo,
     })?;
-    if values(host) != edited {
+    if values(host) != edited || application(host) != edited_application || control_values(host) != edited_controls {
         return Err("Redo did not restore every property".into());
     }
     dispatch(
         host,
         json!({"type":"effect", "action":{"op":"reset", "layer":layer, "key":key}}),
     )?;
-    let reset = values(host);
+    let reset = control_values(host);
     if reset[key] != control["default"] {
         return Err("Reset did not restore the shared default".into());
     }
     Ok(
-        json!({"action":action, "before":before[key], "edited":edited[key], "reset":reset[key],
+        json!({"action":action, "before":before_controls[key], "edited":edited_controls[key], "reset":reset[key],
         "undo_restored_all_properties":true, "redo_restored_all_properties":true}),
     )
 }
@@ -151,9 +163,10 @@ fn capture(mut host: NativeHost, name: &str, setup: Vec<Value>) -> Value {
         .map(|_| json!(host.session.layer_menu(layer, false).unwrap()));
     let locked_edit = lock.as_ref().and_then(|_| edits.first()).map(|edit| {
         let action = edit["result"]["action"].clone();
-        let before = values(&host);
+        let before = values(&host); let before_application = application(&host); let before_controls = control_values(&host);
         let error = dispatch(&mut host, action.clone()).err();
-        json!({"action":action,"error":error,"values_unchanged":values(&host) == before})
+        json!({"action":action,"error":error,"values_unchanged":values(&host) == before
+            && application(&host) == before_application && control_values(&host) == before_controls})
     });
     json!({"name":name, "setup":setup, "error":error, "properties":initial, "edits":edits,
         "menu":menu, "lock_action":lock, "lock_error":lock_error, "locked_properties":locked,
@@ -188,14 +201,14 @@ pub(super) fn inventory(platform: Platform) -> Vec<Value> {
 
 #[test]
 fn conditional_controls_keep_hidden_values_through_history_and_reset() {
-    for platform in [Platform::Mac, Platform::Ios] {
-        let scenario = capture(apple_host(platform), "filter:threshold",
-            vec![json!({"type":"effect","action":{"op":"insert","effect":"threshold"}})]);
+    for platform in [Platform::Mac, Platform::Ios] { for effect in ["threshold", "paper"] {
+        let scenario = capture(apple_host(platform), &format!("filter:{effect}"),
+            vec![json!({"type":"effect","action":{"op":"insert","effect":effect}})]);
         assert!(scenario["error"].is_null());
         for edit in scenario["edits"].as_array().unwrap() {
             assert!(edit["error"].is_null(), "{edit}");
         }
         assert_eq!(scenario["properties"]["controls"], scenario["locked_properties"]["controls"]);
         assert_eq!(scenario["locked_edit"]["values_unchanged"], true);
-    }
+    } }
 }
