@@ -70,6 +70,7 @@ otherwise a slider; definitions can explicitly override the kind. Prediction
 time (0–64 ms) uses a slider, with the unit beside the value. Brush size is a
 logarithmic slider over 0.5–2048 px. Opacity is displayed as a percentage;
 the pressure slider uses a linear range.
+Control schema comparisons include the logarithmic offset as part of the slider curve.
 
 `NumericOperation` handles formatting, stepping, fine value scrubbing, native
 values, normalized slider positions and typed expressions. Sliders send positions in 0–1.

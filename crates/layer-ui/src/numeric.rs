@@ -173,8 +173,8 @@ pub struct NumericControl {
 }
 impl NumericControl {
     pub fn same_rules(&self, other: &Self) -> bool {
-        (self.kind, &self.mapping, self.min, self.max, self.soft_min, self.soft_max, self.step)
-            == (other.kind, &other.mapping, other.min, other.max, other.soft_min, other.soft_max, other.step)
+        (self.kind, &self.mapping, self.min, self.max, self.soft_min, self.soft_max, self.step, self.log_offset)
+            == (other.kind, &other.mapping, other.min, other.max, other.soft_min, other.soft_max, other.step, other.log_offset)
             && (self.resolution, self.slider_snap, self.digits, self.scale, &self.unit, self.default_value)
                 == (other.resolution, other.slider_snap, other.digits, other.scale, &other.unit, other.default_value)
     }
@@ -756,6 +756,14 @@ mod tests {
                 11.0
             );
         }
+        let first = NumericControl {
+            mapping: NumericMapping::Log, log_offset: 1., kind: NumericKind::Slider,
+            ..NumericControl::number(0., 100., 1., 6)
+        };
+        let second = NumericControl { log_offset: 4., ..first.clone() };
+        let midpoint = |spec: &NumericControl| spec.resolve(0., NumericOperation::Position { position: 0.5 }).unwrap().value;
+        assert_ne!(midpoint(&first), midpoint(&second));
+        assert!(!first.same_rules(&second));
     }
     #[test]
     fn logarithmic_offsets_reject_invalid_domains() {
