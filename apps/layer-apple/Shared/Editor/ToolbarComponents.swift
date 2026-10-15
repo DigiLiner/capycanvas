@@ -171,10 +171,10 @@ private struct SliderStampImage: @unchecked Sendable { let image: CGImage? }
     nonisolated static func image(_ reply: JSON) -> CGImage? {
         let side = Int(reply["size"].uint), alpha = reply["alpha"].array
         guard side > 0, alpha.count == side * side else { return nil }
-        let bytes = alpha.map { UInt8(clamping: Int($0.uint)) }
+        let bytes = alpha.flatMap { value -> [UInt8] in [0, 0, 0, UInt8(clamping: Int(value.uint))] }
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
-        return CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: side,
-            space: nil, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.alphaOnly.rawValue),
+        return CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
             provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 }
