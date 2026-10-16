@@ -2466,6 +2466,7 @@ mod tests {
         .unwrap();
         host.session.frame(0, 0).unwrap();
         assert!(host.paint_ready());
+        assert!(host.session.engine().brush().stabilization.strength > 0.);
         assert_eq!(host.paint_start_sequence(), 0);
         let revision = host.session.state().camera.revision;
         for (token, pending, x, phase, time) in [
@@ -2494,8 +2495,21 @@ mod tests {
             host.session.frame(time as u64, time as u64).unwrap();
         }
         assert!(host.last_pen.is_none());
+        let clock = std::cell::Cell::new(21_000_000);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while host.session.engine().has_active_stroke() || host.session.engine().has_pending_input()
+            || host.session.engine().raster_backing_pending()
+            || crate::test_support::active_source(host.session.engine().document()).raster.try_data().is_none()
+        {
+            frame_step(&mut host, &clock, deadline);
+        }
+        assert_eq!(host.session.engine().metrics().committed_strokes, 1);
+        assert!(!host.session.engine().has_active_stroke());
+        assert!(host.session.engine().can_undo());
         let checkpoint = host.session.engine().checkpoint();
         let before = crate::test_support::active_source(host.session.engine().document()).raster.clone();
+        assert!(before.try_data().is_some_and(|data| data.is_ok_and(|data| !data.tiles.is_empty())),
+            "the original stroke must publish nonempty raster data before the late correction");
         let before_pixels = host.session
             .renderer_mut()
             .0
@@ -2520,7 +2534,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(host.paint_start_sequence(), paint_start, "corrected down samples do not start another contact");
-        host.session.frame(30_000_000, 30_000_000).unwrap();
+        frame_step(&mut host, &clock, deadline);
+        while host.session.engine().has_pending_input() || host.session.engine().raster_backing_pending()
+            || crate::test_support::active_source(host.session.engine().document()).raster.try_data().is_none()
+        {
+            frame_step(&mut host, &clock, deadline);
+        }
         let after = &crate::test_support::active_source(host.session.engine().document()).raster;
         assert_ne!(
             after, &before,
@@ -2544,7 +2563,7 @@ mod tests {
         assert_eq!(json!(host.session.state().camera), camera);
         host.session.require_document_idle().unwrap();
         host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
-        host.session.frame(40_000_000, 40_000_000).unwrap();
+        frame_step(&mut host, &clock, deadline);
         assert!(crate::test_support::active_source(host.session.engine().document()).raster.is_empty());
         assert!(!host.session.engine().can_undo(), "correction adds no undo entry");
     }

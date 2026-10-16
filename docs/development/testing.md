@@ -159,6 +159,9 @@ retain pressure axes, sequence numbers, cadence and GPU-wait policy.
 Completed-stroke fixtures settle `has_pending_document_edits` before reading
 pixels or starting another document edit; draining input alone does not publish
 delayed pen-up work. Live-preview fixtures retain their unfinished contact.
+`estimated_input_tokens_reach_committed_stroke_corrections` waits for nonempty
+committed pigment before correcting the stroke, then checks pixels, the dirty
+checkpoint and one Undo entry.
 Preview-scale equality fixtures disable position smoothing so zoom-dependent
 Curve fit does not change the authored contact path being compared.
 Retouch replay fixtures keep each brush's path and pen-up position. Check source
