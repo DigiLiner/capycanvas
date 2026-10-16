@@ -106,7 +106,7 @@ impl GraphShape {
             let references = shape.references();
             for target in &references {
                 if let Some(referenced) = self.objects.get(target) {
-                    if referenced.ancillary() { return Err("Artwork or ancillary record depends on ancillary data".into()); }
+                    if referenced.ancillary() && !shape.ancillary() { return Err("Artwork depends on ancillary data".into()); }
                 } else if !self.resources.contains(target) { return Err("Dangling authored reference".into()); }
             }
             let mut expect = |target: PortableId, predicate: fn(&Shape) -> bool| match self.objects.get(&target) {

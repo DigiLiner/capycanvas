@@ -65,20 +65,25 @@ before interpreting or discarding any record.
 
 Unknown envelope fields or an unknown envelope version prevent interpretation of
 the manifest; only the fixed preview convention and original package remain
-available. Malformed JSON, IDs, references, lengths and known required fields are
+available. The format therefore grows through record types, fields and values,
+never through new envelope fields. Malformed JSON, IDs, references, lengths and known required fields are
 invalid. Metadata size, nesting, total reference edges and reference-expansion
 work are bounded before adoption independently of device pixel admission.
 
 ## Object records and defaults
 
 An object is `{"id":"…","type":"capy.stack/1","data":{…}}`. Optional
-`ancillary` and `copy_safe` flags default to false. `copy_safe:true` requires
-`ancillary:true`; known artwork types reject either flag. Required artwork cannot
-depend on ancillary records. Ancillary records may reference artwork/resources,
-not other ancillary records. Unknown ancillary data is retained after edits only
-when copy-safe and every reference still resolves; otherwise it is dropped on an
-edited save. No-edit copying retains the original package. Unknown records are
-not cloned onto independently duplicated objects.
+`ancillary` and `copy_safe` flags default to false. A known type's flags must
+match its registration, and every current type is required artwork, so known
+types reject either flag. An unknown type marked `copy_safe` without `ancillary`
+is unknown required artwork. Required artwork, required resources and photo
+metadata cannot depend on ancillary records. An ancillary record that names
+another ancillary record is accepted but never retained after an edit. Unknown
+ancillary data is retained after edits only when copy-safe and every reference
+still resolves; otherwise it is dropped on an edited save. Retention checks only
+that referenced records still exist, so a copy-safe record may depend on their
+identity, never on their content. No-edit copying retains the original package.
+Unknown records are not cloned onto independently duplicated objects.
 
 The current registry is shared by portable and private contexts. Manifest
 classification, topology, record adapters and history descriptors consume its
@@ -780,7 +785,8 @@ Fixtures distinguish malformed content from unsupported content and preservation
 | Unknown non-ancillary record with no path from the root/output | Preserved; it is retained authored work. |
 | Unknown ancillary copy-safe note references an existing occurrence and opaque resource | Editable; preserve note/resource unchanged after unrelated edits. |
 | Same note without `copy_safe`, or after deletion of its referenced occurrence | Editable; drop note on edited save, retain byte-for-byte on no-edit copy. |
-| Ancillary record refers to another ancillary record, or required artwork depends on ancillary data | Invalid. |
+| Ancillary record refers to another ancillary record | Editable; the referring record is dropped on edited save and kept by no-edit copying. |
+| Required artwork depends on ancillary data | Invalid. |
 | Known future root with empty outputs and no default | Structurally valid; preserved if outside the editable subset. |
 | Supported source, missing or corrupt preview | Editable source; no stale preview is adopted. |
 | Corrupt required source block with valid preview | Recovered view; never substitute empty source. |

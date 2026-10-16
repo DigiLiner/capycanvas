@@ -77,6 +77,17 @@ fn edited_capture_drops_deleted_or_unresolved_records_and_exclusive_resources() 
 }
 
 #[test]
+fn ancillary_records_naming_other_ancillary_records_load_and_are_dropped_on_edited_capture() {
+    let mut reply=note(9,true,10);reply["data"]["thread"]=reference(7);
+    let (manifest,backing)=manifest(b"abc",vec![resource(10,0,b"abc",json!({}))],vec![note(7,true,10),reply]);
+    let extensions=Extensions::load(&manifest,&backing,&AtomicBool::new(false)).unwrap();
+    assert_eq!(extensions.records.len(),2);
+    let (records,resources)=extensions.edited_retained(&live()).unwrap();
+    assert_eq!(records,vec![manifest.objects[&id(7)].clone()]);
+    assert_eq!(resources.iter().map(|r|r.id).collect::<Vec<_>>(),vec![id(10)]);
+}
+
+#[test]
 fn resource_cycles_terminate_and_retain_the_complete_reachable_closure() {
     let (manifest,backing)=manifest(b"abcdef",vec![resource(10,0,b"abc",json!({"next":reference(11)})),
         resource(11,3,b"def",json!({"next":reference(10)}))],vec![note(7,true,10)]);

@@ -82,13 +82,16 @@ fn identity_reference_and_ancillary_rules_cover_every_retained_record() {
             2=>value["objects"][3]["data"]["subject"]=reference_value(100),
             3=>value["objects"][3]["data"]["subject"]=json!({"ref":id(2),"other":true}),
             4=>value["objects"][1]["ancillary"]=true.into(),
-            _=>value["objects"][3]["ancillary"]=false.into(),
+            _=>value["objects"][1]["copy_safe"]=true.into(),
         }
         assert!(parse(&value,&directory(&[])).is_err(),"edit {edit}");
     }
     let mut value=fixture("ancillary");
-    push_object(&mut value,json!({"id":id(8),"type":"future.note/1","ancillary":true,"data":{"link":reference_value(7)}}));
-    assert!(parse(&value,&directory(&[])).is_err());
+    value["objects"][3]["ancillary"]=false.into();
+    assert!(matches!(known(&value,&directory(&[])).support,Support::Preserved(_)));
+    let mut value=fixture("ancillary");
+    push_object(&mut value,json!({"id":id(8),"type":"future.note/1","ancillary":true,"copy_safe":true,"data":{"link":reference_value(7)}}));
+    assert_eq!(known(&value,&directory(&[])).support,Support::Editable);
     value["objects"].as_array_mut().unwrap().pop();
     value["objects"][1]["extra"]=reference_value(7);
     assert!(parse(&value,&directory(&[])).is_err());

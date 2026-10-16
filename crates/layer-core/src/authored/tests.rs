@@ -119,7 +119,7 @@ fn ancillary_dependencies_cannot_change_required_artwork() {
     g.objects.insert(id(6), Shape::Unknown { ancillary: true, references: vec![id(4)] });
     assert_eq!(validate(&g), Ok(Support::Editable));
     g.objects.insert(id(7), Shape::Unknown { ancillary: true, references: vec![id(6)] });
-    assert!(validate(&g).is_err());
+    assert_eq!(validate(&g), Ok(Support::Editable));
     g.objects.insert(id(7), Shape::Unknown { ancillary: false, references: vec![id(6)] });
     assert!(validate(&g).is_err());
 }

@@ -83,7 +83,7 @@ fn shape(record: &Value, refs: &[PortableId], context: RecordContext, reasons: &
     let copy_safe = boolean(fields, "copy_safe")?;
     let name = kind(record)?;
     let descriptor = registry::descriptor(name).filter(|record| record.role == RecordRole::Object);
-    if copy_safe && !ancillary || descriptor.is_some() && (ancillary || copy_safe) { return Err("Invalid ancillary flags".into()); }
+    if descriptor.is_some() && (ancillary || copy_safe) { return Err("Invalid ancillary flags".into()); }
     if extras(fields, &["id", "type", "data", "ancillary", "copy_safe"]) && !ancillary { reasons.insert("Unknown object record field"); }
     let unknown = || Shape::Unknown { ancillary, references: refs.to_vec() };
     let Some(descriptor) = descriptor else { return Ok(unknown()); };
@@ -305,11 +305,6 @@ impl Manifest {
             targets.extend(refs.iter().filter(|id| resources.contains_key(id)).copied());
             graph.objects.insert(*id, shape);
         }
-        for record in objects.values().chain(resources.values().map(|r| &r.value)).chain(metadata.iter()) {
-            for target in references(record, limits.traversal_nodes)? {
-                if matches!(graph.objects.get(&target), Some(Shape::Unknown { ancillary: true, .. })) { return Err("Reference to ancillary record".into()); }
-            }
-        }
         if let Some(metadata) = &metadata {
             for target in references(metadata, limits.traversal_nodes)? {
                 if !resources.contains_key(&target) { return Err("Photo metadata must reference resources".into()); }
@@ -323,6 +318,13 @@ impl Manifest {
                     if resources.contains_key(&target) && roots.insert(target) { pending.push(target); }
                 }
             }
+        }
+        let ancillary_record = |id: &PortableId| matches!(graph.objects.get(id), Some(Shape::Unknown { ancillary: true, .. }));
+        let required_records = objects.iter().filter(|(id, _)| !ancillary_record(id)).map(|(_, record)| record)
+            .chain(resources.iter().filter(|(id, _)| required_resources.contains(id) || !ancillary_resources.contains(id)).map(|(_, record)| &record.value))
+            .chain(metadata.iter());
+        for record in required_records {
+            if references(record, limits.traversal_nodes)?.iter().any(ancillary_record) { return Err("Required data references an ancillary record".into()); }
         }
         for (id, record) in &resources {
             let location = object(required(object(&record.value)?, "location")?)?;
