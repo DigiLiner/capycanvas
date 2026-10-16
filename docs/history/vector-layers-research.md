@@ -3,14 +3,17 @@
 [Technical documentation](../README.md) · [Design and validation history](README.md)
 
 Research date: **2026-09-25**, source baseline **`796f7f5b`**. Code audit and
-design: **2026-10-14**, source baseline **`15f01f80e`**.
+design: **2026-10-14**, source baseline **`15f01f80e`**. Extension audit and
+model revision: **2026-10-16**, source baseline **`86a0fd0e4`**.
 
 This record holds the research behind vector layers and the design chosen after
 auditing the code. It describes intended work, not implemented capabilities.
 
 - **Evidence:** sections 2.1 and 3–5 are research from the first date.
-- **Design:** sections 1, 2.2 and 6–9 are the audited design. They replace the
-  earlier recommendation, which proposed three things:
+- **Design:** sections 1, 2.2 and 6–9 are the audited design. Sections 7.2–7.4
+  were revised after the [extension audit](object-content-extensions-research.md),
+  which checked the model against SVG, Inkscape, Illustrator and other editors.
+  The design replaces the earlier recommendation, which proposed three things:
   - replaying recorded samples through the brush engine;
   - a `VectorIndex` beside `SelectionIndex`;
   - a raster cache persisted in the file.
@@ -52,17 +55,18 @@ The research combines eight streams. Their full write-ups, with every source URL
 ## 1. Executive summary
 
 **Decision.** A Vector layer is an ordinary Object layer whose content is one
-**vector object**. The vector object owns an ordered list of **paths**:
-- Each path is a compound cubic Bézier path with one **style** (an optional fill and an optional stroke) and an optional **width profile**.
-- Shape tools, the Path tool and freehand pens all create this one item type.
-- The file stores the paths, never their outlines or rendered pixels.
+**vector object**, the root of a tree of **items**:
+- The first item kind is the **path**: a compound cubic Bézier path with a fill rule and one **style**, an ordered list of fills and strokes. A stroke can carry a **width profile**.
+- Shape tools, the Path tool and freehand pens all create paths. Groups, images, text and symbol instances are later kinds in the same tree.
+- The file stores the items, never their outlines or rendered pixels.
 
 **The design in brief**
 - **Layer model:** no layer per path, no container record and no second layer hierarchy.
   - Rows, masks, effects, opacity, blend, clipping, clipboard and Rasterize Layer stay those of Object layers.
   - Path selection inside the layer is working state.
-- **File:** one `capy.vector-object/1` record per layer holds a style table and references immutable binary `capy.vector-items/1` chunks of F64 geometry.
+- **File:** one `capy.vector-object/1` record per layer references immutable binary `capy.vector-items/1` chunks. Together they hold the item tree in pre-order as tagged F64 data.
   - Readers without vector support preserve such files; the test `unknown_drawable_children_preserve_the_complete_package` already shows the mechanism.
+  - Unknown item kinds and properties either preserve the file or, when flagged ignorable, are kept or dropped by fixed rules.
 - **Rendering:** one new GPU coverage kernel with exact-area antialiasing and nonzero or even-odd fill rules, fed by CPU curve flattening and stroke expansion.
   - It also replaces the selection contour filler and the Figure distance-field shapes.
   - Layers render at native density first; crisp zoom is the next renderer milestone.
@@ -73,8 +77,9 @@ The research combines eight streams. Their full write-ups, with every source URL
   - Raster-only tools refuse with the existing notice.
 - **Smoothing:** freehand vector lines use the preset's existing stabilizer, the global pressure curve, the pressure fall limiter and rulers unchanged. They are fitted to Béziers at pen-up.
 - **Foundation:**
-  - Brush paths, groups, live shapes, booleans, gradients and text are later item kinds or style additions.
-  - Each later addition is a new record version that older readers preserve.
+  - Brush paths, groups, images, text, instances, gradients and dashes are later item kinds, properties or paint kinds.
+  - Live shapes, booleans, blends and other live features store their result as ordinary items plus a recipe.
+  - Each addition is new vocabulary inside the same two types; older readers preserve the file, or safely ignore an addition flagged ignorable.
 
 **What changed since the research**
 1. **An Object layer holds exactly one object.** Commit `3e809895b` (2026-10-08) removed the object-layer collection record and child rows. The GA design's route of mixing vectors into "the existing ordered object list" no longer exists, so the vector object owns its items.
@@ -85,6 +90,14 @@ The research combines eight streams. Their full write-ups, with every source URL
 6. **Strokes are still not persisted, and two guides disagree with the code:**
    - [`docs/internals/brushes.md`](../internals/brushes.md) (lines 40 and 136) still describes stored strokes and replay.
    - [`docs/architecture.md`](../architecture.md) (lines 20–21) still describes object collections.
+7. **The extension audit reshaped the model before it froze** (2026-10-16):
+   - one item tree instead of a flat path list;
+   - tagged properties with PNG-style rules for unknown data;
+   - ordered paint lists instead of one optional fill and stroke;
+   - transforms on groups and non-path items;
+   - recipes for live features.
+
+   It also made the package reader classify combinations a later version may allow as unsupported rather than damaged ([extension research](object-content-extensions-research.md)).
 
 ---
 
@@ -446,7 +459,7 @@ allowlist).
 ### 7.1 Principles
 
 1. **Lines and fills first, as an illustrator expects.** Paths stay paths, strokes stay strokes, and shapes stay editable until Rasterize Layer.
-2. **One item type.** Shapes, pen paths, freehand lines, merge results and imports are all paths. Behavior differs by tool, not by parallel object kinds.
+2. **One item type for lines and fills.** Shapes, pen paths, freehand lines, merge results and imported shapes are all paths. Behavior differs by tool, not by parallel object kinds. Later kinds (groups, images, text, instances) join the same tree.
 3. **Vector content is an object type, not a layer hierarchy** (6.1).
 4. **Authored geometry, derived pixels.** The file stores neither outlines nor rendered pixels of vector content.
 5. **Never worse than raster at what beginners try first.** Drawing, erasing, filling, resizing and undo all work on a vector layer, with no error and no invisible artifacts.
@@ -456,38 +469,51 @@ allowlist).
 
 ```text
 Stack entry → Occurrence (name, visibility, opacity, blend, mask, effects, integer offset)
-                └ content: objects → VectorObject
-                                       ├ styles: [Style]                 shared within the layer
-                                       └ items:  [Chunk] → [Path]        front to back
-Path    { id: u64, style, subpaths: [Subpath], width: Option<WidthProfile> }
-Subpath { anchors: [Anchor], closed: bool }
-Anchor  { point, in_handle, out_handle, kind: Corner | Smooth | Symmetric }
+                └ content: objects → VectorObject: the root group of one item tree
+                                       ├ items: [Chunk] → item stream, pre-order, front to back
+                                       └ slots: images, fonts, definitions, effects (later)
+Item     { kind, id: u64, properties: tag → value }
+  Path     { geometry, rule, style }                                        V0
+  Group    { properties }, its children, then an End marker                 later
+  Image, Text, Instance, Mask                                               later
+Subpath  { anchors: [Anchor], segment kinds, closed: bool }
+Anchor   { point, in_handle, out_handle, kind: Corner | Smooth | Symmetric }
+Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter limit, width profile }] }
 ```
 
+- **One tree:**
+  - The vector object is the root of a single item tree. SVG, PDF, Illustrator, Inkscape, Affinity, Figma and Krita all use one.
+  - A flat path list would need a second nesting mechanism once groups, clipping groups and symbols arrive, with its own selection, undo and compositing rules.
+  - V0 defines only Path. Group arrives in V2 as an opening item with the group's properties, followed by its children and an End marker. Adding or removing a child changes only the chunk that holds it.
 - **Handles:** `OccurrenceContent::Objects` holds an `ObjectHandle`, which is either `Image(ImageObjectHandle)` or `Vector(VectorObjectHandle)`.
   - `LayerKind::Object` remains, and a derived object kind drives tool routing and UI text.
   - Image-only reads (`.image`, interpolation, sampling preflight) stop compiling and are fixed one by one.
-- **No retained transform on the vector object:**
-  - Geometry is in the layer's local pixels, and the occurrence keeps its integer offset.
-  - Move, scale, rotate and flip rewrite the coordinates of the affected paths, which is exact for Béziers, as one undo step.
-  - With Scale Strokes on, stroke widths scale by √|det|. Illustrator works the same way.
-  - The file has one coordinate system and no hidden transform.
-- **One vector object per layer, many paths per object:**
-  - The layer is the isolation and cache boundary, and it holds thousands of paths.
+- **Transforms:**
+  - **Paths keep none.** Their geometry is in the layer's local pixels.
+    - Move, scale, rotate and flip rewrite the affected coordinates, which is exact for Béziers, as one undo step.
+    - With Scale Strokes on, stroke widths, width profiles and later dash lengths scale by √|det|. Illustrator and Inkscape work the same way.
+    - Later gradient and pattern geometry transforms with the path.
+  - **Items that cannot absorb a transform carry an F64 affine:** groups, images, text and instances. Their content (shared definitions, glyphs, image pixels) cannot be rewritten in place.
+  - **Stretched strokes stay in a group.** One width cannot describe a stroke under a skew or uneven scale. SVG import therefore keeps such a path inside a group that holds the transform, as usvg does.
+  - **No layer transform:** the root group has no affine, and the occurrence keeps its integer offset.
+- **One vector object per layer, many items per object:**
+  - The layer is the isolation and cache boundary, and it holds thousands of items.
   - Several vector layers are fine. Each one counts toward the 4,096-occurrence admission.
-- **Path identity:**
-  - Each path has a stable layer-local `u64` ID. It is assigned at creation, kept through edits and undo, and renewed on duplicate and paste.
+- **Item identity:**
+  - Each item, groups included, has a layer-local `u64` ID. It is assigned at creation, kept through edits, undo and save, and renewed on duplicate and paste.
+  - A new ID is a random nonzero value checked against the layer, so deleted IDs never come back in practice.
   - Like ruler IDs, it is owned by the record type, not a portable record ID.
-  - It anchors working selection, history and future references such as gap fills or symbols.
+  - It anchors working selection and history, and later references inside the layer, such as instance overrides and text on a path.
 - **Working state:**
-  - `WorkingState` gains the selected paths of the current vector layer and, while editing points, the selected anchors.
-  - Selection is not an undo step, but Undo and Redo select the paths they restore. Delete repairs it.
-  - Portable saves omit it; private sessions keep it. Selecting a path makes its layer the current layer.
+  - `WorkingState` gains the selected items of the current vector layer and, while editing points, the selected anchors. Later it also records the group being edited.
+  - Selection is not an undo step, but Undo and Redo select the items they restore. Delete repairs it.
+  - Portable saves omit it; private sessions keep it. Selecting an item makes its layer the current layer.
 - **Undo:**
   - `Edit::RecordChange<VectorObject>` replaces the record.
-  - Paths live in immutable chunks of at most 64 (`Arc<[Arc<Path>]>`), and an edit copies only the chunks it touches.
+  - The item stream lives in immutable chunks of at most 64 items (`Arc<[Item]>`, End markers included), and an edit copies only the chunks it touches.
+  - Parents and subtree ranges are derived on load and after each edit, never stored.
   - History charges chunks by `Arc` identity, as it charges selection contours today.
-- **Later content in the same layer:** images, groups and text become further item kinds inside the vector object, not a second container (7.9).
+- **Later content in the same layer:** images, groups, text and instances are further item kinds in this tree, not a second container (7.9 and the [extension research](object-content-extensions-research.md)).
 
 ### 7.3 Paths and appearance
 
@@ -495,38 +521,49 @@ Anchor  { point, in_handle, out_handle, kind: Corner | Smooth | Symmetric }
 
 | Element | Representation | Reason |
 |---|---|---|
-| Anchor | Point plus in and out handle offsets, F64 in layer pixels. A zero offset is a retracted handle. The segment between two anchors is the cubic `(p0, p0+out0, p1+in1, p1)`, and a line when both handles are retracted | Matches node editors; maps one-to-one to SVG and PDF `C`/`L` commands; exact under affine maps |
+| Anchor | Point plus in and out handle offsets, F64 in layer pixels. A zero offset is a retracted handle | Matches node editors; maps one-to-one to SVG and PDF `C`/`L` commands; exact under affine maps |
 | Anchor kind | Corner (independent handles), Smooth (collinear handles, independent lengths), Symmetric (mirrored handles) | Editing intent that handle positions cannot recover; Inkscape keeps `sodipodi:nodetypes` for the same reason |
+| Segment | Each segment between two anchors has a kind. V0 defines only Cubic, `(p0, p0+out0, p1+in1, p1)`; it is a line when both handles are retracted | Exact elliptical arcs, which CAD and cutting machines keep, can become a later kind without a new layout |
 | Subpath | One or more anchors and a `closed` flag that adds the closing segment. A single-anchor subpath is a dot, drawn only with round or square caps | Covers lines, outlines and dots |
-| Path | One or more subpaths with one style. A compound path is a path with several subpaths; holes come from the fill rule | Merge results, letters with counters and imported SVG need no other type |
-| Other curve types | Quadratics become cubics exactly. Arcs and ellipses become cubics split finely enough to stay within 1/64 pixel | One segment type for editing, rendering and export |
+| Path | One or more subpaths with one fill rule (nonzero or even-odd) and one style. A compound path is a path with several subpaths; holes come from the rule | Merge results, letters with counters and imported SVG need no other type |
+| Fill rule | On the path, not on each fill | It defines the shape's inside for every fill, hit-testing, merge and later clipping |
+| Other curve types | Quadratics become cubics exactly. Arcs and ellipses become cubics split finely enough to stay within 1/64 pixel | One segment kind for editing, rendering and export at first |
 | Precision | F64 in memory and in the file | Image-object affines are F64 already; F32 would drift after repeated transforms on 61 MP canvases |
 
 **Appearance**
 
-- **Style:**
-  - A style is an optional fill and an optional stroke.
-  - A path with neither is valid: it is selectable, shows as an outline while selected and acts as construction geometry.
-- **Fill:** a portable color and a rule, nonzero or even-odd.
+- **A style is an ordered list of paints.**
+  - Each entry is a Fill or a Stroke, painted first to last.
+    - SVG's default is `[Fill, Stroke]`, and `paint-order: stroke` is `[Stroke, Fill]`.
+    - Illustrator, Affinity, Figma and Graphite allow any number of each.
+  - The first tools and Properties edit at most one fill below one stroke. The format holds any list.
+  - An empty list is valid: the path is selectable, shows as an outline while selected and acts as construction geometry.
+- **Paint:** each entry has exactly one paint. V0 has a portable color. Gradients, patterns, meshes, swatch references and context paints are later paint kinds.
+- **Fill:** a paint.
 - **Stroke:**
-  - A portable color, a width in layer pixels, a cap (butt, round or square), a join (miter, round or bevel) and a miter limit.
-  - The stroke is centered on the path and painted over the fill, as SVG does.
-  - Frozen wire defaults follow SVG (butt, miter, 4, nonzero), so export needs no attributes for them. Tool defaults are separate: pens use round caps and joins.
-  - Inside and outside alignment comes later; it needs offsetting.
+  - A paint, a width in layer pixels, a cap (butt, round or square), a join (miter, round or bevel), a miter limit and an optional width profile.
+  - The stroke is centered on the path. SVG 2's final join set is also miter, round and bevel; `miter-clip` and `arcs` were removed in 2026.
+  - Frozen wire defaults follow SVG (butt, miter, 4), so export needs no attributes for them. Tool defaults are separate: pens use round caps and joins.
+  - Dashes, inside and outside alignment, markers and non-scaling strokes are later stroke properties.
 - **Width profile:**
-  - Optional. It is a list of knots `(segment, t, factor)` ordered along the path.
-  - Width is the style width times the factor, interpolated linearly between knots and held constant beyond the ends.
+  - It belongs to a stroke, as in Illustrator, Affinity and Graphite. A freehand line has one stroke with a profile.
+  - It is a list of knots `(segment, t, factor)` ordered along the path.
+  - Width is the stroke width times the factor, interpolated linearly between knots and held constant beyond the ends.
   - Knots are anchor-relative, so moving an anchor leaves widths in place.
   - Splitting a segment remaps its knots exactly. Deleting an anchor reparameterizes the merged segment.
-  - Changing the style width scales the whole profile, as Illustrator does.
+  - Changing the stroke width scales the whole profile, as Illustrator does.
   - Widths are symmetric for now; Illustrator's one-sided widths come later.
+- **Styles are inline:**
+  - Each path stores its own style. Readers intern equal styles in memory, and LZ4 absorbs the repetition in files.
+  - A shared table would save no edits: changing the style of selected paths rewrites their chunks either way.
+  - Linked styles (graphic styles, global swatches) come later as references to document-level definitions.
 - **Opacity and blend:**
-  - There is no per-path opacity, blend or effect at first; layers provide them, and color alpha covers translucent paths.
-  - The [GA scope rule](object-layer-ga-design.md#3-ga-state-and-deliberately-deferred-work) defers per-object opacity, blend and effects.
+  - There is no per-path opacity, blend or effect at first. Layers provide them, and color alpha covers translucent paths.
+  - The [GA scope rule](object-layer-ga-design.md#3-ga-state-and-deliberately-deferred-work) defers per-object opacity, blend and effects. They come later as properties of items, groups and paint entries.
 - **Colors:**
   - Colors are portable colors, converted into the working space at evaluation as effect colors are.
   - Coverage blends in the composition's blend domain. In Linear documents, antialiased dark hairlines therefore render slightly lighter than in browsers (open question 7).
-- **Derived data, never stored:** flattened segments, stroke outlines, bounds, tile bins and hit-test data.
+- **Derived data, never stored:** flattened segments, stroke outlines, bounds, tile bins, the tree index and hit-test data.
 
 ### 7.4 File format
 
@@ -535,55 +572,93 @@ a vector object.
 
 ```json
 {"id":"…","type":"capy.vector-object/1","data":{
-  "styles":[
-    {"fill":{"color":{"rgba":[0.92,0.33,0.2,1]}}},
-    {"stroke":{"color":{"rgba":[0,0,0,1]},"width":6,"cap":"round","join":"round"}}
-  ],
   "items":[{"ref":"…"},{"ref":"…"}]
 }}
 ```
 
-Each `items` entry references a `capy.vector-items/1` resource. Its `data`
-gives the path count; its payload uses a raw little-endian layout encoding,
-optionally wrapped in `capy.lz4-bytes/1` like LUTs.
+Each `items` entry references a `capy.vector-items/1` resource:
+- **Data:** its record data gives the item count.
+- **Payload:** a raw little-endian layout encoding, optionally wrapped in `capy.lz4-bytes/1` like LUTs.
+- **Stream:** concatenated in order, the chunks form the item stream. A chunk boundary may fall anywhere, including inside a group.
 
-**Payload layout.** The exact layout belongs in the
+**Tagged layout.** The exact bytes belong in the
 [package contract](../reference/capy-package.md) when implemented. The design
-fixes its content:
-- **Per path:** the `u64` ID, a `u32` style index, the subpath count and the width knots (`u32` segment, F64 `t`, F64 factor).
-- **Per subpath:** the anchor count and the closed flag.
-- **Per anchor:** a `u8` kind, then the point and both handle offsets as F64 pairs.
+fixes the structure:
+- **Item:** a `u16` kind, a `u64` ID (End markers have none) and a length-prefixed list of properties.
+- **Property:** a `u16` tag, a byte length and a value. Paint entries in a style and the paint in each entry use the same kind, tag and length form.
+- **V0 vocabulary:**
+  - Kinds: Path.
+  - Path tags: geometry, fill rule, style.
+  - Paint-entry kinds: Fill and Stroke.
+  - Stroke tags: width, cap, join, miter limit, width profile.
+  - Paint kinds: color.
+  - Geometry: per subpath, the anchor count and the closed flag. Per anchor, a `u8` kind and the point and both handle offsets as F64 pairs. Per segment, a `u8` kind. Per width knot, a `u32` segment, an F64 `t` and an F64 factor.
 - **Never:** Capy IDs inside the payload.
 
+**Unknown kinds and tags.** Two bits in every kind and tag number tell a reader
+that does not know it what to do, as PNG's chunk names do:
+
+| Bits | Reader without support | Use |
+|---|---|---|
+| Neither | The file is Unsupported and opens as Preserved, as with unknown record fields today | Anything that changes rendering or meaning |
+| Ignorable | Renders and edits without it | |
+| Ignorable and copy-safe | Keeps it unchanged through every edit | Item names, SVG `id` and `class`, notes |
+| Ignorable, not copy-safe | Keeps it while its item and that item's subtree are unchanged. Drops it as soon as the reader changes either, or duplicates or pastes the item | Recipes, editing hints |
+
+- **Ignorable data stays local:** it may depend only on its own item and that item's subtree, never on slots or other items. Keeping or dropping it then cannot break anything else.
+- **Required data:** a known tag on a kind it does not apply to, and an unknown value of a known tag, are Unsupported, like unknown values in records today.
+
+**Slots**
+- Item kinds that use package records or resources name them through slot lists in the record's JSON, because payloads cannot hold Capy IDs. Examples: `images` for Image items, and `fonts`, `definitions` and `effects`.
+- Each list arrives with the first kind that needs it.
+- Writers keep slot lists dense and renumber the items they know. That is safe because ignorable data never uses slots.
+
+**Live content: results with recipes**
+- **Storage:** a live feature stores its result as ordinary items, and its editing intent as an ignorable, not copy-safe property:
+  - a rounded rectangle is a Path plus a live-shape property {kind, size, corner radii};
+  - a blend, a Repeat or a live boolean is a Group holding the results, with a recipe on the group.
+- **Inputs that must not render,** such as a blend's key objects or a boolean's operands, live inside the recipe's value. Illustrator keeps its edit art apart from the result art in the same way.
+- **Readers that know the recipe** regenerate the result only when the recipe is edited. On open they use the stored result, so artwork never changes because the app was updated.
+- **Readers that don't know it** render the result and drop the recipe when they change the item. That is Illustrator's Expand, rather than Inkscape's silent overwrite of a foreign edit to `d`.
+- **A recipe that needs a slot,** such as a trace's source image, is required data instead, and older readers preserve the file.
+
 **Rules**
-- **Order:** paths are front to back across `items` and within each chunk, matching `capy.stack/1`.
+- **Order:** items are front to back across `items` and within each chunk, matching `capy.stack/1`.
 - **Validation:**
-  - Style indices in range, finite values, `t` in `[0,1]`, factors ≥ 0 and ordered knots.
-  - Path IDs unique within the layer, positive stroke widths, nonempty chunks with the declared count, and decoded size bounded before allocation.
-  - Malformed data is Invalid. Unknown style fields, item layouts or encodings are Unsupported and preserve the package, following the existing rule.
-- **Writers:**
-  - Writers deduplicate styles and omit unused ones.
-  - Chunk membership stays stable across edits, so unchanged chunks keep their resource IDs and encoded bytes when saved again.
-- **Chunks of up to 64 paths:**
+  - **Invalid (malformed):**
+    - lengths, non-finite values, unbalanced groups and End markers;
+    - indices out of range, `t` outside `[0,1]`, negative widths or factors, unordered knots;
+    - duplicate IDs within the layer;
+    - empty chunks or a count that disagrees with the payload.
+  - **Unsupported, preserving the package as the existing rule requires:**
+    - unknown required kinds, tags, values and encodings;
+    - known tags on other kinds;
+    - counts and depths beyond admission: items per layer, anchors per path and group depth.
+  - **Allocation:** decoded size is bounded before allocation.
+- **Writers:** chunk membership stays stable across edits, so unchanged chunks keep their resource IDs and encoded bytes when saved again.
+- **Chunks of up to 64 items:**
   - One resource per layer would rewrite the whole layer in session history on every edit.
   - One resource per path costs about 200 bytes of resource JSON per path.
   - 64 matches the session's 64-entry tile-index chunks.
 - **No record per path:** the limits in 6.2 rule it out, and every edit would walk every path record.
 - **Older readers:**
   - A file with vector layers opens there as Preserved: read-only, showing its preview, with Copy Original.
-  - That is the package contract's documented trade, and the format reserves no fields to avoid it.
+  - That is the package contract's documented trade.
 - **Evolution:**
-  - Once released, `capy.vector-object/1` and `capy.vector-items/1` keep their meaning.
-  - New item kinds (group, image, live shape, brush path, text) and style additions (dashes, gradients, per-path opacity) are new type versions. Each has a fixed-file test, and older readers preserve files that use it.
+  - `capy.vector-object/1` and `capy.vector-items/1` keep their names and meaning once released.
+  - Later features are new kinds, tags, values and slot lists, never a new meaning for an existing one, so neither type needs a `/2`.
+  - Additions that older readers can safely lose use the ignorable bits. Each addition gets a fixed-file test.
 - **Evaluation meaning:** the package contract's evaluation table gains these definitions, with an F64 reference renderer like `object_sampling_reference.rs`, so that renderer changes keep the authored meaning:
   - coverage as the exact area of the filled region in each pixel;
+  - paint entries composited in list order;
   - stroke geometry: offset curves, SVG joins, caps and miter limit;
   - the flattening error bound;
   - width interpolation.
 - **Fixtures:**
   - A generator next to `crates/layer-color/examples/object_fixture.rs` and a fixed `vector-objects.capy`.
-  - Coverage: open, closed and compound paths, both fill rules, every cap and join, a width profile, a dot, an empty layer and a full chunk.
-  - Codec tests for round trip, Preserved for unknown fields and Invalid for malformed data; `session_tests` coverage; new render-contract rows in `authored-renders.tsv`.
+  - Geometry coverage: open, closed and compound paths, both fill rules, every cap and join, a width profile, a dot, a stroke below a fill, an empty layer and a full chunk.
+  - Unknown-data coverage: a required unknown kind and tag (Preserved). An ignorable copy-safe tag, kept through an edit. An ignorable unsafe tag, kept until its item changes and then dropped.
+  - Codec tests for round trip and Invalid for malformed data; `session_tests` coverage; new render-contract rows in `authored-renders.tsv`.
 
 ### 7.5 Rendering
 
@@ -595,7 +670,8 @@ fixes its content:
 - **GPU side:**
   - Accumulates exact signed area and cover per pixel in fixed point. Integer atomics make the result deterministic.
   - Prefix-sums each row and maps winding to coverage with the nonzero or even-odd rule.
-  - Writes premultiplied RGBA32F in the working space: each path's fill, then its stroke, source-over in item order inside the isolated layer.
+  - Writes premultiplied RGBA32F in the working space: each path's paint entries in list order, source-over in item order inside the isolated layer.
+  - Groups with opacity, blend, masks or effects (V2 and later) render into their own window first; groups without them add no pass.
 - **Known limit:** area accumulation over-covers edge pixels where a stroke outline overlaps itself, such as at tight inner joins. Skia and vello accept the same limit; fixtures must bound it.
 - **It replaces two existing renderers** (replace, don't layer):
   - **Selection contour filler:** keeps its even-odd meaning with better antialiasing.
@@ -665,9 +741,11 @@ fixes its content:
   - Pasting paths onto a layer that is not a vector layer creates a vector layer above it.
   - External copies publish PNG as today, and SVG once export exists.
 - **Properties for selected paths:**
-  - Fill (color, rule) and Stroke (color, width, cap, join, miter limit), using the existing Color, Number, Choice and Toggle kinds. A toggle per section removes the fill or the stroke.
+  - Fill (color) and Stroke (color, width, cap, join, miter limit), plus the path's fill rule, using the existing Color, Number, Choice and Toggle kinds. A toggle per section removes the fill or the stroke.
+  - A path whose style holds more than one fill or stroke, such as an import, shows its first fill and topmost stroke. Editing them keeps the other entries.
   - Mixed values show as mixed, and each gesture is one undo step.
 - **Snapping:** Move snaps to rulers and the canvas as it does today. Snapping to anchors and paths comes in V2.
+- **Groups (V2):** Group and Ungroup. Move selects a group as a unit; double-click enters it, as Illustrator's isolation mode does, and Edit Points reaches inside. The Layers panel keeps one row per layer, so nested content is browsed by entering groups.
 
 ### 7.7 Freehand lines, smoothing and brushes
 
@@ -716,6 +794,8 @@ fixes its content:
     - Cut and plot presets with the maker semantics of section 5.2.
 - **SVG import and paste (V2):**
   - usvg produces paths and styles.
+  - Layer groups (Inkscape `groupmode="layer"`, Illustrator layers) become Capy group layers and vector layers; other groups become Groups.
+  - A path whose stroke sits under a skew or uneven scale stays inside a group that holds the transform (7.2).
   - Content without a supported meaning (filters, text, or gradients before they exist) is rasterized or refused with a notice.
 - **PDF export and import** come later (krilla, hayro).
 
@@ -723,14 +803,19 @@ fixes its content:
 
 | Later feature | Built on | New pieces |
 |---|---|---|
-| **Brush paths** (textured strokes on vector layers) | The path and its width profile drive `DabGenerator` through `PositionField`; width knots supply size | A new item kind with an embedded `BrushSnapshot` and its tip and grain resources, a seed, and an arc-length texture phase so that cuts do not shift texture. Optional pressure channel for brushes whose other dynamics use pressure. Rendered by the stamp engine into the layer's windows |
+| **Brush paths** (textured strokes on vector layers) | The path and its width profile drive `DabGenerator` through `PositionField`; width knots supply size | A new item kind with a seed and a brush slot naming a record that holds the `BrushSnapshot` and its tip and grain resources, and an arc-length texture phase so that cuts do not shift texture. Optional pressure channel for brushes whose other dynamics use pressure. Rendered by the stamp engine into the layer's windows |
 | Trim to intersection, Width tool, Simplify, grab to reshape | Intersections of flattened centerlines via tile bins; width-profile edits | Ink cleanup tools (V4) |
 | Merge (union, subtract, intersect, exclude), Shape Builder, Convert Stroke to Shape, Offset | i_overlay on flattened outlines, refit with kurbo; results are ordinary paths | V2 |
-| Groups, live shapes, images inside vector layers, text | New item kinds in the next chunk version | Group transform and selection rules; text shaping and fonts |
-| Dashes, linear and radial gradients, per-path opacity and blend | Style additions | Gradient handles on canvas |
+| Groups, images inside vector layers, text, instances | New item kinds in the same stream (7.4) | Group selection rules and isolation; text shaping and fonts; symbol definitions |
+| Live shapes, live corners, booleans, blends, Repeat | Results plus recipes (7.4) | Recipe editors on canvas |
+| Dashes, gradients, patterns, per-item opacity and blend | New stroke tags, paint kinds and item properties | Gradient handles on canvas |
 | Vector region fill (Live Paint) | Faces from centerlines plus gap closing, stored as paths under the ink | OpenToonz-style region code |
 | Crisp zoom | The density-independent `ObjectWindow` | Above-native plan levels (V3) |
 | Image trace, PDF import, DXF export | Paths | Importers and exporters |
+
+The [extension research](object-content-extensions-research.md) maps every SVG,
+Inkscape and Illustrator construct to the kind, property or record that would
+hold it.
 
 ### 7.10 Journeys to qualify
 
@@ -762,9 +847,9 @@ themes, after the GTK review, using the image-object journeys of
 
 | Milestone | Scope | Exit |
 |---|---|---|
-| **V0. Foundation** (no UI) | kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. Damage per path, tile bins, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control |
+| **V0. Foundation** (no UI) | kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, the tagged item layout and its unknown-data rules, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. Damage per path, tile bins, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control |
 | **V1. Lines and fills** | New Vector Layer and its badge; Move path selection, marquee, transforms and arrange; Edit Points; Figure shapes and Path on both layer kinds; Properties style; G-Pen and Monoline vector lines; the vector eraser; Fill and Lasso Fill on vector layers; compound, join, close, split and reverse; copy and paste; refusal text; all hosts and catalogs | The 7.10 journeys pass on every host in both themes. Path drag, anchor drag, freehand latency and pan and zoom over a 5,000-path layer are measured on all three tiers |
-| **V2. Organize and exchange** | Groups, merge, Convert Stroke to Shape, Offset, dashes, linear and radial gradients, align and distribute, anchor snapping, an eraser that subtracts from fills, SVG export, import and paste | SVG round trip through Inkscape and a browser; merge fuzzing under time and size limits |
+| **V2. Organize and exchange** | Groups with Group and Ungroup, merge, Convert Stroke to Shape, Offset, dashes, linear and radial gradients, align and distribute, anchor snapping, an eraser that subtracts from fills, SVG export, import and paste | SVG round trip through Inkscape and a browser; merge fuzzing under time and size limits |
 | **V3. Crisp zoom** (can start after V0) | Above-native density for object content in both evaluators | Pan and zoom rows hold their tier rates with vector and image layers |
 | **V4. Ink cleanup and brush paths** | Trim to intersection, Width tool, Simplify, reshape, brush paths | Brush-path replay equals live drawing, extending the existing determinism tests |
 
@@ -785,3 +870,5 @@ Counts are workload inputs, not limits.
 6. **Crisp zoom.** Should V3 land before V1 ships, given how much illustrators zoom while editing anchors?
 7. **Hairlines in Linear documents.** Accept slightly lighter antialiased edges than browsers show, or add a per-layer perceptual option later?
 8. **Maker scope.** How far should cut-file presets and the cut-ready check go once SVG export exists?
+9. **Several fills and strokes.** The format holds any paint list. When should Properties show more than one fill and one stroke, as Illustrator's Appearance panel does?
+10. **Browsing nested content.** With groups, is entering a group enough, or does a vector layer need an object list beside the Layers panel?
