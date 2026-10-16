@@ -4,7 +4,7 @@
 
 Every claim below was checked in code at the baseline. `pkg` means `crates/layer-core/src/package/` and `doc` means `docs/reference/capy-package.md`; other paths are relative to the repository root.
 
-On 2026-10-16 the reader stopped treating well-formed relationships a later version may allow as damage. Known types in other slots and bindings are now unsupported rather than invalid; see [section 2.2 of the main record](../object-content-extensions-research.md#22-reader-classifications-fixed-in-this-change).
+On 2026-10-16 the reader stopped treating well-formed relationships a later version may allow as damage. Known types in other slots and bindings are now unsupported rather than invalid; see [section 2.2 of the main record](../object-content-extensions-research.md#22-reader-classifications-fixed).
 
 
 ## 1. Package structure, references, sharing, root

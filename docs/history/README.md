@@ -23,9 +23,10 @@ Progress notes, validation reports and other work records are not committed
 - [Vector layers: research, code audit and design](vector-layers-research.md):
   the object model, file format, rendering and tools for vector lines and fills,
   with its [source reports](vector-layers-research).
-- [Object content extensions: format audit and later additions](object-content-extensions-research.md):
-  whether the format grows into full SVG editing, the reader fixes and model
-  changes that made it so, and the slot each later feature uses, with its
+- [Object content extensions: format audits and later additions](object-content-extensions-research.md):
+  whether the format grows into full SVG editing and the shapes, text and comic
+  elements of other editors and painting apps, the reader fixes and model changes
+  that made it so, and the slot each later feature uses, with its
   [source reports](object-content-extensions).
 - [Layers: illustration workflows and panel design](layers-research.md).
 - [Professional illustration and manga gaps](illustration-manga-gap-audit.md):

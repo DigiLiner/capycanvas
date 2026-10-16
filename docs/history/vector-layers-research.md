@@ -98,6 +98,13 @@ The research combines eight streams. Their full write-ups, with every source URL
    - recipes for live features.
 
    It also made the package reader classify combinations a later version may allow as unsupported rather than damaged ([extension research](object-content-extensions-research.md)).
+8. **A second audit fixed the record framing** (2026-10-16). It covered Affinity, CorelDRAW, Xara, Figma, Sketch, Penpot, painting apps, text engines, office and motion formats, CAD, and long-lived format designs. The changes:
+   - a parent bit, so readers that do not know a container kind still find its end;
+   - value classes, so unknown data can name items and slots safely;
+   - recipes that hold nested inputs and carry a fingerprint;
+   - a two-sided width profile;
+   - a forward rule for anchor kinds;
+   - item basics (hidden, name, locked) and live shapes from the first release.
 
 ---
 
@@ -470,21 +477,22 @@ allowlist).
 ```text
 Stack entry → Occurrence (name, visibility, opacity, blend, mask, effects, integer offset)
                 └ content: objects → VectorObject: the root group of one item tree
-                                       ├ items: [Chunk] → item stream, pre-order, front to back
+                                       ├ items: [Chunk] → record stream, pre-order, front to back
                                        └ slots: images, fonts, definitions, effects (later)
-Item     { kind, id: u64, properties: tag → value }
-  Path     { geometry, rule, style }                                        V0
-  Group    { properties }, its children, then an End marker                 later
-  Image, Text, Instance, Mask                                               later
-Subpath  { anchors: [Anchor], segment kinds, closed: bool }
+Record   { kind word, id: u64, properties: [tag word → value] }
+  Path     { geometry, fill rule, style, name, hidden, locked, live shape }   V0
+  Group    a parent record: its children follow, then an End marker          later
+  Text, Image, Instance, Definitions                                         later
+Subpath  { anchors: [Anchor], closed: bool }
 Anchor   { point, in_handle, out_handle, kind: Corner | Smooth | Symmetric }
-Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter limit, width profile }] }
+Style    nested records: [Fill { paint } | Stroke { paint, width, cap, join, miter limit, width profile }]
 ```
 
 - **One tree:**
   - The vector object is the root of a single item tree. SVG, PDF, Illustrator, Inkscape, Affinity, Figma and Krita all use one.
   - A flat path list would need a second nesting mechanism once groups, clipping groups and symbols arrive, with its own selection, undo and compositing rules.
-  - V0 defines only Path. Group arrives in V2 as an opening item with the group's properties, followed by its children and an End marker. Adding or removing a child changes only the chunk that holds it.
+  - V0 defines only Path. Group arrives in V2 as a parent record: a bit in its kind word says that children and an End marker follow. A reader that does not know a later container kind can still find where it ends.
+  - Adding or removing a child changes only the chunk that holds it.
 - **Handles:** `OccurrenceContent::Objects` holds an `ObjectHandle`, which is either `Image(ImageObjectHandle)` or `Vector(VectorObjectHandle)`.
   - `LayerKind::Object` remains, and a derived object kind drives tool routing and UI text.
   - Image-only reads (`.image`, interpolation, sampling preflight) stop compiling and are fixed one by one.
@@ -494,15 +502,19 @@ Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter lim
     - With Scale Strokes on, stroke widths, width profiles and later dash lengths scale by √|det|. Illustrator and Inkscape work the same way.
     - Later gradient and pattern geometry transforms with the path.
   - **Items that cannot absorb a transform carry an F64 affine:** groups, images, text and instances. Their content (shared definitions, glyphs, image pixels) cannot be rewritten in place.
-  - **Stretched strokes stay in a group.** One width cannot describe a stroke under a skew or uneven scale. SVG import therefore keeps such a path inside a group that holds the transform, as usvg does.
+  - **Under a group's affine,** stroke widths, dashes and effect radii are measured in the item's own space and transformed with it, as in SVG. A later non-scaling stroke is the opt-out. This is fixed now because changing it later would change how existing files look.
+  - **Stretched strokes stay in a group.** One width cannot describe a stroke under a skew or uneven scale, so SVG import keeps such a path inside a group that holds the transform, as usvg does.
   - **No layer transform:** the root group has no affine, and the occurrence keeps its integer offset.
 - **One vector object per layer, many items per object:**
   - The layer is the isolation and cache boundary, and it holds thousands of items.
   - Several vector layers are fine. Each one counts toward the 4,096-occurrence admission.
 - **Item identity:**
-  - Each item, groups included, has a layer-local `u64` ID. It is assigned at creation, kept through edits, undo and save, and renewed on duplicate and paste.
-  - A new ID is a random nonzero value checked against the layer, so deleted IDs never come back in practice.
-  - Like ruler IDs, it is owned by the record type, not a portable record ID.
+  - Each item, groups included, has a layer-local `u64` ID. It is assigned at creation and kept through edits, undo and save.
+  - **Allocation:** a new ID is a random nonzero value. It is checked against every ID the object contains or references: nested records, definitions and items the reader does not understand. IDs are never reused, never positions and never renumbered on save.
+    - A counter recomputed from live items would reuse deleted IDs, as SQLite row IDs do.
+    - A stored high-water mark would be rolled back by Undo.
+  - **Duplicating a layer** keeps item IDs, because they are layer-local. Pasting renews colliding IDs and rewrites references within the pasted set in the same edit.
+  - Like ruler IDs, the ID is owned by the record type, not a portable record ID.
   - It anchors working selection and history, and later references inside the layer, such as instance overrides and text on a path.
 - **Working state:**
   - `WorkingState` gains the selected items of the current vector layer and, while editing points, the selected anchors. Later it also records the group being edited.
@@ -510,7 +522,7 @@ Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter lim
   - Portable saves omit it; private sessions keep it. Selecting an item makes its layer the current layer.
 - **Undo:**
   - `Edit::RecordChange<VectorObject>` replaces the record.
-  - The item stream lives in immutable chunks of at most 64 items (`Arc<[Item]>`, End markers included), and an edit copies only the chunks it touches.
+  - The record stream lives in immutable chunks of at most 64 records (`Arc<[Record]>`, End markers included), and an edit copies only the chunks it touches.
   - Parents and subtree ranges are derived on load and after each edit, never stored.
   - History charges chunks by `Arc` identity, as it charges selection contours today.
 - **Later content in the same layer:** images, groups, text and instances are further item kinds in this tree, not a second container (7.9 and the [extension research](object-content-extensions-research.md)).
@@ -522,12 +534,12 @@ Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter lim
 | Element | Representation | Reason |
 |---|---|---|
 | Anchor | Point plus in and out handle offsets, F64 in layer pixels. A zero offset is a retracted handle | Matches node editors; maps one-to-one to SVG and PDF `C`/`L` commands; exact under affine maps |
-| Anchor kind | Corner (independent handles), Smooth (collinear handles, independent lengths), Symmetric (mirrored handles) | Editing intent that handle positions cannot recover; Inkscape keeps `sodipodi:nodetypes` for the same reason |
-| Segment | Each segment between two anchors has a kind. V0 defines only Cubic, `(p0, p0+out0, p1+in1, p1)`; it is a line when both handles are retracted | Exact elliptical arcs, which CAD and cutting machines keep, can become a later kind without a new layout |
+| Anchor kind | Corner (independent handles), Smooth (collinear handles, independent lengths), Symmetric (mirrored handles). A reader edits a kind it does not know as Corner, and writes Corner when it changes that anchor | Editing intent that handle positions cannot recover; Inkscape keeps `sodipodi:nodetypes` for the same reason. Rendering never needs it, so a later kind such as Affinity's automatic Smart node does not make files read-only |
+| Segment | Cubic `(p0, p0+out0, p1+in1, p1)`; a line when both handles are retracted | Lottie, Rive, After Effects and Illustrator store cubics too. Exact arcs, circles and splines for CAD become recipes over a cubic result (7.4), so older readers still edit them. A new segment kind would be a new required geometry tag |
 | Subpath | One or more anchors and a `closed` flag that adds the closing segment. A single-anchor subpath is a dot, drawn only with round or square caps | Covers lines, outlines and dots |
 | Path | One or more subpaths with one fill rule (nonzero or even-odd) and one style. A compound path is a path with several subpaths; holes come from the rule | Merge results, letters with counters and imported SVG need no other type |
 | Fill rule | On the path, not on each fill | It defines the shape's inside for every fill, hit-testing, merge and later clipping |
-| Other curve types | Quadratics become cubics exactly. Arcs and ellipses become cubics split finely enough to stay within 1/64 pixel | One segment kind for editing, rendering and export at first |
+| Other curve types | Quadratics become cubics exactly. Arcs and ellipses become cubics split finely enough to stay within 1/64 pixel in the path's own units, so large radii get more segments | One segment kind for editing, rendering and export |
 | Precision | F64 in memory and in the file | Image-object affines are F64 already; F32 would drift after repeated transforms on 61 MP canvases |
 
 **Appearance**
@@ -535,7 +547,7 @@ Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter lim
 - **A style is an ordered list of paints.**
   - Each entry is a Fill or a Stroke, painted first to last.
     - SVG's default is `[Fill, Stroke]`, and `paint-order: stroke` is `[Stroke, Fill]`.
-    - Illustrator, Affinity, Figma and Graphite allow any number of each.
+    - Illustrator, Affinity, Figma, Sketch and Graphite allow any number of each.
   - The first tools and Properties edit at most one fill below one stroke. The format holds any list.
   - An empty list is valid: the path is selectable, shows as an outline while selected and acts as construction geometry.
 - **Paint:** each entry has exactly one paint. V0 has a portable color. Gradients, patterns, meshes, swatch references and context paints are later paint kinds.
@@ -547,19 +559,27 @@ Style    { paints: [Fill { paint } | Stroke { paint, width, cap, join, miter lim
   - Dashes, inside and outside alignment, markers and non-scaling strokes are later stroke properties.
 - **Width profile:**
   - It belongs to a stroke, as in Illustrator, Affinity and Graphite. A freehand line has one stroke with a profile.
-  - It is a list of knots `(segment, t, factor)` ordered along the path.
-  - Width is the stroke width times the factor, interpolated linearly between knots and held constant beyond the ends.
+  - It is a list of knots `(segment, t, left, right)` ordered along the path. Left and right are the factors on either side of the path; tools write equal sides at first.
+    - Two sides are stored from the start because Illustrator's one-sided widths and CorelDRAW's two-sided outlines need them, and a second profile layout would be decoded forever.
+  - Each side's width is half the stroke width times its factor, interpolated linearly between knots and held constant beyond the ends.
   - Knots are anchor-relative, so moving an anchor leaves widths in place.
   - Splitting a segment remaps its knots exactly. Deleting an anchor reparameterizes the merged segment.
   - Changing the stroke width scales the whole profile, as Illustrator does.
-  - Widths are symmetric for now; Illustrator's one-sided widths come later.
 - **Styles are inline:**
   - Each path stores its own style. Readers intern equal styles in memory, and LZ4 absorbs the repetition in files.
-  - A shared table would save no edits: changing the style of selected paths rewrites their chunks either way.
+  - A shared table would save no edits: changing the style of selected paths rewrites their chunks either way. Its indices would also be hidden references that compaction renumbers.
   - Linked styles (graphic styles, global swatches) come later as references to document-level definitions.
 - **Opacity and blend:**
   - There is no per-path opacity, blend or effect at first. Layers provide them, and color alpha covers translucent paths.
   - The [GA scope rule](object-layer-ga-design.md#3-ga-state-and-deliberately-deferred-work) defers per-object opacity, blend and effects. They come later as properties of items, groups and paint entries.
+- **Item basics from V0:**
+  - **Hidden** is required data: a hidden item does not render.
+  - **Name and locked** are ignorable and copy-safe.
+  - Every editor surveyed has all three, and SVG, Inkscape and Illustrator imports need them before an object list exists.
+- **Live shapes from V1:**
+  - Rectangle, Ellipse, Polygon and Star keep their kind, frame (center, size, rotation) and parameters (corner radii, point count, inner radius) as a live-shape recipe (7.4).
+  - Edit Points or a merge turns them into plain paths.
+  - The first release thereby uses all three classes of unknown-data handling: required geometry, an ignorable copy-safe name and an ignorable, not copy-safe recipe. Rules no shipped data uses tend to break unnoticed.
 - **Colors:**
   - Colors are portable colors, converted into the working space at evaluation as effect colors are.
   - Coverage blends in the composition's blend domain. In Linear documents, antialiased dark hairlines therefore render slightly lighter than in browsers (open question 7).
@@ -577,66 +597,111 @@ a vector object.
 ```
 
 Each `items` entry references a `capy.vector-items/1` resource:
-- **Data:** its record data gives the item count.
+- **Data:** its record data gives the record count.
 - **Payload:** a raw little-endian layout encoding, optionally wrapped in `capy.lz4-bytes/1` like LUTs.
-- **Stream:** concatenated in order, the chunks form the item stream. A chunk boundary may fall anywhere, including inside a group.
+- **Stream:** concatenated in order, the chunks form the record stream. A record never spans chunks; a chunk boundary may fall anywhere else, including inside a group.
 
-**Tagged layout.** The exact bytes belong in the
-[package contract](../reference/capy-package.md) when implemented. The design
-fixes the structure:
-- **Item:** a `u16` kind, a `u64` ID (End markers have none) and a length-prefixed list of properties.
-- **Property:** a `u16` tag, a byte length and a value. Paint entries in a style and the paint in each entry use the same kind, tag and length form.
+**Framing.** The exact bytes belong in the
+[package contract](../reference/capy-package.md) when implemented. The structure
+is fixed now, because changing it later needs a new resource type:
+- **Record:** a kind word, then, unless it is the End marker (kind 0), a `u64` ID and a length-prefixed property list.
+- **Property:** a tag word, a byte length and the value. Every value is length-prefixed, including fixed-size ones, so any reader can step over any property.
+- **Words are varuints with flags in the low bits:**
+  - **kind word:** ignorable, copy-safe, parent (children and an End marker follow), one reserved bit; the rest is the kind number;
+  - **tag word:** ignorable, copy-safe, a two-bit value class, one reserved bit; the rest is the tag number.
+  - Flags are part of a number's identity. Changing them means a new number.
+- **Canonical form:** minimal varuints; tags strictly ascending within a record; no repeated tag; a known value fills its length exactly; F64 values finite.
+- **No growing values:** values never grow by appending fields. New fields are new tags, so chunks stay byte-stable and fingerprints stay meaningful.
 - **V0 vocabulary:**
   - Kinds: Path.
-  - Path tags: geometry, fill rule, style.
-  - Paint-entry kinds: Fill and Stroke.
-  - Stroke tags: width, cap, join, miter limit, width profile.
+  - Path tags: geometry, fill rule, style, hidden, name, locked and live shape.
+  - Paint-entry kinds: Fill and Stroke. Stroke tags: width, cap, join, miter limit and width profile.
   - Paint kinds: color.
-  - Geometry: per subpath, the anchor count and the closed flag. Per anchor, a `u8` kind and the point and both handle offsets as F64 pairs. Per segment, a `u8` kind. Per width knot, a `u32` segment, an F64 `t` and an F64 factor.
+  - Geometry: per subpath, the anchor count and the closed flag. Per anchor, a `u8` kind and the point and both handle offsets as F64 pairs. Per width knot, a `u32` segment, an F64 `t` and two F64 factors.
 - **Never:** Capy IDs inside the payload.
 
-**Unknown kinds and tags.** Two bits in every kind and tag number tell a reader
-that does not know it what to do, as PNG's chunk names do:
+**Value classes** tell a reader that does not know a property what it refers to:
 
-| Bits | Reader without support | Use |
+| Class | Value | A reader that does not know the property |
 |---|---|---|
-| Neither | The file is Unsupported and opens as Preserved, as with unknown record fields today | Anything that changes rendering or meaning |
-| Ignorable | Renders and edits without it | |
-| Ignorable and copy-safe | Keeps it unchanged through every edit | Item names, SVG `id` and `class`, notes |
-| Ignorable, not copy-safe | Keeps it while its item and that item's subtree are unchanged. Drops it as soon as the reader changes either, or duplicates or pastes the item | Recipes, editing hints |
+| Data | Opaque bytes with no item IDs, slot indices or offsets | Copies it |
+| Items | A list of item IDs in this vector object | Rewrites them when IDs are renewed; treats a missing ID as a deleted item |
+| Slots | A list of (slot list, index) pairs | Keeps those slots alive and renumbers them when it compacts slot lists |
+| Nested | A record stream with the same framing | Applies these rules recursively |
 
-- **Ignorable data stays local:** it may depend only on its own item and that item's subtree, never on slots or other items. Keeping or dropping it then cannot break anything else.
-- **Required data:** a known tag on a kind it does not apply to, and an unknown value of a known tag, are Unsupported, like unknown values in records today.
+- **Nested records:** styles and their paints, recipe inputs and later text tables are nested records.
+- **Anonymous records:** a record inside a value may have ID 0 when its kind needs no identity, as paint entries do.
+
+**Unknown kinds and tags.** PNG's chunk rules, made exact:
+
+| Bits | Reader without support |
+|---|---|
+| Not ignorable, or a reserved bit set | Unsupported: the file opens as Preserved, never as Invalid |
+| Ignorable and copy-safe | Ignores it when rendering and keeps it unchanged through edits. Clones it on duplicate, rewriting item references. Drops it when a reference would point outside the layer or at a deleted item |
+| Ignorable, not copy-safe | Ignores it when rendering and keeps it while its dependency content is unchanged. Drops it when that changes, and on duplicate or paste |
+
+- **Dependency content:** the owning record, its subtree, and the items its Items values name.
+  - Each contributes its kind and its required properties, recursively, without IDs.
+  - Renaming an item therefore keeps a recipe, while moving, restyling, reordering children or editing a referenced item drops it.
+- **Unknown parent kinds are atomic:** their children are never interpreted, and an ignorable one hides its whole subtree from rendering. Containers whose children should still render (links, slices, tags) are therefore ignorable properties on Group, not new kinds.
+- **Known tags with values the reader does not accept:**
+  - an ignorable tag is handled as an unknown property with the same bits;
+  - a required tag makes the file Unsupported;
+  - a tag may define its own forward rule instead, as anchor kinds do.
+- **Operations that make new items** (merge, outline stroke, split pieces) give them no unknown properties. The piece that keeps the original ID keeps them.
 
 **Slots**
-- Item kinds that use package records or resources name them through slot lists in the record's JSON, because payloads cannot hold Capy IDs. Examples: `images` for Image items, and `fonts`, `definitions` and `effects`.
-- Each list arrives with the first kind that needs it.
-- Writers keep slot lists dense and renumber the items they know. That is safe because ignorable data never uses slots.
+- **Why:** payloads cannot hold Capy IDs, so item kinds and properties that use package records or resources name them through slot lists in the record's JSON.
+- **Lists:** `images`, `fonts`, `definitions`, `effects`, and later `links` to other vector objects. Each list arrives with the first feature that needs it.
+- **References** use the Slots class wherever they appear, so writers can compact the lists without breaking data they do not understand.
 
 **Live content: results with recipes**
-- **Storage:** a live feature stores its result as ordinary items, and its editing intent as an ignorable, not copy-safe property:
-  - a rounded rectangle is a Path plus a live-shape property {kind, size, corner radii};
+- **Storage:** a live feature stores its result as ordinary records, and its editing intent as an ignorable, not copy-safe property:
+  - a rounded rectangle is a Path plus a live-shape property;
   - a blend, a Repeat or a live boolean is a Group holding the results, with a recipe on the group.
-- **Inputs that must not render,** such as a blend's key objects or a boolean's operands, live inside the recipe's value. Illustrator keeps its edit art apart from the result art in the same way.
-- **Readers that know the recipe** regenerate the result only when the recipe is edited. On open they use the stored result, so artwork never changes because the app was updated.
-- **Readers that don't know it** render the result and drop the recipe when they change the item. That is Illustrator's Expand, rather than Inkscape's silent overwrite of a foreign edit to `d`.
-- **A recipe that needs a slot,** such as a trace's source image, is required data instead, and older readers preserve the file.
+- **Inputs that must not render,** such as a blend's key objects or a boolean's operands, are nested records inside the recipe, with their own recipes. Illustrator keeps its edit art apart from the result art in the same way.
+- **References:** recipes may name other items (connectors, text on a path) and slots (a trace's source image, a brush) through the Items and Slots classes.
+- **Fingerprint:** each recipe stores a fingerprint of its dependency content, such as a truncated SHA-256 over its canonical bytes; the recipe's own tag defines it.
+  - The reader that knows the recipe checks it on load and detaches a mismatched recipe, leaving plain geometry.
+  - Nothing is regenerated on open, so artwork never changes because the app was updated.
+  - This guards against writers that ignore the drop rule, which PNG's history shows happens.
+- **Readers that know the recipe** regenerate the result only when the recipe is edited. Transforms and recoloring update the recipe and its fingerprint.
+- **Readers that do not know it** render the result and drop the recipe by the rules above. That is Illustrator's Expand, rather than Inkscape's silent overwrite of a foreign edit to `d`.
+- **The rule for new features:**
+  - If the result can be drawn with kinds that already shipped, store result plus recipe, so older versions keep the file editable. CorelDRAW does the same with its variable-outline fallback and "Keep appearance".
+  - Only features whose result cannot be drawn that way, such as Text, are required kinds or tags.
+
+**Instances (later)**
+- **Overrides:** `(path of item IDs, tag, value)` from the instance's definition down through nested instances. The outermost instance wins, as in Figma.
+- **Inert overrides:** an override whose path no longer reaches a target is inert, not Invalid. Shared definitions will be edited apart from their instances.
+- **Identity:** local definitions share the vector object's ID space.
+
+**Number registry**
+- **Source of truth:** a checked-in list of every kind and tag number with its flags, value class, grammar and the kinds it applies to.
+- **Append-only:** a test keeps it so. Retired numbers stay reserved.
+- **Experimental range:** one range is for development builds; portable save refuses it.
 
 **Rules**
 - **Order:** items are front to back across `items` and within each chunk, matching `capy.stack/1`.
 - **Validation:**
-  - **Invalid (malformed):**
-    - lengths, non-finite values, unbalanced groups and End markers;
-    - indices out of range, `t` outside `[0,1]`, negative widths or factors, unordered knots;
-    - duplicate IDs within the layer;
-    - empty chunks or a count that disagrees with the payload.
+  - **Invalid for anything unknown is decided from framing alone:**
+    - lengths and End balance, using parent bits;
+    - canonical form;
+    - out-of-range slot indices.
+  - **Invalid for known data:**
+    - non-finite values, `t` outside `[0,1]`, negative widths or factors, unordered knots;
+    - duplicate IDs;
+    - a count that disagrees with the payload.
   - **Unsupported, preserving the package as the existing rule requires:**
-    - unknown required kinds, tags, values and encodings;
+    - unknown required words, reserved bits and unknown slot lists;
     - known tags on other kinds;
-    - counts and depths beyond admission: items per layer, anchors per path and group depth.
+    - admission bounds: items per layer, anchors per path, group depth and bytes per property, sized to admit a text story of about 1 MB.
+  - **Accepted:** a missing ID in an Items value, which instance overrides may legitimately outlive, and an empty chunk.
   - **Allocation:** decoded size is bounded before allocation.
-- **Writers:** chunk membership stays stable across edits, so unchanged chunks keep their resource IDs and encoded bytes when saved again.
-- **Chunks of up to 64 items:**
+- **Writers:**
+  - Chunk membership stays stable across edits, so unchanged chunks keep their resource IDs and encoded bytes when saved again.
+  - A save that did not edit a layer reuses its chunks byte for byte.
+- **Chunks of up to 64 records:**
   - One resource per layer would rewrite the whole layer in session history on every edit.
   - One resource per path costs about 200 bytes of resource JSON per path.
   - 64 matches the session's 64-entry tile-index chunks.
@@ -647,18 +712,28 @@ that does not know it what to do, as PNG's chunk names do:
 - **Evolution:**
   - `capy.vector-object/1` and `capy.vector-items/1` keep their names and meaning once released.
   - Later features are new kinds, tags, values and slot lists, never a new meaning for an existing one, so neither type needs a `/2`.
-  - Additions that older readers can safely lose use the ignorable bits. Each addition gets a fixed-file test.
+  - Each addition gets a fixed-file test.
 - **Evaluation meaning:** the package contract's evaluation table gains these definitions, with an F64 reference renderer like `object_sampling_reference.rs`, so that renderer changes keep the authored meaning:
   - coverage as the exact area of the filled region in each pixel;
   - paint entries composited in list order;
   - stroke geometry: offset curves, SVG joins, caps and miter limit;
   - the flattening error bound;
-  - width interpolation.
-- **Fixtures:**
-  - A generator next to `crates/layer-color/examples/object_fixture.rs` and a fixed `vector-objects.capy`.
-  - Geometry coverage: open, closed and compound paths, both fill rules, every cap and join, a width profile, a dot, a stroke below a fill, an empty layer and a full chunk.
-  - Unknown-data coverage: a required unknown kind and tag (Preserved). An ignorable copy-safe tag, kept through an edit. An ignorable unsafe tag, kept until its item changes and then dropped.
-  - Codec tests for round trip and Invalid for malformed data; `session_tests` coverage; new render-contract rows in `authored-renders.tsv`.
+  - two-sided width interpolation.
+- **Fixtures and tests:**
+  - **Fixture file:** a generator next to `crates/layer-color/examples/object_fixture.rs` and a fixed `vector-objects.capy`.
+  - **Geometry coverage:**
+    - open, closed and compound paths, both fill rules, every cap and join;
+    - a symmetric and a one-sided width profile, a dot, a stroke below a fill;
+    - a hidden path, an empty layer and a full chunk.
+  - **Unknown data:**
+    - An unknown required leaf kind, and a required parent kind with children: Preserved, not Invalid.
+    - A reserved bit, or a required word marked copy-safe: Preserved.
+    - An ignorable, copy-safe parent holding known paths: renders without its subtree; editing a sibling keeps its bytes.
+    - Each value class in an ignorable property through move, recolor, rename, duplicate, deletion of a referenced item and slot compaction.
+    - A live shape whose geometry a foreign writer changed without dropping the recipe: opens as plain geometry with that geometry unchanged.
+  - **Stability:** a no-edit save keeps chunks byte-identical, and a seeded create, delete, undo and redo run never reissues an ID.
+  - **Coverage of the rules:** the registry test, codec tests for round trip and Invalid for malformed framing, `session_tests` coverage and new render-contract rows in `authored-renders.tsv`.
+  - **Fuzzing:** a fuzz test injects unknown properties with every bit combination at every nesting level and applies random edit scripts.
 
 ### 7.5 Rendering
 
@@ -726,7 +801,7 @@ that does not know it what to do, as PNG's chunk names do:
 |---|---|---|
 | **Move** (O; V in the Photoshop and Affinity presets) | Click selects the frontmost path under the pointer in any visible, unlocked vector layer and makes that layer current. Shift toggles a path. Dragging on empty canvas marquee-selects paths in the current layer. Dragging moves; the existing Scale–Rotate frame scales and rotates. Alt duplicates, arrow keys nudge and Delete deletes. Double-click or Enter opens Edit Points; Escape leaves it | Extends object picking with path hit-testing and selecting individual paths. Marquee is new: image objects have none. Tool options gain Scale Strokes, on by default |
 | **Edit Points** (A; a new variant in the Move slot) | Click or marquee anchors. Drag anchors, handles or a segment to bend it. Alt-drag a handle to break symmetry. Double-click an anchor to switch corner and smooth. Click a segment to add an anchor. Delete removes anchors and heals the curve. Shift constrains to 45° | On touch, on-screen modifier chips replace Alt and Shift. Anchors join `object_touch_hit` |
-| **Figure** (U): Line, Rectangle, Ellipse, Polygon, Star, **Path** | Creates an editable path using the tool's paint mode (Outline, Fill or Both) and line width. The foreground color strokes and the background fills, as Figure's Both mode does today. Rectangle takes a corner radius and Polygon and Star a point count at creation | Path: click for a corner, drag for a smooth anchor. Alt breaks the handle, Shift constrains, clicking the first anchor closes and clicking an open end of a selected path continues it. Enter or Finish ends, Backspace removes the last anchor and Escape cancels. The polygon canvas bar (Remove Last Point · Cancel · Finish) is reused |
+| **Figure** (U): Line, Rectangle, Ellipse, Polygon, Star, **Path** | Creates an editable path using the tool's paint mode (Outline, Fill or Both) and line width. The foreground color strokes and the background fills, as Figure's Both mode does today. Rectangle takes a corner radius and Polygon and Star a point count at creation. Rectangle, Ellipse, Polygon and Star keep these as a live-shape recipe (7.3); Edit Points turns the shape into a plain path | Path: click for a corner, drag for a smooth anchor. Alt breaks the handle, Shift constrains, clicking the first anchor closes and clicking an open end of a selected path continues it. Enter or Finish ends, Backspace removes the last anchor and Escape cancels. The polygon canvas bar (Remove Last Point · Cancel · Finish) is reused |
 | **Ink pens** (P) | G-Pen and Monoline draw vector lines (7.7). Other presets refuse with the notice | |
 | **Eraser** (E) | Touched Part (default) splits paths where the eraser covers the centerline. Whole Path deletes every path it touches. A cut closed path becomes open; its fill still closes implicitly, as in SVG and Illustrator's Path Eraser | Subtracting from fills comes with merge (V2); trimming to intersections with the ink tools (V4) |
 | **Fill** (F) | Clicking inside a path's fill, or inside a closed path, sets its fill to the current color. Clicking elsewhere fills a new Paint layer below, using this layer as the reference with Close Gaps (the existing region fill) | Gives Clip Studio's flats workflow, with no error |
@@ -847,8 +922,8 @@ themes, after the GTK review, using the image-object journeys of
 
 | Milestone | Scope | Exit |
 |---|---|---|
-| **V0. Foundation** (no UI) | kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, the tagged item layout and its unknown-data rules, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. Damage per path, tile bins, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control |
-| **V1. Lines and fills** | New Vector Layer and its badge; Move path selection, marquee, transforms and arrange; Edit Points; Figure shapes and Path on both layer kinds; Properties style; G-Pen and Monoline vector lines; the vector eraser; Fill and Lasso Fill on vector layers; compound, join, close, split and reverse; copy and paste; refusal text; all hosts and catalogs | The 7.10 journeys pass on every host in both themes. Path drag, anchor drag, freehand latency and pan and zoom over a 5,000-path layer are measured on all three tiers |
+| **V0. Foundation** (no UI) | kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, the record framing, value classes, unknown-data rules and number registry, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. Damage per path, tile bins, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control |
+| **V1. Lines and fills** | New Vector Layer and its badge; Move path selection, marquee, transforms and arrange; Edit Points; Figure shapes with live-shape recipes and Path on both layer kinds; Properties style; G-Pen and Monoline vector lines; the vector eraser; Fill and Lasso Fill on vector layers; compound, join, close, split and reverse; copy and paste; refusal text; all hosts and catalogs | The 7.10 journeys pass on every host in both themes. Path drag, anchor drag, freehand latency and pan and zoom over a 5,000-path layer are measured on all three tiers |
 | **V2. Organize and exchange** | Groups with Group and Ungroup, merge, Convert Stroke to Shape, Offset, dashes, linear and radial gradients, align and distribute, anchor snapping, an eraser that subtracts from fills, SVG export, import and paste | SVG round trip through Inkscape and a browser; merge fuzzing under time and size limits |
 | **V3. Crisp zoom** (can start after V0) | Above-native density for object content in both evaluators | Pan and zoom rows hold their tier rates with vector and image layers |
 | **V4. Ink cleanup and brush paths** | Trim to intersection, Width tool, Simplify, reshape, brush paths | Brush-path replay equals live drawing, extending the existing determinism tests |
@@ -872,3 +947,5 @@ Counts are workload inputs, not limits.
 8. **Maker scope.** How far should cut-file presets and the cut-ready check go once SVG export exists?
 9. **Several fills and strokes.** The format holds any paint list. When should Properties show more than one fill and one stroke, as Illustrator's Appearance panel does?
 10. **Browsing nested content.** With groups, is entering a group enough, or does a vector layer need an object list beside the Layers panel?
+11. **Item-local read-only.** Preserved is whole-document, so one balloon using a newer required text feature makes a whole page read-only in an older version. Should items that carry a stored result, such as Text, lock and render that result instead? It would need a reader outcome between Editable and Preserved.
+12. **Duplicates of live shapes in older versions.** Older readers drop recipes they do not know on duplicate and paste. Keeping them on an untransformed duplicate, with nested IDs renewed, is possible from framing alone. Is that worth the extra generic code?
