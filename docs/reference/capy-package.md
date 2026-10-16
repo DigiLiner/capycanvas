@@ -160,7 +160,11 @@ Do not deserialize them away. Malformed data for understood fields is invalid.
 Invalid is reserved for data that can never become valid: malformed JSON, IDs,
 references, lengths, integrity, cycles and values outside a field's mathematical
 domain. A well-formed value that this version does not accept, such as a count,
-range or combination a later version may allow, is unsupported.
+range or combination a later version may allow, is unsupported. That includes a
+reference to a known record type in a slot that does not accept it, a field that
+does not apply to the occurrence's content and an attachment without an eligible
+target. Later versions extend the format with new names, never by giving an
+existing field a second meaning.
 Reader, editor admission and finalized capture publication share metadata and
 record admission. Metadata is bounded to 64 MiB, fewer than 128 nested JSON
 containers and 4,194,304 traversal nodes; evaluation graphs admit 65,536 objects,
@@ -336,13 +340,13 @@ never Rust discriminants or GPU blend codes. Blend names are `normal`,
 `multiply`, `screen`, `add`, `overlay`, `soft_light`, `color`, `darken`, `lighten`,
 `color_burn`, `linear_burn`, `color_dodge`, `hard_light`, `vivid_light`,
 `linear_light`, `pin_light`, `hard_mix`, `difference`, `exclusion`, `subtract`,
-`divide`, `hue`, `saturation`, `luminosity`, `pass_through`. Only stack occurrences
-admit pass-through. Attachment relationships resolve from stack order at admission:
+`divide`, `hue`, `saturation`, `luminosity`, `pass_through`. This version admits
+pass-through only on stack occurrences. Attachment relationships resolve from stack order at admission:
 `clip` content shares an eligible unclipped base, while `effect` adjustments belong
 to the eligible content below their contiguous chain. Direct targets are paint, image
 layers or isolated groups. Selection rows do not affect clipping bases and cannot split an
-effect chain from its owner. Dangling attachments and pass-through
-dependencies are invalid. Rendering intents are `perceptual`, `relative_colorimetric`,
+effect chain from its owner. Attachments without an eligible target and
+pass-through dependencies are unsupported. Rendering intents are `perceptual`, `relative_colorimetric`,
 `saturation`, `absolute_colorimetric`. Proof paper simulation requires black-ink
 simulation; absolute colorimetric intent forbids black-point compensation.
 
@@ -791,7 +795,7 @@ mask offsets, contour selection geometry, every ruler kind, non-default built-in
 choices and gradient interpolations, and both color forms, using the current
 occurrence and filter data versions. Its fixed values exercise opening, editing,
 saving, reopening and compiling current filters. `builtin-contracts.json` fixes
-all 53 built-in contracts and 285 parameter keys: kinds, choice IDs,
+all 62 built-in contracts, 54 filters and 8 paper textures, and their 311 parameter keys: kinds, choice IDs,
 dimensions, accepted bounds, constraints, color domain, alpha behavior and time
 use. Parameters are keyed; control order, shader parameter order, runtime ABI
 and displayed unit labels are excluded. Choice order may change because built-in

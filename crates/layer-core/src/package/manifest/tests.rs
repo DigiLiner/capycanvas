@@ -242,7 +242,7 @@ fn drawable_ownership_is_distinct_from_immutable_image_sharing() {
     assert!(matches!(known(&shared_child,&directory(&[])).support,Support::Preserved(_)));
     let mut wrong_type = value.clone();
     wrong_type["objects"][5]["data"]["image"] = reference_value(7);
-    assert!(matches!(parse(&wrong_type,&directory(&[])),Err(DecodeError::Invalid(_))));
+    assert!(matches!(known(&wrong_type,&directory(&[])).support,Support::Preserved(_)));
     let mut future = value;
     future["objects"][5]["type"] = json!("example.path-object/1");
     assert!(matches!(known(&future,&directory(&[])).support,Support::Preserved(_)));

@@ -246,7 +246,7 @@ fn future_record_types_and_selection_descriptors_preserve_the_package() {
             record["type"]=json!("capy.icc/1");
         }
     });
-    assert!(matches!(open(backing(changed),Default::default(),&AtomicBool::new(false)).unwrap(),OpenOutcome::RecoveredView {..}));
+    assert!(matches!(open(backing(changed),Default::default(),&AtomicBool::new(false)).unwrap(),OpenOutcome::Preserved {..}));
 }
 
 #[test]

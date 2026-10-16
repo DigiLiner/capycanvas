@@ -296,7 +296,7 @@ impl<'a> ResourceReader<'a> {
         let record = &self.manifest.resources.get(&id).ok_or("Missing resource")?.value;
         let actual=values::string(&record["type"])?;
         if !super::manifest::known_resource(actual) {return Err(DecodeError::Unsupported(format!("Unknown resource type {actual}")));}
-        if actual != kind { return Err("Resource type does not match binding".into()); }
+        if actual != kind { return Err(DecodeError::Unsupported("Resource type does not match binding".into())); }
         if !super::manifest::resource_supported(record)? {return Err(DecodeError::Unsupported("Unknown resource interpretation".into()));}
         Ok((id,record))
     }

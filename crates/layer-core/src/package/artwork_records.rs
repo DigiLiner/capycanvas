@@ -19,7 +19,7 @@ fn id<T>(store:&Store<T>, handle:Handle<T>)->Result<PortableId,String> {
     store.id(handle).ok_or_else(||"Missing authored identity".into())
 }
 fn handle<T>(store:&Store<T>, value:&Value)->DecodeResult<Handle<T>> {
-    store.allocated(reference_id(value)?).ok_or_else(||"Reference has the wrong object type".into())
+    store.allocated(reference_id(value)?).ok_or_else(||DecodeError::Unsupported("Reference has an unsupported object type".into()))
 }
 fn endpoint_handle<T>(store:&Store<T>, value:&Value)->DecodeResult<Handle<T>> {
     let fields=v::object(value,&["object","port"])?;
@@ -131,7 +131,7 @@ pub(super) fn image_reference(value:&Value,reader:&mut ResourceReader<'_>)->Deco
     let identity=reference_id(value)?;
     if let Some((_,image))=reader.images.get(&identity) {return Ok(image.clone());}
     let record=reader.manifest.objects.get(&identity).ok_or("Missing immutable image")?;
-    if record["type"]!="capy.image/1" {return Err("Reference has the wrong object type".into());}
+    if record["type"]!="capy.image/1" {return Err(DecodeError::Unsupported("Reference has an unsupported object type".into()));}
     decode_image(identity,&record["data"].clone(),reader)
 }
 fn finite_double(value:&Value)->DecodeResult<f64> {value.as_f64().filter(|value|value.is_finite()).ok_or_else(||"Expected finite double".into())}
@@ -400,14 +400,14 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
             let (kind,value)=content.iter().next().unwrap();let content=match kind.as_str() {"paint"=>OccurrenceContent::Paint(handle(&art.paint,value)?),"objects"=>OccurrenceContent::Objects(handle(&art.objects,value)?),"stack"=>OccurrenceContent::Stack(handle(&art.stacks,value)?),"effect"=>OccurrenceContent::Effect(handle(&art.effects,value)?),"selection"=>OccurrenceContent::Selection(handle(&art.selections,value)?),_=>unreachable!()};
             let offset=data.get("offset").map(decode_offset).transpose()?.unwrap_or_default();
             let blend=data.get("blend").map(v::parse_layer_blend).transpose()?.unwrap_or(LayerBlend::Normal);
-            if blend==LayerBlend::PassThrough && !matches!(content,OccurrenceContent::Stack(_)) {return Err("Pass through requires a stack".into());}
+            if blend==LayerBlend::PassThrough && !matches!(content,OccurrenceContent::Stack(_)) {return Err(DecodeError::Unsupported("Pass through requires a stack".into()));}
             let opacity=float_field(data,"opacity",1.)?;if !(0. ..=1.).contains(&opacity) {return Err("Invalid occurrence opacity".into());}
             let mask=data.get("mask").map(|value| {let data=fields(value,&["source","enabled","linked","inverted","offset"])?;
                 Ok::<_,DecodeError>(MaskUse {source:handle(&art.coverage,v::required(data,"source")?)?,enabled:bool_field(data,"enabled",true)?,linked:bool_field(data,"linked",true)?,
                     inverted:bool_field(data,"inverted",false)?,offset:data.get("offset").map(decode_offset).transpose()?.unwrap_or_default()})}).transpose()?;
             let attachment=match data.get("attachment").map(v::string).transpose()? {None|Some("none")=>Attachment::None,Some("clip")=>Attachment::Clip,Some("effect")=>Attachment::Effect,Some(name)=>return Err(DecodeError::Unsupported(format!("Unknown occurrence attachment {name}")))};
             let occurrence=Occurrence {content,name:name(data)?,visible:bool_field(data,"visible",true)?,opacity,blend,locked:bool_field(data,"locked",false)?,alpha_locked:bool_field(data,"alpha_locked",false)?,reference:bool_field(data,"reference",false)?,attachment,offset,mask};
-            if !occurrence.positioned() && data.contains_key("offset") || occurrence.alpha_locked && !matches!(occurrence.content,OccurrenceContent::Paint(_)) {return Err("Inapplicable occurrence fields".into());}
+            if !occurrence.positioned() && data.contains_key("offset") || occurrence.alpha_locked && !matches!(occurrence.content,OccurrenceContent::Paint(_)) {return Err(DecodeError::Unsupported("Inapplicable occurrence fields".into()));}
             art.occurrences.install(art.occurrences.allocated(*identity).unwrap(),occurrence)?;
         },_=>{}
     }}
@@ -472,9 +472,9 @@ pub(crate) fn decode_with_layout(manifest:&Manifest,reader:&mut ResourceReader<'
     }
     metadata.validate()?;art.metadata=Arc::new(metadata);
     let default=manifest.default_output.ok_or_else(||DecodeError::Unsupported("Artwork has no editable output".into()))?;
-    art.default_output=art.outputs.allocated(default).ok_or("Default is not an output")?;
+    art.default_output=art.outputs.allocated(default).ok_or_else(||DecodeError::Unsupported("Default is not an output".into()))?;
     if matches!(manifest.support,Support::Editable) {
-        let index=Arc::new(SceneIndex::build(&art)?);let scene=SceneView::new(&art,&index);
+        let index=Arc::new(SceneIndex::build(&art).map_err(DecodeError::Unsupported)?);let scene=SceneView::new(&art,&index);
         if scene.order().iter().any(|h|!crate::offsets::admitted(scene.layer_origin(Some(*h))) || scene.mask_origin(*h).is_some_and(|origin|!crate::offsets::admitted(origin)))
             || art.occurrences.iter().any(|(_,_,o)|!crate::offsets::admitted(o.offset) || o.mask.as_ref().is_some_and(|m|!crate::offsets::admitted(m.offset))) {
             return Err(DecodeError::Unsupported("Layer offsets exceed the editor's range".into()));
@@ -624,7 +624,7 @@ mod tests {
         assert!(matches!(reopened(legacy),Err(DecodeError::Unsupported(_))));
         let group=art.occurrences.iter().find(|(_,_,o)|matches!(o.content,OccurrenceContent::Stack(_))).unwrap().1;
         let mut manifest=captured(&art).0;manifest.objects.get_mut(&group).unwrap()["data"]["alpha_locked"]=true.into();
-        assert!(matches!(reopen(&manifest,&backing),Err(DecodeError::Invalid(_))));
+        assert!(matches!(reopen(&manifest,&backing),Err(DecodeError::Unsupported(_))));
     }
     #[test]
     fn conflicting_immutable_image_ids_fail_across_reader_states() {
@@ -668,7 +668,7 @@ mod tests {
         assert!(matches!(reopen(&manifest,&backing),Err(DecodeError::Unsupported(_))));
         manifest.objects.insert(occurrence,original.clone());manifest.objects.get_mut(&occurrence).unwrap()["data"]["attachment"]="future".into();
         assert!(matches!(reopen(&manifest,&backing),Err(DecodeError::Unsupported(_))));
-        for attachment in ["clip","effect"] {manifest.objects.insert(occurrence,original.clone());manifest.objects.get_mut(&occurrence).unwrap()["data"]["attachment"]=attachment.into();assert!(matches!(reopen(&manifest,&backing),Err(DecodeError::Invalid(_))));}
+        for attachment in ["clip","effect"] {manifest.objects.insert(occurrence,original.clone());manifest.objects.get_mut(&occurrence).unwrap()["data"]["attachment"]=attachment.into();assert!(matches!(reopen(&manifest,&backing),Err(DecodeError::Unsupported(_))));}
     }
     #[test]
     fn tile_coordinates_and_output_phase_duplicates_are_invalid() {

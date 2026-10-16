@@ -212,6 +212,41 @@ fn unknown_drawable_children_preserve_the_complete_package() {
     let mut copied=Vec::new();copy_original(&source,&mut copied,&AtomicBool::new(false)).unwrap();assert_eq!(copied,changed);
 }
 
+#[test]
+fn well_formed_combinations_a_later_version_may_allow_preserve_the_package() {
+    let bytes=include_bytes!("fixtures/shared-image-objects.capy");
+    fn record(manifest:&mut Value,id:u128)->&mut Value {
+        let id=resources::reference(identity(id))["ref"].clone();
+        manifest["objects"].as_array_mut().unwrap().iter_mut().find(|record|record["id"]==id).unwrap()
+    }
+    for edit in 0..9 {
+        let changed=rewrite(bytes,|manifest| match edit {
+            0=>record(manifest,3)["data"]["blend"]="pass_through".into(),
+            1=>record(manifest,3)["data"]["alpha_locked"]=true.into(),
+            2=>record(manifest,3)["data"]["content"]=json!({"paint":resources::reference(identity(9))}),
+            3=>record(manifest,3)["data"]["content"]=json!({"objects":resources::reference(identity(11))}),
+            4=>record(manifest,4)["data"]["mask"]=json!({"source":resources::reference(identity(12))}),
+            5=>record(manifest,9)["data"]["image"]=resources::reference(identity(7)),
+            6=>record(manifest,5)["data"]["attachment"]="clip".into(),
+            7=>record(manifest,1)["data"]["result"]["object"]=resources::reference(identity(3)),
+            _=>{manifest["outputs"]=json!([resources::reference(identity(1))]);manifest["default_output"]=resources::reference(identity(1));},
+        });
+        let original=backing(changed.clone());
+        let outcome=open(original.clone(),Default::default(),&AtomicBool::new(false)).unwrap();
+        assert!(matches!(outcome,OpenOutcome::Preserved {..}),"edit {edit}: {outcome:?}");
+        let mut copied=Vec::new();copy_original(&original,&mut copied,&AtomicBool::new(false)).unwrap();assert_eq!(copied,changed);
+    }
+    for edit in 0..3 {
+        let changed=rewrite(bytes,|manifest| match edit {
+            0=>record(manifest,3)["data"]["blend"]=json!(7),
+            1=>record(manifest,3)["data"]["opacity"]=json!(1.5),
+            _=>record(manifest,3)["data"]["content"]=json!({"paint":resources::reference(identity(0x99))}),
+        });
+        let outcome=open(backing(changed),Default::default(),&AtomicBool::new(false)).unwrap();
+        assert!(matches!(outcome,OpenOutcome::Failure {..}),"edit {edit}: {outcome:?}");
+    }
+}
+
 fn collide_image_and_tile(manifest:&mut Value) {
     let tile=manifest["resources"].as_array().unwrap().iter().find(|record|record["type"]=="capy.raster-tile/1").unwrap()["id"].clone();
     let image=manifest["objects"].as_array_mut().unwrap().iter_mut().find(|record|record["type"]=="capy.image/1").unwrap();

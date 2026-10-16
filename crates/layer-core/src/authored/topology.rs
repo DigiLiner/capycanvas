@@ -90,9 +90,10 @@ impl GraphShape {
         let mut seen_outputs = BTreeSet::new();
         for id in &self.outputs {
             if !seen_outputs.insert(*id) { return Err("Duplicate output".into()); }
-            let shape = self.objects.get(id).ok_or("Missing output")?;
-            if !matches!(shape, Shape::Output { .. } | Shape::Unknown { ancillary: false, .. }) {
-                return Err("Invalid output type".into());
+            match self.objects.get(id).ok_or("Missing output")? {
+                Shape::Output { .. } | Shape::Unknown { ancillary: false, .. } => {},
+                Shape::Unknown { ancillary: true, .. } => return Err("Ancillary output".into()),
+                _ => { reasons.insert("Unsupported output type"); },
             }
         }
         let mut memberships = BTreeMap::<PortableId, usize>::new();
@@ -108,23 +109,21 @@ impl GraphShape {
                     if referenced.ancillary() { return Err("Artwork or ancillary record depends on ancillary data".into()); }
                 } else if !self.resources.contains(target) { return Err("Dangling authored reference".into()); }
             }
-            let mut expect = |target: PortableId, predicate: fn(&Shape) -> bool| -> Result<(), GraphError> {
-                match self.objects.get(&target) {
-                    Some(Shape::Unknown { ancillary: false, .. }) => { reasons.insert("Unknown referenced type"); Ok(()) },
-                    Some(value) if predicate(value) => Ok(()),
-                    _ => Err("Invalid authored relationship".into()),
-                }
+            let mut expect = |target: PortableId, predicate: fn(&Shape) -> bool| match self.objects.get(&target) {
+                Some(Shape::Unknown { ancillary: false, .. }) => { reasons.insert("Unknown referenced type"); },
+                Some(value) if predicate(value) => {},
+                _ => { reasons.insert("Unsupported authored relationship"); },
             };
             let mut dependencies = Vec::new();
             match shape {
                 Shape::Composition { result } => {
-                    expect(*result, |s| matches!(s, Shape::Stack { .. }))?;
+                    expect(*result, |s| matches!(s, Shape::Stack { .. }));
                     *uses.entry(*result).or_default() += 1;
                     dependencies.push(*result);
                 }
                 Shape::Stack { entries } => {
                     for entry in entries {
-                        expect(*entry, |s| matches!(s, Shape::Occurrence { .. }))?;
+                        expect(*entry, |s| matches!(s, Shape::Occurrence { .. }));
                         if *memberships.entry(*entry).or_default() != 0 { return Err("Occurrence belongs to multiple stack slots".into()); }
                         *memberships.get_mut(entry).unwrap() += 1;
                     }
@@ -132,24 +131,24 @@ impl GraphShape {
                 }
                 Shape::Occurrence { content, mask } => {
                     let target = match content {
-                        Content::Paint(id) => { expect(*id, |s| matches!(s, Shape::Paint { .. }))?; *id },
-                        Content::Objects(id) => { expect(*id, |s| matches!(s, Shape::ImageObject { .. }))?; *id },
-                        Content::Group(id) => { expect(*id, |s| matches!(s, Shape::Stack { .. }))?; *id },
-                        Content::Effect(id) => { expect(*id, |s| matches!(s, Shape::Effect))?; *id },
-                        Content::Selection(id) => { expect(*id, |s| matches!(s, Shape::Selection))?; *id },
+                        Content::Paint(id) => { expect(*id, |s| matches!(s, Shape::Paint { .. })); *id },
+                        Content::Objects(id) => { expect(*id, |s| matches!(s, Shape::ImageObject { .. })); *id },
+                        Content::Group(id) => { expect(*id, |s| matches!(s, Shape::Stack { .. })); *id },
+                        Content::Effect(id) => { expect(*id, |s| matches!(s, Shape::Effect)); *id },
+                        Content::Selection(id) => { expect(*id, |s| matches!(s, Shape::Selection)); *id },
                     };
                     if let Some(mask) = mask {
-                        expect(*mask, |s| matches!(s, Shape::Coverage))?;
+                        expect(*mask, |s| matches!(s, Shape::Coverage));
                     }
                     for target in std::iter::once(target).chain(*mask) {
                         *uses.entry(target).or_default() += 1;
                         dependencies.push(target);
                     }
                 }
-                Shape::Paint { image:Some(image) } => {expect(*image,|s|matches!(s,Shape::Image))?;dependencies.push(*image);}
-                Shape::ImageObject { image } => {expect(*image,|s|matches!(s,Shape::Image))?;dependencies.push(*image);}
+                Shape::Paint { image:Some(image) } => {expect(*image,|s|matches!(s,Shape::Image));dependencies.push(*image);}
+                Shape::ImageObject { image } => {expect(*image,|s|matches!(s,Shape::Image));dependencies.push(*image);}
                 Shape::Output { composition } => {
-                    expect(*composition, |s| matches!(s, Shape::Composition { .. }))?;
+                    expect(*composition, |s| matches!(s, Shape::Composition { .. }));
                     if *composition != root { reasons.insert("Output has an independent composition"); }
                 }
                 Shape::Unknown { ancillary: false, .. } => { reasons.insert("Unknown authored type"); }
