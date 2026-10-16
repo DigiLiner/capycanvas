@@ -149,6 +149,12 @@ Cursor tests observe a frame before asserting that no ink was deposited. Stroke
 selection tests check nonempty live batches; undo/redo compares raster identities.
 The Web pointer fixture records pen-button reports separately from tip contacts
 so a held barrel button exercises both input paths.
+Paper library regressions retain newer texture choices when an older image read
+finishes, including choosing the already selected texture. Scale edits preserve
+pending texture reads. Run `a_late_library_read_cannot_replace_a_newer_paper_choice`
+and `scaling_paper_preserves_the_pending_library_choice` in `layer-ui`; late
+completion must preserve authored data, dirty state and history while its host
+request retires.
 Presentation tests use the renderer's `create_target` for their surfaces; preserve
 each test's format and extent, and validate its usage flags on the test GPU.
 Renderer source fixtures use `test_support::depth_source` with their original

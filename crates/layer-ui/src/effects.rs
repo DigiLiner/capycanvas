@@ -1403,6 +1403,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                             return self.request(HostRequestKind::Paper { request: PaperRequest::Load { id: paper } });
                         }
                     };
+                    if key == paper::TEXTURE { self.papers.pending = None; }
                     if edited == *application { return Ok(()); }
                     let chosen = paper::choice(&edited, &self.papers);
                     if self.effect_gesture.is_none() { self.paper_preview.show(handle); }

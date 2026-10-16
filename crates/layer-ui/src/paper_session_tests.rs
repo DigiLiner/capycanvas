@@ -183,3 +183,49 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
     assert!(matches!(paper_requests(&reopened).last(), Some(PaperRequest::Add { layer, .. }) if *layer == paper));
     assert!(reopened.paper_image(paper).is_some());
 }
+
+#[test]
+fn a_late_library_read_cannot_replace_a_newer_paper_choice() {
+    use crate::paper_library::{PaperEntry, paper_identity};
+    for platform in [Platform::Gtk, Platform::Mac, Platform::Ios] {
+        for different in [false,true] {
+            let mut s = session(platform);
+            let layer = paper_layer(&s);
+            s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
+            let current = paper_control(&s,"texture").value;
+            let image = gray_paper(90);
+            let id = paper_identity(&image).unwrap();
+            s.set_paper_library(vec![PaperEntry { id: id.clone(), name: "linen scan".into(), bytes: 64,
+                preview: vec![90;96 * 96].into() }]).unwrap();
+            s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(13) } }).unwrap();
+            let request = s.state.requests.iter().find(|request|matches!(&request.kind,HostRequestKind::Paper { .. })).unwrap().id;
+            let value = if different { layer_core::EffectValue::Choice(2) } else { current };
+            s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: value.clone() } }).unwrap();
+            let document = s.engine.document().clone();
+            let mark = s.engine.checkpoint();
+            let modified = s.state.document_file.modified;
+            s.paper_loaded(&id,image).unwrap();
+            s.dispatch(UiAction::CompleteRequest { id:request,error:None }).unwrap();
+            assert_live_artwork_eq(s.engine.document(),&document);
+            assert_eq!(s.engine.checkpoint(),mark,"the stale read must not add history");
+            assert_eq!(s.state.document_file.modified,modified);
+            assert_eq!(paper_control(&s,"texture").value,value);
+            assert!(!s.state.requests.iter().any(|item|item.id==request));
+        }
+    }
+}
+
+#[test]
+fn scaling_paper_preserves_the_pending_library_choice() {
+    use crate::paper_library::{PaperEntry, paper_identity};
+    let mut s = session(Platform::Mac);
+    let layer = paper_layer(&s);
+    s.dispatch(UiAction::SelectLayer { id:layer }).unwrap();
+    let image = gray_paper(90);let id = paper_identity(&image).unwrap();
+    s.set_paper_library(vec![PaperEntry { id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into() }]).unwrap();
+    s.dispatch(UiAction::Effect { action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)} }).unwrap();
+    s.dispatch(UiAction::Effect { action:EffectAction::Number {layer,key:"scale".into(),operation:NumericOperation::Value {value:1.5}} }).unwrap();
+    s.paper_loaded(&id,image.clone()).unwrap();
+    assert_eq!(*s.paper_image(layer).unwrap(),image);
+    assert!((paper_scale(&s)-1.5).abs()<1e-4);
+}
