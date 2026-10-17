@@ -82,6 +82,22 @@ function fixture(t) {
   return root;
 }
 
+test("Arch setup installs the recipe dependency graph in a coherent system upgrade", t => {
+  const root = fixture(t), log = join(root, "pacman.json");
+  writeFileSync(join(root, "sudo"), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+  writeFileSync(join(root, "pacman"), `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`, { mode: 0o755 });
+  execFileSync("bash", [new URL("../../tools/build/arch-setup.sh", import.meta.url).pathname, "--print"], {
+    env: { ...process.env, PATH: `${root}:/usr/bin:/bin` },
+  });
+  const args = JSON.parse(readFileSync(log));
+  assert.deepEqual(args.slice(0, 2), ["-Syu", "--needed"]);
+  const metadata = readFileSync(new URL("../../packaging/arch/capycanvas-git/.SRCINFO", import.meta.url), "utf8");
+  for (const [, dependency] of metadata.matchAll(/^\s*(?:make)?depends = (.+)$/gm))
+    assert.ok(args.includes(dependency), `Missing Arch dependency: ${dependency}`);
+  assert.ok(args.includes("base-devel"));
+  assert.equal(args.at(-1), "--print");
+});
+
 test("the generated application icon has one viewport and preserves the shared capybara", t => {
   const root = fixture(t), build = join(root, "build-icon");
   execFileSync("rustc", ["--edition=2024", new URL("./build.rs", import.meta.url).pathname, "-o", build]);
@@ -126,7 +142,8 @@ test("staging refuses a package symlink and preserves its target", t => {
 function packageFixture(t) {
   const root = fixture(t);
   for (const path of ["apps/layer-linux/package.mjs", "apps/layer-linux/package-files.mjs",
-    "apps/layer-linux/gtk-runtime.mjs", "tools/build/dependency-notices.mjs", "tools/build/gtk-runtime/build.sh"]) {
+    "apps/layer-linux/gtk-runtime.mjs", "tools/build/dependency-notices.mjs", "tools/build/gtk-runtime/build.sh",
+    "tools/build/gtk-runtime/check-env.py"]) {
     mkdirSync(join(root, path, ".."), { recursive: true });
     cpSync(new URL(`../../${path}`, import.meta.url), join(root, path));
   }

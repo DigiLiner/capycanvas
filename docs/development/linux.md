@@ -36,9 +36,14 @@ sudo dnf install gcc gcc-c++ pkgconf-pkg-config python3 curl patch tar \
 On Arch Linux or Omarchy:
 
 ```bash
-sudo pacman -S --needed base-devel rust python curl glib2-devel gtk4 libadwaita wayland \
-  libpng zlib meson ninja patchelf shaderc sassc wayland-protocols libdrm vulkan-headers
+bash tools/build/arch-setup.sh
 ```
+
+This updates the system and installs the package recipe's complete dependencies,
+plus the private-display test and Arch packaging tools. Pacman shows the transaction
+before installing. Keep the system on one coherent repository snapshot; partial
+upgrades and extracted SDK overlays are unsupported. The runtime builder compiles
+a header probe and runs GLib's resource compiler before building GTK or GLib.
 
 GTK still requires its native toolkit libraries, fonts and Wayland/Vulkan
 interfaces. These are Linux host requirements, separate from the portable
@@ -468,12 +473,12 @@ asserting, and check persistence by reopening, not only by reading rows.
 
 ## Stage a native bundle
 
-Besides the build prerequisites, install Node.js, `strip`,
-`desktop-file-validate`, `cargo-about`, and GTK's own build dependencies with
-Meson, Ninja, `glslc` and `sassc`:
+Arch's setup command includes Node.js, `strip`, `desktop-file-validate` and
+`cargo-about`. On other distributions, install these packaging tools too;
+`cargo install cargo-about --version 0.9.2 --features cli --locked` installs
+the license tool when the distribution does not package it.
 
 ```bash
-cargo install cargo-about --version 0.9.2 --features cli --locked
 node apps/layer-linux/package.mjs
 dist/capycanvas-linux/bin/capycanvas
 ```

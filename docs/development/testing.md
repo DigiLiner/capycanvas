@@ -58,6 +58,10 @@ in both themes.
 
 ## Checks by change type
 
+CI's Arch job installs the package recipe's dependencies into a fresh Arch
+container, tests SDK validation, and builds the default GTK development launcher.
+GPU journeys still run through the private display on hardware.
+
 Run the rows that match your change, then walk the affected user journeys on each
 affected host. Scope Cargo commands with `-p`; `cargo test --workspace` pulls in
 GPU and platform crates that a given machine may not be able to run.

@@ -20,6 +20,20 @@ jobs:
       - run: cargo check --locked -p layer-web --target wasm32-unknown-unknown
       - run: python3 apps/layer-apple/scripts/project.py && git diff --exit-code
       - run: python3 -m unittest discover -s tools/git -p 'test_*.py'
+  arch:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    env:
+      CAPY_BUILD_JOBS: "2"
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - run: pacman -Syu --noconfirm git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash tools/build/arch-setup.sh --noconfirm
+      - run: python3 tools/build/gtk-runtime/test-environment.py
+      - run: python3 tools/build/gtk-runtime/test-configure.py
+      - run: node --test apps/layer-linux/package.test.mjs tools/build/development-profile.test.mjs
+      - run: apps/layer-linux/run.sh --help
   licenses:
     runs-on: ubuntu-24.04
     steps:

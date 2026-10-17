@@ -9,6 +9,27 @@ import unittest
 
 
 class ConfigureTest(unittest.TestCase):
+    def test_sdk_path_change_replaces_cached_dependency(self):
+        with tempfile.TemporaryDirectory(prefix='capy-sdk-change-') as temporary:
+            root = Path(temporary)
+            source, build = root / 'source', root / 'build'
+            source.mkdir()
+            (source / 'meson.build').write_text("project('sdk-probe', 'c')\nexecutable('probe', 'probe.c', dependencies: dependency('sdk-probe'))\n")
+            (source / 'probe.c').write_text('int main(void) { return 0; }\n')
+            previous = None
+            for name in ['old-sdk', 'new-sdk']:
+                sdk = root / name
+                sdk.mkdir()
+                (sdk / 'sdk-probe.pc').write_text(f'Name: sdk-probe\nDescription: SDK dependency probe\nVersion: 1.0\nCflags: -I{sdk}/include\nLibs:\n')
+                result = subprocess.run([sys.executable, str(Path(__file__).with_name('configure.py')),
+                    str(build), str(source), f'-Dpkg_config_path={sdk}'], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                commands = (build / 'build.ninja').read_text()
+                self.assertIn(str(sdk / 'include'), commands)
+                if previous:
+                    self.assertNotIn(str(previous / 'include'), commands)
+                previous = sdk
+
     def test_source_upgrade_replaces_old_build_then_reuses_new_build(self):
         with tempfile.TemporaryDirectory(prefix='capy-gtk-upgrade-') as temporary:
             root = Path(temporary)

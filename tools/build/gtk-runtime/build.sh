@@ -8,6 +8,7 @@ mkdir -p "$gtk_build" "$gtk_prefix/lib" "$gtk_prefix/share/doc/capycanvas-gtk/so
 gtk_docs="$gtk_prefix/share/doc/capycanvas-gtk"
 gtk_archive=gtk-4.24.1.tar.xz
 glib_archive=glib-2.90.1.tar.xz
+python3 "$gtk_recipe/check-env.py"
 for gtk_source in \
     "$gtk_archive e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9 https://download.gnome.org/sources/gtk/4.24" \
     "$glib_archive 93c941aa17d5eb1d53fe838365f29a8b4e539c222a256d974ec8f30fc413e396 https://download.gnome.org/sources/glib/2.90"; do
@@ -47,11 +48,6 @@ for name in ['libtiff', 'libjpeg-turbo']:
             (projects / 'packagecache').mkdir(exist_ok=True)
             shutil.copy2(sources / filename, projects / 'packagecache' / filename)
 PY
-if [[ -d "$gtk_build/deps/usr" ]]; then
-    export PKG_CONFIG_PATH="$gtk_build/deps/usr/lib64/pkgconfig:$gtk_build/deps/usr/share/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-    export PATH="$gtk_build/deps/usr/bin:$PATH"
-    export LD_LIBRARY_PATH="$gtk_build/deps/usr/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-fi
 gtk_wrap_mode=nofallback
 if [[ ${CARGO_NET_OFFLINE:-false} == true ]]; then gtk_wrap_mode=nodownload; fi
 gtk_c_args="${CFLAGS:+$CFLAGS }-fPIC $(printf '%q' "-ffile-prefix-map=$gtk_build=/capycanvas-gtk")"
@@ -59,6 +55,7 @@ if [[ ! -d "$gtk_build/glib-2.90.1" ]]; then tar -xf "$gtk_build/$glib_archive" 
 python3 "$gtk_recipe/configure.py" "$gtk_build/glib-build" "$gtk_build/glib-2.90.1" \
     --prefix=/usr --libdir=lib --libexecdir=lib --buildtype=release --default-library=shared \
     "-Dc_args=$gtk_c_args" "-Dc_link_args=${LDFLAGS:-}" --wrap-mode="$gtk_wrap_mode" \
+    "-Dpkg_config_path=${PKG_CONFIG_PATH:-}" \
     -Dtests=false -Dinstalled_tests=false -Ddocumentation=false -Dintrospection=disabled \
     -Dman-pages=disabled -Dselinux=disabled -Dlibmount=enabled -Dsysprof=disabled \
     -Dlibelf=disabled -Ddtrace=disabled -Dsystemtap=disabled -Dglib_debug=disabled
@@ -91,7 +88,7 @@ cp "$gtk_build/$gtk_archive" "$gtk_docs/sources/"
 cp "$gtk_build/$glib_archive" "$gtk_docs/sources/"
 mkdir -p "$gtk_docs/glib"
 cp "$gtk_build/glib-2.90.1/COPYING" "$gtk_docs/glib/"
-cp "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" "$gtk_recipe/build.sh" "$gtk_recipe/configure.py" "$gtk_docs/"
+cp "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" "$gtk_recipe/build.sh" "$gtk_recipe/configure.py" "$gtk_recipe/check-env.py" "$gtk_docs/"
 python3 - "$gtk_prefix" "$gtk_build/gtk-4.24.1/subprojects" <<'PY'
 import configparser, hashlib, json, pathlib, shutil, sys
 p = pathlib.Path(sys.argv[1])
@@ -101,7 +98,8 @@ files = ['lib/libgtk-4.so.1', 'share/doc/capycanvas-gtk/COPYING',
          'share/doc/capycanvas-gtk/sources/gtk-4.24.1.tar.xz',
          'share/doc/capycanvas-gtk/pad-event-surface.patch',
          'share/doc/capycanvas-gtk/tablet-proximity-cursor.patch', 'share/doc/capycanvas-gtk/build.sh',
-         'share/doc/capycanvas-gtk/configure.py', 'share/doc/capycanvas-gtk/sources/glib-2.90.1.tar.xz',
+         'share/doc/capycanvas-gtk/configure.py', 'share/doc/capycanvas-gtk/check-env.py',
+         'share/doc/capycanvas-gtk/sources/glib-2.90.1.tar.xz',
          'share/doc/capycanvas-gtk/glib/COPYING']
 files += [f'lib/lib{name}-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]
 dependencies = dict(glib=dict(version='2.90.1', source='https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz'))

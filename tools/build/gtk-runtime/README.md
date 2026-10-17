@@ -63,6 +63,7 @@ python3 tools/build/gtk-runtime/test-pad-focus.py target/gtk-runtime/gtk-4.24.1
 python3 tools/build/gtk-runtime/test-runtime.py \
   target/gtk-runtime/prefix target/gtk-runtime/gtk-4.24.1/subprojects
 python3 tools/build/gtk-runtime/test-configure.py
+python3 tools/build/gtk-runtime/test-environment.py
 ```
 
 The pad check executes GTK's actual callbacks without a display, checking all
@@ -79,6 +80,9 @@ development packages are unnecessary. TIFF enables JPEG and deflate compression;
 its optional JBIG, LERC, LZMA, WebP and Zstandard dependencies are disabled.
 
 Install the [Linux prerequisites](../../../docs/development/linux.md#prerequisites).
+The builder checks the actual native headers and GLib resource compiler before
+compilation. It uses the installed SDK; extracted packages under the build cache
+do not supply tools, headers or libraries.
 The runtime builder neither installs system packages nor replaces system GTK.
 The prefix contains the libraries, source archives,
 licenses, patches, standalone build script and a checksum manifest, including
@@ -97,7 +101,7 @@ When a recipe introduces options absent from a configured cache, setup uses
 Meson's `--wipe`; source-version changes also replace the configured build. Known
 options in the same source tree use incremental reconfiguration. The installed
 library stays intact until the replacement finishes. The shipped rebuild script
-includes the same `configure.py` helper.
+includes the same `configure.py` and `check-env.py` helpers.
 
 From a relocated package, rebuild the supplied source without a network fetch:
 
