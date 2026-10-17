@@ -367,7 +367,7 @@ export async function checkHeal({call,evaluate,settle,device=false}) {
     await wait(`layerApp.state().canvas_bar?.context.kind==='placement'`);
     assert.deepEqual(await evaluate('layerApp.state().canvas_bar.anchor'),[0,0,width,height],'the photo covers the canvas');
     await invoke('apply_transform');
-    await wait(`!layerApp.state().canvas_bar`);
+    await wait(`layerApp.state().canvas_bar?.context.kind==='transform'`);
     const photo=h.track(await evaluate('String(layerApp.state().layer_tools.editing_layer.id)'));
     h.target=await h.newLayer();
     await invoke('use_reference_below');

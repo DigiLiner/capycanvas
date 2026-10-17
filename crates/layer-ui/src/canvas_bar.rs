@@ -540,7 +540,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     fn canvas_bar_anchor(&self, kind: CanvasBarKind) -> Option<[f32; 4]> {
         match kind {
-            CanvasBarKind::Placement | CanvasBarKind::Transform => self.transform_document_bounds(),
+            CanvasBarKind::Placement | CanvasBarKind::Transform => self.transform_document_bounds().or_else(|| self.object_frame_bounds()),
             CanvasBarKind::Polygon
             | CanvasBarKind::Picker
             | CanvasBarKind::QuickMask
@@ -891,11 +891,10 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     fn canvas_bar_protected(&self, kind: CanvasBarKind) -> Option<Bounds> {
         let points: Vec<[f32; 2]> = match kind {
-            CanvasBarKind::Placement | CanvasBarKind::Transform => {
-                let mut points = self.transform_handle_points();
-                points.extend(self.transform_hull()?);
-                points
-            }
+            CanvasBarKind::Placement | CanvasBarKind::Transform => match self.transform_hull() {
+                Some(hull) => self.transform_handle_points().into_iter().chain(hull).collect(),
+                None => self.object_handle_points(),
+            },
             CanvasBarKind::Polygon
             | CanvasBarKind::Picker
             | CanvasBarKind::QuickMask

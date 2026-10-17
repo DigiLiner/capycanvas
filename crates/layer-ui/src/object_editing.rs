@@ -147,6 +147,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         unit.inverse()?;
         Some(Frame { unit, pivot: unit.map([0.5, 0.5]) })
     }
+    fn selected_frame(&self) -> Option<Frame> {
+        self.session_frame().filter(|_| !self.selected_objects().is_empty())
+    }
+    pub(super) fn object_frame_bounds(&self) -> Option<[f32; 4]> {
+        let [min, max] = self.selected_frame()?.unit.bounds([1, 1]);
+        Some([min[0], min[1], max[0], max[1]].map(|v| v as f32))
+    }
+    pub(super) fn object_handle_points(&self) -> Vec<[f32; 2]> {
+        let map = self.document_to_logical();
+        self.selected_frame().map_or_else(Vec::new, |frame| frame.handles(f64::from(self.ruler_reach())).into_iter()
+            .map(|(_, [x, y])| map(Point { x: x as f32, y: y as f32 })).collect())
+    }
     fn object_hit(&self, point: [f64; 2]) -> Option<ObjectHandle> {
         let frame = self.session_frame()?;
         let reach = f64::from(self.ruler_reach());

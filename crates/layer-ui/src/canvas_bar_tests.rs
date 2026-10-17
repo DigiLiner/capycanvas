@@ -342,9 +342,13 @@ fn placements_hint_the_layer_their_drags_may_move() {
 #[test]
 fn image_placement_bar_offers_object_commands_and_counts_a_batch() {
     let mut s = placed_photo("bar placement");
+    s.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
     s.frame(0, 0).unwrap();
     let bar = s.state.canvas_bar.clone().expect("placement bar");
     assert_eq!(bar.context.kind, CanvasBarKind::Placement);
+    let [x0, y0, x1, y1] = bar.anchor.expect("the bar is anchored to the placed image");
+    assert_eq!([x1 - x0, y1 - y0], [20., 10.]);
+    assert_ne!(s.canvas_bar_layout(&measure(&bar, 40.)).unwrap().side, CanvasBarSide::BottomEdge, "the bar sits beside the image");
     assert_eq!(
         bar_commands(&bar.items),
         [
