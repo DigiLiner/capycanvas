@@ -72,7 +72,7 @@ fn tonal_tile(@builtin(global_invocation_id) id:vec3<u32>) {
         let world=tile.origin+local;
         let color=raw_color(id.z,local);
         var y=0.;
-        if color.a>0. {
+        if working_has_color(color.a) {
             let rgb=color.rgb/color.a;
             y=rgb.g+tonal.weights.x*(rgb.r-rgb.g)+tonal.weights.z*(rgb.b-rgb.g);
         }

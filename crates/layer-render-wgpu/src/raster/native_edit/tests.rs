@@ -1305,3 +1305,48 @@ fn reduced_color_empty_layers_constrain_colored_brush_strokes_and_restore_undo()
         assert_eq!(backing(&paint(live.document()).raster), painted);
     }
 }
+
+#[test]
+fn blend_pickup_of_excess_alpha_commits_bounded_color() {
+    for texel in [[0.2f32, 0.4, 0.1, 1.5], [0.1, 0.1, 0.1, 1e-39]] {
+        let mut document = layer_core::Document::new(PortableId::random(), 512, 256, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+        let root = document.artwork.root;
+        document.artwork.compositions.get_mut(root).unwrap().blend = layer_core::BlendSpace::Perceptual;
+        document.working.occurrence = Some(occurrence_id(&document));
+        document.working.target = Some(target(&document));
+        let r = WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
+        let (mut input, consumer) = input_queue(64);
+        let view = ViewState { width_px: 512, height_px: 256, document_to_surface: [1., 0., 0., 1., 0., 0.] };
+        let mut engine = CanvasEngine::new(r, document, consumer, view, ViewTransform::IDENTITY).unwrap();
+        let mut sequence = 0;
+        let mut drag = |engine: &mut CanvasEngine<WgpuRasterizer>, xs: &[f32]| {
+            for (i, &x) in xs.iter().enumerate() {
+                let phase = if i == 0 { PenPhase::Down } else if i + 1 == xs.len() { PenPhase::Up } else { PenPhase::Move };
+                sequence += 1;
+                input.push(crate::test_support::pen(sequence, phase, [x, 128.], SampleFlags::PRIMARY)).unwrap();
+                flush(engine);
+            }
+        };
+        engine.set_brush(layer_core::BrushSnapshot { diameter: 60., ..layer_core::default_brush(layer_core::DefaultBrushPreset::GPen) }).unwrap();
+        flush(&mut engine);
+        drag(&mut engine, &[40., 140., 240., 340., 440.]);
+        let id = engine.document().active_target().unwrap();
+        let (textures, _) = engine.backend().raster_textures(id);
+        let page = textures.into_iter().find(|(key, _)| key.coordinate == [0, 0] && key.plane == RasterPlane::Color).unwrap().1;
+        engine.backend().queue.write_texture(
+            wgpu::TexelCopyTextureInfo { origin: wgpu::Origin3d { x: 120, y: 120, z: 0 }, ..page.as_image_copy() },
+            &texel.repeat(64).iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>(),
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(8 * 16), rows_per_image: None },
+            wgpu::Extent3d { width: 8, height: 8, depth_or_array_layers: 1 },
+        );
+        engine.set_brush(layer_core::BrushSnapshot { diameter: 120., ..layer_core::default_brush(layer_core::DefaultBrushPreset::NaturalBlender) }).unwrap();
+        flush(&mut engine);
+        drag(&mut engine, &[60., 100., 140., 180., 220.]);
+        for (key, bytes) in working(engine.backend(), id) {
+            for stored in bytes.chunks(16) {
+                let [r, g, b, a] = std::array::from_fn(|i| f32::from_le_bytes(stored[i * 4..][..4].try_into().unwrap()));
+                assert!([r, g, b, a].iter().all(|v| v.is_finite()) && (a == 0. || (f32::MIN_POSITIVE..=1.).contains(&a)), "{texel:?}: {key:?} holds {:?}", [r, g, b, a]);
+            }
+        }
+    }
+}

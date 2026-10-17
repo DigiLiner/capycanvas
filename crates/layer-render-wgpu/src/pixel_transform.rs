@@ -538,7 +538,8 @@ fn shader_source(key: Key, scalar: bool, visibility: bool, compute: Option<bool>
         format!("{}\nfn horizon_selection()->f32{{return select(0.,1.,brush_selection.info.y==0u || brush_selection.info.x!=0u);}}",
             include_str!("selection_clip.wgsl").replace("@group(1) @binding(1)", "@group(1) @binding(16)"))
     };
-    let mut parts = vec![prefix.as_str(), include_str!("pixel_transform/source.wgsl"), &sources, &selection];
+    let working_color = crate::working_color::source(space);
+    let mut parts = vec![prefix.as_str(), &working_color, include_str!("pixel_transform/source.wgsl"), &sources, &selection];
     let mut transformed = String::new();
     if key.mapping != Mapping::Copy {
         parts.push(if key.mapping == Mapping::Affine { include_str!("pixel_transform/affine.wgsl") }
@@ -578,14 +579,13 @@ fn shader_source(key: Key, scalar: bool, visibility: bool, compute: Option<bool>
         else { "fn layer_pixel(world:vec2<f32>)->vec4<f32>{if (flags()&UNMOVED)!=0u{return original(vec2<i32>(floor(world)));}return over_remainder(world,transformed(world));}" };
     parts.push(pixel);
     let output;
-    let working_color = crate::working_color::source(space);
     match compute {
         None => parts.push(include_str!("pixel_transform/render.wgsl")),
         Some(false) => {
             output = include_str!("pixel_transform/placement.wgsl").replace("BINDING", if scalar { "1" } else { "0" }).replace("FORMAT", if scalar { "r32float" } else { "rgba32float" });
             parts.push(&output);
         }
-        Some(true) => {parts.push(include_str!("pixel_transform/display.wgsl")); parts.push(&working_color);}
+        Some(true) => parts.push(include_str!("pixel_transform/display.wgsl")),
     }
     super::compose_wgsl(&parts)
 }

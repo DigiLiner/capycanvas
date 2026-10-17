@@ -31,6 +31,7 @@ fn material_result(fragment_position:vec4<f32>)->MaterialOutput {
         result=material_alpha_locked(result,canvas_load(world));
     }
     result.color=layer_color(result.color,WORKING_LUMA,style.color_mode.x,style.color_mode.y);
+    result.color=working_clamp(result.color);
     return result;
 }
 

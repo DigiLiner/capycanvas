@@ -24,7 +24,7 @@ fn hdr_color_error(value:vec4<f32>)->u32 {
 fn float32_color_error(value:vec4<f32>)->u32 {
     let error=color_error(value);
     if error!=0u {return error;}
-    if value.a>0. {return color_error(vec4(value.rgb/value.a,value.a));}
+    if (bitcast<u32>(value.a)&0x7f800000u)!=0u {return color_error(vec4(value.rgb/value.a,value.a));}
     return 0u;
 }
 // IEEE binary16 ties-to-even, including subnormals. Integer operations avoid

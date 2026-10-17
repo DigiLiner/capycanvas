@@ -309,8 +309,18 @@ view transformations do not change those pages.
 
 [`working_color.wgsl`](../../crates/layer-render-wgpu/src/working_color.wgsl) shares
 unassociation, interpolation and perceptual conversion across scene composition,
-effects and materials. Positive alpha is divided directly; only zero coverage
-returns black. Native scene/image interpolation uses explicit Float32 texel loads.
+effects and materials. `working_unassociate`, `working_ratio` and
+`working_has_color` treat alpha below the smallest normal Float32
+(`WORKING_MIN_ALPHA`) as empty. Vulkan does not define division by smaller
+values, and smudge and blender pickups drive faint halo alpha that low within
+one stroke: a GPU that keeps denormals returns NaN there, and the pickup
+spreads it. The publication checks and resampling filters use the same
+threshold. Material passes clamp the alpha they write, and wet and watercolor
+passes the canvas alpha they deposit over, to [0, 1], treating smaller alpha
+as transparent. The Perceptual `working_encode` and
+`working_decode` keep their positive-alpha test: they run for every composited
+pixel, and any further test in them measurably slows painting on Mali-G52.
+Native scene/image interpolation uses explicit Float32 texel loads.
 Before interpolating extreme components, the sampler scales both endpoints by
 one binary exponent and bounds the result to their interval before restoring
 that scale. Opposite finite HDR endpoints cannot overflow their difference.

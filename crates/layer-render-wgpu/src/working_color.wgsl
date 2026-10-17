@@ -1,7 +1,8 @@
 // Shared color arithmetic for compositing and materials. Scalar wetness/slop
 // thresholds are separate from the question of whether pigment has coverage.
+const WORKING_MIN_ALPHA:f32=1.17549435e-38;
 fn working_unassociate(c:vec4<f32>)->vec3<f32> {
-    if c.a>0. {return c.rgb/c.a;}
+    if working_has_color(c.a) {return c.rgb/c.a;}
     return vec3<f32>(0.);
 }
 // The Perceptual composite holds premultiplied encoded values, enc(c/a)*a.
@@ -14,15 +15,15 @@ fn working_decode(c:vec4<f32>)->vec4<f32> {
     return vec4<f32>(sdr_decode(c.rgb/c.a,WORKING_SPACE)*c.a,c.a);
 }
 fn working_has_color(alpha:f32)->bool {
-    return alpha>0.;
+    return alpha>=WORKING_MIN_ALPHA;
 }
 fn working_ratio(value:f32,denominator:f32)->f32 {
-    if denominator>0. {return value/denominator;}
+    if denominator>=WORKING_MIN_ALPHA {return value/denominator;}
     return 0.;
 }
 fn working_clamp(c:vec4<f32>)->vec4<f32> {
-    if c.a<=0. {return vec4<f32>(0.);}
-    return vec4<f32>(c.rgb,clamp(c.a,0.,1.));
+    if !working_has_color(c.a) {return vec4<f32>(0.);}
+    return vec4<f32>(c.rgb,min(c.a,1.));
 }
 fn working_mix(a:vec3<f32>,b:vec3<f32>,amount:f32)->vec3<f32> {
     if amount==0. {return a;}

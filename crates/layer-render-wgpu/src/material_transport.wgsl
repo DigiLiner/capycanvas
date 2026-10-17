@@ -218,7 +218,7 @@ fn watercolor_fragment(
     first: u32,
     count: u32,
 ) -> MaterialOutput {
-    let original = canvas_load(world);
+    let original = working_clamp(canvas_load(world));
     let state_coordinate = clamp(
         vec2<i32>(floor(fragment_position)),
         vec2<i32>(0),
@@ -351,7 +351,7 @@ fn wet_fragment(
     first: u32,
     count: u32,
 ) -> MaterialOutput {
-    let original = canvas_load(world);
+    let original = working_clamp(canvas_load(world));
     let state_coordinate = clamp(
         vec2<i32>(floor(fragment_position)),
         vec2<i32>(0),

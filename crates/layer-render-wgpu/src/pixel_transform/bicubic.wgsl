@@ -15,7 +15,7 @@ fn bicubic(local:vec2<f32>)->vec4<f32> {
             row+=value*wx[i];
             if (i==1 || i==2) && (j==1 || j==2) {
                 low=min(low,value);high=max(high,value);
-                if value.a>0. {brightest=max(brightest,value.rgb/value.a);}
+                if working_has_color(value.a) {brightest=max(brightest,value.rgb/value.a);}
             }
         }
         sum+=row*wy[j];
