@@ -7,6 +7,7 @@ common-save = Kaydet
 common-preparing-brush = Fırça hazırlanıyor…
 common-preparing-canvas = Tuval hazırlanıyor…
 common-canvas-init-failed = Tuval başlatılamadı
+common-gpu-unsupported = Bu cihazın grafik işlemcisi (GPU) { common-app-name } uygulamasını çalıştıramıyor. Sistemi veya grafik sürücüsünü güncellemek yardımcı olabilir.
 common-restart-canvas = Tuvali yeniden başlat
 common-action-failed = Bu eylem tamamlanamadı
 common-editor-closed = Düzenleyici kapandı

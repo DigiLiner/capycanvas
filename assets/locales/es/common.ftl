@@ -7,6 +7,7 @@ common-save = Guardar
 common-preparing-brush = Preparando pincel…
 common-preparing-canvas = Preparando lienzo…
 common-canvas-init-failed = No se pudo iniciar el lienzo
+common-gpu-unsupported = El procesador gráfico (GPU) de este dispositivo no puede ejecutar { common-app-name }. Actualizar el sistema o el controlador gráfico puede ayudar.
 common-restart-canvas = Reiniciar lienzo
 common-action-failed = No se pudo completar esta acción
 common-editor-closed = El editor se ha cerrado

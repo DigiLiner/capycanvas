@@ -7,6 +7,7 @@ common-save = Enregistrer
 common-preparing-brush = Préparation du pinceau…
 common-preparing-canvas = Préparation de la toile…
 common-canvas-init-failed = Impossible d’initialiser la toile
+common-gpu-unsupported = Le processeur graphique (GPU) de cet appareil ne peut pas exécuter { common-app-name }. Mettre à jour le système ou le pilote graphique peut aider.
 common-restart-canvas = Redémarrer la toile
 common-action-failed = Impossible de terminer cette action
 common-editor-closed = L’éditeur a été fermé

@@ -7,6 +7,7 @@ common-save = Speichern
 common-preparing-brush = Pinsel wird vorbereitet…
 common-preparing-canvas = Leinwand wird vorbereitet…
 common-canvas-init-failed = Leinwand konnte nicht initialisiert werden
+common-gpu-unsupported = Der Grafikprozessor (GPU) dieses Geräts kann { common-app-name } nicht ausführen. Ein Update des Systems oder Grafiktreibers kann helfen.
 common-restart-canvas = Leinwand neu starten
 common-action-failed = Diese Aktion konnte nicht abgeschlossen werden
 common-editor-closed = Der Editor wurde geschlossen

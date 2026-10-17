@@ -64,6 +64,18 @@ impl GpuContext {
     }
 }
 
+pub fn unsupported_adapter(adapter: &wgpu::Adapter, limits: &wgpu::Limits) -> Option<String> {
+    let info = adapter.get_info();
+    if info.device_type == wgpu::DeviceType::Cpu && !layer_render_wgpu::software_adapter_tests() {
+        return Some(format!("{} is a software renderer, not a hardware GPU", info.name));
+    }
+    let mut short = Vec::new();
+    limits.check_limits_with_fail_fn(&adapter.limits(), false, |name, required, allowed| {
+        short.push(format!("{name} is {allowed}, needs {required}"))
+    });
+    (!short.is_empty()).then(|| format!("{} does not meet the canvas limits: {}", info.name, short.join(", ")))
+}
+
 #[derive(Clone, Default)]
 pub struct DeviceWatch {
     lost: Arc<OnceLock<String>>,
@@ -123,6 +135,21 @@ mod tests {
         assert!(gpu.device() == headless.device());
         gpu.shader_input();
         assert!(gpu.shader_wait_ms() > 0.);
+    }
+
+    #[test]
+    fn adapters_short_of_canvas_limits_are_refused_with_a_plain_reason() {
+        let gpu = WgpuRasterizer::new_native_headless(DocumentColor::default()).unwrap();
+        let adapter = gpu.adapter();
+        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        assert_eq!(unsupported_adapter(adapter, &limits), None);
+        let beyond = wgpu::Limits { max_bind_groups: adapter.limits().max_bind_groups + 1, ..limits };
+        let cause = unsupported_adapter(adapter, &beyond).unwrap();
+        assert!(cause.contains("max_bind_groups"), "{cause}");
+        let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
+        let message = layer_ui::gpu_unsupported(&localization, &cause);
+        assert!(message.starts_with("This device’s graphics processor (GPU) can’t run Capy Canvas."), "{message}");
+        assert!(message.ends_with(&cause));
     }
 
     #[test]

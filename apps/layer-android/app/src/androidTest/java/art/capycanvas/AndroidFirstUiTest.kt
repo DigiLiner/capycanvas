@@ -8,9 +8,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.core.app.ActivityScenario
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -89,22 +92,19 @@ class AndroidFirstUiTest {
             val cause = IllegalStateException("Vulkan attach diagnostic\n" + (1..60).joinToString("\n") {
                 "Driver detail $it: preserved native cause for renderer initialization"
             })
-            val diagnostic = cause.toString()
+            val diagnostic = cause.message!!
             CanvasHost.beforeGpuAttachForTest = { throw cause }
             try {
                 ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                     val activity = scenario.activity()
                     val host = activity.host
-                    host.awaitMain("original startup failure", 20_000, { "failure=${host.failure}" }, compose) {
-                        host.failure != null
-                    }
+                    compose.waitUntil(20_000) { host.failure != null && host.workspaceManager?.optBoolean("ready") == true }
                     compose.runOnIdle {
                         assertEquals(diagnostic, host.failure)
                         host.dispatch(obj("type" to "set_theme", "theme" to theme))
                     }
-                    host.awaitMain("diagnostic theme", 10_000, { "state=${host.snapshot?.optJSONObject("state")}" }, compose) {
-                        host.snapshot?.optJSONObject("state")?.optString("theme") == theme
-                    }
+                    compose.waitUntil(10_000) { host.snapshot?.optJSONObject("state")?.optString("theme") == theme }
+                    assertNull(host.actionError)
                     compose.onNodeWithText(host.bootstrap!!.getString("canvas_init_failed")).assertIsDisplayed()
                     val detail = compose.onNodeWithText(diagnostic, useUnmergedTree = true)
                     detail.assertIsDisplayed().assertTextEquals(diagnostic)
@@ -122,7 +122,7 @@ class AndroidFirstUiTest {
                     val epoch = host.snapshot!!.getJSONObject("state").getJSONObject("document_file").getLong("epoch")
                     CanvasHost.beforeGpuAttachForTest = null
                     restart.performClick()
-                    host.awaitMain("canvas restart", 60_000, { "failure=${host.failure}; ready=${host.surfaceReady}" }, compose) {
+                    compose.waitUntil(60_000) {
                         host.failure == null && host.surfaceReady && host.snapshot?.optBoolean("brush_ready") == true
                     }
                     compose.runOnIdle {
@@ -132,6 +132,31 @@ class AndroidFirstUiTest {
                     compose.onNodeWithTag("canvas-placeholder").assertDoesNotExist()
                 }
             } finally { CanvasHost.beforeGpuAttachForTest = null }
+        }
+    }
+
+    @Test fun unsupportedGpuExplainsTheDeviceInTheCanvasArea() {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("unsupportedGpu") == "true")
+        for (theme in listOf("light", "dark")) {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                val activity = scenario.activity()
+                val host = activity.host
+                compose.waitUntil(60_000) { host.failure != null && host.workspaceManager?.optBoolean("ready") == true }
+                compose.runOnIdle { host.dispatch(obj("type" to "set_theme", "theme" to theme)) }
+                compose.waitUntil(10_000) { host.snapshot?.optJSONObject("state")?.optString("theme") == theme }
+                assertNull(host.actionError)
+                val failure = host.failure!!
+                assertTrue(failure, failure.startsWith("This device’s graphics processor (GPU) can’t run Capy Canvas. Updating the system or graphics driver may help.\n\n"))
+                assertFalse(failure, failure.contains("java.lang"))
+                compose.onNodeWithText(host.bootstrap!!.getString("canvas_init_failed")).assertIsDisplayed()
+                compose.onNodeWithText(failure, useUnmergedTree = true).assertIsDisplayed()
+                compose.waitForIdle()
+                val screen = InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot()
+                File(activity.getExternalFilesDir(null), "unsupported-gpu-$theme.png").outputStream().use {
+                    screen.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+                screen.recycle()
+            }
         }
     }
 }

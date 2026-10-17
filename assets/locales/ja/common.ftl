@@ -10,6 +10,7 @@ common-preparing-brush = ブラシを準備中…
 common-preparing-canvas = キャンバスを準備中…
 
 common-canvas-init-failed = キャンバスを初期化できませんでした
+common-gpu-unsupported = このデバイスのグラフィックプロセッサ（GPU）では{ common-app-name }を実行できません。システムまたはグラフィックドライバーを更新すると解決する場合があります。
 
 common-restart-canvas = キャンバスを再起動
 

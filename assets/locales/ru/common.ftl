@@ -7,6 +7,7 @@ common-save = Сохранить
 common-preparing-brush = Подготовка кисти…
 common-preparing-canvas = Подготовка холста…
 common-canvas-init-failed = Не удалось инициализировать холст
+common-gpu-unsupported = Графический процессор (GPU) этого устройства не может запустить { common-app-name }. Может помочь обновление системы или графического драйвера.
 common-restart-canvas = Перезапустить холст
 common-action-failed = Не удалось выполнить действие
 common-editor-closed = Редактор закрыт

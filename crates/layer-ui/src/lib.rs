@@ -22,7 +22,7 @@ pub(crate) use variants;
 
 pub mod localization;
 pub use fluent_bundle::FluentArgs;
-pub use localization::{LanguagePreference, LanguageRequest, LanguageTransition, Localizer, LocalizerPreparation, MessageId, UiLanguage, resolve_language, resolve_launch_language, launch_localization, BootstrapView, bootstrap_view, file_open_failure};
+pub use localization::{LanguagePreference, LanguageRequest, LanguageTransition, Localizer, LocalizerPreparation, MessageId, UiLanguage, resolve_language, resolve_launch_language, launch_localization, BootstrapView, bootstrap_view, file_open_failure, gpu_unsupported};
 #[cfg(test)]
 mod localization_catalog_tests;
 #[cfg(test)]

@@ -393,6 +393,7 @@ impl App {
             // Readiness belongs to this GPU initialization, including hosts
             // whose shared state otherwise defaults to eager rendering.
             self.host.startup = Default::default();
+            let unsupported = |cause: &str| layer_ui::gpu_unsupported(self.host.session.localization(), cause);
             let adapter =
                 pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                     compatible_surface: Some(&surface),
@@ -400,8 +401,11 @@ impl App {
                     power_preference: wgpu::PowerPreference::None,
                     apply_limit_buckets: false,
                 }))
-                .map_err(error)?;
+                .map_err(|e| unsupported(&e.to_string()))?;
             let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+            if let Some(cause) = layer_host::unsupported_adapter(&adapter, &limits) {
+                return Err(unsupported(&cause));
+            }
             let (device, queue) =
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Android"),

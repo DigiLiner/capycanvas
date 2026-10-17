@@ -7,6 +7,7 @@ common-save = Lưu
 common-preparing-brush = Đang chuẩn bị cọ…
 common-preparing-canvas = Đang chuẩn bị khung vẽ…
 common-canvas-init-failed = Không thể khởi tạo khung vẽ
+common-gpu-unsupported = Bộ xử lý đồ họa (GPU) của thiết bị này không thể chạy { common-app-name }. Cập nhật hệ thống hoặc trình điều khiển đồ họa có thể giúp khắc phục.
 common-restart-canvas = Khởi động lại khung vẽ
 common-action-failed = Không thể hoàn tất thao tác này
 common-editor-closed = Trình chỉnh sửa đã đóng

@@ -10,6 +10,7 @@ common-preparing-brush = 브러시 준비 중…
 common-preparing-canvas = 캔버스 준비 중…
 
 common-canvas-init-failed = 캔버스를 초기화할 수 없습니다
+common-gpu-unsupported = 이 기기의 그래픽 프로세서(GPU)에서는 { common-app-name }를 실행할 수 없습니다. 시스템이나 그래픽 드라이버를 업데이트하면 해결될 수 있습니다.
 
 common-restart-canvas = 캔버스 다시 시작
 

@@ -7,6 +7,7 @@ common-save = บันทึก
 common-preparing-brush = กำลังเตรียมพู่กัน…
 common-preparing-canvas = กำลังเตรียมผืนผ้าใบ…
 common-canvas-init-failed = เริ่มผืนผ้าใบไม่ได้
+common-gpu-unsupported = หน่วยประมวลผลกราฟิก (GPU) ของอุปกรณ์นี้เรียกใช้ { common-app-name } ไม่ได้ การอัปเดตระบบหรือไดรเวอร์กราฟิกอาจช่วยได้
 common-restart-canvas = เริ่มผืนผ้าใบใหม่
 common-action-failed = ทำการกระทำนี้ไม่สำเร็จ
 common-editor-closed = ตัวแก้ไขปิดแล้ว

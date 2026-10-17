@@ -46,9 +46,14 @@ unexpected diagnostics stay literal. Color, profile, proof and export controls
 relabel retained scalar copy without revalidating dirty input, reading profile
 storage, decoding ICC data or restarting image jobs.
 
-Canvas startup failures retain the original native exception beneath the shared
-title. Diagnostic text is selectable and scrolls within a bounded height, leaving
-Restart canvas reachable. Action failures keep their cause in the existing
+Canvas startup failures show the native cause beneath the shared title.
+Before creating the device, `layer_host::unsupported_adapter` refuses a missing
+Vulkan adapter, a software renderer or limits below the renderer's request; the
+message then leads with the shared plain-language reason. Diagnostic text is
+selectable and scrolls within a bounded height, leaving Restart canvas reachable.
+`AndroidFirstUiTest#unsupportedGpuExplainsTheDeviceInTheCanvasArea` opts in
+with `-e unsupportedGpu true`; run it on an emulator started with
+`-gpu host -feature -Vulkan`. Action failures keep their cause in the existing
 dismissible notice.
 
 File and conversion jobs use `inspection::on_worker` for named threads with an

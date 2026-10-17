@@ -14,6 +14,7 @@ common-preparing-brush = Menyiapkan kuas…
 common-preparing-canvas = Menyiapkan kanvas…
 
 common-canvas-init-failed = Tidak dapat menginisialisasi kanvas
+common-gpu-unsupported = Prosesor grafis (GPU) perangkat ini tidak dapat menjalankan { common-app-name }. Memperbarui sistem atau driver grafis mungkin membantu.
 
 common-restart-canvas = Mulai ulang kanvas
 

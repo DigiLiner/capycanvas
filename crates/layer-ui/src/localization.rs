@@ -150,6 +150,10 @@ pub fn file_open_failure(l: &Localizer, name: &str) -> String {
     l.format(MessageId::COMMON_OPEN_FILE_FAILED, &args)
 }
 
+pub fn gpu_unsupported(l: &Localizer, cause: &str) -> String {
+    format!("{}\n\n{cause}", l.text(MessageId::COMMON_GPU_UNSUPPORTED))
+}
+
 /// Immutable language context. Arguments are literal text without bidi isolation marks.
 pub struct Localizer {
     language: UiLanguage,

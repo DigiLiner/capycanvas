@@ -10,6 +10,7 @@ common-preparing-brush = 正在準備筆刷…
 common-preparing-canvas = 正在準備畫布…
 
 common-canvas-init-failed = 無法初始化畫布
+common-gpu-unsupported = 此裝置的圖形處理器（GPU）無法執行 { common-app-name }。更新系統或顯示卡驅動程式可能會有幫助。
 
 common-restart-canvas = 重新啟動畫布
 
