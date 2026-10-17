@@ -28,6 +28,11 @@ Progress notes, validation reports and other work records are not committed
   elements of other editors and painting apps, the reader fixes and model changes
   that made it so, and the slot each later feature uses, with its
   [source reports](object-content-extensions).
+- [Vector layer performance](vector-performance-research.md): scale targets,
+  lessons from Vello, Graphite, Inkscape, Chromium, WebRender and other editors,
+  and the data structures, coverage kernel, caching, gesture and panel rules
+  that keep large vector layers fast on the tier devices, with its
+  [source reports](vector-performance-research).
 - [Layers: illustration workflows and panel design](layers-research.md).
 - [Professional illustration and manga gaps](illustration-manga-gap-audit.md):
   current capabilities and recommended behavior, with detailed daily-editing and

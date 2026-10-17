@@ -4,7 +4,8 @@
 
 Research date: **2026-09-25**, source baseline **`796f7f5b`**. Code audit and
 design: **2026-10-14**, source baseline **`15f01f80e`**. Extension audit and
-model revision: **2026-10-16**, source baseline **`86a0fd0e4`**.
+model revision: **2026-10-16**, source baseline **`86a0fd0e4`**. Performance
+revision: **2026-10-16**, source baseline **`7c71b731c`**.
 
 This record holds the research behind vector layers and the design chosen after
 auditing the code. It describes intended work, not implemented capabilities.
@@ -13,6 +14,8 @@ auditing the code. It describes intended work, not implemented capabilities.
 - **Design:** sections 1, 2.2 and 6–9 are the audited design. Sections 7.2–7.4
   were revised after the [extension audit](object-content-extensions-research.md),
   which checked the model against SVG, Inkscape, Illustrator and other editors.
+  Sections 7.2 and 7.5 were revised after the [performance research](vector-performance-research.md),
+  which set scale targets and the caching, kernel and gesture rules.
   The design replaces the earlier recommendation, which proposed three things:
   - replaying recorded samples through the brush engine;
   - a `VectorIndex` beside `SelectionIndex`;
@@ -69,7 +72,7 @@ The research combines eight streams. Their full write-ups, with every source URL
   - Unknown item kinds and properties either preserve the file or, when flagged ignorable, are kept or dropped by fixed rules.
 - **Rendering:** one new GPU coverage kernel with exact-area antialiasing and nonzero or even-odd fill rules, fed by CPU curve flattening and stroke expansion.
   - It also replaces the selection contour filler and the Figure distance-field shapes.
-  - Layers render at native density first; crisp zoom is the next renderer milestone.
+  - Layers evaluate at the display level the view needs, never finer than native at first; crisp zoom adds finer levels next.
 - **Tools:** the Clip Studio families Capy already uses.
   - On vector layers, Figure (U) makes editable shapes and a new Path variant.
   - Move (O) selects paths, and a new Edit Points tool (A) edits anchors and handles.
@@ -105,6 +108,11 @@ The research combines eight streams. Their full write-ups, with every source URL
    - a two-sided width profile;
    - a forward rule for anchor kinds;
    - item basics (hidden, name, locked) and live shapes from the first release.
+9. **A performance study revised the renderer** (2026-10-16), against Vello, Graphite, Inkscape, Chromium, WebRender, other editors and Mali guidance ([performance research](vector-performance-research.md)):
+   - vector content evaluates at the display level, not at native density;
+   - a per-tile coverage kernel without atomics writes each pixel once;
+   - gestures keep their state out of the document, and drags split the layer by paint order;
+   - records share geometry by `Arc`, and chunks carry summaries.
 
 ---
 
@@ -522,9 +530,11 @@ Style    nested records: [Fill { paint } | Stroke { paint, width, cap, join, mit
   - Portable saves omit it; private sessions keep it. Selecting an item makes its layer the current layer.
 - **Undo:**
   - `Edit::RecordChange<VectorObject>` replaces the record.
-  - The record stream lives in immutable chunks of at most 64 records (`Arc<[Record]>`, End markers included), and an edit copies only the chunks it touches.
+  - The record stream lives in immutable chunks of at most 64 records (End markers included), and an edit copies only the chunks it touches.
+  - Records hold path geometry by `Arc`, so copying a chunk is shallow. In memory, a path over 256 anchors keeps them in `Arc` runs of 256, so an anchor edit copies one run.
+  - Each chunk carries a summary computed once: bounds, counts, flags and style keys. Select All, mixed property values and layer bounds then cost O(chunks).
   - Parents and subtree ranges are derived on load and after each edit, never stored.
-  - History charges chunks by `Arc` identity, as it charges selection contours today.
+  - History charges chunks and geometry by `Arc` identity, as it charges selection contours today.
 - **Later content in the same layer:** images, groups, text and instances are further item kinds in this tree, not a second container (7.9 and the [extension research](object-content-extensions-research.md)).
 
 ### 7.3 Paths and appearance
@@ -737,15 +747,20 @@ is fixed now, because changing it later needs a new resource type:
 
 ### 7.5 Rendering
 
+The [performance research](vector-performance-research.md) sets the targets,
+costs and caching rules behind this section.
+
 **Coverage kernel**
 - **CPU side (geometry only):**
-  - Flattens curves into line segments within 1/8 output pixel.
-  - Expands strokes into closed outlines with joins, caps, the miter limit and the width profile.
-  - Rebases each 256-pixel window in F64, then uploads F32 segments.
+  - Expands strokes into closed outlines with joins, caps, the miter limit and the width profile, cached per geometry and stroke style.
+  - Flattens outlines into line segments within 1/4 pixel of the evaluated level, cached per outline and level.
+  - Bins each path's segments into the level's 16-pixel tiles with a backdrop per tile row, in tile-relative fixed point.
+  - Builds the ordered list of path spans for each dirty tile, and drops commands beneath an opaque solid fill.
 - **GPU side:**
-  - Accumulates exact signed area and cover per pixel in fixed point. Integer atomics make the result deterministic.
-  - Prefix-sums each row and maps winding to coverage with the nonzero or even-odd rule.
-  - Writes premultiplied RGBA32F in the working space: each path's paint entries in list order, source-over in item order inside the isolated layer.
+  - One dispatch per vector layer per frame, and one 64-thread workgroup per tile.
+  - Each pixel starts from its backdrop and sums the exact signed area of each path's segments in the tile. It uses no atomics or workgroup memory. It then maps winding to coverage with the nonzero or even-odd rule.
+  - Composites each path's paint entries source-over in registers, in item order inside the isolated layer, and writes each premultiplied RGBA32F pixel once.
+  - A fixed command and segment order makes the result deterministic on a device.
   - Groups with opacity, blend, masks or effects (V2 and later) render into their own window first; groups without them add no pass.
 - **Known limit:** area accumulation over-covers edge pixels where a stroke outline overlaps itself, such as at tight inner joins. Skia and vello accept the same limit; fixtures must bound it.
 - **It replaces two existing renderers** (replace, don't layer):
@@ -755,32 +770,43 @@ is fixed now, because changing it later needs a new resource type:
 
 **Integration**
 - **Leaves:** dispatch at `object_tile`, `Compositor::objects` and thumbnails. Masks, effects and clipping above the leaf are unchanged.
-- **Caches and damage:**
-  - Flattened segments are cached per path, keyed by the path's `Arc` identity and tolerance level.
-  - Tile bins (256-pixel tile → path indices) are derived on load and updated incrementally.
-  - Layer results are cached per window, as object results are today.
-  - Edits diff old and new paths by `Arc` identity. Damage is the union of the changed paths' old and new bounds: hull plus stroke reach, including miters, plus 1 pixel. Reordering damages only the reordered paths' bounds. Vector edits never fall back to compositing everything.
-- **Prerequisite:** key the document-wide refinement and batching opt-outs (6.3) on pending image work before vector layers ship.
+- **Evaluation level:**
+  - The display leaf evaluates vector content at the level the view requests.
+  - The native leaf evaluates level 0 only for exports, captures, color sampling and effects that need native input.
+  - Pixel caches are regenerable display-level windows within the display budget.
+- **Derived layout and damage:**
+  - A `VectorLayout` per vector object holds the item table, the tile bins (256-pixel tile → item IDs) and the geometry caches.
+  - It updates from the chunk diff and is shared by rendering, picking, the eraser and snapping.
+  - Edits diff chunks by `Arc` identity, then records. Damage is the union of the changed items' old and new bounds: hull plus stroke reach, including miters, plus 1 pixel. It is collected as page sets.
+  - Reordering damages only the reordered items' bounds. Vector edits never fall back to compositing everything.
+- **Prerequisites:**
+  - Key the document-wide refinement and batching opt-outs (6.3) on pending image work.
+  - Make the edit, frame and autosave costs listed in the [performance research](vector-performance-research.md#5-capy-today-what-breaks-at-scale) proportional to what changed.
 - **Live feedback:**
   - A path under construction, or a freehand line in progress, is a provisional item in the engine, not an authored record.
   - The same kernel renders it in the layer's stack position and damages only the changed tail. Prediction extends the tail as it does for brushes.
   - At pen-up or Finish, the fitted path replaces it in the same submission.
   - The [instant stroke feedback](../reference/instant-stroke-feedback.md) budget applies.
   - Drawing live through the G-Pen contact renderer instead was rejected: a vector layer has no paint target, and the edge would change at pen-up.
-- **Drags:**
-  - Moving selected paths re-renders the damaged windows from cached segments with the transient transform applied.
-  - If that misses the tier rate, split the layer into below, moving and above caches during the drag.
+- **Gestures:**
+  - Drags, anchor drags, erasing and scrubs keep their state in tool modifiers and commit one edit at release.
+  - At gesture start, the layer splits by paint order into three ranges:
+    - Below and above the affected items: cached.
+    - The affected range: renders once into a moving cache that the transient affine places each frame. If unaffected items interleave with it, it re-renders each frame instead.
+  - At release, the moved items re-derive, visible windows first, while the moving cache stays on screen.
 - **Density:**
-  - Vector layers compose at native density, as image objects do.
+  - Until crisp zoom, no level is finer than native.
   - The editing overlay (outlines of selected paths, anchors and handles) is drawn at screen resolution, so editing precision does not depend on density.
-  - Crisp zoom (V3) adds above-native plan levels for object content in both evaluators. Paint and spatial effects keep native boundaries ([GA design §9.1](object-layer-ga-design.md#91-authored-source-versus-evaluated-result)), and image objects benefit too.
+  - Crisp zoom (V3) adds levels finer than native for object content in both evaluators. Paint and spatial effects keep native boundaries ([GA design §9.1](object-layer-ga-design.md#91-authored-source-versus-evaluated-result)), and image objects benefit too.
   - Until then, Capy claims "resize without quality loss", not "sharp at any zoom".
-- **Overlay markers:** `CursorSegment` gains a round marker for handle ends and hollow and filled squares for unselected and selected anchors. This is a shared renderer change.
+- **Overlay markers:**
+  - `CursorSegment` gains a round marker for handle ends, and hollow and filled squares for unselected and selected anchors. This is a shared renderer change.
+  - Outlines of large selections render once into an overlay cache.
 - **Picking (CPU, F64):**
   - Tile bins give candidates, tested front to back.
   - A stroke hits within half its width plus a screen-pixel tolerance, using the view scale.
   - A fill hits where its winding is inside under the path's rule.
-- **Memory:** all work is windowed and bounded, with no full-layer intermediates.
+- **Memory:** all work is windowed and bounded, with no full-layer intermediates and no vector pixels kept at native density.
 
 ### 7.6 Tools and interaction
 
@@ -922,15 +948,16 @@ themes, after the GTK review, using the image-object journeys of
 
 | Milestone | Scope | Exit |
 |---|---|---|
-| **V0. Foundation** (no UI) | kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, the record framing, value classes, unknown-data rules and number registry, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. Damage per path, tile bins, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control |
-| **V1. Lines and fills** | New Vector Layer and its badge; Move path selection, marquee, transforms and arrange; Edit Points; Figure shapes with live-shape recipes and Path on both layer kinds; Properties style; G-Pen and Monoline vector lines; the vector eraser; Fill and Lasso Fill on vector layers; compound, join, close, split and reverse; copy and paste; refusal text; all hosts and catalogs | The 7.10 journeys pass on every host in both themes. Path drag, anchor drag, freehand latency and pan and zoom over a 5,000-path layer are measured on all three tiers |
+| **V0. Foundation** (no UI) | First, the [kernel microbenchmark](vector-performance-research.md#82-kernel-microbenchmark-first-step-of-v0) on the tier devices. kurbo after `cargo deny` and a wasm size check. `VectorObject`, the object handle enum, records, resources, the record framing, value classes, unknown-data rules and number registry, validation and history. The coverage kernel replacing the selection filler and Figure distance fields. The derived layout, damage per item, hit-testing, the F64 reference renderer and render contracts. Refinement opt-outs keyed on images, and edit, frame and autosave costs proportional to what changed | Fixtures round-trip; both evaluators match the reference; selection and figure regressions pass on regenerated baselines; selection and figure motion rows show no regression against a matched control; [headless work counts](vector-performance-research.md#81-headless-scaling-tests) stay flat between 10,000 and 50,000 paths |
+| **V1. Lines and fills** | New Vector Layer and its badge; Move path selection, marquee, transforms and arrange; Edit Points; Figure shapes with live-shape recipes and Path on both layer kinds; Properties style; G-Pen and Monoline vector lines; the vector eraser; Fill and Lasso Fill on vector layers; compound, join, close, split and reverse; copy and paste; refusal text; all hosts and catalogs | The 7.10 journeys pass on every host in both themes. The [device rows](vector-performance-research.md#83-device-rows-v1-exit) pass on all three tiers |
 | **V2. Organize and exchange** | Groups with Group and Ungroup, merge, Convert Stroke to Shape, Offset, dashes, linear and radial gradients, align and distribute, anchor snapping, an eraser that subtracts from fills, SVG export, import and paste | SVG round trip through Inkscape and a browser; merge fuzzing under time and size limits |
 | **V3. Crisp zoom** (can start after V0) | Above-native density for object content in both evaluators | Pan and zoom rows hold their tier rates with vector and image layers |
 | **V4. Ink cleanup and brush paths** | Trim to intersection, Width tool, Simplify, reshape, brush paths | Brush-path replay equals live drawing, extending the existing determinism tests |
 
 Qualification extends the [GA workloads](object-layer-ga-design.md#143-performance-qualification):
-many small strokes in one layer, one path with 50,000 anchors, active anchor and
-path drags, high zoom, newly exposed regions and mixed paint and vector stacks.
+many small strokes in one layer, one path with 32,000 anchors, active anchor and
+path drags, high zoom, newly exposed regions and mixed paint and vector stacks
+([targets](vector-performance-research.md#2-scale-targets)).
 Counts are workload inputs, not limits.
 
 ---
