@@ -353,7 +353,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
 
   await navigate(host.url);
   await call("Network.setCacheDisabled", { cacheDisabled: false });
-  const previousAssets = await evaluate("[document.querySelector('script[src*=\"/app.\"]').src, document.querySelector('link[rel=stylesheet]').href]");
+  const previousAssets = await evaluate("[document.querySelector('script[src*=\"/start.\"]').src, document.querySelector('link[rel=stylesheet]').href]");
   assert.equal(await evaluate("globalThis.capyTestRelease ?? null"), null);
   // Focus, viewport and status revisions can legitimately change in another
   // tab. Compare drawing identity/content revisions and document tabs instead.
@@ -400,7 +400,7 @@ export async function checkPwa({ call, evaluate, settle, canvasPixels, host, sto
     assert.equal(await oldEvaluate(snapshot), oldState, "Worker activation preserves the old editor state");
     assert.equal(await oldEvaluate("globalThis.capyTestRelease ?? null"), null);
     assert.equal(await evaluate("navigator.serviceWorker.getRegistration().then(r=>!!r.waiting)"), false);
-    const nextAssets = await evaluate("[document.querySelector('script[src*=\"/app.\"]').src, document.querySelector('link[rel=stylesheet]').href]");
+    const nextAssets = await evaluate("[document.querySelector('script[src*=\"/start.\"]').src, document.querySelector('link[rel=stylesheet]').href]");
     assert.ok(nextAssets.every((url, i) => url !== previousAssets[i]));
     assert.ok((await evaluate("caches.keys()")).includes(keys.find(key => key.startsWith(`capycanvas:${host.url}:`))), "Open old tabs retain their package");
     await offline(true);

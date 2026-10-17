@@ -79,12 +79,12 @@ export async function checkEditor({call,evaluate,settle,canvasPixels}) {
   await settle();
   assert.ok(await evaluate('document.querySelector("#workspace").classList.contains("zen-hidden")'));
   await invoke("zen_mode");
-  await evaluate(`(()=>{const group=layerApp.app.layout(innerWidth,innerHeight).groups.find(g=>g.panels.includes("navigator"));window.editorColumnGroup=group.id;layerApp.dispatch({type:"customize",action:{type:"set_column_collapsed",group:group.id,collapsed:true}});const column=layerApp.app.layout(innerWidth,innerHeight).collapsed.find(c=>c.groups.some(g=>g.group===group.id)).id;layerApp.dispatch({type:"customize",action:{type:"set_column_drawers",column,drawers:true}});})()`);
+  await evaluate(`(()=>{const group=layerApp.app.layout(innerWidth,innerHeight).groups.find(g=>g.panels.includes("navigator"));window.editorColumnGroup=group.id;window.editorColumnWidth=group.bounds.width;layerApp.dispatch({type:"customize",action:{type:"set_column_collapsed",group:group.id,collapsed:true}});const column=layerApp.app.layout(innerWidth,innerHeight).collapsed.find(c=>c.groups.some(g=>g.group===group.id)).id;layerApp.dispatch({type:"customize",action:{type:"set_column_drawers",column,drawers:true}});})()`);
   await settle();
   await click('.collapsed-column [data-panel="navigator"]');
   await wait('!!document.querySelector(".content-drawer .navigator-overview")');
   await settle();
-  await wait('document.querySelector(".content-drawer")?.getBoundingClientRect().width>=271');
+  await wait('document.querySelector(".content-drawer")?.getBoundingClientRect().width>=editorColumnWidth');
 
   await click('.content-drawer [data-navigator-command="zoom_out"]');
   await pointer("#canvas",.5,.5);
@@ -104,7 +104,7 @@ export async function checkEditor({call,evaluate,settle,canvasPixels}) {
   await settle();
   await wait('!!document.querySelector(".content-drawer[data-drawer=tool] .color-wheel")');
   await evaluate('new Promise(r=>setTimeout(r,200))');
-  assert.ok(await evaluate('document.querySelector(".content-drawer[data-drawer=tool]").getBoundingClientRect().width>=280'),"Nested content drawer uses measured toolbar anchor");
+  assert.ok(await evaluate('document.querySelector(".content-drawer[data-drawer=tool]").getBoundingClientRect().width>=editorColumnWidth'),"Nested content drawer uses measured toolbar anchor");
   await pointer("#canvas",.5,.5);
   await wait('!document.querySelector(".content-drawer[data-drawer=tool]")');
   await evaluate('layerApp.dispatch({type:"restore_workspace",workspace:editorWorkspace})');
@@ -194,9 +194,10 @@ export async function checkEditor({call,evaluate,settle,canvasPixels}) {
   // localStorage key is only a migration input. Verify the Commands panel
   // remains available after a completed save/reload. The profile is isolated.
   await wait('JSON.parse(layerApp.app.workspace_view()).ready && !JSON.parse(layerApp.app.workspace_view()).busy && !JSON.parse(layerApp.app.workspace_view()).dirty');
+  const reloadedFrom = await evaluate("performance.timeOrigin");
   await call("Page.reload", {ignoreCache: true});
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  await wait('window.layerApp?.startupTimes.complete != null',60000);
+  for (;;) try { await wait(`performance.timeOrigin !== ${reloadedFrom} && window.layerApp?.startupTimes.complete != null`,60000); break; }
+    catch (error) { if (!/navigated|context|Cannot find/i.test(String(error))) throw error; }
   await wait('JSON.parse(layerApp.app.workspace_view()).ready && !JSON.parse(layerApp.app.workspace_view()).busy');
   assert.ok(await evaluate('!!layerApp.app.workspace_persistence().layout.panels.find(p=>p.id==="commands")'));
   assert.ok(await evaluate('!!document.querySelector(".commands-panel .tile-button")'));
