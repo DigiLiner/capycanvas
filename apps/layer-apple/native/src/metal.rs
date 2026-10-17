@@ -209,7 +209,7 @@ impl MetalHost {
                 std::thread::Builder::new()
                     .name("capy-renderer".into())
                     .stack_size(8 * 1024 * 1024)
-                    .spawn_scoped(scope, || context.rasterizer(color, &options, false).map(Box::new))
+                    .spawn_scoped(scope, || context.rasterizer(color, &options, false))
                     .map_err(|e| e.to_string())?
                     .join()
                     .map_err(super::panic_diagnostic)?

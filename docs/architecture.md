@@ -62,6 +62,8 @@ target. Pending raster operations retain the earlier revision they need to repla
 Android, Apple and Windows use `NativeHost`, in `layer-host`, to share session and
 renderer integration. GTK and web integrate `UiSession` directly. The host layer
 is not another document model and does not own native surfaces or widgets.
+The shared native GPU factory keeps renderers on the heap during construction
+and transfer to their owning sessions, leaving room on native thread stacks.
 
 ## From a pen event to a frame
 

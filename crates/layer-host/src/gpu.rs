@@ -47,7 +47,7 @@ impl GpuContext {
         color: DocumentColor,
         options: &RendererOptions,
         finish_cache: bool,
-    ) -> Result<WgpuRasterizer, String> {
+    ) -> Result<Box<WgpuRasterizer>, String> {
         let (adapter, device, queue) = (
             self.adapter.clone(),
             self.device.clone(),
@@ -115,6 +115,24 @@ impl DeviceWatch {
 mod tests {
     use super::*;
     use layer_render::CanvasRenderer;
+
+    #[test]
+    fn native_renderer_factory_leaves_stack_for_its_caller() {
+        let color = DocumentColor::default();
+        let reference = WgpuRasterizer::new_native_headless(color).unwrap();
+        let context = GpuContext::of(&reference);
+        std::thread::Builder::new()
+            .name("native-renderer-factory".into())
+            .stack_size(640 * 1024)
+            .spawn(move || {
+                let renderer = context.rasterizer(color, &RendererOptions::default(), false).unwrap();
+                assert_eq!(renderer.document_color(), color);
+                assert!(renderer.device() == &context.device);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 
     #[test]
     fn renderer_factory_admits_input_and_follows_host_ui_color() {

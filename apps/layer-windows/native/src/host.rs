@@ -339,7 +339,7 @@ impl CapyHost {
         let (retired, change) = self
             .native
             .session
-            .replace_renderer(layer_host::Renderer(Some(renderer.into())))?;
+            .replace_renderer(layer_host::Renderer(Some(renderer)))?;
         self.native.apply_change(revision, change);
         if let Some(service) = self.documents.as_mut().and_then(|d| d.recovery.as_mut()) { service.retire_renderer(retired); } else { drop(retired); }
         if self.device_is_lost() {

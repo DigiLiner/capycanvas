@@ -19,7 +19,8 @@ On Windows 11, install:
   Windows App SDK installation are unnecessary.
 - [Rust stable](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
   with the **`x86_64-pc-windows-msvc` host toolchain**, including on ARM64 PCs.
-  The client builds x64; adding the x64 target to an ARM64 host is insufficient.
+  Run the installer with `--default-host x86_64-pc-windows-msvc`. The client builds
+  x64; adding the x64 target to an ARM64 host is insufficient.
 
 Unless `nuget.exe` is already on `PATH`, download the official CLI to the location
 the build script searches:
@@ -51,6 +52,7 @@ The script restores the NuGet packages pinned in
 [`packages.config`](../../apps/layer-windows/packages.config) into ignored
 `artifacts/windows/packages`, builds the Rust DLL and then the WinUI app into
 `artifacts/windows/Release`, and prints the path of `CapyCanvas.exe`.
+For a Debug build, omit `-Configuration Release`; the output is `artifacts/windows/Debug`.
 `-OutputDirectory` builds elsewhere, `-PackagesDirectory` reuses another restore
 and `-SkipRestore` skips it. `-ControlFixture` and `-SoftwareAdapterTests` build
 the [control reviews](#control-reviews) and the [VM fixture build](windows-vm.md#ui-fixtures-on-the-software-adapter).
@@ -431,7 +433,7 @@ registration and menu actions in both themes.
 | Where | Checks |
 | --- | --- |
 | Linux or Windows | `cargo test --locked -p layer-host -p layer-ui -p layer-workspace -p layer-windows --lib` and `cargo clippy --locked -p layer-windows --all-targets -- -D warnings` |
-| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: build, native input queue tests, Rust unit tests and the `d3d12_` document tests. On Linux: `tools/windows-vm/windows-vm.py check`. |
+| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: build, native input queue tests, Rust unit tests and the `d3d12_` document tests on the Microsoft software adapter. On Linux: `tools/windows-vm/windows-vm.py check`. |
 | Windows desktop | The `exercise-*.ps1` fixtures for the changed area. On Linux: `tools/windows-vm/windows-vm.py fixtures <name>`. |
 | Hardware D3D12 | `cargo test --locked -p layer-windows --lib d3d12_ -- --ignored --test-threads=1`, which adds the HDR and color round-trip tests; [GPU reconstruction](#gpu-reconstruction); renderer tests with `LAYER_GPU_INDEX`; performance. |
 

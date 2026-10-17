@@ -273,7 +273,7 @@ impl WgpuRasterizer {
         queue: wgpu::Queue,
         directory: Option<&std::path::Path>,
         color: DocumentColor,
-    ) -> Result<Self, GpuRasterError> {
+    ) -> Result<Box<Self>, GpuRasterError> {
         let device = PipelineDevice::cached(device, &adapter, directory);
         Self::native_staged_on_device(adapter, device, queue, color)
     }
@@ -288,7 +288,7 @@ impl WgpuRasterizer {
     ) -> Result<Self, GpuRasterError> {
         let mut device = PipelineDevice::cached(self.device().clone(), &self.adapter, directory);
         device.source_samples = self.device.source_samples.clone();
-        Self::native_staged_on_device(self.adapter.clone(), device, self.queue.clone(), color)
+        Self::native_staged_on_device(self.adapter.clone(), device, self.queue.clone(), color).map(|renderer| *renderer)
     }
 
     /// Portable native integer SDR backing with Float32 working pixels.
@@ -298,7 +298,7 @@ impl WgpuRasterizer {
         queue: wgpu::Queue,
         color: DocumentColor,
     ) -> Result<Self, GpuRasterError> {
-        Self::native_staged_on_device(adapter, device.into(), queue, color)
+        Self::native_staged_on_device(adapter, device.into(), queue, color).map(|renderer| *renderer)
     }
 
     pub(crate) fn native_staged_on_device(
@@ -306,7 +306,7 @@ impl WgpuRasterizer {
         device: PipelineDevice,
         queue: wgpu::Queue,
         color: DocumentColor,
-    ) -> Result<Self, GpuRasterError> {
+    ) -> Result<Box<Self>, GpuRasterError> {
         let device = device.with_working_space(color.space).with_depth(color.depth);
         let mut r = Self::from_wgpu_inner(adapter, device, queue, Initialization::Interactive)?;
         r.startup.as_mut().unwrap().host_catalog_pending = !cfg!(target_arch = "wasm32");
@@ -336,7 +336,7 @@ impl WgpuRasterizer {
         let device = device.with_working_space(color.space).with_depth(color.depth);
         let mut r = Self::from_wgpu_inner(adapter, device, queue, Initialization::Snapshot)?;
         r.initialize_native(color)?;
-        Ok(r)
+        Ok(*r)
     }
 
     fn initialize_native(&mut self, color: DocumentColor) -> Result<(), GpuRasterError> {

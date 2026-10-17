@@ -140,7 +140,7 @@ impl OpenEnvironment {
             std::thread::sleep(Duration::from_millis(2));
         }
         let mut candidate =
-            UiSession::from_project_localized(Renderer(Some(gpu.into())), project, None, self.viewport, self.platform, self.localization.clone())?;
+            UiSession::from_project_localized(Renderer(Some(gpu)), project, None, self.viewport, self.platform, self.localization.clone())?;
         candidate.frame(0, 0)?;
         check()?;
         Ok(Box::new(candidate))

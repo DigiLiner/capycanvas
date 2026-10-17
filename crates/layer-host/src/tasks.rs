@@ -463,7 +463,7 @@ mod tests {
         .rasterizer(DocumentColor::default(), &Default::default(), true)
         .unwrap();
         host.session
-            .replace_renderer(Renderer(Some(replacement.into())))
+            .replace_renderer(Renderer(Some(replacement)))
             .unwrap();
         assert!(task.adopt(&mut host, false, || true).is_err());
         assert_eq!(

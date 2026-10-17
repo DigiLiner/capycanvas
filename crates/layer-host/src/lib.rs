@@ -1258,7 +1258,7 @@ mod tests {
         let reference = layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let gpu = GpuContext::of(&reference).rasterizer(Default::default(), &RendererOptions::default(), true).unwrap();
         let mut host = NativeHost::new(platform).unwrap();
-        *host.session = UiSession::from_project(Renderer(Some(gpu.into())), document, None, [640, 480], platform).unwrap();
+        *host.session = UiSession::from_project(Renderer(Some(gpu)), document, None, [640, 480], platform).unwrap();
         host.startup = Default::default();
         host.resize(640, 480, 1.).unwrap();
         (reference, host)
@@ -1424,7 +1424,7 @@ mod tests {
             frame_step(&mut host, &clock, deadline);
         };
         let replacement = GpuContext::of(&reference).rasterizer(Default::default(), &RendererOptions::default(), true).unwrap();
-        host.session.replace_renderer(Renderer(Some(replacement.into()))).unwrap();
+        host.session.replace_renderer(Renderer(Some(replacement))).unwrap();
         host.startup = Default::default();
         while !(host.startup.canvas_ready && host.session.background_readback_idle()
             && host.session.engine().backend().0.as_ref().is_some_and(|gpu| gpu.ui_readback_ready())) { frame_step(&mut host, &clock, deadline); }
@@ -1604,7 +1604,7 @@ mod tests {
         let reference=layer_render_wgpu::WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let gpu=GpuContext::of(&reference).rasterizer(Default::default(),&RendererOptions::default(),true).unwrap();
         let mut host=NativeHost::new(layer_ui::Platform::Android).unwrap();
-        *host.session=UiSession::from_project(Renderer(Some(gpu.into())),document,None,[640,480],layer_ui::Platform::Android).unwrap();
+        *host.session=UiSession::from_project(Renderer(Some(gpu)),document,None,[640,480],layer_ui::Platform::Android).unwrap();
         let id=layer_ui::occurrence_token(layer);
         let before=host.session.engine().document().working.clone();
         let menu=host.query(json!({"type":"layer_menu","id":id,"mask":false})).unwrap();

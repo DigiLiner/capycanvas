@@ -1115,7 +1115,7 @@ impl WgpuRasterizer {
             PipelineDevice::from(device).with_working_space(space),
             queue,
             initialization,
-        )
+        ).map(|renderer| *renderer)
     }
 
     fn from_wgpu_inner(
@@ -1123,7 +1123,7 @@ impl WgpuRasterizer {
         device: PipelineDevice,
         queue: wgpu::Queue,
         initialization: Initialization,
-    ) -> Result<Self, GpuRasterError> {
+    ) -> Result<Box<Self>, GpuRasterError> {
         if adapter.get_info().device_type == wgpu::DeviceType::Cpu && !software_adapter_tests() {
             return Err(GpuRasterError::HardwareAdapterRequired);
         }
@@ -1244,7 +1244,7 @@ impl WgpuRasterizer {
         let changed_cells = Some(changed_cells::ChangedCells::new(&device));
         let portable_blend = portable_blend::Renderer::new(&device);
         let transforms = Some(paint_transform::PaintTransforms::new(&device));
-        let mut renderer = Self {
+        let mut renderer = Box::new(Self {
             snapshot_worker: initialization == Initialization::Snapshot,
             snapshot_cancelled: None,
             startup: None,
@@ -1396,7 +1396,7 @@ impl WgpuRasterizer {
             portable_blend,
             last_submission: None,
             metrics: GpuRasterMetrics::default(),
-        };
+        });
         if initialization == Initialization::Headless { renderer.install_builtin_masks()?; }
         if initialization == Initialization::Interactive {
             renderer.upload_mask(&AssetId::from(WHITE_MASK_ASSET), 1, 1, 1, &[255])?;

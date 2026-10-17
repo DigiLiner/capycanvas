@@ -434,7 +434,7 @@ impl App {
             let (_, change) = self
                 .host
                 .session
-                .replace_renderer(layer_host::Renderer(Some(renderer.into())))?;
+                .replace_renderer(layer_host::Renderer(Some(renderer)))?;
             self.host.apply_change(previous, change);
         }
         let gpu = self.host.session.renderer_mut().0.as_ref().unwrap();

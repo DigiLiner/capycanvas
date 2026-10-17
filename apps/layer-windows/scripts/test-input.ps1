@@ -14,6 +14,24 @@ if($LASTEXITCODE -ne 0){throw 'Canvas queue test failed.'}
 
 & {
  $tokens=$null;$errors=$null
+ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'build.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw 'Build script parse failed'}
+ $selection=$ast.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -in '$installation','$toolset'},$true)
+ if($selection.Count -ne 2){throw 'Expected installation and toolset selection'}
+ foreach($case in @(@{version='17.14.0';toolset='v143'},@{version='18.11.0';toolset='v145'})){
+  $vswhere={
+   if($args -contains '-format'){
+    ConvertTo-Json -InputObject @(@{installationPath='C:\Visual Studio\C++';installationVersion=$case.version}) -Compress
+   }elseif($args[-1] -eq 'installationPath'){'C:\Visual Studio\C++'}
+   else{'19.0.0'}
+  }
+  foreach($statement in $selection){Invoke-Expression $statement.Extent.Text}
+  if($toolset -ne $case.toolset){throw 'Toolset came from another Visual Studio installation'}
+ }
+}
+
+& {
+ $tokens=$null;$errors=$null
  $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'exercise-localization.ps1'),[Text.Encoding]::UTF8)
  $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
  if($errors.Count){throw 'Localization fixture parse failed'}

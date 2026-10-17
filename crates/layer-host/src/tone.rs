@@ -260,7 +260,7 @@ mod tests {
             .rasterizer(document.composition().color, &Default::default(), true)
             .unwrap();
         let mut replacement =
-            UiSession::new(Renderer(Some(renderer.into())), document, [32, 24], layer_ui::Platform::Mac).unwrap();
+            UiSession::new(Renderer(Some(renderer)), document, [32, 24], layer_ui::Platform::Mac).unwrap();
         replacement.inherit_window_state(&host.session).unwrap();
         *host.session = replacement;
         assert!(tone.current(&host).is_none());

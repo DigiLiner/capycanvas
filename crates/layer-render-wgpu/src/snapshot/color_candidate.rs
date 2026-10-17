@@ -57,7 +57,7 @@ impl SnapshotGpu {
         #[cfg(not(target_arch = "wasm32"))]
         renderer.finish_startup_cache();
         Ok(ColorCanvas {
-            renderer: Some(renderer),
+            renderer: Some(*renderer),
             context,
             document,
             view,

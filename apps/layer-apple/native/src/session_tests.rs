@@ -219,7 +219,7 @@ fn apple_fill_selection_survives_background_checkpoint_undo_redo_and_restart() {
         let first_presented = App::new(platform);
         let gpu = native_renderer();
         let staged = layer_host::GpuContext::of(&gpu).rasterizer(Default::default(), &Default::default(), false).unwrap();
-        unsafe { &mut *first_presented.0 }.host.session.renderer_mut().0 = Some(staged.into());
+        unsafe { &mut *first_presented.0 }.host.session.renderer_mut().0 = Some(staged);
         unsafe { &mut *first_presented.0 }.host.prepare_canvas_frame(2_000_000_000, 2_000_000_000, true).unwrap();
         assert!(!unsafe { &*first_presented.0 }.host.startup.complete);
         let task = open(&first_presented, &path, false);

@@ -14,12 +14,12 @@ if (!$PackagesDirectory) { $PackagesDirectory = Join-Path $repo 'artifacts/windo
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $repo "artifacts/windows/$Configuration" }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio Build Tools with C++ and Windows application development support.' }
-$installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio Build Tools with Desktop development with C++ and Windows SDK 10.0.26100.0.' }
+$installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json
 if (!$installation) { throw 'No Visual Studio C++ toolchain was found.' }
-Import-Module (Join-Path $installation 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
-Enter-VsDevShell -VsInstallPath $installation -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
-$toolset = if ([int](& $vswhere -latest -products '*' -property installationVersion).Split('.')[0] -ge 18) { 'v145' } else { 'v143' }
+Import-Module (Join-Path $installation.installationPath 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
+Enter-VsDevShell -VsInstallPath $installation.installationPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+$toolset = if (([version]$installation.installationVersion).Major -ge 18) { 'v145' } else { 'v143' }
 if (!$SkipRestore) {
     $nuget = Get-Command nuget -ErrorAction SilentlyContinue
     $nugetPath = if ($nuget) {$nuget.Source} else {Join-Path $env:USERPROFILE '.local/tools/nuget/nuget.exe'}

@@ -94,7 +94,7 @@ impl Activation {
             .gpu
             .as_ref()
             .ok_or("The window GPU is unavailable; restart the canvas")?;
-        self.renderer = Some(gpu.rasterizer(self.color, &self.options, true)?.into());
+        self.renderer = Some(gpu.rasterizer(self.color, &self.options, true)?);
         Ok(())
     }
     pub fn take_renderer(&mut self) -> Option<Box<WgpuRasterizer>> {
