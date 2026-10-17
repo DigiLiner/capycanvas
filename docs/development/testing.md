@@ -432,6 +432,18 @@ are your task, and remove an entry when you fix it.
   `accepted_photo_keeps_raw_lod_for_sparse_watercolor_and_transform_reopen`
   repairs 70 pages where the fixture expects fewer than 64. Keep these assertions
   when checking renderer changes.
+- Renderer failures reproduced on unmodified `0eb2b6720` on Linux:
+  `statistics_extreme_finite_rgb_uses_f64_classification_without_unassociation_overflow`,
+  `statistics_rgb_exact_correction_matches_f64_at_boundary_neighbors` and
+  `waveform_reuses_exact_rgb_and_luminance_classification_for_hdr_and_tiny_alpha`
+  report different classification counts;
+  `levels_statistics_constant_empty_hdr_tiny_alpha_and_cancellation_are_explicit`
+  finds no usable pixels for Auto;
+  `native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear` reports
+  "first prediction must force cold work"; and
+  `a_pointwise_filter_cannot_follow_the_documents_blending` validates the
+  program it expects to reject. `repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set`
+  fails there as on Iris Xe.
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
   `repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set`
   does not produce the expected resident output;
@@ -452,6 +464,10 @@ are your task, and remove an entry when you fix it.
   `native_workspace_motion_input`, and `native_workspace_switcher_input`
   (intermittent). `native_workspace_resize_input` presents below its rate
   threshold under the runner's `color-mgmt`.
+- GTK `native_image_object_clipboard_and_paste_into` looks for Paste Into in
+  the Edit menu itself, where Edit › Paste Special holds it.
+  `native_image_object_rows_picking_and_transforms` expects a held touch on a
+  row body to reorder the rows, which touch leaves to scrolling.
 - GTK `native_document_tabs_history_storage_and_close`: the reactivated camera's
   translation differs from the original by about 3e-5.
   `native_embedded_proof_replacement_preserves_local_copy_and_saves_one_profile`
@@ -472,6 +488,21 @@ are your task, and remove an entry when you fix it.
   `toolbarManagerSelectsConfirmsDeletesAndRestores`,
   `filterLayerIconsUsePackagedNames` and
   `toolbarConfigurationAndGroupCollapseUseTheSharedDefault`.
+- Android `AndroidInteractionTest` expectations that differ from the shared
+  behaviour, on MovinkPad 11 and MovinkPad Pro 14: `#healingAcrossDevices`
+  and the Web `--heal` journey look for a Heal toolbar tile, but the Photo
+  toolbar holds Heal and Spot Healing in one Healing tool slot;
+  `#clipboardCopyPasteAcrossDevices` reads
+  the pasted image's own affine, while the paste position is in its layer
+  offset; `#layerHandleLongPressDragCancelAndUndo` expects a finger or pen hold
+  on a row body to start a reorder, which touch and pen leave to scrolling and
+  the menu; `#dodgeBurnAndFrequencySeparationAcrossDevices` expects a radius
+  above 6 at 45 % of the slider, where its square mapping gives 4.2;
+  `#canvasEdgeDoubleTapUsesRecursiveDefaultWidths` expects fixed column widths
+  where a double tap restores the automatic width.
+- Android `AndroidInteractionTest#navigationPreferencesControlWheel` taps the
+  wheel choice while Preferences slides in, and reads the option's bounds
+  before its menu is laid out.
 - Android `AndroidHostTest#touchNavigationHistoryCancellationAndSurfaceRecovery`
   passes recovery and continued drawing, then cannot find the portrait Settings
   label `Pen & Input` on TCL TAB 11 Gen 2.
