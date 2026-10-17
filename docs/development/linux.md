@@ -494,9 +494,10 @@ stay system requirements, so this is a native bundle for compatible distribution
 patches, licenses, checksums and a rebuild script.
 
 The output holds the executable, desktop entry, AppStream metainfo, `.capy` MIME
-definition, icon, runtime filters, GTK runtime and notices. Photo codecs are compiled in, so a
-moved package needs no codec path. Staging replaces only a directory carrying
-the generated `.capy-package` marker. The GTK and Web packagers share
+definition, icon, runtime filters, GTK runtime and notices. The app icon uses a
+single SVG viewport so Qt launchers render the shared capybara mark. Photo codecs
+are compiled in, so a moved package needs no codec path. Staging replaces only a
+directory carrying the generated `.capy-package` marker. The GTK and Web packagers share
 `tools/build/about.toml`, need original license texts including vendored
 dependencies, and accept `LAYER_CARGO_ABOUT` for the notice generator.
 

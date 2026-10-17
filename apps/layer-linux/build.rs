@@ -9,14 +9,13 @@ fn main() {
         .collect();
     names.sort();
     let mut xml = String::from("<gresources><gresource prefix=\"/dev/layer/icons\">");
-    let mark = std::fs::read_to_string(format!("{source}/layer-zen-looking-up-symbolic.svg"))
-        .unwrap()
-        .replace(
-            "width=\"24\" height=\"24\"",
-            "x=\"36\" y=\"36\" width=\"440\" height=\"440\" color=\"#f6f5f4\"",
-        );
+    let mark = std::fs::read_to_string(format!("{source}/layer-zen-looking-up-symbolic.svg")).unwrap();
+    let view: Vec<f64> = mark.split_once("viewBox=\"").unwrap().1.split('"').next().unwrap()
+        .split_whitespace().map(|value| value.parse().unwrap()).collect();
+    assert!(view.len() == 4 && view[2] > 0. && view[2] == view[3]);
+    let geometry = mark.split_once('>').unwrap().1.rsplit_once("</svg>").unwrap().0;
     let icon = output.join("art.capycanvas.CapyCanvas.svg");
-    std::fs::write(&icon, format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"512\" height=\"512\"><rect width=\"512\" height=\"512\" rx=\"76.8\" fill=\"#767676\"/>{mark}</svg>")).unwrap();
+    std::fs::write(&icon, format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"512\" height=\"512\"><rect width=\"512\" height=\"512\" rx=\"76.8\" fill=\"#767676\"/><g color=\"#f6f5f4\" transform=\"translate(36 36) scale({}) translate({} {})\">{geometry}</g></svg>", 440. / view[2], -view[0], -view[1])).unwrap();
     xml.push_str(&format!(
         "<file alias=\"scalable/apps/art.capycanvas.CapyCanvas.svg\">{}</file>",
         icon.display()

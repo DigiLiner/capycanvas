@@ -82,6 +82,26 @@ function fixture(t) {
   return root;
 }
 
+test("the generated application icon has one viewport and preserves the shared capybara", t => {
+  const root = fixture(t), build = join(root, "build-icon");
+  execFileSync("rustc", ["--edition=2024", new URL("./build.rs", import.meta.url).pathname, "-o", build]);
+  execFileSync(build, [], {
+    cwd: new URL(".", import.meta.url), env: { ...process.env, OUT_DIR: root },
+  });
+  execFileSync("python3", ["-c", `
+import sys, xml.etree.ElementTree as ET
+icon, mark = [ET.parse(path).getroot() for path in sys.argv[1:]]
+ns = "{http://www.w3.org/2000/svg}"
+assert icon.tag == ns + "svg" and not icon.findall(".//" + ns + "svg"), "Launcher icons need a single SVG viewport"
+assert icon.get("width") == icon.get("height") == "512"
+assert icon.find(ns + "rect").get("fill") == "#767676"
+group = icon.find(ns + "g")
+assert group.get("color") == "#f6f5f4"
+assert [path.attrib for path in group.iter(ns + "path")] == [path.attrib for path in mark.iter(ns + "path")]
+assert list(group.iter(ns + "path")), "The app icon must contain the capybara"
+`, join(root, "art.capycanvas.CapyCanvas.svg"), new URL("../layer-web/icons/layer-zen-looking-up-symbolic.svg", import.meta.url).pathname]);
+});
+
 test("staging only clears an owned generated directory", t => {
   const root = fixture(t), output = join(root, "package");
   mkdirSync(output);
