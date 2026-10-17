@@ -1479,3 +1479,26 @@ fn slider_stamp_retries_admission_errors_and_mismatched_replies() {
     assert!(missed.pending && missed.alpha.is_empty(),"client with a missed result retries");
     assert_eq!(s.renderer_mut().requests.len(),count+2);
 }
+
+#[test]
+fn toolbar_brush_metadata_updates_while_raster_backing_is_pending() {
+    for platform in Platform::ALL {
+        for wrapped in [false, true] {
+            let mut s = session(platform);
+            let checkpoint = s.engine.checkpoint();
+            s.renderer_mut().settling = true;
+            assert!(s.engine.raster_backing_pending());
+            for value in [13.5, 62., 174.] {
+                let action = UiAction::SetToolSetting { id: "size".into(), value };
+                let action = if wrapped { UiAction::ToolbarEdit {
+                    context: s.state().toolbar_context(), action: Box::new(action),
+                } } else { action };
+                s.dispatch(action).unwrap();
+                assert_eq!(s.state().brush.diameter, value as f32, "{platform:?}, wrapped={wrapped}");
+                assert_eq!(s.engine.configured_brush().diameter, value as f32);
+                assert!(s.deferred_edits.is_empty());
+                assert_eq!(s.engine.checkpoint(), checkpoint);
+            }
+        }
+    }
+}

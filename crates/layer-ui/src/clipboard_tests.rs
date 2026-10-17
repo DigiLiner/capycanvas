@@ -265,19 +265,29 @@ mod clipboard_checks {
         assert_live_artwork_eq(s.engine.document(), &original);
     }
 
-    fn contact_sizes_across_brush_change(deferred: bool, during_contact: bool) -> Vec<Vec<[f32; 2]>> {
+    fn contact_sizes_across_brush_change(deferred: bool, during_contact: bool, toolbar: bool) -> Vec<Vec<[f32; 2]>> {
         let mut s = clip_session();
-        s.dispatch(UiAction::SetBrushSize { value: 19. }).unwrap();
+        let resize = |s: &mut UiSession<Recorder>, value: f32| {
+            let action = if toolbar { UiAction::ToolbarEdit {
+                context: s.state().toolbar_context(),
+                action: Box::new(UiAction::SetToolSetting { id: "size".into(), value: value.into() }),
+            } } else { UiAction::SetBrushSize { value } };
+            s.dispatch(action).unwrap();
+        };
+        resize(&mut s, 19.);
         if deferred {
-            invoke(&mut s, CommandId::AddLayer);
+            if toolbar { s.dispatch(UiAction::SetLayerOpacity { id: None, opacity: 0.5 }).unwrap(); }
+            else { invoke(&mut s, CommandId::AddLayer); }
             s.frame(2, 2).unwrap();
             s.renderer_mut().settling = true;
             shortcut(&mut s, "z");
+            assert!(s.undo_deferred());
         }
+        let context = s.state().toolbar_context();
         pen_at(&mut s, 10, PenPhase::Down, [100., 100.]);
-        if during_contact { s.dispatch(UiAction::SetBrushSize { value: 43. }).unwrap(); }
+        if during_contact { resize(&mut s, 43.); }
         pen_at(&mut s, 11, PenPhase::Up, [110., 100.]);
-        if !during_contact { s.dispatch(UiAction::SetBrushSize { value: 43. }).unwrap(); }
+        if !during_contact { resize(&mut s, 43.); }
         pen_at(&mut s, 20, PenPhase::Down, [150., 100.]);
         pen_at(&mut s, 21, PenPhase::Up, [160., 100.]);
         s.renderer_mut().settling = false;
@@ -293,21 +303,32 @@ mod clipboard_checks {
         assert_eq!(contacts.len(), 2, "both contacts commit without stalling");
         assert_eq!(s.engine.configured_brush().diameter, 43.);
         assert_eq!(s.state.brush.diameter, 43.);
+        if toolbar {
+            assert_eq!(s.state().toolbar_context(), context);
+            let document = s.engine.document();
+            assert_eq!(document.scene().occurrence(document.working.occurrence.unwrap()).unwrap().opacity, 1.);
+        }
         contacts
     }
 
     #[test]
     fn queued_contact_keeps_the_brush_size_from_down_when_size_changes_during_contact() {
-        let immediate = contact_sizes_across_brush_change(false, true);
+        let immediate = contact_sizes_across_brush_change(false, true, false);
         assert_ne!(immediate[0][0], immediate[1][0]);
-        assert_eq!(contact_sizes_across_brush_change(true, true), immediate);
+        for toolbar in [false, true] {
+            assert_eq!(contact_sizes_across_brush_change(false, true, toolbar), immediate);
+            assert_eq!(contact_sizes_across_brush_change(true, true, toolbar), immediate);
+        }
     }
 
     #[test]
     fn queued_contact_brush_size_changes_after_up_apply_to_the_next_contact() {
-        let immediate = contact_sizes_across_brush_change(false, false);
+        let immediate = contact_sizes_across_brush_change(false, false, false);
         assert_ne!(immediate[0][0], immediate[1][0]);
-        assert_eq!(contact_sizes_across_brush_change(true, false), immediate);
+        for toolbar in [false, true] {
+            assert_eq!(contact_sizes_across_brush_change(false, false, toolbar), immediate);
+            assert_eq!(contact_sizes_across_brush_change(true, false, toolbar), immediate);
+        }
     }
 
     #[test]

@@ -2816,3 +2816,20 @@ and are not a matched comparison with this larger viewport.
 
 Run `native_pressure_calibration --tablet` with `LAYER_PRESSURE_MOTION=1` and
 `LAYER_NATIVE_EVENT_MS=8` to repeat the workload.
+
+## Apple native measurements
+
+| Hardware / workload | Current rate and metric | Motion interval p99 | Qualification |
+| --- | --- | --- | --- |
+| M2 Pro Mac: brush-size stamp preview, light | Longest unchanged or unsampled interval: 92.44 ms; prior 1,244.49 ms | Not measured | Four original six-second continuity checks pass; presentation rate unqualified |
+
+The stamp-preview check on 2026-10-17 used an optimized build, a 9504 × 6336
+sRGB 8-bit photo and a 1200 × 870 logical viewport at 2× scale. Recognizing wrapped
+brush settings as metadata removes their wait behind unrelated raster backing.
+One priming and three measured six-second contacts retain the original 250 ms
+continuity bound, exact artwork, authored resources and Undo/Redo checks. During
+73 brush-unready samples, the diameter changed through 59 values. All supplied
+samples arrived in order. This measures control-state continuity; presentation
+FPS, motion p99 and thermal coverage remain unmeasured. Raw before/after results
+are in `artifacts/apple/port-oct13-regenerated/source-audit/current-surface-and-optimized-motion-ready/stamp-delivery-diagnostic/full7-run1`
+and the sibling `stamp-classifier-fixed/full7-run1`.

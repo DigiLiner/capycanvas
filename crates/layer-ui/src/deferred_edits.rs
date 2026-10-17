@@ -10,10 +10,14 @@ pub(super) struct DeferredEdit {
 }
 
 fn configures_brush(action: &UiAction) -> bool {
-    matches!(action, UiAction::SetBrushSize { .. } | UiAction::SetBrushOpacity { .. } | UiAction::SetBrushStrength { .. }
-        | UiAction::SetColor { .. } | UiAction::Color { .. }
-        | UiAction::SetToolSetting { .. } | UiAction::StepToolSetting { .. }
-        | UiAction::ResetToolSetting { .. })
+    match action {
+        UiAction::ToolbarEdit { action, .. } => configures_brush(action),
+        UiAction::SetBrushSize { .. } | UiAction::SetBrushOpacity { .. } | UiAction::SetBrushStrength { .. }
+            | UiAction::SetColor { .. } | UiAction::Color { .. }
+            | UiAction::SetToolSetting { .. } | UiAction::StepToolSetting { .. }
+            | UiAction::ResetToolSetting { .. } => true,
+        _ => false,
+    }
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
