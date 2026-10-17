@@ -1,4 +1,5 @@
 use layer_core::color::source::SourceImage;
+use layer_core::package::session_store::atomic_publish;
 use layer_ui::paper_library::{PAPER_LIBRARY_BYTES, PAPER_LIBRARY_ENTRIES, PaperEntry, PaperLibraryError, paper_identity, valid_paper_id};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -42,7 +43,7 @@ fn read_index(directory: &Path) -> Result<Index, String> {
 
 fn write_index(directory: &Path, index: &Index) -> Result<(), String> {
     std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-    layer_core::atomic_write(&directory.join(INDEX), |file| serde_json::to_writer(file, index).map_err(|e| e.to_string()))
+    atomic_publish(&directory.join(INDEX), |file| serde_json::to_writer(file, index).map_err(|e| e.to_string()), || Ok(()))
 }
 
 fn entries(directory: &Path, index: &Index) -> Vec<PaperEntry> {
@@ -75,7 +76,7 @@ pub fn store(directory: &Path, paper: &SourceImage, name: &str) -> Result<(Strin
         let total = stored.iter().map(|entry| entry.bytes).sum::<u64>() + encoded.len() as u64;
         if stored.len() >= PAPER_LIBRARY_ENTRIES || total > PAPER_LIBRARY_BYTES { return Err(PaperLibraryError::Full); }
         std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-        layer_core::atomic_write(&image(directory, &id), |file| std::io::Write::write_all(file, &encoded).map_err(|e| e.to_string()))?;
+        atomic_publish(&image(directory, &id), |file| std::io::Write::write_all(file, &encoded).map_err(|e| e.to_string()), || Ok(()))?;
         std::fs::write(preview(directory, &id), layer_core::paper::image_preview(paper)?).map_err(|e| e.to_string())?;
         let name = layer_ui::paper_library::paper_name(name).unwrap_or_else(|| id[..8].into());
         index.papers.push(Named { id: id.clone(), name });
@@ -151,6 +152,23 @@ mod tests {
         assert_eq!(delete(&directory, &id).unwrap().iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), [second.as_str()]);
         assert!(load(&directory, &id).is_err());
         assert!(load(&directory, "../index").is_err());
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn locked_index_preserves_paper_names_until_publication_succeeds() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = std::env::temp_dir().join(format!("capy-papers-{}", layer_core::PortableId::random()));
+        let (id, _, _) = import(&directory, &photo(7), "scan", &|| false).unwrap();
+        let path = directory.join(INDEX);
+        let original = std::fs::read(&path).unwrap();
+        let locked = std::fs::OpenOptions::new().read(true).share_mode(1).open(&path).unwrap();
+        assert!(rename(&directory, &id, "Cotton rag").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(list(&directory).unwrap()[0].name, "scan");
+        drop(locked);
+        assert_eq!(rename(&directory, &id, "Cotton rag").unwrap()[0].name, "Cotton rag");
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }

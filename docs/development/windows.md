@@ -11,9 +11,24 @@ upstream features to Windows.
 
 ## Prerequisites
 
-Install Rust stable for `x86_64-pc-windows-msvc`, Visual Studio C++ Build Tools
-with v143 or v145, Windows SDK 10.0.26100.0, PowerShell 7 and the official NuGet
-CLI, on `PATH` or at `~/.local/tools/nuget/nuget.exe`.
+On Windows 11, install:
+
+- [Visual Studio Build Tools](https://aka.ms/vs/18/stable/vs_buildtools.exe): select
+  **Desktop development with C++**, the MSVC x64/x86 build tools (v143 or v145)
+  and **Windows 11 SDK (10.0.26100.0)**. The full Visual Studio IDE and a separate
+  Windows App SDK installation are unnecessary.
+- [Rust stable](https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe)
+  with the **`x86_64-pc-windows-msvc` host toolchain**, including on ARM64 PCs.
+  The client builds x64; adding the x64 target to an ARM64 host is insufficient.
+
+Unless `nuget.exe` is already on `PATH`, download the official CLI to the location
+the build script searches:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE/.local/tools/nuget" | Out-Null
+Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe `
+  -UseBasicParsing -OutFile "$env:USERPROFILE/.local/tools/nuget/nuget.exe"
+```
 
 Painting needs a hardware D3D12 GPU. On Linux, [Windows VMs](windows-vm.md) build
 the client and run the GPU-free tests and the UI fixtures on the software
@@ -22,17 +37,20 @@ the Windows hardware.
 
 ## Build and run
 
-From PowerShell at the repository root:
+Open a new PowerShell terminal after installing Rust so it sees Cargo on `PATH`.
+Windows PowerShell 5.1, included with Windows, is sufficient. From the repository
+root, allow local scripts for this terminal, then build and run:
 
 ```powershell
-./apps/layer-windows/scripts/build.ps1
+Set-ExecutionPolicy -Scope Process RemoteSigned -Force
 ./apps/layer-windows/scripts/build.ps1 -Configuration Release
+& ./artifacts/windows/Release/CapyCanvas.exe
 ```
 
 The script restores the NuGet packages pinned in
 [`packages.config`](../../apps/layer-windows/packages.config) into ignored
 `artifacts/windows/packages`, builds the Rust DLL and then the WinUI app into
-`artifacts/windows/Debug` or `Release`, and prints the path of `CapyCanvas.exe`.
+`artifacts/windows/Release`, and prints the path of `CapyCanvas.exe`.
 `-OutputDirectory` builds elsewhere, `-PackagesDirectory` reuses another restore
 and `-SkipRestore` skips it. `-ControlFixture` and `-SoftwareAdapterTests` build
 the [control reviews](#control-reviews) and the [VM fixture build](windows-vm.md#ui-fixtures-on-the-software-adapter).

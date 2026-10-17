@@ -32,7 +32,7 @@ store first; see [workspace ownership](workspace-ownership.md#startup-always-ado
 
 The paper library keeps each imported paper as `<id>.png`, a gray PNG named by
 the SHA-256 of its samples, with its picker preview in `<id>.preview` and names
-and order in `index.json`
+and order in `index.json`. PNGs and the index use the shared native atomic writer
 ([`papers.rs`](../../crates/layer-host/src/papers.rs)). A lost preview is
 rebuilt from its PNG. Drawings embed the papers they use, so deleting a paper
 changes no drawing.
