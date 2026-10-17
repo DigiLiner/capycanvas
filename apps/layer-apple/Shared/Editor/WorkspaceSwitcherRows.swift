@@ -33,14 +33,23 @@ struct WorkspaceSwitcherRows: View {
         optionTitles = titles; optionCaptions = captions; reorderCaptions = reorder; switchCaptions = switches
     }
     var body: some View {
-        EditorScrollView { content }
+        scroll
             .accessibilityIdentifier("workspace-manager-rows")
             .onAppear { refreshCaptions() }
             .onChange(of: interfaceLanguage) { _, _ in optionTitles = [:]; refreshCaptions() }
             .onChange(of: workspaces.view["rows"].stableKey) { _, _ in refreshCaptions() }
-            .onScrollPhaseChange { _, phase in
-                if phase != .idle && !interaction.contact.held && !interaction.contact.dragging { interaction.cancel() }
-            }
+    }
+    @ViewBuilder private var scroll: some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            EditorScrollView { content }.modifier(EditorScrollActivity(action: scrollStarted))
+        } else {
+            #if os(iOS)
+            EditorScrollView { content.background(NativeScrollObservation(activity: scrollStarted)) }
+            #endif
+        }
+    }
+    private func scrollStarted() {
+        if !interaction.contact.held && !interaction.contact.dragging { interaction.cancel() }
     }
     private var content: some View {
         LazyVStack(spacing: 2) {

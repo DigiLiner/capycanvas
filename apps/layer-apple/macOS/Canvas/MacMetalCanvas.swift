@@ -51,7 +51,7 @@ final class MacCanvasView: NSView {
         }
         frames.canPresent = { [weak self] in self?.window?.occlusionState.contains(.visible) == true }
         frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
-        frames.submittedViewport = { [weak self] in self?.setAccessibilityValue(self?.store.bootstrap["canvas_ready"].string) }
+        frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
     }
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
     override func viewDidMoveToWindow() {
@@ -147,7 +147,7 @@ final class MacCanvasView: NSView {
     private func updateAccessibility() {
         setAccessibilityLabel(store.bootstrap["drawing_canvas"].string)
         setAccessibilityHelp(store.bootstrap["drawing_canvas_help"].string)
-        setAccessibilityValue(store.bootstrap[store.restartingCanvas ? "restarting_canvas" : store.canvasSubmitted ? "canvas_ready" : "starting_canvas"].string)
+        setAccessibilityValue(store.bootstrap[store.restartingCanvas ? "restarting_canvas" : store.canvasReady ? "canvas_ready" : "starting_canvas"].string)
     }
     func stop() {
         documentDelegate.attach(nil)

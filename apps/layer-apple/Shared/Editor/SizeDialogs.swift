@@ -5,9 +5,9 @@ struct SizeDialogs: ViewModifier {
     private var tools: JSON { store.state["layer_tools"] }
     func body(content: Content) -> some View {
         content.sheet(isPresented: presented("canvas_size")) {
-            SizeForm(store: store, kind: .canvas).presentationSizing(.fitted).modifier(EditorPopupPresentation())
+            SizeForm(store: store, kind: .canvas).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }.sheet(isPresented: presented("image_size")) {
-            SizeForm(store: store, kind: .image).presentationSizing(.fitted).modifier(EditorPopupPresentation())
+            SizeForm(store: store, kind: .image).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
         }
     }
     private func presented(_ type: String) -> Binding<Bool> {

@@ -2,9 +2,15 @@ import SwiftUI
 import UIKit
 import ObjectiveC
 
-struct NativePenScroll: UIViewRepresentable {
+struct NativePenScroll: View {
     var showsIndicators = true
     var axes: Axis.Set = .vertical
+    var body: some View { PenScrollHost(showsIndicators: showsIndicators, axes: axes).allowsHitTesting(false) }
+}
+
+private struct PenScrollHost: UIViewRepresentable {
+    let showsIndicators: Bool
+    let axes: Axis.Set
     func makeUIView(context: Context) -> PenScrollView { let view = PenScrollView(); view.showsIndicators = showsIndicators; view.axes = axes; return view }
     func updateUIView(_ view: PenScrollView, context: Context) { view.showsIndicators = showsIndicators; view.axes = axes; view.attach() }
 }

@@ -76,7 +76,7 @@ private struct NavigatorDrawing: View {
                 .onDisappear { if started { send("cancel"); started = false } }
                 .accessibilityElement().accessibilityLabel(store.catalog["native_copy"]["color"]["navigator"].string)
                 .accessibilityAddTraits(.isImage)
-                .accessibilityValue(store.canvasSubmitted && store.snapshot["canvas_ready"].bool ? "Live preview" : "Preparing preview")
+                .accessibilityValue(store.canvasReady ? "Live preview" : "Preparing preview")
                 .accessibilityHint("Drag the work area to move the canvas")
                 .accessibilityIdentifier("navigator-overview")
         }

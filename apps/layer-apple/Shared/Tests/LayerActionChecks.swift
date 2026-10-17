@@ -7,7 +7,7 @@ extension XCTestCase {
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch
         expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
         waitForExpectations(timeout: 30)
-        workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "header-tool-panel", "Layers")).firstMatch)
+        workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "header-tool-panel", "Layers panel")).firstMatch)
         let footer = app.buttons["layer-properties-disclosure"], label = app.staticTexts["layer-properties-disclosure-label"]
         XCTAssertTrue(footer.waitForExistence(timeout: 10))
         let drawer = app.descendants(matching: .any)["tool-drawer"].firstMatch
@@ -23,7 +23,7 @@ extension XCTestCase {
         for _ in 0..<6 {
             let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
             let before = rows.firstMatch.identifier
-            workspaceActivate(app.buttons["layer-New layer"])
+            workspaceActivate(drawer.buttons.matching(NSPredicate(format: "label == %@", "New layer")).firstMatch)
             expectation(for: NSPredicate { _, _ in rows.firstMatch.identifier != before }, evaluatedWith: rows.firstMatch)
             waitForExpectations(timeout: 5)
         }
@@ -37,7 +37,7 @@ extension XCTestCase {
         workspaceActivate(footer)
         expectation(for: NSPredicate { _, _ in label.label == "Layer properties" && abs(drawer.frame.height - grown) <= 2 }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
-        workspaceActivate(app.buttons["layer-New group"])
+        workspaceActivate(drawer.buttons.matching(NSPredicate(format: "label == %@", "New group")).firstMatch)
         expectation(for: NSPredicate(format: "label == %@", "Group properties"), evaluatedWith: label)
         waitForExpectations(timeout: 5)
         attachEditor(in: app, name: "layer-properties-group-\(theme)")

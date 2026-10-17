@@ -1,8 +1,8 @@
 import XCTest
 
 extension XCTestCase {
-    @MainActor func checkCanvasSize(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"dark"}]"#
+    @MainActor func checkCanvasSize(in app: XCUIApplication, theme: String = "dark") {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
         app.launch(); capturePaintEditor(in: app)
         editorMenu(in: app, menu: "Image", id: "canvas_size", label: "Canvas Size…")
         let apply = app.buttons["canvas-size-apply"], message = app.staticTexts["canvas-size-message"]
@@ -17,8 +17,9 @@ extension XCTestCase {
         let topLeft = app.buttons["canvas-size-anchor-top_left"]
         workspaceActivate(topLeft)
         expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: topLeft); waitForExpectations(timeout: 5)
-        workspaceActivate(app.buttons["number-value-canvas-size-width"])
-        app.textFields["number-entry-canvas-size-width"].typeText("2047\n")
+        let width = app.textFields["number-entry-canvas-size-width"]
+        workspaceActivate(width)
+        width.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (width.value as? String)?.count ?? 0) + "2047\n")
         expectation(for: NSPredicate { _, _ in shown(message) == "New size: 2047 × 1536 px" }, evaluatedWith: message)
         waitForExpectations(timeout: 10)
         attachEditor(in: app, name: "canvas-size")
@@ -32,8 +33,8 @@ extension XCTestCase {
 }
 
 extension XCTestCase {
-    @MainActor func checkImageSize(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"dark"}]"#
+    @MainActor func checkImageSize(in app: XCUIApplication, theme: String = "dark") {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
         app.launch(); capturePaintEditor(in: app)
         editorMenu(in: app, menu: "Image", id: "image_size", label: "Image Size…")
         let apply = app.buttons["image-size-apply"], message = app.staticTexts["image-size-message"]
@@ -42,8 +43,9 @@ extension XCTestCase {
         XCTAssertTrue(apply.waitForExistence(timeout: 15), "Image Size opens its dialog")
         XCTAssertFalse(apply.isEnabled, "The current size has nothing to apply")
         XCTAssertTrue(app.descendants(matching: .any)["image-size-resample"].exists)
-        workspaceActivate(app.buttons["number-value-image-size-width"])
-        app.textFields["number-entry-image-size-width"].typeText("2047\n")
+        let width = app.textFields["number-entry-image-size-width"]
+        workspaceActivate(width)
+        width.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (width.value as? String)?.count ?? 0) + "2047\n")
         expectation(for: NSPredicate { _, _ in shown(message).contains("2047") }, evaluatedWith: message)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(apply.isEnabled)

@@ -31,6 +31,17 @@ the arm64 iOS simulator:
 rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
 ```
 
+The iPad app and UI test runner require iPadOS 17.5 or later, including the
+12.9-inch second-generation iPad Pro. On iPadOS 18 and later, scrolling and
+fitted sheets use the current SwiftUI APIs. On iPadOS 17, native scroll
+observation preserves layer offsets and scroll cancellation, and sheet detents
+follow the content height. Passive UIKit bridges opt out of SwiftUI hit testing;
+chrome contact observation stays on the window and converts to editor coordinates.
+Keyboard-only background views have no touch area.
+Fitted Color panels use their natural height without a scroll container on
+iPadOS 17, preserving the entire control target at the same position.
+Both versions use the same renderer and brush quality.
+
 The scripts default to `/Applications/Xcode.app/Contents/Developer`; set
 `DEVELOPER_DIR` if Xcode is elsewhere. A physical iPad also needs Developer Mode,
 pairing, a development certificate and a profile covering the device. A first
@@ -56,6 +67,9 @@ Arguments after the platform are passed to `xcodebuild`.
 - `CAPY_DESTINATION='id=DEVICE_UDID'` selects a device destination.
 - `CAPY_DERIVED_DATA` changes the output directory (default
   `apps/layer-apple/DerivedData`, ignored by Git).
+- iOS Rust output lives in `target/ios-<deployment target>` so a build cannot
+  reuse libraries compiled for a newer minimum OS. `CAPY_RUST_BUILD_ROOT` on
+  the `xcodebuild` command line overrides both the Cargo output and library path.
 - macOS builds are ad-hoc signed unless `CAPY_APPLE_TEAM` is set.
 
 Build both Xcode targets to check Swift types; parsing Swift sources alone does
@@ -377,6 +391,30 @@ deletes afterwards. Both Apple policies run on the Mac with that storage. Point
 filter assets. Fixtures that open windows take focus: run them one at a time and
 never alongside a UI test batch.
 
+`EditorLaunchTests/testIPadCompatibilityJourneys` runs the existing light/dark
+size, color, editor, layer, tab and workspace checks in one XCTest case. Each
+named activity launches a fresh private application and terminates it afterwards.
+This avoids repeated test-runner handoffs on older iPads while retaining the
+individual checks. `testOwnerWorkloadShaderFirstUseBothThemes` similarly groups
+the synthetic painting and history checks; it does not measure physical Pencil
+input or tier performance.
+`testIPadPanelCompatibilityJourneys` runs only the color, layer, tab and workspace
+activities when the size dialogs and editor captures are already verified.
+Its Color and panel-layout activities can also run separately with
+`testIPadColorCompatibilityJourneys` and `testIPadPanelLayoutCompatibilityJourneys`.
+`EditorMenuChecks/testPanelGripTapBounds` checks the adjacent Color button edges
+and panel-grip tap, hold and double tap in both themes.
+`testColorPanelResizeTargets` resizes the Color panel below its natural height
+and checks control bounds and button targets in both themes.
+`testColorEntryKeepsDraftFocus` pauses while typing a partial hex value, then
+finishes the same draft and checks the committed color in both themes.
+
+`tests/canvas-readiness.swift` runs both Apple policies without windows or input.
+It checks that a submitted backdrop stays preparing, then pumps the real renderer
+until document startup updates the native canvas accessibility value without
+another submission. Run it with
+`bash apps/layer-apple/scripts/test-project-files.sh apps/layer-apple/tests/canvas-readiness.swift`.
+
 `tests/drawing-tabs.swift` checks independent drawing history, save destinations,
 recovery, close cancellation, and closing a tab before opening several files.
 Shared Next/Previous drawing requests complete before switching documents, so a
@@ -438,9 +476,9 @@ existing live-language pair and `testNewEditorAfterLastWindowClose` after changi
 focused command ownership or retained windowless copy.
 
 The same pattern pairs `json-lookup`, `reorder-contact`, `estimated-input`,
-`frame-trace` and `drawing-workload-plan` with their `Shared/Bridge` sources
-(`JSON.swift`, `ReorderContact.swift`, `EstimatedInput.swift`, `FrameTrace.swift`
-and `DrawingWorkloadPlan.swift`). Other runners in `scripts/` and `tests/`:
+`frame-trace`, `drawing-workload-plan` and `native-input-gate` with their `Shared/Bridge` sources
+(`JSON.swift`, `ReorderContact.swift`, `EstimatedInput.swift`, `FrameTrace.swift`,
+`DrawingWorkloadPlan.swift` and `NativeInputGate.swift`). Other runners in `scripts/` and `tests/`:
 
 | Runner | Checks |
 | --- | --- |
@@ -449,7 +487,8 @@ and `DrawingWorkloadPlan.swift`). Other runners in `scripts/` and `tests/`:
 | `scripts/test-project-access.py` | Project writes through a file-only App Sandbox grant |
 | `cargo test -p layer-apple tests::session` | Session restart, history, durable removal, preserved unreadable copies, retry beside new work, and new windows adopting unrestored sessions on both policies |
 | `tests/background-expiration.py` | iPad background-task lease ordering |
-| `scripts/test-native-rows.py` | UIKit row scrolling and contacts on one booted iPad simulator (`--fixture scenes` for per-scene cancellation) |
+| `scripts/test-native-rows.py` | UIKit row scrolling and contacts on one booted iPad simulator (`--fixture scenes` for per-scene cancellation, `--fixture scroll` for native offset restoration and nested-scroll observation) |
+| `tests/test_rust_build.py` | Cargo deployment target, output-directory isolation and custom build-root propagation |
 | `scripts/test-workspace-scrolling.py` | Long workspace list on an iPad simulator |
 
 The UIKit fixtures `canvas-modifiers.swift`, `canvas-hover.swift` and
@@ -552,6 +591,10 @@ cancellation and exact Undo/Redo pixels in both themes.
 - On a physical iPad, keep the device awake and unlocked and turn on
   **Settings → Developer → Enable UI Automation**; Developer Mode alone does not
   enable the UI runner.
+- A timeout initiating the test-manager control session before any test starts
+  is an inconclusive harness run. Inspect the result bundle's `testmanagerd.log`;
+  if the iPad still shows Automation Running after cancellation, stop that
+  session on the iPad before starting a fresh run.
 - To test apps already installed on the iPad, set `UseDestinationArtifacts` in
   the `.xctestrun` target with `TestHostBundleIdentifier`,
   `UITargetAppBundleIdentifier` and `TestBundleDestinationRelativePath`. Omit
@@ -560,10 +603,12 @@ cancellation and exact Undo/Redo pixels in both themes.
   bundle during `app.launch()`.
 - Resolve any device-trust or automation and capture permission prompt before
   retrying a failed run. A physical iPad runner that times out while enabling
-  automation is a runner failure, not a product result; it usually means the
-  screen went to sleep. Launching your own test build with
-  `xcrun devicectl device process launch --device DEVICE_ID <bundle id>` wakes
-  it; terminate that process before the next run.
+  automation is an inconclusive harness run. Check screen state and the
+  test-manager authorization/startup logs before retrying. If the same timeout
+  recurs while the device is awake and unlocked, stop repeating runner launches.
+  Launch your own build through `devicectl` and use native component fixtures
+  or Rust tests for independent checks. Record touch journeys as unverified;
+  component input does not establish touch or Pencil delivery.
 
 Known failures on iPad: `testCompactMenuShortcutAcrossPages` (Command-Z) and
 `testSettingsTextSelectionShortcut` (Command-A) fail because XCTest key events

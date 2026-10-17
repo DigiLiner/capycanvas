@@ -131,6 +131,12 @@
 			"path" = "Shared/Bridge/LayerThumbnails.swift";
 			"sourceTree" = "<group>";
 		};
+		"BB7AF9FA56DD3FFB9F4F6F24" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "Shared/Bridge/NativeInputGate.swift";
+			"sourceTree" = "<group>";
+		};
 		"BBF21617B3B4264C57A1DCFA" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -1139,6 +1145,12 @@
 			"path" = "iOS/Platform/NativeReorderInput.swift";
 			"sourceTree" = "<group>";
 		};
+		"E0802EFD5C57C8D4712D71E5" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "iOS/Platform/NativeScrollObservation.swift";
+			"sourceTree" = "<group>";
+		};
 		"50310923A19004D5BF8FDCCF" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -1517,6 +1529,10 @@
 		"6B0751BE169F4C3D5C90AC3B" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "7421D8050D500B65945F860D";
+		};
+		"0F2591623F37CB1DCD69192E" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BB7AF9FA56DD3FFB9F4F6F24";
 		};
 		"619E736FA1D5AF16620B2273" = {
 			"isa" = "PBXBuildFile";
@@ -1970,6 +1986,10 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "B6A91FAD38C90953906B7E60";
 		};
+		"E4BFF5B0AE70A0513070AA61" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "E0802EFD5C57C8D4712D71E5";
+		};
 		"7E69E8F237D3F717B7D32EF1" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "50310923A19004D5BF8FDCCF";
@@ -2066,6 +2086,7 @@
 				"F1F17CE65FE5C65B82BF36FD",
 				"6F4FA0030A689ED177D918DA",
 				"6B0751BE169F4C3D5C90AC3B",
+				"0F2591623F37CB1DCD69192E",
 				"619E736FA1D5AF16620B2273",
 				"6F0060484E19B2CE12D50235",
 				"4B0184040BC6BAE750FE2900",
@@ -2179,6 +2200,7 @@
 				"784DF5E7518C7F88871FE103",
 				"ABD0D5ECA27C81A9AE5F5E9C",
 				"4D74C50F6055C208741B5E50",
+				"E4BFF5B0AE70A0513070AA61",
 				"7E69E8F237D3F717B7D32EF1",
 				"F9C788D506A6E35C3D50DB47",
 			);
@@ -2208,9 +2230,10 @@
 				"ENABLE_USER_SCRIPT_SANDBOXING" = "NO";
 				"SWIFT_OBJC_BRIDGING_HEADER" = "$(SRCROOT)/native/include/CapyApple.h";
 				"ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS" = "NO";
+				"CAPY_RUST_BUILD_ROOT" = "$(SRCROOT)/../../target/ios-$(IPHONEOS_DEPLOYMENT_TARGET)";
 				"LIBRARY_SEARCH_PATHS" = (
 					"$(inherited)",
-					"$(SRCROOT)/../../target/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
+					"$(CAPY_RUST_BUILD_ROOT)/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
 				);
 				"OTHER_LDFLAGS" = (
 					"$(inherited)",
@@ -2231,7 +2254,7 @@
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"CAPY_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
 				"TARGETED_DEVICE_FAMILY" = "2";
-				"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"INFOPLIST_FILE" = "iOS/App/Info.plist";
 				"SUPPORTS_MACCATALYST" = "NO";
 				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
@@ -2254,9 +2277,10 @@
 				"ENABLE_USER_SCRIPT_SANDBOXING" = "NO";
 				"SWIFT_OBJC_BRIDGING_HEADER" = "$(SRCROOT)/native/include/CapyApple.h";
 				"ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS" = "NO";
+				"CAPY_RUST_BUILD_ROOT" = "$(SRCROOT)/../../target/ios-$(IPHONEOS_DEPLOYMENT_TARGET)";
 				"LIBRARY_SEARCH_PATHS" = (
 					"$(inherited)",
-					"$(SRCROOT)/../../target/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
+					"$(CAPY_RUST_BUILD_ROOT)/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
 				);
 				"OTHER_LDFLAGS" = (
 					"$(inherited)",
@@ -2277,7 +2301,7 @@
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"CAPY_RUST_TARGET[sdk=iphonesimulator*]" = "aarch64-apple-ios-sim";
 				"TARGETED_DEVICE_FAMILY" = "2";
-				"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"INFOPLIST_FILE" = "iOS/App/Info.plist";
 				"SUPPORTS_MACCATALYST" = "NO";
 				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
@@ -2651,7 +2675,7 @@
 				"SDKROOT" = "iphoneos";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"TARGETED_DEVICE_FAMILY" = "2";
-				"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"TEST_TARGET_NAME" = "CapyCanvas-iPad";
 				"ARCHS" = "arm64";
@@ -2674,7 +2698,7 @@
 				"SDKROOT" = "iphoneos";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
 				"TARGETED_DEVICE_FAMILY" = "2";
-				"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "17.5";
 				"GENERATE_INFOPLIST_FILE" = "YES";
 				"TEST_TARGET_NAME" = "CapyCanvas-iPad";
 				"ARCHS" = "arm64";
@@ -2799,6 +2823,10 @@
 		"55436AA94D220E06751D12B4" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "7421D8050D500B65945F860D";
+		};
+		"9F0AAFBF82C1E82739643A39" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "BB7AF9FA56DD3FFB9F4F6F24";
 		};
 		"148C70F1CC5981DC4E152176" = {
 			"isa" = "PBXBuildFile";
@@ -3360,6 +3388,7 @@
 				"0EE2F90EBC59E692EFF214BC",
 				"D49FC01895B3ECDA47DD26F8",
 				"55436AA94D220E06751D12B4",
+				"9F0AAFBF82C1E82739643A39",
 				"148C70F1CC5981DC4E152176",
 				"BF4746BC614320FBC6C4846A",
 				"7852969B3EDA1ED63C590B42",
@@ -3505,9 +3534,10 @@
 				"ENABLE_USER_SCRIPT_SANDBOXING" = "NO";
 				"SWIFT_OBJC_BRIDGING_HEADER" = "$(SRCROOT)/native/include/CapyApple.h";
 				"ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS" = "NO";
+				"CAPY_RUST_BUILD_ROOT" = "$(SRCROOT)/../../target";
 				"LIBRARY_SEARCH_PATHS" = (
 					"$(inherited)",
-					"$(SRCROOT)/../../target/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
+					"$(CAPY_RUST_BUILD_ROOT)/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
 				);
 				"OTHER_LDFLAGS" = (
 					"$(inherited)",
@@ -3549,9 +3579,10 @@
 				"ENABLE_USER_SCRIPT_SANDBOXING" = "NO";
 				"SWIFT_OBJC_BRIDGING_HEADER" = "$(SRCROOT)/native/include/CapyApple.h";
 				"ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS" = "NO";
+				"CAPY_RUST_BUILD_ROOT" = "$(SRCROOT)/../../target";
 				"LIBRARY_SEARCH_PATHS" = (
 					"$(inherited)",
-					"$(SRCROOT)/../../target/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
+					"$(CAPY_RUST_BUILD_ROOT)/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)",
 				);
 				"OTHER_LDFLAGS" = (
 					"$(inherited)",
@@ -4036,6 +4067,7 @@
 				"4274D146F93BD2E5209EBA0C",
 				"2515D317A09AD9EE635A76D0",
 				"7421D8050D500B65945F860D",
+				"BB7AF9FA56DD3FFB9F4F6F24",
 				"BBF21617B3B4264C57A1DCFA",
 				"1977B5F8C1B2006D6B09AE77",
 				"D7FEF0DF9F40E7CFC526B00E",
@@ -4204,6 +4236,7 @@
 				"5DD976DC9A32119C714E5268",
 				"208B16FF60C91B23D7EB1593",
 				"B6A91FAD38C90953906B7E60",
+				"E0802EFD5C57C8D4712D71E5",
 				"50310923A19004D5BF8FDCCF",
 				"A448F54CB6160438B9BE6307",
 				"1FEA291CA42DBDBB1ECE030A",

@@ -85,7 +85,8 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
         "CODE_SIGN_STYLE": "Automatic", "SWIFT_VERSION": "5.0", "CLANG_ENABLE_MODULES": "YES",
         "ENABLE_USER_SCRIPT_SANDBOXING": "NO", "SWIFT_OBJC_BRIDGING_HEADER": "$(SRCROOT)/native/include/CapyApple.h",
         "ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS": "NO",
-        "LIBRARY_SEARCH_PATHS": ["$(inherited)", "$(SRCROOT)/../../target/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)"],
+        "CAPY_RUST_BUILD_ROOT": "$(SRCROOT)/../../target",
+        "LIBRARY_SEARCH_PATHS": ["$(inherited)", "$(CAPY_RUST_BUILD_ROOT)/$(CAPY_RUST_TARGET)/$(CAPY_RUST_PROFILE)"],
         "OTHER_LDFLAGS": ["$(inherited)", "-llayer_apple", "-lsqlite3", "-lc++", "-framework", "Metal", "-framework", "QuartzCore", "-framework", "Security"],
         "ARCHS": "arm64", "ONLY_ACTIVE_ARCH": "YES",
         "CAPY_RUST_TARGET": "aarch64-apple-ios" if platform == "iOS" else "aarch64-apple-darwin",
@@ -93,7 +94,8 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
     if platform == "iOS":
         settings.update({"SDKROOT": "iphoneos", "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
             "CAPY_RUST_TARGET[sdk=iphonesimulator*]": "aarch64-apple-ios-sim",
-            "TARGETED_DEVICE_FAMILY": "2", "IPHONEOS_DEPLOYMENT_TARGET": "18.0",
+            "CAPY_RUST_BUILD_ROOT": "$(SRCROOT)/../../target/ios-$(IPHONEOS_DEPLOYMENT_TARGET)",
+            "TARGETED_DEVICE_FAMILY": "2", "IPHONEOS_DEPLOYMENT_TARGET": "17.5",
             "INFOPLIST_FILE": "iOS/App/Info.plist", "SUPPORTS_MACCATALYST": "NO", "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon"})
     else:
         settings.update({"SDKROOT": "macosx", "SUPPORTED_PLATFORMS": "macosx", "MACOSX_DEPLOYMENT_TARGET": "15.0", "INFOPLIST_FILE": "macOS/App/Info.plist",
@@ -122,7 +124,7 @@ for platform, scheme in [("iOS", "CapyCanvas-iPad"), ("macOS", "CapyCanvas-Mac")
         "CAPY_APPLE_BUNDLE_ID": settings["CAPY_APPLE_BUNDLE_ID"],
         "CODE_SIGN_STYLE": "Automatic", "SWIFT_VERSION": "5.0", "SDKROOT": "iphoneos",
         "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator", "TARGETED_DEVICE_FAMILY": "2",
-        "IPHONEOS_DEPLOYMENT_TARGET": "18.0", "GENERATE_INFOPLIST_FILE": "YES",
+        "IPHONEOS_DEPLOYMENT_TARGET": "17.5", "GENERATE_INFOPLIST_FILE": "YES",
         "TEST_TARGET_NAME": scheme, "ARCHS": "arm64", "CLANG_ENABLE_MODULES": "YES",
     }
     if platform == "macOS":

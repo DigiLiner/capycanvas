@@ -144,7 +144,7 @@ extension XCTestCase {
         }
     }
 
-    @MainActor private func editPaintSize(_ size: String, in app: XCUIApplication) {
+    @MainActor func editPaintSize(_ size: String, in app: XCUIApplication) {
         let value = app.buttons["number-value-tool-size"]
         XCTAssertTrue(value.waitForExistence(timeout: 5))
         revealEditorControl(value, in: app.scrollViews.containing(.button, identifier: value.identifier).firstMatch)

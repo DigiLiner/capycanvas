@@ -1,5 +1,18 @@
 import SwiftUI
 
+struct EditorFittedPresentation: ViewModifier {
+    @State private var height: CGFloat = 500
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, macOS 15.0, *) {
+            content.presentationSizing(.fitted)
+        } else {
+            content.fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = max(1, $0) }
+                .presentationDetents([.height(height)])
+        }
+    }
+}
+
 /// Keep text on an opaque surface from the same shared palette. Drawing content
 /// must not change the contrast of a popup while it is open.
 struct EditorPopupSurface<S: Shape>: ViewModifier {

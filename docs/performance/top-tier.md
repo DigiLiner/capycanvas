@@ -3195,3 +3195,104 @@ Comparison and full source/runtime/ownership closure:
 `navigation-24-image-review-6307/review.json` (`5328D28B1504`).
 Current EXE/DLL prefixes are `371C35B30BF7`/`AC8122F54893`;
 normal Release qualification is `55F6B17F6D8E`.
+
+## iPadOS 17 compatibility diagnostics
+
+The 2026-10-17 older-device GPU-counter candidate is based on `86a0fd0e4`;
+its iPad executable SHA-256 is
+`e786b68a7bf083f4cb05138ec30395a0334c59dabef6def1fa5839ebd9000445`.
+These supplemental Apple runs use the native `ink` producer on a 2048 × 2048
+document, one paint layer, G-Pen at 24 px, ten seconds of warm-up and a
+ten-second postlude. Input is synthetic; these are actual drawable presentation
+rates, not fresh painted-update rates or physical Pencil latency.
+
+| Device and measured interval | Actual presentations/s | Interval p99, ms | Valid GPU spans | Thermal states | Result |
+| --- | --- | --- | --- | --- | --- |
+| A10X iPad Pro 12.9-inch, second generation; iPadOS 17.7.11; 30 s | 31.44 | 183.38 | 2,369 | 0 | Completed with postlude; no restart |
+| Same device and binary; 120 s repeat | 48.27 | 175.42 | 6,567 | 0, 1, 2 | Completed with postlude; no restart |
+
+Both older-device runs enable paired GPU counter markers. They have zero
+rejected input batches, frame errors, missing presentation callbacks, invalid
+GPU samples and GPU polling errors. Full readback slots skip observations
+without blocking drawing. Earlier one-sided compute markers triggered a GPU
+page fault and device restart on this hardware; paired markers avoid that
+observed failure in these runs. The longer run becomes thermally constrained.
+Neither run qualifies a tier target, the required workload matrix or ten-minute
+acceptance. Evidence is in
+`artifacts/ipados17/old-release/{paired-counter,paired-repeat}-report.json`.
+
+The completed compatibility Release executable has SHA-256
+`90025051cf26b1f39b2d8ce57e8065720619b3fa505f57746119a88d46fb52c7`.
+The same older iPad completes two 30-second ink windows with its final UI fixes:
+
+| Final A10X run | GPU timing off | GPU timing on |
+| --- | --- | --- |
+| Measured duration, s | 30.134 | 30.091 |
+| Actual presentations/s | 37.90 | 24.92 |
+| Presentation interval p99, ms | 208.38 | 183.38 |
+| Owner service p99, ms | 12.62 | 12.18 |
+| Peak footprint, decimal MB | 437.7 | 442.2 |
+
+Both complete the postlude with zero frame errors, rejected inputs, missing
+callbacks and dropped trace records. The measured windows include 1,898 and
+2,217 zero-time presentation callbacks, respectively; these do not count as
+actual presentations. The GPU-timed window has 2,339 valid spans, zero invalid
+samples or polling errors, and 841 skipped observations across its whole trace.
+It reaches fair thermal state; the timing-disabled run stays nominal. This
+sequential pair does not isolate profiling overhead, and neither meets the
+120 Hz target. Ordinary launches leave GPU profiling off. Evidence is in
+`artifacts/ipados17/final-release/summary.json`.
+
+The measured iPadOS 17.5-minimum compatibility Release executable has SHA-256
+`25df098c40eaae567d31627148a7b3f4f9e44f42c8f1d50d2796e4c78d4959ab`.
+On the M4 iPad Pro 13-inch with iPadOS 27.0, a baseline/candidate/candidate/baseline
+comparison disables GPU timing and uses the same 30-second ink measurement,
+2048 × 2048 document, 24 px brush, warm-up and postlude. The baseline is
+`86a0fd0e4`, executable SHA-256
+`cf0694ccf81e98fffbcbe3cab71d9780e006562f60828eeb4ddf75469f4f1f27`.
+
+| M4, GPU timing disabled | Baseline range | Candidate range |
+| --- | --- | --- |
+| Actual presentations/s | 116.14–116.21 | 116.01–116.27 |
+| Presentation interval p95, ms | 8.334 | 8.334 |
+| Presentation interval p99, ms | 8.33–12.50 | 8.33–13.58 |
+| Owner service p95, ms | 2.263–2.425 | 2.273–2.338 |
+| Owner service p99, ms | 2.669–2.676 | 3.273–4.396 |
+| Peak footprint, decimal MB | 539–542 | 538–539 |
+
+Cadence, owner p95 and footprint overlap; owner p99 is higher in both candidate
+windows. Nearly all owner-service frames above 8.33 ms occur within 150 ms of
+pen-up, with long acquisition or work outside the recorded Rust stage spans.
+The trace does not identify the cause. These runs do not establish unchanged
+latency tails. All four complete without rejected input, frame errors or missing
+presentation callbacks, with nominal thermal state.
+
+A candidate run with GPU timing enabled presents at 116.00/s, with presentation
+interval p99 8.338 ms, owner-service p95 2.761 ms and GPU queue-span p95
+2.581 ms. Owner p95 is 18–21% above the candidate GPU-timing-disabled runs. The
+paired counter instrumentation therefore has measurable overhead; its queue
+spans must not be treated as uninstrumented GPU busy time. It has zero invalid
+GPU samples, frame errors, rejected input and missing presentation callbacks.
+Evidence is in `artifacts/ipados17/comparison/gpu0-final/`. These supplemental
+measurements do not qualify the workload matrix, physical Pencil latency or
+ten-minute acceptance.
+
+A second comparison holds the measured source constant and changes only its minimum
+iPadOS version: 18.0 → 17.5 → 18.0. The 18.0 executable SHA-256 is
+`bc36589ca5e13c6c7f953b1b24770c2e175f5b07849fb518ea85238ecb623ae7`.
+All three GPU-timing-disabled runs complete with nominal thermal state and no
+input rejections, frame errors or missing presentations.
+
+| Same-source deployment control | 18.0 first | 17.5 repeat | 18.0 second |
+| --- | --- | --- | --- |
+| Actual presentations/s | 116.116 | 116.133 | 116.200 |
+| Owner service p95, ms | 2.443 | 2.482 | 2.273 |
+| Owner service p99, ms | 3.068 | 2.980 | 3.305 |
+| Presentation interval p99, ms | 12.500 | 8.334 | 13.833 |
+
+The repeated 17.5 CPU p99 is below both same-source 18.0 controls. This does not
+reproduce a latency-tail penalty from lowering the deployment target. It does
+not isolate compatibility source changes from temporal runtime variation against
+the frozen baseline. A Mac test-bundle compile overlapped the 17.5 run; the
+reference iPad ran only the workload. Evidence and stage/pen-up attribution are
+in `artifacts/ipados17/comparison/codegen-control/`.

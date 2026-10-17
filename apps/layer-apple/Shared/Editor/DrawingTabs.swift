@@ -308,7 +308,7 @@ private struct DrawingTabList: View {
             .overlay(alignment: .topLeading) {
                 if let marker = interaction.marker { Rectangle().fill(palette.accent).frame(width: marker.width, height: marker.height).offset(x: marker.minX, y: marker.minY).allowsHitTesting(false) }
             }
-            .onScrollPhaseChange { _, phase in if phase != .idle && !interaction.contact.held && !interaction.contact.dragging { interaction.cancel() } }
+            .modifier(EditorScrollActivity { if !interaction.contact.held && !interaction.contact.dragging { interaction.cancel() } })
     }
     private func pick(_ row: JSON, alignment: Alignment) -> some View {
         let id = row["id"].uint

@@ -120,6 +120,9 @@ performance bundle identity and a signing team, install it, and launch it with
 that targets passed. Review rejected input, frame errors, missing presentations,
 readiness and every warning. A completed input producer does not show continuous
 rendering if the window was occluded.
+The analyzer requires an error-free state with both canvas and shaders ready
+(mask 9); the retired catalog bit is not required. Missing readiness produces
+the warning “No error-free state with canvas and shaders ready was observed.”
 
 For an externally observed motion interval, `apple_trace.py TRACE.jsonl
 --motion-windows WINDOWS.json --target-hz 90` also reports bounded canvas
@@ -138,6 +141,9 @@ Canvas presentation callbacks do not measure cached native chrome.
   polling, not GPU durations.
 - **GPU.** Timestamps bracket queue work across paint and viewport submissions,
   including CPU submission gaps: a GPU queue span, not isolated GPU busy time.
+  Pass-based markers sample both boundaries, so their tiny compute writes are
+  included in the span. Resolves include only queries written by the selected
+  marker strategy; this avoids an observed legacy Metal driver fault.
   Three readback slots bound the work and full slots skip observations; the owner
   never waits for a readback.
 - **Presentation.** Actual `presentedTime` values give intervals and lateness
@@ -169,7 +175,7 @@ the `CACurrentMediaTime` clock, and frame IDs are admission timestamps.
 | 6 display | time, pixel width/height, scale × 1000, maximum refresh rate |
 | 7 GPU | frame ID, GPU queue span, status (1 valid, 2 readback failure, 3 invalid timestamps), raw GPU start/end ticks |
 | 8 GPU status | time, support (0 uninitialized, 1 supported, 2 unavailable), requested/skipped/invalid/pending counts, poll-error flag |
-| 9 state | time, frame ID, flags (1 canvas ready, 2 catalog loaded, 4 another frame needed, 8 shaders ready), frame-error flag |
+| 9 state | time, frame ID, flags (1 canvas ready, 4 another frame needed, 8 shaders ready; bit 2 retired), frame-error flag |
 | 10 activity | time, display-link awake flag |
 | 11 workload | time, phase, profile ID, phase-dependent counters |
 | 14 GPU clock | recorder time before, Metal CPU nanoseconds, Metal GPU ticks, recorder time after |

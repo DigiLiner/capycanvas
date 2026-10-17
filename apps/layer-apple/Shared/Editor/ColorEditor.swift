@@ -46,7 +46,7 @@ private struct ColorEditingHost: View {
     var body: some View {
         Color.clear.allowsHitTesting(false)
             .sheet(isPresented: Binding(get: { !session.picking }, set: { if !$0 && !session.picking { session.close(apply: false) } }), onDismiss: { store?.focusCanvas?() }) {
-                ColorEditor(session: session).presentationSizing(.fitted).modifier(EditorPopupPresentation())
+                ColorEditor(session: session).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
             }
             .overlay(alignment: .topLeading) { if session.picking, let store { ColorPickStrip(store: store, session: session) } }
     }
@@ -98,7 +98,7 @@ struct ColorEditor: View {
             #else
             .background(ColorClipboardKeys(editing: focused != nil,
                 copy: { Self.copy(view["hex"].string) },
-                paste: { if let text = UIPasteboard.general.string { session.act(["op": "text", "text": text]) } }))
+                paste: { if let text = UIPasteboard.general.string { session.act(["op": "text", "text": text]) } }).frame(width: 0, height: 0))
             #endif
     }
     private var shapes: some View {

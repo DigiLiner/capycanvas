@@ -14,6 +14,12 @@ extension XCTestCase {
         // the application frame can retain a zero origin. Use the editor window.
         return app.windows.firstMatch
     }
+    @MainActor func waitForEditorInteraction(in app: XCUIApplication) {
+        let paint = app.buttons["workspace-switch-builtin:workspace:illustrator"]
+        XCTAssertTrue(paint.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: paint)
+        waitForExpectations(timeout: 60)
+    }
     @MainActor func workspaceActivate(_ element: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         #if os(macOS)

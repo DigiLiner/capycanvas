@@ -236,11 +236,22 @@ class ReportChecks(unittest.TestCase):
         self.assertEqual(metric["p50"], 1)
         self.assertTrue(any("input-to-pixel" in w for w in result["warnings"]))
 
-    def test_ready_subset_requires_shader_completion(self):
-        events = [record(9, 10, 1, 3), frame(20), record(9, 30, 20, 11), frame(40)]
-        result = analyze(header(), events)
-        self.assertEqual(result["frames_after_readiness"]["owner_service_ms"]["count"], 1)
-        self.assertEqual(result["ready_seconds_from_start"], 30 / 1e9)
+    def test_ready_subset_requires_error_free_canvas_and_shaders_without_catalog_bit(self):
+        for ready_flags in (9, 13):
+            with self.subTest(ready_flags=ready_flags):
+                events = [record(9, 10, 1, 1), frame(20),
+                          record(9, 30, 20, 8), frame(40),
+                          record(9, 50, 40, 9, 1), frame(60)]
+                unready = analyze(header(), events)
+                self.assertIsNone(unready["ready_seconds_from_start"])
+                self.assertEqual(unready["frames_after_readiness"]["owner_service_ms"]["count"], 0)
+                warning = "No error-free state with canvas and shaders ready was observed."
+                self.assertIn(warning, unready["warnings"])
+                events += [record(9, 70, 60, ready_flags), frame(80)]
+                result = analyze(header(), events)
+                self.assertEqual(result["frames_after_readiness"]["owner_service_ms"]["count"], 1)
+                self.assertEqual(result["ready_seconds_from_start"], 70 / 1e9)
+                self.assertNotIn(warning, result["warnings"])
 
     def test_corrections_have_separate_receipt_proxies_and_predictions_are_excluded(self):
         events = []

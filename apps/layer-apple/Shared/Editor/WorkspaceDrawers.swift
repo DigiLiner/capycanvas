@@ -45,7 +45,9 @@ private struct WorkspaceCollapsedColumnContent: View {
     var body: some View {
         let base = column["bounds"], clip = column["content"]
         ZStack(alignment: .topLeading) {
-            EditorScrollView(.vertical) {
+            EditorScrollView(.vertical, offsetChanged: { next in
+                if abs(next - offset) > 0.5 { store.dispatch(["type": "measure_column_scroll", "column": column["id"].raw, "offset": next]) }
+            }) {
                 let bottom = column["groups"].array.map { $0["bounds"].rect.maxY }.max() ?? clip.rect.minY
                 ZStack(alignment: .topLeading) {
                     ForEach(column["groups"].array.indices, id: \.self) { index in
@@ -76,9 +78,6 @@ private struct WorkspaceCollapsedColumnContent: View {
                 }.frame(width: clip.rect.width, height: max(clip.rect.height, bottom - clip.rect.minY + offset), alignment: .topLeading)
             }.environment(\.workspaceClip, clip.rect)
                 .scrollIndicators(.hidden).placed(clip.relative(to: base))
-                .onScrollGeometryChange(for: CGFloat.self) { max(0, $0.contentOffset.y + $0.contentInsets.top) } action: { _, next in
-                    if abs(next - offset) > 0.5 { store.dispatch(["type": "measure_column_scroll", "column": column["id"].raw, "offset": next]) }
-                }
             PanelGrip(vertical: true).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
                 .accessibilityElement().accessibilityHidden(false).accessibilityLabel("Move column")
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: JSON(["kind": "column", "column": column["id"].raw]),

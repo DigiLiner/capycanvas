@@ -40,6 +40,7 @@ import Darwin
     }
     private static func diagnostic(_ error: String) -> String { "\(error)\n\n\(diagnosticEnvironment)" }
     @Published var canvasSubmitted = false
+    var canvasReady: Bool { canvasSubmitted && snapshot["canvas_ready"].bool }
     @Published private(set) var restartingCanvas = false
     @Published var storageFailure: String?
     @Published var storagePending = true
@@ -161,6 +162,7 @@ import Darwin
                 NSLog("Capy Canvas renderer diagnostic: %@", Self.diagnostic(next["error"].string))
             }
             let hadRenderer = snapshot["gpu_ready"].bool
+            let hadCanvas = snapshot["canvas_ready"].bool
             let documentEpoch = state["document_file"]["epoch"].uint, cursor = navigationCursor
             switch ui.receive(next) {
             case .full:
@@ -173,8 +175,8 @@ import Darwin
                 if hadRenderer != snapshot["gpu_ready"].bool {
                     filterPreviews.reset()
                     if !snapshot["gpu_ready"].bool { canvasSubmitted = false }
-                    bootstrapChanged?()
                 }
+                if hadRenderer != snapshot["gpu_ready"].bool || hadCanvas != snapshot["canvas_ready"].bool { bootstrapChanged?() }
                 filterPreviews.refresh()
                 if !SnapshotProjection.equal(camera.value.raw, state["camera"].raw) { camera.value = state["camera"] }
                 proof.receive(state.json, gpuReady: snapshot["gpu_ready"].bool)

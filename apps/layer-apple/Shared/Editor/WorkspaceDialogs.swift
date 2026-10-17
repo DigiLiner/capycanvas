@@ -23,7 +23,7 @@ private struct WorkspaceDialog: View {
             else if !snapshot["toolbar_manager"].isNull { manager(snapshot["toolbar_manager"]) }
             else { colorPopup }
         }.padding(24).frame(minWidth: 320, idealWidth: 500, maxWidth: 560)
-            .buttonStyle(.bordered).presentationSizing(.fitted)
+            .buttonStyle(.bordered).modifier(EditorFittedPresentation())
             .id(!snapshot["toolbar_prompt"].isNull ? snapshot["toolbar_prompt"]["title"].string : "workspace")
     }
     private func action(_ name: String) { store.customize(["type": name]) }

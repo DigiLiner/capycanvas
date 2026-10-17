@@ -80,6 +80,9 @@ impl TimestampMarker {
     fn ready(&self) -> bool {
         match self { Self::Encoder => true, Self::Pass { pipeline, .. } => pipeline.ready() }
     }
+    fn query_count(&self) -> u32 {
+        match self { Self::Encoder => 2, Self::Pass { .. } => 4 }
+    }
     pub fn write(&self, encoder: &mut wgpu::CommandEncoder, query: &wgpu::QuerySet, index: u32) {
         let Self::Pass { pipeline, bind_group } = self else {
             encoder.write_timestamp(query, index);
@@ -89,8 +92,8 @@ impl TimestampMarker {
             label: Some("timestamp marker"),
             timestamp_writes: Some(wgpu::ComputePassTimestampWrites {
                 query_set: query,
-                beginning_of_pass_write_index: Some(index),
-                end_of_pass_write_index: None,
+                beginning_of_pass_write_index: Some(index * 2),
+                end_of_pass_write_index: Some(index * 2 + 1),
             }),
         });
         pass.set_pipeline(pipeline);
@@ -105,12 +108,13 @@ struct Slot {
     read: wgpu::Buffer,
     busy: Arc<AtomicBool>,
     gpu_done: Arc<AtomicBool>,
-    awaiting_resolve: Option<u64>,
+    awaiting_resolve: Option<(u64, u32)>,
 }
 
 pub struct GpuFrameTimer {
     slots: Vec<Slot>,
-    active: Option<(usize, u64)>,
+    active: Option<(usize, u64, u32)>,
+    query_count: u32,
     period: f64,
     marker: Option<TimestampMarker>,
     ready: Arc<Mutex<VecDeque<GpuFrameSample>>>,
@@ -126,13 +130,16 @@ impl GpuFrameTimer {
         } else {
             0.
         };
+        let invalid = Arc::default();
+        let marker = (period > 0.).then(|| TimestampMarker::new(device, Arc::clone(&invalid)));
+        let query_count = marker.as_ref().map_or(0, TimestampMarker::query_count);
         let slots = if period > 0. {
             (0..3)
                 .map(|_| Slot {
                     query: device.create_query_set(&wgpu::QuerySetDescriptor {
                         label: Some("frame GPU timestamps"),
                         ty: wgpu::QueryType::Timestamp,
-                        count: 2,
+                        count: query_count,
                     }),
                     resolve: device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("frame timestamp resolve"),
@@ -142,7 +149,7 @@ impl GpuFrameTimer {
                     }),
                     read: device.create_buffer(&wgpu::BufferDescriptor {
                         label: Some("frame timestamp readback"),
-                        size: 16,
+                        size: u64::from(query_count) * 8,
                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     }),
@@ -154,11 +161,10 @@ impl GpuFrameTimer {
         } else {
             Vec::new()
         };
-        let invalid = Arc::default();
-        let marker = (period > 0.).then(|| TimestampMarker::new(device, Arc::clone(&invalid)));
         Self {
             slots,
             active: None,
+            query_count,
             period,
             marker,
             ready: Arc::new(Mutex::new(VecDeque::with_capacity(256))),
@@ -172,10 +178,10 @@ impl GpuFrameTimer {
     /// outside this span, and timing adds no start/end queue submissions.
     /// Pair a successful begin with end_encoded and submitted.
     pub(crate) fn begin_encoded(&mut self, encoder: &mut wgpu::CommandEncoder, frame: u64) -> bool {
-        if !self.reserve(frame) {
+        if !self.reserve(frame, self.query_count.saturating_sub(1)) {
             return false;
         }
-        let (index, _) = self.active.unwrap();
+        let (index, _, _) = self.active.unwrap();
         self.marker.as_ref().unwrap().write(encoder, &self.slots[index].query, 0);
         true
     }
@@ -183,10 +189,10 @@ impl GpuFrameTimer {
     /// Optional pass-only profiling, without extra marker passes. The caller
     /// must notify `submitted` after submitting the containing command buffer.
     pub(crate) fn begin_render_pass(&mut self, frame: u64) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        if !self.reserve(frame) {
+        if !self.reserve(frame, 1) {
             return None;
         }
-        let (index, _) = self.active.unwrap();
+        let (index, _, _) = self.active.unwrap();
         Some(wgpu::RenderPassTimestampWrites {
             query_set: &self.slots[index].query,
             beginning_of_pass_write_index: Some(0),
@@ -194,7 +200,7 @@ impl GpuFrameTimer {
         })
     }
 
-    fn reserve(&mut self, frame: u64) -> bool {
+    fn reserve(&mut self, frame: u64, end_index: u32) -> bool {
         self.requested += 1;
         let slot = if self.active.is_none() && self.marker.as_ref().is_some_and(TimestampMarker::ready) {
             self.slots
@@ -209,11 +215,11 @@ impl GpuFrameTimer {
             return false;
         };
         slot.busy.store(true, Ordering::Release);
-        self.active = Some((index, frame));
+        self.active = Some((index, frame, end_index));
         true
     }
     pub(crate) fn end_encoded(&self, encoder: &mut wgpu::CommandEncoder) {
-        if let Some((index, _)) = self.active {
+        if let Some((index, _, _)) = self.active {
             self.marker
                 .as_ref()
                 .unwrap()
@@ -221,7 +227,7 @@ impl GpuFrameTimer {
         }
     }
     pub(crate) fn submitted(&mut self, queue: &wgpu::Queue) {
-        let Some((index, frame)) = self.active.take() else {
+        let Some((index, frame, end_index)) = self.active.take() else {
             return;
         };
         let slot = &mut self.slots[index];
@@ -229,7 +235,7 @@ impl GpuFrameTimer {
         queue.on_submitted_work_done(move || {
             done.store(true, Ordering::Release);
         });
-        slot.awaiting_resolve = Some(frame);
+        slot.awaiting_resolve = Some((frame, end_index));
     }
     /// Optional host queue spans also include gaps between drawing/presentation
     /// submissions. Saturation drops the observation rather than waiting.
@@ -262,13 +268,13 @@ impl GpuFrameTimer {
             if slot.awaiting_resolve.is_none() || !slot.gpu_done.load(Ordering::Acquire) {
                 continue;
             }
-            let frame = slot.awaiting_resolve.take().unwrap();
+            let (frame, end_index) = slot.awaiting_resolve.take().unwrap();
             slot.gpu_done.store(false, Ordering::Release);
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("completed frame timestamps"),
             });
-            encoder.resolve_query_set(&slot.query, 0..2, &slot.resolve, 0);
-            encoder.copy_buffer_to_buffer(&slot.resolve, 0, &slot.read, 0, 16);
+            encoder.resolve_query_set(&slot.query, 0..end_index + 1, &slot.resolve, 0);
+            encoder.copy_buffer_to_buffer(&slot.resolve, 0, &slot.read, 0, u64::from(end_index + 1) * 8);
             queue.submit([encoder.finish()]);
             let buffer = slot.read.clone();
             let busy = slot.busy.clone();
@@ -285,7 +291,8 @@ impl GpuFrameTimer {
                 if result.is_ok() {
                     if let Ok(bytes) = buffer.get_mapped_range(..) {
                         let start = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-                        let end = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+                        let offset = end_index as usize * 8;
+                        let end = u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
                         let elapsed = end.saturating_sub(start) as f64 * period;
                         if start > 0
                             && end > start
@@ -347,6 +354,80 @@ impl GpuFrameTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn paired_markers_and_render_passes_reuse_the_same_slot() {
+        let instance = crate::WgpuRasterizer::headless_instance();
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::TIMESTAMP_QUERY,
+            ..Default::default()
+        })).unwrap();
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("timestamp regression triangle"),
+            source: wgpu::ShaderSource::Wgsl("@vertex fn vs(@builtin(vertex_index) i:u32)->@builtin(position) vec4<f32> { let p=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.)); return vec4(p[i],0.,1.); } @fragment fn fs()->@location(0) vec4<f32> { return vec4(1.,0.,0.,1.); }".into()),
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("timestamp regression triangle"), layout: None,
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
+                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+            }),
+            primitive: Default::default(), depth_stencil: None, multisample: Default::default(),
+            multiview_mask: None, cache: None,
+        });
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("timestamp regression target"),
+            size: wgpu::Extent3d { width: 8, height: 8, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm, usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let mut timer = GpuFrameTimer::new(&device, &queue);
+        let mut previous_end = 0;
+        for frame in 1..=12 {
+            let mut encoder = device.create_command_encoder(&Default::default());
+            let encoded = frame % 2 == 1;
+            if encoded { assert!(timer.begin_encoded(&mut encoder, frame)); }
+            {
+                let timestamps = if encoded { None } else { Some(timer.begin_render_pass(frame).unwrap()) };
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("timestamp regression draw"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view, depth_slice: None, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None, timestamp_writes: timestamps,
+                    occlusion_query_set: None, multiview_mask: None,
+                });
+                pass.set_pipeline(&pipeline);
+                pass.draw(0..3, 0..1);
+            }
+            if encoded { timer.end_encoded(&mut encoder); }
+            queue.submit([encoder.finish()]);
+            timer.submitted(&queue);
+            for _ in 0..2 {
+                device.poll(wgpu::PollType::Wait {
+                    submission_index: None, timeout: Some(std::time::Duration::from_secs(5)),
+                }).unwrap();
+                timer.poll(&device, &queue);
+            }
+            let mut samples = [GpuFrameSample::default(); 2];
+            assert_eq!(timer.take_into(&mut samples), 1);
+            let sample = samples[0];
+            assert_eq!(sample.frame, frame);
+            assert_eq!(sample.status, 1, "{sample:?}");
+            assert!(sample.elapsed_ns > 0 && sample.end_tick > sample.start_tick);
+            assert!(sample.start_tick >= previous_end && sample.start_tick > 0, "Stale timestamps after slot reuse: {sample:?}");
+            previous_end = sample.end_tick;
+            assert_eq!(timer.stats().pending, 0);
+            assert_eq!(timer.stats().invalid, 0);
+        }
+        assert_eq!(timer.stats().requested, 12);
+        assert_eq!(timer.stats().skipped, 0);
+    }
 
     #[test]
     fn encoded_span_excludes_cpu_delay_before_the_drawing_is_submitted() {

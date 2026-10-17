@@ -8,17 +8,14 @@ extension XCTestCase {
         let value = app.descendants(matching: .any)["color-value-" + name].firstMatch
         workspaceActivate(value)
         let field = app.textFields["color-entry-" + name]
-        XCTAssertTrue(field.waitForExistence(timeout: 5), "Tapping a value opens it for typing")
+        guard field.waitForExistence(timeout: 5) else { XCTFail("Tapping a value opens it for typing"); return }
         #if os(macOS)
         field.typeKey("a", modifierFlags: .command); field.typeText(text + "\r")
         #else
         let current = field.value as? String ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
-        typeConfirmed(field, text)
-        field.typeText("\n")
-        if !field.waitForNonExistence(timeout: 2) && field.exists { field.typeText("\n") }
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + text + "\n")
         #endif
-        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Enter commits the value")
+        XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Color entry closes after committing the value")
     }
     @MainActor func typeConfirmed(_ field: XCUIElement, _ text: String) {
         field.typeText(text)
@@ -41,7 +38,7 @@ extension XCTestCase {
     }
     @MainActor func colorValueText(_ name: String, in app: XCUIApplication) -> String {
         let value = app.descendants(matching: .any)["color-value-" + name].firstMatch
-        XCTAssertTrue(value.waitForExistence(timeout: 10))
+        guard value.waitForExistence(timeout: 10) else { XCTFail("The color value must remain available"); return "" }
         return value.value as? String ?? ""
     }
     @MainActor func checkEditColor(in app: XCUIApplication, theme: String) {
@@ -62,7 +59,13 @@ extension XCTestCase {
         }
         let edit = app.buttons["paint-edit-color"].firstMatch, use = app.buttons["color-use"]
         workspaceActivate(edit)
-        XCTAssertTrue(use.waitForExistence(timeout: 15), "Edit Color opens")
+        guard use.waitForExistence(timeout: 15) else {
+            attachEditor(in: app, name: "edit-color-not-presented-\(theme)")
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "edit-color-not-presented-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            XCTFail("Edit Color opens")
+            return
+        }
         for id in ["color-editor-wheel", "color-current", "color-new", "color-pick", "color-copy-hex", "color-format-0", "color-format-1",
                    "color-format-2", "color-copy-0", "color-swatches", "color-editor-shape-circle", "color-editor-shape-square", "color-editor-shape-triangle"] {
             XCTAssertTrue(element(id).waitForExistence(timeout: 5), "Edit Color shows \(id)")
@@ -124,11 +127,20 @@ extension XCTestCase {
 
         workspaceActivate(app.buttons["color-format-0"])
         let unit = app.buttons["color-format-0-rgb_unit"]
-        XCTAssertTrue(unit.waitForExistence(timeout: 10), "Row names are format menus")
+        guard unit.waitForExistence(timeout: 10) else {
+            attachEditor(in: app, name: "edit-color-format-missing-\(theme)")
+            XCTFail("Row names are format menus")
+            return
+        }
         workspaceActivate(unit)
         expectation(for: NSPredicate { _, _ in self.colorValueText("0-0", in: app).contains(".") }, evaluatedWith: app)
         waitForExpectations(timeout: 10)
         editColorValue("hex", "#00FF00", in: app)
+        guard app.state == .runningForeground, use.exists else {
+            let image = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            image.name = "color-entry-left-editor"; image.lifetime = .keepAlways; add(image)
+            XCTFail("Color entry must keep the editor open: \(app.state.rawValue)"); return
+        }
         expectHex("#00FF00", "The hex accepts a whole color")
         editColorValue("0-0", "1", in: app)
         expectHex("#FFFF00", "A value commits through its row")

@@ -163,8 +163,8 @@ extension XCTestCase {
             waitForExpectations(timeout: 10)
         }
         #endif
+        waitForEditorInteraction(in: app)
         let paint = app.buttons["workspace-switch-builtin:workspace:illustrator"]
-        XCTAssertTrue(paint.waitForExistence(timeout: 30))
         if !paint.isSelected { workspaceActivate(paint) }
         expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: paint)
         waitForExpectations(timeout: 10)

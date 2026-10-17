@@ -23,8 +23,16 @@ extension XCTestCase {
             return
         }
         if button.exists {
-            button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)).tap()
-            XCTAssertEqual(button.value as? String, "Expanded", "Open the requested \(menu) menu")
+            workspaceActivate(button)
+            let expanded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Expanded"), object: button)
+            guard XCTWaiter.wait(for: [expanded], timeout: 5) == .completed else {
+                let blocked = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+                blocked.name = "editor-menu-collapsed"; blocked.lifetime = .keepAlways; add(blocked)
+                let hierarchy = XCTAttachment(string: app.debugDescription)
+                hierarchy.name = "editor-menu-collapsed-hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+                XCTFail("Open the requested \(menu) menu")
+                return
+            }
         } else {
             workspaceActivate(compact)
             workspaceActivate(app.buttons["menu-action-" + menu].firstMatch)

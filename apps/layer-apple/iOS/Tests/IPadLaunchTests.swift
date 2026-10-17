@@ -1,13 +1,57 @@
 import XCTest
 
 extension EditorLaunchTests {
+    @MainActor func testIPadCompatibilityJourneys() throws {
+        continueAfterFailure = true
+        try checkIPadJourneys([
+            ("Canvas Size dark", testCanvasSize), ("Canvas Size light", testCanvasSizeLight),
+            ("Image Size dark", testImageSize), ("Image Size light", testImageSizeLight),
+            ("Editor light", testCompleteEditorCapture), ("Editor dark", testCompleteEditorDarkCapture),
+        ])
+        try testIPadPanelCompatibilityJourneys()
+    }
+    @MainActor func testIPadPanelCompatibilityJourneys() throws {
+        try testIPadColorCompatibilityJourneys()
+        try testIPadPanelLayoutCompatibilityJourneys()
+    }
+    @MainActor func testIPadColorCompatibilityJourneys() throws {
+        continueAfterFailure = true
+        try checkIPadJourneys([
+            ("Color light", testEditColor), ("Color dark", testEditColorDark),
+        ])
+    }
+    @MainActor func testIPadPanelLayoutCompatibilityJourneys() throws {
+        continueAfterFailure = true
+        try checkIPadJourneys([
+            ("Layer scrolling", testLayerListScrolling),
+            ("Layer properties light", testLayerPropertiesDrawer), ("Layer properties dark", testLayerPropertiesDrawerDark),
+            ("Drawing tabs light", testNativeDrawingTabs), ("Drawing tabs dark", testNativeDrawingTabsDark),
+            ("Workspace switcher", testWorkspaceSwitcher),
+        ])
+    }
+    @MainActor private func checkIPadJourneys(_ journeys: [(String, () throws -> Void)]) throws {
+        for (name, journey) in journeys {
+            try XCTContext.runActivity(named: name) { _ in try journey() }
+            editorTestApplication().terminate()
+        }
+    }
+    @MainActor func testOwnerWorkloadShaderFirstUseBothThemes() throws {
+        continueAfterFailure = true
+        for theme in ["light", "dark"] {
+            try XCTContext.runActivity(named: "Owner painting and history " + theme) { _ in
+                try checkOwnerWorkloadShaderFirstUse(theme: theme)
+            }
+            editorTestApplication().terminate()
+        }
+    }
     @MainActor func testOwnerWorkloadShaderFirstUse() throws { try checkOwnerWorkloadShaderFirstUse(theme: "light") }
     @MainActor func testOwnerWorkloadShaderFirstUseDark() throws { try checkOwnerWorkloadShaderFirstUse(theme: "dark") }
 
     @MainActor private func checkOwnerWorkloadShaderFirstUse(theme: String) throws {
         let app = editorCaptureApplication()
         app.launchEnvironment["CAPY_WORKLOAD"] = "ink"
-        app.launchEnvironment["CAPY_WORKLOAD_SECONDS"] = "120"
+        app.launchEnvironment["CAPY_WORKLOAD_SECONDS"] = "180"
+        app.launchEnvironment["CAPY_TRACE_GPU"] = "0"
         app.launchEnvironment["CAPY_GPU_RECOVERY_TEST"] = "1"
         app.launchEnvironment["CAPY_PERSISTENCE_PROBE"] = "1"
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
@@ -28,11 +72,12 @@ extension EditorLaunchTests {
                 expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: button)
                 waitForExpectations(timeout: 10)
             }
+            editPaintSize("24", in: app)
             expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Renderer ready", "Renderer ready"), evaluatedWith: status)
             waitForExpectations(timeout: 30)
         }
         func rendered(_ preset: String) {
-            XCTAssertLessThan(Date().timeIntervalSince(launched), 120, "The native owner producer must still be running")
+            XCTAssertLessThan(Date().timeIntervalSince(launched), 180, "The native owner producer must still be running")
             let before = pixels()
             let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() != before }, object: app)
             let rendered = XCTWaiter.wait(for: [changed], timeout: 15) == .completed
@@ -45,8 +90,8 @@ extension EditorLaunchTests {
             ("Liquify", "Liquify", "Liquify Push")] {
             select(tool, group, preset); rendered(preset)
         }
-        let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in Date().timeIntervalSince(launched) >= 165 }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 170), .completed)
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in Date().timeIntervalSince(launched) >= 225 }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 230), .completed)
         let ready = app.staticTexts["recovery-status"]
         expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Recovery ready", "Recovery ready"), evaluatedWith: ready)
         waitForExpectations(timeout: 30)
@@ -62,7 +107,7 @@ extension EditorLaunchTests {
         XCTAssertEqual(XCTWaiter.wait(for: [redone], timeout: 15), .completed)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         attachEditor(in: app, name: "owner-workload-first-use-history-\(theme)")
-        let provenance = XCTAttachment(string: "Existing synthetic native-owner samples; ordinary UIKit tool selections; noncanonical functional workload; no physical Pencil sensor or tier timing claim")
+        let provenance = XCTAttachment(string: "Existing synthetic native-owner samples; ordinary UIKit tool selections at 24 px to preserve visible ink edges; noncanonical functional workload; no physical Pencil sensor or tier timing claim")
         provenance.name = "owner-workload-provenance"; provenance.lifetime = .keepAlways; add(provenance)
     }
 
@@ -73,6 +118,7 @@ extension EditorLaunchTests {
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch
         expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
         waitForExpectations(timeout: 60)
+        waitForEditorInteraction(in: app)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 

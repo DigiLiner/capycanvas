@@ -115,7 +115,9 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testTransformToolAcceptanceDark() { checkTransformToolAcceptance(in: editorCaptureApplication(), theme: "dark") }
 
     @MainActor func testCanvasSize() { checkCanvasSize(in: editorCaptureApplication()) }
+    @MainActor func testCanvasSizeLight() { checkCanvasSize(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testImageSize() { checkImageSize(in: editorCaptureApplication()) }
+    @MainActor func testImageSizeLight() { checkImageSize(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testFrequencySeparation() { checkFrequencySeparation(in: editorCaptureApplication()) }
     @MainActor func testPixelClipboard() throws { try checkPixelClipboard(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testPixelClipboardDark() throws { try checkPixelClipboard(in: editorCaptureApplication(), theme: "dark") }

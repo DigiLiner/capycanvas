@@ -1,10 +1,10 @@
 import Foundation
-import Synchronization
+import os
 
 /// Call on NativeProjectTask.io: every window shares ordered, atomic preferences.
 final class ColorPreferencesStore: @unchecked Sendable {
     private let locations: StorageLocations?
-    private let language = Mutex("en")
+    private let language = OSAllocatedUnfairLock(initialState: "en")
     func setLanguage(_ tag: String) { language.withLock { $0 = tag } }
     private func localized(_ request: JSON) -> JSON {
         JSON(["language": language.withLock { $0 }, "request": request.raw])

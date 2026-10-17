@@ -1,7 +1,12 @@
 import SwiftUI
 import UIKit
 
-struct NativeReorderInput: UIViewRepresentable {
+struct NativeReorderInput: View {
+    let model: any NativeReorderModel
+    var body: some View { ReorderInputHost(model: model).allowsHitTesting(false) }
+}
+
+private struct ReorderInputHost: UIViewRepresentable {
     let model: any NativeReorderModel
     func makeUIView(context: Context) -> ReorderInputView { ReorderInputView() }
     func updateUIView(_ view: ReorderInputView, context: Context) { view.model = model; view.validate() }

@@ -2,14 +2,16 @@ import XCTest
 
 extension EditorLaunchTests {
     @MainActor func testWorkspaceHeldTiles() {
+        continueAfterFailure = true
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = editorTestApplication()
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"customize","action":{"type":"insert_tools","panel":"toolbar","before":1}},{"type":"customize","action":{"type":"picker_select","control":{"kind":"command","command":"undo_workspace"},"selected":true}},{"type":"customize","action":{"type":"picker_select","control":{"kind":"command","command":"redo_workspace"},"selected":true}},{"type":"customize","action":{"type":"confirm_tools"}}]"#
         app.launch()
+        waitForEditorInteraction(in: app)
         func tile(_ panel: String, _ name: String) -> XCUIElement {
             app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-\(panel)-", name)).firstMatch
         }
-        let eraser = tile("toolbar", "Eraser"), brush = tile("toolbar", "Brush")
+        let eraser = tile("toolbar", "Eraser"), brush = tile("toolbar", "Paint Brush")
         let undo = tile("toolbar", "Undo Layout Change"), redo = tile("toolbar", "Redo Layout Change")
         XCTAssertTrue(eraser.waitForExistence(timeout: 30)); XCTAssertTrue(brush.exists)
         let initial = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

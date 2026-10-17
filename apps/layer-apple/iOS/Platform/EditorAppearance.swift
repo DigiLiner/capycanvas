@@ -3,7 +3,13 @@ import UIKit
 
 /// Keep the window choice separate from the scene's system appearance. Native
 /// menus inherit the window; Auto must still observe the underlying OS choice.
-struct NativeEditorAppearance: UIViewRepresentable {
+struct NativeEditorAppearance: View {
+    let store: EditorStore
+    let preferred: String
+    var body: some View { EditorAppearanceHost(store: store, preferred: preferred).allowsHitTesting(false) }
+}
+
+private struct EditorAppearanceHost: UIViewRepresentable {
     let store: EditorStore
     let preferred: String
     func makeUIView(context: Context) -> EditorAppearanceView { EditorAppearanceView() }

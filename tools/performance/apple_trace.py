@@ -88,7 +88,7 @@ def analyze(header, events, target_hz=120):
     gpu = {r[0]: r for r in grouped[7]}
     calibrated_gpu, gpu_clocks = calibrate_gpu(grouped[14], gpu)
     submitted = [r for r in frames.values() if r[6] > 0]
-    ready_states = [r[0] for r in grouped[9] if r[2] & 11 == 11 and not r[3]]
+    ready_states = [r[0] for r in grouped[9] if r[2] & 9 == 9 and not r[3]]
     ready_at = min(ready_states, default=None)
     state_errors = sum(bool(r[3]) for r in grouped[9])
     stats = sorted(grouped[8], key=lambda r: r[0])
@@ -174,7 +174,7 @@ def analyze(header, events, target_hz=120):
     if not displays or all(d[3] < target_hz for d in displays):
         warnings.append(f"No observed display configuration advertises {target_hz:g} Hz.")
     if ready_at is None:
-        warnings.append("No fully ready canvas/shaders/filter catalog state observed.")
+        warnings.append("No error-free state with canvas and shaders ready was observed.")
     warnings.extend(["Input receipt association does not establish physical input-to-pixel latency.",
                      "GPU queue spans include submission gaps and profiler submissions; overhead is not calibrated.",
                      "This trace alone does not establish the required workload matrix or ten-minute acceptance."])

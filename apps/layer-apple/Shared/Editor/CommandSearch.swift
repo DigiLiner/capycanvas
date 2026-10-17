@@ -14,12 +14,12 @@ private struct CommandSearchBar: View {
     let store: EditorStore
     let view: JSON
     @State private var text = ""
-    @State private var selection: TextSelection?
     @State private var shown = false
     @State private var origin = "canvas"
     #if os(iOS)
     @State private var focused = false
     #else
+    @State private var selection: TextSelection?
     @FocusState private var focused: Bool
     #endif
     @Environment(\.editorPalette) private var palette
@@ -79,7 +79,9 @@ private struct CommandSearchBar: View {
         .onDisappear { if origin != "text" { store.focusCanvas?() } }
         .onChange(of: parameter["id"].string) { _, _ in
             text = parameter.isNull ? view["query"].string : parameter["parameter"]["text"].string
+            #if os(macOS)
             selection = parameter.isNull ? nil : TextSelection(range: text.startIndex..<text.endIndex)
+            #endif
         }
     }
 

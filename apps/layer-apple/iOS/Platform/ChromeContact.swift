@@ -3,7 +3,7 @@ import UIKit
 
 extension View {
     func editorChromeContact(_ action: @escaping (CGPoint?, Bool) -> Bool) -> some View {
-        background(EditorContact(action: action))
+        background(EditorContact(action: action).allowsHitTesting(false))
     }
 }
 
@@ -16,11 +16,11 @@ private struct EditorContact: UIViewRepresentable {
 
 private final class EditorContactView: UIView {
     let observer = ChromeContacts(target: nil, action: nil)
-    private weak var attached: UIView?
+    private weak var attached: UIWindow?
     private var focus: NSObjectProtocol?
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isUserInteractionEnabled = false
+        isUserInteractionEnabled = false; observer.coordinates = self
         observer.cancelsTouchesInView = false; observer.delaysTouchesBegan = false; observer.delaysTouchesEnded = false
         observer.requiresExclusiveTouchType = false
         observer.allowedTouchTypes = [UITouch.TouchType.direct, .pencil, .indirectPointer].map { NSNumber(value: $0.rawValue) }
@@ -29,7 +29,7 @@ private final class EditorContactView: UIView {
     override func didMoveToSuperview() { super.didMoveToSuperview(); attach() }
     override func didMoveToWindow() { super.didMoveToWindow(); detach(); attach() }
     private func attach() {
-        let next = window == nil ? nil : superview
+        let next = window
         guard next !== attached else { return }
         detach(); attached = next; next?.addGestureRecognizer(observer)
         if let scene = window?.windowScene { focus = NotificationCenter.default.addObserver(forName: UIScene.willDeactivateNotification, object: scene, queue: .main) { [weak self] _ in
@@ -44,10 +44,14 @@ private final class EditorContactView: UIView {
 
 private final class ChromeContacts: UIGestureRecognizer {
     var action: (CGPoint?, Bool) -> Bool = { _, _ in false }
+    weak var coordinates: UIView?
     private var held = [ObjectIdentifier:UUID]()
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let coordinates else { return }
         for touch in touches where !(touch.view is CanvasView) {
-            if action(touch.location(in: view), true) { held[ObjectIdentifier(touch)] = UUID() }
+            let point = touch.location(in: coordinates)
+            guard touch.window === coordinates.window, coordinates.bounds.contains(point) else { continue }
+            if action(point, true) { held[ObjectIdentifier(touch)] = UUID() }
         }
     }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {

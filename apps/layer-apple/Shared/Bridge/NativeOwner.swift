@@ -1,7 +1,6 @@
 import Foundation
 import QuartzCore
 import Metal
-import Synchronization
 
 /// ARC lease crossing the queue boundary. UIKit/AppKit owns view geometry;
 /// only the render owner uses the layer's Metal surface and drawable APIs.
@@ -750,11 +749,11 @@ final class NativeOwner: @unchecked Sendable {
             }
         }
     }
-    private let shaderInputPending = Atomic<Bool>(false)
+    private let shaderInputPending = NativeInputGate()
     func shaderInput() {
-        guard shaderInputPending.compareExchange(expected: false, desired: true, ordering: .acquiringAndReleasing).exchanged else { return }
+        guard shaderInputPending.claim() else { return }
         queue.async { [self] in
-            shaderInputPending.store(false, ordering: .releasing)
+            shaderInputPending.release()
             capy_apple_shader_input(handle)
         }
     }

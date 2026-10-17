@@ -73,7 +73,7 @@ final class CanvasView: UIView {
         }
         store.interruptInput = { [weak self] in self?.interruptContacts() }
         frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
-        frames.submittedViewport = { [weak self] in self?.accessibilityValue = self?.store.bootstrap["canvas_ready"].string }
+        frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)),
             name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
     }
@@ -208,7 +208,7 @@ final class CanvasView: UIView {
         accessibilityLabel = store.bootstrap["drawing_canvas"].string
         accessibilityHint = store.bootstrap["drawing_canvas_help"].string
         accessibilityLanguage = store.interfaceLanguage.isEmpty ? nil : store.interfaceLanguage
-        accessibilityValue = store.bootstrap[store.restartingCanvas ? "restarting_canvas" : store.canvasSubmitted ? "canvas_ready" : "starting_canvas"].string
+        accessibilityValue = store.bootstrap[store.restartingCanvas ? "restarting_canvas" : store.canvasReady ? "canvas_ready" : "starting_canvas"].string
     }
     private func updateHeadroom() {
         let value = Double(window?.screen.currentEDRHeadroom ?? 1).clampedHeadroom

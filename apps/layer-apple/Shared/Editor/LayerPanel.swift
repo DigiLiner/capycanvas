@@ -8,8 +8,7 @@ struct LayerPanel: View {
     @State private var popupID = UUID()
     @State private var filterMenu = JSON()
     @State private var filterPopupID = UUID()
-    @State private var scrollPosition = ScrollPosition()
-    @State private var scrollOffset: CGFloat = 0
+    @StateObject private var scrollPosition = EditorScrollPosition()
     @State private var retainedOffset: CGFloat?
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var view: JSON { store.state["layer_tools"] }
@@ -27,7 +26,7 @@ struct LayerPanel: View {
             VStack(spacing: 0) {
                 if visible("layer_opacity") { header.modifier(PanelBodyMeasurement(panel: "layers", part: "header")) }
                 if visible("layers") {
-                    EditorScrollView {
+                    EditorPositionedScrollView(position: scrollPosition) {
                         LazyVStack(spacing: 0) {
                             ForEach(rows) { row in
                                 let thumbnailToken = "\(popupID):\(row.id)"
@@ -51,9 +50,7 @@ struct LayerPanel: View {
                             .onPreferenceChange(LayerRowFrames.self) { interaction.frames = $0 }
                             .overlay(alignment: .topLeading) { dragPreview }
                             .modifier(PanelBodyMeasurement(panel: "layers", part: "rows", kind: .scroll))
-                    }.scrollPosition($scrollPosition)
-                        .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, next in scrollOffset = next }
-                        .overlayPreferenceValue(LayerRowFrames.self) { frames in
+                    }.overlayPreferenceValue(LayerRowFrames.self) { frames in
                         LayerConnections(store: store, frames: frames)
                     }.accessibilityIdentifier("layer-rows").modifier(LayerInputCheckOrder(layers: layers))
                 } else { Spacer(minLength: 0) }
@@ -62,7 +59,7 @@ struct LayerPanel: View {
         }
             .onAppear { interaction.store = store }
             .onChange(of: drawerPagePosition) { before, next in
-                if before == 0 && next != 0 { retainedOffset = scrollOffset }
+                if before == 0 && next != 0 { retainedOffset = scrollPosition.offset }
                 if next == 0, let offset = retainedOffset { scrollPosition.scrollTo(y: offset); retainedOffset = nil }
             }
             .onChange(of: editingTarget) { _, _ in

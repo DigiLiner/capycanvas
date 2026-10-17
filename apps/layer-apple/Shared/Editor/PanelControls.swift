@@ -58,8 +58,15 @@ struct PanelControls: View {
         Group {
             if scrollable {
                 GeometryReader { viewport in
-                    EditorScrollView(showsIndicators: panel["id"].string != "color") {
-                        controlBody(maximumHeight: max(128, viewport.size.height - padding * 2))
+                    let maximumHeight = max(128, viewport.size.height - padding * 2)
+                    Group {
+                        if #unavailable(iOS 18.0), fitsColorWheel, colorWheelHeight(viewport.size.width) <= viewport.size.height {
+                            controlBody(maximumHeight: maximumHeight).frame(height: colorWheelHeight(viewport.size.width), alignment: .top)
+                        } else {
+                            EditorScrollView(showsIndicators: panel["id"].string != "color") {
+                                controlBody(maximumHeight: maximumHeight)
+                            }
+                        }
                     }
                     // Workspace layout already reserves space above the keyboard.
                     .ignoresSafeArea(.keyboard)
@@ -77,8 +84,11 @@ struct PanelControls: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .modifier(PanelBodyMeasurement(panel: panel["id"].string,
                 kind: scrollable && !["color", "histogram", "waveform"].contains(panel["id"].string) ? .scroll : .fixed,
-                naturalHeight: fitsColorWheel ? { [padding, ratio = ColorPanel.aspect(hdr: store.snapshot["color_panel"]["hdr"].bool)] width in
-                    max(128, width - padding * 2) * ratio + padding * 2 } : nil))
+                naturalHeight: fitsColorWheel ? colorWheelHeight : nil))
+    }
+    private var colorWheelHeight: (CGFloat) -> CGFloat {
+        { [padding, ratio = ColorPanel.aspect(hdr: store.snapshot["color_panel"]["hdr"].bool)] width in
+            max(128, width - padding * 2) * ratio + padding * 2 }
     }
     @ViewBuilder func control(_ item: JSON, maximumHeight: CGFloat? = nil) -> some View {
         switch item["control"].string {
