@@ -275,6 +275,15 @@ CAPY_APPLE_PHOTO_JPEG=/path/to/photo.jpg cargo test -p layer-apple --lib \
 
 ### Live interface language
 
+The focused Mac command context carries the published language and shared headings
+with its editor. Standard File, Edit and View headings use public native action
+roles; Window uses the designated windows menu. Reconcile shared titles after
+native menu construction while retaining actions, shortcuts and responder routing.
+Application menus and quit alerts retain the last published non-null shared copy
+when a window loses focus or a new window is still loading. Window-close failures,
+quit choices and the windowless New Window command use shared localized copy;
+native I/O errors retain their original details.
+
 Language changes use the same `NativeOwner` and `EditorStore`. Rust's shared
 transition rejects superseded preparation; a separate language queue warms the
 immutable context and English command aliases. The drawing owner publishes
@@ -402,6 +411,12 @@ Fixtures for a single Swift file compile directly, for example:
 xcrun swiftc -parse-as-library apps/layer-apple/Shared/Bridge/CanvasFrameDriver.swift \
   apps/layer-apple/tests/frame-driver.swift -o "$TMPDIR/capy-frame-driver" && "$TMPDIR/capy-frame-driver"
 ```
+
+The AppKit `tests/native-menu-titles.swift` fixture pairs with
+`macOS/Platform/NativeMenuTitles.swift` and checks translated headings, reordered
+menus, unrelated titles, ambiguous roles and retained native actions. Run the
+existing live-language pair and `testNewEditorAfterLastWindowClose` after changing
+focused command ownership or retained windowless copy.
 
 The same pattern pairs `json-lookup`, `reorder-contact`, `estimated-input`,
 `frame-trace` and `drawing-workload-plan` with their `Shared/Bridge` sources

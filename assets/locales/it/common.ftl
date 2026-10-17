@@ -353,3 +353,8 @@ pressure-curve-help = Fai clic per aggiungere un punto di controllo. Trascina i 
 pressure-description = Regola la pressione della penna mentre disegni.
 
 common-adjust = Regola…
+native-dialog-changes-not-saved = Non è stato possibile salvare alcune modifiche.
+native-dialog-close-save-failed = Non è stato possibile salvare alcune modifiche. Riprova prima di chiudere questa finestra.
+native-dialog-quit-unsaved-description = Puoi tenere aperta l’app per riprovare oppure uscire conservando le ultime copie salvate.
+native-dialog-quit-anyway = Esci comunque
+native-dialog-drawing-window-unavailable = La finestra del disegno non è disponibile.

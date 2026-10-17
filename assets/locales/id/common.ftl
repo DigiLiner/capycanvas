@@ -654,3 +654,8 @@ pressure-curve-help = Klik untuk menambahkan titik kontrol. Seret titik untuk me
 pressure-description = Sesuaikan tekanan pena sambil menggambar.
 
 common-adjust = Sesuaikan…
+native-dialog-changes-not-saved = Sebagian perubahan tidak dapat disimpan.
+native-dialog-close-save-failed = Sebagian perubahan tidak dapat disimpan. Coba lagi sebelum menutup jendela ini.
+native-dialog-quit-unsaved-description = Anda dapat membiarkan aplikasi terbuka untuk mencoba lagi, atau keluar dengan salinan terakhir yang disimpan.
+native-dialog-quit-anyway = Tetap Keluar
+native-dialog-drawing-window-unavailable = Jendela gambar tidak tersedia.

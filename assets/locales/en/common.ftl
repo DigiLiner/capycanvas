@@ -576,3 +576,8 @@ pressure-curve-help = Click to add a control point. Drag points to shape the cur
 pressure-description = Adjust pen pressure while drawing.
 
 common-adjust = Adjust…
+native-dialog-changes-not-saved = Some changes could not be saved.
+native-dialog-close-save-failed = Some changes could not be saved. Try again before closing this window.
+native-dialog-quit-unsaved-description = You can keep the app open to try again, or quit with the last saved copies.
+native-dialog-quit-anyway = Quit Anyway
+native-dialog-drawing-window-unavailable = The drawing window is unavailable.

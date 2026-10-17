@@ -570,3 +570,8 @@ pressure-curve-help = Nhấp để thêm điểm điều khiển. Kéo các đi�
 pressure-description = Điều chỉnh lực nhấn bút trong khi vẽ.
 
 common-adjust = Điều chỉnh…
+native-dialog-changes-not-saved = Không thể lưu một số thay đổi.
+native-dialog-close-save-failed = Không thể lưu một số thay đổi. Hãy thử lại trước khi đóng cửa sổ này.
+native-dialog-quit-unsaved-description = Bạn có thể giữ ứng dụng mở để thử lại hoặc thoát và giữ các bản sao đã lưu gần nhất.
+native-dialog-quit-anyway = Vẫn thoát
+native-dialog-drawing-window-unavailable = Cửa sổ bản vẽ không khả dụng.

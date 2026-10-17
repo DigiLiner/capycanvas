@@ -1247,6 +1247,12 @@
 			"path" = "macOS/Platform/NativeContextMenuSource.swift";
 			"sourceTree" = "<group>";
 		};
+		"A319F5D091A7B21C409D0A38" = {
+			"isa" = "PBXFileReference";
+			"lastKnownFileType" = "sourcecode.swift";
+			"path" = "macOS/Platform/NativeMenuTitles.swift";
+			"sourceTree" = "<group>";
+		};
 		"B4D4620A0F291BABD9128179" = {
 			"isa" = "PBXFileReference";
 			"lastKnownFileType" = "sourcecode.swift";
@@ -3246,6 +3252,10 @@
 			"isa" = "PBXBuildFile";
 			"fileRef" = "D1203360BD6A9C25DFBEC3C5";
 		};
+		"AB77100A109B5EFAD6A6A3AC" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "A319F5D091A7B21C409D0A38";
+		};
 		"E64E81464382A39B192D3596" = {
 			"isa" = "PBXBuildFile";
 			"fileRef" = "B4D4620A0F291BABD9128179";
@@ -3463,6 +3473,7 @@
 				"48784626CAB7B90BA65A9425",
 				"C769C6711DB7FD46D116EEE2",
 				"0A96D849E9CB3BD80CF9C0EF",
+				"AB77100A109B5EFAD6A6A3AC",
 				"E64E81464382A39B192D3596",
 				"F55DBC0AC6F4926CC6024C1D",
 				"1181F9ED0788A3DCD693CD1E",
@@ -4211,6 +4222,7 @@
 				"A5B7B4BA1DD812CE2C758383",
 				"9646C9A9CFB7D29BB5D210F2",
 				"D1203360BD6A9C25DFBEC3C5",
+				"A319F5D091A7B21C409D0A38",
 				"B4D4620A0F291BABD9128179",
 				"DEECB91A3DE993B42A773DB9",
 				"F91440B57C22D445A5BE2440",

@@ -577,3 +577,8 @@ pressure-curve-help = Klicken, um einen Kontrollpunkt hinzuzufügen. Ziehen Sie 
 pressure-description = Stiftdruck während des Zeichnens anpassen.
 
 common-adjust = Anpassen…
+native-dialog-changes-not-saved = Einige Änderungen konnten nicht gespeichert werden.
+native-dialog-close-save-failed = Einige Änderungen konnten nicht gespeichert werden. Versuche es erneut, bevor du dieses Fenster schließt.
+native-dialog-quit-unsaved-description = Du kannst die App geöffnet lassen und es erneut versuchen oder mit den zuletzt gespeicherten Kopien beenden.
+native-dialog-quit-anyway = Trotzdem beenden
+native-dialog-drawing-window-unavailable = Das Zeichenfenster ist nicht verfügbar.

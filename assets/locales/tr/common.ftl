@@ -570,3 +570,8 @@ pressure-curve-help = Kontrol noktası eklemek için tıklayın. Eğriyi şekill
 pressure-description = Çizim yaparken kalem basıncını ayarlayın.
 
 common-adjust = Ayarla…
+native-dialog-changes-not-saved = Bazı değişiklikler kaydedilemedi.
+native-dialog-close-save-failed = Bazı değişiklikler kaydedilemedi. Bu pencereyi kapatmadan önce yeniden deneyin.
+native-dialog-quit-unsaved-description = Yeniden denemek için uygulamayı açık tutabilir veya son kaydedilen kopyalarla çıkabilirsiniz.
+native-dialog-quit-anyway = Yine de Çık
+native-dialog-drawing-window-unavailable = Çizim penceresi kullanılamıyor.

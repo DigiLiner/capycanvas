@@ -346,3 +346,8 @@ pressure-curve-help = คลิกเพื่อเพิ่มจุดคว�
 pressure-description = ปรับแรงกดปากกาขณะวาดภาพ
 
 common-adjust = ปรับ…
+native-dialog-changes-not-saved = บันทึกการเปลี่ยนแปลงบางส่วนไม่ได้
+native-dialog-close-save-failed = บันทึกการเปลี่ยนแปลงบางส่วนไม่ได้ ลองอีกครั้งก่อนปิดหน้าต่างนี้
+native-dialog-quit-unsaved-description = คุณสามารถเปิดแอปไว้เพื่อลองอีกครั้ง หรือออกโดยเก็บสำเนาที่บันทึกไว้ล่าสุด
+native-dialog-quit-anyway = ออกต่อไป
+native-dialog-drawing-window-unavailable = หน้าต่างวาดภาพไม่พร้อมใช้งาน

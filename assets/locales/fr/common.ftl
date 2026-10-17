@@ -579,3 +579,8 @@ pressure-curve-help = Cliquez pour ajouter un point de contrôle. Faites glisser
 pressure-description = Réglez la pression du stylet tout en dessinant.
 
 common-adjust = Ajuster…
+native-dialog-changes-not-saved = Certaines modifications n’ont pas pu être enregistrées.
+native-dialog-close-save-failed = Certaines modifications n’ont pas pu être enregistrées. Réessayez avant de fermer cette fenêtre.
+native-dialog-quit-unsaved-description = Vous pouvez laisser l’application ouverte pour réessayer ou quitter en conservant les dernières copies enregistrées.
+native-dialog-quit-anyway = Quitter quand même
+native-dialog-drawing-window-unavailable = La fenêtre de dessin n’est pas disponible.

@@ -570,3 +570,8 @@ pressure-curve-help = Нажмите, чтобы добавить контрол
 pressure-description = Настройте нажим пера во время рисования.
 
 common-adjust = Настроить…
+native-dialog-changes-not-saved = Не удалось сохранить некоторые изменения.
+native-dialog-close-save-failed = Не удалось сохранить некоторые изменения. Повторите попытку перед закрытием этого окна.
+native-dialog-quit-unsaved-description = Можно оставить приложение открытым и повторить попытку или выйти с последними сохранёнными копиями.
+native-dialog-quit-anyway = Всё равно выйти
+native-dialog-drawing-window-unavailable = Окно рисунка недоступно.

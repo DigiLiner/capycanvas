@@ -394,3 +394,8 @@ pressure-curve-help = クリックして制御点を追加します。点をド�
 pressure-description = 描画しながら筆圧を調整します。
 
 common-adjust = 調整…
+native-dialog-changes-not-saved = 一部の変更を保存できませんでした。
+native-dialog-close-save-failed = 一部の変更を保存できませんでした。このウインドウを閉じる前に、もう一度お試しください。
+native-dialog-quit-unsaved-description = アプリを開いたまま再試行するか、最後に保存した状態で終了できます。
+native-dialog-quit-anyway = 保存せずに終了
+native-dialog-drawing-window-unavailable = 描画ウインドウを利用できません。

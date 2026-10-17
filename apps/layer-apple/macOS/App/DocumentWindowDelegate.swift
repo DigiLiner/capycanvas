@@ -98,7 +98,7 @@ import AppKit
                 } else {
                     store.cancelPreparedClose()
                     if store.workspaces?.error == nil && store.storageFailure == nil {
-                        store.projectFiles.error = "Some changes could not be saved. Retry before closing this window."
+                        store.projectFiles.error = store.bootstrap["recovery"]["close_save_failed"].string
                     }
                 }
             }

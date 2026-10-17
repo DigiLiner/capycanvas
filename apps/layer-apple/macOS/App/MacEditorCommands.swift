@@ -19,24 +19,40 @@ import SwiftUI
     return selector.map { NSApp.sendAction($0, to: nil, from: nil) } == true || native
 }
 
-private struct FocusedEditorKey: FocusedValueKey { typealias Value = EditorStore }
+struct EditorCommandContext: Equatable {
+    let store: EditorStore
+    let language: String
+    let menuTitles: [String: String]
+    @MainActor init(store: EditorStore) {
+        self.store = store
+        language = store.interfaceLanguage
+        menuTitles = Dictionary(uniqueKeysWithValues: store.snapshot["application_menus"].array.map {
+            ($0["id"].string, $0["label"].string)
+        })
+    }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.language == rhs.language && lhs.menuTitles == rhs.menuTitles
+    }
+}
+
+private struct FocusedEditorKey: FocusedValueKey { typealias Value = EditorCommandContext }
 extension FocusedValues {
-    var editorStore: EditorStore? {
+    var editorCommands: EditorCommandContext? {
         get { self[FocusedEditorKey.self] }
         set { self[FocusedEditorKey.self] = newValue }
     }
 }
 
 struct MacEditorCommands: Commands {
-    @FocusedValue(\.editorStore) private var store
+    let copy: () -> JSON
+    @FocusedValue(\.editorCommands) private var context
+    private var store: EditorStore? { context?.store }
     @Environment(\.openWindow) private var openWindow
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             if let store { CatalogMenuItems(store: store, id: "file") }
             else {
-                // A windowless app must still open an editor. Keeping New
-                // present also retains File before the first scene gains focus.
-                Button("New Window") { openWindow(id: "editor") }.keyboardShortcut("n")
+                Button(copy()["recovery"]["new_window"].string) { openWindow(id: "editor") }.keyboardShortcut("n")
             }
         }
         CommandGroup(replacing: .undoRedo) {

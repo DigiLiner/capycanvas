@@ -394,3 +394,8 @@ pressure-curve-help = 클릭하여 제어점을 추가합니다. 점을 드래�
 pressure-description = 그리면서 필압을 조정합니다.
 
 common-adjust = 조정…
+native-dialog-changes-not-saved = 일부 변경 사항을 저장하지 못했습니다.
+native-dialog-close-save-failed = 일부 변경 사항을 저장하지 못했습니다. 이 윈도우를 닫기 전에 다시 시도하세요.
+native-dialog-quit-unsaved-description = 앱을 열어 둔 채 다시 시도하거나 마지막으로 저장된 상태로 종료할 수 있습니다.
+native-dialog-quit-anyway = 그대로 종료
+native-dialog-drawing-window-unavailable = 그림 윈도우를 사용할 수 없습니다.

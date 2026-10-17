@@ -429,6 +429,12 @@ impl NativeCaption {
 }
 
 copy_struct! { RecoveryCopy {
+    new_window: COMMAND_NEW_WINDOW,
+    changes_not_saved: NATIVE_DIALOG_CHANGES_NOT_SAVED,
+    close_save_failed: NATIVE_DIALOG_CLOSE_SAVE_FAILED,
+    quit_unsaved_description: NATIVE_DIALOG_QUIT_UNSAVED_DESCRIPTION,
+    quit_anyway: NATIVE_DIALOG_QUIT_ANYWAY,
+    drawing_window_unavailable: NATIVE_DIALOG_DRAWING_WINDOW_UNAVAILABLE,
     preferences_failed: NATIVE_DIALOG_PREFERENCES_FAILED,
     open: DOCUMENTS_OPEN_ACCEPT,
     import: DOCUMENTS_IMPORT_ACCEPT,

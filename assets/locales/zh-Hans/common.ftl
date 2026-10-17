@@ -394,3 +394,8 @@ pressure-curve-help = 单击添加控制点。拖动控制点调整曲线。双�
 pressure-description = 在绘画时调整笔压。
 
 common-adjust = 调整…
+native-dialog-changes-not-saved = 部分更改无法保存。
+native-dialog-close-save-failed = 部分更改无法保存。请在关闭此窗口前重试。
+native-dialog-quit-unsaved-description = 您可以保持应用打开以重试，或保留上次保存的副本并退出。
+native-dialog-quit-anyway = 仍然退出
+native-dialog-drawing-window-unavailable = 绘画窗口不可用。
