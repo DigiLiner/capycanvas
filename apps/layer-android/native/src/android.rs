@@ -1193,12 +1193,13 @@ pub extern "system" fn Java_art_capycanvas_Native_modelUpdate(
         if a.published_language == a.host.localization_generation() {
             return String::from_utf8(bytes).map(Some).map_err(error);
         }
-        let mut packet: serde_json::Value = serde_json::from_slice(&bytes).map_err(error)?;
-        packet["bootstrap"] = serde_json::to_value(a.host.bootstrap_view()).map_err(error)?;
-        packet["catalog"] = a.host.query(serde_json::json!({"type": "catalog"}))?;
-        packet["localization_generation"] = a.host.localization_generation().into();
+        let extension = serde_json::to_vec(&serde_json::json!({
+            "bootstrap": serde_json::to_value(a.host.bootstrap_view()).map_err(error)?,
+            "catalog": a.host.query(serde_json::json!({"type": "catalog"}))?,
+            "localization_generation": a.host.localization_generation(),
+        })).map_err(error)?;
         a.published_language = a.host.localization_generation();
-        Ok(Some(packet.to_string()))
+        String::from_utf8(layer_host::extend_update(bytes, &extension)).map(Some).map_err(error)
     })();
     match result {
         Ok(Some(value)) => string(&mut env, Ok(value)),
