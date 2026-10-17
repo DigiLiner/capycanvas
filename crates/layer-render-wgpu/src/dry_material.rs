@@ -4,6 +4,11 @@ use super::*;
 
 pub(super) type Job = (wgpu::BindGroup, wgpu::BindGroup, [u32; 2], bool, u32, bool, PixelRect);
 
+pub(super) const FINE_TIP_RADIUS: f32 = 8.;
+pub(super) const CONTRIBUTION: u32 = 1024;
+pub(super) const AGGREGATE: u32 = 8192;
+pub(super) const FINE_TIP: u32 = 16384;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Target { Exact, InPlace, Tracked, Display, DisplayTracked }
 
@@ -50,13 +55,14 @@ pub(super) fn shader_source(space: layer_core::color::RgbSpace, float_sampling: 
 }
 
 pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
+    let relief_contact=if flags==u32::MAX || flags&FINE_TIP!=0 {include_str!("relief_fine.wgsl")} else {include_str!("relief_coarse.wgsl")};
     if flags!=u32::MAX && flags&64!=0 {
         compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("contact_field.wgsl"),
-            include_str!("relief.wgsl"),include_str!("dry_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
+            include_str!("relief.wgsl"),relief_contact,include_str!("dry_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
     } else {
         compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("analytic_coverage.wgsl"),
             include_str!("brush_coverage.wgsl"),include_str!("contact_field.wgsl"),
-            include_str!("contact.wgsl"),include_str!("relief.wgsl"),include_str!("bristle.wgsl"),
+            include_str!("contact.wgsl"),include_str!("relief.wgsl"),relief_contact,include_str!("bristle.wgsl"),
             include_str!("brush_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
     }
 }
@@ -135,7 +141,7 @@ type Kernels = [Deferred<wgpu::ComputePipeline>; 2 * OPERATIONS.len()];
 fn kernel_constants(target: Target, flags: u32) -> [(&'static str, f64); 1] {
     [
         if matches!(target, Target::Display | Target::DisplayTracked) {
-            ("MATERIAL_PREVIEW_CONTRIBUTION", f64::from(flags != u32::MAX && flags & 1024 != 0))
+            ("MATERIAL_PREVIEW_CONTRIBUTION", f64::from(flags != u32::MAX && flags & CONTRIBUTION != 0))
         } else {
             ("MATERIAL_IN_PLACE", f64::from(matches!(target, Target::InPlace | Target::Tracked)))
         },
@@ -278,10 +284,10 @@ impl Pipelines {
         flags.insert(0);
         flags.extend(flags.clone().into_iter().map(|flags| flags | 128));
         if matches!(target,Target::Display|Target::DisplayTracked) {
-            flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&!(67|2048|4096|32768)==0).chain([0,1,128,129]).map(|f|f|1024));
+            flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&!(67|2048|4096|32768)==0).chain([0,1,128,129]).map(|f|f|CONTRIBUTION));
         }
-        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|8192));
-        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|16384));
+        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|AGGREGATE));
+        flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|FINE_TIP));
         let variants = flags.into_iter().map(|f| (f, make_kernels(f))).collect();
         Self {
             in_place,
@@ -416,9 +422,7 @@ impl WgpuRasterizer {
             .find(|set| set.key == texture_key)
             .unwrap();
         let contribution=self.compact_preview_contribution(batch);
-        let cropped = operation == MaterialOperation::Deposit
-            && batch.style.contact.is_some_and(|c|c.dry.is_some())
-            && batch.style.rendering.accumulation == BrushAccumulation::Flow;
+        let cropped = operation == MaterialOperation::Deposit && dry_flow(&batch.style);
         if cropped && jobs.iter().any(|job| !job.3 && !if job.5 {
             self.pipelines.dry_display_tracked.as_ref().unwrap().in_place
         } else { pipelines.in_place }) {
@@ -444,11 +448,11 @@ impl WgpuRasterizer {
         pass.set_bind_group(3, &textures.bind_group, &[]);
         let marker=batch_index*self.style_stride as usize+mem::offset_of!(StyleGpu,material_a)+12;
         let aggregate=f32::from_ne_bytes(self.style_upload[marker..marker+4].try_into().unwrap())>0.5
-            && batch.style.contact.is_some_and(|c|c.dry.is_some())
-            && batch.style.rendering.accumulation==BrushAccumulation::Flow;
-        let fine=batch.style.contact.is_some_and(|c|c.dry.is_some_and(|d|d.corner==0.))
+            && aggregate_kernel(&batch.style);
+        let fine=fine_tip_capable(&batch.style)
             && self.dab_upload[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize]
-                .iter().any(|d|(0..2).any(|i|0.5*(d.dab.radii[i]+d.dab.previous[i])<8.));
+                .iter().any(|d|(0..2).any(|i|0.5*(d.dab.radii[i]+d.dab.previous[i])<FINE_TIP_RADIUS));
+        let extra=if contribution {CONTRIBUTION} else {0} | if aggregate {AGGREGATE} else {0} | if fine {FINE_TIP} else {0};
         for (output, source, coordinate, coverage, record_offset, tracked_display, dirty) in jobs {
             let pipelines=if *tracked_display {self.pipelines.dry_display_tracked.as_ref().unwrap()} else {pipelines};
             pass.set_bind_group(0, output, &[batch_index as u32 * self.style_stride as u32]);
@@ -459,11 +463,10 @@ impl WgpuRasterizer {
             );
             pass.set_bind_group(2, source, &[*record_offset]);
             let block=self.dry_material_block(batch);
-            let cropped=!coverage && operation==MaterialOperation::Deposit
-                && batch.style.contact.is_some_and(|c|c.dry.is_some())
-                && batch.style.rendering.accumulation==BrushAccumulation::Flow;
-            let extra=if contribution {1024} else {0} | if aggregate {8192} else {0} | if fine {16384} else {0};
-            pass.set_pipeline(pipelines.selected_kernel(&batch.style,operation,*coverage,extra));
+            let cropped=!coverage && cropped;
+            let kernel=pipelines.selected_kernel(&batch.style,operation,*coverage,extra);
+            debug_assert!(kernel.ready() || !self.startup.as_ref().is_some_and(|s| s.current.covers(&batch.style)), "dry kernel {extra:#x} was not prepared for its brush");
+            pass.set_pipeline(kernel);
             let size=if cropped {[dirty.max_x().div_ceil(block)-dirty.min_x()/block,
                 dirty.max_y().div_ceil(block)-dirty.min_y()/block]} else {[PAGE_SIZE.div_ceil(block);2]};
             pass.dispatch_workgroups(size[0].div_ceil(32),size[1].div_ceil(2),1);
@@ -473,6 +476,57 @@ impl WgpuRasterizer {
 
 pub(super) fn dry_material_compute_eligible(style: &layer_render::DabStyle) -> bool {
     pointwise(style) && style.rendering.blend_mode == BrushBlendMode::Normal
+}
+
+pub(super) fn single_pigment_marked(style: &layer_render::DabStyle) -> bool {
+    style.execution == BrushExecution::Dry && !style.contact.is_some_and(|c| c.bristles.is_some())
+        && style.rendering.blend_mode == BrushBlendMode::Normal && !style.alpha_locked && style.selection.is_none()
+}
+
+pub(super) fn dry_flow(style: &layer_render::DabStyle) -> bool {
+    style.contact.is_some_and(|c| c.dry.is_some()) && style.rendering.accumulation == BrushAccumulation::Flow
+}
+
+fn aggregate_kernel(style: &layer_render::DabStyle) -> bool {
+    single_pigment_marked(style) && dry_flow(style)
+}
+
+fn fine_tip_capable(style: &layer_render::DabStyle) -> bool {
+    style.contact.is_some_and(|c| c.dry.is_some_and(|d| d.corner == 0.))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Reach {
+    coarse_tip: bool,
+    varying_color: bool,
+}
+
+impl Reach {
+    pub fn of(brush: &layer_core::BrushSnapshot) -> Self {
+        Self {
+            coarse_tip: brush.contact.and_then(|c| c.dry).is_none_or(|d| d.corner > 0.)
+                || brush.conservative_minor_radius() >= FINE_TIP_RADIUS,
+            varying_color: brush.dab_color_varies(),
+        }
+    }
+
+    pub fn any_size(self) -> Self {
+        Self { coarse_tip: true, ..self }
+    }
+
+    pub fn batch_variants(self, style: &layer_render::DabStyle) -> impl Iterator<Item = u32> {
+        let aggregate = aggregate_kernel(style);
+        let pigments = [aggregate.then_some(AGGREGATE),
+            (!aggregate || (style.mode == DabMode::Paint && self.varying_color)).then_some(0)];
+        let fine = fine_tip_capable(style);
+        let tips = [fine.then_some(FINE_TIP), (!fine || self.coarse_tip).then_some(0)];
+        pigments.into_iter().flatten().flat_map(move |pigment| tips.into_iter().flatten().map(move |tip| pigment | tip))
+    }
+}
+
+pub(super) fn contribution_possible(style: &layer_render::DabStyle) -> bool {
+    style.mode == DabMode::Paint && style.opacity == 1.
+        && (display_preview_eligible(style) || native_dry_preview_eligible(style))
 }
 
 /// Basic analytic contacts (including G-Pen, eraser and airbrush) have no

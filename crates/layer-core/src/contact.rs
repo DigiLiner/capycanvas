@@ -29,6 +29,11 @@ impl BrushDryMedia {
             else { p.radii[0].max(p.radii[1]) }).fold(0., f32::max)
     }
 
+    pub fn minor_extent(self, aspect: f32) -> f32 {
+        self.poses.windows(2).map(|pair| pair[0].radii[0].max(pair[1].radii[0])
+            .min(pair[0].radii[1].max(pair[1].radii[1]) / aspect)).fold(0., f32::max)
+    }
+
     pub fn pose(self, tilt: f32) -> BrushDryPose {
         let (i, t) = if tilt < 0.5 { (0, tilt * 2.) } else { (1, (tilt - 0.5) / 0.35) };
         let t = t.clamp(0., 1.);

@@ -1071,6 +1071,27 @@ impl BrushSnapshot {
         shape_radius * contact_extent + scatter_radius + 2.0
     }
 
+    pub fn conservative_minor_radius(&self) -> f32 {
+        let (_, diameter_max) = self.target_range(BrushTarget::Diameter);
+        let (aspect_min, _) = self.target_range(BrushTarget::Aspect);
+        let diameter = diameter_max
+            .clamp(self.bounds.minimum_size, self.bounds.maximum_size)
+            .clamp(0.01, MAX_BRUSH_DIAMETER);
+        let aspect = aspect_min.clamp(0.02, 50.0);
+        let shape = self.contact.and_then(|c| c.dry)
+            .map_or(1_f32.min(1.0 / aspect), |dry| dry.minor_extent(aspect));
+        diameter * 0.5 * shape * (1.0 + self.shape.size_jitter.abs())
+    }
+
+    pub fn dab_color_varies(&self) -> bool {
+        let dynamics = self.color_dynamics;
+        [dynamics.stamp_hue_jitter, dynamics.stamp_saturation_jitter,
+            dynamics.stamp_lightness_jitter, dynamics.stamp_secondary_jitter]
+            .into_iter().any(|jitter| jitter != 0.0)
+            || self.mappings.iter().take(MAX_BRUSH_MAPPINGS).any(|mapping| matches!(mapping.target,
+                BrushTarget::Hue | BrushTarget::Saturation | BrushTarget::Lightness | BrushTarget::SecondaryColor))
+    }
+
     fn target_range(&self, target: BrushTarget) -> (f32, f32) {
         let base = match target {
             BrushTarget::Diameter => self.diameter,

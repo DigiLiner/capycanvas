@@ -2331,9 +2331,7 @@ impl WgpuRasterizer {
             let batch = &packet.dab_batches[index];
             let block = if self.compute_dry_material(batch) { self.dry_material_block(batch) } else { 1 };
             let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device, self.paper_style(&batch.style));
-            if batch.style.execution==BrushExecution::Dry && !batch.style.contact.is_some_and(|c|c.bristles.is_some())
-                && batch.style.rendering.blend_mode==BrushBlendMode::Normal
-                && !batch.style.alpha_locked && batch.style.selection.is_none() && batch.dab_count>0 {
+            if dry_material::single_pigment_marked(&batch.style) && batch.dab_count>0 {
                 let source=&packet.dabs[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize];
                 record.material_a[3]=f32::from(batch.style.mode==DabMode::Erase
                     || source.iter().all(|d|d.color_rgba_linear[..3]==source[0].color_rgba_linear[..3]));
@@ -5426,7 +5424,7 @@ fn advanced_brush_shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule
                     include_str!("brush_types.wgsl"), include_str!("advanced_brush.wgsl"),
                     include_str!("brush_math.wgsl"), include_str!("contact_field.wgsl"),
                     include_str!("analytic_coverage.wgsl"), include_str!("brush_coverage.wgsl"),
-                    include_str!("contact.wgsl"), include_str!("relief.wgsl"),
+                    include_str!("contact.wgsl"), include_str!("relief.wgsl"), include_str!("relief_fine.wgsl"),
                     include_str!("selection_clip.wgsl"),
                 ])),
             })

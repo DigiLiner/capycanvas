@@ -54,6 +54,33 @@ results show the first-use tradeoff, not a controlled startup speedup. The Safar
 override fix also changed between revisions. Raw rows, source hashes and probe
 limits are retained in `artifacts/apple-issue10-oct9/provenance/startup-first-use-*`.
 
+## Dry brush preparation
+
+Selecting a dry brush prepares only the kernels its strokes can select
+([shader readiness](../internals/shared-shader-readiness.md)). Measured on
+2026-10-16 with release benchmark builds of `1f8fdd621` and this change, using
+`android-brush-benchmark.py --presets 2 --size 36 --warmup-idle-ms 0 --probe-presets 2,25,6`
+on each tablet's tier photo at Fit (the 6000 × 4000 photo on the Huion and
+XP-Pen). Cold launches clear the application data; relaunches keep it. Values are
+medians of three launches, from selecting Pencil to brush readiness.
+
+| Tablet | Cold before | Cold after | Relaunch before | Relaunch after | 36 px after 20 s idle |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| TCL TAB 11 Gen 2 | 37.1 s | 8.95 s | 37.1 s | 0.57 s | 91–96 ms |
+| MovinkPad 11 | 17.1 s | 4.24 s | 17.0 s | 0.31 s | 60–78 ms |
+| MovinkPad Pro 14 | 16.5 s | 3.99 s | 0.34 s | 0.16 s | 55–59 ms |
+| Huion Kamvas Pad 12 | 13.8 s | 3.62 s | 14.4 s | 0.35 s | 89–96 ms |
+| XP-Pen Magic Note Pad | 17.5 s | 4.38 s | 17.8 s | 0.38 s | 68–71 ms |
+
+Pointy Pencil and Chalk improve by the same factor. A size change straight after a
+cold selection still waits 1.4–3.5 s for the other tip size, which background
+preparation otherwise covers. UI-thread frame gaps and render-owner latency
+during preparation match the previous build; two compiler threads on these
+eight-core tablets doubled long frames on the Huion and were rejected. Pencil
+painting at 16 and 256 px matches matched controls on the three tier tablets.
+On Linux with an RTX PRO 6000 and the driver cache disabled, GTK readiness after
+selecting Pencil fell from 10.8–11.6 s to 0.88–1.15 s.
+
 ## Idle brush preparation
 
 These measurements describe the previous speculative catalog policy. Current

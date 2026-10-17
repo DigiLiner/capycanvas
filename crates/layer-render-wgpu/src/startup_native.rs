@@ -9,12 +9,17 @@ use std::{
 type Work = Box<dyn FnOnce() -> Result<(), String> + Send>;
 struct Job {
     priority: u8,
+    tracked: bool,
+    independent: bool,
     work: Work,
 }
 #[derive(Default)]
 struct Queue {
     jobs: VecDeque<Job>,
     admission: admission::Admission,
+    running: usize,
+    required_running: usize,
+    ordered_running: bool,
     started: bool,
     stopped: bool,
 }
@@ -36,7 +41,7 @@ pub fn finish_shader_compiler_shutdown() {
     }
 }
 
-pub(crate) struct Compiler(Arc<Shared>, Option<std::thread::JoinHandle<()>>);
+pub(crate) struct Compiler(Arc<Shared>, Vec<std::thread::JoinHandle<()>>);
 /// Thread-safe input admission only; this handle never accesses a live canvas.
 #[derive(Clone)]
 pub struct Activity(Arc<Shared>);
@@ -47,7 +52,7 @@ impl Activity {
         if queue.admission.idle != idle || queue.admission.speculative_idle != speculative_idle {
             queue.admission.idle = idle;
             queue.admission.speculative_idle = speculative_idle;
-            self.0.wake.notify_one();
+            self.0.wake.notify_all();
         }
     }
 }
@@ -66,64 +71,38 @@ impl Compiler {
             pending: AtomicUsize::new(0),
             error: Mutex::new(None),
         });
-        let worker = shared.clone();
-        let thread = std::thread::Builder::new()
-            .name("capy-shaders".into())
-            .spawn(move || {
-                loop {
-                    let job = {
-                        let mut queue = worker.queue.lock().unwrap();
-                        loop {
-                            if queue.stopped { return; }
-                            if queue.started && let Some(index) = queue.jobs.iter().enumerate()
-                                .filter(|(_, job)| queue.admission.allows(job.priority))
-                                .min_by_key(|(_, job)| job.priority).map(|(index, _)| index) {
-                                break queue.jobs.remove(index).unwrap();
-                            }
-                            let delay = queue.admission.delay(queue.jobs.iter().map(|job| job.priority));
-                            queue = if queue.started && queue.admission.idle && !delay.is_zero() {
-                                worker.wake.wait_timeout(queue, delay).unwrap().0
-                            } else { worker.wake.wait(queue).unwrap() };
-                        }
-                    };
-                    let _span = crate::performance_trace::Span::new(match job.priority {
-                        DOCUMENT => c"capy.compile.document",
-                        BRUSH => c"capy.compile.brush",
-                        _ => c"capy.compile.other",
-                    });
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job.work))
-                        .unwrap_or_else(|payload| Err(payload.downcast_ref::<String>().cloned()
-                            .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_owned()))
-                            .unwrap_or_else(|| "Shader compilation panicked without a message".into())));
-                    if let Err(error) = result {
-                        worker.error.lock().unwrap().get_or_insert(error);
-                    }
-                    worker.queue.lock().unwrap().admission.finished(job.priority);
-                    worker.pending.fetch_sub(1, Ordering::Release);
-                }
-            })
-            .map_err(|e| GpuRasterError::Effect(e.to_string()))?;
-        Ok(Self(shared, Some(thread)))
+        let workers = std::thread::available_parallelism().map_or(1, |n| (n.get() / 8).clamp(1, 4));
+        let threads = (0..workers).map(|index| {
+            let worker = shared.clone();
+            std::thread::Builder::new()
+                .name(format!("capy-shaders-{index}"))
+                .spawn(move || compile(&worker))
+                .map_err(|e| GpuRasterError::Effect(e.to_string()))
+        }).collect::<Result<_, _>>()?;
+        Ok(Self(shared, threads))
     }
     pub fn enqueue(
         &self,
         priority: u8,
         work: impl FnOnce() -> Result<(), String> + Send + 'static,
     ) {
-        self.0.pending.fetch_add(1, Ordering::Relaxed);
-        self.0.queue.lock().unwrap().jobs.push_back(Job {
-            priority,
-            work: Box::new(work),
-        });
+        self.submit(Job { priority, tracked: true, independent: false, work: Box::new(work) });
+    }
+    pub fn enqueue_untracked(&self, priority: u8, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
+        self.submit(Job { priority, tracked: false, independent: true, work: Box::new(work) });
+    }
+    fn submit(&self, job: Job) {
+        self.0.pending.fetch_add(usize::from(job.tracked), Ordering::Relaxed);
+        self.0.queue.lock().unwrap().jobs.push_back(job);
         self.0.wake.notify_one();
     }
     pub fn pipeline<T: Send + Sync + 'static>(&self, pipeline: &Deferred<T>, priority: u8) {
         if pipeline.promote(priority) {
             let pipeline = pipeline.clone();
-            self.enqueue(priority, move || {
+            self.submit(Job { priority, tracked: true, independent: true, work: Box::new(move || {
                 pipeline.compile();
                 Ok(())
-            });
+            }) });
         }
     }
     pub fn require<'a, T: Send + Sync + 'static>(&self, pipelines: impl IntoIterator<Item = &'a Deferred<T>>, priority: u8) -> bool {
@@ -131,7 +110,7 @@ impl Compiler {
     }
     pub fn start(&self) {
         self.0.queue.lock().unwrap().started = true;
-        self.0.wake.notify_one();
+        self.0.wake.notify_all();
     }
     pub fn pending(&self) -> usize {
         self.0.pending.load(Ordering::Acquire)
@@ -145,18 +124,62 @@ impl Compiler {
             .map_or(Ok(()), |e| Err(GpuRasterError::Effect(e.clone())))
     }
 }
+fn compile(worker: &Shared) {
+    loop {
+        let job = {
+            let mut queue = worker.queue.lock().unwrap();
+            loop {
+                if queue.stopped { return; }
+                if queue.started && let Some(index) = queue.jobs.iter().enumerate()
+                    .filter(|(_, job)| queue.admission.allows(job.priority) && (job.priority < OTHER || queue.required_running == 0))
+                    .min_by_key(|(_, job)| job.priority).map(|(index, _)| index)
+                    && !queue.ordered_running && (queue.jobs[index].independent || queue.running == 0) {
+                    let job = queue.jobs.remove(index).unwrap();
+                    queue.running += 1;
+                    queue.required_running += usize::from(job.priority < OTHER);
+                    queue.ordered_running = !job.independent;
+                    break job;
+                }
+                let delay = queue.admission.delay(queue.jobs.iter().map(|job| job.priority));
+                queue = if queue.started && queue.admission.idle && !delay.is_zero() {
+                    worker.wake.wait_timeout(queue, delay).unwrap().0
+                } else { worker.wake.wait(queue).unwrap() };
+            }
+        };
+        let _span = crate::performance_trace::Span::new(match job.priority {
+            DOCUMENT => c"capy.compile.document",
+            BRUSH => c"capy.compile.brush",
+            _ => c"capy.compile.other",
+        });
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job.work))
+            .unwrap_or_else(|payload| Err(payload.downcast_ref::<String>().cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_owned()))
+                .unwrap_or_else(|| "Shader compilation panicked without a message".into())));
+        if let Err(error) = result {
+            worker.error.lock().unwrap().get_or_insert(error);
+        }
+        let mut queue = worker.queue.lock().unwrap();
+        queue.admission.finished(job.priority);
+        queue.running -= 1;
+        queue.required_running -= usize::from(job.priority < OTHER);
+        queue.ordered_running &= job.independent;
+        drop(queue);
+        worker.wake.notify_all();
+        worker.pending.fetch_sub(usize::from(job.tracked), Ordering::Release);
+    }
+}
 impl Drop for Compiler {
     fn drop(&mut self) {
         let mut queue = self.0.queue.lock().unwrap();
         queue.stopped = true;
         queue.jobs.clear();
-        self.0.wake.notify_one();
+        self.0.wake.notify_all();
         drop(queue);
         // An in-flight driver compilation finishes using its own GPU handles.
         // Surface teardown never joins the compiler or waits for it.
         let mut retired = RETIRED.lock().unwrap();
         retired.retain(|worker| !worker.is_finished());
-        retired.push(self.1.take().unwrap());
+        retired.append(&mut self.1);
     }
 }
 
@@ -234,6 +257,40 @@ mod tests {
         drop(compiler);
         finish_shader_compiler_shutdown();
         assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn ordered_jobs_run_alone_while_independent_pipelines_compile_together() {
+        let compiler = Compiler::new().unwrap();
+        let running = Arc::new(AtomicUsize::new(0));
+        let overlapped = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let pipelines: Vec<_> = (0..8).map(|_| {
+            let (running, peak) = (running.clone(), peak.clone());
+            Deferred::new(move || {
+                peak.fetch_max(running.fetch_add(1, Ordering::SeqCst) + 1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(20));
+                running.fetch_sub(1, Ordering::SeqCst);
+            })
+        }).collect();
+        for (index, pipeline) in pipelines.iter().enumerate() {
+            compiler.pipeline(pipeline, BRUSH);
+            let (running, overlapped) = (running.clone(), overlapped.clone());
+            compiler.enqueue(if index % 2 == 0 { BRUSH } else { VALIDATION }, move || {
+                if running.fetch_add(1, Ordering::SeqCst) != 0 { overlapped.fetch_add(1, Ordering::SeqCst); }
+                std::thread::sleep(Duration::from_millis(5));
+                running.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            });
+        }
+        compiler.start();
+        finish_jobs(&compiler);
+        assert_eq!(overlapped.load(Ordering::SeqCst), 0, "a job that is not a pipeline compile never overlaps another job");
+        if std::thread::available_parallelism().map_or(1, |n| n.get()) >= 16 {
+            assert!(peak.load(Ordering::SeqCst) > 1, "independent pipelines compile together");
+        }
+        drop(compiler);
+        finish_shader_compiler_shutdown();
     }
 
     #[test]

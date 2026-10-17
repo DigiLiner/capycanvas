@@ -355,23 +355,62 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             }
             if (waitForWarmup) waitFor { host.snapshot?.optBoolean("shaders_ready") == true }
             warmupIdleMs?.let { check(it in 0..120_000); SystemClock.sleep(it) }
+            fun prepared(change: JSONObject): JSONObject {
+                val began = System.nanoTime()
+                val window = 2_000_000_000L
+                val frames = java.util.concurrent.ConcurrentLinkedQueue<Long>()
+                val sampling = java.util.concurrent.atomic.AtomicBoolean(true)
+                val callback = object : android.view.Choreographer.FrameCallback {
+                    override fun doFrame(frameTimeNanos: Long) {
+                        frames.add(System.nanoTime())
+                        if (sampling.get()) android.view.Choreographer.getInstance().postFrameCallback(this)
+                    }
+                }
+                runOnMainSync { android.view.Choreographer.getInstance().postFrameCallback(callback) }
+                action(change)
+                val owner = mutableListOf<Double>()
+                val ownerSamples = JSONArray()
+                var ready: Long? = null
+                while (ready == null || System.nanoTime() - began < window) {
+                    check(host.failure == null) { host.failure!! }
+                    check(System.nanoTime() - began < 600_000_000_000L) { "Timed out waiting for brush preparation" }
+                    if (ready == null && host.snapshot?.optBoolean("brush_ready") == true) ready = System.nanoTime()
+                    val probe = System.nanoTime()
+                    native { Unit }
+                    val latency = (System.nanoTime() - probe) / 1e6
+                    if (ready == null) owner += latency
+                    if (probe - began < window) ownerSamples.put(JSONArray(listOf((probe - began) / 1e6, latency)))
+                    SystemClock.sleep(16)
+                }
+                sampling.set(false)
+                val times = frames.toList()
+                val gaps = times.zipWithNext { a, b -> (b - a) / 1e6 }.sorted()
+                val windowFrames = JSONArray(times.filter { it - began < window }.map { (it - began) / 1e6 })
+                fun percentile(values: List<Double>, p: Double) = if (values.isEmpty()) 0.0 else values[min(values.size - 1, (values.size * p).toInt())]
+                val sortedOwner = owner.sorted()
+                return obj("selected_ns" to began, "ready_ns" to ready!!, "ready_ms" to (ready!! - began) / 1e6,
+                    "ui_frames" to times.size, "ui_frame_gap_p50_ms" to percentile(gaps, .5),
+                    "ui_frame_gap_p99_ms" to percentile(gaps, .99), "ui_frame_gap_max_ms" to (gaps.lastOrNull() ?: 0.0),
+                    "owner_samples" to owner.size, "owner_latency_p99_ms" to percentile(sortedOwner, .99),
+                    "owner_latency_max_ms" to (sortedOwner.lastOrNull() ?: 0.0),
+                    "window_ms" to window / 1e6, "window_frame_ms" to windowFrames, "window_owner_ms" to ownerSamples)
+            }
             val brushProbes = JSONArray()
             arguments.getString("probePresets")?.split(",")?.forEach { id ->
-                val began = System.nanoTime()
                 val complete = host.snapshot?.optBoolean("shaders_ready") == true
-                action(obj("type" to "select_brush", "id" to id.toInt()))
-                waitFor { host.snapshot?.optBoolean("brush_ready") == true }
-                brushProbes.put(obj("preset" to id.toInt(), "selected_ns" to began,
-                    "ready_ns" to System.nanoTime(), "shaders_complete_at_selection" to complete,
-                    "shaders_complete_at_ready" to (host.snapshot?.optBoolean("shaders_ready") == true)))
+                brushProbes.put(prepared(obj("type" to "select_brush", "id" to id.toInt()))
+                    .put("preset", id.toInt()).put("shaders_complete_at_selection", complete)
+                    .put("shaders_complete_at_ready", host.snapshot?.optBoolean("shaders_ready") == true))
             }
             val shadersCompleteAtSelection = host.snapshot?.optBoolean("shaders_ready") == true
-            val brushSelectedNs = System.nanoTime()
-            action(obj("type" to "select_brush", "id" to preset))
-            waitFor { host.snapshot?.optBoolean("brush_ready") == true }
-            val brushReadyNs = System.nanoTime()
+            val selection = prepared(obj("type" to "select_brush", "id" to preset))
+            val brushSelectedNs = selection.getLong("selected_ns")
+            val brushReadyNs = selection.getLong("ready_ns")
             if (state().getJSONObject("brush").getString("tool") in setOf("clone", "heal", "spot_heal")) invoke("use_reference_below")
-            action(obj("type" to "set_brush_size", "value" to size))
+            val sizeIdleMs = arguments.getString("sizeIdleMs")?.toLong() ?: 0L
+            check(sizeIdleMs in 0..120_000)
+            SystemClock.sleep(sizeIdleMs)
+            val sizePreparation = prepared(obj("type" to "set_brush_size", "value" to size))
             strength?.let { action(obj("type" to "set_brush_strength", "value" to it)) }
             opacity?.let { action(obj("type" to "set_brush_opacity", "value" to it)) }
             arguments.getString("paintLoad")?.let {
@@ -521,6 +560,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 "wait_for_warmup" to waitForWarmup,
                 "warmup_idle_ms" to warmupIdleMs, "brush_selected_ns" to brushSelectedNs,
                 "brush_ready_ns" to brushReadyNs, "brush_ready_ms" to (brushReadyNs - brushSelectedNs) / 1e6,
+                "brush_preparation" to selection, "size_preparation" to sizePreparation, "size_idle_ms" to sizeIdleMs,
                 "brush_size" to size, "mode" to mode, "prediction" to prediction, "speed" to speed,
                 "strength" to strength, "opacity" to opacity, "tilt" to tilt,
                 "orientation" to if (tilt != null) -PI/2 else if (mode == "tilt") .5 else 0.0,

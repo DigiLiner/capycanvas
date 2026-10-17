@@ -24,7 +24,26 @@ Startup cannot fail because of shaders needed only by an unused brush.
 Native paint requires tile decoding before document readiness, including drawings
 without imported images: restoration and Undo consume that same decoder.
 
-The native compiler thread and browser task runner share `shader_admission.rs`.
+A dry brush prepares only the kernels its next stroke can select. Each batch
+chooses fine-tip filtering when a dab semi-axis is under 8 px, a single-pigment
+kernel when all its dabs share one color, and a display contribution while the
+reduced display is painted directly. `dry_material::Reach` bounds the tip size
+and color variation from the brush's size range, poses, mappings and jitter; the
+document's selection and alpha lock rule out single-pigment batches. Changing
+size, opacity, selection or alpha lock prepares again before the next contact,
+never during one, and debug builds assert that once a brush is ready, every
+kernel its strokes select was prepared. The reduced display's changed-cell tracking can start or stop
+during a stroke, so both the tracked and untracked in-place and display kernels
+are prepared. Kernels without fine-tip filtering omit its shader code. Once the
+brush is ready and speculative work is admitted, native hosts prepare the other
+tip size in the background so a later size change is usually ready; selecting
+another brush discards that queued work.
+
+The native compiler workers and browser task runner share `shader_admission.rs`.
+Native hosts run one worker per eight CPUs, up to four, so eight-core tablets
+compile on one thread and their UI keeps its CPU time. Pipeline compilations run
+concurrently; every other job, such as effect preparation and validation, runs
+alone and in queue order because those jobs hand state from one to the next.
 Required canvas/brush dependencies and explicit package validation retain
 priority and progress while input arrives. Visible optional previews wait for
 200 ms without input; pipeline-cache finalization waits for one second and no
@@ -92,8 +111,10 @@ startup. Android also stops packaging that redundant asset copy. GTK still
 accepts explicit `CAPY_FILTERS_DIR` / `CAPY_FILTERS_MODE` overrides; runtime
 package installation and atomic validation remain available. Identical library
 refreshes are no-ops on all three hosts. Existing native pipeline caches remain;
-there is no additional platform cache or compiler worker. A renderer created
-while another still holds the startup cache, such as a restored or opened
-document's, starts from the saved cache read-only; only the holder cleans or
-replaces it. The native cache closes after required startup work; later first-use
-variants are not persisted in that cache.
+there is no additional platform cache. The native pipeline cache stays attached
+after startup: once a later preparation completes, a compiler worker saves any new
+pipelines after 200 ms without input, without delaying startup completion. A
+renderer created while another still holds the cache, such as a restored or opened
+document's or the canvas adopted after a display color change, starts from the
+saved data and takes over saving once the holder closes; only the holder cleans or
+replaces it. Data beyond the 64 MiB budget detaches the cache.

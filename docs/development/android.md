@@ -705,6 +705,12 @@ command encoder or obtain a timer slot records its renderer frame ID in
 measures brush preparation without waiting for the remaining shader catalogue.
 Use `--probe-presets 1,9,11,10,12,41` to record representative preparation times
 in `-info.json`; repeat with `--warmup-idle-ms 30000` for idle preparation.
+Each probe, the selected preset and the following `--size` change record
+`ready_ms`, the largest gaps between UI-thread frame callbacks and the slowest
+render-owner round trip while preparation runs. `--size-idle-ms` waits that long
+after the selection before changing the size. Clear the application data before
+a run to measure a cold shader cache; a later launch reuses the pipelines saved by
+the previous one.
 These diagnostic runs also retain the first unprimed stroke in `-prime.json`.
 For a matched fully warm control, use `--wait-for-warmup`: it adopts the photo
 after current-brush readiness, then waits for the catalogue once in that context.

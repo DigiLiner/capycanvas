@@ -171,10 +171,14 @@ impl PipelineDevice {
         self.device.create_compute_pipeline(descriptor)
     }
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn finish_cache(&self) {
+    pub fn save_cache(&self) {
         if let Some(cache) = &self.cache {
-            cache.finish();
+            cache.save();
         }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn cache_unsaved(&self) -> bool {
+        self.cache.as_ref().is_some_and(|cache| cache.take_unsaved())
     }
 }
 pub(crate) fn float_sampling_wgsl(filterable: bool) -> &'static str {

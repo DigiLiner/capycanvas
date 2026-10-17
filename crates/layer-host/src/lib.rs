@@ -1490,6 +1490,34 @@ mod tests {
             assert!(differing.is_empty(), "attempt {attempt}: Undo restores the thumbnail bytes: {differing:?}");
         }
     }
+    #[test]
+    fn dry_brushes_never_compile_while_painting_any_pose() {
+        use layer_core::DefaultBrushPreset as D;
+        for (size, extent) in [(None, [512, 512]), (Some(36.), [512, 512]), (Some(300.), [2048, 2048])] {
+            let (_reference, mut host) = gpu_host(layer_ui::Platform::Android, extent);
+            let clock = std::cell::Cell::new(0);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(900);
+            while !host.startup.brush_ready { frame_step(&mut host, &clock, deadline); }
+            for preset in [D::Pencil, D::PointyPencil, D::ShadingPencil, D::Charcoal, D::Chalk, D::PastelBlock, D::Crayon] {
+                host.dispatch(UiAction::SelectBrush { id: preset as u32 }).unwrap();
+                if let Some(value) = size { host.dispatch(UiAction::SetBrushSize { value }).unwrap(); }
+                while !host.paint_ready() { frame_step(&mut host, &clock, deadline); }
+                for tool in [0, 2] {
+                    let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
+                    for i in 0..48u64 {
+                        let t = i as f32 / 47.;
+                        let at = surface.map(Point { x: extent[0] as f32 * (0.2 + 0.6 * t), y: extent[1] as f32 * (0.5 + 0.2 * (t * std::f32::consts::TAU).sin()) });
+                        let phase = match i { 0 => 1., 47 => 3., _ => 2. };
+                        let record = [f64::from(at.x), f64::from(at.y), 0.02 + 0.98 * f64::from(t), 1.4 * f64::from(t), 0., 0., 0., clock.get() as f64, phase];
+                        pointer(&mut host, 80 + u64::from(tool), tool, 0, &record, false).unwrap();
+                        frame_step(&mut host, &clock, deadline);
+                        assert!(host.paint_ready(), "{preset:?} size={size:?} tool={tool} stays prepared while painting");
+                    }
+                    while host.session.engine().has_active_stroke() { frame_step(&mut host, &clock, deadline); }
+                }
+            }
+        }
+    }
     fn pointer(host: &mut NativeHost, id: u64, tool: u8, button: u8, records: &[f64], predicted: bool) -> Result<(), String> {
         host.pointer_batch(PointerBatch {
             id, tool, button, records, predicted,

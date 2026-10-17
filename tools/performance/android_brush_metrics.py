@@ -115,6 +115,9 @@ def validate_setup(info, requested):
         if key in requested:
             expected[key] = requested[key]
             actual[key] = info.get(key)
+    if requested.get("size_idle_ms"):
+        expected["size_idle_ms"] = requested["size_idle_ms"]
+        actual["size_idle_ms"] = info.get("size_idle_ms")
     if "wait_for_warmup" in requested:
         expected["wait_for_warmup"] = requested["wait_for_warmup"]
         actual["wait_for_warmup"] = info.get("wait_for_warmup", False)

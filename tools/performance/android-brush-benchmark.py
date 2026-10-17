@@ -40,6 +40,7 @@ def main():
     p.add_argument("--wait-for-warmup", action="store_true", help="Wait for the full shader catalogue after early photo adoption")
     p.add_argument("--probe-presets", help="Measure selected-brush preparation before the motion workload")
     p.add_argument("--warmup-idle-ms", type=int, help="Select a brush after this startup idle delay, without waiting for all shaders")
+    p.add_argument("--size-idle-ms", type=int, default=0, help="Idle delay between selecting the brush and setting --size")
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--duration", type=int, default=10000)
     p.add_argument("--size", type=int, default=1000)
@@ -128,7 +129,7 @@ def main():
                          radii=[args.radius_x, args.radius_y], photo_layers=args.photo_layers,
                          paint_layer_index=args.paint_layer_index,
                          horizon=args.horizon, zoom=args.zoom, blending=args.blending, stats_panel=args.stats)
-        requested.update(wait_for_warmup=args.wait_for_warmup, warmup_idle_ms=args.warmup_idle_ms,
+        requested.update(wait_for_warmup=args.wait_for_warmup, warmup_idle_ms=args.warmup_idle_ms, size_idle_ms=args.size_idle_ms,
                          probe_presets=[int(value) for value in args.probe_presets.split(",")] if args.probe_presets else [])
         requested.update(workload=args.workload, effect_radius=args.effect_radius, color_mode=args.color_mode)
         if args.workload.startswith("objects"):
@@ -178,6 +179,8 @@ def main():
             cmd += ["-e", "probePresets", args.probe_presets]
         if args.warmup_idle_ms is not None:
             cmd += ["-e", "warmupIdleMs", str(args.warmup_idle_ms)]
+        if args.size_idle_ms:
+            cmd += ["-e", "sizeIdleMs", str(args.size_idle_ms)]
         cmd += ["-e", "colorMode", args.color_mode]
         if args.live_filter:
             cmd += ["-e", "liveFilter", args.live_filter, "-e", "liveFilterValues", shlex.quote(args.live_filter_values),

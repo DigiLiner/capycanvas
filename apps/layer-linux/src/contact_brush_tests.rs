@@ -150,3 +150,58 @@ fn contact_pixels(w: &Workspace, region: [u32; 4]) -> Vec<[f32; 4]> {
         renderer.read_region(region).unwrap()
     })).unwrap()
 }
+
+#[test]
+#[ignore = "requires a private Wayland display and GPU"]
+fn native_dry_brush_preparation() {
+    let app = native_test_app("art.capycanvas.DryBrushPreparation");
+    let w = fixture_workspace(&app);
+    w.window.present();
+    pump(1600);
+    until(|| ui_session(&w).engine().backend().startup.complete, "startup timed out");
+    pump(1500);
+    let measure = |label: &str, change: &dyn Fn()| {
+        let context = glib::MainContext::default();
+        let started = Instant::now();
+        change();
+        let dispatch = started.elapsed();
+        let mut worst = Duration::ZERO;
+        while !w.gpu.borrow().as_ref().is_some_and(|g| { let e = g.session.engine(); e.backend().paint_ready(e.document(), e.brush(), false) }) {
+            assert!(started.elapsed() < Duration::from_secs(600), "{label} preparation timed out");
+            while context.pending() {
+                let t = Instant::now();
+                context.iteration(false);
+                worst = worst.max(t.elapsed());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        eprintln!("PROBE_GTK {label} ready_ms={:.1} dispatch_ms={:.1} worst_main_iteration_ms={:.1}",
+            started.elapsed().as_secs_f64() * 1000., dispatch.as_secs_f64() * 1000., worst.as_secs_f64() * 1000.);
+    };
+    use layer_core::DefaultBrushPreset as D;
+    for (label, preset) in [("Pencil", D::Pencil), ("Pointy Pencil", D::PointyPencil), ("Chalk", D::Chalk), ("Pencil again", D::Pencil)] {
+        let id = preset as u32;
+        let group = layer_ui::brush_catalog().find(|b| b.id == id).unwrap().group;
+        w.dispatch(UiAction::Invoke { command: group.tool().command() });
+        w.dispatch(UiAction::SelectToolGroup { group });
+        pump(30);
+        let button = w.tool_set.buttons.borrow().iter().find(|(item, _, _)| item.preview == Some(id)).unwrap().1.clone();
+        measure(label, &|| click(&button));
+        pump(200);
+    }
+    measure("Pencil 36 px", &|| w.dispatch(UiAction::SetBrushSize { value: 36. }));
+    pump(200);
+    let camera = state(&w).camera;
+    for i in 0..=48 {
+        let t = i as f32 / 48.;
+        let now = glib::monotonic_time() as u64 * 1000;
+        let phase = match i { 0 => PenPhase::Down, 48 => PenPhase::Up, _ => PenPhase::Move };
+        w.input.send(&w, PenEvent { device_id: 97, timestamp_ns: now, pressure: 0.2 + 0.8 * (t * std::f32::consts::PI).sin(),
+            ..pen_event(&camera, [300. + 700. * t, 400. + (t * std::f32::consts::TAU).sin() * 16.], phase, now) });
+        pump(6);
+    }
+    pump(400);
+    assert_eq!(ui_session(&w).engine().metrics().committed_strokes, 1, "the stroke after preparation is committed");
+    w.window.close();
+    pump(50);
+}

@@ -1,10 +1,10 @@
-//! Disposable, app-private startup pipeline data. One generation avoids
-//! accumulating obsolete shaders. The 64 MiB budget includes atomic-write files.
+//! Disposable, app-private pipeline data. One generation avoids accumulating
+//! obsolete shaders. The 64 MiB budget includes atomic-write files.
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, atomic::{AtomicBool, Ordering}},
 };
 
 const BUDGET: u64 = 64 * 1024 * 1024;
@@ -12,7 +12,9 @@ const HEADER: u64 = 32;
 const MAGIC: &[u8; 8] = b"CAPYPC01";
 
 pub(super) struct Cache {
-    active: Mutex<Option<(wgpu::PipelineCache, Store)>>,
+    active: Mutex<Option<wgpu::PipelineCache>>,
+    store: Mutex<Store>,
+    unsaved: AtomicBool,
 }
 impl Cache {
     pub fn open(device: &wgpu::Device, info: &wgpu::AdapterInfo, directory: &Path) -> Option<Self> {
@@ -58,32 +60,40 @@ impl Cache {
             })
         };
         Some(Self {
-            active: Mutex::new(Some((pipeline, store))),
+            active: Mutex::new(Some(pipeline)),
+            store: Mutex::new(store),
+            unsaved: AtomicBool::new(false),
         })
     }
     pub fn pipeline(&self) -> Option<wgpu::PipelineCache> {
-        self.active.lock().unwrap().as_ref().map(|(p, _)| p.clone())
+        let pipeline = self.active.lock().unwrap().clone();
+        self.unsaved.fetch_or(pipeline.is_some(), Ordering::Relaxed);
+        pipeline
     }
-    pub fn finish(&self) {
-        // Detach before serializing. Later runtime filter compilations cannot
-        // grow this startup cache indefinitely. Existing pipelines remain live.
-        let Some((pipeline, mut store)) = self.active.lock().unwrap().take().filter(|(_, store)| store.lock.is_some()) else {
-            return;
-        };
+    pub fn take_unsaved(&self) -> bool {
+        self.unsaved.swap(false, Ordering::Relaxed)
+    }
+    pub fn save(&self) {
+        self.unsaved.store(false, Ordering::Relaxed);
+        let Some(pipeline) = self.active.lock().unwrap().clone() else { return };
+        let Some(data) = pipeline.get_data() else { return };
+        let identity = (data.len(), crc32fast::hash(&data));
+        let mut store = self.store.lock().unwrap();
+        if store.published == Some(identity) { return; }
         let start = std::time::Instant::now();
-        if let Some(data) = pipeline.get_data() {
-            match store.save(&data) {
-                Ok(true) => log(&format!(
-                    "saved bytes={} elapsed_ms={:.2}",
-                    data.len() + HEADER as usize,
-                    start.elapsed().as_secs_f64() * 1000.
-                )),
-                Ok(false) => log(&format!(
-                    "save skipped: bytes={} exceeds budget={BUDGET}",
-                    data.len()
-                )),
-                Err(e) => log(&format!("save skipped: {e}")),
+        let retained = match store.save(&data) {
+            Ok(true) => {
+                store.published = Some(identity);
+                log(&format!("saved bytes={} elapsed_ms={:.2}", data.len() + HEADER as usize, start.elapsed().as_secs_f64() * 1000.));
+                true
             }
+            Ok(false) if data.len() as u64 + HEADER <= BUDGET => true,
+            Ok(false) => { log(&format!("save skipped: bytes={} exceeds budget={BUDGET}", data.len())); false }
+            Err(e) => { log(&format!("save skipped: {e}")); false }
+        };
+        drop(store);
+        if !retained {
+            self.active.lock().unwrap().take();
         }
     }
 }
@@ -93,27 +103,20 @@ struct Store {
     key: u64,
     budget: u64,
     // Held through background save. A renderer created while another holds it
-    // reads the published data but never cleans or writes. OS releases it on death.
+    // reads the published data and writes only after the owner releases it.
+    // OS releases it on death.
     lock: Option<File>,
+    published: Option<(usize, u32)>,
 }
 impl Store {
     fn open(directory: &Path, key: u64, budget: u64) -> io::Result<Self> {
         fs::create_dir_all(directory)?;
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(directory.join("lock"))?;
-        let lock = match try_lock(&lock) {
-            Ok(()) => Some(lock),
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => None,
-            Err(e) => return Err(e),
-        };
         let store = Self {
             directory: directory.into(),
             key,
             budget,
-            lock,
+            lock: acquire(directory)?,
+            published: None,
         };
         if store.lock.is_some() { store.clean()?; }
         Ok(store)
@@ -172,6 +175,9 @@ impl Store {
     }
     fn save(&mut self, data: &[u8]) -> io::Result<bool> {
         if self.lock.is_none() {
+            self.lock = acquire(&self.directory)?;
+        }
+        if self.lock.is_none() {
             return Ok(false);
         }
         self.clean()?;
@@ -202,6 +208,19 @@ impl Store {
             let _ = fs::remove_file(self.temporary());
         }
         result
+    }
+}
+
+fn acquire(directory: &Path) -> io::Result<Option<File>> {
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(directory.join("lock"))?;
+    match try_lock(&lock) {
+        Ok(()) => Ok(Some(lock)),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(e) => Err(e),
     }
 }
 
@@ -322,6 +341,17 @@ mod tests {
     }
 
     #[test]
+    fn a_waiting_renderer_takes_over_the_store_when_its_owner_closes() {
+        let temp = Temp::new();
+        let mut owner = Store::open(&temp.0, 1, 128).unwrap();
+        let mut adopted = Store::open(&temp.0, 1, 128).unwrap();
+        assert!(owner.save(b"startup").unwrap() && !adopted.save(b"adopted brushes").unwrap());
+        drop(owner);
+        assert!(adopted.save(b"adopted brushes").unwrap(), "the renderer still running saves later preparations");
+        assert_eq!(Store::open(&temp.0, 1, 128).unwrap().load().unwrap().unwrap(), b"adopted brushes");
+    }
+
+    #[test]
     fn cached_gpu_startup_matches_eager_pixels_and_waits_for_catalog() {
         use crate::{PipelineDevice, WgpuRasterizer};
         use layer_render::CanvasRenderer;
@@ -380,6 +410,7 @@ mod tests {
             &expected[(32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 4],
             "test must paint visible pixels"
         );
+        let mut prepared_later = 0;
         for _ in 0..2 {
             let mut renderer = WgpuRasterizer::from_wgpu_native_staged_cached(
                 adapter.clone(),
@@ -402,15 +433,23 @@ mod tests {
                     "Unsupported driver caches must use the normal staged path"
                 );
             } else {
-                assert!(fs::metadata(temp.0.join("startup.bin")).unwrap().len() > HEADER);
+                let startup = fs::metadata(temp.0.join("startup.bin")).unwrap().len();
+                assert!(startup > HEADER && startup >= prepared_later, "the next launch keeps brushes prepared after startup");
+                if prepared_later == 0 {
+                    renderer.prepare_startup(&doc, &layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil), false).unwrap();
+                    crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.complete, format_args!("Pencil compilation timed out"));
+                    crate::test_support::wait_startup(&mut renderer, deadline, |_| fs::metadata(temp.0.join("startup.bin")).unwrap().len() > startup,
+                        format_args!("a brush prepared after startup must reach the saved cache"));
+                    prepared_later = fs::metadata(temp.0.join("startup.bin")).unwrap().len();
+                }
             }
         }
-        // A new device wrapper reads the saved driver blob, then releases it.
-        let cached = PipelineDevice::cached(device, &adapter, Some(&temp.0));
-        cached.finish_cache();
-        assert!(
-            Store::open(&temp.0, 1, BUDGET).is_ok(),
-            "save must release the store lock and driver cache"
-        );
+        if !cache_features.is_empty() {
+            let cached = PipelineDevice::cached(device, &adapter, Some(&temp.0));
+            cached.save_cache();
+            assert!(Store::open(&temp.0, 1, BUDGET).unwrap().lock.is_none(), "a live cache keeps its store for later saves");
+            drop(cached);
+            assert!(Store::open(&temp.0, 1, BUDGET).unwrap().lock.is_some(), "dropping the cache releases its store");
+        }
     }
 }

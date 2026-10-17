@@ -30,6 +30,14 @@ GTK's `native_late_shader_failure_after_startup` completes startup, then queues
 a compiler failure and requires the render owner to return its recorded cause
 without another startup request. Run it on the private hardware test display.
 
+Brush preparation changes run layer-host's
+`dry_brushes_never_compile_while_painting_any_pose` in a debug build: it paints
+every dry preset at three sizes through pressure and tilt extremes, and the
+renderer asserts that each selected dry kernel was prepared before the stroke.
+GTK's `native_dry_brush_preparation` selects dry presets through the toolbar,
+reports each preparation time and the slowest main-loop iteration, then paints.
+Run it with `__GL_SHADER_DISK_CACHE=0` on NVIDIA to measure a cold driver.
+
 Pipeline preparation changes also run the Web `--pipeline-readiness` journey.
 It intercepts real GPU device calls on the page and in workers, requires zero
 blocking pipeline creation during startup and cold painted and linked-mask
