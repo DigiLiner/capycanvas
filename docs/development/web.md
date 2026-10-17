@@ -42,7 +42,9 @@ and the icon sprite, then serves `apps/layer-web` with Python.
 `CAPY_RUST_PROFILE` the profile. Rebuild with `bash apps/layer-web/build.sh`
 after Rust changes; the browser tests do not build.
 
-Where to look in [`apps/layer-web`](../../apps/layer-web): `app.js` schedules
+Where to look in [`apps/layer-web`](../../apps/layer-web): `start.js` loads
+`app.js` only when the browser has the platform features the editor UI needs;
+otherwise `gpu.js` shows the update help in the canvas area. `app.js` schedules
 frames on animation callbacks, routes input and applies shared UI changes to the
 DOM; `gpu.js` writes the help shown when WebGPU cannot start;
 `documents.js` connects project requests to browser file access and downloads;

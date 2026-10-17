@@ -87,6 +87,7 @@ node --test apps/layer-web/run.test.mjs apps/layer-web/package.test.mjs
 node apps/layer-web/test.mjs --package
 node apps/layer-web/test.mjs --package --gpu-startup
 node apps/layer-web/test.mjs --package --gpu-compatibility
+node apps/layer-web/test.mjs --package --outdated-browser
 node apps/layer-web/test.mjs --package --workspace
 node apps/layer-web/test.mjs --package --customization
 node apps/layer-web/test.mjs --package --smoke
@@ -100,7 +101,9 @@ between installations on different paths. Its update fixture changes real JS
 and CSS and checks that one ordinary refresh runs the new code while a second
 open editor keeps its state and can still fetch old assets offline.
 `--gpu-startup` injects missing API, adapter and device failures and delayed
-startup; `--gpu-compatibility` injects browser exceptions escaping Wasm startup.
+startup; `--gpu-compatibility` injects browser exceptions escaping Wasm startup;
+`--outdated-browser` removes popovers and WebGPU and checks the update help for
+Android and desktop in both themes.
 The tests never install an OS app, touch an existing browser profile or deploy.
 OS installation UI, mobile browsers and real storage eviction need device testing.
 
@@ -112,7 +115,9 @@ package cannot enable it. The client uses no shared-memory threads, so it needs
 no cross-origin isolation headers.
 
 The Rust UI session starts before the GPU. Without a GPU, menus, panels and
-preferences still work and the canvas area shows platform-specific help. There
+preferences still work and the canvas area shows platform-specific help. A
+browser too old for the editor UI (no popover support) does not start the editor;
+the canvas area says the browser is out of date and shows the same help. There
 is no CPU renderer and no queued painting before the GPU attaches. Startup
 checks the secure context, the WebGPU API, real adapter and device requests and
 renderer validation, and reports each failure separately. It never blocks a

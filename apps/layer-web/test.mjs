@@ -98,7 +98,7 @@ import { checkAdjustments, checkCurves } from "./effects.test.mjs";
 import { checkPreferences, checkSettingsParity, checkLiveLanguage } from "./preferences.test.mjs";
 import {checkLiveHistogramLanguage,checkLiveWorkspaceLanguage,checkLiveDeliveryLanguage,checkLiveProofLanguage,checkLiveColorFormLanguage,checkLiveToolbarLanguage,checkLiveEffectLanguage,checkLiveToolLanguage} from "./localization-journey.test.mjs";
 import { checkPwa, servePackage } from "./pwa.test.mjs";
-import { checkGpuStartup, checkGpuCompatibility, checkGpuFailureLifecycle, checkCallbackBoundaries } from "./gpu.test.mjs";
+import { checkGpuStartup, checkGpuCompatibility, checkGpuFailureLifecycle, checkCallbackBoundaries, checkOutdatedBrowser } from "./gpu.test.mjs";
 import { checkStagedStartup } from "./startup.test.mjs";
 import { checkMediumTiles } from "./tiles.test.mjs";
 import { checkCustomization, checkWorkspace, checkTabStyles, checkToolbarManager, checkToolPicker } from "./customization.test.mjs";
@@ -200,9 +200,8 @@ try {
   if (process.argv.includes("--title-bar-overflow")) await call("Page.addScriptToEvaluateOnNewDocument", {source:
     `window.__overflowEvents=[];for(const type of ['pointerdown','pointerup','click'])window.addEventListener(type,e=>{const value={type,id:e.pointerId,pointer:e.pointerType,target:e.target.tagName,source:e.target.closest('details')?.id};__overflowEvents.push(value);setTimeout(()=>{value.prevented=e.defaultPrevented},0);},true)`});
   if(process.argv.some(flag=>['--pipeline-readiness','--drawing-tabs-recovery','--staged-startup'].includes(flag)))await call('Page.addScriptToEvaluateOnNewDocument',{source:'Error.stackTraceLimit=100'});
-  await call("Page.navigate", {
-    url: packageHost?.url || process.env.LAYER_WEB_URL || "http://127.0.0.1:4173",
-  });
+  const pageUrl = packageHost?.url || process.env.LAYER_WEB_URL || "http://127.0.0.1:4173";
+  await call("Page.navigate", { url: pageUrl });
   await evaluate(
     `new Promise((resolve, reject) => { const started = performance.now(); function check() { if (window.layerApp && document.body.dataset.gpu === 'ready' && layerApp.app.brush_ready()) resolve(true); else if (performance.now() - started > 25000) reject(new Error(document.querySelector('#gpu-notice')?.textContent || document.querySelector('#status')?.textContent)); else setTimeout(check, 100); } check(); })`,
   );
@@ -374,6 +373,7 @@ try {
       assert.ok(packageHost, "Use --package --gpu-compatibility to test the built distribution");
       await checkGpuCompatibility({ call, evaluate, settle, url: packageHost.url, errors });
     }, checkErrors],
+    [process.argv.includes("--outdated-browser"), () => checkOutdatedBrowser({ call, evaluate, settle, url: pageUrl, errors }), checkErrors],
     [process.argv.includes("--gpu-startup"), async () => {
       assert.ok(packageHost, "Use --package --gpu-startup to test the built distribution");
       await checkGpuStartup({ call, evaluate, settle, canvasPixels, url: packageHost.url, errors });

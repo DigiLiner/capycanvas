@@ -49,6 +49,62 @@ export async function checkCallbackBoundaries({call,evaluate,settle,errors}) {
   } finally {await evaluate('window.showSaveFilePicker=callbackBoundaries.picker');}
 }
 
+export async function checkOutdatedBrowser({ call, evaluate, settle, url, errors }) {
+  const waitFor = async condition => {
+    const deadline=Date.now()+20000;
+    while(Date.now()<deadline) {
+      try { if(await evaluate(`Boolean(${condition})`))return; }
+      catch(error) { if(!/navigated|context.*destroyed|Cannot find context/i.test(String(error)))throw error; }
+      await new Promise(resolve=>setTimeout(resolve,50));
+    }
+    throw Error('Outdated browser page stuck: '+condition);
+  };
+  const browsers = {
+    android: ["Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Mobile Safari/537.36", /Try the latest Chrome\s+Update Chrome and Android/],
+    desktop: ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36", /Update your browser\s+Install the latest version of your browser/],
+  };
+  const panels = { light: "rgb(237, 237, 237)", dark: "rgb(65, 65, 65)" };
+  try {
+    for (const [mode, [userAgent, help]] of Object.entries(browsers)) for (const theme of ["light", "dark"]) {
+      await call("Page.navigate", { url: "about:blank" });
+      await call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+      const { identifier } = await call("Page.addScriptToEvaluateOnNewDocument", { source: `
+        delete HTMLElement.prototype.showPopover;
+        Object.defineProperty(navigator, 'gpu', { configurable: true, value: undefined });
+        Object.defineProperty(navigator, 'userAgent', { configurable: true, value: ${JSON.stringify(userAgent)} });
+        Object.defineProperty(navigator, 'userAgentData', { configurable: true, value: undefined });
+        Object.defineProperty(navigator, 'platform', { configurable: true, value: '' });
+      ` });
+      try {
+        await call("Page.navigate", { url });
+        await waitFor("document.body?.dataset.gpu === 'unavailable'");
+        await settle();
+        assert.equal(await evaluate("!!window.layerApp"), false, "The editor does not start in an outdated browser");
+        assert.equal(await evaluate("document.body.dataset.theme"), theme);
+        assert.equal(await evaluate("document.querySelector('#gpu-notice').hidden"), false);
+        assert.equal(await evaluate("document.querySelector('.gpu-help h1').textContent"), "Could not initialize canvas");
+        assert.equal(await evaluate("document.querySelector('.gpu-cause').textContent"), "Your browser is out of date.");
+        assert.equal(await evaluate("document.querySelectorAll('#gpu-notice button, #gpu-notice .diagnostic-detail').length"), 0);
+        assert.match(await evaluate("document.querySelector('#gpu-notice').innerText"), help);
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.gpu-help')).backgroundColor"), panels[theme]);
+        assert.ok(await evaluate("(()=>{const n=document.querySelector('#gpu-notice').getBoundingClientRect(),h=document.querySelector('.gpu-help').getBoundingClientRect();return h.width>0&&h.left>=n.left&&h.right<=n.right&&h.top>=n.top})()"), "Help sits inside the canvas area");
+        const dir = "artifacts/ui/outdated-browser";
+        await mkdir(dir, { recursive: true });
+        const shot = await call("Page.captureScreenshot", { format: "png" });
+        await writeFile(`${dir}/${mode}-${theme}.png`, Buffer.from(shot.data, "base64"));
+        assert.deepEqual(errors, [], `${mode} ${theme} reports no browser errors`);
+        console.log(`Outdated browser: ${mode} ${theme} passed`);
+      } finally {
+        await call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+      }
+    }
+  } finally {
+    await call("Emulation.setEmulatedMedia", { features: [] });
+    await call("Page.navigate", { url });
+    await waitFor("!!window.layerApp && document.body.dataset.gpu === 'ready'");
+  }
+}
+
 // API exceptions escaping the actual Wasm initialization future (not a mock app).
 export async function checkGpuCompatibility({ call, evaluate, settle, url, errors }) {
   const waitFor = async condition => {

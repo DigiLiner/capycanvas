@@ -202,7 +202,7 @@ export function packageWeb() {
     // Discover the whole UI module graph from the HTML, instead of waiting for
     // successive import fetches through the service worker on each navigation.
     const preloads = Object.keys(names).filter(path => path.endsWith(".js") &&
-      path !== "app.js" && !path.endsWith("-worker.js")).map(path =>
+      path !== "start.js" && !path.endsWith("-worker.js")).map(path =>
       `<link rel="modulepreload" href="${asset(path)}" />`).join("\n    ");
     const metadata = `${preloads}
     <link rel="manifest" href="./manifest.webmanifest" />

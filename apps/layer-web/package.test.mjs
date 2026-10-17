@@ -23,6 +23,8 @@ test("filter icons declare theme paint without GTK's symbolic CSS", () => {
 test("GPU help distinguishes missing support, insecure access and no adapter", () => {
   assert.match(gpuProblem({ secure: false, api: false })[1], /secure connection/);
   assert.match(gpuProblem({ secure: true, api: false })[1], /WebGPU is not available/);
+  assert.match(gpuProblem({ secure: true, api: false, ui: false })[1], /out of date/);
+  assert.match(gpuProblem({ secure: false, api: false, ui: false })[1], /secure connection/);
   assert.deepEqual(gpuProblem({ secure: true, api: true, stage: "adapter" }), [
     "Could not initialize canvas", "Your browser could not find a GPU adapter.",
   ]);
@@ -31,35 +33,35 @@ test("GPU help distinguishes missing support, insecure access and no adapter", (
     assert.match(gpuProblem({ secure: true, api: true, stage })[1], /canvas renderer/);
 });
 
-test("GPU failure notice retains the cause, unhides itself and offers restart", async t => {
-  for (const name of ["navigator", "isSecureContext"]) {
+function fakeBrowser(t, { userAgent, platform, popover = true, clipboard }) {
+  for (const name of ["navigator", "isSecureContext", "document", "HTMLElement"]) {
     const original = Object.getOwnPropertyDescriptor(globalThis, name);
     t.after(() => original ? Object.defineProperty(globalThis, name, original) : delete globalThis[name]);
   }
-  const copied = [];
   Object.defineProperty(globalThis, "isSecureContext", { configurable: true, value: true });
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
-    gpu: {}, userAgent: "X11; Linux x86_64 Chrome/150", platform: "Linux", maxTouchPoints: 0,
-    clipboard: { writeText: async value => copied.push(value) },
+    gpu: popover ? {} : undefined, userAgent, platform, maxTouchPoints: 0, clipboard,
   }});
   const element = (tagName, className = "", textContent = "") => Object.assign(new FakeElement(), {
     tagName, className, textContent, children: [], attributes: new Map(), listeners: {}, hidden: false,
     append(...nodes) { FakeElement.prototype.append.call(this, ...nodes.map(node => typeof node === "string" ? element("#text", "", node) : node)); },
   });
-  const button = (label, callback) => {
-    const node = element("button", "", label);
-    node.addEventListener("click", callback);
-    return node;
-  };
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { createElement: tag => element(tag) } });
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: popover ? class { showPopover() {} } : class {} });
   const nodes = node => [node, ...node.children.filter(child => typeof child === "object").flatMap(nodes)];
   const text = node => [node.textContent, ...node.children.map(child => typeof child === "string" ? child : text(child))].join(" ");
-  const container = element("section");
+  return { container: element("section"), nodes, text };
+}
+
+test("GPU failure notice retains the cause, unhides itself and offers restart", async t => {
+  const copied = [];
+  const { container, nodes, text } = fakeBrowser(t, { userAgent: "X11; Linux x86_64 Chrome/150", platform: "Linux",
+    clipboard: { writeText: async value => copied.push(value) } });
   let retries = 0;
   for (const error of [{ stage: "device", message: "capy-test: device refused" },
     new Error("capy-test: native compiler failure"), "capy-test: escaped rejection"]) {
     container.hidden = true;
-    showGpuNotice({ container, error, element, button,
-      restart: () => retries++, restartLabel: "Restart canvas" });
+    showGpuNotice({ container, error, restart: () => retries++, restartLabel: "Restart canvas" });
     assert.equal(container.hidden, false);
     assert.ok(text(container).includes(error.message ?? String(error)));
     const retry = nodes(container).filter(node => node.tagName === "button" && node.textContent === "Restart canvas");
@@ -75,6 +77,25 @@ test("GPU failure notice retains the cause, unhides itself and offers restart", 
   }
   assert.equal(retries, 3);
   assert.equal(copied.length, 12);
+});
+
+test("An outdated browser gets update help without a restart or diagnostic", t => {
+  for (const [userAgent, platform, help, list] of [
+    ["Linux; Android 10; K Chrome/111.0.0.0 Mobile Safari/537.36", "Linux armv8l", /Try the latest Chrome.*Update Chrome and Android/, false],
+    ["Windows NT 10.0 Chrome/111 Safari/537.36", "Win32", /Update your browser.*Install the latest version/, true],
+  ]) {
+    const { container, nodes, text } = fakeBrowser(t, { userAgent, platform, popover: false });
+    container.hidden = true;
+    showGpuNotice({ container });
+    assert.equal(container.hidden, false);
+    const all = nodes(container);
+    assert.equal(all.find(node => node.className === "gpu-cause").textContent, "Your browser is out of date.");
+    assert.equal(all.filter(node => node.tagName === "button").length, 0);
+    assert.equal(all.filter(node => node.className === "diagnostic-detail").length, 0);
+    assert.match(text(container).replace(/\s+/g, " "), help);
+    assert.doesNotMatch(text(container), /chrome:\/\/|graphics acceleration/);
+    assert.equal(all.some(node => node.className === "gpu-browsers"), list);
+  }
 });
 
 test("GPU help identifies platforms without using browser identity to decide support", () => {

@@ -19,9 +19,9 @@ export async function servePackage() {
   // A real changed JS/CSS release, not merely a changed HTML comment. Old URLs
   // stay immutable; only the updated HTML/worker point at the new fingerprints.
   for (const [type, suffix] of [["js", '\nglobalThis.capyTestRelease = "updated";'], ["css", "\n:root { --capy-test-release: updated; }"]]) {
-    // Change the app entry point, not workspace-preload.js (also imported by
-    // app.js). Renaming that dependency alone would create an invalid fixture.
-    const old = html.match(new RegExp(`assets/${type === "js" ? "app" : "style"}\\.[0-9a-f]{20}\\.${type}`))[0];
+    // Change the page entry module, which no other module imports. Renaming a
+    // dependency alone would create an invalid fixture.
+    const old = html.match(new RegExp(`assets/${type === "js" ? "start" : "style"}\\.[0-9a-f]{20}\\.${type}`))[0];
     const data = readFileSync(join(update, old), "utf8") + suffix;
     const path = old.replace(/\.[0-9a-f]{20}\./, `.${createHash("sha256").update(data).digest("hex").slice(0, 20)}.`);
     writeFileSync(join(update, path), data);

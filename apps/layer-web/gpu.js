@@ -1,12 +1,21 @@
 // Original help UI. Browser settings URLs must be copied into the address bar:
 // browsers deliberately prevent web pages from opening their internal settings.
-export function gpuProblem({ secure, api, stage }) {
+export function gpuProblem({ secure, api, ui = true, stage }) {
   const title = "Could not initialize canvas";
   if (!secure) return [title, "Your browser needs a secure connection to access the GPU."];
+  if (!ui) return [title, "Your browser is out of date."];
   if (!api) return [title, "WebGPU is not available in this browser."];
   if (stage === "adapter") return [title, "Your browser could not find a GPU adapter."];
   if (stage === "device") return [title, "Your browser found a GPU but could not start it."];
   return [title, "Your GPU could not initialize the canvas renderer."];
+}
+
+export function browserSupport() {
+  return {
+    secure: isSecureContext,
+    api: !!navigator.gpu,
+    ui: typeof HTMLElement.prototype.showPopover === "function",
+  };
 }
 
 // Platform/browser hints select help only. Never use them to gate GPU startup.
@@ -28,13 +37,28 @@ export function gpuEnvironment({ userAgent = "", platform = "", maxTouchPoints =
   return { system, browser };
 }
 
-export function showGpuNotice({ container, error, element, button, restart, restartLabel }) {
-  const [title, reason] = gpuProblem({ secure: isSecureContext, api: !!navigator.gpu, stage: error?.stage });
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+function button(text, action, className = "") {
+  const node = element("button", className, text);
+  node.type = "button";
+  node.addEventListener("click", action);
+  return node;
+}
+
+export function showGpuNotice({ container, error, restart, restartLabel }) {
+  const support = browserSupport();
+  const [title, reason] = gpuProblem({ ...support, stage: error?.stage });
   const content = element("div", "gpu-help");
   const intro = element("p", "", "Capy Canvas is a GPU-accelerated drawing app and needs access to your GPU.");
-  content.append(element("h1", "", title), element("p", "gpu-cause", reason),
-    element("p", "diagnostic-detail", error?.message ?? String(error)),
-    button(restartLabel, restart, "gpu-retry"), intro);
+  content.append(element("h1", "", title), element("p", "gpu-cause", reason));
+  if (error !== undefined) content.append(element("p", "diagnostic-detail", error?.message ?? String(error)));
+  if (restart) content.append(button(restartLabel, restart, "gpu-retry"));
+  content.append(intro);
   const { system, browser } = gpuEnvironment(navigator);
   const address = (parent, url) => {
     const row = element("div", "gpu-address");
@@ -55,7 +79,7 @@ export function showGpuNotice({ container, error, element, button, restart, rest
   } else if (system === "android") {
     content.append(element("h2", "", "Try the latest Chrome"),
       element("p", "", "Update Chrome and Android, then reopen this page in Chrome. WebGPU needs Android 12 or later and a supported GPU. Some devices are not supported."));
-  } else if (["chromium", "edge"].includes(browser)) {
+  } else if (support.ui && ["chromium", "edge"].includes(browser)) {
     const scheme = browser === "edge" ? "edge" : "chrome";
     const name = browser === "edge" ? "Edge" : "Chrome";
     const steps = element("ol", "gpu-steps");
@@ -100,6 +124,8 @@ export function showGpuNotice({ container, error, element, button, restart, rest
       list.append(item);
     }
     content.append(list);
+    if (!support.ui) content.append(element("h2", "", "Update your browser"),
+      element("p", "", "Install the latest version of your browser, then reload this page."));
   }
   container.replaceChildren(content);
   container.hidden = false;
