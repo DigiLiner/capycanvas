@@ -1,5 +1,5 @@
 import unittest
-from apple_trace import analyze, calibrate_gpu
+from apple_trace import analyze, calibrate_gpu, motion_windows
 
 
 def record(kind, *values):
@@ -18,6 +18,41 @@ def header(**changes):
 
 
 class ReportChecks(unittest.TestCase):
+    def window_fixture(self):
+        begin, end = 1_000_000_000, 7_000_000_000
+        events = [record(9, begin - 1, 0, 11), record(5, begin + 1, 1, 1, 0, 0)]
+        for i, time in enumerate([begin + 1, begin + 3_000_000_000, end - 1]):
+            events += [record(3, time, time, time, i + 1, 1), record(4, time, time, time + 1, i + 1)]
+        return events, {"begin_ns": begin, "end_ns": end, "motion_witness": "retained native input observations"}
+
+    def test_motion_window_deduplicates_frame_drawable_identity_and_rejects_missing_zero(self):
+        events, window = self.window_fixture()
+        base = motion_windows(header(), events, [window], 90)[0]
+        self.assertEqual(base["presented_frames"], 3)
+        self.assertTrue(base["instrumentation_eligible"])
+        duplicate = motion_windows(header(), events + [events[-1]], [window], 90)[0]
+        self.assertEqual(duplicate["presented_frames"], 3)
+        self.assertEqual(duplicate["duplicate_presentation_records"], 1)
+        self.assertFalse(duplicate["instrumentation_eligible"])
+        missing = motion_windows(header(), events[:-1], [window], 90)[0]
+        self.assertEqual(missing["missing_presentation_callbacks"], 1)
+        self.assertFalse(missing["instrumentation_eligible"])
+        zero_events = [*events[:-1], record(4, events[-1][1], 0, events[-1][3], events[-1][4])]
+        zero = motion_windows(header(), zero_events, [window], 90)[0]
+        self.assertEqual(zero["zero_time_presentations"], 1)
+        self.assertFalse(zero["instrumentation_eligible"])
+
+    def test_motion_window_rejects_readiness_loss_even_without_error_and_keeps_global_report(self):
+        events, window = self.window_fixture()
+        events += [record(9, window["begin_ns"] + 1_000_000, 0, 3, 0),
+                   record(9, window["begin_ns"] + 2_000_000, 0, 11, 0)]
+        result = motion_windows(header(), events, [window], 90)[0]
+        self.assertTrue(result["fully_ready_at_begin"])
+        self.assertEqual(result["frame_error_records"], 0)
+        self.assertEqual(result["readiness_loss_records"], 1)
+        self.assertFalse(result["instrumentation_eligible"])
+        self.assertEqual(analyze(header(), events)["counts"]["presented_drawables"], 3)
+
     def test_gpu_clocks_translate_epochs_rates_and_preserve_target_uncertainty(self):
         clocks = [record(14, 0, 500_000_000, 100, 2_000_000),
                   record(14, 100_000_000, 600_000_000, 300, 102_000_000)]

@@ -121,6 +121,15 @@ that targets passed. Review rejected input, frame errors, missing presentations,
 readiness and every warning. A completed input producer does not show continuous
 rendering if the window was occluded.
 
+For an externally observed motion interval, `apple_trace.py TRACE.jsonl
+--motion-windows WINDOWS.json --target-hz 90` also reports bounded canvas
+presentations. The JSON array contains `begin_ns`, `end_ns` and a retained
+`motion_witness` reference for each 5–10 s interval on the same native clock.
+A witness label requires human review. Instrumentation eligibility does not
+establish movement, filtered pixel freshness or a rate target. Readiness loss,
+missing/zero/duplicate presentations and window-edge coverage remain explicit.
+Canvas presentation callbacks do not measure cached native chrome.
+
 ## Reading the report
 
 - **CPU.** Owner queue age runs from display-link admission to owner execution;

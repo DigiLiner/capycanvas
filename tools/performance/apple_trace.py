@@ -291,18 +291,63 @@ def analyze(header, events, target_hz=120):
     return result
 
 
+def motion_windows(header, events, windows, target_hz):
+    results = []
+    for window in windows:
+        begin, end = window["begin_ns"], window["end_ns"]
+        if not isinstance(begin, int) or not isinstance(end, int) or not 5e9 <= end - begin <= 10e9:
+            raise ValueError("Each observed motion window must span 5–10 seconds")
+        if not window.get("motion_witness"):
+            raise ValueError("Observed motion witness is required; scheduled time alone is insufficient")
+        acquired = {(e[1], e[4]) for e in events if e[0] == 3 and e[5] and begin <= e[1] < end}
+        raw = [e for e in events if e[0] == 4]
+        presented = {(e[1], e[4]): e for e in raw}
+        visible = {key: e for key, e in presented.items() if begin <= e[2] <= end and e[2] > 0}
+        scoped = acquired | visible.keys()
+        duplicates = sum((e[1], e[4]) in scoped for e in raw) - len(scoped & presented.keys())
+        missing = len(acquired - presented.keys())
+        zero = sum(key in acquired and e[2] == 0 for key, e in presented.items())
+        times = sorted(e[2] for e in visible.values())
+        ready = [e for e in events if e[0] == 9 and e[1] <= begin]
+        prior = max(ready, key=lambda e: e[1], default=None)
+        during = [e for e in events if e[0] == 9 and begin <= e[1] <= end]
+        memory = [e for e in events if e[0] == 5 and begin <= e[1] <= end]
+        intervals = distribution(b - a for a, b in zip(times, times[1:]))
+        full_ready = bool(prior and prior[3] & 11 == 11 and not prior[4])
+        readiness_losses = sum(e[3] & 11 != 11 for e in during)
+        errors = sum(bool(e[4]) for e in during)
+        thermal_zero = bool(memory) and all(e[4] == 0 and e[5] == 0 for e in memory)
+        hz = len(times) * 1e9 / (end - begin)
+        budget = 1000 / target_hz
+        coverage = bool(times and times[0] - begin <= budget * 2e6 and end - times[-1] <= budget * 2e6)
+        results.append({"window": window, "presented_frames": len(times), "presentations_per_s": hz,
+            "interval_ms": intervals, "fully_ready_at_begin": full_ready, "readiness_loss_records": readiness_losses,
+            "frame_error_records": errors, "missing_presentation_callbacks": missing,
+            "zero_time_presentations": zero, "duplicate_presentation_records": duplicates,
+            "thermal_zero_observed": thermal_zero, "boundary_coverage": coverage,
+            "configuration": header.get("configuration"),
+            "instrumentation_eligible": bool(header.get("configuration") == "release" and not header.get("dropped_records")
+                and full_ready and not (readiness_losses or errors or missing or zero or duplicates)
+                and thermal_zero and coverage and intervals["count"]),
+            "scope": "Metal canvas only; human-reviewed motion witness is scope evidence, not automatic movement or target proof"})
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("trace", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--target-hz", type=float, default=120,
                         help="Refresh rate to evaluate (default: 120; use 90 for the current Mac display)")
+    parser.add_argument("--motion-windows", type=Path, help="Observed native-clock motion windows JSON; no synthetic markers")
     args = parser.parse_args()
     with args.trace.open() as source:
         header = json.loads(next(source))
         events = [json.loads(line) for line in source if line.strip()]
     try:
         report = analyze(header, events, target_hz=args.target_hz)
+        if args.motion_windows:
+            report["observed_motion_windows"] = motion_windows(header, events, json.loads(args.motion_windows.read_text()), args.target_hz)
     except ValueError as error:
         parser.error(str(error))
     result = json.dumps(report, indent=2) + "\n"
