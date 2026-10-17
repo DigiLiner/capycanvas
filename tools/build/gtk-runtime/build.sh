@@ -7,20 +7,26 @@ gtk_prefix=$(realpath -m "${2:?Usage: build.sh BUILD_DIRECTORY PREFIX}")
 mkdir -p "$gtk_build" "$gtk_prefix/lib" "$gtk_prefix/share/doc/capycanvas-gtk/sources"
 gtk_docs="$gtk_prefix/share/doc/capycanvas-gtk"
 gtk_archive=gtk-4.24.1.tar.xz
-if [[ ! -f "$gtk_build/$gtk_archive" ]]; then
-    if [[ -f "$gtk_recipe/sources/$gtk_archive" ]]; then
-        cp "$gtk_recipe/sources/$gtk_archive" "$gtk_build/"
-    elif [[ ${CARGO_NET_OFFLINE:-false} == true ]]; then
-        echo "GTK source archive is missing from the offline cache: $gtk_archive" >&2
-        exit 1
-    else
-        curl --fail --location "https://download.gnome.org/sources/gtk/4.24/$gtk_archive" -o "$gtk_build/$gtk_archive"
+glib_archive=glib-2.90.1.tar.xz
+for gtk_source in \
+    "$gtk_archive e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9 https://download.gnome.org/sources/gtk/4.24" \
+    "$glib_archive 93c941aa17d5eb1d53fe838365f29a8b4e539c222a256d974ec8f30fc413e396 https://download.gnome.org/sources/glib/2.90"; do
+    read -r gtk_source_file gtk_source_hash gtk_source_url <<< "$gtk_source"
+    if [[ ! -f "$gtk_build/$gtk_source_file" ]]; then
+        if [[ -f "$gtk_recipe/sources/$gtk_source_file" ]]; then
+            cp "$gtk_recipe/sources/$gtk_source_file" "$gtk_build/"
+        elif [[ ${CARGO_NET_OFFLINE:-false} == true ]]; then
+            echo "GTK source archive is missing from the offline cache: $gtk_source_file" >&2
+            exit 1
+        else
+            curl --fail --location "$gtk_source_url/$gtk_source_file" -o "$gtk_build/$gtk_source_file"
+        fi
     fi
-fi
-python3 - "$gtk_build/$gtk_archive" <<'PY'
+    python3 - "$gtk_build/$gtk_source_file" "$gtk_source_hash" <<'PY'
 import hashlib, pathlib, sys
-assert hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest() == 'e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9', 'GTK source hash mismatch'
+assert hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest() == sys.argv[2], 'Runtime source hash mismatch'
 PY
+done
 # Re-extract the verified archive before applying a changed patch.
 gtk_patch_hash=$(cat "$gtk_build/$gtk_archive" "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" | sha256sum | cut -d ' ' -f 1)
 if [[ ! -f "$gtk_build/patched.sha256" ]] || [[ $(cat "$gtk_build/patched.sha256") != "$gtk_patch_hash" ]]; then
@@ -49,8 +55,18 @@ fi
 gtk_wrap_mode=nofallback
 if [[ ${CARGO_NET_OFFLINE:-false} == true ]]; then gtk_wrap_mode=nodownload; fi
 gtk_c_args="${CFLAGS:+$CFLAGS }-fPIC $(printf '%q' "-ffile-prefix-map=$gtk_build=/capycanvas-gtk")"
+if [[ ! -d "$gtk_build/glib-2.90.1" ]]; then tar -xf "$gtk_build/$glib_archive" -C "$gtk_build"; fi
+python3 "$gtk_recipe/configure.py" "$gtk_build/glib-build" "$gtk_build/glib-2.90.1" \
+    --prefix=/usr --libdir=lib --libexecdir=lib --buildtype=release --default-library=shared \
+    "-Dc_args=$gtk_c_args" "-Dc_link_args=${LDFLAGS:-}" --wrap-mode="$gtk_wrap_mode" \
+    -Dtests=false -Dinstalled_tests=false -Ddocumentation=false -Dintrospection=disabled \
+    -Dman-pages=disabled -Dselinux=disabled -Dlibmount=enabled -Dsysprof=disabled \
+    -Dlibelf=disabled -Ddtrace=disabled -Dsystemtap=disabled -Dglib_debug=disabled
+ninja -C "$gtk_build/glib-build" -j "${CAPY_BUILD_JOBS:-8}"
+export PKG_CONFIG_PATH="$gtk_build/glib-build/meson-uninstalled${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 python3 "$gtk_recipe/configure.py" "$gtk_build/build" "$gtk_build/gtk-4.24.1" \
     --buildtype=release "-Dc_args=$gtk_c_args" "-Dc_link_args=${LDFLAGS:-}" \
+    "-Dpkg_config_path=$PKG_CONFIG_PATH" \
     --wrap-mode="$gtk_wrap_mode" --force-fallback-for=libtiff,libjpeg-turbo \
     -Dlibtiff:default_library=static -Dlibtiff:jbig=disabled -Dlibtiff:lerc=disabled \
     -Dlibtiff:lzma=disabled -Dlibtiff:webp=disabled -Dlibtiff:zstd=disabled \
@@ -61,10 +77,20 @@ python3 "$gtk_recipe/configure.py" "$gtk_build/build" "$gtk_build/gtk-4.24.1" \
     -Dbuild-testsuite=false -Dbuild-examples=false -Dintrospection=disabled \
     -Dmedia-gstreamer=disabled -Ddocumentation=false -Dman-pages=false -Dx11-backend=false
 ninja -C "$gtk_build/build" -j "${CAPY_BUILD_JOBS:-8}" gtk/libgtk-4.so.1.2400.1
+for gtk_family in glib gobject gio gmodule gthread; do
+    gtk_library="lib$gtk_family-2.0.so.0"
+    cp "$gtk_build/glib-build/$gtk_family/$gtk_library" "$gtk_prefix/lib/$gtk_library.new"
+    patchelf --set-rpath '$ORIGIN' "$gtk_prefix/lib/$gtk_library.new"
+    mv -f "$gtk_prefix/lib/$gtk_library.new" "$gtk_prefix/lib/$gtk_library"
+done
 cp "$gtk_build/build/gtk/libgtk-4.so.1.2400.1" "$gtk_prefix/lib/libgtk-4.so.1.new"
+patchelf --set-rpath '$ORIGIN' "$gtk_prefix/lib/libgtk-4.so.1.new"
 mv -f "$gtk_prefix/lib/libgtk-4.so.1.new" "$gtk_prefix/lib/libgtk-4.so.1"
 cp "$gtk_build/gtk-4.24.1/COPYING" "$gtk_docs/COPYING"
 cp "$gtk_build/$gtk_archive" "$gtk_docs/sources/"
+cp "$gtk_build/$glib_archive" "$gtk_docs/sources/"
+mkdir -p "$gtk_docs/glib"
+cp "$gtk_build/glib-2.90.1/COPYING" "$gtk_docs/glib/"
 cp "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" "$gtk_recipe/build.sh" "$gtk_recipe/configure.py" "$gtk_docs/"
 python3 - "$gtk_prefix" "$gtk_build/gtk-4.24.1/subprojects" <<'PY'
 import configparser, hashlib, json, pathlib, shutil, sys
@@ -75,8 +101,10 @@ files = ['lib/libgtk-4.so.1', 'share/doc/capycanvas-gtk/COPYING',
          'share/doc/capycanvas-gtk/sources/gtk-4.24.1.tar.xz',
          'share/doc/capycanvas-gtk/pad-event-surface.patch',
          'share/doc/capycanvas-gtk/tablet-proximity-cursor.patch', 'share/doc/capycanvas-gtk/build.sh',
-         'share/doc/capycanvas-gtk/configure.py']
-dependencies = {}
+         'share/doc/capycanvas-gtk/configure.py', 'share/doc/capycanvas-gtk/sources/glib-2.90.1.tar.xz',
+         'share/doc/capycanvas-gtk/glib/COPYING']
+files += [f'lib/lib{name}-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]
+dependencies = dict(glib=dict(version='2.90.1', source='https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz'))
 for name in ['libtiff', 'libjpeg-turbo']:
     wrap = configparser.ConfigParser(interpolation=None)
     wrap.read(projects / (name + '.wrap'))

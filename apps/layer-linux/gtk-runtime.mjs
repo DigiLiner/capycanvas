@@ -15,11 +15,15 @@ export function stageGtkRuntime(root, output) {
   }
   const library = join(output, "lib/capycanvas/gtk");
   mkdirSync(library, { recursive: true });
-  cpSync(join(prefix, "lib/libgtk-4.so.1"), join(library, "libgtk-4.so.1"));
   const docs = join(output, "share/doc/capycanvas-gtk");
   cpSync(join(prefix, "share/doc/capycanvas-gtk"), docs, { recursive: true });
   // Paths in the shipped manifest describe the actual relocated payload.
-  manifest.files["lib/capycanvas/gtk/libgtk-4.so.1"] = manifest.files["lib/libgtk-4.so.1"];
-  delete manifest.files["lib/libgtk-4.so.1"];
+  for (const [file, digest] of Object.entries(manifest.files)) {
+    if (!file.startsWith("lib/")) continue;
+    const staged = file.replace(/^lib\//, "lib/capycanvas/gtk/");
+    cpSync(join(prefix, file), join(output, staged));
+    manifest.files[staged] = digest;
+    delete manifest.files[file];
+  }
   return manifest;
 }

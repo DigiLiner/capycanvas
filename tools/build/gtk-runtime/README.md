@@ -1,7 +1,8 @@
 # Packaged GTK runtime
 
 The Linux packager and development launcher invoke `build.sh BUILD_DIRECTORY PREFIX`
-and use the resulting GTK 4.24.1 library. `pad-event-surface.patch` backports
+and use the resulting GTK 4.24.1 and GLib 2.90.1 libraries.
+`pad-event-surface.patch` backports
 [GTK !10171](https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/10171) at commit
 `c6613dd0ad4e1bde77b6cd2e48cfcc80c8e63f33`, with its focus/device guard extended
 to button, ring, strip and dial events. One checked-in patch contains both changes;
@@ -79,7 +80,7 @@ its optional JBIG, LERC, LZMA, WebP and Zstandard dependencies are disabled.
 
 Install the [Linux prerequisites](../../../docs/development/linux.md#prerequisites).
 The runtime builder neither installs system packages nor replaces system GTK.
-The prefix contains the library, source archive,
+The prefix contains the libraries, source archives,
 licenses, patches, standalone build script and a checksum manifest, including
 the TIFF and JPEG source archives and Meson build overlays. Rebuilds seed Meson's
 package cache from these shipped sources, so they need no codec downloads.
@@ -88,7 +89,10 @@ package cache from these shipped sources, so they need no codec downloads.
 `CAPY_GTK_BUILD_DIR` can select another cache. The launcher selects the bundled
 library using an executable-relative path that survives relocation and symlinks.
 Applications can replace the local library with a compatible rebuilt version.
-GTK's other shared dependencies and libadwaita remain system requirements.
+GLib is bundled so GTK 4.24 runs on systems with older GLib, including Omarchy.
+Each private library resolves its siblings through `$ORIGIN`; system GTK and GLib
+remain untouched. Libadwaita and GTK's remaining shared dependencies stay system
+requirements.
 When a recipe introduces options absent from a configured cache, setup uses
 Meson's `--wipe`; source-version changes also replace the configured build. Known
 options in the same source tree use incremental reconfiguration. The installed

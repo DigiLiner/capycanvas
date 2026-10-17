@@ -14,11 +14,11 @@ For the Flatpak runtime, signed downloads and update repository, see
 ## Prerequisites
 
 Install a recent stable Rust toolchain, a C/C++ toolchain, `pkg-config`, and the
-GTK 4.24+, libadwaita 1.9 and Wayland development packages. Enabled API features
+GTK 4.22+, libadwaita 1.9 and Wayland development packages. Enabled API features
 are declared in [`apps/layer-linux/Cargo.toml`](../../apps/layer-linux/Cargo.toml).
-The launcher also builds the [patched GTK runtime](../../tools/build/gtk-runtime/README.md),
-which needs Meson, Ninja, `glslc`, `sassc`, Wayland protocol files, DRM headers
-and GTK's development dependencies. Its TIFF and JPEG libraries build from
+The launcher builds its own [GTK 4.24.1 and GLib runtime](../../tools/build/gtk-runtime/README.md),
+which needs Meson, Ninja, `patchelf`, `glslc`, `sassc`, Wayland protocol files,
+DRM headers and GTK's development dependencies. Its TIFF and JPEG libraries build from
 checksum-pinned sources and link statically; their system development packages
 are unnecessary. The first build downloads those sources; later builds use the cache.
 Photo codecs and ICC color management are Rust crates; no libjpeg-turbo,
@@ -29,14 +29,15 @@ On Fedora:
 ```bash
 sudo dnf install gcc gcc-c++ pkgconf-pkg-config python3 curl patch tar \
   gtk4-devel libadwaita-devel wayland-devel libpng-devel zlib-devel \
-  meson ninja-build glslc sassc wayland-protocols-devel libdrm-devel vulkan-headers
+  libffi-devel libmount-devel pcre2-devel \
+  meson ninja-build patchelf glslc sassc wayland-protocols-devel libdrm-devel vulkan-headers
 ```
 
-On Arch Linux or Omarchy with GTK 4.24 or newer:
+On Arch Linux or Omarchy:
 
 ```bash
 sudo pacman -S --needed base-devel rust python curl glib2-devel gtk4 libadwaita wayland \
-  libpng zlib meson ninja shaderc sassc wayland-protocols libdrm vulkan-headers
+  libpng zlib meson ninja patchelf shaderc sassc wayland-protocols libdrm vulkan-headers
 ```
 
 GTK still requires its native toolkit libraries, fonts and Wayland/Vulkan
@@ -482,15 +483,15 @@ gives it the application ID `art.capycanvas.CapyCanvas` and the `capycanvas`
 folders; every other build runs as `art.capycanvas.CapyCanvas.Devel` with
 `capycanvas-devel` folders, so it never shares a running instance or files with
 an installed package ([storage](../internals/storage.md)). It also builds a
-pinned GTK 4.24.1 with the
-[tablet patches](../../tools/build/gtk-runtime/README.md), cached in
+pinned GTK 4.24.1 with the [tablet patches](../../tools/build/gtk-runtime/README.md)
+and GLib 2.90.1, cached in
 `target/gtk-runtime` (`CAPY_GTK_BUILD_DIR` overrides it). The `bin/capycanvas`
 executable finds the bundled `libgtk-4.so.1` through its embedded library path.
-System GTK is never replaced; libadwaita and GTK's other dependencies stay system
-requirements, so this is a native bundle for compatible distributions. The
+System GTK and GLib are never replaced; libadwaita and the remaining dependencies
+stay system requirements, so this is a native bundle for compatible distributions. The
 [Flatpak](releasing.md#linux-flatpak) uses the GNOME runtime for those dependencies.
-`share/doc/capycanvas-gtk` carries the GTK source,
-patches, license, checksums and a rebuild script.
+`share/doc/capycanvas-gtk` carries the GTK and GLib sources,
+patches, licenses, checksums and a rebuild script.
 
 The output holds the executable, desktop entry, AppStream metainfo, `.capy` MIME
 definition, icon, runtime filters, GTK runtime and notices. Photo codecs are compiled in, so a

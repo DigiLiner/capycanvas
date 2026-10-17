@@ -10,5 +10,8 @@ rustup toolchain install "$RUST_VERSION" --profile minimal --component rust-docs
 rustup default "$RUST_VERSION"
 export CARGO_BUILD_JOBS=$CAPY_BUILD_JOBS
 cargo install --locked cargo-about --version 0.9.2 --features cli
+python3 -m pip install --only-binary=:all: --no-deps \
+    --prefix="$CARGO_HOME/build-tools" patchelf==0.17.2.4
+export PATH="$CARGO_HOME/build-tools/bin:$PATH"
 node apps/layer-linux/package.mjs
 cp -a dist/capycanvas-linux/bin dist/capycanvas-linux/lib dist/capycanvas-linux/share /app/

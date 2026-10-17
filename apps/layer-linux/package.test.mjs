@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -113,6 +114,30 @@ function packageFixture(t) {
   writeFileSync(join(root, "dist/capycanvas-linux/keep"), "existing package");
   return root;
 }
+
+test("runtime staging relocates every private library in the checksum manifest", t => {
+  const root = fixture(t), build = join(root, "build"), prefix = join(build, "prefix"), output = join(root, "output"), bin = join(root, "bin");
+  mkdirSync(join(prefix, "lib"), { recursive: true });
+  mkdirSync(join(prefix, "share/doc/capycanvas-gtk"), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(join(bin, "bash"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const files = {};
+  const names = ["libgtk-4.so.1", ...["glib", "gobject", "gio", "gmodule", "gthread"].map(name => `lib${name}-2.0.so.0`)];
+  for (const name of names) {
+    writeFileSync(join(prefix, "lib", name), name);
+    files[`lib/${name}`] = createHash("sha256").update(name).digest("hex");
+  }
+  writeFileSync(join(prefix, "manifest.json"), JSON.stringify({ files }));
+  const script = `import { stageGtkRuntime } from ${JSON.stringify(new URL("./gtk-runtime.mjs", import.meta.url).href)};
+    console.log(JSON.stringify(stageGtkRuntime(${JSON.stringify(root)}, ${JSON.stringify(output)})));`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8", env: { ...process.env, PATH: bin, CAPY_GTK_BUILD_DIR: build },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const staged = JSON.parse(result.stdout);
+  assert.deepEqual(Object.keys(staged.files).sort(), names.map(name => `lib/capycanvas/gtk/${name}`).sort());
+  for (const name of names) assert.equal(readFileSync(join(output, "lib/capycanvas/gtk", name), "utf8"), name);
+});
 
 test("preparing original license notices preserves the existing package without compiling", t => {
   const root = packageFixture(t), bin = join(root, "bin");

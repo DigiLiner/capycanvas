@@ -11,6 +11,10 @@ import tempfile
 
 prefix, projects = map(lambda path: Path(path).resolve(), sys.argv[1:])
 library = prefix / 'lib/libgtk-4.so.1'
+libraries = [library, *[prefix / f'lib/lib{name}-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]]
+for path in libraries:
+    dynamic = subprocess.check_output(['readelf', '-d', str(path)], text=True)
+    assert '(RUNPATH)' in dynamic and 'Library runpath: [$ORIGIN]' in dynamic, dynamic
 assert str(projects.parent.parent).encode() not in library.read_bytes(), 'GTK library embeds its build directory'
 needed = subprocess.check_output(['readelf', '-d', str(library)], text=True)
 assert 'Shared library: [libtiff' not in needed, needed
@@ -91,6 +95,7 @@ int main (int argc, char **argv)
 }
 '''
 flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'gtk4'], text=True))
+flags = [flag for flag in flags if flag not in ['-lgtk-4', '-lglib-2.0', '-lgobject-2.0', '-lgio-2.0', '-lgmodule-2.0', '-lgthread-2.0']]
 with tempfile.TemporaryDirectory(prefix='capy-gtk-codecs-') as directory:
     test = Path(directory) / 'test.c'
     test.write_text(source)
@@ -98,10 +103,21 @@ with tempfile.TemporaryDirectory(prefix='capy-gtk-codecs-') as directory:
     subprocess.run(['cc', str(test), '-o', str(executable),
                     '-I' + str(projects / 'libjpeg-turbo-3.1.1/src'),
                     '-I' + str(projects.parent / '../build/subprojects/libjpeg-turbo-3.1.1/src'),
-                    str(library), *flags, '-ldl'], check=True)
-    env = dict(os.environ, LD_LIBRARY_PATH=str(prefix / 'lib'))
+                    *map(str, libraries), *flags, '-ldl', '-Wl,-rpath,' + str(prefix / 'lib')], check=True)
+    env = dict(os.environ)
+    env.pop('LD_LIBRARY_PATH', None)
     subprocess.run([str(executable), str(library)], env=env, check=True)
     subprocess.run([sys.executable, '-c',
-                    "import ctypes, os; ctypes.CDLL('libadwaita-1.so.0', mode=os.RTLD_NOW)"],
+                    """import ctypes, os, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+names = ['libgtk-4.so.1', *['lib' + name + '-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]]
+for name in names:
+    ctypes.CDLL(str(root / name), mode=os.RTLD_NOW | os.RTLD_GLOBAL)
+ctypes.CDLL('libadwaita-1.so.0', mode=os.RTLD_NOW)
+maps = pathlib.Path('/proc/self/maps').read_text().splitlines()
+for name in names:
+    loaded = {line.split()[-1] for line in maps if name in line}
+    assert loaded == {str(root / name)}, (name, loaded)
+""", str(prefix / 'lib')],
                    env=env, check=True)
-    print('PASS: system libadwaita resolves against the local GTK')
+    print('PASS: private GTK/GLib and system libadwaita resolve without LD_LIBRARY_PATH')
