@@ -42,6 +42,9 @@ pub enum TabRequest {
         id: u64,
         before: Option<u64>,
     },
+    RestoreOrder {
+        ids: Vec<u64>,
+    },
     Step {
         id: u64,
         forward: bool,
@@ -277,6 +280,14 @@ impl<P: Parked> DocumentWindow<P> {
             TabRequest::Reorder { id, before } => self.arrange(host, |d| {
                 d.reorder(id, before);
             })?,
+            TabRequest::RestoreOrder { ids } => {
+                let order = self.documents.order();
+                let restored = ids.into_iter().filter(|id| order.contains(id)).collect::<Vec<_>>();
+                let order = order.iter().copied().filter(|id| !restored.contains(id)).chain(restored.iter().copied()).collect::<Vec<_>>();
+                self.documents.restore_order(&order, self.documents.selected())?;
+                self.changed(host);
+                Value::Null
+            }
             TabRequest::Step { id, forward } => self.arrange(host, |d| {
                 if let Some(before) = d.step(id, forward) {
                     d.reorder(id, before);
@@ -1070,6 +1081,19 @@ mod tests {
         assert!(window.documents.parked_owner_mut(2).unwrap().rendering_suspended());
         assert_eq!(retired.len(), 3);
         drop(retired);
+        finish(host, window);
+    }
+
+    #[test]
+    fn restored_order_applies_while_the_window_is_busy() {
+        let mut host = host();
+        let mut window = Window::default();
+        open(&mut window, &mut host);
+        host.session.begin_workspace_transition().unwrap();
+        assert!(window.request(&mut host, TabRequest::Reorder { id: 2, before: Some(1) }).is_err());
+        window.request(&mut host, TabRequest::RestoreOrder { ids: vec![1] }).unwrap();
+        assert_eq!(window.documents.order(), [2, 1]);
+        assert!(!window.documents.can_undo());
         finish(host, window);
     }
 

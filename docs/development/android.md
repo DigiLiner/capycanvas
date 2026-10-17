@@ -94,7 +94,9 @@ loupe path. Unfinished numeric text keeps its native focus and selection through
 statistics updates. Ending an edit retires its late native text callbacks.
 
 Restart restores the selected drawing first, then hydrates the other tabs without
-changing the selected canvas. The shared private session format retains tab order,
+changing the selected canvas. It then applies the saved tab order through the
+shared `restore_order` tab request, which, unlike a user reorder, is accepted
+while the editor is busy and records no tab-order history. The shared private session format retains tab order,
 camera, working state, manual save checkpoint and bounded undo/redo history for
 both saved and unsaved drawings. Common restart has no dialog. A drawing restored
 after an interrupted exit shows the shared recovered suffix until its next save.

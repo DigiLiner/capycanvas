@@ -260,7 +260,7 @@ internal class RecoveryController(private val host: CanvasHost) {
                 candidate = source.path
                 return false
             }
-            for(row in rows)ids[row.getLong("id")]?.let {host.drawingTabs.query(obj("op" to "reorder","id" to it,"before" to null))}
+            host.drawingTabs.query(obj("op" to "restore_order","ids" to org.json.JSONArray(rows.mapNotNull {ids[it.getLong("id")]})))
             if(appended) {
                 val mapping = ids.filter {it.key != it.value}.map {org.json.JSONArray(listOf(it.key,it.value))}
                 if(mapping.isNotEmpty())writeManifest(obj("type" to "remap","mapping" to org.json.JSONArray(mapping)))
