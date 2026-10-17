@@ -40,15 +40,25 @@ the Windows hardware.
 
 Open a new PowerShell terminal after installing Rust so it sees Cargo on `PATH`.
 Windows PowerShell 5.1, included with Windows, is sufficient. From the repository
-root, allow local scripts for this terminal, then build and run:
+root, build and run:
+
+```powershell
+.\run.cmd
+```
+
+The launcher builds Debug and opens the app after a successful build. Use
+`.\run.cmd -Configuration Release` for an optimized build. It sets the script
+execution policy for its child PowerShell process, leaving your settings intact.
+
+To build without launching, allow local scripts in this terminal and call the
+build script directly:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process RemoteSigned -Force
 ./apps/layer-windows/scripts/build.ps1 -Configuration Release
-& ./artifacts/windows/Release/CapyCanvas.exe
 ```
 
-The script restores the NuGet packages pinned in
+The build script restores the NuGet packages pinned in
 [`packages.config`](../../apps/layer-windows/packages.config) into ignored
 `artifacts/windows/packages`, builds the Rust DLL and then the WinUI app into
 `artifacts/windows/Release`, and prints the path of `CapyCanvas.exe`.

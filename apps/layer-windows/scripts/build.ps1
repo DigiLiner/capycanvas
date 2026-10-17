@@ -6,7 +6,8 @@ param(
     [ValidateSet('None','Number','Color')][string]$ControlFixture = 'None',
     [switch]$SkipRestore,
     [switch]$SoftwareAdapterTests,
-    [switch]$ReleaseIdentity
+    [switch]$ReleaseIdentity,
+    [switch]$Run
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -40,5 +41,7 @@ try {
     $fixture = switch ($ControlFixture) { Number {'true'} Color {'Color'} default {'false'} }
     & msbuild apps/layer-windows/CapyCanvas.vcxproj /m "/p:Configuration=$Configuration" /p:Platform=x64 "/p:CapyControlFixture=$fixture" "/p:PlatformToolset=$toolset" "/p:CapyPackages=$PackagesDirectory" "/p:OutDir=$OutputDirectory/" /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { throw 'WinUI build failed.' }
-    Write-Output (Join-Path $OutputDirectory 'CapyCanvas.exe')
+    $executable = Join-Path $OutputDirectory 'CapyCanvas.exe'
+    Write-Output $executable
+    if ($Run) { Start-Process -FilePath $executable }
 } finally { Pop-Location }
