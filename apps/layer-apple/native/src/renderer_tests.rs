@@ -111,3 +111,29 @@ fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_bot
         }
     }
 }
+
+#[test]
+fn unsupported_metal_adapter_keeps_localized_explanation_and_native_cause_on_both_apple_hosts() {
+    layer_core::temp_files::set_directory(std::env::temp_dir()).unwrap();
+    let gpu = native_renderer();
+    let adapter = gpu.adapter();
+    let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+    let beyond = wgpu::Limits { max_bind_groups: adapter.limits().max_bind_groups + 1, ..limits.clone() };
+    let cause = layer_host::unsupported_adapter(adapter, &beyond).unwrap();
+    assert!(cause.contains("max_bind_groups"), "{cause}");
+    for platform in [0, 1] {
+        for language in [layer_ui::UiLanguage::English, layer_ui::UiLanguage::Japanese] {
+            let localization = layer_ui::Localizer::shared(language);
+            let app = App(apple_launch_localized(platform, "", localization.clone()).unwrap());
+            let native = unsafe { &mut *app.0 };
+            assert!(metal::check_adapter(&native.host, adapter, &limits).is_ok());
+            let expected = layer_ui::gpu_unsupported(&localization, &format!("Metal adapter requirements: {cause}"));
+            assert!(native.perform(|a| a.gpu_operation(|a| metal::check_adapter(&a.host, adapter, &beyond))).is_none());
+            let error = unsafe { CStr::from_ptr(capy_apple_error(app.0)) }.to_str().unwrap();
+            assert_eq!(error, expected);
+            let snapshot = app.full_snapshot();
+            assert_eq!(snapshot["gpu_ready"], false);
+            assert_eq!(snapshot["error"], expected);
+        }
+    }
+}

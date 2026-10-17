@@ -64,7 +64,10 @@ the app version/build and OS version before changing the installation. The canva
 error panel shows selectable native diagnostics with the app version/build, OS
 version and hardware model identifier. Metal errors retain the failing startup
 stage and available adapter details; launch and panic boundaries preserve the
-underlying error. Include this text when reporting a failure. In older builds
+underlying error. Missing hardware adapters and adapters below the canvas limits
+use the shared localized unsupported-GPU explanation before the Metal diagnostic;
+`layer_host::unsupported_adapter` owns the hardware and limits checks. Include
+this text when reporting a failure. In older builds
 that show only the headline, connect the iPad to Mac Console and filter for
 `Capy Canvas native diagnostic:`, `Capy Canvas renderer diagnostic:` or
 `CapyCanvas GPU stopped:` while reproducing. A recovery banner after the canvas

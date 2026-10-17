@@ -41,6 +41,13 @@ fn error(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+pub(super) fn check_adapter(host: &NativeHost, adapter: &wgpu::Adapter, limits: &wgpu::Limits) -> Result<(), String> {
+    match layer_host::unsupported_adapter(adapter, limits) {
+        Some(cause) => Err(layer_ui::gpu_unsupported(host.session.localization(), &format!("Metal adapter requirements: {cause}"))),
+        None => Ok(()),
+    }
+}
+
 impl MetalHost {
     pub(crate) fn document_changed(&mut self) {
         self.local_tone.clear();
@@ -182,8 +189,9 @@ impl MetalHost {
                     power_preference: wgpu::PowerPreference::None,
                     apply_limit_buckets: false,
                 }))
-                .map_err(|e| format!("Metal adapter selection: {e}"))?;
+                .map_err(|e| layer_ui::gpu_unsupported(host.session.localization(), &format!("Metal adapter selection: {e}")))?;
             let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+            check_adapter(host, &adapter, &limits)?;
             let (device, queue) =
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Apple"),

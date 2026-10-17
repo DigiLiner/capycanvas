@@ -151,3 +151,17 @@ fn dynamic_arguments_remain_literal_and_formatting_errors_are_visible() {
     bundle.format_pattern(bundle.get_message("message").unwrap().value().unwrap(), None, &mut errors);
     assert!(!errors.is_empty());
 }
+
+#[test]
+fn unsupported_gpu_explanations_keep_native_causes_literal_in_every_catalog() {
+    let cause = "Metal adapter selection: { $name } 🖌 日本語\nmax_bind_groups is 3, needs 4";
+    let english = crate::Localizer::shared(crate::UiLanguage::English);
+    let english_heading = english.text(MessageId::COMMON_GPU_UNSUPPORTED);
+    for &language in crate::localization::SHIPPED_LANGUAGES {
+        let localization = crate::Localizer::shared(language);
+        let heading = localization.text(MessageId::COMMON_GPU_UNSUPPORTED);
+        assert!(!heading.is_empty());
+        if language != crate::UiLanguage::English { assert_ne!(heading, english_heading); }
+        assert_eq!(crate::gpu_unsupported(&localization, cause), format!("{heading}\n\n{cause}"));
+    }
+}
