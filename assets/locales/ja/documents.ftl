@@ -4,6 +4,7 @@ documents-current-ink = 現在のインク
 documents-paper = 用紙
 documents-layer-name = レイヤー { $number }
 documents-group-name = グループ { $number }
+documents-vector-layer-name = ベクター { $number }
 documents-selection-name = 選択範囲 { $number }
 documents-copy-name = { $name }のコピー
 documents-close-confirm = 「{ $name }」の変更を保存しますか？

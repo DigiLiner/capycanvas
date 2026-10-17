@@ -440,6 +440,7 @@ resources-layer-menu-new = 新增
 resources-layer-menu-new-clipping-layer = 新增剪裁圖層
 
 resources-layer-menu-new-group = 新增圖層群組
+resources-layer-menu-new-vector-layer = 新增向量圖層
 
 resources-layer-menu-new-selection-layer-in-group = 在群組內新增選取範圍圖層…
 

@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = Sposta livello / maschera
 resources-layer-menu-new = Nuovo
 resources-layer-menu-new-clipping-layer = Nuovo livello ritagliato
 resources-layer-menu-new-group = Nuovo gruppo
+resources-layer-menu-new-vector-layer = Nuovo livello vettoriale
 resources-layer-menu-new-selection-layer-in-group = Nuovo livello di selezione nel gruppo…
 resources-layer-menu-organize = Organizza
 resources-layer-menu-paste-mask = Incolla maschera

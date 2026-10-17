@@ -440,6 +440,7 @@ resources-layer-menu-new = 새로 만들기
 resources-layer-menu-new-clipping-layer = 새 클리핑 레이어
 
 resources-layer-menu-new-group = 새 그룹
+resources-layer-menu-new-vector-layer = 새 벡터 레이어
 
 resources-layer-menu-new-selection-layer-in-group = 그룹에 새 선택 영역 레이어 만들기…
 

@@ -5,6 +5,7 @@ documents-paper = Papel
 documents-photo-name = Foto
 documents-layer-name = Capa { $number }
 documents-group-name = Grupo { $number }
+documents-vector-layer-name = Vector { $number }
 documents-selection-name = Selección { $number }
 documents-copy-name = { $name } copia
 documents-close-confirm = ¿Guardar los cambios de «{ $name }»?

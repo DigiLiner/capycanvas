@@ -4,6 +4,7 @@ documents-current-ink = 현재 잉크
 documents-paper = 종이
 documents-layer-name = 레이어 { $number }
 documents-group-name = 그룹 { $number }
+documents-vector-layer-name = 벡터 { $number }
 documents-selection-name = 선택 영역 { $number }
 documents-copy-name = { $name } 복사본
 documents-close-confirm = “{ $name }”의 변경 내용을 저장할까요?

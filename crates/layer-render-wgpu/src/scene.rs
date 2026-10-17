@@ -30,6 +30,7 @@ mod objects;
 mod object_cache;
 mod object_spatial;
 mod vectors;
+pub(crate) use vectors::preview_bounds;
 mod bake;
 pub(crate) mod resample;
 pub(crate) mod scale;

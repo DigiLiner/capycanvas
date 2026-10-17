@@ -5,6 +5,7 @@ documents-paper = Papier
 documents-photo-name = Photo
 documents-layer-name = Calque { $number }
 documents-group-name = Groupe { $number }
+documents-vector-layer-name = Vecteur { $number }
 documents-selection-name = Sélection { $number }
 documents-copy-name = Copie de { $name }
 documents-close-confirm = Enregistrer les modifications de « { $name } » ?

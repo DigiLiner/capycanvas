@@ -5,6 +5,7 @@ documents-paper = Giấy
 documents-photo-name = Ảnh
 documents-layer-name = Lớp { $number }
 documents-group-name = Nhóm { $number }
+documents-vector-layer-name = Vector { $number }
 documents-selection-name = Vùng chọn { $number }
 documents-copy-name = Bản sao { $name }
 documents-close-confirm = Lưu thay đổi của “{ $name }”?

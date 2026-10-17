@@ -5,6 +5,7 @@ documents-paper = 紙張
 documents-photo-name = 照片
 documents-layer-name = 圖層{ $number }
 documents-group-name = 圖層群組{ $number }
+documents-vector-layer-name = 向量圖層{ $number }
 documents-selection-name = 選取範圍{ $number }
 documents-copy-name = { $name }副本
 documents-close-confirm = 要儲存對「{ $name }」的變更嗎？

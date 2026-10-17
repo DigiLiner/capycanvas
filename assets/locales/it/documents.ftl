@@ -5,6 +5,7 @@ documents-paper = Carta
 documents-photo-name = Foto
 documents-layer-name = Livello { $number }
 documents-group-name = Gruppo { $number }
+documents-vector-layer-name = Vettore { $number }
 documents-selection-name = Selezione { $number }
 documents-copy-name = { $name } copia
 documents-close-confirm = Salvare le modifiche a «{ $name }»?

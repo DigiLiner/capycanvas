@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = Ebene / Maske verschieben
 resources-layer-menu-new = Neu
 resources-layer-menu-new-clipping-layer = Neue beschnittene Ebene
 resources-layer-menu-new-group = Neue Gruppe
+resources-layer-menu-new-vector-layer = Neue Vektorebene
 resources-layer-menu-new-selection-layer-in-group = Neue Auswahlebene in Gruppe…
 resources-layer-menu-organize = Anordnen
 resources-layer-menu-paste-mask = Maske einfügen

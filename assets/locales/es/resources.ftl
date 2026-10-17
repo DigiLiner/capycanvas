@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = Mover capa / máscara
 resources-layer-menu-new = Nuevo
 resources-layer-menu-new-clipping-layer = Nueva capa de recorte
 resources-layer-menu-new-group = Grupo nuevo
+resources-layer-menu-new-vector-layer = Nueva capa vectorial
 resources-layer-menu-new-selection-layer-in-group = Nueva capa de selección en el grupo…
 resources-layer-menu-organize = Organizar
 resources-layer-menu-paste-mask = Pegar máscara

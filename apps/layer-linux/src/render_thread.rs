@@ -162,6 +162,7 @@ enum Command {
     SelectionOverlay(Option<layer_render::SelectionOverlay>),
     CropOverlay(Option<layer_render::CropOverlay>),
     PaperOverlay(u64, Option<layer_render::PaperOverlay>),
+    VectorPreview(Option<layer_render::VectorPreview>),
     ClippingPreview(bool,bool),
     QuickMaskThumbnail(Option<layer_core::Selection>),
     Region(u64, layer_render::RegionRequest),
@@ -864,6 +865,9 @@ impl CanvasRenderer for RenderWorker {
             self.crop_overlay = overlay;
         }
     }
+    fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) {
+        let _ = self.send(Command::VectorPreview(preview));
+    }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if self.paper_overlay != overlay {
             if self.paper_overlay.as_ref().map(|o| &o.paper) != overlay.as_ref().map(|o| &o.paper) {
@@ -1545,6 +1549,7 @@ impl Worker {
                     #[cfg(test)]
                     timing.paper_overlay();
                 }
+                Command::VectorPreview(preview) => self.renderer.set_vector_preview(preview),
                 Command::ClippingPreview(shadows,highlights) => self.renderer.set_clipping_preview(shadows,highlights),
                 Command::Region(generation, request) => {
                     region_generation = generation;

@@ -9,9 +9,11 @@ mod canvas;
 mod feedback;
 mod input;
 mod selection_stroke;
+mod vector_stroke;
 #[cfg(test)]
 mod test_support;
 pub use selection_stroke::SelectionStroke;
+pub use vector_stroke::{VectorStroke, Sample as VectorSample, fit_line, polyline};
 #[cfg(feature = "prediction-bench")]
 pub mod prediction_bench;
 pub mod recording;

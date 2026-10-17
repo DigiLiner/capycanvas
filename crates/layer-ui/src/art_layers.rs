@@ -201,6 +201,9 @@ pub(super) fn swipe_actions(doc: &Document, id: OccurrenceHandle, layer: &Occurr
         crate::LayerSwipeAction {id:"delete", label:l.text(MessageId::COMMON_DELETE), enabled:can_delete, action:LayerAction::Delete {id:token}},
     ]
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NewContent { Paint, Group, Vector }
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum LayerAction {
@@ -208,6 +211,7 @@ pub enum LayerAction {
         group: bool,
         clipped: bool,
     },
+    NewVector,
     Select {
         id: u64,
         mask: bool,
@@ -755,6 +759,50 @@ impl<R: CanvasRenderer> UiSession<R> {
         if self.engine.document().is_locked(id) { return Err("This layer is locked".into()); }
         Ok(layer.clone())
     }
+    fn new_layer(&mut self, kind: NewContent, clipped: bool) -> Result<(), String> {
+        self.return_to_artwork()?;
+        let doc = self.engine.document();
+        let scene = doc.scene();
+        let active = doc.working.occurrence;
+        if clipped && !active.is_some_and(|h| scene.eligible_target(h)) {
+            return Err("Choose a paint layer, object layer or isolated group to clip to".into());
+        }
+        let parent = active.and_then(|h| if !clipped && scene.occurrence(h).is_some_and(|l| l.kind() == LayerKind::Group) { Some(h) } else { scene.parent(h) });
+        if parent.is_some_and(|p| doc.is_locked(p)) { return Err("The destination group is locked".into()); }
+        let stack_handle = match parent { Some(h) => match scene.occurrence(h).unwrap().content { OccurrenceContent::Stack(h) => h, _ => unreachable!() }, None => doc.composition().result };
+        let mut stack = doc.artwork.stacks.get(stack_handle).ok_or("Unknown stack")?.clone();
+        let index = active.and_then(|h| {
+            let top = if clipped { scene.attached_effects(h).last().copied().unwrap_or(h) } else { doc.clipping_stack_top(h).unwrap_or(h) };
+            stack.entries.iter().position(|id| *id == top)
+        }).unwrap_or(0);
+        let mut edits = Vec::new();
+        let (content, name) = match kind {
+            NewContent::Group => {
+                let change = RecordChange::insert(&doc.artwork.stacks, Stack::default());
+                let content = OccurrenceContent::Stack(change.handle); edits.push(Edit::Stack(change)); (content, MessageId::DOCUMENTS_GROUP_NAME)
+            }
+            NewContent::Paint => {
+                let change = RecordChange::insert(&doc.artwork.paint, PaintSource { color_mode: Default::default(), domain: doc.composition().size, raster: Default::default(), base: None, operations: Arc::default() });
+                let content = OccurrenceContent::Paint(change.handle); edits.push(Edit::Paint(change)); (content, MessageId::DOCUMENTS_LAYER_NAME)
+            }
+            NewContent::Vector => {
+                let change = RecordChange::insert(&doc.artwork.vectors, layer_core::authored::vector::VectorObject::default());
+                let content = OccurrenceContent::Vector(change.handle); edits.push(Edit::Vector(change)); (content, MessageId::DOCUMENTS_VECTOR_LAYER_NAME)
+            }
+        };
+        let id = doc.artwork.occurrences.next_handle();
+        let mut layer = Occurrence::new(content, self.numbered_document_name(name, occurrence_token(id)));
+        if kind == NewContent::Group { layer.blend = self.new_group_blend(); }
+        layer.attachment = if clipped { Attachment::Clip } else { Attachment::None };
+        let mut working = doc.working.clone();
+        working.occurrence = Some(id); working.target = match layer.content { OccurrenceContent::Paint(h) => Some(SourceTarget::Paint(h)), _ => None }; working.inspect_mask = None;
+        working.layer_selection = BTreeSet::from([id]); working.layer_anchor = Some(id);
+        stack.entries.insert(index, id);
+        edits.extend([Edit::Occurrence(RecordChange::insert(&doc.artwork.occurrences, layer)), Edit::Stack(RecordChange::replace(&doc.artwork.stacks, stack_handle, Some(stack))?), Edit::Working(working)]);
+        self.layer_edit(Edit::Batch(edits))?;
+        if let Some(parent) = parent { self.layer_interaction.collapsed.remove(&parent); }
+        Ok(())
+    }
     pub(super) fn layer_action(&mut self, action: LayerAction) -> Result<(), String> {
         if self.selection_masks.quick() {
             match action {
@@ -883,41 +931,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if group && !clipped && self.selected_layers().len() > 1 {
                     return self.layer_action(LayerAction::GroupSelected);
                 }
-                self.return_to_artwork()?;
-                let doc = self.engine.document();
-                let scene = doc.scene();
-                let active = doc.working.occurrence;
-                if clipped && !active.is_some_and(|h| scene.eligible_target(h)) {
-                    return Err("Choose a paint layer, object layer or isolated group to clip to".into());
-                }
-                let parent = active.and_then(|h| if !clipped && scene.occurrence(h).is_some_and(|l| l.kind() == LayerKind::Group) { Some(h) } else { scene.parent(h) });
-                if parent.is_some_and(|p| doc.is_locked(p)) { return Err("The destination group is locked".into()); }
-                let stack_handle = match parent { Some(h) => match scene.occurrence(h).unwrap().content { OccurrenceContent::Stack(h) => h, _ => unreachable!() }, None => doc.composition().result };
-                let mut stack = doc.artwork.stacks.get(stack_handle).ok_or("Unknown stack")?.clone();
-                let index = active.and_then(|h| {
-                    let top = if clipped { scene.attached_effects(h).last().copied().unwrap_or(h) } else { doc.clipping_stack_top(h).unwrap_or(h) };
-                    stack.entries.iter().position(|id| *id == top)
-                }).unwrap_or(0);
-                let mut edits = Vec::new();
-                let content = if group {
-                    let change = RecordChange::insert(&doc.artwork.stacks, Stack::default());
-                    let content = OccurrenceContent::Stack(change.handle); edits.push(Edit::Stack(change)); content
-                } else {
-                    let change = RecordChange::insert(&doc.artwork.paint, PaintSource { color_mode: Default::default(), domain: doc.composition().size, raster: Default::default(), base: None, operations: Arc::default() });
-                    let content = OccurrenceContent::Paint(change.handle); edits.push(Edit::Paint(change)); content
-                };
-                let id = doc.artwork.occurrences.next_handle();
-                let mut layer = Occurrence::new(content, self.numbered_document_name(if group { MessageId::DOCUMENTS_GROUP_NAME } else { MessageId::DOCUMENTS_LAYER_NAME }, occurrence_token(id)));
-                if group { layer.blend = self.new_group_blend(); }
-                layer.attachment = if clipped { Attachment::Clip } else { Attachment::None };
-                let mut working = doc.working.clone();
-                working.occurrence = Some(id); working.target = match layer.content { OccurrenceContent::Paint(h) => Some(SourceTarget::Paint(h)), _ => None }; working.inspect_mask = None;
-                working.layer_selection = BTreeSet::from([id]); working.layer_anchor = Some(id);
-                stack.entries.insert(index, id);
-                edits.extend([Edit::Occurrence(RecordChange::insert(&doc.artwork.occurrences, layer)), Edit::Stack(RecordChange::replace(&doc.artwork.stacks, stack_handle, Some(stack))?), Edit::Working(working)]);
-                self.layer_edit(Edit::Batch(edits))?;
-                if let Some(parent) = parent { self.layer_interaction.collapsed.remove(&parent); }
+                self.new_layer(if group { NewContent::Group } else { NewContent::Paint }, clipped)?;
             }
+            LayerAction::NewVector => self.new_layer(NewContent::Vector, false)?,
             LayerAction::Select { id, mask } => {
                 let handle = occurrence_handle(id)?;
                 if self.engine.document().scene().occurrence(handle).is_some_and(|l| l.kind() == LayerKind::Selection) {
@@ -1322,6 +1338,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     !parent.is_some_and(|p| doc.is_locked(p))
                         && (!clipped || doc.scene().eligible_target(handle))
                 }
+                A::NewVector => !parent.is_some_and(|p| doc.is_locked(p)),
                 A::Reference { .. } => matches!(l.kind(), LayerKind::Paint | LayerKind::Object | LayerKind::Group),
                 A::ReferenceSelection => !self.reference_selection().is_empty(),
                 A::Lock { .. } => controls.edit_lock,
@@ -1556,6 +1573,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         clipped: false,
                     },
                 ),
+                item(self.localization().text(MessageId::RESOURCES_LAYER_MENU_NEW_VECTOR_LAYER).as_ref(), A::NewVector),
             ]];
             let current = Some(handle) == doc.working.occurrence;
             if current {

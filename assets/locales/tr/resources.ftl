@@ -380,6 +380,7 @@ resources-layer-menu-move-layer-mask = Katmanı / maskeyi taşı
 resources-layer-menu-new = Yeni
 resources-layer-menu-new-clipping-layer = Yeni kırpma katmanı
 resources-layer-menu-new-group = Yeni grup
+resources-layer-menu-new-vector-layer = Yeni vektör katmanı
 resources-layer-menu-new-selection-layer-in-group = Grupta yeni seçim katmanı…
 resources-layer-menu-organize = Düzenle
 resources-layer-menu-paste-mask = Maskeyi yapıştır

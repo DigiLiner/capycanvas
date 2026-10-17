@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = Déplacer le calque / masque
 resources-layer-menu-new = Nouveau
 resources-layer-menu-new-clipping-layer = Nouveau calque écrêté
 resources-layer-menu-new-group = Nouveau groupe
+resources-layer-menu-new-vector-layer = Nouveau calque vectoriel
 resources-layer-menu-new-selection-layer-in-group = Nouveau calque de sélection dans le groupe…
 resources-layer-menu-organize = Organiser
 resources-layer-menu-paste-mask = Coller le masque

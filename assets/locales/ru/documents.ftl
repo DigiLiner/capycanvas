@@ -5,6 +5,7 @@ documents-paper = Бумага
 documents-photo-name = Фотография
 documents-layer-name = Слой { $number }
 documents-group-name = Группа { $number }
+documents-vector-layer-name = Вектор { $number }
 documents-selection-name = Выделение { $number }
 documents-copy-name = { $name } — копия
 documents-close-confirm = Сохранить изменения в «{ $name }»?

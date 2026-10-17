@@ -107,6 +107,11 @@ impl LayerCache {
     fn order(&self, item: &Item) -> u64 { u64::from(self.chunks.get(&item.chunk).copied().unwrap_or(0)) << 32 | u64::from(item.index) }
 }
 
+pub(crate) fn preview_bounds(scene: SceneView<'_>, preview: &layer_render::VectorPreview) -> DocRect {
+    let offset = scene.occurrence_offset64(preview.owner);
+    let [x0, y0, x1, y1] = preview.path.bounds();
+    DocRect { min: [(x0 + offset[0]).floor() as i64 - 16, (y0 + offset[1]).floor() as i64 - 16], max: [(x1 + offset[0]).ceil() as i64 + 16, (y1 + offset[1]).ceil() as i64 + 16] }
+}
 pub(super) fn edit_damage(before: &VectorObject, after: &VectorObject) -> Vec<[f64; 4]> {
     if before.same_root(after) { return Vec::new(); }
     let old: HashSet<usize> = before.chunks().iter().map(chunk_key).collect();
@@ -135,6 +140,7 @@ pub(super) struct Vectors {
     pool: Option<Pool>,
     frame: u64,
     stamp: u64,
+    preview: Option<((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Arc<[[f32; 4]]>)>,
     derived_bytes: usize,
     buffers: [Option<wgpu::Buffer>; 4],
 }
@@ -147,7 +153,8 @@ impl Scene {
     }
     pub(super) fn vector_tile(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, owner: OccurrenceHandle, coordinate: [u32; 2]) -> usize {
         let origin = coordinate.map(|v| i64::from(v * PAGE_SIZE));
-        let batch = self.vectors.batch(packet.scene, owner, origin, 0, [PAGE_SIZE; 2], packet.document_extent, Self::vector_palette(r, packet));
+        let preview = r.vector_preview.as_ref().filter(|p| self.object_display && p.owner == owner).map(|p| p.path.clone());
+        let batch = self.vectors.batch_with(packet.scene, owner, origin, 0, [PAGE_SIZE; 2], packet.document_extent, Self::vector_palette(r, packet), preview.as_ref());
         let output = self.alloc(r, wgpu::Color::TRANSPARENT);
         if batch.tile_count() > 0 { self.jobs.push(Job::Vector(Box::new(VectorJob { batch, output: self.pool[output].view.clone(), base: None }))); }
         output
@@ -161,6 +168,9 @@ impl Scene {
         Ok(target)
     }
     pub(super) fn vector_damage(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>) {
+        self.scale_sources.vector_preview = r.vector_preview.as_ref().zip(r.vector_preview_shown).map(|(p, (_, _, bounds))| (p.owner, p.path.clone(), bounds));
+        self.scale_sources.preview_damage = r.vector_preview_damage.clone();
+        self.scale_sources.preview_layers = r.vector_preview_layers.iter().copied().filter(|h| packet.scene.vector_layer(*h).is_some()).collect();
         self.vectors.begin_frame();
         self.vectors.retain(packet.scene);
         let palette = Self::vector_palette(r, packet);
@@ -208,6 +218,10 @@ impl Vectors {
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
     pub fn batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Batch {
+        self.batch_with(scene, owner, origin, level, size, extent, palette, None)
+    }
+    #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent, color domain and provisional path")]
+    fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>) -> Batch {
         let mut batch = Batch::default();
         let Some(handle) = scene.vector_handle(owner) else { return batch };
         let Some(object) = scene.vector(handle) else { return batch };
@@ -267,8 +281,34 @@ impl Vectors {
             let Some(base) = derived.base else { continue };
             entries.push((derived.geometry.clone(), base, item.colors.clone()));
         }
+        if let Some(path) = preview {
+            let key = (Arc::as_ptr(path) as usize, level, offset.map(f64::to_bits));
+            if self.preview.as_ref().is_none_or(|p| p.0 != key) {
+                if let Some(previous) = self.preview.take() { pool.release(previous.1, &previous.2); }
+                let geometry = Arc::new(tiles::derive(path, &frame));
+                if let Some(base) = pool.allocate(&geometry) { self.preview = Some((key, base, geometry, colors(path, palette))); }
+            }
+            if let Some((_, base, geometry, colors)) = &self.preview { entries.push((geometry.clone(), *base, colors.clone())); }
+        }
         let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
         batch.build(&layers, level_origin, size);
+        batch
+    }
+    #[expect(clippy::too_many_arguments, reason = "A preview window names its path, placement, level, extent and color domain")]
+    pub fn preview_batch(&mut self, path: &Arc<PathItem>, offset: [f64; 2], origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Batch {
+        let side = 1i64 << level;
+        let key = (Arc::as_ptr(path) as usize, level, offset.map(f64::to_bits));
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        if self.preview.as_ref().is_none_or(|p| p.0 != key) {
+            if let Some(previous) = self.preview.take() { pool.release(previous.1, &previous.2); }
+            let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
+            let geometry = Arc::new(tiles::derive(path, &Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] }));
+            let Some(base) = pool.allocate(&geometry) else { return Batch::default() };
+            self.preview = Some((key, base, geometry, colors(path, palette)));
+        }
+        let (_, base, geometry, colors) = self.preview.as_ref().unwrap();
+        let mut batch = Batch::default();
+        batch.build(&[Layer { geometry, base: *base, colors }], [origin[0].div_euclid(side), origin[1].div_euclid(side)], size);
         batch
     }
     pub fn encode(&mut self, r: &mut WgpuRasterizer, encoder: &mut wgpu::CommandEncoder, job: &VectorJob) -> Result<(), GpuRasterError> {

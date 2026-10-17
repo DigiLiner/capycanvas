@@ -5,6 +5,7 @@ documents-paper = Kâğıt
 documents-photo-name = Fotoğraf
 documents-layer-name = Katman { $number }
 documents-group-name = Grup { $number }
+documents-vector-layer-name = Vektör { $number }
 documents-selection-name = Seçim { $number }
 documents-copy-name = { $name } kopyası
 documents-close-confirm = “{ $name }” değişiklikleri kaydedilsin mi?

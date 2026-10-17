@@ -440,6 +440,7 @@ resources-layer-menu-new = 新規
 resources-layer-menu-new-clipping-layer = 新規クリッピングレイヤー
 
 resources-layer-menu-new-group = 新規グループ
+resources-layer-menu-new-vector-layer = 新規ベクターレイヤー
 
 resources-layer-menu-new-selection-layer-in-group = グループ内に新規選択範囲レイヤー…
 

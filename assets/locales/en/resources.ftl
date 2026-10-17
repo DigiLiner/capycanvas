@@ -381,6 +381,7 @@ resources-layer-menu-move-layer-mask = Move layer / mask
 resources-layer-menu-new = New
 resources-layer-menu-new-clipping-layer = New clipping layer
 resources-layer-menu-new-group = New group
+resources-layer-menu-new-vector-layer = New vector layer
 resources-layer-menu-new-selection-layer-in-group = New Selection Layer in Group…
 resources-layer-menu-organize = Organize
 resources-layer-menu-paste-mask = Paste mask

@@ -65,6 +65,8 @@ pub(crate) mod selection_tools;
 pub use selection_tools::{SelectionTool, SelectionConstraint, SelectionOptions, SelectionMode};
 #[path = "painted_selections.rs"]
 mod painted_selections;
+#[path = "vector_lines.rs"]
+mod vector_lines;
 #[path = "deferred_edits.rs"]
 mod deferred_edits;
 pub use painted_selections::SelectionBrushOptions;
@@ -263,6 +265,7 @@ pub struct UiSession<R: CanvasRenderer> {
     selection_tools: selection_tools::SelectionTools,
     tonal_tools: tonal_selection::TonalTools,
     painted_selections: painted_selections::PaintedSelections,
+    vector_lines: vector_lines::VectorLines,
     deferred_edits: std::collections::VecDeque<deferred_edits::DeferredEdit>,
     selection_masks: selection_masks::SelectionMasks,
     canvas_size: Option<canvas_size::CanvasSizeDraft>,
@@ -469,6 +472,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             selection_tools: Default::default(),
             tonal_tools: Default::default(),
             painted_selections: Default::default(),
+            vector_lines: Default::default(),
             deferred_edits: Default::default(),
             selection_masks: Default::default(),
             canvas_size: None,
@@ -4138,6 +4142,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.input_pending = true;
             return Ok(());
         }
+        if self.vector_lines.active() || (event.phase == PenPhase::Down && self.vector_drawing_layer().is_some()) {
+            if let Err(error) = self.vector_line_pen(event) { self.notify(error); }
+            self.input_pending = true;
+            return Ok(());
+        }
         if event.phase == PenPhase::Down {
             self.notify_stroke_refusal(&event);
         }
@@ -6467,6 +6476,7 @@ mod tests {
     include!("selection_refine_tests.rs");
     include!("tonal_tests.rs");
     include!("painted_selection_tests.rs");
+    include!("vector_line_tests.rs");
     include!("toolbar_component_tests.rs");
     include!("tool_slot_tests.rs");
     include!("canvas_bar_tests.rs");

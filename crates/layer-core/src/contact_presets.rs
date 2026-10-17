@@ -219,3 +219,16 @@ pub(crate) fn dry_material(preset: DefaultBrushPreset) -> BrushContact {
         _ => unreachable!("only continuous dry presets use this material"),
     }
 }
+
+#[cfg(test)]
+mod vector_line_tests {
+    use super::*;
+    #[test]
+    fn only_solid_round_contact_pens_draw_vector_lines() {
+        assert!(contact_brush(DefaultBrushPreset::GPen).draws_vector_lines());
+        for preset in [DefaultBrushPreset::RoughGPen, DefaultBrushPreset::CalligraphyPen, DefaultBrushPreset::BrushedInk, DefaultBrushPreset::WetInk] {
+            assert!(!contact_brush(preset).draws_vector_lines(), "{preset:?}");
+        }
+        assert!(!BrushSnapshot::default().draws_vector_lines());
+    }
+}

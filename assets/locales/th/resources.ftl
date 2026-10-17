@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = ย้ายเลเยอร์ / ม�
 resources-layer-menu-new = ใหม่
 resources-layer-menu-new-clipping-layer = เลเยอร์ตัดตามใหม่
 resources-layer-menu-new-group = กลุ่มใหม่
+resources-layer-menu-new-vector-layer = เลเยอร์เวกเตอร์ใหม่
 resources-layer-menu-new-selection-layer-in-group = เลเยอร์พื้นที่เลือกใหม่ในกลุ่ม…
 resources-layer-menu-organize = จัดระเบียบ
 resources-layer-menu-paste-mask = วางมาสก์

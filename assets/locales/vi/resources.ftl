@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = Di chuyển lớp / mặt nạ
 resources-layer-menu-new = Mới
 resources-layer-menu-new-clipping-layer = Lớp cắt mới
 resources-layer-menu-new-group = Nhóm mới
+resources-layer-menu-new-vector-layer = Lớp vector mới
 resources-layer-menu-new-selection-layer-in-group = Lớp vùng chọn mới trong nhóm…
 resources-layer-menu-organize = Sắp xếp
 resources-layer-menu-paste-mask = Dán mặt nạ

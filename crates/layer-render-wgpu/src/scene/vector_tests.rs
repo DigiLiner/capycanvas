@@ -92,3 +92,25 @@ fn vector_edits_damage_only_changed_items_and_match_a_fresh_render() {
     submit_ready(&mut fresh, packet(editor.document().scene(), [300, 200]));
     assert!(max_error(&display(&r), &display(&fresh)) < 1e-5);
 }
+
+#[test]
+fn provisional_strokes_draw_over_the_cached_layer_and_hand_off_without_change() {
+    use layer_render::CanvasRenderer;
+    let (mut editor, layer) = document([300, 200], records());
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, packet(editor.document().scene(), [300, 200]));
+    let before = display(&r);
+    let Record::Path(path) = stroke(900, &[[30., 30.], [150., 90.], [280., 40.]], 6., [0.9, 0.1, 0.1, 1.]) else { unreachable!() };
+    let path = Arc::new(path);
+    r.set_vector_preview(Some(layer_render::VectorPreview { owner: layer, path: path.clone(), revision: 1 }));
+    submit_ready(&mut r, FramePacket { composite_all: false, ..packet(editor.document().scene(), [300, 200]) });
+    let drawn = display(&r);
+    let changed = drawn.iter().zip(&before).filter(|(a, b)| (a[0] - b[0]).abs() > 0.01).count();
+    eprintln!("preview changed {changed} pixels");
+    assert!(changed > 500, "the provisional stroke must show");
+    let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![Record::Path((*path).clone())]);
+    editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
+    r.set_vector_preview(None);
+    submit_ready(&mut r, FramePacket { composite_all: true, ..packet(editor.document().scene(), [300, 200]) });
+    assert!(max_error(&display(&r), &drawn) < 1e-5, "committing the stroke must look the same as its preview");
+}

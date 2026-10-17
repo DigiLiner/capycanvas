@@ -1496,6 +1496,25 @@ impl Evaluator<'_> {
         }
         self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)
     }
+    fn vector_preview(&mut self, owner: OccurrenceHandle, output: Option<Target>) -> Result<Value, GpuRasterError> {
+        let Some((_, path, bounds)) = self.scene.scale_sources.vector_preview.clone().filter(|(o, ..)| *o == owner) else { return self.materialize(Value::Color([0.; 4]), output) };
+        if bounds.intersect(self.region).is_empty() { return self.materialize(Value::Color([0.; 4]), output); }
+        self.commands.flush(self.r, self.encoder)?;
+        let mut target = self.target();
+        let side = 1u32 << target.plan.level;
+        let window = self.region.intersect(target.plan.doc_bounds).aligned(side);
+        let size = window.size().map_err(|_| GpuRasterError::ExtentUnsupported)?;
+        target.plan.doc_bounds = window; target.plan.size = size.map(|v| v.div_ceil(side)); target.plan.bounds = PixelRect::full(size);
+        let plan = target.plan;
+        let offset = self.packet.scene.occurrence_offset64(owner);
+        let batch = self.scene.vectors.preview_batch(&path, offset, window.min, plan.level, plan.size, self.packet.document_extent, Scene::vector_palette(self.r, self.packet));
+        self.r.encode_clear(self.encoder, &target.view, "vector preview");
+        if batch.tile_count() > 0 {
+            self.scene.jobs.push(super::Job::Vector(Box::new(super::vectors::VectorJob { batch, output: target.view.clone(), base: None })));
+            self.encode_scene_jobs()?;
+        }
+        self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)
+    }
     fn objects(&mut self,content:&object_spatial::Content,moving:bool,output:Option<Target>)->Result<Value,GpuRasterError> {
         self.commands.flush(self.r,self.encoder)?;
         let mut target=self.target();let side=1u32<<target.plan.level;

@@ -752,6 +752,7 @@ resources-layer-menu-new = Baru
 resources-layer-menu-new-clipping-layer = Lapisan kliping baru
 
 resources-layer-menu-new-group = Grup baru
+resources-layer-menu-new-vector-layer = Lapisan vektor baru
 
 resources-layer-menu-new-selection-layer-in-group = Lapisan Seleksi Baru dalam Grup…
 

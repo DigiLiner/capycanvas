@@ -159,6 +159,9 @@ impl CanvasRenderer for AttachedRenderer {
     fn set_clipping_preview(&mut self, shadows: bool, highlights: bool) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_clipping_preview(shadows, highlights); }
     }
+    fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) {
+        if let Some(gpu) = self.0.as_mut() { gpu.set_vector_preview(preview); }
+    }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_paper_overlay(overlay); }
     }

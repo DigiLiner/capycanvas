@@ -378,6 +378,7 @@ resources-layer-menu-move-layer-mask = Переместить слой / мас�
 resources-layer-menu-new = Создать
 resources-layer-menu-new-clipping-layer = Новый обтравочный слой
 resources-layer-menu-new-group = Новая группа
+resources-layer-menu-new-vector-layer = Новый векторный слой
 resources-layer-menu-new-selection-layer-in-group = Новый слой выделения в группе…
 resources-layer-menu-organize = Упорядочить
 resources-layer-menu-paste-mask = Вставить маску

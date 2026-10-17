@@ -11,6 +11,7 @@ documents-photo-name = Foto
 documents-layer-name = Lapisan { $number }
 
 documents-group-name = Grup { $number }
+documents-vector-layer-name = Vektor { $number }
 
 documents-selection-name = Seleksi { $number }
 

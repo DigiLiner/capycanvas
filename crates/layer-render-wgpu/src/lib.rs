@@ -886,6 +886,10 @@ pub struct WgpuRasterizer {
     paper_overlay_drawn: std::cell::Cell<bool>,
     paper_lighting: Option<paper::PaperLighting>,
     paper_export: Option<paper::ExportShade>,
+    vector_preview: Option<layer_render::VectorPreview>,
+    vector_preview_shown: Option<(OccurrenceHandle, u64, DocRect)>,
+    vector_preview_layers: std::collections::HashSet<OccurrenceHandle>,
+    vector_preview_damage: Vec<DocRect>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
     selection_paint_revision: u64,
@@ -1271,6 +1275,10 @@ impl WgpuRasterizer {
             paper_overlay_drawn: std::cell::Cell::new(false),
             paper_lighting: None,
             paper_export: None,
+            vector_preview: None,
+            vector_preview_shown: None,
+            vector_preview_layers: Default::default(),
+            vector_preview_damage: Vec::new(),
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
             selection_paint_revision: 0,
@@ -3601,6 +3609,10 @@ impl CanvasRenderer for WgpuRasterizer {
     }
     fn set_selection_overlay(&mut self, overlay: Option<layer_render::SelectionOverlay>) { self.selection_overlay = overlay; }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
+    fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) {
+        if let Some(preview) = &preview { self.vector_preview_layers.insert(preview.owner); }
+        self.vector_preview = preview;
+    }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if let Some(overlay) = &overlay && self.require_paper_slope(&overlay.paper, startup::VALIDATION).is_err() {
             return;
@@ -3853,6 +3865,7 @@ impl WgpuRasterizer {
             && settled_commit.is_none() && self.transform_preview.is_none()
             && self.transform_damage.is_empty() && self.document_damage.is_empty()
             && self.moving_layer.is_none() && self.moving_pixels.is_none()
+            && self.vector_preview.as_ref().map(|p| (p.owner, p.revision)) == self.vector_preview_shown.map(|(owner, revision, _)| (owner, revision))
             && self.artwork_frame.as_ref().is_some_and(|frame|
                 frame.view == packet.view && frame.same_artwork(packet))
         { return Ok(()); }
@@ -3882,6 +3895,15 @@ impl WgpuRasterizer {
             scene::Scene::object_edit_damage(old.scene.view().with_scope(&old.scope), packet.scene, packet.document_extent)
         }).flatten();
         if let Some(damage) = &object_damage { self.document_damage.extend(damage.regions.iter().copied()); }
+        self.vector_preview_damage.clear();
+        let shown = self.vector_preview.as_ref().map(|p| (p.owner, p.revision, scene::preview_bounds(packet.scene, p)));
+        if shown.map(|(o, r, _)| (o, r)) != self.vector_preview_shown.map(|(o, r, _)| (o, r)) {
+            for (_, _, bounds) in self.vector_preview_shown.iter().chain(shown.iter()) {
+                let rect = bounds.in_frame(packet.document_extent);
+                if !rect.is_empty() { self.vector_preview_damage.push(*bounds); self.document_damage.push(rect); }
+            }
+            self.vector_preview_shown = shown;
+        }
         let packet = FramePacket { composite_all: packet.composite_all && object_damage.is_none(), ..packet };
         self.metrics.frame_composited_pages.clear();
         if let Some(t) = &mut self.transforms {

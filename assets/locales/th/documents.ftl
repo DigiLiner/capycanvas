@@ -5,6 +5,7 @@ documents-paper = กระดาษ
 documents-photo-name = ภาพถ่าย
 documents-layer-name = เลเยอร์ { $number }
 documents-group-name = กลุ่ม { $number }
+documents-vector-layer-name = เวกเตอร์ { $number }
 documents-selection-name = พื้นที่เลือก { $number }
 documents-copy-name = { $name } สำเนา
 documents-close-confirm = บันทึกการเปลี่ยนแปลง “{ $name }” หรือไม่?
