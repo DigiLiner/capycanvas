@@ -229,17 +229,20 @@ private struct PrintProofControls: View {
 
 /// The same section order as the shared profile menus; ICC loading stays off UI.
 private struct PrintProfileMenu: View {
+    @Environment(\.capyInterfaceLanguage) private var language
     @Environment(\.editorPalette) private var palette
     @ObservedObject var controller: ProofController
     let recipe: JSON
     @Binding var busy: Bool
     var labelWidth: CGFloat? = nil
     let choose: (JSON) -> Void
-    @State private var saved: [JSON] = []
+    @StateObject private var entryCopy = ProfileEntryCopyCache()
+    @State private var metadata: [JSON] = []
     @State private var importing = false
     @State private var library = false
     @State private var mounted = false
     var body: some View {
+        let saved = entryCopy.rows(metadata, language: language)
         PropertyChoiceRow(labelWidth:labelWidth) {
             Text("Profile").lineLimit(1)
             Menu {
@@ -285,7 +288,7 @@ private struct PrintProfileMenu: View {
             let result = Result { try preferences.profiles() }
             DispatchQueue.main.async {
                 guard mounted else { return }
-                switch result { case .success(let entries): saved = entries.filter { $0["visible"].bool && $0["issue"].isNull }
+                switch result { case .success(let entries): metadata = entries.filter { $0["visible"].bool && $0["issue"].isNull }
                 case .failure(let error): controller.error = error.localizedDescription }
             }
         }

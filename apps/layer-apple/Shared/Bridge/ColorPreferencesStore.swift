@@ -149,10 +149,10 @@ final class ColorPreferencesStore: @unchecked Sendable {
                 do { data = try read(location(entry["id"].string)) }
                 catch { failure = error.localizedDescription }
             }
-            return try library(JSON(["type": "inspect", "entry": entry.raw,
+            return try library(JSON(["type": "inspect_metadata", "entry": entry.raw,
                 "error": failure.map { ["Diagnostic": $0] as Any } ?? NSNull()]), bytes: data)
                 .replacing("visible", with: JSON(!hidden.contains(entry["id"].string)))
-        }.sorted { $0["name"].string.localizedStandardCompare($1["name"].string) == .orderedAscending }
+        }
     }
     func profile(_ id: String) throws -> JSON {
         try exportProfile(library(JSON(["type": "get", "id": id]), bytes: read(location(id))))

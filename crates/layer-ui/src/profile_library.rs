@@ -198,6 +198,10 @@ pub enum ProfileLibraryAction {
         entry: ProfileRecord,
         error: Option<ColorFeatureError>,
     },
+    InspectMetadata {
+        entry: ProfileRecord,
+        error: Option<ColorFeatureError>,
+    },
     Remove {
         id: String,
     },
@@ -231,6 +235,7 @@ impl ProfileLibraryAction {
             Self::Inspect { entry, error } => {
                 view(inspect_library_entry(&entry, error.map_or(Ok(bytes), Err)))
             }
+            Self::InspectMetadata { entry, error } => Self::Inspect { entry, error }.execute(bytes)?,
             Self::Remove { id } => {
                 if !valid_profile_id(&id) {
                     return Err(ColorFeatureError::SelectImportedProfile);
@@ -276,6 +281,44 @@ mod tests {
         let view = missing.localized_view(&localizer);
         assert_eq!(view["name"], missing.display_name(&localizer));
         assert_eq!(view["issue"], ColorFeatureError::ProfileMissing.profile_message(&localizer));
+    }
+    #[test]
+    fn retained_profile_metadata_reprojects_without_icc_bytes_or_losing_raw_reasons() {
+        use crate::{ColorUiRequest, Localizer, UiLanguage, color_ui_localized};
+        let literal = "Embedded ICC profile 私の色 { $name }";
+        let diagnostic = "Missing file 私の色 { $name }";
+        let mut entries = vec![
+            ProfileEntry { id: "a".repeat(64), bytes: 2602, name: String::new(), channels: Some(ProfileChannels::Gray), profile: None, issue: None },
+            ProfileEntry { id: "b".repeat(64), bytes: 128, name: literal.into(), channels: Some(ProfileChannels::Rgb), profile: None, issue: None },
+        ];
+        for issue in [ColorFeatureError::ProfileMissing, ColorFeatureError::Diagnostic(diagnostic.into())] {
+            let raw = ProfileLibraryAction::InspectMetadata {
+                entry: ProfileRecord { id: "c".repeat(64), bytes: 17, issue: None }, error: Some(issue.clone()),
+            }.execute_localized(&[], &Localizer::shared(UiLanguage::Japanese)).unwrap();
+            let entry: ProfileEntry = serde_json::from_value(raw).unwrap();
+            assert_eq!(entry.issue, Some(issue)); assert!(entry.profile.is_none());
+            entries.push(entry);
+        }
+        let payload = serde_json::to_value(&entries).unwrap();
+        assert_eq!(payload[0]["name"], ""); assert_eq!(payload[1]["name"], literal);
+        let mut views = Vec::new();
+        for language in [UiLanguage::English, UiLanguage::Japanese, UiLanguage::English] {
+            let localizer = Localizer::shared(language);
+            let request: ColorUiRequest = serde_json::from_value(serde_json::json!({"type":"profile_entries", "entries":payload})).unwrap();
+            let view = color_ui_localized(request, &localizer).unwrap();
+            for (entry, row) in entries.iter().zip(view.as_array().unwrap()) {
+                assert_eq!(*row, entry.localized_view(&localizer));
+                assert!(row["profile"].is_null());
+            }
+            assert_eq!(view[1]["name"], literal);
+            assert!(view[3]["issue"].as_str().unwrap().ends_with(diagnostic));
+            views.push(view);
+        }
+        assert_ne!(views[0][0]["name"], views[1][0]["name"]);
+        assert_ne!(views[0][0]["details"], views[1][0]["details"]);
+        assert_ne!(views[0][2]["issue"], views[1][2]["issue"]);
+        assert_eq!(views[0], views[2]);
+        assert_eq!(serde_json::to_value(&entries).unwrap(), payload);
     }
     #[test]
     fn import_deduplicates_accounts_all_entries_and_preserves_exact_owned_bytes() {

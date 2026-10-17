@@ -19,6 +19,11 @@ enum ColorUI {
             return try JSON.decode(String(cString: response))
         } catch { return JSON(["error": error.localizedDescription]) }
     }
+    static func profileEntries(_ entries: [JSON], language: String) -> [JSON] {
+        let rows = resolve(["type": "profile_entries", "entries": entries.map(\.raw)], language: language).array
+        return zip(entries, rows).map { entry, row in row.replacing("visible", with: entry["visible"]) }
+            .sorted { $0["name"].string.localizedStandardCompare($1["name"].string) == .orderedAscending }
+    }
     static func preview(_ color: JSON) -> JSON {
         resolve(["type": "preview", "colors": [color.raw], "display_space": "DisplayP3"])[0]
     }

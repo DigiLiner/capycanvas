@@ -301,6 +301,10 @@ while editing color/numeric drafts, renaming with marked text, drawing, dragging
 using open dialogs, and activating parked drawings in both themes. Run
 `tests/persistence.swift` for cross-scene delivery after a failed write.
 
+Saved ICC library rows and Print profile menus retain worker-inspected metadata
+without ICC bytes. Publishing a language reprojects those descriptors through
+`ColorUiRequest::ProfileEntries`; it does not reread or decode the saved profiles.
+
 ### Navigation input
 
 Pen pressure uses the shared curve editor in a modeless utility above the canvas.

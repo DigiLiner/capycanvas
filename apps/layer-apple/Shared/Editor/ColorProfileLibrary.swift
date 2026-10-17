@@ -52,14 +52,30 @@ struct ProfileChooserButtons: View {
     }
 }
 
+@MainActor final class ProfileEntryCopyCache: ObservableObject {
+    private var metadata: [JSON] = []
+    private var language: String?
+    private var cached: [JSON] = []
+    func rows(_ entries: [JSON], language: String) -> [JSON] {
+        if self.language == language && metadata.count == entries.count
+            && zip(metadata, entries).allSatisfy({ SnapshotProjection.equal($0.raw, $1.raw) }) { return cached }
+        metadata = entries; self.language = language
+        cached = ColorUI.profileEntries(entries, language: language)
+        return cached
+    }
+}
+
 struct ColorProfileLibrary: View {
+    @Environment(\.capyInterfaceLanguage) private var language
     let preferences: ColorPreferencesStore
     var onProfile: ((JSON) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
-    @State private var entries: [JSON] = []
+    @StateObject private var entryCopy = ProfileEntryCopyCache()
+    @State private var metadata: [JSON] = []
     @State private var busy = false
     @State private var error: String?
     var body: some View {
+        let entries = entryCopy.rows(metadata, language: language)
         VStack(alignment: .leading, spacing: 16) {
             Text("Color Profile Library").font(.headline)
             Text("Imported profiles are saved as exact copies. Removing one leaves original files and profiles embedded in drawings or export presets intact.")
@@ -69,7 +85,7 @@ struct ColorProfileLibrary: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry["name"].string).font(.headline)
                             if !entry["issue"].isNull { Text(entry["issue"].string).foregroundStyle(.red) }
-                            else { Text("\(entry["channels"].string) · \(ByteCountFormatter.string(fromByteCount: Int64(entry["bytes"].uint), countStyle: .file))").font(.caption) }
+                            else { Text(entry["details"].string).font(.caption) }
                             HStack {
                                 if onProfile != nil {
                                     Button("Use Profile") { select(entry["id"].string) }
@@ -113,7 +129,7 @@ struct ColorProfileLibrary: View {
             DispatchQueue.main.async {
                 busy = false
                 switch result {
-                case .success(let values): entries = values
+                case .success(let values): metadata = values
                 case .failure(let failure): error = failure.localizedDescription
                 }
             }

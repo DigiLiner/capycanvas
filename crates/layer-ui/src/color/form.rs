@@ -5,6 +5,7 @@ use super::*;
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ColorUiRequest {
+    ProfileEntries { entries: Vec<crate::profile_library::ProfileEntry> },
     IntensityArc { size:f32, stops:f32, #[serde(default)] depth:Option<layer_core::color::SampleDepth>, base:RgbColor, document_space:RgbSpace, recipe:layer_core::color::hdr::SdrRendition, headroom:f32 },
     IntensityPoint {size:f32, point:[f32;2], minimum:f32, maximum:f32},
     PickerLayout { size: f32, #[serde(default)] hdr: bool },
@@ -67,6 +68,7 @@ fn color_ui(request: ColorUiRequest) -> Result<serde_json::Value, String> { colo
 
 pub fn color_ui_localized(request: ColorUiRequest, localizer: &crate::localization::Localizer) -> Result<serde_json::Value, String> {
     let value = match request {
+        ColorUiRequest::ProfileEntries { entries } => return Ok(serde_json::Value::Array(entries.iter().map(|entry| entry.localized_view(localizer)).collect())),
         ColorUiRequest::IntensityPoint {size,point,minimum,maximum} => {
             if !point.iter().all(|v|v.is_finite()) || !minimum.is_finite() || !maximum.is_finite() || minimum>=maximum || minimum < -149. || maximum>128. {return Err("Invalid intensity range".into());}
             let a=HdrIntensityArc::new(size).ok_or("Invalid picker extent")?;
