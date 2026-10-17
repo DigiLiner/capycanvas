@@ -31,15 +31,20 @@ extension EnvironmentValues {
 /// margins that a content-only background would leave translucent.
 struct EditorPopupPresentation: ViewModifier {
     @Environment(\.editorPopupStore) private var store
+    @State private var popup = UUID()
     private var source: JSON { store?.state["palette"] ?? JSON() }
-    @ViewBuilder func body(content: Content) -> some View {
-        if !source["panel"].isNull && !source["text"].isNull {
-            let palette = EditorPalette(source: source)
-            content.modifier(EditorPopoverHost()).foregroundStyle(palette["text"]).presentationBackground(palette["panel"])
-                .modifier(EditorPresentationAppearance())
-        } else {
-            content.modifier(EditorPopoverHost()).foregroundStyle(.primary).presentationBackground(.background)
+    func body(content: Content) -> some View {
+        Group {
+            if !source["panel"].isNull && !source["text"].isNull {
+                let palette = EditorPalette(source: source)
+                content.modifier(EditorPopoverHost()).foregroundStyle(palette["text"]).presentationBackground(palette["panel"])
+                    .modifier(EditorPresentationAppearance())
+            } else {
+                content.modifier(EditorPopoverHost()).foregroundStyle(.primary).presentationBackground(.background)
+            }
         }
+        .onAppear { store?.workspace.popover(popup, open: true) }
+        .onDisappear { store?.workspace.popover(popup, open: false) }
     }
 }
 

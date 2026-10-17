@@ -33,12 +33,14 @@ extension XCTestCase {
     }
 
     @MainActor func editorHistory(_ label: String, in app: XCUIApplication) {
-        let button = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
-            "toolbar-tile-commands-", label)).firstMatch
+        let buttons = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "toolbar-tile-", label))
+        let button = buttons.firstMatch
         // History is published asynchronously by the Rust owner. In particular,
         // Redo need not be enabled at the instant the preceding Undo click ends.
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: button)
         waitForExpectations(timeout: 10)
+        XCTAssertEqual(buttons.count, 1, "The active workspace needs one \(label) history control")
         workspaceActivate(button)
     }
 

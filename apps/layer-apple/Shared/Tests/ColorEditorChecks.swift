@@ -178,11 +178,14 @@ extension XCTestCase {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
     @MainActor func checkFillThumbnailColor(in app: XCUIApplication, theme: String) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:painter"}}]"#
         app.launch()
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch
         XCTAssertTrue(canvas.waitForExistence(timeout: 30))
-        expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
+        let sketch = app.buttons["workspace-switch-builtin:workspace:painter"]
+        expectation(for: NSPredicate { _, _ in
+            canvas.value as? String == "Canvas ready" && sketch.exists && sketch.isSelected
+        }, evaluatedWith: app)
         waitForExpectations(timeout: 30)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
         func pixels(_ accept: @escaping (Int, Int, Int) -> Bool, _ message: String) {
@@ -195,18 +198,31 @@ extension XCTestCase {
             }
         }
         pixels({ r, g, b in min(r, g, b) >= 250 }, "A new drawing shows white Paper")
+        workspaceActivate(app.buttons["Layers panel"])
+        let footer = app.buttons["layer-properties-disclosure"]
+        XCTAssertTrue(footer.waitForExistence(timeout: 10))
         let paper = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paper layer row")).firstMatch
         XCTAssertTrue(paper.waitForExistence(timeout: 10))
-        workspaceActivate(paper.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-content")).firstMatch)
+        let thumbnail = paper.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-content")).firstMatch
+        workspaceActivate(thumbnail)
         let use = app.buttons["color-use"]
         XCTAssertTrue(use.waitForExistence(timeout: 10), "Paper's thumbnail opens Edit Color on its color")
         XCTAssertEqual(colorValueText("hex", in: app).uppercased(), "#FFFFFF")
         let current = elementPixel(app.descendants(matching: .any)["color-current"].firstMatch, in: app)
         XCTAssertTrue(min(current.0, current.1, current.2) >= 250, "Current shows Paper's white: \(current)")
+        workspaceActivate(app.buttons["color-cancel"])
+        XCTAssertTrue(use.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(footer.waitForExistence(timeout: 10), "Cancel preserves the sheet's parent drawer")
+        XCTAssertTrue(app.buttons["workspace-switch-builtin:workspace:painter"].isSelected)
+        XCTAssertTrue(paper.buttons["layer-Select layer without changing drawing target"].isSelected)
+        pixels({ r, g, b in min(r, g, b) >= 250 }, "Cancel preserves white Paper")
+        workspaceActivate(thumbnail)
+        XCTAssertTrue(use.waitForExistence(timeout: 10))
         editColorValue("hex", "#FF0000", in: app)
         attachEditor(in: app, name: "fill-thumbnail-edit-\(theme)")
         workspaceActivate(use)
         XCTAssertTrue(use.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(footer.waitForExistence(timeout: 10), "Use Color preserves the sheet's parent drawer")
         pixels({ r, g, b in r >= 250 && g <= 5 && b <= 5 }, "Use Color sets the fill")
         editorHistory("Undo", in: app)
         pixels({ r, g, b in min(r, g, b) >= 250 }, "Undo restores the fill")

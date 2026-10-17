@@ -203,6 +203,12 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   gesture overrides, menu/drag handoffs or per-menu presenters. Keep menus fast,
   theme colors readable and opaque, and animation minimal, without
   glass shine. Preserve native keyboard and accessibility conventions.
+
+  Native sheets register their presented lifetime with the workspace through
+  `EditorPopupPresentation`. The existing shared popup fact then keeps outside
+  contacts in a child sheet from closing its parent content drawer. Cancel and
+  Use Color preserve the selected workspace, Paper row and artwork history;
+  `testFillThumbnailColor` and its dark variant check this through native controls.
 - **OS presentation.** macOS top-level menus use the OS menu bar; the header keeps
   its title, Zen and other controls over the live canvas. Zen clears native window
   controls. Remove the designated native Help submenu by identity after launch
