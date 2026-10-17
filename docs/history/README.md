@@ -19,6 +19,11 @@ Progress notes, validation reports and other work records are not committed
   with its [source reports](photo-editing-research).
 - [PSD import and layer styles](psd-and-layer-styles-research.md): PhotoCraft reuse,
   compatibility gaps, style compositing and the proposed owner badge and Properties UI.
+- [PSD import compatibility](psd-import-compatibility-research.md): what PSDs from
+  Photoshop, Illustrator, Fresco and other apps contain, how about thirty importers
+  degrade, where each PSD capability fits in Capy's model, the gaps ranked by
+  impact and the decisions due before the format freeze, with its
+  [source reports](psd-import-compatibility).
 - [Vector drawing and editing](vector-drawing-research.md).
 - [Vector layers: research, code audit and design](vector-layers-research.md):
   the object model, file format, rendering and tools for vector lines and fills,
