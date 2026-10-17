@@ -49,9 +49,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.deferred_edits.iter().any(|edit| matches!(edit.input,
             EditInput::Action(UiAction::Invoke { command: CommandId::Undo })))
     }
-    pub(super) fn defer_document_action(&mut self, action: &UiAction) -> bool {
+    fn deferrable(&self, action: &UiAction) -> bool {
         let configures_brush = configures_brush(action);
-        if self.rendering_suspended || self.workspace_read_only || self.workspace_transition
+        !(self.rendering_suspended || self.workspace_read_only || self.workspace_transition
             || (self.deferred_contact().unwrap_or(self.pen_contact) && !configures_brush)
             || self.state.document_file.close_ready
             || matches!(action, UiAction::Invoke { command } if Self::command_without_document(*command) || NAVIGATOR_COMMANDS.contains(command) || matches!(command, CommandId::FitCanvas | CommandId::ActualPixels))
@@ -62,20 +62,23 @@ impl<R: CanvasRenderer> UiSession<R> {
                 | UiAction::CanvasSize { .. } | UiAction::ImageSize { .. }
                 | UiAction::FrequencySeparation { .. } | UiAction::Tonal { .. }
                 | UiAction::TransformReference { .. } | UiAction::ToolbarEdit { .. }
-                | UiAction::CanvasBarEdit { .. }))
-        {
-            return false;
-        }
-        if self.deferred_edits.is_empty() && configures_brush { return false; }
-        if !configures_brush { self.cancel_selection_contact(); }
+                | UiAction::CanvasBarEdit { .. })))
+            && !(self.deferred_edits.is_empty() && configures_brush)
+    }
+    fn edits_pending(&self, action: &UiAction) -> bool {
         let history = matches!(action, UiAction::Invoke { command: CommandId::Undo | CommandId::Redo });
-        if self.deferred_edits.is_empty() && !self.painted_selections.busy()
-            && !(history && (self.region_tools.publishing_edit() || self.files.pending.is_some()))
-            && !((self.engine.raster_backing_pending() || self.engine.has_pending_input())
-                && !held_actions::selects_tool(action) && !configures_brush)
-        {
-            return false;
-        }
+        !self.deferred_edits.is_empty() || self.painted_selections.busy()
+            || (history && (self.region_tools.publishing_edit() || self.files.pending.is_some()))
+            || ((self.engine.raster_backing_pending() || self.engine.has_pending_input())
+                && !held_actions::selects_tool(action) && !configures_brush(action))
+    }
+    pub(super) fn defers(&self, action: &UiAction) -> bool {
+        self.deferrable(action) && self.edits_pending(action)
+    }
+    pub(super) fn defer_document_action(&mut self, action: &UiAction) -> bool {
+        if !self.deferrable(action) { return false; }
+        if !configures_brush(action) { self.cancel_selection_contact(); }
+        if !self.edits_pending(action) { return false; }
         self.defer_edit(EditInput::Action(action.clone()));
         self.refresh_commands();
         true

@@ -256,7 +256,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn binding_enabled(&self, action: &ShortcutAction) -> bool {
         match action {
             ShortcutAction::Action { action } => match &**action {
-                UiAction::Invoke { command } => if navigation::command_mode(*command).is_some() { self.navigation_idle() } else { self.command_flags(*command).0 },
+                UiAction::Invoke { command } => if navigation::command_mode(*command).is_some() { self.navigation_idle() }
+                    else { self.command_flags(*command).0 || self.defers(action) },
                 UiAction::StepToolSetting { id, .. } => self.state.tool_settings.iter().any(|c| c.id == *id),
                 _ => true,
             },

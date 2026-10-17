@@ -265,6 +265,18 @@ mod clipboard_checks {
         assert_live_artwork_eq(s.engine.document(), &original);
     }
 
+    #[test]
+    fn paste_after_pen_lift_waits_for_the_stroke() {
+        let mut s = clip_session();
+        pen_at(&mut s, 10, PenPhase::Down, [100., 100.]);
+        pen_at(&mut s, 11, PenPhase::Up, [110., 100.]);
+        shortcut(&mut s, "v");
+        assert!(!has_document_request(&s), "Paste must not capture the document before the stroke");
+        for tick in 2..8 { s.frame(tick, tick).unwrap(); }
+        assert_eq!(s.engine.metrics().committed_strokes, 1);
+        assert!(matches!(pending(&s).1, DocumentRequest::Paste { mode: PasteMode::Paste }));
+    }
+
     fn contact_sizes_across_brush_change(deferred: bool, during_contact: bool, toolbar: bool) -> Vec<Vec<[f32; 2]>> {
         let mut s = clip_session();
         let resize = |s: &mut UiSession<Recorder>, value: f32| {
