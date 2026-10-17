@@ -181,10 +181,14 @@ Reuse the contracts in [`layers.rs`](../../crates/layer-core/src/layers.rs) and
 
 - Isolated groups evaluate over transparency. Pass-through groups receive a
   backdrop `B` and produce `B + opacity * mask * (group(B) - B)` in the applicable
-  blend domain. Clipped pass-through groups stay isolated Normal groups.
-- Adjustments transform their scoped lower composite; clipped adjustments operate
-  on the clipping stack and preserve base coverage. Hiding a direct contribution
-  must not disable a source that a future explicit input still needs.
+  blend domain. Pass-through groups cannot clip or serve as clipping bases
+  ([authored model](../reference/authored-model.md)).
+- Adjustments transform their scoped lower composite and cannot split a clipping
+  run. A clipped adjustment stays unsupported, so a later version can give it
+  Photoshop's meaning: a change to the clipping run's composite within the base's
+  coverage ([PSD import compatibility](../history/psd-import-compatibility-research.md#53-clipped-adjustments)).
+  Hiding a direct contribution must not disable a source that a future explicit
+  input still needs.
 - Mask source evaluation, inversion, offset and application stage are distinct.
   A linked mask follows its owner's integer offset. Preserve default coverage and
   out-of-bounds behavior.

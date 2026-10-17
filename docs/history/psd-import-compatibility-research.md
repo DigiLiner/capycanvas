@@ -46,7 +46,7 @@ The research combines five streams. Their write-ups, with every source URL, are 
 **Three things should be decided before the format freezes,** because frozen readers apply their rules to every later file (section 5):
 1. **Whole-document read-only.** Every PSD feature added after the freeze (styles, fill opacity, text, vector masks, Blend If and more) makes older versions open the *whole* document read-only. Opening only the affected layer read-only needs a reader rule that exists at the freeze.
 2. **Presentation-only properties.** Color labels, position locks, linked layers and comps should not make files read-only in older versions. The existing copy-safe ancillary records can carry them, but that should be stated as policy now.
-3. **Clipped adjustments.** A guide describes them as frozen semantics, while the code rejects them. The code is right to leave them open, and the guide should say so.
+3. **Clipped adjustments.** The code reads them as unsupported, which leaves them open for Photoshop's meaning. The format plan now says so; it used to list them as frozen semantics.
 
 **Biggest gaps for real files**, most common first (section 6):
 1. **Layer styles.** Stroke, drop shadow and color overlay are common in design and comic lettering. Photoshop's stored layer pixels never include effects, so without a style renderer Capy cannot even bake them.
@@ -311,11 +311,11 @@ The [format freeze](../development/capy-format.md) fixes how readers treat data 
 ### 5.3 Clipped adjustments
 
 - **The conflict.**
-  - The [format plan](../development/capy-format.md) lists "clipped adjustments operate on the clipping stack" among the semantics to freeze.
+  - The [format plan](../development/capy-format.md) listed "clipped adjustments operate on the clipping stack" among the semantics to freeze.
   - The scene index instead rejects an adjustment with clip attachment as unsupported (`crates/layer-core/src/authored/scene.rs:54`).
 - **Photoshop's meaning:** a clipped adjustment acts on the composite of its clipping run (base plus earlier clipped layers), inside the base's alpha.
 - **Capy's nearest form** is an adjustment attached to one owner, which acts before the clipped members are combined. That is a different meaning.
-- **Recommendation:** keep the code's behaviour, so a later version can give `clip` on adjustments Photoshop's meaning, and correct the plan before the freeze.
+- **Recommendation:** keep the code's behaviour, so a later version can give `clip` on adjustments Photoshop's meaning. The format plan was corrected to match.
 
 ---
 
@@ -402,12 +402,12 @@ The importer rasterizes or drops these with a notice.
 
 ---
 
-## 9. Docs that disagree with the code
+## 9. Docs that disagreed with the code
 
-Found during the audit and not changed here:
-- **Clipped adjustments.** [`docs/development/capy-format.md`](../development/capy-format.md) (lines 185–186) says clipped adjustments operate on the clipping stack; `crates/layer-core/src/authored/scene.rs:54` rejects them (section 5.3).
-- **Generators as clipping bases.** [The extension format audit](object-content-extensions/01-capy-format-audit.md) §4 lists generators as clipping bases; `authored/scene.rs:45` makes them ineligible.
-- **Groups as clipping bases.** [The layers audit](photo-editing-research/08-audit-layers.md) says groups cannot be clipping bases; isolated groups now can.
+Found during the audit:
+- **Clipped adjustments and clipped pass-through groups.** The [format plan](../development/capy-format.md) said clipped adjustments operate on the clipping stack and clipped pass-through groups stay isolated Normal groups. `crates/layer-core/src/authored/scene.rs:54` rejects both as unsupported, as the [authored model](../reference/authored-model.md) states. The plan now matches (section 5.3).
+- **Generators as clipping bases.** [The extension format audit](object-content-extensions/01-capy-format-audit.md) §4 listed generators as clipping bases, which `authored/scene.rs:45` did not allow at that audit's baseline either. The report is corrected.
+- **Groups as clipping bases.** [The layers audit](photo-editing-research/08-audit-layers.md) says groups cannot be clipping bases. That was true at its baseline `dac76c20`; isolated groups can now. As a history record it stays unchanged.
 
 ---
 

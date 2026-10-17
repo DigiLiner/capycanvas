@@ -116,7 +116,7 @@ The outcomes are `OpenOutcome::{Candidate, Preserved, RecoveredView, Failure}` (
   - The pass-through formula is `B + opacity·mask·(group(B) − B)` (`authored-model.md:339-343`).
   - Pass-through groups cannot clip, be a clipping base, or own effects (`lib.rs:1661`).
 - **Clipping** (`attachment:"clip"`). Resolved from stack order, Photoshop-style.
-  - Consecutive clipped rows share the first unclipped eligible base below them: paint, object, isolated group, or a generator (`authored/scene.rs:39-64`).
+  - Consecutive clipped rows share the first unclipped eligible base below them: paint, object or isolated group. Generators, adjustments and pass-through groups are not eligible (`authored/scene.rs:39-64`).
   - The renderer's `blend_clip` blends the clipped row inside its base's coverage (`docs/internals/rendering.md:361-365`).
   - An adjustment between clipped rows is an error (`scene.rs:55`).
 - **Masks.** Raster only: `{source: coverage-source ref, enabled, linked, inverted, offset}` (`artwork.rs:92-98`).
