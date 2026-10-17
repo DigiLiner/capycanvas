@@ -76,11 +76,10 @@ The source archive is pinned by SHA-256. TIFF and JPEG use GTK's checksum-pinned
 Meson wraps and link statically into the local GTK library. System TIFF and JPEG
 development packages are unnecessary. TIFF enables JPEG and deflate compression;
 its optional JBIG, LERC, LZMA, WebP and Zstandard dependencies are disabled.
-The build needs GTK's remaining system development dependencies, Wayland protocol
-files, DRM headers, Meson, Ninja, `pkg-config`, a C compiler, `glslc` and `sassc`. It neither
-installs system packages nor replaces system GTK. An optional `deps/usr` under
-the build directory can supply extracted development headers/tools, as in the
-recorded Fedora review build. The prefix contains the library, source archive,
+
+Install the [Linux prerequisites](../../../docs/development/linux.md#prerequisites).
+The runtime builder neither installs system packages nor replaces system GTK.
+The prefix contains the library, source archive,
 licenses, patches, standalone build script and a checksum manifest, including
 the TIFF and JPEG source archives and Meson build overlays. Rebuilds seed Meson's
 package cache from these shipped sources, so they need no codec downloads.
