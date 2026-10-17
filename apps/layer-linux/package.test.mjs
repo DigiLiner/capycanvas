@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -100,4 +100,55 @@ test("staging refuses a package symlink and preserves its target", t => {
   symlinkSync(target, output);
   assert.throws(() => preparePackageOutput(output), /unmarked/);
   assert.equal(readFileSync(join(target, "keep"), "utf8"), "content");
+});
+
+function packageFixture(t) {
+  const root = fixture(t);
+  for (const path of ["apps/layer-linux/package.mjs", "apps/layer-linux/package-files.mjs",
+    "apps/layer-linux/gtk-runtime.mjs", "tools/build/dependency-notices.mjs", "tools/build/gtk-runtime/build.sh"]) {
+    mkdirSync(join(root, path, ".."), { recursive: true });
+    cpSync(new URL(`../../${path}`, import.meta.url), join(root, path));
+  }
+  preparePackageOutput(join(root, "dist/capycanvas-linux"));
+  writeFileSync(join(root, "dist/capycanvas-linux/keep"), "existing package");
+  return root;
+}
+
+test("preparing original license notices preserves the existing package without compiling", t => {
+  const root = packageFixture(t), bin = join(root, "bin");
+  mkdirSync(bin);
+  for (const [name, body] of [
+    ["rustc", 'printf "host: x86_64-unknown-linux-gnu\\n"'],
+    ["cargo-about", `printf '%s' '${JSON.stringify({ licenses: [{ name: "MIT", source_path: "LICENSE",
+      text: "Copyright 2026 Fixture author", used_by: [{ crate: { name: "fixture", version: "1.0", source: "registry" } }] }] })}'`],
+    ["cargo", "exit 99"], ["bash", "exit 99"],
+  ]) writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, [join(root, "apps/layer-linux/package.mjs"), "--prepare"],
+    { encoding: "utf8", env: { ...process.env, PATH: bin, LAYER_CARGO_ABOUT: join(bin, "cargo-about") } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(readFileSync(join(root, "target/linux-package-licenses.html"), "utf8"), /Copyright 2026 Fixture author/);
+  assert.equal(readFileSync(join(root, "dist/capycanvas-linux/keep"), "utf8"), "existing package");
+});
+
+test("offline packaging requires prepared notices before replacing an existing package", t => {
+  const root = packageFixture(t);
+  const result = spawnSync(process.execPath, [join(root, "apps/layer-linux/package.mjs"), "--offline"],
+    { encoding: "utf8", env: { ...process.env, PATH: "", LAYER_CARGO_ABOUT: "/missing/cargo-about" } });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ENOENT.*linux-package-licenses\.html/);
+  assert.equal(readFileSync(join(root, "dist/capycanvas-linux/keep"), "utf8"), "existing package");
+});
+
+test("offline packaging refuses missing GTK sources without downloading", t => {
+  const root = packageFixture(t), bin = join(root, "bin"), downloaded = join(root, "downloaded");
+  mkdirSync(bin);
+  mkdirSync(join(root, "target"));
+  writeFileSync(join(root, "target/linux-package-licenses.html"), "prepared notices");
+  writeFileSync(join(bin, "curl"), `#!/bin/sh\nprintf attempted > '${downloaded}'\nexit 99\n`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, [join(root, "apps/layer-linux/package.mjs"), "--offline"], {
+    encoding: "utf8", env: { ...process.env, PATH: `${bin}:/usr/bin`, CARGO_NET_OFFLINE: "false", CAPY_GTK_BUILD_DIR: join(root, "gtk") },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /GTK source archive is missing from the offline cache/);
+  assert.ok(!existsSync(downloaded));
 });

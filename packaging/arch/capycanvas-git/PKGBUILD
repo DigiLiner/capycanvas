@@ -1,21 +1,39 @@
 # Maintainer: Jordan Hubbard <jkh@FreeBSD.org>
 
 pkgname=capycanvas-git
-pkgver=r883.g20cecad7
-pkgrel=1
+pkgver=r2268.g4d5a4ab2
+pkgrel=2
 pkgdesc='GPU-accelerated drawing and painting application (development version)'
 arch=('x86_64')
 url='https://github.com/capyatelier/capycanvas'
-license=('MIT OR Apache-2.0' 'LicenseRef-Capy-Canvas-Branding')
-depends=('glibc' 'gcc-libs' 'gtk4>=1:4.22' 'libadwaita>=1:1.9' 'wayland' 'vulkan-icd-loader')
-optdepends=('vulkan-driver: hardware Vulkan rendering (required at runtime)')
-makedepends=('cargo-about' 'curl' 'desktop-file-utils' 'git' 'glib2-devel' 'libdrm' 'meson' 'ninja' 'nodejs' 'python' 'rust' 'sassc' 'shaderc' 'vulkan-headers' 'wayland-protocols')
+license=('MIT OR Apache-2.0' 'LicenseRef-Capy-Canvas-Branding'
+         'LGPL-2.1-or-later' 'libtiff' 'IJG' 'BSD-3-Clause')
+depends=('cairo' 'fontconfig' 'fribidi' 'gdk-pixbuf2' 'glib2' 'glibc'
+         'graphene' 'gtk4>=1:4.24' 'harfbuzz' 'hicolor-icon-theme' 'libadwaita>=1:1.9'
+         'libepoxy' 'libgcc' 'libpng' 'libxkbcommon' 'pango' 'vulkan-icd-loader'
+         'vulkan-driver' 'wayland' 'zlib')
+makedepends=('cargo' 'cargo-about' 'desktop-file-utils' 'git' 'glib2-devel' 'libdrm' 'meson' 'ninja' 'nodejs' 'python' 'sassc' 'shaderc' 'vulkan-headers' 'wayland-protocols')
+optdepends=('python: rebuild the bundled GTK runtime')
 provides=('capycanvas')
 conflicts=('capycanvas')
 # The native packager strips the app; preserve the bundled GTK manifest hashes.
-options=('!debug' '!strip')
-source=('capycanvas::git+https://github.com/capyatelier/capycanvas.git')
-sha256sums=('SKIP')
+options=('!debug' '!strip' '!lto')
+source=('capycanvas::git+https://github.com/capyatelier/capycanvas.git'
+        'https://download.gnome.org/sources/gtk/4.24/gtk-4.24.1.tar.xz'
+        'tiff-4.7.0.tar.gz::https://download.osgeo.org/libtiff/tiff-4.7.0.tar.xz'
+        'libtiff_4.7.0-1_patch.zip::https://wrapdb.mesonbuild.com/v2/libtiff_4.7.0-1/get_patch'
+        'https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.1/libjpeg-turbo-3.1.1.tar.gz'
+        'libjpeg-turbo_3.1.1-1_patch.zip::https://wrapdb.mesonbuild.com/v2/libjpeg-turbo_3.1.1-1/get_patch')
+noextract=('gtk-4.24.1.tar.xz' 'tiff-4.7.0.tar.gz' 'libtiff_4.7.0-1_patch.zip'
+           'libjpeg-turbo-3.1.1.tar.gz' 'libjpeg-turbo_3.1.1-1_patch.zip')
+sha256sums=('SKIP'
+            'e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9'
+            '273a0a73b1f0bed640afee4a5df0337357ced5b53d3d5d1c405b936501f71017'
+            '1c0f574783528f109887f8b4387c35089dc9e01ec1ca34eef75872757ab0caec'
+            'aadc97ea91f6ef078b0ae3a62bba69e008d9a7db19b34e4ac973b19b71b4217c'
+            '6d9c43f0a3700f2a74fab74d26a5e7aaadca0117770a00631077bfc28ab46abd')
+
+export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
 
 pkgver() {
   cd capycanvas
@@ -24,19 +42,21 @@ pkgver() {
 
 prepare() {
   cd capycanvas
+  install -d tools/build/gtk-runtime/sources
+  cp "${noextract[@]/#/$srcdir/}" tools/build/gtk-runtime/sources/
   cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+  node apps/layer-linux/package.mjs --prepare
 }
 
 build() {
   cd capycanvas
-  unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS
-  node apps/layer-linux/package.mjs
+  CARGO_NET_OFFLINE=true node apps/layer-linux/package.mjs --offline
 }
 
 check() {
   cd capycanvas
-  cargo test --locked -p layer-ui
-  cargo test --locked -p layer-linux
+  cargo test --frozen -p layer-ui
+  cargo test --frozen -p layer-linux
 }
 
 package() {
@@ -50,4 +70,5 @@ package() {
   install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
   install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
   install -Dm644 BRANDING.md "$pkgdir/usr/share/licenses/$pkgname/BRANDING.md"
+  ln -s ../../doc/capycanvas-gtk "$pkgdir/usr/share/licenses/$pkgname/gtk"
 }

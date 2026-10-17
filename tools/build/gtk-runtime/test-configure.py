@@ -9,6 +9,24 @@ import unittest
 
 
 class ConfigureTest(unittest.TestCase):
+    def test_source_upgrade_replaces_old_build_then_reuses_new_build(self):
+        with tempfile.TemporaryDirectory(prefix='capy-gtk-upgrade-') as temporary:
+            root = Path(temporary)
+            build = root / 'build'
+            command = [sys.executable, str(Path(__file__).with_name('configure.py')), str(build)]
+            for name in ['old-source', 'new-source']:
+                source = root / name
+                source.mkdir()
+                (source / 'meson.build').write_text("project('runtime-probe')\n")
+                result = subprocess.run([*command, str(source)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads((build / 'meson-info/meson-info.json').read_text())['directories']['source'], str(source))
+            sentinel = build / 'retained-build-output'
+            sentinel.write_text('keep incremental artifacts')
+            result = subprocess.run([*command, str(source)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(sentinel.is_file())
+
     def test_new_subproject_options_then_incremental_reconfigure(self):
         with tempfile.TemporaryDirectory(prefix='capy-gtk-configure-') as temporary:
             root = Path(temporary)

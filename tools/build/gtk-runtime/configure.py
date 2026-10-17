@@ -13,5 +13,6 @@ if (Path(build) / 'build.ninja').is_file():
     shared = {option['name'] for option in configured if option['section'] != 'user'}
     requested = {option[2:].split('=', 1)[0] for option in options if option.startswith('-D')}
     missing = any(name not in available and (':' not in name or name.split(':', 1)[1] not in shared) for name in requested)
-    mode = ['--wipe' if missing else '--reconfigure']
+    previous_source = json.loads((Path(build) / 'meson-info/meson-info.json').read_text())['directories']['source']
+    mode = ['--wipe' if missing or Path(previous_source).resolve() != Path(source).resolve() else '--reconfigure']
 subprocess.run(['meson', 'setup', *mode, build, source, *options], check=True)

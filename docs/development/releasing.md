@@ -457,8 +457,8 @@ out of public test reports.
 
 ### Linux Flatpak
 
-`packaging/flatpak/build.sh` builds against `org.gnome.Platform//50` and
-`org.gnome.Sdk//50`, reusing `apps/layer-linux/package.mjs` and its patched GTK
+`packaging/flatpak/build.sh` builds against `org.gnome.Platform//51` and
+`org.gnome.Sdk//51`, reusing `apps/layer-linux/package.mjs` and its patched GTK
 runtime. `packaging/flatpak/export.sh` exports `art.capycanvas.CapyCanvas` on the
 `stable` branch. Tagged CI builds sign the application commits and repository
 summary with the release key and add the reference and repository archive; the

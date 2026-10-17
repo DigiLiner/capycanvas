@@ -622,7 +622,7 @@ apply to final output, not independently to every intermediate pass.
   ./target/debug/layer-linux`. The native transport also accepts directories
   for live add/replace/merge. There is no automatic file watcher.
 - The native packager ships editable resources in
-  `dist/capycanvas-linux/bin/filters`; custom packages can be added without rebuilding.
+  `dist/capycanvas-linux/share/capycanvas/filters`; custom packages can be added without rebuilding.
   Shipped built-in resources must match the executable.
 - Web and Android use the shared embedded catalog, without duplicate filter
   manifests or shaders in the Web asset tree; runtime packages load on GTK

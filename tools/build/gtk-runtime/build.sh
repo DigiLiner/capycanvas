@@ -6,27 +6,30 @@ gtk_build=$(realpath -m "${1:?Usage: build.sh BUILD_DIRECTORY PREFIX}")
 gtk_prefix=$(realpath -m "${2:?Usage: build.sh BUILD_DIRECTORY PREFIX}")
 mkdir -p "$gtk_build" "$gtk_prefix/lib" "$gtk_prefix/share/doc/capycanvas-gtk/sources"
 gtk_docs="$gtk_prefix/share/doc/capycanvas-gtk"
-gtk_archive=gtk-4.22.4.tar.xz
+gtk_archive=gtk-4.24.1.tar.xz
 if [[ ! -f "$gtk_build/$gtk_archive" ]]; then
     if [[ -f "$gtk_recipe/sources/$gtk_archive" ]]; then
         cp "$gtk_recipe/sources/$gtk_archive" "$gtk_build/"
+    elif [[ ${CARGO_NET_OFFLINE:-false} == true ]]; then
+        echo "GTK source archive is missing from the offline cache: $gtk_archive" >&2
+        exit 1
     else
-        curl --fail --location "https://download.gnome.org/sources/gtk/4.22/$gtk_archive" -o "$gtk_build/$gtk_archive"
+        curl --fail --location "https://download.gnome.org/sources/gtk/4.24/$gtk_archive" -o "$gtk_build/$gtk_archive"
     fi
 fi
 python3 - "$gtk_build/$gtk_archive" <<'PY'
 import hashlib, pathlib, sys
-assert hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest() == '51bd9f60c7d23a665a556c7364c21fb2e4e282566b3e7e092455e8f910330893', 'GTK source hash mismatch'
+assert hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest() == 'e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9', 'GTK source hash mismatch'
 PY
 # Re-extract the verified archive before applying a changed patch.
-gtk_patch_hash=$(cat "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" | sha256sum | cut -d ' ' -f 1)
+gtk_patch_hash=$(cat "$gtk_build/$gtk_archive" "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" | sha256sum | cut -d ' ' -f 1)
 if [[ ! -f "$gtk_build/patched.sha256" ]] || [[ $(cat "$gtk_build/patched.sha256") != "$gtk_patch_hash" ]]; then
     tar -xf "$gtk_build/$gtk_archive" -C "$gtk_build"
-    patch -d "$gtk_build/gtk-4.22.4" -p1 < "$gtk_recipe/pad-event-surface.patch"
-    patch -d "$gtk_build/gtk-4.22.4" -p1 < "$gtk_recipe/tablet-proximity-cursor.patch"
+    patch -d "$gtk_build/gtk-4.24.1" -p1 < "$gtk_recipe/pad-event-surface.patch"
+    patch -d "$gtk_build/gtk-4.24.1" -p1 < "$gtk_recipe/tablet-proximity-cursor.patch"
     echo "$gtk_patch_hash" > "$gtk_build/patched.sha256"
 fi
-python3 - "$gtk_recipe/sources" "$gtk_build/gtk-4.22.4/subprojects" <<'PY'
+python3 - "$gtk_recipe/sources" "$gtk_build/gtk-4.24.1/subprojects" <<'PY'
 import configparser, pathlib, shutil, sys
 sources, projects = map(pathlib.Path, sys.argv[1:])
 for name in ['libtiff', 'libjpeg-turbo']:
@@ -43,8 +46,12 @@ if [[ -d "$gtk_build/deps/usr" ]]; then
     export PATH="$gtk_build/deps/usr/bin:$PATH"
     export LD_LIBRARY_PATH="$gtk_build/deps/usr/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-python3 "$gtk_recipe/configure.py" "$gtk_build/build" "$gtk_build/gtk-4.22.4" \
-    --buildtype=release -Dc_args=-fPIC --wrap-mode=nofallback --force-fallback-for=libtiff,libjpeg-turbo \
+gtk_wrap_mode=nofallback
+if [[ ${CARGO_NET_OFFLINE:-false} == true ]]; then gtk_wrap_mode=nodownload; fi
+gtk_c_args="${CFLAGS:+$CFLAGS }-fPIC $(printf '%q' "-ffile-prefix-map=$gtk_build=/capycanvas-gtk")"
+python3 "$gtk_recipe/configure.py" "$gtk_build/build" "$gtk_build/gtk-4.24.1" \
+    --buildtype=release "-Dc_args=$gtk_c_args" "-Dc_link_args=${LDFLAGS:-}" \
+    --wrap-mode="$gtk_wrap_mode" --force-fallback-for=libtiff,libjpeg-turbo \
     -Dlibtiff:default_library=static -Dlibtiff:jbig=disabled -Dlibtiff:lerc=disabled \
     -Dlibtiff:lzma=disabled -Dlibtiff:webp=disabled -Dlibtiff:zstd=disabled \
     -Dlibtiff:jpeg=enabled -Dlibtiff:zlib=enabled \
@@ -53,19 +60,19 @@ python3 "$gtk_recipe/configure.py" "$gtk_build/build" "$gtk_build/gtk-4.22.4" \
     -Dbuild-demos=false -Dbuild-tests=false \
     -Dbuild-testsuite=false -Dbuild-examples=false -Dintrospection=disabled \
     -Dmedia-gstreamer=disabled -Ddocumentation=false -Dman-pages=false -Dx11-backend=false
-ninja -C "$gtk_build/build" -j "${CAPY_BUILD_JOBS:-8}" gtk/libgtk-4.so.1.2200.4
-cp "$gtk_build/build/gtk/libgtk-4.so.1.2200.4" "$gtk_prefix/lib/libgtk-4.so.1.new"
+ninja -C "$gtk_build/build" -j "${CAPY_BUILD_JOBS:-8}" gtk/libgtk-4.so.1.2400.1
+cp "$gtk_build/build/gtk/libgtk-4.so.1.2400.1" "$gtk_prefix/lib/libgtk-4.so.1.new"
 mv -f "$gtk_prefix/lib/libgtk-4.so.1.new" "$gtk_prefix/lib/libgtk-4.so.1"
-cp "$gtk_build/gtk-4.22.4/COPYING" "$gtk_docs/COPYING"
+cp "$gtk_build/gtk-4.24.1/COPYING" "$gtk_docs/COPYING"
 cp "$gtk_build/$gtk_archive" "$gtk_docs/sources/"
 cp "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" "$gtk_recipe/build.sh" "$gtk_recipe/configure.py" "$gtk_docs/"
-python3 - "$gtk_prefix" "$gtk_build/gtk-4.22.4/subprojects" <<'PY'
+python3 - "$gtk_prefix" "$gtk_build/gtk-4.24.1/subprojects" <<'PY'
 import configparser, hashlib, json, pathlib, shutil, sys
 p = pathlib.Path(sys.argv[1])
 projects = pathlib.Path(sys.argv[2])
 docs = p / 'share/doc/capycanvas-gtk'
 files = ['lib/libgtk-4.so.1', 'share/doc/capycanvas-gtk/COPYING',
-         'share/doc/capycanvas-gtk/sources/gtk-4.22.4.tar.xz',
+         'share/doc/capycanvas-gtk/sources/gtk-4.24.1.tar.xz',
          'share/doc/capycanvas-gtk/pad-event-surface.patch',
          'share/doc/capycanvas-gtk/tablet-proximity-cursor.patch', 'share/doc/capycanvas-gtk/build.sh',
          'share/doc/capycanvas-gtk/configure.py']
@@ -85,8 +92,8 @@ for name in ['libtiff', 'libjpeg-turbo']:
         shutil.copy2(projects / data['directory'] / filename, licenses / filename)
         files.append(str((licenses / filename).relative_to(p)))
     dependencies[name] = dict(version=data['wrapdb_version'].split('-')[0], source=data['source_url'])
-manifest = dict(version='4.22.4', license='LGPL-2.1-or-later',
-                source='https://download.gnome.org/sources/gtk/4.22/gtk-4.22.4.tar.xz',
+manifest = dict(version='4.24.1', license='LGPL-2.1-or-later',
+                source='https://download.gnome.org/sources/gtk/4.24/gtk-4.24.1.tar.xz',
                 dependencies=dependencies,
                 rebuild='bash share/doc/capycanvas-gtk/build.sh "$PWD/gtk-build" "$PWD/gtk-prefix"',
                 files={f: hashlib.sha256((p/f).read_bytes()).hexdigest() for f in files})

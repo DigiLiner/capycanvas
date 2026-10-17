@@ -1,7 +1,7 @@
 # Packaged GTK runtime
 
 The Linux packager and development launcher invoke `build.sh BUILD_DIRECTORY PREFIX`
-and use the resulting GTK 4.22.4 library. `pad-event-surface.patch` backports
+and use the resulting GTK 4.24.1 library. `pad-event-surface.patch` backports
 [GTK !10171](https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/10171) at commit
 `c6613dd0ad4e1bde77b6cd2e48cfcc80c8e63f33`, with its focus/device guard extended
 to button, ring, strip and dial events. One checked-in patch contains both changes;
@@ -57,10 +57,10 @@ frames, stale cursor suppression, canvas/control cursors, repeated motion, and
 departure before any motion:
 
 ```sh
-python3 tools/build/gtk-runtime/test-tablet-entry.py target/gtk-runtime/gtk-4.22.4
-python3 tools/build/gtk-runtime/test-pad-focus.py target/gtk-runtime/gtk-4.22.4
+python3 tools/build/gtk-runtime/test-tablet-entry.py target/gtk-runtime/gtk-4.24.1
+python3 tools/build/gtk-runtime/test-pad-focus.py target/gtk-runtime/gtk-4.24.1
 python3 tools/build/gtk-runtime/test-runtime.py \
-  target/gtk-runtime/prefix target/gtk-runtime/gtk-4.22.4/subprojects
+  target/gtk-runtime/prefix target/gtk-runtime/gtk-4.24.1/subprojects
 python3 tools/build/gtk-runtime/test-configure.py
 ```
 
@@ -90,7 +90,8 @@ library using an executable-relative path that survives relocation and symlinks.
 Applications can replace the local library with a compatible rebuilt version.
 GTK's other shared dependencies and libadwaita remain system requirements.
 When a recipe introduces options absent from a configured cache, setup uses
-Meson's `--wipe`; known options use incremental reconfiguration. The installed
+Meson's `--wipe`; source-version changes also replace the configured build. Known
+options in the same source tree use incremental reconfiguration. The installed
 library stays intact until the replacement finishes. The shipped rebuild script
 includes the same `configure.py` helper.
 

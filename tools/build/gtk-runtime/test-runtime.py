@@ -11,6 +11,7 @@ import tempfile
 
 prefix, projects = map(lambda path: Path(path).resolve(), sys.argv[1:])
 library = prefix / 'lib/libgtk-4.so.1'
+assert str(projects.parent.parent).encode() not in library.read_bytes(), 'GTK library embeds its build directory'
 needed = subprocess.check_output(['readelf', '-d', str(library)], text=True)
 assert 'Shared library: [libtiff' not in needed, needed
 assert 'Shared library: [libjpeg' not in needed, needed
@@ -100,3 +101,7 @@ with tempfile.TemporaryDirectory(prefix='capy-gtk-codecs-') as directory:
                     str(library), *flags, '-ldl'], check=True)
     env = dict(os.environ, LD_LIBRARY_PATH=str(prefix / 'lib'))
     subprocess.run([str(executable), str(library)], env=env, check=True)
+    subprocess.run([sys.executable, '-c',
+                    "import ctypes, os; ctypes.CDLL('libadwaita-1.so.0', mode=os.RTLD_NOW)"],
+                   env=env, check=True)
+    print('PASS: system libadwaita resolves against the local GTK')

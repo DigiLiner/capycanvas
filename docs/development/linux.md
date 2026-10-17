@@ -14,7 +14,7 @@ For the Flatpak runtime, signed downloads and update repository, see
 ## Prerequisites
 
 Install a recent stable Rust toolchain, a C/C++ toolchain, `pkg-config`, and the
-GTK 4.22+, libadwaita 1.9 and Wayland development packages. Enabled API features
+GTK 4.24+, libadwaita 1.9 and Wayland development packages. Enabled API features
 are declared in [`apps/layer-linux/Cargo.toml`](../../apps/layer-linux/Cargo.toml).
 The launcher also builds the [patched GTK runtime](../../tools/build/gtk-runtime/README.md),
 which needs Meson, Ninja, `glslc`, `sassc`, Wayland protocol files, DRM headers
@@ -32,7 +32,7 @@ sudo dnf install gcc gcc-c++ pkgconf-pkg-config python3 curl patch tar \
   meson ninja-build glslc sassc wayland-protocols-devel libdrm-devel vulkan-headers
 ```
 
-On Arch Linux or Omarchy, with a current system:
+On Arch Linux or Omarchy with GTK 4.24 or newer:
 
 ```bash
 sudo pacman -S --needed base-devel rust python curl glib2-devel gtk4 libadwaita wayland \
@@ -52,10 +52,6 @@ pkg-config --modversion gtk4 libadwaita-1 wayland-client
 The canvas needs a Wayland session and a hardware Vulkan driver with mailbox
 presentation and premultiplied-alpha surfaces. There is no X11, GLES or CPU
 canvas fallback. GTK chooses its own renderer for the controls.
-
-On Omarchy the native libraries are in the base install; add Rust with
-`omarchy install dev-env rust`. The app runs directly in its Wayland session and
-advertises `art.capycanvas.CapyCanvas`, matching its desktop entry and icon.
 
 ## Build and run
 
@@ -486,7 +482,7 @@ gives it the application ID `art.capycanvas.CapyCanvas` and the `capycanvas`
 folders; every other build runs as `art.capycanvas.CapyCanvas.Devel` with
 `capycanvas-devel` folders, so it never shares a running instance or files with
 an installed package ([storage](../internals/storage.md)). It also builds a
-pinned GTK 4.22.4 with the
+pinned GTK 4.24.1 with the
 [tablet patches](../../tools/build/gtk-runtime/README.md), cached in
 `target/gtk-runtime` (`CAPY_GTK_BUILD_DIR` overrides it). The `bin/capycanvas`
 executable finds the bundled `libgtk-4.so.1` through its embedded library path.

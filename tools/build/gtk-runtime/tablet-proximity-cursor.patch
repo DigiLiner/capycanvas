@@ -38,7 +38,7 @@
          case GDK_PROXIMITY_IN:
            event = gdk_proximity_event_new (GDK_PROXIMITY_IN,
                                             tablet->pointer_info.focus,
-@@ -2859,15 +2871,12 @@
+@@ -2859,14 +2871,11 @@
                                                event);
          }
  
@@ -49,8 +49,7 @@
 -      else if (tablet_event->event_type == GDK_PROXIMITY_OUT)
 +      if (tablet_event->event_type == GDK_PROXIMITY_OUT)
          {
-           g_object_unref (tablet->pointer_info.focus);
-           tablet->pointer_info.focus = NULL;
+           g_clear_object (&tablet->pointer_info.focus);
            tablet->pointer_info.has_cursor_surface = FALSE;
 +          tablet->proximity_enter_pending = FALSE;
  

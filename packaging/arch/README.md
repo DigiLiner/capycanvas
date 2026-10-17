@@ -1,66 +1,41 @@
 # Arch Linux packaging
 
-`capycanvas-git/PKGBUILD` builds the current upstream revision for Arch Linux
-and Omarchy. It stages the same desktop entry, MIME registration, icon, filters,
-license material and pinned GTK runtime as the native Linux package. Photo
-codecs are compiled into the shared Rust core.
+[Linux development](../../docs/development/linux.md)
 
-Shared Rust photo codecs need no native codec archives. The local GTK runtime
-builds its own statically linked TIFF and JPEG libraries from checksum-pinned
-sources; their archives, build overlays and licenses ship with the package.
-`shaderc` supplies GTK's shader compiler and `sassc` compiles its stylesheets;
-`curl` fetches the pinned GTK archive; `cargo-about` collects original Rust
-dependency notices. GLib tools, DRM/Vulkan headers and Wayland protocols are explicit GTK
-build dependencies. GTK runtime sources and missing license notices use the pinned checksums
-and revisions from the shared packaging tools.
+`capycanvas-git/` contains the AUR recipe and `.SRCINFO`. It builds upstream Git
+with desktop integration, runtime filters, original license notices and a private
+patched GTK library. GTK 4.24+, a Wayland session and a hardware Vulkan driver
+are required.
 
-For development on Arch or Omarchy, install the toolkit and build prerequisites
-listed in the [Linux guide](../../docs/development/linux.md#prerequisites).
+The recipe downloads checksum-pinned GTK and codec sources through makepkg.
+`prepare()` fetches Rust dependencies and original license notices; compilation
+and checks run offline. Filters install under `/usr/share/capycanvas/filters`.
+The native packager strips application debug data; makepkg preserves the bundled
+GTK library so its installed checksum manifest remains valid.
+makepkg's LTO is disabled because bundled SQLite's GCC objects cannot link with
+Rust's LLVM linker.
 
-Rust copyright notices are collected from either rustup's sysroot or Arch's
-system `rust` package. The native packager removes application debug data; additional
-`makepkg` stripping is disabled so the bundled GTK library still matches its
-shipped checksum manifest.
+## Build and install
 
-Validate the package from a clean copy of this directory:
+From `packaging/arch/capycanvas-git`:
 
 ```bash
-makepkg --syncdeps --cleanbuild --clean --noconfirm
-namcap capycanvas-git-*.pkg.tar.zst
+makepkg --syncdeps --install
 ```
 
-## VM qualification (2026-09-20 UTC)
+For source development, use the [Linux prerequisites](../../docs/development/linux.md#prerequisites)
+and launcher instead.
 
-The recipe was built and installed in the official Arch Linux
-`Arch-Linux-x86_64-cloudimg-20260915.594445.qcow2` image, fully updated with
-`pacman -Syu`, under QEMU 10.2.2/KVM (24 vCPUs, 48 GiB RAM). The guest used
-Linux 7.2.6, Rust 1.98.1, GTK 4.22.5, libadwaita 1.9.4, Hyprland 0.56.2 and
-Mesa/Venus 26.2.3. Sources were upstream `a23c627a` plus the packaging and
-test-fixture fixes in this change.
+## Validate and submit
 
-- `makepkg` passed all 493 shared UI and 22 Linux tests. The Linux suite's 184
-  opt-in integration tests remained ignored by the recipe.
-- `pacman -U` installed successfully; `pacman -Qkk` reported 46 files and zero
-  altered files. Desktop-entry validation and every bundled GTK manifest hash
-  passed. `namcap` reported warnings about retained symbols and implicitly
-  satisfied GTK dependencies, but no errors.
-- The installed desktop entry launched `/usr/bin/capycanvas-bin` on hardware
-  Vulkan through Venus, with mailbox presentation and managed Display P3.
-  Wayland virtual-pointer input drew a house, tree and sun. The saved `.capy`
-  picture rendered identically across repeated launches and its tiles were also
-  independently decoded. An additional stroke rendered correctly; undo restored
-  the original canvas exactly, and redo differed by at most 2/255 per display
-  channel after restoring the 8-bit backing.
-
-The NVIDIA-backed Venus setup required synchronous driver operations for reliable
-rendering across launches. Start the **guest compositor** with this environment
-when reproducing this VM test:
+Build a clean package with Arch's `devtools`, then inspect it with `namcap`:
 
 ```bash
-VN_PERF=no_async_set_alloc,no_async_buffer_create,no_async_queue_submit,no_async_mem_alloc,no_async_image_create,no_async_image_format,no_async_present,no_second_queue Hyprland
+extra-x86_64-build
+namcap PKGBUILD capycanvas-git-*.pkg.tar.zst
+makepkg --printsrcinfo > .SRCINFO
 ```
 
-Default asynchronous Venus operation produced intermittent black or partial
-frames. These are VM test settings, not package defaults or application renderer
-changes. This qualifies installation and basic drawing on Arch/Hyprland; it is
-not a full Omarchy installation or a performance/tablet/HDR qualification.
+Check installation, launch and removal in an isolated Arch environment. Submit
+`PKGBUILD` and the matching `.SRCINFO` to the `capycanvas-git` AUR repository;
+package archives and local build files stay out of that repository.

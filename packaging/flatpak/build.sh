@@ -11,12 +11,12 @@ mkdir -p "$state"
 touch "$state/.capy-flatpak-build"
 export FLATPAK_USER_DIR=${FLATPAK_USER_DIR:-$state/installation}
 flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-flatpak install --user --noninteractive flathub org.gnome.Sdk//50 org.gnome.Platform//50 org.freedesktop.Sdk.Extension.node24//25.08
+flatpak install --user --noninteractive flathub org.gnome.Sdk//51 org.gnome.Platform//51 org.freedesktop.Sdk.Extension.node24//26.08
 rm -rf "$state/app" "$state/source"
 mkdir "$state/source"
 git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$state/source"
 flatpak build-init --sdk-extension=org.freedesktop.Sdk.Extension.node24 \
-    "$state/app" art.capycanvas.CapyCanvas org.gnome.Sdk org.gnome.Platform 50
+    "$state/app" art.capycanvas.CapyCanvas org.gnome.Sdk org.gnome.Platform 51
 rust_version=${RUST_VERSION:-$(sed -n 's/^  RUST_VERSION: "\(.*\)"$/\1/p' .github/workflows/release.yml)}
 flatpak build --share=network --filesystem="$state" \
     --bind-mount="/run/build/capycanvas=$state/source" --build-dir=/run/build/capycanvas \
