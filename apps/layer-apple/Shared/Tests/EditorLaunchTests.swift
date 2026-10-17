@@ -364,3 +364,9 @@ final class EditorLaunchTests: XCTestCase {
         return app
     }
 }
+
+
+extension EditorLaunchTests {
+    @MainActor func testPreservedPackageCopyOriginal() async throws { try await checkPreservedPackageCopyOriginal(in: editorCaptureApplication(), theme: "light") }
+    @MainActor func testPreservedPackageCopyOriginalDark() async throws { try await checkPreservedPackageCopyOriginal(in: editorCaptureApplication(), theme: "dark") }
+}

@@ -665,3 +665,118 @@ extension XCTestCase {
         #endif
     }
 }
+
+
+extension XCTestCase {
+    @MainActor func checkPreservedPackageCopyOriginal(in app: XCUIApplication, theme: String) async throws {
+        let token = try XCTUnwrap(ProcessInfo.processInfo.environment["CAPY_FILE_TEST_TOKEN"])
+        guard UUID(uuidString: token) != nil else { XCTFail("A private fixture UUID is required"); return }
+        let folder = "Capy Files " + token
+        #if os(macOS)
+        let directory = try XCTUnwrap(ProcessInfo.processInfo.environment["CAPY_UI_PACKAGE_DIRECTORY"])
+        let root = URL(fileURLWithPath: directory, isDirectory: true)
+        guard directory.hasPrefix("/"), root.lastPathComponent == folder else { XCTFail("Private fixture directory mismatch"); return }
+        #else
+        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(folder, isDirectory: true)
+        let provider = try XCTUnwrap(ProcessInfo.processInfo.environment["CAPY_UI_PACKAGE_PROVIDER"])
+        guard provider.hasPrefix("Capy Test Files ") else { XCTFail("Private runner provider mismatch"); return }
+        #endif
+        let source = root.appendingPathComponent("Unsupported.capy"), destination = root.appendingPathComponent("Copy.capy")
+        func bytes(_ url: URL) async throws -> Data {
+            try await Task.detached(priority: .utility) {
+                let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+                guard values.isRegularFile == true, values.isSymbolicLink != true,
+                    let count = values.fileSize, (1...65536).contains(count) else { throw CocoaError(.fileReadCorruptFile) }
+                return try Data(contentsOf: url)
+            }.value
+        }
+        let existing = try await Task.detached(priority: .utility) {
+            try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
+        }.value
+        guard existing == [source.lastPathComponent] else { XCTFail("The private fixture folder must contain only its input"); return }
+        let original = try await bytes(source)
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
+        app.launch()
+        let paint = app.buttons["workspace-switch-builtin:workspace:illustrator"]
+        XCTAssertTrue(paint.waitForExistence(timeout: 30))
+        if !paint.isSelected { workspaceActivate(paint) }
+        let canvas = app.descendants(matching: .any)["canvas"].firstMatch
+        let startup = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "Canvas ready"), object: canvas)
+        await fulfillment(of: [startup], timeout: 30)
+        let title = editorDocumentTitle(in: app)
+        let originalTitle = title.value as? String ?? title.label
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
+        let originalRows = rows.allElementsBoundByIndex.map(\.identifier).sorted()
+        let paper = editorPixels(in: app)
+        editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")
+        editorMenu(in: app, menu: "Edit", id: "fill_selection", label: "Fill selection")
+        let fill = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let pixels = self.editorPixels(in: app); return Int(pixels[2]) > Int(pixels[0]) + 50
+        }, object: app)
+        await fulfillment(of: [fill], timeout: 15)
+        let painted = editorPixels(in: app)
+        #if os(iOS)
+        func folderTitle(_ value: String) -> XCUIElement {
+            app.otherElements["DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: " + value]
+        }
+        func enterRunnerFolder() {
+            let local = app.cells["DOC.sidebar.item.On My iPad"]
+            XCTAssertTrue(local.waitForExistence(timeout: 15)); workspaceActivate(local)
+            XCTAssertTrue(folderTitle("On My iPad").waitForExistence(timeout: 10))
+            workspaceActivate(app.cells[provider + ", Folder"])
+            XCTAssertTrue(folderTitle(provider).waitForExistence(timeout: 10))
+            workspaceActivate(app.cells[folder + ", Folder"])
+            XCTAssertTrue(folderTitle(folder).waitForExistence(timeout: 10))
+        }
+        #endif
+        editorMenu(in: app, menu: "File", id: "open_document", label: "Open…")
+        #if os(macOS)
+        let open = app.windows.buttons["OKButton"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout: 15)); goToFolder(source, in: app); workspaceActivate(open)
+        XCTAssertTrue(open.waitForNonExistence(timeout: 20))
+        #else
+        enterRunnerFolder()
+        let input = app.cells.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Unsupported.capy,")).firstMatch.images.firstMatch
+        XCTAssertTrue(input.waitForExistence(timeout: 10)); workspaceActivate(input)
+        #endif
+        let preview = app.descendants(matching: .any)["preserved-package-preview"].firstMatch
+        let copy = app.buttons["copy-original-package"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 30)); XCTAssertTrue(copy.isEnabled)
+        XCTAssertTrue(preview.exists)
+        XCTAssertTrue(app.staticTexts["This drawing can be viewed, but cannot be edited."].exists)
+        XCTAssertTrue(app.staticTexts["Pass through requires a stack"].exists)
+        XCTAssertFalse(app.buttons["export-package-preview"].exists)
+        XCTAssertFalse(canvas.isHittable, "The preserved package must not expose editable canvas input")
+        app.typeKey("z", modifierFlags: .command)
+        XCTAssertTrue(copy.exists)
+        attachEditor(in: app, name: "preserved-unsupported-read-only-" + theme)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "preserved-package-hierarchy-" + theme; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        workspaceActivate(copy)
+        #if os(macOS)
+        let save = app.windows.buttons["OKButton"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 15)); goToFolder(root, in: app)
+        let name = app.textFields["saveAsNameTextField"]
+        workspaceActivate(name); name.typeKey("a", modifierFlags: .command); name.typeText(destination.lastPathComponent)
+        workspaceActivate(save); XCTAssertTrue(save.waitForNonExistence(timeout: 20))
+        #else
+        let name = app.textFields["DOCPicker.filenameTextField"]
+        XCTAssertTrue(name.waitForExistence(timeout: 20)); enterRunnerFolder()
+        workspaceActivate(name); name.typeKey("a", modifierFlags: .command); name.typeText("Copy")
+        let save = app.navigationBars.buttons["Save"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); workspaceActivate(save)
+        XCTAssertTrue(save.waitForNonExistence(timeout: 20))
+        #endif
+        XCTAssertTrue(copy.waitForNonExistence(timeout: 20))
+        let copied = try await bytes(destination), retained = try await bytes(source)
+        XCTAssertEqual(copied, original, "Copy Original must retain every package byte")
+        XCTAssertEqual(retained, original, "Copy Original must preserve its input")
+        XCTAssertEqual(title.value as? String ?? title.label, originalTitle)
+        XCTAssertEqual(rows.allElementsBoundByIndex.map(\.identifier).sorted(), originalRows)
+        expectPixels(painted, in: app)
+        editorHistory("Undo", in: app); expectPixels(paper, in: app)
+        editorHistory("Redo", in: app); expectPixels(painted, in: app)
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists); XCTAssertFalse(app.alerts.firstMatch.exists)
+        attachEditor(in: app, name: "copied-original-retains-editor-and-history-" + theme)
+    }
+}

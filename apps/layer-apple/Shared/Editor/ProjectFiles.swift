@@ -739,7 +739,9 @@ import UIKit
             error = "The drawing window is unavailable."
             return
         }
-        panel.beginSheetModal(for: presentationWindow, completionHandler: completion)
+        var presenter = presentationWindow
+        while let sheet = presenter.attachedSheet { presenter = sheet }
+        panel.beginSheetModal(for: presenter, completionHandler: completion)
     }
     #endif
     func picked(_ urls: [URL]) {
@@ -756,6 +758,7 @@ struct ProjectFilesModifier: ViewModifier {
     @Environment(\.capyCommonCopy) private var common
     func body(content: Content) -> some View {
         content.allowsHitTesting(!files.blocksEditor)
+            .accessibilityHidden(files.blocksEditor)
             .alert(files.error == nil ? "Save changes to “\(files.title)” before continuing?" : "Document",
                 isPresented: Binding(get: { files.confirming || files.error != nil }, set: { if !$0 { files.dismissAlert() } })) {
                 if files.error != nil { Button("OK", role: .cancel) { files.error = nil } }
@@ -784,7 +787,8 @@ struct ProjectFilesModifier: ViewModifier {
                                 .accessibilityIdentifier("copy-original-package")
                         }
                     }.padding(24).frame(minWidth: 320, idealWidth: 560)
-                        .accessibilityIdentifier("preserved-package-preview")
+                        .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("preserved-package-preview")
                         .interactiveDismissDisabled(files.packageCopying).modifier(EditorPopupPresentation())
                 }
             }

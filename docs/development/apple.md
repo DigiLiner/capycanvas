@@ -209,7 +209,11 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   and main-menu insertion, retaining an unattached help menu alongside the empty
   Help command group. iPad menus use the same command catalog in-app; native
   iPadOS window controls provide full screen, so the shared Fullscreen command is
-  unavailable.
+  unavailable. Present a Mac file panel from the topmost attached sheet of its
+  drawing window. A second sheet attached to the base window waits for the first
+  to close, so a preview that remains open during delivery must own its Save panel.
+  Blocked editor content must also be hidden from accessibility while the
+  presented controls retain their own identifiers.
 - **Independent publications.** Handle small `layer-host` packets such as
   `{command_search, revision}` in `EditorSnapshotState.receive` without promoting
   the content revision or refreshing retained panels and thumbnails.
@@ -415,6 +419,18 @@ The UIKit fixtures `canvas-modifiers.swift`, `canvas-hover.swift` and
 and `iOS/` sources; they have no runner script.
 
 ### UI tests
+
+`testPreservedPackageCopyOriginal` and its dark variant open the preserved-package
+sheet, use the native Save panel and compare every copied and retained input byte.
+They also check the original drawing, layer list, title and exact Undo/Redo pixels.
+Copy `crates/layer-core/src/package/codec/fixtures/unsupported-pass-through.capy`
+to `Unsupported.capy` in a fresh `Capy Files <UUID>` folder containing only that
+file. Set the test target's `.xctestrun` `EnvironmentVariables` entry
+`CAPY_FILE_TEST_TOKEN` to that UUID. On Mac, set `CAPY_UI_PACKAGE_DIRECTORY` to
+the folder's absolute path. On iPad, put the folder in the private test runner's
+Documents directory, enable that runner's file sharing, name its provider
+`Capy Test Files <UUID>` and set `CAPY_UI_PACKAGE_PROVIDER` to that display name.
+
 
 Shared journeys are `check…` functions in `Shared/Tests`, called by `test…`
 methods in `Shared/Tests/EditorLaunchTests.swift`, compiled by both UI targets.
