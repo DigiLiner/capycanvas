@@ -35,8 +35,9 @@ unchanged; a Small toolbar still wraps on a very short edge. `TileLayout`
 publishes the presented `tile_style`, icon size, radius and label metrics with
 the tile bounds. Hosts draw docked, expanded and drawer toolbars from that
 geometry, so resizing, rotation and divider drags restyle tiles during
-layout-only updates. GTK rebuilds an affected strip once, on idle after the
-allocation that crossed a threshold.
+layout-only updates. GTK rebuilds an affected strip once, inside the
+allocation that crossed a threshold, so the first frame at the new size already
+shows the new tiles.
 
 Sketch's default places size and opacity in the centered left region.
 Dragging the handle to the centered right target moves the same toolbar there.

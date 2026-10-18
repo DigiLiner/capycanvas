@@ -1550,8 +1550,37 @@ fn native_compact_toolbar_presentation_input() {
         (960, 600, TileStyle::Small),
         (1400, 950, TileStyle::Medium),
     ] {
+        let frames = Rc::new(RefCell::new(Vec::new()));
+        let clock = d.w.surface.frame_clock().unwrap();
+        let painted = clock.connect_after_paint(glib::clone!(
+            #[strong]
+            frames,
+            #[weak(rename_to = w)]
+            d.w,
+            move |_| {
+                let resolved = w.resolved();
+                let group = resolved.groups.iter().find(|g| g.active == panel);
+                let button = find_named(w.window.upcast_ref(), &format!("tile-{undo}"));
+                frames.borrow_mut().push((
+                    group.and_then(|g| g.tiles.as_ref()).map(|t| t.presentation.tile_style),
+                    button.as_ref().and_then(|b| b.parent()).map(|p| p.width()),
+                    button.as_ref().and_then(descendant::<gtk::Image>).map(|i| i.pixel_size()),
+                ));
+            }
+        ));
         d.w.window.set_default_size(width, height);
         pump(600);
+        clock.disconnect(painted);
+        let late: Vec<_> = frames
+            .borrow()
+            .iter()
+            .filter(|(resolved, width, icon)| {
+                *resolved == Some(style)
+                    && (*width != Some(style.size()[0] as i32) || *icon != Some(style.icon_size() as i32))
+            })
+            .cloned()
+            .collect();
+        assert!(late.is_empty(), "{width}x{height}: frames painted before the tiles took {style:?}: {late:?}");
         let resolved = d.w.resolved();
         let group = resolved.groups.iter().find(|g| g.active == panel).unwrap();
         assert_eq!(group.tiles.as_ref().unwrap().presentation.tile_style, style);

@@ -187,10 +187,11 @@ mod allocation {
             }
         }
         fn size_allocate(&self, width: i32, height: i32, _: i32) {
-            if let Some(owner) = self.owner.borrow().upgrade()
-                && owner.measure_on_allocate.replace(false)
-            {
-                owner.settle_measurements([width as f32, height as f32]);
+            if let Some(owner) = self.owner.borrow().upgrade() {
+                if owner.measure_on_allocate.replace(false) {
+                    owner.settle_measurements([width as f32, height as f32]);
+                }
+                owner.present_toolbars();
             }
             let mut resolved = self.layout.borrow().workspace(
                 width as f32,
@@ -329,7 +330,6 @@ mod allocation {
                     }
                 }
                 owner.queue_panel_measurements();
-                owner.queue_toolbar_presentation(&resolved);
                 owner.present_popovers();
                 let scale = owner.area.scale_factor() as u32;
                 let extent = [
@@ -880,7 +880,6 @@ pub struct Workspace {
     workspace_drag: RefCell<Option<NativeWorkspaceDrag>>,
     publication: workspace_update::Publication,
     measuring_panels: Cell<bool>,
-    presenting_toolbars: Cell<bool>,
     drop_hint: RefCell<Option<DropHint>>,
     toolbar: TileStrip,
     panels: Vec<(Panel, gtk::Widget)>,
@@ -1223,7 +1222,6 @@ impl Workspace {
             publication: workspace_update::Publication::default(),
             drop_hint: RefCell::new(None),
             measuring_panels: Cell::new(false),
-            presenting_toolbars: Cell::new(false),
             toolbar: toolbar.clone(),
             groups: RefCell::new(Vec::new()),
             panels: vec![
@@ -3071,31 +3069,17 @@ impl Workspace {
             })
             .collect()
     }
-    fn queue_toolbar_presentation(self: &Rc<Self>, resolved: &ResolvedLayout) {
-        if !self.customization.presentation_stale(resolved)
-            || self.presenting_toolbars.replace(true)
-        {
+    fn present_toolbars(self: &Rc<Self>) {
+        if !self.customization.presentation_stale(&self.resolved()) {
             return;
         }
-        glib::idle_add_local_once(glib::clone!(
-            #[weak(rename_to = w)]
-            self,
-            move || {
-                w.presenting_toolbars.set(false);
-                let Some(layout) = w
-                    .gpu
-                    .borrow()
-                    .as_ref()
-                    .map(|g| g.session.state().workspace.layout.clone())
-                else {
-                    return;
-                };
-                w.refreshing.set(true);
-                w.reconcile_layout(&layout);
-                w.customization.refresh(&w);
-                w.refreshing.set(false);
-            }
-        ));
+        let Some(layout) = self.gpu.borrow().as_ref().map(|g| g.session.state().workspace.layout.clone()) else {
+            return;
+        };
+        self.refreshing.set(true);
+        self.reconcile_layout(&layout);
+        self.customization.refresh(self);
+        self.refreshing.set(false);
     }
     fn reconcile_layout(self: &Rc<Self>, layout: &DockLayout) {
         let size = layout.header.size;
