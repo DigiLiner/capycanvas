@@ -12,7 +12,7 @@ fn draw_line(s: &mut UiSession<Recorder>, first: u64, samples: u64) {
         let mut e = event(s, first + i, phase, 0.3 + 0.6 * (i as f32 / samples as f32 * 3.1).sin());
         e.surface_position.y += (i as f32 * 0.15).sin() * 60.;
         e.surface_position.x = 150. + i as f32 * 6.;
-        s.pen(e).unwrap();
+        s.pen(e);
         s.frame((first + i) * 10_000_000, (first + i) * 10_000_000).unwrap();
     }
 }
@@ -73,7 +73,7 @@ fn late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step() {
         e
     }).collect();
     for (i, e) in events.iter().enumerate() {
-        s.pen(*e).unwrap();
+        s.pen(*e);
         s.frame((i as u64 + 1) * 10_000_000, (i as u64 + 1) * 10_000_000).unwrap();
     }
     let widest = |s: &UiSession<Recorder>| {
@@ -84,7 +84,7 @@ fn late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step() {
     };
     let before = widest(&s);
     for (i, e) in events.iter().enumerate() {
-        s.pen(PenEvent { pressure: 0.9, flags: SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::CORRECTION.0), ..*e }).unwrap();
+        s.pen(PenEvent { pressure: 0.9, flags: SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::CORRECTION.0), ..*e });
         s.frame((50 + i as u64) * 10_000_000, (50 + i as u64) * 10_000_000).unwrap();
     }
     assert!(widest(&s) > before * 2., "{} vs {before}", widest(&s));
@@ -103,7 +103,7 @@ fn press(s: &mut UiSession<Recorder>, first: u64, points: &[Point]) {
         let phase = if i == 0 { PenPhase::Down } else if i + 1 == points.len() { PenPhase::Up } else { PenPhase::Move };
         let mut e = event(s, first + i as u64, phase, 0.5);
         e.surface_position = *point;
-        s.pen(e).unwrap();
+        s.pen(e);
         s.frame((first + i as u64) * 10_000_000, (first + i as u64) * 10_000_000).unwrap();
     }
 }
@@ -527,7 +527,7 @@ fn crowded_vector_layer_session_costs() {
                 e.surface_position.x = 150. + i as f32 * 6.;
                 e.surface_position.y = 100. + line as f32 * 20.;
                 let start = std::time::Instant::now();
-                s.pen(e).unwrap();
+                s.pen(e);
                 s.frame((first + i) * 10_000_000, (first + i) * 10_000_000).unwrap();
                 if phase == PenPhase::Up { commits.push(start.elapsed().as_secs_f64() * 1e3); }
             }
