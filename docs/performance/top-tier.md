@@ -3056,6 +3056,24 @@ frames and renderer submissions; a shared geometry poll is not a native frame.
 Synthetic documents and renderer-only rates do not qualify the reference tier
 or physical input latency.
 
+On 2026-10-18, a Release offscreen comparison on the M2 Pro Mac mini checked
+the partial-opacity material correction against the previous contact-feature
+gate. Both variants use the `cc6d1ab48` shared source, the same monotonic replay
+clock and seed settlement, a 9504 × 6336 photo, 1600 × 1000 offscreen target,
+1000 px brushes, opacity 0.4, and eight samples per update. Four setup runs and
+three measured runs per variant and brush retain all input, artwork and exact
+Undo/Redo assertions. Measured motion lasts 6.087–7.012 seconds per run.
+
+| Brush | Median completed updates/s, before → after | Median per-run completion p99, before → after |
+| --- | --- | --- |
+| G-Pen | 174.37 → 195.30 | 8.236 → 8.008 ms |
+| Eraser | 169.26 → 184.12 | 9.920 → 9.566 ms |
+
+These are queue-completed offscreen updates, without native input or display
+presentation. They establish no native frame rate or tier qualification.
+Source, binaries, raw CSVs and the retained earlier failed runs are under
+`artifacts/apple/port-oct13-regenerated/source-audit/partial-opacity-specialized-kernel-correction/M2Pro-proxy-preparation/monotonic-phase-clock-preparation/`.
+
 The stamp-preview check on 2026-10-17 used an optimized build, a 9504 × 6336
 sRGB 8-bit photo and a 1200 × 870 logical viewport at 2× scale. Recognizing wrapped
 brush settings as metadata removes their wait behind unrelated raster backing.

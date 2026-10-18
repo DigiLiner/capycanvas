@@ -40,6 +40,26 @@ fn roots(engine: &Engine) -> Result<BTreeMap<SourceTarget, Vec<u8>>> {
     }).collect()
 }
 
+fn settle(engine: &mut Engine) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        engine.backend_mut().wait_idle()?;
+        if engine.has_pending_document_edits() || engine.has_pending_input() {
+            engine.render_frame()?;
+        }
+        if engine.backend().raster_ready()
+            && !engine.has_pending_document_edits()
+            && !engine.has_pending_input()
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err("Raster backing deadline exceeded".into());
+        }
+        std::thread::yield_now();
+    }
+}
+
 fn main() -> Result<()> {
     replay(std::env::args().skip(1))
 }
@@ -109,6 +129,7 @@ pub fn replay(mut args: impl Iterator<Item = String>) -> Result<()> {
     let mut csv = BufWriter::new(std::fs::File::create(&output)?);
     writeln!(csv, "phase,frame,cpu_ms,completed_ms,prepare_ms,paint_ms,capture_ms,prediction_ms,composition_ms,submission_ms,dabs,composited_pixels,source_misses,display_batches,display_bytes")?;
     let mut sequence = 0;
+    let mut elapsed_samples = 0;
     for phase in if preset == DefaultBrushPreset::Eraser { vec!["seed", "circles", "zoom"] } else { vec!["circles", "zoom"] } {
         if phase == "seed" {
             let mut seed = default_brush(DefaultBrushPreset::GPen);
@@ -119,7 +140,7 @@ pub fn replay(mut args: impl Iterator<Item = String>) -> Result<()> {
         for frame in 0..if phase == "zoom" { 360 } else { frames } {
             frame_pool(|| -> Result<()> {
             let before = engine.backend().metrics();
-            let now = 1_000_000_000 + (frame + 1) * samples * 4_166_667;
+            let now = 1_000_000_000 + (elapsed_samples + samples) * 4_166_667;
             let start = Instant::now();
             if phase != "zoom" {
                 for j in 0..samples {
@@ -132,7 +153,7 @@ pub fn replay(mut args: impl Iterator<Item = String>) -> Result<()> {
                     } else { [angle.cos(), angle.sin()] };
                     sequence += 1;
                     input.push(PenEvent { device_id: 1, sequence,
-                        timestamp_ns: 1_000_000_000 + index * 4_166_667, view_revision: 0,
+                        timestamp_ns: 1_000_000_000 + (elapsed_samples + j) * 4_166_667, view_revision: 0,
                         surface_position: Point { x: SIZE[0] as f32 * 0.5 + path_radius[0]*position[0],
                             y: SIZE[1] as f32 * 0.5 + path_radius[1]*position[1] },
                         pressure: 1., tilt_radians: [0.; 2], twist_radians: 0., distance: 0.,
@@ -165,8 +186,12 @@ pub fn replay(mut args: impl Iterator<Item = String>) -> Result<()> {
                 after.composite_storage_bytes)?;
             Ok(())
             })?;
+            elapsed_samples += samples;
         }
-        if phase == "seed" { original = roots(&engine)?; }
+        if phase == "seed" {
+            settle(&mut engine)?;
+            original = roots(&engine)?;
+        }
         csv.flush()?;
         println!("Completed {phase}");
     }

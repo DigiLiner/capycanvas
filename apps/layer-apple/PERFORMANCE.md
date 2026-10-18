@@ -223,6 +223,12 @@ The arguments are samples per update, cache allowance in MiB, updates, brush
 diameter, path and preset. On the iPad the same public `replay` function must be
 called from a small wrapper app through a C ABI; no wrapper is checked in.
 
+Replay timestamps share one sample clock across seed, contact and zoom phases.
+The Eraser seed settles its pending pen-up and raster backing before its
+authored roots become the Undo baseline. Seed settlement is outside the timed
+frames; the replay retains its input-drain, changed-artwork and exact Undo/Redo
+checks.
+
 ## Rejected scheduling changes
 
 These were measured on both devices and made presentation worse or no better.
