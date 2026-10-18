@@ -533,6 +533,7 @@ fn shape(widget: &gtk::Widget, radius: f32) -> serde_json::Value {
 fn capture_panel(w: &Rc<Workspace>, output: &std::path::Path, panel_id: Panel, context: &str, theme: Theme, width: i32, reports: &mut Vec<serde_json::Value>) {
     pump(150);
     let panel = w.panel_widget(panel_id);
+    until(|| !widgets(&panel).any(|page| page.downcast_ref::<gtk::Stack>().is_some_and(gtk::Stack::is_transition_running)), &format!("{context}: panel pages settle"));
     capture_reference(w, output.join(format!("panel-{context}-{theme:?}-{width}.png")).to_str().unwrap(), 1.);
     assert_eq!(panel.width()+panel.margin_start()+panel.margin_end(), width, "{context}: requested panel width is preserved");
     assert!(panel.measure(gtk::Orientation::Horizontal, -1).0 <= panel.width(), "{context}: minimum content fits narrow panel");
