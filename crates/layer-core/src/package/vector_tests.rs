@@ -234,6 +234,27 @@ fn open(bytes: Vec<u8>) -> crate::Artwork {
 fn vector(artwork: &crate::Artwork) -> &VectorObject { artwork.vectors.iter().next().unwrap().2 }
 
 #[test]
+fn vector_edits_reject_identities_and_markers_that_break_the_object() {
+    let (mut editor, layer) = document_with_paths(300);
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    assert!(object.chunks().len() > 3);
+    let far = object.find(ItemId(290)).unwrap();
+    assert!(far.chunk > 0);
+    let rejected = |editor: &mut crate::Editor, next: VectorObject| {
+        let edit = editor.document().vector_object_edit(layer, next).unwrap();
+        assert!(editor.perform(edit).is_err());
+    };
+    rejected(&mut editor, object.insert_front(vec![line(290, &[[0., 0.], [1., 1.]], 1.)]));
+    rejected(&mut editor, object.replace([(object.find(ItemId(2)).unwrap(), Some(line(290, &[[0., 0.], [1., 1.]], 1.)))]));
+    rejected(&mut editor, object.insert_front(vec![Record::End]));
+    let id = object.allocate_id();
+    assert!(!object.contains(id) && object.contains(ItemId(290)));
+    let drawn = object.insert_front(vec![line(id.0, &[[0., 0.], [1., 1.]], 1.)]);
+    editor.perform(editor.document().vector_object_edit(layer, drawn).unwrap()).unwrap();
+    assert_eq!(editor.document().scene().vector_layer(layer).unwrap().find(id), Some(Position { chunk: 0, index: 0 }));
+}
+
+#[test]
 fn vector_layers_round_trip_through_packages_and_keep_unchanged_chunks() {
     let (mut editor, layer) = document_with_paths(300);
     let original = editor.document().artwork.clone();
@@ -298,4 +319,28 @@ fn vector_history_survives_sessions_and_worker_transfer() {
     assert_eq!(vector(&adopted.editor.document().artwork), vector(&first));
     adopted.editor.redo().unwrap();
     assert_eq!(vector(&adopted.editor.document().artwork), vector(&drawn));
+}
+
+#[test]
+fn session_history_shares_unchanged_runs_of_vector_chunk_lists() {
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let (mut editor, layer) = document_with_paths(128 * CHUNK_RECORDS as u64);
+    let first = editor.document().artwork.clone();
+    let strokes = 40;
+    for i in 0..strokes {
+        let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![line(100_000 + i, &[[0., 0.], [50., i as f64]], 4.)]);
+        editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
+    }
+    let chunks = vector(&editor.document().artwork).chunks().len();
+    let capture = editor.capture_session(editor.capture(1, Default::default()).unwrap()).unwrap();
+    let session = super::session::PreparedSession::prepare(&capture, serde_json::json!({}), &cancel).unwrap();
+    let metadata: serde_json::Value = serde_json::from_slice(session.metadata()).unwrap();
+    let listed: usize = metadata["index_chunks"].as_array().unwrap().iter().map(|chunk| chunk.as_array().unwrap().len()).sum();
+    assert!(listed < (strokes as usize + 1) * chunks / 4, "{listed} chunk references for {chunks} chunks");
+    let mut pack = Vec::new();
+    std::io::Read::read_to_end(&mut session.resources().reader(&cancel), &mut pack).unwrap();
+    let mut loaded = super::session::open_parts(session.metadata(), super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(pack))).unwrap(), crate::ProjectLimits::default(), &cancel).unwrap();
+    assert_eq!(vector(&loaded.editor.document().artwork), vector(&editor.document().artwork));
+    for _ in 0..strokes { loaded.editor.undo().unwrap(); }
+    assert_eq!(vector(&loaded.editor.document().artwork), vector(&first));
 }

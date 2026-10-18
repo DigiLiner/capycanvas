@@ -149,9 +149,7 @@ fn crowded_vector_layer_drawing_frames() {
             stroke.cap = Cap::Round; stroke.join = Join::Round;
             let path = PathItem::new(ItemId(u64::MAX - 1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])));
             r.set_vector_preview(Some(layer_render::VectorPreview { owner: layer, path: Arc::new(path), revision: i + 1 }));
-            let passes = r.metrics.command_passes;
             frames.push(timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }));
-            if i == 60 { eprintln!("drawing frame passes {}", r.metrics.command_passes - passes); }
             let mut extra = 0;
             while r.has_pending_work() && extra < 50 { r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap(); r.wait_idle().unwrap(); extra += 1; }
             assert!(extra < 50, "drawing frames settle");
@@ -163,11 +161,7 @@ fn crowded_vector_layer_drawing_frames() {
         editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
         let perform = start.elapsed().as_secs_f64() * 1e3;
         r.set_vector_preview(None);
-        let passes = r.metrics.command_passes;
-        if count == 50_000 { unsafe { std::env::set_var("VECTOR_TRACE", "1") }; }
         let commit = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
-        unsafe { std::env::remove_var("VECTOR_TRACE") };
-        eprintln!("commit passes {}", r.metrics.command_passes - passes);
         let start = std::time::Instant::now();
         editor.undo().unwrap();
         let undo_perform = start.elapsed().as_secs_f64() * 1e3;

@@ -95,9 +95,10 @@ Recovery publication is separate from manual-save acknowledgement.
 [`Editor::capture_session`](../../crates/layer-core/src/package/session.rs)
 freezes working state, bounded Undo/Redo and edit/stroke identities alongside the
 artwork capture. Workers encode private complete checkpoint metadata with shared
-record versions and an immutable resource inventory. Sparse raster-index chunks
-and original-image descriptors are shared across changed paint records; small
-strokes do not repeat the complete canvas/photo index per Undo entry.
+record versions and an immutable resource inventory. Raster-tile and vector-chunk
+index groups and original-image descriptors are shared across changed records;
+small strokes and new vector paths do not repeat the complete canvas, photo or
+vector-layer index per Undo entry.
 Ordinary `.capy` saves
 continue to contain authored artwork only. The private reader validates resource
 bytes, working targets, history transitions and budgets before returning an

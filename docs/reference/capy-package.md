@@ -751,8 +751,10 @@ atomic replacement, tab close and renderer loss. The private
 resource identities, encodings and record adapters with complete checkpoint
 metadata. Selection, targets, camera, tab order and bounded history remain
 outside the portable manifest. Historical record versions and payload owners
-are shared across checkpoints. Sparse raster indexes reuse 64-entry metadata
-chunks and immutable image IDs are interned across paint revisions; the
+are shared across checkpoints. Raster `tiles` and vector `items` lists are split
+into metadata groups of at most 64 entries, ending after an entry whose CRC-32
+is divisible by 8, so an insertion changes only nearby groups. Immutable image
+IDs are interned across paint revisions; the
 private wrapper expands back into the ordinary artwork records before validation.
 Manual-save identity stays separate from recovery
 publication. Private sessions preserve all retained ancillary data, including

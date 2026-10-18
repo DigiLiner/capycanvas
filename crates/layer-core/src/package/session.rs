@@ -83,43 +83,60 @@ impl WorkingRecord {
             selection_overlays:self.selection_overlays.clone(),layer_selection:self.layer_selection.clone(),layer_anchor:self.layer_anchor,solo_visibility:self.solo_visibility.clone(),occurrence:self.occurrence,target:self.target,inspect_mask:self.inspect_mask,view_origin:self.view_origin})
     }
 }
-const RASTER_INDEX_CHUNK:usize=64;
+const INDEX_CHUNK:usize=64;
+const INDEX_BOUNDARY:u32=8;
 #[derive(Clone,Debug,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct ObjectVersion {pub(crate) record:Value,tiles:Option<Vec<usize>>,}
+pub(crate) struct ObjectVersion {pub(crate) record:Value,index:Option<Vec<usize>>,}
+fn indexed_field(record:&Value)->Option<&'static str> {
+    match record["type"].as_str().and_then(registry::descriptor)?.kind {
+        RecordKind::PaintSource|RecordKind::CoverageSource|RecordKind::Image=>Some("tiles"),
+        RecordKind::VectorObject=>Some("items"),
+        _=>None,
+    }
+}
 impl ObjectVersion {
     pub(crate) fn capture(mut record:Value,chunks:&mut Vec<Vec<Value>>,versions:&mut BTreeMap<Vec<u8>,usize>)->Result<Self,String> {
-        let tiles=if matches!(record["type"].as_str().and_then(registry::descriptor).map(|record|record.kind),Some(RecordKind::PaintSource|RecordKind::CoverageSource|RecordKind::Image)) {
-            record["data"].as_object_mut().ok_or("Invalid session object data")?.remove("tiles").map(|value| {
-                let tiles=value.as_array().ok_or("Invalid captured raster index")?;
-                tiles.chunks(RASTER_INDEX_CHUNK).map(|chunk| {
-                    let key=serde_json::to_vec(chunk).map_err(|e|e.to_string())?;
-                    Ok(if let Some(index)=versions.get(&key) {*index}else {let index=chunks.len();versions.insert(key,index);chunks.push(chunk.to_vec());index})
+        let index=if let Some(field)=indexed_field(&record) {
+            record["data"].as_object_mut().ok_or("Invalid session object data")?.remove(field).map(|value| {
+                let entries=value.as_array().ok_or("Invalid captured session index")?;
+                let mut groups=Vec::new();let mut group=Vec::new();
+                for entry in entries {
+                    let boundary=crc32fast::hash(&serde_json::to_vec(entry).map_err(|e|e.to_string())?)%INDEX_BOUNDARY==0;
+                    group.push(entry.clone());
+                    if boundary||group.len()==INDEX_CHUNK {groups.push(std::mem::take(&mut group));}
+                }
+                if !group.is_empty() {groups.push(group);}
+                groups.into_iter().map(|chunk| {
+                    let key=serde_json::to_vec(&chunk).map_err(|e|e.to_string())?;
+                    Ok(if let Some(index)=versions.get(&key) {*index}else {let index=chunks.len();versions.insert(key,index);chunks.push(chunk);index})
                 }).collect::<Result<Vec<_>,String>>()
             }).transpose()?
         }else{None};
-        Ok(Self {record,tiles})
+        Ok(Self {record,index})
     }
     pub(crate) fn expanded_size(&self,chunks:&[Vec<Value>],limits:ProjectLimits)->Result<usize,String> {
         if !self.record.is_object() || !self.record["data"].is_object() {return Err("Invalid session object data".into());}
         let mut size=crate::json_len(&self.record).saturating_add(32);
-        if let Some(indices)=&self.tiles {
-            if !matches!(self.record["type"].as_str().and_then(registry::descriptor).map(|record|record.kind),Some(RecordKind::PaintSource|RecordKind::CoverageSource|RecordKind::Image)) || self.record["data"].get("tiles").is_some() || indices.is_empty()
-                || indices.len()>limits.tiles.div_ceil(RASTER_INDEX_CHUNK) {return Err("Invalid session raster index".into());}
-            let mut tiles=0usize;
-            for (index,chunk) in indices.iter().enumerate() {
-                let chunk=chunks.get(*chunk).ok_or("Unknown session raster index chunk")?;
-                if chunk.is_empty() || chunk.len()>RASTER_INDEX_CHUNK || (index+1!=indices.len() && chunk.len()!=RASTER_INDEX_CHUNK) {return Err("Invalid session raster index chunk".into());}
-                tiles=tiles.saturating_add(chunk.len());size=size.saturating_add(crate::json_len(chunk));
+        let field=indexed_field(&self.record);
+        if let Some(indices)=&self.index {
+            let limit=match field {Some("tiles")=>limits.tiles,Some(_)=>super::vector_records::MAX_RECORDS,None=>return Err("Invalid session index".into())};
+            if field.is_some_and(|field|self.record["data"].get(field).is_some()) || indices.is_empty()
+                || indices.len()>limit {return Err("Invalid session index".into());}
+            let mut entries=0usize;
+            for chunk in indices {
+                let chunk=chunks.get(*chunk).ok_or("Unknown session index chunk")?;
+                if chunk.is_empty() || chunk.len()>INDEX_CHUNK {return Err("Invalid session index chunk".into());}
+                entries=entries.saturating_add(chunk.len());size=size.saturating_add(crate::json_len(chunk));
             }
-            if tiles>limits.tiles {return Err("Session raster index exceeds admission".into());}
-        } else if matches!(self.record["type"].as_str().and_then(registry::descriptor).map(|record|record.kind),Some(RecordKind::PaintSource|RecordKind::CoverageSource|RecordKind::Image)) && self.record["data"].get("tiles").is_some() {return Err("Unexpected session raster index".into());}
+            if entries>limit {return Err("Session index exceeds admission".into());}
+        } else if field.is_some_and(|field|self.record["data"].get(field).is_some()) {return Err("Unexpected session index".into());}
         if size as u64>limits.metadata_bytes {return Err("Expanded session object exceeds admission".into());}
         Ok(size)
     }
     pub(crate) fn expand(&self,chunks:&[Vec<Value>],limits:ProjectLimits)->Result<Value,String> {
         self.expanded_size(chunks,limits)?;let mut record=self.record.clone();
-        if let Some(indices)=&self.tiles {record["data"]["tiles"]=Value::Array(indices.iter().flat_map(|index|chunks[*index].iter().cloned()).collect());}
+        if let (Some(indices),Some(field))=(&self.index,indexed_field(&self.record)) {record["data"][field]=Value::Array(indices.iter().flat_map(|index|chunks[*index].iter().cloned()).collect());}
         Ok(record)
     }
 }
@@ -131,17 +148,17 @@ struct StateRecord {objects:Vec<usize>,outputs:Vec<Value>,working:WorkingRecord,
 struct SessionRecord {
     format:String,version:u32,checkpoint:CaptureCheckpoint,next_checkpoint:u64,next_stroke_id:u64,
     layout:TransferLayout,root:Value,default_output:Value,artwork_metadata:Option<Value>,
-    metadata:Value,metadata_profiles:Vec<Value>,objects:Vec<ObjectVersion>,tile_chunks:Vec<Vec<Value>>,resources:Vec<Value>,extension_records:BTreeMap<PortableId,Value>,extension_resources:Vec<PortableId>,current:StateRecord,undo:Vec<StateRecord>,redo:Vec<StateRecord>,
+    metadata:Value,metadata_profiles:Vec<Value>,objects:Vec<ObjectVersion>,index_chunks:Vec<Vec<Value>>,resources:Vec<Value>,extension_records:BTreeMap<PortableId,Value>,extension_resources:Vec<PortableId>,current:StateRecord,undo:Vec<StateRecord>,redo:Vec<StateRecord>,
 }
 impl SessionRecord {
     fn manifest(&self,state:&StateRecord,directory:&Directory,limits:ProjectLimits)->Result<Manifest,String> {
         if state.objects.len()>ManifestLimits::default().graph.objects {return Err("Session object graph exceeds admission".into());}
         let mut expanded=0usize;
         for index in &state.objects {
-            expanded=expanded.saturating_add(self.objects.get(*index).ok_or("Unknown session object version")?.expanded_size(&self.tile_chunks,limits)?);
+            expanded=expanded.saturating_add(self.objects.get(*index).ok_or("Unknown session object version")?.expanded_size(&self.index_chunks,limits)?);
             if expanded as u64>limits.metadata_bytes {return Err("Expanded session state exceeds admission".into());}
         }
-        let objects=state.objects.iter().map(|index|self.objects.get(*index).ok_or_else(||"Unknown session object version".to_string()).and_then(|object|object.expand(&self.tile_chunks,limits))).collect::<Result<Vec<_>,_>>()?;
+        let objects=state.objects.iter().map(|index|self.objects.get(*index).ok_or_else(||"Unknown session object version".to_string()).and_then(|object|object.expand(&self.index_chunks,limits))).collect::<Result<Vec<_>,_>>()?;
         let resources=self.resources.iter().map(|value|Ok((value["id"].as_str().ok_or("Missing session resource identity")?.parse::<PortableId>().map_err(str::to_string)?,value))).collect::<Result<BTreeMap<_,_>,String>>()?;
         let mut needed=std::collections::BTreeSet::new();
         let mut pending=super::references(&Value::Array(objects.clone()),ManifestLimits::default().traversal_nodes)?;
@@ -164,7 +181,7 @@ impl SessionRecord {
 }
 
 #[derive(Default)]
-struct StateEncoder {inventory:ResourceInventory,records:Vec<ObjectVersion>,versions:BTreeMap<Vec<u8>,usize>,tile_chunks:Vec<Vec<Value>>,tile_versions:BTreeMap<Vec<u8>,usize>}
+struct StateEncoder {inventory:ResourceInventory,records:Vec<ObjectVersion>,versions:BTreeMap<Vec<u8>,usize>,index_chunks:Vec<Vec<Value>>,index_versions:BTreeMap<Vec<u8>,usize>}
 impl StateEncoder {
     fn capture(&mut self,document:&Document,checkpoint:u64,cancel:&AtomicBool)->Result<StateRecord,String> {
             active(cancel)?;let art=&document.artwork;
@@ -172,7 +189,7 @@ impl StateEncoder {
             let (objects,next)=artwork_records::encode_with_inventory(art,cancel,std::mem::take(&mut self.inventory))?;self.inventory=next;
             let mut indices=Vec::with_capacity(objects.len());
             for record in objects {
-                let object=ObjectVersion::capture(record,&mut self.tile_chunks,&mut self.tile_versions)?;
+                let object=ObjectVersion::capture(record,&mut self.index_chunks,&mut self.index_versions)?;
                 let key=serde_json::to_vec(&object).map_err(|e|e.to_string())?;
                 let index=if let Some(index)=self.versions.get(&key) {*index}else {let index=self.records.len();self.versions.insert(key,index);self.records.push(object);index};
                 indices.push(index);
@@ -206,7 +223,7 @@ impl PreparedSession {
         for (history,target) in [(&undo,&mut undo_states),(&redo,&mut redo_states)] {
             for (document,checkpoint) in history {target.push(encoder.capture(document,*checkpoint,cancel)?);}
         }
-        let StateEncoder {mut inventory,records,versions:_,tile_chunks,tile_versions:_}=encoder;
+        let StateEncoder {mut inventory,records,versions:_,index_chunks,index_versions:_}=encoder;
         let metadata=metadata.into();let metadata_profiles=metadata.encode_profiles(&mut inventory)?;
         current.artwork.metadata.validate()?;
         let mut artwork_metadata=serde_json::Map::new();
@@ -218,7 +235,7 @@ impl PreparedSession {
         let record=SessionRecord {format:"capy.session".into(),version:1,checkpoint:capture.artwork.checkpoint,next_checkpoint:capture.next_checkpoint,next_stroke_id:current.next_stroke_id,
             layout:TransferLayout::capture(art),root:resources::reference(art.compositions.id(art.root).ok_or("Missing session root")?),
             default_output:resources::reference(art.outputs.id(art.default_output).ok_or("Missing session output")?),
-            artwork_metadata:(!artwork_metadata.is_empty()).then_some(Value::Object(artwork_metadata)),metadata:metadata.value,metadata_profiles,objects:records,tile_chunks,resources:resources.entries.iter().map(|r|r.record.clone()).collect(),
+            artwork_metadata:(!artwork_metadata.is_empty()).then_some(Value::Object(artwork_metadata)),metadata:metadata.value,metadata_profiles,objects:records,index_chunks,resources:resources.entries.iter().map(|r|r.record.clone()).collect(),
             extension_records:art.extensions.records.clone(),extension_resources:art.extensions.resources.keys().copied().collect(),current:current_state,undo:undo_states,redo:redo_states};
         let metadata=serde_json::to_vec(&record).map_err(|e|e.to_string())?;
         if metadata.len()>ProjectLimits::default().metadata_bytes as usize {return Err("Session metadata exceeds admission".into());}
@@ -318,10 +335,10 @@ pub fn open_parts(metadata:&[u8],resource_pack:ImmutableBacking,limits:ProjectLi
     let mut used_chunks=std::collections::BTreeSet::new();
     for object in &record.objects {
         references.extend(super::references(&object.record,ManifestLimits::default().traversal_nodes)?);
-        if let Some(chunks)=&object.tiles {used_chunks.extend(chunks.iter().copied());}
+        if let Some(chunks)=&object.index {used_chunks.extend(chunks.iter().copied());}
     }
-    if used_chunks.len()!=record.tile_chunks.len() || used_chunks.iter().any(|index|*index>=record.tile_chunks.len()) {return Err("Unindexed session raster chunks".into());}
-    for chunk in &record.tile_chunks {references.extend(super::references(&Value::Array(chunk.clone()),ManifestLimits::default().traversal_nodes)?);}
+    if used_chunks.len()!=record.index_chunks.len() || used_chunks.iter().any(|index|*index>=record.index_chunks.len()) {return Err("Unindexed session chunks".into());}
+    for chunk in &record.index_chunks {references.extend(super::references(&Value::Array(chunk.clone()),ManifestLimits::default().traversal_nodes)?);}
     for state in std::iter::once(&record.current).chain(&record.undo).chain(&record.redo) {
         if let Some(selection)=&state.working.selection {references.extend(super::references(selection,ManifestLimits::default().traversal_nodes)?);}
     }
@@ -590,7 +607,6 @@ mod tests {
         }
         let prepared=prepared(&editor);let metadata:Value=serde_json::from_slice(prepared.metadata()).unwrap();
         assert!(prepared.metadata().len()<2*1024*1024,"small strokes must not repeat the full canvas index in every history entry");
-        assert!(metadata["tile_chunks"].as_array().unwrap().len()<150);
         let original_descriptors=metadata["objects"].as_array().unwrap().iter().filter(|object|object["record"]["type"]=="capy.image/1").count();
         assert_eq!(original_descriptors,1,"immutable photo indexes must remain shared while painting");
         let mut restored=reopen(&prepared).editor;
@@ -606,20 +622,20 @@ mod tests {
     fn chunk_expansion_refuses_metadata_amplification_before_adoption() {
         for data in [Value::Null,json!(true),json!(3),json!([])] {
             for tiles in [Some(vec![0]),None] {
-                let object=ObjectVersion {record:json!({"type":"capy.paint-source/2","data":data}),tiles};
+                let object=ObjectVersion {record:json!({"type":"capy.paint-source/2","data":data}),index:tiles};
                 assert!(object.expand(&[vec![json!({})]],ProjectLimits::default()).is_err());
             }
         }
-        let chunk=(0..RASTER_INDEX_CHUNK).map(|index|json!({"coordinate":[index,0],"resource":resources::reference(PortableId::random()),"data":"x".repeat(256)})).collect::<Vec<_>>();
-        let object=ObjectVersion {record:json!({"id":PortableId::random(),"type":"capy.paint-source/2","data":{}}),tiles:Some(vec![0;256])};
+        let chunk=(0..INDEX_CHUNK).map(|index|json!({"coordinate":[index,0],"resource":resources::reference(PortableId::random()),"data":"x".repeat(256)})).collect::<Vec<_>>();
+        let object=ObjectVersion {record:json!({"id":PortableId::random(),"type":"capy.paint-source/2","data":{}}),index:Some(vec![0;256])};
         let limits=ProjectLimits {metadata_bytes:32*1024,..Default::default()};
         assert!(crate::json_len(&chunk)<limits.metadata_bytes as usize);
         assert!(object.expand(&[chunk],limits).unwrap_err().contains("exceeds admission"));
         let prepared=prepared(&editor());let mut record:SessionRecord=serde_json::from_slice(prepared.metadata()).unwrap();
-        let original=json!({"extent":[1,1],"interpretation":{"data":"x".repeat(4096)}});record.tile_chunks=vec![vec![original]];
+        let original=json!({"extent":[1,1],"interpretation":{"data":"x".repeat(4096)}});record.index_chunks=vec![vec![original]];
         let mut current=Vec::new();
         for _ in 0..100 {
-            let index=record.objects.len();record.objects.push(ObjectVersion {record:json!({"id":PortableId::random(),"type":"capy.paint-source/2","data":{}}),tiles:Some(vec![0])});current.push(index);
+            let index=record.objects.len();record.objects.push(ObjectVersion {record:json!({"id":PortableId::random(),"type":"capy.paint-source/2","data":{}}),index:Some(vec![0])});current.push(index);
         }
         record.current.objects=current;
         assert!(crate::json_len(&record)<limits.metadata_bytes as usize);

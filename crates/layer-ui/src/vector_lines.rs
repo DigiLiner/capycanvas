@@ -74,8 +74,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let Some(fitted) = layer_engine::fit_line(&samples, line.tolerance) else { return Ok(()) };
             let document = self.engine.document();
             let object = document.scene().vector_layer(line.layer).ok_or("The vector layer was removed")?;
-            let ids = object.ids();
-            let id = object.allocate_id(|id| ids.contains(&id));
+            let id = object.allocate_id();
             let drawn = object.insert_front(vec![Record::Path(path(id, &line.paint, fitted))]);
             let edit = document.vector_object_edit(line.layer, drawn).map_err(|e| e.to_string())?;
             self.layer_edit(edit)

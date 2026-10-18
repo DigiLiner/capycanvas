@@ -50,8 +50,9 @@ rebuilds.
 
 The [`private codec`](../../crates/layer-core/src/package/session.rs) shares the
 portable artwork record and resource adapters. It retains typed record identities,
-tombstones and checkpoint identities across history. Object versions, raster index
-chunks and immutable resource payloads are shared across historical states.
+tombstones and checkpoint identities across history. Object versions, raster-tile
+and vector-chunk index groups and immutable resource payloads are shared across
+historical states.
 Immutable images are interned by portable ID across all states. Changed-record
 transfers carry each value’s image dependency closure, including images retained
 only by undo. Conflicting descriptors for one image ID reject the session;

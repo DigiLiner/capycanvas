@@ -15,7 +15,7 @@ struct EntryRecord {changes:Vec<ChangeRecord>,working:Option<WorkingRecord>,chec
 #[serde(deny_unknown_fields)]
 pub struct SessionTransferDescriptor {
     artwork:TransferDescriptor,working:WorkingRecord,undo:Vec<EntryRecord>,redo:Vec<EntryRecord>,
-    next_checkpoint:u64,next_stroke_id:u64,metadata:Value,metadata_profiles:Vec<Value>,tile_chunks:Vec<Vec<Value>>,extensions:BTreeMap<PortableId,Value>,extension_resources:Vec<PortableId>,
+    next_checkpoint:u64,next_stroke_id:u64,metadata:Value,metadata_profiles:Vec<Value>,index_chunks:Vec<Vec<Value>>,extensions:BTreeMap<PortableId,Value>,extension_resources:Vec<PortableId>,
 }
 pub struct PreparedSessionTransfer {descriptor:SessionTransferDescriptor,artwork:PreparedTransfer}
 pub struct SessionTransferReceiver {descriptor:SessionTransferDescriptor,artwork:TransferReceiver}
@@ -65,7 +65,7 @@ impl PreparedSessionTransfer {
         let Document {artwork:_,working:_,revision:_,owner:_,scene_index:_,next_stroke_id}=document;
         let mut resources=ResourceInventory::for_transfer();
         let metadata=metadata.into();let metadata_profiles=metadata.encode_profiles(&mut resources)?;
-        let working=WorkingRecord::capture(&document.working,&mut resources)?;let mut tile_chunks=Vec::new();let mut chunk_versions=BTreeMap::new();
+        let working=WorkingRecord::capture(&document.working,&mut resources)?;let mut index_chunks=Vec::new();let mut chunk_versions=BTreeMap::new();
         fn history(document:&Document,entries:&[(Edit,u64)],resources:&mut ResourceInventory,chunks:&mut Vec<Vec<Value>>,versions:&mut BTreeMap<Vec<u8>,usize>,cancel:&AtomicBool)->Result<Vec<EntryRecord>,String> {
             let mut context=document.clone();let mut result=Vec::with_capacity(entries.len());
             for (edit,checkpoint) in entries.iter().rev() {
@@ -77,13 +77,13 @@ impl PreparedSessionTransfer {
             Ok(result)
         }
         let mut current=document.clone();current.artwork=(*artwork.artwork).clone();
-        let undo_records=history(&current,undo,&mut resources,&mut tile_chunks,&mut chunk_versions,cancel)?;let redo_records=history(&current,redo,&mut resources,&mut tile_chunks,&mut chunk_versions,cancel)?;
+        let undo_records=history(&current,undo,&mut resources,&mut index_chunks,&mut chunk_versions,cancel)?;let redo_records=history(&current,redo,&mut resources,&mut index_chunks,&mut chunk_versions,cancel)?;
         let mut roots=crate::RootInventory::default();for (edit,_) in undo.iter().chain(redo) {edit.roots(&mut roots);}
         let luts=roots.resources.into_iter().filter_map(|lut|lut.resource().map(|r|(r.id(),lut.clone()))).collect();
         let mut live=artwork.clone();Arc::make_mut(&mut live.artwork).extensions=Arc::default();
         let mut prepared=PreparedTransfer::capture_with_additional(&live,&None,resources,luts,cancel)?;
         for resource in artwork.artwork.extensions.resources.values() {prepared.append_private_resource(resource.clone())?;}
-        let descriptor=SessionTransferDescriptor {artwork:prepared.descriptor().clone(),working,undo:undo_records,redo:redo_records,next_checkpoint:*next_checkpoint,next_stroke_id:*next_stroke_id,metadata:metadata.value,metadata_profiles,tile_chunks,
+        let descriptor=SessionTransferDescriptor {artwork:prepared.descriptor().clone(),working,undo:undo_records,redo:redo_records,next_checkpoint:*next_checkpoint,next_stroke_id:*next_stroke_id,metadata:metadata.value,metadata_profiles,index_chunks,
             extensions:artwork.artwork.extensions.records.clone(),extension_resources:artwork.artwork.extensions.resources.keys().copied().collect()};
         validate(&descriptor,ProjectLimits::default())?;active(cancel)?;
         Ok(Self {descriptor,artwork:prepared})
@@ -98,7 +98,7 @@ impl PreparedSessionTransfer {
         let (capture,_,(working,undo,redo,profiles))=self.artwork.adopt_verified_with(limits,cancel,|art,reader|{
             let profiles=decode_profiles(&record.metadata_profiles,reader)?;
             let working=record.working.decode(reader)?;
-            let undo=decode_history(art,&working,record.artwork.checkpoint.edit_checkpoint,&record.undo,&record.tile_chunks,reader,cancel)?;let redo=decode_history(art,&working,record.artwork.checkpoint.edit_checkpoint,&record.redo,&record.tile_chunks,reader,cancel)?;
+            let undo=decode_history(art,&working,record.artwork.checkpoint.edit_checkpoint,&record.undo,&record.index_chunks,reader,cancel)?;let redo=decode_history(art,&working,record.artwork.checkpoint.edit_checkpoint,&record.redo,&record.index_chunks,reader,cancel)?;
             Ok((working,undo,redo,profiles))
         })?;
         let mut artwork=(*capture.artwork).clone();
@@ -321,7 +321,7 @@ mod tests {
         let mut original=editor();rename(&mut original,"edited");let prepared=transfer(&original);let mut descriptor=prepared.descriptor().clone();
         let mut versions=BTreeMap::new();let mut changes=Vec::new();
         for handle in 0..8 {let id=PortableId::random();let record=json!({"id":id,"type":"capy.paint-source/2","data":{"domain":[1,1],"tiles":[{"coordinate":[0,0],"padding":"x".repeat(128*1024)}]}});
-            let value=ObjectVersion::capture(record,&mut descriptor.tile_chunks,&mut versions).unwrap();
+            let value=ObjectVersion::capture(record,&mut descriptor.index_chunks,&mut versions).unwrap();
             changes.push(ChangeRecord {kind:"capy.paint-source/2".into(),handle,id,value:Some(value)});
         }
         descriptor.undo[0].changes=changes;let invalid=PreparedSessionTransfer {descriptor,artwork:prepared.artwork};

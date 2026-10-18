@@ -363,7 +363,6 @@ impl<'a> ResourceReader<'a> {
     pub fn vector_object(&mut self, items: &[Value]) -> DecodeResult<VectorObject> {
         let mut open = 0u32;
         let mut records = 0usize;
-        let mut ids = std::collections::HashSet::new();
         let mut chunks = Vec::with_capacity(items.len());
         for item in items {
             let (id, record) = self.record(item, "capy.vector-items/1")?;
@@ -383,13 +382,11 @@ impl<'a> ResourceReader<'a> {
                     resource
                 }
             };
-            for id in chunk.records().iter().filter_map(|r| r.id()) {
-                if !ids.insert(id) { return Err("Invalid vector data: duplicate item identity".into()); }
-            }
             chunks.push(chunk);
         }
-        if open != 0 { return Err("Invalid vector data: unbalanced end marker".into()); }
-        Ok(VectorObject::from_chunks(chunks))
+        let object = VectorObject::from_chunks(chunks);
+        object.validate().map_err(|e| format!("Invalid vector data: {e}"))?;
+        Ok(object)
     }
     pub fn profile(&mut self, value: &Value) -> DecodeResult<ColorProfile> {
         let fields = values::object(value,&["builtin","resource"])?;

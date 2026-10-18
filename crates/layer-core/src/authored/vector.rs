@@ -316,87 +316,155 @@ pub fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
     a.map_or(b, |a| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])
 }
 
+const DUPLICATE: &str = "Duplicate item identity";
+const UNBALANCED: &str = "Unbalanced end marker";
+const CONTAINED: &str = "Contents of unknown containers stay uninterpreted";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Nesting { net: i64, low: i64, deepest_path: Option<i64> }
+impl Nesting {
+    fn of(records: &[Record]) -> Self {
+        let mut nesting = Self::default();
+        for record in records {
+            match record {
+                Record::Path(_) => nesting.deepest_path = nesting.deepest_path.max(Some(nesting.net)),
+                Record::Opaque(opaque) => if opaque.kind & PARENT != 0 { nesting.net += 1; },
+                Record::End => { nesting.net -= 1; nesting.low = nesting.low.min(nesting.net); }
+            }
+        }
+        nesting
+    }
+}
+
 #[derive(Clone, Debug)]
-pub struct VectorChunk { records: Box<[Record]>, summary: ChunkSummary, encoded_len: OnceLock<usize> }
+pub struct VectorChunk {
+    records: Box<[Record]>,
+    summary: ChunkSummary,
+    ids: Box<[ItemId]>,
+    nesting: Nesting,
+    local: Result<(), &'static str>,
+    encoded_len: OnceLock<usize>,
+}
 impl PartialEq for VectorChunk { fn eq(&self, other: &Self) -> bool { self.records == other.records } }
 impl VectorChunk {
     pub fn new(records: Vec<Record>) -> Self {
         let summary = ChunkSummary::of(&records);
-        Self { records: records.into(), summary, encoded_len: OnceLock::new() }
+        let mut ids: Vec<ItemId> = records.iter().filter_map(Record::id).collect();
+        ids.sort_unstable();
+        let local = records.iter().filter_map(Record::path).try_for_each(PathItem::validate)
+            .and_then(|()| if ids.windows(2).any(|pair| pair[0] == pair[1]) { Err(DUPLICATE) } else { Ok(()) });
+        Self { nesting: Nesting::of(&records), records: records.into(), summary, ids: ids.into(), local, encoded_len: OnceLock::new() }
     }
     pub fn encoded_len(&self) -> Option<usize> { self.encoded_len.get().copied() }
     pub fn note_encoded_len(&self, length: usize) { let _ = self.encoded_len.set(length); }
     pub fn records(&self) -> &[Record] { &self.records }
     pub fn summary(&self) -> &ChunkSummary { &self.summary }
+    pub fn contains(&self, id: ItemId) -> bool { self.ids.binary_search(&id).is_ok() }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position { pub chunk: u32, pub index: u32 }
 
+#[derive(Debug, Default)]
+struct Root { chunks: Box<[Resource<VectorChunk>]>, valid: OnceLock<Result<(), &'static str>> }
+
 #[derive(Clone, Debug, Default)]
-pub struct VectorObject { chunks: Arc<[Resource<VectorChunk>]> }
+pub struct VectorObject { root: Arc<Root> }
 impl PartialEq for VectorObject {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.chunks, &other.chunks) || (self.chunks.len() == other.chunks.len()
-            && self.chunks.iter().zip(other.chunks.iter()).all(|(a, b)| a.same_owner(b) || **a == **b))
+        self.same_root(other) || (self.chunks().len() == other.chunks().len()
+            && self.chunks().iter().zip(other.chunks()).all(|(a, b)| a.same_owner(b) || **a == **b))
     }
 }
 impl VectorObject {
-    pub fn from_chunks(chunks: Vec<Resource<VectorChunk>>) -> Self { Self { chunks: chunks.into() } }
+    pub fn from_chunks(chunks: Vec<Resource<VectorChunk>>) -> Self { Self { root: Arc::new(Root { chunks: chunks.into(), valid: OnceLock::new() }) } }
     pub fn from_records(records: Vec<Record>) -> Self { Self::from_chunks(pack(records)) }
-    pub fn chunks(&self) -> &[Resource<VectorChunk>] { &self.chunks }
-    pub fn same_root(&self, other: &Self) -> bool { Arc::ptr_eq(&self.chunks, &other.chunks) }
+    pub fn chunks(&self) -> &[Resource<VectorChunk>] { &self.root.chunks }
+    pub fn same_root(&self, other: &Self) -> bool { Arc::ptr_eq(&self.root, &other.root) }
     pub fn records(&self) -> impl DoubleEndedIterator<Item = (Position, &Record)> {
-        self.chunks.iter().enumerate().flat_map(|(c, chunk)| chunk.records().iter().enumerate()
+        self.chunks().iter().enumerate().flat_map(|(c, chunk)| chunk.records().iter().enumerate()
             .map(move |(i, record)| (Position { chunk: c as u32, index: i as u32 }, record)))
     }
     pub fn paths(&self) -> impl DoubleEndedIterator<Item = (Position, &PathItem)> {
         self.records().filter_map(|(p, r)| r.path().map(|path| (p, path)))
     }
     pub fn record(&self, position: Position) -> Option<&Record> {
-        self.chunks.get(position.chunk as usize)?.records().get(position.index as usize)
+        self.chunks().get(position.chunk as usize)?.records().get(position.index as usize)
     }
-    pub fn record_count(&self) -> usize { self.chunks.iter().map(|c| c.records().len()).sum() }
-    pub fn path_count(&self) -> usize { self.chunks.iter().map(|c| c.summary().paths as usize).sum() }
-    pub fn anchor_count(&self) -> u64 { self.chunks.iter().map(|c| c.summary().anchors).sum() }
+    pub fn record_count(&self) -> usize { self.chunks().iter().map(|c| c.records().len()).sum() }
+    pub fn path_count(&self) -> usize { self.chunks().iter().map(|c| c.summary().paths as usize).sum() }
+    pub fn anchor_count(&self) -> u64 { self.chunks().iter().map(|c| c.summary().anchors).sum() }
     pub fn bounds(&self) -> Option<[f64; 4]> {
-        self.chunks.iter().filter_map(|c| c.summary().bounds).fold(None, |a, b| Some(union(a, b)))
+        self.chunks().iter().filter_map(|c| c.summary().bounds).fold(None, |a, b| Some(union(a, b)))
     }
     pub fn validate(&self) -> Result<(), &'static str> {
-        let mut ids = HashSet::with_capacity(self.record_count());
-        let mut open = 0u32;
-        for (_, record) in self.records() {
-            match record {
-                Record::Path(path) if open == 0 => path.validate()?,
-                Record::Path(_) => return Err("Contents of unknown containers stay uninterpreted"),
-                Record::Opaque(opaque) => if opaque.kind & PARENT != 0 { open += 1; },
-                Record::End => open = open.checked_sub(1).ok_or("Unbalanced end marker")?,
+        *self.root.valid.get_or_init(|| {
+            self.validate_nesting()?;
+            let mut ids = HashSet::with_capacity(self.record_count());
+            for chunk in self.chunks() {
+                chunk.local?;
+                if !chunk.ids.iter().all(|id| ids.insert(*id)) { return Err(DUPLICATE); }
             }
-            if let Some(id) = record.id() && !ids.insert(id) { return Err("Duplicate item identity"); }
-        }
-        if open == 0 { Ok(()) } else { Err("Unbalanced end marker") }
+            Ok(())
+        })
     }
     pub fn validate_changed(&self, previous: &Self) -> Result<(), &'static str> {
-        let kept: HashSet<usize> = previous.chunks.iter().map(|c| Arc::as_ptr(c.storage()) as usize).collect();
-        for chunk in self.chunks.iter().filter(|c| !kept.contains(&(Arc::as_ptr(c.storage()) as usize))) {
-            let mut ids = HashSet::with_capacity(chunk.records().len());
-            for record in chunk.records() {
-                if let Record::Path(path) = record { path.validate()?; }
-                if let Some(id) = record.id() && !ids.insert(id) { return Err("Duplicate item identity"); }
+        if previous.root.valid.get() != Some(&Ok(())) { return self.validate(); }
+        *self.root.valid.get_or_init(|| self.validate_edit_of(previous))
+    }
+    fn validate_nesting(&self) -> Result<(), &'static str> {
+        let mut open = 0i64;
+        for chunk in self.chunks() {
+            let nesting = chunk.nesting;
+            if open + nesting.low < 0 { return Err(UNBALANCED); }
+            if nesting.deepest_path.is_some_and(|depth| open + depth > 0) { return Err(CONTAINED); }
+            open += nesting.net;
+        }
+        if open == 0 { Ok(()) } else { Err(UNBALANCED) }
+    }
+    fn validate_edit_of(&self, previous: &Self) -> Result<(), &'static str> {
+        self.validate_nesting()?;
+        let key = |chunk: &Resource<VectorChunk>| Arc::as_ptr(chunk.storage()) as usize;
+        let before: HashSet<usize> = previous.chunks().iter().map(key).collect();
+        let mut present = HashSet::with_capacity(self.chunks().len());
+        let (mut kept, mut added) = (Vec::new(), Vec::new());
+        for chunk in self.chunks() {
+            if present.insert(key(chunk)) && before.contains(&key(chunk)) { kept.push(chunk); } else { added.push(chunk); }
+        }
+        let removed: HashSet<ItemId> = previous.chunks().iter().filter(|chunk| !present.contains(&key(chunk)))
+            .flat_map(|chunk| chunk.ids.iter().copied()).collect();
+        let mut fresh = HashSet::new();
+        let mut unseen = Vec::new();
+        for chunk in added {
+            chunk.local?;
+            for &id in chunk.ids.iter() {
+                if !fresh.insert(id) { return Err(DUPLICATE); }
+                if !removed.contains(&id) { unseen.push(id); }
             }
         }
-        Ok(())
+        let kept_ids: usize = kept.iter().map(|chunk| chunk.ids.len()).sum();
+        let collides = if unseen.len().saturating_mul(kept.len()) <= kept_ids {
+            unseen.iter().any(|&id| kept.iter().any(|chunk| chunk.contains(id)))
+        } else {
+            let unseen: HashSet<ItemId> = unseen.into_iter().collect();
+            kept.iter().any(|chunk| chunk.ids.iter().any(|id| unseen.contains(id)))
+        };
+        if collides { Err(DUPLICATE) } else { Ok(()) }
     }
-    pub fn find(&self, id: ItemId) -> Option<Position> { self.records().find(|(_, r)| r.id() == Some(id)).map(|(p, _)| p) }
-    pub fn ids(&self) -> HashSet<ItemId> { self.records().filter_map(|(_, r)| r.id()).collect() }
-    pub fn allocate_id(&self, used: impl Fn(ItemId) -> bool) -> ItemId {
-        loop { let id = ItemId::random(); if !used(id) { return id; } }
+    pub fn contains(&self, id: ItemId) -> bool { self.chunks().iter().any(|chunk| chunk.contains(id)) }
+    pub fn find(&self, id: ItemId) -> Option<Position> {
+        let chunk = self.chunks().iter().position(|chunk| chunk.contains(id))?;
+        let index = self.chunks()[chunk].records().iter().position(|record| record.id() == Some(id))?;
+        Some(Position { chunk: chunk as u32, index: index as u32 })
+    }
+    pub fn allocate_id(&self) -> ItemId {
+        loop { let id = ItemId::random(); if !self.contains(id) { return id; } }
     }
     pub fn insert_front(&self, records: Vec<Record>) -> Self {
         if records.is_empty() { return self.clone(); }
         let mut edits = BTreeMap::new();
-        if self.chunks.is_empty() { return Self::from_records(records); }
-        let first = &self.chunks[0];
+        if self.chunks().is_empty() { return Self::from_records(records); }
+        let first = &self.chunks()[0];
         if first.records().len() + records.len() <= CHUNK_RECORDS {
             let mut joined = records;
             joined.extend(first.records().iter().cloned());
@@ -404,22 +472,22 @@ impl VectorObject {
             return self.edit_chunks(edits);
         }
         let mut chunks = pack(records);
-        chunks.extend(self.chunks.iter().cloned());
+        chunks.extend(self.chunks().iter().cloned());
         Self::from_chunks(chunks)
     }
     pub fn replace(&self, changes: impl IntoIterator<Item = (Position, Option<Record>)>) -> Self {
         let mut grouped: BTreeMap<u32, Vec<(u32, Option<Record>)>> = BTreeMap::new();
         for (position, record) in changes { grouped.entry(position.chunk).or_default().push((position.index, record)); }
         let edits = grouped.into_iter().map(|(chunk, changes)| {
-            let mut records: Vec<Option<Record>> = self.chunks[chunk as usize].records().iter().cloned().map(Some).collect();
+            let mut records: Vec<Option<Record>> = self.chunks()[chunk as usize].records().iter().cloned().map(Some).collect();
             for (index, record) in changes { records[index as usize] = record; }
             (chunk as usize, records.into_iter().flatten().collect())
         }).collect();
         self.edit_chunks(edits)
     }
     pub fn edit_chunks(&self, edits: BTreeMap<usize, Vec<Record>>) -> Self {
-        let mut chunks: Vec<Resource<VectorChunk>> = Vec::with_capacity(self.chunks.len() + edits.len());
-        for (index, chunk) in self.chunks.iter().enumerate() {
+        let mut chunks: Vec<Resource<VectorChunk>> = Vec::with_capacity(self.chunks().len() + edits.len());
+        for (index, chunk) in self.chunks().iter().enumerate() {
             let Some(records) = edits.get(&index) else { chunks.push(chunk.clone()); continue };
             for packed in pack(records.clone()) {
                 if let Some(last) = chunks.last()
