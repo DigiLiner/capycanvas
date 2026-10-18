@@ -36,7 +36,7 @@ fn native_canvas_background_during_startup_and_tab_switch() {
     pump(400);
     let mut input = RemoteInput::new().settle_ms(0).timeout_secs(30);
     input.ready();
-    let mut capture = |name: &str, expected: [u8; 3]| {
+    let mut capture = |name: &str, expected: Option<[u8; 3]>| -> [u8; 3] {
         input.perform(serde_json::json!([{"wait_ms":250}, {"capture":name}]));
         let mut reader =
             png::Decoder::new(std::fs::File::open(captures.join(format!("{name}.png"))).unwrap())
@@ -45,6 +45,8 @@ fn native_canvas_background_during_startup_and_tab_switch() {
         let mut pixels = vec![0; reader.output_buffer_size()];
         let info = reader.next_frame(&mut pixels).unwrap();
         assert_eq!(info.color_type, png::ColorType::Rgb);
+        let center = ((info.height / 2 * info.width + info.width / 2) * 3) as usize;
+        let expected = expected.unwrap_or_else(|| pixels[center..center + 3].try_into().unwrap());
         for y in info.height / 2 - 20..info.height / 2 + 20 {
             for x in info.width / 2 - 20..info.width / 2 + 20 {
                 let i = ((y * info.width + x) * 3) as usize;
@@ -107,8 +109,13 @@ fn native_canvas_background_during_startup_and_tab_switch() {
                 );
             }
         }
+        expected
     };
-    capture("behind", [255, 0, 255]);
+    let sentinel = capture("behind", None);
+    assert!(
+        sentinel[0] > 250 && sentinel[1] < 20 && sentinel[2] > 250,
+        "the capture shows the sentinel window: {sentinel:?}"
+    );
     let pause = crate::render_thread::pause_next_startup();
     let w = Workspace::with_project(&app, Some((new_drawing(256, 256, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)));
     w.window.maximize();
@@ -119,7 +126,7 @@ fn native_canvas_background_during_startup_and_tab_switch() {
     // Allow the compositor's window-opening fade to finish; the GPU remains
     // paused, so this cannot hide a missing application background.
     pump(600);
-    capture("startup-wait", [51; 3]);
+    capture("startup-wait", Some([51; 3]));
     assert!(
         !ui_session(&w)
             .engine()
@@ -129,7 +136,7 @@ fn native_canvas_background_during_startup_and_tab_switch() {
     );
     pause.store(false, Ordering::Release);
     new_photo::ready(&w);
-    capture("startup-ready", [255; 3]);
+    capture("startup-ready", Some([255; 3]));
 
     let pause = crate::render_thread::pause_next_startup();
     glib::MainContext::default()
@@ -138,31 +145,31 @@ fn native_canvas_background_during_startup_and_tab_switch() {
                 .open(&w, (new_drawing(128, 128, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)),
         )
         .unwrap();
-    capture("new-tab-wait", [51; 3]);
+    capture("new-tab-wait", Some([51; 3]));
     assert!(
         w.documents.parked_memory().1,
         "inactive GPU worker still stops"
     );
     pause.store(false, Ordering::Release);
     new_photo::ready(&w);
-    capture("new-tab-ready", [255; 3]);
+    capture("new-tab-ready", Some([255; 3]));
 
     let pause = crate::render_thread::pause_next_startup();
     glib::MainContext::default()
         .block_on(w.documents.activate(&w, 1))
         .unwrap();
-    capture("switch-wait", [51; 3]);
+    capture("switch-wait", Some([51; 3]));
     w.window.unmaximize();
     w.window.set_default_size(1100, 750);
     pump(350);
-    capture("switch-resized", [51; 3]);
+    capture("switch-resized", Some([51; 3]));
     w.dispatch(UiAction::SetTheme {
         theme: Some(Theme::Light),
     });
-    capture("switch-light", [184; 3]);
+    capture("switch-light", Some([184; 3]));
     pause.store(false, Ordering::Release);
     new_photo::ready(&w);
-    capture("switch-ready", [255; 3]);
+    capture("switch-ready", Some([255; 3]));
 
     ui_session(&w)
         .engine()
@@ -176,18 +183,18 @@ fn native_canvas_background_during_startup_and_tab_switch() {
         },
         "failed GPU worker",
     );
-    capture("failed-worker", [184; 3]);
+    capture("failed-worker", Some([184; 3]));
     // Simulate the opaque GTK fallback after a background transport failure.
     // A successful restart must reveal the new drawing again, not mask it.
     w.window.remove_css_class("native-canvas-background");
     let pause = crate::render_thread::pause_next_startup();
     w.restart_gpu();
-    capture("restart-wait", [184; 3]);
+    capture("restart-wait", Some([184; 3]));
     pause.store(false, Ordering::Release);
     new_photo::ready(&w);
-    capture("restart-ready", [255; 3]);
+    capture("restart-ready", Some([255; 3]));
     w.window.destroy();
-    capture("closed", [255, 0, 255]);
+    capture("closed", Some(sentinel));
     behind.destroy();
     input.finish();
 }
