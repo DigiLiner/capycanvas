@@ -249,3 +249,15 @@ fn gpu_kernel_matches_its_emulation() {
         assert!(max < 2e-3, "{name}: {max}");
     }
 }
+
+#[test]
+#[ignore = "writes SPIR-V of the vector coverage kernel for the Mali Offline Compiler"]
+fn coverage_kernel_spirv() {
+    let out = std::env::var("CAPY_KERNEL_SPIRV").expect("CAPY_KERNEL_SPIRV names the output file");
+    let module = naga::front::wgsl::parse_str(include_str!("coverage.wgsl")).unwrap();
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&module).unwrap();
+    let pipeline = naga::back::spv::PipelineOptions { shader_stage: naga::ShaderStage::Compute, entry_point: "main".into() };
+    let options = naga::back::spv::Options { lang_version: (1, 3), ..Default::default() };
+    let words = naga::back::spv::write_vec(&module, &info, &options, Some(&pipeline)).unwrap();
+    std::fs::write(out, words.iter().flat_map(|w| w.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+}

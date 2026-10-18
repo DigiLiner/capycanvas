@@ -10,12 +10,11 @@ struct Command { header: u32, start: u32, backdrop: i32, color: u32 }
 @group(0) @binding(5) var base: texture_2d<f32>;
 @group(0) @binding(6) var output: texture_storage_2d<rgba32float, write>;
 
-const PIXELS: u32 = 4u;
 const UNIT: f32 = 1.0 / 2048.0;
+const LANES: vec4<f32> = vec4<f32>(0.0, 1.0, 2.0, 3.0);
 
-fn area(command: Command, count: u32, even_odd: bool, xy: vec2<f32>) -> array<f32, 4> {
-    let backdrop = f32(command.backdrop);
-    var acc = array<f32, 4>(backdrop, backdrop, backdrop, backdrop);
+fn area(command: Command, count: u32, even_odd: bool, xy: vec2<f32>) -> vec4<f32> {
+    var acc = vec4<f32>(f32(command.backdrop));
     for (var i = 0u; i < count; i++) {
         let w0 = pool[command.start + i * 2u];
         let w1 = pool[command.start + i * 2u + 1u];
@@ -31,96 +30,104 @@ fn area(command: Command, count: u32, even_odd: bool, xy: vec2<f32>) -> array<f3
             let start = p0.x - xy.x;
             let x0 = start + (y0 - y) * inverse * delta.x;
             let x1 = start + (y1 - y) * inverse * delta.x;
-            let low = min(x0, x1);
-            let high = max(x0, x1);
-            for (var k = 0u; k < PIXELS; k++) {
-                let offset = f32(k);
-                let xmin = min(low - offset, 1.0) - 1.0e-6;
-                let xmax = high - offset;
-                let b = min(xmax, 1.0);
-                let c = max(b, 0.0);
-                let d = max(xmin, 0.0);
-                acc[k] += (b + 0.5 * (d * d - c * c) - xmin) / (xmax - xmin) * dy;
-            }
+            let xmin = min(vec4<f32>(min(x0, x1)) - LANES, vec4<f32>(1.0)) - 1.0e-6;
+            let xmax = vec4<f32>(max(x0, x1)) - LANES;
+            let b = min(xmax, vec4<f32>(1.0));
+            let c = max(b, vec4<f32>(0.0));
+            let d = max(xmin, vec4<f32>(0.0));
+            acc += (b + 0.5 * (d * d - c * c) - xmin) / (xmax - xmin) * dy;
         }
         var edge = 1.0e9;
         if (w0 & 0xffffu) == 0u { edge = p0.y; } else if (w1 & 0xffffu) == 0u { edge = p1.y; }
-        let cover = sign(delta.x) * clamp(xy.y - edge + 1.0, 0.0, 1.0);
-        for (var k = 0u; k < PIXELS; k++) { acc[k] += cover; }
+        acc += vec4<f32>(sign(delta.x) * clamp(xy.y - edge + 1.0, 0.0, 1.0));
     }
-    for (var k = 0u; k < PIXELS; k++) {
-        acc[k] = select(min(abs(acc[k]), 1.0), abs(acc[k] - 2.0 * round(0.5 * acc[k])), even_odd);
-    }
-    return acc;
+    return select(min(abs(acc), vec4<f32>(1.0)), abs(acc - 2.0 * round(0.5 * acc)), even_odd);
 }
 
 fn point(index: u32) -> vec3<f32> { return vec3<f32>(bitcast<f32>(pool[index]), bitcast<f32>(pool[index + 1u]), bitcast<f32>(pool[index + 2u])); }
 
-fn stroke(command: Command, count: u32, xy: vec2<f32>, coverage: ptr<function, array<f32, 4>>) {
-    let first = xy + 0.5;
+fn stroke(command: Command, count: u32, first: vec2<f32>, coverage: vec4<f32>) -> vec4<f32> {
+    var result = coverage;
     var a = point(command.start);
     for (var i = 0u; i < count; i++) {
         let b = point(command.start + (i + 1u) * 3u);
+        let reach = max(max(a.z, b.z), 0.5) + 1.0;
+        let low = min(a.xy, b.xy) - reach;
+        let high = max(a.xy, b.xy) + reach;
+        if high.x < first.x - 0.5 || low.x > first.x + 3.5 || high.y < first.y - 0.5 || low.y > first.y + 0.5 { a = b; continue; }
         let span = b.xy - a.xy;
-        let reach = sqrt(dot(span, span));
-        let u = select(vec2<f32>(1.0, 0.0), span / reach, reach > 0.0);
+        let span_length = sqrt(dot(span, span));
+        let u = select(vec2<f32>(1.0, 0.0), span / span_length, span_length > 0.0);
         let ra = max(a.z, 0.5);
         let rb = max(b.z, 0.5);
         let thin = min(a.z + b.z, 1.0);
-        let s = select(0.0, clamp((ra - rb) / reach, -1.0, 1.0), reach > 0.0);
+        let s = select(0.0, clamp((ra - rb) / span_length, -1.0, 1.0), span_length > 0.0);
         let c = sqrt(max(1.0 - s * s, 0.0));
-        let end = reach * c;
-        for (var k = 0u; k < PIXELS; k++) {
-            let d = first + vec2<f32>(f32(k), 0.0) - a.xy;
-            let x = dot(d, u);
-            let y = abs(d.x * u.y - d.y * u.x);
-            let along = x * c - y * s;
-            let far = along > end;
-            var distance = length(vec2<f32>(x - select(0.0, reach, far), y)) - select(ra, rb, far);
-            if along >= 0.0 && along <= end { distance = x * s + y * c - ra; }
-            (*coverage)[k] = max((*coverage)[k], clamp(0.5 - distance, 0.0, 1.0) * thin);
-        }
+        let end = span_length * c;
+        let dx = vec4<f32>(first.x - a.x) + LANES;
+        let dy = first.y - a.y;
+        let x = dx * u.x + dy * u.y;
+        let y = abs(dx * u.y - dy * u.x);
+        let along = x * c - y * s;
+        let far = along > vec4<f32>(end);
+        let near = x - select(vec4<f32>(0.0), vec4<f32>(span_length), far);
+        let round = sqrt(near * near + y * y) - select(vec4<f32>(ra), vec4<f32>(rb), far);
+        let side = along >= vec4<f32>(0.0) & !far;
+        let distance = select(round, x * s + y * c - ra, side);
+        result = max(result, clamp(0.5 - distance, vec4<f32>(0.0), vec4<f32>(1.0)) * thin);
         a = b;
     }
+    return result;
 }
+
+fn over(color: vec4<f32>, paint: vec4<f32>, coverage: f32) -> vec4<f32> {
+    let source = paint * coverage;
+    return source + color * (1.0 - source.a);
+}
+
+fn texel_inside(texel: vec2<i32>) -> bool { return all(texel >= vec2<i32>(0)) && all(vec2<u32>(texel) < params.size); }
 
 @compute @workgroup_size(4, 16)
 fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_id) local: vec3<u32>) {
     let index = group.x + group.y * params.columns;
     if index >= params.tiles { return; }
     let tile = tiles[index];
-    let local_origin = vec2<i32>(i32(local.x * PIXELS), i32(local.y));
+    let local_origin = vec2<i32>(i32(local.x * 4u), i32(local.y));
     let xy = vec2<f32>(local_origin);
-    let first = tile.origin + local_origin;
-    var color = array<vec4<f32>, 4>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
+    let texel = tile.origin + local_origin;
+    let first = vec2<f32>(texel + params.origin) + 0.5;
+    var c0 = vec4<f32>(0.0);
+    var c1 = vec4<f32>(0.0);
+    var c2 = vec4<f32>(0.0);
+    var c3 = vec4<f32>(0.0);
     if params.base != 0u {
-        for (var k = 0u; k < PIXELS; k++) {
-            let texel = first + vec2<i32>(i32(k), 0);
-            if all(texel >= vec2<i32>(0)) && all(vec2<u32>(texel) < params.size) { color[k] = textureLoad(base, texel + params.base_origin, 0); }
-        }
+        if texel_inside(texel) { c0 = textureLoad(base, texel + params.base_origin, 0); }
+        if texel_inside(texel + vec2<i32>(1, 0)) { c1 = textureLoad(base, texel + vec2<i32>(1, 0) + params.base_origin, 0); }
+        if texel_inside(texel + vec2<i32>(2, 0)) { c2 = textureLoad(base, texel + vec2<i32>(2, 0) + params.base_origin, 0); }
+        if texel_inside(texel + vec2<i32>(3, 0)) { c3 = textureLoad(base, texel + vec2<i32>(3, 0) + params.base_origin, 0); }
     }
-    var coverage = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+    var coverage = vec4<f32>(0.0);
     for (var i = tile.start; i < tile.end; i++) {
         let command = commands[i];
         let kind = command.header & 15u;
         let count = command.header >> 8u;
         if kind == 3u {
-            stroke(command, count, vec2<f32>(first + params.origin), &coverage);
+            coverage = stroke(command, count, first, coverage);
             if (command.header & 16u) != 0u { continue; }
         } else if kind == 0u {
-            coverage = array<f32, 4>(1.0, 1.0, 1.0, 1.0);
+            coverage = vec4<f32>(1.0);
         } else {
             coverage = area(command, count, kind == 2u, xy);
         }
         let paint = colors[command.color];
-        for (var k = 0u; k < PIXELS; k++) {
-            let source = paint * coverage[k];
-            color[k] = source + color[k] * (1.0 - source.a);
-        }
-        coverage = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
+        c0 = over(c0, paint, coverage.x);
+        c1 = over(c1, paint, coverage.y);
+        c2 = over(c2, paint, coverage.z);
+        c3 = over(c3, paint, coverage.w);
+        coverage = vec4<f32>(0.0);
     }
-    for (var k = 0u; k < PIXELS; k++) {
-        let texel = first + vec2<i32>(i32(k), 0);
-        if all(texel >= vec2<i32>(0)) && all(vec2<u32>(texel) < params.size) { textureStore(output, texel, color[k]); }
-    }
+    if texel_inside(texel) { textureStore(output, texel, c0); }
+    if texel_inside(texel + vec2<i32>(1, 0)) { textureStore(output, texel + vec2<i32>(1, 0), c1); }
+    if texel_inside(texel + vec2<i32>(2, 0)) { textureStore(output, texel + vec2<i32>(2, 0), c2); }
+    if texel_inside(texel + vec2<i32>(3, 0)) { textureStore(output, texel + vec2<i32>(3, 0), c3); }
 }
