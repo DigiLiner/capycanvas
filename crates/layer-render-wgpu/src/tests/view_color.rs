@@ -206,6 +206,36 @@ fn presentation_wakes_for_visible_changes_and_skips_unchanged_frames() {
 }
 
 #[test]
+fn navigator_shows_transparency_without_a_paper_or_fill_layer() {
+    let mut layer = document("Ink on transparency");
+    let mut r = WgpuRasterizer::new_native_headless(layer.composition().color).unwrap();
+    let mut p = ViewportPresenter::for_overview_surface(&r, wgpu::TextureFormat::Rgba32Float,
+        SdrSurfaceColor::ExtendedLinearSrgb).unwrap();
+    let (texture, target) = crate::create_target(r.device(), [256; 2],
+        wgpu::TextureFormat::Rgba32Float, "transparent Navigator");
+    for alpha in [None, Some(0), Some(128), Some(255)] {
+        paint_mut(&mut layer).base = alpha.map(|alpha| layer_core::authored::PaintBase::new(rgba8_source([256; 2],
+            |x, _| if x < 128 { [255, 0, 0, alpha] } else { [0; 4] }).into()));
+        frame(&mut r, &mut layer);
+        for (background, shades) in [([0.04; 3], [0.232, 0.032]), ([0.9; 3], [0.92, 0.72])] {
+            p.set_overviews(&r, &[crate::OverviewPlacement {
+                bounds: [0., 0., 256., 256.], clip: None, work_area: [[-1000.; 2]; 4],
+                outline_linear: [0.; 3], background_linear: background, scale: 1., opacity: 1.,
+            }]);
+            p.present_overviews(&r, &target, [256; 2]).unwrap();
+            let actual = crate::test_support::float_pixels(&r, &texture);
+            for (x, checker) in [(32, shades[0]), (40, shades[1]), (160, shades[0]), (168, shades[1])] {
+                let a = if x < 128 { f32::from(alpha.unwrap_or(0)) / 255. } else { 0. };
+                let expected = [a + checker * (1. - a), checker * (1. - a), checker * (1. - a), 1.];
+                let pixel = actual[32 * 256 + x];
+                assert!(pixel.into_iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-5),
+                    "alpha={alpha:?} background={background:?} x={x}: {pixel:?} != {expected:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn native_surface_rotation_preserves_artwork_cursor_and_clipped_overview() {
     let mut r = WgpuRasterizer::new_native_headless(DocumentColor {
         space: RgbSpace::Srgb, depth: SampleDepth::U16,

@@ -100,6 +100,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Smooth Zoom tool, up/down | 60 | **Current binary unmeasured; earlier 1.0.11 missed:** 43.43–43.56 presented fps, p99 99.96–116.21 ms, 12 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized APK `10e734af`, navigation source `87b79f29`; `artifacts/navigation-controls/zoom-audit-20261009/final/low/` |
 | Footer zoom and rotation sliders | 60 | Unmeasured on the reference tablet | |
 | Navigator drag | 60 | | |
+| Pan with Navigator open, checkerboard shader | 60 | Diagnostic: 59.76–59.82 renderer submissions/s; submission interval p99 18.94–19.14 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 12 MP tier photo, thermal 0; release APK `c6136dfd`, base `ed97cae7f` plus shader `bd7e1f35bfcb`; `artifacts/navigator-android/low/` |
 | Brush-cursor hover | 60 | | |
 | Placed-photo translation | 60 | Navigator closed: screen 59.3 presents/s, p99 16.9 ms; renderer 122.9 completed updates/s | Earlier direct-presentation comparison below, `photo-translate-drag` |
 | Placed-photo corner resize | 60 | Navigator open: screen 59.4 presents/s, p99 ≤17.0 ms; renderer 104.2 fresh completed updates/s | Current drag comparison below |

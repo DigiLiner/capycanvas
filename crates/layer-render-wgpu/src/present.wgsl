@@ -479,10 +479,12 @@ fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
         }}
     }
     let paint = proof_artwork(sample, point);
-    var rgb = view_working_rgb(paint.rgb) + view_ui_rgb(v.background_scale.rgb) * (1.-paint.a);
+    let scale = v.background_scale.w;
+    let checker = select(0., 1., (i32(floor(p.x / (8. * scale))) + i32(floor(p.y / (8. * scale)))) % 2 == 0);
+    let background = mix(view_ui_rgb(v.background_scale.rgb), vec3(checker), .2);
+    var rgb = view_working_rgb(paint.rgb) + background * (1.-paint.a);
     let edge = min(min(segment_distance(p,v.ab.xy,v.ab.zw),segment_distance(p,v.ab.zw,v.cd.xy)),
                    min(segment_distance(p,v.cd.xy,v.cd.zw),segment_distance(p,v.cd.zw,v.ab.xy)));
-    let scale = v.background_scale.w;
     rgb = mix(rgb,vec3(v.halo),clamp(1.5*scale+.5-edge,0.,1.));
     rgb = mix(rgb,view_ui_rgb(v.outline.rgb),clamp(.75*scale+.5-edge,0.,1.));
     if camera.viewport.z > .5 { rgb = display_color(rgb); }

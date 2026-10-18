@@ -3290,6 +3290,8 @@ fn native_navigator() {
     });
     pump(200);
     let dir = artifact_dir("../../artifacts/familiar-workspace");
+    let paper = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(
+        ui_session(&w).engine().document().scene(), None).unwrap());
     for theme in [Theme::Dark, Theme::Light] {
         w.dispatch(UiAction::RestoreSettings {
             settings: Settings {
@@ -3297,9 +3299,14 @@ fn native_navigator() {
                 ..Settings::default()
             },
         });
-        pump(250);
-        capture_reference(&w, &format!("{dir}/navigator-{theme:?}.png"), 1.0);
+        for visible in [true, false] {
+            w.dispatch(UiAction::SetLayerVisibility { id: paper, visible });
+            pump(250);
+            let background = if visible { "" } else { "transparent-" };
+            capture_reference(&w, &format!("{dir}/navigator-{background}{theme:?}.png"), 1.0);
+        }
     }
+    w.dispatch(UiAction::SetLayerVisibility { id: paper, visible: true });
     // A second projection shares the same image/cache producer.
     let mut workspace = state(&w).workspace;
     workspace
