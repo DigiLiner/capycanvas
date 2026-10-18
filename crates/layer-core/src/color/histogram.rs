@@ -105,9 +105,10 @@ impl Histogram {
         }
     }
 
-    /// Consume linear-premultiplied working pixels in bounded strips. Alpha zero
-    /// contributes no RGB; partial alpha is unassociated before counting. Never
-    /// feed a downsampled preview: averaging changes the distribution.
+    /// Consume linear-premultiplied working pixels in bounded strips. Alpha below
+    /// the smallest normal Float32 is transparent, as in composition; partial
+    /// alpha is unassociated before counting. Never feed a downsampled preview:
+    /// averaging changes the distribution.
     pub fn add(&mut self, pixels: &[[f32; 4]]) -> Result<(), &'static str> {
         let encoded = encoded_bins::for_space(self.color.space);
         let domain = (self.domain != HistogramDomain::Artwork).then(|| self.boundaries(0));
@@ -115,7 +116,7 @@ impl Histogram {
             if pixel.iter().any(|v| !v.is_finite()) || !(0. ..=1.).contains(&pixel[3]) {
                 return Err("Invalid histogram pixel");
             }
-            if pixel[3] == 0. {
+            if pixel[3] < f32::MIN_POSITIVE {
                 self.transparent += 1;
                 continue;
             }
@@ -277,7 +278,7 @@ mod tests {
             let mut expected = Histogram::new(color);
             let coefficients = space.to_xyz()[1];
             for p in &pixels {
-                if p[3] == 0. {
+                if p[3] < f32::MIN_POSITIVE {
                     expected.transparent += 1;
                     continue;
                 }

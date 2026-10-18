@@ -167,7 +167,7 @@ fn count(@builtin(local_invocation_index) lane:u32,@builtin(workgroup_id) group:
         if !selected(world) {continue;}
         let color=textureLoad(pixels,vec2<i32>(local),0);let bits=bitcast<vec4<u32>>(color);let absolute=bits&vec4<u32>(0x7fffffffu);
         if any(absolute>=vec4<u32>(0x7f800000u)) || absolute.a>0x3f800000u || (bits.a>>31u!=0u && absolute.a!=0u) {atomicOr(&counts[1042u],1u);continue;}
-        if absolute.a==0u {atomicAdd(&counts[1041u],1u);continue;}
+        if (bits.a&0x7f800000u)==0u {atomicAdd(&counts[1041u],1u);continue;}
         atomicAdd(&counts[1040u],1u);
         let alpha=float_number(color.a);let rgb=array<FloatNumber,3>(float_number(color.r),float_number(color.g),float_number(color.b));
         let neutral=rgb[0].mantissa==rgb[1].mantissa && rgb[1].mantissa==rgb[2].mantissa

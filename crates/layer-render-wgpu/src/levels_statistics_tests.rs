@@ -109,9 +109,9 @@ fn levels_statistics_constant_empty_hdr_tiny_alpha_and_cancellation_are_explicit
         let doc=fixture(space,SampleDepth::F32,&[[1e-30,2e-30,4e-30,1e-30],[2.,4.,8.,1.]]);
         let result=stats(&doc,false).unwrap();assert_eq!(result.pixels,2);
         for c in 0..3 {close(result.minimum[c],space.encode((1u32<<c) as f64),4e-6);close(result.maximum[c],space.encode((2u32<<c) as f64),4e-6);}
-        let subnormal=fixture(space,SampleDepth::F32,&[[f32::from_bits(1);4]]);
-        let result=stats(&subnormal,false).unwrap();assert_eq!(result.pixels,1);
-        for c in 0..3 {close(result.minimum[c],1.,4e-6);close(result.maximum[c],1.,4e-6);}
+        let subnormal=fixture(space,SampleDepth::F32,&[[f32::from_bits(1);4]]);assert!(stats(&subnormal,false).is_err());
+        let beside=fixture(space,SampleDepth::F32,&[[f32::from_bits(1);4],[0.25,0.25,0.25,1.]]);let result=stats(&beside,false).unwrap();assert_eq!(result.pixels,1);
+        for c in 0..3 {close(result.minimum[c],space.encode(0.25),4e-6);close(result.maximum[c],space.encode(0.25),4e-6);}
         let extreme=[[-2.,-4.,-8.,1.],[1e25,2e25,4e25,1e-30]];
         let signed=fixture(space,SampleDepth::F32,&extreme);let result=stats(&signed,false).unwrap();
         assert_eq!(result.pixels,2);

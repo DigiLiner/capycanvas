@@ -970,10 +970,13 @@ the capture budget. Exact submits at most sixteen native 256-pixel tiles before
 waiting, while retaining cancellation checks and budget-driven window splitting.
 Source preparation is shared by the tiles in each bounded window.
 Four channel histograms and coverage/clipping counts occupy a 4 KiB readback;
-no full-resolution image reaches the panel. Positive alpha counts once, including
-subnormal coverage. Nonfinite color rejects the result. RGB bin boundaries use
-exact ratio comparisons, and ambiguous luminance boundaries use a separate wide
-integer reduction so ordinary pixels avoid its register cost.
+no full-resolution image reaches the panel. A pixel with alpha of at least
+`WORKING_MIN_ALPHA` counts once. Smaller alpha, tested by its bits, is
+transparent here and in Auto Levels, as in composition and Float32 publication,
+so GPUs that flush subnormals give the same counts. Nonfinite color rejects the
+result. RGB bin boundaries use exact ratio comparisons, and ambiguous luminance
+boundaries use a separate wide integer reduction so ordinary pixels avoid its
+register cost.
 
 Waveform optionally extends that same scan with four 256-by-256 count planes.
 Columns preserve document x; rows use the histogram's existing RGB and luminance

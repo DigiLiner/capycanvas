@@ -420,7 +420,7 @@ mod waveform {
                 let [x, y] = world;
                 if !admitted(x, y) { continue; }
                 let rgba = pixel(x, y);
-                if rgba[3] == 0. { histogram.transparent += 1; continue; }
+                if rgba[3] < f32::MIN_POSITIVE { histogram.transparent += 1; continue; }
                 histogram.pixels += 1;
                 let rgb = [0, 1, 2].map(|i| f64::from(rgba[i]) / f64::from(rgba[3]));
                 let luminance: f64 = if rgb[0] == rgb[1] && rgb[1] == rgb[2] { rgb[0] }
