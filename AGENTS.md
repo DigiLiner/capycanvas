@@ -16,6 +16,13 @@ specific tasks.
   Create another worktree only when none is assigned or the user requests one,
   and put it under `/home`, never `/tmp`
   ([environment](docs/development/environment.md)).
+- `/tmp` may be RAM-backed, so large files there can run the machine out of
+  memory. Keep builds, captures, recordings, downloads and other heavy files out
+  of it. When `/mnt/localssd` exists, put as many of them there as you can, such
+  as `CARGO_TARGET_DIR`, Gradle build directories and large test output. It is
+  temporary scratch space: anything in it is safe to clean up. Keep track of the
+  artifacts, worktrees, builds and test runs you create, and delete them once
+  you no longer need them so the disk doesn't fill.
 - Delegate routine, context-heavy verification such as test suites, scripted
   journeys and performance runs to subagents on Sonnet or Sol, when supported.
   Give them the worktree and commands, and ask for concise results with

@@ -19,7 +19,9 @@ hardware are in [devices](devices.md).
   `~/.cache/capy/<name>`. `/tmp` is a tmpfs whose per-user quota every session
   shares; a few Cargo `target/` directories fill it, and then every session's
   builds and tool output fail. If a worktree must live in `/tmp`, set
-  `CARGO_TARGET_DIR` and the Gradle build directory under `/home`.
+  `CARGO_TARGET_DIR` and the Gradle build directory under `/home`. When
+  `/mnt/localssd` exists, prefer it for build directories and other heavy
+  scratch files; anything there is temporary and safe to clean up.
 - Delete scratch worktrees and build copies you created when you finish; keep
   the user's assigned worktree. Never delete, reset or clean another session's
   worktree, branch, build or files.
