@@ -5718,14 +5718,14 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             material_shader.clone(),
         );
         Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_recipe(
+            fullscreen_pipeline_targets_with_constants_recipe(
                 mode,
                 &device,
                 &layout,
                 &shader,
                 "reservoir_fragment",
-                None,
-                device.working_format(),
+                &[Some(wgpu::ColorTargetState { format: device.working_format(), blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                &MaterialOperation::Wet.constants()[1..],
                 "layer brush reservoir exchange",
             )
         })
