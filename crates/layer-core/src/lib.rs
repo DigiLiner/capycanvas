@@ -1482,7 +1482,7 @@ impl Document {
             candidate.scene_index = Arc::new(
                 SceneIndex::build(&candidate.artwork).map_err(DocumentError::InvalidArtwork)?,
             );
-            candidate.validate_paper_order(self)?;
+            candidate.validate_papers(self)?;
         }
         candidate.validate_payloads()?;
         if resources {let mut roots=RootInventory::default();roots.document(&candidate);roots.validate_resources().map_err(DocumentError::InvalidArtwork)?;}

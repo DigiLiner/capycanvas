@@ -1248,6 +1248,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             C::PasteImage | C::PasteInPlace | C::PasteAtView | C::PasteAtCursor => self.paste_refusal().unwrap_or_else(|| l.text(MessageId::COMMANDS_UNAVAILABLE_IN_THE_CURRENT_TOOL_OR_EDIT_TARGET)),
             C::PasteInto => self.paste_into_refusal().unwrap_or_else(|| l.text(MessageId::COMMANDS_UNAVAILABLE_IN_THE_CURRENT_TOOL_OR_EDIT_TARGET)),
             C::MaskSelection if self.engine.document().working.selection.is_none() => l.text(MessageId::COMMANDS_MAKE_A_SELECTION_FIRST),
+            C::MaskSelection if document.working.occurrence.is_some_and(|h| layer_core::paper::is_paper_layer(document.scene(), h)) => l.text(MessageId::COMMANDS_PAPER_CANNOT_HAVE_A_MASK),
             C::ApplyLayerMask if apply_refusal.is_some() => apply_refusal.unwrap_or_else(|| l.text(MessageId::COMMANDS_UNAVAILABLE_IN_THE_CURRENT_TOOL_OR_EDIT_TARGET)),
             C::ApplyLayerMask if active.and_then(|l| l.mask.as_ref()).is_some_and(|m| !m.enabled) => {
                 l.text(MessageId::COMMANDS_ENABLE_THE_MASK_BEFORE_APPLYING_IT)
@@ -1331,6 +1332,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if document.working.selection.is_none() && self.current_selection().is_none() =>
             {
                 Some(l.text(MessageId::COMMANDS_CREATE_A_SELECTION_FIRST).to_string())
+            }
+            UiAction::Layer { action: LayerAction::AddMask { id, .. } | LayerAction::PasteMask { id } | LayerAction::MaskSelection { id, .. } }
+                if occurrence_handle(*id).is_ok_and(|handle| layer_core::paper::is_paper_layer(document.scene(), handle)) =>
+            {
+                Some(l.text(MessageId::COMMANDS_PAPER_CANNOT_HAVE_A_MASK).to_string())
             }
             UiAction::Layer { action: LayerAction::PasteMask { id } }
                 if occurrence_handle(*id).is_ok_and(|handle| self.copied_mask_use(handle).is_err()) =>

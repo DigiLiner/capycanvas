@@ -185,7 +185,7 @@ impl LayerControls {
             blend: editable && unlocked,
             alpha_lock: l.kind() == LayerKind::Paint && unlocked,
             edit_lock: !doc.scene().parent(id).is_some_and(|p| doc.is_locked(p)),
-            mask: editable && unlocked,
+            mask: editable && unlocked && !layer_core::paper::is_paper_layer(doc.scene(), id),
             fill: l.kind() == LayerKind::Paint && unlocked && !matches!(doc.working.target, Some(SourceTarget::Coverage(_))),
         }
     }
@@ -782,6 +782,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         } else {
             action
         };
+        if let LayerAction::AddMask { id, .. } | LayerAction::PasteMask { id } = action
+            && layer_core::paper::is_paper_layer(self.engine.document().scene(), occurrence_handle(id)?) {
+            return Err(self.localization().text(MessageId::COMMANDS_PAPER_CANNOT_HAVE_A_MASK).to_string());
+        }
         match action {
             LayerAction::RasterizeSource { id } => self.request_source_edit(SourceUse::Paint(occurrence_handle(id)?), DocumentRequest::RasterizeSource { layer: id })?,
             LayerAction::RepairSourceProfile { id } => self.request_source_edit(SourceUse::from_token(id)?, DocumentRequest::RepairSourceProfile { layer: id })?,
@@ -1290,6 +1294,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let locked = doc.is_locked(handle);
         let paint = l.kind() == LayerKind::Paint;
         let controls = LayerControls::for_layer(doc, handle, l);
+        let accepts_mask = !layer_core::paper::is_paper_layer(doc.scene(), handle);
         let roots = doc.layer_roots(self.selected_layers());
         let multiple = roots.len() > 1;
         let parent = if l.kind() == LayerKind::Group {
@@ -1309,8 +1314,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 A::Select { .. } | A::ShowMask { .. } => true,
                 A::CopyMask { .. } => l.mask.is_some(),
                 A::PasteMask { .. } => {
-                    !locked && self.copied_mask_use(handle).is_ok()
+                    accepts_mask && !locked && self.copied_mask_use(handle).is_ok()
                 }
+                A::AddMask { .. } => accepts_mask && !locked,
                 A::New { group: true, clipped: false } if self.selected_layers().len() > 1 => doc.group_layers_edit(&roots, self.new_group_blend(), "").is_ok(),
                 A::New { clipped, .. } => {
                     !parent.is_some_and(|p| doc.is_locked(p))
@@ -1320,7 +1326,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 A::ReferenceSelection => !self.reference_selection().is_empty(),
                 A::Lock { .. } => controls.edit_lock,
                 A::AlphaLock { .. } | A::Clear { .. } => controls.alpha_lock,
-                A::MaskSelection { .. } => !locked && doc.working.selection.is_some(),
+                A::MaskSelection { .. } => accepts_mask && !locked && doc.working.selection.is_some(),
                 A::ApplyMask { .. } => {
                     paint && !locked && l.mask.as_ref().is_some_and(|m| m.enabled)
                 }

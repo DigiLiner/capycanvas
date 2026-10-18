@@ -386,6 +386,7 @@ commands-this-selection-layer-is-locked = Diese Auswahlebene ist gesperrt
 commands-edit-a-selection-layer-first = Zuerst eine Auswahlebene bearbeiten
 commands-return-to-the-artwork-first = Zuerst zum Bild zurückkehren
 commands-the-layer-has-no-mask = Die Ebene hat keine Maske
+commands-paper-cannot-have-a-mask = Papier kann keine Maske haben
 commands-already-editing-the-layer-mask = Ebenenmaske wird bereits bearbeitet
 commands-already-editing-the-layer-content = Ebeneninhalt wird bereits bearbeitet
 commands-deselect-before-restoring-the-previous-selection = Vor dem Wiederherstellen der vorherigen Auswahl die Auswahl aufheben

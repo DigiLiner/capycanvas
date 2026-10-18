@@ -399,7 +399,7 @@ extension XCTestCase {
         #endif
     }
 
-    @MainActor private func revealLayerMenuAction(_ label: String, in app: XCUIApplication) -> XCUIElement {
+    @MainActor func revealLayerMenuAction(_ label: String, in app: XCUIApplication) -> XCUIElement {
         let action = app.buttons.matching(NSPredicate(format: "identifier == %@ OR (identifier BEGINSWITH %@ AND label == %@)",
             "menu-action-" + label, "command-", label)).firstMatch
         guard !action.waitForExistence(timeout: 1) else { return action }
@@ -416,7 +416,7 @@ extension XCTestCase {
         return action
     }
 
-    @MainActor func layerContext(_ label: String, on element: XCUIElement, in app: XCUIApplication) {
+    @MainActor private func layerContext(_ label: String, on element: XCUIElement, in app: XCUIApplication) {
         #if os(macOS)
         element.rightClick()
         #else

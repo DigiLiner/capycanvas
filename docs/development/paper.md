@@ -52,7 +52,7 @@ the library, rendering, saved data and what each host has.
 | New drawing | Resolution (ppi) beside Width and Height, 300 by default and kept in saved presets. There is no paper choice: a new drawing uses the paper last chosen. |
 | Image Size | Unchanged. It shows 300 ppi for a drawing without a resolution. |
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
-| Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name, after the mask when there is one, and opens Choose Texture unless the layer is locked. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
+| Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name and opens Choose Texture unless the layer is locked. Add mask in the footer and the row menu's Add mask, mask-from-selection and Paste mask items are disabled while Paper is selected. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
 | Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%. Double-clicking the Scale label returns to 100%. |
 | Choose Texture | A dialog with Edit Color's size, title and footer. One grid of squircle tiles, each preview at its own size with the paper's name below: the thirteen built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
 | Canvas | Relief shading while Scale changes and for a moment after a paper is chosen. |
@@ -110,9 +110,9 @@ the same thing in every drawing.
 
 Paper is a built-in fill program, `paper`, in the Fill category beside Solid
 Color and Gradient Fill. It keeps the decision that made the default paper an
-ordinary fill: masks, opacity, blending, history, thumbnails and color editing
-come from the general layer rules. Paper stays at the bottom of the root stack;
-other layers drop above it. It cannot be grouped or duplicated. Adding a sheet
+ordinary fill: opacity, blending, history, thumbnails and color editing come
+from the general layer rules. Paper stays at the bottom of the root stack;
+other layers drop above it. It cannot be masked, grouped or duplicated. Adding a sheet
 when none exists inserts it at the bottom, regardless of the selected group.
 
 | Value | Kind | Rule |
@@ -140,9 +140,9 @@ hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 ### Which paper a stroke uses
 
 - **The nearest Paper at or below the target** in its stack, then in each
-  enclosing stack. Painting into a Paper's own mask uses that Paper.
-- **Appearance does not change tooth.** Visibility, opacity, blending, masks
-  and clipping affect only how Paper looks. A Transparent background hides the
+  enclosing stack.
+- **Appearance does not change tooth.** Visibility, opacity, blending and
+  clipping affect only how Paper looks. A Transparent background hides the
   Paper but keeps its tooth.
 - **No Paper below** uses the default paper at 100% of the paper resolution.
 - **The stroke keeps its paper.** It is resolved at pen-down and held with the
@@ -157,8 +157,8 @@ hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 | Paper color is opaque | Adopted | Transparency comes from visibility or layer opacity; the startup background stays exact. |
 | Tooth ignores appearance | Adopted | Brushes read one texture per stroke and never a mask. |
 | No offset or angle on Paper | Adopted | Position and orientation come from the spatial reference that image commands already update. |
-| A selected Paper with a mask paints its mask | Adopted | Without a mask, Paper and other fills use the nearest artwork layer above them. If that layer is inside a group, there is no drawable target. |
-| No masks on Paper | Rejected | Paper shares fill-mask editing, selection masks, mask paste and history. |
+| A selected Paper paints the layer above | Adopted | Paper and unmasked fills use the nearest artwork layer above them. If that layer is inside a group, there is no drawable target. |
+| No masks on Paper | Adopted for now | Shared edit validation refuses any edit that gives Paper a mask, and the mask controls are disabled on its row. A masked sheet adds row layouts, drawing targets and mask cases that painters rarely need. A file that already has one keeps it until it is deleted. |
 | One Paper per drawing, pinned to the bottom | Adopted | The sheet stays below the artwork. Shared edit validation protects its position through reorder, group, duplicate and paste. |
 | Normal blend only | Rejected | Blend modes cost nothing; forbidding them adds code. |
 
@@ -325,7 +325,7 @@ keep their Solid Color.
 | Area | State |
 | --- | --- |
 | Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
-| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the dialog, the row thumbnails, drawing targets, masks and sheet creation in both themes. |
+| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. |
 | Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows and Choose Texture in both themes. |
 | Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Native workers run image decoding and library files through the shared `layer_host::papers::PaperTask`. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
 | Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the texture dialog, missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it. |

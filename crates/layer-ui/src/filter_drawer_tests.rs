@@ -186,7 +186,7 @@ fn fill_color_lock_history_and_blocked_cursor_share_document_policy() {
     s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
     let controls = s.state.layer_tools.controls;
     assert!(controls.edit_lock);
-    assert!(controls.opacity && controls.blend && controls.mask && !controls.alpha_lock);
+    assert!(controls.opacity && controls.blend && !controls.mask && !controls.alpha_lock);
     assert_eq!(s.state.layer_properties.controls.iter().map(|control| control.key.as_str()).collect::<Vec<_>>(), ["color", "texture", "scale"]);
     let revision = s.state.layers.iter().find(|layer| layer.id == 2).unwrap().paint_revision;
     s.dispatch(UiAction::SetColor { rgba: [0.08, 0.1, 0.15, 1.] }).unwrap();

@@ -1327,8 +1327,12 @@ mod tests {
             assert_eq!((image.width, image.height, image.bytes.len()), (32, 32, 4096));
             assert!(image.bytes.as_chunks::<4>().0.iter().all(|pixel| *pixel == expected), "request {}", image.request_id);
         }
-        host.dispatch(serde_json::from_value(json!({"type":"layer","action":{"op":"add_mask","id":fill,"replace":false}})).unwrap()).unwrap();
-        let mask = host.session.state().layers.iter().find(|layer| layer.id == fill).unwrap().mask_id.unwrap();
+        let add_mask = |id| serde_json::from_value(json!({"type":"layer","action":{"op":"add_mask","id":id,"replace":false}})).unwrap();
+        assert!(host.dispatch(add_mask(fill)).is_err());
+        host.dispatch(serde_json::from_value(json!({"type":"effect","action":{"op":"insert","effect":"solid_color"}})).unwrap()).unwrap();
+        let solid = layer_ui::occurrence_token(host.session.engine().document().working.occurrence.unwrap());
+        host.dispatch(add_mask(solid)).unwrap();
+        let mask = host.session.state().layers.iter().find(|layer| layer.id == solid).unwrap().mask_id.unwrap();
         loop {
             let (_, images) = host.layer_thumbnails([(3, mask)]).unwrap();
             if let Some(image) = images.iter().find(|image| image.request_id == 3) {

@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = 此选区图层已锁定
 commands-edit-a-selection-layer-first = 请先编辑选区图层
 commands-return-to-the-artwork-first = 请先返回画作
 commands-the-layer-has-no-mask = 图层没有蒙版
+commands-paper-cannot-have-a-mask = 纸张不能有蒙版
 commands-already-editing-the-layer-mask = 已在编辑图层蒙版
 commands-already-editing-the-layer-content = 已在编辑图层内容
 commands-deselect-before-restoring-the-previous-selection = 恢复之前的选区前，请先取消当前选择

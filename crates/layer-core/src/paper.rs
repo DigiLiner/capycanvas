@@ -17,6 +17,10 @@ pub fn is_paper(program: &EffectProgram) -> bool {
     program.id.as_ref() == PAPER_PROGRAM && program.kind == crate::EffectKind::Generator
 }
 
+pub fn is_paper_layer(scene: SceneView<'_>, occurrence: OccurrenceHandle) -> bool {
+    scene.effect(occurrence).is_some_and(|effect| is_paper(effect.program))
+}
+
 mod import;
 pub use import::{CMYK, decode_png, encode_png, image_preview, paper_image};
 
@@ -136,20 +140,20 @@ pub fn paper_occurrence(scene: SceneView<'_>, from: Option<OccurrenceHandle>) ->
 
 impl crate::Document {
     pub fn bottom_paper(&self) -> Option<OccurrenceHandle> {
-        self.scene().children(None).last().copied().filter(|h| self.scene().effect(*h).is_some_and(|e| is_paper(e.program)))
+        self.scene().children(None).last().copied().filter(|h| is_paper_layer(self.scene(), *h))
     }
-    pub(crate) fn validate_paper_order(&self, previous: &Self) -> Result<(), crate::DocumentError> {
+    pub(crate) fn validate_papers(&self, previous: &Self) -> Result<(), crate::DocumentError> {
         let scene = self.scene();
         let bottom = self.bottom_paper();
         if let Some(paper) = previous.bottom_paper()
-            && scene.includes(paper) && scene.effect(paper).is_some_and(|e| is_paper(e.program)) && bottom != Some(paper) {
+            && scene.includes(paper) && is_paper_layer(scene, paper) && bottom != Some(paper) {
             return Err(crate::DocumentError::ProtectedOccurrence(paper));
         }
-        for &h in scene.order() {
-            if scene.effect(h).is_some_and(|e| is_paper(e.program))
-                && (previous.scene().position(h).is_none() || !previous.scene().effect(h).is_some_and(|e| is_paper(e.program))) && bottom != Some(h) {
-                return Err(crate::DocumentError::ProtectedOccurrence(h));
-            }
+        let mask = |document: &Self, h| document.scene().occurrence(h).and_then(|o| o.mask.as_ref()).map(|mask| mask.source);
+        for &h in scene.order().iter().filter(|h| is_paper_layer(scene, **h)) {
+            let kept = previous.scene().position(h).is_some() && is_paper_layer(previous.scene(), h);
+            if !kept && bottom != Some(h) { return Err(crate::DocumentError::ProtectedOccurrence(h)); }
+            if mask(self, h).is_some() && (!kept || mask(self, h) != mask(previous, h)) { return Err("Paper can't have a mask".into()); }
         }
         Ok(())
     }
@@ -265,6 +269,23 @@ mod tests {
         assert_eq!(doc.bottom_paper(), None);
     }
     #[test]
+    fn edits_never_give_paper_a_mask() {
+        use crate::{CoverageSnapshot, Edit, authored::{MaskUse, RecordChange}, operation_test_support as f};
+        let mut doc = f::document([32; 2], &["Ink"]);
+        let masked = |doc: &Document, owner| {
+            let snapshot = CoverageSnapshot::reveal_all(doc.artwork.coverage.next_handle(), [32; 2], [0; 2]);
+            let coverage = RecordChange::insert(&doc.artwork.coverage, snapshot.source);
+            let mut occurrence = doc.scene().occurrence(owner).unwrap().clone();
+            occurrence.mask = Some(MaskUse { source: coverage.handle, ..snapshot.use_ });
+            Edit::Batch(vec![Edit::Coverage(coverage), Edit::Occurrence(RecordChange::replace(&doc.artwork.occurrences, owner, Some(occurrence)).unwrap())])
+        };
+        let original = doc.artwork.clone();
+        let paper = doc.bottom_paper().unwrap();
+        assert_eq!(doc.apply(masked(&doc, paper)), Err(crate::DocumentError::InvalidLayerOperation("Paper can't have a mask")));
+        assert_eq!(doc.artwork, original);
+        doc.apply(masked(&doc, f::id(&doc, "Ink"))).unwrap();
+    }
+    #[test]
     fn unmasked_fills_draw_above_without_entering_groups_and_own_masks_take_priority() {
         use crate::{DrawingRefusal, LayerBlend, operation_test_support as f};
         for program in ["paper", "solid_color", "gradient_fill"] {
@@ -284,6 +305,7 @@ mod tests {
             assert_eq!(doc.drawing_target(), doc.scene().source_target(nearest));
             let undo = doc.apply(doc.delete_layers_edit(&[f::id(&doc, "Top"), nearest]).unwrap()).unwrap();
             assert_eq!(doc.try_drawing_target(), Err(DrawingRefusal::NoLayer));
+            if program == "paper" { continue; }
             let coverage = f::add_mask(&mut doc, fill, [32; 2], [0; 2]);
             assert_eq!(doc.drawing_target(), Some(SourceTarget::Coverage(coverage)));
             doc.apply(undo).unwrap();

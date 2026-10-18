@@ -86,8 +86,8 @@ current UI preferences.
 
 `DocumentNames` supplies localized initial names. Created occurrence names are
 literal authored strings, not live localization keys. A new drawing has a white
-Solid Color effect named Paper at the bottom, without a mask or special layer
-restrictions. Window titles, locations,
+[Paper](../development/paper.md) fill at the bottom, which takes no mask and
+stays below the other root layers. Window titles, locations,
 permissions, tab order, camera, tool settings and view toggles remain with their
 shared session or workspace owners.
 

@@ -411,6 +411,51 @@ class AndroidInteractionTest {
         waitFor("Paper unlocked") { texture().getBoolean("editable") }
     }
 
+    private fun menuItem(label: String): Offset {
+        var result: Offset? = null
+        waitFor("menu item $label") {
+            result = findNode(hasLabel(label))?.let { (root, node) ->
+                val origin = IntArray(2); val base = IntArray(2)
+                root.view.getLocationOnScreen(origin); owner.view.getLocationOnScreen(base)
+                node.boundsInRoot.center + Offset((origin[0] - base[0]).toFloat(), (origin[1] - base[1]).toFloat())
+            }
+            result != null
+        }
+        return result!!
+    }
+    private fun menuItems(sections: JSONArray) = sections.values().flatMap { (it as JSONArray).objects() }
+    private fun menuOp(item: JSONObject) = item.optJSONObject("action")?.optJSONObject("action")?.optString("op")
+    private fun layerMenu(id: Long) = kotlinx.coroutines.runBlocking { host.withNative { JSONObject(Native.query(it, obj("type" to "layer_menu", "id" to id, "mask" to false).toString())) } }
+    private fun menuPath(id: Long, op: String): List<String> {
+        val menu = layerMenu(id)
+        fun path(sections: JSONArray): List<String>? {
+            for (item in menuItems(sections)) {
+                val value = menuOp(item)
+                if (value == op || value == "${op}_selected") return listOf(item.getString("label"))
+                path(item.array("sections"))?.let { return listOf(item.getString("label")) + it }
+            }
+            return null
+        }
+        return checkNotNull(path(menu.array("sections"))) { "Missing $op in $menu" }
+    }
+    private fun menuTap(at: Offset) { popupInput = true; try { tap(at) } finally { popupInput = false }; settle() }
+    private fun hold(at: Offset) { event(MotionEvent.ACTION_DOWN, at); SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout() + 250L); event(MotionEvent.ACTION_UP) }
+    private fun clickable(node: SemanticsNode) = generateSequence(node) { it.parent }.first { it.config.contains(SemanticsActions.OnClick) }
+    private fun footerMaskEnabled(): Boolean {
+        val label = host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("add_mask")
+        var enabled: Boolean? = null
+        onMain { owner.find { it.config.getOrNull(SemanticsProperties.ContentDescription)?.contains(label) == true }?.let { enabled = !clickable(it).config.contains(SemanticsProperties.Disabled) } }
+        return checkNotNull(enabled) { "Missing $label" }
+    }
+    private fun menuItemEnabled(label: String): Boolean {
+        var enabled: Boolean? = null
+        waitFor("menu item $label") {
+            findNode(hasLabel(label))?.let { (_, node) -> enabled = !clickable(node).config.contains(SemanticsProperties.Disabled) }
+            enabled != null
+        }
+        return enabled!!
+    }
+
     @Test fun selectingFillRowsKeepsPropertiesAndDrawingTargets() {
         customize(obj("type" to "close_expanded"))
         revealLayers()
@@ -426,16 +471,30 @@ class AndroidInteractionTest {
             tap(bounds("layer-row-$fill").center)
             waitFor("Fill properties retain editing selection") { editingLayer() == fill && state().getJSONObject("layer_properties").getString("title") == title }
             assertEquals("The unmasked layer above the selected fill receives paint", listOf(ink), layerStates().filter { it.getBoolean("drawing") }.map { it.getLong("id") })
-            layerAction(obj("op" to "add_mask", "id" to fill, "replace" to false))
-            layerAction(obj("op" to "select", "id" to fill, "mask" to false))
-            waitFor("A fill's own mask owns painting") { layerStates().first { it.getLong("id") == fill }.getBoolean("mask_selected") }
             if (effect == "paper") {
-                waitFor("Paper mask and texture shown") { shown("layer-mask-$fill") && shown("layer-texture-$fill") }
-                assertTrue("The texture follows the mask", bounds("layer-texture-$fill").left >= bounds("layer-mask-$fill").right)
-                screenshot("validation/paper/texture-row-mask.png")
-            } else assertFalse("Only Paper rows show a texture", exists("layer-texture-$fill"))
-            assertFalse("A fill mask prevents drawing on a layer above", layerStates().any { it.getLong("id") != fill && it.getBoolean("drawing") })
-            command("undo")
+                waitFor("Paper shows its texture") { shown("layer-texture-$fill") }
+                assertFalse("Paper offers no mask in the Layers footer", footerMaskEnabled())
+                val path = menuPath(fill, "add_mask")
+                val submenu = path.dropLast(1).fold(layerMenu(fill)) { item, label -> menuItems(item.array("sections")).first { it.getString("label") == label } }
+                val masks = menuItems(submenu.array("sections")).filter { menuOp(it) in listOf("add_mask", "mask_selection", "paste_mask") }
+                assertEquals("Add, reveal, hide and paste mask: $masks", 4, masks.size)
+                assertTrue("The shared menu refuses every Paper mask", masks.none { it.optBoolean("enabled", true) })
+                hold(bounds("layer-row-$fill").center)
+                for (label in path.dropLast(1)) menuTap(menuItem(label))
+                for (item in masks) assertFalse("${item.getString("label")} is unavailable for Paper", menuItemEnabled(item.getString("label")))
+                screenshot("validation/paper/paper-mask-menu.png")
+                back()
+                assertFalse("Paper has no mask", layerStates().first { it.getLong("id") == fill }.getBoolean("has_mask"))
+                assertFalse("Paper shows no mask thumbnail", exists("layer-mask-$fill"))
+            } else {
+                assertTrue("Fills offer a mask in the Layers footer", footerMaskEnabled())
+                layerAction(obj("op" to "add_mask", "id" to fill, "replace" to false))
+                layerAction(obj("op" to "select", "id" to fill, "mask" to false))
+                waitFor("A fill's own mask owns painting") { layerStates().first { it.getLong("id") == fill }.getBoolean("mask_selected") }
+                assertFalse("Only Paper rows show a texture", exists("layer-texture-$fill"))
+                assertFalse("A fill mask prevents drawing on a layer above", layerStates().any { it.getLong("id") != fill && it.getBoolean("drawing") })
+                command("undo")
+            }
             layerAction(obj("op" to "delete", "id" to ink))
             if (effect != "paper") layerAction(obj("op" to "delete", "id" to fill))
         }
@@ -449,32 +508,6 @@ class AndroidInteractionTest {
         fun rows() = state().array("layers").objects()
         fun images() = rows().filter { it.getBoolean("object") }
         fun imageRow(id: Long) = images().single { it.getLong("id") == id }
-        fun menuItem(label: String): Offset {
-            var result: Offset? = null
-            waitFor("menu item $label") {
-                result = findNode(hasLabel(label))?.let { (root, node) ->
-                    val origin = IntArray(2); val base = IntArray(2)
-                    root.view.getLocationOnScreen(origin); owner.view.getLocationOnScreen(base)
-                    node.boundsInRoot.center + Offset((origin[0] - base[0]).toFloat(), (origin[1] - base[1]).toFloat())
-                }
-                result != null
-            }
-            return result!!
-        }
-        fun menuPath(id: Long, op: String): List<String> {
-            val menu = kotlinx.coroutines.runBlocking { host.withNative { JSONObject(Native.query(it, obj("type" to "layer_menu", "id" to id, "mask" to false).toString())) } }
-            fun path(sections: JSONArray): List<String>? {
-                for (item in sections.values().flatMap { (it as JSONArray).objects() }) {
-                    val value = item.optJSONObject("action")?.optJSONObject("action")?.optString("op")
-                    if (value == op || value == "${op}_selected") return listOf(item.getString("label"))
-                    path(item.array("sections"))?.let { return listOf(item.getString("label")) + it }
-                }
-                return null
-            }
-            return checkNotNull(path(menu.array("sections"))) { "Missing $op in $menu" }
-        }
-        fun menuTap(at: Offset) { popupInput = true; try { tap(at) } finally { popupInput = false }; settle() }
-        fun hold(at: Offset) { event(MotionEvent.ACTION_DOWN, at); SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout() + 250L); event(MotionEvent.ACTION_UP) }
         fun drag(from: Offset, to: Offset) {
             event(MotionEvent.ACTION_DOWN, from)
             for (step in 1..10) { SystemClock.sleep(16); event(MotionEvent.ACTION_MOVE, from + (to - from) * (step / 10f)) }

@@ -229,13 +229,6 @@ fn native_paper_picker_relief_and_scale() {
     until(|| !dialog.is_mapped(), "Use Texture closes Choose Texture");
     assert_eq!(texture(&w), layer_core::paper::built_in_paper("bristol").unwrap().texture);
     until(|| row().paper.unwrap().id.as_deref() == Some("bristol"), "the row shows the chosen texture");
-    w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: paper, replace: false } });
-    ready(&w);
-    let buttons = thumbnails();
-    assert_eq!(buttons.len(), 3, "a Paper mask sits between its color and its texture");
-    assert_eq!(buttons[2].widget_name(), format!("layer-texture-{paper}"));
-    save_snapshot(&w, 200, || path("paper-row-texture-mask"));
-    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
     w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Lock { id: paper, value: true } });
     ready(&w);
     assert!(!row().paper.unwrap().editable);
@@ -294,6 +287,35 @@ fn native_fill_drawing_targets_and_paper_order() {
         ready(&w);
         assert!(state(&w).layers.iter().all(|row| !row.drawing), "{program}: a grouped layer is not a fallback");
         w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+        if program == "paper" {
+            w.dispatch(UiAction::SelectLayer { id: fill });
+            ready(&w);
+            let add_mask = widgets(w.layer_panel.footer.upcast_ref()).filter_map(|node| node.downcast::<gtk::Button>().ok())
+                .find(|button| button.tooltip_text().as_deref() == Some("Add mask")).unwrap();
+            assert!(!add_mask.is_sensitive(), "Paper has no Add mask button");
+            input.perform(serde_json::json!([{"point":point}, {"button":273, "down":true}, {"button":273, "down":false}]));
+            let mask = super::canvas_bar_tests::until_some(|| find_menu_item(w.layer_panel.root.upcast_ref(), "Mask").filter(|item| item.is_mapped()), "the Paper row menu");
+            let submenu = mask.property::<Option<gtk::PopoverMenu>>("popover").unwrap();
+            let point = screen_point(&mask, &w.window, [0.5, 0.5]);
+            input.perform(serde_json::json!([{"point":point}, {"wait_ms":200}]));
+            if !submenu.is_mapped() { input.click(point); }
+            until(|| submenu.is_mapped(), "the Paper Mask submenu opens");
+            for label in ["Add mask", "Mask: reveal selection", "Mask: hide selection", "Paste mask"] {
+                let item = super::canvas_bar_tests::until_some(|| find_menu_item(w.layer_panel.root.upcast_ref(), label).filter(|item| item.is_mapped()), label);
+                assert!(!item.is_sensitive(), "Paper offers no {label}");
+            }
+            capture_popover(submenu.upcast_ref(), directory.join("paper-mask-menu.png").to_str().unwrap());
+            let menu = mask.ancestor(gtk::Popover::static_type()).unwrap();
+            for popover in [submenu.upcast_ref::<gtk::Widget>(), &menu] {
+                if popover.is_visible() { input.key(0xff1b); }
+                until(|| !popover.is_visible(), "Escape closes the Paper menus");
+            }
+            ready(&w);
+            assert!(fill_row().mask_id.is_none());
+            w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: ink } });
+            ready(&w);
+            continue;
+        }
         w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: fill, replace: false } });
         w.dispatch(UiAction::SelectLayer { id: fill });
         ready(&w);
@@ -305,7 +327,7 @@ fn native_fill_drawing_targets_and_paper_order() {
         w.dispatch(UiAction::Invoke { command: CommandId::Undo });
         w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::DeleteMask { id: fill } });
         w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: ink } });
-        if program != "paper" { w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: fill } }); }
+        w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: fill } });
         ready(&w);
     }
     let paper = layer_ui::occurrence_token(ui_session(&w).engine().document().bottom_paper().unwrap());

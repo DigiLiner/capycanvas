@@ -386,6 +386,7 @@ commands-this-selection-layer-is-locked = Esta capa de selección está bloquead
 commands-edit-a-selection-layer-first = Edita primero una capa de selección
 commands-return-to-the-artwork-first = Vuelve primero a la imagen
 commands-the-layer-has-no-mask = La capa no tiene máscara
+commands-paper-cannot-have-a-mask = El papel no puede tener máscara
 commands-already-editing-the-layer-mask = Ya estás editando la máscara de capa
 commands-already-editing-the-layer-content = Ya estás editando el contenido de la capa
 commands-deselect-before-restoring-the-previous-selection = Deselecciona antes de restaurar la selección anterior

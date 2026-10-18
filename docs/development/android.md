@@ -322,8 +322,7 @@ manual save checkpoints and undo/redo after an actual process death.
   walks Choose Texture from the Paper row and Properties: its size against Edit
   Color, Cancel, Use Texture with one Undo, Escape and a locked Paper.
   `#selectingFillRowsKeepsPropertiesAndDrawingTargets` checks fill selection,
-  painting on the layer above, existing mask selection and the texture
-  thumbnail after a Paper mask.
+  painting on the layer above, fill masks and Paper's disabled mask controls.
 - `AndroidFeatureParityTest#paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`
   imports through Import… in Choose Texture, renames and deletes through the
   open dialog's tile menu and adds the drawing's own paper back with Add to

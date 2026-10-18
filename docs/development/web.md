@@ -485,7 +485,7 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
 - `--paper-rows` runs the same Add paper layout, input, history and fill-mask
   checks as the desktop journey, in both themes, and walks Choose Texture from
   the Paper row and Properties: its size against Edit Color, Cancel, Use Texture
-  with one Undo, a locked Paper and a Paper with a mask.
+  with one Undo, a locked Paper and Paper's disabled mask controls.
 - `--paper-library` imports an image with Import… in Choose Texture, then
   renames it in the tile menu's Rename prompt, relists it, deletes it, adds the
   drawing's own paper back with Add to Library, and checks that library edits

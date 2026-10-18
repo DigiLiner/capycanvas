@@ -386,6 +386,7 @@ commands-this-selection-layer-is-locked = This selection layer is locked
 commands-edit-a-selection-layer-first = Edit a Selection Layer first
 commands-return-to-the-artwork-first = Return to the artwork first
 commands-the-layer-has-no-mask = The layer has no mask
+commands-paper-cannot-have-a-mask = Paper can't have a mask
 commands-already-editing-the-layer-mask = Already editing the layer mask
 commands-already-editing-the-layer-content = Already editing the layer content
 commands-deselect-before-restoring-the-previous-selection = Deselect before restoring the previous selection

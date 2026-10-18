@@ -294,15 +294,25 @@ extension XCTestCase {
         showLayers()
         expectTexture("Drawing paper"); expectPixels(white, in: app)
 
-        layerContext("Add mask", on: thumbnail, in: app)
-        let mask = paper.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-mask")).firstMatch
-        XCTAssertTrue(mask.waitForExistence(timeout: 10))
-        XCTAssertGreaterThan(texture.frame.minX, mask.frame.maxX, "The texture follows the Paper mask")
-        attachEditor(in: app, name: "texture-row-mask-\(theme)")
-        editorHistory("Undo", in: app)
-        showLayers()
-        XCTAssertTrue(mask.waitForNonExistence(timeout: 10))
-        layerContext("Lock editing", on: thumbnail, in: app)
+        let addMask = app.buttons["layer-Add mask"]
+        XCTAssertTrue(addMask.waitForExistence(timeout: 10))
+        XCTAssertFalse(addMask.isEnabled, "Paper can't have a mask")
+        #if os(macOS)
+        thumbnail.rightClick()
+        #else
+        thumbnail.press(forDuration: 0.6)
+        #endif
+        for label in ["Add mask", "Mask: reveal selection", "Mask: hide selection", "Paste mask"] {
+            let item = revealLayerMenuAction(label, in: app)
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "The Paper Mask menu lists \(label)")
+            XCTAssertFalse(item.isEnabled, "Paper can't have a mask: \(label)")
+        }
+        attachEditor(in: app, name: "texture-row-mask-menu-\(theme)")
+        let lock = revealLayerMenuAction("Lock editing", in: app)
+        revealEditorControl(lock, in: app.scrollViews.containing(.button, identifier: lock.identifier).firstMatch)
+        workspaceActivate(lock)
+        XCTAssertTrue(lock.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(paper.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-mask")).firstMatch.exists, "Paper shows no mask")
         workspaceActivate(texture)
         XCTAssertFalse(dialog.waitForExistence(timeout: 3), "A locked Paper keeps its texture")
         editorHistory("Undo", in: app)

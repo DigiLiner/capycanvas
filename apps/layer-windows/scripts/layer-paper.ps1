@@ -82,6 +82,13 @@ function Texture-Span([string]$Prefix,$Expected){
     if($Expected -and ([Math]::Abs($span.height-$Expected.height) -gt 1 -or [Math]::Abs($span.right-$Expected.right) -gt 1)){throw "Choose Texture is not the size of Edit Color: $($span.height) vs $($Expected.height)"}
     $span
 }
+function Texture-ScreenCapture([string]$Name,$Rects){
+    $left=[int](($Rects|ForEach-Object Left|Measure-Object -Minimum).Minimum-24);$top=[int](($Rects|ForEach-Object Top|Measure-Object -Minimum).Minimum-24)
+    $right=[int](($Rects|ForEach-Object Right|Measure-Object -Maximum).Maximum+24);$bottom=[int](($Rects|ForEach-Object Bottom|Measure-Object -Maximum).Maximum+24)
+    $bitmap=[Drawing.Bitmap]::new($right-$left,$bottom-$top);$graphics=[Drawing.Graphics]::FromImage($bitmap)
+    try{$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size);$bitmap.Save((Join-Path $run "$Name.png"),[Drawing.Imaging.ImageFormat]::Png)}finally{$graphics.Dispose();$bitmap.Dispose()}
+    (Model)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run "$Name-model.json")
+}
 function Texture-Menu([int]$Index,[string]$Op){
     $tile=(Control "texture-tile-$Index" -Arranged).Current.BoundingRectangle
     [CapyRowPointer]::RightClick([int]($tile.X+$tile.Width/2),[int]($tile.Y+$tile.Width/3))
@@ -199,11 +206,25 @@ function Test-PaperTexture{
     }elseif($theme -ne 'light'){throw 'The seeded library paper is missing'}
 
     Invoke "layer-$paper-name";Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paper} 'Paper selection did not publish'
-    Invoke 'layer-add-mask';Wait-Until {(Relationship-Layer $paper).has_mask} 'The Paper mask did not publish'
-    $m=(Control "layer-$paper-mask" -Arranged).Current.BoundingRectangle;$t=(Control "layer-texture-$paper" -Arranged).Current.BoundingRectangle
-    if($t.Left -lt $m.Right){throw 'The texture thumbnail is not right of the mask'}
-    Capture "texture-row-mask-$theme" -WithModel
-    Relationship-Undo;Wait-Until {!(Relationship-Layer $paper).has_mask} 'Undo did not remove the Paper mask'
+    & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Select';Invoke 'select_all'
+    Wait-Until {((Model).state.commands|Where-Object id -eq 'deselect').enabled} 'Select All did not create a selection'
+    $maskCommand=(Model).state.commands|Where-Object id -eq 'mask_selection'
+    if($maskCommand.enabled -or $maskCommand.disabled_reason -ne "Paper can't have a mask"){throw 'Mask selection did not refuse the Paper'}
+    if((Control 'layer-add-mask' -Arranged).Current.IsEnabled){throw 'Add mask stayed enabled for the Paper'}
+    Focus "layer-$paper-name";[CapyRowPointer]::Key([uint32]$review.Id,0x5D)
+    (Control 'Mask' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    $shown=@((Control "layer-row-$paper" -Arranged).Current.BoundingRectangle,(Control 'Mask' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).Current.BoundingRectangle)
+    foreach($label in @('Add mask','Mask: reveal selection','Mask: hide selection','Paste mask')){
+        $item=Control $label -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Arranged
+        if($item.Current.IsEnabled){throw "$label stayed enabled for the Paper"}
+        $shown+=$item.Current.BoundingRectangle
+    }
+    Texture-ScreenCapture "texture-row-mask-menu-$theme" $shown
+    [CapyRowPointer]::Key([uint32]$review.Id,0x1B);[CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+    Wait-Until {!(Find 'Add mask' -Name -Type ([System.Windows.Automation.ControlType]::MenuItem))} 'The Paper row menu did not close'
+    & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Select';Invoke 'deselect'
+    Wait-Until {!((Model).state.commands|Where-Object id -eq 'deselect').enabled} 'Deselect did not clear the selection'
+    if((Relationship-Layer $paper).has_mask){throw 'The Paper gained a mask'}
     Toggle-Flag 'layer-lock';Wait-Until {(Relationship-Layer $paper).locked -and !(Relationship-Layer $paper).paper.editable} 'Locking did not publish a read-only texture'
     Invoke "layer-texture-$paper";Start-Sleep -Milliseconds 800
     if(Find 'texture-apply'){throw 'A locked Paper opened Choose Texture'}

@@ -38,7 +38,7 @@ and selection layers refuse with a reason (`Document::try_drawing_target`).
 An empty stack stays valid.
 
 New documents contain an empty paint layer above a white [Paper](../development/paper.md)
-fill. Paper can be renamed, hidden, deleted or masked; it cannot be reordered,
+fill. Paper can be renamed, hidden or deleted; it cannot be masked, reordered,
 grouped or duplicated. Adding Paper places it below all root layers, regardless
 of the selection; adding it again selects the existing sheet. Its thumbnail
 shows its color over the checkerboard. Flatten and

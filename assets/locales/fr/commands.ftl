@@ -386,6 +386,7 @@ commands-this-selection-layer-is-locked = Ce calque de sélection est verrouill�
 commands-edit-a-selection-layer-first = Modifier d’abord un calque de sélection
 commands-return-to-the-artwork-first = Revenir d’abord au dessin
 commands-the-layer-has-no-mask = Le calque n’a pas de masque
+commands-paper-cannot-have-a-mask = Le papier ne peut pas avoir de masque
 commands-already-editing-the-layer-mask = Le masque de calque est déjà en cours de modification
 commands-already-editing-the-layer-content = Le contenu du calque est déjà en cours de modification
 commands-deselect-before-restoring-the-previous-selection = Désélectionner avant de restaurer la sélection précédente

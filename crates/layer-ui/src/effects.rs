@@ -1129,7 +1129,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let current = if paper { None } else { destination.map(|(owner, _)| owner).or(doc.working.occurrence) };
         let occurrence = current.and_then(|id| scene.occurrence(id));
         let replacing = choosing && current.and_then(|id| scene.effect(id)).is_some_and(|effect| effect.program.kind == catalog.program.kind);
-        let masked = !replacing && doc.working.selection.is_some();
+        let masked = !replacing && !paper && doc.working.selection.is_some();
         if replacing && doc.is_locked(current.unwrap()) { return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string()); }
         if replacing && current.and_then(|id| scene.effect(id)).is_some_and(|effect| effect.program.id == catalog.program.id) { return Ok(()); }
         let attaches=choosing && current.is_some_and(|id| scene.eligible_target(id)) && occurrence.is_some_and(|o| o.attachment==layer_core::Attachment::Clip);

@@ -303,7 +303,8 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   const invoke=command=>send({type:'invoke',command});
   const wait=(condition,timeout=10000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
   const box=selector=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()`);
-  const click=async selector=>{const r=await box(selector),p={x:r.x+r.width/2,y:r.y+r.height/2};for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...p,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();};
+  const press=async(find,button='left')=>{const p=await evaluate(`(()=>{const n=${find};n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...p,button:type==='mouseMoved'?'none':button,buttons:type==='mousePressed'?(button==='right'?2:1):0,clickCount:1});await settle();};
+  const click=selector=>press(`document.querySelector(${JSON.stringify(selector)})`);
   const key=async(name,code)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:name,code,windowsVirtualKeyCode:{Enter:13,Escape:27,End:35,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40}[name],...(type==='keyDown'&&name==='Enter'?{text:'\r'}:{})});await settle();};
   const capture=async name=>writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
   const paper=await evaluate('Number(layerApp.state().layers.find(l=>l.paper).id)'),ink=await evaluate('Number(layerApp.state().layers.find(l=>!l.paper).id)');
@@ -396,12 +397,22 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   assert.equal(await evaluate("document.querySelector('#status').textContent"),await evaluate('layerApp.app.bootstrap_view().action_failed'),'Use Texture reports a dialog whose Paper left Properties');
   await send({type:'layer',action:{op:'select',id:paper,mask:false}});
   assert.equal((await texture()).value,initial.value,'A stale dialog edits nothing');
-  await send({type:'layer',action:{op:'add_mask',id:paper,replace:false}});
-  const order=await evaluate(`(()=>{const row=document.querySelector('${row}'),x=n=>n.getBoundingClientRect(),[content,mask]=[...row.querySelectorAll('.layer-thumbnail')].map(x),link=x(row.querySelector('.layer-link')),texture=x(row.querySelector('.layer-texture'));return[mask.width>0,content.right<=link.left,link.right<=mask.left,mask.right<=texture.left,texture.right<=x(row.querySelector('.layer-text')).left]})()`);
-  assert.deepEqual(order,[true,true,true,true,true],'A Paper mask sits between the content and texture thumbnails');
-  await capture(`texture-row-mask-${theme}`);
-  await click(thumbnail);await wait(opened);await click(`${dialog} #texture-cancel`);await wait(closed);
-  await invoke('undo');
+  const unmasked=()=>evaluate(`(()=>{const s=layerApp.state(),l=s.layers.find(l=>Number(l.id)===${paper});return{mask:l.mask_id??null,has:l.has_mask,revision:String(s.document_file.revision)}})()`),before=await unmasked();
+  const footerMask=`document.querySelector('.layer-footer [aria-label="Add mask"]')`;
+  assert.equal(await evaluate(`${footerMask}.disabled`),true,'Paper cannot take a mask from the Layers footer');
+  await press(footerMask);
+  await press(`document.querySelector('${row} .layer-name')`,'right');
+  const contextMenu=`document.querySelector('.panel-context-menu:popover-open')`,maskLabel=await evaluate(`layerApp.app.layer_menu(layerApp.state().layers.find(l=>Number(l.id)===${paper}).id,false).sections.flat().find(i=>i.sections?.flat().some(s=>s.action?.action?.op==='add_mask')).label`);
+  await wait(`!!${contextMenu}`);
+  await press(`[...${contextMenu}.querySelectorAll('button')].find(n=>n.querySelector('.menu-label')?.textContent===${JSON.stringify(maskLabel)})`);
+  const maskItems=()=>evaluate(`[...${contextMenu}.querySelectorAll(':scope > button:not(.submenu-back)')].map(n=>[n.querySelector('.menu-label').textContent,n.disabled])`);
+  const refused=[['Add mask',true],['Mask: reveal selection',true],['Mask: hide selection',true],['Paste mask',true]];
+  assert.deepEqual(await maskItems(),refused,'The Paper Mask submenu offers nothing');
+  await capture(`texture-row-mask-menu-${theme}`);
+  await press(`[...${contextMenu}.querySelectorAll('button')].find(n=>n.querySelector('.menu-label')?.textContent==='Add mask')`);
+  assert.deepEqual(await maskItems(),refused);
+  await key('Escape','Escape');await wait(`!${contextMenu}`);
+  assert.deepEqual(await unmasked(),{...before,mask:null,has:false},'Paper stays without a mask');
   await send({type:'layer',action:{op:'lock',id:paper,value:true}});await send({type:'layer',action:{op:'select',id:ink,mask:false}});
   assert.equal((await texture()).paper.editable,false,'Locking Paper makes its texture read-only');
   await click(thumbnail);await new Promise(resolve=>setTimeout(resolve,250));
@@ -527,11 +538,7 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
     await invoke('redo');assert.equal(await missing(),false);
     const ink=all.find(l=>l.id!==paper).id;
     await layer({op:'select',id:paper,mask:false});
-    assert.deepEqual((await rows()).filter(l=>l.drawing).map(l=>l.id),[ink],'Unmasked Paper draws into ink above');
-    await layer({op:'add_mask',id:paper,replace:false});
-    await layer({op:'select',id:paper,mask:false});
-    assert.equal((await rows()).find(l=>l.id===paper).mask_selected,true,'Masked Paper selects its mask');
-    await invoke('undo');
+    assert.deepEqual((await rows()).filter(l=>l.drawing).map(l=>l.id),[ink],'Paper draws into ink above');
     await layer({op:'select',id:ink,mask:false});await layer({op:'group_selected'});
     await layer({op:'select',id:paper,mask:false});
     assert.equal((await rows()).some(l=>l.drawing),false,'A group above Paper blocks fallback drawing');
@@ -565,5 +572,5 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
     for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
     await layer({op:'new',group:false,clipped:false});
   }
-  console.log('PASS: Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, mask order, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
+  console.log('PASS: Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, no Paper mask, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
 }

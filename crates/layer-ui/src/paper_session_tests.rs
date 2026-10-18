@@ -115,12 +115,54 @@ fn selected_fills_keep_properties_and_mark_only_an_ungrouped_layer_drawable() {
             assert_eq!(s.engine.document().drawing_target(), None);
             invoke(&mut s, CommandId::Undo);
             assert_eq!(s.state.layers.iter().filter(|row| row.drawing).map(|row| row.id).collect::<Vec<_>>(), [ink]);
+            if program == "paper" { continue; }
             s.dispatch(UiAction::Layer { action: LayerAction::AddMask { id: fill, replace: false } }).unwrap();
             s.dispatch(UiAction::SelectLayer { id: fill }).unwrap();
             assert!(s.state.layers.iter().all(|row| row.id == fill || !row.drawing));
             assert!(s.state.layers.iter().find(|row| row.id == fill).unwrap().mask_selected);
         }
     }
+}
+
+#[test]
+fn paper_disables_every_way_to_add_a_mask() {
+    let mut s = session(Platform::Gtk);
+    let paper = paper_layer(&s);
+    let ink = occurrence_token(s.engine.document().working.occurrence.unwrap());
+    s.dispatch(UiAction::Layer { action: LayerAction::AddMask { id: ink, replace: false } }).unwrap();
+    s.dispatch(UiAction::Layer { action: LayerAction::CopyMask { id: ink } }).unwrap();
+    s.dispatch(UiAction::SelectLayer { id: paper }).unwrap();
+    invoke(&mut s, CommandId::SelectAll);
+    let tool = s.state.layer_tools.tool;
+    assert!(!s.state.layer_tools.controls.mask, "the Layers mask button is off");
+    fn adding_mask(sections: Vec<Vec<ContextMenuItem>>, into: &mut Vec<(String, bool)>) {
+        for item in sections.into_iter().flatten() {
+            if matches!(item.action, Some(UiAction::Layer { action: LayerAction::AddMask { .. } | LayerAction::MaskSelection { .. } | LayerAction::PasteMask { .. } })) {
+                into.push((item.label.clone(), item.enabled));
+            }
+            adding_mask(item.sections, into);
+        }
+    }
+    let mut mask_items = Vec::new();
+    adding_mask(s.layer_menu(paper, false).unwrap().sections, &mut mask_items);
+    assert_eq!(mask_items.len(), 4, "{mask_items:?}");
+    assert!(mask_items.iter().all(|(_, enabled)| !enabled), "{mask_items:?}");
+    let command = s.command(CommandId::MaskSelection);
+    assert!(!command.enabled);
+    assert_eq!(command.disabled_reason.as_deref(), Some("Paper can't have a mask"));
+    for action in [LayerAction::AddMask { id: paper, replace: false }, LayerAction::MaskSelection { id: paper, hide: false }, LayerAction::PasteMask { id: paper }] {
+        assert_eq!(s.dispatch(UiAction::Layer { action }).err().as_deref(), Some("Paper can't have a mask"));
+    }
+    assert_eq!(s.state.layer_tools.tool, tool);
+    assert!(s.state.layers.iter().find(|row| row.id == paper).unwrap().mask_id.is_none());
+    s.dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }).unwrap();
+    assert!(s.state.layer_tools.controls.mask && s.command(CommandId::MaskSelection).enabled, "other layers keep their masks");
+    s.dispatch(UiAction::Layer { action: LayerAction::Delete { id: paper } }).unwrap();
+    assert!(s.engine.document().working.selection.is_some());
+    s.dispatch(UiAction::Effect { action: EffectAction::Insert { effect: "paper".into() } }).unwrap();
+    let inserted = s.engine.document().working.occurrence.unwrap();
+    assert!(layer_core::paper::is_paper_layer(s.engine.document().scene(), inserted));
+    assert!(s.engine.document().scene().occurrence(inserted).unwrap().mask.is_none(), "a selection does not mask a new Paper");
 }
 
 #[test]

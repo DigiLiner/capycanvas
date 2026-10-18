@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = 此選取範圍圖層已鎖定
 commands-edit-a-selection-layer-first = 請先編輯選取範圍圖層
 commands-return-to-the-artwork-first = 請先返回畫作
 commands-the-layer-has-no-mask = 圖層沒有遮罩
+commands-paper-cannot-have-a-mask = 紙張不能有遮罩
 commands-already-editing-the-layer-mask = 已在編輯圖層遮罩
 commands-already-editing-the-layer-content = 已在編輯圖層內容
 commands-deselect-before-restoring-the-previous-selection = 恢復先前的選取範圍前，請先取消目前選取

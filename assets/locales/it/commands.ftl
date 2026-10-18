@@ -386,6 +386,7 @@ commands-this-selection-layer-is-locked = Questo livello di selezione è bloccat
 commands-edit-a-selection-layer-first = Modifica prima un livello di selezione
 commands-return-to-the-artwork-first = Torna prima al disegno
 commands-the-layer-has-no-mask = Il livello non ha una maschera
+commands-paper-cannot-have-a-mask = La carta non può avere una maschera
 commands-already-editing-the-layer-mask = Stai già modificando la maschera del livello
 commands-already-editing-the-layer-content = Stai già modificando il contenuto del livello
 commands-deselect-before-restoring-the-previous-selection = Deseleziona prima di ripristinare la selezione precedente

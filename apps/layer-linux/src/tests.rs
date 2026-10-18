@@ -4812,7 +4812,7 @@ fn native_layer_panel_review() {
     );
     assert!(w.layer_panel.opacity.is_sensitive());
     let controls = state(&w).layer_tools.controls;
-    assert!(controls.opacity && controls.blend && controls.mask);
+    assert!(controls.opacity && controls.blend && !controls.mask);
     assert!(!controls.alpha_lock && !controls.fill);
     let thumbnail = find_css(&paper, "layer-thumbnail")
         .unwrap()

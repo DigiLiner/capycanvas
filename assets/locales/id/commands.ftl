@@ -760,6 +760,7 @@ commands-edit-a-selection-layer-first = Edit Lapisan Seleksi terlebih dahulu
 commands-return-to-the-artwork-first = Kembali ke karya terlebih dahulu
 
 commands-the-layer-has-no-mask = Lapisan tidak memiliki mask
+commands-paper-cannot-have-a-mask = Kertas tidak dapat memiliki mask
 
 commands-already-editing-the-layer-mask = Mask lapisan sudah sedang diedit
 

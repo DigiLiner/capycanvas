@@ -388,6 +388,7 @@ commands-this-selection-layer-is-locked = Этот слой выделения �
 commands-edit-a-selection-layer-first = Сначала начните редактирование слоя выделения
 commands-return-to-the-artwork-first = Сначала вернитесь к рисунку
 commands-the-layer-has-no-mask = У слоя нет маски
+commands-paper-cannot-have-a-mask = У бумаги не может быть маски
 commands-already-editing-the-layer-mask = Маска слоя уже редактируется
 commands-already-editing-the-layer-content = Содержимое слоя уже редактируется
 commands-deselect-before-restoring-the-previous-selection = Снимите выделение перед восстановлением предыдущего

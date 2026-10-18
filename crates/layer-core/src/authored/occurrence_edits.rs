@@ -49,7 +49,7 @@ fn content_position(scene:SceneView<'_>,entries:&[OccurrenceHandle],index:usize)
     entries.iter().position(|h|scene.effect_owner(*h)==Some(owner)).map_or(index,|top|top.min(index))
 }
 fn paper_position(scene:SceneView<'_>,entries:&[OccurrenceHandle],index:usize)->usize {
-    entries.iter().position(|h|scene.effect(*h).is_some_and(|e|crate::paper::is_paper(e.program))).map_or(index,|paper|index.min(paper))
+    entries.iter().position(|h|crate::paper::is_paper_layer(scene,*h)).map_or(index,|paper|index.min(paper))
 }
 fn clipping_gap(scene:SceneView<'_>,entries:&[OccurrenceHandle],index:usize)->bool {
     let content=|h:&OccurrenceHandle|scene.occurrence(*h).is_some_and(|o|o.is_artwork()&&o.attachment!=Attachment::Effect);
@@ -322,7 +322,7 @@ impl Document {
         if roots.is_empty() { return Err(invalid("Select layers first")); }
         let scene = self.scene();
         for h in self.layer_subtrees(roots) {
-            if scene.effect(h).is_some_and(|e|crate::paper::is_paper(e.program)) { return Err(DocumentError::ProtectedOccurrence(h)); }
+            if crate::paper::is_paper_layer(scene,h) { return Err(DocumentError::ProtectedOccurrence(h)); }
         }
         for h in roots {
             scene.occurrence(*h).ok_or(DocumentError::MissingOccurrence(*h))?;

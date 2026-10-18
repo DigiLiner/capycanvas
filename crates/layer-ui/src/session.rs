@@ -2481,6 +2481,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     && self.selection_masks.target().is_none()
                     && !self.operation.active()
                     && !document.is_locked(active.unwrap_or_default())
+                    && !layer_core::paper::is_paper_layer(scene, active.unwrap_or_default())
                     && scene.occurrence(active.unwrap_or_default()).is_some_and(|l| {
                         l.kind() != LayerKind::Selection
                     })
@@ -5877,7 +5878,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let l = scene.occurrence(id).expect("placed occurrence");
             let source = scene.source_target(id);
             let locked = doc.is_locked(id);
-            let can_reorder = !scene.effect(id).is_some_and(|e| layer_core::paper::is_paper(e.program));
+            let can_reorder = !layer_core::paper::is_paper_layer(scene, id);
             let drawing = drawing_owner == Some(id) || self.selection_masks.target() == Some(layer_core::SelectionTarget::Saved(id));
             let can_delete = doc.can_delete_layers(&if collapsed.contains(&id) {
                 scene.order().iter().copied().filter(|h| *h == id || layer_core::descends_from(scene, *h, Some(id))).collect()
@@ -10523,7 +10524,7 @@ mod tests {
     }
 
     #[test]
-    fn paper_stays_at_the_bottom_and_accepts_a_mask() {
+    fn paper_stays_at_the_bottom_without_a_mask() {
         let mut s = session(Platform::Gtk);
         s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
         let paper_handle = occurrence_handle(2).unwrap();
@@ -10532,7 +10533,7 @@ mod tests {
         assert!(paper.mask.is_none());
         assert_eq!(s.engine.document().scene().effect(paper_handle).unwrap().constant_color(), Some(layer_core::color::RgbColor::WHITE));
         let controls = s.state.layer_tools.controls;
-        assert!(controls.opacity && controls.mask && controls.blend && controls.edit_lock);
+        assert!(controls.opacity && !controls.mask && controls.blend && controls.edit_lock);
         let row = s.state.layers.iter().find(|l| l.id == 2).unwrap();
         assert!(row.has_thumbnail);
         assert_eq!(row.content_icon.as_deref(), Some("layer-paper-symbolic"));
@@ -10546,10 +10547,6 @@ mod tests {
         assert!(s.dispatch(UiAction::Layer { action: LayerAction::Drop { id: 2, target: 1, fraction: 0., surface: LayerDropSurface::Row } }).is_err());
         layer(&mut s, LayerAction::Drop { id: 1, target: 2, fraction: 1., surface: LayerDropSurface::Row, });
         assert_eq!(s.state.layers.last().unwrap().id, 2);
-        s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
-        layer(&mut s, LayerAction::AddMask { id: 2, replace: false });
-        let mask = layer_core::authored::SourceTarget::Coverage(s.engine.document().scene().occurrence(paper_handle).unwrap().mask.as_ref().unwrap().source);
-        assert_eq!(s.engine.document().drawing_target(), Some(mask));
         let document = s.engine.document();
         let paint = layer_core::authored::RecordChange::insert(&document.artwork.paint, layer_core::authored::PaintSource { color_mode: Default::default(),
             domain: document.composition().size, base: None, raster: Default::default(), operations: Default::default(),

@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = Lớp vùng chọn này đã khóa
 commands-edit-a-selection-layer-first = Trước tiên hãy sửa lớp vùng chọn
 commands-return-to-the-artwork-first = Trước tiên hãy trở về bản vẽ
 commands-the-layer-has-no-mask = Lớp không có mặt nạ
+commands-paper-cannot-have-a-mask = Giấy không thể có mặt nạ
 commands-already-editing-the-layer-mask = Đang sửa mặt nạ lớp
 commands-already-editing-the-layer-content = Đang sửa nội dung lớp
 commands-deselect-before-restoring-the-previous-selection = Bỏ chọn trước khi khôi phục vùng chọn trước đó

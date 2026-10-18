@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = 이 선택 영역 레이어는 잠겨 
 commands-edit-a-selection-layer-first = 먼저 선택 영역 레이어를 편집하세요.
 commands-return-to-the-artwork-first = 먼저 그림으로 돌아가세요.
 commands-the-layer-has-no-mask = 레이어에 마스크가 없습니다.
+commands-paper-cannot-have-a-mask = 종이에는 마스크를 추가할 수 없습니다.
 commands-already-editing-the-layer-mask = 이미 레이어 마스크를 편집 중입니다.
 commands-already-editing-the-layer-content = 이미 레이어 내용을 편집 중입니다.
 commands-deselect-before-restoring-the-previous-selection = 이전 선택 영역을 복원하기 전에 현재 선택을 해제하세요.

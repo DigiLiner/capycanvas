@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = Bu seçim katmanı kilitli
 commands-edit-a-selection-layer-first = Önce bir seçim katmanını düzenleyin
 commands-return-to-the-artwork-first = Önce çizime dönün
 commands-the-layer-has-no-mask = Katmanda maske yok
+commands-paper-cannot-have-a-mask = Kâğıda maske eklenemez
 commands-already-editing-the-layer-mask = Katman maskesi zaten düzenleniyor
 commands-already-editing-the-layer-content = Katman içeriği zaten düzenleniyor
 commands-deselect-before-restoring-the-previous-selection = Önceki seçimi geri yüklemeden önce seçimi kaldırın

@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = この選択範囲レイヤーはロ�
 commands-edit-a-selection-layer-first = 先に選択範囲レイヤーを編集してください。
 commands-return-to-the-artwork-first = 先に作品に戻ってください。
 commands-the-layer-has-no-mask = このレイヤーにはマスクがありません。
+commands-paper-cannot-have-a-mask = 用紙にはマスクを追加できません。
 commands-already-editing-the-layer-mask = すでにレイヤーマスクを編集中です。
 commands-already-editing-the-layer-content = すでにレイヤーの内容を編集中です。
 commands-deselect-before-restoring-the-previous-selection = 以前の選択範囲を復元するには、現在の選択を解除してください。

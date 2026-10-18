@@ -383,6 +383,7 @@ commands-this-selection-layer-is-locked = เลเยอร์พื้นท�
 commands-edit-a-selection-layer-first = แก้ไขเลเยอร์พื้นที่เลือกก่อน
 commands-return-to-the-artwork-first = กลับไปยังภาพก่อน
 commands-the-layer-has-no-mask = เลเยอร์ไม่มีมาสก์
+commands-paper-cannot-have-a-mask = กระดาษมีมาสก์ไม่ได้
 commands-already-editing-the-layer-mask = กำลังแก้ไขมาสก์เลเยอร์อยู่แล้ว
 commands-already-editing-the-layer-content = กำลังแก้ไขเนื้อหาเลเยอร์อยู่แล้ว
 commands-deselect-before-restoring-the-previous-selection = ยกเลิกการเลือกก่อนคืนค่าพื้นที่เลือกก่อนหน้า

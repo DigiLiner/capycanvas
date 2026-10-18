@@ -386,6 +386,7 @@ commands-this-selection-layer-is-locked = Esta camada de seleção está bloquea
 commands-edit-a-selection-layer-first = Edite primeiro uma camada de seleção
 commands-return-to-the-artwork-first = Volte primeiro à arte
 commands-the-layer-has-no-mask = A camada não tem máscara
+commands-paper-cannot-have-a-mask = O papel não pode ter máscara
 commands-already-editing-the-layer-mask = Já está editando a máscara da camada
 commands-already-editing-the-layer-content = Já está editando o conteúdo da camada
 commands-deselect-before-restoring-the-previous-selection = Desmarque antes de restaurar a seleção anterior
