@@ -255,6 +255,9 @@ pub(super) struct Vectors {
     preview: Option<PreviewGeometry>,
     pub(super) motion: Option<MotionImage>,
     buffers: [Option<wgpu::Buffer>; 4],
+    evicted: u64,
+    trimmed: usize,
+    levels: HashMap<(VectorHandle, u32), u64>,
 }
 pub(super) struct MotionImage { pub key: (OccurrenceHandle, usize, u32, [i64; 2]), pub window: DocRect, pub image: super::Image }
 #[derive(Clone)]
@@ -451,6 +454,7 @@ impl Vectors {
         let frame = level_frame(offset, level, extent);
         let integer_offset = offset.map(|v| v as i64);
         let frame_number = self.frame;
+        self.levels.insert((handle, level), frame_number);
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let Some(layer) = self.layers.get_mut(&handle) else { return Vec::new() };
         let mut keyed: Vec<(u64, u32)> = slots.into_iter().map(|s| (layer.order(layer.items[s as usize].as_ref().unwrap()), s)).collect();
@@ -462,7 +466,8 @@ impl Vectors {
             let derived = &mut item.derived[at];
             derived.used = frame_number;
             if derived.base.is_none() { derived.base = pool.allocate(&derived.geometry); }
-            if derived.base.is_none() {
+            if derived.base.is_none() && self.evicted < frame_number {
+                self.evicted = frame_number;
                 let geometry = derived.geometry.clone();
                 for other in layer.items.iter_mut().flatten() {
                     for d in other.derived.iter_mut().filter(|d| d.used < frame_number) { if let Some(b) = d.base.take() { pool.release(b, &d.geometry); } }
@@ -544,8 +549,11 @@ impl Vectors {
         r.scene_pipelines.vector.encode(&r.device, encoder, &mut r.uploads, &mut self.buffers, &job.batch, &buffer, job.base.as_ref().map(|(view, origin)| (view, *origin)), &r.empty_view, &job.output)
     }
     pub fn trim(&mut self) {
-        if self.layers.values().map(|layer| layer.derived_bytes).sum::<usize>() <= DERIVED_BYTES { return; }
+        let total: usize = self.layers.values().map(|layer| layer.derived_bytes).sum();
+        self.trimmed = self.trimmed.min(total);
         let frame = self.frame;
+        let stale = self.levels.values().any(|used| used + 2 < frame);
+        if total <= DERIVED_BYTES || (!stale && total < self.trimmed + DERIVED_BYTES / 8) { return; }
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         for layer in self.layers.values_mut() {
             let mut freed = 0usize;
@@ -558,6 +566,8 @@ impl Vectors {
             }
             layer.derived_bytes = layer.derived_bytes.saturating_sub(freed);
         }
+        self.trimmed = self.layers.values().map(|layer| layer.derived_bytes).sum();
+        self.levels.retain(|_, used| *used + 2 >= frame);
     }
 }
 

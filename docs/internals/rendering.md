@@ -341,6 +341,14 @@ then either draws appended front paths over its previous pixels or copies them
 and redraws only the tiles the changed paths cover, gathering just the paths
 that reach those tiles; a page where most tiles change renders whole.
 
+Derived geometry has a 256 MiB budget. Over budget, the cache drops geometry
+not drawn in the last two frames, scanning the layer only when a whole level
+has gone unused or it has grown by an eighth of the budget since the last scan,
+so frames that draw a little keep their cost. The work-count test
+`frame_work_after_small_edits_and_drags_stays_flat_from_ten_to_fifty_thousand_paths`
+checks that idle, recolor, undo, redo and drag frames derive and gather the
+same paths at 10,000 and 50,000.
+
 The provisional line of a pen stroke arrives through `set_vector_preview` and
 draws above the cached layer, damaging only the part of the line that changed.
 A drag arrives through `set_vector_motion` with the moving item IDs and an

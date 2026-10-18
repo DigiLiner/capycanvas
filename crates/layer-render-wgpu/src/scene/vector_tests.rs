@@ -216,6 +216,91 @@ fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render()
     }
 }
 
+fn derivation_work(r: &WgpuRasterizer, since: u64, known: &mut HashSet<usize>) -> (usize, usize) {
+    let (mut derived, mut batched) = (0, 0);
+    for layer in r.scene.as_ref().unwrap().vectors.layers.values() {
+        for item in layer.items.iter().flatten() {
+            batched += usize::from(item.derived.iter().any(|d| d.used > since));
+            derived += item.derived.iter().filter(|d| known.insert(Arc::as_ptr(&d.geometry) as usize)).count();
+        }
+    }
+    (derived, batched)
+}
+
+#[test]
+fn frame_work_after_small_edits_and_drags_stays_flat_from_ten_to_fifty_thousand_paths() {
+    use std::collections::BTreeSet;
+    let view = layer_render::ViewState { width_px: 800, height_px: 600, document_to_surface: [1., 0., 0., 1., 0., 0.] };
+    let rows: Vec<Vec<(&str, usize, usize)>> = [10_000u64, 50_000].into_iter().map(|count| {
+        let columns = (count as f64).sqrt().ceil() as u64;
+        let at = |i: u64| [(i % columns) as f64 * 12. + 4., (i / columns) as f64 * 12. + 4.];
+        let records = (0..count).map(|i| { let [x, y] = at(i); stroke(i + 1, &[[x, y], [x + 7., y + 9.]], 2., [0.1, 0.1, 0.1, 1.]) }).collect();
+        let side = (columns * 12 + 16) as u32;
+        let extent = [side, side];
+        let (mut editor, layer) = document(extent, records);
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        let mut known = HashSet::new();
+        derivation_work(&r, 0, &mut known);
+        let mut rows = Vec::new();
+        let mut step = |r: &mut WgpuRasterizer, editor: &layer_core::Editor, name: &'static str| {
+            let since = r.scene.as_ref().unwrap().vectors.frame;
+            submit_ready(r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+            let (derived, batched) = derivation_work(r, since, &mut known);
+            rows.push((name, derived, batched));
+        };
+        step(&mut r, &editor, "idle frame");
+        let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+        let target = ItemId(5 * columns + 6);
+        let position = object.find(target).unwrap();
+        let Some(Record::Path(path)) = object.record(position).cloned() else { unreachable!() };
+        let mut ink = Stroke::new(paint([0.9, 0.1, 0.1, 1.]), 2.);
+        (ink.cap, ink.join) = (Cap::Round, Join::Round);
+        let recolored = path.with_style(Arc::new(Style::new(vec![PaintEntry::Stroke(ink)])));
+        editor.perform(editor.document().vector_object_edit(layer, object.replace([(position, Some(Record::Path(recolored)))])).unwrap()).unwrap();
+        step(&mut r, &editor, "recolor one path");
+        editor.undo().unwrap();
+        step(&mut r, &editor, "undo");
+        editor.redo().unwrap();
+        step(&mut r, &editor, "redo");
+        let near: Vec<ItemId> = (0..count).filter(|i| { let [x, y] = at(*i); x < 400. && y < 300. }).map(|i| ItemId(i + 1)).collect();
+        for (name, moving) in [("drag one path", vec![target]), ("drag 500 paths", near[..500].to_vec())] {
+            let items: Arc<BTreeSet<ItemId>> = Arc::new(moving.into_iter().collect());
+            for offset in [[3., 4.], [9., 7.]] {
+                r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset }));
+                step(&mut r, &editor, name);
+            }
+            r.set_vector_motion(None);
+            step(&mut r, &editor, "drag cancelled");
+        }
+        eprintln!("{count} paths: {rows:?}");
+        rows
+    }).collect();
+    assert_eq!(rows[0], rows[1], "frame work must not grow with paths outside the view");
+}
+
+#[test]
+fn frames_over_the_derived_budget_rescan_only_after_growth_or_a_stale_level() {
+    let (mut editor, layer) = document([300, 200], records());
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    let at = |zoom: f32, editor: &layer_core::Editor, r: &mut WgpuRasterizer| submit_ready(r, FramePacket {
+        view: layer_render::ViewState { width_px: 300, height_px: 200, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] }, composite_all: false, ..packet(editor.document().scene(), [300, 200]) });
+    let entries = |r: &WgpuRasterizer, level: u32| -> usize { r.scene.as_ref().unwrap().vectors.layers.values().flat_map(|layer| layer.items.iter().flatten()).map(|item| item.derived.iter().filter(|d| d.level == level).count()).sum() };
+    at(1., &editor, &mut r);
+    let drawn = entries(&r, 0);
+    for layer in r.scene.as_mut().unwrap().vectors.layers.values_mut() { layer.derived_bytes += DERIVED_BYTES; }
+    let draw = |i: u64, zoom: f32, editor: &mut layer_core::Editor, r: &mut WgpuRasterizer| {
+        let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![stroke(1000 + i, &[[10. + i as f64 * 9., 5.], [14. + i as f64 * 9., 9.]], 2., [0.9, 0.1, 0.1, 1.])]);
+        editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
+        at(zoom, editor, r);
+    };
+    for i in 0..4 { draw(i, 1., &mut editor, &mut r); }
+    assert_eq!(entries(&r, 0), drawn + 4, "frames that derive little keep the unused entries of the level in use");
+    for i in 4..8 { draw(i, 0.5, &mut editor, &mut r); }
+    assert!(entries(&r, 1) > 0);
+    assert_eq!(entries(&r, 0), 0, "a level no longer drawn is evicted");
+}
+
 #[test]
 fn removing_or_dragging_a_lone_path_clears_tiles_no_other_path_covers() {
     use std::collections::BTreeSet;
