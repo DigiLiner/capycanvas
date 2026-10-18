@@ -174,3 +174,75 @@ license = "MIT OR Apache-2.0"
 path = "LICENSE-MIT"
 license = "MIT"
 checksum = "b47fb719a40d9ef9c8e3be525c41ce129c46d613cfc96a91bddd7c19dcebf7a1"
+
+# Apple's Metal bindings publish no license files. The objc2 repository's
+# original LICENSE.md states each crate's terms at every recorded revision.
+[objc2.clarify]
+license = "MIT"
+[[objc2.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-encode.clarify]
+license = "MIT"
+[[objc2-encode.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-foundation.clarify]
+license = "MIT"
+[[objc2-foundation.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[block2.clarify]
+license = "MIT"
+[[block2.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[dispatch2.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+[[dispatch2.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-core-foundation.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+[[objc2-core-foundation.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-core-graphics.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+[[objc2-core-graphics.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-metal.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+[[objc2-metal.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-quartz-core.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+[[objc2-quartz-core.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+
+[objc2-io-kit.clarify]
+license = "Zlib OR Apache-2.0 OR MIT"
+[[objc2-io-kit.clarify.git]]
+path = "LICENSE.md"
+license = "MIT"
+checksum = "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"

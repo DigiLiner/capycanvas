@@ -8,10 +8,11 @@ export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Develope
 python3 "$CAPY_APP/scripts/prepare.py"
 python3 "$CAPY_APP/scripts/project.py"
 case "${1:-}" in
-  ipad) CAPY_SCHEME=CapyCanvas-iPad; CAPY_DEST='generic/platform=iOS' ;;
-  mac) CAPY_SCHEME=CapyCanvas-Mac; CAPY_DEST='generic/platform=macOS' ;;
+  ipad) CAPY_SCHEME=CapyCanvas-iPad; CAPY_DEST='generic/platform=iOS'; CAPY_RUST_TARGET=aarch64-apple-ios ;;
+  mac) CAPY_SCHEME=CapyCanvas-Mac; CAPY_DEST='generic/platform=macOS'; CAPY_RUST_TARGET=aarch64-apple-darwin ;;
   *) echo 'Usage: release.sh ipad|mac' >&2; exit 1 ;;
 esac
+node "$CAPY_APP/scripts/package-notices.mjs" "$CAPY_APP/Generated/licenses" "$CAPY_RUST_TARGET"
 CAPY_VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$CAPY_APP/../../Cargo.toml")
 CAPY_OUT="$CAPY_APP/../../dist/apple-$1"
 rm -rf "$CAPY_OUT"

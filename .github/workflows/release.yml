@@ -237,6 +237,7 @@ jobs:
       - run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target aarch64-apple-ios --target aarch64-apple-darwin
           rustup default "$RUST_VERSION"
+          cargo install --locked cargo-about --version 0.9.2 --features cli
       - if: env.SIGNED == 'true'
         env:
           API_KEY: ${{ secrets.APPLE_API_KEY }}

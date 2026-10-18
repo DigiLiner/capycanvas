@@ -104,6 +104,9 @@ or removing a Swift file also changes the project, so commit that diff too.
 `scripts/prepare.py` fills the ignored `Generated/` directory with the shared
 icons and brush previews from `apps/layer-web`, the iPad app icon from
 `iOS/AppIcon.png` and the license files. Edit those sources, never `Generated/`.
+`scripts/release.sh` also adds the Rust toolchain notices and, through
+`scripts/package-notices.mjs` and the pinned `cargo-about`, the exact notices of
+the Rust dependencies linked for the archived target.
 The Xcode generation phase declares its resource outputs so incremental builds
 compile the newly generated assets and localized names.
 
