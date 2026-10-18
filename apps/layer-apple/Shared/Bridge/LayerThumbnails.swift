@@ -73,6 +73,7 @@ import CoreGraphics
         }
         guard generation == self.generation else { return false }
         if reply.isNull { pending.removeAll(); return false }
+        if reply["canvas_wake"].bool { store.wake?() }
         for token in reply["accepted"].array { if let request = requests[token.uint] { pending[token.uint] = request } }
         let current = desired()
         var updated = images

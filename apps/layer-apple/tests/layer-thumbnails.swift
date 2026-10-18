@@ -9,11 +9,13 @@ import SwiftUI
         return Mirror(reflecting: value).children.count
     }
     @MainActor static func run() async throws {
-        for platform: UInt32 in [1, 0] {
+        for (platform, theme) in [(UInt32(1), "light"), (1, "dark"), (0, "light"), (0, "dark")] {
             let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil), managedWorkspaces: false)
             let native = store.native!
+            try await store.apply(["type":"set_theme","theme":theme])
             let window = NSWindow(contentRect: CGRect(x: 80, y: 80, width: 1200, height: 870),
                 styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            window.appearance = NSAppearance(named: theme == "light" ? .aqua : .darkAqua)
             window.isReleasedWhenClosed = false
             defer { window.contentView = nil; window.close() }
             window.contentView = NSHostingView(rootView: EditorView(store: store) { MacMetalCanvas(store: store) })
@@ -48,7 +50,7 @@ import SwiftUI
             try require(store.failure == nil, store.failure ?? "")
             try require(expected.count == 2 && expected.isSubset(of: Set(store.layerThumbnails.images.keys)),
                 "Replacing a document during preview readback must populate both new layer thumbnails")
-            note("PASS platform \(platform): document replacement retires old readbacks and populates current thumbnails")
+            note("PASS platform \(platform) \(theme): document replacement retires old readbacks and populates current thumbnails")
         }
     }
     @MainActor static func main() {

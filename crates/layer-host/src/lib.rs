@@ -998,7 +998,7 @@ impl NativeHost {
                     .into_iter()
                     .map(|image| (image.request_id, image.width, image.height, image.bytes))
                     .collect();
-                json!({ "accepted": accepted, "images": images })
+                json!({ "accepted": accepted, "images": images, "canvas_wake": self.dirty })
             }
             Query::Context { target } => json!(self.session.context_menu(target)?),
             Query::PanelHandleTarget { item } => {
@@ -1537,10 +1537,12 @@ mod tests {
         let mut woke = false;
         loop {
             host.dirty = false;
-            let (_, images) = host.layer_thumbnails([(1, layer_ui::occurrence_token(layer))]).unwrap();
+            let reply = host.query(json!({"type":"layer_thumbnails","requests":[[1,layer_ui::occurrence_token(layer)]]})).unwrap();
+            assert_eq!(reply["canvas_wake"].as_bool(), Some(host.dirty), "The query carries frame demand to its native caller");
+            let images = reply["images"].as_array().unwrap();
             woke |= host.dirty;
             assert!(host.dirty || !host.session.engine().wants_continuous_frames(), "work left for frames schedules one");
-            if images.iter().any(|image| image.request_id == 1) { break; }
+            if images.iter().any(|image| image[0].as_u64() == Some(1)) { break; }
             while host.dirty { frame_step(&mut host, &clock, deadline); }
             std::thread::sleep(std::time::Duration::from_millis(16));
         }

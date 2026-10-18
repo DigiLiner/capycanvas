@@ -3256,6 +3256,17 @@ The current iPad build passes signing and minimum-OS inspection, but has no
 corresponding runtime measurement. The Mac trace and reviewed capture are in
 `latest-Apple-integrated-Release-preparation/runtime-photo20-Light-Mac/`.
 
+The subsequent native thumbnail-wake change on `43c8c67a9` passes both normal
+Release builds and four mounted thumbnail replacement cases. Its Mac photo run
+fails the unchanged callback guard with one measured zero-time presentation and
+zero missing callbacks. Contact rates are 87.122/89.493/89.300 presentations/s;
+maximum prepare is 107.342 ms. The captured photo-layer previews remain blank.
+A separate idle mounted check delivers the correct photo preview after its
+three-second observation, within the original 45-second bound. This does not
+close preview latency or the earlier presentation failure. Evidence is in
+`latest-Apple-integrated-Release-preparation/runtime-thumbnail-photo20-Light-Mac/`
+and `layer-thumbnail-photo-private-storage-successor/` beside that directory.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

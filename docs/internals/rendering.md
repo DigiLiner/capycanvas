@@ -1030,7 +1030,9 @@ preview execution path, sampling document coordinates on a grid of at most
 images per request. Object-layer rows frame the layer's own objects in linear
 light on a grid of at most 256 × 256 pixels: from the canvas's prefiltered image
 levels when every object has them, otherwise from one exact collection evaluation.
-Thumbnail work that leaves decoding or sampling for the canvas schedules a frame. Shared layer revisions include generator parameters, so all
+Thumbnail work that leaves decoding or sampling for the canvas schedules a frame.
+The native JSON reply carries `canvas_wake`; pollers forward it even when the
+editor snapshot is unchanged. Shared layer revisions include generator parameters, so all
 hosts request new pixels after a parameter edit or undo. Content requests use
 occurrence IDs; mask requests use encoded coverage source IDs. GTK, Web and
 native bridges share `ThumbnailTarget::from_wire_id` to decode both targets.
