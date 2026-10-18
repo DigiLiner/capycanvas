@@ -73,7 +73,7 @@ struct PaperPicker : std::enable_shared_from_this<PaperPicker> {
         pick=button(data(),property->label(),[]{});pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
         pick.MinHeight(data()->controlHeight());pick.Padding({6,3,6,3});pick.Background(data()->brush(L"input"));
         AutomationProperties::SetAutomationId(pick,property->id());
-        Grid row;row.ColumnSpacing(data()->panelMetric(L"control_spacing"));ColumnDefinition picture;picture.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(picture);ColumnDefinition title;title.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(title);
+        Grid row;row.ColumnSpacing(data()->panelMetric(L"group_spacing"));ColumnDefinition picture;picture.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(picture);ColumnDefinition title;title.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(title);
         thumbnail.Width(28);thumbnail.Height(28);thumbnail.Stretch(Stretch::UniformToFill);Grid swatch;swatch.Children().Append(icon(L"layer-fill-symbolic",data()->theme(),28));swatch.Children().Append(thumbnail);row.Children().Append(swatch);
         name=label(data(),L"",false,false);name.VerticalAlignment(VerticalAlignment::Center);name.TextTrimming(TextTrimming::CharacterEllipsis);Grid::SetColumn(name,1);row.Children().Append(name);pick.Content(row);
         grid.ColumnSpacing(6);grid.RowSpacing(6);for(int i=0;i<4;++i){ColumnDefinition column;column.Width({84,GridUnitType::Pixel});grid.ColumnDefinitions().Append(column);}

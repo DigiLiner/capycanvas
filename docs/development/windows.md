@@ -267,7 +267,12 @@ The default layers fixture closes with a focused opacity draft, reopens the same
 private profile, and verifies the saved draft and its clean Undo checkpoint.
 `exercise-layer-drawer.ps1 -Theme dark|light` checks the combined header drawer,
 the six-row floor and seventh-row growth, compact Properties, footer alignment,
-Lock/Unlock, Duplicate, Delete and Undo. The VM fixture is `layer-drawer`.
+Lock/Unlock, Duplicate, Delete and Undo. When Paper is absent, the Layers list
+presents the shared Add paper action after its last row. Its native button keeps
+row sizing, pointer cancellation and keyboard activation. Adding Paper opens its
+properties; shared Rust owns creation, bottom placement and history. The VM
+fixture is `layer-drawer`. The overflow check retains arranged controls and reads
+their live bounds and placement within its existing stability deadline.
 
 Each imported image has one ordinary Object layer row. Its shared layer ID owns
 the thumbnail, selection, visibility, masks, locks, context menu and reordering.

@@ -82,7 +82,7 @@ void LayerRow::init(){
     swipeActions.HorizontalAlignment(HorizontalAlignment::Right);swipeActions.VerticalAlignment(VerticalAlignment::Stretch);
     swipeFrame.Children().Append(swipeActions);swipeFrame.Children().Append(body);body.RenderTransform(swipeTransform);
     swipeFrame.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock()){RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});self->swipeFrame.Clip(clip);}});
-    root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();}});root.MinHeight(40);root.Padding({6,2,6,2});root.BorderThickness({0});
+    root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->swipe(0);self->contentEdge.stop();self->maskEdge.stop();}});root.MinHeight(LayerRowHeight);root.Padding(LayerRowPadding);root.BorderThickness({0});
     root.BorderBrush(accent(data));body.ColumnSpacing(0);body.VerticalAlignment(VerticalAlignment::Center);
     AutomationProperties::SetAutomationId(root,L"layer-row-"+to_hstring(uint64_t(id)));
     auto rowCaption=[weak]{

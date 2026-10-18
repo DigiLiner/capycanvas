@@ -103,7 +103,26 @@ void LayersView::init(){
     auto factory=make_self<ElementFactory>();factory->owner=weak;repeater.ItemTemplate(factory.as<IElementFactory>());
     StackLayout layout;layout.Orientation(Orientation::Vertical);layout.Spacing(0);repeater.Layout(layout);repeater.ItemsSource(source);
     repeater.HorizontalCacheLength(.0);repeater.VerticalCacheLength(.5);
-    list.Content(repeater);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
+    addPaper=button(data,L"",[weak]{if(auto self=weak.lock();self&&!self->data->updating){
+        auto action=object(object(self->view(),L"add_paper"),L"action");
+        if(action.Size())self->data->dispatchDocument(O({{L"type",S(L"effect")},{L"action",action}}),epochOf(self->data));
+    }});
+    addPaper.MinHeight(LayerRowHeight);addPaper.Padding(LayerRowPadding);addPaper.CornerRadius({0});
+    addPaper.HorizontalAlignment(HorizontalAlignment::Stretch);addPaper.FontWeight(Windows::UI::Text::FontWeights::Normal());
+    AutomationProperties::SetAutomationId(addPaper,L"layer-add-paper");
+    StackPanel paperContent;paperContent.Orientation(Orientation::Horizontal);paperContent.Spacing(data->panelMetric(L"group_spacing"));
+    ContentControl paperIcon;paperIcon.IsTabStop(false);paperIcon.IsHitTestVisible(false);
+    auto paperLabel=label(data,L"",false,false);paperLabel.VerticalAlignment(VerticalAlignment::Center);
+    paperContent.Children().Append(paperIcon);paperContent.Children().Append(paperLabel);addPaper.Content(paperContent);
+    controls.emplace_back([weak,paperIcon,paperLabel,key=std::make_shared<hstring>()](J,J){if(auto self=weak.lock()){
+        auto action=object(self->view(),L"add_paper");auto title=str(action,L"label");
+        self->addPaper.Visibility(action.Size()?Visibility::Visible:Visibility::Collapsed);
+        AutomationProperties::SetName(self->addPaper,title);paperLabel.Text(title);
+        auto next=self->data->theme()+L":"+str(action,L"icon");
+        if(action.Size()&&*key!=next){*key=next;paperIcon.Content(icon(str(action,L"icon"),self->data->theme()));}
+    }});
+    rowsHost.Children().Append(repeater);rowsHost.Children().Append(addPaper);
+    list.Content(rowsHost);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
     list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);
     AutomationProperties::SetAutomationId(list,L"layer-scroll-container");listFrame.Children().Append(list);
     connectionOverlay.IsHitTestVisible(false);AutomationProperties::SetAccessibilityView(connectionOverlay,Automation::Peers::AccessibilityView::Raw);
@@ -381,7 +400,7 @@ FrameworkElement LayersPanel(std::shared_ptr<WorkspaceData> const& data,Bindings
         if(auto view=weak.lock()){
             auto height=[](FrameworkElement const& item){return item.Visibility()==Visibility::Visible?item.ActualHeight():0.;};
             double unit=0;for(auto const& [key,row]:view->rows)if(row->root.IsLoaded()&&row->root.ActualHeight()>0){auto margin=row->root.Margin();unit=row->root.ActualHeight()+margin.Top+margin.Bottom;break;}
-            return O({{L"fixed_height",N(height(view->header)+height(view->footerFrame))},{L"unit_height",N(unit)}});
+            return O({{L"fixed_height",N(height(view->header)+height(view->footerFrame))},{L"unit_height",N(std::max(unit,height(view->addPaper)))}});
         }return J{};
     };
     if(contentHeight)*contentHeight=[weak=std::weak_ptr(view)]{

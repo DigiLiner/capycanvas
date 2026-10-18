@@ -77,6 +77,42 @@ function Swipe([long]$Id,[int]$Distance){
  Start-Sleep -Milliseconds 250
  $list=Control 'layer-list';@{distance=$Distance;before_up=$beforeUp;status=$list.Current.ItemStatus;lock_visible=[bool](Find "layer-$Id-swipe-lock" -Visible);gesture=$list.Current.HelpText;drawer=(Drawer)}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run ('swipe-'+$Id+'-'+$Distance+'.json'))
 }
+function Test-AddPaper {
+ $original=@((Model).state.layers);$paper=@($original|Where-Object content_icon -eq 'layer-paper-symbolic')
+ if($paper.Count -ne 1){throw 'The Paper row fixture needs one bottom Paper'}
+ Press ("layer-"+$paper[0].id+'-name');Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $paper[0].id} 'Paper did not select'
+ Press 'layer-delete'
+ Wait-Until {(Model).state.layer_tools.add_paper -and @((Model).state.layers).Count -eq $original.Count-1} 'Deleting Paper did not publish Add paper'
+ $row=Control 'layer-add-paper' -Arranged;$box=$row.Current.BoundingRectangle
+ $last=@((Model).state.layers)[-1];$above=Bounds ("layer-row-"+$last.id)
+ if([Math]::Abs($box.Top-$above.Bottom) -gt 1 -or [Math]::Abs($box.Height-$above.Height) -gt 1){throw 'Add paper did not share the last native layer row geometry'}
+ if($row.Current.Name -ne (Model).state.layer_tools.add_paper.label){throw 'Add paper did not present its shared label'}
+ Capture ('drawer-add-paper-'+$Theme) -Composed -WithModel
+ foreach($device in @('mouse','pen','touch','Space','Enter')){
+  $row=Control 'layer-add-paper' -Arranged;$box=$row.Current.BoundingRectangle
+  $x=[int]($box.X+$box.Width*.5);$y=[int]($box.Y+$box.Height*.5)
+  if($device -in @('mouse','pen','touch')){
+   $revision=(Model).state.document_file.revision
+   [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 35
+   [CapyRowPointer]::Move($x,[int]($above.Y+$above.Height*.5));[CapyRowPointer]::Up();Start-Sleep -Milliseconds 250
+   if((Model).state.document_file.revision -ne $revision -or !(Model).state.layer_tools.add_paper){throw "$device release outside Add paper changed the drawing"}
+   [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 35;[CapyRowPointer]::Up()
+  }else{
+   $row.SetFocus();Wait-Until {$row.Current.HasKeyboardFocus} 'Add paper did not accept keyboard focus'
+   [CapyRowPointer]::Key([uint32]$review.Id,$(if($device -eq 'Space'){0x20}else{0x0D}))
+  }
+  Wait-Until {!((Model).state.layer_tools.add_paper) -and @((Model).state.layers).Count -eq $original.Count -and @((Model).state.layers)[-1].content_icon -eq 'layer-paper-symbolic'} "$device did not create one bottom Paper"
+  if(Find 'layer-add-paper' -Visible){throw 'Add paper stayed visible after Paper was created'}
+  Invoke 'Undo' -Name;Wait-Until {(Model).state.layer_tools.add_paper -and @((Model).state.layers).Count -eq $original.Count-1} "$device Paper did not Undo in one step"
+  Invoke 'Redo' -Name;Wait-Until {!((Model).state.layer_tools.add_paper) -and @((Model).state.layers).Count -eq $original.Count} "$device Paper did not Redo in one step"
+  Invoke 'Undo' -Name;Wait-Until {(Model).state.layer_tools.add_paper -and @((Model).state.layers).Count -eq $original.Count-1} "$device Paper did not return to its absent state"
+  if((Model).state.customization.drawer.layer_properties){
+   Press 'layer-properties-disclosure'
+   Wait-Until {!(Model).state.customization.drawer.layer_properties -and (Control 'layer-add-paper' -Arranged)} 'All layers did not restore the arranged Add paper row'
+  }
+ }
+ Invoke 'Undo' -Name;Wait-Until {@((Model).state.layers).Count -eq $original.Count -and @((Model).state.layers)[-1].id -eq $paper[0].id} 'Paper fixture did not restore its original row'
+}
 function Check-Footer {
  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
  $footer=Bounds 'layer-footer';$first=Bounds 'layer-new';$last=Bounds 'layer-actions'
@@ -133,6 +169,7 @@ try {
  Press ('header-item-'+$entry.id)
  Wait-Until {(Model).state.customization.drawer.layer_properties -eq $false -and (Find 'layer-new' -Visible)} 'Layers did not reopen after Brush'
  Check-Footer
+ Test-AddPaper
  Capture ('drawer-initial-'+$Theme) -Composed -WithModel
  $before=Visible-DrawerBounds;$initial=@((Model).state.layers).Count
  for($i=$initial;$i -lt 6;$i++){Press 'layer-new'}
@@ -196,11 +233,25 @@ try {
  Wait-Until {!(Model).state.customization.drawer.layer_properties -and (Control 'layer-properties-disclosure').Current.Name -eq 'Gaussian Blur'} 'All layers did not restore the filter disclosure'
  for($i=0;$i -lt 18;$i++){Press 'layer-new'}
  Wait-Until {@((Model).state.layers).Count -ge $count+20} 'Overflow fixture layers did not publish'
- $settled=@{height=0.;count=0}
+ $overflowFrame=Control 'tool-drawer' -Arranged
+ $overflowFooter=Control 'layer-properties-disclosure' -Arranged
+ $overflowWatch=[Diagnostics.Stopwatch]::StartNew()
+ $settled=@{height=0.;count=0;last=$null}
  Wait-Until {
-  $native=Visible-DrawerBounds;$shared=(Drawer).placement.bounds
-  if(!$shared -or [Math]::Abs($native.Height/$scale-$shared.height) -gt 1){$settled.count=0;return $false}
-  if([Math]::Abs($settled.height-$shared.height) -lt .5){$settled.count++}else{$settled.height=$shared.height;$settled.count=0}
+  $frame=$overflowFrame.Current;$footer=$overflowFooter.Current
+  $frameBounds=$frame.BoundingRectangle;$footerBounds=$footer.BoundingRectangle
+  $frameOffscreen=$frame.IsOffscreen;$footerOffscreen=$footer.IsOffscreen
+  if($frameOffscreen -or $footerOffscreen -or $frameBounds.IsEmpty -or $footerBounds.IsEmpty -or $frameBounds.Width -le 0 -or $frameBounds.Height -le 0 -or $footerBounds.Width -le 0 -or $footerBounds.Height -le 0 -or $footerBounds.Bottom -le $frameBounds.Top){
+   $settled.count=0
+   $settled.last=@{frame=$frameBounds;footer=$footerBounds;frame_offscreen=$frameOffscreen;footer_offscreen=$footerOffscreen;count=0;elapsed_ms=$overflowWatch.Elapsed.TotalMilliseconds}
+   return $false
+  }
+  $native=[Windows.Rect]::new($frameBounds.X,$frameBounds.Y,$frameBounds.Width,$footerBounds.Bottom-$frameBounds.Top)
+  $drawer=$frame.ItemStatus|ConvertFrom-Json;$shared=$drawer.placement.bounds
+  $matches=$shared -and [Math]::Abs($native.Height/$scale-$shared.height) -le 1
+  if(!$matches){$settled.count=0}
+  elseif([Math]::Abs($settled.height-$shared.height) -lt .5){$settled.count++}else{$settled.height=$shared.height;$settled.count=0}
+  $settled.last=@{native=$native;shared=$shared;frame_offscreen=$frameOffscreen;footer_offscreen=$footerOffscreen;count=$settled.count;elapsed_ms=$overflowWatch.Elapsed.TotalMilliseconds}
   $settled.count -ge 3
  } 'Overflow drawer native and shared placement did not settle together'
  $box=Visible-DrawerBounds;$window=$root.Current.BoundingRectangle
@@ -217,8 +268,9 @@ try {
  Capture ('drawer-color-pair-'+$Theme) -Composed -WithModel
  Custom-Toolbar
  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
- [pscustomobject]@{theme=$Theme;header='passed';growth='passed';properties='passed';footer='passed';swipe_actions='passed';group='passed';overflow='passed';scope='WARP UI and synthetic touch; reference hardware performance unverified'}|ConvertTo-Json
+ [pscustomobject]@{theme=$Theme;header='passed';growth='passed';properties='passed';footer='passed';add_paper='passed';swipe_actions='passed';group='passed';overflow='passed';scope='WARP UI and synthetic touch; reference hardware performance unverified'}|ConvertTo-Json
 }catch{
+ try{if($settled -and $settled.last){$settled.last|ConvertTo-Json -Depth 14|Set-Content (Join-Path $run 'overflow-failure-comparison.json')}}catch{}
  try{$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|ForEach-Object {@{id=$_.Current.AutomationId;name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle;offscreen=$_.Current.IsOffscreen}}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'failure-native-tree.json')}catch{}
  try{Capture 'failure' -Composed -WithModel}catch{}
  ($_|Out-String)+$_.ScriptStackTrace|Set-Content (Join-Path $run 'failure.txt');throw

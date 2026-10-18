@@ -14,6 +14,8 @@ winrt::Microsoft::UI::Xaml::FrameworkElement LayersPanel(
     std::shared_ptr<CapyLayers::LayersView>* layerView=nullptr);
 namespace CapyLayers {
 using namespace CapyUi;
+inline constexpr double LayerRowHeight=40;
+inline constexpr Thickness LayerRowPadding{6,2,6,2};
 inline J layerAction(J const& operation){return O({{L"type",S(L"layer")},{L"action",operation}});}
 inline hstring epochOf(std::shared_ptr<WorkspaceData> const& data){
     return to_hstring(uint64_t(num(object(data->state,L"document_file"),L"epoch")));
@@ -87,10 +89,10 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     CompositionTarget::Rendering_revoker connectionFrame;
     UIElement outsideSurface{nullptr};
     PointerEventHandler outsidePress{nullptr};
-    StackPanel header,tools,footer;
+    StackPanel header,tools,footer,rowsHost;
     ScrollView list;
     ItemsRepeater repeater;
-    Button blend{nullptr};
+    Button blend{nullptr},addPaper{nullptr};
     TextBlock blendLabel{nullptr};
     ContentControl opacityGate;
     Bindings opacityBindings;
