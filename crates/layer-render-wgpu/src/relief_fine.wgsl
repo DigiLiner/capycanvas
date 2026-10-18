@@ -124,7 +124,8 @@ fn relief_swept_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32,radius:f32)->f3
         if span.y<=span.x {continue;}
         for(var i=0u;i<taps;i+=1u) {
             let outer=taps==4u && (i==0u || i==3u);
-            let node=select(select(0.3399810435848563,0.8611363115940526,outer),0.5773502691896257,taps==2u)*select(-1.0,1.0,i>=taps/2u);
+            let abscissa:f32=select(select(0.3399810435848563,0.8611363115940526,outer),0.5773502691896257,taps==2u);
+            let node=abscissa*select(-1.0,1.0,i>=taps/2u);
             let position=0.5*(span.x+span.y)+0.5*(span.y-span.x)*node;
             let probability=select(1.0/a,(half-abs(position))/max(a*b,0.00000001),abs(position)>flat);
             let weight=0.5*(span.y-span.x)*select(select(0.6521451548625461,0.3478548451374538,outer),1.0,taps==2u)*probability;

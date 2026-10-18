@@ -573,6 +573,47 @@ pub(super) fn reduced_preview_eligible(style: &layer_render::DabStyle) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "Requires an explicitly selected hardware GPU"]
+    fn fine_aggregate_pencil_color_pipeline_prepares_on_hardware() {
+        let dxc = std::env::current_exe().unwrap().with_file_name("dxcompiler.dll");
+        assert!(dxc.is_file(), "bundled DXC required: {dxc:?}");
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::DX12;
+        descriptor.flags.remove(wgpu::InstanceFlags::DEBUG);
+        descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::DynamicDxc {
+            dxc_path: dxc.to_str().unwrap().to_owned(),
+        };
+        let instance = wgpu::Instance::new(descriptor);
+        let adapter = pollster::block_on(wgpu::util::initialize_adapter_from_env(&instance, None)).unwrap();
+        let features = (adapter.features() & (wgpu::Features::TIMESTAMP_QUERY
+            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::FLOAT32_FILTERABLE
+            | wgpu::Features::FLOAT32_BLENDABLE)) | native_tiles::native_in_place_features(&adapter);
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: features,
+            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            memory_hints: memory_hints(),
+            ..Default::default()
+        })).unwrap();
+        let renderer = WgpuRasterizer::from_wgpu_inner(adapter, device.into(), queue, Initialization::Snapshot).unwrap();
+        let info = renderer.adapter.get_info();
+        assert_ne!(info.device_type, wgpu::DeviceType::Cpu, "{info:?}");
+        let material = &renderer.pipelines.dry_material;
+        let pipeline = &material.variants.get(&0x6843).expect("fine aggregate Pencil recipe")[0];
+        assert_eq!(OPERATIONS[0], MaterialOperation::Deposit);
+        assert!(!pipeline.ready());
+        eprintln!("adapter={info:?} features={:?} in_place={} filterable={} contact=0x6843 operation=Deposit entry=compute_color cache=none",
+            renderer.device.features(), material.in_place(), renderer.device.features().contains(wgpu::Features::FLOAT32_FILTERABLE));
+        let internal_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Internal);
+        let validation_scope = renderer.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        pollster::block_on(pipeline.prepare()).unwrap();
+        let validation = pollster::block_on(validation_scope.pop());
+        let internal = pollster::block_on(internal_scope.pop());
+        assert!(validation.is_none() && internal.is_none(), "validation={validation:?}; internal={internal:?}");
+        assert!(pipeline.ready());
+    }
+
     #[test]
     fn every_kernel_entry_resolves_its_overrides() {
         let validate = |module: &naga::Module| {

@@ -542,6 +542,13 @@ D3D12 uses the same pinned DXC as the app. Before direct Cargo GPU tests, prepen
 that folder to `$env:PATH`, for example
 `$env:PATH=(Resolve-Path artifacts/windows/Release).Path+';'+$env:PATH`.
 
+The renderer's ignored
+`dry_material::tests::fine_aggregate_pencil_color_pipeline_prepares_on_hardware`
+checks the fine-tip, aggregate Pencil compute pipeline through the native DXC
+compiler. Place the app's pinned `dxcompiler.dll` beside the renderer test
+executable before running it. The test requires hardware and rejects software
+adapters; a successful WGSL validation alone does not cover pipeline creation.
+
 The zoom menu grows to fit its shared captions and shortcut hints. Its readout
 exposes localized open/closed accessibility status after the native popup events.
 `exercise-navigation-controls.ps1` checks the Zoom Click, Drag and Direction
