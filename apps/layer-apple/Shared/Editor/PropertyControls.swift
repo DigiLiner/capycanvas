@@ -250,7 +250,7 @@ struct CurveEditor: View {
         return reversed ? labels.reversed() : labels
     }
     var body: some View {
-        let axes = curve["axes"].array
+        let axes = curve["axes"]
         VStack(alignment: .leading, spacing: store.panelMetrics.spacing) {
             HStack(spacing: 4) {
                 VStack {
@@ -368,8 +368,10 @@ struct CurveEditor: View {
                 .focusable(enabled).focused($focused).focusEffectDisabled()
                 .onKeyPress(phases: [.down, .repeat, .up], action: press)
                 .onChange(of: touching) { _, active in if !active, contact != nil { cancel() } }
-                .accessibilityLabel(label).accessibilityValue(String(points.count))
-                .accessibilityIdentifier("effect-curve")
+                .accessibilityRepresentation {
+                    Button(label) { focused = true }.accessibilityValue(String(points.count))
+                        .accessibilityIdentifier("effect-curve")
+                }
         }.frame(height: 200)
             .overlay(alignment: .bottomTrailing) {
                 if histogram && control["modified"].bool {

@@ -179,7 +179,7 @@ extension XCTestCase {
         XCTAssertTrue(app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch.frame.contains(insertion))
         let point = curve.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
         point.clickOrTap()
-        expectation(for: NSPredicate(format: "label == %@", "Red, 3 points"), evaluatedWith: curve)
+        expectation(for: NSPredicate(format: "label == %@ AND value == %@", "Red", "3"), evaluatedWith: curve)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(app.buttons["curve-reset"].waitForExistence(timeout: 5), "An edited curve offers reset on the chart")
         let curved = changed(from: blue)
@@ -199,7 +199,7 @@ extension XCTestCase {
         let moved = changed(from: curved)
         XCTAssertLessThan(moved[0], curved[0])
         XCTAssertEqual(Int(moved[1]), Int(curved[1]), accuracy: 1); XCTAssertEqual(Int(moved[2]), Int(curved[2]), accuracy: 1)
-        XCTAssertEqual(curve.label, "Red, 3 points", "Dragging an existing point must not insert another")
+        XCTAssertEqual(curve.value as? String, "3", "Dragging an existing point must not insert another")
         editorHistory("Undo", in: app); expectPixels(curved, in: app)
         nearPoint.clickOrTap()
         expectPixels(curved, in: app)
@@ -211,12 +211,12 @@ extension XCTestCase {
         destination.doubleTap()
         #endif
         expectPixels(blue, in: app); history(before: moved, after: blue)
-        XCTAssertEqual(curve.label, "Red, 2 points", "Double-clicking a point removes it")
+        XCTAssertEqual(curve.value as? String, "2", "Double-clicking a point removes it")
         editorHistory("Undo", in: app); expectPixels(moved, in: app)
         #if os(iOS)
         // A touch on the plot edits its curve. Scroll from the noninteractive
         // heading instead of starting the gesture inside that editing surface.
-        let heading = app.descendants(matching: .any)["layer-properties"].firstMatch.staticTexts["Curves"]
+        let heading = app.descendants(matching: .any)["layer-properties"].firstMatch.staticTexts["properties-layer-name"]
         let scrollStart = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         scrollStart.press(forDuration: 0.05, thenDragTo: scrollStart.withOffset(CGVector(dx: 0, dy: -160)),
             withVelocity: .slow, thenHoldForDuration: 0.1)
@@ -226,7 +226,7 @@ extension XCTestCase {
         workspaceActivate(app.buttons["curve-reset"])
         expectPixels(blue, in: app); history(before: moved, after: blue)
         func expectPoints(_ count: Int) {
-            expectation(for: NSPredicate(format: "label == %@", "Red, \(count) points"), evaluatedWith: curve)
+            expectation(for: NSPredicate(format: "label == %@ AND value == %@", "Red", String(count)), evaluatedWith: curve)
             waitForExpectations(timeout: 10)
         }
         let press = curve.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.35))
@@ -310,8 +310,8 @@ extension XCTestCase {
             expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: element)
             waitForExpectations(timeout: 30)
         }
-        func expectGraphic(_ element: XCUIElement, _ description: String) {
-            expectation(for: NSPredicate(format: "label ENDSWITH %@", ", " + description), evaluatedWith: element)
+        func expectGraphic(_ element: XCUIElement, _ count: Int) {
+            expectation(for: NSPredicate(format: "value == %@", String(count)), evaluatedWith: element)
             waitForExpectations(timeout: 30)
         }
         func search(_ text: String) {
@@ -350,10 +350,10 @@ extension XCTestCase {
         workspaceActivate(app.buttons["filter-search-toggle"]); search("Curves")
         workspaceActivate(app.buttons["adjustment-curves"])
         let curve = app.descendants(matching: .any)["effect-curve"].firstMatch
-        XCTAssertTrue(curve.waitForExistence(timeout: 10)); expectGraphic(curve, "2 points")
+        XCTAssertTrue(curve.waitForExistence(timeout: 10)); expectGraphic(curve, 2)
         let point = curve.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
         point.clickOrTap()
-        expectGraphic(curve, "3 points")
+        expectGraphic(curve, 3)
         let reset = app.buttons["curve-reset"]
         XCTAssertTrue(reset.waitForExistence(timeout: 10))
         #if os(iOS)
@@ -364,7 +364,7 @@ extension XCTestCase {
         #else
         revealEditorControl(reset, in: app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch)
         #endif
-        workspaceActivate(reset); expectGraphic(curve, "2 points")
+        workspaceActivate(reset); expectGraphic(curve, 2)
 
         workspaceActivate(app.buttons["panel-tab-adjustments"])
         workspaceActivate(app.buttons["filter-search-toggle"]); search("Gradient Map")

@@ -72,6 +72,7 @@ struct PressureCalibration: View {
                     }
                     .onKeyPress(.escape) { guard !NativeTextContext.composing else { return .ignored }; escape(); return .handled }
                     .offset(x: bounds["x"].number, y: bounds["y"].number)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("pen-pressure-dialog")
             }.zIndex(1100)
         }

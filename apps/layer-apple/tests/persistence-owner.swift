@@ -106,8 +106,44 @@ private final class State: @unchecked Sendable {
             }
             fflush(stdout)
         }
+        func checkPressure(platform: UInt32) throws {
+            let persistence = EditorPersistence(root: directory.appendingPathComponent("pressure-\(platform)")), state = State()
+            let owner = try NativeOwner(platform: platform, persistence: persistence, receive: { state.receive($0, $1) })
+            send(owner, ["type": "invoke", "command": "pen_pressure"])
+            let original = state.read().0["state"]["settings"].stableKey
+            let points = state.read().0["state"]["pressure_calibration"]["editor"]["points"].stableKey
+            func calibration(_ kind: String) { send(owner, ["type": "pressure_calibration", "action": ["kind": kind]]) }
+            func alter() {
+                send(owner, ["type": "pressure_calibration", "action": ["kind": "sensitivity", "lighter": false]])
+                precondition(state.read().0["state"]["pressure_calibration"]["editor"]["points"].stableKey != points,
+                    "Firmer must alter the actual pressure response")
+            }
+            alter(); calibration("cancel")
+            precondition(state.read().0["state"]["settings"].stableKey == original && flush(owner),
+                "Cancel must preserve every saved preference")
+            send(owner, ["type": "invoke", "command": "pen_pressure"])
+            precondition(state.read().0["state"]["pressure_calibration"]["editor"]["points"].stableKey == points,
+                "Reopening after Cancel must restore the exact original response")
+            alter()
+            let chosen = state.read().0["state"]["pressure_calibration"]["editor"]["points"].stableKey
+            calibration("apply")
+            precondition(flush(owner))
+            let edited = state.read().0["state"]["settings"], disk = try JSON.decode(String(decoding:
+                Data(contentsOf: persistence.locations!.settings), as: UTF8.self))
+            precondition(edited.stableKey != original && disk.stableKey == edited.stableKey,
+                "Apply must durably save the edited response")
+            let restoredState = State()
+            let restored = try NativeOwner(platform: platform, persistence: persistence, receive: { restoredState.receive($0, $1) })
+            send(restored, ["type": "invoke", "command": "pen_pressure"])
+            precondition(restoredState.read().0["state"]["settings"].stableKey == edited.stableKey
+                && restoredState.read().0["state"]["pressure_calibration"]["editor"]["points"].stableKey == chosen,
+                "A fresh owner must restore the exact applied pressure response")
+            precondition(state.read().2 == nil && restoredState.read().2 == nil && flush(restored))
+            print("PASS pressure platform \(platform): exact Cancel restoration and Apply/flush/fresh-owner curve persistence")
+        }
         for platform: UInt32 in [0,1] {
             try checkPreferenceRows(platform: platform)
+            try checkPressure(platform: platform)
             let root = directory.appendingPathComponent("platform-\(platform)")
             let persistence = EditorPersistence(root: root)
             let stateA = State(), stateB = State()

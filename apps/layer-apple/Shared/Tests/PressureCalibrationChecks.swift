@@ -16,13 +16,22 @@ extension XCTestCase {
             let input = app.staticTexts["settings-page-input"]
             XCTAssertTrue(input.waitForExistence(timeout: 10)); workspaceActivate(input)
             let adjust = app.buttons["preference-pen_pressure"]
-            revealEditorControl(adjust, in: app.scrollViews.firstMatch); open()
+            if !adjust.exists || !adjust.isHittable {
+                let search = app.textFields["settings-search"]
+                workspaceActivate(search)
+                search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (search.value as? String ?? "").count))
+                search.typeText("Pen pressure")
+                workspaceActivate(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pen pressure")).firstMatch)
+            }
+            open()
         }
         open()
         let graph = panel.descendants(matching: .any)["effect-curve"].firstMatch
         func count(_ n: Int) {
-            expectation(for: NSPredicate(format: "value == %@", String(n)), evaluatedWith: graph)
-            waitForExpectations(timeout: 5)
+            let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", String(n)), object: graph)
+            let result = XCTWaiter.wait(for: [expected], timeout: 5)
+            let value = graph.exists ? String(describing: graph.value) : "missing"
+            XCTAssertEqual(result, .completed, "Expected \(n) pressure points, value=\(value); \(panel.debugDescription)")
         }
         count(3)
         XCTAssertFalse(panel.textFields.firstMatch.exists)
@@ -43,9 +52,10 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas); waitForExpectations(timeout: 30)
         #if os(macOS)
         let before = editorPixels(in: app)
-        let stroke = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.8))
+        let stroke = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
         stroke.press(forDuration: 0.05, thenDragTo: stroke.withOffset(CGVector(dx: 80, dy: 0)), withVelocity: .slow, thenHoldForDuration: 0.05)
-        XCTAssertNotEqual(editorPixels(in: app), before)
+        expectation(for: NSPredicate { _, _ in self.editorPixels(in: app) != before }, evaluatedWith: canvas)
+        waitForExpectations(timeout: 15)
         #endif
         attachEditor(in: app, name: "pen-pressure-\(theme)")
         for close in ["cancel", "close", "apply"] {

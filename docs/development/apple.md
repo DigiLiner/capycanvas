@@ -327,6 +327,10 @@ without ICC bytes. Publishing a language reprojects those descriptors through
 ### Navigation input
 
 Pen pressure uses the shared curve editor in a modeless utility above the canvas.
+The utility is an accessibility container; its curve plot exposes its shared
+label and point count as one accessible element, like effect curves. Its native
+accessibility action focuses the plot for keyboard editing. Handle absent curve
+axes while pressure and effect views retire.
 `EditorLaunchTests/testPressureCalibrationLight` and `testPressureCalibrationDark`
 check the Preferences entry, draggable title, control insertion and drag-out
 removal, Reset, Firmer, Lighter, Apply, Cancel and Close. The macOS journey also
@@ -334,6 +338,9 @@ checks painting while the utility stays open. On iPadOS, check that final drawin
 step with a physical Pencil; XCTest cannot synthesize Pencil pressure. These
 journeys require Xcode and native Apple hardware; Swift parsing alone does not
 establish UI behavior.
+`tests/persistence-owner.swift` verifies exact pressure response restoration
+after Cancel and durable Apply values after a fresh owner opens the same private
+settings directory, on both Apple policies.
 
 Native cursors read the shared `navigation_cursor` snapshot, including command,
 modifier and restored-document changes. Toolbar and header double activation use
