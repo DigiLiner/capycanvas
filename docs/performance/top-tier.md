@@ -3316,6 +3316,31 @@ exactly. Evidence is in
 `M4-current-thumbnail-throttle-Release-photo-Light-current-Mac/` beside
 `latest-Apple-integrated-Release-preparation/`.
 
+A 2026-10-18 optimized headless comparison on the M2 Pro measures the
+Painterly change in `52b8cd4bc`. One frozen Release executable replaces the
+linked filter module with either the preceding shader or the current shader.
+Both use the 9504 × 6336 photo, a 1600 × 1000 output, Strength 100 and alternating
+Radius 5/5.5. Three processes per variant run in before/after, after/before,
+before/after order. Rows 0–3 warm each process; matching rows 4–23 supply the
+20 measured samples. Extra rows from the first three processes remain recorded.
+
+| Matched pair | Previous completion median, ms | Current completion median, ms | Change |
+| --- | ---: | ---: | ---: |
+| 1 | 896.076 | 912.774 | +1.86% |
+| 2 | 896.413 | 906.521 | +1.13% |
+| 3 | 895.724 | 915.462 | +2.20% |
+
+Every parameter sample evaluates 60,217,344 filter pixels through 20 effect
+passes and 21 image-window submissions; cached frames perform no effect work.
+Source-miss and command-pass ranges vary slightly in the first two pairs and
+match in the third. These serialized completion costs include source paging
+and composition, so they do not isolate shader execution or measure native
+control-preview latency. Retained thermal samples report no warning; one
+post-run sample and temperatures are unavailable. These small samples establish
+neither presented frame rate nor a reference-tier pass. Raw rows, source hashes,
+cold results and limitations are in
+`artifacts/apple/port-oct13-regenerated/source-audit/painterly-continuous-weighting-proposal/optimized-cost-control/upstream52b8-controls/run1/`.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized
