@@ -9,23 +9,26 @@
     the stroke trails the pen.
   - On the TCL (12 MP) Opaque Gouache, Loaded Oil, Natural Blender, Palette
     Knife, Watercolor Wash, Wet Watercolor, Wet Round, Smudge and Liquify Push
-    complete 0.6–2.1 updates/s, at most 2.1 GB resident and 9,000 mappings.
-  - On the MovinkPad 11 (24 MP) they complete 1.0–3.4 updates/s, at most
+    complete 0.6–2.2 updates/s, at most 2.1 GB resident and 9,000 mappings.
+  - On the MovinkPad 11 (24 MP) they complete 1.0–3.5 updates/s, at most
     3.1 GB resident and 7,100 mappings.
+  - Where a device kept up before, the budget's extra frames cost Liquify
+    Twirl, Pinch and Expand 15–27% on the TCL and Liquify Expand 20% on the
+    MovinkPad Pro 14.
 - **Material brushes on the MovinkPad Pro 14 are limited by command storage.**
   - wgpu records each pass in its own command buffers, and a material brush
     runs one pass per page its contacts touch. The Android command-pool policy
     destroys pools above 128 buffers at every completed reset, because keeping
     their storage exhausts Adreno host mappings (`vm.max_map_count` is 65,530).
-  - At 512 px it completes Smudge at 4.2 updates/s, Liquify Push at 4.1, Wet
-    Round at 3.7, Opaque Gouache at 3.4 and Watercolor Wash at 3.4, with about
-    22,000 mappings.
+  - At 512 px it completes Smudge at 5.0 updates/s, Liquify Push at 4.9, Wet
+    Round at 4.4, Opaque Gouache and Watercolor Wash at 4.2, with about 22,000
+    mappings.
   - Keeping pools for 16 cycles restores the 2026-09-27 rates (Smudge 22,
     Liquify Push 16, Wet Round 13, Watercolor Wash 19 updates/s) but reaches
     61,000–66,000 mappings and crashes most runs. Rebuilding large pools every
     four cycles reaches 41,000–47,000 mappings for about 25% more updates.
     Recovering the rest needs fewer command buffers per material page.
-  - Multiply Glaze at 1024 px completes 34.2 updates/s (76.1 on 2026-09-27).
+  - Multiply Glaze at 1024 px completes 36.5 updates/s (76.1 on 2026-09-27).
 - **The simple-brush class remains unqualified.**
   - On the current contained 60 × 10 path, 1536 px G-Pen reaches only
     75.36–75.54 fresh updates/s on Mid (target 90), although its gap passes.
