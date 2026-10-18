@@ -86,7 +86,7 @@ fn draw(
     let alpha = f64::from(level.surface_alpha(dark));
     if level.enabled() {
         let cell = 1. / f64::from(CHECKS);
-        let (light, shade) = (0.94, 0.28);
+        let [light, shade] = layer_ui::TRANSPARENCY_CHECKER.map(|color| f64::from(color.0[0]) / 255.);
         for row in 0..CHECKS {
             for column in 0..CHECKS {
                 let tone = if (row + column) % 2 == 0 { light } else { shade };

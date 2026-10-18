@@ -9,6 +9,7 @@
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
 #include <optional>
+#include <array>
 #include <limits>
 
 using namespace CapyUi;
@@ -36,27 +37,26 @@ bool insideTrack(double along,double across,double length,double narrow){
     if(along>length-3){double a=(along-(length-3))/3,b=across/8;return a*a+b*b<=1;}
     return std::abs(across)<=narrow+(8-narrow)*along/std::max(1.,length-3);
 }
-Imaging::WriteableBitmap trackRaster(double width,double height,double scale,bool vertical,bool opacity,winrt::Windows::UI::Color ink){
+Imaging::WriteableBitmap trackRaster(double width,double height,double scale,bool vertical,bool opacity,winrt::Windows::UI::Color ink,winrt::Windows::UI::Color light,winrt::Windows::UI::Color dark){
     int pw=std::max(1,int(std::ceil(width*scale))),ph=std::max(1,int(std::ceil(height*scale)));
     Imaging::WriteableBitmap result(pw,ph);uint8_t* bytes=nullptr;
     check_hresult(result.PixelBuffer().as<::Windows::Storage::Streams::IBufferByteAccess>()->Buffer(&bytes));
     double length=(vertical?height:width)-12,narrow=opacity?8:2.5;
     for(int y=0;y<ph;y++)for(int x=0;x<pw;x++){
-        double coverage=0;
+        std::array<double,4> sum{};
         for(int sy=0;sy<4;sy++)for(int sx=0;sx<4;sx++){
             double px=(x+(sx+.5)/4)/scale,py=(y+(sy+.5)/4)/scale;
             double along=vertical?length+6-py:px-6,across=vertical?px-14:py-14;
             if(!insideTrack(along,across,length,narrow))continue;
-            double a=.22;
             if(opacity){
                 bool cell=((int(std::floor(along/4))+int(std::floor(across/4)))%2+2)%2==0;
                 double t=std::clamp(along/std::max(1.,length),0.,1.)*.65;
-                a=1-(1-.08)*(1-(cell?.2:0))*(1-t);
-            }
-            coverage+=a;
+                auto base=cell?dark:light;
+                sum[0]+=base.B*(1-t)+ink.B*t;sum[1]+=base.G*(1-t)+ink.G*t;sum[2]+=base.R*(1-t)+ink.R*t;sum[3]+=255;
+            }else{sum[0]+=ink.B*.22;sum[1]+=ink.G*.22;sum[2]+=ink.R*.22;sum[3]+=255*.22;}
         }
-        double a=coverage/16;auto p=bytes+(size_t(y)*pw+x)*4;
-        p[0]=uint8_t(std::lround(ink.B*a));p[1]=uint8_t(std::lround(ink.G*a));p[2]=uint8_t(std::lround(ink.R*a));p[3]=uint8_t(std::lround(255*a));
+        auto p=bytes+(size_t(y)*pw+x)*4;
+        for(size_t channel=0;channel<4;channel++)p[channel]=uint8_t(std::lround(sum[channel]/16));
     }
     result.Invalidate();return result;
 }
@@ -365,9 +365,9 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         double w=track.Width(),h=track.Height();
         if(!(w>0)||!(h>0))return;
         double scale=root.XamlRoot()?root.XamlRoot().RasterizationScale():1.;
-        auto ink=color(str(object(data->state,L"palette"),L"text"));
+        auto palette=object(data->state,L"palette");auto ink=color(str(palette,L"text"));
         auto key=std::to_wstring(w)+L"x"+std::to_wstring(h)+L"@"+std::to_wstring(scale)+(vertical?L"v":L"h")+std::to_wstring(ink.R)+L"."+std::to_wstring(ink.G)+L"."+std::to_wstring(ink.B);
-        if(key!=trackKey){trackKey=key;trackImage.Source(trackRaster(w,h,scale,vertical,opacity,ink));}
+        if(key!=trackKey){trackKey=key;trackImage.Source(trackRaster(w,h,scale,vertical,opacity,ink,color(str(palette,L"checker_light")),color(str(palette,L"checker_dark"))));}
         trackImage.Width(w);trackImage.Height(h);
     }
     void paintSlider(){

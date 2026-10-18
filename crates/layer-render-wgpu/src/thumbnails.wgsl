@@ -53,9 +53,7 @@ struct Vertex { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f3
         return hdr_map_sdr(mip_sample(pixels,sampling,size,0.,v.uv*size,0u),record.rendition,record.highlight);
     }
     if record.options.x >= 2u {
-        // Neutral checker colors in linear light (sRGB #bbb / #eee).
-        let square = (u32(v.position.x)/4u + u32(v.position.y)/4u) % 2u;
-        let gray = select(.497, .855, square == 0u);
+        let gray = transparency_checker(v.position.xy, 4.);
         let color=hdr_map_sdr(vec4(record.color.rgb*record.color.a,record.color.a),record.rendition,record.highlight);
         return vec4<f32>(color.rgb + gray * (1.-color.a), 1.);
     }

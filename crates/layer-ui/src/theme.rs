@@ -43,7 +43,10 @@ pub const ACCENTS: [(&str, HexColor); 9] = [
 ];
 pub const DEFAULT_ACCENT: HexColor = ACCENTS[0].1;
 const TINT_CHROMA: f64 = 0.05;
-pub const TRANSPARENCY_CHECKER: [HexColor; 2] = [HexColor([220; 3]), HexColor([170; 3])];
+pub const TRANSPARENCY_CHECKER: [HexColor; 2] = [
+    HexColor([layer_color::TRANSPARENCY_CHECKER_SRGB[0]; 3]),
+    HexColor([layer_color::TRANSPARENCY_CHECKER_SRGB[1]; 3]),
+];
 pub const TRANSPARENCY_CHECKER_CELL: f32 = 5.;
 
 /// Opaque, validated six-digit sRGB. Serialized as a canonical #rrggbb string.
@@ -266,6 +269,8 @@ mod tests {
                 );
             }
             let p = Settings::default().palette(theme, Platform::Web, None);
+            assert_eq!(p.checker_light, HexColor([255; 3]));
+            assert_eq!(p.checker_dark, HexColor([204; 3]));
             assert_eq!(p.bg, anchor);
             assert_eq!(
                 p.panel,

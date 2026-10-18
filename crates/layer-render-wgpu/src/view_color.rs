@@ -1,6 +1,11 @@
 //! Display/output coordinates, independent of document depth and editing values.
 use layer_core::color::RgbSpace;
 
+pub(crate) fn checker_shader() -> String {
+    let [light, dark] = layer_color::TRANSPARENCY_CHECKER_SRGB.map(|v| RgbSpace::Srgb.decode(f64::from(v) / 255.));
+    format!("fn transparency_checker(point:vec2<f32>,cell:f32)->f32{{let square=vec2<i32>(floor(point/cell));return select({dark:.12},{light:.12},(square.x+square.y)%2==0);}}\n")
+}
+
 /// Surface encodings, independent of document storage. Extended linear sRGB
 /// carries wide-gamut SDR; scRGB, PQ and extended sRGB also support HDR.
 /// Surface selection never changes the document's reference white.

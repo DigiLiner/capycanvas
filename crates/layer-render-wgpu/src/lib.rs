@@ -6289,6 +6289,8 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
             layer_core::color::RgbColor { rgba: [1., 1., 1., 0.], ..layer_core::color::RgbColor::WHITE }));
         frame(&mut r, &document, &[], &[]);
         let transparent_paper = preview(&mut r, layer_render::ThumbnailTarget::Occurrence(paper));
+        assert_eq!(&transparent_paper[..4], [255; 4]);
+        assert_eq!(&transparent_paper[4 * 4..][..4], [204, 204, 204, 255]);
         assert_ne!(transparent_paper[0], transparent_paper[4 * 4]);
         assert!(
             transparent_paper

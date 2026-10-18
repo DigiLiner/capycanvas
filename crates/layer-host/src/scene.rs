@@ -65,7 +65,6 @@ impl Navigators {
         let state = host.session.state();
         let document = host.session.engine().document();
         let fg = state.palette.text.linear();
-        let bg = state.palette.panel.linear();
         let units = match self.units {
             SlotUnits::Logical => 1.,
             SlotUnits::Physical => scale,
@@ -89,7 +88,6 @@ impl Navigators {
                     clip: Some(slot.clip.map(|v| v / units * scale)),
                     work_area: g.work_area.map(|[a, b]| [(x + a) * scale, (y + b) * scale]),
                     outline_linear: [fg[0], fg[1], fg[2]],
-                    background_linear: [bg[0], bg[1], bg[2]],
                     scale,
                     opacity: 1.,
                 })

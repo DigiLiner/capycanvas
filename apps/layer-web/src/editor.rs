@@ -262,7 +262,6 @@ impl WebApp {
         let state = self.session.state();
         let camera = state.camera.clone();
         let fg = state.palette.text.linear();
-        let bg = state.palette.panel.linear();
         let document = self.session.engine().document();
         let extent = document.composition().size;
         let (Some(gpu), Some(window)) = (self.session.engine().backend().0.as_deref(), self.surface.as_ref()) else {
@@ -321,7 +320,6 @@ impl WebApp {
                     clip: None,
                     work_area: g.work_area.map(|p| p.map(|v| v * scale)),
                     outline_linear: [fg[0], fg[1], fg[2]],
-                    background_linear: [bg[0], bg[1], bg[2]],
                     scale,
                     opacity: 1.,
                 }],

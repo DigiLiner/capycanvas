@@ -4,6 +4,7 @@ mod icc;
 pub use icc::*;
 pub mod photo;
 pub mod screen;
+pub const TRANSPARENCY_CHECKER_SRGB: [u8; 2] = [255, 204];
 mod photo_project;
 pub use photo_project::{assume_source_profile, photo_project};
 mod resize;

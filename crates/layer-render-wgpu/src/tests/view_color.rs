@@ -217,20 +217,42 @@ fn navigator_shows_transparency_without_a_paper_or_fill_layer() {
         paint_mut(&mut layer).base = alpha.map(|alpha| layer_core::authored::PaintBase::new(rgba8_source([256; 2],
             |x, _| if x < 128 { [255, 0, 0, alpha] } else { [0; 4] }).into()));
         frame(&mut r, &mut layer);
-        for (background, shades) in [([0.04; 3], [0.232, 0.032]), ([0.9; 3], [0.92, 0.72])] {
-            p.set_overviews(&r, &[crate::OverviewPlacement {
+        p.set_overviews(&r, &[crate::OverviewPlacement {
+            bounds: [0., 0., 256., 256.], clip: None, work_area: [[-1000.; 2]; 4],
+            outline_linear: [0.; 3], scale: 1., opacity: 1.,
+        }]);
+        p.present_overviews(&r, &target, [256; 2]).unwrap();
+        let actual = crate::test_support::float_pixels(&r, &texture);
+        for (x, checker) in [(32, 1.), (40, 0.60382734), (160, 1.), (168, 0.60382734)] {
+            let a = if x < 128 { f32::from(alpha.unwrap_or(0)) / 255. } else { 0. };
+            let expected = [a + checker * (1. - a), checker * (1. - a), checker * (1. - a), 1.];
+            let pixel = actual[32 * 256 + x];
+            assert!(pixel.into_iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-5),
+                "alpha={alpha:?} x={x}: {pixel:?} != {expected:?}");
+        }
+    }
+}
+
+#[test]
+fn canvas_and_navigator_checker_colors_are_exact_srgb_white_and_cccccc() {
+    let mut layer = document("Transparent page");
+    let mut r = WgpuRasterizer::new_native_headless(layer.composition().color).unwrap();
+    frame(&mut r, &mut layer);
+    let (texture, target) = crate::create_target(r.device(), [256; 2],
+        wgpu::TextureFormat::Rgba8UnormSrgb, "checker color reference");
+    for overview in [false, true] {
+        let mut presenter = if overview { ViewportPresenter::for_overview_surface } else { ViewportPresenter::for_surface }(
+            &r, wgpu::TextureFormat::Rgba8UnormSrgb, SdrSurfaceColor::Srgb).unwrap();
+        if overview {
+            presenter.set_overviews(&r, &[crate::OverviewPlacement {
                 bounds: [0., 0., 256., 256.], clip: None, work_area: [[-1000.; 2]; 4],
-                outline_linear: [0.; 3], background_linear: background, scale: 1., opacity: 1.,
+                outline_linear: [0.; 3], scale: 1., opacity: 1.,
             }]);
-            p.present_overviews(&r, &target, [256; 2]).unwrap();
-            let actual = crate::test_support::float_pixels(&r, &texture);
-            for (x, checker) in [(32, shades[0]), (40, shades[1]), (160, shades[0]), (168, shades[1])] {
-                let a = if x < 128 { f32::from(alpha.unwrap_or(0)) / 255. } else { 0. };
-                let expected = [a + checker * (1. - a), checker * (1. - a), checker * (1. - a), 1.];
-                let pixel = actual[32 * 256 + x];
-                assert!(pixel.into_iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-5),
-                    "alpha={alpha:?} background={background:?} x={x}: {pixel:?} != {expected:?}");
-            }
+            presenter.present_overviews(&r, &target, [256; 2]).unwrap();
+        } else { presenter.present(&r, &target, view(), [0.; 4]).unwrap(); }
+        let actual = crate::layer_tests::page_bytes(&r, &texture);
+        for (x, gray) in [(32, 255), (if overview { 40 } else { 48 }, 204)] {
+            assert_eq!(&actual[(32 * 256 + x) * 4..][..4], [gray, gray, gray, 255], "overview={overview}");
         }
     }
 }
@@ -250,7 +272,7 @@ fn native_surface_rotation_preserves_artwork_cursor_and_clipped_overview() {
     presenter.set_overviews(&r, &[crate::OverviewPlacement {
         bounds: [117., 59., 57., 43.], clip: Some([127., 62., 38., 33.]),
         work_area: [[120., 64.], [163., 67.], [161., 94.], [122., 91.]],
-        outline_linear: [0.1, 0.2, 0.8], background_linear: [0.3; 3], scale: 1., opacity: 1.,
+        outline_linear: [0.1, 0.2, 0.8], scale: 1., opacity: 1.,
     }]);
     let mut reference = Vec::new();
     for turns in 0..4 {
@@ -339,7 +361,7 @@ fn native_export_thumbnails_and_raw_samples_keep_their_declared_color_coordinate
                     let i = (16 * 32 + 16) * 4;
                     close(
                         &thumbnail.bytes[i..i + 4],
-                        bytes(preview.map(|v| v * alpha + 0.855 * (1. - alpha)), 1.),
+                        bytes(preview.map(|v| v * alpha + 1. * (1. - alpha)), 1.),
                         "retained photo thumbnail",
                     );
                     if codes[3] == 65535 {
@@ -438,7 +460,7 @@ fn explicit_sdr_surfaces_transform_artwork_and_ui_without_changing_document_pixe
                 let mut presenter = ViewportPresenter::for_surface(&r, format, color).unwrap();
                 let alpha = f64::from(codes[3]) / 65535.;
                 let expected = linear(RgbSpace::ProPhoto, codes, color.primaries())
-                    .map(|v| v * alpha + 0.94 * (1. - alpha));
+                    .map(|v| v * alpha + 1. * (1. - alpha));
                 presenter
                     .present(&r, &target_view, view(), [0.; 4])
                     .unwrap();
@@ -730,7 +752,7 @@ fn check_proof_renderer(recipe: &layer_core::color::ProofRecipe, renderer: impl 
                         let expected = apply_proof(&lut, input, proof, warning);
                         let expected = rgb::apply(space.linear_transform(surface.primaries()),
                             [expected[0] as f64, expected[1] as f64, expected[2] as f64])
-                            .map(|v| v + 0.94 * (1. - alpha as f64));
+                            .map(|v| v + (1. - alpha as f64));
                         let i = (16 * 256 + 16) * 4;
                         close(&actual[i..i+4], bytes(expected, 1.), "CPU/GPU proof parity");
                         assert_eq!(r.readback_srgb_rgba8().unwrap(), exported, "proof must not reach export");
@@ -783,7 +805,7 @@ fn check_hdr_renderer(mut make: impl FnMut(DocumentColor) -> WgpuRasterizer) {
                             else {layer_core::color::hdr::map_display_premultiplied([p[0]*p[3],p[1]*p[3],p[2]*p[3],p[3]],headroom)};
                             if proof {expected=apply_proof(&lut,expected,true,false);}
                             let rgb=if headroom==1. && !proof && !compositor {[expected[0],expected[1],expected[2]].map(f64::from)} else {rgb::apply(space.linear_transform(RgbSpace::Srgb),[expected[0],expected[1],expected[2]].map(f64::from))};
-                            let expected=rgb.map(|v|v+0.94*(1.-f64::from(p[3])));
+                            let expected=rgb.map(|v|v+1.*(1.-f64::from(p[3])));
                             let expected = if surface == SdrSurfaceColor::WindowsScrgb { expected.map(|v| v*2.5375) }
                             else if surface == SdrSurfaceColor::ExtendedLinearSrgb { expected }
                             else if surface == SdrSurfaceColor::ExtendedSrgb { expected.map(|v| v.signum()*if v.abs()<=0.0031308 {12.92*v.abs()} else {1.055*v.abs().powf(1./2.4)-0.055}) }
@@ -940,7 +962,7 @@ fn local_sdr_spatial_guide_matches_cpu_and_preserves_master() {
                             let i = (y * 256 + x) * 16 + c * 4;
                             let value =
                                 f32::from_le_bytes(actual[i..i + 4].try_into().unwrap()) as f64;
-                            let checker=if (x/16+y/16)%2==0 {0.94}else{0.80};
+                            let checker=if (x/16+y/16)%2==0 {1.}else{RgbSpace::Srgb.decode(0.8)};
                             let expected = (rgb[c] + checker * (1. - p[3] as f64)) * 2.5375;
                             assert!(
                                 (value - expected).abs() < 0.0005,
@@ -1011,7 +1033,7 @@ fn surface_triangular_quantization_is_phase_stable_and_format_aware() {
                     let mut errors:[Vec<f64>;2]=std::array::from_fn(|_|Vec::new());
                     for y in 1..size[1]-1 {for x in 1..size[0]-1 {
                         let parity=(((x as f32+0.5)/scale/16.).floor() as usize+((y as f32+0.5)/scale/16.).floor() as usize)%2;
-                        let checker=if parity==0 {0.94}else{0.80};
+                        let checker=if parity==0 {1.}else{RgbSpace::Srgb.decode(0.8)};
                         let expected=RgbSpace::Srgb.encode(f64::from(linear)*f64::from(alpha)+checker*(1.-f64::from(alpha)))*255.;
                         errors[parity].push(f64::from(first[((y*size[0]+x)*4) as usize])-expected);
                     }}

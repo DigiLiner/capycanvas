@@ -76,7 +76,7 @@ private final class DisplayCaptureLayer: CAMetalLayer, @unchecked Sendable {
             context.draw(image, in: CGRect(x: 0, y: 0, width: 20, height: 10))
             let bytes = data.assumingMemoryBound(to: UInt8.self)
             // Sample each checker level; vertical origin does not affect the pair.
-            for level in [220.0 / 255, 170.0 / 255] {
+            for level in [1.0, 204.0 / 255] {
                 let expected = [1.0, 0.5, 0.0].map { encode(decode($0) * alpha + decode(level) * (1 - alpha)) }
                 let matches = stride(from: 0, to: 800, by: 4).filter { offset in
                     (0..<3).allSatisfy { abs(Int(bytes[offset + $0]) - expected[$0]) <= 2 }

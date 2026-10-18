@@ -516,7 +516,7 @@ private fun JSONObject.settingsTitle(): String? = objectOrNull("shortcut_editor"
                     fun grey(v: Float, a: Float = 1f) = Color(v, v, v, a)
                     clipPath(Path().apply { addOval(Rect(0f, 0f, s, s)) }) {
                         if (alpha < 1f) for (cell in 0 until 16)
-                            drawRect(grey(if ((cell % 4 + cell / 4) % 2 == 0) .94f else .28f), Offset(cell % 4 * s / 4, cell / 4 * s / 4), Size(s / 4, s / 4))
+                            drawRect(if ((cell % 4 + cell / 4) % 2 == 0) colors.checkerLight else colors.checkerDark, Offset(cell % 4 * s / 4, cell / 4 * s / 4), Size(s / 4, s / 4))
                         drawRect(grey(if (colors.dark) .55f else .8f, alpha))
                         if (alpha < 1f) drawRect(Brush.radialGradient(0f to Color.White.copy(alpha = minOf(1f, .25f + 1.2f * (1 - alpha))),
                             1f to Color.White.copy(alpha = 0f), center = Offset(.32f * s, .26f * s), radius = .5f * s))

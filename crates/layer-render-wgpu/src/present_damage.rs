@@ -63,7 +63,7 @@ pub(super) struct Retained {
     pub screen: [f32; 16],
     pub cursor: PixelRect,
     pub picker: Option<[f32; 4]>,
-    pub overviews: Vec<[f32; 24]>,
+    pub overviews: Vec<[f32; 21]>,
 }
 impl Default for Retained {
     fn default() -> Self {

@@ -43,6 +43,7 @@ fn main() {
         "crates/layer-shader-cache-key/Cargo.toml",
         "Cargo.lock",
         "crates/layer-core/src",
+        "crates/layer-color/src/lib.rs",
         "assets/filters",
     ] {
         sources(&root, &root.join(path), &mut hash);

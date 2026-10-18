@@ -259,12 +259,12 @@ private struct ToolbarSliderTrack: View {
             track.clip(to: path)
             let bounds = CGRect(x: -3, y: -wide, width: length + 4, height: wide * 2)
             if opacity {
-                track.fill(Path(bounds), with: .color(text.opacity(0.08)))
+                track.fill(Path(bounds), with: .color(palette["checker_light"]))
                 let cell: CGFloat = 4
                 for column in -1...(Int(length / cell) + 1) {
                     for row in -2...1 where (column + row) % 2 == 0 {
                         track.fill(Path(CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell)),
-                            with: .color(text.opacity(0.2)))
+                            with: .color(palette["checker_dark"]))
                     }
                 }
                 track.fill(Path(bounds), with: .linearGradient(Gradient(colors: [text.opacity(0), text.opacity(0.65)]),

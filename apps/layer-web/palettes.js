@@ -2,7 +2,7 @@ import {liveCopy,bindCopy} from './localization.js';
 const GAP = 4, CELL = 44, SLOP = 8;
 const plain = (_, value) => typeof value === "bigint" ? Number(value) : value;
 const css = rgba => `rgba(${rgba.slice(0, 3).map(v => Math.round(Math.min(1, Math.max(0, v)) * 255)).join(",")},${rgba[3] ?? 1})`;
-const paint = (node, rgba) => { node.style.background = `linear-gradient(${css(rgba)},${css(rgba)}),repeating-conic-gradient(#ccc 0 25%,#8c8c8c 0 50%) 0 0 / 10px 10px`; };
+const paint = (node, rgba) => { node.style.background = `linear-gradient(${css(rgba)},${css(rgba)}),repeating-conic-gradient(var(--checker-light) 0 25%,var(--checker-dark) 0 50%) 0 0 / 10px 10px`; };
 
 export function createPalettes({ app, state, workspace, element, button, icon, panelFrame, applyChange, rasterWorker, dismissContext, contentChanged }) {
   const copy=liveCopy(app,"catalog").native_copy.palettes,common=liveCopy(app,"bootstrap_view").common;

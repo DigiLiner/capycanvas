@@ -263,7 +263,7 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
     if any(p < vec2<f32>(0.)) || any(p >= extent) {
         var rgb = view_ui_rgb(camera.surround.rgb);
         if cropping && inside_crop(p) {
-            rgb = vec3<f32>(select(0.80, 0.94, (i32(floor(p.x / 16.0)) + i32(floor(p.y / 16.0))) % 2 == 0));
+            rgb = vec3<f32>(transparency_checker(p, 16.));
         }
         if camera.viewport.z > .5 { rgb = display_color(rgb); }
         let coverage = window_coverage(surface);
@@ -275,7 +275,7 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
     else if source==1u { artwork = placed_at(p, camera.inverse.xy * footprint, camera.inverse.zw * footprint, true); }
     else { artwork = canvas_linear(grid_artwork_at(p, camera.inverse.xy * footprint, camera.inverse.zw * footprint)); }
     let paint = proof_artwork(artwork,p);
-    let checker = select(0.80, 0.94, (i32(floor(p.x / 16.0)) + i32(floor(p.y / 16.0))) % 2 == 0);
+    let checker = transparency_checker(p, 16.);
     var rgb = screen_marked(paint, view_working_rgb(paint.rgb) + vec3<f32>(checker) * (1.0 - paint.a), checker);
     if (bitcast<u32>(artwork.a)&0x7fffffffu)!=0u {
         let bits=bitcast<vec3<u32>>(artwork.rgb);
@@ -441,13 +441,13 @@ struct OverviewVertex {
     @location(1) @interpolate(flat) ab: vec4<f32>,
     @location(2) @interpolate(flat) cd: vec4<f32>,
     @location(3) @interpolate(flat) outline: vec4<f32>,
-    @location(4) @interpolate(flat) background_scale: vec4<f32>,
+    @location(4) @interpolate(flat) scale: f32,
     @location(5) @interpolate(flat) clip: vec4<f32>,
     @location(6) @interpolate(flat) halo: f32,
 };
 @vertex fn overview_vertex(@builtin(vertex_index) index: u32,
     @location(0) bounds: vec4<f32>, @location(1) ab: vec4<f32>, @location(2) cd: vec4<f32>,
-    @location(3) outline: vec4<f32>, @location(4) background_scale: vec4<f32>,
+    @location(3) outline: vec4<f32>, @location(4) scale: f32,
     @location(5) clip: vec4<f32>) -> OverviewVertex {
     let corners = array(vec2(0.,0.), vec2(1.,0.), vec2(0.,1.), vec2(0.,1.), vec2(1.,0.), vec2(1.,1.));
     let uv = corners[index];
@@ -455,7 +455,7 @@ struct OverviewVertex {
     // Choose the more contrasting black/white surround once per vertex. A
     // constant white halo disappears with a light-colored outline in dark UI.
     let halo = select(1., 0., dot(outline.rgb, vec3(.2126,.7152,.0722)) > .179);
-    return OverviewVertex(surface_clip(point), uv, ab, cd, outline, background_scale, clip, halo);
+    return OverviewVertex(surface_clip(point), uv, ab, cd, outline, scale, clip, halo);
 }
 fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     let d = b-a;
@@ -479,10 +479,9 @@ fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
         }}
     }
     let paint = proof_artwork(sample, point);
-    let scale = v.background_scale.w;
-    let checker = select(0., 1., (i32(floor(p.x / (8. * scale))) + i32(floor(p.y / (8. * scale)))) % 2 == 0);
-    let background = mix(view_ui_rgb(v.background_scale.rgb), vec3(checker), .2);
-    var rgb = view_working_rgb(paint.rgb) + background * (1.-paint.a);
+    let scale = v.scale;
+    let checker = transparency_checker(p, 8. * scale);
+    var rgb = view_working_rgb(paint.rgb) + vec3(checker) * (1.-paint.a);
     let edge = min(min(segment_distance(p,v.ab.xy,v.ab.zw),segment_distance(p,v.ab.zw,v.cd.xy)),
                    min(segment_distance(p,v.cd.xy,v.cd.zw),segment_distance(p,v.cd.zw,v.ab.xy)));
     rgb = mix(rgb,vec3(v.halo),clamp(1.5*scale+.5-edge,0.,1.));
@@ -538,11 +537,11 @@ fn picker_layer_mark(p: vec2<f32>, center: vec2<f32>) -> f32 {
     let point = vec2(dot(camera.inverse.xz,sample_surface),dot(camera.inverse.yw,sample_surface)) + camera.offset_document.xy;
     var rgb = view_ui_rgb(camera.surround.rgb);
     if v.sample.w > .5 {
-        let checker = select(.80,.94,(i32(floor(p.x/8.))+i32(floor(p.y/8.)))%2==0);
+        let checker = transparency_checker(p, 8.);
         rgb = select(vec3(checker),view_working_rgb(v.candidate.rgb),v.candidate.a>0.);
     } else if all(point >= vec2(0.)) && all(point < camera.offset_document.zw) {
         let paint = proof_artwork(canvas_linear(artwork_at(point,camera.inverse.xy*.5,camera.inverse.zw*.5)),point);
-        let checker = select(.80,.94,(i32(floor(point.x/16.))+i32(floor(point.y/16.)))%2==0);
+        let checker = transparency_checker(point, 16.);
         rgb = view_working_rgb(paint.rgb) + vec3(checker)*(1.-paint.a);
     }
     var ring = view_working_rgb(select(v.candidate.rgb,v.original.rgb,p.y>=0.));

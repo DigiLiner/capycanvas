@@ -538,10 +538,10 @@ internal fun menuButtonWidth(caption: String, textWidth: (String) -> Float) = ca
             clipPath(track) {
                 val bounds = Rect(-3 * unit, -wide, length + unit, wide)
                 if (opacity) {
-                    drawRect(colors.text.copy(alpha = .08f), bounds.topLeft, bounds.size)
+                    drawRect(colors.checkerLight, bounds.topLeft, bounds.size)
                     val cell = 4 * unit
                     for (col in -1..(length / cell).toInt() + 1) for (row in -2..1) if ((col + row) % 2 == 0)
-                        drawRect(colors.text.copy(alpha = .2f), Offset(col * cell, row * cell), Size(cell, cell))
+                        drawRect(colors.checkerDark, Offset(col * cell, row * cell), Size(cell, cell))
                     drawRect(Brush.horizontalGradient(listOf(colors.text.copy(alpha = 0f), colors.text.copy(alpha = .65f)), 0f, length),
                         bounds.topLeft, bounds.size)
                 } else drawRect(colors.text.copy(alpha = .22f), bounds.topLeft, bounds.size)

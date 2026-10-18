@@ -979,7 +979,7 @@ fn deferred_transform_preview_navigator_preserves_coarse_artwork() {
             r, wgpu::TextureFormat::Rgba32Float, crate::SdrSurfaceColor::ExtendedLinearSrgb).unwrap();
         presenter.set_overviews(r, &[crate::OverviewPlacement {
             bounds: [0., 0., size[0] as f32, size[1] as f32], clip: None,
-            work_area: [[-1000.; 2]; 4], outline_linear: [0.; 3], background_linear: [1.; 3], scale: 1., opacity: 1.,
+            work_area: [[-1000.; 2]; 4], outline_linear: [0.; 3], scale: 1., opacity: 1.,
         }]);
         let (texture, target) = create_color_target(&r.device, size, "placement navigator oracle");
         presenter.present_overviews(r, &target, size).unwrap();

@@ -28,8 +28,8 @@ struct EditorPalette {
     var glassSwitcherSelection: Color { glass("switcher_selection", role("header_selection", "#afc6e5")) }
     var glassDocumentTab: Color { glass("document_tab", self["panel"]) }
     var glassy: EditorPalette { var palette = self; palette.onGlass = true; return palette }
-    var checkerLight: Color { role("checker_light", "#dcdcdc") }
-    var checkerDark: Color { role("checker_dark", "#aaaaaa") }
+    var checkerLight: Color { role("checker_light", "#ffffff") }
+    var checkerDark: Color { role("checker_dark", "#cccccc") }
 }
 extension GraphicsContext {
     func fillTransparencyChecker(_ size: CGSize, palette: EditorPalette) {

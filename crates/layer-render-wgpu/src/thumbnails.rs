@@ -652,8 +652,8 @@ pub(super) struct BoundsPipeline {
 }
 impl BoundsPipeline {
     fn shader(device: &PipelineDevice) -> String {
-        format!("{}\n{}\n{}\n{}", include_str!("selection_clip.wgsl").replace("@binding(1)", "@binding(3)"),
-            device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("thumbnails.wgsl"))
+        format!("{}\n{}\n{}\n{}\n{}", include_str!("selection_clip.wgsl").replace("@binding(1)", "@binding(3)"),
+            device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), crate::view_color::checker_shader(), include_str!("thumbnails.wgsl"))
     }
     pub fn new(device: &PipelineDevice) -> Arc<Self> {
         device.bounds_pipeline.get_or_init(|| Arc::new(Self::build(device))).clone()

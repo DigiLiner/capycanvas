@@ -265,9 +265,10 @@ Navigator presentation samples bilinearly, using a bounded 4 × 4 average in
 linear light for footprints wider than four preview texels. It applies the
 existing color and proof transforms to these coarse pixels; its camera outline,
 clip, orientation and input stay current. Transparent pixels reveal an 8-unit
-checkerboard shaded from the panel color, so a page without Paper or Fill remains
-visible in either theme. The presenter draws the checkerboard without additional
-textures or render passes.
+checkerboard, so a page without Paper or Fill remains visible in either theme.
+All transparency backdrops use sRGB white (`#ffffff`) and gray (`#cccccc`) from
+shared color constants, decoded before GPU compositing. The presenter draws the
+checkerboard without additional textures or render passes.
 
 Partial selections and copies compose moved and
 retained inputs before presentation, preserving their correlated coverage.

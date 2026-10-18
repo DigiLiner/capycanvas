@@ -46,7 +46,6 @@ impl Overviews {
         let Some(tab) = state.tabs.first() else {
             return Vec::new();
         };
-        let bg = state.palette.panel.linear();
         let fg = state.palette.text.linear();
         let mut views: Vec<_> = self
             .views
@@ -80,7 +79,6 @@ impl Overviews {
                             .work_area
                             .map(|[x, y]| [(p.origin[0] + x) * scale, (p.origin[1] + y) * scale]),
                         outline_linear: [fg[0], fg[1], fg[2]],
-                        background_linear: [bg[0], bg[1], bg[2]],
                         opacity: p.opacity,
                         scale,
                     },

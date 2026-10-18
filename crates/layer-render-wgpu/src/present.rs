@@ -17,21 +17,19 @@ pub struct OverviewPlacement {
     pub clip: Option<[f32; 4]>,
     pub work_area: [[f32; 2]; 4],
     pub outline_linear: [f32; 3],
-    pub background_linear: [f32; 3],
     pub scale: f32,
     pub opacity: f32,
 }
 
 impl OverviewPlacement {
-    fn packed(self) -> Option<[f32; 24]> {
+    fn packed(self) -> Option<[f32; 21]> {
         let [x, y, w, h] = self.bounds;
         let [[ax, ay], [bx, by], [cx, cy], [dx, dy]] = self.work_area;
         let [r, g, b] = self.outline_linear;
-        let [br, bg, bb] = self.background_linear;
         let opacity = self.opacity.clamp(0., 1.);
         let [clip_x, clip_y, clip_w, clip_h] = self.clip.unwrap_or(self.bounds);
         let data = [
-            x, y, w, h, ax, ay, bx, by, cx, cy, dx, dy, r, g, b, opacity, br, bg, bb, self.scale,
+            x, y, w, h, ax, ay, bx, by, cx, cy, dx, dy, r, g, b, opacity, self.scale,
             clip_x, clip_y, clip_w, clip_h,
         ];
         (w > 0.
@@ -97,7 +95,7 @@ pub struct ViewportPresenter {
     overview_pipeline: Option<crate::Deferred<wgpu::RenderPipeline>>,
     navigator_view: Option<wgpu::TextureView>,
     overview_buffer: Option<wgpu::Buffer>,
-    overviews: Vec<[f32; 24]>,
+    overviews: Vec<[f32; 21]>,
     overviews_changed: bool,
     standalone_overview: bool,
 }
@@ -509,7 +507,7 @@ impl ViewportPresenter {
             label: Some("viewport shader"),
             source: wgpu::ShaderSource::Wgsl(
                 format!(
-                    "const VIEW_8BIT:bool={};\nconst VIEW_SRGB_ATTACHMENT:bool={};\nconst VIEW_FLOAT16:bool={};\nconst VIEW_WHITE_SCALE:f32={};\nconst VIEW_PQ:bool={};\nconst VIEW_EXTENDED_SRGB:bool={};\nconst SCREEN_SAMPLE_STRIDE:u32={}u;\nconst CANVAS_SPACE:u32={}u;\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "const VIEW_8BIT:bool={};\nconst VIEW_SRGB_ATTACHMENT:bool={};\nconst VIEW_FLOAT16:bool={};\nconst VIEW_WHITE_SCALE:f32={};\nconst VIEW_PQ:bool={};\nconst VIEW_EXTENDED_SRGB:bool={};\nconst SCREEN_SAMPLE_STRIDE:u32={}u;\nconst CANVAS_SPACE:u32={}u;\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
                     matches!(format,wgpu::TextureFormat::Rgba8Unorm|wgpu::TextureFormat::Bgra8Unorm|wgpu::TextureFormat::Rgba8UnormSrgb|wgpu::TextureFormat::Bgra8UnormSrgb),
                     format.is_srgb(),
                     format == wgpu::TextureFormat::Rgba16Float,
@@ -525,6 +523,7 @@ impl ViewportPresenter {
                     concat!(include_str!("float_number.wgsl"), "\n", include_str!("guide_luminance.wgsl"), "\n", include_str!("hdr_view.wgsl")),
                     concat!(include_str!("tetrahedron.wgsl"), "\n", include_str!("proof_view.wgsl")),
                     [device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("mapped_sample.wgsl"), include_str!("present.wgsl")].join("\n").replace("resample.", "camera.mapped."),
+                    crate::view_color::checker_shader(),
                     include_str!("present_screen.wgsl")
                 )
                 .into(),
@@ -686,9 +685,9 @@ impl ViewportPresenter {
         }
         let device = &renderer.device;
         let instance = wgpu::VertexBufferLayout {
-            array_stride: 96,
+            array_stride: 84,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32, 5 => Float32x4],
         };
         let blend = wgpu::BlendState {
             color: wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING.color,
@@ -1156,7 +1155,7 @@ impl ViewportPresenter {
             // full-screen render area. Only merge intersecting damage regions.
             if previous.overviews != self.overviews {
                 for o in previous.overviews.iter().chain(self.overviews.iter()) {
-                    let pad = o[19] * 3. + 2.;
+                    let pad = o[16] * 3. + 2.;
                     crate::present_damage::add_region(
                         &mut regions,
                         crate::present_damage::surface_bounds(
@@ -1170,7 +1169,7 @@ impl ViewportPresenter {
                 for o in &self.overviews {
                     crate::present_damage::add_region(&mut regions,
                         crate::present_damage::surface_bounds([o[0], o[1], o[2], o[3]], view, self.quarter_turns)
-                            .intersect(crate::present_damage::surface_bounds([o[20], o[21], o[22], o[23]], view, self.quarter_turns)));
+                            .intersect(crate::present_damage::surface_bounds([o[17], o[18], o[19], o[20]], view, self.quarter_turns)));
                 }
             }
             let previous = &mut self.history;
@@ -1576,7 +1575,6 @@ mod tests {
             clip: None,
             work_area: [[0.; 2]; 4],
             outline_linear: [0.; 3],
-            background_linear: [0.; 3],
             scale: 1.,
             opacity: 1.,
         };

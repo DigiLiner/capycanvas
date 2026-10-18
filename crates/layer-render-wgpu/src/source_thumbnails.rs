@@ -117,7 +117,7 @@ impl SourceThumbnails {
         ]);
         let shader = d.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("photo overview display"),
-            source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", crate::view_color::hdr_shader(d.working_space(), r.ui_preview_space), include_str!("source_thumbnail_display.wgsl")).into()),
+            source: wgpu::ShaderSource::Wgsl(format!("{}\n{}\n{}", crate::view_color::hdr_shader(d.working_space(), r.ui_preview_space), crate::view_color::checker_shader(), include_str!("source_thumbnail_display.wgsl")).into()),
         });
         let display = fullscreen_pipeline(
             d,

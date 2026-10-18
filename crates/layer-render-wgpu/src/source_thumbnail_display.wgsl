@@ -10,7 +10,6 @@ fn sample_overview(p: vec2<i32>) -> vec4<f32> {
     return vec4(p[i], 0., 1.);
 }
 @fragment fn fragment_main(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
-    let xy = vec2<u32>(p.xy);
     let q = mat2x2<f32>(options.orientation.xy, options.orientation.zw) * (p.xy - 16.) + 15.5;
     // Branch before float-to-int conversion for subpixel-thin placements.
     var raw = vec4<f32>(0.);
@@ -21,6 +20,6 @@ fn sample_overview(p: vec2<i32>) -> vec4<f32> {
             mix(sample_overview(low + vec2(0, 1)), sample_overview(low + vec2(1, 1)), t.x), t.y);
     }
     raw=hdr_map_sdr(raw,options.rendition,options.highlight);
-    let gray = select(.497, .855, (xy.x / 4u + xy.y / 4u) % 2u == 0u);
+    let gray = transparency_checker(p.xy, 4.);
     return vec4(raw.rgb + gray * (1. - clamp(raw.a, 0., 1.)), 1.);
 }

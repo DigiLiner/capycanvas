@@ -187,7 +187,7 @@ struct SettingsView: View {
                 ForEach(kind["options"].array.indices, id: \.self) { index in
                     let selected = index == Int(kind["selected"].number)
                     Button { edit(row, index) } label: {
-                        TransparencyCircle(alpha: kind["presentation"]["alphas"][index][dark ? 1 : 0].number, dark: dark, selected: selected)
+                        TransparencyCircle(alpha: kind["presentation"]["alphas"][index][dark ? 1 : 0].number, dark: dark, selected: selected, palette: EditorPalette(source: store.state["palette"]))
                             .frame(width: 28, height: 28).contentShape(Circle())
                     }.buttonStyle(.plain)
                         .overlay { if selected { Circle().strokeBorder(Color.primary, lineWidth: 2).padding(-4).allowsHitTesting(false) } }
@@ -347,6 +347,7 @@ private struct TransparencyCircle: View {
     let alpha: Double
     let dark: Bool
     let selected: Bool
+    let palette: EditorPalette
     var body: some View {
         Canvas { context, size in
             let rect = CGRect(origin: .zero, size: size), circle = Path(ellipseIn: rect)
@@ -356,7 +357,7 @@ private struct TransparencyCircle: View {
                 for row in 0..<4 {
                     for column in 0..<4 {
                         context.fill(Path(CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell)),
-                            with: .color(Color(white: (row + column) % 2 == 0 ? 0.94 : 0.28)))
+                            with: .color((row + column) % 2 == 0 ? palette.checkerLight : palette.checkerDark))
                     }
                 }
             }

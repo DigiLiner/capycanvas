@@ -68,7 +68,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Smooth Zoom tool, up/down | 90 | **Misses:** 50.03–50.28 presented fps, p99 66.99–117.22 ms, 24 MP photo, Navigator open, thermal 0 | Measured 2026-10-09, optimized 1.0.12 APK `ef20cbb3`, navigation `cbcee39a`, base `ee4805dfe`; `artifacts/navigation-controls/zoom-audit-20261009/post-rebase/mid/` |
 | Footer zoom and rotation sliders | 90 | Unmeasured on the reference tablet | |
 | Navigator drag | 90 | | |
-| Pan with Navigator open, checkerboard shader | 90 | Diagnostic: 60.33–60.37 renderer submissions/s; submission interval p99 19.67–19.83 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 24 MP tier photo, thermal 0; release APK `c6136dfd`, base `ed97cae7f` plus shader `bd7e1f35bfcb`; `artifacts/navigator-android/mid/` |
+| Pan with Navigator open, checkerboard shader | 90 | Diagnostic: 60.33–60.43 renderer submissions/s; submission interval p99 19.12–19.25 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 24 MP tier photo, thermal 0; release APK `e38cf984`, base `5cee14be0` plus shared white/gray checker colors; `artifacts/checker-android/mid/` |
 | Brush-cursor hover | 90 | | |
 | Placed-photo drag (24 MP photo) | 90 | screen 59.0/s; renderer 99.4 completed updates/s, Navigator closed | Transform presentation below; 90 Hz not met |
 | Pixel transform handle drag: Free, Uniform, Skew or Rotate | 90 | Free: screen 59.2/s; renderer 182.1 completed updates/s, Navigator closed | Transform presentation below; 90 Hz not met |

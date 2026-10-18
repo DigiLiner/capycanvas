@@ -289,7 +289,7 @@ struct SettingsView::Impl : std::enable_shared_from_this<Impl> {
                     auto grey=[](double value,double opacity=1){auto c=uint8_t(std::lround(value*255));return winrt::Windows::UI::Color{uint8_t(std::lround(opacity*255)),c,c,c};};
                     Grid disc;disc.Width(28);disc.Height(28);disc.IsHitTestVisible(false);
                     auto circle=[&](Brush const& brush){Shapes::Ellipse shape;shape.Fill(brush);disc.Children().Append(shape);};
-                    if(alpha<1){Media::ImageBrush checks;checks.ImageSource(checkerBitmap(28,2,grey(.94),grey(.28),7));checks.Stretch(Stretch::Fill);circle(checks);}
+                    if(alpha<1){auto palette=object(data->state,L"palette");Media::ImageBrush checks;checks.ImageSource(checkerBitmap(28,2,color(str(palette,L"checker_light")),color(str(palette,L"checker_dark")),7));checks.Stretch(Stretch::Fill);circle(checks);}
                     circle(fill(grey(dark?.55:.8,alpha)));
                     if(alpha<1){
                         Media::RadialGradientBrush sheen;sheen.Center({.32f,.26f});sheen.GradientOrigin({.32f,.26f});sheen.RadiusX(.5);sheen.RadiusY(.5);

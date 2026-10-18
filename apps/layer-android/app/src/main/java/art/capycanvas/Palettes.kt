@@ -425,14 +425,15 @@ private fun Offset.round() = IntOffset(x.roundToInt(), y.roundToInt())
 
 private fun Modifier.blockInput() = pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
 
-private fun DrawScope.checker() {
+private fun DrawScope.checker(colors: Palette) {
     val tile = 5.dp.toPx()
     for (y in 0..ceil(size.height / tile).toInt()) for (x in 0..ceil(size.width / tile).toInt())
-        drawRect(if ((x + y) % 2 == 0) Color(0xffcccccc) else Color(0xff8c8c8c), Offset(x * tile, y * tile), Size(tile, tile))
+        drawRect(if ((x + y) % 2 == 0) colors.checkerLight else colors.checkerDark, Offset(x * tile, y * tile), Size(tile, tile))
 }
 
 @Composable internal fun PaletteFace(color: Color, modifier: Modifier = Modifier, shape: Shape = ControlShape) {
-    Canvas(modifier.clip(shape)) { if (color.alpha < 1f) checker(); drawRect(color) }
+    val colors = LocalPalette.current
+    Canvas(modifier.clip(shape)) { if (color.alpha < 1f) checker(colors); drawRect(color) }
 }
 
 @Composable private fun CellLayout(cells: PaletteCells, count: Int, modifier: Modifier = Modifier, content: @Composable () -> Unit) {

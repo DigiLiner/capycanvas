@@ -24,9 +24,9 @@ follow the active tool’s Size, Strength or Opacity setting and disable when un
 Multiple instances and existing panels share the same state and preset memory.
 Size tracks widen toward larger values; percentage tracks use a gradient over
 a checkerboard. Both orientations use equal end padding. Every host draws
-GTK's track: 6px end insets, rounded tapered ends, fills from the theme text
-color (22% for size; 8% base, 20% checker cells and a 0–65% gradient for
-percentage controls) and a 12×28px squircle thumb with a 60% text border. The tracks have no
+GTK's track: 6px end insets, rounded tapered ends, the theme text color at 22%
+for size, and a 0–65% text-color gradient over the shared white/gray transparency
+checkerboard for percentage controls. A 12×28px squircle thumb uses a 60% text border. The tracks have no
 persistent numeric readout. Dragging opens a rounded floating stamp preview
 beside the slider, updates it continuously, and
 closes it on release or cancellation. A tap keeps the preview open until an

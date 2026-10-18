@@ -306,7 +306,6 @@ fn in_surface_navigator_keeps_clipped_geometry() {
                 clip: clipped.then_some([13., 17., (size[0] - 31) as f32, (size[1] - 37) as f32]),
                 work_area: [[-1000.; 2]; 4],
                 outline_linear: [0.; 3],
-                background_linear: [1.; 3],
                 scale: 1.,
                 opacity: 1.,
             }],

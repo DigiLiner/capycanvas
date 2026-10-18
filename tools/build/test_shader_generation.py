@@ -13,6 +13,7 @@ INPUTS = (
     "crates/layer-render-wgpu/src/shader.wgsl",
     "crates/layer-render-wgpu/Cargo.toml",
     "crates/layer-core/src/color.rs",
+    "crates/layer-color/src/lib.rs",
     "crates/layer-shader-cache-key/src/lib.rs",
     "crates/layer-shader-cache-key/build.rs",
     "crates/layer-shader-cache-key/Cargo.toml",

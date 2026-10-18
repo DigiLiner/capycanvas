@@ -62,7 +62,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Painting with Filters previews pending (61 MP) | 120 | One frame-gap outlier; repeat passes. Completed-update rate unqualified. Curves thumbnail opening 6.782 → 0.943–1.015 s | [Filters previews](#filters-previews), 2026-10-06 |
 | Footer zoom and rotation sliders | 120 | Unmeasured on the reference tablet | |
 | Navigator drag | 120 | | |
-| Pan with Navigator open, checkerboard shader | 120 | Diagnostic: 34.28–38.90 renderer submissions/s; submission interval p99 37.40–38.23 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 61 MP tier photo, thermal 0; release APK `c6136dfd`, base `ed97cae7f` plus shader `bd7e1f35bfcb`; `artifacts/navigator-android/top/` |
+| Pan with Navigator open, checkerboard shader | 120 | Diagnostic: 34.92–39.12 renderer submissions/s; submission interval p99 37.11–39.52 ms. Presented FPS unmeasured; target unqualified | 2026-10-17, three warmed 5 s gestures, 61 MP tier photo, thermal 0; release APK `e38cf984`, base `5cee14be0` plus shared white/gray checker colors; `artifacts/checker-android/top/` |
 | Brush-cursor hover | 120 | | |
 | Placed-photo drag (24 MP photo) | 120 | | |
 | Retained photo translation with snapping (61 MP) | 120 | **Not met.** 59.29–59.87 completed updates/s; matched snapping-off run 59.46–59.71/s | [Transform snapping](#transform-snapping), 2026-10-02 |

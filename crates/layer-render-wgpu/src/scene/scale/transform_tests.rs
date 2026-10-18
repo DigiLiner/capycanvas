@@ -15,7 +15,7 @@ fn navigator_visibility_preserves_direct_transform_presentation() {
         crate::SdrSurfaceColor::Srgb).unwrap();
     let overview = crate::OverviewPlacement {
         bounds: [0., 0., 100., 50.], clip: None, work_area: [[0.; 2]; 4],
-        outline_linear: [0.; 3], background_linear: [1.; 3], scale: 1., opacity: 1.,
+        outline_linear: [0.; 3], scale: 1., opacity: 1.,
     };
     standalone.set_overviews(&r, std::slice::from_ref(&overview));
     for (step, (visible, x)) in [(false, 10.), (true, 10.), (true, 20.), (false, 30.), (true, 40.), (false, 50.)].into_iter().enumerate() {
@@ -50,7 +50,7 @@ fn deferred_transforms_present_rotated_views_and_navigators_without_intermediate
         if overview {
             presenter.set_overviews(r, &[crate::OverviewPlacement {
                 bounds: [0., 0., size[0] as f32, size[1] as f32], clip: None,
-                work_area: [[-1000.; 2]; 4], outline_linear: [0.; 3], background_linear: [1.; 3], scale: 1., opacity: 1.,
+                work_area: [[-1000.; 2]; 4], outline_linear: [0.; 3], scale: 1., opacity: 1.,
             }]);
             presenter.present_overviews(r, &target, size).unwrap();
         } else { presenter.present(r, &target, view, [1.; 4]).unwrap(); }

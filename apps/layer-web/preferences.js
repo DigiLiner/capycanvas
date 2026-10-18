@@ -193,7 +193,7 @@ export function createPreferences({ app, element, button, icon, numberField, pan
     const grey = v => `rgb(${v * 255} ${v * 255} ${v * 255})`;
     widget.querySelectorAll("[data-choice]").forEach((choice, index) => {
       const alpha = kind.presentation.alphas[index][Number(dark)], clear = 1 - alpha, checked = index === kind.selected;
-      const checks = alpha < 1 ? Array.from({ length: 16 }, (_, i) => `<rect x="${i % 4 / 4}" y="${Math.floor(i / 4) / 4}" width=".25" height=".25" fill="${grey((i % 4 + Math.floor(i / 4)) % 2 ? .28 : .94)}"/>`).join("") : "";
+      const checks = alpha < 1 ? Array.from({ length: 16 }, (_, i) => `<rect x="${i % 4 / 4}" y="${Math.floor(i / 4) / 4}" width=".25" height=".25" fill="var(--checker-${(i % 4 + Math.floor(i / 4)) % 2 ? 'dark' : 'light'})"/>`).join("") : "";
       const sheen = alpha < 1 ? `<radialGradient id="sheen-${index}" cx=".32" cy=".26" fr=".02" r=".5"><stop offset="0" stop-color="white" stop-opacity="${Math.min(1, .25 + 1.2 * clear)}"/><stop offset="1" stop-color="white" stop-opacity="0"/></radialGradient><circle cx=".5" cy=".5" r=".5" fill="url(#sheen-${index})"/>` : "";
       const [ink, halo] = dark ? [1, 0] : [.18, 1];
       const check = checked ? `<path d="M.3 .52L.44 .66L.71 .36" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke="${grey(halo)}" stroke-opacity=".45" stroke-width="${4 / 28}"/><path d="M.3 .52L.44 .66L.71 .36" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke="${grey(ink)}" stroke-width="${2 / 28}"/>` : "";

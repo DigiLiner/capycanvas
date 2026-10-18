@@ -118,7 +118,7 @@ fn fill_thumbnails_fill_their_square_for_gradients_and_future_multipass_generato
             r.submit(packet(document.scene().with_owner(0,0), extent)).unwrap();
             let bytes = crate::source_thumbnails::tests::thumbnail(&mut r, layer_render::ThumbnailTarget::Occurrence(owner));
             for [x, y] in points {
-                let checker = if (x / 4 + y / 4) % 2 == 0 { 0.855 } else { 0.497 };
+                let checker = if (x / 4 + y / 4) % 2 == 0 { 1. } else { RgbSpace::Srgb.decode(0.8) };
                 let expected = [0.25, (y as f64 + 0.5) / 32., (x as f64 + 8.5) / 48.]
                     .map(|value| (RgbSpace::Srgb.encode(value * 0.5 + checker * 0.5) * 255.).round() as i32);
                 let pixel = &bytes[(y * 32 + x) * 4..][..4];

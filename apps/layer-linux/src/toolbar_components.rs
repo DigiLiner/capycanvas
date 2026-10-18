@@ -1483,19 +1483,10 @@ fn paint_track(
     let ink = root.color();
     let alpha = if scale.is_sensitive() { 1. } else { 0.35 };
     if opacity {
-        cr.set_source_rgba(
-            ink.red() as f64,
-            ink.green() as f64,
-            ink.blue() as f64,
-            0.08 * alpha,
-        );
+        let [light, dark] = layer_ui::TRANSPARENCY_CHECKER.map(|color| f64::from(color.0[0]) / 255.);
+        cr.set_source_rgb(light, light, light);
         let _ = cr.paint();
-        cr.set_source_rgba(
-            ink.red() as f64,
-            ink.green() as f64,
-            ink.blue() as f64,
-            0.2 * alpha,
-        );
+        cr.set_source_rgb(dark, dark, dark);
         for col in -1..(length / 4.) as i32 + 2 {
             for row in -2..2 {
                 if (col + row) % 2 == 0 {
