@@ -3374,6 +3374,24 @@ and populated layer thumbnails. Matched phase analysis and limitations are in
 `M4-source-reduction-Release-photo-Light-matched-pair/matched-contact-phase-analysis.json`
 beside `latest-Apple-integrated-Release-preparation/`.
 
+Normal Release checks after the unit-opacity pixel-copy correction and transform
+integration through `175b8917e` pass the original guards on both Apple devices:
+4320 samples, three contacts, priming Undo, and zero measured missing or zero-time
+presentation callbacks, input rejections or rendering errors.
+
+| Device | Previous first-contact prepare, ms | Current, ms | Previous associated Down-to-present, ms | Current, ms |
+| --- | ---: | ---: | ---: | ---: |
+| M2 Pro Mac mini | 7.412 | 7.581 | 54.967 | 53.850 |
+| M4 iPad Pro | 4.592 | 5.367 | — | — |
+
+The M4's first-contact maximum presentation interval remains about 25 ms and its
+presentation rate changes from 119.500 to 119.667/s. These single comparisons
+preserve the watercolor preparation improvement; they do not establish a causal
+repair for older Mac zero-time callbacks, completed brush-update cadence, physical
+latency or a reference-tier target. Current evidence is in
+`latest-Apple-integrated-Release-preparation/runtime-current175b-opacity-GPU0-photo20-Light-Mac/`
+and `M4-current175b-Opacity-Release-photo-Light/` beside it.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

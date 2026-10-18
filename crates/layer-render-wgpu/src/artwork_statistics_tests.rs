@@ -118,6 +118,16 @@ fn statistics_frozen_source_and_cancel_do_not_publish_changed_pixels() {
 }
 
 #[test]
+fn unit_opacity_capture_preserves_subnormal_rgba_bits() {
+    let bits = [[1, 2, 0x80000003, 1], [0x007fffff; 4]];
+    let pixels = bits.map(|pixel| pixel.map(f32::from_bits));
+    let doc = generated([2, 1], DocumentColor { depth: SampleDepth::F32, ..Default::default() }, &pixels);
+    let mut snapshot = gpu().capture_scene(doc.snapshot(), SceneScope::All, CaptureControl::default()).unwrap();
+    let actual = snapshot.read_region([0, 0, 2, 1]).unwrap();
+    assert_eq!(actual.iter().map(|pixel| pixel.map(f32::to_bits)).collect::<Vec<_>>(), bits);
+}
+
+#[test]
 fn statistics_extreme_finite_rgb_uses_f64_classification_without_unassociation_overflow() {
     let pixels = [[1e10, 5e9, 2.5e9, 1e-30], [f32::MAX, f32::MAX, f32::MAX, 1.], [-f32::MAX, -f32::MAX, -f32::MAX, 1.], [f32::from_bits(1); 4], [0., 0., 0., 1.], [1.; 4]];
     for space in RgbSpace::ALL {

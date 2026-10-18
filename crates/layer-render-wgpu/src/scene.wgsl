@@ -174,7 +174,7 @@ fn scene_value(v: Vertex) -> vec4<f32> {
     if op == 16u { return raw * settings.options.y + dst * settings.options.z; }
     if op == 3u { return raw*mix(dst.a,1.-dst.a,settings.options.z); }
     if op == 5u { let a = (1.-raw.a)*.42; return scene_space(vec4<f32>(.46,.12,.8,1.)*a); }
-    let src = select(raw*settings.options.y,raw,settings.options.y==1.);
+    let src = blend_opacity(raw,settings.options.y);
     if settings.options.w > .5 { return blend_clip(src,dst,u32(settings.options.z)); }
     return blend_composite(src,dst,u32(settings.options.z));
 }

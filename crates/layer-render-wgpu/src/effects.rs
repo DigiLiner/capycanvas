@@ -1055,7 +1055,7 @@ fn fx_original(p:vec2<f32>)->vec4<f32> {
             source.push_str("c=select(vec4(0.),adjusted,fx_in_frame(position)); }\n");
         }
     }
-    if !stage.reduced() {source.push_str("if settings.options.x>.5 {let backdrop=select(settings.backdrop,back_value,settings.options.x>1.5);c=blend_composite(select(c*settings.options.y,c,settings.options.y==1.),backdrop,u32(settings.options.z));}");}
+    if !stage.reduced() {source.push_str("if settings.options.x>.5 {let backdrop=select(settings.backdrop,back_value,settings.options.x>1.5);c=blend_composite(blend_opacity(c,settings.options.y),backdrop,u32(settings.options.z));}");}
     source.push_str("return c; }\n");
     if stage.reduced() {
         source.push_str("const EFFECT_POSITION_INDEPENDENT:bool=false;\n");

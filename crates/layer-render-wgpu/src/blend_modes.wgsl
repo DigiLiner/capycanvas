@@ -86,6 +86,9 @@ fn blend(s: vec3<f32>, d: vec3<f32>, code: u32) -> vec3<f32> {
         default: { return s; }
     }
 }
+fn blend_opacity(color: vec4<f32>, opacity: f32) -> vec4<f32> {
+    return bitcast<vec4<f32>>(select(bitcast<vec4<u32>>(color * opacity), bitcast<vec4<u32>>(color), opacity == 1.));
+}
 // Premultiplied source over a premultiplied backdrop.
 fn blend_composite(src: vec4<f32>, dst: vec4<f32>, code: u32) -> vec4<f32> {
     if (bitcast<u32>(src.a)&0x7fffffffu)==0u {return dst;}

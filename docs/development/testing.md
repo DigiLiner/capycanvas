@@ -293,7 +293,10 @@ Precision adjustment checks use `artwork_statistics_tests`,
 `levels_statistics_tests` and `curves_calibration_tests` in `layer-render-wgpu`,
 with independent scalar references and real source codecs. Their generator
 fixtures load exact pixel bits at run time: compilers may flush subnormal shader
-literals that also feed Float32 arithmetic. GTK journeys are
+literals that also feed Float32 arithmetic. The unit-opacity capture regression
+compares raw RGBA bits before histogram classification; copies at unit layer
+opacity must preserve subnormal values without Float32 identity arithmetic.
+GTK journeys are
 `native_composite_histogram_updates_without_changing_the_drawing`,
 `native_curves_histogram_preserves_numeric_focus`,
 `native_levels_auto_and_calibration_atomic_history`,
