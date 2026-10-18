@@ -45,6 +45,15 @@ public:
         bytes=0;
         return result;
     }
+    std::deque<CanvasWork> TakeBeforePointers() {
+        std::deque<CanvasWork> result;
+        while(!items.empty()&&!std::holds_alternative<std::vector<CapyPointer>>(items.front())) {
+            bytes-=Bytes(items.front());
+            result.emplace_back(std::move(items.front()));
+            items.pop_front();
+        }
+        return result;
+    }
 private:
     static size_t Bytes(CanvasWork const& item) {
         // Capacity counts retained allocations, including spare vector/string

@@ -928,7 +928,7 @@ void CanvasWindow::Run() {
             bool overflow;std::optional<bool> hover;
             // Samples admitted during reconstruction must wait for replacement
             // brushes; draining sooner would classify their presses as unready.
-            {std::lock_guard lock(mutex);if(!recoveryAttempts)pending=work.Take();overflow=transportFailed;hover=std::exchange(pendingHover,std::nullopt);}
+            {std::lock_guard lock(mutex);pending=recoveryAttempts?work.TakeBeforePointers():work.Take();overflow=transportFailed;hover=std::exchange(pendingHover,std::nullopt);}
             space.notify_all();
             bool failed=false;
             if(hover&&capy_chrome(host,*hover?0:1,0,0,false,menuOpen.load())<0){Fail(capy_error());break;}

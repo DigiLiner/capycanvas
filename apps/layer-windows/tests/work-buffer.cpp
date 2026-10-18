@@ -261,6 +261,22 @@ int main() {
     assert(queue.Push(CanvasScroll{1,2,3,4,2,true,false}));
     std::cout<<"Canvas queue: ordered boundaries, reserved commands, refusal ownership, item and allocation limits passed\n";
 
+    assert(queue.Push(CanvasCommand{CanvasCommandKind::Document,"close"}));
+    CapyPointer down{};down.phase=1;
+    assert(queue.Push(std::vector<CapyPointer>{down}));
+    assert(queue.Push(CanvasCommand{CanvasCommandKind::Action,"undo"}));
+    batch=queue.TakeBeforePointers();
+    assert(batch.size()==2&&std::holds_alternative<CanvasScroll>(batch[0])&&std::get<CanvasCommand>(batch[1]).json=="close");
+    assert(queue.TakeBeforePointers().empty()&&!queue.Empty());
+    batch=queue.Take();
+    assert(batch.size()==2&&std::get<std::vector<CapyPointer>>(batch[0])[0].phase==1&&std::get<CanvasCommand>(batch[1]).json=="undo");
+    size_t commands=0;
+    while(queue.Push(CanvasCommand{CanvasCommandKind::Action,std::string(16384,'x')}))++commands;
+    assert(queue.TakeBeforePointers().size()==commands&&queue.Empty());
+    for(size_t i=0;i<commands;i++)assert(queue.Push(CanvasCommand{CanvasCommandKind::Action,std::string(16384,'x')}));
+    queue.Take();
+    std::cout<<"Canvas queue: commands ahead of held pointer samples leave in order and release their capacity\n";
+
     CanvasQueryQueue queries;
     auto payload=std::make_shared<int>(7);std::weak_ptr<int> lifetime=payload;
     for(size_t i=0;i<CanvasQueryQueue::MaxItems;i++)

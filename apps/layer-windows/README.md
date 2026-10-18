@@ -82,6 +82,8 @@ whole client area, including behind the custom title bar.
   the render thread polls completions without blocking. Replaced GPU resources
   retire off the render thread.
 - **Device loss.** A removed D3D12 device is rebuilt from the shared document.
+  Pointer samples queued meanwhile wait for the replacement's brushes; commands
+  queued ahead of them, such as closing the window, run without waiting.
   If that fails, painting stops, queued contacts are canceled, completed edits
   stay saveable and GPU-dependent commands are disabled.
 - **Windows.** Each window owns its drawings, canvas, render thread, dialogs and
