@@ -776,12 +776,18 @@ impl PageSurface {
     }
 
     fn copy_to(&self, destination: &Self, encoder: &mut crate::submission::CommandEncoder) {
-        destination.preview.set(None);
-        encoder.copy_texture_to_texture(
-            self.texture.as_image_copy(),
-            destination.texture.as_image_copy(),
-            self.texture.size(),
-        );
+        destination.copy_from(&self.texture, self.texture.size(), encoder);
+    }
+
+    fn copy_from(&self, source: &wgpu::Texture, extent: wgpu::Extent3d, encoder: &mut crate::submission::CommandEncoder) {
+        self.preview.set(None);
+        encoder.copy_texture_to_texture(source.as_image_copy(), self.texture.as_image_copy(), extent);
+    }
+
+    fn clear(&self, zeros: &[wgpu::Texture; 2], encoder: &mut crate::submission::CommandEncoder) {
+        let source = zeros.iter().find(|source| source.format() == self.texture.format())
+            .expect("page format has an immutable zero source");
+        self.copy_from(source, self.texture.size(), encoder);
     }
 }
 
@@ -1047,6 +1053,7 @@ pub struct WgpuRasterizer {
     snapshot_job: Option<snapshot::SnapshotJob>,
     #[cfg(target_arch = "wasm32")]
     snapshot_worker_callback: Option<snapshot::BrowserSnapshot>,
+    zero_pages: [wgpu::Texture; 2],
     _empty_texture: wgpu::Texture,
     empty_view: wgpu::TextureView,
     _empty_scalar_texture: wgpu::Texture,
@@ -1224,6 +1231,18 @@ impl WgpuRasterizer {
             device.scalar_format(),
             "layer zero missing paint state",
         );
+        let zero_pages = [device.working_format(), device.scalar_format()].map(|format| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("layer immutable zero page"),
+                size: wgpu::Extent3d { width: PAGE_SIZE, height: PAGE_SIZE, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            })
+        });
         let reservoir = BrushReservoir {
             primary: create_page_surface(
                 &device,
@@ -1422,6 +1441,7 @@ impl WgpuRasterizer {
             snapshot_job: None,
             #[cfg(target_arch = "wasm32")]
             snapshot_worker_callback: None,
+            zero_pages,
             _empty_texture: empty_texture,
             empty_view,
             _empty_scalar_texture: empty_scalar_texture,
@@ -2280,6 +2300,7 @@ impl WgpuRasterizer {
             .saturating_mul(scalar_bytes * 2)
             .saturating_add(material_surface_pages.saturating_mul(scalar_bytes))
             .saturating_add(u64::from(RESERVOIR_SIZE * RESERVOIR_SIZE) * pixel_bytes * 2)
+            .saturating_add(self.zero_pages.iter().map(texture_bytes).sum::<u64>())
             .saturating_add(self.selection_clip.storage_bytes())
             .saturating_add(self.selection_painter.as_ref().map_or(0, |p| p.storage_bytes()))
             .saturating_add(self.selection_previews.buffer.as_ref().map_or(0, |b|b.size()*2))
@@ -2504,10 +2525,6 @@ impl WgpuRasterizer {
         label: &'static str,
         value: f32,
     ) {
-        for page in &self.preview_pages {
-            if page.primary.preview.get().is_some() && page.primary.view==*view {page.primary.preview.set(None);}
-            if let Some(secondary)=&page.secondary && secondary.preview.get().is_some() && secondary.view==*view {secondary.preview.set(None);}
-        }
         let _pass = encoder.color_pass(
             label,
             view,
@@ -4258,27 +4275,15 @@ impl WgpuRasterizer {
         for layer in &self.paint_layers {
             for page in &layer.pages {
                 if page.primary_needs_clear {
-                    self.encode_clear(
-                        &mut encoder,
-                        &page.primary.view,
-                        "layer clear new paint page",
-                    );
+                    page.primary.clear(&self.zero_pages, &mut encoder);
                 }
             }
             for page in &layer.watercolor_wetness_pages {
                 if page.primary_needs_clear {
-                    self.encode_clear(
-                        &mut encoder,
-                        &page.primary.view,
-                        "layer clear new watercolor wetness A",
-                    );
+                    page.primary.clear(&self.zero_pages, &mut encoder);
                 }
                 if page.secondary_needs_clear {
-                    self.encode_clear(
-                        &mut encoder,
-                        &page.secondary.view,
-                        "layer clear new watercolor wetness B",
-                    );
+                    page.secondary.clear(&self.zero_pages, &mut encoder);
                 }
             }
         }
@@ -4504,11 +4509,7 @@ impl WgpuRasterizer {
                             },
                         );
                     } else {
-                        self.encode_clear(
-                            &mut encoder,
-                            &preview.primary.view,
-                            "layer reset preview page",
-                        );
+                        preview.primary.clear(&self.zero_pages, &mut encoder);
                     }
                 }
             }
@@ -4559,11 +4560,7 @@ impl WgpuRasterizer {
                         },
                     );
                 } else {
-                    self.encode_clear(
-                        &mut encoder,
-                        &coverage.primary.view,
-                        "layer reset preview stroke coverage",
-                    );
+                    coverage.primary.clear(&self.zero_pages, &mut encoder);
                 }
             }
             // Prediction forks the persistent watercolor wetness as another
@@ -4626,11 +4623,7 @@ impl WgpuRasterizer {
                             },
                         );
                     } else {
-                        self.encode_clear(
-                            &mut encoder,
-                            &preview_wetness.primary.view,
-                            "layer reset preview watercolor wetness",
-                        );
+                        preview_wetness.primary.clear(&self.zero_pages, &mut encoder);
                     }
                 }
             }

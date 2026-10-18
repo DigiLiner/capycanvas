@@ -21,6 +21,13 @@ entry point: Safari versions can reject unused overrides even when the module
 declares them. This catches the dry-brush recipe mismatch; browser compiler
 failures still need checks in the actual browser. Native Metal and Chrome use
 different shader compilers from Safari.
+
+The renderer's `first_watercolor_frame_batches_page_initialization` bounds the
+passes needed for the first contact across four tiles.
+`page_zero_copies_reclear_both_formats_and_reduced_extents` checks exact zero
+pixels, preview invalidation and zero render/compute passes when reusing full
+and reduced paint and scalar pages.
+
 The renderer's `direct_contact_paint_and_erase_match_destination_deposition`
 requires hardware float32 blending and runs with `--ignored`. It compares actual
 direct paint and erase with destination deposition; portable blending devices

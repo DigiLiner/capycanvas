@@ -58,11 +58,7 @@ impl WgpuRasterizer {
                     .find(|page| page.coordinate == coordinate)
                     .expect("stroke coverage page is prepared before encoding");
                 if page.owner != Some(batch.stroke_id) {
-                    let _pass = encoder.color_pass(
-                        "layer reset stroke coverage page",
-                        &page.active().view,
-                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    );
+                    page.active().clear(&self.zero_pages, encoder);
                     page.owner = Some(batch.stroke_id);
                 }
             }

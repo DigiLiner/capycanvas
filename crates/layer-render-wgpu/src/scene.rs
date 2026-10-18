@@ -1392,12 +1392,12 @@ impl Scene {
             // reservoirs/wet pigment must not bring discarded content back.
             if let Some(stored) = r.paint_layers.iter().find(|l| l.id == target) {
                 for p in &stored.watercolor_wetness_pages {
-                    r.encode_clear(encoder, &p.primary.view, "clear baked wetness");
-                    r.encode_clear(encoder, &p.secondary.view, "clear baked wetness companion");
+                    p.primary.clear(&r.zero_pages, encoder);
+                    p.secondary.clear(&r.zero_pages, encoder);
                 }
                 for p in &stored.coverage_pages {
-                    r.encode_clear(encoder, &p.primary.view, "clear baked stroke coverage");
-                    r.encode_clear(encoder, &p.secondary.view, "clear baked coverage companion");
+                    p.primary.clear(&r.zero_pages, encoder);
+                    p.secondary.clear(&r.zero_pages, encoder);
                 }
             }
             if let Some(stored) = r.paint_layers.iter_mut().find(|l| l.id == target) {

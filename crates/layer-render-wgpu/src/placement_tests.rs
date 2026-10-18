@@ -543,3 +543,56 @@ fn watercolor_transport_preserves_multitile_prediction_commit_and_restore() {
     let accepted = send(&mut r, &layer, &[ink], &[stroke], false);
     assert_eq!(send(&mut r, &layer, &[], &[], true), accepted);
 }
+
+#[test]
+fn first_watercolor_frame_batches_page_initialization() {
+    let layer = paint_document([512; 2], "first watercolor frame");
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    r.submit(FramePacket { reset_layers: true, ..packet(layer.scene(), [512; 2]) }).unwrap();
+    let mut ink = dab([0.1, 0.3, 0.8, 1.]);
+    ink.center = Point { x: 256., y: 256. };
+    ink.radii = [160.; 2];
+    ink.material = [0.8, 1., 1., 1.];
+    let mut stroke = batch(target(&layer));
+    stroke.style = preset_style(layer_core::DefaultBrushPreset::WetWatercolor);
+    stroke.damage = ink.bounds();
+    stroke.stroke_end = false;
+    let before = r.metrics().command_passes;
+    r.submit(FramePacket { dabs: &[ink], dab_batches: &[stroke], commit_rasters: false,
+        composite_all: false, ..packet(layer.scene(), [512; 2]) }).unwrap();
+    r.wait_idle().unwrap();
+    assert_eq!(r.paint_layers[0].pages.len(), 4);
+    assert_eq!(r.paint_layers[0].watercolor_wetness_pages.len(), 4);
+    let passes = r.metrics().command_passes - before;
+    println!("first watercolor frame: {passes} render/compute passes");
+    assert!(passes <= 4 * (1 + u64::from(WATERCOLOR_TRANSPORT_STEPS)), "first watercolor frame encoded {passes} passes");
+    assert!(paint(&layer).raster.is_empty());
+}
+
+#[test]
+fn page_zero_copies_reclear_both_formats_and_reduced_extents() {
+    let layer = paint_document([512; 2], "zero page stamps");
+    let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    assert_eq!(r.device.working_format(), wgpu::TextureFormat::Rgba32Float);
+    assert_eq!(r.device.scalar_format(), wgpu::TextureFormat::R32Float);
+    for format in [r.device.working_format(), r.device.scalar_format()] {
+        for extent in [[PAGE_SIZE; 2], [PAGE_SIZE / 4; 2]] {
+            let page = create_page_surface(&r.device, &r.float_texture_layout, &r.sampler,
+                extent, format, "dirty zero page");
+            for _ in 0..2 {
+                let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+                r.encode_clear_value(&mut encoder, &page.view, "dirty zero page", 1.);
+                encoder.submit(&r.queue);
+                assert!(crate::layer_tests::page_bytes(&r, &page.texture).chunks_exact(4)
+                    .all(|word| word == 1f32.to_le_bytes()));
+                page.preview.set(Some((target(&layer), [0, 0])));
+                let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+                page.clear(&r.zero_pages, &mut encoder);
+                assert_eq!(encoder.pass_count(), 0);
+                assert_eq!(page.preview.get(), None);
+                encoder.submit(&r.queue);
+                assert!(crate::layer_tests::page_bytes(&r, &page.texture).iter().all(|&byte| byte == 0));
+            }
+        }
+    }
+}

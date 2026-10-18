@@ -3182,6 +3182,34 @@ fixed. Engine progress and presentation observations still do not qualify GPU
 completed-update throughput. Current traces and both reviewed light captures
 remain under `current10d-Release-refresh/runtime-Light/` beside those controls.
 
+A further comparison replaces zero-only paint, coverage and wetness clears with
+GPU copies from immutable zero pages. The working and scalar sources add
+1.25 MiB, included in resident storage. On `194b011e7` plus this change, the
+headless four-tile first-contact regression falls from 23 to 7 render/compute
+passes. Five matched cases preserve all 380 captured raw color, wetness,
+coverage and active-side files exactly through prediction, movement, cancel,
+commit and restore. Both normal Apple Release apps build and pass signing and
+ABI checks.
+
+One light-theme observation per host uses the same photo workload and retained
+`10d515055` controls described above:
+
+| Device | Control contact presentations/s | Zero-page copies, contact presentations/s | First-contact maximum displayed gap, control → candidate |
+| --- | --- | --- | --- |
+| M2 Pro Mac mini, 90 Hz | 87.34 / 89.31 / 89.32 | 87.45 / 89.28 / 89.27 | 177.779 → 177.779 ms |
+| M4 iPad Pro, 120 Hz | 106.48 / 109.82 / 108.99 | 111.17 / 113.34 / 113.17 | 141.670 → 141.670 ms |
+
+The iPad completes all input, priming Undo and callback-accounting guards with
+zero missing or zero-time callbacks; interval p99 remains about 16.667 ms.
+Its contact rates still miss the 114 presentations/s floor. The Mac completes
+the workload but fails the original guard with one zero-time callback on the
+third contact's resume, retaining the earlier failure class. Neither host's
+first-contact displayed gap improves. Reduced command count therefore does not
+establish that the initial response stall is fixed. These presentation
+observations do not qualify GPU-completed brush updates or physical latency.
+Current traces and reviewed captures are in
+`batched-page-clear-Release-refresh/runtime-Light/` beside those controls.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

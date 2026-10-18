@@ -791,7 +791,7 @@ impl ImageTransformState {
                 {
                     initialize_original.insert(c);
                 } else {
-                    r.encode_clear(encoder, &page.primary.view, "initialize transformed paint");
+                    page.primary.clear(&r.zero_pages, encoder);
                 }
                 page.primary_needs_clear = false;
                 r.paint_layers[index].pages.push(page);
@@ -821,16 +821,8 @@ impl ImageTransformState {
                 page.active_secondary = false;
                 page.primary_needs_clear = false;
                 page.secondary_needs_clear = false;
-                r.encode_clear(
-                    encoder,
-                    &page.primary.view,
-                    "initialize transformed watercolor A",
-                );
-                r.encode_clear(
-                    encoder,
-                    &page.secondary.view,
-                    "initialize transformed watercolor B",
-                );
+                page.primary.clear(&r.zero_pages, encoder);
+                page.secondary.clear(&r.zero_pages, encoder);
                 r.paint_layers[index].watercolor_wetness_pages.push(page);
             }
         }

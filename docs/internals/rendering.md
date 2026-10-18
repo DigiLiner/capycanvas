@@ -308,7 +308,11 @@ A device removed during buffer allocation must not unwind the render owner; the
 host can reconstruct its GPU while retaining the shared document session. Disabled
 coverage and changed-cell buffers use zero initialization without mapping during
 construction. Nonzero uniforms and native transfer tables return mapping failures
-from construction. Scene replacement retains its cached resources until the
+from construction. Paint, coverage and wetness pages reset through full-destination
+GPU copies from immutable zero pages in the working and scalar formats. These
+copy-only sources avoid clear-only render passes and invalidate reused preview
+stamps; their storage counts toward the renderer's resident budget.
+Scene replacement retains its cached resources until the
 replacement succeeds. Optional save-preview failures leave captured project
 serialization available. Uploads
 continue to reuse the staging belt and never wait for GPU completion on the UI
