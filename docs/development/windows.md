@@ -77,7 +77,9 @@ shutdown fixes. After updating the runtime, run `exercise-selection.ps1` and
 See the [WinUI release notes](https://github.com/microsoft/microsoft-ui-xaml/releases).
 
 For a Debug build, pass `-Configuration Debug`; the output is `artifacts/windows/Debug`.
-`-OutputDirectory` builds elsewhere, `-PackagesDirectory` reuses another restore
+`-OutputDirectory` builds elsewhere and keeps native objects and precompiled headers
+in `<OutputDirectory>.obj`, so separate outputs never share native intermediates.
+`-PackagesDirectory` reuses another restore
 and `-SkipRestore` skips it. `-ControlFixture` and `-SoftwareAdapterTests` build
 the [control reviews](#control-reviews) and the [VM fixture build](windows-vm.md#ui-fixtures-on-the-software-adapter).
 `-ReleaseIdentity` gives the build the installed app's [folders](#where-files-live);

@@ -3567,6 +3567,9 @@ normal Release at `f147c48b7`. Executable/DLL SHA-256 prefixes are
 build and original native input checks pass. All 4,564 inputs are consumed with
 zero unmatched records or statistics errors. Artwork, camera, controls and Undo
 checks pass; actual measured input is 215.3–216.6 Hz.
+This output shared native intermediates with other output directories. These
+results describe the pinned binary; they do not qualify the later clean,
+integrated Windows build.
 
 | Measured contact | Submitted frames/s | Input-to-frame-return p99, ms | Pen-down to frame return, ms |
 | --- | ---: | ---: | ---: |

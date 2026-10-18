@@ -14,6 +14,7 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 if (!$PackagesDirectory) { $PackagesDirectory = Join-Path $repo 'artifacts/windows/packages' }
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $repo "artifacts/windows/$Configuration" }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+$intermediateDirectory = $OutputDirectory.TrimEnd('\','/') + '.obj'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio Build Tools with Desktop development with C++ and Windows SDK 10.0.26100.0.' }
 $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json
@@ -39,7 +40,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Rust build failed.' }
     }
     $fixture = switch ($ControlFixture) { Number {'true'} Color {'Color'} Bitmap {'Bitmap'} default {'false'} }
-    & msbuild apps/layer-windows/CapyCanvas.vcxproj /m "/p:Configuration=$Configuration" /p:Platform=x64 "/p:CapyControlFixture=$fixture" "/p:PlatformToolset=$toolset" "/p:CapyPackages=$PackagesDirectory" "/p:OutDir=$OutputDirectory/" /v:minimal /nologo
+    & msbuild apps/layer-windows/CapyCanvas.vcxproj /m "/p:Configuration=$Configuration" /p:Platform=x64 "/p:CapyControlFixture=$fixture" "/p:PlatformToolset=$toolset" "/p:CapyPackages=$PackagesDirectory" "/p:OutDir=$OutputDirectory/" "/p:IntDir=$intermediateDirectory/" /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { throw 'WinUI build failed.' }
     $executable = Join-Path $OutputDirectory 'CapyCanvas.exe'
     Write-Output $executable

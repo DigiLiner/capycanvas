@@ -33,6 +33,26 @@ if($LASTEXITCODE -ne 0){throw 'Canvas queue test failed.'}
 
 & {
  $tokens=$null;$errors=$null
+ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'build.ps1'),[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw 'Build script parse failed'}
+ $directory=$ast.FindAll({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$intermediateDirectory'},$true)
+ $build=$ast.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'msbuild'},$true)
+ if($directory.Count -ne 1 -or $build.Count -ne 1){throw 'Expected one native build and intermediate directory'}
+ function msbuild {$script:nativeBuildArguments=@($args)}
+ $Configuration='Release';$fixture='false';$toolset='v145';$PackagesDirectory='C:\fixture\packages'
+ $seen=@()
+ foreach($case in @(@{output='C:\fixture\first';expected='C:\fixture\first.obj'},@{output='C:\fixture\second\';expected='C:\fixture\second.obj'})){
+  $OutputDirectory=$case.output
+  Invoke-Expression $directory[0].Extent.Text
+  Invoke-Expression $build[0].Extent.Text
+  if($script:nativeBuildArguments -notcontains "/p:IntDir=$($case.expected)/" -or $script:nativeBuildArguments -notcontains "/p:OutDir=$OutputDirectory/"){throw 'The native build did not isolate intermediates beside its output'}
+  $seen+=$intermediateDirectory
+ }
+ if(@($seen|Select-Object -Unique).Count -ne 2){throw 'Distinct native outputs reused intermediate objects'}
+}
+
+& {
+ $tokens=$null;$errors=$null
  $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'exercise-localization.ps1'),[Text.Encoding]::UTF8)
  $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
  if($errors.Count){throw 'Localization fixture parse failed'}
