@@ -263,6 +263,7 @@ pub struct NewDocumentSpec {
     pub labels: [std::sync::Arc<str>; 2],
     pub extent: [u32; 2],
     pub numeric: NumericControl,
+    pub resolution_numeric: NumericControl,
     pub minimum: u32,
     pub maximum: u32,
     pub accept: std::sync::Arc<str>,
@@ -279,6 +280,7 @@ pub fn new_document_spec(localization: &Localizer) -> NewDocumentSpec {
             kind: NumericKind::Number,
             ..NumericControl::number(1., f64::from(MAX_NEW_DOCUMENT_DIMENSION), 1., 0)
         },
+        resolution_numeric: NumericControl::number(1., f64::from(crate::MAX_NEW_DOCUMENT_RESOLUTION), 1., 0),
         minimum: 1,
         maximum: MAX_NEW_DOCUMENT_DIMENSION,
         accept: localization.text(MessageId::DOCUMENTS_CREATE),

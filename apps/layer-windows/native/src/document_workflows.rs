@@ -1026,8 +1026,8 @@ mod tests {
         .unwrap();
         let features = adapter.features()
             & (wgpu::Features::FLOAT32_FILTERABLE
-                | wgpu::Features::FLOAT32_BLENDABLE
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+                | wgpu::Features::FLOAT32_BLENDABLE)
+                | layer_render_wgpu::native_tiles::native_in_place_features(&adapter);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: features,
             required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
@@ -1258,7 +1258,16 @@ mod tests {
         })
         .unwrap();
         settle(&mut host);
+        let document = host.session.engine().document();
+        assert_eq!(document.selected_objects().len(), 2);
+        assert!(!host.session.command(CommandId::RepairSourceProfile).enabled);
+        assert!(!host.session.command(CommandId::RasterizeSource).enabled);
+        let object = document.scene().object_handle(document.working.occurrence.unwrap()).unwrap();
+        let source = (**document.scene().object(object).unwrap().image.storage()).clone();
+        host.session.import_layer_source("Photo", source).unwrap();
+        settle(&mut host);
         for command in [CommandId::RepairSourceProfile, CommandId::RasterizeSource] {
+            assert!(host.session.command(command).enabled);
             let mut task = begin(&mut host, command);
             ready(
                 &mut task,

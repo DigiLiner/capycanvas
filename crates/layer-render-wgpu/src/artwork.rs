@@ -95,8 +95,8 @@ impl Capture {
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<source_access::RawTile,GpuRasterError> {
         let frame = r.artwork_frame.clone().ok_or(GpuRasterError::InvalidExtent)?;
-        self.scene.get_or_insert_with(|| scene::Scene::new(r))
-            .layer_tile_for_query(r,frame.scene.view(),id,coordinate,encoder)
+        if self.scene.is_none() { self.scene = Some(scene::Scene::new(r)?); }
+        self.scene.as_mut().unwrap().layer_tile_for_query(r,frame.scene.view(),id,coordinate,encoder)
     }
     pub fn thumbnail_tile(&mut self, r: &mut WgpuRasterizer, target: layer_render::ThumbnailTarget, coordinate: [u32;2], encoder: &mut submission::CommandEncoder) -> Result<source_access::RawTile, GpuRasterError> {
         let frame = r.artwork_frame.clone().ok_or(GpuRasterError::InvalidExtent)?;
@@ -172,7 +172,8 @@ impl Capture {
                 scene.release_capture_window(window);
             }
         }
-        let scene = self.scene.get_or_insert_with(|| scene::Scene::new(r));
+        if self.scene.is_none() { self.scene = Some(scene::Scene::new(r)?); }
+        let scene = self.scene.as_mut().unwrap();
         let output = match packet.scene.scope() { Some(SceneScope::RawObjects(handle)) => scene::Output::Objects(*handle), _ => scene::Output::Artwork(None) };
         scene.capture_region_prepared(r, packet, destination, region, output, encoder)?;
         self.window = Some(window);
@@ -183,7 +184,7 @@ impl Capture {
     /// refused above the image limit before anything is allocated.
     fn image_bytes(&self, packet: FramePacket<'_>, region: PixelRect) -> Result<(DocRect, u64), GpuRasterError> {
         let window = scene::Scene::capture_window(packet.scene, region, packet.document_extent);
-        let bytes = scene::Scene::capture_image_bound(packet.scene, window);
+        let bytes = scene::Scene::capture_image_bound(packet.scene, region);
         let limit = self.image_limit.unwrap_or(256 * 1024 * 1024);
         if bytes > limit {
             return Err(GpuRasterError::Color(format!(
@@ -199,29 +200,36 @@ impl Capture {
     /// pixels: it needs filter images, retires earlier ones, or decodes tiles.
     pub fn would_block(&self, r: &WgpuRasterizer, packet: FramePacket<'_>, region: PixelRect) -> bool {
         let window = scene::Scene::capture_window(packet.scene, region, packet.document_extent);
-        scene::Scene::capture_image_bound(packet.scene, window) > 0
+        scene::Scene::capture_image_bound(packet.scene, region) > 0
             || self.retires_window(window)
-            || page_coordinates(region).any(|tile| self.decodes(r, packet.scene, tile))
+            || page_coordinates(region).any(|tile| {
+                r.source_tiles.borrow().uploads_full() || source_tile_decodes(r, packet.scene, tile)
+            })
     }
-    fn decodes(&self, r: &WgpuRasterizer, scene: SceneView<'_>, tile: [u32; 2]) -> bool {
-        let sources = r.source_tiles.borrow();
-        let space = r.document_color().space;
-        let resident = |id: SourceTarget| {
-            r.paint_layers.iter().any(|l| l.id == id && l.pages.iter().any(|p| p.coordinate == tile))
-        };
-        sources.uploads_full() || scene.order().iter().any(|&h| {
-            if !scene.visible(h) { return false; }
-            if scene.object_layer(h).is_some() { return true; }
-            let Some(target) = scene.source_target(h) else { return false; };
-            let placed = scene.target_offset(target) != [0; 2];
-            let source = scene.paint_base(target).is_some_and(|base| placed
-                || (source_access::paint_base_contains(base, tile)
-                    && !resident(target) && sources.prepared_base_view(base, tile).is_none()));
-            let native = r.native_backing(target).is_some() || scene.mask(h).is_some_and(|(use_, _)| r.native_backing(SourceTarget::Coverage(use_.source)).is_some());
-            source || native && (placed || scene.mask(h).is_some() || (!resident(target)
-                && r.native_color_tile(target, tile).map_or(true, |blob| blob.is_some_and(|blob| sources.prepared_raster_view(&blob, space).is_none()))))
-        })
-    }
+}
+
+pub(super) fn resident_first(r: &WgpuRasterizer, scene: SceneView<'_>, pages: &mut [[u32; 2]]) {
+    pages.sort_by_cached_key(|tile| source_tile_decodes(r, scene, *tile));
+}
+
+fn source_tile_decodes(r: &WgpuRasterizer, scene: SceneView<'_>, tile: [u32; 2]) -> bool {
+    let sources = r.source_tiles.borrow();
+    let space = r.document_color().space;
+    let resident = |id: SourceTarget| {
+        r.paint_layers.iter().any(|l| l.id == id && l.pages.iter().any(|p| p.coordinate == tile))
+    };
+    scene.order().iter().any(|&h| {
+        if !scene.visible(h) { return false; }
+        if scene.object_layer(h).is_some() { return true; }
+        let Some(target) = scene.source_target(h) else { return false; };
+        let placed = scene.target_offset(target) != [0; 2];
+        let source = scene.paint_base(target).is_some_and(|base| placed
+            || (source_access::paint_base_contains(base, tile)
+                && !resident(target) && sources.prepared_base_view(base, tile).is_none()));
+        let native = r.native_backing(target).is_some() || scene.mask(h).is_some_and(|(use_, _)| r.native_backing(SourceTarget::Coverage(use_.source)).is_some());
+        source || native && (placed || scene.mask(h).is_some() || (!resident(target)
+            && r.native_color_tile(target, tile).map_or(true, |blob| blob.is_some_and(|blob| sources.prepared_raster_view(&blob, space).is_none()))))
+    })
 }
 
 impl WgpuRasterizer {

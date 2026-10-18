@@ -443,3 +443,43 @@ fn p21_photo_filter_converts_tagged_color_and_preserves_encoded_document_luma() 
         }
     }
 }
+
+
+#[test]
+fn filter_weights_preserve_exact_original_and_signed_output_endpoints() {
+    fn constant(image:bool)->EffectInstance {
+        let mut layer=effect(2,"hue_saturation",image);
+        let program=Arc::make_mut(&mut layer.program);
+        program.entry="filter_endpoint".into();
+        program.alpha=layer_core::EffectAlpha::Filter;
+        program.wgsl="fn filter_endpoint(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{return vec4<f32>(0.25,-0.125,0.75,1.);}".into();
+        if image {program.passes=vec![EffectPass {entry:program.entry.clone(),sampling:EffectSampling::Neighborhood {radius:0}}].into();}
+        layer
+    }
+    let mut renderer=WgpuRasterizer::new_native_headless(DocumentColor {space:RgbSpace::Srgb,depth:SampleDepth::F32}).unwrap();
+    let adjusted=[0.25f32,-0.125,0.75,1.];
+    for image in [false,true] {
+        for rgb in [physical_hue(80.,0.08).map(|v|v as f32),[1.,0.,0.],[0.8,0.15,0.02],[-0.125,0.34,1.25]] {
+            for alpha in [0.37,1.,0.5,8e-8] {
+                let input=source(rgb,alpha);
+                let original=frame(&mut renderer,&[input.clone()]);
+                let actual=frame(&mut renderer,&[constant(image),input.clone()]);
+                assert_eq!(actual.map(f32::to_bits),adjusted.map(f32::to_bits),"full filter image={image} rgb={rgb:?} alpha={alpha}");
+                let mut document=effect_document(&[constant(image),input],[256;2],renderer.document_color);
+                let handle=document.scene().order()[0];
+                document.artwork.occurrences.get_mut(handle).unwrap().opacity=0.;
+                assert_eq!(frame_document(&mut renderer,&document).map(f32::to_bits),original.map(f32::to_bits),"zero filter image={image} rgb={rgb:?} alpha={alpha}");
+            }
+        }
+        for alpha in [0.5,1.] {
+            let input=source([1.;3],alpha);
+            let original=frame(&mut renderer,&[input.clone()]);
+            let mut document=effect_document(&[constant(image),input],[256;2],renderer.document_color);
+            let handle=document.scene().order()[0];
+            document.artwork.occurrences.get_mut(handle).unwrap().blend=layer_core::LayerBlend::Multiply;
+            assert_eq!(frame_document(&mut renderer,&document).map(f32::to_bits),adjusted.map(f32::to_bits),"full multiply filter image={image} alpha={alpha}");
+            document.artwork.occurrences.get_mut(handle).unwrap().opacity=0.;
+            assert_eq!(frame_document(&mut renderer,&document).map(f32::to_bits),original.map(f32::to_bits),"zero multiply filter image={image} alpha={alpha}");
+        }
+    }
+}

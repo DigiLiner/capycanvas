@@ -26,9 +26,8 @@ impl Plan {
         if extent.contains(&0) {
             return Err(GpuRasterError::InvalidExtent);
         }
-        let full_window = images::capture_window_cached(layers, PixelRect::full(extent),objects);
-        let full = Scene::capture_image_bound(layers, full_window);
-        if full <= limit && (full == 0 || full_window.size()?.into_iter().all(|side| side <= maximum_side)) {
+        let full = Scene::capture_image_bound(layers, PixelRect::full(extent));
+        if full <= limit && images::image_sizes_fit(layers,PixelRect::full(extent).into(),maximum_side,objects) {
             return Ok(None);
         }
         stack::support(layers,0)
@@ -39,8 +38,8 @@ impl Plan {
         // preserve the existing compositor's tile ownership at window seams.
         for side in [2048u32, 1024, 512, PAGE_SIZE] {
             let plan = Self { side };
-            if plan.regions_cached(layers, PixelRect::full(extent),objects).all(|(_, window)| Scene::capture_image_bound(layers, window) <= limit
-                && window.size().is_ok_and(|size| size.into_iter().all(|side| side <= maximum_side))) {
+            if plan.regions_cached(layers, PixelRect::full(extent),objects).all(|(output, _window)| Scene::capture_image_bound(layers, output) <= limit
+                && images::image_sizes_fit(layers,output.into(),maximum_side,objects)) {
                 return Ok(Some(plan));
             }
         }
@@ -123,11 +122,11 @@ mod tests {
     #[test]
     fn sibling_image_outputs_enter_admission_and_window_when_the_full_planes_exceed_it() {
         let extent=[2048,1536];let mut document=image_layers(3,extent);let limit=8*1024*1024;
-        let full=DocRect::from(PixelRect::full(extent));
+        let full=PixelRect::full(extent);
         assert_eq!(Scene::capture_image_bound(document.scene(),full),3*full.area()*16);
         let plan=Plan::new(document.scene(),extent,limit,16384).unwrap().unwrap();
         let windows=plan.regions(document.scene(),PixelRect::full(extent)).collect::<Vec<_>>();
-        assert!(windows.len()>1);assert!(windows.iter().all(|(_,window)|Scene::capture_image_bound(document.scene(),*window)<=limit));
+        assert!(windows.len()>1);assert!(windows.iter().all(|(output,_)|Scene::capture_image_bound(document.scene(),*output)<=limit));
         let first=document.scene().order()[0];document.artwork.occurrences.get_mut(first).unwrap().visible=false;
         let second=document.scene().order()[1];document.artwork.occurrences.get_mut(second).unwrap().offset=[1_000_000,0];
         assert_eq!(Scene::capture_image_bound(document.scene(),full),full.area()*16);
@@ -137,7 +136,7 @@ mod tests {
 
     #[test]
     fn eighty_image_planes_require_their_resident_allowance_even_with_shared_samples() {
-        let document=image_layers(80,[256;2]);let full=DocRect::from(PixelRect::full([256;2]));
+        let document=image_layers(80,[256;2]);let full=PixelRect::full([256;2]);
         assert_eq!(Scene::capture_image_bound(document.scene(),full),80*256*256*16);
         assert!(Plan::new(document.scene(),[256;2],DEFAULT_IMAGE_PIXEL_BYTES,16384).unwrap().is_none());
         assert!(Plan::new(document.scene(),[256;2],64*1024*1024,16384).is_err(),"the smallest output page still needs eighty resident image planes");
@@ -167,8 +166,7 @@ mod tests {
         let extent = [32768, 1];
         let document = adjustments(EffectSampling::Neighborhood { radius: 19 }, 1, extent);
         let scene = document.scene();
-        let window = Scene::capture_window(scene, PixelRect::full(extent), extent);
-        assert!(Scene::capture_image_bound(scene, window) < DEFAULT_IMAGE_PIXEL_BYTES);
+        assert!(Scene::capture_image_bound(scene, PixelRect::full(extent)) < DEFAULT_IMAGE_PIXEL_BYTES);
         let plan = Plan::new(scene, extent, DEFAULT_IMAGE_PIXEL_BYTES, 16384).unwrap().unwrap();
         for (_, input) in plan.regions(scene, PixelRect::full(extent)) {
             assert!(input.size().unwrap().into_iter().all(|side| side <= 16384));
@@ -188,7 +186,7 @@ mod tests {
             for (output, window) in plan.regions(layers, PixelRect::full(extent)) {
                 covered += output.area();
                 assert_eq!(window, Scene::capture_window(layers, output, extent));
-                assert!(Scene::capture_image_bound(layers, window) <= DEFAULT_IMAGE_PIXEL_BYTES);
+                assert!(Scene::capture_image_bound(layers, output) <= DEFAULT_IMAGE_PIXEL_BYTES);
                 assert_eq!(output.min_x() % PAGE_SIZE, 0);
                 assert_eq!(output.min_y() % PAGE_SIZE, 0);
                 if let Some(old) = previous {
@@ -219,15 +217,15 @@ mod tests {
             let document=layer_core::Document::from_artwork(artwork).unwrap();
             let scene=document.scene();
             let bytes_per_pixel=u64::from(2*count+1)*16;
-            let minimum=Plan { side: PAGE_SIZE }.regions(scene, PixelRect::full(extent)).map(|(_, input)| Scene::capture_image_bound(scene, input)).max().unwrap();
+            let minimum=Plan { side: PAGE_SIZE }.regions(scene, PixelRect::full(extent)).map(|(output, _)| Scene::capture_image_bound(scene, output)).max().unwrap();
             let plan=Plan::new(scene,extent,limit,16384);
             if minimum>limit {assert!(plan.is_err(),"sigma={sigma} depth={count} minimum={minimum} cap={limit}");continue;}
             let plan=plan.unwrap().unwrap();let mut covered=0;let mut halo_pixels=0;let mut windows=0;
             for (output,input) in plan.regions(scene, PixelRect::full(extent)) {
                 assert_eq!(input,Scene::capture_window(scene,output,extent));
-                let bytes=input.area()*bytes_per_pixel;
+                let bytes=Scene::capture_image_bound(scene,output);
                 assert!(bytes<=limit,"sigma={sigma} depth={count} actual input={input:?} bytes={bytes} cap={limit}");
-                assert_eq!(bytes,Scene::capture_image_bound(scene,input));
+                assert!(bytes<=input.area()*bytes_per_pixel);
                 covered+=output.area();halo_pixels+=input.area();windows+=1;
             }
             assert_eq!(covered,u64::from(extent[0])*u64::from(extent[1]));
@@ -240,6 +238,88 @@ mod tests {
                 println!("61MP sigma21 windows={windows} input pixels={halo_pixels} prior1024 input pixels={old_inputs}");
             }
         }}}
+    }
+
+    fn clamped_source_document(extent:[u32;2],corner:bool,style:u32)->layer_core::Document {
+        use layer_core::authored::*;
+        use layer_core::color::source::rgba8_source;
+        use layer_core::{Document, DocumentNames, EffectValue};
+        let mut artwork = Document::new(PortableId::random(), 65, 33, DocumentNames { paint: "Ink".into(), paper: "Paper".into() }).artwork;
+        let root = artwork.root;
+        let stack = artwork.compositions.get(root).unwrap().result;
+        let ink = artwork.stacks.get(stack).unwrap().entries[0];
+        artwork.stacks.get_mut(stack).unwrap().entries = vec![ink];
+        let OccurrenceContent::Paint(paint) = artwork.occurrences.get(ink).unwrap().content else { panic!("Paint expected") };
+        artwork.paint.get_mut(paint).unwrap().base = Some(PaintBase::new(rgba8_source([65, 33], |x, y| [x as u8, y as u8, 80, 255]).into()));
+        if corner { artwork.occurrences.get_mut(ink).unwrap().offset = [i64::from(extent[0] - 65), i64::from(extent[1] - 33)]; }
+        if style == 3 { artwork.stacks.get_mut(stack).unwrap().entries.clear(); }
+        for sigma in [9., 21., 13.] {
+            let mut draft = EffectInstance::new(layer_core::bundled_effect_catalog().get("gaussian_blur").unwrap().program());
+            draft.set("sigma", EffectValue::Number(sigma)).unwrap();
+            let effect = artwork.effects.insert(PortableId::random(), EffectApplication::new(draft.program, draft.values, [65, 33])).unwrap();
+            let occurrence = artwork.occurrences.insert(PortableId::random(), Occurrence::new(OccurrenceContent::Effect(effect), "Gaussian")).unwrap();
+            if style == 1 { artwork.occurrences.get_mut(occurrence).unwrap().attachment=Attachment::Effect; }
+            if style == 2 {
+                let coverage=artwork.coverage.insert(PortableId::random(),CoverageSource {domain:[65,33],raster:Default::default(),default_coverage:1.,operations:Arc::default()}).unwrap();
+                let item=artwork.occurrences.get_mut(occurrence).unwrap();
+                item.mask=Some(MaskUse {source:coverage,enabled:true,linked:false,inverted:false,offset:[17,-9]});
+                item.opacity=0.61;item.blend=layer_core::LayerBlend::Multiply;
+            }
+            artwork.stacks.get_mut(stack).unwrap().entries.insert(0, occurrence);
+        }
+        artwork.compositions.get_mut(root).unwrap().size = extent;
+        Document::from_artwork(artwork).unwrap()
+    }
+
+    #[test]
+    fn clamped_sparse_inputs_remain_admitted_for_distant_output_windows() {
+        for extent in [[6000, 4000], [9504, 6336], [32768, 257]] { for corner in [false, true] { for style in 0..4 {
+            let document=clamped_source_document(extent,corner,style);
+            let scene = document.scene();
+            let plan = Plan::new(scene, extent, DEFAULT_IMAGE_PIXEL_BYTES, 16384).unwrap().unwrap();
+            let regions: Vec<_> = plan.regions(scene, PixelRect::full(extent)).collect();
+            assert_eq!(regions.iter().map(|(output, _)| output.area()).sum::<u64>(), u64::from(extent[0]) * u64::from(extent[1]));
+            assert!(regions.iter().all(|(output, _)| images::image_sizes_fit(scene,(*output).into(),16384,None)
+                && Scene::capture_image_bound(scene,*output)<=DEFAULT_IMAGE_PIXEL_BYTES));
+            if extent[0]>16384 && style!=3 { assert!(regions.iter().any(|(_,window)|window.size().unwrap()[0]>16384)); }
+        }}}
+    }
+    #[test]
+    fn clamped_sparse_windows_preserve_edge_pixels_and_bound_actual_image_storage() {
+        fn capture(corner:bool,style:u32,far:bool)->Vec<u8> {
+            let extent=[512,257];
+            let mut document=clamped_source_document(extent,corner,style);
+            if far && style!=3 {
+                let paint=document.scene().order().iter().copied().find(|handle|matches!(document.scene().source_target(*handle),Some(SourceTarget::Paint(_)))).unwrap();
+                document.artwork.occurrences.get_mut(paint).unwrap().offset[0]+=if corner {20000}else{-20000};
+                document=layer_core::Document::from_artwork(document.artwork).unwrap();
+            }
+            let mut r=WgpuRasterizer::new_native_headless(document.composition().color).unwrap();
+            let output=PixelRect::new(extent[0]/2,80,extent[0]/2+32,104);
+            let mut packet=crate::test_support::packet(document.scene(),extent);
+            packet.view.width_px=32;packet.view.height_px=24;
+            packet.view.document_to_surface=[1.,0.,0.,1.,-(output.min_x() as f32),-80.];
+            r.submit(packet).unwrap();
+            let mut scene=Scene::new(&r).unwrap();
+            let (texture,_)=create_color_target(&r.device,[32,24],"clamped sparse image oracle");
+            let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            scene.capture_region(&mut r,packet,&texture,output,Output::Artwork(None),&mut encoder).unwrap();
+            let planned=Scene::capture_image_bound(packet.scene,output);
+            let actual=scene.image_cache_bytes();
+            assert!(actual<=planned,"{extent:?} corner={corner} style={style} actual={actual} planned={planned}");
+            assert!(planned<=DEFAULT_IMAGE_PIXEL_BYTES);
+            r.uploads.finish(&encoder);encoder.submit(&r.queue);
+            let bytes=crate::layer_tests::page_bytes(&r,&texture);
+            if style==3 {assert!(bytes.iter().all(|byte|*byte==0));}
+            else {assert!(bytes.chunks_exact(16).all(|pixel| f32::from_le_bytes(pixel[8..12].try_into().unwrap())>0.000001 && (f32::from_le_bytes(pixel[12..16].try_into().unwrap())-1.).abs()<2e-5));}
+            eprintln!("clamped source {extent:?} corner={corner} style={style} far={far} actual={actual} planned={planned}");
+            bytes
+        }
+        for corner in [false,true] {for style in 0..4 {
+            let reference=capture(corner,style,false);
+            let distant=capture(corner,style,true);
+            assert_eq!(distant,reference,"corner={corner} style={style}: far clamped source-edge pixels");
+        }}
     }
 
     #[test]

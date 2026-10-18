@@ -176,7 +176,7 @@ fn stacked_resources_masks_clipping_and_cropped_checkpoints_keep_distinct_inputs
                 let second_input=mid.map(|v|v as f32);let corrected=reference(&second,second_input,working,3,40.);let output=std::array::from_fn(|i|if i==3{mid[i]}else{mid[i]+0.8*(corrected[i]-mid[i])});expected_mid.push(mid);expected_final.push(output);
             }
             for i in 0..3{close(full[i],expected_final[i],"stacked LUTs");}
-            let mut scene=scene::Scene::new(&r);let all=capture(&mut r,&mut scene,&document,scene::Output::Artwork(None),PixelRect::full([256;2]));
+            let mut scene=scene::Scene::new(&r).unwrap();let all=capture(&mut r,&mut scene,&document,scene::Output::Artwork(None),PixelRect::full([256;2]));
             for (i,p) in all.iter().enumerate(){close(*p,expected_final[(i%256)%3],"retained checkpoint full");}
             let crop=PixelRect::new(131,7,149,19);let before_top=capture(&mut r,&mut scene,&document,scene::Output::EffectInput(top_h),crop);
             for (i,p) in before_top.iter().enumerate(){close(*p,expected_mid[((i%crop.width() as usize)+131)%3],"checkpoint effect input");}
@@ -346,7 +346,7 @@ fn auxiliary_lookup_is_pointwise_and_stays_out_of_neighbor_fusion_chains() {
     assert!(chains.iter().any(|(chain,execution)|chain[0]==lut_h && chain.len()==1 && *execution==crate::effects::Execution::Fused));
     assert!(chains.iter().all(|(chain,_)|chain.len()==1 || chain.iter().all(|h|*h!=lut_h)));
     let ordinary=effect_document(&[exposure.clone(),invert,source],[256;2],Default::default());assert!(scene::startup_effect_chains(ordinary.scene()).iter().any(|(chain,_)|chain.len()==2));
-    let invalid=effect_document(&[lut,exposure],[256;2],Default::default());let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();let mut scene=scene::Scene::new(&r);
+    let invalid=effect_document(&[lut,exposure],[256;2],Default::default());let r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();let mut scene=scene::Scene::new(&r).unwrap();
     assert!(scene.effects.prepare(&r,invalid.scene(),invalid.scene().order(),crate::effects::Execution::Fused,0.,0,Default::default()).is_err());
 }
 

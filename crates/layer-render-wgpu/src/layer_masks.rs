@@ -420,7 +420,7 @@ impl WgpuRasterizer {
                         continue;
                     }
                     if !matches!(operation.kind, layer_core::RasterOperationKind::Transform(_)) {
-                        let mut compositor = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+                        let mut compositor = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
                         let damage = batch_pixel_rect(batch, self.target_extent(batch.target));
                         let result = compositor.apply_operation(self, packet, batch.target, op as usize, damage, encoder);
                         self.scene = Some(compositor);

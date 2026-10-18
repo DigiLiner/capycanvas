@@ -1,8 +1,7 @@
 #include "pch.h"
 #include "UiControls.h"
 #include "LayerThumbnails.h"
-#include <winrt/Windows.Storage.Streams.h>
-#include <robuffer.h>
+#include "BitmapUpload.h"
 #include <chrono>
 #include <set>
 
@@ -14,8 +13,7 @@ hstring key(LayerThumbnail const& item){return slot(item)+L":"+item.target+L":"+
 struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
     PreviewTransport transport;
     Microsoft::UI::Dispatching::DispatcherQueue dispatcher{Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread()};
-    struct Tile {hstring key;Imaging::WriteableBitmap image{nullptr};uint64_t used=0;};
-    struct Pixels {LayerThumbnail item;std::vector<uint8_t> bytes;};
+    struct Tile {hstring key,target;std::shared_ptr<BitmapUpload> upload;uint64_t used=0;};
     struct Readback {LayerThumbnail item;size_t offset;};
     std::map<hstring,Tile> images;
     std::map<hstring,LayerThumbnail> pending;
@@ -24,49 +22,33 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
     uint64_t serial=0,clock=0;
     bool busy=false;
     std::chrono::steady_clock::time_point last{};
-    static fire_and_forget Convert(std::weak_ptr<LayerThumbnailCache> weak,
-        Microsoft::UI::Dispatching::DispatcherQueue queue,PreviewPacket packet,hstring generation,std::vector<Readback> readbacks){
-        co_await resume_background();
-        std::vector<Pixels> converted;
-        try{
-            size_t length=0;auto bytes=capy_preview_bytes(packet.get(),&length);
-            if(!bytes||readbacks.size()>8||length>8*4096)throw hresult_invalid_argument();
-            for(auto const& source:readbacks){
-                if(source.offset>length||length-source.offset<4096)throw hresult_invalid_argument();
-                Pixels tile{source.item,std::vector<uint8_t>(4096)};
-                for(size_t p=0;p<4096;p+=4){
-                    auto in=bytes+source.offset+p;auto out=tile.bytes.data()+p;unsigned a=in[3];
-                    out[0]=uint8_t((unsigned(in[2])*a+127)/255);
-                    out[1]=uint8_t((unsigned(in[1])*a+127)/255);
-                    out[2]=uint8_t((unsigned(in[0])*a+127)/255);out[3]=uint8_t(a);
+    ~LayerThumbnailCache(){for(auto& [id,tile]:images)tile.upload->Close();}
+    void upload(PreviewPacket packet,hstring const& generation,std::vector<Readback> const& readbacks){
+        if(readbacks.empty()||readbacks.size()>8)return;
+        auto left=std::make_shared<size_t>(readbacks.size());auto weak=weak_from_this();busy=true;
+        for(auto const& readback:readbacks){
+            auto id=slot(readback.item),revision=key(readback.item);
+            if(!images.contains(id)){
+                if(images.size()>=128){
+                    auto oldest=std::min_element(images.begin(),images.end(),[](auto const& a,auto const& b){return a.second.used<b.second.used;});
+                    oldest->second.upload->Close();images.erase(oldest);
                 }
-                converted.emplace_back(std::move(tile));
+                images.emplace(id,Tile{L"",readback.item.target,BitmapUpload::Create(),++clock});
             }
-        }catch(...){converted.clear();}
-        packet.reset();
-        queue.TryEnqueue([weak,generation,converted=std::move(converted)]{
-            if(auto self=weak.lock()){
-                self->busy=false;if(self->epoch!=generation)return;
-                try{
-                    for(auto& tile:converted){
-                        auto id=slot(tile.item),revision=key(tile.item);
-                        auto wanted=self->wanted.find(id);
-                        if(wanted==self->wanted.end()||wanted->second!=revision)continue;
-                        Imaging::WriteableBitmap bitmap(32,32);uint8_t* destination=nullptr;
-                        auto buffer=bitmap.PixelBuffer();
-                        check_hresult(buffer.as<::Windows::Storage::Streams::IBufferByteAccess>()->Buffer(&destination));
-                        if(buffer.Capacity()!=4096)throw hresult_invalid_argument();
-                        memcpy(destination,tile.bytes.data(),4096);bitmap.Invalidate();
-                        if(!self->images.contains(id)&&self->images.size()>=128){
-                            auto oldest=std::min_element(self->images.begin(),self->images.end(),
-                                [](auto const& a,auto const& b){return a.second.used<b.second.used;});
-                            self->images.erase(oldest);
-                        }
-                        self->images.insert_or_assign(id,Tile{revision,bitmap,++self->clock});
+            auto& tile=images.at(id);tile.key=L"";auto bitmap=tile.upload;std::weak_ptr<BitmapUpload> weakBitmap=bitmap;
+            bitmap->Submit({BitmapUpload::ReadPacket(packet),readback.offset,8*4096,32,32,true,false,
+                [weak,generation,id,revision,weakBitmap]{
+                    auto self=weak.lock();if(!self||self->epoch!=generation)return false;
+                    auto found=self->images.find(id);auto wanted=self->wanted.find(id);
+                    return found!=self->images.end()&&found->second.upload==weakBitmap.lock()&&wanted!=self->wanted.end()&&wanted->second==revision;
+                },
+                [weak,id,revision,weakBitmap,left](bool accepted){
+                    if(auto self=weak.lock()){
+                        if(!--*left)self->busy=false;
+                        if(accepted){auto found=self->images.find(id);if(found!=self->images.end()&&found->second.upload==weakBitmap.lock()){found->second.key=revision;found->second.used=++self->clock;}}
                     }
-                }catch(hresult_error const& e){OutputDebugStringW(e.message().c_str());}
-            }
-        });
+                }});
+        }
     }
     void receive(PreviewPacket packet,hstring const& generation,std::map<hstring,LayerThumbnail> const& proposed){
         busy=false;if(!packet||epoch!=generation)return;
@@ -88,12 +70,15 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
                 auto current=wanted.find(slot(item));
                 if(current!=wanted.end()&&current->second==key(item))readbacks.push_back({item,size_t(offset)});
             }
-            if(!readbacks.empty()){busy=true;Convert(weak_from_this(),dispatcher,std::move(packet),generation,std::move(readbacks));}
+            if(!readbacks.empty())upload(std::move(packet),generation,readbacks);
         }catch(hresult_error const& e){OutputDebugStringW(e.message().c_str());}
     }
     void refresh(hstring const& generation,std::vector<LayerThumbnail> const& visible){
-        if(epoch!=generation){epoch=generation;pending.clear();wanted.clear();images.clear();}
-        wanted.clear();for(auto const& item:visible)wanted.insert_or_assign(slot(item),key(item));
+        if(epoch!=generation){epoch=generation;pending.clear();wanted.clear();for(auto& [id,tile]:images)tile.upload->Close();images.clear();}
+        wanted.clear();for(auto const& item:visible){
+            auto id=slot(item);wanted.insert_or_assign(id,key(item));auto found=images.find(id);
+            if(found!=images.end()&&found->second.target!=item.target){found->second.key=L"";found->second.target=item.target;found->second.upload->Clear();}
+        }
         auto now=std::chrono::steady_clock::now();
         if(busy||now-last<std::chrono::milliseconds(120))return;
         A requests;std::map<hstring,LayerThumbnail> proposed;
@@ -126,7 +111,7 @@ void RefreshLayerThumbnails(std::shared_ptr<LayerThumbnailCache> const& cache,hs
 ImageSource LayerThumbnailSource(std::shared_ptr<LayerThumbnailCache> const& cache,hstring const& epoch,LayerThumbnail const& item){
     if(cache&&cache->epoch==epoch){
         auto found=cache->images.find(slot(item));
-        if(found!=cache->images.end()&&found->second.key==key(item)){found->second.used=++cache->clock;return found->second.image;}
+        if(found!=cache->images.end()&&found->second.key==key(item)){found->second.used=++cache->clock;return found->second.upload->Image();}
     }return nullptr;
 }
 }

@@ -271,8 +271,8 @@ fn d3d12_file_packages_update_catalog_without_rewriting_live_filters() {
         label: Some("Windows runtime filter correctness"),
         required_features: adapter.features()
             & (wgpu::Features::FLOAT32_FILTERABLE
-                | wgpu::Features::FLOAT32_BLENDABLE
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+                | wgpu::Features::FLOAT32_BLENDABLE)
+                | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
         required_limits: limits,
         ..Default::default()
     }))

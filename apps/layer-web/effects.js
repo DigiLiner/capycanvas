@@ -166,7 +166,7 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
     return number;
   }
   function curveEditor(layer,key,initial){
-    const histogram=scopeGraph({state,element,kind:'tonal_histogram',height:200});
+    const histogram=scopeGraph({state,element,kind:'tonal_histogram'});
     const footer=scopeFooter({state,element,button,icon,dispatch,kind:'tonal_histogram'});
     const model=c=>({controls:c.curve,points:c.value.value,plot:c.plot,marker:null,modified:c.modified});
     const editor=createCurveEditor({element,button,icon,numberField,dispatch,target:{kind:"effect",layer,key},

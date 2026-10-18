@@ -132,7 +132,7 @@ const EXPORT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const INITIAL_DAB_BYTES: u64 = 4 * 1024 * 1024;
 const INITIAL_STYLE_RECORDS: usize = 128;
 const INITIAL_TARGET_RECORDS: usize = 257;
-const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
+const READBACK_TIMEOUT: Duration = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 60 } else { 30 });
 const WHITE_MASK_ASSET: &str = "builtin:brush-tip/solid-white-v1";
 const PAGE_SIZE: u32 = 256;
 const MOVING_IMAGE_IDLE_STEPS: usize = 32;
@@ -146,7 +146,19 @@ const RESERVOIR_SIZE: u32 = 64;
 const PROCEDURAL_GRAIN_SIZE: u32 = 256;
 const WATERCOLOR_TRANSPORT_STEPS: u32 = 3;
 
-
+pub(crate) fn initialized_buffer(device: &wgpu::Device, descriptor: &wgpu::util::BufferInitDescriptor<'_>) -> Result<wgpu::Buffer, GpuRasterError> {
+    let size = descriptor.contents.len() as u64;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: descriptor.label, size: size.next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT), usage: descriptor.usage,
+        mapped_at_creation: size != 0,
+    });
+    if size != 0 {
+        buffer.get_mapped_range_mut(..).map_err(|e| GpuRasterError::MapFailed(e.to_string()))?
+            .slice(..descriptor.contents.len()).copy_from_slice(descriptor.contents);
+        buffer.unmap();
+    }
+    Ok(buffer)
+}
 
 /// Uploads are encoded at their point of use on every host. Queue::write_buffer
 /// runs before submitted commands, so it cannot replace ordered copies when
@@ -895,6 +907,7 @@ pub struct WgpuRasterizer {
     selection_overlay: Option<layer_render::SelectionOverlay>,
     crop_overlay: Option<layer_render::CropOverlay>,
     paper_overlay: Option<layer_render::PaperOverlay>,
+    paper_overlay_drawn: std::cell::Cell<bool>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
     selection_paint_revision: u64,
@@ -1260,6 +1273,7 @@ impl WgpuRasterizer {
             selection_overlay: None,
             crop_overlay: None,
             paper_overlay: None,
+            paper_overlay_drawn: std::cell::Cell::new(false),
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
             selection_paint_revision: 0,
@@ -2475,19 +2489,6 @@ impl WgpuRasterizer {
         );
     }
 
-    fn encode_batch(
-        &self,
-        encoder: &mut crate::submission::CommandEncoder,
-        batch_index: usize,
-        batch: &DabBatch,
-        target: &wgpu::TextureView,
-        scissor: PixelRect,
-        target_offset: u32,
-    ) -> Result<(), GpuRasterError> {
-        self.encode_batch_to_target(encoder, batch_index, batch, target, scissor,
-            self.paint_target_binding(&batch.style), target_offset)
-    }
-
     #[expect(clippy::too_many_arguments, reason = "Brush batch encoding keeps target, scissor, bind group, and instance offset explicit")]
     fn encode_batch_to_target(
         &self,
@@ -2507,9 +2508,7 @@ impl WgpuRasterizer {
             return Err(GpuRasterError::InvalidDabRange);
         }
         let plan = BrushPassPlan::for_device(&batch.style, &self.device);
-        let direct = plan
-            .direct
-            .expect("destination brushes use the material encoder");
+        let direct = plan.direct.expect("destination brushes use the material encoder");
         let pipeline = self.pipelines.direct(direct);
         let key = Self::texture_set_key(&batch.style);
         let texture_set = self
@@ -2629,12 +2628,13 @@ impl WgpuRasterizer {
                 .iter()
                 .find(|page| page.coordinate == tile.coordinate)
                 .expect("brush pages are prepared before encoding");
-            self.encode_batch(
+            self.encode_batch_to_target(
                 encoder,
                 batch_index,
                 batch,
                 &page.active().view,
                 tile.local,
+                self.paint_target_binding(&batch.style),
                 self.layer_target_offset(batch.target, tile.coordinate),
             )?;
         }
@@ -3572,7 +3572,13 @@ impl CanvasRenderer for WgpuRasterizer {
                 .and_then(|_| self.papers.advance(&self.device, &self.queue, true)).is_err() {
             return;
         }
+        if self.paper_overlay.as_ref().map(|o| &o.paper) != overlay.as_ref().map(|o| &o.paper) {
+            self.paper_overlay_drawn.set(false);
+        }
         self.paper_overlay = overlay;
+    }
+    fn paper_overlay_ready(&self, paper: &layer_core::paper::PaperBinding) -> bool {
+        self.paper_overlay_drawn.get() && self.paper_overlay.as_ref().is_some_and(|o| o.paper == *paper)
     }
     fn set_clipping_preview(&mut self, shadows: bool, highlights: bool) { self.clipping_preview = [shadows, highlights]; }
     fn set_telemetry_enabled(&mut self, enabled: bool) {
@@ -3900,7 +3906,7 @@ impl WgpuRasterizer {
         if packet.commit_rasters && (!unchanged || packet.composite_all || packet.reset_layers || self.object_deferred
             || self.scene.as_ref().is_some_and(|scene|scene.objects_pending())
             || self.artwork_frame.as_ref().is_none_or(|frame|frame.view!=packet.view)) {
-            let mut scene=self.scene.take().unwrap_or_else(||scene::Scene::new(self));
+            let mut scene=self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
             let bounds=scene.cached_capture_window(packet.scene,display_request.plan.bounds);
             let side=if display_request.evaluation==scene::scale::Evaluation::Native {1.} else {f64::from(1u32<<display_request.plan.level)};
             let cold=scene.live_objects_cold(self,packet.scene,bounds,side);
@@ -4224,7 +4230,7 @@ impl WgpuRasterizer {
             }
         }
         if source_access::placed_targets(packet.scene).any(|t| packet.scene.paint_base(t).is_some() || self.native_backing(t).is_some()) {
-            let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+            let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
             scene.initialize_source_paint(self, packet.scene, &mut encoder)?;
             self.scene = Some(scene);
         }
@@ -4276,7 +4282,7 @@ impl WgpuRasterizer {
                     self.transforms = Some(transforms);
                     result?;
                 } else {
-                    let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+                    let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
                     let damage = batch_pixel_rect(batch, self.target_extent(batch.target));
                     scene.apply_operation(self, packet, batch.target, op as usize, damage, &mut encoder)?;
                     self.scene = Some(scene);
@@ -4455,7 +4461,7 @@ impl WgpuRasterizer {
             }
             if new_preview_requires_base && !new_preview_from_persistent
                 && (packet.scene.paint_base(layer_id).is_some() || self.native_backing(layer_id).is_some()) {
-                let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+                let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
                 scene.initialize_source_preview(self, packet.scene, layer_id, copied, &mut encoder)?;
                 self.scene = Some(scene);
             }
@@ -4684,7 +4690,7 @@ impl WgpuRasterizer {
         // the document itself did not change (for example after navigation).
         let mut evaluated_objects = false;
         if !dirty.is_empty() || animated || display_rebuilt || !unchanged || self.object_deferred || self.scene.as_ref().is_some_and(|scene| scene.objects_pending()) {
-            let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+            let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
             // A moved target's damage is stored in image coordinates. Round to
             // scene tiles after applying the target's document translation.
             for batch in original_batches {
@@ -4738,7 +4744,7 @@ impl WgpuRasterizer {
                 old.view.document_to_surface == packet.view.document_to_surface
                     && old.same_artwork(packet))
         {
-            let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+            let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
             let result = scene.refine_display(self, packet, &mut encoder);
             self.scene = Some(scene);
             let changed = result?;

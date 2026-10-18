@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "NativeKeyRepeats.h"
 #include "EffectControls.h"
 #include "ScopesView.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
@@ -22,7 +23,7 @@ hstring curveKey(Windows::System::VirtualKey key){
 }
 bool held(int key){return (GetKeyState(key)&0x8000)!=0;}
 TextBlock axisText(std::shared_ptr<WorkspaceData> const& data){
-    auto text=label(data,L"");text.FontSize(data->textSize()*.85);text.Opacity(.7);return text;
+    auto text=label(data,L"");text.FontSize(data->textSize()*.85);text.Opacity(.55);return text;
 }
 struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
     std::shared_ptr<Property> property;
@@ -78,9 +79,10 @@ struct CurveEditor : std::enable_shared_from_this<CurveEditor> {
         if(name==L"Escape"&&pointer){pointer.reset();graph.ReleasePointerCaptures();}
         if(name.starts_with(L"Arrow"))heldKey=pressed?name:hstring();
         auto status=e.KeyStatus();auto keyOwner=epoch();
-        for(uint32_t i=0,count=pressed?std::max(1u,status.RepeatCount):1u;i<count;i++)
+        ForwardKeyRepeats(pressed,status.WasKeyDown,status.RepeatCount,[&](bool repeat){
             send(O({{L"kind",S(L"key")},{L"epoch",N(keyOwner)},{L"key_event",S(name)},{L"pressed",B(pressed)},
-                {L"repeat",B(pressed&&(status.WasKeyDown||i>0))},{L"modifiers",O({{L"command",B(control)},{L"shift",B(held(VK_SHIFT))},{L"alt",B(alt)}})}}));
+                {L"repeat",B(repeat)},{L"modifiers",O({{L"command",B(control)},{L"shift",B(held(VK_SHIFT))},{L"alt",B(alt)}})}}));
+        });
         e.Handled(true);
     }
     FrameworkElement coordinate(int axis,Bindings& bindings){

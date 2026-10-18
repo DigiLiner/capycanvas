@@ -1,13 +1,14 @@
 import {liveCopy} from './localization.js';
 
-export function scopeGraph({state,element,kind,waveform=false,height=160}) {
+export function scopeGraph({state,element,kind,waveform=false}) {
   const canvas=element('canvas');canvas.dataset.scopeControl='chart';canvas.setAttribute('role','img');
   const context=canvas.getContext('2d',{willReadFrequently:true}),imageCanvas=waveform?document.createElement('canvas'):null;
   const imageContext=imageCanvas?.getContext('2d',{willReadFrequently:true});
   let painted,colors,extent;
   function refresh() {
     const view=state()[kind],plot=view?.plot;
-    const size=[Math.max(1,Math.round(canvas.clientWidth*devicePixelRatio)),Math.round(height*devicePixelRatio)];
+    const bounds=canvas.getBoundingClientRect();
+    const size=[Math.max(1,Math.round(bounds.width*devicePixelRatio)),Math.max(1,Math.round(bounds.height*devicePixelRatio))];
     canvas.title=[view?.description,view?.range].filter(Boolean).join('\n');
     canvas.setAttribute('aria-label',canvas.title);
     if(painted===plot&&colors===state().scope_colors&&extent?.every((n,i)=>n===size[i]))return;
@@ -62,18 +63,21 @@ export function createScope(options) {
   channel.onchange=()=>dispatch({type:'histogram',action:{type:waveform?'waveform_channel':'channel',index:Number(channel.value)}});
   toolbar.append(source,channel);toolbar.hidden=tonal;
   const graph=element('div','scope-graph'),axis=element('div','scope-axis'),lower=element('span'),upper=element('span');
-  const plot=scopeGraph({state,element,kind,waveform,height:tonal?120:160}),footer=scopeFooter({...options,kind,logarithmic:!tonal});
+  const plot=scopeGraph({state,element,kind,waveform}),footer=scopeFooter({...options,kind,logarithmic:!tonal});
   axis.append(lower,upper);graph.append(plot.node,axis);root.append(toolbar,graph,footer.node);
   const choices=(select,labels,index)=>{
     const key=JSON.stringify(labels);
     if(select.dataset.schema!==key){select.dataset.schema=key;select.replaceChildren(...labels.map((label,i)=>{const option=element('option','',label);option.value=i;return option;}));}
     select.value=index;
   };
+  let intrinsic;
   return {node:root,dispose:plot.dispose,refresh(){
     const view=state()[kind];if(!view)return;
     choices(source,view.sources,view.source);choices(channel,view.channels,view.channel);
     source.title=copy.sampler.source;source.setAttribute('aria-label',source.title);
     channel.title=copy.color.channel;channel.setAttribute('aria-label',channel.title);
     [lower.textContent,upper.textContent]=view.axis;plot.refresh();footer.refresh();
+    const next=JSON.stringify([view.sources,view.channels,view.axis,view.status,view.labels[0]]);
+    if(next!==intrinsic){intrinsic=next;options.contentChanged?.();}
   }};
 }

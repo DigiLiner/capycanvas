@@ -1,82 +1,71 @@
 #include "pch.h"
 #include "UiControls.h"
 #include "FilterPreviews.h"
-#include <winrt/Windows.Storage.Streams.h>
-#include <robuffer.h>
+#include "BitmapUpload.h"
 #include <chrono>
 using namespace CapyUi;
 namespace CapyUi {
 struct FilterPreviewCache : std::enable_shared_from_this<FilterPreviewCache> {
     PreviewTransport transport;
     Microsoft::UI::Dispatching::DispatcherQueue dispatcher{Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread()};
-    struct Tile {hstring key;Imaging::WriteableBitmap image{nullptr};};
+    struct Tile {hstring key;std::shared_ptr<BitmapUpload> upload;};
     std::map<hstring,Tile> images;
-    hstring context,key;
+    hstring context,key,source;
     struct Geometry {int width,height;std::vector<hstring> ids;};
     std::map<uint64_t,Geometry> views;
-    bool busy=false;
+    bool busy=false;std::array<int,2> extent{80,1};
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
-    ~FilterPreviewCache(){if(timer)timer.Stop();}
+    ~FilterPreviewCache(){if(timer)timer.Stop();for(auto& [id,tile]:images)tile.upload->Close();}
     void start(){
         if(!timer){timer=dispatcher.CreateTimer();timer.Interval(std::chrono::milliseconds(200));
             auto weak=weak_from_this();timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->poll();});}
         if(!timer.IsRunning())timer.Start();
     }
-    struct Pixels {hstring id;std::vector<uint8_t> bytes;};
-    static fire_and_forget Convert(std::weak_ptr<FilterPreviewCache> weak,
-        Microsoft::UI::Dispatching::DispatcherQueue queue,PreviewPacket packet,hstring acceptedKey,hstring acceptedContext,
-        int width,int height,std::vector<hstring> ids) {
-        // No XAML objects or strong UI owners cross onto this worker.
-        co_await resume_background();
-        std::vector<Pixels> converted;bool valid=true;
-        try {
-            size_t length=0;auto bytes=capy_preview_bytes(packet.get(),&length);
-            size_t tileSize=size_t(width)*height*4;
-            if(!bytes||ids.empty()||ids.size()>8||width<1||width>512||height<1||height>128||length!=tileSize*ids.size())
-                valid=false;
-            if(valid)for(size_t i=0;i<ids.size();i++){
-                Pixels tile{ids[i],std::vector<uint8_t>(tileSize)};
-                for(size_t p=0;p<tileSize;p+=4){
-                    auto in=bytes+i*tileSize+p;auto out=tile.bytes.data()+p;unsigned a=in[3];
-                    // Shared readback is straight RGBA; WriteableBitmap expects
-                    // premultiplied BGRA in its native pixel buffer.
-                    out[0]=uint8_t((unsigned(in[2])*a+127)/255);
-                    out[1]=uint8_t((unsigned(in[1])*a+127)/255);
-                    out[2]=uint8_t((unsigned(in[0])*a+127)/255);out[3]=uint8_t(a);
-                }
-                converted.emplace_back(std::move(tile));
-            }
-        }catch(...){valid=false;}
-        packet.reset();
-        queue.TryEnqueue([weak,converted=std::move(converted),valid,acceptedKey,acceptedContext,width,height]{
-        if(auto self=weak.lock()){
-            self->busy=false;
-            if(!valid||acceptedContext!=self->context||acceptedKey!=self->key)return;
-            try {
-                for(auto& tile:converted){
-                    Imaging::WriteableBitmap bitmap(width,height);
-                    auto buffer=bitmap.PixelBuffer();uint8_t* destination=nullptr;
-                    check_hresult(buffer.as<::Windows::Storage::Streams::IBufferByteAccess>()->Buffer(&destination));
-                    if(buffer.Capacity()!=tile.bytes.size())throw hresult_invalid_argument();
-                    memcpy(destination,tile.bytes.data(),tile.bytes.size());bitmap.Invalidate();
-                    self->images.insert_or_assign(tile.id,Tile{acceptedKey,bitmap});
-                }
-            }catch(hresult_error const& e){OutputDebugStringW(e.message().c_str());}
-        }
-        });
+    std::array<int,2> size()const{
+        std::array<int,2> result{80,1};
+        for(auto const& [view,geometry]:views){result[0]=std::max(result[0],geometry.width);result[1]=std::max(result[1],geometry.height);}
+        return result;
     }
-    void receive(PreviewPacket packet,hstring const& requestedContext,bool hadVisible){
+    bool visible(hstring const& id)const{
+        for(auto const& [view,geometry]:views)if(std::find(geometry.ids.begin(),geometry.ids.end(),id)!=geometry.ids.end())return true;
+        return false;
+    }
+    void upload(PreviewPacket packet,int width,int height,std::vector<hstring> const& ids){
+        if(ids.empty()||ids.size()>8||width<1||width>512||height<1||height>128)return;
+        auto left=std::make_shared<size_t>(ids.size());auto weak=weak_from_this();
+        auto acceptedKey=key,acceptedContext=context,acceptedSource=source;auto acceptedExtent=extent;size_t tileSize=size_t(width)*height*4;busy=true;
+        for(size_t i=0;i<ids.size();++i){
+            auto id=ids[i];auto [found,inserted]=images.try_emplace(id);
+            if(inserted)found->second.upload=BitmapUpload::Create();found->second.key=L"";
+            auto bitmap=found->second.upload;std::weak_ptr<BitmapUpload> weakBitmap=bitmap;
+            bitmap->Submit({BitmapUpload::ReadPacket(packet),i*tileSize,tileSize*ids.size(),width,height,true,true,
+                [weak,id,weakBitmap,acceptedKey,acceptedContext,acceptedSource,acceptedExtent]{
+                    auto self=weak.lock();if(!self||self->key!=acceptedKey||self->context!=acceptedContext||self->source!=acceptedSource||self->extent!=acceptedExtent)return false;
+                    auto found=self->images.find(id);return found!=self->images.end()&&found->second.upload==weakBitmap.lock();
+                },
+                [weak,id,weakBitmap,acceptedKey,left](bool accepted){
+                    if(auto self=weak.lock()){
+                        if(!--*left)self->busy=false;
+                        if(accepted){auto found=self->images.find(id);if(found!=self->images.end()&&found->second.upload==weakBitmap.lock())found->second.key=acceptedKey;}
+                    }
+                }});
+        }
+    }
+    void receive(PreviewPacket packet,hstring const& requestedContext,hstring const& requestedSource,std::array<int,2> requestedExtent,bool hadVisible){
         busy=false;
         if(!packet){timer.Interval(std::chrono::milliseconds(1000));return;}
-        if(requestedContext!=context)return;
+        if(requestedContext!=context||requestedSource!=source||requestedExtent!=extent)return;
         try {
             auto status=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
             if(status.GetNamedValue(L"epoch").Stringify()!=context)return;
             auto next=str(status,L"key");
-            if(key!=next){key=next;images.clear();}
+            if(key!=next){key=next;for(auto& [id,tile]:images)tile.key=L"";}
             std::vector<hstring> retained;
             for(auto id:array(status,L"retained"))retained.push_back(id.GetString());
-            std::erase_if(images,[&](auto const& row){return std::find(retained.begin(),retained.end(),row.first)==retained.end();});
+            std::erase_if(images,[&](auto const& row){
+                bool remove=std::find(retained.begin(),retained.end(),row.first)==retained.end()&&!visible(row.first);
+                if(remove)row.second.upload->Close();return remove;
+            });
             timer.Interval(std::chrono::milliseconds(std::max(8,int(num(status,L"wait_ms")))));
             if(!hadVisible&&views.empty())timer.Stop();
             auto atlas=object(status,L"atlas");
@@ -85,46 +74,57 @@ struct FilterPreviewCache : std::enable_shared_from_this<FilterPreviewCache> {
                 for(auto id:filters)ids.push_back(id.GetString());
                 if(ids.empty()||ids.size()>8)return;
                 int width=int(num(atlas,L"width")),height=int(num(atlas,L"height"))/int(ids.size());
-                busy=true;Convert(weak_from_this(),dispatcher,std::move(packet),key,context,width,height,std::move(ids));
+                upload(std::move(packet),width,height,ids);
             }else if(hadVisible&&views.empty())poll();
         }catch(hresult_error const& e){OutputDebugStringW(e.message().c_str());timer.Interval(std::chrono::milliseconds(1000));}
     }
     void poll(){
         if(busy)return;
-        A ids,cached;int width=80,height=1;std::vector<hstring> unique;
+        A ids,cached;auto requestedExtent=extent;int width=extent[0],height=extent[1];std::vector<hstring> unique;
         for(auto const& [view,geometry]:views){
-            width=std::max(width,geometry.width);height=std::max(height,geometry.height);
             for(auto const& id:geometry.ids)if(std::find(unique.begin(),unique.end(),id)==unique.end()){
                 unique.push_back(id);ids.Append(S(id));
             }
         }
-        for(auto const& [id,tile]:images)cached.Append(S(id));
+        for(auto const& [id,tile]:images)if(tile.key==key&&tile.upload->Image())cached.Append(S(id));
         A size;size.Append(N(width));size.Append(N(height));
         auto query=O({{L"filters",ids},{L"size",size},{L"cache",O({{L"key",S(key)},{L"rows",cached}})}});
-        auto weak=weak_from_this();auto queue=dispatcher;auto requestedContext=context;bool hadVisible=ids.Size()>0;busy=true;
-        if(!transport(CanvasQueryKind::Filters,to_string(query.Stringify()),[weak,queue,requestedContext,hadVisible](PreviewPacket packet){
-            queue.TryEnqueue([weak,packet=std::move(packet),requestedContext,hadVisible]{
-                if(auto self=weak.lock())self->receive(packet,requestedContext,hadVisible);
+        auto weak=weak_from_this();auto queue=dispatcher;auto requestedContext=context,requestedSource=source;bool hadVisible=ids.Size()>0;busy=true;
+        if(!transport(CanvasQueryKind::Filters,to_string(query.Stringify()),[weak,queue,requestedContext,requestedSource,requestedExtent,hadVisible](PreviewPacket packet){
+            queue.TryEnqueue([weak,packet=std::move(packet),requestedContext,requestedSource,requestedExtent,hadVisible]{
+                if(auto self=weak.lock())self->receive(packet,requestedContext,requestedSource,requestedExtent,hadVisible);
             });
         }))busy=false;
     }
-    void refresh(uint64_t view,hstring const& epoch,int width,int height,std::vector<hstring> const& visible){
-        // A queued native image conversion must not reach a replacement document.
-        if(context!=epoch){context=epoch;key=L"";images.clear();}
-        views.insert_or_assign(view,Geometry{width,height,visible});start();
+    void publish(hstring const& epoch,hstring const& identity){
+        if(context==epoch&&source==identity)return;
+        context=epoch;source=identity;key=L"";
+        for(auto& [id,tile]:images){tile.key=L"";tile.upload->Clear();}
     }
-    void remove(uint64_t view){if(views.erase(view)){start();poll();}}
+    void refresh(uint64_t view,hstring const& epoch,int width,int height,std::vector<hstring> const& visible){
+        if(context!=epoch)publish(epoch,source);
+        views.insert_or_assign(view,Geometry{width,height,visible});auto next=size();
+        if(next!=extent){extent=next;for(auto& [id,tile]:images){tile.key=L"";tile.upload->Clear();}}
+        start();
+    }
+    void remove(uint64_t view){if(views.erase(view)){
+        auto next=size();if(next!=extent){extent=next;for(auto& [id,tile]:images){tile.key=L"";tile.upload->Clear();}}
+        start();poll();
+    }}
 
 };
 std::shared_ptr<FilterPreviewCache> CreateFilterPreviewCache(PreviewTransport transport){
     auto cache=std::make_shared<FilterPreviewCache>();cache->transport=std::move(transport);return cache;
+}
+void RefreshFilterPreviewContext(std::shared_ptr<FilterPreviewCache> const& cache,hstring const& epoch,hstring const& source){
+    if(cache)cache->publish(epoch,source);
 }
 void RefreshFilterPreviews(std::shared_ptr<FilterPreviewCache> const& cache,uint64_t view,hstring const& epoch,
     int width,int height,std::vector<hstring> const& visible){if(cache)cache->refresh(view,epoch,width,height,visible);}
 void RemoveFilterPreviewView(std::shared_ptr<FilterPreviewCache> const& cache,uint64_t view){if(cache)cache->remove(view);}
 ImageSource FilterPreviewSource(std::shared_ptr<FilterPreviewCache> const& cache,hstring const& epoch,hstring const& id){
     if(cache&&cache->context==epoch){auto found=cache->images.find(id);
-        if(found!=cache->images.end()&&found->second.key==cache->key)return found->second.image;
+        if(found!=cache->images.end()&&found->second.key==cache->key)return found->second.upload->Image();
     }return nullptr;
 }
 }

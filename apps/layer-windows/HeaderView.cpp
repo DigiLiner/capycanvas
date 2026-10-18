@@ -11,6 +11,8 @@
 #include <set>
 #include <limits>
 #include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
+#include <winrt/Microsoft.UI.Content.h>
+#include <winrt/Microsoft.UI.Interop.h>
 
 using namespace CapyUi;
 namespace {
@@ -227,7 +229,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
     void applyMenus(){
         if(menuGeneration==data->localizationGeneration)return;
         auto specs=array(data->model,L"application_menus");auto fontSize=data->textSize();
-        menuWidth=8+2*std::max(0,int(menus.size())-1);
+        auto padding=menuCapsule.Padding();menuWidth=padding.Left+padding.Right+menuLabels.Spacing()*std::max(0,int(menus.size())-1);
         for(auto const& item:menus){
             auto caption=str(find(specs,L"id",unbox_value<hstring>(item.Tag())),L"label");
             item.Content(box_value(caption));AutomationProperties::SetName(item,caption);item.FontSize(fontSize);
@@ -247,6 +249,17 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         result.Opening([weak=weak_from_this(),populate](winrt::Windows::Foundation::IInspectable const& sender,auto&&){if(auto self=weak.lock()){
             self->activeMenu=sender.as<MenuFlyout>();self->menuPopulate=populate;self->menuSource=L"";
             self->activeMenu.Items().Clear();self->refreshMenu();
+            auto target=self->activeMenu.Target();if(!target||!target.XamlRoot())return;
+            auto xaml=target.XamlRoot();
+            auto bounds=target.TransformToVisual(xaml.Content()).TransformBounds({0,0,float(target.ActualWidth()),float(target.ActualHeight())});
+            double bottom=bounds.Y+bounds.Height,height=xaml.Size().Height-bottom-12;
+            auto handle=Microsoft::UI::GetWindowFromWindowId(xaml.ContentIslandEnvironment().AppWindowId());
+            POINT origin{};MONITORINFO monitor{sizeof(monitor)};
+            if(ClientToScreen(handle,&origin)&&GetMonitorInfoW(MonitorFromWindow(handle,MONITOR_DEFAULTTONEAREST),&monitor))
+                height=std::min(height,(monitor.rcWork.bottom-origin.y)/xaml.RasterizationScale()-bottom-12);
+            Style style;style.TargetType(xaml_typename<MenuFlyoutPresenter>());
+            Setter limit;limit.Property(FrameworkElement::MaxHeightProperty());limit.Value(box_value(std::max(1.,height)));
+            style.Setters().Append(limit);self->activeMenu.MenuFlyoutPresenterStyle(style);
         }});
         result.Closed([weak=weak_from_this()](winrt::Windows::Foundation::IInspectable const& sender,auto&&){if(auto self=weak.lock();self&&self->activeMenu==sender.as<MenuFlyout>()){
             self->activeMenu=nullptr;self->menuPopulate={};self->menuSource=L"";
@@ -264,7 +277,7 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
         bankKey=geometryKey=desiredKey=lastMeasurement=L"";systemStatus.reset();menuGeneration.reset();
         background=Border();background.Background(clear());canvas.Children().Append(background);
         menuLabels=StackPanel();menuLabels.Orientation(Orientation::Horizontal);menuLabels.Spacing(2);
-        menuLabels.UseLayoutRounding(false);menuWidth=8;
+        menuLabels.UseLayoutRounding(false);
         for(auto value:array(data->model,L"application_menus")){
             auto spec=value.GetObject();auto id=str(spec,L"id");auto item=button(data,L"",[]{});style(item,data,false);item.Padding({8,0,8,0});item.Tag(box_value(id));
             item.Height(26);item.CornerRadius({13*CornerFit,13*CornerFit,13*CornerFit,13*CornerFit});item.FontWeight(winrt::Windows::UI::Text::FontWeights::SemiBold());
@@ -274,15 +287,6 @@ struct HeaderView::Impl:std::enable_shared_from_this<Impl>{
             }));
             item.Flyout().OverlayInputPassThroughElement(menuLabels);
             item.Flyout().Placement(Primitives::FlyoutPlacementMode::BottomEdgeAlignedLeft);
-            item.Flyout().Opening([weak=weak_from_this(),id](auto const& sender,auto&&){if(auto self=weak.lock();self&&self->root.XamlRoot()){
-                auto target=std::find_if(self->menus.begin(),self->menus.end(),[id](Button const& button){return unbox_value<hstring>(button.Tag())==id;});
-                if(target==self->menus.end())return;
-                auto xaml=self->root.XamlRoot();
-                auto bounds=target->TransformToVisual(xaml.Content()).TransformBounds({0,0,float(target->ActualWidth()),float(target->ActualHeight())});
-                Style style;style.TargetType(xaml_typename<MenuFlyoutPresenter>());
-                Setter limit;limit.Property(FrameworkElement::MaxHeightProperty());limit.Value(box_value(std::max(1.,double(xaml.Size().Height-bounds.Y-bounds.Height-12))));
-                style.Setters().Append(limit);sender.template as<MenuFlyout>().MenuFlyoutPresenterStyle(style);
-            }});
             item.PointerEntered([weak=weak_from_this(),id](auto&&,PointerRoutedEventArgs const& event){if(auto self=weak.lock()){
                 auto point=event.GetCurrentPoint(self->menuLabels);
                 if(event.Pointer().PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Touch||point.IsInContact()||self->editing)return;

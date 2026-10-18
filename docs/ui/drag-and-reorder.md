@@ -58,6 +58,8 @@ when the native API provides the original device type.
 Layer snapshots publish `drag_from_body` from Rust. Native clients use those
 device capabilities and latch pickup eligibility at the start of a contact;
 closing a swipe cannot turn that same contact into a reorder.
+Shared pickup validation rejects locked rows, including inherited locks.
+Their body device list is empty; destination drop eligibility stays separate.
 
 GTK and Web mouse/pen feedback on hold-to-reorder tiles (including toolbar/drawer
 tiles and collapsed-column panel icons) is the regular pointer before pickup,

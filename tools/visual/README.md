@@ -125,9 +125,10 @@ failure. It never rescales, crops or masks.
   Chrome reserves the measured caption area and runs the real camera commands.
   The manifest records the native effective palette; Chrome supplies its accent
   through the shared `system_theme_changed` action and verifies the result.
-  Tool Set bounds describe the visible control after viewport and ancestor
+  Control bounds describe the visible rectangle after viewport and ancestor
   clipping, with full DOM bounds retained as `unclipped_bounds`; wholly clipped
-  controls are excluded from that geometry inventory. Layers identifies its
+  controls, including scrolled layer rows, are excluded from the inventory.
+  Header includes the shared `zen-capy` control. Layers identifies its
   current semantic blend button. Workspace buttons use their shared workspace
   IDs, with the options button identified separately. Tool Set position, size
   and edges retain the one-physical-pixel rounding bound. Preserve prior

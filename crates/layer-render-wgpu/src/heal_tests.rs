@@ -250,8 +250,12 @@ fn settling_preserves_sources_while_navigation_and_queued_paint_wait_for_publica
         assert!(!engine.backend().can_submit());
         assert!(engine.can_undo());
         assert!(engine.raster_backing_pending());
-        assert!(engine.undo().is_err());
+        let history = (engine.checkpoint(), engine.can_undo(), engine.can_redo());
         let root = engine.document().target_raster(TARGET).unwrap().clone();
+        assert!(root.try_data().is_none());
+        assert!(matches!(engine.undo(), Err(layer_core::DocumentError::InvalidLayerOperation("Raster backing is busy; retry the edit"))));
+        assert_eq!((engine.checkpoint(), engine.can_undo(), engine.can_redo()), history);
+        assert_eq!(engine.document().target_raster(TARGET), Some(&root));
         assert!(root.try_data().is_none());
         engine.set_brush(BrushSnapshot { diameter: 8., ..default_brush(DefaultBrushPreset::GPen) }).unwrap();
         engine.set_retouch(None);

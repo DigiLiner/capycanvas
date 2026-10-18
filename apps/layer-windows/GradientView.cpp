@@ -1,17 +1,13 @@
 #include "pch.h"
 #include "EffectControls.h"
+#include "BitmapUpload.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
-#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
-#include <winrt/Windows.Storage.Streams.h>
-#include <robuffer.h>
 #include <cstdlib>
 #include <cstring>
-#include <mutex>
 #include <optional>
 using namespace CapyEffects;
 namespace {
-struct RampRequest {std::shared_ptr<CapyLocalization> localization;std::string request;hstring key;int width=0,height=0;winrt::Windows::UI::Color light{},dark{};double cell=1;};
-struct RampResult {hstring key;int width=0,height=0;std::vector<uint8_t> bytes;};
+struct RampRequest {std::shared_ptr<CapyLocalization> localization;std::string request;int width=0,height=0;winrt::Windows::UI::Color light{},dark{};double cell=1;};
 bool rasterRamp(RampRequest const& request,std::vector<uint8_t>& bytes){
     std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_color_ui(request.localization.get(),request.request.c_str()),capy_string_free);
     if(!raw)return false;
@@ -28,34 +24,16 @@ bool rasterRamp(RampRequest const& request,std::vector<uint8_t>& bytes){
     }
     return true;
 }
-struct RampWorker:std::enable_shared_from_this<RampWorker> {
-    Microsoft::UI::Dispatching::DispatcherQueue queue{Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread()};
-    std::function<void(RampResult)> deliver;
-    std::mutex mutex;std::optional<RampRequest> pending;bool running=false;
-    void submit(RampRequest request){
-        std::lock_guard lock(mutex);pending=std::move(request);
-        if(!running){running=true;std::thread([self=shared_from_this()]{self->run();}).detach();}
-    }
-    void run(){
-        for(;;){
-            RampRequest request;
-            {std::lock_guard lock(mutex);if(!pending){running=false;return;}request=std::move(*pending);pending.reset();}
-            auto result=std::make_shared<RampResult>(RampResult{request.key,request.width,request.height,{}});
-            if(!rasterRamp(request,result->bytes))continue;
-            queue.TryEnqueue([weak=weak_from_this(),result]{if(auto self=weak.lock();self&&self->deliver)self->deliver(std::move(*result));});
-        }
-    }
-};
 struct RampView:std::enable_shared_from_this<RampView> {
     std::shared_ptr<WorkspaceData> data;std::function<J()> gradient;double height=32;
-    Border root;Image image;Imaging::WriteableBitmap bitmap{nullptr};
-    std::shared_ptr<RampWorker> worker=std::make_shared<RampWorker>();
-    hstring requested,shown;
+    Border root;Image image;
+    std::shared_ptr<CapyUi::BitmapUpload> upload=CapyUi::BitmapUpload::Create();
+    hstring requested;
+    ~RampView(){upload->Close();}
     void init(){
         root.Height(height);root.CornerRadius(data->controlCorner());root.Background(data->brush(L"input"));
         image.Stretch(Stretch::Fill);image.IsHitTestVisible(false);root.Child(image);
         auto weak=weak_from_this();
-        worker->deliver=[weak](RampResult result){if(auto self=weak.lock())self->install(std::move(result));};
         root.SizeChanged([weak](auto&&,auto&&){if(auto self=weak.lock())self->refresh();});
     }
     void refresh(){
@@ -70,14 +48,14 @@ struct RampView:std::enable_shared_from_this<RampView> {
         auto light=str(palette,L"checker_light"),dark=str(palette,L"checker_dark");
         auto key=request.Stringify()+light+dark+to_hstring(scale);
         if(key==requested)return;requested=key;
-        worker->submit({data->localization,to_string(request.Stringify()),key,width,pixels,color(light),color(dark),5*scale});
-    }
-    void install(RampResult result){
-        if(result.key==shown)return;
-        if(!bitmap||bitmap.PixelWidth()!=result.width||bitmap.PixelHeight()!=result.height){bitmap=Imaging::WriteableBitmap(result.width,result.height);image.Source(bitmap);}
-        uint8_t* destination=nullptr;
-        check_hresult(bitmap.PixelBuffer().as<::Windows::Storage::Streams::IBufferByteAccess>()->Buffer(&destination));
-        std::memcpy(destination,result.bytes.data(),result.bytes.size());bitmap.Invalidate();shown=result.key;
+        RampRequest raster{data->localization,to_string(request.Stringify()),width,pixels,color(light),color(dark),5*scale};
+        auto bytes=std::make_shared<std::vector<uint8_t>>();auto weak=weak_from_this();
+        upload->Submit({[raster=std::move(raster),bytes]{
+                if(!rasterRamp(raster,*bytes))bytes->clear();
+                return std::span<uint8_t const>(*bytes);
+            },0,size_t(width)*pixels*4,width,pixels,false,true,
+            [weak,key]{auto self=weak.lock();return self&&self->requested==key;},
+            [weak](bool accepted){if(auto self=weak.lock();self&&accepted)self->image.Source(self->upload->Image());}});
     }
 };
 struct EditorView:std::enable_shared_from_this<EditorView> {
@@ -123,7 +101,7 @@ struct EditorView:std::enable_shared_from_this<EditorView> {
         auto weak=weak_from_this();root.Spacing(data->panelMetric(L"control_spacing"));
         top.ColumnSpacing(data->panelMetric(L"control_spacing"));column(top,{1,GridUnitType::Star});column(top,{1,GridUnitType::Auto});column(top,{1,GridUnitType::Auto});
         interpolation.HorizontalAlignment(HorizontalAlignment::Stretch);interpolation.MinWidth(0);interpolation.MinHeight(data->controlHeight());interpolation.Height(data->controlHeight());
-        interpolation.FontSize(data->textSize());AutomationProperties::SetAutomationId(interpolation,source.id+L"-interpolation");
+        interpolation.FontSize(data->textSize());interpolation.Padding({6,0,0,0});AutomationProperties::SetAutomationId(interpolation,source.id+L"-interpolation");
         interpolation.SelectionChanged([weak](auto&&,auto&&){if(auto self=weak.lock();self&&!self->syncing&&!self->data->updating){
             auto modes=array(self->gradient(),L"interpolations");auto index=self->interpolation.SelectedIndex();
             if(index>=0&&uint32_t(index)<modes.Size())self->send(O({{L"kind",S(L"interpolation")},{L"value",S(modes.GetArrayAt(uint32_t(index)).GetStringAt(0))}}));

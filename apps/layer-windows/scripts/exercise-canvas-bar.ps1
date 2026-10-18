@@ -49,13 +49,13 @@ try {
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned canvas bar review $($review.Id): $run"
- $watch=[Diagnostics.Stopwatch]::StartNew()
- do{$review.Refresh();if($review.HasExited){throw 'Review exited at startup'};Start-Sleep -Milliseconds 100}while($review.MainWindowHandle -eq [IntPtr]::Zero -and $watch.Elapsed.TotalSeconds -lt 45)
- $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window} 'Review did not start' 45
+ $root=$native.window.Root;$drawingWindow=$native.window.Handle
  Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Canvas bar review did not start'
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
- [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)
  Wait-Until {$b=(Find 'drawing-canvas').Current.BoundingRectangle;$b.Width -gt 1200} 'Maximized canvas did not settle' 10
  Fit-Canvas;Start-Sleep -Milliseconds 300
@@ -220,7 +220,7 @@ try {
  $checks.light_theme='passed'
 
  [CapyRowPointer]::Dispose()
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
  if((Get-Item (Join-Path $run 'stderr.log')).Length){throw 'Native stderr requires review'}
  $checks.evidence=$run
  [pscustomobject]$checks|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')

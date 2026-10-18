@@ -70,11 +70,23 @@ fn fx_hsl_domain(rgb:vec3<f32>)->vec2<f32> {
     let high=max(1.,max(rgb.r,max(rgb.g,rgb.b)));
     return vec2<f32>(low,high-low);
 }
+fn fx_hue_angle(ab:vec2<f32>)->f32 {
+    let magnitude=abs(ab);let largest=max(magnitude.x,magnitude.y);
+    if largest==0. {return 0.;}
+    let ratio=min(magnitude.x,magnitude.y)/largest;
+    let square=ratio*ratio;
+    let polynomial=fma(square,fma(square,fma(square,fma(square,fma(square,fma(square,fma(square,fma(square,0.0023981390986591578,-0.014152348041534424),0.039345413446426392),-0.071943841874599457),0.10477539151906967),-0.14154806733131409),0.19984884560108185),-0.33332523703575134),0.99999988079071045);
+    var angle=ratio*polynomial;
+    if magnitude.y>magnitude.x {angle=1.5707963267948966-angle;}
+    if ab.x<0. {angle=3.141592653589793-angle;}
+    if ab.y<0. {angle=-angle;}
+    return angle;
+}
 fn fx_hue_coordinates(c:vec4<f32>)->vec2<f32> {
     var linear=fx_unassociate(c);
     if FX_ENCODED {linear=fx_decode(linear);}
     let lab=working_to_oklab(linear);
-    return vec2(fract(atan2(lab.z,lab.y)/6.28318530718+1.)*360.,length(lab.yz));
+    return vec2(fract(fx_hue_angle(lab.yz)/6.28318530718+1.)*360.,length(lab.yz));
 }
 fn fx_hue_weight(hue_chroma:vec2<f32>,center:f32,width:f32,feather:f32)->f32 {
     let angle=abs(hue_chroma.x-center);let distance=min(angle,360.-angle);let half_width=width*.5;

@@ -64,6 +64,10 @@ in the table is transformed per channel using the same rule as a grey.
 | Brush preview PNGs | Existing light-stroke variant, transparent background | Existing dark-stroke variant, transparent background | Keep; no baked panel background to regenerate |
 | Branding, favicon, install icons, manifest/splash launch colors | Fixed branded/launch assets | Fixed branded/launch assets | Unchanged; install assets cannot follow a per-user setting |
 
+Scope status and axis labels, layer metadata and summaries use main text at
+55% opacity. Apply that alpha once: a derived text color in Web, or opacity on
+an opaque text foreground in native controls.
+
 Native toolkit error colors remain native rather than replacing their complete
 semantic palettes; GTK's accent follows the resolved accent. New surface roles map to libadwaita's
 [documented CSS variables](https://gnome.pages.gitlab.gnome.org/libadwaita/doc/main/css-variables.html),

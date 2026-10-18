@@ -196,7 +196,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     const revealWidth = () => Math.min(root.clientWidth || 216, get().swipe_actions.length * 72);
     let offset = 0, drag, suppressClick, settling = false;
     const atRest = () => offset === 0 && !settling;
-    record.refreshGrip = () => { grip.hidden = !get().can_drop_below || !atRest(); };
+    record.refreshGrip = () => { grip.hidden = !get().can_drop_below || !atRest(); grip.ariaDisabled = String(get().locked); };
     const settled = e => {
       if (e.target !== row || e.propertyName !== "transform" || row.getAnimations().some(animation =>
         animation.transitionProperty === "transform" && !["finished", "idle"].includes(animation.playState))) return;
@@ -219,7 +219,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       if (suppressClick) { row.removeEventListener("click", suppressClick, true); suppressClick = null; }
       if (e.button || !e.isPrimary || e.target.closest("input") || (!get().can_drop_below && !get().swipe_actions.some(action => action.enabled) && !get().right_swipe)) return;
       drag = { x: e.clientX, y: e.clientY, top: row.getBoundingClientRect().top, pointer: e.pointerId,
-        canDrag: atRest() && get().can_drop_below && (grip.contains(e.target) || get().drag_from_body.includes(e.pointerType)),
+        canDrag: atRest() && get().can_drop_below && !get().locked && (grip.contains(e.target) || get().drag_from_body.includes(e.pointerType)),
         direct: e.pointerType !== "mouse" && !grip.contains(e.target), held: false, origin: offset };
       // Follow fast mouse exits before pickup without retargeting ordinary
       // button clicks. Capture the row only once movement becomes a drag.
@@ -253,7 +253,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
         }
         return;
       }
-      if (!drag.canDrag || !atRest() || !get().can_drop_below) return;
+      if (!drag.canDrag || !atRest() || !get().can_drop_below || get().locked) return;
       if (!drag.ghost && Math.hypot(e.clientX-drag.x, e.clientY-drag.y) > 6) {
         dismissContext();
         row.setPointerCapture(e.pointerId); drag.ghost = row.cloneNode(true); drag.ghost.classList.add("layer-drag-preview");

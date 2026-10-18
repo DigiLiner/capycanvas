@@ -1330,7 +1330,7 @@ pub struct LayerState {
 
 impl LayerState {
     pub fn can_drag(&self, kind: PointerKind, handle: bool, at_rest: bool) -> bool {
-        self.can_drop_below && at_rest && (handle || self.drag_from_body.contains(&kind))
+        self.can_drop_below && !self.locked && at_rest && (handle || self.drag_from_body.contains(&kind))
     }
 }
 

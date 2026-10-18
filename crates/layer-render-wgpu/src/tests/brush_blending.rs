@@ -204,7 +204,8 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
                     base.copy_to(&output, &mut encoder);
                     { let mut pass = encoder.begin_compute_pass(&Default::default());
-                        pass.set_pipeline(r.pipelines.dry_material.selected_kernel(&batch.style, MaterialOperation::Deposit, false, if enabled && !reference {8192} else {0}));
+                        let pipeline = r.pipelines.dry_material.selected_kernel(&batch.style, MaterialOperation::Deposit, false, if enabled && !reference {8192} else {0});
+                        pass.set_pipeline(&pipeline);
                         pass.set_bind_group(0, &binding, &[0]);
                         pass.set_bind_group(1, r.paint_target_binding(&batch.style), &[0]);
                         pass.set_bind_group(2, &sources, &[0]);
@@ -291,23 +292,77 @@ fn a_brush_blend_mode_equals_the_layer_blend_mode_in_both_spaces() {
         canvas.paint(layer, test_style(BrushExecution::Dry), soft([40., 60.], [0.9, 0.1, 0.6, 1.], 70., 0.));
         canvas.paint(layer, test_style(BrushExecution::Dry), soft([100., 90.], [0.05, 0.08, 0.5, 0.8], 50., 0.3));
     };
-    let stroke = soft([70., 64.], [0.85, 0.7, 0.15, 0.75], 55., 0.2);
-    for space in BlendSpace::ALL {
-        for mode in [BrushBlendMode::Overlay, BrushBlendMode::Multiply, BrushBlendMode::Screen, BrushBlendMode::Darken, BrushBlendMode::Lighten] {
-            let mut brush = Canvas::new(DocumentColor::default(), space, None);
-            let target = brush.base;
-            base(&mut brush, target);
-            let mut style = test_style(BrushExecution::Dry);
-            style.rendering.blend_mode = mode;
-            brush.paint(brush.base, style, stroke);
-            let mut layered = Canvas::new(DocumentColor::default(), space, Some(LayerBlend::from(mode)));
-            let target = layered.base;
-            base(&mut layered, target);
-            layered.paint(layered.over.unwrap(), test_style(BrushExecution::Dry), stroke);
-            for (i, (a, b)) in brush.composite().into_iter().zip(layered.composite()).enumerate() {
-                for c in 0..4 {
-                    assert!((a[c] - b[c]).abs() < 2e-4, "{space:?} {mode:?} pixel {i} channel {c}: brush {} != layer {}", a[c], b[c]);
+    let custom = layer_core::BrushContact { pooling: 0.25, linear_edge: true, ..Default::default() };
+    layer_core::BrushSnapshot { contact: Some(custom), ..Default::default() }.validate().unwrap();
+    for contact in [None, Some(custom)] {
+        let mut stroke = soft([70., 64.], [0.85, 0.7, 0.15, 0.75], 55., 0.2);
+        if contact.is_some() {
+            stroke.previous = [55., 55., 1., 0.];
+            stroke.contact = [0.8, 0., 0., 0.];
+            stroke.previous_contact = stroke.contact;
+        }
+        for space in BlendSpace::ALL {
+            for mode in [BrushBlendMode::Overlay, BrushBlendMode::Multiply, BrushBlendMode::Screen, BrushBlendMode::Darken, BrushBlendMode::Lighten] {
+                let mut brush = Canvas::new(DocumentColor::default(), space, None);
+                let target = brush.base;
+                base(&mut brush, target);
+                let before = brush.composite();
+                let mut style = test_style(BrushExecution::Dry);
+                style.contact = contact;
+                let normal = style.clone();
+                style.rendering.blend_mode = mode;
+                brush.paint(brush.base, style, stroke);
+                let mut layered = Canvas::new(DocumentColor::default(), space, Some(LayerBlend::from(mode)));
+                let target = layered.base;
+                base(&mut layered, target);
+                layered.paint(layered.over.unwrap(), normal, stroke);
+                let actual = brush.composite();
+                assert!(actual.iter().zip(&before).any(|(a, b)| (0..3).any(|c| (a[c] - b[c]).abs() > 0.01)),
+                    "{space:?} {mode:?} contact={contact:?}: brush must change visible paint");
+                for (i, (a, b)) in actual.into_iter().zip(layered.composite()).enumerate() {
+                    for c in 0..4 {
+                        assert!((a[c] - b[c]).abs() < 2e-4, "{space:?} {mode:?} contact={contact:?} pixel {i} channel {c}: brush {} != layer {}", a[c], b[c]);
+                    }
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn distant_material_gather_moves_source_color_without_changing_source() {
+    let extent = [1024, 128];
+    let probes = [[824usize, 56usize], [832, 64], [840, 72]];
+    for space in BlendSpace::ALL {
+        for execution in [BrushExecution::Smudge, BrushExecution::Liquify] {
+            let mut canvas = Canvas::at(DocumentColor::default(), space, None, extent);
+            canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([64., 64.], [0., 1., 0., 1.], 80., 1.));
+            canvas.paint(canvas.base, test_style(BrushExecution::Dry), soft([832., 64.], [1., 0., 0., 1.], 80., 1.));
+            let before = canvas.r.readback_srgb_rgba8().unwrap();
+            let pixel = |image: &[u8], [x, y]: [usize; 2]| -> [u8; 4] {
+                image[(y * extent[0] as usize + x) * 4..][..4].try_into().unwrap()
+            };
+            for probe in probes {
+                assert_eq!(pixel(&before, probe), [255, 0, 0, 255], "destination starts red");
+                assert_eq!(pixel(&before, [probe[0] - 768, probe[1]]), [0, 255, 0, 255], "distant source starts green");
+            }
+            let mut style = test_style(execution);
+            style.wet_mix.blur = 0.;
+            style.wet_mix.attack = 1.;
+            style.wet_mix.mix_space = layer_core::ColorMixSpace::LinearRgb;
+            style.deform.mode = layer_core::LiquifyMode::Push;
+            style.deform.momentum = 0.;
+            let mut stroke = soft([832., 64.], [0.; 4], 32., 1.);
+            stroke.motion = [768., 0.];
+            stroke.material = [0., 1., 1., 1.];
+            let jobs = canvas.r.metrics.material_sample_jobs;
+            canvas.paint(canvas.base, style, stroke);
+            assert!(canvas.r.metrics.material_sample_jobs > jobs, "{execution:?}/{space:?}: distant gather must execute");
+            let after = canvas.r.readback_srgb_rgba8().unwrap();
+            for probe in probes {
+                let source = [probe[0] - 768, probe[1]];
+                assert_eq!(pixel(&after, probe), pixel(&before, source), "{execution:?}/{space:?}: destination receives original distant source");
+                assert_eq!(pixel(&after, source), pixel(&before, source), "{execution:?}/{space:?}: source remains unchanged");
             }
         }
     }
@@ -324,6 +379,46 @@ fn erasing_is_the_same_in_both_spaces() {
         canvas.r.readback_srgb_rgba8().unwrap()
     };
     assert_eq!(erased(BlendSpace::Perceptual), erased(BlendSpace::Linear));
+}
+
+#[test]
+#[ignore = "Requires hardware float32 blending for direct painting"]
+fn direct_contact_paint_and_erase_match_destination_deposition() {
+    let contact = layer_core::BrushContact { pooling: 0.25, linear_edge: true, ..Default::default() };
+    layer_core::BrushSnapshot { contact: Some(contact), ..Default::default() }.validate().unwrap();
+    for mode in [DabMode::Paint, DabMode::Erase] {
+        let mut direct = Canvas::new(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None);
+        let mut destination = Canvas::new(DocumentColor { depth: SampleDepth::F32, ..Default::default() }, BlendSpace::Linear, None);
+        direct.fill(direct.base, [0.3, 0.55, 0.2, 1.]);
+        destination.fill(destination.base, [0.3, 0.55, 0.2, 1.]);
+        let before = direct.composite();
+        let mut style = test_style(BrushExecution::Dry);
+        style.mode = mode;
+        style.contact = Some(contact);
+        style.rendering.accumulation = BrushAccumulation::Flow;
+        style.rendering.wet_edge = 0.6;
+        style.rendering.burnt_edge = 0.3;
+        assert!(BrushPassPlan::for_device(&style, &direct.r.device).direct.is_some(), "{mode:?}: actual direct route");
+        let mut reference = style.clone();
+        if mode == DabMode::Paint { reference.alpha_locked = true; }
+        else { reference.rendering.blend_mode = BrushBlendMode::Multiply; }
+        assert!(BrushPassPlan::for_device(&reference, &destination.r.device).direct.is_none(), "{mode:?}: destination oracle");
+        let mut dab = soft([70., 64.], [0.85, 0.7, 0.15, 0.75], 55., 0.2);
+        dab.previous = [55., 55., 1., 0.];
+        dab.contact = [0.8, 0., 0., 0.];
+        dab.previous_contact = dab.contact;
+        direct.paint(direct.base, style, dab);
+        destination.paint(destination.base, reference, dab);
+        let actual = direct.composite();
+        assert!(actual.iter().zip(before).any(|(a, b)| (0..4).any(|c| (a[c] - b[c]).abs() > 0.01)),
+            "{mode:?}: direct contact must change visible paint");
+        for (pixel, (a, b)) in actual.into_iter().zip(destination.composite()).enumerate() {
+            for channel in 0..4 {
+                assert!((a[channel] - b[channel]).abs() < 2e-4,
+                    "{mode:?} pixel={pixel} channel={channel}: direct {a:?} != destination {b:?}");
+            }
+        }
+    }
 }
 
 #[test]
@@ -512,7 +607,8 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
             base.copy_to(&output,&mut encoder);
             {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("full independent page"),timestamp_writes:None});
-                pass.set_pipeline(kernels.selected_kernel(&style,MaterialOperation::Deposit,false,if aggregate {8192}else{0}|if fine{16384}else{0}));
+                let pipeline = kernels.selected_kernel(&style,MaterialOperation::Deposit,false,if aggregate {8192}else{0}|if fine{16384}else{0});
+                pass.set_pipeline(&pipeline);
                 pass.set_bind_group(0,&binding,&[0]);pass.set_bind_group(1,r.paint_target_binding(&style),&[0]);pass.set_bind_group(2,&sources,&[0]);
                 pass.set_bind_group(3,&r.texture_sets.iter().find(|s|s.key==key).unwrap().bind_group,&[]);pass.dispatch_workgroups(8,128,1);}
             encoder.submit(&r.queue);let reference=crate::test_support::float_pixels(r,&output.texture);

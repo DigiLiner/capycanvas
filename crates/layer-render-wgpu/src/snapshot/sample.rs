@@ -109,7 +109,7 @@ impl SnapshotGpu {
         let summary = snapshot.with_region_gpu([origin[0], origin[1], size[0], size[1]], 64,
             |r, packet, region, encoder| {
                 let (texture, _) = create_color_target(&r.device, size, "artwork sample footprint");
-                let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+                let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
                 let result = scene.capture_region(r, packet, &texture, region, output, encoder);
                 r.scene = Some(scene);
                 result?;

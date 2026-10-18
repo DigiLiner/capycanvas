@@ -79,6 +79,17 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         control.Content(box_value(hstring(copy)));AutomationProperties::SetName(control,copy);
         data->copyView([weak=make_weak(control),resolve=copy.current]{auto control=weak.get();if(!control)return false;auto value=resolve();control.Content(box_value(value));AutomationProperties::SetName(control,value);return true;});
     }
+    fire_and_forget importPaper(J envelope){
+        auto lifetime=shared_from_this();auto id=num(envelope,L"id");showing=true;changed();
+        J response=O({{L"operation",S(L"paper_import")},{L"id",N(id)},{L"path",JsonValue::CreateNullValue()}});
+        try{
+            Pickers::FileOpenPicker open(window.AppWindow().Id());open.CommitButtonText(native(L"paper",L"import_accept"));
+            for(auto suffix:array(object(object(catalog,L"native_copy"),L"paper"),L"extensions"))open.FileTypeFilter().Append(suffix.GetString());
+            picker=open.PickSingleFileAsync();auto selected=co_await picker;if(selected)response.Insert(L"path",S(selected.Path()));
+        }catch(hresult_canceled const&){}
+        catch(hresult_error const& error){if(!stopping)report(to_string(error.message()));}
+        picker=nullptr;if(!stopping)send(to_string(response.Stringify()));showing=false;changed();
+    }
     fire_and_forget show(J envelope) {
         auto lifetime=shared_from_this();
         auto request=object(object(envelope,L"kind"),L"request");
@@ -136,8 +147,14 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                     std::array<TextBox,2> entries;
                     for(uint32_t i=0;i<2;++i){entries[i].Header(box_value(labels.GetStringAt(i)));entries[i].MaxLength(512);
                         AutomationProperties::SetName(entries[i],labels.GetStringAt(i));AutomationProperties::SetAutomationId(entries[i],i==0?L"document-width":L"document-height");body.Children().Append(entries[i]);}
+                    TextBox resolution;resolution.Header(box_value(str(text,L"resolution")+L" ("+str(object(creation,L"resolution"),L"unit")+L")"));resolution.MaxLength(512);
+                    AutomationProperties::SetAutomationId(resolution,L"document-resolution");body.Children().Append(resolution);
                     TextBlock summary,blendHelp,note,error;for(auto item:{summary,blendHelp,note,error}){item.TextWrapping(TextWrapping::Wrap);body.Children().Append(item);}
                     error.Visibility(Visibility::Collapsed);AutomationProperties::SetAutomationId(error,L"document-error");
+                    auto errorReveal=std::make_shared<event_token>();
+                    error.Unloaded([weak=make_weak(error),errorReveal](auto&&,auto&&){
+                        if(auto error=weak.get();error&&*errorReveal){error.LayoutUpdated(*errorReveal);*errorReveal={};}
+                    });
                     auto loading=std::make_shared<bool>(false);auto appearanceSource=std::make_shared<hstring>();auto chosen=std::make_shared<hstring>(str(creationDraft,L"blend_space"));
                     auto appearance=[creationDraft,summary,blendHelp,note,appearanceSource,blending,blendChoices,loading,this]{
                         try{
@@ -148,19 +165,22 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                             blending.IsEnabled(flag(view,L"blending_editable"));*loading=false;
                         }catch(hresult_error const&){*loading=false;}
                     };
-                    auto project=[creationDraft,entries,space,spaces,depth,depths,background,backgrounds,chosen,loading,spec,defaults,appearance,this]{
+                    auto project=[creationDraft,entries,resolution,space,spaces,depth,depths,background,backgrounds,chosen,loading,spec,creation,defaults,appearance,this]{
                         if(*loading||space.SelectedIndex()<0||depth.SelectedIndex()<0||background.SelectedIndex()<0)return;
                         try{
                             A dimensions;for(uint32_t i=0;i<2;++i){auto result=numeric(this->localization.get(),object(spec,L"numeric"),defaults.GetNumberAt(i),O({{L"type",S(L"expression")},{L"text",S(entries[i].Text())}}));dimensions.Append(N(num(result,L"value")));}
                             creationDraft.Insert(L"extent",dimensions);
+                            auto ppi=numeric(this->localization.get(),object(creation,L"resolution"),num(creationDraft,L"resolution"),O({{L"type",S(L"expression")},{L"text",S(resolution.Text())}}));
+                            creationDraft.Insert(L"resolution",N(num(ppi,L"value")));
                             creationDraft.Insert(L"color",O({{L"space",spaces.GetArrayAt(space.SelectedIndex()).GetAt(0)},{L"depth",depths.GetArrayAt(depth.SelectedIndex()).GetAt(0)}}));
                             creationDraft.Insert(L"background",backgrounds.GetArrayAt(background.SelectedIndex()).GetAt(0));
                             if(!chosen->empty())creationDraft.Insert(L"blend_space",S(*chosen));
                             appearance();
                         }catch(hresult_error const&){*loading=false;}
                     };
-                    auto load=[creationDraft,entries,space,depth,background,blending,spaces,depths,backgrounds,blendChoices,chosen,loading,project](J value){
+                    auto load=[creationDraft,entries,resolution,space,depth,background,blending,spaces,depths,backgrounds,blendChoices,chosen,loading,project](J value){
                         *loading=true;*chosen=str(value,L"blend_space");creationDraft.Insert(L"blend_space",value.GetNamedValue(L"blend_space"));auto color=object(value,L"color");
+                        resolution.Text(to_hstring(uint32_t(num(value,L"resolution"))));
                         auto dimensions=array(value,L"extent");for(uint32_t i=0;i<2;++i)entries[i].Text(to_hstring(uint32_t(dimensions.GetNumberAt(i))));
                         for(uint32_t i=0;i<spaces.Size();++i)if(spaces.GetArrayAt(i).GetStringAt(0)==str(color,L"space"))space.SelectedIndex(i);
                         for(uint32_t i=0;i<depths.Size();++i)if(depths.GetArrayAt(i).GetStringAt(0)==str(color,L"depth"))depth.SelectedIndex(i);
@@ -174,6 +194,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                         if(!*loading&&blending.IsEnabled()&&blending.SelectedIndex()>=0)*chosen=str(blendChoices.GetObjectAt(blending.SelectedIndex()),L"id");project();
                     });
                     for(auto entry:entries)entry.TextChanged([project](auto&&,auto&&){project();});
+                    resolution.TextChanged([project](auto&&,auto&&){project();});
                     preset.SelectionChanged([preset,presets,load,loading](auto&&,auto&&){if(!*loading&&preset.SelectedIndex()>=0)load(object(presets.GetObjectAt(preset.SelectedIndex()),L"options"));});
                     auto selected=creation.GetNamedValue(L"selected",JsonValue::CreateNullValue());for(uint32_t i=0;i<presets.Size();++i)if(presets.GetObjectAt(i).GetNamedValue(L"id").Stringify()==selected.Stringify())preset.SelectedIndex(i);
                     Button remove;remove.Content(box_value(str(text,L"remove_preset")));body.Children().Append(remove);
@@ -189,12 +210,13 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                     remove.Click([this,preset,presets,remove,id](auto&&,auto&&){auto index=preset.SelectedIndex();if(index<0)return;auto action=presets.GetObjectAt(index).GetNamedValue(L"remove",JsonValue::CreateNullValue());if(action.ValueType()!=JsonValueType::Object)return;
                         send(to_string(O({{L"operation",S(L"new_preferences")},{L"id",N(id)},{L"action",action}}).Stringify()));preset.SelectedIndex(-1);remove.IsEnabled(false);
                     });
-                    presentationChanged=[this,preset,space,depth,background,blending,presetName,remember,entries,remove,appearance,loading]{
+                    presentationChanged=[this,preset,space,depth,background,blending,presetName,remember,entries,resolution,remove,appearance,loading]{
                         auto creation=object(object(model,L"document_options"),L"creation"),text=object(creation,L"text");
                         dialog.Title(box_value(str(text,L"new_title")));dialog.PrimaryButtonText(str(text,L"create"));dialog.CloseButtonText(common(L"cancel"));
                         preset.Header(box_value(str(text,L"preset")));space.Header(box_value(str(text,L"space")));depth.Header(box_value(str(text,L"depth")));
                         background.Header(box_value(str(text,L"background")));presetName.Header(box_value(str(text,L"preset_name")));remember.Content(box_value(str(text,L"remember")));
                         remove.Content(box_value(str(text,L"remove_preset")));
+                        resolution.Header(box_value(str(text,L"resolution")+L" ("+str(object(creation,L"resolution"),L"unit")+L")"));
                         *loading=true;
                         for(auto const& [control,key]:std::initializer_list<std::pair<ComboBox,wchar_t const*>>{{space,L"spaces"},{depth,L"depths"},{background,L"backgrounds"}}){
                             auto selected=control.SelectedIndex();auto choices=array(creation,key);for(uint32_t i=0;i<std::min(choices.Size(),control.Items().Size());++i)comboOptionText(control,i,choices.GetArrayAt(i).GetStringAt(1));control.SelectedIndex(selected);
@@ -206,9 +228,18 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                     };
                     presetName.Header(box_value(str(text,L"preset_name")));presetName.MaxLength(64);body.Children().Append(presetName);
                     remember.Content(box_value(str(text,L"remember")));body.Children().Append(remember);
-                    dialog.PrimaryButtonClick([entries,defaults,spec,extent,error,creationDraft,project,this](auto&&,ContentDialogButtonClickEventArgs const& e){
-                        try{for(uint32_t i=0;i<2;++i){auto result=numeric(this->localization.get(),object(spec,L"numeric"),defaults.GetNumberAt(i),O({{L"type",S(L"expression")},{L"text",S(entries[i].Text())}}));(*extent)[i]=uint32_t(num(result,L"value"));}project();}
-                        catch(hresult_error const& failure){e.Cancel(true);error.Text(failure.message());error.Visibility(Visibility::Visible);}
+                    dialog.PrimaryButtonClick([entries,resolution,defaults,spec,creation,extent,error,errorReveal,creationDraft,project,this](auto&&,ContentDialogButtonClickEventArgs const& e){
+                        try{for(uint32_t i=0;i<2;++i){auto result=numeric(this->localization.get(),object(spec,L"numeric"),defaults.GetNumberAt(i),O({{L"type",S(L"expression")},{L"text",S(entries[i].Text())}}));(*extent)[i]=uint32_t(num(result,L"value"));}numeric(this->localization.get(),object(creation,L"resolution"),num(creationDraft,L"resolution"),O({{L"type",S(L"expression")},{L"text",S(resolution.Text())}}));project();}
+                        catch(hresult_error const& failure){
+                            e.Cancel(true);if(*errorReveal){error.LayoutUpdated(*errorReveal);*errorReveal={};}
+                            error.Text(failure.message());error.Visibility(Visibility::Visible);
+                            *errorReveal=error.LayoutUpdated([weak=make_weak(error),errorReveal](auto&&,auto&&){
+                                auto error=weak.get();if(!error)return;
+                                error.LayoutUpdated(*errorReveal);*errorReveal={};
+                                if(error.IsLoaded()&&error.Visibility()==Visibility::Visible&&error.ActualWidth()>0&&error.ActualHeight()>0)error.StartBringIntoView();
+                            });
+                            error.InvalidateArrange();
+                        }
                     });
                 } else {
                     presentationChanged=[this,id]{auto options=object(model,L"document_options");auto current=object(object(findId(array(object(model,L"state"),L"requests"),id),L"kind"),L"request");dialog.Title(box_value(str(current,L"title")));dialog.PrimaryButtonText(str(options,L"save_label"));dialog.SecondaryButtonText(str(options,L"discard_label"));dialog.CloseButtonText(str(options,L"cancel_label"));};
@@ -695,6 +726,9 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
             auto envelope=value.GetObject();
             if(str(object(envelope,L"kind"),L"type")==L"soft_proof_setup"){
                 auto id=uint32_t(num(envelope,L"id"));if(id!=handled){handled=id;send(to_string(O({{L"operation",S(L"workflow_begin")},{L"id",N(id)}}).Stringify()));}break;
+            }
+            if(str(object(envelope,L"kind"),L"type")==L"paper"&&str(object(object(envelope,L"kind"),L"request"),L"type")==L"import"){
+                auto id=uint32_t(num(envelope,L"id"));if(id!=handled){handled=id;importPaper(envelope);}break;
             }
             if(str(object(envelope,L"kind"),L"type")!=L"document")continue;
             auto id=uint32_t(num(envelope,L"id"));

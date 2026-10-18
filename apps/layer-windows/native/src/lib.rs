@@ -50,6 +50,8 @@ mod frame_pacing;
 mod host;
 #[cfg(any(target_os = "windows", test))]
 mod palette_files;
+#[cfg(any(target_os = "windows", test))]
+mod paper_files;
 #[cfg(target_os = "windows")]
 pub use host::*;
 
@@ -101,6 +103,34 @@ mod test_support {
         use layer_core::authored::*;let application=document.artwork.effects.insert(PortableId::random(),EffectApplication::new(effect.program,effect.values,document.composition().size)).unwrap();let h=document.artwork.occurrences.insert(PortableId::random(),Occurrence::new(OccurrenceContent::Effect(application),name)).unwrap();let stack=document.composition().result;document.artwork.stacks.get_mut(stack).unwrap().entries.insert(0,h);document.apply(layer_core::Edit::Stack(RecordChange::replace(&document.artwork.stacks,stack,document.artwork.stacks.get(stack).cloned()).unwrap())).unwrap();document.working.occurrence=Some(h);document.working.target=None;h
     }
     pub(crate) fn editable(outcome:layer_ui::ImportOutcome)->layer_ui::ImportedDocument {let layer_ui::ImportOutcome::Editable(document)=outcome else{panic!("Expected editable photo")};document}
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn d3d12_renderer() -> layer_render_wgpu::WgpuRasterizer {
+        use layer_render_wgpu::WgpuRasterizer;
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        descriptor.backends = wgpu::Backends::DX12;
+        descriptor.flags.remove(wgpu::InstanceFlags::DEBUG);
+        let instance = wgpu::Instance::new(descriptor);
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            ..Default::default()
+        }))
+        .unwrap();
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: adapter.features()
+                & (wgpu::Features::FLOAT32_FILTERABLE
+                    | wgpu::Features::FLOAT32_BLENDABLE)
+                    | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
+            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            ..Default::default()
+        }))
+        .unwrap();
+        let mut gpu =
+            WgpuRasterizer::from_wgpu_native_staged(adapter, device, queue, Default::default())
+                .unwrap();
+        gpu.finish_startup_cache();
+        gpu
+    }
 
     pub(crate) fn isolated_storage() -> PathBuf {
         crate::storage::roots().unwrap();

@@ -29,7 +29,7 @@ impl Cache {
             r.metrics.image_window_submissions += 1;
         }
         for (output, window) in regions {
-            scene.prepare_region(r, packet, window, dirty, false, encoder)?;
+            scene.prepare_region(r, packet, (output, window), dirty, false, encoder)?;
             if plan.is_some() {
                 r.metrics.image_window_peak_bytes = r.metrics.image_window_peak_bytes.max(scene.images.storage_bytes());
             }
@@ -53,7 +53,7 @@ impl Cache {
                 Scene::submit_chunk(r, encoder, "after native filter window")?;
                 r.metrics.image_window_submissions += 1;
                 scene.retire_images(|scene| scene.images.release_window_pixels());
-                scene.image_window = None;
+                scene.image_window = None; scene.image_output = None;
             }
         }
         Ok(changed)
@@ -122,7 +122,7 @@ impl Cache {
             let work = combined.area().saturating_add(window.area().saturating_mul(passes));
             if bounds.is_empty() {work_limit=work_limit.max(work.saturating_add(work/2));}
             if !bounds.is_empty() && (passes>0&&(combined.area()>bounds.area()+region.area()||work>work_limit)
-                ||Scene::capture_image_bound(packet.scene, window)>budget) {return false;}
+                ||Scene::capture_image_bound(packet.scene, combined)>budget) {return false;}
             bounds = combined;
             true
         }).collect();
@@ -130,7 +130,7 @@ impl Cache {
         r.telemetry.phase_begin(9, &r.device, &r.queue, encoder);
         r.ensure_exact_preview(encoder)?;
         if !bounds.is_empty() {
-            scene.prepare_region(r, packet, scene.cached_capture_window(packet.scene, bounds), PixelRect::EMPTY, false, encoder)?;
+            scene.prepare_region(r, packet, (bounds, scene.cached_capture_window(packet.scene, bounds)), PixelRect::EMPTY, false, encoder)?;
         }
         let changed = if regions.is_empty() { PixelRect::EMPTY }
             else { self.capture_exact(scene, r, packet, &mut image, &regions, encoder, commands)? };
@@ -213,7 +213,7 @@ impl Scene {
         &mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<PixelRect, GpuRasterError> {
-        let write = self.begin_write(r);
+        let write = self.begin_write(r)?;
         let Some(mut cache) = r.scale_display.take() else { return Ok(PixelRect::EMPTY) };
         cache.submission_valid = Some(self.valid.clone());
         let mut commands = self.scale_commands.take().unwrap_or_else(|| Commands::new(r));

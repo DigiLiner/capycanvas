@@ -160,7 +160,7 @@ void LayersView::init(){
     pickup=std::make_unique<LayerRowDrag>(shared_from_this());
     timer=root.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(120));
     timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->preview();});
-    root.Loaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->timer.Start();self->preview();}});
+    root.Loaded([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->data->thumbnails){self->timer.Start();self->preview();}});
     root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){
         self->timer.Stop();++self->menuGeneration;if(self->menu)self->menu.Hide();if(self->pickup)self->pickup->Cancel();
     }});

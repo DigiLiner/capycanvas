@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use std::collections::BTreeMap;
 
-type Fields<'a> = BTreeMap<&'a str, &'a RawValue>;
+use crate::snapshot::RawFields as Fields;
 
 #[derive(Default, Serialize)]
 struct Update<'a> {

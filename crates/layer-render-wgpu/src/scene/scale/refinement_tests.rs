@@ -298,7 +298,10 @@ fn idle_spatial_refinement_bounds_pass_work_and_yields_between_distant_contacts(
     r.scene=Some(scene);
     assert_eq!(r.metrics.frame_composited_pages,vec![(0,[0,0])]);
     assert_eq!(r.scene.as_ref().unwrap().image_work(),[1,1]);
-    assert_eq!(r.scene.as_ref().unwrap().image_pass_pixels(),272u64.pow(2),"the document-edge page reads only its declared halo");
+    let output = page_rect([0,0]).intersect(PixelRect::full(extent));
+    let scene = r.scene.as_ref().unwrap();
+    assert_eq!(scene.cached_capture_window(frame.scene,output).in_frame(extent).area(),272u64.pow(2),"the document-edge page reads only its declared halo");
+    assert_eq!(scene.image_pass_pixels(),output.area(),"the pass writes only the requested output page");
     assert!(r.has_pending_work(),"the distant page waits for another idle batch");
     let submissions = r.metrics.submissions;
     r.background_ready=Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -610,6 +613,9 @@ fn idle_display_reuses_global_effect_dependencies_until_the_next_edit() {
         let work = r.scene.as_ref().unwrap().image_pass_pixels();
         assert!(work > 0);
         assert_settled(&mut r, frame, &pixels(&exact, crate::test_support::document_texture(&exact)));
+        assert_eq!(r.scene.as_ref().unwrap().image_pass_pixels(), u64::from(extent[0]) * u64::from(extent[1]), "unchanged global dependencies execute once across all requested pages");
+        let work = r.scene.as_ref().unwrap().image_pass_pixels();
+        r.submit(FramePacket { composite_all: false, ..frame }).unwrap();
         assert_eq!(r.scene.as_ref().unwrap().image_pass_pixels(), work, "unchanged global dependencies execute once");
     }
 }

@@ -218,7 +218,9 @@ Each parameter declares its semantic `dimension`: `scalar` (the default),
 `count`, `angle`, `time`, `source_pixels`, `composition_pixels` or `normalized`.
 Counts require whole bounds and values. Posterize Levels and Kaleidoscope Segments
 are counts. Denoise exposes Strength and uses an internal radius of two composition units;
-Domain Warp uses three internal noise octaves. Built-in pixel lengths are
+Domain Warp uses three internal noise octaves. Its phase, noise feedback and
+final displacement use explicit fused multiply-add operations. The shared FBM
+noise and hash retain their existing evaluation. Built-in pixel lengths are
 composition units when inserted, then follow the saved effect reference mapping.
 Image resize composes that mapping and keeps authored values and reference extent;
 explicit distances and implicit periods scale together. Displayed `unit` labels
@@ -304,7 +306,10 @@ composition. The default, `"native"`, requires document-resolution evaluation.
 `"display"` permits evaluation on the compositor's reduced grid. Spatial effects
 receive positions in their authored reference coordinates and `fx_extent()`
 returns that reference extent. The finite F64 affine mapping places those
-coordinates in the composition. Crop translates the mapping once; Image Size
+coordinates in the composition. The renderer derives inverse coefficients in
+F64 before uploading them, avoiding a determinant division at every pixel.
+Forward and inverse coefficients both participate in cache reuse and identity
+specialization. Crop translates the mapping once; Image Size
 and image orientation compose it with the accepted image transform, retaining
 reference extents and values. Explicit distances and implicit periods therefore
 transform together. Evaluation density never changes their document appearance,
@@ -330,6 +335,14 @@ and coordinate buffers; unchanged prepared lookup ranges copy between buffers
 without recomputing their tables. Native views and programs
 declaring native resolution retain exact evaluation. Surrounding composition
 can still use the reduced grid and its existing exact idle refinement.
+
+Each image stage uses its own input, output and mask grids. The dependency union
+gathers source data without allocating the empty gap between a requested output
+and a distant clamped edge. Two reusable scratch textures retain the largest
+required width and height for each alternating pass slot. Admission charges those
+physical shapes and cached planes, including one-pixel empty allocations, using
+the same plans as execution. Every allocated texture must fit the device limit;
+the dependency union itself need not fit a texture.
 
 Static pointwise alpha conversions use the same tile execution and fusion as
 color adjustments. Changing coverage alone does not require a full-image stage.
@@ -561,8 +574,8 @@ Generic Rust packs values and offsets; preparation WGSL owns the mathematics.
 
 Gaussian Blur, Unsharp Mask, High Pass, Bloom, Soft Focus and Pencil share the
 Gaussian preparation definition. It generates normalized, bilinear-paired taps
-with a tree reduction. Consumers accumulate half-weighted samples with explicit
-fused multiply-adds, then restore the scale within the finite Float32 range.
+with a tree reduction. Consumers use signed-safe pair means and accumulate at
+half scale, then restore the scale within the finite Float32 range.
 Kernels without effective side taps return the center sample unchanged. Coverage
 is clamped to its valid range after accumulation. Coefficients are prepared once, outside pixel evaluation. The
 standalone Tent Blur example demonstrates a different kernel using the same ABI.

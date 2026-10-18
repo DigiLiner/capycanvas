@@ -30,7 +30,7 @@ fn deferred_object_snapshot_retries_preserve_filtered_windows_and_histogram() {
     let mut live = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     live.ensure_document_metadata([32; 2], doc.scene()).unwrap();
     let (texture, _) = create_color_target(&live.device, [32; 2], "native object reference");
-    let mut scene = live.scene.take().unwrap_or_else(|| scene::Scene::new(&live));
+    let mut scene = live.scene.take().unwrap_or_else(|| scene::Scene::new(&live).unwrap());
     let mut encoder = submission::CommandEncoder::new(&live.device, &Default::default());
     let deadline=std::time::Instant::now()+std::time::Duration::from_secs(30);
     loop {
@@ -65,7 +65,7 @@ fn cancelled_deferred_object_drain_keeps_output_unpublished() {
     let mut reader = capture(doc).unwrap();
     let (r, packet, region, mut encoder) = reader.prepare_region_gpu([0, 0, 32, 32], 0).unwrap();
     let (texture, _) = create_color_target(&r.device, [32; 2], "cancelled object capture");
-    let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+    let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r).unwrap());
     assert!(matches!(scene.capture_region(r, packet, &texture, region, scene::Output::Artwork(None), &mut encoder), Err(GpuRasterError::DeferredObjectWork)));
     r.snapshot_cancelled.as_ref().unwrap().store(true, Ordering::Relaxed);
     assert!(matches!(pollster::block_on(scene.drain_exact_objects_async(r)), Err(GpuRasterError::Color(message)) if message == "Snapshot capture cancelled"));

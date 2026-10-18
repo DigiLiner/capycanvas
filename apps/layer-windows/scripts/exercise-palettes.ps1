@@ -45,7 +45,7 @@ function Swatches{@((Panel).swatches|ForEach-Object {[uint64]$_.id})}
 function Menu-Items{
     $items=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$ControlType::MenuItem))
-    @($items|Where-Object {$_.Current.ProcessId -eq $review.Id -and !$_.Current.IsOffscreen})
+    @($items|Where-Object {$_.Current.ProcessId -eq $review.Id -and !$_.Current.IsOffscreen -and [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($_).Current.ControlType -eq $ControlType::Menu})
 }
 function Close-Menu{
     Wait-Until {
@@ -77,18 +77,85 @@ function Picker([string]$Title,[string]$Path){
     } "$Title accept button did not become ready"
     if(![CapyPalettePicker]::PostMessage([IntPtr]$accept.value.Current.NativeWindowHandle,245,[UIntPtr]::Zero,[IntPtr]::Zero)){throw "Cannot accept the $Title picker"}
 }
-function Drag($from,$to,[string]$Device='mouse'){
-    $trace=[ordered]@{device=$Device;from=Input-Trace $from.x $from.y;to=Input-Trace $to.x $to.y;before=@(Swatches)}
+function Drag($from,$to,[string]$Device='mouse',[switch]$Cancel,[switch]$Escape){
+    $trace=[ordered]@{device=$Device;cancel=[bool]$Cancel;escape=[bool]$Escape;from=Input-Trace $from.x $from.y;to=Input-Trace $to.x $to.y;before=@(Swatches)}
+    if($Cancel -or $Escape){$trace.color_before=(Model).color_panel.definition;$trace.selected_before=@(Swatches|Where-Object {(Control ('palette-swatch-'+$_)).Current.ItemStatus -eq 'Selected'})}
     $watch=[Diagnostics.Stopwatch]::StartNew()
     [CapyRowPointer]::Down($Device,$from.x,$from.y)
     try{for($i=1;$i -le 16;$i++){[CapyRowPointer]::Move([int]($from.x+($to.x-$from.x)*$i/16),[int]($from.y+($to.y-$from.y)*$i/16));Start-Sleep -Milliseconds 16}
         Start-Sleep -Milliseconds 250
         $trace.release_ms=$watch.Elapsed.TotalMilliseconds;$trace.panel_before_release=(Control 'palettes-panel').Current.ItemStatus;$trace.preview_before_release=(Control 'palette-swatches').Current.ItemStatus
+        if(($Cancel -or $Escape) -and ($trace.panel_before_release -ne 'Dragging' -or !$trace.preview_before_release)){throw "$Device cancellation did not start from a held drag preview"}
     }finally{
-        [CapyRowPointer]::Up()
+        if($Cancel){[CapyRowPointer]::Cancel()}
+        else{if($Escape){[CapyRowPointer]::Key([uint16]0x1B)};[CapyRowPointer]::Up()}
         $trace.panel_after_release=(Control 'palettes-panel').Current.ItemStatus;$trace.preview_after_release=(Control 'palette-swatches').Current.ItemStatus;$trace.after=@(Swatches)
+        if($Cancel -or $Escape){$trace.color_after=(Model).color_panel.definition;$trace.selected_after=@(Swatches|Where-Object {(Control ('palette-swatch-'+$_)).Current.ItemStatus -eq 'Selected'})}
         $trace|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run ('palette-drag-'+$Device+'-'+[Guid]::NewGuid().ToString('N')+'.json'))
     }
+}
+function Palette-Scroller([string]$Id){
+    $node=Control $Id -Arranged;$walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$scroll=$null
+    while($node -and !$node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$scroll)){$node=$walker.GetParent($node)}
+    if(!$scroll -or !$scroll.Current.VerticallyScrollable){throw "$Id did not expose an overflowing native scroll provider"}
+    @{node=$node;pattern=$scroll}
+}
+function Palette-Scrollbars($Scroller){
+    $viewport=$Scroller.node.Current.BoundingRectangle
+    $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$ControlType::ScrollBar)
+    @($Scroller.node.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)|Where-Object {
+        $b=$_.Current.BoundingRectangle
+        !$_.Current.IsOffscreen -and !$b.IsEmpty -and $b.Height -gt $b.Width -and $b.X -ge $viewport.Right-30 -and $b.X -le $viewport.Right+5 -and $b.Y -ge $viewport.Y-5 -and $b.Bottom -le $viewport.Bottom+5
+    })
+}
+function Palette-ScrollState([string]$Id,$Scroller){
+    $view=$Scroller.pattern.Current;$provider=$Scroller.node.Current.BoundingRectangle;$content=Native-Bounds $Id $scale
+    [ordered]@{percent=$view.VerticalScrollPercent;view_size=$view.VerticalViewSize;horizontal_view_size=$view.HorizontalViewSize;provider=@($provider.X,$provider.Y,$provider.Width,$provider.Height);content=@($content.X,$content.Y,$content.Width,$content.Height);six_tiles=@(if($Id -eq 'palette-swatches'){foreach($id in (Swatches)[-6..-1]){$b=Native-Bounds ('palette-swatch-'+$id) $scale;@{id=$id;bounds=@($b.X,$b.Y,$b.Width,$b.Height)}}})}|ConvertTo-Json -Depth 8 -Compress
+}
+function Check-PaletteScrollModes([string]$Id){
+    $scroller=Palette-Scroller $Id
+    Scroll-Position (Control $Id -Arranged) 0
+    $top=(Native-Bounds $Id $scale).Y
+    Scroll-Position (Control $Id -Arranged) 50
+    Wait-Until {(Native-Bounds $Id $scale).Y -lt $top} "$Id did not publish its actual scrolled content position"
+    $panel=(Control 'palettes-panel').Current.BoundingRectangle
+    $safe=@{x=[int]($panel.X+2);y=[int]($panel.Y+2)}
+    if(!$panel.Contains([double]$safe.x,[double]$safe.y) -or $scroller.node.Current.BoundingRectangle.Contains([double]$safe.x,[double]$safe.y)){throw 'Scrollbar transition point is not inside owned panel padding and outside the scroller'}
+    $beforeOrder=(Swatches) -join ',';$beforeColor=(Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress
+    [CapyRowPointer]::Hover($safe.x,$safe.y)
+    Wait-Until {@(Palette-Scrollbars $scroller).Count -eq 1} "$Id mouse mode did not show one native vertical scrollbar"
+    $baseline=Palette-ScrollState $Id $scroller
+    $tracePath=Join-Path $run ($Id+'-scroll-transitions.json')
+    $records=[Collections.Generic.List[object]]::new();$records.Add(@{device='mouse';state=($baseline|ConvertFrom-Json)})
+    $records|ConvertTo-Json -Depth 12|Set-Content $tracePath
+    foreach($device in @('pen','touch')){
+        if($device -eq 'pen'){[CapyRowPointer]::PenHover($safe.x,$safe.y)}else{[CapyRowPointer]::Down('touch',$safe.x,$safe.y)}
+        try{
+            Wait-Until {@(Palette-Scrollbars $scroller).Count -eq 0} "$Id $device mode retained a visible native scrollbar"
+            $state=Palette-ScrollState $Id $scroller;$records.Add(@{device=$device;state=($state|ConvertFrom-Json)})
+            $records|ConvertTo-Json -Depth 12|Set-Content $tracePath
+            if($state -ne $baseline){throw "$Id $device mode changed exact scroll position, viewport or tile geometry"}
+        }finally{if($device -eq 'pen'){[CapyRowPointer]::PenLeave()}else{[CapyRowPointer]::Up()}}
+        [CapyRowPointer]::Hover($safe.x,$safe.y)
+        Wait-Until {@(Palette-Scrollbars $scroller).Count -eq 1} "$Id mouse mode did not restore its native scrollbar after $device"
+        $state=Palette-ScrollState $Id $scroller;$records.Add(@{device='mouse';after=$device;state=($state|ConvertFrom-Json)})
+        $records|ConvertTo-Json -Depth 12|Set-Content $tracePath
+        if($state -ne $baseline){throw "$Id mouse return changed exact scroll position, viewport or tile geometry"}
+    }
+    $bar=@(Palette-Scrollbars $scroller)[0]
+    $thumbs=@($bar.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$ControlType::Thumb))|Where-Object {!$_.Current.IsOffscreen -and !$_.Current.BoundingRectangle.IsEmpty})
+    if($thumbs.Count -ne 1){throw "$Id does not expose one arranged native scrollbar thumb"}
+    $thumb=$thumbs[0].Current.BoundingRectangle;$track=$bar.Current.BoundingRectangle;$at=Center $thumbs[0]
+    $to=@{x=$at.x;y=[int]($at.y+[Math]::Min($thumb.Height,$track.Bottom-$thumb.Bottom-1))}
+    if($to.y -le $at.y -or !$track.Contains([double]$to.x,[double]$to.y)){throw "$Id thumb has no owned downward travel"}
+    $percent=$scroller.pattern.Current.VerticalScrollPercent
+    [CapyRowPointer]::Down('mouse',$at.x,$at.y)
+    try{for($i=1;$i -le 8;$i++){[CapyRowPointer]::Move($at.x,[int]($at.y+($to.y-$at.y)*$i/8));Start-Sleep -Milliseconds 16}}finally{[CapyRowPointer]::Up()}
+    Wait-Until {$scroller.pattern.Current.VerticalScrollPercent -gt $percent} "$Id mouse thumb drag did not move the scroll offset"
+    if(((Swatches) -join ',') -ne $beforeOrder -or ((Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress) -ne $beforeColor){throw "$Id scrollbar interaction changed swatches or the exact current color"}
+    $records.Add(@{device='mouse-thumb';from=$at;to=$to;state=((Palette-ScrollState $Id $scroller)|ConvertFrom-Json)})
+    $records|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run ($Id+'-scroll-transitions.json'))
+    Capture ($Id+'-mouse-scrollbar')
 }
 try {
     Enter-CapyEnvironment
@@ -98,11 +165,12 @@ try {
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     Write-Output "Owned palettes review $($review.Id): $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Palettes review did not start' 90
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Palettes review did not start' 90
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
     Start-Sleep -Milliseconds 600
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
 
     foreach($workspace in @(@('Paint','builtin:workspace:illustrator'),@('Photo','builtin:workspace:photographer'))){
@@ -118,7 +186,7 @@ try {
     Invoke 'panel-tab-palettes'
     $null=Control 'palettes-panel'
     Wait-Until {@(Swatches).Count -gt 5 -and (Control ('palette-swatch-'+(Swatches)[0])).Current.BoundingRectangle.Y -eq (Control ('palette-swatch-'+(Swatches)[5])).Current.BoundingRectangle.Y} 'Six saved swatches did not render across the first row'
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $panel=Native-Bounds 'palettes-panel' $scale
     $selector=Native-Bounds 'palette-selector' $scale
     $name=Native-Bounds 'palette-name' $scale
@@ -166,13 +234,40 @@ try {
         Drag (Center $a) (Center $b) $device
         Wait-Until {((Swatches) -join ',') -ne $before} "$device drag did not reorder swatches"
         if(((Swatches)[2]) -ne ([uint64[]]($before -split ','))[0]){throw "$device drag placed the swatch in the wrong slot"}
+        $moved=(Swatches) -join ','
         (Control ('palette-swatch-'+(Swatches)[0])).SetFocus()
         [CapyRowPointer]::Hold(0x11,$true);try{[CapyRowPointer]::Key([uint16]0x5A)}finally{[CapyRowPointer]::Hold(0x11,$false)}
         Wait-Until {((Swatches) -join ',') -eq $before} "Ctrl+Z did not undo the $device reorder"
+        $a=Control ('palette-swatch-'+(Swatches)[0]);$b=Control ('palette-swatch-'+(Swatches)[2])
+        $colorBefore=(Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress
+        $selectedBefore=@(Swatches|Where-Object {(Control ('palette-swatch-'+$_)).Current.ItemStatus -eq 'Selected'}) -join ','
+        Drag (Center $a) (Center $b) $device -Cancel:($device -ne 'mouse') -Escape:($device -eq 'mouse')
+        Wait-Until {((Swatches) -join ',') -eq $before -and (Control 'palettes-panel').Current.ItemStatus -eq 'Ready'} "$device cancellation changed swatch order or left a drag active"
+        if(((Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress) -ne $colorBefore -or (@(Swatches|Where-Object {(Control ('palette-swatch-'+$_)).Current.ItemStatus -eq 'Selected'}) -join ',') -ne $selectedBefore){throw "$device cancellation activated a swatch or changed the exact color definition"}
+        (Control ('palette-swatch-'+(Swatches)[0])).SetFocus()
+        [CapyRowPointer]::Hold(0x11,$true);try{[CapyRowPointer]::Key([uint16]0x59)}finally{[CapyRowPointer]::Hold(0x11,$false)}
+        Wait-Until {((Swatches) -join ',') -eq $moved} "$device cancellation discarded the seeded Redo"
+        [CapyRowPointer]::Hold(0x11,$true);try{[CapyRowPointer]::Key([uint16]0x5A)}finally{[CapyRowPointer]::Hold(0x11,$false)}
+        Wait-Until {((Swatches) -join ',') -eq $before} "Ctrl+Z did not restore the original order after $device cancellation and Redo"
+        if($selectedBefore -notmatch '^\d+$'){throw 'Cancellation tap checks require one selected saved swatch'}
+        $tapId=(Swatches)[0];$invokeId=(Swatches)[1]
+        $tapColor=((Panel).swatches|Where-Object id -eq $tapId).color|ConvertTo-Json -Depth 12 -Compress
+        Tap (Center (Control ('palette-swatch-'+$tapId))) $device
+        Wait-Until {(Control ('palette-swatch-'+$tapId)).Current.ItemStatus -eq 'Selected' -and ((Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress) -eq $tapColor} "$device short tap did not select a swatch after cancellation"
+        $invokeColor=((Panel).swatches|Where-Object id -eq $invokeId).color|ConvertTo-Json -Depth 12 -Compress
+        Invoke ('palette-swatch-'+$invokeId)
+        Wait-Until {(Control ('palette-swatch-'+$invokeId)).Current.ItemStatus -eq 'Selected' -and ((Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress) -eq $invokeColor} "Accessible swatch Invoke did not select a color after $device cancellation"
+        Invoke ('palette-swatch-'+$selectedBefore)
+        Wait-Until {(Control ('palette-swatch-'+$selectedBefore)).Current.ItemStatus -eq 'Selected' -and ((Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress) -eq $colorBefore} "The original selected color was not restored after $device cancellation tap checks"
     }
     $before=(Swatches) -join ','
     $a=Control ('palette-swatch-'+(Swatches)[0])
-    Drag (Center $a) @{x=(Center $a).x-600;y=(Center $a).y}
+    $canvas=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle;$area=(Model).state.camera.work_area
+    $outside=@{x=[int]($canvas.X+$area[0]+$area[2]/2);y=[int]($canvas.Y+$area[1]+$area[3]/2)}
+    $workArea=[System.Windows.Rect]::new($canvas.X+$area[0],$canvas.Y+$area[1],$area[2],$area[3])
+    $grid=(Control 'palette-swatches' -Arranged).Current.BoundingRectangle
+    if(!$canvas.Contains([double]$outside.x,[double]$outside.y) -or !$workArea.Contains([double]$outside.x,[double]$outside.y) -or $grid.Contains([double]$outside.x,[double]$outside.y)){throw 'Outside-grid release point is not inside the owned canvas work area and outside the swatch grid'}
+    Drag (Center $a) $outside
     Start-Sleep -Milliseconds 300
     if(((Swatches) -join ',') -ne $before){throw 'Releasing outside the grid reordered swatches'}
 
@@ -205,6 +300,46 @@ try {
     Wait-Until {@((Panel).palettes).Count -eq $palettes+1 -and !(Model).windows_palettes.busy} 'GPL import did not add a palette' 20
     Capture 'imported'
 
+    $overflow=Join-Path $run 'scroll fixture.gpl'
+    $gpl=@('GIMP Palette','Name: Scroll fixture','Columns: 6','#')
+    for($i=0;$i -lt 36;$i++){$gpl+=('{0} {1} {2} Scroll {3:D2}' -f (($i*37)%256),(($i*71)%256),(($i*109)%256),$i)}
+    [IO.File]::WriteAllLines($overflow,$gpl)
+    $count=@((Panel).palettes).Count
+    if(!(Find 'palette-search')){Invoke 'palette-selector'}
+    Invoke 'palette-library-add';Menu-Invoke 'palette-command-import_palette';Picker 'Open' $overflow
+    Wait-Until {@((Panel).palettes).Count -eq $count+1 -and !(Model).windows_palettes.busy} 'Overflow GPL import did not finish' 20
+    if(!(Find 'palette-search')){Invoke 'palette-selector'}
+    (Control 'palette-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('')
+    $overflowPalette=@((Panel).palettes|Where-Object name -eq 'Scroll fixture')
+    if($overflowPalette.Count -ne 1){throw 'Overflow import did not produce one isolated Scroll fixture palette'}
+    Check-PaletteScrollModes 'palette-list'
+    (Control 'palette-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('Scroll fixture')
+    Wait-Until {$choice=Find ('palette-choice-'+$overflowPalette[0].id);$choice -and !$choice.Current.IsOffscreen} 'Overflow palette did not arrange in its filtered chooser viewport'
+    Invoke ('palette-choice-'+$overflowPalette[0].id)
+    Wait-Until {(Panel).palette -eq $overflowPalette[0].id -and !(Find 'palette-search') -and @(Swatches).Count -eq 36} 'Overflow palette did not select and close its chooser'
+    Check-PaletteScrollModes 'palette-swatches'
+    foreach($device in @('mouse','pen','touch')){
+        Scroll-Position (Control 'palette-swatches' -Arranged) 100
+        $before=@(Swatches);$beforeOrder=$before -join ','
+        $last=@(foreach($id in $before[-6..-1]){Native-Bounds ('palette-swatch-'+$id) $scale})
+        $viewport=(Palette-Scroller 'palette-swatches').node.Current.BoundingRectangle
+        for($i=0;$i -lt 6;$i++){
+            if(!$viewport.Contains($last[$i]) -or $last[$i].Y -ne $last[0].Y -or $last[$i].Width -ne $last[0].Width -or $last[$i].Height -ne $last[0].Height -or ($i -gt 0 -and $last[$i].X -le $last[$i-1].Right)){throw 'Last palette row did not expose six equal, separated tiles inside its viewport'}
+        }
+        $id=$before[-1];$expectedColor=((Panel).swatches|Where-Object id -eq $id).color|ConvertTo-Json -Depth 12 -Compress
+        Tap (Center (Control ('palette-swatch-'+$id))) $device
+        Wait-Until {(Control ('palette-swatch-'+$id)).Current.ItemStatus -eq 'Selected' -and ((Model).color_panel.definition|ConvertTo-Json -Depth 12 -Compress) -eq $expectedColor} "$device last-tile hit did not select its exact color"
+        Drag (Center (Control ('palette-swatch-'+$id))) (Center (Control ('palette-swatch-'+$before[-3]))) $device
+        $expected=@($before[0..32])+@($before[35],$before[33],$before[34]);$moved=$expected -join ','
+        Wait-Until {((Swatches) -join ',') -eq $moved} "$device last-tile drag did not reach its exact destination slot"
+        (Control ('palette-swatch-'+$id)).SetFocus()
+        [CapyRowPointer]::Hold(0x11,$true);try{[CapyRowPointer]::Key([uint16]0x5A)}finally{[CapyRowPointer]::Hold(0x11,$false)}
+        Wait-Until {((Swatches) -join ',') -eq $beforeOrder} "$device last-tile drag did not undo in one step"
+        [CapyRowPointer]::Hold(0x11,$true);try{[CapyRowPointer]::Key([uint16]0x59)}finally{[CapyRowPointer]::Hold(0x11,$false)}
+        Wait-Until {((Swatches) -join ',') -eq $moved} "$device last-tile Redo did not restore exact order"
+        [CapyRowPointer]::Hold(0x11,$true);try{[CapyRowPointer]::Key([uint16]0x5A)}finally{[CapyRowPointer]::Hold(0x11,$false)}
+        Wait-Until {((Swatches) -join ',') -eq $beforeOrder} "$device last-tile final Undo did not restore the fixture"
+    }
     Switch-Workspace 'Sketch' 'builtin:workspace:painter'
     $color=$null;foreach($zone in @((Model).header.model.zones)){foreach($entry in @($zone)){if($entry.item.control.kind -eq 'color'){$color=$entry.id}}}
     Tap (Center (Control ('header-item-'+$color)))
@@ -213,7 +348,7 @@ try {
     Capture 'sketch-drawer'
     [CapyRowPointer]::Verify();[CapyRowPointer]::Dispose()
 
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     if(!$review.WaitForExit(8000)){throw 'Palettes review did not close'}
     if((Get-Item -LiteralPath $stderr).Length){throw 'Palettes review wrote to stderr'}
     Write-Output "Palettes acceptance passed: $run"

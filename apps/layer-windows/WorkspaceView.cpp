@@ -57,7 +57,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
     std::unique_ptr<WorkspaceExpansion> expansion;
     struct Measurement {double tab=36,content=320;J scroll;};
     std::map<std::wstring,Measurement> measurements;
-    struct Offscreen {std::wstring key;std::unique_ptr<PanelBody> body;};
+    struct Offscreen {std::wstring key;std::shared_ptr<WorkspaceData> data;std::unique_ptr<PanelBody> body;};
     std::map<std::wstring,Offscreen> offscreen;
     Canvas measureHost;
     hstring lastMeasurements;
@@ -172,7 +172,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 auto id=value.GetString();auto model=find(array(data->model,L"panels"),L"id",id);
                 auto tab=button(data,str(model,L"title"),[data=data,id,groupId=num(geometry,L"id")]{
                     data->dispatch(O({{L"type",S(L"select_panel_tab")},{L"group",N(groupId)},{L"panel",S(id)}}));
-                });tab.Height(36);tab.MinWidth(36);tab.Padding(Thickness{8,4,8,4});tab.CornerRadius(CornerRadius{6,6,0,0});
+                });tab.UseLayoutRounding(false);tab.Height(36);tab.MinWidth(36);tab.Padding(Thickness{8,4,8,4});tab.CornerRadius(CornerRadius{6,6,0,0});
                 StackPanel content;content.Orientation(Orientation::Horizontal);content.Spacing(6);
                 auto tabStyle=object(model,L"tab");
                 if(flag(tabStyle,L"show_icon")||fitted)content.Children().Append(panelIcon(data,str(model,L"icon"),group.paintIcons));
@@ -198,7 +198,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 tabScroll.SizeChanged([weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))](auto&&,auto&&){if(auto self=weak.lock())self->fitTabs(id);});
                 group.header=Grid();auto header=group.header;header.Background(clear());
                 ColumnDefinition labels;labels.Width({1,GridUnitType::Star});header.ColumnDefinitions().Append(labels);
-                ColumnDefinition trailing;trailing.Width({28,GridUnitType::Pixel});header.ColumnDefinitions().Append(trailing);
+                ColumnDefinition trailing;trailing.Width({20,GridUnitType::Pixel});header.ColumnDefinitions().Append(trailing);
                 header.Children().Append(tabScroll);
                 Border handle;handle.Background(clear());handle.Width(20);handle.Height(36);
                 handle.HorizontalAlignment(HorizontalAlignment::Left);handle.Child(panelGrip(data->theme()));
@@ -312,6 +312,8 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             data->previews=CreateFilterPreviewCache(data->query);
         }
         data->model=snapshot;data->state=object(snapshot,L"state");data->colorPreview=object(snapshot,L"color_preview");
+        RefreshFilterPreviewContext(data->previews,object(data->state,L"document_file").GetNamedValue(L"epoch").Stringify(),
+            array(snapshot,L"windows_filter_source").Stringify());
         // Adoption and layout restoration discard transient host measurements.
         // Reconcile the new model even when retained controls have identical sizes.
         lastMeasurements=L"";
@@ -467,6 +469,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 auto key=std::wstring_view(id);
                 if((key.starts_with(L"layer-")||key.starts_with(L"column-")||key.starts_with(L"collapsed-column-")
                     ||key.starts_with(L"tool-")||key.starts_with(L"number-")||key.starts_with(L"property-")||key.starts_with(L"properties-")
+                    ||key.starts_with(L"toolbar-")||key.starts_with(L"component-slider-")||key.starts_with(L"slider-")
                     ||key.starts_with(L"filter-")||key.starts_with(L"histogram-")||key.starts_with(L"waveform-")||key.starts_with(L"navigator-")
                     ||key.starts_with(L"palette-")||key.starts_with(L"palettes-")||key.starts_with(L"proof-panel-"))
                     &&item.IsLoaded()&&item.ActualWidth()>0&&item.ActualHeight()>0){
@@ -547,31 +550,35 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         auto stable=[](double value){return std::round(std::clamp(value,0.,999999.)*64.)/64.;};
         for(auto const& [id,group]:groups){
             if(group.hidden||group.presented.Size()||!group.frame.IsLoaded())continue;
-            for(auto const& [panel,tab]:group.tabs)if(tab.IsLoaded()&&tab.DesiredSize().Width>0)
-                measurements[panel].tab=stable(tab.DesiredSize().Width);
+            for(auto const& [panel,tab]:group.tabs)if(tab.IsLoaded()&&tab.DesiredSize().Width>0){
+                double width=tab.DesiredSize().Width;
+                for(auto const& automatic:group.automatic)if(automatic.tab==tab)
+                    if(auto cached=tabWidths.find(automatic.key);cached!=tabWidths.end()){width=cached->second;break;}
+                measurements[panel].tab=stable(width);
+            }
             measurements[std::wstring(str(group.geometry,L"active"))].scroll=group.body->ScrollMetrics();
             double height=group.body->ContentHeight();
             if(std::isfinite(height)&&height>=0)measurements[std::wstring(str(group.geometry,L"active"))].content=stable(height);
         }
         std::set<std::wstring> keep;
-        auto fitted=array(object(object(data->state,L"workspace"),L"layout"),L"fit_height_groups");
         for(auto const& [id,group]:groups){
-            bool fit=false;for(auto value:fitted)fit=fit||uint32_t(value.GetNumber())==id;
-            if(!fit||group.hidden)continue;
+            if(group.hidden||group.presented.Size())continue;
             double width=num(object(group.geometry,L"bounds"),L"width");auto active=str(group.geometry,L"active");
             for(auto value:array(group.geometry,L"panels")){
                 auto panelId=value.GetString();if(panelId==active)continue;
-                auto panel=find(array(data->model,L"panels"),L"id",panelId);if(!panel.Size())continue;
+                auto panel=find(array(data->model,L"panels"),L"id",panelId);if(!panel.Size()||array(panel,L"tiles").Size())continue;
                 std::wstring name(panelId);keep.insert(name);auto& copy=offscreen[name];
-                auto key=std::wstring(panelStructure(panel).Stringify())+L"@"+std::to_wstring(width);
+                auto key=std::wstring(panelStructure(panel).Stringify());
                 if(copy.key!=key){
                     if(copy.body){uint32_t at=0;if(measureHost.Children().IndexOf(copy.body->Root(),at))measureHost.Children().RemoveAt(at);}
                     auto inert=std::make_shared<WorkspaceData>(*data);
                     inert->send=[](std::string){};inert->document=[](std::string){};inert->input=[](std::string){};
+                    inert->query=nullptr;inert->previews.reset();inert->thumbnails.reset();inert->scopes.reset();
                     inert->popupChanged=nullptr;inert->transients.clear();inert->colorViews.clear();inert->copyViews.clear();
-                    copy.key=key;copy.body=std::make_unique<PanelBody>(inert,panel,O({{L"bounds",O({{L"width",N(width)}})}}),[]{},nullptr,false);
+                    copy.key=key;copy.data=inert;copy.body=std::make_unique<PanelBody>(inert,panel,O({{L"bounds",O({{L"width",N(width)}})}}),[]{},nullptr,false);
                     copy.body->Root().Width(width);measureHost.Children().Append(copy.body->Root());copy.body->Apply(true);
-                }
+                }else{copy.data->state=data->state;copy.data->model=data->model;copy.body->Apply(true);}
+                if(copy.body->Root().Width()!=width)copy.body->Root().Width(width);
                 double height=copy.body->ContentHeight();
                 if(std::isfinite(height)&&height>=0&&measurements.contains(name)){
                     measurements[name].content=stable(height);measurements[name].scroll=copy.body->ScrollMetrics();

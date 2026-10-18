@@ -34,7 +34,7 @@ fn raster_cache_keys_share_generated_contents_and_keep_loaded_owner_identity() {
 #[test]
 fn equal_generated_rasters_reuse_gpu_pixels_without_another_sample_decode() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let descriptor = r.document_color().paint_descriptor();
     let bytes = [64, 128, 192, 255].repeat((PAGE_SIZE * PAGE_SIZE) as usize);
     let first = Arc::new(TileBlob::encode(descriptor, &bytes).unwrap());
@@ -95,6 +95,7 @@ fn scan_source(tiles: usize, offset: u8) -> Arc<SourceImage> {
 
 fn assert_threshold_pixels(r: &WgpuRasterizer, threshold: f32, offset: u8) {
     let cache = r.scale_display.as_ref().unwrap();
+    assert!(matches!(cache.plan.level, 0 | 2));
     let pixels = crate::test_support::float_pixels(r, cache.texture());
     for (i, actual) in pixels.into_iter().enumerate() {
         let id = (i as u32 % cache.plan.size[0] / (PAGE_SIZE >> cache.plan.level)) as u8 + offset;
@@ -102,6 +103,10 @@ fn assert_threshold_pixels(r: &WgpuRasterizer, threshold: f32, offset: u8) {
         let luminance: f64 = codes.into_iter().zip(r.document_color().space.to_xyz()[1])
             .map(|(code, weight)| f64::from(code) / 255. * weight).sum();
         let expected = if luminance >= f64::from(threshold) { 1. } else { 0. };
+        let x = i as u32 % cache.plan.size[0]; let y = i as u32 / cache.plan.size[0];
+        let expected = if x < (4 >> cache.plan.level) && y < (4 >> cache.plan.level) {
+            if cache.plan.level == 0 { ((x + y) & 1) as f32 } else { 0.5 }
+        } else { expected };
         assert_eq!(actual, [expected, expected, expected, 1.], "offset={offset} threshold={threshold} pixel={i}");
     }
 }
@@ -110,12 +115,19 @@ fn assert_threshold_pixels(r: &WgpuRasterizer, threshold: f32, offset: u8) {
 fn repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set() {
     use layer_core::{Document, DocumentNames, EffectInstance, EffectValue};
     use layer_core::authored::*;
+    let threshold_source = |tiles: usize, offset: u8| {
+        layer_core::color::source::rgba8_source([tiles as u32 * PAGE_SIZE, PAGE_SIZE], |x, y| {
+            if x < 4 && y < 4 { let value = if (x + y) & 1 == 0 { 0 } else { 255 }; return [value, value, value, 255]; }
+            let id = (x / PAGE_SIZE) as u8 + offset;
+            [id.wrapping_mul(17), id.wrapping_mul(43).wrapping_add(61), id.wrapping_mul(97).wrapping_add(11), 255]
+        })
+    };
     for capacity in [8, 16] {
         for tiles in [capacity + 1, capacity * 13 / 10 + 1] {
             let extent = [tiles as u32 * PAGE_SIZE, PAGE_SIZE];
             let mut doc = Document::new(PortableId::random(), extent[0], extent[1], DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
             let SourceTarget::Paint(paint) = doc.working.target.unwrap() else { unreachable!() };
-            doc.artwork.paint.get_mut(paint).unwrap().base = Some(layer_core::authored::PaintBase::new((scan_source(tiles, 0)).into()));
+            doc.artwork.paint.get_mut(paint).unwrap().base = Some(layer_core::authored::PaintBase::new((threshold_source(tiles, 0)).into()));
             let program = crate::tests::fixture("threshold").program();
             let parameter = program.parameters.iter().position(|parameter| parameter.key.as_ref() == "threshold").unwrap();
             let size=doc.composition().size;
@@ -126,7 +138,6 @@ fn repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set() {
             let mut doc = Document::from_artwork(doc.artwork).unwrap();
             let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
             r.source_tiles.get_mut().limits.slots = capacity;
-            r.native_edit.as_mut().unwrap().display_complete_bytes = u64::MAX;
             let mut allocated = None;
             for (round, threshold) in [0.2, 0.35, 0.5, 0.65, 0.8, 0.45].into_iter().enumerate() {
                 doc.artwork.effects.get_mut(effect).unwrap().values[parameter] = EffectValue::Number(threshold);
@@ -145,12 +156,11 @@ fn repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set() {
                 assert_eq!(sources.slots.len(), capacity);
                 drop(sources);
                 let cache = r.scale_display.as_ref().unwrap();
-                assert!(cache.resident_bytes() > 0, "oversized decoded scans must exercise resident native output");
                 assert_eq!(cache.plan.level, 2);
                 assert_eq!(cache.plan.bounds, PixelRect::full(extent));
                 assert_threshold_pixels(&r, threshold, 0);
             }
-            let replacement = scan_source(capacity, 64);
+            let replacement = threshold_source(capacity, 64);
             doc.artwork.paint.get_mut(paint).unwrap().base = Some(layer_core::authored::PaintBase::new((replacement).into()));
             doc.artwork.paint.get_mut(paint).unwrap().domain[0] = capacity as u32 * PAGE_SIZE;
             let composition = doc.artwork.root;
@@ -174,7 +184,7 @@ fn repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set() {
 fn discarded_source_decodes_cannot_be_reused_as_valid_pixels() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     r.source_tiles.get_mut().limits.slots = 2;
-    let source = scan_source(2, 32);
+    let source = scan_source(3, 32);
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     r.paint_base_tile(&layer_core::authored::PaintBase::new(source.clone().into()), [0, 0], &mut encoder).unwrap();
     assert!(r.source_tiles.borrow().prepared_view(&source, [0, 0]).is_some());
@@ -195,12 +205,44 @@ fn discarded_source_decodes_cannot_be_reused_as_valid_pixels() {
     assert_eq!(r.source_cache_work(), [0, 3]);
     let (_, pending) = r.source_tiles.borrow_mut().plan(&r, &source, [0, 0]).unwrap();
     assert!(pending.is_none());
+    use layer_core::{Document, DocumentNames, authored::PortableId};
+    let extent = [3 * PAGE_SIZE, PAGE_SIZE];
+    let mut doc = Document::new(PortableId::random(), extent[0], extent[1], DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+    let SourceTarget::Paint(paint) = doc.working.target.unwrap() else { unreachable!() };
+    doc.artwork.paint.get_mut(paint).unwrap().base = Some(layer_core::authored::PaintBase::new(source.clone().into()));
+    let doc = Document::from_artwork(doc.artwork).unwrap();
+    let capture = crate::artwork::Capture::default();
+    let warm = PixelRect::full([PAGE_SIZE; 2]);
+    let blocks = |region| capture.would_block(&r, crate::test_support::packet(doc.scene(), extent), region);
+    crate::test_support::complete(&r);
+    assert!(!blocks(warm));
+    assert!(!blocks(PixelRect::EMPTY));
+    let before = r.source_cache_work();
+    let allocated = r.source_tiles.borrow().gpu_bytes();
+    let pending = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+    let upload_bytes = r.source_tiles.borrow().limits.upload_bytes;
+    assert_eq!(r.source_tiles.borrow().in_flight.bytes.load(Ordering::Acquire), 0);
+    assert_eq!(r.source_tiles.borrow().charge_upload(&pending, upload_bytes), upload_bytes);
+    assert!(r.source_tiles.borrow().uploads_full());
+    assert!(blocks(warm));
+    assert!(!blocks(PixelRect::EMPTY));
+    let mut pages = [[2, 0], [0, 0], [1, 0]];
+    crate::artwork::resident_first(&r, doc.scene(), &mut pages);
+    assert_eq!(pages, [[0, 0], [1, 0], [2, 0]]);
+    assert_eq!(r.source_cache_work(), before);
+    assert_eq!(r.source_tiles.borrow().gpu_bytes(), allocated);
+    assert!(r.source_tiles.borrow().prepared_view(&source, [0, 0]).is_some());
+    assert!(r.source_tiles.borrow().prepared_view(&source, [1, 0]).is_some());
+    assert!(r.source_tiles.borrow().prepared_view(&source, [2, 0]).is_none());
+    drop(pending);
+    assert_eq!(r.source_tiles.borrow().in_flight.bytes.load(Ordering::Acquire), 0);
+    assert!(!r.source_tiles.borrow().uploads_full());
+    assert!(!blocks(warm));
 }
-
 #[test]
 fn effect_mask_bindings_reuse_retire_and_bound_real_texture_views() {
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let layout = scene.effects.masks.clone();
     let views = (std::array::from_fn::<_, { crate::effects::MASK_SLOTS }, _>(|_| r.empty_view.clone()), r.changed_cells.as_ref().unwrap().disabled.clone());
     let create = |key: &([wgpu::TextureView; crate::effects::MASK_SLOTS], wgpu::Buffer)| {
@@ -264,7 +306,7 @@ fn source_residency_and_upload_window_follow_admitted_headroom() {
 #[test]
 fn decoded_sources_preserve_srgb_codes_and_padding() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let mut exact = DecodedTiles::new(RgbSpace::Srgb);
     exact.admit(2 * 1024 * 1024 * 1024);
     let mut builder = SourceBuilder::new([255, 19], SourceInterpretation {

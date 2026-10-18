@@ -574,6 +574,28 @@ fn toolbar_choices_keep_independent_selections_and_disable_unavailable_sliders()
     for (language, source, sample_size) in [(UiLanguage::English, "Source", "Sample size"), (UiLanguage::Japanese, "参照対象", "取得範囲")] {
     let mut s = UiSession::blank_localized(Recorder::default(), [256, 256], Platform::Gtk,
         Localizer::shared(language)).unwrap();
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(WorkspaceState {
+        layout: WorkspacePreset::Photographer.layout(Platform::Gtk), ..WorkspaceState::default()
+    }) }).unwrap();
+    invoke(&mut s, CommandId::Pen);
+    let presets: Vec<_> = s.state().tool_set.subtools.iter()
+        .filter(|item| matches!(item.action, UiAction::SelectBrush { .. }))
+        .take(2).map(|item| item.action.clone()).collect();
+    assert_eq!(presets.len(), 2);
+    for preset in presets {
+        s.dispatch(UiAction::ToolbarEdit {
+            context: s.state().toolbar_context(), action: Box::new(preset.clone()),
+        }).unwrap();
+        let state = s.state();
+        assert!(state.tool_set.subtools.iter().any(|item|
+            item.selected && matches!(item.action, UiAction::SelectToolGroup { .. })));
+        assert!(state.tool_set.subtools.iter().any(|item| item.selected && item.action == preset));
+        let ToolOption::Choice { items, .. } = state.tool_options().into_iter()
+            .find(|option| matches!(option, ToolOption::Choice { id: "variant", .. })).unwrap()
+            else { panic!() };
+        assert_eq!(items.iter().filter(|item| item.selected).count(), 1);
+        assert!(items.iter().any(|item| item.selected && item.action == preset));
+    }
     invoke(&mut s, CommandId::Eyedropper);
     let choices = s.state().tool_options();
     assert!(choices.iter().any(|o| matches!(o, ToolOption::Choice { id: "variant", label, .. } if label.as_ref() == source)));

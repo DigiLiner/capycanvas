@@ -24,7 +24,7 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
     else if (kind === "color_wheel") refresh = colorWheel(root);
     else if (kind === "navigator") refresh = navigatorPanel(root);
     else if (["histogram","waveform"].includes(kind)) {
-      const scope=createScope({state,app,element,button,icon,dispatch,waveform:kind==="waveform"});
+      const scope=createScope({state,app,element,button,icon,dispatch,waveform:kind==="waveform",contentChanged:()=>contentChanged(kind)});
       root.append(scope.node);root.disposeSettings=scope.dispose;refresh=scope.refresh;
     }
     else return null;

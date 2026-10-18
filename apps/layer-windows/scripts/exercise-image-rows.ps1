@@ -287,6 +287,7 @@ try{
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File';Invoke-Id 'close_document'
  Wait-Until {$review.HasExited} 'Closing the sole edited drawing did not exit' 30 -Closing
  if($review.ExitCode -ne 0){throw 'The edited drawing did not close cleanly'}
+ Record-CapyFixtureClose $review.Id $drawingWindow.ToInt64() $false -Contract 'image-rows original close_document exit30'
  [CapyRowPointer]::Dispose()
  $reopenStderr=Join-Path $run 'reopen-stderr.log';Start-Review $reopenStderr
  Open-Project $saved

@@ -1311,6 +1311,7 @@ impl ViewportPresenter {
                     pass.set_pipeline(&self.paper.pipeline);
                     pass.set_bind_group(1, group, &[]);
                     pass.draw(0..3, 0..1);
+                    renderer.paper_overlay_drawn.set(true);
                 }
                 self.picker.draw(&mut pass);
                 if !self.cursor_vertices.is_empty() {

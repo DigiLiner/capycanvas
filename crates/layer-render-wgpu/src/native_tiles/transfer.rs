@@ -58,17 +58,9 @@ impl NativeTransfer {
             bytes.extend(decoded.to_le_bytes());
             bytes.extend(decision.to_le_bytes());
         }
-        let table = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shared native SDR transfer table"),
-            size: TABLE_BYTES,
-            usage: wgpu::BufferUsages::STORAGE,
-            mapped_at_creation: true,
-        });
-        table
-            .get_mapped_range_mut(..)
-            .map_err(|e| GpuRasterError::MapFailed(e.to_string()))?
-            .copy_from_slice(&bytes);
-        table.unmap();
+        let table = crate::initialized_buffer(device, &wgpu::util::BufferInitDescriptor {
+            label: Some("shared native SDR transfer table"), contents: &bytes, usage: wgpu::BufferUsages::STORAGE,
+        })?;
 
         Ok(Self {
             table,

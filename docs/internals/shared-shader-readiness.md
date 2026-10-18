@@ -9,6 +9,9 @@ Compiler failures retain the first reported cause, including a native worker's
 panic payload. Dry-material labels identify the target, shader entry, operation
 and contact flags, so a driver rejection can be traced to its actual recipe.
 Recipes for one dry target share its two coverage-layout pipeline layouts.
+Material paint and compute recipes capture full or partial stroke opacity.
+Partial opacity values remain uniforms and share one prepared recipe. Gathering,
+reservoir exchange, direct drawing and visibility masks retain their own keys.
 Hosts keep polling compiler failures after initial startup completes, including
 pipelines requested by a later transform frame.
 
@@ -21,6 +24,16 @@ prepare on first use. Unused filter programs retain recipes. Shared pipeline
 recipes deduplicate work and prepared handles survive tool changes; a first
 selection can wait for compilation, while later selections reuse those handles.
 Startup cannot fail because of shaders needed only by an unused brush.
+Non-dry material recipes declare dry contact absent so their shaders exclude
+dry relief. Deposit and coverage retain their captured contact capabilities.
+Material recipes use the captured contact flags and accumulation mode, with
+separate entries for destination targets, gathering and reservoir exchange.
+Readiness requests only the entries used by the selected pass plan, including
+its compute and display-preview eligibility; custom contacts use the same recipe
+cache as presets. Changing stroke opacity across full opacity refreshes preview
+dependencies; edits within reduced opacity reuse the prepared recipes.
+Direct drawing and dry visibility masks specialize their advanced fragment
+entries with the same captured contact flags. Vertex bounds remain dynamic.
 Native paint requires tile decoding before document readiness, including drawings
 without imported images: restoration and Undo consume that same decoder.
 
@@ -49,10 +62,10 @@ ping-pong pair. Sampling a page inside the evaluator, even on a branch commits
 never take, costs Adreno and Mali tablets up to a third of their painting rate.
 
 The native compiler workers and browser task runner share `shader_admission.rs`.
-Native hosts run one worker per eight CPUs, up to four, so eight-core tablets
-compile on one thread and their UI keeps its CPU time. Pipeline compilations run
-concurrently; every other job, such as effect preparation and validation, runs
-alone and in queue order because those jobs hand state from one to the next.
+Native hosts use `available_parallelism() / 8`, clamped to one through four
+workers. Only independent required pipeline recipes compile concurrently.
+Generic recipes, effect preparation, validation and optional pipelines run alone;
+ordered jobs retain queue order. Optional work waits for required jobs to finish.
 Required canvas/brush dependencies and explicit package validation retain
 priority and progress while input arrives. Visible optional previews wait for
 200 ms without input; pipeline-cache finalization waits for one second and no
@@ -68,9 +81,10 @@ skips standby until those handles are ready. Selecting pixels on a reduced view
 does not compile pipelines on the render owner or block the current canvas.
 
 The browser admits one optional pipeline per task; required pipeline batches
-remain bounded to four. Requested brush masks publish when their generation jobs
-finish. Brush readiness includes their upload. Startup completion describes
-current dependencies and cache finalization, not the entire tool catalog.
+remain bounded to four. Requested brush masks publish
+when their generation jobs finish. Brush readiness includes their upload. Startup
+completion describes current dependencies and cache finalization, not the entire
+tool catalog.
 Retouch shader handles survive tool changes; unused source pixels and healing
 buffers are still released.
 

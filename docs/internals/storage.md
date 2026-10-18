@@ -35,7 +35,8 @@ the SHA-256 of its samples, with its picker preview in `<id>.preview` and names
 and order in `index.json`. PNGs and the index use the shared native atomic writer
 ([`papers.rs`](../../crates/layer-host/src/papers.rs)). A lost preview is
 rebuilt from its PNG. Drawings embed the papers they use, so deleting a paper
-changes no drawing.
+changes no drawing. Paper images and the index use the shared native atomic
+publisher, which flushes a private sibling before replacing the destination.
 
 ## Folders on each platform
 

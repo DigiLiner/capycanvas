@@ -344,6 +344,7 @@ fn before_endpoint_encoder(r: &WgpuRasterizer, in_place: bool) -> NativeTileEnco
         for tracked in [false, true] {
             for count in 1..=if format.is_some() {encoder.tiles_per_dispatch} else {encoder.gray_tiles_per_dispatch} {
                 let (_, source) = NativeTileEncoder::pipeline_source(in_place, false, tracked, count, format, name);
+                let source = source.replace("\r\n", "\n");
                 let decode = "fn decode_quantized(code:u32)->f32 {\n    if code==0u {return 0.;}\n    if code==65535u {return 1.;}\n    return transfer[code].x;\n}\n";
                 let endpoints = "    if value==0. {return 0u;}\n    if value==1. {return settings.maximum;}\n";
                 assert!(source.contains(decode) && source.contains(endpoints));
@@ -760,5 +761,32 @@ fn writeback_shaders_validate_for_every_format_tile_count_and_mode() {
                 assert_eq!(module.entry_points.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), ["main"]);
             }
         }
+    }
+}
+
+#[test]
+fn native_in_place_features_require_float_storage_read_write_for_both_planes() {
+    let feature = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+    let unrelated = wgpu::Features::FLOAT32_FILTERABLE;
+    assert_eq!(in_place_features(unrelated, |_| panic!("missing feature must not query formats")), wgpu::Features::empty());
+    for mask in 0u32..16 {
+        let mut queried = Vec::new();
+        let actual = in_place_features(feature | unrelated, |format| {
+            queried.push(format);
+            let shift = match format {
+                wgpu::TextureFormat::Rgba32Float => 0,
+                wgpu::TextureFormat::R32Float => 2,
+                _ => panic!("unexpected in-place format"),
+            };
+            wgpu::TextureFormatFeatures {
+                allowed_usages: wgpu::TextureUsages::TEXTURE_BINDING
+                    | if mask & (1 << shift) != 0 { wgpu::TextureUsages::STORAGE_BINDING } else { wgpu::TextureUsages::empty() },
+                flags: if mask & (2 << shift) != 0 { wgpu::TextureFormatFeatureFlags::STORAGE_READ_WRITE } else { wgpu::TextureFormatFeatureFlags::empty() },
+            }
+        });
+        assert_eq!(actual, if mask == 15 { feature } else { wgpu::Features::empty() }, "capability mask {mask:04b}");
+        let expected = if mask & 3 == 3 { vec![wgpu::TextureFormat::Rgba32Float, wgpu::TextureFormat::R32Float] }
+            else { vec![wgpu::TextureFormat::Rgba32Float] };
+        assert_eq!(queried, expected, "capability mask {mask:04b}");
     }
 }

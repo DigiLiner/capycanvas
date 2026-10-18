@@ -180,6 +180,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             }
         }
         std::function<void(J const&)> strip=[&strip](J const& node){
+            if(node.HasKey(L"group_id")&&node.HasKey(L"group"))node.Remove(L"group");
             for(auto field:{L"label",L"title",L"tooltip",L"description",L"disabled_reason",L"hint"})if(node.HasKey(field))node.Remove(field);
             for(auto const& entry:node){auto value=entry.Value();if(value.ValueType()==JsonValueType::Object)strip(value.GetObject());
                 else if(value.ValueType()==JsonValueType::Array)for(auto item:value.GetArray())if(item.ValueType()==JsonValueType::Object)strip(item.GetObject());}
@@ -402,7 +403,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         auto dispatcher=root.DispatcherQueue();
         auto query=O({{L"type",S(L"toolbar_stamp")},{L"context",object(model,L"context")}});
         if(stamp.Size())query.SetNamedValue(L"known_request",N(num(stamp,L"request_id")));
-        data->query(CanvasQueryKind::Workspace,to_string(query.Stringify()),[dispatcher,weak,request](PreviewPacket packet){
+        if(!data->query(CanvasQueryKind::Workspace,to_string(query.Stringify()),[dispatcher,weak,request](PreviewPacket packet){
             dispatcher.TryEnqueue([weak,request,packet=std::move(packet)]{
                 auto self=weak.lock();if(!self||request!=self->stampRequest)return;
                 self->stampBusy=false;if(!packet)return;
@@ -422,7 +423,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
                     }
                 }catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());}
             });
-        });
+        }))stampBusy=false;
     }
     static fire_and_forget ConvertStamp(std::weak_ptr<Impl> weak,
         Microsoft::UI::Dispatching::DispatcherQueue queue,PreviewPacket packet,J result,
@@ -481,6 +482,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
     }
     void paintPreview(){
         if(!preview||!stamp.Size())return;
+        AutomationProperties::SetName(previewFrame,tileLabel);
         auto geometry=toolbarUi(data->localization.get(),O({{L"type",S(L"slider_preview")},{L"control",control},{L"style",S(tileStyle)},{L"value",N(current)},
             {L"length",N(std::max(width,height))},{L"extent",N(num(stamp,L"extent"))}})).GetObject();
         double side=num(geometry,L"side");
@@ -789,7 +791,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
             }
             menu.ShowAt(sender.as<FrameworkElement>());
         });
-        result.row=pick;
+        result.row=pick;result.slim=true;
         result.update=[weak,pick,labelText,shown,glyph,name](J const& option){
             auto self=weak.lock();if(!self)return;
             *labelText=object(option,L"Choice");auto current=array(*labelText,L"items");

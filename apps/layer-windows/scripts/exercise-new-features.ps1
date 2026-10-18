@@ -33,7 +33,7 @@ function Tap([string]$Id,[string]$Device='mouse') {
         Start-Sleep -Milliseconds 250;return
     }
     Wait-Until {(Control $Id).Current.IsEnabled -and (Model).brush_ready} "Disabled $Id" 120
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle);Start-Sleep -Milliseconds 100
+    $null=[CapyRowPointer]::SetForegroundWindow($ownedDrawing.Handle);Start-Sleep -Milliseconds 100
     $at=At $Id;[CapyRowPointer]::Down($Device,$at.x,$at.y);Start-Sleep -Milliseconds 60;[CapyRowPointer]::Up();Start-Sleep -Milliseconds 240
 }
 function HeaderId([string]$Kind,[string]$Value) {
@@ -87,7 +87,7 @@ function Set-Theme([string]$Theme) {
     $dialog=Control 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)
     (Control 'CloseButton' -Within $dialog).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {!(Find 'Color theme' -Name)} 'Preferences did not close'
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle);Start-Sleep -Milliseconds 200
+    $null=[CapyRowPointer]::SetForegroundWindow($ownedDrawing.Handle);Start-Sleep -Milliseconds 200
 }
 try {
     Enter-CapyEnvironment
@@ -96,9 +96,9 @@ try {
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     Write-Output "Owned feature review $($review.Id): $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Feature review did not start' 90
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
-    $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4));$null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    Wait-Until {$script:ownedDrawing=Owned-DrawingWindow $review;$null -ne $ownedDrawing -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Feature review did not start' 90
+    $root=$ownedDrawing.Root
+    $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4));$null=[CapyRowPointer]::SetForegroundWindow($ownedDrawing.Handle)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     Check-InputPreferences
     $switch=Find 'workspace-switch-builtin:workspace:painter'
@@ -230,16 +230,7 @@ try {
     Wait-Until {@((Model).state.layers).Count -eq $before+1 -and (Command-Enabled 'deselect')} 'One Undo did not remove the fill and restore the selection'
     Write-Output 'PASS: Filter Fill without and with a selection, and one Undo'
     [CapyRowPointer]::Dispose()
-    # Use this review's atomic snapshot; ui-state.json can be read mid-write.
-    $null=$review.CloseMainWindow();$lastDecision=$null
-    Wait-Until {
-        $review.Refresh();if($review.HasExited){return $true}
-        $m=Model;$discard=Find 'Discard Changes' -Name -Type ([System.Windows.Automation.ControlType]::Button)
-        if($m.windows_isolated_settings -and $discard -and $discard.Current.IsEnabled -and $lastDecision -ne $m.state.document_file.epoch){
-            $discard.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke();$lastDecision=$m.state.document_file.epoch
-        }
-        return $false
-    } 'Owned review did not close' 20 -Closing
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $ownedDrawing.Handle.ToInt64() -Action Close -DiscardUnsaved
     if($review.ExitCode -ne 0){throw "Native review exit code $($review.ExitCode)"}
 
     if((Get-Item $stderr).Length){throw 'Review stderr is not empty'}

@@ -95,7 +95,14 @@ fn cases(saved: &Document) -> BTreeMap<String,(Document,bool)> {
 }
 
 #[test]
-fn saved_artwork_render_contracts() {
+fn saved_artwork_render_contracts() { saved_render_contracts(false); }
+
+#[test]
+fn saved_angular_filter_render_contracts() { saved_render_contracts(true); }
+
+fn saved_angular_case(name:&str)->bool {name.strip_prefix("filter/").is_some_and(|rest|["kaleidoscope","swirl","motion_blur","halftone","crosshatch","emboss","chromatic_aberration","gradient_fill"].contains(&rest.split('/').next().unwrap()))}
+
+fn saved_render_contracts(angular_only:bool) {
     let rasterizer=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     assert_ne!(rasterizer.adapter().get_info().device_type,wgpu::DeviceType::Cpu,"Saved render contracts require a hardware GPU");
     eprintln!("Saved render contract GPU: {:?}",rasterizer.adapter().get_info());
@@ -107,23 +114,25 @@ fn saved_artwork_render_contracts() {
     let baseline=include_bytes!("fixtures/authored-renders.rgba32f");
     let index=include_str!("fixtures/authored-renders.tsv");
     assert_eq!(index.lines().count(),cases.len());
-    let mut compared=0;
+    let (mut compared,mut checked)=(0,0);
     for line in index.lines() {
         let columns:Vec<_>=line.split_whitespace().collect();assert_eq!(columns.len(),5);
         let name=columns[0];let offset:usize=columns[1].parse().unwrap();let length:usize=columns[2].parse().unwrap();
         let max_abs:f64=columns[3].parse().unwrap();let rms:f64=columns[4].parse().unwrap();
         assert_eq!(offset,compared);compared+=length;
+        if angular_only && !saved_angular_case(name){continue;}checked+=1;
         let (document,sdr)=cases.get(name).unwrap_or_else(||panic!("Missing render case {name}"));
         let output=pixels(&gpu,document,*sdr);
         assert_eq!(output.len(),(EXTENT[0]*EXTENT[1]) as usize);assert_eq!(length,output.len()*16);
-        let (mut peak,mut square)=(0f64,0f64);
+        let (mut peak,mut square)=(0f64,0f64);let mut witness=None;
         for (channel,(actual,expected)) in output.iter().flatten().zip(baseline[offset..offset+length].chunks_exact(4)).enumerate() {
             let expected=f32::from_le_bytes(expected.try_into().unwrap());
             assert!(actual.is_finite() && expected.is_finite(),"{name}: nonfinite channel {channel}");
-            let error=f64::from(*actual)-f64::from(expected);peak=peak.max(error.abs());square+=error*error;
+            let error=f64::from(*actual)-f64::from(expected);if error.abs()>peak {peak=error.abs();witness=Some((channel,*actual,expected));}square+=error*error;
         }
         let actual_rms=(square/(output.len()*4) as f64).sqrt();
-        assert!(peak<=max_abs && actual_rms<=rms,"{name}: linear-float drift: maximum {peak} (limit {max_abs}), RMS {actual_rms} (limit {rms}). Preserve the released baseline; fix the regression or version the authored meaning.");
+        assert!(peak<=max_abs && actual_rms<=rms,"{name}: linear-float drift: maximum {peak} (limit {max_abs}), RMS {actual_rms} (limit {rms}), witness={witness:?}. Preserve the released baseline; fix the regression or version the authored meaning.");
     }
     assert_eq!(compared,baseline.len());
+    assert_eq!(checked,if angular_only {16}else{132});
 }

@@ -58,11 +58,12 @@ try{
  [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
- Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Navigation review did not start' 120
- $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Navigation review did not start' 120
+ $root=$native.window.Root;$drawingWindow=$native.window.Handle
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
- [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)
  $tiles=@((Model).panels|Where-Object id -eq 'toolbar')[0].tiles
  $zoom=@($tiles|Where-Object {$_.control.command -eq 'zoom' -or $_.resolved_control.command -eq 'zoom'})[0]
@@ -88,16 +89,16 @@ try{
    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text),
    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$spec.label)))
   if(!$caption -or $caption.Current.IsOffscreen -or $caption.Current.BoundingRectangle.Right -gt $bar.Current.BoundingRectangle.Left){throw "Zoom choice $id does not display its label to the left"}
-  $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
   $captionBounds=$caption.Current.BoundingRectangle;$barBounds=Native-Bounds ("tool-choice-$id") $scale
   $rowBounds=[Windows.Rect]::new([Math]::Min($captionBounds.Left,$barBounds.Left),[Math]::Min($captionBounds.Top,$barBounds.Top),[Math]::Max($captionBounds.Right,$barBounds.Right)-[Math]::Min($captionBounds.Left,$barBounds.Left),[Math]::Max($captionBounds.Bottom,$barBounds.Bottom)-[Math]::Min($captionBounds.Top,$barBounds.Top))
   $zoomRows[$id]=@{row=$rowBounds;bar=$barBounds;caption=$captionBounds}
-  $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+  $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
   for($i=0;$i -lt $spec.items.Count;$i++){
    $button=Control "tool-choice-$id-$i" -Arranged
    $label=$spec.items[$i].label
    if($button.Current.Name -ne $label){throw "Zoom segment $id/$i has the wrong accessible label"}
-   $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+   $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
    $bounds=Native-Bounds ("tool-choice-$id-$i") $scale
    if([Math]::Abs($bounds.Width/$scale-24) -gt 1 -or [Math]::Abs($bounds.Height/$scale-24) -gt 1){throw "Zoom segment $id/$i is not a compact square"}
    $glyph=Control ('icon-'+$spec.items[$i].icon) -Within $button -Arranged
@@ -110,7 +111,7 @@ try{
   }
  }
  $zoomRows|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'zoom-row-geometry.json')
- $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+ $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
  $zoomGroup=@((Model).layout.groups|Where-Object active -eq 'tool_settings')[0]
  $zoomPanel=Native-Bounds $zoomGroup.id $scale -Group
  if([Math]::Abs(($zoomRows['zoom-click'].row.Left-$zoomPanel.Left)/$scale-8) -gt 1 -or [Math]::Abs(($zoomPanel.Right-$zoomRows['zoom-click'].bar.Right)/$scale-8) -gt 1){throw 'Zoom controls do not share the panel content inset'}
@@ -192,7 +193,7 @@ try{
  Wait-Until {(Model).state.camera.zoom -gt $before} 'Ctrl+wheel did not zoom with Wheel Pan selected'
  $checks.navigation_preferences='passed'
  [CapyRowPointer]::Dispose()
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
  $saved=Get-Content (Settings-File) -Raw|ConvertFrom-Json
  if(!$saved.zoom_tool.center_clicked_point -or $saved.wheel_zoom -or $saved.rotate_with_two_fingers){throw 'Navigation settings did not persist'}
  $checks.persistence='passed';$checks.theme=$Theme;$checks.evidence=$run

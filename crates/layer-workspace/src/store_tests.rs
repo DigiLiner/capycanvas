@@ -822,7 +822,7 @@ fn stores_of_other_versions_serve_only_reset() {
             panic!()
         };
         assert!(items.is_empty());
-        let kept = Connection::open(f.directory.join("workspaces.unreadable.sqlite3")).unwrap();
+        let kept = Connection::open(std::fs::canonicalize(f.directory.join("workspaces.unreadable.sqlite3")).unwrap()).unwrap();
         let older: u32 = kept.query_row("SELECT count(*) FROM items", [], |r| r.get(0)).unwrap();
         assert_eq!(older, 1, "version {version}");
         let retired: u32 = store

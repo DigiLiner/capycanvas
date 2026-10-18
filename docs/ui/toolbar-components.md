@@ -74,6 +74,8 @@ size, tool-specific fields (including tonal presets and intervals), selection
 combination, sampling-source, family-ordered brush fields, then
 remaining actions/toggles. A tool switch changes the form,
 not the toolbar allocation or canvas size. Value changes retain native editors.
+Each toolbar choice publishes one selected item. Brush variants select the
+concrete preset; the Tool Set retains its selected parent group and preset.
 GTK also presents shared list (single or multiple choice), text, and information
 fields. Narrow bars use menu faces with native popover contents; their complete
 form remains available through overflow. Within one tool context, adding or
@@ -229,7 +231,7 @@ private Mutter display with `--native-test=` and one of these tests from
   `native_toolbar_components_pen_input` variant adds `--tablet`; its synthetic
   serials cannot authorize popup grabs, so popups are covered by mouse and touch.
 - `native_toolbar_added_sliders_input`: Add Tools in Paint, then tap and drag
-  the new size and opacity sliders with mouse and touch in both themes.
+  the added Size and custom Opacity sliders with mouse and touch in both themes.
 - `native_toolbar_components_narrow_input` with `LAYER_MOTION_VIEWPORT=680x500`:
   overflow and full options at small widths.
 - `native_toolbar_components_drawer_input`, `native_toolbar_options_presentation_input`,
@@ -244,3 +246,10 @@ inline transform completion in both themes, or
 `#toolbarEditorsAndOverflow`. Apple runs the `toolbar_component` tests in
 `cargo test --locked -p layer-apple --target aarch64-apple-darwin --lib` and the
 `testToolbarComponents` journey on macOS and iPad.
+
+Windows exposes the preview frame with the shared tile label, so accessibility
+clients can identify its bounds and bookmark button.
+Windows answers idle preview queries on the render owner without acquiring or
+presenting the canvas. Input, visual changes and GPU recovery keep their normal
+frame path. A full optional-query queue retries on the next preview tick.
+Idle service deadlines remain independent of preview query arrivals.

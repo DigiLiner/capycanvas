@@ -34,6 +34,46 @@ function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds=$scri
     }while($watch.Elapsed.TotalSeconds -lt $Seconds*$(if($env:CAPY_WAIT_SCALE){[double]$env:CAPY_WAIT_SCALE}else{1}))
     throw $Message
 }
+function Update-CapyFixtureContext([scriptblock]$Update){
+    if(!$env:CAPY_FIXTURE_CONTEXT){return}
+    $context=if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json -AsHashtable}else{@{}}
+    & $Update $context
+    $temporary=$env:CAPY_FIXTURE_CONTEXT+'.tmp-'+[guid]::NewGuid().ToString('N')
+    $stream=[IO.FileStream]::new($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
+    try{$bytes=[Text.UTF8Encoding]::new($false).GetBytes(($context|ConvertTo-Json -Depth 12));$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+    [IO.File]::Move($temporary,$env:CAPY_FIXTURE_CONTEXT,$true)
+}
+function Register-CapyFixtureWindow([Diagnostics.Process]$Process,[long]$WindowHandle,[string]$TraceDirectory){
+    if(!$env:CAPY_FIXTURE_CONTEXT){return}
+    $owner=[uint32]0;[CapyWindowApi]::GetWindowThreadProcessId([IntPtr]$WindowHandle,[ref]$owner)|Out-Null
+    if($WindowHandle -eq 0 -or $owner -ne $Process.Id){throw 'Fixture census window is not owned by the review'}
+    $executable=$Process.Path
+    $context=if(Test-Path -LiteralPath $env:CAPY_FIXTURE_CONTEXT){Get-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT -Raw|ConvertFrom-Json}else{$null}
+    $known=@($context.windows|Where-Object {$_.process_id -eq $Process.Id -and $_.hwnd -eq $WindowHandle})
+    if($known.Count -gt 1 -or ($known.Count -eq 1 -and $known[0].executable -ne $executable)){throw 'Fixture census owner changed'}
+    if(!$TraceDirectory){$TraceDirectory=if($known.Count){$known[0].trace_directory}elseif($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{Split-Path -Parent $executable}}
+    $entry=[ordered]@{process_id=$Process.Id;hwnd=$WindowHandle;executable=$executable;trace_directory=$TraceDirectory;observed_utc=[DateTime]::UtcNow.ToString('o')}
+    $registryPath=Join-Path $TraceDirectory ("windows-$($Process.Id).json")
+    if(Test-Path -LiteralPath $registryPath){
+        $registry=Read-Snapshot $registryPath
+        $registered=@($registry.windows|Where-Object hwnd -eq $WindowHandle)
+        if($registry.process_id -ne $Process.Id -or $registered.Count -ne 1){throw 'Fixture census requires the registered owned drawing HWND'}
+        $entry.window_id=[long]$registered[0].id
+        $entry.registered_window=$registered[0]
+    }
+    Update-CapyFixtureContext {
+        param($context)
+        $windows=@($context.windows|Where-Object {$null -ne $_})
+        $old=@($windows|Where-Object {$_.process_id -eq $entry.process_id -and $_.hwnd -eq $entry.hwnd})
+        if($old.Count -gt 1 -or ($old.Count -eq 1 -and ($old[0].executable -ne $entry.executable -or $old[0].trace_directory -ne $entry.trace_directory -or ($null -ne $old[0].window_id -and $old[0].window_id -ne $entry.window_id)))){throw 'Fixture census ownership changed'}
+        $context.windows=@($windows|Where-Object {!($_.process_id -eq $entry.process_id -and $_.hwnd -eq $entry.hwnd)})+@($entry)
+    }
+}
+function Record-CapyFixtureClose([int]$ProcessId,[long]$WindowHandle,[bool]$WindowOnly,[ValidateSet('exercise-window original five-second authorization','image-rows original close_document exit30')][string]$Contract='exercise-window original five-second authorization'){
+    if(!$env:CAPY_FIXTURE_CONTEXT){return}
+    $entry=[ordered]@{process_id=$ProcessId;hwnd=$WindowHandle;contract=$Contract;result='pass';window_only=$WindowOnly;completed_utc=[DateTime]::UtcNow.ToString('o')}
+    Update-CapyFixtureContext {param($context);$context.closes=@($context.closes)+@($entry)}
+}
 function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle){
     $registered=$false
     if($WindowHandle){
@@ -56,7 +96,7 @@ function Owned-DrawingWindow([Diagnostics.Process]$Process,[long]$WindowHandle){
     })
     if($found.Count -gt 1){throw 'The owned process has multiple drawing windows; specify a window handle'}
     if($WindowHandle -and $found.Count -ne 1){throw 'The specified window is not an owned drawing window'}
-    if($found.Count){$found[0]}
+    if($found.Count){Register-CapyFixtureWindow $Process $found[0].Handle.ToInt64();$found[0]}
 }
 function Screen-Pixels([int]$X,[int]$Y,[string]$Path='',[switch]$Cursor) {
     $bitmap=[Drawing.Bitmap]::new(96,96)
@@ -90,10 +130,17 @@ function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible)
     $condition=[System.Windows.Automation.PropertyCondition]::new($property,$Value)
     if($Type){$condition=[System.Windows.Automation.AndCondition]::new($condition,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$Type))}
     if(!$Within){$Within=$root}
+    $searchScope=$Within
+    if(!$Name -and $Within -eq $root -and $Value -match '^layer-(?:row-)?\d+(?:-|$)'){
+        $parent=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'layer-list'))
+        $bounds=if($parent){$parent.Current.BoundingRectangle}else{$null}
+        if(!$parent -or $parent.Current.IsOffscreen -or !$bounds -or $bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){$parent=Find 'layer-list' -Visible -Within $root}
+        if($parent){$searchScope=$parent}
+    }
     $found=$null
-    if(!$Visible -and 'first' -eq $script:CapyFind){$found=$Within.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)}
+    if(!$Visible -and 'first' -eq $script:CapyFind){$found=$searchScope.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)}
     else{
-        $items=$Within.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
+        $items=$searchScope.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
         foreach($item in $items){if(!$item.Current.IsOffscreen){return $item}}
         if(!$Visible -and 'prefer-visible' -eq $script:CapyFind -and $items.Count){$found=$items[0]}
     }
@@ -132,7 +179,7 @@ function Control-Trace($Element){
 }
 function Input-Trace([int]$X,[int]$Y){
     $point=[System.Windows.Point]::new($X,$Y)
-    @{point=@($X,$Y);foreground=[CapyRowPointer]::GetForegroundWindow().ToInt64();owned_window=$review.MainWindowHandle.ToInt64();hit=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FromPoint($point)));focus=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FocusedElement))}
+    @{point=@($X,$Y);foreground=[CapyRowPointer]::GetForegroundWindow().ToInt64();owned_window=[long]$root.Current.NativeWindowHandle;hit=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FromPoint($point)));focus=@(Control-Trace ([System.Windows.Automation.AutomationElement]::FocusedElement))}
 }
 function Scroll-Position($Control,[ValidateRange(0,100)][double]$Percent){
     $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$scroller=$walker.GetParent($Control);$scroll=$null
@@ -211,7 +258,7 @@ function Capture([string]$Name,[switch]$WithModel,[switch]$Composed){
     if($WithModel){(Model)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))}
 }
 function Enter-CapyEnvironment([string[]]$Names=@()){
-    if($env:CAPY_FIXTURE_CONTEXT -and $run){@{run=$run}|ConvertTo-Json|Set-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT}
+    if($env:CAPY_FIXTURE_CONTEXT -and $run){Update-CapyFixtureContext {param($context);$context.Clear();$context.run=$run;$context.windows=@();$context.closes=@()}}
     $script:CapyEnvironment=@{}
     foreach($name in @('CAPY_STORAGE_DIR','CAPY_TRACE_UI','CAPY_SMOKE_TEST','CAPY_TEST_DISPLAY','CAPY_TEST_PRIMARY')+$Names){
         $script:CapyEnvironment[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
@@ -221,8 +268,7 @@ function Enter-CapyEnvironment([string[]]$Names=@()){
 function Exit-CapyEnvironment{
     if(!$script:CapyEnvironment){return}
     if($env:CAPY_FIXTURE_CONTEXT -and $run){
-        @{run=$run;process_id=$review.Id;trace_directory=$(if($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{$directory});profile=$env:CAPY_STORAGE_DIR}|
-            ConvertTo-Json|Set-Content -LiteralPath $env:CAPY_FIXTURE_CONTEXT
+        Update-CapyFixtureContext {param($context);$context.run=$run;$context.process_id=$review.Id;$context.trace_directory=$(if($script:CapyTraceDirectory){$script:CapyTraceDirectory}else{$directory});$context.profile=$env:CAPY_STORAGE_DIR}
     }
     foreach($entry in $script:CapyEnvironment.GetEnumerator()){
         if($null -eq $entry.Value){Remove-Item -LiteralPath ('Env:'+$entry.Key) -ErrorAction SilentlyContinue}
@@ -316,11 +362,26 @@ function Save-ProjectAs([string]$Path,[scriptblock]$NativeSaved){
 }
 function Workspace-Root{
     $traced=[System.Windows.Automation.NotCondition]::new([System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ItemStatusProperty,''))
-    foreach($workspace in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$traced)){
-        $status=$workspace.Current.ItemStatus
-        if(!$status.StartsWith('{')){continue}
-        try{$presentation=$status|ConvertFrom-Json}catch{continue}
-        if($presentation.PSObject.Properties.Name -contains 'groups' -and $presentation.PSObject.Properties.Name -contains 'elements'){return $workspace}
+    $workspaces=@($root)
+    foreach($route in @(
+        @([System.Windows.Automation.ControlType]::Pane,'Microsoft.UI.Content.DesktopChildSiteBridge'),
+        @([System.Windows.Automation.ControlType]::Pane,'InputSiteWindowClass'),
+        @([System.Windows.Automation.ControlType]::Group,'NamedContainerAutomationPeer'),
+        @([System.Windows.Automation.ControlType]::Group,'NamedContainerAutomationPeer'))){
+        $condition=[System.Windows.Automation.AndCondition]::new(
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$route[0]),
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ClassNameProperty,$route[1]))
+        $workspaces=@(foreach($parent in $workspaces){$parent.FindAll([System.Windows.Automation.TreeScope]::Children,$condition)})
+        if(!$workspaces.Count){break}
+    }
+    foreach($local in @($true,$false)){
+        if(!$local){$workspaces=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,$traced)}
+        foreach($workspace in $workspaces){
+            $status=$workspace.Current.ItemStatus
+            if(!$status.StartsWith('{')){continue}
+            try{$presentation=$status|ConvertFrom-Json}catch{continue}
+            if($presentation.PSObject.Properties.Name -contains 'groups' -and $presentation.PSObject.Properties.Name -contains 'elements'){return $workspace}
+        }
     }
 }
 function Compact-Choice([string]$Id,[double]$Scale,[double]$Height=24){

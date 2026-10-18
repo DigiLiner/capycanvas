@@ -11,13 +11,18 @@ project check and the license check ([releasing](releasing.md#continuous-integra
 so run the checks for every area your change touches.
 
 The renderer's `dry_material::tests::pipeline_overrides_are_used_by_the_entry_point`
-also runs in CI without a GPU. It validates each generated dry-material shader
-and checks pipeline constants against the overrides used by its entry point,
-including called helpers. Supply only constants used by that entry point: Safari
-versions can reject unused overrides even when the module declares them.
-This catches the dry-brush recipe mismatch; browser compiler failures still need
-checks in the actual browser. Native Metal and Chrome use different shader
-compilers from Safari.
+also runs in CI without a GPU. It validates each generated dry-material shader,
+the destination, gather and reservoir entries, and the advanced direct and mask
+fragment entries. It checks pipeline constants against the overrides used by
+each entry point, including called helpers. Supply only constants used by that
+entry point: Safari versions can reject unused overrides even when the module
+declares them. This catches the dry-brush recipe mismatch; browser compiler
+failures still need checks in the actual browser. Native Metal and Chrome use
+different shader compilers from Safari.
+The renderer's `direct_contact_paint_and_erase_match_destination_deposition`
+requires hardware float32 blending and runs with `--ignored`. It compares actual
+direct paint and erase with destination deposition; portable blending devices
+use a different GPU route.
 
 The renderer's `pixel_transform::program_tests` validates every generated transform
 program without a window or GPU and checks that unused mapping, filtering and
@@ -37,6 +42,10 @@ renderer asserts that each selected dry kernel was prepared before the stroke.
 GTK's `native_dry_brush_preparation` selects dry presets through the toolbar,
 reports each preparation time and the slowest main-loop iteration, then paints.
 Run it with `__GL_SHADER_DISK_CACHE=0` on NVIDIA to measure a cold driver.
+
+Native compiler tests require two independent pipeline recipes to enter before
+either completes, keep data and optional work serial, hold cache finalization
+until required work finishes, and retire both workers without blocking teardown.
 
 Pipeline preparation changes also run the Web `--pipeline-readiness` journey.
 It intercepts real GPU device calls on the page and in workers, requires zero
@@ -88,6 +97,23 @@ services; an unprotected local build does not verify the APK processed by Play.
 
 ## Shared Rust
 
+Storage-folder tests supply the override and platform folders explicitly. Their
+assertions must hold when the suite sets a private `CAPY_STORAGE_DIR`.
+
+SQLite fixtures that reopen preserved files must canonicalize their paths before
+passing them to `rusqlite::Connection::open`, as the store does. Run them in a
+private directory whose database paths exceed 260 characters on Windows.
+
+A smoothed pen-up settles for 32 ms before publishing its raster boundary.
+Native prediction fixtures wait for the current input to be consumed and its
+Engine frame submitted before reading GPU reuse flags. Pen-down need not create
+a prediction; require the first live prediction to be cold and a later prediction
+to reuse tracked output. Timed pen-up settles in the final untimed drain.
+
+Committed-stroke correction fixtures advance the existing frame helper until
+the stroke and native backing publish, then capture their baseline and send the
+correction. Keep smoothing enabled and preserve the two-second correction window.
+
 Private session persistence changes must retain the compile-time field and edit
 classification checks and the failure-boundary tests described in
 [session recovery](../internals/session-recovery.md#regression-checks). Run core
@@ -112,6 +138,10 @@ every wire name it lists in the [package contract](../reference/capy-package.md#
 Keep resize precision, whole-count controls, choice reordering and private
 selection-overlay recovery assertions. Replace superseded pre-release fixtures
 without conversion readers; retain the pixel and authored-value checks.
+Run `cargo test --locked -p layer-render-wgpu saved_angular_filter_render_contracts -- --nocapture`
+for the 16 U8/F32 angular cases using the same fixed index and tolerances.
+The full saved-artwork contract below remains required.
+
 Run `cargo test --locked -p layer-render-wgpu saved_artwork_render_contracts -- --nocapture`
 on a hardware GPU for saved rendering semantics. The fixed 32×24 linear RGBA F32
 [images](../../crates/layer-render-wgpu/src/fixtures/authored-renders.rgba32f)
@@ -151,7 +181,10 @@ transport failures without writing outside the private test profile.
 Workspace tests replay the SQLite/browser preference fixture through IndexedDB.
 The manager fixture's `expire_lease` changes both the cached claim and SQLite row.
 Host test helpers keep serialization flags, update readers and GPU frame timing
-in the callers' control.
+in the callers' control. NativeHost GPU fixtures fit the current viewport before
+choosing an object-body gesture and project authored points through that camera.
+Thumbnail waits retire held native contacts and pending engine work before
+checking stroke completion, changed pixels and exact Undo restoration.
 Figure and gradient tests share `abandon_layer_drag` while retaining their own
 frame timestamps and commit assertions. Collapsed resize fixtures retain the
 nested and outside handle coordinates, width checks and cancellation points.
@@ -170,7 +203,11 @@ request retires.
 Presentation tests use the renderer's `create_target` for their surfaces; preserve
 each test's format and extent, and validate its usage flags on the test GPU.
 Renderer source fixtures use `test_support::depth_source` with their original
-budget and coordinate mapping. Pen fixtures override the shared event's timestamp
+budget and coordinate mapping. Oversized decoded-source fixtures require warm
+resident tiles to be reused before misses evict them, with fixed slot counts and
+GPU bytes. The native Threshold checker verifies evaluation before reduction;
+optional display hierarchy residency is not a pixel oracle.
+Pen fixtures override the shared event's timestamp
 and pressure where their cadence differs.
 Integration pen fixtures share sample construction and input draining; callers
 retain pressure axes, sequence numbers, cadence and GPU-wait policy.
@@ -184,6 +221,9 @@ Preview-scale equality fixtures disable position smoothing so zoom-dependent
 Curve fit does not change the authored contact path being compared.
 Retouch replay fixtures keep each brush's path and pen-up position. Check source
 readiness and healing counts after replay settles, before collecting result pages.
+Undo/Redo availability reports history entries; raster backing readiness is separate.
+While healing publication is pending, check the exact busy navigation refusal and
+unchanged revision and history before replaying queued contacts.
 Mesh fixtures pass a previously constructed projective map to `MeshMap::fit`.
 Raster corruption fixtures retain their exact pixel descriptor. File-format
 changes must read the checked-in `layer-core/src/package/codec/fixtures` files,
@@ -250,6 +290,9 @@ reduced-resolution previews independently of catalog screenshots.
 Selective Color references lock original-color membership and Black scaling;
 Channel Mixer references cover signed coefficients, constants and independent
 Monochrome rows. Both preserve hidden page values through undo and project I/O.
+Run `filter_weights_preserve_exact_original_and_signed_output_endpoints` for
+bit-exact zero/full weight, signed output and blend endpoints through both
+pointwise and image evaluation.
 
 Gradient definitions use the core `gradient` tests, shared `shared_gradient`
 session tests and renderer gradient fixtures. GTK's
@@ -300,6 +343,9 @@ live Vulkan devices per process or deadlock while many threads create and destro
 devices; use `--test-threads=1` for device-heavy filters. Headless renderers keep
 one wgpu instance for the process lifetime, because reloading the driver
 eventually exhausts static TLS.
+
+The Windows software-adapter runner uses one test thread for both Rust phases
+so independent rendering tests do not submit to software devices concurrently.
 
 `layer-render-wgpu` unit tests and `software-adapter-tests` builds accept a CPU
 adapter when `LAYER_TEST_SOFTWARE_GPU=1` is set. Those runs check numbers only;
@@ -449,8 +495,6 @@ are your task, and remove an entry when you fix it.
   program it expects to reject. `repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set`
   fails there as on Iris Xe.
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
-  `repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set`
-  does not produce the expected resident output;
   `saved_artwork_render_contracts` reports
   `domain_warp/F32` maximum drift 0.000232696533203125 against 0.0002.
   `native_publication_pipelines_follow_canvas_and_gate_brush` and

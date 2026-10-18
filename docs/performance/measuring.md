@@ -452,8 +452,12 @@ Build the native Release app first and prepend its folder to `$env:PATH` before
 running the example:
 `$env:PATH=(Resolve-Path artifacts/windows/Release).Path+';'+$env:PATH`.
 This uses the app's pinned DXC compiler instead of falling back to system FXC.
+The example drains pen-up and host-backed raster publication before reading a
+completed stroke or changing history, outside the per-frame timing intervals.
 
-**Pen latency (Windows).** Against a Release build, run
+**Pen latency (Windows).** The harness commits the requested brush diameter and
+checks its shared settled readout before injecting input. Against a Release
+build, run
 `tools/performance/windows-pen-latency.ps1 -Executable <exe> -Project <.capy>
 -OutputDirectory <dir>`, then `node tools/performance/windows-pen-report.mjs <dir>`.
 It retains the owned drawing window and waits for the requested document,
@@ -465,6 +469,12 @@ statistics. Immediate presentation has no applicable refresh timestamp, so only
 a presentation observation upper bound is available in that mode. These software
 timings exclude physical digitizer and panel response. Per-window traces use
 `latency-<pid>-<window>` names. PresentMon needs administrator rights.
+
+The opt-in native latency trace also writes `-presentations.csv`, including idle
+canvas presentations. It buffers at most 65,536 records and writes only after
+input and rendering stop. Keep idle diagnostic intervals separate from moving
+frames in `-frames.csv`; submission counts alone do not establish displayed FPS.
+The status file reports overflow for either series.
 
 **Canvas navigation (Windows).** Use the same capture and report with
 `-NavigationMode hand`, `zoom` or `rotate_view` and `-SkipPresentMon`, in a fresh

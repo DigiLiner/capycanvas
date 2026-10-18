@@ -49,23 +49,23 @@ function Set-Viewport {
     # and non-client dimensions differ, so adjust the window by the measured
     # canvas delta instead of assuming a fixed frame thickness.
     for($attempt=0;$attempt -lt 3;$attempt++){
-        $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+        $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
         $canvas=(Control 'drawing-canvas').Current.BoundingRectangle
         $dx=[Math]::Round(986*$scale-$canvas.Width);$dy=[Math]::Round(658*$scale-$canvas.Height)
         if([Math]::Abs($dx) -lt 1 -and [Math]::Abs($dy) -lt 1){return}
         $window=[CapyEditorWindow+Rect]::new()
-        if(![CapyEditorWindow]::GetWindowRect($review.MainWindowHandle,[ref]$window)){throw 'Cannot measure review window'}
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width ($window.right-$window.left+$dx) -Height ($window.bottom-$window.top+$dy)
+        if(![CapyEditorWindow]::GetWindowRect($drawingWindow,[ref]$window)){throw 'Cannot measure review window'}
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ($window.right-$window.left+$dx) -Height ($window.bottom-$window.top+$dy)
         Start-Sleep -Milliseconds 350
     }
     throw 'Native viewport did not match the Chrome fixture'
 }
 function Capture([string]$Name){
-    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run ($Name+'.png')) -ClientOnly *> (Join-Path $run ($Name+'.json'))
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $run ($Name+'.png')) -ClientOnly *> (Join-Path $run ($Name+'.json'))
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $canvas=(Control 'drawing-canvas').Current.BoundingRectangle
     $origin=[CapyRowPointer+Point]::new()
-    if(![CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$origin)){throw 'Cannot locate client origin'}
+    if(![CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'Cannot locate client origin'}
     $bitmap=[Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
     try{
         [IO.File]::WriteAllText((Join-Path $run ($Name+'-metrics.json')),(@{
@@ -83,8 +83,8 @@ function Set-Zen {
 }
 function Check-Rect($Control,$Box,[double]$X=0,[double]$Y=0){
     $origin=[CapyRowPointer+Point]::new()
-    if(![CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$origin)){throw 'Cannot locate client origin'}
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    if(![CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'Cannot locate client origin'}
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $actual=$Control.Current.BoundingRectangle
     $expected=@(($origin.x+($X+$Box.x)*$scale),($origin.y+($Y+$Box.y)*$scale),($Box.width*$scale),($Box.height*$scale))
     $values=@($actual.Left,$actual.Top,$actual.Width,$actual.Height)
@@ -100,7 +100,7 @@ function Check-Editor {
             $first=$group.panels[0];$tab=Control "panel-tab-$first"
             $measure=$model.panel_measurements|Where-Object panel -eq $first
             Check-Rect $tab @{x=0;y=0;width=$measure.tab_width;height=36} $group.bounds.x $group.bounds.y
-            Check-Rect (Control "group-grip-$($group.id)") @{x=($group.bounds.width-28);y=0;width=20;height=36} $group.bounds.x $group.bounds.y
+            Check-Rect (Control "group-grip-$($group.id)") @{x=($group.bounds.width-20);y=0;width=20;height=36} $group.bounds.x $group.bounds.y
         }
         if($group.tiles){
             for($i=0;$i -lt $panel.tiles.Count;$i++){
@@ -123,7 +123,7 @@ function Check-Zen {
     if([bool](Find 'zen-capy' -Visible) -ne [bool]$model.keep_zen_button){throw 'Full Zen Capy visibility differs'}
 }
 function Check-Header {
-    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $menu=(& (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Window' -Inspect).Current.BoundingRectangle
     $settings=(Control 'settings-button' -Type ([System.Windows.Automation.ControlType]::Button)).Current.BoundingRectangle
     $points=@(
@@ -134,7 +134,7 @@ function Check-Header {
     foreach($entry in $points){
         $x=[int]$entry.x;$y=[int]$entry.y
         $point=[IntPtr](([int64]($y -band 65535) -shl 16) -bor ($x -band 65535))
-        if([CapyEditorWindow]::SendMessage($review.MainWindowHandle,0x84,[IntPtr]::Zero,$point).ToInt64() -ne $entry.expected){
+        if([CapyEditorWindow]::SendMessage($drawingWindow,0x84,[IntPtr]::Zero,$point).ToInt64() -ne $entry.expected){
             throw "Incorrect native titlebar hit region for $($entry.name)"
         }
     }
@@ -159,9 +159,10 @@ try{
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/editor-review.json'),(@{process_id=$review.Id;run=$run}|ConvertTo-Json))
     Write-Output "Owned editor review $($review.Id)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Review did not start' 45
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready} 'Review did not start' 45
     [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     Wait-Until {(Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Workspace startup did not complete' 45
     # Open secondary tools when the workspace keeps them in a collapsed column.
     if(Find 'column-icon-brushes'){Invoke 'column-icon-brushes'}
@@ -194,7 +195,7 @@ try{
     & (Join-Path $PSScriptRoot 'exercise-tools.ps1') -ProcessId $review.Id -StateFile (State-File) -OutputDirectory $run
     if($panelOnly){
         Capture ('tools-panel-'+$Theme)
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         @{theme=$Theme;tool_controls='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
         return
     }
@@ -205,7 +206,7 @@ try{
     Wait-Until {(Model).chrome_hidden} 'Full Zen did not hide workspace chrome'
     Check-Zen
     Capture 'zen-dark'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 900 -Height 720
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 900 -Height 720
     Start-Sleep -Milliseconds 400
     Check-Zen
     if(((Control 'drawing-canvas').GetRuntimeId() -join ':') -ne $retained -or (Model).windows_gpu_generation -ne $generation){throw 'Zen resize replaced the native canvas or its device'}
@@ -231,7 +232,7 @@ try{
     Capture 'zen-light'
     if((Model).keep_zen_button){(Control 'zen-capy').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}else{Set-Zen}
     Wait-Until {!(Model).chrome_hidden -and !(Model).state.workspace.zen_mode} 'Zen Capy did not leave Zen'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     [pscustomobject]@{full_editor='passed';titlebar_hit_regions='passed';core_rectangles='passed';native_measurements='passed';tools='passed';full_zen='passed';zen_activation='passed';retained_canvas_resize='passed';restored_workspace='passed';themes='passed';zero_exit='passed';scope='native projection; complete visual and physical input acceptance remain separate'}|ConvertTo-Json
 }catch{

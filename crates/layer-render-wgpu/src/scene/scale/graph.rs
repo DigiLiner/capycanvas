@@ -415,6 +415,7 @@ impl Cache {
             let mut pages: Vec<_> = regions.iter().flat_map(|region| page_coordinates(region.intersect(target.plan.bounds)))
                 .filter(|page| !branch.valid.contains(page)).collect::<BTreeSet<_>>().into_iter().collect();
             pages.sort_by_key(|[x, y]| (*y, *x));
+            crate::artwork::resident_first(r, packet.scene, &mut pages);
             let mut first = 0;
             while first < pages.len() {
                 let mut end = first + 1;

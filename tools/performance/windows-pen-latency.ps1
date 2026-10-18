@@ -205,7 +205,7 @@ $brushName=(Control 'tool-subtool-0').Current.Name
 if($brushName -notmatch 'G[- ]?Pen'){throw "Expected G-Pen, got $brushName"}
 $size=Control 'tool-setting-size';$size.SetFocus();$size.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue([string]$Diameter)
 (Control 'tool-setting-opacity').SetFocus();Fit-Canvas
-Wait-Until {$committedSize=Find 'tool-setting-size';$committedSize -and $committedSize.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq "$Diameter.0 px"} 'Brush size was not committed'
+Wait-Until {$committedSize=Find 'tool-setting-size';$committedSize -and $committedSize.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq "$Diameter px"} 'Brush size was not committed'
 [CapyWindowApi]::SetForegroundWindow($window)|Out-Null
 Start-Sleep -Seconds 3
 }

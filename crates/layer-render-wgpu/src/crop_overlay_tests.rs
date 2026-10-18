@@ -87,14 +87,26 @@ fn paper_relief_shades_only_the_canvas_and_leaves_no_trace() {
         texture: layer_core::paper::built_in_paper("rough").unwrap().texture.clone(),
         mapping: layer_core::paper::reference([128; 2], [300.; 2]).mapping,
     }), target_offset: [0; 2] };
-    r.set_paper_overlay(Some(layer_render::PaperOverlay { paper, opacity: 1. }));
+    r.set_paper_overlay(Some(layer_render::PaperOverlay { paper: paper.clone(), opacity: 1. }));
+    assert!(!r.paper_overlay_ready(&paper));
     let shaded = present(&r);
+    assert!(r.paper_overlay_ready(&paper));
     let pixel = |pixels: &[u8], x: usize, y: usize| -> [u8; 4] { pixels[(y * 128 + x) * 4..][..4].try_into().unwrap() };
     let changed = (34..94).flat_map(|y| (34..94).map(move |x| (x, y))).filter(|&(x, y)| pixel(&shaded, x, y) != pixel(&baseline, x, y)).count();
     assert!(changed > 1200, "the relief shades the canvas: {changed} pixels");
     for (x, y) in [(10, 10), (120, 120), (10, 120)] {
         assert_eq!(pixel(&shaded, x, y), pixel(&baseline, x, y), "the surround is unshaded");
     }
+    r.set_paper_overlay(Some(layer_render::PaperOverlay { paper: paper.clone(), opacity: 0.5 }));
+    assert!(r.paper_overlay_ready(&paper), "fading keeps the prepared binding");
+    let mut replacement = paper.clone();
+    replacement.target_offset = [1, 0];
+    r.set_paper_overlay(Some(layer_render::PaperOverlay { paper: replacement.clone(), opacity: 1. }));
+    assert!(!r.paper_overlay_ready(&replacement));
+    assert!(!r.paper_overlay_ready(&paper));
+    present(&r);
+    assert!(r.paper_overlay_ready(&replacement));
     r.set_paper_overlay(None);
+    assert!(!r.paper_overlay_ready(&paper));
     assert_eq!(present(&r), baseline, "no overlay, no relief");
 }

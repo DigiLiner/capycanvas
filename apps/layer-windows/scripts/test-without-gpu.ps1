@@ -17,7 +17,7 @@ try {
     $env:WGPU_ADAPTER_NAME = 'Microsoft Basic Render Driver'
     $env:LAYER_GPU_INDEX = $null
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
-    & cargo test --locked @cargoProfileArgs @packages --lib --features layer-render-wgpu/software-adapter-tests
+    & cargo test --locked @cargoProfileArgs @packages --lib --features layer-render-wgpu/software-adapter-tests -- --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
     & cargo test --locked @cargoProfileArgs -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests d3d12_ -- --ignored --test-threads=1 --skip hdr --skip native_color

@@ -52,19 +52,23 @@ impl Fixture {
         self.service.dispatch(&mut self.host, action).unwrap();
     }
     fn wait(&self) {
-        self.done.recv_timeout(Duration::from_secs(60)).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while self.service.worker.shared.mailbox.lock().unwrap().completed.is_none() {
+            let remaining = deadline.checked_duration_since(std::time::Instant::now()).expect("Document worker timed out");
+            self.done.recv_timeout(remaining).unwrap();
+        }
     }
     fn poll(&mut self) {
         self.service.poll(&mut self.host).unwrap();
     }
     fn finish(&mut self) {
-        self.wait();
-        self.poll();
+        super::tests::finish(&mut self.service, &mut self.host, &self.done);
     }
     fn remove_device(&mut self) {
         remove_device(self.host.session.engine().backend(), &self.device);
     }
     fn retire_renderer(&mut self) {
+        self.service.renderer_unavailable(&mut self.host).unwrap();
         drop(self.host.session.renderer_mut().0.take());
         self.host.startup = Default::default();
     }
@@ -158,7 +162,23 @@ fn new_open_and_save_keep_the_authoritative_document_across_removal() {
             assert!(!f.host.session.state().document_file.busy);
             assert_eq!(f.host.session.state().document_file.epoch, epoch);
             assert_eq!(f.host.session.engine().document(), &original);
-            let error = f.host.session.state().host_error.as_ref().unwrap();
+            let error = if let Some(package) = f.service.package.as_ref() {
+                assert!(!completed && open.is_some());
+                let summary = package.view.summary(f.host.session.localization());
+                assert_eq!(summary.disposition, layer_ui::PackageDisposition::Preserved);
+                assert!(summary.capabilities.copy_original);
+                assert!(!summary.capabilities.edit && !summary.capabilities.save);
+                let mut copied = Vec::new();
+                package.view.copy_original(&mut copied, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+                assert_eq!(copied, expected_project);
+                let error = package.view.reason().to_owned();
+                let id = package.id;
+                f.dispatch(DocumentAction::Package { id, action: layer_ui::PackageAction::Close, path: None });
+                assert!(f.service.package.is_none());
+                error
+            } else {
+                f.host.session.state().host_error.as_ref().unwrap().clone()
+            };
             assert_ne!(
                 error, "Document worker failed",
                 "Device loss must not unwind document preparation"

@@ -1281,7 +1281,7 @@ fn sparse_transform_capture_keeps_filter_edges_and_watercolor_metadata_without_e
             let planes = snapshot.raw_planes.clone();
             let (tiles, capture) = pollster::block_on(snapshot.with_region_gpu([region.min_x(), region.min_y(), region.width(), region.height()], 8 * 1024 * 1024,
                 |r, packet, _, encoder| {
-                    let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+                    let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r).unwrap());
                     let result = scene.capture_raw_tile(r, packet, coordinate, &plan, &planes, encoder);
                     r.scene = Some(scene); result
                 })).unwrap();
@@ -1322,7 +1322,7 @@ fn default_one_masks_keep_zero_tiles_and_skip_no_authored_coverage() {
         let region = page_rect(coordinate).intersect(PixelRect::full(plan.extent));
         let (tiles, capture) = pollster::block_on(snapshot.with_region_gpu([region.min_x(), region.min_y(), region.width(), region.height()], 8 * 1024 * 1024,
             |r, packet, _, encoder| {
-                let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+                let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r).unwrap());
                 let result = scene.capture_raw_tile(r, packet, coordinate, &plan, &[RasterPlane::Mask], encoder);
                 r.scene = Some(scene); result
             })).unwrap();

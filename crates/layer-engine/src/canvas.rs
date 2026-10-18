@@ -151,6 +151,7 @@ pub struct CanvasEngine<B: CanvasRenderer> {
     frame_clock_ns: Option<u64>,
     completed_stroke: Option<Stroke>,
     completed_at: Option<web_time::Instant>,
+    completed_publication: Option<layer_core::raster::RasterRevision>,
     completed_before: Option<layer_core::raster::RasterRevision>,
     completed_clone_start: Option<CloneSource>,
     restore_rasters: Vec<(SourceTarget, layer_core::raster::RasterRevision)>,
@@ -234,6 +235,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             frame_clock_ns: None,
             completed_stroke: None,
             completed_at: None,
+            completed_publication: None,
             completed_before: None,
             completed_clone_start: None,
             restore_rasters: Vec::new(),
@@ -283,7 +285,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     pub fn capture_session(&self, session_generation: u64) -> Result<layer_core::package::session::EditorCapture, DocumentError> {
         let Self {editor,settings:_,used_colors:_,recording:_,backend:_,input:_,queued_contacts:_,contact_settings:_,
             view:_,transforms:_,clone_stroke:_,retouch_points:_,prepared_retouch:_,builder:_,dab_generator:_,
-            finalized_real_points:_,active_stroke:_,pending_up:_,frame_clock_ns:_,completed_stroke:_,completed_at:_,completed_before:_,
+            finalized_real_points:_,active_stroke:_,pending_up:_,frame_clock_ns:_,completed_stroke:_,completed_at:_,completed_publication:_,completed_before:_,
             completed_clone_start:_,restore_rasters:_,pending_frame:_,rebuild_completed:_,estimates:_,
             pending_smudge_dabs:_,dabs:_,batches:_,transform_preview:_,transform_selection:_,selection_display:_,
             scene_preview:_,rebuild_all:_,composite_all:_,raster_dirty:_,animation_origin_ns:_,animation_time:_,
@@ -346,6 +348,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.batches = Vec::new();
         self.pending_smudge_dabs = Vec::new();
         self.completed_stroke = None;
+        self.completed_publication = None;
         self.completed_at = None;
         self.completed_before = None;
         self.estimates.clear();
@@ -999,9 +1002,23 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         }
     }
 
+    fn begin_completed_correction_window(&mut self) {
+        let Some(publication) = self.completed_publication.as_ref() else { return; };
+        let owned = self.completed_stroke.as_ref()
+            .and_then(|stroke| self.document().target_raster(stroke.target))
+            .is_some_and(|revision| revision.identity() == publication.identity());
+        if !owned || publication.failed() {
+            self.end_corrections();
+        } else if publication.host_backed() {
+            self.completed_publication = None;
+            self.completed_at = Some(web_time::Instant::now());
+        }
+    }
+
     /// The completed stroke can no longer be corrected or replayed.
     fn end_corrections(&mut self) {
         self.completed_stroke = None;
+        self.completed_publication = None;
         self.completed_before = None;
         self.completed_clone_start = None;
         self.completed_at = None;
@@ -1038,9 +1055,11 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             return Ok(());
         };
         let layer = stroke.target;
-        self.editor.amend_raster(layer, layer_core::raster::RasterRevision::pending())?;
+        let publication = layer_core::raster::RasterRevision::pending();
+        self.editor.amend_raster(layer, publication.clone())?;
+        self.completed_publication = Some(publication);
         self.rebuild_completed = true;
-        self.completed_at = Some(web_time::Instant::now());
+        self.completed_at = None;
         self.rebuild_all |= !self.backend.supports_raster_damage();
         Ok(())
     }
@@ -1181,6 +1200,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.require_renderer_color(self.history_color(redo))?;
         self.flush_pending_edits()?;
         self.completed_stroke = None;
+        self.completed_publication = None;
         self.completed_before = None;
         self.estimates.clear();
         let next = self.editor.next_history_edit(redo);
@@ -1360,6 +1380,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         if !self.backend.can_submit() {
             return Ok(());
         }
+        self.begin_completed_correction_window();
         if let Some(frame) = self.pending_frame.take() {
             return self.submit_prepared_frame(frame);
         }
@@ -1483,6 +1504,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             self.raster_dirty = false;
             self.editor.finish_raster_submission();
         }
+        self.begin_completed_correction_window();
         result
     }
 
@@ -1602,6 +1624,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         }
         self.pending_up = None;
         self.completed_stroke = None;
+        self.completed_publication = None;
         self.completed_before = None;
         self.completed_at = None;
         self.rebuild_completed = false;
@@ -1744,6 +1767,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         match event.phase {
             PenPhase::Down => {
                 self.completed_stroke = None;
+                self.completed_publication = None;
                 self.estimates.clear();
                 self.transform_preview = None;
                 if self.active_stroke.is_some() {
@@ -1958,15 +1982,17 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                 stroke.retouch = active.style.retouch.clone();
                 stroke.paper = active.style.paper.clone();
                 self.completed_stroke = Some(stroke);
-                self.completed_at = Some(web_time::Instant::now());
+                let publication = layer_core::raster::RasterRevision::pending();
+                self.completed_at = None;
                 self.completed_before = Some(active.before);
                 self.completed_clone_start = active.clone_start;
                 self.editor
                     .perform(Edit::SetRaster {
                         target: active.target,
-                        revision: layer_core::raster::RasterRevision::pending(),
+                        revision: publication.clone(),
                     })
                     .map_err(EngineError::Document)?;
+                self.completed_publication = Some(publication);
                 if active.persistent_started
                     && let Some(color) = active.paint_color
                 {
@@ -2861,6 +2887,7 @@ mod tests {
         color_adoptions: usize,
         capture_blocked: bool,
         restore_blocked: bool,
+        unrelated_submission: bool,
         time_seconds: f32,
         phases: Vec<(layer_core::authored::EffectHandle, f32)>,
         fail_submit: bool,
@@ -2904,6 +2931,11 @@ mod tests {
             self.prepared_color = None;
             Ok(true)
         }
+        fn poll_pending(&mut self, _view: ViewState) -> Result<(), Self::Error> {
+            self.unrelated_submission = false;
+            Ok(())
+        }
+        fn has_pending_submission(&self) -> bool { self.unrelated_submission }
         fn raster_dependencies_ready(&mut self, _packet: FramePacket<'_>, _preview: Option<&layer_render::TransformPreview>) -> bool {
             !self.restore_blocked
         }
@@ -5043,6 +5075,79 @@ mod tests {
         assert!(engine.undo().unwrap());
         assert!(engine.undo().unwrap());
         assert!(!engine.undo().unwrap());
+    }
+
+    #[test]
+    fn delayed_stroke_publication_preserves_corrections_then_expires_and_keeps_one_undo_step() {
+        let (mut input, mut engine) = engine("delayed stroke publication", 64, 64);
+        engine.render_frame().unwrap();
+        let before = active_paint(engine.document()).raster.identity();
+        engine.backend_mut().restore_blocked = true;
+        let mut down = event(1, PenPhase::Down, 8.);
+        down.flags = SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::ESTIMATED.0);
+        input.push(down).unwrap();
+        input.push(event(2, PenPhase::Up, 12.)).unwrap();
+        engine.render_frame().unwrap();
+        let pending = active_paint(engine.document()).raster.clone();
+        assert!(pending.try_data().is_none());
+        engine.completed_at = Some(web_time::Instant::now() - CORRECTION_WINDOW * 2);
+        down.flags = SampleFlags::CORRECTION;
+        down.pressure = 0.1;
+        let corrected = engine.settings.pressure.map(down.pressure);
+        input.push(down).unwrap();
+        engine.render_frame().unwrap();
+        assert_eq!(engine.metrics().input_events, 2);
+        assert!(engine.completed_stroke.is_some());
+        assert!(pending.try_data().is_none());
+        engine.backend_mut().restore_blocked = false;
+        engine.render_frame().unwrap();
+        assert_eq!(engine.metrics().input_events, 2);
+        assert!(pending.try_data().is_some_and(|data| data.is_ok()));
+        engine.backend_mut().saw_reset = false;
+        engine.render_frame().unwrap();
+        assert_eq!(engine.metrics().input_events, 3);
+        assert_eq!(engine.completed_stroke.as_ref().map(|stroke| stroke.points[0].pressure), Some(corrected));
+        assert!(engine.backend().saw_reset);
+        assert_eq!(engine.metrics().committed_strokes, 1);
+        let repaired = active_paint(engine.document()).raster.identity();
+        assert_ne!(repaired, pending.identity());
+        engine.completed_at = Some(web_time::Instant::now() - CORRECTION_WINDOW * 2);
+        engine.render_frame().unwrap();
+        assert!(engine.completed_stroke.is_none());
+        assert!(engine.estimates.is_empty());
+        assert_eq!(active_paint(engine.document()).raster.identity(), repaired);
+        assert!(engine.undo().unwrap());
+        engine.render_frame().unwrap();
+        assert_eq!(active_paint(engine.document()).raster.identity(), before);
+        assert!(!engine.can_undo());
+        assert!(engine.redo().unwrap());
+        engine.render_frame().unwrap();
+        assert_eq!(active_paint(engine.document()).raster.identity(), repaired);
+        assert!(engine.completed_stroke.is_none());
+        assert!(engine.estimates.is_empty());
+    }
+
+    #[test]
+    fn unrelated_submission_completion_does_not_extend_the_correction_window() {
+        let (mut input, mut engine) = engine("unrelated submission", 64, 64);
+        let mut down = event(1, PenPhase::Down, 8.);
+        down.flags = SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::ESTIMATED.0);
+        input.push(down).unwrap();
+        input.push(event(2, PenPhase::Up, 12.)).unwrap();
+        engine.render_frame().unwrap();
+        let root = active_paint(engine.document()).raster.identity();
+        engine.completed_at = Some(web_time::Instant::now() - CORRECTION_WINDOW * 2);
+        engine.backend_mut().unrelated_submission = true;
+        down.flags = SampleFlags::CORRECTION;
+        down.pressure = 0.1;
+        input.push(down).unwrap();
+        engine.render_frame().unwrap();
+        assert!(!engine.backend().unrelated_submission);
+        assert_eq!(engine.metrics().input_events, 3);
+        assert!(engine.completed_stroke.is_none());
+        assert!(engine.completed_before.is_none());
+        assert!(engine.estimates.is_empty());
+        assert_eq!(active_paint(engine.document()).raster.identity(), root);
     }
 
     #[test]

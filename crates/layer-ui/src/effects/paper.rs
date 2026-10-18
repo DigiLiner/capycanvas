@@ -67,7 +67,8 @@ const FADE_NS: u64 = 300_000_000;
 pub(crate) struct PaperPreview {
     layer: Option<OccurrenceHandle>,
     restart: bool,
-    until: u64,
+    remaining: u64,
+    last_frame: Option<(u64, bool)>,
     shown: Option<layer_render::PaperOverlay>,
 }
 impl PaperPreview {
@@ -75,21 +76,29 @@ impl PaperPreview {
         self.layer = Some(layer);
         self.restart = true;
     }
-    pub fn active(&self) -> bool {
-        self.shown.is_some() || self.restart
+    pub fn invalidate(&mut self) {
+        self.shown = None;
+        self.last_frame = None;
     }
-    pub fn update(&mut self, document: &Document, dragging: Option<OccurrenceHandle>, now: u64) -> Option<Option<layer_render::PaperOverlay>> {
-        if let Some(layer) = dragging {
-            self.layer = Some(layer);
-            self.until = now + RELEASED_NS;
+    pub fn active(&self) -> bool {
+        self.layer.is_some() || self.restart
+    }
+    pub fn update<R: CanvasRenderer>(&mut self, document: &Document, renderer: &R, dragging: Option<OccurrenceHandle>, now: u64) -> Option<Option<layer_render::PaperOverlay>> {
+        if let Some(layer) = dragging { self.layer = Some(layer); }
+        let paper = self.layer.and_then(|layer| document.paper_surface(layer))
+            .map(|surface| paper::PaperBinding { surface: Arc::new(surface), target_offset: [0; 2] });
+        let ready = paper.as_ref().is_some_and(|paper| renderer.paper_overlay_ready(paper));
+        let previous = self.last_frame.replace((now, ready));
+        if dragging.is_some() {
+            self.remaining = RELEASED_NS;
         } else if std::mem::take(&mut self.restart) {
-            self.until = now + CHOSEN_NS;
+            self.remaining = CHOSEN_NS;
+        } else if ready && let Some((previous, true)) = previous {
+            self.remaining = self.remaining.saturating_sub(now.saturating_sub(previous));
         }
-        let opacity = (self.until.saturating_sub(now) as f32 / FADE_NS as f32).min(1.);
-        let overlay = self.layer.filter(|_| opacity > 0.)
-            .and_then(|layer| document.paper_surface(layer))
-            .map(|surface| layer_render::PaperOverlay { paper: paper::PaperBinding { surface: Arc::new(surface), target_offset: [0; 2] }, opacity });
-        if overlay.is_none() { self.layer = None; }
+        let opacity = (self.remaining as f32 / FADE_NS as f32).min(1.);
+        let overlay = paper.filter(|_| opacity > 0.).map(|paper| layer_render::PaperOverlay { paper, opacity });
+        if overlay.is_none() { self.layer = None; self.last_frame = None; }
         (overlay != self.shown).then(|| { self.shown = overlay.clone(); overlay })
     }
 }

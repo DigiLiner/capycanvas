@@ -206,6 +206,13 @@ cargo test --offline --manifest-path vendor/wgpu-hal/Cargo.toml --features vulka
 These tests exercise the worker on the desktop. Android compilation and device
 motion, memory, idle/resume and teardown journeys still verify the Android path.
 
+`wgpu-dx12-allocation-report.patch` returns no allocator report when D3D12
+suballocation is disabled. Committed resources are absent from the suballocator
+report, so reporting its empty allocation list would misrepresent live resources.
+This follows the existing wgpu API contract. The object-sampling regression checks
+parameter-buffer identity on every backend and exact allocation counts when a
+report is available.
+
 `wgpu-instance-identity.patch` makes native wgpu handles equal only when the
 same instance owns them. Upstream compares only the registry identifier, and
 every instance restarts identifiers, so a device recreated after GPU recovery

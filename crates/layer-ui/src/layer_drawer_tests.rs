@@ -238,15 +238,30 @@ fn layer_pickup_requires_a_resting_row_and_a_handle_for_direct_contacts() {
 #[test]
 fn serialized_layer_body_drag_devices_match_shared_pickup_policy() {
     for platform in Platform::ALL {
-        let s = session(platform);
-        for row in &s.state.layers {
+        let mut s = session(platform);
+        let verify=|s:&UiSession<Recorder>|{for row in &s.state.layers {
             let serialized = serde_json::to_value(row).unwrap();
             let devices = serialized["drag_from_body"].as_array().unwrap();
-            assert_eq!(devices, &if row.can_drop_below { vec![serde_json::json!("mouse")] } else { vec![] });
+            assert_eq!(devices, &if row.can_drop_below&&!row.locked { vec![serde_json::json!("mouse")] } else { vec![] });
             for kind in [crate::PointerKind::Mouse, crate::PointerKind::Touch, crate::PointerKind::Pen] {
                 assert_eq!(devices.contains(&serde_json::to_value(kind).unwrap()), row.can_drag(kind, false, true));
+                assert_eq!(row.can_drag(kind,true,true),row.can_drop_below&&!row.locked);
             }
-        }
+        }};
+        verify(&s);
+        let target=s.state.layers.iter().find(|row|row.id!=1).unwrap().id;
+        layer(&mut s,LayerAction::Lock {id:1,value:true});verify(&s);
+        assert!(s.state.layers.iter().find(|row|row.id==1).unwrap().can_drop_below);
+        assert!(s.layer_drop_preview(1,target,1.,LayerDropSurface::Row).is_none());
+        layer(&mut s,LayerAction::Lock {id:1,value:false});verify(&s);
+        assert!(s.layer_drop_preview(1,target,1.,LayerDropSurface::Row).is_some());
+        layer(&mut s,LayerAction::New {group:true,clipped:false});let group=s.state.layer_properties.layer.unwrap();
+        layer(&mut s,LayerAction::New {group:false,clipped:false});let child=s.state.layer_properties.layer.unwrap();
+        layer(&mut s,LayerAction::Lock {id:group,value:true});verify(&s);
+        assert!(s.state.layers.iter().find(|row|row.id==child).unwrap().locked);
+        assert!(s.layer_drop_preview(child,1,0.,LayerDropSurface::Row).is_none());
+        layer(&mut s,LayerAction::Lock {id:group,value:false});verify(&s);
+        assert!(s.layer_drop_preview(child,1,0.,LayerDropSurface::Row).is_some());
     }
 }
 

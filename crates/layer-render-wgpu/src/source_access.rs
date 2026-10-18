@@ -219,7 +219,7 @@ impl WgpuRasterizer {
     }
 
     pub(super) fn paint_base_tile(&mut self, base: &PaintBase, coordinate: [u32; 2], encoder: &mut crate::submission::CommandEncoder) -> Result<Option<RawTile>, GpuRasterError> {
-        let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+        let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
         let result = scene.paint_base_tile_for_query(self, base, coordinate, encoder);
         self.scene = Some(scene);
         result
@@ -231,7 +231,7 @@ impl WgpuRasterizer {
         space: layer_core::color::RgbSpace,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<RawTile, GpuRasterError> {
-        let mut scene = self.scene.take().unwrap_or_else(|| scene::Scene::new(self));
+        let mut scene = self.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(self))?;
         let result = scene.raster_tile_for_query(self, blob, space, encoder);
         self.scene = Some(scene);
         result

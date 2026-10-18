@@ -102,7 +102,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with Gaussian Blur, Radius 85 | 120 | **Not met.** 40.55–41.09 presents/s; interval p99 33.33 ms | [Gaussian Blur and Unsharp Mask](#gaussian-blur-and-unsharp-mask), 2026-10-03 |
 | Saved spatial lengths beyond editor bounds, including Gaussian sigma >85 | 120, soft | Unmeasured | Full authored lengths need moving-frame qualification; earlier capped-value measurements do not apply |
 | Edge-Preserving Smooth slider | 120, soft | | |
-| Animated or warping filter: Domain Warp, Ripple | 120, soft | | |
+| Animated or warping filter: Domain Warp, Ripple | 120, soft | Unmeasured on the reference tablet | [Windows Domain Warp comparison](#windows-domain-warp-comparison) |
 | Fill layer or gradient-fill edit | 120, soft | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Navigation with proof or tone guide shown | 120 | | |
 | Navigation with exact artwork sampling (61 MP) | 120 | **Not met.** 48.43–49.89 canvas presents/s; interval p99 25.00 ms | [Exact artwork samples](#exact-artwork-samples), 2026-10-02 |
@@ -2178,6 +2178,169 @@ and `same-head-pen-bccb-0f2ab217/`. Brush SHA-256 prefixes are `37A8CA3A57DC`
 project remains `FF686BDF3CB3`. The fresh Object failure is retained separately
 under `object-motion-0f2ab217-numeric-feedback/`; it supplies no timing result.
 
+### Windows historical diagnostic, 2026-10-10
+
+On the same Surface Laptop 5, i7-1255U and Intel Iris Xe D3D12 driver
+32.0.101.6737, source `3a5da4436` was built in Release with no local production
+changes. These headless engine measurements precede the Windows menu and shared
+column sizing corrections. No owned compiler or other Capy Canvas workload ran
+during capture.
+The user's Chrome session remained open, so intermittent background activity is
+not excluded.
+
+The existing `brush_frames` workload uses a synthetic 9504 × 6336 drawing,
+1000 px brush and offscreen composition. Three 480-frame contacts per brush
+retain 479 moving frames each, lasting 5.57–5.88 seconds. Pen-up frames are
+excluded; initial moving frames and all tails are retained. Exact native
+Undo/Redo passed for every contact.
+
+| Brush | Completed updates/s, median (range) | Completion p99 range (ms) |
+| --- | ---: | ---: |
+| G-Pen | 85.41 (81.95–86.02) | 21.74–23.95 |
+| Eraser | 82.30 (81.49–83.65) | 19.47–19.89 |
+| Airbrush | 84.40 (83.35–85.03) | 18.03–18.68 |
+
+These offscreen results qualify neither displayed frame rates nor the reference
+tier. They do not resolve the earlier Windows comparison's latency and
+throughput differences. Raw contacts, moving-frame summary and build identity
+are in `artifacts/windows/port-20261010/performance/baseline-brush/`.
+The benchmark SHA-256 prefix is `F7223887BE07`; DXC is `9A5100511E12`.
+
+### Windows brush comparison, 2026-10-17
+
+The same Surface Laptop 5 / Iris Xe D3D12 driver 32.0.101.7085 ran the
+original Release `brush_frames` workload: 1000 px brushes, synthetic
+9504 × 6336 Paint/Paper canvas, 1600 × 1000 offscreen composition, 64 warmup
+frames, two samples and three 240-frame repetitions. Only the 239 moving
+frames per repetition count; pen-up, startup, history/readback and CSV writing
+are outside the frame timer. Exact Undo/Redo passes for all 24 current presets.
+
+The control is archived `3a5da4436ed4`; the candidate is source manifest
+`3E4391CFB134`, based on `7c71b731c391` with the Windows port. They span upstream
+brush changes, including grain calibration, so the comparison does not isolate
+a local regression. Values below are medians of the three per-repetition rates
+or nearest-rank p99 values. Completed time includes CPU-observed GPU completion,
+not a GPU timestamp or presented frame. No initial moving frames or tails are
+removed. This synthetic canvas and Intel GPU do not qualify the reference tier.
+
+| Preset | Control to candidate completed updates/s | Control to candidate completion p99 (ms) |
+| --- | ---: | ---: |
+| Pencil | 75.05 to 94.44 | 17.511 to 14.693 |
+| Pointy Pencil | 85.73 to 105.80 | 16.755 to 12.210 |
+| Shading Pencil | 111.11 to 156.26 | 13.238 to 9.486 |
+| Charcoal | 86.73 to 98.62 | 16.760 to 13.098 |
+| Crayon | unmeasured to 94.40 | unmeasured to 14.492 |
+| G-Pen | 93.17 to 94.09 | 19.187 to 15.055 |
+| Rough G-Pen | 67.13 to 65.01 | 28.327 to 22.324 |
+| Calligraphy Pen | 115.49 to 109.61 | 12.434 to 12.382 |
+| Antique Pen | 86.51 to 76.13 | 21.177 to 17.302 |
+| Realistic Pen | 77.14 to 81.49 | 22.634 to 15.550 |
+| Wet Ink | 69.22 to 63.43 | 22.798 to 19.840 |
+| Blotty Ink | 56.48 to 54.76 | 29.510 to 28.630 |
+| Brushed Ink | 49.90 to 51.83 | 37.071 to 28.716 |
+| Eraser | 89.60 to 86.69 | 16.751 to 16.384 |
+| Paintbrush | 49.62 to 48.92 | 41.654 to 28.601 |
+| Bristle Paintbrush | 92.96 to 87.08 | 17.731 to 16.037 |
+| Airbrush | 94.68 to 86.66 | 16.750 to 14.768 |
+| Chalk | 75.89 to 107.94 | 19.895 to 12.581 |
+| Marker | 52.71 to 53.05 | 39.686 to 28.360 |
+| Dual Texture | 64.50 to 50.72 | 21.255 to 27.814 |
+| Textured Flat | 57.45 to 51.43 | 33.900 to 25.708 |
+| Dry Scumble | 50.29 to 49.75 | 33.610 to 28.896 |
+| Pastel Block | 49.16 to 107.12 | 37.947 to 13.311 |
+| Transparent Glaze | 48.38 to 36.35 | 37.836 to 36.432 |
+
+Of the 23 comparable presets, ten have higher median throughput and thirteen
+have lower throughput; the median change is -1.40%. Crayon has no matched
+control. These results establish neither uniform improvement nor no regression.
+All per-repetition values and maxima remain in the raw evidence.
+
+Raw CSVs are `artifacts/windows/port-20261010/`
+`b3a-dx23-before-18a8efb39433/before23.csv` and
+`dx24-after-and-native6-prepared-421734aec379/after24.csv`; the latter directory
+also holds `retained-performance-comparison.json`. CSV SHA-256 prefixes are
+`1B56F75D1E8F` and `B8991D073C60`. The current run has 17,280 rows and 24 exact
+Undo/Redo checks; control has 16,560 rows and 23 presets.
+
+#### Same-revision brush control
+
+The same laptop and driver also ran a matched control based on `73a298f2c6fa`
+and candidate source `67E7D45A45B4`, with the same Release toolchain, build
+options and workload above. Both retain the existing untimed settle repair.
+The control ran first, followed by the candidate, with three repetitions of
+Dual Texture and Transparent Glaze. Each run retains 1,440 rows and passes
+exact Undo/Redo. The browser already running on the machine remained open;
+these measurements do not establish an otherwise idle machine.
+
+| Preset | Control to candidate completed updates/s | Completion p99 (ms) | CPU submit p99 (ms) |
+| --- | ---: | ---: | ---: |
+| Dual Texture | 43.72 to 49.45 | 33.446 to 28.701 | 11.024 to 9.864 |
+| Transparent Glaze | 37.17 to 40.51 | 45.688 to 38.409 | 14.766 to 15.667 |
+
+Completed moving rates increase by 13.10% and 8.97%, respectively. Completion
+p99 improves for both; Glaze CPU submit p99 worsens. Candidate maximum moving
+completion times remain 151.667 ms and 142.986 ms. No moving samples or spikes
+are removed. This two-preset comparison does not establish all-brush,
+native-input, physical-pen or reference-tier performance.
+
+Evidence is in `artifacts/windows/port-20261010/`
+`brush-stock73a-comparable-prepared-20261017/`: the raw runs, immutable build
+identities, moving summary and analysis. Benchmark SHA-256 prefixes are
+`B43D59C3AF94` (control) and `D118C028944A` (candidate); analysis is
+`47B8FA668E72`.
+
+### Windows snapshot routing comparison
+
+On the Surface Laptop 5, i7-1255U and Intel Iris Xe D3D12 driver
+32.0.101.7085, the retained control `n3e` is compared with snapshot-routing
+build `nrte`, source manifest `5248F242EE22`. Both use Balanced power, a
+2256 × 1504 display at scale 1.5, and the same plain 8192 × 6336 project
+`FF686BDF3CB3`. These observations do not qualify the reference tablet,
+physical pen latency or displayed frame rates.
+
+The original 18 px G-Pen workload injects a ten-second contact after settling,
+without a priming stroke, at a nominal 240 Hz. Each run consumes all 2401
+inputs with none unmatched; the canvas is 1418 × 988 at density 1.5. All moving
+frames and latency tails are retained. Input-to-frame-return values are ms:
+
+| Run | Control p99 | Snapshot-routing p99 | Control maximum | Snapshot-routing maximum |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 76.239 | 99.267 | 184.024 | 207.852 |
+| 2 | 55.245 | 99.003 | 162.403 | 206.615 |
+| 3 | 57.305 | 23.405 | 165.275 | 130.245 |
+
+Pen latency is mixed: two tails increase and one decreases. The candidate's
+first host frame takes 72.8–114.6 ms, with additional stalls near contact end.
+The measurements do not identify the internal cause or establish that Windows
+pen stutter is fixed.
+
+Hand, Zoom and Rotate view use their original maximized-window workload: one
+priming contact and three six-second contacts, Reset view between contacts.
+Each mode consumes all 4564 inputs with none unmatched. Rates count distinct
+renderer submissions during motion; interval p99 retains gaps within contacts.
+
+| Navigation | Control submissions/s | Snapshot-routing submissions/s | Control interval p99 (ms) | Snapshot-routing interval p99 (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Hand | 203.112 | 204.986 | 6.999 | 6.843 |
+| Zoom | 173.006 | 196.341 | 37.830 | 14.102 |
+| Rotate view | 166.847 | 200.039 | 38.550 | 9.917 |
+
+Navigation interval p99 decreases in these captures. UI tracing is absent
+during motion; no owned build or competing Capy Canvas workload runs
+concurrently. Background activity and thermal effects are not excluded. All 24
+navigation captures were reviewed; the pen workload emits no screenshots.
+Original guard failures and the Pen 1 geometry supplement remain with the raw
+records; no motion workload was repeated for postprocessing.
+
+Raw before/after records are under `artifacts/windows/port-20261010/performance/`
+in `dynamic-pen-navigation-9e5c042d1c364f97b79893188fc2f706/` and
+`dynamic-pen-navigation-798df53f75f345169e3769253953a717/`. The lossless comparison
+is `nrte-four-outer-00aeed8a89d5/direct-all6-original3e-comparison.json`.
+Control executable/DLL prefixes are `F7ACFCD0471E`/`1D9E74825AC2`; candidate
+prefixes are `9E72CB289257`/`B44C8ED6F692`. Later test-fixture and documentation
+changes are not new measurements. Presenter-readiness changes are unmeasured
+by these runs.
+
 ## Retained-material G-Pen comparison
 
 This earlier comparison is measured on 2026-10-02 at `eb9b8bab1` with the retained-material changes:
@@ -2862,3 +3025,173 @@ samples arrived in order. This measures control-state continuity; presentation
 FPS, motion p99 and thermal coverage remain unmeasured. Raw before/after results
 are in `artifacts/apple/port-oct13-regenerated/source-audit/current-surface-and-optimized-motion-ready/stamp-delivery-diagnostic/full7-run1`
 and the sibling `stamp-classifier-fixed/full7-run1`.
+
+## Windows Domain Warp comparison
+
+On 2026-10-15, the Surface Laptop 5, i7-1255U and Intel Iris Xe driver
+32.0.101.7085 compare the original Domain Warp with explicit fused multiply-add
+for phase, noise feedback and displacement. Both use the `f6871aab0` working tree,
+Release Rust 1.98.1 and Naga 30.0.1. The diagnostic source manifest is
+`C5703F14F38DDE5BB97CF07BFEEF88F0B1540E08932080FA02F0D4531932B320`.
+This laptop is not the reference tablet.
+
+The matched workload uses F32 source images, three octaves, scale 96, distance 24
+and phase 3.125. Each renderer warms twice, then evaluates three changed source
+images with alternating original/candidate order. Work counters match for every
+pair. Values are medians of three GPU durations in milliseconds.
+
+| Backend | Extent | Original | Explicit FMA |
+| --- | --- | --- | --- |
+| D3D12 | 384 × 256 | 1.009 | 1.036 |
+| D3D12 | 1600 × 1000 | 27.610 | 21.258 |
+| Vulkan | 384 × 256 | 1.369 | 1.345 |
+| Vulkan | 1600 × 1000 | 24.652 | 21.361 |
+
+The large-image samples range from 21.786–28.674 to 15.310–26.513 ms on D3D12,
+and from 17.917–26.090 to 18.625–25.541 ms on Vulkan. These short samples do not
+establish a sustained speedup, displayed frame rate or input latency. They show
+no consistent increase in the cost of the corrected arithmetic. Reference-tier
+motion remains unmeasured.
+
+The fixed 32 × 24 saved Domain image passes all 3072 channels on both backends
+without changing the baseline or tolerances. Maximum error falls from
+0.000232697 to 0.000104904 on D3D12 and 0.000236988 to 0.000102520 on Vulkan;
+the limit is 0.0002. Procedural FBM sources and rendered pixels remain unchanged
+against their own controls. Raw logs and all matched counters are in
+`artifacts/windows/port-20261010/post188-fma-guard-and-resolution-preparation-bf342fa0d8fe40d6b393697bda9e36d2/actual-67ac6b6355224e608a3968556c7fee98/`.
+
+### Windows angular filter accuracy observations
+
+On 2026-10-15, Surface Laptop 5 / Intel Iris Xe driver 32.0.101.7085,
+Rust 1.98.1 and Naga 30.0.1, the corrected shared axis and Cartesian Kaleidoscope fold pass all 16
+fixed U8/F32 angular cases on D3D12 and Vulkan. Original arithmetic fails three
+cases on D3D12 and two on Vulkan. Baselines and tolerances are unchanged; the
+full saved-artwork contract remains required and its Painterly failure is open.
+
+The diagnostic source was `B6E74B1A` at commit `1c246f3d`, targeting upstream
+`37fabf99`. Each filter used two warm frames followed by three alternating
+original/corrected changed-source pairs at 384 × 256 and 1600 × 1000, with
+matching work counters and a positive effect-pass count. The 96 observations
+per backend are short headless samples, not sustained motion, presentation,
+input latency or reference-tier qualification. Large-image GPU medians (ms):
+
+| Filter | D3D12 original | D3D12 corrected | Vulkan original | Vulkan corrected |
+| --- | ---: | ---: | ---: | ---: |
+| Kaleidoscope | 23.473 | 21.056 | 21.560 | 23.291 |
+| Swirl | 23.194 | 20.024 | 20.313 | 22.094 |
+| Motion blur | 29.704 | 23.665 | 25.736 | 25.585 |
+| Halftone | 22.910 | 20.933 | 21.849 | 22.522 |
+| Crosshatch | 8.985 | 8.601 | 8.531 | 8.705 |
+| Emboss | 22.759 | 21.203 | 22.633 | 18.809 |
+| Chromatic aberration | 22.684 | 22.087 | 20.699 | 19.236 |
+| Gradient fill | 16.413 | 13.701 | 13.919 | 14.004 |
+
+Vulkan Swirl increases consistently by 1.056–1.156× in the large-image paired
+samples (median 20.313 → 22.094 ms). Individual paired outliers reach 3.272×
+at the small extent and 1.531× at the large extent. These observations support
+no general speedup or no-regression claim; affected reference-tier motion
+qualification remains open.
+
+Raw logs are in
+`artifacts/windows/port-20261010/post37-angular-eight-red-control-b301fd0b59614cb5b9ab4c4849e5bd5e/actual-5298332983894c02a39fc96eae9afb80/`.
+The complete 32-comparison table and original/corrected samples are retained
+alongside it as `angular-eight-actual-cost-summary-v2.md` and
+`angular-eight-actual-cost-summary.json` in the proposal directory.
+
+
+### Windows hue-coordinate accuracy comparison
+
+On 2026-10-16, the same Surface Laptop 5, i7-1255U and Intel Iris Xe driver
+32.0.101.7085 ran Release Rust 1.98.1/Naga 30.0.1 source `4B86F4F0` at
+`b0fc6c6c`, targeting upstream `86a0fd0e`. The bounded hue-angle polynomial
+passes all nine physical-color tests, four Selective Color tests, exact filter
+endpoint tests and four fixed Hue/Selective U8/F32 render rows on D3D12 and
+Vulkan. The full saved-artwork contract remains required; Painterly is still open.
+
+The matched programs differ only in the hue-angle call: original native
+`atan2` versus the corrected polynomial. Both keep the same parameters,
+spatial reference, exact endpoint behavior and rendering work. Non-neutral Hue
+and Selective Color recipes use pointwise and zero-radius image evaluation,
+two warm frames and three changed-source pairs in AB/BA/AB order at each size.
+All 48 work-counter pairs match; all 96 CPU, complete and GPU records are finite
+and positive. GPU medians and individual paired candidate/original ratios:
+
+| Backend | Effect/path | Size | GPU original to candidate ms | Three paired ratios |
+|---|---|---|---|---|
+| Dx12 | hue_saturation/pointwise | 384x256 | 0.490 to 0.560 | 1.232/1.241/1.140 |
+| Dx12 | hue_saturation/pointwise | 1600x1000 | 13.541 to 11.182 | 0.726/1.378/0.826 |
+| Dx12 | hue_saturation/image | 384x256 | 0.973 to 0.929 | 1.028/0.955/1.044 |
+| Dx12 | hue_saturation/image | 1600x1000 | 23.712 to 22.258 | 0.812/1.211/0.659 |
+| Dx12 | selective_color/pointwise | 384x256 | 0.423 to 0.469 | 1.114/1.062/1.122 |
+| Dx12 | selective_color/pointwise | 1600x1000 | 12.358 to 10.396 | 0.845/1.169/0.827 |
+| Dx12 | selective_color/image | 384x256 | 0.800 to 0.929 | 1.207/0.959/1.018 |
+| Dx12 | selective_color/image | 1600x1000 | 23.694 to 21.711 | 0.916/1.157/0.614 |
+| Vulkan | hue_saturation/pointwise | 384x256 | 0.818 to 0.799 | 0.964/1.027/0.941 |
+| Vulkan | hue_saturation/pointwise | 1600x1000 | 11.644 to 11.498 | 1.017/0.987/0.892 |
+| Vulkan | hue_saturation/image | 384x256 | 1.268 to 1.211 | 1.103/0.911/0.812 |
+| Vulkan | hue_saturation/image | 1600x1000 | 22.265 to 24.721 | 1.110/0.906/1.136 |
+| Vulkan | selective_color/pointwise | 384x256 | 0.789 to 0.789 | 1.001/1.021/0.958 |
+| Vulkan | selective_color/pointwise | 1600x1000 | 11.402 to 11.376 | 1.009/0.829/0.612 |
+| Vulkan | selective_color/image | 384x256 | 1.167 to 1.212 | 1.024/0.971/1.040 |
+| Vulkan | selective_color/image | 1600x1000 | 16.162 to 21.947 | 1.374/1.301/1.009 |
+
+Large D3D12 pointwise medians improve, while small D3D12 pointwise samples and
+Vulkan image evaluation regress. Large Vulkan Selective Color image ratios
+are 1.374, 1.301 and 1.009; the 16.162 to 21.947 ms medians do not support a
+no-regression claim. Keep the individual samples and outliers when comparing
+future changes. These short headless frames measure rendering work, not
+sustained motion, presentation, physical pen latency or reference-tier targets.
+
+Raw logs, paired CPU/complete/GPU records and matching work counters are in
+`artifacts/windows/port-20261010/hue-selective-both-paths-cost-unapplied-2280d4a64c38412aae6c7c5af6a32447/actual-28100bdd80154a5c9374c334e608330a/`,
+in `results.json` and `paired-cost-summary.json`.
+
+### Windows current-build input comparison, 2026-10-17
+
+The Surface Laptop 5, i7-1255U and Intel Iris Xe D3D12 driver
+32.0.101.7085 compare qualified source `0E13A14FD1A5` with
+`44207B3D00F4`, based on `origin/main` revision `6307b53623cd`.
+The display is 2256 x 1504 at 60 Hz, density 1.5, Balanced power.
+These builds include upstream and local changes; this comparison does not
+isolate one fix. The original plain 8192 x 6336 project, 18 px G-Pen,
+Immediate presentation and maximum frame latency 1 are unchanged.
+Pen canvas bounds are 1418 x 988; navigation uses 2256 x 1432.
+
+| Contact | Previous input-to-frame-return p99 (ms) | Current p99 (ms) | Current maximum (ms) |
+| --- | ---: | ---: | ---: |
+| Pen 1 | 206.665 | 21.956 | 127.979 |
+| Pen 2 | 26.694 | 26.359 | 134.032 |
+| Pen 3 | 49.969 | 19.437 | 121.219 |
+| Hand | 19.258 | 18.029 | 49.168 |
+| Zoom | 18.262 | 15.005 | 52.621 |
+| Rotate view | 18.589 | 19.566 | 49.647 |
+
+Each unprimed pen contact requests ten seconds at nominal 240 Hz, after the
+original three-second settle. Navigation retains one excluded priming
+contact and three six-second contacts, resetting view between contacts.
+The navigation rows pool input latency across their measured contacts;
+these are not averages of contact frame rates. All 20,895 injected inputs
+were consumed with zero unmatched records and no trace overflow.
+
+Every pen input-to-frame-return sample above 16.667 ms occurs in the first
+132.8081 ms of its contact. The first host-frame render spans are
+71.6399, 74.2565 and 70.4790 ms. The underlying blocking call remains
+unidentified. The first-contact pause is unresolved, and navigation does
+not show a uniform latency improvement.
+
+The original reporter, input pacing, 180-second outer and 90-second
+shutdown limits are unchanged. UI tracing is absent and SkipPresentMon
+is retained. These software timestamps exclude physical digitizer and
+panel response; they are not scanout latency, displayed fps or a
+reference-tier qualification. All 24 navigation endpoint PNGs were viewed;
+no missing tiles or error banners were observed. The blank document limits
+content validation, and stills do not establish temporal continuity.
+
+Raw captures: `artifacts/windows/port-20261010/performance/` under
+`dynamic-pen-navigation-e9123645f3d4418ba15d2c419e91e24e/`.
+Comparison and full source/runtime/ownership closure:
+`n6307-six-closure-93587e8786b641a99c0a8770cf24bb79/`
+(`closure-and-release.json`, `B2967F434089`). Image review:
+`navigation-24-image-review-6307/review.json` (`5328D28B1504`).
+Current EXE/DLL prefixes are `371C35B30BF7`/`AC8122F54893`;
+normal Release qualification is `55F6B17F6D8E`.

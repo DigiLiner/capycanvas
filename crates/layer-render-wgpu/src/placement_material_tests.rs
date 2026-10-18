@@ -306,7 +306,7 @@ fn snapshot_affine_material_transform_preserves_raw_codes_masks_and_world_regist
         let control = crate::snapshot::CaptureControl::with_allocation_tracking();
         let edit = pollster::block_on(renderer.snapshot_gpu().transform_pixels(plan, control.clone())).unwrap();
     let mut baked = document.clone(); baked.apply(edit).unwrap();
-        assert!(control.allocation_peaks().unwrap().observations > 0);
+        assert_eq!(control.allocation_peaks().unwrap().observations > 0, renderer.device.generate_allocator_report().is_some());
         assert_eq!(target(&baked), target(&document));
         assert_eq!(occurrence(&baked).offset, [-80, -40]);
         assert_eq!(occurrence(&baked).opacity, occurrence(&before).opacity);

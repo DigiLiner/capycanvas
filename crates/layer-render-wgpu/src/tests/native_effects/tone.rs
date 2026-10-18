@@ -393,15 +393,24 @@ fn native_gradient_signed_hdr_interpolation_keeps_finite_interior_values() {
     let magnitude=2.8e38f32;
     for (mix,expected) in [(ColorMixSpace::LinearRgb,0.75),(ColorMixSpace::Oklab,0.421875)] {
         let mut layer=table_probe("gradient_map",false,0);
-        let p=Arc::make_mut(&mut layer.program);
-        p.wgsl="fn table_probe(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{let v=fx_lut(b,0u,.125);return vec4(ldexp(v.rgb,vec3<i32>(-127)),1.);}".into();
         set(&mut layer,"gradient",EffectValue::Gradient(GradientDefinition {
             stops:[magnitude,-magnitude].into_iter().enumerate().map(|(i,v)|GradientStop {
                 position:i as f32,color:RgbColor::from_linear(RgbSpace::Srgb,[v,v,v,1.]).unwrap(),
             }).collect(),interpolation:mix,
         }));
-        let actual=frame(&mut r,&[layer]);
-        assert!(actual.iter().all(|v|v.is_finite()),"{mix:?}: {actual:?}");
+        let mut bits=[0u32;3];
+        for shift in [0u32,16] {
+            Arc::make_mut(&mut layer.program).wgsl=format!("fn table_probe(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{let bits=bitcast<vec3<u32>>(fx_lut(b,0u,.125).rgb);return vec4<f32>(vec3<f32>((bits>>vec3<u32>({shift}u))&vec3<u32>(65535u)),1.);}}").into();
+            let words=frame(&mut r,&[layer.clone()]);
+            assert_eq!(words[3],1.);
+            for c in 0..3 {
+                assert!(words[c].is_finite()&&(0. ..=65535.).contains(&words[c])&&words[c]==words[c].trunc(),"{mix:?} shift={shift}: {words:?}");
+                bits[c]|=(words[c] as u32)<<shift;
+            }
+        }
+        let raw=bits.map(f32::from_bits);
+        assert!(raw.iter().all(|v|v.is_finite()),"{mix:?}: {raw:?}");
+        let actual=std::array::from_fn(|c|if c==3 {1.}else{(f64::from(raw[c])/2f64.powi(127)) as f32});
         close(actual,[(f64::from(magnitude)/2f64.powi(127)*f64::from(expected)) as f32;3],1.,&format!("signed HDR {mix:?}"));
     }
 }

@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[string]$DebuggerPath,[ValidateSet('drawers')][string]$ColumnMode='drawers')
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('touch','pen','mouse')][string]$Device='touch',[string]$DebuggerPath,[ValidateSet('drawers')][string]$ColumnMode='drawers',[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='prefer-visible';$CapyPopups=$true
@@ -18,6 +18,13 @@ function Presentation {
     if($workspace){try{$workspace.Current.ItemStatus|ConvertFrom-Json}catch{}}
 }
 function Layout { (Model).state.workspace.layout|ConvertTo-Json -Depth 90 -Compress }
+function CommandTileId([string]$Command) {
+    $panels=@((Model).panels|Where-Object id -eq 'commands')
+    if($panels.Count -ne 1){throw 'Expected one Commands panel'}
+    $tiles=@($panels[0].tiles|Where-Object {$_.resolved_control.kind -ceq 'command' -and $_.resolved_control.command -ceq $Command})
+    if($tiles.Count -ne 1 -or @($panels[0].tiles|Where-Object id -eq $tiles[0].id).Count -ne 1){throw "Expected one $Command command tile"}
+    "tile-commands-$($tiles[0].id)"
+}
 function Settled-Layout {
     $state=@{value=$null;count=0}
     Wait-Until {
@@ -46,6 +53,15 @@ function Point([string]$Id,[switch]$Name) {
         $stable.count -ge 2
     } "Source $Id did not arrange visibly"
     @{x=[int]($stable.bounds.X+$stable.bounds.Width*.5);y=[int]($stable.bounds.Y+$stable.bounds.Height*.5)}
+}
+function Floating-Point($At,$Preview,$Area,[double]$Density) {
+    @{x=[int]($At.x+($Area.x+$Area.width*.5-$Preview.x-$Preview.width*.5)*$Density)
+      y=[int]($At.y+($Area.y+$Area.height*.5-$Preview.y-$Preview.height*.5)*$Density)}
+}
+function Floating-Toolbar($Model,[long]$After) {
+    $Model.workspace_update.revision -gt $After -and $null -eq $Model.workspace_update.drag -and
+        @($Model.state.workspace.layout.floating|Where-Object {$_.root.kind -eq 'tabs' -and $_.root.panels -contains 'toolbar'}).Count -eq 1 -and
+        @($Model.layout.groups|Where-Object {$_.panels -contains 'toolbar' -and $_.floating}).Count -eq 1
 }
 function Move-To($At) {[CapyRowPointer]::Move([int]$At.x,[int]$At.y)}
 function Tap([string]$Id) {
@@ -174,7 +190,7 @@ function Held-Blur([string]$Id) {
         [CapyRowPointer]::Cancel()
     }finally{
         $window.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
-        $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+        $null=[CapyRowPointer]::SetForegroundWindow($drawing.Handle)
     }
     Intact $before
 }
@@ -210,17 +226,20 @@ function Held-Drag([string]$Id,$To,[switch]$Cancel) {
     }
     (Gesture)|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run ($script:case+'-terminal.json'))
 }
+$closeAttempted=$false
 try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
+    [IO.Directory]::CreateDirectory($env:CAPY_STORAGE_DIR)|Out-Null
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
     $env:CAPY_TRACE_UI='1'
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError $stderr
     $null=$review.Handle
     @{process_id=$review.Id;run=$run;device=$Device}|ConvertTo-Json|Set-Content (Join-Path $repo 'artifacts/windows/workspace-pickup-review.json')
     Write-Output "Owned workspace pickup review $($review.Id) ($Device)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Workspace review did not start' 45
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    Wait-Until {$script:drawing=Owned-DrawingWindow $review;$null -ne $drawing -and (Model).brush_ready -and (Model).state.theme -eq $Theme -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Workspace review did not start' 45
+    $root=$drawing.Root
     if($DebuggerPath){
         $DebuggerPath=(Resolve-Path -LiteralPath $DebuggerPath).Path
         $debugCommands=Join-Path $run 'debugger.txt'
@@ -244,7 +263,7 @@ try {
     }
     if(Find 'Test stroke' -Name){throw 'Workspace fixture requires the production editor'}
     $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawing.Handle)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     $null=Settled-Layout
     $script:case='canvas-native-cursor'
@@ -274,9 +293,9 @@ try {
     [CapyRowPointer]::Key(0x5d)
     Wait-Until {(Gesture).menu_open} 'Divider did not expose its keyboard context menu'
     Dismiss
-    $disabled='tile-commands-25'
+    $disabled=CommandTileId 'undo'
     if((Control $disabled).Current.IsEnabled){throw 'Undo must be disabled in the empty review document'}
-    $disabledDestination=Point 'tile-commands-28'
+    $disabledDestination=Point (CommandTileId 'clear_layer')
     $script:case='disabled-early';Early-Motion $disabled $disabledDestination
     $script:case='disabled-release';Held-Release $disabled
     $script:case='disabled-drag';Held-Drag $disabled $disabledDestination
@@ -300,8 +319,17 @@ try {
     Start-Sleep -Milliseconds 35
     Move-To $gripDestination
     Wait-Until {(Gesture).phase -eq 'dragging' -and $null -ne (Presentation).workspace_update.drag.group} 'Toolbar did not reach shared floating placement'
+    $heldUpdate=(Presentation).workspace_update
+    $model=Model;$canvas=(Control 'drawing-canvas').Current.BoundingRectangle
+    $gripDestination=Floating-Point $gripDestination $heldUpdate.drag.group.bounds $model.layout.work_area ($canvas.Width/$model.layout.viewport[0])
+    Move-To $gripDestination
+    Wait-Until {
+        $update=(Presentation).workspace_update
+        (Gesture).phase -eq 'dragging' -and $update.revision -gt $heldUpdate.revision -and $null -ne $update.drag.group -and $null -eq $update.drag.drop_hint
+    } 'Toolbar preview did not reach free workspace'
+    $releasedAfter=(Presentation).workspace_update.revision
     [CapyRowPointer]::Up()
-    Wait-Until {@((Model).layout.groups|Where-Object {$_.panels -contains 'toolbar' -and $_.floating}).Count -eq 1} 'Toolbar grip did not commit a floating panel'
+    Wait-Until {(Gesture).phase -eq 'idle' -and (Floating-Toolbar (Model) $releasedAfter)} 'Toolbar grip did not commit a floating panel'
     Drifting-Taps
     $destination=Point 'tile-toolbar-4'
     $script:case='floating-early';Early-Motion 'tile-toolbar-1' $destination
@@ -378,6 +406,7 @@ try {
     $script:case='held-blur';Held-Blur ('tile-toolbar-'+$color.id)
     if((Model).state.document_file.modified){throw 'Workspace gestures unexpectedly modified the drawing'}
     [CapyRowPointer]::Dispose()
+    $closeAttempted=$true
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires review'}
     [pscustomobject]@{device=$Device;column_mode=$ColumnMode;canvas_cursor='passed';short_click='passed';drifting_taps='passed';early_rejection='passed';hold_release_menu='passed';same_contact_drag='passed';immediate_grip='passed';native_cancellation='passed';one_step_undo_redo='passed';collapsed_icons='passed';floating_tiles='passed';divider_tiles='passed';disabled_commands='passed';drawer_tiles='passed';nested_drawer='passed';zen_visibility='passed';divider_keyboard='passed';held_blur='passed';native_submenu='passed';zero_exit='passed';scope='OS-delivered synthetic input; physical devices, full presentation matrix and timing remain separate'}|ConvertTo-Json
@@ -386,10 +415,19 @@ try {
     try{Model|ConvertTo-Json -Depth 90|Set-Content (Join-Path $run 'failure-model.json')}catch{}
     @{case=$script:case;error=$failure.ToString();gesture=(Gesture)}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
     if($review -and !$review.HasExited){
-        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
+        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
     }
     throw $failure
 }finally{
     [CapyRowPointer]::Dispose()
+    try{
+        if(!$closeAttempted -and $review -and !$review.HasExited){
+            if(!$drawing){throw 'Owned drawing window unavailable during failure cleanup'}
+            $closeAttempted=$true
+            & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Close
+        }
+    }catch{
+        try{[IO.File]::WriteAllText((Join-Path $run 'cleanup-failure.txt'),($_|Out-String))}catch{}
+    }
     Exit-CapyEnvironment
 }

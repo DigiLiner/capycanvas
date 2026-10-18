@@ -818,6 +818,7 @@ pub trait CanvasRenderer {
     fn set_selection_overlay(&mut self, _overlay: Option<SelectionOverlay>) {}
     fn set_crop_overlay(&mut self, _overlay: Option<CropOverlay>) {}
     fn set_paper_overlay(&mut self, _overlay: Option<PaperOverlay>) {}
+    fn paper_overlay_ready(&self, _paper: &layer_core::paper::PaperBinding) -> bool { true }
     fn set_clipping_preview(&mut self, _shadows: bool, _highlights: bool) {}
     fn set_telemetry_enabled(&mut self, _enabled: bool) {}
     fn telemetry(&self) -> RendererTelemetry {

@@ -15,7 +15,7 @@ fn retained_paint_base_without_live_pages_matches_identity_and_translated_querie
     let extent = [32, 16];
     for offset in [[0, 0], [-7, -5]] {
         let (texture, _) = create_color_target(&r.device, extent, "retained paint query");
-        let mut scene = Scene::new(&r);
+        let mut scene = Scene::new(&r).unwrap();
         let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
         scene.capture_region(&mut r, crate::test_support::packet(snapshot.view().with_offset64(offset.map(f64::from)), extent),
             &texture, PixelRect::full(extent), Output::Artwork(None), &mut encoder).unwrap();

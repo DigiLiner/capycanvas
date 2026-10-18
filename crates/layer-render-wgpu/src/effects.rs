@@ -73,7 +73,7 @@ impl Execution {
 type Stage = (Execution, layer_core::BlendSpace, bool, bool);
 
 pub(super) fn identity_chain(scene:SceneView<'_>,layers:&[OccurrenceHandle])->bool {
-    layers.iter().all(|handle|effect_geometry(scene,*handle).is_ok_and(|geometry|geometry[0]==[1.,0.,0.,1.]))
+    layers.iter().all(|handle|effect_geometry(scene,*handle).is_ok_and(|geometry|geometry[0]==[1.,0.,0.,1.] && geometry[3]==[1.,0.,0.,1.]))
 }
 
 pub(super) fn normal_chain(scene:SceneView<'_>,layers:&[OccurrenceHandle])->bool {
@@ -167,7 +167,7 @@ impl Pipeline {
 struct CachedEffect {
     program: Arc<EffectProgram>,
     values: Vec<layer_core::EffectValue>,
-    geometry: [[f32; 4]; 3],
+    geometry: [[f32; 4]; 4],
 }
 impl CachedEffect {
     fn view(&self) -> EffectView<'_> { EffectView::new(&self.program, &self.values) }
@@ -586,8 +586,8 @@ impl Effects {
             let end = directory + effect.program.lookups.len();
             r.queue().write_buffer(
                 &buffer,
-                u64::from(base - 3) * 16,
-                &bytes[(base as usize - 3) * 16..end * 16],
+                u64::from(base - 4) * 16,
+                &bytes[(base as usize - 4) * 16..end * 16],
             );
         }
         let resource = match analysis {
@@ -655,15 +655,18 @@ impl Effects {
     }
 }
 
-fn effect_geometry(scene: SceneView<'_>, handle: OccurrenceHandle) -> Result<[[f32; 4]; 3], GpuRasterError> {
+fn effect_geometry(scene: SceneView<'_>, handle: OccurrenceHandle) -> Result<[[f32; 4]; 4], GpuRasterError> {
     let offset = scene.evaluation_offset64();
     let (mapping, extent) = scene.effect_application(handle).unwrap().spatial.as_ref()
         .map_or(([1., 0., 0., 1., 0., 0.], scene.composition().size.map(f64::from)),
             |reference| (reference.mapping.0, reference.extent));
     let [a, b, c, d, x, y] = mapping;
+    let inverse = layer_core::authored::Affine64(mapping).inverse()
+        .ok_or(GpuRasterError::InvalidTransform("Effect coordinates exceed the GPU numerical range"))?.0;
     let geometry = [[a as f32, b as f32, c as f32, d as f32],
         [(x + offset[0]) as f32, (y + offset[1]) as f32, extent[0] as f32, extent[1] as f32],
-        [offset[0] as f32, offset[1] as f32, scene.composition().size[0] as f32, scene.composition().size[1] as f32]];
+        [offset[0] as f32, offset[1] as f32, scene.composition().size[0] as f32, scene.composition().size[1] as f32],
+        [inverse[0] as f32, inverse[1] as f32, inverse[2] as f32, inverse[3] as f32]];
     let [a,b,c,d]=geometry[0];let determinant=a*d-b*c;
     if !geometry.iter().flatten().all(|value| value.is_finite()) || !determinant.is_finite() || determinant==0.
         || ![d/determinant,-b/determinant,-c/determinant,a/determinant].into_iter().all(f32::is_finite) {
@@ -703,7 +706,7 @@ fn computable(programs:&[Arc<EffectProgram>],execution:Execution)->bool {
 }
 fn validate_source(source: &mut String, compute:bool,mask_slots:usize,reduced:bool,programs:&[Arc<EffectProgram>]) -> Result<bool, GpuRasterError> {
     let (mut module,info) = validated_module(source)?;
-    if module.global_variables.len() != 11 + if compute { mask_slots + 1 } else { MASK_SLOTS + usize::from(reduced) }
+    if module.global_variables.len() != 12 + if compute { mask_slots + 1 } else { MASK_SLOTS + usize::from(reduced) }
         || module.entry_points.len() != 2 + usize::from(compute)
         || !module.overrides.is_empty()
     {
@@ -788,12 +791,14 @@ fn fx_lookup(base:u32,table:u32,index:u32)->vec4<f32> {
 }
 fn fx_time(base:u32)->f32 { return effect_data[base-1u].w; }
 var<private> fx_reference_linear:vec4<f32>;
+var<private> fx_reference_inverse:vec4<f32>;
 var<private> fx_reference_frame:vec4<f32>;
 var<private> fx_composition_frame:vec4<f32>;
 fn fx_begin(base:u32) {
-    fx_reference_linear=effect_data[base-4u];
-    fx_reference_frame=effect_data[base-3u];
-    fx_composition_frame=effect_data[base-2u];
+    fx_reference_linear=effect_data[base-5u];
+    fx_reference_frame=effect_data[base-4u];
+    fx_composition_frame=effect_data[base-3u];
+    fx_reference_inverse=effect_data[base-2u];
     fx_front_grid=fx_grid(settings.source_over,settings.operation_linear.x,vec4(settings.color.zw,settings.operation_offset.zw));
     fx_back_grid=fx_grid(settings.backdrop,settings.operation_linear.y,fx_original_support());
 }
@@ -804,8 +809,8 @@ fn fx_to_document(point:vec2<f32>)->vec2<f32> {
 }
 fn fx_from_document(point:vec2<f32>)->vec2<f32> {
     if FX_REFERENCE_IDENTITY {return point-fx_reference_frame.xy;}
-    let m=fx_reference_linear;let q=point-fx_reference_frame.xy;let determinant=m.x*m.w-m.y*m.z;
-    return vec2(m.w*q.x-m.z*q.y,-m.y*q.x+m.x*q.y)/determinant;
+    let m=fx_reference_inverse;let q=point-fx_reference_frame.xy;
+    return vec2(m.x*q.x+m.z*q.y,m.y*q.x+m.w*q.y);
 }
 fn fx_extent()->vec2<f32> { return fx_reference_frame.zw; }
 fn fx_in_frame(point:vec2<f32>)->bool {
@@ -1095,7 +1100,7 @@ mod tests {
     fn checked_modules_omit_unreachable_helpers_after_interface_validation() {
         let program=crate::tests::fixture("exposure").program();
         let programs=[program];
-        let mut source=shader_source(&programs,&[3],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
+        let mut source=shader_source(&programs,&[4],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
         let full=source.len();
         validate_source(&mut source,true,1,false,&programs).unwrap();
         assert!(source.len()<full/2);
@@ -1113,7 +1118,7 @@ mod tests {
             program.wgsl.sources().unwrap().join("\n")).into();
         let program=Arc::new(program);
         let programs=[program];
-        let mut source=shader_source(&programs,&[3],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
+        let mut source=shader_source(&programs,&[4],Execution::Fused,Default::default(),false,layer_core::BlendSpace::Linear,true,true).unwrap();
         validate_source(&mut source,true,1,false,&programs).unwrap();
         parse_validated(&source).unwrap();
         assert!(source.contains(&format!("{attribute} fn attribute_probe"))&&source.contains("fn attribute_dependency"));
@@ -1124,7 +1129,7 @@ mod tests {
         for (name,expected) in [("threshold",true),("brightness_to_opacity",true),("film_grain",false)] {
             let program=crate::tests::fixture(name).program();
             for blend in layer_core::BlendSpace::ALL {
-                let source=shader_source(std::slice::from_ref(&program),&[3],Execution::Reduced,Default::default(),false,blend,true,false).unwrap();
+                let source=shader_source(std::slice::from_ref(&program),&[4],Execution::Reduced,Default::default(),false,blend,true,false).unwrap();
                 assert_eq!(position_independent(std::slice::from_ref(&program),&source).unwrap(),expected,"{name} {blend:?}");
             }
         }
@@ -1147,6 +1152,39 @@ mod tests {
                 assert_eq!(pass_input_support(view,1,input,level),Some(expected));
             }
         }
+    }
+    #[test]
+    fn authored_inverse_coefficients_preserve_sub_f32_geometry() {
+        use layer_core::authored::*;
+        let mut artwork=Artwork::new([32,24]).unwrap();
+        let program=layer_core::bundled_effect_catalog().get("vignette").unwrap().program();
+        let application=EffectApplication::new(program.clone(),layer_core::EffectInstance::new(program).values,[32,24]);
+        let effect=artwork.effects.insert(PortableId::random(),application).unwrap();
+        let occurrence=artwork.occurrences.insert(PortableId::random(),Occurrence::new(OccurrenceContent::Effect(effect),"Vignette")).unwrap();
+        let stack=artwork.compositions.get(artwork.root).unwrap().result;
+        artwork.stacks.get_mut(stack).unwrap().entries.push(occurrence);
+        let cases=[
+            ([3.,0.,0.,5.,-39.75,47.5],[1./3.,0.,0.,1./5.]),
+            ([2.,1.,1.,3.,0.,0.],[0.6,-0.2,-0.2,0.4]),
+            ([-2.,0.,0.,4.,0.,0.],[-0.5,0.,0.,0.25]),
+            ([0.,1.,-1.,0.,0.,0.],[0.,-1.,1.,0.]),
+            ([1.00000005,0.,0.,1.,0.,0.],[f64::from(f32::from_bits(0x3f7fffff)),0.,0.,1.]),
+        ];
+        for (mapping,inverse) in cases {
+            artwork.effects.get_mut(effect).unwrap().spatial.as_mut().unwrap().mapping=Affine64(mapping);
+            let document=layer_core::Document::from_artwork(artwork.clone()).unwrap();
+            let geometry=effect_geometry(document.scene(),occurrence).unwrap();
+            assert_eq!(geometry[3],inverse.map(|v|v as f32));
+            assert!(!identity_chain(document.scene(),&[occurrence]));
+        }
+        artwork.effects.get_mut(effect).unwrap().spatial.as_mut().unwrap().mapping=Affine64([3.,0.,0.,5.,-39.75,47.5]);
+        let document=layer_core::Document::from_artwork(artwork).unwrap();
+        let geometry=effect_geometry(document.scene(),occurrence).unwrap();
+        assert_eq!(geometry[0],[3.,0.,0.,5.]);
+        assert_eq!(geometry[1],[-39.75,47.5,32.,24.]);
+        assert_eq!(geometry[2],[0.,0.,32.,24.]);
+        assert_eq!(geometry[3][0]*107.25,35.75);
+        assert_eq!(geometry[3][3]*35.,7.);
     }
     #[test]
     fn finite_authored_coordinates_outside_gpu_range_are_refused_before_encoding() {
@@ -1179,21 +1217,21 @@ mod tests {
         for name in ["threshold","brightness_to_opacity"] {
             let program=crate::tests::fixture(name).program();
             for blend in layer_core::BlendSpace::ALL {
-                let mut source=shader_source(std::slice::from_ref(&program),&[3],Execution::Fused,Default::default(),false,blend,true,false).unwrap();
+                let mut source=shader_source(std::slice::from_ref(&program),&[4],Execution::Fused,Default::default(),false,blend,true,false).unwrap();
                 assert!(validate_source(&mut source,true,1,false,std::slice::from_ref(&program)).unwrap());
                 let mut original=(*program).clone();
                 original.entry="original_probe".into();
                 original.wgsl=format!("{}\nfn original_helper(p:vec2<f32>)->vec4<f32>{{return fx_original(p);}}\nfn original_probe(c:vec4<f32>,p:vec2<f32>,base:u32)->vec4<f32>{{return original_helper(p);}}",
                     program.wgsl.sources().unwrap().join("\n")).into();
                 let original=[Arc::new(original)];
-                let mut source=shader_source(&original,&[3],Execution::Fused,Default::default(),false,blend,true,false).unwrap();
+                let mut source=shader_source(&original,&[4],Execution::Fused,Default::default(),false,blend,true,false).unwrap();
                 assert!(!validate_source(&mut source,true,1,false,&original).unwrap());
             }
         }
     }
     fn validate(p: &[Arc<EffectProgram>], execution: Execution) {
         for blend in layer_core::BlendSpace::ALL {for normal in [false,true] {
-            let mut source = shader_source(p, &vec![3; p.len()], execution, Default::default(), false, blend,normal,false).unwrap();
+            let mut source = shader_source(p, &vec![4; p.len()], execution, Default::default(), false, blend,normal,false).unwrap();
             validate_source(&mut source,computable(p,execution),p.len().min(MASK_SLOTS),execution.reduced(),p).unwrap();
         }}
     }

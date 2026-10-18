@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-enum class CanvasQueryKind { Filters, Thumbnails, LayerMenu, Workspace, Document };
+enum class CanvasQueryKind { Filters, Thumbnails, LayerMenu, Workspace, Document, Papers };
 using PreviewPacket=std::shared_ptr<CapyPreview>;
 using PreviewReply=std::function<void(PreviewPacket)>;
 using PreviewTransport=std::function<bool(CanvasQueryKind,std::string,PreviewReply)>;
@@ -27,12 +27,14 @@ public:
         if(items.size()>=MaxItems)return false;
         items.emplace_back(std::move(item));return true;
     }
-    std::optional<CanvasQuery> Take(){
-        if(items.empty())return {};
-        // Menus contain no pixels and should not wait behind thumbnail batches.
-        auto next=items.begin();
-        for(auto it=items.begin();it!=items.end();++it)
+    std::optional<CanvasQuery> Take(std::optional<CanvasQueryKind> kind={}){
+        auto next=items.end();
+        for(auto it=items.begin();it!=items.end();++it){
+            if(kind&&it->kind!=*kind)continue;
+            if(next==items.end())next=it;
             if(it->kind==CanvasQueryKind::LayerMenu){next=it;break;}
+        }
+        if(next==items.end())return {};
         auto item=std::move(*next);items.erase(next);return item;
     }
     void Clear(){items.clear();}

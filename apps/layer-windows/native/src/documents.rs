@@ -28,6 +28,7 @@ pub(crate) enum DocumentAction {
     Tabs { action: tabs::Action },
     Package { id:u32, action:layer_ui::PackageAction, path:Option<String> },
     Palette { action: crate::palette_files::Action },
+    PaperImport { id: u32, path: Option<String> },
     NewPreferences { id: u32, action: layer_ui::NewDocumentAction },
     Recovery { action: crate::recovery::Action },
     WorkflowBegin { id: u32 },
@@ -372,6 +373,7 @@ pub(crate) struct DocumentService {
     pub proof: crate::proof::Service,
     pub tone: layer_host::tone::ToneService,
     pub palettes: crate::palette_files::Service,
+    pub papers: crate::paper_files::Service,
     worker: Worker,
     active: Option<Active>,
     opening: Option<Box<Opening>>,
@@ -408,6 +410,7 @@ impl DocumentService {
             proof: crate::proof::Service::new(wake.clone()),
             tone: layer_host::tone::ToneService::new(Some(wake.clone())),
             palettes: crate::palette_files::Service::new(wake.clone()),
+            papers: crate::paper_files::Service::new(wake.clone()),
             wake,
             window: layer_host::window::DocumentWindow::localized(localization),
             profile_copy: serde_json::to_value(layer_ui::color_feature_copy::ProfileCopy::new(localization)).unwrap(),
@@ -603,6 +606,7 @@ impl DocumentService {
         }
         if let DocumentAction::Tabs { action } = action { return self.tab_action(host, action); }
         if let DocumentAction::Palette { action } = action { return self.palettes.dispatch(host, action); }
+        if let DocumentAction::PaperImport { id, path } = action { return self.papers.import(host, id, path); }
         if let DocumentAction::Recovery { action } = action {
             self.recovery.as_mut().ok_or_else(|| layer_ui::DocumentTransportRefusal::RecoveryServiceUnavailable.message(host.session.localization()).to_string())?.dispatch(&mut host.session, action)?;
             host.invalidate_snapshot();
@@ -848,6 +852,7 @@ impl DocumentService {
     pub(crate) fn poll(&mut self, host: &mut NativeHost) -> Result<(), String> {
         self.poll_tabs(host)?;
         self.palettes.poll(host);
+        self.papers.poll(host)?;
         self.open_queued(host);
         if let Some(result) = self.recording_save.as_ref().and_then(|receiver| receiver.try_recv().ok()) {
             self.recording_save = None;
@@ -973,6 +978,8 @@ impl DocumentService {
         task.preview(index)
     }
     pub(crate) fn stop_worker(&mut self) -> Result<(), String> {
+        self.palettes.stop();
+        self.papers.stop();
         if let Some(package)=&self.package {package.cancelled.store(true,Ordering::Release);}
         if let Some(cancelled) = self.active.as_ref().and_then(|a| a.cancelled.as_ref()) { cancelled.store(true, Ordering::Release); }
         if let Some(recovery) = &mut self.recovery { recovery.stop()?; }
@@ -992,7 +999,7 @@ mod tests {
     use crate::test_support::TempDir;
     use layer_ui::{CommandId, Platform, UiAction};
     use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     #[test]
     fn localized_service_seeds_japanese_tab_caption_without_gpu() {
         let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
@@ -1001,6 +1008,21 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(host.session.localization(), &localization));
         assert_eq!(service.window.view(&host, 900.)["tabs"][0]["title"], "無題 1");
         service.stop_worker().unwrap();
+    }
+    pub(super) fn finish(service: &mut DocumentService, host: &mut NativeHost, done: &mpsc::Receiver<()>) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            service.poll(host).unwrap();
+            if service.active.is_none() && service.recording_save.is_none()
+                && service.package.as_ref().is_none_or(|package| package.writing.is_none()) { return; }
+            let remaining = deadline.checked_duration_since(Instant::now()).expect("Document worker timed out");
+            let gpu = host.session.engine().backend().0.is_some();
+            match done.recv_timeout(if gpu { remaining.min(Duration::from_millis(2)) } else { remaining }) {
+                Ok(()) => {},
+                Err(mpsc::RecvTimeoutError::Timeout) if gpu => { host.session.frame(0, 0).unwrap(); }
+                Err(error) => panic!("Document worker did not complete: {error}"),
+            }
+        }
     }
     struct Fixture {
         host: NativeHost,
@@ -1041,8 +1063,7 @@ mod tests {
             self.service.dispatch(&mut self.host, action).unwrap();
         }
         fn finish(&mut self) {
-            self.done.recv_timeout(Duration::from_secs(60)).unwrap();
-            self.service.poll(&mut self.host).unwrap();
+            finish(&mut self.service, &mut self.host, &self.done);
         }
         fn path(&self, name: &str) -> String {
             self.directory.path.join(name).to_str().unwrap().into()
@@ -1418,6 +1439,7 @@ mod tests {
 
 #[cfg(all(test, target_os = "windows"))]
 mod gpu_tests {
+    use super::tests::finish;
     use super::*;
     use crate::test_support::TempDir;
     use layer_ui::{CommandId, Platform, UiAction};
@@ -1437,21 +1459,6 @@ mod gpu_tests {
             .id;
         let state = &host.session.state().document_file;
         (id, state.epoch, state.revision)
-    }
-    fn finish(service: &mut DocumentService, host: &mut NativeHost, done: &mpsc::Receiver<()>) {
-        let deadline = Instant::now() + Duration::from_secs(60);
-        loop {
-            match done.recv_timeout(Duration::from_millis(2)) {
-                Ok(()) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    // Exercise the old document's renderer while another renderer is prepared.
-                    host.session.frame(0, 0).unwrap();
-                    assert!(Instant::now() < deadline, "Document worker timed out");
-                }
-                Err(e) => panic!("Document worker disconnected: {e}"),
-            }
-        }
-        service.poll(host).unwrap();
     }
     pub(super) fn image(host: &mut NativeHost) -> layer_render::ReadbackImage {
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -1480,7 +1487,7 @@ mod gpu_tests {
     #[ignore = "Requires an explicitly selected hardware D3D12 adapter"]
     fn d3d12_save_checkpoint_survives_later_edits() {
         crate::test_support::temporary_files();
-        let gpu = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let gpu = crate::test_support::d3d12_renderer();
         assert_eq!(gpu.adapter().get_info().backend, wgpu::Backend::Dx12);
         assert!(gpu.adapter().get_info().device_type != wgpu::DeviceType::Cpu || layer_render_wgpu::software_adapter_tests());
         let project = layer_ui::new_drawing(63, 47, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
@@ -1542,7 +1549,7 @@ mod gpu_tests {
     #[ignore = "Requires an explicitly selected hardware D3D12 adapter"]
     fn d3d12_background_save_open_new_and_stale_adoption() {
         crate::test_support::temporary_files();
-        let gpu = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let gpu = crate::test_support::d3d12_renderer();
         assert_eq!(gpu.adapter().get_info().backend, wgpu::Backend::Dx12);
         assert!(gpu.adapter().get_info().device_type != wgpu::DeviceType::Cpu || layer_render_wgpu::software_adapter_tests());
         let mut host = NativeHost::new(Platform::Gtk).unwrap();
@@ -1569,7 +1576,7 @@ mod gpu_tests {
         })
         .unwrap();
         let clean = image(&mut host);
-        let paper=host.session.engine().document().scene().order().iter().copied().find(|h|host.session.engine().document().scene().effect(*h).is_some_and(|effect|effect.program.id.as_ref()=="solid_color")).map(layer_ui::occurrence_token).unwrap();
+        let paper=layer_ui::occurrence_token(layer_core::paper::paper_occurrence(host.session.engine().document().scene(),None).unwrap());
         host.dispatch(UiAction::SetLayerVisibility {
             id: paper,
             visible: false,

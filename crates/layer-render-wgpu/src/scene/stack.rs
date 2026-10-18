@@ -205,8 +205,8 @@ impl Compositor for Tile<'_> {
                 && self.scene.images.output(*handle).is_some()
         })?;
         let pixels = self.scene.images.output(handle)?;
-        let bounds = self.scene.images.doc_bounds;
-        let output = self.scene.image_tile(self.r, pixels, bounds, self.coordinate);
+        let bounds = pixels.plan.doc_bounds.translated(self.scene.images.doc_bounds.min);
+        let output = self.scene.image_tile(self.r, pixels.view, bounds, self.coordinate);
         Some((handle, output))
     }
 }

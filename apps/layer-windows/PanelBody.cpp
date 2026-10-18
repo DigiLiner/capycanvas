@@ -160,10 +160,10 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
             StackPanel content;content.Spacing(data->panelMetric(L"group_spacing"));auto panelId=str(panel,L"id");
             bool scope=panelId==L"histogram"||panelId==L"waveform";
             double inset=data->panelMetric(L"inset");
-            contentHeight=[content]{return content.DesiredSize().Height;};
+            contentHeight=[content]{content.Measure({float(content.ActualWidth()),INFINITY});return content.DesiredSize().Height;};
             content.Padding(Thickness{inset,inset,inset,inset});
             if(panelId==L"proof"){content.VerticalAlignment(VerticalAlignment::Top);content.Children().Append(ProofPanel(data,bindings));}
-            FrameworkElement fittedColor{nullptr};size_t visibleControls=0;
+            FrameworkElement fittedControl{nullptr};std::function<double()> fittedHeight;size_t visibleControls=0;
             for(auto value:array(panel,L"controls"))if(flag(value.GetObject(),L"visible_in_panel"))visibleControls++;
             auto brushValue=[data=data](wchar_t const* key){return num(object(data->state,L"brush"),key);};
             for(auto value:array(panel,L"controls")){
@@ -174,11 +174,15 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                 else if(kind==L"tool_settings")content.Children().Append(ToolSettingsPanel(data,bindings));
                 else if(kind==L"color_wheel"){
                     auto picker=ColorPanel(data,bindings,visibleControls==1);
-                    if(visibleControls==1)fittedColor=picker;else content.Children().Append(picker);
+                    if(visibleControls==1){fittedControl=picker;fittedHeight=[data=data,picker]{auto root=picker.XamlRoot();return ColorPanelNaturalHeight(data,picker.ActualWidth(),root?root.RasterizationScale():1.);};}
+                    else content.Children().Append(picker);
                 }
                 else if(kind==L"properties")content.Children().Append(PropertiesPanel(data,bindings));
                 else if(kind==L"stats")content.Children().Append(StatsPanel(data,bindings));
-                else if(kind==L"histogram"||kind==L"waveform")content.Children().Append(CapyScopes::ScopePanel(data,bindings,kind==L"waveform"));
+                else if(kind==L"histogram"||kind==L"waveform"){
+                    auto view=CapyScopes::ScopePanel(data,bindings,kind==L"waveform",visibleControls==1?&fittedHeight:nullptr);
+                    if(visibleControls==1)fittedControl=view;else content.Children().Append(view);
+                }
                 else if(kind==L"brush_size"||kind==L"brush_opacity"){
                     bool size=kind==L"brush_size";
                     NumberPresentation presentation;presentation.reset=[data=data,size]{data->dispatch(O({{L"type",S(L"reset_tool_setting")},{L"id",S(size?L"size":L"opacity")}}));};
@@ -202,25 +206,23 @@ PanelBody::PanelBody(std::shared_ptr<WorkspaceData> source,J const& panel,J cons
                     }content.Children().Append(actions);
                 }
             }
-            if(fittedColor){
-                Grid fitted;fitted.Padding({inset,inset,inset,inset});fitted.Children().Append(fittedColor);root=fitted;
-                contentHeight=[data=data,fittedColor,inset]{
-                    auto root=fittedColor.XamlRoot();
-                    return ColorPanelNaturalHeight(data,fittedColor.ActualWidth(),root?root.RasterizationScale():1.)+2*inset;
-                };
+            if(fittedControl){
+                Grid fitted;fitted.Padding({inset,inset,inset,inset});fitted.Children().Append(fittedControl);root=fitted;
+                contentHeight=[fittedHeight,inset]{return fittedHeight()+2*inset;};
             }else if(!scrollable)root=content;
             else if(scope||str(panel,L"id")==L"proof"){StackPanel natural;natural.Children().Append(content);root=natural;}
-            else if(str(panel,L"id")==L"tool_settings"||str(panel,L"id")==L"properties"){
+            else{
                 scrollMetrics=[] {return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
                 ScrollView scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
                 scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
                 scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);
+                scroll.ViewChanged([changed=std::move(layoutChanged)](auto&&,auto&&){if(changed)changed();});
+                scroll.LayoutUpdated([weak=make_weak(scroll),id=L"panel-scroll-"+str(panel,L"id"),presenter=weak_ref<Microsoft::UI::Xaml::Controls::Primitives::ScrollPresenter>{}](auto&&,auto&&)mutable{
+                    if(auto view=weak.get())if(auto current=view.ScrollPresenter();current&&current!=presenter.get()){
+                        AutomationProperties::SetAutomationId(current,id);presenter=make_weak(current);
+                    }
+                });
                 root=scroll;
-            }else{
-                scrollMetrics=[] {return O({{L"fixed_height",N(0)},{L"unit_height",N(0)}});};
-                ScrollView scroll;scroll.Content(content);scroll.HorizontalScrollMode(ScrollingScrollMode::Disabled);
-                scroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
-                scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(scroll);root=scroll;
             }
         }
     if(!scrollMetrics&&(contentHeight||navigator)&&str(panel,L"id")!=L"color"&&str(panel,L"id")!=L"proof"

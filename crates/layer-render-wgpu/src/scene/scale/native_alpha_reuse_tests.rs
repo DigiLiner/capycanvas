@@ -191,7 +191,7 @@ fn native_alpha_reuse_admits_warm_pages_beside_cold_output_pages() {
         let mut scene=r.scene.take().unwrap();
         let warm=page_rect([0,0]);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        scene.prepare_region_in_frame(&mut r,frame,warm.into(),PixelRect::EMPTY,false,&mut encoder).unwrap();
+        scene.prepare_region_in_frame(&mut r,frame,(warm,warm.into()),PixelRect::EMPTY,false,&mut encoder).unwrap();
         scene.capture_prepared_regions_reuse(&mut r,frame,&image,&[warm],scene::Output::EffectComposite(handle),false,None,
             cache.initialized_pages(&output),&mut encoder).unwrap();
         r.uploads.finish(&encoder);
@@ -202,7 +202,7 @@ fn native_alpha_reuse_admits_warm_pages_beside_cold_output_pages() {
         let forced=r.metrics.native_effect_forced_cells;
         let full=PixelRect::full(extent);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        scene.prepare_region_in_frame(&mut r,frame,full.into(),PixelRect::EMPTY,false,&mut encoder).unwrap();
+        scene.prepare_region_in_frame(&mut r,frame,(full,full.into()),PixelRect::EMPTY,false,&mut encoder).unwrap();
         scene.capture_prepared_regions_reuse(&mut r,frame,&image,&[full],scene::Output::EffectComposite(handle),false,None,
             cache.initialized_pages(&output),&mut encoder).unwrap();
         r.uploads.finish(&encoder);
@@ -213,7 +213,7 @@ fn native_alpha_reuse_admits_warm_pages_beside_cold_output_pages() {
             "{name}: every cold output cell must receive full evaluation");
         let reference=Image::new(&r,image.plan,"full effect capture reference");
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        scene.prepare_region_in_frame(&mut r,frame,full.into(),PixelRect::EMPTY,false,&mut encoder).unwrap();
+        scene.prepare_region_in_frame(&mut r,frame,(full,full.into()),PixelRect::EMPTY,false,&mut encoder).unwrap();
         scene.capture_prepared_regions(&mut r,frame,&reference,&[full],scene::Output::EffectComposite(handle),false,None,&mut encoder).unwrap();
         r.uploads.finish(&encoder);
         encoder.submit(&r.queue);
@@ -378,24 +378,45 @@ fn native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear() {
             let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
             loop {
                 engine.render_frame().unwrap(); engine.backend_mut().wait_idle().unwrap();
-                if !engine.has_pending_input() && (!settle || !engine.backend().has_pending_work()) { break; }
+                if !engine.has_pending_input() && !engine.has_pending_document_edits() && (!settle || !engine.backend().has_pending_work()) { break; }
                 assert!(std::time::Instant::now() < deadline);
             }
         };
         drain(&mut engine, true);
         let before = display_pixels(engine.backend());
         let candidates = engine.backend().metrics.native_effect_reuse_candidate_cells;
+        let mut cold_observed = false;
+        let mut warm_checks = 0;
         for i in 0..=4 {
             let phase = if i == 0 { PenPhase::Down } else if i == 4 { PenPhase::Up } else { PenPhase::Move };
             input.push(PenEvent { timestamp_ns: (i as u64 + 1) * 8_333_333, pressure: 0.8,
                 ..crate::test_support::pen(i as u64 + 1, phase, [(100. + i as f32 * 8.) * scale, 100. * scale], SampleFlags::PRIMARY) }).unwrap();
             let timestamp=(i as u64+1)*8_333_333;
-            engine.render_frame_for(timestamp,timestamp+16_000_000).unwrap();engine.backend_mut().wait_idle().unwrap();
+            let input_events = engine.metrics().input_events;
+            let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+            loop {
+                let frames = engine.metrics().frames;
+                engine.render_frame_for(timestamp,timestamp+16_000_000).unwrap();engine.backend_mut().wait_idle().unwrap();
+                let r = engine.backend();
+                eprintln!("{name}/{level}/{phase:?}: frames={}, input={}, pending_edits={}, pending_submission={}, dabs={}, preview={:?}/{}/{}, page={}, reusable={}",
+                    engine.metrics().frames - frames, engine.metrics().input_events - input_events,
+                    engine.has_pending_document_edits(), r.has_pending_submission(), r.metrics.dabs,
+                    r.preview_layer_id, r.preview_level, r.preview_contribution, r.preview_page([0,0]).is_some(),
+                    r.changed_cells.as_ref().unwrap().reusable(target,[0,0]).is_some());
+                if engine.metrics().frames > frames && engine.metrics().input_events > input_events { break; }
+                assert!(std::time::Instant::now() < deadline);
+            }
             assert!(!engine.has_pending_input());
             assert_pixels_equal(&display_pixels(engine.backend()), &before, engine.backend().scale_display.as_ref().unwrap().plan.size[0], (name, phase));
-            if phase == PenPhase::Down {assert!(engine.backend().changed_cells.as_ref().unwrap().reusable(target,[0,0]).is_none(),"first prediction must force cold work");}
-            if phase == PenPhase::Move {
-                let r = engine.backend();
+            let r = engine.backend();
+            if r.preview_layer_id == Some(target) && r.preview_contribution {
+                r.preview_page([0,0]).expect("real enabled prediction must remain live");
+                if !cold_observed {
+                    assert!(r.changed_cells.as_ref().unwrap().reusable(target,[0,0]).is_none(),"first prediction must force cold work");
+                    cold_observed = true;
+                    continue;
+                }
+                warm_checks += 1;
                 let flags = r.changed_cells.as_ref().unwrap().reusable(target, [0, 0]).expect("warm real Engine prediction must be eligible for reuse");
                 let page=r.preview_page([0,0]).expect("real enabled prediction must remain live");
                 assert_eq!(page.primary.preview.get(),Some((target,[0,0])));assert!(!page.active_secondary);
@@ -407,6 +428,8 @@ fn native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear() {
                     r.metrics.native_effect_reuse_candidate_cells, r.metrics.native_effect_forced_cells);
             }
         }
+        assert!(cold_observed, "real Engine contact must execute a cold prediction");
+        assert!(warm_checks > 0, "real Engine contact must execute a later warm prediction");
         drain(&mut engine, true);
         assert!(engine.backend().metrics.native_effect_reuse_candidate_cells > candidates,
             "{name} unchanged real contact must execute eligible retained reuse");
@@ -799,7 +822,7 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
         {let mut pass=encoder.begin_compute_pass(&Default::default());pass.set_pipeline(&pipeline);pass.set_bind_group(0,&binding,&[]);pass.dispatch_workgroups(1,1,1);}
         encoder.submit(&r.queue);
         let actual=pollster::block_on(crate::local_tone::read_buffer_async(&r.device,&r.queue,&flags)).unwrap();
-        assert_eq!(u32::from_le_bytes(actual[16..20].try_into().unwrap()),dirty,"{old:?}→{new:?} must compare exact bits");
+        assert_eq!(u32::from_le_bytes(actual[16..20].try_into().unwrap()),dirty,"{old:?}â†’{new:?} must compare exact bits");
         let bytes=crate::layer_tests::page_bytes(&r,&texture);
         assert_eq!(&bytes[..16],new.into_iter().flat_map(f32::to_le_bytes).collect::<Vec<_>>(),"tracked store must preserve exact RGBA32F");
     }

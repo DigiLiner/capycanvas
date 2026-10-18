@@ -7,7 +7,7 @@ import {join} from 'node:path';
 function client(send, {timeout = 30000, onEvent = () => {}} = {}) {
   const pending = new Map(), waiters = new Set(), errors = [];
   let sequence = 0;
-  const cdp = {errors, session: undefined, detail: () => ''};
+  const cdp = {errors, session: undefined, detail: () => '', timeout: method => typeof timeout === 'function' ? timeout(method) : timeout};
   cdp.report = message => {
     errors.push(message);
     if (process.env.LAYER_TEST_VERBOSE) console.error(message);
@@ -25,22 +25,25 @@ function client(send, {timeout = 30000, onEvent = () => {}} = {}) {
       cdp.report(details.exception?.description || details.exception?.value || details.text);
     } else if (message.method === 'Page.javascriptDialogOpening' && message.params.type === 'beforeunload')
       cdp.call('Page.handleJavaScriptDialog', {accept: true}).catch(() => {});
-    for (const waiter of waiters) if (waiter.method === message.method) waiter.resolve(message.params);
+    if (message.method === 'Target.detachedFromTarget')
+      for (const waiter of waiters) if (waiter.session === message.params.sessionId) waiter.reject(Error('Worker detached'));
+    for (const waiter of waiters) if (waiter.method === message.method && (waiter.session === undefined || waiter.session === message.sessionId)) waiter.resolve(message.params);
     onEvent(message);
   };
   cdp.call = (method, params = {}, sessionId = cdp.session) => new Promise((resolve, reject) => {
     const id = ++sequence;
     const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}${cdp.detail()}`)); },
-      typeof timeout === 'function' ? timeout(method) : timeout);
+      cdp.timeout(method));
     pending.set(id, {resolve, reject, timer, method});
     try { send({id, method, params, ...(sessionId ? {sessionId} : {})}); }
     catch (error) { pending.delete(id); clearTimeout(timer); reject(error); }
   });
-  cdp.once = (method, limit = 60000) => {
-    const waiter = {method};
+  cdp.once = (method, limit = 60000, session) => {
+    const waiter = {method, session};
     const event = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { waiters.delete(waiter); reject(Error(`Timed out waiting for ${method}`)); }, limit);
       waiter.resolve = params => { waiters.delete(waiter); clearTimeout(timer); resolve(params); };
+      waiter.reject = error => { waiters.delete(waiter); clearTimeout(timer); reject(error); };
     });
     waiters.add(waiter);
     event.catch(() => {});
@@ -56,8 +59,88 @@ function client(send, {timeout = 30000, onEvent = () => {}} = {}) {
   cdp.fail = reason => {
     for (const job of pending.values()) { clearTimeout(job.timer); job.reject(Error(reason)); }
     pending.clear();
+    for (const waiter of [...waiters]) waiter.reject(Error(reason));
+    waiters.clear();
   };
   return cdp;
+}
+
+const workerPreparations = new WeakMap();
+export function prepareWorkers(cdp, install) {
+  let state = workerPreparations.get(cdp);
+  if (!state) {
+    state = {installers: new Set(), pending: new Set(), detached: new Set(), failures: [], started: false, starting: null};
+    workerPreparations.set(cdp, state);
+    const receive = cdp.receive;
+    cdp.receive = message => {
+      receive(message);
+      if (message.method === 'Target.detachedFromTarget') state.detached.add(message.params.sessionId);
+      if (message.method !== 'Target.attachedToTarget' || message.params.targetInfo.type !== 'worker' || !state.installers.size) return;
+      const attached = message.params, session = attached.sessionId;
+      const task = (async () => {
+        let breakpoint, runIfSent = false, runIfCompleted = false;
+        try {
+          await cdp.call('Runtime.enable', {}, session);
+          if (!attached.waitingForDebugger) {
+            for (const installer of state.installers) await installer(session, attached);
+            return;
+          }
+          await cdp.call('Debugger.enable', {}, session);
+          breakpoint = (await cdp.call('Debugger.setInstrumentationBreakpoint', {instrumentation: 'beforeScriptExecution'}, session)).breakpointId;
+          const paused = cdp.once('Debugger.paused', cdp.timeout('Runtime.evaluate'), session);
+          runIfSent = true;
+          await cdp.call('Runtime.runIfWaitingForDebugger', {}, session);
+          runIfCompleted = true;
+          const boundary = await paused;
+          if (boundary.reason !== 'instrumentation') throw Error('Unexpected worker pause: ' + boundary.reason);
+          for (const installer of state.installers) await installer(session, attached);
+        } catch (error) {
+          if (!state.detached.has(session)) state.failures.push(error);
+        } finally {
+          if (!state.detached.has(session) && attached.waitingForDebugger) {
+            if (!runIfSent) {
+              runIfSent = true;
+              try { await cdp.call('Runtime.runIfWaitingForDebugger', {}, session); runIfCompleted = true; }
+              catch (error) { if (!state.detached.has(session)) state.failures.push(error); }
+            }
+            for (const [method, params] of [
+              ['Debugger.removeBreakpoint', {breakpointId: breakpoint}],
+              ['Debugger.resume', {}], ['Debugger.disable', {}],
+            ]) {
+              if (method === 'Debugger.removeBreakpoint' && !breakpoint) continue;
+              if (method === 'Debugger.resume' && !runIfCompleted) continue;
+              try { await cdp.call(method, params, session); }
+              catch (error) { if (!state.detached.has(session)) state.failures.push(error); }
+            }
+          }
+        }
+      })();
+      state.pending.add(task);task.finally(() => state.pending.delete(task));
+    };
+  }
+  state.installers.add(install);
+  const check = async () => {
+    while (state.pending.size) await Promise.all([...state.pending]);
+    if (state.failures.length) throw new AggregateError(state.failures, 'Worker preparation failed');
+  };
+  return {
+    start() {
+      if (!state.starting) state.starting = cdp.call('Target.setAutoAttach', {autoAttach: true, waitForDebuggerOnStart: true, flatten: true, filter: [{type: 'worker'}, {exclude: true}]}).then(() => { state.started = true; });
+      return state.starting;
+    },
+    check,
+    async close() {
+      try { await check(); }
+      finally {
+        state.installers.delete(install);
+        if (!state.installers.size && state.started) {
+          await cdp.call('Target.setAutoAttach', {autoAttach: false, waitForDebuggerOnStart: false, flatten: true});
+          state.started = false;
+          state.starting = null;
+        }
+      }
+    },
+  };
 }
 
 export async function connectTab(endpoint, match, options) {

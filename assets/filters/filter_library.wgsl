@@ -2,7 +2,14 @@
 // manifest.json. No platform code or filter-specific renderer branches.
 const FX_PI:f32=3.141592653589793;
 fn fx_period(value:f32)->f32 {return max(value,1./256.);}
-fn fx_axis(degrees:f32)->vec2<f32> {let a=degrees*FX_PI/180.;return vec2<f32>(cos(a),sin(a));}
+fn fx_axis(degrees:f32)->vec2<f32> {
+    let wrapped=fma(-floor(degrees/360.+.5),360.,degrees);
+    let quadrant=i32(floor(wrapped/90.+.5));
+    let angle=fma(-f32(quadrant),90.,wrapped)*(FX_PI/180.);let z=angle*angle;
+    let sine=angle*fma(z,fma(z,fma(z,fma(z,fma(z,-2.5052107943679403e-8,2.7557318844628753e-6),-.00019841270113829523),.008333333767950535),-.1666666716337204),1.);
+    let cosine=fma(z,fma(z,fma(z,fma(z,fma(z,fma(z,2.0876755879584152e-9,-2.755731998149713e-7),2.4801587642286904e-5),-.0013888889225199819),.0416666679084301),-.5),1.);
+    switch (quadrant&3) {case 1:{return vec2<f32>(-sine,cosine);}case 2:{return vec2<f32>(-cosine,-sine);}case 3:{return vec2<f32>(sine,-cosine);}default:{return vec2<f32>(cosine,sine);}}
+}
 fn fx_rotate(p:vec2<f32>,axis:vec2<f32>)->vec2<f32> {return vec2<f32>(p.x*axis.x-p.y*axis.y,p.x*axis.y+p.y*axis.x);}
 fn fx_straight(c:vec4<f32>)->vec3<f32> {return fx_unassociate(c);}
 fn fx_random(p:vec2<f32>,seed:u32)->f32 {
@@ -57,8 +64,8 @@ fn fx_blur(p:vec2<f32>,base:u32,axis:vec2<f32>,threshold:f32)->vec4<f32> {
     if info.y==0. {return center;}
     var sum=center*(info.x*.5);
     for(var i=1u;i<=u32(info.y);i+=1u){let tap=fx_lookup(base,0u,i);let offset=axis*tap.x;
-        let weight=vec4(tap.y*.5);
-        sum+=fma(fx_bright(fx_sample(p-offset),threshold),weight,fx_bright(fx_sample(p+offset),threshold)*weight);
+        let pair=working_sample_mix(fx_bright(fx_sample(p-offset),threshold),fx_bright(fx_sample(p+offset),threshold),.5);
+        sum+=pair*tap.y;
     }
     let result=ldexp(clamp(sum,vec4(-1.7014117e38),vec4(1.7014117e38)),vec4<i32>(1));
     return vec4(result.rgb,clamp(result.a,0.,1.));
@@ -189,9 +196,12 @@ fn capy_painterly(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
 fn capy_solarize(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{let rgb=fx_rgb(c);return fx_rgba(mix(rgb,select(rgb,1.-rgb,rgb>vec3<f32>(fx_parameter(b,0u).x/100.)),fx_parameter(b,1u).x/100.),c.a);}
 fn capy_kaleidoscope(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let center=fx_extent()*vec2<f32>(fx_parameter(b,2u).x,fx_parameter(b,3u).x)/100.;let delta=p-center;
+    if all(delta==vec2<f32>(0.)){return fx_sample(center);}
     let rotation=fx_parameter(b,1u).x*FX_PI/180.;let sector=2.*FX_PI/fx_parameter(b,0u).x;
-    let angle=abs(fract((atan2(delta.y,delta.x)-rotation)/sector+.5)-.5)*sector+rotation;
-    return fx_sample(center+vec2<f32>(cos(angle),sin(angle))*length(delta));
+    let index=floor((atan2(delta.y,delta.x)-rotation)/sector+.5);let frame=rotation+index*sector;
+    let reduced=frame-floor((frame+FX_PI)/(2.*FX_PI))*(2.*FX_PI);
+    let local=fx_rotate(delta,vec2<f32>(cos(reduced),-sin(reduced)));
+    return fx_sample(center+fx_rotate(vec2<f32>(local.x,abs(local.y)),vec2<f32>(cos(rotation),sin(rotation))));
 }
 fn capy_swirl(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let center=fx_extent()*vec2<f32>(fx_parameter(b,2u).x,fx_parameter(b,3u).x)/100.;let delta=p-center;
@@ -256,10 +266,12 @@ fn capy_iridescence(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     return fx_rgba(mix(rgb,fx_preserve_luma(film,l),fx_parameter(b,0u).x/100.),c.a);
 }
 fn capy_domain_warp(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
-    let octaves=3u;let time=fx_time(b);let q=p/fx_period(fx_parameter(b,1u).x)+vec2<f32>(time*.17,-time*.23);
+    let octaves=3u;let time=fx_time(b);let scale=fx_period(fx_parameter(b,1u).x);
+    let q=fma(vec2<f32>(time),vec2<f32>(.17,-.23),p/scale);
     let bend=vec2<f32>(fx_fbm(q,octaves,3u),fx_fbm(q+19.3,octaves,31u));
-    let warp=vec2<f32>(fx_fbm(q+bend*1.4,octaves,71u),fx_fbm(q+bend*1.4+7.9,octaves,113u));
-    return fx_sample(p+warp*fx_parameter(b,0u).x);
+    let bent=fma(bend,vec2<f32>(1.4),q);
+    let warp=vec2<f32>(fx_fbm(bent,octaves,71u),fx_fbm(bent+7.9,octaves,113u));
+    return fx_sample(fma(warp,vec2<f32>(fx_parameter(b,0u).x),p));
 }
 fn capy_gradient_fill(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let extent=fx_extent();let delta=p-extent*vec2(fx_parameter(b,68u).x,fx_parameter(b,69u).x)/100.;

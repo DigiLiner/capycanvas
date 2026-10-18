@@ -33,6 +33,31 @@ pub fn extend_update(mut bytes: Vec<u8>, extension: &[u8]) -> Vec<u8> {
     bytes
 }
 
+pub(crate) type RawFields<'a> = std::collections::BTreeMap<&'a str, &'a serde_json::value::RawValue>;
+
+pub struct SnapshotFields<'a> {
+    bytes: &'a [u8],
+    fields: RawFields<'a>,
+}
+impl<'a> SnapshotFields<'a> {
+    pub fn parse(bytes: &'a [u8]) -> Result<Self, serde_json::Error> {
+        Ok(Self { bytes, fields: serde_json::from_slice(bytes)? })
+    }
+    pub fn contains(&self, key: &str) -> bool { self.fields.contains_key(key) }
+    pub fn range(&self, key: &str) -> Option<std::ops::Range<usize>> {
+        self.fields.get(key).map(|value| {
+            let start = value.get().as_ptr() as usize - self.bytes.as_ptr() as usize;
+            start..start + value.get().len()
+        })
+    }
+    pub fn nonempty_object_range(&self, key: &str) -> Result<Option<std::ops::Range<usize>>, serde_json::Error> {
+        let Some(value) = self.fields.get(key) else { return Ok(None) };
+        if !value.get().starts_with('{') { return Ok(None) }
+        let object: RawFields<'_> = serde_json::from_str(value.get())?;
+        Ok((!object.is_empty()).then(|| self.range(key).unwrap()))
+    }
+}
+
 impl NativeHost {
     /// Shared incremental publication: a full snapshot establishes model_revision;
     /// later workspace_update messages replace only transient geometry. Consumers
@@ -796,6 +821,52 @@ mod tests {
         assert!(packet.get("state").is_none());
         assert!(packet.get("camera").is_some());
         assert!(packet["workspace_update"]["drag"]["group"].is_object());
+    }
+
+    #[test]
+    fn raw_snapshot_fields_preserve_presence_and_utf8_ranges() {
+        let bytes = br#"{"state":null,"workspace_update":null,"command_search":null,"brush_ready":null,"camera":{"text":"\u03bb \\\" } {"},"localization":{"text":"\u65e5\n"}}"#;
+        let fields = SnapshotFields::parse(bytes).unwrap();
+        for key in ["state", "workspace_update", "command_search", "brush_ready"] {
+            assert!(fields.contains(key));
+            assert_eq!(&bytes[fields.range(key).unwrap()], b"null");
+        }
+        assert!(!fields.contains("missing"));
+        assert!(fields.range("missing").is_none());
+        let value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        for key in ["camera", "localization"] {
+            let range = fields.range(key).unwrap();
+            assert_eq!(serde_json::from_slice::<serde_json::Value>(&bytes[range]).unwrap(), value[key]);
+        }
+        for empty in [b"{}".as_slice(), b"null", b"[]", b"false", b"\"text\""] {
+            let bytes = [b"{\"localization\":".as_slice(), empty, b"}"].concat();
+            assert!(SnapshotFields::parse(&bytes).unwrap().nonempty_object_range("localization").unwrap().is_none());
+        }
+        let bytes = serde_json::to_vec(&json!({"localization":{"text":"Japanese 日本語 λ\\\"\n"},"camera":{"zoom":0.123456789}})).unwrap();
+        let fields = SnapshotFields::parse(&bytes).unwrap();
+        assert_eq!(fields.nonempty_object_range("localization").unwrap(), fields.range("localization"));
+        let camera = bytes[fields.range("camera").unwrap()].to_vec();
+        let owned = std::ffi::CString::new(bytes).unwrap();
+        assert_eq!(&owned.as_bytes()[SnapshotFields::parse(owned.as_bytes()).unwrap().range("camera").unwrap()], camera);
+        assert!(SnapshotFields::parse(b"{").is_err());
+    }
+
+    #[test]
+    fn raw_snapshot_fields_follow_camera_and_structural_publications() {
+        let mut host = host(Platform::Windows);
+        let full = host.take_update_bytes().unwrap().unwrap();
+        assert!(SnapshotFields::parse(&full).unwrap().contains("state"));
+        assert!(host.take_update_bytes().unwrap().is_none());
+        host.scroll([1200., 900.], [30., -20.], 2., false, false).unwrap();
+        let camera = host.take_update_bytes().unwrap().unwrap();
+        let fields = SnapshotFields::parse(&camera).unwrap();
+        assert!(!fields.contains("state"));
+        let range = fields.range("camera").unwrap();
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&camera[range]).unwrap(), json!(host.session.state().camera));
+        host.dispatch(UiAction::SetBrushSize { value: 37. }).unwrap();
+        let full = host.take_update_bytes().unwrap().unwrap();
+        assert!(SnapshotFields::parse(&full).unwrap().contains("state"));
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(&full).unwrap()["state"]["brush"]["diameter"], 37.);
     }
 
     #[test]

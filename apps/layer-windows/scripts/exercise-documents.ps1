@@ -65,6 +65,10 @@ $stderr=Join-Path $run 'stderr.log'
 $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
 [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
 Write-Output "Document review process $($review.Id)"
+function Bind-ReviewWindow([string]$Message) {
+    Wait-Until {$script:drawing=Owned-DrawingWindow $review;$null-ne$script:drawing} $Message 30
+    $script:root=$drawing.Root;$script:scope=$root
+}
 function Request-Close([switch]$WithPreferences) {
     # Shared completion precedes native dialog teardown. RequestClose ignores
     # window close while a document dialog is open; wait for native readiness.
@@ -84,7 +88,7 @@ function Request-Close([switch]$WithPreferences) {
     if(![CapyDocumentControls]::PostMessage($handle,0x10,[UIntPtr]::Zero,[IntPtr]::Zero)){throw 'Native owner rejected the close request'}
 }
 function Wait-Closed([string]$Message) {
-    $handle=$review.MainWindowHandle
+    $handle=$drawing.Handle
     $watch=[Diagnostics.Stopwatch]::StartNew()
     Wait-Until {
         $review.Refresh();if($review.HasExited){return $true}
@@ -99,6 +103,7 @@ function Wait-Closed([string]$Message) {
     } $Message -Closing
     Write-Output ('Native close completed in {0:N2}s' -f $watch.Elapsed.TotalSeconds)
     if($review.ExitCode -ne 0){throw ("Native review exit code: 0x{0:X8}" -f [uint32]($review.ExitCode -band 0xffffffffL))}
+    $script:drawing=$null;$script:root=$null;$script:scope=$null
 }
 function Find-Name([string]$Name,$Type=[System.Windows.Automation.ControlType]::Button) {
     $condition=[System.Windows.Automation.AndCondition]::new(
@@ -225,13 +230,13 @@ function Stroke-InkPixels {
     $context=[CapyDocumentControls]::SetThreadDpiAwarenessContext([IntPtr](-4))
     try {
         $rect=[CapyDocumentControls+Rect]::new()
-        if(![CapyDocumentControls]::GetClientRect($review.MainWindowHandle,[ref]$rect)){throw 'No canvas bounds'}
+        if(![CapyDocumentControls]::GetClientRect($drawing.Handle,[ref]$rect)){throw 'No canvas bounds'}
         $bitmap=[Drawing.Bitmap]::new($rect.right,$rect.bottom)
         try {
             $graphics=[Drawing.Graphics]::FromImage($bitmap)
             try{
                 $origin=[CapyDocumentControls+Point]::new()
-                if(![CapyDocumentControls]::ClientToScreen($review.MainWindowHandle,[ref]$origin)){throw 'No canvas origin'}
+                if(![CapyDocumentControls]::ClientToScreen($drawing.Handle,[ref]$origin)){throw 'No canvas origin'}
                 $graphics.CopyFromScreen($origin.x,$origin.y,0,0,$bitmap.Size)
             }finally{$graphics.Dispose()}
             # Early pen segment, away from its current cursor and chrome.
@@ -255,12 +260,22 @@ function Recovery-Events {
 }
 function Start-GpuLoss([string[]]$Queued=@()) {
     $script:scope=$root
+    $patterns=@(foreach($action in $Queued){
+        $script:replayPattern=$null
+        Wait-Until {
+            $item=Find-Name $action
+            if(!$item -or !$item.Current.IsEnabled){return $false}
+            $script:replayPattern=$item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            $true
+        } "Could not invoke control: $action"
+        $script:replayPattern
+    })
     $before=@(Recovery-Events|Where-Object event -eq 'gpu_recovery_preparing').Count
     Invoke-Control 'Test GPU loss'
     if(!$Queued.Count){return}
     Wait-Until {@(Recovery-Events|Where-Object event -eq 'gpu_recovery_preparing').Count -gt $before} 'GPU reconstruction did not start' 30
     $start=@(Recovery-Events|Where-Object event -eq 'gpu_recovery_preparing')[-1].time
-    foreach($action in $Queued){Invoke-Control $action}
+    foreach($pattern in $patterns){$pattern.Invoke()}
     $endEvent=if($FailGpu){'gpu_recovery_save_available'}else{'gpu_recovery_prepared'}
     Wait-Until {@(Recovery-Events|Where-Object {$_.event -eq $endEvent -and $_.time -gt $start}).Count -gt 0} 'GPU reconstruction boundary did not finish' 30
     $end=@(Recovery-Events|Where-Object {$_.event -eq $endEvent -and $_.time -gt $start})[0].time
@@ -289,9 +304,7 @@ function Start-RecoveryReview([string]$label){
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
     Write-Output "GPU save review process $($review.Id), $label"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero} 'No GPU save review window' 30
-    $script:root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
-    $script:scope=$root
+    Bind-ReviewWindow 'No GPU save review window'
     # GPU readiness can precede the asynchronous restoration of saved Zen/layout.
     Wait-Until {$model=Model;$model.brush_ready -and $model.windows_workspace.ready} 'GPU save review did not restore its workspace' 60
     if((Model).state.workspace.zen_mode){
@@ -359,7 +372,7 @@ function Draw-Below {
     $revision=(Model).state.document_file.revision
     $context=[CapyDocumentControls]::SetThreadDpiAwarenessContext([IntPtr](-4))
     try{
-        [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+        [CapyRowPointer]::SetForegroundWindow($drawing.Handle)|Out-Null
         [CapyRowPointer]::Initialize([uint32]$review.Id)
         try{
             for($i=0;$i -le 16;$i++){
@@ -372,9 +385,7 @@ function Draw-Below {
     }finally{[CapyDocumentControls]::SetThreadDpiAwarenessContext($context)|Out-Null}
     Wait-Until {(Model).state.document_file.revision -gt $revision} 'The stroke below the controlled stroke did not modify the drawing'
 }
-Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero} 'No review window' 30
-$root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
-$script:scope=$root
+Bind-ReviewWindow 'No review window'
 Wait-Until {(Model).brush_ready} 'Canvas startup did not finish' 45
 if(!(Model).windows_isolated_settings){throw 'Review must use an isolated profile'}
 File-Command 'new_document';New-Dialog
@@ -395,7 +406,16 @@ Wait-Until {(Combo-Value $blending) -eq $linear -and !$blending.Current.IsEnable
 Combo-Select $depth {$_.Current.Name -eq $startDepth}
 Wait-Until {(Combo-Value $blending) -eq $perceptual -and $blending.Current.IsEnabled} 'Leaving Float lost the Perceptual blending choice'
 Set-Size '2+' '96';Invoke-Control 'Create'
-Wait-Until {(Find-Id 'document-error').Current.Name} 'Invalid expression did not show validation'
+Wait-Until {
+    $validationError=Find-Id 'document-error'
+    if(!$validationError-or$validationError.Current.ProcessId-ne$review.Id-or$validationError.Current.IsOffscreen-or[string]::IsNullOrWhiteSpace($validationError.Current.Name)){return $false}
+    $bounds=$validationError.Current.BoundingRectangle
+    if($bounds.IsEmpty-or$bounds.Width-le0-or$bounds.Height-le0){return $false}
+    $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$viewport=$walker.GetParent($validationError);$scroll=$null
+    while($viewport){$pattern=$null;if($viewport.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern)-and$pattern.Current.VerticallyScrollable){$scroll=$pattern;break};if($viewport-eq$scope){break};$viewport=$walker.GetParent($viewport)}
+    $clip=if($scroll){$viewport.Current.BoundingRectangle}else{$scope.Current.BoundingRectangle}
+    $clip.Contains($bounds)
+} 'Invalid expression did not show visible validation'
 if((Model).state.document_file.epoch -ne 0){throw 'Invalid size replaced the drawing'}
 Set-Size '64*2' '96';Invoke-Control 'Create';Idle
 Wait-Until {(Model).state.tabs[0].width -eq 128 -and (Model).state.tabs[0].height -eq 96} 'New drawing did not use shared expressions'
@@ -658,8 +678,7 @@ Wait-Closed 'Session close did not finish'
 if((Get-Item -LiteralPath $stderr).Length){throw 'Native review reported stderr'}
 $stderr=Join-Path $run 'reopened.stderr.log'
 $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
-Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero} 'No restarted review window' 30
-$root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle);$script:scope=$root
+Bind-ReviewWindow 'No restarted review window'
 Wait-Until {(Model).brush_ready -and !(Model).windows_recovery.busy -and !(Model).windows_recovery.restoring} 'Session did not reopen' 120
 if((Model).state.settings.dark_base -ne '#223344' -or !(Model).state.document_file.modified){throw 'Window close lost the focused Preferences draft or unsaved drawing'}
 Request-Close;Wait-Closed 'Restarted session close did not finish'
@@ -669,9 +688,7 @@ $stderr=Join-Path $run 'untitled.stderr.log'
 $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
 [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
 Write-Output "Untitled close review process $($review.Id)"
-Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero} 'No untitled review window' 30
-$root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
-$script:scope=$root
+Bind-ReviewWindow 'No untitled review window'
 Wait-Until {(Model).brush_ready} 'Untitled canvas did not finish starting' 45
 Draw
 Fail-Gpu

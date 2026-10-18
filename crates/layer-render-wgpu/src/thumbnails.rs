@@ -516,7 +516,7 @@ impl PreviewPipeline {
         let cached = self.prepared.iter().position(|p| p.id == target);
         let mut prepared = if let Some(i) = cached { self.prepared.remove(i).unwrap() } else { self.begin(r, target) };
         if let Some(generator) = prepared.generator.filter(|_| prepared.generated.is_empty()) {
-            if self.generators.is_none() { self.generators = Some(scene::Scene::new(r)); }
+            if self.generators.is_none() { self.generators = Some(scene::Scene::new(r)?); }
             let Some(generated) = self.generators.as_mut().unwrap().generator_preview(r, generator, generator_grid(r.document_extent), encoder)? else {
                 self.prepared.push_back(prepared);
                 return Ok(false);
@@ -524,8 +524,8 @@ impl PreviewPipeline {
             prepared.generated = generated;
         }
         if let Some(owner) = prepared.objects.filter(|_| prepared.generated.is_empty()) {
-            let Some(content) = self.generators.get_or_insert_with(|| scene::Scene::new(r))
-                .object_thumbnail(r, owner, object_grid(r.document_extent), encoder)? else {
+            if self.generators.is_none() { self.generators = Some(scene::Scene::new(r)?); }
+            let Some(content) = self.generators.as_mut().unwrap().object_thumbnail(r, owner, object_grid(r.document_extent), encoder)? else {
                 self.prepared.push_back(prepared);
                 return Ok(false);
             };

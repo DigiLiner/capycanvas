@@ -2641,7 +2641,7 @@ impl crate::Device for super::Device {
     }
 
     fn generate_allocator_report(&self) -> Option<wgt::AllocatorReport> {
-        Some(self.mem_allocator.generate_report())
+        self.shared.private_caps.suballocation_supported.then(|| self.mem_allocator.generate_report())
     }
 
     fn tlas_instance_to_bytes(&self, instance: TlasInstance) -> Vec<u8> {

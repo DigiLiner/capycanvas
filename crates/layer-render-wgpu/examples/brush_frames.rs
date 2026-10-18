@@ -46,6 +46,25 @@ fn device(backend: wgpu::Backends) -> Result<(wgpu::Adapter, wgpu::Device, wgpu:
     Ok((adapter, device, queue))
 }
 
+fn settle(engine: &mut Engine) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        engine.backend_mut().wait_idle()?;
+        if engine.has_pending_document_edits() || engine.has_pending_input() {
+            engine.render_frame()?;
+        }
+        if engine.backend().raster_ready()
+            && !engine.has_pending_document_edits()
+            && !engine.has_pending_input()
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err("Raster backing deadline exceeded".into());
+        }
+        std::thread::yield_now();
+    }
+}
 fn stroke(
     engine: &mut Engine,
     input: &mut InputProducer<PenEvent>,
@@ -106,6 +125,7 @@ fn stroke(
         })?;
         timings.push([submitted, start.elapsed().as_secs_f64() * 1000.]);
     }
+    settle(engine)?;
     Ok(timings)
 }
 fn roots(engine: &Engine) -> Result<Vec<(SourceTarget, layer_core::raster::TileKey, [u8; 32])>> {
@@ -315,8 +335,7 @@ fn main() -> Result<()> {
         )?;
         assert!(engine.undo()?);
         clock += 20_000_000;
-        engine.render_frame_at(clock)?;
-        engine.backend_mut().wait_idle()?;
+        settle(&mut engine)?;
         assert_eq!(roots(&engine)?, baseline);
         let mut total = 0.;
         for repetition in 1..=repeats {
@@ -341,18 +360,15 @@ fn main() -> Result<()> {
             assert_ne!(painted, baseline, "{preset:?} must change content");
             assert!(engine.undo()?);
             clock += 20_000_000;
-            engine.render_frame_at(clock)?;
-            engine.backend_mut().wait_idle()?;
+            settle(&mut engine)?;
             assert_eq!(roots(&engine)?, baseline, "{preset:?} exact native Undo");
             assert!(engine.redo()?);
             clock += 20_000_000;
-            engine.render_frame_at(clock)?;
-            engine.backend_mut().wait_idle()?;
+            settle(&mut engine)?;
             assert_eq!(roots(&engine)?, painted, "{preset:?} exact native Redo");
             assert!(engine.undo()?);
             clock += 20_000_000;
-            engine.render_frame_at(clock)?;
-            engine.backend_mut().wait_idle()?;
+            settle(&mut engine)?;
             for (frame, [submit, complete]) in times.into_iter().enumerate() {
                 total += complete;
                 writeln!(

@@ -98,28 +98,7 @@ fn d3d12_retained_drawing_tabs_spill_history_save_close_and_cancel() {
     };
     let directory = crate::test_support::isolated_storage();
     std::fs::create_dir_all(&directory).unwrap();
-    let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-    descriptor.backends = wgpu::Backends::DX12;
-    descriptor.flags.remove(wgpu::InstanceFlags::DEBUG);
-    let instance = wgpu::Instance::new(descriptor);
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        ..Default::default()
-    }))
-    .unwrap();
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: adapter.features()
-            & (wgpu::Features::FLOAT32_FILTERABLE
-                | wgpu::Features::FLOAT32_BLENDABLE
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
-        required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-        ..Default::default()
-    }))
-    .unwrap();
-    let mut gpu =
-        WgpuRasterizer::from_wgpu_native_staged(adapter, device, queue, Default::default())
-            .unwrap();
-    gpu.finish_startup_cache();
+    let gpu = crate::test_support::d3d12_renderer();
     assert_eq!(gpu.adapter().get_info().backend, wgpu::Backend::Dx12);
     assert!(gpu.adapter().get_info().device_type != wgpu::DeviceType::Cpu || layer_render_wgpu::software_adapter_tests());
     let mut project = layer_ui::new_drawing(32, 24, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();

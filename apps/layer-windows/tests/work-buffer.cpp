@@ -1,8 +1,10 @@
 #include "../CanvasWorkBuffer.h"
 #include "../TextCompositionKeys.h"
+#include "../NativeKeyRepeats.h"
 #include "../CanvasPointerSample.h"
 #include <limits>
 #include "../CanvasQueryQueue.h"
+#include "../CanvasLatencyTrace.h"
 #include "../CanvasSnapshotMailbox.h"
 #include "../WorkspacePublication.h"
 #include "../GamepadState.h"
@@ -16,6 +18,9 @@
 #endif
 
 int main() {
+    static_assert(offsetof(CapySnapshotInfo,camera)==((3*sizeof(uint32_t)+alignof(size_t)-1)&~(alignof(size_t)-1)));
+    static_assert(offsetof(CapySnapshotInfo,brush_ready)==offsetof(CapySnapshotInfo,camera)+6*sizeof(size_t));
+    static_assert(sizeof(CapySnapshotInfo)==offsetof(CapySnapshotInfo,camera)+8*sizeof(size_t));
 #ifdef _WIN32
     auto traceFolder=std::filesystem::temp_directory_path()/(L"capy-trace-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
     assert(std::filesystem::create_directory(traceFolder));
@@ -28,6 +33,15 @@ int main() {
     assert(currentValue=="current");assert(!std::filesystem::exists(trace.wstring()+L".pending"));
     char retained[3];DWORD read=0;assert(ReadFile(reader,retained,3,&read,nullptr)&&read==3);assert(std::string(retained,3)=="old");
     currentTrace.close();assert(CloseHandle(reader));
+    auto latencyFolder=traceFolder/L"latency";assert(std::filesystem::create_directory(latencyFolder));
+    auto latencyPrefix=(latencyFolder/L"capture").string();
+    {CanvasLatencyTrace latency(true);uint64_t stats[6]{7,6,5,4,3,2};
+        latency.Frame(10,11,12,13,stats,0);latency.Frame(20,21,22,23,stats,0);latency.Dump(latencyPrefix);}
+    std::ifstream presentations(latencyPrefix+"-presentations.csv");std::string line;size_t presented=0;
+    while(std::getline(presentations,line))++presented;presentations.close();assert(presented==3);
+    std::ifstream movingFrames(latencyPrefix+"-frames.csv");size_t moving=0;
+    while(std::getline(movingFrames,line))++moving;movingFrames.close();assert(moving==1);
+    assert(std::filesystem::remove_all(latencyFolder)==6);
     assert(std::filesystem::remove_all(traceFolder)==2);
     std::cout<<"Trace publication atomically replaces window manifests while readers retain complete snapshots\n";
 #endif
@@ -86,6 +100,18 @@ int main() {
         assert(delayed.Owns(key,310,false,false));
     }
     std::cout<<"Composition retains confirming keys through release, without consuming pointer confirmation or the next press\n";
+
+    std::vector<bool> repeats;
+    auto collect=[&](bool repeat){repeats.push_back(repeat);};
+    ForwardKeyRepeats(true,false,3,collect);
+    ForwardKeyRepeats(true,true,4,collect);
+    ForwardKeyRepeats(false,true,1,collect);
+    assert((repeats==std::vector<bool>{false,true,true,true,true,true,true,false}));
+    repeats.clear();
+    ForwardKeyRepeats(true,false,0,collect);
+    ForwardKeyRepeats(false,false,0,collect);
+    assert((repeats==std::vector<bool>{false,false}));
+    std::cout<<"Combined native key presses retain every repeat and one release\n";
 
     for(uint32_t phase=0;phase<=4;++phase) {
         assert(CanvasPointerPhase(phase,false)==phase);
@@ -172,13 +198,11 @@ int main() {
     snapshots.Push("Korean models",true,true,{},false,"Korean context");
     shown=snapshots.Take();assert(shown.localization=="Korean context");
     assert(snapshots.Take().localization.empty());
-    struct Presentation {size_t fields;std::string value;size_t Size()const{return fields;}};
-    auto encode=[](Presentation const& value){return value.value;};
-    snapshots.Push("localized model",true,true,{},false,CanvasSnapshotMailbox::Localization(Presentation{3,"French context"},encode));
-    snapshots.Push("new model with null localization",true,true,{},false,CanvasSnapshotMailbox::Localization(Presentation{0,"{}"},encode));
+    snapshots.Push("localized model",true,true,{},false,"French context");
+    snapshots.Push("new model with null localization",true,true,{},false,"");
     shown=snapshots.Take();assert(shown.full=="new model with null localization"&&shown.localization=="French context");
-    snapshots.Push("incremental localization",false,true,{},false,CanvasSnapshotMailbox::Localization(Presentation{3,"Thai context"},encode));
-    snapshots.Push("incremental search without localization",false,false,{},true,CanvasSnapshotMailbox::Localization(Presentation{0,"{}"},encode));
+    snapshots.Push("incremental localization",false,true,{},false,"Thai context");
+    snapshots.Push("incremental search without localization",false,false,{},true,"");
     shown=snapshots.Take();assert(shown.workspace=="incremental localization"&&shown.search=="incremental search without localization"&&shown.localization.empty());
     assert(snapshots.Take().localization.empty());
     snapshots.Push("complete translated model",true,true);
@@ -264,6 +288,15 @@ int main() {
     assert(queries.Push({CanvasQueryKind::LayerMenu,"context",{}}));
     for(auto expected:{"context","drawer","thumbnail","stats"})assert(queries.Take()->json==expected);
     assert(queries.Empty());
+    assert(queries.Push({CanvasQueryKind::Thumbnails,"thumbnail",{}}));
+    assert(queries.Push({CanvasQueryKind::Workspace,"first",{}}));
+    assert(queries.Push({CanvasQueryKind::LayerMenu,"menu",{}}));
+    assert(queries.Push({CanvasQueryKind::Workspace,"second",{}}));
+    assert(!queries.Take(CanvasQueryKind::Filters));
+    assert(queries.Take(CanvasQueryKind::Workspace)->json=="first");
+    assert(queries.Take(CanvasQueryKind::Workspace)->json=="second");
+    assert(!queries.Take(CanvasQueryKind::Workspace));
+    assert(queries.Take()->json=="menu");assert(queries.Take()->json=="thumbnail");assert(queries.Empty());
     std::cout<<"Canvas queries: menu priority, FIFO geometry/pixels, bounded retained allocation, retry ownership and disposal passed\n";
 
     std::vector<std::string> sent;

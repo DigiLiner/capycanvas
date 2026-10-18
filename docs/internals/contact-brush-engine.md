@@ -115,6 +115,9 @@ pixels, where blending toward the point evaluator begins. These fixed pixel thre
 control antialiasing cost, independently of material softness `W`. Large brushes
 specialize the filter out of their shader.
 
+Quadrature nodes bind their abscissa as `f32` before sign multiplication, keeping
+the generated D3D12 shader single precision.
+
 Changing poses use a local resolved profile within the engine's retained segments.
 They are an approximation to a continuously deforming contact, rather than an exact
 integral of arbitrary time-varying geometry. The same approximation applies during
@@ -143,8 +146,10 @@ pass before contact dispatches begin. Page jobs have distinct destinations and
 stable original sources. Reduced display
 previews preserve block averages and partial document edges. Tracked previews
 compare final pixels, avoiding changes caused by intermediate restoration.
-Shader preparation includes every reachable contact/profile/paper combination
-and its actual color and antialiasing variants before a stroke.
+Shader preparation uses the captured contact, accumulation and pass plan before
+a stroke. Destination, gather, reservoir, direct drawing and dry mask recipes
+share those contact flags. Compute recipes use the same eligibility rule in
+readiness and deposition.
 
 Pointwise deposition and transported materials share their compositing helpers
 but compile separate dependency sets. Dry contact modules omit bristle and

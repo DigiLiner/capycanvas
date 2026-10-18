@@ -104,7 +104,7 @@ private:
     CanvasSnapshotMailbox snapshots;
     bool snapshotPosted=false;
     void UpdateNavigationCursor();
-    void Publish(std::string snapshot, winrt::Windows::Data::Json::JsonObject const& model);
+    void Publish(std::string snapshot, CapySnapshotInfo const& info);
     void ApplyPending();
     void ApplyModel(winrt::Windows::Data::Json::JsonObject const&);
     void Popup(bool open);

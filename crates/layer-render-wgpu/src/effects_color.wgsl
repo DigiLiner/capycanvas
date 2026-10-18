@@ -10,7 +10,13 @@ fn fx_mix_rgb(original:vec3<f32>,adjusted:vec3<f32>,weight:f32)->vec3<f32> {
     return working_mix(original,adjusted,weight);
 }
 fn fx_filter(c:vec4<f32>,adjusted:vec4<f32>,code:u32,weight:f32)->vec4<f32> {
-    if code==0u {return mix(c,adjusted,weight);}
+    if weight==0. {return c;}
+    if code==0u {
+        if weight==1. {return adjusted;}
+        return mix(c,adjusted,weight);
+    }
     let rgb=blend(fx_unassociate(adjusted),fx_unassociate(c),code);
-    return mix(c,vec4<f32>(rgb*adjusted.a,adjusted.a),weight);
+    let filtered=vec4<f32>(rgb*adjusted.a,adjusted.a);
+    if weight==1. {return filtered;}
+    return mix(c,filtered,weight);
 }

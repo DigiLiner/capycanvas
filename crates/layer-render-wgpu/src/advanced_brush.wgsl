@@ -108,10 +108,10 @@ fn vertex_main(input: VertexInput) -> VertexOutput {
 }
 
 fn advanced_color(input: VertexOutput, opacity: f32) -> vec4<f32> {
-    if style.contact_a.x > 0.5 {
+    if contact_feature(1u,style.contact_a.x > 0.5) {
         let field = contact_field(input.world);
         var coverage = 0.0;
-        if style.contact_a.z>0.5 {
+        if contact_feature(64u,style.contact_a.z>0.5) {
             let dab=Dab(input.center,input.geometry.xy,input.geometry.zw,input.motion,input.color,
                 input.flow_hardness.x,1.0,vec2<f32>(1.0),input.cached_material,input.previous,
                 input.contact,input.previous_contact,input.material,

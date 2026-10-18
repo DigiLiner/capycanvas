@@ -190,6 +190,7 @@ pub(super) struct Scene {
     pub effect_passes: u64,
     images: images::ImageStages,
     image_window: Option<DocRect>,
+    image_output: Option<PixelRect>,
     image_evaluation_origin: [i64; 2],
     stop_before: Option<OccurrenceHandle>,
     image_damage: Option<scale::Damage>,
@@ -213,21 +214,22 @@ impl Scene {
     pub(super) fn analysis_changed(&mut self) {
         self.retire_images(|scene| scene.images = images::ImageStages::default());
     }
-    fn begin_write(&mut self, r: &WgpuRasterizer) -> crate::submission::CacheWrite {
+    fn begin_write(&mut self, r: &WgpuRasterizer) -> Result<crate::submission::CacheWrite, GpuRasterError> {
         if !self.valid.load(std::sync::atomic::Ordering::Acquire) {
+            let replacement = Self::new(r)?;
             let exact = std::mem::take(&mut self.exact_object_results);
             let display = std::mem::take(&mut self.object_results);
             let objects = std::mem::take(&mut self.object_spatial);
             let damage = std::mem::take(&mut self.object_source_damage);
             let query = self.object_query;
-            *self = Self::new(r);
+            *self = replacement;
             self.exact_object_results = exact;
             self.object_results = display;
             self.object_spatial = objects;
             self.object_source_damage = damage;
             self.object_query = query;
         }
-        crate::submission::CacheWrite::shared(self.valid.clone())
+        Ok(crate::submission::CacheWrite::shared(self.valid.clone()))
     }
     #[cfg(test)]
     pub fn image_pass_pixels(&self) -> u64 {
@@ -366,7 +368,7 @@ impl Scene {
         self.record_count = 0;
         self.effect_passes = 0;
     }
-    pub fn new(r: &WgpuRasterizer) -> Self {
+    pub fn new(r: &WgpuRasterizer) -> Result<Self, GpuRasterError> {
         let device = &r.device;
         let Pipelines {
             uniforms,
@@ -383,13 +385,12 @@ impl Scene {
         });
         let binding = uniform_binding(device, &uniforms, &buffer);
         let effects = effects::Effects::new(r, &uniforms);
-        use wgpu::util::DeviceExt;
-        let coordinates = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let coordinates = initialized_buffer(device, &wgpu::util::BufferInitDescriptor {
             label: Some("placed material neighborhood"),
             contents: target_bytes(&TargetGpu::new([PAGE_SIZE; 2], [PAGE_SIZE; 2], [PAGE_SIZE * 3; 2])),
             usage: wgpu::BufferUsages::UNIFORM,
-        });
-        Self {
+        })?;
+        Ok(Self {
             valid: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             placement_display: false,
             object_display: false,
@@ -436,10 +437,11 @@ impl Scene {
             effect_passes: 0,
             images: images::ImageStages::default(),
             image_window: None,
+            image_output: None,
             image_evaluation_origin: [0; 2],
             stop_before: None,
             image_damage: None,
-        }
+        })
     }
     pub(super) fn retire_changed_cells(&mut self,buffers:&[wgpu::Buffer]) {
         if buffers.is_empty() {return;}
@@ -715,8 +717,9 @@ impl Scene {
     ) -> Result<usize, GpuRasterError> {
         let handle = indices[0];
         if packet.scene.effect(handle).unwrap().program.image_boundary() {
-            let view = self.images.output(handle).ok_or_else(|| GpuRasterError::Effect("Missing image effect stage".into()))?;
-            let out = self.image_tile(r, view, self.images.doc_bounds, tile);
+            let image = self.images.output(handle).ok_or_else(|| GpuRasterError::Effect("Missing image effect stage".into()))?;
+            let bounds=image.plan.doc_bounds.translated(self.images.doc_bounds.min);
+            let out = self.image_tile(r, image.view, bounds, tile);
             self.free(input);
             return Ok(out);
         }
@@ -1425,26 +1428,27 @@ impl Scene {
             self.retire_images(|scene| scene.images = images::ImageStages::default());
         }
     }
-    pub(super) fn capture_image_bound(scene: SceneView<'_>, window: impl Into<DocRect>) -> u64 {
+    pub(super) fn capture_image_bound(scene: SceneView<'_>, output: PixelRect) -> u64 {
         if matches!(scene.scope(),Some(layer_core::SceneScope::Raw(_))) {return 0;}
-        let window = window.into();
+        let window=DocRect::from(output);
         let raw = match scene.scope() { Some(layer_core::SceneScope::RawObjects(owner)) => Some(*owner), _ => None };
+        let stages=images::has_images(scene).then(||images::stage_regions(scene,window,0,None));
         let objects = scene.order().iter().copied()
             .filter(|owner| raw.map_or_else(|| scene.visible(*owner), |raw| raw == *owner) && scene.object_layer(*owner).is_some())
-            .map(|owner| Self::object_content_bounds(scene, owner).intersect(window).aligned(PAGE_SIZE).area().saturating_mul(16))
+            .map(|owner| Self::object_content_bounds(scene, owner).intersect(stages.as_ref().and_then(|stages|stages.get(&owner)).map_or(window,|regions|regions[0])).aligned(PAGE_SIZE).area().saturating_mul(16))
             .fold(0u64, u64::saturating_add);
-        if raw.is_some() {return objects;}
-
-        let mut images = 0u64;
-        let mut scratch = 0;
+        let Some(stages)=stages else {return objects;};
+        let scratch=images::scratch_shapes(&stages);
+        let mut images = scratch.into_iter().map(|size|size.into_iter().map(u64::from).product::<u64>().saturating_mul(16)).fold(0u64,u64::saturating_add);
         for &handle in scene.order() {
             if !scene.visible(handle) { continue; }
-            if let Some(effect) = scene.effect(handle).filter(|effect| effect.program.image_boundary()) {
-                images += 2 + u64::from(scene.mask(handle).is_some_and(|(mask, _)| mask.enabled));
-                scratch = scratch.max(effect.program.passes.len().saturating_sub(1).min(2) as u64);
+            if scene.effect(handle).is_some_and(|effect| effect.program.image_boundary()) {
+                let regions=&stages[&handle];
+                let input=regions[0].area().max(1);let output=regions.last().unwrap().area().max(1);
+                images=images.saturating_add(input.saturating_add(output.saturating_mul(1+u64::from(scene.mask(handle).is_some_and(|(mask,_)|mask.enabled)))).saturating_mul(16));
             }
         }
-        objects.saturating_add(window.area().saturating_mul(16).saturating_mul(images + scratch))
+        objects.saturating_add(images)
     }
 
     /// Capture a document-coordinate crop with its finite upstream dependencies.
@@ -1478,7 +1482,7 @@ impl Scene {
         if !matches!(output, Output::Source(_) | Output::MaskImage(_)) && !self.prepare_object_pages(r, packet, raw, page_coordinates(window.in_frame(packet.document_extent)))? {
             return Err(GpuRasterError::DeferredObjectWork);
         }
-        self.prepare_region(r, packet, window, dirty, matches!(output,Output::Source(_) | Output::MaskImage(_) | Output::Objects(_)), encoder)?;
+        self.prepare_region(r, packet, (region, window), dirty, matches!(output,Output::Source(_) | Output::MaskImage(_) | Output::Objects(_)), encoder)?;
         let destination = Image { texture: destination.clone(), view: destination.create_view(&Default::default()),
             plan: display_mips::Plan::window(packet.document_extent, 0, region) };
         self.capture_prepared_regions(r, packet, &destination, &[region], output, preview, None, encoder)
@@ -1504,18 +1508,18 @@ impl Scene {
     }
 
     fn prepare_region(
-        &mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, window: DocRect,
+        &mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, (output, window): (PixelRect, DocRect),
         dirty: PixelRect, raw: bool, encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
         self.begin_frame();
-        self.prepare_region_in_frame(r, packet, window, dirty, raw, encoder)
+        self.prepare_region_in_frame(r, packet, (output, window), dirty, raw, encoder)
     }
 
     fn prepare_region_in_frame(
-        &mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, window: DocRect,
+        &mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, (output, window): (PixelRect, DocRect),
         dirty: PixelRect, raw: bool, encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
-        let write = self.begin_write(r);
+        let write = self.begin_write(r)?;
         self.object_spatial.prepare(packet.scene);
         if self.placement_display { self.retire_images(|scene| scene.images = images::ImageStages::default()); }
         self.placement_display = false;
@@ -1528,6 +1532,7 @@ impl Scene {
         self.record_count = 0;
         self.effect_passes = 0;
         self.image_window = Some(window);
+        self.image_output = Some(output);
         self.effects.retain(packet.scene);
         let result = if raw {
             self.retire_images(|scene|scene.images=images::ImageStages::default());
@@ -1574,7 +1579,7 @@ impl Scene {
     ) -> Result<(), GpuRasterError> {
         let window = if matches!(output,Output::Source(_) | Output::MaskImage(_) | Output::Objects(_)) {region.into()} else {self.cached_capture_window(packet.scene, region)};
         loop {
-            match self.prepare_region(r, packet, window, window.in_frame(packet.document_extent), matches!(output,Output::Source(_) | Output::MaskImage(_) | Output::Objects(_)), encoder) {
+            match self.prepare_region(r, packet, (region, window), window.in_frame(packet.document_extent), matches!(output,Output::Source(_) | Output::MaskImage(_) | Output::Objects(_)), encoder) {
                 Err(GpuRasterError::DeferredObjectWork)=> {
                     r.uploads.finish(encoder);
                     std::mem::replace(encoder,crate::submission::CommandEncoder::new(&r.device,&Default::default())).submit(&r.queue);
@@ -1633,7 +1638,9 @@ impl Scene {
         if let Some(reserved) = reserved { self.used[..reserved.len()].copy_from_slice(reserved); }
         self.stop_before = packet.scene.effect_input();
         let object_pages = packet.scene.order().iter().any(|owner| packet.scene.object_layer(*owner).is_some());
-        for tile in regions.iter().flat_map(|r| page_coordinates(*r)) {
+        let mut pages: Vec<_> = regions.iter().flat_map(|region| page_coordinates(*region)).collect();
+        crate::artwork::resident_first(r, packet.scene, &mut pages);
+        for tile in pages {
             let covered = regions.iter().fold(PixelRect::EMPTY, |bounds, region| bounds.union(page_rect(tile).intersect(*region))).intersect(destination.plan.bounds);
             if covered.is_empty() { continue; }
             let image = match output {
@@ -1749,7 +1756,7 @@ impl Scene {
         encoder: &mut crate::submission::CommandEncoder,
         tiles: Option<&std::collections::BTreeSet<[u32; 2]>>,
     ) -> Result<PixelRect, GpuRasterError> {
-        let write = self.begin_write(r);
+        let write = self.begin_write(r)?;
         self.object_results.retain(packet.scene,packet.blend_space,r.device.working_space());
         self.object_spatial.prepare(packet.scene);
         if let Some(cache) = &r.scale_display {
@@ -1786,7 +1793,7 @@ impl Scene {
                 cache.render_native(self, r, packet, dirty, &mut scale::Encoding { encoder, commands: &mut commands }, tiles)
             } else {
                 self.retire_images(|scene| scene.images.release_window_pixels());
-                self.image_window = None;
+                self.image_window = None; self.image_output = None;
                 if cache.plan.level > 0 && !scale::bounded(packet.scene) {
                     self.clear_material_pages();
                     self.pool.clear();

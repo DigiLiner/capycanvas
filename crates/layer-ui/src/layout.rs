@@ -995,12 +995,10 @@ pub struct PanelMeasurement {
     pub scroll: Option<PanelScrollMeasurement>,
 }
 impl PanelMeasurement {
-    /// Compact content stays whole; scrollers reserve controls and four rows
-    /// (or all rows when shorter). Shared by fitting and floating drop sizing.
-    fn minimum_content_height(&self) -> f32 {
+    fn content_height_for_rows(&self, rows: f32) -> f32 {
         self.scroll.map_or(self.content_height, |m| {
             (m.fixed_height
-                + 4. * if m.unit_height > 0. {
+                + rows * if m.unit_height > 0. {
                     m.unit_height
                 } else {
                     TILE_SIZE
@@ -2432,7 +2430,7 @@ impl DockLayout {
         self.measurements
             .iter()
             .filter(|m| panels.contains(&m.panel))
-            .map(PanelMeasurement::minimum_content_height)
+            .map(|m| m.content_height_for_rows(4.))
             .filter(|h| *h > 0.0)
             .reduce(f32::max)
     }
@@ -2442,7 +2440,7 @@ impl DockLayout {
             None => (self.fitted_height(second)?, first, false),
         };
         let size = height
-            .min(usable - stacked_min_height(sibling))
+            .min(usable - stacked_min_height(sibling, self))
             .max(height.min(TAB_BAR_HEIGHT))
             .min(usable);
         Some(if leading { size } else { usable - size })
@@ -3525,7 +3523,7 @@ impl DockLayout {
             .min(usable);
         let scroll = measurement.and_then(|m| m.scroll);
         let minimum = scroll.map_or(natural, |_| {
-            (chrome + measurement.unwrap().minimum_content_height()).min(natural)
+            (chrome + measurement.unwrap().content_height_for_rows(4.)).min(natural)
         });
         let budget = 400.0_f32.min(usable * 0.5).max(minimum).min(usable);
         let preferred = if !newly_floating {
@@ -4321,16 +4319,26 @@ fn expanded_ribbon_cross_width(node: &DockNode, ribbon_axis: Axis, length: f32, 
         minimum
     }
 }
-fn stacked_min_height(node: &DockNode) -> f32 {
+fn stacked_min_height(node: &DockNode, layout: &DockLayout) -> f32 {
     match node {
-        DockNode::Tabs { .. } => TAB_BAR_HEIGHT + TILE_SIZE,
+        DockNode::Tabs { panels, active, .. } => {
+            let chrome = if panels.len() == 1 && layout.panel(*active).is_ok_and(|p| p.hide_tab) {
+                PANEL_GRIP_HEIGHT
+            } else {
+                TAB_BAR_HEIGHT
+            };
+            layout.measurements.iter()
+                .filter(|m| panels.contains(&m.panel) && m.scroll.is_some() && m.content_height > 0.)
+                .map(|m| chrome + m.content_height_for_rows(1.))
+                .fold(TAB_BAR_HEIGHT + TILE_SIZE, f32::max)
+        },
         DockNode::Split {
             axis,
             first,
             second,
             ..
         } => {
-            let (a, b) = (stacked_min_height(first), stacked_min_height(second));
+            let (a, b) = (stacked_min_height(first, layout), stacked_min_height(second, layout));
             if *axis == Axis::Vertical {
                 a + b + WORKSPACE_SPACING
             } else {
@@ -4517,7 +4525,7 @@ fn resolve_node(
                 Edge::Top
             };
             let usable = length - gap;
-            let mut first_size = usable * fraction;
+            let mut first_size;
             if *axis == Axis::Horizontal || *axis != orientation {
                 let minimum = |node: &DockNode, preferred: bool| {
                     let group_width: fn(&DockLayout, u32) -> f32 = if preferred { DockLayout::group_preferred_width } else { DockLayout::group_min_width };
@@ -4557,6 +4565,8 @@ fn resolve_node(
                 first_size = split_size(usable, *fraction, a, b);
             } else if let Some(size) = layout.fitted_split(first, second, usable) {
                 first_size = size;
+            } else {
+                first_size = split_size(usable, *fraction, stacked_min_height(first, layout), stacked_min_height(second, layout));
             }
             if *axis == Axis::Horizontal {
                 if layout.is_collapsed(first.id()) && !(open_columns && layout.open_stack_column(first.id()).is_some()) {

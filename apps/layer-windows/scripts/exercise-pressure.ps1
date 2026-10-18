@@ -49,13 +49,13 @@ function At([double]$X,[double]$Y){
     $inset=(Pressure).editor.controls.inset*[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     @([int]($r.Left+$inset+$X*($r.Width-2*$inset)),[int]($r.Top+$inset+(1-$Y)*($r.Height-2*$inset)))
 }
-function Drag([string]$Device,[int[]]$From,[int[]]$To,[switch]$Escape,[scriptblock]$BeforeUp){
+function Drag([string]$Device,[int[]]$From,[int[]]$To,[switch]$Escape,[switch]$Cancel,[scriptblock]$BeforeUp){
     [CapyRowPointer]::Down($Device,$From[0],$From[1])
     try{
         for($i=1;$i -le 8;$i++){[CapyRowPointer]::Move([int]($From[0]+($To[0]-$From[0])*$i/8),[int]($From[1]+($To[1]-$From[1])*$i/8));Start-Sleep -Milliseconds 30}
         if($Escape){[CapyRowPointer]::Key(0x1B)}
         if($BeforeUp){& $BeforeUp}
-    }finally{[CapyRowPointer]::Up()}
+    }finally{if($Cancel){[CapyRowPointer]::Cancel()}else{[CapyRowPointer]::Up()}}
     Start-Sleep -Milliseconds 200
 }
 function Native-Stroke([string]$Device){
@@ -129,11 +129,27 @@ try{
         }
         Wait-Until {@(Points).Count -eq 2} "$device Up restored the removed interior control"
         Invoke 'pen-pressure-reset';Wait-Until {(Curve) -eq $original} "$device reset did not restore the deleted interior point"
+        if($device -ne 'mouse'){
+            $middle=(Points)[1]
+            Drag $device (At $middle[0] $middle[1]) @([int]($r.Right+30*$scale),[int]($r.Top+$r.Height/2)) -Cancel -BeforeUp {
+                Wait-Until {@(Points).Count -eq 2} "$device canceled drag never removed its interior point before cancellation"
+            }
+            Wait-Until {(Curve) -eq $original -and (Pressure)} "$device cancellation did not restore the removed point and retain the utility"
+            Capture "$device-canceled-drag" -WithModel
+        }
     }
     $frame=(Control 'pen-pressure-dialog').Current.BoundingRectangle;$layout=Json (Model).layout
     Drag 'touch' @([int]($frame.Left+60*$scale),[int]($frame.Top+17*$scale)) @([int]($frame.Left+20*$scale),[int]($frame.Top+27*$scale))
     Wait-Until {[Math]::Abs((Control 'pen-pressure-dialog').Current.BoundingRectangle.Left-$frame.Left) -gt 10} 'The title did not move the modeless utility'
     if((Json (Model).layout) -ne $layout){throw 'Moving the utility changed the dock layout'}
+    foreach($device in @('touch','pen')){
+        $frame=(Control 'pen-pressure-dialog' -Arranged).Current.BoundingRectangle;$beforeBounds=Json (Pressure).bounds
+        Drag $device @([int]($frame.Left+60*$scale),[int]($frame.Top+17*$scale)) @([int]($frame.Left+20*$scale),[int]($frame.Top+27*$scale)) -Cancel -BeforeUp {
+            Wait-Until {(Json (Pressure).bounds) -ne $beforeBounds} "$device canceled panel drag never moved before cancellation"
+        }
+        Wait-Until {(Json (Pressure).bounds) -eq $beforeBounds -and (Pressure)} "$device cancellation did not restore the pressure utility position"
+        if((Json (Model).layout) -ne $layout){throw "$device canceled panel drag changed the dock layout"}
+    }
     Native-Stroke 'mouse';Native-Stroke 'pen'
     Capture 'moved-and-painted' -WithModel
     Invoke 'pen-pressure-lighter';Invoke 'pen-pressure-cancel'
@@ -155,7 +171,7 @@ try{
     Wait-Until {$canvas=Find 'drawing-canvas' -Visible;$null -eq (Pressure) -and !(Find 'pen-pressure-dialog') -and $canvas -and $canvas.Current.IsEnabled} 'Closing Pen pressure did not restore the owned drawing canvas'
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native pressure stderr requires inspection'}
-    @{theme=$Theme;modeless_pressure='passed';graph_mouse_touch_pen='passed';drag_out_delete_before_up='passed';escape_cancel='passed';canvas_pixels_and_undo='passed';live_pen_marker='passed';apply_cancel_reset_and_storage='passed';scope='isolated injected native input on WARP; physical input, hardware rendering and presentation remain unverified';run=$run}|ConvertTo-Json
+    @{theme=$Theme;modeless_pressure='passed';graph_mouse_touch_pen='passed';drag_out_delete_before_up='passed';escape_cancel='passed';native_pointer_cancellation='passed';canvas_pixels_and_undo='passed';live_pen_marker='passed';apply_cancel_reset_and_storage='passed';scope='isolated OS-delivered synthetic input; physical input and presented-frame performance remain unverified';run=$run}|ConvertTo-Json
 }catch{
     try{Capture 'failure' -WithModel}catch{}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw

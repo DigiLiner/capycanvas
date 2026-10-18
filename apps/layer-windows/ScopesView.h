@@ -3,9 +3,9 @@
 
 namespace CapyScopes {
 using namespace CapyUi;
-FrameworkElement ScopePanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,bool waveform);
+FrameworkElement ScopePanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,bool waveform,std::function<double()>* naturalHeight=nullptr);
 FrameworkElement TonalScope(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings);
 FrameworkElement ScopeFooter(std::shared_ptr<WorkspaceData> const& data,hstring const& prefix,std::function<J()> view,Bindings& bindings,
-    FrameworkElement const& trailing=nullptr);
+    FrameworkElement const& trailing=nullptr,FrameworkElement const& leading=nullptr);
 FrameworkElement TonalPlot(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings);
 }

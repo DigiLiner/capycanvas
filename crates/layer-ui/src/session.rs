@@ -5873,6 +5873,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let scene = doc.scene();
             let l = scene.occurrence(id).expect("placed occurrence");
             let source = scene.source_target(id);
+            let locked = doc.is_locked(id);
             let drawing = drawing_owner == Some(id) || self.selection_masks.target() == Some(layer_core::SelectionTarget::Saved(id));
             let can_delete = doc.can_delete_layers(&if collapsed.contains(&id) {
                 scene.order().iter().copied().filter(|h| *h == id || layer_core::descends_from(scene, *h, Some(id))).collect()
@@ -5881,7 +5882,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             id: occurrence_token(id),
             selection_layer: l.kind() == LayerKind::Selection,
             quick_mask: false,
-            can_rename: !doc.is_locked(id),
+            can_rename: !locked,
             has_thumbnail: matches!(l.kind(), LayerKind::Paint | LayerKind::Object | LayerKind::Selection)
                 || scene.effect(id).is_some_and(|fx| fx.program.kind == layer_core::EffectKind::Generator),
             content_icon: scene.effect(id).map(|fx| {
@@ -5933,7 +5934,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             mask_enabled: l.mask.as_ref().is_some_and(|m| m.enabled),
             mask_linked: l.mask.as_ref().is_some_and(|m| m.linked),
             alpha_locked: l.alpha_locked,
-            locked: doc.is_locked(id),
+            locked,
             relationship: crate::layer_relationships::relation(doc, id),
             right_swipe: crate::layer_relationships::right_swipe(doc, id),
             pass_through: l.passes_through(),
@@ -5941,7 +5942,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             group: l.kind() == LayerKind::Group,
             object: l.kind() == LayerKind::Object,
             can_drop_below: true,
-            drag_from_body: &[PointerKind::Mouse],
+            drag_from_body: if locked { &[] } else { &[PointerKind::Mouse] },
             depth: self.layer_interaction.depth(doc, id),
             collapsed: self.layer_interaction.collapsed.contains(&id),
             blend: l.blend.code(),

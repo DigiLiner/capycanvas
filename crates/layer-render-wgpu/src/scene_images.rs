@@ -52,11 +52,11 @@ impl ImageStages {
         self.scratch.clear();
 
     }
-    pub fn output(&self, id: OccurrenceHandle) -> Option<wgpu::TextureView> {
+    pub fn output(&self, id: OccurrenceHandle) -> Option<Image> {
         self.stages
             .iter()
             .find(|s| s.id == id && s.valid)
-            .map(|s| s.output.view.clone())
+            .map(|s| s.output.clone())
     }
     fn views(&self) -> Vec<wgpu::TextureView> {
         self.stages.iter().flat_map(|stage| [
@@ -109,27 +109,52 @@ fn support_map(scene: SceneView<'_>, level: u32, objects:&mut object_spatial::Sp
     supports
 }
 
-pub(super) fn dependency_window(scene: SceneView<'_>, output: DocRect, level: u32, objects:Option<&object_spatial::SpatialIndex>) -> DocRect {
-    if stack::support(scene, level) == Some(0) { return output; }
+pub(super) fn stage_regions(scene: SceneView<'_>, output: DocRect, level: u32, objects:Option<&object_spatial::SpatialIndex>) -> std::collections::HashMap<OccurrenceHandle, Vec<DocRect>> {
     let mut objects=objects.cloned().unwrap_or_default();
     let supports = support_map(scene, level,&mut objects);
     let mut required = std::collections::HashMap::<OccurrenceHandle, DocRect>::new();
-    let mut window = output;
+    let mut stages = std::collections::HashMap::new();
     for &handle in scene.order() {
         if !scene.visible(handle) { continue; }
-        let region = required.get(&handle).copied().unwrap_or(output).union(output);
+        let region = required.get(&handle).copied().unwrap_or(output);
         let dependencies = layer_core::composite_input_layers(scene, handle);
         let input = dependencies.iter().fold(content_support(scene, handle,level,&mut objects), |support, dependency| support.union(supports.get(dependency).copied().unwrap_or_default()));
-        let region = if let Some(effect) = scene.effect(handle).filter(|effect| effect.program.image_boundary()) {
-            let regions = effects::document_pass_regions(effect, region, input, level);
-            for &region in &regions { window = window.union(region); }
-            regions[0]
-        } else { region };
+        let regions = if let Some(effect) = scene.effect(handle).filter(|effect| effect.program.image_boundary()) {
+            effects::document_pass_regions(effect, region, input, level)
+        } else { vec![region; 2] };
         for dependency in dependencies {
-            required.entry(dependency).and_modify(|required| *required = required.union(region)).or_insert(region);
+            required.entry(dependency).and_modify(|required| *required = required.union(regions[0])).or_insert(regions[0]);
+        }
+        stages.insert(handle, regions);
+    }
+    stages
+}
+
+pub(super) fn dependency_window(scene: SceneView<'_>, output: DocRect, level: u32, objects:Option<&object_spatial::SpatialIndex>) -> DocRect {
+    if stack::support(scene, level) == Some(0) { return output; }
+    stage_regions(scene,output,level,objects).values().flatten().fold(output, |window,region|window.union(*region))
+}
+
+pub(super) fn has_images(scene:SceneView<'_>)->bool {
+    !matches!(scene.scope(),Some(layer_core::SceneScope::Raw(_) | layer_core::SceneScope::RawObjects(_)))
+        && scene.order().iter().any(|handle|scene.visible(*handle)&&scene.effect(*handle).is_some_and(|effect|effect.program.image_boundary()))
+}
+
+pub(super) fn image_sizes_fit(scene:SceneView<'_>,output:DocRect,maximum:u32,objects:Option<&object_spatial::SpatialIndex>)->bool {
+    if !has_images(scene) {return true;}
+    stage_regions(scene,output,0,objects).iter().filter(|(handle,_)|scene.effect(**handle).is_some_and(|effect|effect.program.image_boundary()))
+        .flat_map(|(_,regions)|regions).all(|region|region.size().is_ok_and(|size|size.into_iter().all(|side|side.max(1)<=maximum)))
+}
+
+pub(super) fn scratch_shapes(stages:&std::collections::HashMap<OccurrenceHandle,Vec<DocRect>>) -> [[u32;2];2] {
+    let mut shapes=[[0;2];2];
+    for regions in stages.values() {
+        for (pass,region) in regions.iter().skip(1).take(regions.len().saturating_sub(2)).enumerate() {
+            let size=region.size().unwrap_or([u32::MAX;2]).map(|side|side.max(1));
+            for axis in 0..2 {shapes[pass%2][axis]=shapes[pass%2][axis].max(size[axis]);}
         }
     }
-    window
+    shapes
 }
 
 impl Scene {
@@ -296,20 +321,23 @@ impl Scene {
         dirty: PixelRect,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<PixelRect, GpuRasterError> {
-        if !packet.scene.order().iter().any(|handle| packet.scene.visible(*handle) && packet.scene.effect(*handle).is_some_and(|effect| effect.program.image_boundary())) {
+        if !has_images(packet.scene) {
             self.retire_images(|scene| scene.images = ImageStages::default());
             return Ok(dirty);
         }
-        let doc_bounds = self.image_window.unwrap_or_else(|| capture_window_cached(packet.scene, PixelRect::full(packet.document_extent), Some(&self.object_spatial)));
+        let output = self.image_output.unwrap_or(PixelRect::full(packet.document_extent));
+        let doc_bounds = self.image_window.unwrap_or_else(|| capture_window_cached(packet.scene, output, Some(&self.object_spatial)));
         let size = doc_bounds.size()?;
-        if size.into_iter().any(|side| side > r.device.limits().max_texture_dimension_2d) { return Err(GpuRasterError::ExtentUnsupported); }
+        if !image_sizes_fit(packet.scene,output.into(),r.device.limits().max_texture_dimension_2d,Some(&self.object_spatial)) { return Err(GpuRasterError::ExtentUnsupported); }
         let rebased = FramePacket { scene: packet.scene.with_offset64(doc_bounds.min.map(|value| -(value as f64))), document_extent: size, ..packet };
         let local_dirty = doc_bounds.local(dirty);
+        let previous_output = self.image_output.replace(doc_bounds.local(output));
         let previous = std::mem::replace(&mut self.image_evaluation_origin, doc_bounds.min);
         let damage = self.image_damage.take();
         self.image_damage = damage.as_ref().map(|damage| damage.map(|region| doc_bounds.local(region)));
         let result = self.retire_images(|scene| scene.update_image_stages(r, rebased, local_dirty, encoder));
         self.image_evaluation_origin = previous;
+        self.image_output = previous_output;
         self.image_damage = damage;
         result.map(|local| {
             let document = DocRect { min: [doc_bounds.min[0] + i64::from(local.min_x()), doc_bounds.min[1] + i64::from(local.min_y())], max: [doc_bounds.min[0] + i64::from(local.max_x()), doc_bounds.min[1] + i64::from(local.max_y())] };
@@ -326,7 +354,10 @@ impl Scene {
         let extent = packet.document_extent;
         let bounds = PixelRect::full(extent);
         let doc_bounds = self.image_window.unwrap_or(DocRect { min: self.image_evaluation_origin, max: [self.image_evaluation_origin[0] + i64::from(extent[0]), self.image_evaluation_origin[1] + i64::from(extent[1])] });
-        let grid = display_mips::Plan::window(extent, 0, bounds);
+        let output = self.image_output.unwrap_or(bounds);
+        let stages = stage_regions(packet.scene, output.into(), 0, Some(&self.object_spatial));
+        let scratch = scratch_shapes(&stages);
+        let grid_for = |region:DocRect| { let bounds=region.in_frame(extent); display_mips::Plan::window(extent, 0, if bounds.is_empty(){PixelRect::new(0,0,1,1)}else{bounds}) };
         if self.images.extent != extent || self.images.doc_bounds != doc_bounds {
             self.images = ImageStages {
                 extent,
@@ -383,6 +414,11 @@ impl Scene {
                 if owner == Some(*h) { content_changes[h].regions.iter().copied() } else { changes[h].regions.iter().copied() }
             }));
             let Some(effect)=scene.effect(handle).filter(|e|e.program.image_boundary()&&visible(scene,handle))else{changes.get_mut(&handle).unwrap().extend(&source_damage);content_changes.get_mut(&handle).unwrap().extend(&source_damage);continue;};
+            let regions = &stages[&handle];
+            let input_grid = grid_for(regions[0]);
+            let output_grid = grid_for(*regions.last().unwrap());
+            let input_bounds = input_grid.bounds;
+            let output_bounds = output_grid.bounds;
             let input=Convert::filter_input(packet,effect.program.space);
             let previous = if let Some(owner) = scene.effect_owner(handle) {
                 scene.attached_effects(owner).iter().copied().take_while(|h|*h!=handle).filter(|h|scene.visible(*h)).last()
@@ -391,7 +427,7 @@ impl Scene {
             };
             let alias = previous.filter(|h| input==Convert::None&&scene.visible(*h)
                 &&effect.program.kind==layer_core::EffectKind::Adjustment&&scene.effect(*h).is_some_and(|e|e.program.kind==layer_core::EffectKind::Adjustment))
-                .and_then(|h|self.images.stages.iter().find(|s|s.id==h&&s.valid).map(|s|s.output.clone()));
+                .and_then(|h|self.images.stages.iter().find(|s|s.id==h&&s.valid&&s.output.plan.bounds.intersect(input_bounds)==input_bounds).map(|s|s.output.clone()));
             let mut cached =
                 if let Some(i) = self.images.stages.iter().position(|s| s.id == handle) {
                     self.images.stages.swap_remove(i)
@@ -400,9 +436,9 @@ impl Scene {
                         id: handle,
                         input: alias
                             .clone()
-                            .unwrap_or_else(|| Image::new(r, grid, "effect source cache")),
+                            .unwrap_or_else(|| Image::new(r, input_grid, "effect source cache")),
                         input_owned: alias.is_none(),
-                        output: Image::new(r, grid, "effect result cache"),
+                        output: Image::new(r, output_grid, "effect result cache"),
                         mask: None,
                         mask_offset: None,
                         time: f32::NAN,
@@ -411,11 +447,13 @@ impl Scene {
                         input_gather: None,
                     }
                 };
+            if cached.output.plan != output_grid { cached.output = Image::new(r, output_grid, "effect result cache"); cached.mask=None; cached.mask_offset=None; cached.valid=false; }
+            if cached.input_owned && cached.input.plan != input_grid { cached.input=Image::new(r,input_grid,"effect source cache"); cached.valid=false; cached.input_gather=None; }
             if let Some(input) = alias {
                 cached.input = input;
                 cached.input_owned = false;
             } else if !cached.input_owned {
-                cached.input = Image::new(r, grid, "effect source cache");
+                cached.input = Image::new(r, input_grid, "effect source cache");
                 cached.input_owned = true;
                 cached.valid = false;
                 cached.input_gather = None;
@@ -423,13 +461,13 @@ impl Scene {
             let time=r.effect_time(scene,handle,packet.time_seconds);
             let input_scope_changed = cached.dependencies != dependencies
                 || self.images.metadata.get(&handle).is_none_or(|old|old.effect_contract.map(|v|(v.0,v.1)) != Some((effect.program.kind,effect.program.space)));
-            let input_dirty = if !cached.valid || reset || input_scope_changed { bounds.into() } else { source_damage.intersect(bounds) };
-            let output_dirty = if !cached.valid || changed.contains(&handle) || cached.time != time || reset { bounds.into() }
+            let input_dirty = if !cached.valid || reset || input_scope_changed { input_bounds.into() } else { source_damage.intersect(input_bounds) };
+            let output_dirty = if !cached.valid || changed.contains(&handle) || cached.time != time || reset { output_bounds.into() }
                 else {
                     let mut result = changes[&handle].clone();
                     let filtered = effect.damage_radius().map_or_else(||if input_dirty.is_empty(){scale::Damage::default()}else{bounds.into()},|radius|input_dirty.expand(radius,extent));
                     result.extend(&filtered);
-                    result.intersect(bounds)
+                    result.intersect(output_bounds)
                 };
             if cached.input_owned && !input_dirty.is_empty() {
                 self.jobs.clear();
@@ -514,7 +552,7 @@ impl Scene {
                     };
                     let image = cached
                         .mask
-                        .get_or_insert_with(|| Image::new(r, grid, "effect mask cache"));
+                        .get_or_insert_with(|| Image::new(r, output_grid, "effect mask cache"));
                     if !mask_dirty.is_empty() {
                         for tile in mask_dirty.pages() {
                             let m = self.mask_tile(r, mask,coverage, mask_offset, tile);
@@ -530,30 +568,31 @@ impl Scene {
                 let count = effect.program.passes.len().max(1);
                 let input_support = layer_core::composite_input_layers(scene, handle).iter().fold(DocRect::default(), |support, dependency| support.union(supports.get(dependency).copied().unwrap_or_default()));
                 let regions: Vec<Vec<_>> = output_dirty.regions.iter().map(|&region| effects::document_pass_regions(effect, region.into(), input_support, 0)
-                    .into_iter().map(|region| grid.doc_bounds.local(region)).collect()).collect();
-                while self.images.scratch.len() < count.saturating_sub(1).min(2) {
-                    self.images
-                        .scratch
-                        .push(Image::new(r, grid, "reusable effect intermediate"));
+                    .into_iter().map(|region| region.in_frame(extent)).collect()).collect();
+                for (index,size) in scratch.iter().copied().enumerate().take(count.saturating_sub(1).min(2)) {
+                    let plan=display_mips::Plan::at(size,0);
+                    if index == self.images.scratch.len() { self.images.scratch.push(Image::new(r,plan,"reusable effect intermediate")); }
+                    else if self.images.scratch[index].plan != plan { self.images.scratch[index]=Image::new(r,plan,"reusable effect intermediate"); }
                 }
                 for regions in regions {
-                let mut previous = cached.input.view.clone();
+                let mut previous = cached.input.clone();
                 for pass in 0..count {
                     let last = pass + 1 == count;
-                    let target = if last {
-                        cached.output.view.clone()
-                    } else {
-                        self.images.scratch[pass % 2].view.clone()
-                    };
                     let region = regions[pass + 1];
-                    let local = region.window_local(bounds);
+                    let target = if last { cached.output.clone() } else {
+                        let mut image = self.images.scratch[pass % 2].clone();
+                        let size=image.plan.size;
+                        image.plan=display_mips::Plan::window(extent,0,PixelRect::new(region.min_x(),region.min_y(),region.min_x()+size[0],region.min_y()+size[1]));
+                        image
+                    };
+                    let local = region.window_local(target.plan.bounds);
                     let dependencies = layer_core::composite_input_layers(scene, handle);
-                    let mut front = grid;
+                    let mut front = previous.plan;
                     front.support = dependencies.iter().fold(DocRect::default(), |support, dependency| support.union(supports.get(dependency).copied().unwrap_or_default()));
                     front.support = effects::pass_input_support(effect, pass, front.support, 0).unwrap_or(front.support);
                     let mut original = cached.input.plan;
                     original.support = dependencies.iter().fold(DocRect::default(), |support, dependency| support.union(supports.get(dependency).copied().unwrap_or_default()));
-                    let mut data = effects::image_grid(grid, front, original);
+                    let mut data = effects::image_grid(target.plan, front, original);
                     data[..4].copy_from_slice(&[
                         local.min_x() as f32,
                         local.min_y() as f32,
@@ -567,8 +606,8 @@ impl Scene {
                         data[11] = 1.;
                     }
                     self.jobs.push(Job::Effect {
-                        target: target.clone(),
-                        sources: [previous, cached.input.view.clone(), r.empty_view.clone()],
+                        target: target.view.clone(),
+                        sources: [previous.view.clone(), cached.input.view.clone(), r.empty_view.clone()],
                         data,
                         prepared: self.effects.prepare(
                             r,
@@ -576,7 +615,7 @@ impl Scene {
                             &[handle],
                             effects::Execution::Image(pass),
                             packet.time_seconds,
-                            grid.level,
+                            target.plan.level,
                             packet.blend_space,
                         )?,
                         masks,source_target:None,changed_cells:None,

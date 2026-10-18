@@ -109,6 +109,33 @@ fn paper_relief_shows_while_scaling_and_briefly_after_a_choice() {
     assert_eq!(opacity(&mut s), None, "hidden shortly after release");
 }
 
+#[test]
+fn paper_relief_waits_for_preparation_and_survives_renderer_replacement() {
+    let mut s = session(Platform::Windows);
+    let layer = paper_layer(&s);
+    s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
+    s.renderer_mut().paper_overlay_pending = true;
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    for now in [1_000_000_000, 4_000_000_000] {
+        s.frame(now, now).unwrap();
+        assert_eq!(s.renderer_mut().paper_overlay.as_ref().map(|o| o.opacity), Some(1.));
+        assert!(s.wants_continuous_frames());
+    }
+    let color = s.engine.backend().document_color();
+    s.replace_renderer(Recorder { color, paper_overlay_pending: true, ..Default::default() }).unwrap();
+    assert!(s.wants_continuous_frames());
+    s.frame(8_000_000_000, 8_000_000_000).unwrap();
+    assert_eq!(s.renderer_mut().paper_overlay.as_ref().map(|o| o.opacity), Some(1.));
+    s.renderer_mut().paper_overlay_pending = false;
+    s.frame(12_000_000_000, 12_000_000_000).unwrap();
+    assert_eq!(s.renderer_mut().paper_overlay.as_ref().map(|o| o.opacity), Some(1.));
+    s.frame(13_050_000_000, 13_050_000_000).unwrap();
+    assert!((s.renderer_mut().paper_overlay.as_ref().unwrap().opacity - 0.5).abs() < 1e-3);
+    s.frame(13_300_000_000, 13_300_000_000).unwrap();
+    assert!(s.renderer_mut().paper_overlay.is_none());
+    assert!(!s.wants_continuous_frames());
+}
+
 fn gray_paper(value: u8) -> layer_core::color::source::SourceImage {
     use layer_core::color::source::{SourceBuilder, SourceChannels, SourceInterpretation};
     let interpretation = SourceInterpretation { channels: SourceChannels::Gray, depth: layer_core::color::SampleDepth::U8, profile: Default::default(), profile_assumed: false };
@@ -187,7 +214,7 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
 #[test]
 fn a_late_library_read_cannot_replace_a_newer_paper_choice() {
     use crate::paper_library::{PaperEntry, paper_identity};
-    for platform in [Platform::Gtk, Platform::Mac, Platform::Ios] {
+    for platform in [Platform::Gtk, Platform::Mac, Platform::Ios, Platform::Windows] {
         for different in [false,true] {
             let mut s = session(platform);
             let layer = paper_layer(&s);
@@ -218,14 +245,16 @@ fn a_late_library_read_cannot_replace_a_newer_paper_choice() {
 #[test]
 fn scaling_paper_preserves_the_pending_library_choice() {
     use crate::paper_library::{PaperEntry, paper_identity};
-    let mut s = session(Platform::Mac);
-    let layer = paper_layer(&s);
-    s.dispatch(UiAction::SelectLayer { id:layer }).unwrap();
-    let image = gray_paper(90);let id = paper_identity(&image).unwrap();
-    s.set_paper_library(vec![PaperEntry { id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into() }]).unwrap();
-    s.dispatch(UiAction::Effect { action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)} }).unwrap();
-    s.dispatch(UiAction::Effect { action:EffectAction::Number {layer,key:"scale".into(),operation:NumericOperation::Value {value:1.5}} }).unwrap();
-    s.paper_loaded(&id,image.clone()).unwrap();
-    assert_eq!(*s.paper_image(layer).unwrap(),image);
-    assert!((paper_scale(&s)-1.5).abs()<1e-4);
+    for platform in [Platform::Mac, Platform::Windows] {
+        let mut s = session(platform);
+        let layer = paper_layer(&s);
+        s.dispatch(UiAction::SelectLayer { id:layer }).unwrap();
+        let image = gray_paper(90);let id = paper_identity(&image).unwrap();
+        s.set_paper_library(vec![PaperEntry { id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into() }]).unwrap();
+        s.dispatch(UiAction::Effect { action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)} }).unwrap();
+        s.dispatch(UiAction::Effect { action:EffectAction::Number {layer,key:"scale".into(),operation:NumericOperation::Value {value:1.5}} }).unwrap();
+        s.paper_loaded(&id,image.clone()).unwrap();
+        assert_eq!(*s.paper_image(layer).unwrap(),image);
+        assert!((paper_scale(&s)-1.5).abs()<1e-4);
+    }
 }

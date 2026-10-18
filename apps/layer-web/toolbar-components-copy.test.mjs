@@ -140,3 +140,15 @@ test('iconless checkable actions retain a native checkbox and publish copy and s
   field.update({Action:spec('fr',true)});assert.equal(field.row.querySelector('input'),input);assert.equal(field.row.tagName==='label'?field.row:field.row.querySelector('label'),label);assert.equal(h.doc.activeElement,input);assert.equal(input.checked,true);assert.equal(input.getAttribute('aria-label'),'fr:Center on click');assert.ok(label.textContent.includes('fr:Center on click'));assert.deepEqual(h.actions,[]);
   input.checked=false;input.dispatch('change');assert.deepEqual(h.actions,[{type:'invoke',command:'center_zoom_clicks'}]);
 });
+
+
+test('fractional numeric captions reach the shared fitter without integer truncation',t=>{
+  const h=harness(t),row=h.root.querySelector('.toolbar-numeric'),natural=202.46875;
+  row.getBoundingClientRect=()=>({x:0,y:0,width:natural,height:24,right:natural,bottom:24});
+  Object.defineProperties(row,{scrollWidth:{get:()=>Math.round(natural)},scrollHeight:{get:()=>24}});
+  const original=h.app.toolbar_ui;let measured;
+  h.app.toolbar_ui=request=>{if(request.type==='options_layout')measured=request;return original(request);};
+  h.root.layoutComponent({width:800,height:36},'horizontal');
+  assert.ok(measured.sizes[0][0]>=natural,'The caption and retained number editor must fit their complete intrinsic width');
+  assert.deepEqual(h.actions,[]);
+});

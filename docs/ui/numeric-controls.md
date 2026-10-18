@@ -22,6 +22,7 @@ Every host shares the same numeric policy and editable values.
 - Titles stay on one line with ellipsis (desktop/web hover shows the full name).
   Values align right. Settings values center against the full title/description block.
   Stacked panel sliders sit just below the text, within a control with a 36-unit base height.
+  Panel captions align with the top of that row, above the slider hit area.
   The 4-pixel track has a symmetric 16-pixel hit area starting just below the
   visible bottom of the label. Its left inset is 36 pixels; its fixed right
   inset reserves room for ordinary values and units: 76 pixels. Panels have no

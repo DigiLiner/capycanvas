@@ -335,12 +335,27 @@ impl SamplerCopy {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct PaperCopy {
+    pub import_accept: String,
+    pub rename_title: String,
+    pub extensions: Vec<String>,
+}
+impl PaperCopy {
+    pub fn new(l: &Localizer) -> Self {
+        Self { import_accept:l.text(MessageId::DOCUMENTS_IMPORT_ACCEPT).to_string(),
+            rename_title:l.text(MessageId::RESOURCES_PAPER_RENAME_TITLE).to_string(),
+            extensions:layer_color::photo::extensions().map(|suffix| format!(".{suffix}")).collect() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct NativeCopy {
     pub tool_controls: ToolControlCopy,
     pub sampler: SamplerCopy,
     pub search: SearchCopy,
     pub layers: LayerCopy,
     pub palettes: PaletteCopy,
+    pub paper: PaperCopy,
     pub header: HeaderCopy,
     pub color: ColorCopy,
     pub shortcuts: ShortcutCopy,
@@ -353,6 +368,7 @@ impl NativeCopy {
             search: SearchCopy::new(l),
             layers: LayerCopy::new(l),
             palettes: PaletteCopy::new(l),
+            paper: PaperCopy::new(l),
             header: HeaderCopy::new(l),
             color: ColorCopy::new(l),
             shortcuts: ShortcutCopy::new(l),
@@ -364,6 +380,7 @@ impl NativeCopy {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NativeCaption {
     NumericError { reason: crate::NumericError },
+    PaperNameError { name: String },
     HeaderDrag { item: String },
     DrawingStorage { detail: String },
     InspectionRange { start: f64, end: f64 },
@@ -393,6 +410,7 @@ impl NativeCaption {
         let mut args = FluentArgs::new();
         let id = match self {
             Self::NumericError { reason } => return reason.message(l),
+            Self::PaperNameError { name } => return if crate::paper_library::paper_name(name).is_some() { String::new() } else { l.text(MessageId::RESOURCES_PAPER_NAME_REQUIRED).to_string() },
             Self::HeaderDrag { item } => return crate::header_drag_label(item, l),
             Self::DrawingStorage { detail } => { args.set("detail", detail.as_str()); MessageId::NATIVE_DRAWING_STORAGE_HELP },
             Self::InspectionRange { start, end } => { args.set("start", start.to_string()); args.set("end", end.to_string()); MessageId::NATIVE_INSPECTION_RANGE },

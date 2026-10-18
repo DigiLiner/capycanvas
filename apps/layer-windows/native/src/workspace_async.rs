@@ -10,12 +10,15 @@ use std::{
     task::{Context, Poll, Wake, Waker},
 };
 
-struct Signal {
+pub(crate) struct Signal {
     ready: AtomicBool,
     callback: Mutex<Option<Box<dyn Fn() + Send>>>,
 }
 impl Signal {
-    fn deactivate(&self) {
+    pub(crate) fn new(wake: impl Fn() + Send + 'static) -> Arc<Self> {
+        Arc::new(Self { ready:AtomicBool::new(false), callback:Mutex::new(Some(Box::new(wake))) })
+    }
+    pub(crate) fn deactivate(&self) {
         // Holding this lock across the callback makes returning from close a
         // boundary: no retained storage waker can touch the window afterwards.
         self.callback.lock().unwrap().take();
@@ -43,10 +46,7 @@ impl<T> AsyncTask<T> {
         Self {
             future: None,
             closed: false,
-            signal: Arc::new(Signal {
-                ready: AtomicBool::new(false),
-                callback: Mutex::new(Some(Box::new(wake))),
-            }),
+            signal: Signal::new(wake),
         }
     }
     pub(crate) fn busy(&self) -> bool {

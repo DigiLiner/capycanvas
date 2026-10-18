@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $id=$Name.ToLowerInvariant().Replace('application-menu-','')
 if($id -notin @('file','edit','image','layer','select','filter','view','window')){throw "Unknown application menu: $Name"}
+$menuRoute=@{id=$null}
 function Visible-Control([string]$Id,$Type,[switch]$ByName){
     $property=if($ByName){[System.Windows.Automation.AutomationElement]::NameProperty}else{[System.Windows.Automation.AutomationElement]::AutomationIdProperty}
     $condition=[System.Windows.Automation.PropertyCondition]::new($property,$Id)
@@ -13,20 +14,20 @@ function Visible-Control([string]$Id,$Type,[switch]$ByName){
 function Menu-Button {
     foreach($entry in @('application-menus','application-primary-menu','header-recovery-menu')){
         $button=Visible-Control $entry ([System.Windows.Automation.ControlType]::Button)
-        if($button){return $button}
+        if($button){$menuRoute.id=$entry;return $button}
     }
 }
 function Submenu {
     $entry=Visible-Control ('application-menu-'+$id) ([System.Windows.Automation.ControlType]::MenuItem)
-    if(!$entry){$entry=Visible-Control ('menu-'+$id) ([System.Windows.Automation.ControlType]::MenuItem)}
-    if(!$entry -and $Caption){$entry=Visible-Control $Caption ([System.Windows.Automation.ControlType]::MenuItem) -ByName}
+    if(!$entry -and $menuRoute.id -ne 'application-menus'){$entry=Visible-Control ('menu-'+$id) ([System.Windows.Automation.ControlType]::MenuItem)}
+    if(!$entry -and $menuRoute.id -ne 'application-menus' -and $Caption){$entry=Visible-Control $Caption ([System.Windows.Automation.ControlType]::MenuItem) -ByName}
     $entry
 }
 $watch=[Diagnostics.Stopwatch]::StartNew()
 do{
     $button=Visible-Control ("application-menu-"+$id) ([System.Windows.Automation.ControlType]::Button)
     $overflow=Menu-Button
-    if($button -or $overflow -or (Submenu)){break}
+    if($button -or $overflow -or (!$Inspect -and (Submenu))){break}
     Start-Sleep -Milliseconds 50
 }while($watch.Elapsed.TotalSeconds -lt 8*$(if($env:CAPY_WAIT_SCALE){[double]$env:CAPY_WAIT_SCALE}else{1}))
 if($Inspect){

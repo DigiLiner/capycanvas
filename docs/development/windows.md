@@ -31,6 +31,10 @@ Invoke-WebRequest https://dist.nuget.org/win-x86-commandline/latest/nuget.exe `
   -UseBasicParsing -OutFile "$env:USERPROFILE/.local/tools/nuget/nuget.exe"
 ```
 
+In-place native paint writes require the adapter extension and read/write
+storage support for both RGBA and coverage float textures. Windows uses the
+shared renderer capability check when requesting device features.
+
 Painting needs a hardware D3D12 GPU. On Linux, [Windows VMs](windows-vm.md) build
 the client and run the GPU-free tests and the UI fixtures on the software
 adapter; they do not replace a hardware GPU. [Devices](devices.md#windows) lists
@@ -149,6 +153,10 @@ unchanged publications skip menu text reads and measurements. Clock widths inclu
 the native control's padding in both customization and fullscreen. Choice controls
 retain each option's TextBlock even while WinUI moves the selected content into
 the collapsed presenter, so visible and accessible captions update together.
+Compact choice fields use zero vertical padding so the native selected presenter
+fits the shared control height; larger dialog choices retain native padding.
+Review the full closed gradient caption in both themes, including Gradient Fill
+and Gradient Map.
 The compact workspace selector keeps its shared Workspaces caption and a
 144-DIP width. A single drawing title uses the Web header's 180-DIP natural and
 80-DIP compact widths; multiple drawing tabs keep their existing width policy.
@@ -156,13 +164,26 @@ Expanded workspace buttons cache the measured caption plus their native padding,
 up to 130 DIP. Their named group contains both the choices and Options; scroll
 automation uses the inner viewer.
 
+The render owner routes snapshots using borrowed UTF-8 field ranges. The UI
+parses retained models; full model parsing on the owner is limited to opt-in
+UI traces. Presentation and overview pipelines are prepared on the shader workers;
+an acquired frame remains owned until presentation is ready. Cursor and brush
+readiness keep their original publication boundaries.
+
 Empty localization metadata preserves the current context; a pending envelope
 stays queued until a full snapshot carries it. Properties, tool controls, filter
-results and options use semantic identities for their structural keys. Current
+results and options use semantic identities for their structural keys. Tool settings
+use `group_id` for section identity and localized `group` only for heading copy;
+toolbar schemas retain action group IDs when stripping translated text. Current
 captions update retained controls, accessibility names and tooltips. Numeric
 refusals retain their shared reason, and color forms relabel their rows and
 re-read a refused value in the new language without changing the draft. Profile,
 proof and export captions preserve raw names, selections and prepared candidates.
+New Drawing presents the shared `creation.resolution` unit beside its label and
+uses that same numeric control for resolution expressions. Width and height use
+the catalog dimension control. Invalid drafts retain the shared refusal; selecting
+a preset restores its authored dimensions and resolution. New Drawing scrolls
+validation errors into view when rejecting a draft.
 Preferences reserves the measured titlebar height when fitting its centered
 dialog; its narrow-window check dismisses it with an actual pointer click.
 
@@ -182,6 +203,22 @@ desktop with an enabled IME; physical GPU presentation needs Windows hardware.
 `localization-smoke` checks English and Japanese, including compact menus and
 narrow Preferences, in both themes. Menu selectors use semantic IDs or the exact
 current caption from the shared snapshot.
+
+The opt-in workspace geometry trace includes toolbar components, slider controls
+and panel widgets, including the toolbar-only Sketch workspace. Matched captures
+require these native controls to settle before recording images.
+
+Header menus limit their scrolling presenters to the space below the heading
+inside both the window content and the monitor work area. Moving or resizing a
+window must preserve menu-heading access during hover switching.
+Their natural width includes the capsule's measured horizontal padding and
+heading spacing, so the final heading retains its full allocation.
+
+`open-application-menu.ps1` uses the submenu IDs of the visible menu entry point.
+The compact `application-menus` button exposes `application-menu-<id>` entries;
+primary and recovery menus retain their ID and localized-caption lookups.
+Inspection waits for a visible button; an existing submenu completes only the
+normal expansion path. Visibility, enabled state and expansion checks remain.
 
 `exercise-header.ps1` compares the Clock caption before and after moving it from
 the component bank into the title bar, including its visible width.
@@ -218,6 +255,14 @@ output; a row drop uses shared insertion policy. Native drag feedback uses the s
 normalized destination and release revalidates the original hit. Right swipes dispatch
 the shared row action. `exercise-layers.ps1 -Relationships` checks these interactions
 and their undo history in both themes, alongside the existing pickup fixture variants.
+Run `exercise-layer-pickup.ps1 -Executable <path> -Device mouse -Theme dark`;
+repeat with `-Device pen` and `-Device touch`, each with `-Theme light` too.
+The UIA helper resolves the current `layer-list` for row searches; explicit
+scopes, names, root controls and owned popup searches keep their original scope.
+Row activation after dragging uses a fresh pointer tap. Keep the original visible
+bounds, stability, history and deadline checks.
+The pickup fixture rejects locked body and handle motion without changing layer
+order or adding history: one Undo unlocks the source, and Redo locks it again.
 The default layers fixture closes with a focused opacity draft, reopens the same
 private profile, and verifies the saved draft and its clean Undo checkpoint.
 `exercise-layer-drawer.ps1 -Theme dark|light` checks the combined header drawer,
@@ -409,6 +454,10 @@ been verified.
 
 ## Test
 
+Run `pwsh -NoProfile -File ./apps/layer-windows/tests/model-snapshot-reader.ps1`
+to check the UI fixture model reader during concurrent atomic snapshot publication.
+This windowless test needs no GPU and writes its results under `artifacts/windows`.
+
 Fluent catalogs and shared cursor SVGs use LF checkouts through `.gitattributes`.
 Their parser structure and byte hashes must stay identical across hosts.
 Original dependency notices in `tools/build/licenses/*.txt` preserve their exact
@@ -446,9 +495,18 @@ registration and menu actions in both themes.
 | Where | Checks |
 | --- | --- |
 | Linux or Windows | `cargo test --locked -p layer-host -p layer-ui -p layer-workspace -p layer-windows --lib` and `cargo clippy --locked -p layer-windows --all-targets -- -D warnings` |
-| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: Release build, native input queue tests, Rust unit tests and the `d3d12_` document tests on the Microsoft software adapter. Pass `-Configuration Debug` for unoptimized builds and tests. On Linux: `tools/windows-vm/windows-vm.py check`. |
+| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: Release build, native input queue tests, serial Rust unit and `d3d12_` document tests on the Microsoft software adapter. Pass `-Configuration Debug` for unoptimized builds and tests. On Linux: `tools/windows-vm/windows-vm.py check`. |
 | Windows desktop | The `exercise-*.ps1` fixtures for the changed area. On Linux: `tools/windows-vm/windows-vm.py fixtures <name>`. |
 | Hardware D3D12 | `cargo test --locked -p layer-windows --lib d3d12_ -- --ignored --test-threads=1`, which adds the HDR and color round-trip tests; [GPU reconstruction](#gpu-reconstruction); renderer tests with `LAYER_GPU_INDEX`; performance. |
+
+D3D12-specific fixtures construct an instance with `Backends::DX12`; a generic
+`PRIMARY` headless instance can select Vulkan. The software-adapter gate permits
+CPU adapters but does not force every ordinary test onto WARP.
+
+The `software-adapter-tests` feature gives WARP readbacks a 60-second budget;
+normal hardware builds retain 30 seconds. The large-canvas fixture keeps its
+60-second overall deadline and exact pose and pixel checks. Hardware qualification
+uses normal builds.
 
 `scripts/test-input.ps1` compiles the C++ input queue and composition-key tests
 with `cl` and needs a Visual Studio developer shell. `TextInput.cpp` observes the
@@ -574,13 +632,18 @@ stops with mouse, touch and pen and checks Escape, arrow keys, Delete,
 interpolation, Reverse and the current-color bucket, each as one Undo step.
 `exercise-tools.ps1` and `exercise-toolbar-components.ps1` cover the Gradient
 tool's editor in Tool Settings and the Tool Options popup.
+Scrolling panel presenters publish `panel-scroll-<panelId>` when their native
+template is created or replaced. Tool fixtures choose scroll direction from the
+control's native, unclipped bounds. UI Automation must still prove full visibility,
+height and stable bounds.
 
 Pen pressure uses the same curve renderer with shared pressure controls and a
 modeless utility frame. Graph drawing clips to its native input bounds, including
 edge handles. Keyboard capture forwards every press in a combined key message's
 repeat count; Rust owns the step and gesture history.
 `exercise-pressure.ps1 -Executable <path> -Theme dark`
-checks opening from Preferences, curve contacts, drag-out removal, live pressure,
+checks opening from Preferences, curve contacts, drag-out removal, touch and pen
+cancellation of curve and panel drags, live pressure,
 canvas painting and calibration transactions. Repeat with `-Theme light`;
 the VM fixture names are `pressure` and `pressure:light`. Physical pen and frame
 performance require Windows hardware.
@@ -594,8 +657,16 @@ presents the shared action row (sampling menu, Auto, targeted adjustment), the
 Color Lookup selector and Import LUT, whose `.cube` file is read and parsed on the
 document worker. `exercise-scopes.ps1 -Executable <path> -Theme dark` walks the
 Photo scopes, Levels, Curves and Color Lookup with mouse, pen and touch; the VM
-fixture names are `scopes` and `scopes:light`. Log counts has a wrapping row above
-the precision and clipping controls. The `layout-dark` and `layout-light` theme
+fixture names are `scopes` and `scopes:light`. Scope, filter, layer and gradient previews use
+`BitmapUpload`: one active upload, one latest pending request and two reusable
+software bitmaps per context. Workers copy pixels and convert straight RGBA to
+premultiplied BGRA. The UI submits `SoftwareBitmapSource.SetBitmapAsync` and
+resumes after completion without blocking the dispatcher. Document,
+setting and extent changes retire the source and its buffers. Retired buffers
+are not reused while native readers may still hold them. A completed frame from
+the same context may appear while a newer frame is pending.
+Log counts shares the compact footer
+with precision and clipping controls. The `layout-dark` and `layout-light` theme
 variants check both scope panels in every registered language at 1100 and 1500
 pixels wide.
 
@@ -649,6 +720,10 @@ the focused header journeys also check placement cancellation and keyboard input
 
 - **Unlocked desktop, one at a time.** Fixtures need an unlocked interactive
   desktop and foreground input. Run them sequentially.
+- **Resolve the drawing window.** Use `Owned-DrawingWindow` from `CapyUia.ps1` at
+  startup and after reopening. Keep its root and HWND for input, sizing and
+  captures; `Process.MainWindowHandle` can select an input-indicator overlay
+  in the same process.
 - **Wait for layout.** Before injecting input, wait for both the published state
   and the arranged control bounds, then check that the hit belongs to the owned
   app. Use `Control -Arranged` from `CapyUia.ps1` when locating a pointer target.
@@ -656,6 +731,9 @@ the focused header journeys also check placement cancellation and keyboard input
   collapsed column before addressing its group grip, and wait for a menu to
   acquire keyboard focus before sending Escape. Cancellation comparisons use
   the saved workspace layout; measured bounds can change as controls settle.
+- **Keep logs observational.** Log acknowledged state and owned control properties
+  already used by assertions. A global focused-element lookup can lose its UI
+  Automation peer during input; avoid querying it only for a log message.
 - **Measure timed input.** Use the native test drivers for double presses and
   prediction strokes. PowerShell sleeps and method calls can exceed a gesture's
   interval under load; retain the actual injection timing with the result.
@@ -667,6 +745,8 @@ the focused header journeys also check placement cancellation and keyboard input
 - **Wait for the operation you started.** Compare the document revision or the
   requested state before and after input. An already enabled Undo command does
   not prove that a new stroke has committed.
+  Shared worker notifications can arrive before the document operation finishes;
+  wait for its completion state.
 - **Capture composed pixels.** GPU pixel assertions use the owned window's
   screen rectangle on the private desktop. `PrintWindow` can return an earlier
   SwapChainPanel image. Wait for the expected visible change before comparing
@@ -674,15 +754,31 @@ the focused header journeys also check placement cancellation and keyboard input
   threshold cannot verify the same journey in the light theme. Keep the sample
   grid, camera and canvas bounds from one checked projection. Move the owned
   pointer away from the capture area and dismiss tooltips before a baseline.
+  Capture pointer failures with composed pixels before synthetic pointer cleanup.
 - **Use current menu identifiers.** `NativeMenuItems` uses the shared command ID
   for routed commands; other layer actions use `layer-menu-<op>`. Check the shared
   menu definition when an item cannot be found.
+  For popup dismissal, the palette fixture counts menu items whose parent is a
+  `Menu` container. Permanent `MenuBar` headings remain after a flyout closes.
+  `exercise-palettes.ps1 -Theme dark` and `-Theme light` preserve swatch order
+  and seeded Redo after held touch/pen cancellation and mouse Escape. They also
+  require the exact color definition and selected swatch IDs to remain, then
+  check ordinary short taps and accessible swatch Invoke still select colors.
+  Outside releases use an owned canvas work-area point beyond the swatch grid.
+  Saved swatches and chooser results use native scrollbars for mouse input;
+  pen and touch retain the same viewport and scroll position with bars hidden.
+  The fixture imports its own overflow palette, compares exact scroll-provider
+  and six-tile geometry across device changes, drags both native scrollbar
+  thumbs, and checks last-tile color hits, reorder slots and one-step Undo/Redo.
 - **Retain tool-slot identity.** Resolve a toolbar tile once and keep its ID
   when returning after a variant change; `resolved_control` remembers the chosen
   variant, so the original command may no longer identify that slot.
 - **Select the telemetry owner.** Use `Workspace-Root` from `CapyUia.ps1` for
   drag state and arranged workspace bounds. The outer window and inner workspace
   share an accessible name; only the inner workspace publishes this state.
+  The helper follows fresh native child containers and accepts the existing
+  workspace schema, with an owned-root search when that route is unavailable.
+  It keeps the original geometry, readiness and stability checks.
 - **Keep callback data distinct.** `Wait-Until` callbacks run in its PowerShell
   scope. Expected values must not share names with the helper's parameters.
 - **One snapshot per assertion.** Read related fields from one state file; check
@@ -708,6 +804,17 @@ strip, Use Color and the Paper's fill thumbnail.
 `enclose-fill` (dark) and `enclose-fill:light` draw an Enclose and Fill loop with
 the mouse over reference ink: two closed holes fill a new layer, a crossed hole
 and the exterior stay empty, and one Undo, Redo and Escape behave as on GTK.
+
+Run `exercise-workspace-pickup.ps1 -Executable <exe> -Device <mouse|pen|touch>`
+in both `-Theme dark` and `-Theme light` on the private test display. Run
+`exercise-workspace-layout.ps1 -Executable <exe>` in both themes too. These
+fixtures check workspace input and layout correctness, not motion timing.
+
+For floating-panel checks, center the actual drag preview in the shared work area.
+The canvas element extends behind the editor controls, and a preview near a dock
+can snap there while the pointer is over the canvas. After release, require an
+idle native gesture, an ended shared drag and the panel in the committed floating
+layout before testing its controls.
 
 `exercise-workspace-pickup.ps1 -DebuggerPath <cdb.exe>` attaches CDB before input
 and saves an access-violation stack and dump in the run directory.
@@ -752,6 +859,10 @@ cargo test --locked -p layer-windows --lib filter_packages::tests::recovery_test
 history and thumbnails after reconstruction. `-FailGpu` also blocks
 reconstruction and checks that completed edits remain saveable.
 
+Resolve queued UIA InvokePatterns before triggering GPU loss. Invoke those same
+controls after the recorded preparation boundary; queued pen events must still
+fall strictly inside the recorded reconstruction interval.
+
 The isolated UI test hook drains the rendering and presentation queues on every
 participating render worker before calling `ID3D12Device5::RemoveDevice`. WARP can crash when
 manual removal races queued presentation work. The hook still removes the real
@@ -759,11 +870,36 @@ device; active contacts and queued input survive successful reconstruction.
 Replacing the surface must not cancel those contacts. The ignored Rust removal
 tests above exercise in-flight GPU work on hardware without this drain.
 
+Window-free document fixtures call `DocumentService::renderer_unavailable` before
+retiring the active renderer. This releases the device retained for tab activation
+and follows the production reconstruction lifecycle. An opened native package
+that fails execution admission remains in the read-only package view; removal
+fixtures check its exact retained bytes and close that view before retrying.
+
+Paper image decoding, library reads and writes run on workers. Paper and
+palette jobs use the workspace task's guarded wakeup. Shutdown disconnects
+those wakeups before releasing the native window callback, including while
+file work is still running. The picker uses four columns with 84-DIP tiles
+and 72-DIP previews. Tile captions use regular text and wrap at whole words.
+
+For an existing owned window on the private test display,
+`exercise-tool-features.ps1` takes `ProcessId`, `WindowHandle`, `StateFile`,
+`OutputDirectory`, `Journey` and `Theme`. Run `smoothing`, `size-keys`, `preview`
+and `size-controls` in both themes. The size controls journey selects Sketch's
+Pencil and Eraser, clicks and drags with mouse, pen and touch, and checks the
+shared size, retained slider, popup dismissal, unchanged drawing and exact
+canvas pixels. The preview journey checks changed and restored stamp pixels.
+The size-key journey holds each bracket key through repeated native key-downs and
+records the accepted calls; it does not qualify physical keyboard auto-repeat.
+The canvas and Curves forward every press in Windows combined key messages;
+shared Rust retains shortcut steps and repeat policy.
+
 ### Control reviews
 
-Separate review builds replace the app's entry point with one production control
-fed by synthetic Rust models, for comparison with the Web controls. Generate the
-models at the display's actual scale, then build and capture:
+Separate review builds replace the app's entry point with production controls
+or upload helpers. Number and Color use synthetic Rust models for comparison
+with the Web controls. Generate those models at the display's actual scale,
+then build and capture:
 
 ```powershell
 cargo run --locked -p layer-windows --example number-fixture -- artifacts/windows/numeric-matrix
@@ -774,6 +910,32 @@ cargo run --locked -p layer-ui --example compact_color_fixture -- artifacts/wind
 ./apps/layer-windows/scripts/build.ps1 -ControlFixture Color -OutputDirectory artifacts/windows/ColorFixture
 ./apps/layer-windows/scripts/capture-compact-color.ps1 -Executable artifacts/windows/ColorFixture/CapyCanvas.exe -FixtureFile artifacts/windows/compact-color-parity/dark-160.json
 ```
+
+Build `Bitmap` to check the common native uploader with owned pixel buffers and
+the same private context setup as the other control reviews:
+
+```powershell
+./apps/layer-windows/scripts/build.ps1 -Configuration Release -ControlFixture Bitmap -OutputDirectory artifacts/windows/BitmapReview
+$run = Join-Path (Get-Location) ('artifacts/windows/bitmap-review/' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $run | Out-Null
+$env:CAPY_BITMAP_FIXTURE = Join-Path (Resolve-Path $run).Path 'input.json'
+'{"schema":1}' | Set-Content -LiteralPath $env:CAPY_BITMAP_FIXTURE -Encoding utf8
+```
+
+Launch `artifacts/windows/BitmapReview/CapyCanvas.exe` visibly on the fixture
+runner's private test desktop with that environment. The input path must be
+absolute; the review creates its isolated context beside it. Require exit code
+zero and `bitmap-upload-fixture-result.json` with `passed: 12`. Keep the
+90-second outer, 10-second callback and five-second close bounds.
+
+The review checks real asynchronous uploads and rendered pixels, RGBA/BGRA
+encoding, two-buffer reuse, failed-copy retirement, latest-request coalescing,
+callback reentrancy and exceptions, context cancellation during upload,
+closed-owner rejection, and new-document thumbnail requests after cancelling
+an old document's active upload. It checks loaded, connected state before waiting for a
+visible rendering event. Its 3 × 2 source-pixel oracle uses Image dimensions
+divided by `XamlRoot.RasterizationScale` and a natural-size `RenderTargetBitmap`
+capture, preserving exact physical pixels at the actual display scale.
 
 The Zoom readout journey checks that opening and closing the readout preserves
 the exact camera, artwork and undo history.
@@ -821,11 +983,38 @@ the native effective accent through the shared `system_theme_changed` action
 and asserts that the resulting accent matches. Preserve earlier captures when
 correcting unmatched inputs.
 
+Before each capture, the fixture searches every fresh `layer-list` peer for
+visible rows and requires each row to exist in shared state with its required
+previews `Ready`. It retains the camera and readiness checks and allows 45 seconds
+for three consecutive unchanged geometry observations.
+
 Tool Set geometry compares the visible part of each control after viewport and
 ancestor clipping, retaining full DOM bounds in `unclipped_bounds`. Controls
 wholly outside the visible panel are excluded from its geometry inventory.
 Layers uses the current semantic blend button. Each host still measures its
 own controls; these records do not alter the raw images or comparison limits.
+
+Workspace shadow masks keep their host at XAML opacity 1. Hide the host through
+its compositor visual so XAML rendering can refresh the `GetAlphaMask` surface
+after shape changes. Keep the source brush mapping and shadow geometry unchanged.
+
+Panel content measurements use the current width with unconstrained height;
+allocated or clipped body heights must not become natural sizing inputs.
+Inactive tabs measure their controls too, using copies without preview queries
+or shared rendering caches. Fixed controls and one complete scroll row reserve
+space before a fitted sibling receives the remaining height.
+Automatic tabs publish cached full-caption widths even when their labels are
+currently hidden; the tab strip reserves the shared 20-pixel member grip.
+Histogram and Waveform keep Log counts beside the status and clipping controls
+in one compact footer. Their graph stretches within the allocated body while
+the selectors, axis and footer retain their height; the preferred graph height
+remains the natural sizing input. Histogram axis labels stay with their graph.
+The plot uses its panel surface without a separate input-field backplate.
+Log counts retains the shared 24-pixel target around its native checkbox.
+Scope status and scale labels, including Curves axes, use the secondary text
+role at 55% opacity.
+Tool Set rows use the defined text line height and preserve fractional layout coordinates
+so native pixel rounding does not accumulate into larger rows.
 
 Compare every image pair and look at the screenshots as well as the geometry
 reports. Use [visual acceptance](../../tools/visual/README.md#comparing-images): fix
@@ -873,3 +1062,30 @@ Keep profiles, databases, captures, traces, debugger logs and dumps under ignore
 `artifacts/windows`: they can contain document contents and paths. Measure
 performance without a debugger, tracing or competing builds and GPU work; the
 [measuring guide](../performance/measuring.md) has the Windows workloads.
+
+Scrollable native panels publish changed geometry through their existing layout
+callback, including compositor-only scrolling that does not raise LayoutUpdated.
+Tool fixtures focus the requested control before revealing its complete row.
+Native focus can bring the control into view; the full-row geometry checks remain.
+For docked Tool controls, intersect the scroll provider bounds with the allocated
+native Tool group bounds before testing visibility or choosing scroll direction.
+Top captures reuse each row's validated expected height when revealing it again.
+Docked Tool fixtures dismiss any tool drawer with canvas focus and Escape after
+selection, then wait for shared closure and native drawer removal before finding
+tool controls.
+Before a panel action, fixtures reveal its collapsed column through the native
+column icon and wait for the shared active panel.
+
+Fixture ownership records use the observed process ID, native HWND and executable.
+A traced WindowID is optional and comes only from a validated window registry;
+it is not the HWND. Registration rechecks native ownership and any available
+registry, including a registry published after the first observation. Performance
+fixtures keep UI tracing disabled.
+
+Run the owner-census helper regression without opening an application:
+
+```powershell
+pwsh -NoProfile -File apps/layer-windows/tests/fixture-owner-census.ps1 `
+  -Helper apps/layer-windows/scripts/CapyUia.ps1 `
+  -Output artifacts/windows/fixture-owner-census-fresh
+```

@@ -28,7 +28,7 @@ struct Status {
 }
 
 pub(crate) struct Service {
-    wake: Arc<dyn Fn() + Send + Sync>,
+    signal: Arc<crate::workspace_async::Signal>,
     pending: Option<mpsc::Receiver<Result<Outcome, String>>>,
     status: Status,
 }
@@ -44,8 +44,9 @@ fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
 }
 
 impl Service {
+    pub(crate) fn stop(&self) { self.signal.deactivate(); }
     pub(crate) fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
-        Self { wake, pending: None, status: Status::default() }
+        Self { signal:crate::workspace_async::Signal::new(move || wake()), pending: None, status: Status::default() }
     }
 
     pub(crate) fn status(&self) -> serde_json::Value {
@@ -97,12 +98,12 @@ impl Service {
             }
         };
         let (send, receive) = mpsc::channel();
-        let wake = self.wake.clone();
+        let wake = std::task::Waker::from(self.signal.clone());
         std::thread::Builder::new()
             .name("capy-palette-file".into())
             .spawn(move || {
                 let _ = send.send(job());
-                wake();
+                wake.wake();
             })
             .map_err(|e| e.to_string())?;
         self.pending = Some(receive);
@@ -134,6 +135,10 @@ impl Service {
         }
         host.invalidate_snapshot();
     }
+}
+
+impl Drop for Service {
+    fn drop(&mut self) { self.stop(); }
 }
 
 #[cfg(test)]

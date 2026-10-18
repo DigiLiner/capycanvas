@@ -37,7 +37,7 @@ function Expand([string]$Id){
     $hit.item.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
 }
 function Focus([string]$Id){
-    [CapyLayersCapture]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+    [CapyLayersCapture]::SetForegroundWindow($drawingWindow)|Out-Null
     $item=Control $Id;$item.SetFocus();Wait-Until {$item.Current.HasKeyboardFocus} "Missing focus on $Id"
 }
 function Toggle-Flag([string]$Id,[switch]$Keyboard){
@@ -99,11 +99,11 @@ function Read-Preview([string]$Id,[scriptblock]$Read){
     if($image.Current.ItemStatus -ne 'Ready'){return ''}
     $r=$image.Current.BoundingRectangle
     $window=[CapyLayersCapture+Rect]::new()
-    if(![CapyLayersCapture]::GetWindowRect($review.MainWindowHandle,[ref]$window)){throw 'Window bounds unavailable'}
+    if(![CapyLayersCapture]::GetWindowRect($drawingWindow,[ref]$window)){throw 'Window bounds unavailable'}
     $bitmap=[Drawing.Bitmap]::new($window.right-$window.left,$window.bottom-$window.top)
     try{
         $graphics=[Drawing.Graphics]::FromImage($bitmap);$dc=$graphics.GetHdc()
-        try{if(![CapyLayersCapture]::PrintWindow($review.MainWindowHandle,$dc,2)){throw 'App capture failed'}}
+        try{if(![CapyLayersCapture]::PrintWindow($drawingWindow,$dc,2)){throw 'App capture failed'}}
         finally{$graphics.ReleaseHdc($dc);$graphics.Dispose()}
         & $Read $bitmap $r $window
     }finally{$bitmap.Dispose()}
@@ -160,14 +160,15 @@ try {
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/layers-review.json'),(@{process_id=$review.Id;run=$run}|ConvertTo-Json))
     Write-Output "Owned Layers review $($review.Id)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Review did not start' 45
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready} 'Review did not start' 45
     [CapyLayersCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     if(!@((Model).layout.groups|Where-Object {$_.active -eq 'layers'}).Count){Invoke 'Layers' -Name}
     if($Relationships){
         . (Join-Path $PSScriptRoot 'layer-relationships.ps1')
         Test-LayerRelationships
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         [PSCustomObject]@{relationships='passed';themes='dark/light';pointer_devices='mouse/pen/touch';evidence=$run;scope='WARP presentation and synthetic native input; physical pens and hardware frame pacing unverified'}|ConvertTo-Json
         return
     }
@@ -312,19 +313,20 @@ try {
     Capture 'replacement'
     Test-LayerModes
     Edit 'layer-opacity' '55'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     $stderr=Join-Path $run 'reopened.stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero} 'Restarted review did not start' 45
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window} 'Restarted review did not start' 45
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     Wait-Until {(Model).brush_ready -and !(Model).windows_recovery.busy -and !(Model).windows_recovery.restoring} 'Layer session did not reopen' 120
     if(!(Model).state.document_file.modified -or [Math]::Abs((Model).state.layer_tools.editing_layer.opacity-.55) -gt .000001){throw 'Window close lost the focused layer draft'}
     Capture 'reopened-draft' -WithModel
     Invoke 'Undo' -Name
     Wait-Until {[Math]::Abs((Model).state.layer_tools.editing_layer.opacity-1) -lt .000001 -and !(Model).state.document_file.modified} 'Restored layer draft did not Undo to the clean checkpoint'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     [PSCustomObject]@{layer_color_modes_and_local_filters='passed';thumbnail_paint_and_exact_undo='passed';row_retention='passed';header_and_lock_controls='passed';native_toggle_states_and_history='passed';keyboard_layer_and_mask_menus='passed';independent_selection='passed';mask_thumbnail='passed';rename_duplicate_delete_undo='passed';mask_controls_clipping_references='passed';group_collapse_hidden_target_and_ungroup='passed';virtualized_rows_and_recycling='passed';theme_and_document_replacement='passed';focused_draft_committed_before_close='passed';zero_exit='passed'}|ConvertTo-Json
 }catch{

@@ -4,6 +4,7 @@
 #include "CanvasPointerSample.h"
 #include "UiControls.h"
 #include "KeyNames.h"
+#include "NativeKeyRepeats.h"
 #include "NavigationCursors.h"
 #include "ExternalImages.h"
 #include <microsoft.ui.xaml.media.dxinterop.h>
@@ -456,7 +457,7 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     workspaceManager=std::make_unique<WorkspaceManagerView>(
         [weak=weak_from_this()](std::string json){if(auto self=weak.lock())self->Send(std::move(json),CanvasCommandKind::Workspace);},
         catalogView,localization,root.XamlRoot(),[weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyDialogs();});
-    if(auto snapshot=capy_snapshot(host)){
+    if(auto snapshot=capy_snapshot(host,nullptr)){
         std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
         ApplyModel(Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot)));
     }
@@ -753,12 +754,15 @@ void CanvasWindow::Key(KeyRoutedEventArgs const& e,bool pressed) {
     input.Insert(L"type",JsonValue::CreateStringValue(L"key"));
     input.Insert(L"key",JsonValue::CreateStringValue(name));
     input.Insert(L"pressed",JsonValue::CreateBooleanValue(pressed));
-    input.Insert(L"repeat",JsonValue::CreateBooleanValue(pressed&&e.KeyStatus().WasKeyDown));
     input.Insert(L"editing",JsonValue::CreateBooleanValue(editing));
     input.Insert(L"modifiers",modifiers);
     if(divider)input.Insert(L"divider",JsonValue::CreateNumberValue(*divider));
     sentModifiers.store(((GetKeyState(VK_CONTROL)&0x8000)?1u:0u)|((GetKeyState(VK_SHIFT)&0x8000)?2u:0u)|((GetKeyState(VK_MENU)&0x8000)?4u:0u));
-    Send(to_string(input.Stringify()),CanvasCommandKind::Input);
+    auto keyStatus=e.KeyStatus();
+    ForwardKeyRepeats(pressed,keyStatus.WasKeyDown,keyStatus.RepeatCount,[&](bool repeat){
+        input.Insert(L"repeat",JsonValue::CreateBooleanValue(repeat));
+        Send(to_string(input.Stringify()),CanvasCommandKind::Input);
+    });
     if(!editing)e.Handled(true);
 }
 bool CanvasWindow::PenButtons(Microsoft::UI::Input::PointerPoint const& point,uint32_t phase){
@@ -834,10 +838,10 @@ void CanvasWindow::Run() {
             self->wake.notify_one();
         })>=0;
         if(prepared){
-            if(auto snapshot=capy_snapshot(host)){
+            CapySnapshotInfo routing{};
+            if(auto snapshot=capy_snapshot(host,&routing)){
                 std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-                auto model=Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot));
-                Publish(snapshot,model);
+                Publish(snapshot,routing);
             }
             prepared=capy_prepare_gpu(host)>=0;
         }
@@ -849,6 +853,7 @@ void CanvasWindow::Run() {
         bool probeReady=false;
         unsigned recoveryAttempts=0;
         std::optional<std::chrono::steady_clock::time_point> lastPresent;
+        auto nextServices=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
         for(;prepared;) {
             if(capy_device_lost(host)){
                 try {
@@ -862,8 +867,7 @@ void CanvasWindow::Run() {
             bool pollServices=false;
             {
                 std::unique_lock lock(mutex);
-                if(!wake.wait_for(lock,std::chrono::milliseconds(250),[&]{return closing||resize||dirty||servicesReady||transportFailed||!work.Empty()||pendingHover.has_value()||!previewWork.Empty();}))
-                    servicesReady=true;
+                wake.wait_until(lock,nextServices,[&]{return closing||resize||dirty||servicesReady||transportFailed||!work.Empty()||pendingHover.has_value()||!previewWork.Empty();});
                 if(closing) break;
                 if(resize) {
                     paused=true;resize=false;probeReady=false;
@@ -872,20 +876,30 @@ void CanvasWindow::Run() {
                     wake.wait(lock,[&]{return !paused||closing;});
                     dirty=true;continue;
                 }
-                pollServices=std::exchange(servicesReady,false);
+                pollServices=std::exchange(servicesReady,false)||std::chrono::steady_clock::now()>=nextServices;
             }
             if(pollServices){
                 auto serviceResult=capy_poll_services(host);
                 if(serviceResult<0){if(capy_device_lost(host))continue;Fail(capy_error());break;}
+                nextServices=std::chrono::steady_clock::now()+std::chrono::milliseconds(250);
                 dirty|=serviceResult!=0;
-                if(auto snapshot=capy_snapshot(host)){
+                CapySnapshotInfo routing{};
+                if(auto snapshot=capy_snapshot(host,&routing)){
                     std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-                    auto model=Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot));
-                    Publish(snapshot,model);
+                    Publish(snapshot,routing);
                 }
             }
-            // An idle service deadline can save/renew without submitting a frame.
-            {std::lock_guard lock(mutex);if(!dirty&&!transportFailed&&work.Empty()&&!pendingHover&&previewWork.Empty())continue;}
+            std::optional<CanvasQuery> idleQuery;
+            {std::lock_guard lock(mutex);
+                bool canvasPending=dirty||transportFailed||!work.Empty()||pendingHover.has_value()||recoveryAttempts;
+                if(!canvasPending)idleQuery=previewWork.Take(CanvasQueryKind::Workspace);
+                if(!idleQuery&&!canvasPending&&previewWork.Empty())continue;
+            }
+            if(idleQuery){
+                PreviewPacket packet(capy_workspace_query(host,idleQuery->json.c_str()),capy_preview_free);
+                if(!packet&&!capy_device_lost(host))Fail(capy_error());
+                idleQuery->reply(std::move(packet));continue;
+            }
             if(lastPresent){
                 std::unique_lock lock(mutex);
                 auto input=[&]{return closing||resize||transportFailed||!work.Empty()||pendingHover.has_value()||!previewWork.Empty();};
@@ -936,12 +950,12 @@ void CanvasWindow::Run() {
                 });
             }
             {std::lock_guard lock(mutex);revision=capy_view_revision(host);}
-            if(auto snapshot=capy_snapshot(host)) {
+            CapySnapshotInfo routing{};
+            if(auto snapshot=capy_snapshot(host,&routing)) {
                 std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-                auto model=Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot));
-                Publish(snapshot,model);
-                if(model.HasKey(L"brush_ready")) {
-                    bool ready=model.GetNamedBoolean(L"brush_ready");
+                Publish(snapshot,routing);
+                if(routing.brush_ready.length) {
+                    bool ready=Windows::Data::Json::JsonValue::Parse(to_hstring(std::string(snapshot+routing.brush_ready.offset,routing.brush_ready.length))).GetBoolean();
                     brushReady=ready;
                     if(ready)recoveryAttempts=0;
                 }
@@ -963,6 +977,7 @@ void CanvasWindow::Run() {
             {std::lock_guard lock(mutex);if(!closing&&work.Empty())preview=previewWork.Take();}
             if(preview){
                 auto request=preview->kind==CanvasQueryKind::Filters?capy_filter_previews:
+                    preview->kind==CanvasQueryKind::Papers?capy_paper_previews:
                     preview->kind==CanvasQueryKind::Thumbnails?capy_layer_thumbnails:
                     preview->kind==CanvasQueryKind::LayerMenu?capy_layer_menu:
                     preview->kind==CanvasQueryKind::Document?capy_document_preview:capy_workspace_query;
@@ -1066,9 +1081,10 @@ void CanvasWindow::SaveAfterGpuFailure(std::string const& reason) {
             if(result!=0)Fail(capy_error());
         }
         if(capy_poll_services(host)<0)throw std::runtime_error(capy_error());
-        if(auto snapshot=capy_snapshot(host)){
+        CapySnapshotInfo routing{};
+        if(auto snapshot=capy_snapshot(host,&routing)){
             std::unique_ptr<char,decltype(&capy_string_free)> owned(snapshot,capy_string_free);
-            Publish(snapshot,Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot)));
+            Publish(snapshot,routing);
         }
         if(query){
             PreviewPacket packet(query->kind==CanvasQueryKind::Workspace?capy_workspace_query(host,query->json.c_str()):nullptr,capy_preview_free);
@@ -1208,13 +1224,16 @@ void CanvasWindow::UpdateNavigationCursor() {
         if(hovered)if(auto source=Microsoft::UI::Input::InputPointerSource::GetForIsland(xaml.ContentIsland()))source.Cursor(next);
     });
 }
-void CanvasWindow::Publish(std::string snapshot,Windows::Data::Json::JsonObject const& model) {
-    bool full=model.HasKey(L"state");
+void CanvasWindow::Publish(std::string snapshot,CapySnapshotInfo const& info) {
+    bool full=info.full!=0;
+    auto value=[&](CapySnapshotRange range){return snapshot.substr(range.offset,range.length);};
     std::optional<std::string> camera;
-    if(!full&&model.HasKey(L"camera"))camera=to_string(CapyUi::O({{L"camera",model.GetNamedValue(L"camera")}}).Stringify());
+    if(info.camera.length)camera="{\"camera\":"+value(info.camera)+"}";
+    auto localizationBytes=value(info.localization);
     // Explicit local test evidence. This can include user state and is never
     // enabled by ordinary launches.
     if(GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)){
+        auto model=Windows::Data::Json::JsonObject::Parse(to_hstring(snapshot));
         auto identity="{\"process_id\":"+std::to_string(GetCurrentProcessId())+
             ",\"window_id\":"+std::to_string(windowId);
         if(full)TraceState("ui-state",identity+",\"model\":"+snapshot+"}");
@@ -1226,7 +1245,8 @@ void CanvasWindow::Publish(std::string snapshot,Windows::Data::Json::JsonObject 
         if(view.Size())TraceState("camera-state",identity+",\"camera\":"+to_string(view.Stringify())+"}");
     }
     if(full){
-        auto mode=CapyUi::str(model,L"navigation_cursor");
+        auto cursorModel=info.navigation_cursor.length?Windows::Data::Json::JsonObject::Parse(to_hstring("{\"navigation_cursor\":"+value(info.navigation_cursor)+"}")):Windows::Data::Json::JsonObject{};
+        auto mode=CapyUi::str(cursorModel,L"navigation_cursor");
         auto cursor=mode==L"pan"?NavigationCursor::Pan:mode==L"zoom"?NavigationCursor::Zoom:
             mode==L"zoom_out"?NavigationCursor::ZoomOut:mode==L"rotate"?NavigationCursor::Rotate:NavigationCursor::None;
         if(navigationCursor.exchange(cursor)!=cursor&&inputDispatcher)inputDispatcher.TryEnqueue([weak=weak_from_this()]{
@@ -1236,7 +1256,7 @@ void CanvasWindow::Publish(std::string snapshot,Windows::Data::Json::JsonObject 
     bool post;
     {
         std::lock_guard lock(mutex);if(closing)return;
-        snapshots.Push(std::move(snapshot),full,model.HasKey(L"workspace_update"),std::move(camera),model.HasKey(L"command_search"),CanvasSnapshotMailbox::Localization(CapyUi::object(model,L"localization"),[](auto const& value){return to_string(value.Stringify());}));
+        snapshots.Push(std::move(snapshot),full,info.workspace!=0,std::move(camera),info.search!=0,std::move(localizationBytes));
         post=!snapshotPosted;snapshotPosted=true;
     }
     if(post)dispatcher.TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyPending();});

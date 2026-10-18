@@ -94,6 +94,10 @@ fn pointer_button(sample: &CapyPointer) -> PointerButton {
         _ => PointerButton::Other,
     }
 }
+fn take_prepared_target<T>(presenter: &ViewportPresenter, renderer: &layer_render_wgpu::WgpuRasterizer, target: &mut Option<T>) -> Option<T> {
+    presenter.pipelines_ready(renderer).then(|| target.take()).flatten()
+}
+
 impl CapyHost {
     fn cancel_contacts(&mut self) -> Result<(), String> {
         for (id, mut sample) in std::mem::take(&mut self.live_contacts) {
@@ -298,8 +302,8 @@ impl CapyHost {
             label: Some("Capy Canvas Windows"),
             required_features: adapter.features() & (wgpu::Features::TIMESTAMP_QUERY
                 | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
-                | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES),
+                | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
+                | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
             required_limits: limits,
             memory_hints: layer_render_wgpu::memory_hints(),
             ..Default::default()
@@ -334,6 +338,7 @@ impl CapyHost {
         self.presenter_key = Some((renderer.document_color(), encoding));
         // Prepare the optional overview pipeline during GPU startup, before input is live.
         presenter.prepare_overviews(&renderer);
+        presenter.pipelines_ready(&renderer);
         gpu_state.check()?;
         let revision = self.native.session.state().revision;
         let (retired, change) = self
@@ -367,9 +372,14 @@ impl CapyHost {
             self.native.dirty = false;
             return Ok(0);
         }
-        let Some(target) = self.target.take() else {
+        if self.target.is_none() { return Ok(1); }
+        let gpu = self.native.session.engine().backend().0.as_ref().unwrap();
+        if self.presenter.as_ref().is_some_and(|presenter| !presenter.pipelines_ready(gpu)) {
+            self.native.session.renderer_mut().0.as_mut().unwrap().poll_startup().map_err(err)?;
+            self.native.dirty = true;
+            self.poll_services()?;
             return Ok(1);
-        };
+        }
         let prediction_before = self.prediction_frames.map(|_| self.native.session.engine().metrics());
         self.native
             .prepare_canvas_frame(now, presentation, self.blank_presented)?;
@@ -390,6 +400,7 @@ impl CapyHost {
         if self.presenter_key != Some(key) {
             let mut presenter = ViewportPresenter::for_surface(gpu, config.format, encoding).map_err(err)?;
             presenter.prepare_overviews(gpu);
+            presenter.pipelines_ready(gpu);
             self.presenter = Some(presenter);
             self.presenter_key = Some(key);
         }
@@ -413,6 +424,10 @@ impl CapyHost {
             display,
         )?;
         let gpu = self.native.session.engine().backend().0.as_ref().unwrap();
+        let Some(target) = take_prepared_target(presenter, gpu, &mut self.target) else {
+            self.native.dirty = true;
+            return Ok(1);
+        };
         presenter.present(
             gpu,
             &target.texture.create_view(&Default::default()),
@@ -992,6 +1007,40 @@ pub unsafe extern "C" fn capy_localization_input(host: *mut CapyHost, busy: bool
 pub unsafe extern "C" fn capy_frame(host: *mut CapyHost, now: u64, presentation: u64) -> i32 {
     guard(host, |host| host.frame(now, presentation))
 }
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct CapySnapshotRange { offset: usize, length: usize }
+impl From<Option<std::ops::Range<usize>>> for CapySnapshotRange {
+    fn from(range: Option<std::ops::Range<usize>>) -> Self {
+        range.map_or_else(Self::default, |range| Self { offset: range.start, length: range.len() })
+    }
+}
+#[repr(C)]
+#[derive(Default)]
+pub struct CapySnapshotInfo {
+    full: u32,
+    workspace: u32,
+    search: u32,
+    camera: CapySnapshotRange,
+    localization: CapySnapshotRange,
+    navigation_cursor: CapySnapshotRange,
+    brush_ready: CapySnapshotRange,
+}
+impl CapySnapshotInfo {
+    fn read(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        let fields = layer_host::SnapshotFields::parse(bytes)?;
+        let full = fields.contains("state");
+        Ok(Self {
+            full: u32::from(full),
+            workspace: u32::from(fields.contains("workspace_update")),
+            search: u32::from(fields.contains("command_search")),
+            camera: (!full).then(|| fields.range("camera")).flatten().into(),
+            localization: fields.nonempty_object_range("localization")?.into(),
+            navigation_cursor: fields.range("navigation_cursor").into(),
+            brush_ready: fields.range("brush_ready").into(),
+        })
+    }
+}
 #[derive(serde::Serialize)]
 struct WindowsMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1007,6 +1056,7 @@ struct WindowsMetadata {
     windows_recovery: Option<serde_json::Value>,
     windows_tabs: Option<serde_json::Value>,
     windows_palettes: Option<serde_json::Value>,
+    windows_papers: Option<serde_json::Value>,
     windows_glass: serde_json::Value,
     windows_tab_styles: serde_json::Map<String, serde_json::Value>,
     windows_isolated_settings: bool,
@@ -1014,19 +1064,25 @@ struct WindowsMetadata {
     windows_workspace: Option<serde_json::Value>,
     windows_settings_close: Option<crate::settings::CloseStatus>,
     windows_scopes: u64,
+    windows_filter_source: [String; 2],
     windows_request_copy: serde_json::Map<String, serde_json::Value>,
 }
 /// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
+/// `info` must be null or aligned, writable and exclusively borrowed for this call.
+/// Its fields reset before host validation; null output never contains ranges.
+/// Ranges address the returned UTF-8 allocation only until `capy_string_free`.
 /// A nonnull result belongs to the caller and must be freed with `capy_string_free`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost) -> *mut c_char {
+pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnapshotInfo) -> *mut c_char {
+    if let Some(info) = unsafe { info.as_mut() } { *info = CapySnapshotInfo::default(); }
     let mut result = std::ptr::null_mut();
     guard(host, |host| {
         let generation = host.native.localization_generation();
         let localization = if host.localization_generation != Some(generation) {
             Some(crate::settings::localization_presentation(&mut host.native)?)
         } else { None };
+        let (_, occurrence, catalog) = host.native.session.filter_preview_revision();
         let metadata = WindowsMetadata {
             localization,
             windows_gpu_generation: host.gpu_generation,
@@ -1036,6 +1092,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost) -> *mut c_char {
             windows_recovery: host.documents.as_ref().and_then(|d| d.recovery.as_ref()).map(|service| service.status(host.native.session.localization())),
             windows_tabs: host.documents.as_ref().map(|d| d.tabs_view(&host.native)),
             windows_palettes: host.documents.as_ref().map(|d| d.palettes.status()),
+            windows_papers: host.documents.as_ref().map(|d| d.papers.status(&host.native)),
             windows_tab_styles: {
                 let layout = &host.native.session.state().workspace.layout;
                 layout
@@ -1061,6 +1118,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost) -> *mut c_char {
                 .and_then(|s| serde_json::to_value(s.status(&host.native)).ok()),
             windows_settings_close: host.services.as_ref().map(|s| s.close_status().clone()),
             windows_scopes: host.scopes.revision(host.native.session.state()),
+            windows_filter_source: [occurrence.to_string(), catalog.to_string()],
             windows_request_copy: {
                 let localization = host.native.session.localization();
                 host.native.session.state().requests.iter().filter_map(|request| match &request.kind {
@@ -1080,9 +1138,11 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost) -> *mut c_char {
         let extension = serde_json::to_vec(&metadata).map_err(err)?;
         if let Some(bytes) = host.native.take_update_bytes().map_err(err)? {
             host.localization_generation = Some(generation);
-            result = CString::new(layer_host::extend_update(bytes, &extension))
-                .map_err(err)?
-                .into_raw();
+            let bytes = layer_host::extend_update(bytes, &extension);
+            let routing = if info.is_null() { None } else { Some(CapySnapshotInfo::read(&bytes).map_err(err)?) };
+            let snapshot = CString::new(bytes).map_err(err)?;
+            if let Some(routing) = routing { unsafe { *info = routing; } }
+            result = snapshot.into_raw();
         }
         Ok(0)
     });
@@ -1561,6 +1621,91 @@ pub unsafe extern "C" fn capy_presentation_stats(host: *const CapyHost, values: 
     output[1..].copy_from_slice(&[u64::from(stats.PresentCount), u64::from(stats.PresentRefreshCount),
         u64::from(stats.SyncRefreshCount), stats.SyncQPCTime as u64, stats.SyncGPUTime as u64]);
     0
+}
+
+/// # Safety
+/// Exclusive render-owner access; json is a readable NUL-terminated request.
+/// Free the returned CPU-only packet with capy_preview_free.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_paper_previews(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
+    let mut result = std::ptr::null_mut();
+    guard(host, |host| {
+        let key = host.documents.as_ref().map(|documents| documents.papers.key(&host.native)).unwrap_or_default();
+        let packet = crate::previews::paper_previews(&host.native, unsafe { read_json(json) }?, &key)?;
+        result = Box::into_raw(Box::new(packet));
+        Ok(0)
+    });
+    result
+}
+
+#[cfg(test)]
+mod presentation_readiness_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "Requires hardware D3D12"]
+    fn acquired_target_survives_cold_presenter_and_rebuild_until_background_ready() {
+        use std::time::{Duration, Instant};
+        for format in [wgpu::TextureFormat::Bgra8UnormSrgb, wgpu::TextureFormat::Rgba16Float] {
+            let mut renderer = crate::test_support::d3d12_renderer();
+            let mut presenter = ViewportPresenter::for_surface(&renderer, format, layer_render_wgpu::SdrSurfaceColor::Srgb).unwrap();
+            presenter.prepare_overviews(&renderer);
+            let mut target = Some(format);
+            assert_eq!(take_prepared_target(&presenter, &renderer, &mut target), None);
+            assert_eq!(target, Some(format));
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                renderer.poll_startup().unwrap();
+                if let Some(acquired) = take_prepared_target(&presenter, &renderer, &mut target) {
+                    assert_eq!(acquired, format);
+                    break;
+                }
+                assert_eq!(target, Some(format));
+                assert!(Instant::now() < deadline, "presenter pipelines did not finish");
+                std::thread::yield_now();
+            }
+            assert!(presenter.pipelines_ready(&renderer));
+            assert_eq!(target, None);
+            assert_eq!(take_prepared_target(&presenter, &renderer, &mut target), None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod snapshot_routing_tests {
+    use super::*;
+    #[test]
+    fn snapshot_descriptor_preserves_null_presence_and_owned_ranges() {
+        let bytes = br#"{"state":null,"workspace_update":null,"command_search":null,"brush_ready":null,"camera":{"zoom":2},"localization":{"text":"\u65e5"},"navigation_cursor":"pan"}"#;
+        let info = CapySnapshotInfo::read(bytes).unwrap();
+        assert_eq!((info.full, info.workspace, info.search), (1,1,1));
+        assert_eq!(info.camera.length,0);
+        assert_eq!(&bytes[info.brush_ready.offset..info.brush_ready.offset+info.brush_ready.length],b"null");
+        let bytes = br#"{"workspace_update":{},"camera":{"zoom":2},"localization":null}"#;
+        let info = CapySnapshotInfo::read(bytes).unwrap();
+        let camera = &bytes[info.camera.offset..info.camera.offset+info.camera.length];
+        assert_eq!(serde_json::from_slice::<serde_json::Value>(camera).unwrap(),serde_json::json!({"zoom":2}));
+        assert_eq!(info.localization.length,0);
+        assert_eq!(info.brush_ready.length,0);
+        for bytes in [b"{}".as_slice(),b"{\"localization\":{}}",b"{\"localization\":null}"] {
+            assert_eq!(CapySnapshotInfo::read(bytes).unwrap().localization.length,0);
+        }
+        let a=std::mem::align_of::<usize>();
+        let first=(3*std::mem::size_of::<u32>()+a-1)&!(a-1);
+        assert_eq!(std::mem::offset_of!(CapySnapshotInfo,camera),first);
+        assert_eq!(std::mem::offset_of!(CapySnapshotInfo,brush_ready),first+6*std::mem::size_of::<usize>());
+        assert_eq!(std::mem::size_of::<CapySnapshotInfo>(),first+8*std::mem::size_of::<usize>());
+    }
+    #[test]
+    fn snapshot_error_resets_descriptor_without_a_host() {
+        let mut info=CapySnapshotInfo::read(br#"{"state":{},"brush_ready":true,"localization":{"text":"x"}}"#).unwrap();
+        assert!(unsafe { capy_snapshot(std::ptr::null_mut(),&mut info) }.is_null());
+        assert_eq!((info.full,info.workspace,info.search),(0,0,0));
+        for range in [info.camera,info.localization,info.navigation_cursor,info.brush_ready] {
+            assert_eq!((range.offset,range.length),(0,0));
+        }
+        assert!(unsafe { capy_snapshot(std::ptr::null_mut(),std::ptr::null_mut()) }.is_null());
+    }
 }
 
 #[cfg(test)]

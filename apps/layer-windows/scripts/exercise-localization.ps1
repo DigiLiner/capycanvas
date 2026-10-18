@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light','light-large','blend-large-dark','blend-large-light')][string]$Theme='dark',[switch]$LargeText,[int]$LanguageLimit=0,[switch]$NoticeOnly,[switch]$HeaderOnly,[switch]$BlendOnly,[switch]$GroupedToolsOnly)
 $ErrorActionPreference='Stop'
 if($Theme -eq 'light-large'){$Theme='light';$LargeText=$true}
 if($Theme.StartsWith('blend-large-')){$Theme=$Theme.Substring(12);$LargeText=$true;$BlendOnly=$true;$LanguageLimit=2}
@@ -79,6 +79,7 @@ function Trace-Part([string]$Kind,[string]$Field,$Window=$script:current){
 function Search{Trace-Part 'search-state' 'search'}
 function Camera{Trace-Part 'camera-state' 'camera'}
 function Use-Window($Window){
+ Register-CapyFixtureWindow $review ([long]$Window.hwnd) $run
  $script:current=$Window;$script:root=[System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Window.hwnd)
  Wait-Until {[CapyRowPointer]::SetForegroundWindow([IntPtr]$Window.hwnd)|Out-Null;[CapyRowPointer]::GetForegroundWindow() -eq [IntPtr]$Window.hwnd} 'Review window did not own foreground input' 10
 }
@@ -91,6 +92,17 @@ function Focus-Canvas{
  } 'Drawing canvas did not regain native keyboard focus' 30
 }
 function Ready($Window){Wait-Until {$view=Model $Window;$view.brush_ready -and $view.windows_workspace.ready} 'Window did not prepare' 120}
+function Close-OwnedLocalizationWindows{
+ $snapshot=Read-Snapshot (Join-Path $run "windows-$($review.Id).json")
+ $windows=@($snapshot.windows)
+ if($snapshot.process_id -ne $review.Id -or !$windows.Count){throw 'Owned drawing window census unavailable for Close'}
+ foreach($window in $windows){
+  if(!$window.hwnd){throw 'Owned drawing HWND unavailable for Close'}
+  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle ([long]$window.hwnd) -Action Close -DiscardUnsaved -StateDirectory $run
+ }
+ if(!$review.HasExited -or $review.ExitCode -ne 0){throw 'Owned localization app did not close cleanly'}
+}
+
 function Language-Row($Window=$script:current){@((Fresh-Model $Window).preferences.pages.groups.rows|Where-Object id -eq 'language')[0]}
 function Request-Language([int]$Index){
  $row=Language-Row;$choice=$row.kind.options[$Index]
@@ -225,6 +237,27 @@ try{
  Wait-Until {@(Windows).Count -eq 2} 'Second window did not register' 45
  $second=@(Windows|Where-Object id -ne $first.id)[0];Ready $second
  if($HeaderOnly -and $BlendOnly){throw 'Choose one focused localization mode'}
+ if($GroupedToolsOnly){
+  if($HeaderOnly -or $BlendOnly -or $NoticeOnly){throw 'Choose one focused localization mode'}
+  [CapyRowPointer]::Initialize([uint32]$review.Id)
+  Use-Window $second;Menu-Command 'edit' 'settings';Invoke-Id 'preference-page-appearance'
+  $inventory=@((Language-Row).kind.options)
+  if($inventory.Count -ne $shippedTags.Count+1 -or !$shippedTags.Count){throw 'Language preference differs from the shared shipped-tag inventory'}
+  $seen=@();$tags=@{};$indices=@(1..($inventory.Count-1))
+  if($LanguageLimit -gt 0){$indices=@($indices|Select-Object -First $LanguageLimit)}
+  foreach($index in $indices){
+   $choice=Language-Choice $index
+   if($tags.ContainsKey($choice.tag)){throw 'Duplicate shared explicit language tag'}
+   $tags[$choice.tag]=$index;$seen+=$choice
+   Wait-Until {(Model $first).windows_active_tag -eq $choice.tag} 'Inactive window did not adopt the selected language' 30
+  }
+  Language-Choice 1|Out-Null
+  Wait-Until {(Model $first).windows_active_tag -eq $shippedTags[0]} 'Grouped baseline did not adopt the first shipped language' 30
+  Toolbar-GroupedLanguageSurface
+  [pscustomobject]@{theme=$Theme;retained_grouped_toolbar_draft_focus_popup='passed';language_choices=$seen;evidence=$run}|ConvertTo-Json -Depth 8|Tee-Object -FilePath (Join-Path $run 'results.json')
+  $completed=$true;return
+ }
+
  if($BlendOnly){
   [CapyRowPointer]::Initialize([uint32]$review.Id)
   Blend-CaptionSurface
@@ -475,7 +508,7 @@ try{
  [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw
 }finally{
  [CapyRowPointer]::Dispose()
- if($completed -and $review -and !$review.HasExited){Stop-Process -Id $review.Id -Force;Wait-Process -Id $review.Id -Timeout 30 -ErrorAction SilentlyContinue}
+ if($completed -and $review -and !$review.HasExited){Close-OwnedLocalizationWindows}
  Exit-CapyEnvironment
  $review=$null
  if($textSizeChanged){

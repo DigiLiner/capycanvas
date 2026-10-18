@@ -910,15 +910,21 @@ impl Cache {
         let levels=match &self.placed {Some(Presentation::Placed(p))=>[0,1,p.coarse_level-p.value.plan.level],_=>[0;3]};
         let sources=[self.view(),self.next_view(),self.coarse_view()];
         let mut bytes=0;
+        let mut copies: [Option<(&wgpu::Texture,u32,wgpu::TextureView)>;3]=std::array::from_fn(|_|None);
         let views=std::array::from_fn(|index| {
             let source=sources[index].texture();let level=levels[index].min(source.mip_level_count()-1);
+            for (texture,mip,view) in copies.iter().flatten() {
+                if *texture==source && *mip==level {return view.clone();}
+            }
             let size=wgpu::Extent3d {width:(source.width()>>level).max(1),height:(source.height()>>level).max(1),depth_or_array_layers:1};
             let texture=r.device.create_texture(&wgpu::TextureDescriptor {label:Some("retained accepted display"),size,
                 mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:source.format(),
                 usage:wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST|wgpu::TextureUsages::COPY_SRC,view_formats:&[]});
             encoder.copy_texture_to_texture(wgpu::TexelCopyTextureInfo {mip_level:level,..source.as_image_copy()},texture.as_image_copy(),size);
             bytes+=texture_bytes(&texture);
-            texture.create_view(&Default::default())
+            let view=texture.create_view(&Default::default());
+            copies[index]=Some((source,level,view.clone()));
+            view
         });
         Some(DisplayBackup {views,geometry:self.geometry.clone(),placement:self.placement_values(),resample:self.resample_values(),bytes})
     }

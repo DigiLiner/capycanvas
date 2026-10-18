@@ -1088,7 +1088,12 @@ fn device_loss_before_deferred_native_backing_keeps_the_last_checkpoint() {
     r.submit(packet(&layers, false)).unwrap();
     r.device.poll(wgpu::PollType::Wait { submission_index: r.last_submission.clone(), timeout: Some(READBACK_TIMEOUT) }).unwrap();
     assert!(!paint(&layers).raster.host_backed());
+    let snapshot = r.snapshot_gpu();
     r.device.destroy();
+    assert!(match snapshot.capture_scene(checkpoint.snapshot(), layer_core::SceneScope::All, Default::default()) {
+        Ok(mut capture) => pollster::block_on(capture.read_band_async(0)).is_err(),
+        Err(_) => true,
+    });
     drop(presentation);
     for root in [&paint(&layers).raster, mask_raster(&layers)] {
         assert!(root.wait_data().unwrap().tiles.values().all(|tile| tile.wait_backing().is_err()));

@@ -21,8 +21,8 @@ function Layer-Scrollbars {
         !$_.Current.IsOffscreen -and !$bounds.IsEmpty -and $bounds.Height -gt $bounds.Width -and $bounds.X -ge $viewport.Right-30 -and $bounds.X -le $viewport.Right+5 -and $bounds.Y -ge $viewport.Y-5 -and $bounds.Bottom -le $viewport.Bottom+5
     })
 }
-function Rows {
-    @((Model).state.layers|ForEach-Object {[ordered]@{id=$_.id;depth=$_.depth;visible=$_.visible;mask_linked=$_.mask_linked;alpha_locked=$_.alpha_locked;pass_through=$_.pass_through;relationship=$_.relationship}})|ConvertTo-Json -Depth 8 -Compress
+function Rows($Snapshot=(Model)) {
+    @($Snapshot.state.layers|ForEach-Object {[ordered]@{id=$_.id;depth=$_.depth;visible=$_.visible;locked=$_.locked;mask_linked=$_.mask_linked;alpha_locked=$_.alpha_locked;pass_through=$_.pass_through;relationship=$_.relationship}})|ConvertTo-Json -Depth 8 -Compress
 }
 function Dismiss {
     [CapyRowPointer]::Key(0x1b)
@@ -120,8 +120,8 @@ function Drag-Row([string]$Id,[double]$Layer,[double]$Target,[switch]$Grip,[swit
     $at=Point $Id
     $to=Destination $Target $Fraction
     $clientOrigin=[CapyRowPointer+Point]::new()
-    [CapyRowPointer]::ClientToScreen($review.MainWindowHandle,[ref]$clientOrigin)|Out-Null
-    $script:contact=@{source=$Id;target=$Target;from=$at;to=$to;source_bounds=(Control $Id).Current.BoundingRectangle;target_bounds=(Control "layer-row-$Target").Current.BoundingRectangle;viewport_bounds=(Control 'layer-list').Current.BoundingRectangle;window_bounds=$root.Current.BoundingRectangle;client_origin=@{x=$clientOrigin.x;y=$clientOrigin.y};dpi=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)}
+    [CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$clientOrigin)|Out-Null
+    $script:contact=@{source=$Id;target=$Target;from=$at;to=$to;source_bounds=(Control $Id).Current.BoundingRectangle;target_bounds=(Control "layer-row-$Target").Current.BoundingRectangle;viewport_bounds=(Control 'layer-list').Current.BoundingRectangle;window_bounds=$root.Current.BoundingRectangle;client_origin=@{x=$clientOrigin.x;y=$clientOrigin.y};dpi=[CapyRowPointer]::GetDpiForWindow($drawingWindow)}
     if($Grip){
         $at=$script:contact.from
         # No UIA wait may accidentally satisfy the hold timeout.
@@ -170,17 +170,18 @@ try {
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $run 'stdout.log') -RedirectStandardError $stderr
     $null=$review.Handle
-    @{process_id=$review.Id;run=$run;device=$Device}|ConvertTo-Json|Set-Content (Join-Path $repo 'artifacts/windows/layer-pickup-review.json')
+    @{process_id=$review.Id;run=$run;device=$Device;theme=$Theme}|ConvertTo-Json|Set-Content (Join-Path $repo 'artifacts/windows/layer-pickup-review.json')
     Write-Output "Owned layer pickup review $($review.Id) ($Device)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Layer review did not start' 45
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Layer review did not start' 45
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     $null=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     Wait-Until {
         $foreground=[CapyRowPointer]::GetForegroundWindow();$owner=[uint32]0
         [CapyRowPointer]::GetWindowThreadProcessId($foreground,[ref]$owner)|Out-Null
-        $script:foregroundState=@{window=$foreground.ToInt64();process=$owner;expected_process=$review.Id;expected_window=$review.MainWindowHandle.ToInt64()}
-        if($owner -ne $review.Id){[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null}
+        $script:foregroundState=@{window=$foreground.ToInt64();process=$owner;expected_process=$review.Id;expected_window=$drawingWindow.ToInt64()}
+        if($owner -ne $review.Id){[CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null}
         $owner -eq $review.Id
     } 'Owned layer review did not receive foreground input'
     [CapyRowPointer]::Initialize([uint32]$review.Id)
@@ -245,6 +246,36 @@ try {
         Wait-Until {!@((Model).state.layers|Where-Object id -eq $created).Count} 'Revealed Delete did not remove its row'
         Layer-History 'Undo';Wait-Until {(Rows) -eq $before} 'Revealed Delete requires more than one Undo'
     }
+    $script:case='locked-source-denied'
+    Tap "layer-$created-name"
+    $unlocked=Rows
+    $lock=(Control 'layer-lock').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if($lock.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::Off){throw 'Locked-source fixture did not start unlocked'}
+    $lock.Toggle()
+    Wait-Until {$snapshot=Model;$row=@($snapshot.state.layers|Where-Object id -eq $created)[0];$row.locked -and @($row.drag_from_body).Count -eq 0 -and $snapshot.state.layer_tools.editing_layer.locked -and !(Control ("layer-$created-drag")).Current.IsEnabled} 'Lock did not publish an effectively locked source with no body pickup devices'
+    $lockedOrder=Rows;$attempts=[Collections.Generic.List[object]]::new()
+    foreach($source in @("layer-$created-name","layer-$created-drag")){
+        if($source -like '*-drag' -and (Control $source).Current.IsEnabled){throw 'Locked source retained an enabled reorder handle'}
+        $at=Point $source;$to=Destination $paint
+        [CapyRowPointer]::Down($Device,$at.x,$at.y)
+        try{
+            Start-Sleep -Milliseconds 35;Move-To $to
+            $held=Gesture;$attempts.Add(@{source=$source;from=$at;to=$to;held=$held;rows=(Rows)})
+            $attempts|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'locked-source-denied.json')
+            if($held.phase -eq 'dragging' -or $held.can_drop -or (Rows) -ne $lockedOrder){throw 'Locked body or handle motion admitted a layer move'}
+        }finally{if($Device -eq 'mouse'){[CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()}else{[CapyRowPointer]::Cancel()}}
+        Wait-Until {(Gesture).phase -eq 'idle'} 'Locked-source rejection retained a pointer contact'
+        if((Gesture).menu_open){Dismiss}
+        $snapshot=Model
+        if((Rows $snapshot) -ne $lockedOrder -or !@($snapshot.state.layers|Where-Object id -eq $created)[0].locked){throw 'Rejected locked-source motion changed layers or cleared the lock'}
+    }
+    $attempts|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'locked-source-denied.json')
+    Layer-History 'Undo'
+    Wait-Until {$snapshot=Model;(Rows $snapshot) -eq $unlocked -and !@($snapshot.state.layers|Where-Object id -eq $created)[0].locked} 'Rejected locked-source motion added history after the Lock action'
+    Layer-History 'Redo'
+    Wait-Until {$snapshot=Model;(Rows $snapshot) -eq $lockedOrder -and @($snapshot.state.layers|Where-Object id -eq $created)[0].locked} 'One Redo did not restore the exact locked source'
+    Layer-History 'Undo'
+    Wait-Until {$snapshot=Model;$row=@($snapshot.state.layers|Where-Object id -eq $created)[0];(Rows $snapshot) -eq $unlocked -and !$row.locked -and (@($row.drag_from_body) -join ',') -eq 'mouse'} 'Final Undo did not restore unlocked mouse body pickup'
     $script:case='row-drag';Drag-Row "layer-$created-name" $created $paint
     $script:case='row-whitespace';Drag-Row "layer-row-$created" $created $paint
     $script:case='child-control-drag';Drag-Row "layer-$created-visibility" $created $paint
@@ -333,14 +364,14 @@ try {
         $null=Point "layer-$created-name"
     }
     $script:case='remaining-child-controls'
-    Invoke "layer-$created-name";Invoke 'layer-add-mask'
+    Tap "layer-$created-name";Invoke 'layer-add-mask'
     Wait-Until {@((Model).state.layers|Where-Object id -eq $created)[0].has_mask} 'Mask did not appear for child pickup tests'
-    Invoke "layer-$created-content"
+    Tap "layer-$created-content"
     foreach($child in @('selection','content','mask','link')){
         Drag-Row ("layer-$created-"+$child) $created $paint
     }
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1780 -Height 1480
-    if(![CapyWindowExercise]::MoveWindow($review.MainWindowHandle,200,20,1780,1480,$true)){throw 'Owned layer review did not move clear of desktop edge gestures'}
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 1780 -Height 1480
+    if(![CapyWindowExercise]::MoveWindow($drawingWindow,200,20,1780,1480,$true)){throw 'Owned layer review did not move clear of desktop edge gestures'}
     $rowHeight=(Control "layer-row-$created").Current.BoundingRectangle.Height
     Wait-Until {(Control 'layer-list').Current.BoundingRectangle.Height -ge $rowHeight*5} 'Layer viewport did not expose the group drop targets away from scrolling edges'
     Invoke 'layer-new-group'
@@ -363,13 +394,13 @@ try {
     $script:case='group-content'
     Drag-Row "layer-$group-content" $group $paint
     if(@((Model).state.layers|Where-Object id -eq $group)[0].collapsed){throw 'Group content drag activated the collapse button'}
-    Invoke "layer-$group-content"
+    Tap "layer-$group-content"
     Wait-Until {@((Model).state.layers|Where-Object id -eq $group)[0].collapsed} 'Group did not collapse before an into-group drop'
     $script:case='drop-into-group'
     Drag-Row "layer-$created-name" $created $group -Fraction .5
     if(@((Model).state.layers|Where-Object id -eq $group)[0].collapsed){throw 'Dropping into a group did not expose its child'}
     $script:case='source-removal'
-    Invoke "layer-$created-name"
+    Tap "layer-$created-name"
     $before=Rows
     Pick-Up "layer-$created-name" $created
     Invoke 'layer-delete'
@@ -449,7 +480,7 @@ try {
     }finally{
         [CapyRowPointer]::Dispose()
         $window.SetWindowVisualState($visualState)
-        $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+        $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
         [CapyRowPointer]::Initialize([uint32]$review.Id)
     }
     if((Rows) -ne $before){throw 'Minimizing committed the row gesture'}
@@ -476,14 +507,14 @@ try {
     Focus-Key "layer-$created-rename" 0x1b
     Wait-Until {(Control "layer-$created-name").Current.Name -eq 'Renamed layer fixture' -and !(Find "layer-$created-name").Current.IsOffscreen} 'Escape did not cancel only the rename'
     [CapyRowPointer]::Dispose()
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires review'}
     [pscustomobject]@{device=$Device;theme=$Theme;column_mode=$ColumnMode;short_click='passed';hold_release='passed';row_drag=$(if($Device -eq 'mouse'){'passed'}else{'handle_only_passed'});child_control_drag=$(if($Device -eq 'mouse'){'passed'}else{'denied_passed'});immediate_grip='passed';cancel='passed';one_step_undo_redo='passed';row_whitespace='passed';rename_ownership='passed';source_removal='passed';mask_and_selection_children='passed';group_content_and_into_drop='passed';keyboard_context='passed';edge_scroll_retention='passed';minimize_cancellation='passed';native_scroll=$(if($Device -eq 'mouse'){'not_applicable'}else{'passed'});floating_and_drawer_rows='passed';scope='OS-delivered synthetic input; physical-device and presentation-performance acceptance remain separate'}|ConvertTo-Json
 }catch{
     $failure=$_
     @{case=$script:case;error=$failure.ToString();contact=$script:contact;foreground=$script:foregroundState;gesture=(Gesture);rows=(Rows);workspace_presentation=$(try{(Workspace-Root).Current.ItemStatus}catch{$null})}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'failure.json')
     if($review -and !$review.HasExited){
-        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
+        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $run 'failure.png') -ClientOnly *> (Join-Path $run 'failure-window.json')
     }
     throw $failure
 }finally{

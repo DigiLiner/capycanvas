@@ -85,7 +85,17 @@ export async function checkScopesSmoke({call,evaluate,settle}) {
     const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/ui/scopes-web';await mkdir(directory,{recursive:true});
     const capture=async name=>{const {data}=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/${name}.png`,Buffer.from(data,'base64'));};
     await evaluate(`layerApp.app.workspace_input(JSON.stringify({type:'switch',id:'builtin:workspace:photographer'}));null`);await fixture.poll(`JSON.parse(layerApp.app.workspace_view()).id==='builtin:workspace:photographer'&&!JSON.parse(layerApp.app.workspace_view()).busy`);await fixture.invoke('fit_canvas');await fixture.idle();
-    const before=await fixture.checkpoint();const histogram=await scope.exact();await capture('histogram-smoke');
+    const compactScope=async kind=>{
+      const geometry=await evaluate(`(()=>{const root=document.querySelector('[data-scope="${kind}"]'),log=root.querySelector('.scope-log'),status=root.querySelector('[data-scope-control=status]'),axis=root.querySelector('.scope-axis');const text=node=>{const style=getComputedStyle(node),canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d');context.fillStyle=style.color;context.fillRect(0,0,1,1);return{color:style.color,opacity:style.opacity,rgba:Array.from(context.getImageData(0,0,1,1).data)};};return{target:log.getBoundingClientRect().height,status:text(status),axis:text(axis),palette:layerApp.state().palette.text}})()`);
+      await writeFile(`${directory}/${kind}-compact.json`,JSON.stringify(geometry,null,2));
+      const failures=[];if(geometry.target!==24)failures.push(`Log counts target ${geometry.target}, expected 24`);
+      for(const [name,text] of Object.entries({status:geometry.status,axis:geometry.axis})){
+        if(text.rgba[3]!==140)failures.push(`${name} secondary alpha ${text.rgba[3]}, expected 140`);
+        if(Number(text.opacity)!==1)failures.push(`${name} compounds secondary opacity`);
+      }
+      assert.deepEqual(failures,[],`${kind} compact target and secondary text: ${JSON.stringify(geometry)}`);
+    };
+    const before=await fixture.checkpoint();const histogram=await scope.exact();await capture('histogram-smoke');await compactScope('histogram');
     assert.equal(histogram.pixels,256*256);assert.equal(histogram.transparent,0);
     for(const channel of histogram.channels)assert.equal(channel.bins.reduce((sum,n)=>sum+n,0),histogram.pixels);
     await fixture.send({type:'customize',action:{type:'set_panel_visible',panel:'waveform',visible:true}});
@@ -95,7 +105,7 @@ export async function checkScopesSmoke({call,evaluate,settle}) {
     await fixture.poll('layerApp.state().waveform.data!=null');await fixture.idle();
     await fixture.poll(`document.querySelector('[data-scope="waveform"] [data-scope-control="status"]').textContent==='Exact'`);
     const pixels=await evaluate(`(()=>{const c=document.querySelector('[data-scope="waveform"] [data-scope-control="chart"]'),a=c.getContext('2d').getImageData(0,0,c.width,c.height).data;return{width:c.width,height:c.height,colored:Array.from(a).filter((n,i)=>i%4!==3&&n>0).length}})()`);
-    await capture('waveform-smoke');
+    await capture('waveform-smoke');await compactScope('waveform');
     await writeFile(`${directory}/waveform-smoke.json`,JSON.stringify({pixels},null,2));
     assert.ok(pixels.width>150&&pixels.height>100&&pixels.colored>0,`Shared Waveform RGBA is drawn on the real canvas: ${JSON.stringify(pixels)}`);
     assert.deepEqual(await fixture.checkpoint(),before);

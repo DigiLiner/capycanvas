@@ -48,7 +48,7 @@ function Pick-ToolAction([string]$Group,[string]$Command,[string]$Device){
  $id="tool-action-group-$Group"
  Reveal $id
  $box=Control $id -Arranged
- $bounds=Native-Bounds $id ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)
+ $bounds=Native-Bounds $id ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)
  $point=[System.Windows.Point]::new(0.,0.)
  if(!$box.TryGetClickablePoint([ref]$point)){throw "Tool action group $Group has no native clickable point"}
  $x=[int]$point.X;$y=[int]$point.Y
@@ -117,7 +117,7 @@ function Check-Mixing{
  Run 'Smudge'
  Wait-Until {(Command 'color_mix_linear').enabled} 'The Smudge brush did not offer color mixing'
  Reveal 'tool-action-group-color-mixing'
- Compact-Choice 'tool-action-group-color-mixing' ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)|Out-Null
+ Compact-Choice 'tool-action-group-color-mixing' ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)|Out-Null
  Pick-ToolAction 'color-mixing' 'color_mix_linear' 'pen'
  Wait-Until {(Command 'color_mix_linear').selected -and !(Command 'color_mix_oklab').selected} 'Linear mixing did not take effect from Tool Settings'
  Pick-ToolAction 'color-mixing' 'color_mix_oklab' 'touch'
@@ -132,18 +132,18 @@ try {
  $review=Start-Process -FilePath $Executable -WorkingDirectory $run -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
  $null=$review.Handle
  Write-Output "Owned photo tools review $($review.Id): $run"
- $watch=[Diagnostics.Stopwatch]::StartNew()
- do{$review.Refresh();if($review.HasExited){throw 'Review exited at startup'};Start-Sleep -Milliseconds 100}while($review.MainWindowHandle -eq [IntPtr]::Zero -and $watch.Elapsed.TotalSeconds -lt 45)
- $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+ $native=@{window=$null}
+ Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window} 'Review did not start' 45
+ $root=$native.window.Root;$drawingWindow=$native.window.Handle
  Wait-Until {(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Photo tools review did not start'
  $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
  [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
- [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+ [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
  [CapyRowPointer]::Initialize([uint32]$review.Id)
  if($mixOnly){
   Check-Mixing
   [pscustomobject]$checks|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
-  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
   return
  }
  Wait-Until {$b=(Find 'drawing-canvas').Current.BoundingRectangle;$b.Width -gt 1200} 'Maximized canvas did not settle' 10
@@ -300,7 +300,7 @@ try {
  $checks.merge_down_stamp_visible_and_flatten_notice='passed'
 
  [CapyRowPointer]::Dispose()
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved -StateDirectory $run
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved -StateDirectory $run
  if((Get-Item (Join-Path $run 'stderr.log')).Length){throw 'Native stderr requires review'}
  $checks.evidence=$run
  [pscustomobject]$checks|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')

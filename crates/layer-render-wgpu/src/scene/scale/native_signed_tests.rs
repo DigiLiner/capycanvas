@@ -22,7 +22,7 @@ fn native_alpha_signed_capture_matches_native_reference_without_reducing_input()
         let bounds = DocRect { min: [-16, -8], max: [48, 24] };
         let size = bounds.size().unwrap();
         let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-        let mut scene = Scene::new(&r);
+        let mut scene = Scene::new(&r).unwrap();
         let mut plan = display_mips::Plan::at(size, 2); plan.extent = extent; plan.doc_bounds = bounds;
         let destination = Image::new(&r, plan, "signed native alpha reduction");
         let mut encoder = submission::CommandEncoder::new(&r.device, &Default::default());
@@ -31,7 +31,7 @@ fn native_alpha_signed_capture_matches_native_reference_without_reducing_input()
         r.uploads.finish(&encoder); encoder.submit(&r.queue);
         let actual = pixels(&r, &destination.texture);
         let (native, _) = create_color_target(&r.device, size, "signed native alpha reference");
-        let mut reference_scene = Scene::new(&r);
+        let mut reference_scene = Scene::new(&r).unwrap();
         let mut encoder = submission::CommandEncoder::new(&r.device, &Default::default());
         let frame = packet(doc.scene().with_offset64(bounds.min.map(|v| -(v as f64))), size);
         reference_scene.capture_region(&mut r, frame, &native, PixelRect::full(size), scene::Output::EffectComposite(handle), &mut encoder).unwrap();
@@ -107,7 +107,7 @@ fn native_alpha_capture_skips_pages_outside_its_destination_window() {
         let plan = display_mips::Plan::window(extent, 2, PixelRect::new(0, 0, 256, 256));
         let capture = |regions: &[DocRect]| {
             let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-            let mut scene = Scene::new(&r);
+            let mut scene = Scene::new(&r).unwrap();
             let destination = Image::new(&r, plan, "windowed native alpha reduction");
             let mut encoder = submission::CommandEncoder::new(&r.device, &Default::default());
             super::super::effects::capture_native_effect(&mut scene, &mut r, packet(doc.scene(), extent), handle,

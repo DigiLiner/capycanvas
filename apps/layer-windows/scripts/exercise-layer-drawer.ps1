@@ -216,7 +216,7 @@ try {
  Wait-Until {(ConvertTo-Json -InputObject (Model).state.customization.drawer.columns -Compress) -eq '[["color","palettes"]]'} 'Color did not open its shared Color and Palettes drawer'
  Capture ('drawer-color-pair-'+$Theme) -Composed -WithModel
  Custom-Toolbar
- & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+ & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
  [pscustomobject]@{theme=$Theme;header='passed';growth='passed';properties='passed';footer='passed';swipe_actions='passed';group='passed';overflow='passed';scope='WARP UI and synthetic touch; reference hardware performance unverified'}|ConvertTo-Json
 }catch{
  try{$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)|ForEach-Object {@{id=$_.Current.AutomationId;name=$_.Current.Name;type=$_.Current.ControlType.ProgrammaticName;bounds=$_.Current.BoundingRectangle;offscreen=$_.Current.IsOffscreen}}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'failure-native-tree.json')}catch{}

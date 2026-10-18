@@ -355,7 +355,8 @@ export function createToolbarComponent({ app, tile, view, element, button, icon,
       if (f.segmented) return vertical ? [extent[0], style.size[1] * (extent[0] < style.size[0] * f.segmented ? f.segmented : 1)] : [style.size[0] * f.segmented, fieldHeight];
       if (!f.interval && !f.intrinsic && (vertical || f.action)) return style.size;
       f.row.style.width = 'max-content'; f.row.style.height = 'auto'; f.row.hidden = false;
-      return [f.row.scrollWidth, Math.max(fieldHeight, f.row.scrollHeight)];
+      const bounds=f.row.getBoundingClientRect();
+      return [bounds.width, Math.max(fieldHeight, bounds.height)];
     });
     const geometry = app.toolbar_ui({ type: 'options_layout', width: extent[0], height: extent[1], axis: vertical ? 'vertical' : 'horizontal', sizes, button: style.size, gap: vertical ? style.gap : 10 });
     place(more, geometry.more);

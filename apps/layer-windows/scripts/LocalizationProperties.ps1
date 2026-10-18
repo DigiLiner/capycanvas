@@ -457,7 +457,84 @@ function Property-Surfaces{
  Use-Window $textWindow
 }
 
+function Toolbar-GroupedLanguageSurface{
+ Use-Window $first
+ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'exercise-toolbar-components.ps1'),[ref]$null,[ref]$null)
+ $method=@($ast.FindAll({param($n)$n-is[Management.Automation.Language.FunctionDefinitionAst]-and$n.Name-eq'Switch-Workspace'},$true));if($method.Count-ne1){throw 'Expected original workspace selector'};Invoke-Expression $method[0].Extent.Text
+ Switch-Workspace 'Photo' 'builtin:workspace:photographer'
+ $pencil=@((Fresh-Model).state.commands|Where-Object id -eq 'pencil')
+ if($pencil.Count-ne1-or!$pencil[0].enabled){throw 'Shared current Pencil command unavailable'}
+ Search-Command $pencil[0].label 'pencil'
+ Wait-Until {$v=Model;$v.state.brush.preset-eq2-and$v.brush_ready-and(@($v.state.tool_settings.id)-join',')-ceq'size,flow,grain_depth,material_hardness,angle,opacity,smoothing_strength'} 'Current Pencil did not prepare grouped options' 8
+ $pencilSmoothing=@((Fresh-Model).state.tool_settings|Where-Object id -eq 'smoothing_strength')
+ if($pencilSmoothing.Count-ne1-or$pencilSmoothing[0].group_id-ne'tool-setting-group-smoothing'-or!$pencilSmoothing[0].group){throw 'Current grouped Pencil smoothing metadata absent'}
+ $options=@(foreach($panel in (Fresh-Model).panels){$panel.tiles|Where-Object {$_.control.kind-eq'tool_options'}})
+ if($options.Count-ne1){throw 'Exactly one current ToolOptions component required'}
+ $pencilTile=Control (Tool-Tile 'pencil') -Arranged
+ if($pencilTile.Current.ProcessId-ne$review.Id){throw 'Current Pencil tile belongs to another process'}
+ if((Fresh-Model).state.customization.drawer){Key 27;Wait-Until {$null-eq(Model).state.customization.drawer} 'Tool drawer did not dismiss before grouped toolbar setup' 8}
+ foreach($setting in @(@{property='text';message='workspace-tool-options-icons';checked=[System.Windows.Automation.ToggleState]::Off},@{property='sliders';message='workspace-show-sliders-menu';checked=[System.Windows.Automation.ToggleState]::On})){
+  $view=Fresh-Model;$currentOptions=@(foreach($panel in $view.panels){$panel.tiles|Where-Object {$_.control.kind-eq'tool_options'-and$_.id-eq$options[0].id}})
+  if($currentOptions.Count-ne1-or$null-eq$currentOptions[0].control.style.($setting.property)){throw 'Current ToolOptions style schema unavailable'}
+  if($currentOptions[0].control.style.($setting.property)){
+   $more=Control ('toolbar-more-'+$options[0].id) -Arranged
+   if($more.Current.ProcessId-ne$review.Id-or!$more.Current.IsEnabled){throw 'ToolOptions context target is not an enabled owned control'}
+   $more.SetFocus();Wait-Until {$more.Current.HasKeyboardFocus} 'ToolOptions context target did not own keyboard focus' 8
+   [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+   $caption=Catalog-Text $view.windows_active_tag $setting.message 'workspace'
+   $menu=Control $caption -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Arranged
+   if($menu.Current.ProcessId-ne$review.Id-or!$menu.Current.IsEnabled){throw 'ToolOptions style action is not an enabled owned menu item'}
+   $toggle=$menu.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+   if($toggle.Current.ToggleState-ne$setting.checked){throw 'ToolOptions native check does not match the published style'}
+   $toggle.Toggle()
+   Wait-Until {$v=Model;$tile=@(foreach($panel in $v.panels){$panel.tiles|Where-Object {$_.control.kind-eq'tool_options'-and$_.id-eq$options[0].id}});$tile.Count-eq1-and$tile[0].control.style.($setting.property)-eq$false} 'ToolOptions native style action did not acknowledge compact settings' 8
+   Wait-Until {!(Find $caption -Name -Type ([System.Windows.Automation.ControlType]::MenuItem) -Visible)} 'ToolOptions style menu did not close' 8
+  }
+ }
+ $compact=Fresh-Model;$compactOptions=@(foreach($panel in $compact.panels){$panel.tiles|Where-Object {$_.control.kind-eq'tool_options'-and$_.id-eq$options[0].id}})
+ if($compactOptions.Count-ne1-or$compactOptions[0].control.style.text-ne$false-or$compactOptions[0].control.style.sliders-ne$false){throw 'Grouped toolbar prerequisite requires acknowledged Icons without Sliders'}
+ $entry=Control 'toolbar-setting-opacity' -Arranged
+ $opacityCurrent=$entry.Current
+ if($opacityCurrent.ProcessId-ne$review.Id){throw 'Arranged inline Opacity belongs to another process'}
+ $setup=[ordered]@{preset=$compact.state.brush.preset;settings=@($compact.state.tool_settings.id);tool_options_id=$options[0].id;style=$compactOptions[0].control.style;pencil_runtime=($pencilTile.GetRuntimeId()-join':');opacity_runtime=($entry.GetRuntimeId()-join':');opacity_bounds=$opacityCurrent.BoundingRectangle.ToString();opacity_offscreen=$opacityCurrent.IsOffscreen;opacity_process=$opacityCurrent.ProcessId;inline_fit='actual mandatory Arranged predicate passed; no assumed width'}
+ $setupPath=Join-Path $run 'grouped-toolbar-prerequisites.json';$setupTemporary=$setupPath+'.tmp-'+[guid]::NewGuid().ToString('N')
+ [IO.File]::WriteAllText($setupTemporary,($setup|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false));[IO.File]::Move($setupTemporary,$setupPath,$true)
+ $base=Fresh-Model;$field=@($base.state.tool_settings|Where-Object id -eq 'opacity')[0]
+ if($field.group_id-ne'tool-setting-group-blending'-or!$field.group){throw 'Actual grouped opacity prerequisite absent'}
+ Select-Draft $entry $numericDraft
+ $toolbarIdentity=$entry.GetRuntimeId()-join':';$toolbarSelection=Selection $entry
+ Invoke-Id ('toolbar-more-'+$options[0].id)
+ Wait-Until {$v=Model;$v.state.customization.drawer-and(Find 'tool-drawer' -Visible)} 'ToolOptions did not open its original overflow drawer' 8
+ $drawer=Control 'tool-drawer';$popupIdentity=$drawer.GetRuntimeId()-join':'
+ $drawerEntry=Control 'tool-setting-opacity' -Within $drawer
+ Select-Draft $drawerEntry $numericDraft
+ $drawerIdentity=$drawerEntry.GetRuntimeId()-join':';$drawerSelection=Selection $drawerEntry
+ $base=Fresh-Model;$document=$base.state.document_file|ConvertTo-Json -Depth 20 -Compress;$gpu=$base.windows_gpu_generation;$brush=$base.state.brush|ConvertTo-Json -Depth 12 -Compress
+ $schema=@($base.state.tool_settings|ForEach-Object{[ordered]@{id=$_.id;group_id=$_.group_id;numeric=$_.numeric;value=$_.value}})|ConvertTo-Json -Depth 12 -Compress
+ $originalGroup=@($base.state.tool_settings|Where-Object id -eq 'opacity')[0].group;$languageState=@{group_changed=$false};$records=[Collections.Generic.List[object]]::new()
+ Surface-Languages 'retained-grouped-toolbar-draft-and-overflow' {
+  $v=Fresh-Model $first $choice.tag;$f=@($v.state.tool_settings|Where-Object id -eq 'opacity')[0]
+  if(($v.state.document_file|ConvertTo-Json -Depth 20 -Compress)-cne$document-or$v.windows_gpu_generation-ne$gpu-or($v.state.brush|ConvertTo-Json -Depth 12 -Compress)-cne$brush){throw 'Language changed authored history, brush values or GPU owner'}
+  if((@($v.state.tool_settings|ForEach-Object{[ordered]@{id=$_.id;group_id=$_.group_id;numeric=$_.numeric;value=$_.value}})|ConvertTo-Json -Depth 12 -Compress)-cne$schema){throw 'Language changed stable tool settings schema or values'}
+  $toolbar=Control 'toolbar-setting-opacity';$popup=Control 'tool-drawer';$edit=Control 'tool-setting-opacity' -Within $popup
+  if(($toolbar.GetRuntimeId()-join':')-cne$toolbarIdentity-or(Value $toolbar)-cne$numericDraft-or(Selection $toolbar)-cne$toolbarSelection){throw 'Language rebuilt dirty toolbar numeric field or lost its draft/selection'}
+  if(($popup.GetRuntimeId()-join':')-cne$popupIdentity-or$popup.Current.IsOffscreen-or!$v.state.customization.drawer){throw 'Language closed or replaced the actual overflow popup'}
+  if(($edit.GetRuntimeId()-join':')-cne$drawerIdentity-or(Value $edit)-cne$numericDraft-or(Selection $edit)-cne$drawerSelection-or!$edit.Current.HasKeyboardFocus){throw 'Language rebuilt grouped popup editor or lost draft/selection/focus'}
+  $expected=(Catalog-Text $choice.tag 'numeric-edit-label' 'common').Replace('{ $label }',$f.label)
+  if($edit.Current.Name-cne$expected-or$toolbar.Current.Name-cne$expected){throw 'Retained opacity controls did not use current shared localized copy'}
+  $heading=Find $f.group -Name -Within $popup -Type ([System.Windows.Automation.ControlType]::Text)
+  if(!$heading-or$heading.Current.ProcessId-ne$review.Id-or$f.group_id-ne'tool-setting-group-blending'){throw 'Grouped popup heading does not match shared current stablegroup/currentcopy'}
+  if($f.group-cne$originalGroup){$languageState.group_changed=$true}
+  $records.Add(@{tag=$choice.tag;group_id=$f.group_id;group_caption=$f.group;toolbar_runtime=$toolbarIdentity;popup_runtime=$popupIdentity;popup_edit_runtime=$drawerIdentity;draft=$numericDraft;focus=$edit.Current.HasKeyboardFocus})
+ }
+ if(!$languageState.group_changed){throw 'No actual localized group caption change observed'}
+ $records|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $run 'grouped-toolbar-language-proof.json')
+ (Control 'tool-setting-opacity' -Within (Control 'tool-drawer')).SetFocus();Key 27
+ Wait-Until {$null-eq(Model).state.customization.drawer} 'Escape did not close grouped ToolOptions drawer' 8
+}
+
 function Tool-Surfaces{
+ Toolbar-GroupedLanguageSurface
  Use-Window $first
  Search-Command 'transform' 'scale_rotate'
  Wait-Until {$view=Model;$view -and $view.state.layer_tools.tool -eq 'transform' -and (Find 'tool-setting-transform_x') -and (Find 'tool-choice-transform-reference')} 'Transform did not expose retained native position and anchor controls' 30

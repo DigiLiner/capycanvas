@@ -95,10 +95,13 @@ request it.
 ## Performance rules
 
 The live path has one contiguous contact upload and one small style-table upload.
-Shaders, pipelines, and samplers are prepared. Full-opacity Flow contact needs
-no stroke-state page;
-destination brushes build small neighborhood bind groups for touched sparse
-pages. Two generic material target variants plus one watercolor-state variant
+Shaders, pipelines, and samplers are prepared. Contact flags and accumulation
+select the material variant for the captured stroke. Startup prepares the brush's
+direct, destination, gather and reservoir recipes before input is ready;
+revisiting that style reuses its compiled recipes. Full-opacity Flow contact needs
+no stroke-state page. Destination brushes build small neighborhood bind groups
+for touched sparse pages. Two generic material target variants plus one
+watercolor-state variant
 prevent an unused coverage feature from attaching and writing its state target. A single pass plan supplies the same attachment decision to page
 allocation, committed rendering, and prediction. Only damaged
 pixels are rasterized and recomposited. Capillary transport uses three

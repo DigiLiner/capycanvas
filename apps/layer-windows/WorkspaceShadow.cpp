@@ -62,9 +62,7 @@ struct WorkspaceShadow::State {
 WorkspaceShadow::WorkspaceShadow():state(std::make_shared<State>()){
     root.IsHitTestVisible(false);
     AutomationProperties::SetAccessibilityView(root,Automation::Peers::AccessibilityView::Raw);
-    // The mask has no navigator cutouts. Hide its parent so only the shadow is
-    // painted; GetAlphaMask reads the shape's own fill, independently of ancestors.
-    mask.Fill(fill({255,255,255,255}));maskHost.Opacity(0);maskHost.Children().Append(mask);
+    mask.Fill(fill({255,255,255,255}));ElementCompositionPreview::GetElementVisual(maskHost).Opacity(0);maskHost.Children().Append(mask);
     Canvas::SetLeft(maskHost,padding);Canvas::SetTop(maskHost,padding);root.Children().Append(maskHost);
     root.Loaded([state=state,host=make_weak(root),shape=make_weak(mask)](auto&&,auto&&){
         auto root=host.get();auto mask=shape.get();if(!root||!mask)return;

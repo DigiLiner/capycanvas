@@ -65,21 +65,26 @@ impl Compiler {
         queue.admission.delay(queue.jobs.iter().map(|job| job.priority))
     }
     pub fn new() -> Result<Self, GpuRasterError> {
+        let workers = std::thread::available_parallelism().map_or(1, |n| (n.get() / 8).clamp(1, 4));
+        Self::with_workers(workers)
+    }
+    fn with_workers(workers: usize) -> Result<Self, GpuRasterError> {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue::default()),
             wake: Condvar::new(),
             pending: AtomicUsize::new(0),
             error: Mutex::new(None),
         });
-        let workers = std::thread::available_parallelism().map_or(1, |n| (n.get() / 8).clamp(1, 4));
-        let threads = (0..workers).map(|index| {
-            let worker = shared.clone();
-            std::thread::Builder::new()
+        let mut compiler = Self(shared, Vec::with_capacity(workers));
+        for index in 0..workers {
+            let worker = compiler.0.clone();
+            let thread = std::thread::Builder::new()
                 .name(format!("capy-shaders-{index}"))
                 .spawn(move || compile(&worker))
-                .map_err(|e| GpuRasterError::Effect(e.to_string()))
-        }).collect::<Result<_, _>>()?;
-        Ok(Self(shared, threads))
+                .map_err(|e| GpuRasterError::Effect(e.to_string()))?;
+            compiler.1.push(thread);
+        }
+        Ok(compiler)
     }
     pub fn enqueue(
         &self,
@@ -88,8 +93,8 @@ impl Compiler {
     ) {
         self.submit(Job { priority, tracked: true, independent: false, work: Box::new(work) });
     }
-    pub fn enqueue_untracked(&self, priority: u8, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
-        self.submit(Job { priority, tracked: false, independent: true, work: Box::new(work) });
+    pub fn enqueue_untracked(&self, priority: u8, independent: bool, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
+        self.submit(Job { priority, tracked: false, independent: independent && priority < OTHER, work: Box::new(work) });
     }
     fn submit(&self, job: Job) {
         self.0.pending.fetch_add(usize::from(job.tracked), Ordering::Relaxed);
@@ -99,7 +104,7 @@ impl Compiler {
     pub fn pipeline<T: Send + Sync + 'static>(&self, pipeline: &Deferred<T>, priority: u8) {
         if pipeline.promote(priority) {
             let pipeline = pipeline.clone();
-            self.submit(Job { priority, tracked: true, independent: true, work: Box::new(move || {
+            self.submit(Job { priority, tracked: true, independent: pipeline.async_pipeline() && priority < OTHER, work: Box::new(move || {
                 pipeline.compile();
                 Ok(())
             }) });
@@ -260,8 +265,8 @@ mod tests {
     }
 
     #[test]
-    fn ordered_jobs_run_alone_while_independent_pipelines_compile_together() {
-        let compiler = Compiler::new().unwrap();
+    fn ordered_jobs_and_generic_recipes_never_overlap() {
+        let compiler = Compiler::with_workers(2).unwrap();
         let running = Arc::new(AtomicUsize::new(0));
         let overlapped = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
@@ -286,9 +291,7 @@ mod tests {
         compiler.start();
         finish_jobs(&compiler);
         assert_eq!(overlapped.load(Ordering::SeqCst), 0, "a job that is not a pipeline compile never overlaps another job");
-        if std::thread::available_parallelism().map_or(1, |n| n.get()) >= 16 {
-            assert!(peak.load(Ordering::SeqCst) > 1, "independent pipelines compile together");
-        }
+        assert_eq!(peak.load(Ordering::SeqCst), 1, "generic recipes remain ordered");
         drop(compiler);
         finish_shader_compiler_shutdown();
     }
@@ -335,5 +338,140 @@ mod tests {
         finish_shader_compiler_shutdown();
         wait_finished.try_recv().unwrap();
         assert_eq!(canceled.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn required_pipeline_jobs_overlap_before_optional_work_and_cache_finalization() {
+        let compiler = Compiler::with_workers(2).unwrap();
+        let (entered, entered_rx) = mpsc::channel();
+        let (finished, finished_rx) = mpsc::channel();
+        let (optional, optional_rx) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut pipelines = Vec::new();
+        for index in 0..2 {
+            let entered = entered.clone();
+            let finished = finished.clone();
+            let (release, wait_release) = mpsc::channel();
+            releases.push(release);
+            let pipeline = Deferred::pipeline(move |_| {
+                entered.send(index).unwrap();
+                wait_release.recv_timeout(Duration::from_secs(10)).unwrap();
+                finished.send(index).unwrap();
+                Compilation::Ready(index)
+            });
+            compiler.pipeline(&pipeline, BRUSH);
+            pipelines.push(pipeline);
+        }
+        let optional_event = optional.clone();
+        let optional_pipeline = Deferred::pipeline(move |_| {
+            optional_event.send("optional").unwrap();
+            Compilation::Ready(())
+        });
+        compiler.pipeline(&optional_pipeline, OTHER);
+        compiler.enqueue(BACKGROUND, move || {optional.send("cache").unwrap(); Ok(())});
+        compiler.start();
+        let first = entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let second = entered_rx.recv_timeout(Duration::from_secs(2)).ok();
+        let _ = releases[first].send(());
+        assert_eq!(finished_rx.recv_timeout(Duration::from_secs(2)).unwrap(), first);
+        let optional_before_last_completion = optional_rx.recv_timeout(Duration::from_millis(1200)).ok();
+        let _ = releases[1-first].send(());
+        finish_jobs(&compiler);
+        drop(compiler);
+        finish_shader_compiler_shutdown();
+        assert_eq!(second, Some(1-first), "both required recipes enter before either is released");
+        assert_eq!(optional_before_last_completion, None, "optional and cache work wait beyond both quiet intervals for the last required recipe");
+        assert_eq!(finished_rx.try_recv().unwrap(), 1-first);
+        assert!(pipelines.iter().all(Deferred::ready));
+        assert!(optional_pipeline.ready());
+        assert_eq!(optional_rx.try_recv().unwrap(), "optional");
+        assert_eq!(optional_rx.try_recv().unwrap(), "cache");
+    }
+
+    #[test]
+    fn generic_data_and_optional_pipeline_jobs_stay_serial() {
+        for kind in 0..4 {
+            let compiler = Compiler::with_workers(2).unwrap();
+            let (entered, events) = mpsc::channel();
+            let mut releases = Vec::new();
+            let mut pipelines = Vec::new();
+            for index in 0..2 {
+                let entered = entered.clone();
+                let (release, wait_release) = mpsc::channel();
+                releases.push(release);
+                let work = move || {
+                    entered.send(index).unwrap();
+                    wait_release.recv_timeout(Duration::from_secs(10)).unwrap();
+                    index
+                };
+                if kind == 0 {
+                    compiler.enqueue(DOCUMENT, move || {work(); Ok(())});
+                } else {
+                    let pipeline = if kind == 1 {Deferred::new(work)}
+                        else {Deferred::pipeline(move |_| Compilation::Ready(work()))};
+                    compiler.pipeline(&pipeline, match kind {1 => BRUSH, 2 => OTHER, _ => BACKGROUND});
+                    pipelines.push(pipeline);
+                }
+            }
+            compiler.start();
+            let first = events.recv_timeout(Duration::from_secs(2)).unwrap();
+            let second_before_release = events.recv_timeout(Duration::from_millis(250)).ok();
+            for release in releases {let _ = release.send(());}
+            finish_jobs(&compiler);
+            drop(compiler);
+            finish_shader_compiler_shutdown();
+            assert_eq!(first, 0, "generic/data/optional FIFO: kind={kind}");
+            assert_eq!(second_before_release, None, "only required pipeline recipes overlap: kind={kind}");
+            assert_eq!(events.try_recv().unwrap(), 1);
+            assert!(pipelines.iter().all(Deferred::ready));
+        }
+    }
+
+    #[test]
+    fn surface_teardown_retires_both_required_workers_and_cancels_queued_work() {
+        let compiler = Compiler::with_workers(2).unwrap();
+        let (entered, entered_rx) = mpsc::channel();
+        let (finished, finished_rx) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut pipelines = Vec::new();
+        for index in 0..2 {
+            let entered = entered.clone();
+            let finished = finished.clone();
+            let (release, wait_release) = mpsc::channel();
+            releases.push(release);
+            let pipeline = Deferred::pipeline(move |_| {
+                entered.send(index).unwrap();
+                wait_release.recv_timeout(Duration::from_secs(10)).unwrap();
+                finished.send(index).unwrap();
+                Compilation::Ready(index)
+            });
+            compiler.pipeline(&pipeline, BRUSH);
+            pipelines.push(pipeline);
+        }
+        let canceled = Arc::new(AtomicUsize::new(0));
+        let flag = canceled.clone();
+        let queued = Deferred::pipeline(move |_| {
+            flag.fetch_add(1, Ordering::Relaxed);
+            Compilation::Ready(())
+        });
+        compiler.pipeline(&queued, OTHER);
+        compiler.start();
+        let first = entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let second = entered_rx.recv_timeout(Duration::from_secs(2)).ok();
+        let (dropped, dropped_rx) = mpsc::channel();
+        let teardown = std::thread::spawn(move || {drop(compiler); dropped.send(()).unwrap();});
+        let returned_before_release = dropped_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        let finished_before_release = finished_rx.try_recv().is_ok();
+        for release in releases {let _ = release.send(());}
+        teardown.join().unwrap();
+        finish_shader_compiler_shutdown();
+        assert_eq!(second, Some(1-first), "both workers were in flight during teardown");
+        assert!(returned_before_release && !finished_before_release, "surface teardown never joins blocked recipes");
+        let mut completed = vec![finished_rx.try_recv().unwrap(), finished_rx.try_recv().unwrap()];
+        completed.sort_unstable();
+        assert_eq!(completed, [0,1], "final shutdown joins both in-flight workers");
+        assert!(pipelines.iter().all(Deferred::ready));
+        assert_eq!(canceled.load(Ordering::Relaxed), 0);
+        assert!(!queued.ready());
     }
 }

@@ -321,7 +321,10 @@ impl UiState {
                 .filter(|a| completion(a.command))
                 .filter_map(action),
         );
-        let choice = |id, label: std::sync::Arc<str>, segmented, items: Vec<ToolSetItem>| {
+        let choice = |id, label: std::sync::Arc<str>, segmented, mut items: Vec<ToolSetItem>| {
+            if let Some(selected) = items.iter().rposition(|item| item.selected) {
+                for (index, item) in items.iter_mut().enumerate() { item.selected = index == selected; }
+            }
             (items.len() > 1).then_some(ToolOption::Choice {
                 id,
                 label,

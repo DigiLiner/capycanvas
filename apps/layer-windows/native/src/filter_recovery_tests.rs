@@ -111,6 +111,18 @@ impl Fixture {
             fs::remove_file(self.directory.path.join(name)).unwrap();
         }
     }
+    fn insert_updated_filter(&mut self) {
+        let document = self.native.session.engine().document();
+        let owner = document.working.occurrence.unwrap();
+        let application = document.scene().effect_application(owner).unwrap().clone();
+        self.native.dispatch(UiAction::Effect {
+            action: EffectAction::Insert { effect: "example:tent_blur".into() },
+        }).unwrap();
+        let document = self.native.session.engine().document();
+        assert_eq!(document.scene().effect_application(owner), Some(&application));
+        assert_ne!(document.scene().effect_application(document.working.occurrence.unwrap()).unwrap().program, application.program);
+        assert_eq!(radius(&self.native), layer_core::EffectValue::Number(3.));
+    }
     fn verify(&mut self, original: &[u8], expected: &[u8], catalog: u64) {
         finish(&mut self.service, &mut self.native);
         assert_eq!(
@@ -124,6 +136,8 @@ impl Fixture {
         );
         assert_eq!(self.service.status.request_id, 2);
         assert_eq!(radius(&self.native), layer_core::EffectValue::Number(7.));
+        assert_eq!(image(&mut self.native), original);
+        self.insert_updated_filter();
         assert_eq!(image(&mut self.native), expected);
         self.native
             .dispatch(UiAction::Invoke {
@@ -155,6 +169,8 @@ fn replacement_pixels() -> Vec<u8> {
         "{:?}",
         fixture.service.status
     );
+    assert_eq!(image(&mut fixture.native), before);
+    fixture.insert_updated_filter();
     let after = image(&mut fixture.native);
     assert_ne!(after, before);
     after

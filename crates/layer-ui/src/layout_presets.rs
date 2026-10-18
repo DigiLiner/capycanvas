@@ -650,21 +650,33 @@ mod tests {
     }
 
     #[test]
-    fn photo_scopes_fit_natural_height_and_properties_receive_sixty_percent_of_remainder() {
-        let mut layout=WorkspacePreset::Photographer.layout(Platform::Gtk);layout.open_default_columns(Platform::Gtk);
-        layout.measurements=[
-            PanelMeasurement{panel:Panel::Histogram,content_height:265.,tab_width:111.,scroll:None},
-            PanelMeasurement{panel:Panel::Waveform,content_height:241.,tab_width:110.,scroll:None},
-            PanelMeasurement{panel:Panel::Properties,content_height:99.,tab_width:111.,scroll:Some(PanelScrollMeasurement{fixed_height:0.,unit_height:0.})},
-            PanelMeasurement{panel:Panel::Layers,content_height:170.,tab_width:85.,scroll:Some(PanelScrollMeasurement{fixed_height:90.,unit_height:40.})},
-        ].to_vec();
-        for width in [640.,1100.] {
-            let resolved=layout.workspace(width,800.,crate::HEADER_HEIGHT,crate::STATUS_HEIGHT);
-            let bounds=|panel|resolved.groups.iter().find(|g|g.panels.contains(&panel)).unwrap().bounds;
-            let scopes=bounds(Panel::Histogram);let properties=bounds(Panel::Properties);let layers=bounds(Panel::Layers);
-            assert_eq!(scopes.height,265.+TAB_BAR_HEIGHT);assert_eq!(scopes,bounds(Panel::Waveform));
-            assert!((properties.height/(properties.height+layers.height)-0.6).abs()<0.01,"width {width}: {properties:?} {layers:?}");
-            assert!(properties.height>200.,"width {width}: {properties:?}");assert!(properties.height-TAB_BAR_HEIGHT>=99.);assert!(scopes.y+scopes.height<properties.y);assert!(properties.y+properties.height<layers.y);assert_eq!(properties.x,layers.x);
+    fn photo_scopes_fit_and_remainder_preserves_visible_rows() {
+        for platform in Platform::ALL {
+            let mut layout=WorkspacePreset::Photographer.layout(platform);layout.open_default_columns(platform);
+            layout.measurements=[
+                PanelMeasurement{panel:Panel::Histogram,content_height:260.,tab_width:111.,scroll:None},
+                PanelMeasurement{panel:Panel::Waveform,content_height:260.,tab_width:110.,scroll:None},
+                PanelMeasurement{panel:Panel::Properties,content_height:160.,tab_width:111.,scroll:Some(PanelScrollMeasurement{fixed_height:0.,unit_height:0.})},
+                PanelMeasurement{panel:Panel::Adjustments,content_height:3720.,tab_width:111.,scroll:Some(PanelScrollMeasurement{fixed_height:40.,unit_height:64.})},
+                PanelMeasurement{panel:Panel::Layers,content_height:172.,tab_width:85.,scroll:Some(PanelScrollMeasurement{fixed_height:92.,unit_height:40.})},
+            ].to_vec();
+            for width in [744.,960.,1200.] {
+                for height in [600.,660.,800.,1000.] {
+                    let resolved=layout.workspace(width,height,crate::HEADER_HEIGHT,0.);
+                    let bounds=|panel|resolved.groups.iter().find(|g|g.panels.contains(&panel)).unwrap().bounds;
+                    let scopes=bounds(Panel::Histogram);let properties=bounds(Panel::Properties);let layers=bounds(Panel::Layers);
+                    assert!(layers.height-TAB_BAR_HEIGHT>=92.+40.,"{platform:?} {width}x{height}: {layers:?}");
+                    assert!(properties.height-TAB_BAR_HEIGHT>=40.+64.,"{platform:?} {width}x{height}: {properties:?}");
+                    assert_eq!(scopes,bounds(Panel::Waveform));
+                    assert!(scopes.y+scopes.height<properties.y);assert!(properties.y+properties.height<layers.y);assert_eq!(properties.x,layers.x);
+                    assert!(layers.y+layers.height<=height);
+                    if height>=800. {assert_eq!(scopes.height,260.+TAB_BAR_HEIGHT);}
+                    if height==1000. {
+                        assert!((properties.height/(properties.height+layers.height)-0.6).abs()<0.01,"{platform:?} {width}x{height}: {properties:?} {layers:?}");
+                        assert!(properties.height-TAB_BAR_HEIGHT>=160.);
+                    }
+                }
+            }
         }
     }
 

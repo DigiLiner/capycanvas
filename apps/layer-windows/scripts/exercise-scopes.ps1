@@ -91,10 +91,10 @@ function Pick([string]$Id,[string]$Option,[string]$Device){
 function View([string]$Name){(Model).state.$Name}
 function Window-Capture{
     $window=[CapyScopeControls+Rect]::new()
-    if(![CapyScopeControls]::GetWindowRect($review.MainWindowHandle,[ref]$window)){throw 'Window bounds unavailable'}
+    if(![CapyScopeControls]::GetWindowRect($drawingWindow,[ref]$window)){throw 'Window bounds unavailable'}
     $bitmap=[Drawing.Bitmap]::new($window.right-$window.left,$window.bottom-$window.top)
     $graphics=[Drawing.Graphics]::FromImage($bitmap);$dc=$graphics.GetHdc()
-    try{if(![CapyScopeControls]::PrintWindow($review.MainWindowHandle,$dc,2)){$bitmap.Dispose();throw 'App capture failed'}}finally{$graphics.ReleaseHdc($dc);$graphics.Dispose()}
+    try{if(![CapyScopeControls]::PrintWindow($drawingWindow,$dc,2)){$bitmap.Dispose();throw 'App capture failed'}}finally{$graphics.ReleaseHdc($dc);$graphics.Dispose()}
     @{bitmap=$bitmap;window=$window}
 }
 function Reveal([string]$Id){
@@ -209,10 +209,10 @@ function Localized-Layout{
         Scope-Language $tags[$index] ($index+1)
         $tag=$tags[$index]
         foreach($width in 1100,1500){
-            & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width $width -Height 1000
+            & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width $width -Height 1000
             foreach($prefix in 'histogram','waveform'){
                 Select-Panel $prefix
-                if($compactOnly){foreach($choice in 'source','channel'){Compact-Choice ($prefix+'-'+$choice) ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)|Out-Null}}
+                if($compactOnly){foreach($choice in 'source','channel'){Compact-Choice ($prefix+'-'+$choice) ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)|Out-Null}}
                 $null=Reveal ($prefix+'-highlights')
                 $plot=(Control ($prefix+'-chart') -Arranged).Current.BoundingRectangle
                 $log=Control ($prefix+'-log') -Arranged
@@ -243,12 +243,13 @@ try{
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $run 'stderr.log')
     $null=$review.Handle
     Write-Output "Owned scopes review $($review.Id): $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Review did not start' 120
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready -and (Model).windows_workspace.ready} 'Review did not start' 120
     if(!(Model).windows_isolated_settings){throw 'Scopes fixture requires an isolated profile'}
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     [CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1500 -Height 1000
-    [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 1500 -Height 1000
+    [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     Workspace 'builtin:workspace:photographer'
     $group=@((Model).layout.groups|Where-Object {$_.panels -contains 'histogram'})[0]
@@ -272,10 +273,10 @@ try{
         Localized-Layout
         if($compactOnly){
             Select-Filter 'color_lookup' 'Color Lookup (LUT)'
-            Compact-Choice 'property-resource-choice' ([CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.)|Out-Null
+            Compact-Choice 'property-resource-choice' ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)|Out-Null
             Capture ('resource-choice-'+$Theme) -Composed -WithModel
         }
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         [pscustomobject]@{theme=$Theme;checks=$checks;evidence=$run}|ConvertTo-Json -Depth 6
         return
     }
@@ -374,7 +375,7 @@ try{
     Wait-Until {$null -ne (View 'histogram').data} 'Reopened Histogram did not publish counts'
     $checks.window_show='passed'
 
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     [pscustomobject]@{theme=$Theme;checks=$checks;devices=@('mouse','pen','touch');evidence=$run}|ConvertTo-Json -Depth 4
 }catch{
     try{$capture=Window-Capture;try{$capture.bitmap.Save((Join-Path $run 'failure.png'))}finally{$capture.bitmap.Dispose()}}catch{}

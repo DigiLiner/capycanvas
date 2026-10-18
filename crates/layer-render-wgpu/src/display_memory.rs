@@ -70,7 +70,7 @@ fn metal_headroom(recommended: u64, allocated: u64, available: Option<u64>) -> O
     available.map(|bytes| bytes.min(recommended.saturating_sub(allocated)))
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "windows"))]
 fn vulkan_headroom(device: &wgpu::Device) -> Option<u64> {
     use ash::vk;
     // SAFETY: the guard keeps wgpu's device/instance alive. We only query
@@ -169,7 +169,11 @@ fn unified_memory(device: &wgpu::Device) -> bool {
 
 #[cfg(target_os = "windows")]
 pub(super) fn complete_budget(device: &wgpu::Device, retained: u64) -> u64 {
-    allowance(dx12_headroom(device), 4, retained)
+    let headroom = dx12_headroom(device).or_else(|| {
+        remaining_headroom(vulkan_headroom(device)?, 0,
+            layer_color::photo::PhotoMemoryBudget::available_memory())
+    });
+    allowance(headroom, 4, retained)
 }
 
 #[cfg(target_os = "windows")]

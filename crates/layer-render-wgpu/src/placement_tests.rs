@@ -491,7 +491,7 @@ fn layer_tiles_beside_the_largest_offset_keep_their_exact_pixels() {
         occurrence_mut(&mut layer).offset = [offset, 3];
         let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         submit(&mut r, &layer, &[], &[], true);
-        let mut scene = crate::scene::Scene::new(&r);
+        let mut scene = crate::scene::Scene::new(&r).unwrap();
         let first = u32::try_from(offset.div_euclid(i64::from(PAGE_SIZE))).unwrap();
         (first..first + 3).map(|x| {
             let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());

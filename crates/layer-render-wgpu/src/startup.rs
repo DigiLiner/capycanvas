@@ -250,8 +250,7 @@ impl ShaderBrushKey {
             execution: style.execution,
             paint,
             erase,
-            dry_material: dry_material::contact_flags(style.contact)
-                | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 },
+            dry_material: dry_material::contact_flags(style.contact) | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 },
             reach: dry_material::Reach::of(brush),
         }
     }
@@ -564,7 +563,7 @@ impl WgpuRasterizer {
             let generation = startup.preparation.load(std::sync::atomic::Ordering::Relaxed);
             for pipeline in std::mem::take(&mut startup.resized.compute).into_iter().filter(|p| !p.ready()) {
                 let preparation = startup.preparation.clone();
-                startup.compiler.enqueue_untracked(BACKGROUND, move || {
+                startup.compiler.enqueue_untracked(BACKGROUND, pipeline.async_pipeline(), move || {
                     if preparation.load(std::sync::atomic::Ordering::Relaxed) == generation { pipeline.compile(); }
                     Ok(())
                 });
@@ -573,7 +572,7 @@ impl WgpuRasterizer {
         #[cfg(not(target_arch = "wasm32"))]
         if startup.finished && self.device.cache_unsaved() {
             let device = self.device.clone();
-            startup.compiler.enqueue_untracked(OTHER, move || {
+            startup.compiler.enqueue_untracked(OTHER, false, move || {
                 device.save_cache();
                 Ok(())
             });
@@ -584,7 +583,7 @@ impl WgpuRasterizer {
             complete: startup.finished,
         };
         if canvas_ready && self.scene.is_none() {
-            self.scene = Some(scene::Scene::new(self));
+            self.scene = Some(scene::Scene::new(self)?);
         }
         Ok(progress)
     }
@@ -1029,6 +1028,55 @@ mod gpu_tests {
             let prediction = pipelines.dry_material.selected_kernel(&style, MaterialOperation::Clone, false,0);
             let commit = pipelines.dry_material.selected_kernel(&style, MaterialOperation::Clone, true,0);
             assert!(prediction.ready() && commit.ready(), "{preset:?} commit and prediction kernels are ready before input");
+        }
+    }
+
+    #[test]
+    fn changing_normal_material_route_prepares_before_painting() {
+        let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
+        let document = Document::new(layer_core::authored::PortableId::random(), 128, 128,
+            layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+        let target = document.scene().targets().find(|target| matches!(target, SourceTarget::Paint(_))).unwrap();
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        for (step, mode) in [BrushBlendMode::Normal, BrushBlendMode::Multiply, BrushBlendMode::Normal].into_iter().enumerate() {
+            brush.rendering.blend_mode = mode;
+            assert!(renderer.startup_needs_update(&document, &brush, false), "route change must invalidate readiness");
+            renderer.prepare_startup(&document, &brush, false).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready,
+                format_args!("{mode:?} brush preparation timed out"));
+            let style = layer_render::DabStyle { blend_space: document.composition().blend,
+                ..layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush) };
+            let plan = BrushPassPlan::for_device(&style, &renderer.device);
+            if mode == BrushBlendMode::Multiply {
+                assert!(!dry_material::dry_material_compute_eligible(&style));
+                assert!(renderer.pipelines.material[MaterialPipelineKind::Coverage.index(plan.material)].ready(),
+                    "non-normal fragment must be compiled before painting");
+            } else {
+                assert!(renderer.pipelines.dry_material.selected_kernel(&style, plan.material, true, 0).ready(),
+                    "normal destination kernel must be compiled before painting");
+            }
+            let mut frame = crate::test_support::packet(document.scene(), [128; 2]);
+            frame.blend_space = document.composition().blend;
+            frame.reset_layers = step == 0;
+            renderer.submit(frame).unwrap();
+            let before = renderer.readback_srgb_rgba8().unwrap();
+            let x = 32 + step as u32 * 32;
+            let mut dab = crate::tests::test_dab([x as f32, 64.], [0.2, 0.4, 0.8, 1.], 1.);
+            dab.radii = [8.; 2];
+            dab.previous = [8., 8., 1., 0.];
+            dab.contact = [1., 0., 0., 0.];
+            dab.previous_contact = dab.contact;
+            let batch = DabBatch { stroke_id: layer_core::StrokeId(step as u64 + 1),
+                ..crate::test_support::dab_batch(target, style, layer_core::Rect::from_extent([128; 2])) };
+            renderer.submit(FramePacket { dabs: &[dab], dab_batches: std::slice::from_ref(&batch),
+                blend_space: document.composition().blend, ..crate::test_support::packet(document.scene(), [128; 2]) }).unwrap();
+            let after = renderer.readback_srgb_rgba8().unwrap();
+            let index = (64 * 128 + x as usize) * 4;
+            assert!((0..3).any(|channel| before[index + channel] != after[index + channel]),
+                "{mode:?}: ready brush must change actual pixels");
+            assert_eq!(after[index + 3], 255, "{mode:?}: opaque paper remains visible");
         }
     }
 }

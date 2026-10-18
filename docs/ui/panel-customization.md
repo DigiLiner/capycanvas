@@ -211,10 +211,12 @@ picker's availability rules.
   controls reachable. Automatic growth leaves saved band extents unchanged and
   returns when space becomes available.
   Manual horizontal resizing releases the caption fit.
-- A stacked group can instead take its active panel's measured content height,
-  leaving the rest of the column to its sibling. Siblings keep a tab bar and one
-  tile row before the fitted group shrinks. Dragging the adjacent divider
-  releases the fit; moving the whole group keeps it.
+- A stacked group can instead fit its pages' measured content height, leaving
+  the rest of the column to its sibling. Vertical splits reserve each group's
+  tab bar, fixed controls and one complete scrolling row before applying their
+  saved proportions. Continuous or unmeasured content keeps one tile row.
+  Fitted groups shrink when their siblings need that space. Dragging the adjacent
+  divider releases the fit; moving the whole group keeps it.
 - Docking a standalone toolbar resets its cross-axis size to one column on a
   vertical dock or one row on a horizontal dock. Add only the lanes required
   to fit its tiles and trailing grip in the available length; floating widths

@@ -14,6 +14,7 @@ __declspec(dllimport) uint64_t capy_clipboard_publication(void);
 /* Render-owner-only request/poll, nonblocking GPU readback. CPU-only packet
    transfers to a worker and is freed once; buffers live until that free. */
 __declspec(dllimport) CapyPreview* capy_filter_previews(CapyHost*, const char* json);
+__declspec(dllimport) CapyPreview* capy_paper_previews(CapyHost*, const char* json);
 __declspec(dllimport) CapyPreview* capy_layer_thumbnails(CapyHost*, const char* json);
 __declspec(dllimport) CapyPreview* capy_layer_menu(CapyHost*, const char* json);
 /* Read-only workspace geometry/menu queries, on the render owner. Metadata
@@ -117,8 +118,15 @@ __declspec(dllimport) uint64_t capy_view_revision(const CapyHost*);
 /* Acquisition: 0=wait, 1=image, 2=UI-thread reconfiguration, 3=commands only while a drawing renderer is unavailable. Can wait for DXGI. Drain newly arrived input after this call. */
 __declspec(dllimport) int32_t capy_acquire(CapyHost*);
 __declspec(dllimport) int32_t capy_frame(CapyHost*, uint64_t now_ns, uint64_t presentation_ns);
-/* Returned UTF-8 owned by Rust; release with capy_string_free. Null=no change. */
-__declspec(dllimport) char* capy_snapshot(CapyHost*);
+/* Returned UTF-8 owned by Rust; release with capy_string_free. Null=no change/error.
+   Optional info is writable/exclusive during the call and reset even on error.
+   Ranges belong to that returned allocation and expire at capy_string_free. */
+typedef struct CapySnapshotRange { size_t offset, length; } CapySnapshotRange;
+typedef struct CapySnapshotInfo {
+    uint32_t full, workspace, search;
+    CapySnapshotRange camera, localization, navigation_cursor, brush_ready;
+} CapySnapshotInfo;
+__declspec(dllimport) char* capy_snapshot(CapyHost*, CapySnapshotInfo*);
 __declspec(dllimport) char* capy_query(CapyHost*, const char* json);
 /* Local-only DXGI identity for correlating a pen latency trace with ETW. */
 __declspec(dllimport) char* capy_surface_info(CapyHost*);

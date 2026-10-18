@@ -22,7 +22,8 @@ export async function checkStagedStartup({ call, evaluate, settle, canvasPixels 
         const times=window.layerApp?.startupTimes;
         p.pipelines.push({method:name,label:descriptor.label,time:performance.now(),canvas:times?.canvas,brush:times?.brush});
         let hold;
-        if(descriptor.label==='layer destination brush color'&&times?.brush==null&&!p.requiredReleased){p.required=true;hold='required'}
+        const stage=descriptor.compute;
+        if(['compute_coverage','compute_color'].includes(stage?.entryPoint)&&/^dry material (?:Exact|InPlace|Tracked) compute_(?:coverage|color) operation=1 contact=0x81$/.test(descriptor.label)&&times?.brush==null&&!p.requiredReleased){p.required=true;hold='required'}
         if(hold&&name.endsWith('Async')) return original.call(this,descriptor).then(pipeline=>{
           if(hold==='required'&&p.requiredReleased)return pipeline;
           return new Promise(resolve=>{

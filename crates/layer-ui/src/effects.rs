@@ -885,7 +885,7 @@ pub(super) struct EffectGesture {
 impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn sync_paper_preview(&mut self, now_ns: u64) {
         let dragging = self.effect_gesture.as_ref().filter(|gesture| gesture.key == paper::SCALE).map(|gesture| gesture.original.occurrence());
-        if let Some(overlay) = self.paper_preview.update(self.engine.document(), dragging, now_ns) {
+        if let Some(overlay) = self.paper_preview.update(self.engine.document(), self.engine.backend(), dragging, now_ns) {
             self.engine.backend_mut().set_paper_overlay(overlay);
         }
     }

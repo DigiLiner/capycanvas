@@ -48,7 +48,7 @@ impl Navigator {
         let write = crate::submission::CacheWrite::new();
         cache.submission_valid = Some(write.validity());
         let mut scene = r.scene.take().unwrap();
-        let scene_write = scene.begin_write(r);
+        let scene_write = scene.begin_write(r)?;
         let mut commands = scene.scale_commands.take().unwrap_or_else(|| Commands::new(r));
         commands.begin();
         let _trace = crate::performance_trace::Span::new(c"capy.navigator_refresh");

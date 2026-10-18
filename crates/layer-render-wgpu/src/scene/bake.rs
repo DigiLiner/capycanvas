@@ -86,6 +86,7 @@ impl Scene {
                 }
                 self.retire_images(|scene| scene.images = images::ImageStages::default());
                 self.image_window = Some(window);
+                self.image_output = Some(output);
                 self.update_images(r, source, output, encoder)?;
                 self.bake_pages(r, source, &pages, coverage, (target, operation), low, encoder)?;
                 if plan.is_some() {
@@ -100,7 +101,7 @@ impl Scene {
         })();
         if let Some(live) = live_masks { r.layer_masks.restore_snapshot((target, operation), live); }
         if let Some(previous) = previous { r.effect_analyses = previous; }
-        self.image_window = None;
+        self.image_window = None; self.image_output = None;
         self.retire_images(|scene| scene.images = images::ImageStages::default());
         result
     }

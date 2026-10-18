@@ -213,11 +213,11 @@ impl Papers {
             TextureSource::Program(instance) => instance.gpu_parameters(layer_core::color::RgbSpace::Srgb).map_err(GpuRasterError::Effect)?,
             TextureSource::Image(_) => vec![[0.; 4]],
         };
-        let data = wgpu::util::DeviceExt::create_buffer_init(&**device, &wgpu::util::BufferInitDescriptor {
+        let data = initialized_buffer(device, &wgpu::util::BufferInitDescriptor {
             label: Some("paper texture parameters"),
             contents: &parameters.iter().flatten().flat_map(|v| v.to_ne_bytes()).collect::<Vec<_>>(),
             usage: wgpu::BufferUsages::STORAGE,
-        });
+        })?;
         self.bakes.push(Bake { id: id.clone(), program, surface: binding.surface.clone(), tile, data, priority, used: clock, stage: Stage::Waiting });
         while self.bakes.len() > CACHED_BAKES {
             let Some(oldest) = self.bakes.iter().enumerate().filter(|(_, b)| matches!(b.stage, Stage::Ready { .. } | Stage::Waiting))
@@ -293,7 +293,7 @@ impl Papers {
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                     mapped_at_creation: false,
                 });
-                let group = Self::group(device, &self.layout, &bake.tile.parameters(&bake.surface, 0., 1.), &bake.data, &image, &self.sampler);
+                let group = Self::group(device, &self.layout, &bake.tile.parameters(&bake.surface, 0., 1.), &bake.data, &image, &self.sampler)?;
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("paper probe") });
                 {
                     let view = probe.create_view(&Default::default());
@@ -349,7 +349,7 @@ impl Papers {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 });
-                let group = Self::group(device, &self.layout, &bake.tile.parameters(&bake.surface, low, high), &bake.data, image, &self.sampler);
+                let group = Self::group(device, &self.layout, &bake.tile.parameters(&bake.surface, low, high), &bake.data, image, &self.sampler)?;
                 Stage::Baking { texture, group, next: 0, relief }
             }
             Stage::Baking { texture, group, next, relief } => {
@@ -383,14 +383,14 @@ impl Papers {
     }
 
     fn group(device: &PipelineDevice, layout: &wgpu::BindGroupLayout, parameters: &[f32; 20], data: &wgpu::Buffer,
-        image: &wgpu::TextureView, sampler: &wgpu::Sampler) -> wgpu::BindGroup {
-        let uniform = wgpu::util::DeviceExt::create_buffer_init(&**device, &wgpu::util::BufferInitDescriptor {
+        image: &wgpu::TextureView, sampler: &wgpu::Sampler) -> Result<wgpu::BindGroup, GpuRasterError> {
+        let uniform = initialized_buffer(device, &wgpu::util::BufferInitDescriptor {
             label: Some("paper bake parameters"),
             contents: &parameters.iter().flat_map(|v| v.to_ne_bytes()).collect::<Vec<_>>(),
             usage: wgpu::BufferUsages::UNIFORM,
-        });
-        bindings::group(device, "paper bake", layout, [uniform.as_entire_binding(), data.as_entire_binding(),
-            wgpu::BindingResource::TextureView(image), wgpu::BindingResource::Sampler(sampler)])
+        })?;
+        Ok(bindings::group(device, "paper bake", layout, [uniform.as_entire_binding(), data.as_entire_binding(),
+            wgpu::BindingResource::TextureView(image), wgpu::BindingResource::Sampler(sampler)]))
     }
 
     fn pass<'a>(encoder: &'a mut wgpu::CommandEncoder, view: &'a wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>) -> wgpu::RenderPass<'a> {
@@ -414,6 +414,38 @@ impl Papers {
 mod tests {
     use super::*;
     use layer_core::paper::{reference, PaperBinding, PaperSurface};
+
+    #[test]
+    fn device_loss_before_paper_parameters_returns_an_error() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let surface = PaperSurface { texture: layer_core::paper::default_texture(), mapping: reference([64, 64], [300.; 2]).mapping };
+        let binding = PaperBinding { surface: Arc::new(surface.clone()), target_offset: [0; 2] };
+        let previous = renderer.papers.require(&renderer.device, None, &binding, startup::BRUSH).unwrap();
+        let mut changed = surface;
+        changed.mapping.0[4] += 0.5;
+        let binding = PaperBinding { surface: Arc::new(changed), target_offset: [0; 2] };
+        assert_ne!(Some(previous), PaperTile::id_for(&binding));
+        renderer.device.destroy();
+        let result = renderer.papers.require(&renderer.device, None, &binding, startup::BRUSH);
+        assert!(matches!(result, Err(GpuRasterError::MapFailed(_))));
+    }
+
+    #[test]
+    fn device_loss_before_paper_bake_uniform_does_not_panic() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let surface = PaperSurface { texture: layer_core::paper::default_texture(), mapping: reference([64, 64], [300.; 2]).mapping };
+        let binding = PaperBinding { surface: Arc::new(surface), target_offset: [0; 2] };
+        let id = renderer.papers.require(&renderer.device, None, &binding, startup::BRUSH).unwrap();
+        let bake = renderer.papers.bakes.iter().find(|bake| bake.id == id).unwrap();
+        let parameters = bake.tile.parameters(&bake.surface, 0., 1.);
+        renderer.device.destroy();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Papers::group(&renderer.device, &renderer.papers.layout, &parameters, &bake.data,
+                &renderer.papers.empty_image, &renderer.papers.sampler)
+        }));
+        assert!(result.is_ok(), "Paper bake uniform initialization must report device loss without panicking");
+        assert!(matches!(result.unwrap(), Err(GpuRasterError::MapFailed(_))));
+    }
 
     fn bake(renderer: &mut WgpuRasterizer, texture: TextureSource) -> (Vec<u8>, [u32; 2], f32) {
         bake_binding(renderer, PaperBinding { surface: Arc::new(PaperSurface { texture, mapping: reference([64, 64], [300.; 2]).mapping }), target_offset: [0; 2] })

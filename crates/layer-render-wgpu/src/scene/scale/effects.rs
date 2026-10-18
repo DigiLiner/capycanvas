@@ -23,7 +23,7 @@ pub(super) fn capture_native_effect(
     let bounds = regions.iter().fold(PixelRect::EMPTY, |bounds, region| bounds.union(*region));
     let destination = Image { texture: target.view.texture().clone(), view: target.view.clone(), plan };
     let window = scene.cached_capture_window(packet.scene, bounds);
-    let result = scene.prepare_region_in_frame(r, packet, window, PixelRect::EMPTY, false, encoder)
+    let result = scene.prepare_region_in_frame(r, packet, (bounds, window), PixelRect::EMPTY, false, encoder)
         .and_then(|()| scene.capture_prepared_regions_reuse(r, packet, &destination, &regions,
             scene::Output::EffectComposite(handle), false, Some(&reserved), initialized, encoder));
     scene.used.fill(false); scene.used[..reserved.len()].copy_from_slice(&reserved); scene.placement_display = true;

@@ -2,10 +2,8 @@
 #include "ScopesView.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>
-#include <winrt/Windows.Storage.Streams.h>
-#include <robuffer.h>
+#include "BitmapUpload.h"
 #include <array>
-#include <cstring>
 namespace CapyUi {
 using Plot=std::vector<std::pair<uint32_t,std::vector<float>>>;
 struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
@@ -14,7 +12,7 @@ struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
     std::array<winrt::Windows::UI::Color,4> colors{};
     Plot histogram,tonal;
     PreviewPacket waveform;int waveformWidth=0,waveformHeight=0;
-    std::array<int,2> waveformSize{},requestedSize{};
+    std::array<int,2> waveformSize{},requestedSize{},waveformRasterSize{};hstring waveformContext;
     std::vector<std::function<bool()>> views;
     static Plot plot(A const& source){
         Plot result;
@@ -26,6 +24,16 @@ struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
         }
         return result;
     }
+    hstring context()const{
+        auto data=owner.lock();if(!data)return L"";A value;
+        value.Append(object(data->state,L"document_file").GetNamedValue(L"epoch",JsonValue::CreateNullValue()));
+        value.Append(data->state.GetNamedValue(L"palette",JsonValue::CreateNullValue()));
+        for(auto kind:{L"histogram",L"waveform",L"tonal_histogram"}){
+            auto scope=object(data->state,kind);A options;
+            for(auto field:{L"source",L"channel",L"logarithmic",L"captured_source"})options.Append(scope.GetNamedValue(field,JsonValue::CreateNullValue()));
+            value.Append(options);
+        }return value.Stringify();
+    }
     void watch(std::function<bool()> view){views.push_back(std::move(view));}
     void refresh(){
         auto data=owner.lock();if(!data||busy||!data->query)return;
@@ -34,14 +42,15 @@ struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
         auto dispatcher=Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();if(!dispatcher)return;
         auto request=O({{L"type",S(L"scopes")}});
         if(waveformSize[0]>0&&waveformSize[1]>0){A size;size.Append(N(waveformSize[0]));size.Append(N(waveformSize[1]));request.Insert(L"size",size);}
-        busy=true;requested=revision;requestedSize=waveformSize;
-        bool queued=data->query(CanvasQueryKind::Workspace,to_string(request.Stringify()),[dispatcher,weak=weak_from_this()](PreviewPacket packet){
-            dispatcher.TryEnqueue([weak,packet=std::move(packet)]{if(auto self=weak.lock())self->receive(packet);});
+        busy=true;requested=revision;requestedSize=waveformSize;auto expected=context();auto size=waveformSize;
+        bool queued=data->query(CanvasQueryKind::Workspace,to_string(request.Stringify()),[dispatcher,weak=weak_from_this(),expected,size](PreviewPacket packet){
+            dispatcher.TryEnqueue([weak,packet=std::move(packet),expected,size]{if(auto self=weak.lock())self->receive(packet,expected,size);});
         });
         if(!queued){busy=false;requested=-1;}
     }
-    void receive(PreviewPacket const& packet){
+    void receive(PreviewPacket const& packet,hstring const& expected,std::array<int,2> size){
         busy=false;
+        if(expected!=context()||size!=waveformSize){requested=-1;refresh();return;}
         if(packet)try{
             auto result=object(J::Parse(to_hstring(capy_preview_metadata(packet.get()))),L"result");
             if(result.Size()){
@@ -55,7 +64,7 @@ struct ScopeFeed : std::enable_shared_from_this<ScopeFeed> {
                 if(extent.ValueType()==JsonValueType::Array){
                     waveform=packet;waveformWidth=int(extent.GetArray().GetNumberAt(0));waveformHeight=int(extent.GetArray().GetNumberAt(1));
                 }else{waveform.reset();waveformWidth=waveformHeight=0;}
-                ++generation;
+                waveformContext=expected;waveformRasterSize=size;++generation;
             }
         }catch(hresult_error const& error){OutputDebugStringW(error.message().c_str());}
         std::erase_if(views,[](auto const& view){return !view();});
@@ -106,7 +115,8 @@ std::shared_ptr<PlotView> plotView(std::shared_ptr<ScopeFeed> const& source,bool
 }
 struct WaveformView : std::enable_shared_from_this<WaveformView> {
     std::shared_ptr<ScopeFeed> source;
-    Image image;Imaging::WriteableBitmap bitmap{nullptr};uint64_t installed=uint64_t(-1);
+    Image image;std::shared_ptr<BitmapUpload> upload=BitmapUpload::Create();uint64_t installed=uint64_t(-1);hstring context;
+    ~WaveformView(){upload->Close();}
     void init(FrameworkElement const& chart){
         image.Stretch(Stretch::Fill);image.IsHitTestVisible(false);
         auto weak=weak_from_this();
@@ -115,20 +125,21 @@ struct WaveformView : std::enable_shared_from_this<WaveformView> {
     }
     void resize(FrameworkElement const& chart){
         auto root=chart.XamlRoot();if(!root)return;double scale=root.RasterizationScale();
-        source->waveformSize={int(std::lround(chart.ActualWidth()*scale)),int(std::lround(chart.ActualHeight()*scale))};
+        std::array<int,2> size{int(std::lround(chart.ActualWidth()*scale)),int(std::lround(chart.ActualHeight()*scale))};
+        if(size!=source->waveformSize){source->waveformSize=size;upload->Clear();image.Source(nullptr);installed=uint64_t(-1);}
         source->refresh();
     }
     void install(){
-        if(installed==source->generation)return;installed=source->generation;
-        if(!source->waveform){image.Source(nullptr);bitmap=nullptr;return;}
-        size_t count=0;auto bytes=capy_preview_bytes(source->waveform.get(),&count);
-        if(!bytes||count!=size_t(source->waveformWidth)*size_t(source->waveformHeight)*4)return;
-        if(!bitmap||bitmap.PixelWidth()!=source->waveformWidth||bitmap.PixelHeight()!=source->waveformHeight){
-            bitmap=Imaging::WriteableBitmap(source->waveformWidth,source->waveformHeight);image.Source(bitmap);
-        }
-        uint8_t* destination=nullptr;
-        check_hresult(bitmap.PixelBuffer().as<::Windows::Storage::Streams::IBufferByteAccess>()->Buffer(&destination));
-        std::memcpy(destination,bytes,count);bitmap.Invalidate();
+        auto current=source->context();
+        if(context!=current){context=current;upload->Clear();image.Source(nullptr);installed=uint64_t(-1);}
+        if(installed==source->generation||source->waveformContext!=current||source->waveformRasterSize!=source->waveformSize)return;
+        installed=source->generation;
+        if(!source->waveform){upload->Clear();image.Source(nullptr);return;}
+        auto weak=weak_from_this();auto size=source->waveformSize;
+        upload->Submit({BitmapUpload::ReadPacket(source->waveform),0,size_t(source->waveformWidth)*source->waveformHeight*4,
+            source->waveformWidth,source->waveformHeight,false,true,
+            [weak,current,size]{auto self=weak.lock();return self&&self->source->context()==current&&self->source->waveformSize==size;},
+            [weak](bool accepted){if(auto self=weak.lock();self&&accepted)self->image.Source(self->upload->Image());}});
     }
 };
 ComboBox selector(std::shared_ptr<WorkspaceData> const& data,hstring const& id){
@@ -155,19 +166,22 @@ struct Updating {
     ~Updating(){flag=previous;}
 };
 TextBlock dim(std::shared_ptr<WorkspaceData> const& data){
-    auto text=label(data,L"");text.Opacity(.7);text.TextTrimming(TextTrimming::CharacterEllipsis);text.TextWrapping(TextWrapping::NoWrap);return text;
+    auto text=label(data,L"");text.Opacity(.55);text.TextTrimming(TextTrimming::CharacterEllipsis);text.TextWrapping(TextWrapping::NoWrap);return text;
 }
 struct ScopeView : std::enable_shared_from_this<ScopeView> {
-    std::shared_ptr<WorkspaceData> data;bool waveform=false,tonal=false;hstring prefix;
-    StackPanel root;Grid chart;ContentControl frame;ComboBox source{nullptr},channel{nullptr};CheckBox logarithmic{nullptr};
+    std::shared_ptr<WorkspaceData> data;bool waveform=false,tonal=false,flexible=false;hstring prefix;
+    Grid root,chart,toolbar{nullptr},scale{nullptr};ContentControl frame;FrameworkElement footer{nullptr};ComboBox source{nullptr},channel{nullptr};CheckBox logarithmic{nullptr};
     std::array<TextBlock,2> axis{nullptr,nullptr};
     std::shared_ptr<PlotView> plot;std::shared_ptr<WaveformView> trace;
     J view()const{return object(data->state,tonal?L"tonal_histogram":waveform?L"waveform":L"histogram");}
+    double naturalHeight()const{return chart.MaxHeight()+toolbar.DesiredSize().Height+footer.DesiredSize().Height
+        +(scale?scale.DesiredSize().Height:0)+2*root.RowSpacing();}
     void init(Bindings& bindings){
         auto weak=weak_from_this();auto scopes=feed(data);
-        root.Spacing(data->panelMetric(L"control_spacing"));
+        root.RowSpacing(data->panelMetric(L"control_spacing"));root.UseLayoutRounding(false);
+        for(int i=0;i<(tonal?2:3);++i){RowDefinition row;row.Height({1,i==(tonal?0:1)?GridUnitType::Star:GridUnitType::Auto});root.RowDefinitions().Append(row);}
         if(!tonal){
-            Grid toolbar;toolbar.ColumnSpacing(data->panelMetric(L"control_spacing"));
+            toolbar=Grid();toolbar.ColumnSpacing(data->panelMetric(L"control_spacing"));
             for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,GridUnitType::Star});toolbar.ColumnDefinitions().Append(column);}
             source=selector(data,prefix+L"-source");channel=selector(data,prefix+L"-channel");Grid::SetColumn(channel,1);
             toolbar.Children().Append(source);toolbar.Children().Append(channel);root.Children().Append(toolbar);
@@ -176,7 +190,7 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
             channel.SelectionChanged([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->channel.SelectedIndex()>=0)
                 sendHistogram(self->data,O({{L"type",S(self->waveform?L"waveform_channel":L"channel")},{L"index",N(self->channel.SelectedIndex())}}));});
         }
-        chart.Height(tonal?120:160);chart.Background(data->brush(L"input"));chart.CornerRadius({4,4,4,4});
+        if(flexible)chart.MaxHeight(160);else chart.Height(tonal?120:160);
         frame.Content(chart);frame.IsTabStop(true);frame.UseSystemFocusVisuals(true);
         frame.HorizontalContentAlignment(HorizontalAlignment::Stretch);frame.VerticalContentAlignment(VerticalAlignment::Stretch);
         AutomationProperties::SetAutomationId(frame,prefix+L"-chart");
@@ -187,21 +201,24 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
                 axis[i].Margin({3,0,0,0});axis[i].IsHitTestVisible(false);axis[i].HorizontalAlignment(HorizontalAlignment::Left);
                 axis[i].VerticalAlignment(i?VerticalAlignment::Top:VerticalAlignment::Bottom);chart.Children().Append(axis[i]);
             }
-            root.Children().Append(frame);
+            Grid::SetRow(frame,1);root.Children().Append(frame);
         }else{
-            plot=plotView(scopes,tonal);chart.Children().Append(plot->canvas);root.Children().Append(frame);
-            Grid scale;for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,i?GridUnitType::Auto:GridUnitType::Star});scale.ColumnDefinitions().Append(column);}
-            Grid::SetColumn(axis[1],1);scale.Children().Append(axis[0]);scale.Children().Append(axis[1]);root.Children().Append(scale);
+            plot=plotView(scopes,tonal);chart.Children().Append(plot->canvas);Grid graph;graph.Children().Append(frame);
+            for(int i=0;i<2;++i){RowDefinition row;row.Height({1,i?GridUnitType::Auto:GridUnitType::Star});graph.RowDefinitions().Append(row);}
+            scale=Grid();for(int i=0;i<2;++i){ColumnDefinition column;column.Width({1,i?GridUnitType::Auto:GridUnitType::Star});scale.ColumnDefinitions().Append(column);}
+            Grid::SetColumn(axis[1],1);scale.Children().Append(axis[0]);scale.Children().Append(axis[1]);Grid::SetRow(scale,1);graph.Children().Append(scale);
+            Grid::SetRow(graph,tonal?0:1);root.Children().Append(graph);
         }
         if(!tonal){
             logarithmic=CheckBox();logarithmic.MinWidth(0);logarithmic.MinHeight(data->controlHeight());logarithmic.Height(data->controlHeight());logarithmic.Padding({0});
             AutomationProperties::SetAutomationId(logarithmic,prefix+L"-log");
             auto text=label(data,L"");text.TextWrapping(TextWrapping::Wrap);logarithmic.Content(text);
-            logarithmic.HorizontalContentAlignment(HorizontalAlignment::Stretch);root.Children().Append(logarithmic);
+            logarithmic.HorizontalContentAlignment(HorizontalAlignment::Stretch);
             logarithmic.Click([weak](auto&&,auto&&){if(auto self=weak.lock())
                 sendHistogram(self->data,O({{L"type",S(self->waveform?L"waveform_logarithmic":L"logarithmic")},{L"enabled",B(self->logarithmic.IsChecked().Value())}}));});
         }
-        root.Children().Append(ScopeFooter(data,prefix,[weak]{if(auto self=weak.lock())return self->view();return J{};},bindings));
+        footer=ScopeFooter(data,prefix,[weak]{if(auto self=weak.lock())return self->view();return J{};},bindings,nullptr,logarithmic);
+        Grid::SetRow(footer,tonal?1:2);root.Children().Append(footer);
         bindings.emplace_back([self=shared_from_this()]{self->refresh();});
     }
     void refresh(){
@@ -215,8 +232,8 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
         }
         auto details=str(current,L"description")+L"\n"+str(current,L"range");
         AutomationProperties::SetName(frame,str(current,L"description"));AutomationProperties::SetHelpText(frame,str(current,L"range"));tooltip(frame,details);
-        auto scale=array(current,L"axis");
-        for(uint32_t i=0;i<2;++i){auto text=i<scale.Size()?scale.GetStringAt(i):hstring();if(axis[i].Text()!=text)axis[i].Text(text);}
+        auto axisLabels=array(current,L"axis");
+        for(uint32_t i=0;i<2;++i){auto text=i<axisLabels.Size()?axisLabels.GetStringAt(i):hstring();if(axis[i].Text()!=text)axis[i].Text(text);}
         if(logarithmic){
             auto labels=array(current,L"labels");auto text=labels.Size()?labels.GetStringAt(0):hstring();
             logarithmic.Content().as<TextBlock>().Text(text);AutomationProperties::SetName(logarithmic,text);
@@ -229,12 +246,13 @@ struct ScopeView : std::enable_shared_from_this<ScopeView> {
 };
 }
 FrameworkElement CapyScopes::ScopeFooter(std::shared_ptr<WorkspaceData> const& data,hstring const& prefix,std::function<J()> view,Bindings& bindings,
-    FrameworkElement const& trailing){
-    Grid footer;footer.ColumnSpacing(4);
-    for(auto width:{GridUnitType::Star,GridUnitType::Auto,GridUnitType::Auto,GridUnitType::Auto}){ColumnDefinition column;column.Width({1,width});footer.ColumnDefinitions().Append(column);}
-    auto status=dim(data);status.VerticalAlignment(VerticalAlignment::Center);AutomationProperties::SetAutomationId(status,prefix+L"-status");
-    footer.Children().Append(status);
-    if(trailing){trailing.VerticalAlignment(VerticalAlignment::Center);Grid::SetColumn(trailing,3);footer.Children().Append(trailing);}
+    FrameworkElement const& trailing,FrameworkElement const& leading){
+    Grid footer;footer.ColumnSpacing(data->panelMetric(L"control_spacing"));
+    ColumnDefinition statusColumn;statusColumn.Width({1,GridUnitType::Star});footer.ColumnDefinitions().Append(statusColumn);
+    auto status=dim(data);status.VerticalAlignment(VerticalAlignment::Center);AutomationProperties::SetAutomationId(status,prefix+L"-status");footer.Children().Append(status);
+    auto append=[&footer](FrameworkElement const& control){ColumnDefinition column;column.Width({1,GridUnitType::Auto});Grid::SetColumn(control,int(footer.ColumnDefinitions().Size()));footer.ColumnDefinitions().Append(column);footer.Children().Append(control);};
+    if(leading)append(leading);
+    StackPanel clippingRow;clippingRow.Orientation(Orientation::Horizontal);
     std::array<Primitives::ToggleButton,2> clipping{nullptr,nullptr};
     for(int i=0;i<2;++i){
         auto name=i?L"highlights":L"shadows";
@@ -243,8 +261,9 @@ FrameworkElement CapyScopes::ScopeFooter(std::shared_ptr<WorkspaceData> const& d
         AutomationProperties::SetAutomationId(toggle,prefix+L"-"+name);
         toggle.Click([data,name,weak=make_weak(toggle)](auto&&,auto&&){if(auto toggle=weak.get())
             sendHistogram(data,O({{L"type",S(name)},{L"enabled",B(toggle.IsChecked().Value())}}));});
-        Grid::SetColumn(toggle,1+i);footer.Children().Append(toggle);
+        clippingRow.Children().Append(toggle);
     }
+    append(clippingRow);if(trailing){trailing.VerticalAlignment(VerticalAlignment::Center);append(trailing);}
     bindings.emplace_back([data,view,status,clipping]{
         auto text=str(view(),L"status");if(status.Text()!=text){status.Text(text);tooltip(status,text);AutomationProperties::SetName(status,text);}
         auto main=object(data->state,L"histogram");auto labels=array(main,L"labels");
@@ -256,9 +275,9 @@ FrameworkElement CapyScopes::ScopeFooter(std::shared_ptr<WorkspaceData> const& d
     });
     return footer;
 }
-FrameworkElement CapyScopes::ScopePanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,bool waveform){
-    auto view=std::make_shared<ScopeView>();view->data=data;view->waveform=waveform;view->prefix=waveform?L"waveform":L"histogram";
-    view->init(bindings);return view->root;
+FrameworkElement CapyScopes::ScopePanel(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings,bool waveform,std::function<double()>* naturalHeight){
+    auto view=std::make_shared<ScopeView>();view->data=data;view->waveform=waveform;view->flexible=naturalHeight!=nullptr;view->prefix=waveform?L"waveform":L"histogram";
+    view->init(bindings);if(naturalHeight)*naturalHeight=[weak=std::weak_ptr(view)]{if(auto view=weak.lock())return view->naturalHeight();return -1.;};return view->root;
 }
 FrameworkElement CapyScopes::TonalScope(std::shared_ptr<WorkspaceData> const& data,Bindings& bindings){
     auto view=std::make_shared<ScopeView>();view->data=data;view->tonal=true;view->prefix=L"tonal";

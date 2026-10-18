@@ -226,8 +226,9 @@ fn light_filters_and_undeclared_filters_read_linear_values() {
 }
 
 #[test]
-fn a_pointwise_filter_cannot_follow_the_documents_blending() {
+fn pointwise_filters_can_follow_the_documents_blending() {
     let mut program = (*fixture("curves").program()).clone();
+    assert!(program.passes.is_empty());
     program.space = EffectSpace::Blending;
-    assert!(EffectInstance::new(Arc::new(program)).validate().is_err());
+    EffectInstance::new(Arc::new(program)).validate().unwrap();
 }

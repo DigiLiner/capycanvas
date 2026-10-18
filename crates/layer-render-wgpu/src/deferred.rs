@@ -66,7 +66,6 @@ struct Inner<T> {
     validating: std::cell::Cell<bool>,
     #[cfg(target_arch = "wasm32")]
     preparation: std::cell::OnceCell<futures_util::future::Shared<futures_util::future::LocalBoxFuture<'static, Result<(), String>>>>,
-    #[cfg(target_arch = "wasm32")]
     async_pipeline: bool,
     factory: Mutex<Option<Factory<T>>>,
     priority: std::sync::atomic::AtomicU8,
@@ -94,20 +93,18 @@ impl<T> Deferred<T> {
     pub fn pipeline(factory: impl FnOnce(CompileMode) -> Compilation<T> + 'static) -> Self {
         Self::boxed(Box::new(factory), true)
     }
-    fn boxed(factory: Factory<T>, _async_pipeline: bool) -> Self {
+    fn boxed(factory: Factory<T>, async_pipeline: bool) -> Self {
         Self(Arc::new(Inner {
             value: OnceLock::new(),
             #[cfg(target_arch = "wasm32")]
             validating: std::cell::Cell::new(false),
             #[cfg(target_arch = "wasm32")]
             preparation: Default::default(),
-            #[cfg(target_arch = "wasm32")]
-            async_pipeline: _async_pipeline,
+            async_pipeline,
             factory: Mutex::new(Some(factory)),
             priority: std::sync::atomic::AtomicU8::new(u8::MAX),
         }))
     }
-    #[cfg(target_arch = "wasm32")]
     pub fn async_pipeline(&self) -> bool {
         self.0.async_pipeline
     }

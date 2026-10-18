@@ -20,7 +20,7 @@ use layer_ui::{ContactPhase, PointerButton, PointerKind, UiAction, UiInput, UiSe
 pub use gpu::{DeviceWatch, GpuContext, RendererOptions, UiColor, unsupported_adapter};
 pub use storage::StorageRoots;
 pub use layer_render_wgpu::AttachedRenderer as Renderer;
-pub use snapshot::extend_update;
+pub use snapshot::{SnapshotFields, extend_update};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -1267,7 +1267,9 @@ mod tests {
     fn frame_step(host: &mut NativeHost, clock: &std::cell::Cell<u64>, deadline: std::time::Instant) {
         clock.set(clock.get() + 8_000_000);
         host.prepare_canvas_frame(clock.get(), clock.get(), true).unwrap();
-        assert!(std::time::Instant::now() < deadline, "startup timed out");
+        assert!(std::time::Instant::now() < deadline, "frame work timed out: {}; Scale/Rotate enabled: {:?}",
+            host.session.rendering_diagnostics(),
+            host.session.state().commands.iter().find(|command| command.id == layer_ui::CommandId::ScaleRotate).map(|command| command.enabled));
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
 
@@ -1372,6 +1374,8 @@ mod tests {
         document.apply(edit).unwrap();
         let image = document.scene().object_handle(layer).unwrap();
         let (_reference, mut host) = gpu_document_host(layer_ui::Platform::Android, document);
+        host.resize(1280, 960, 1.).unwrap();
+        host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::FitCanvas }).unwrap();
         let clock = std::cell::Cell::new(0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !host.startup.brush_ready { frame_step(&mut host, &clock, deadline); }
@@ -1399,7 +1403,9 @@ mod tests {
         while host.deferred_contacts.holding() { frame_step(&mut host, &clock, deadline); }
         assert!(saving(&host), "delivering the drag releases saving");
         for _ in 0..4 { frame_step(&mut host, &clock, deadline); }
-        let [.., x, y] = host.session.engine().document().scene().object(image).unwrap().affine.0;
+        let affine = host.session.engine().document().scene().object(image).unwrap().affine.0;
+        assert_eq!(affine[..4], [1., 0., 0., 1.]);
+        let [.., x, y] = affine;
         assert!((x - 130.).abs() < 0.5 && (y - 120.).abs() < 0.5, "the held drag moved the image: {x}, {y}");
         assert!(host.paint_ready());
         contact(&mut host, 8, &[([500., 400.], 1.), ([500., 400.], 3.)]);
@@ -1466,7 +1472,7 @@ mod tests {
     fn thumbnail(host: &mut NativeHost, clock: &std::cell::Cell<u64>, request: u64, target: u64) -> Vec<u8> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         loop {
-            while host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() { frame_step(host, clock, deadline); }
+            while host.deferred_contacts.holding() || host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() { frame_step(host, clock, deadline); }
             let (_, images) = host.layer_thumbnails([(request, target)]).unwrap();
             if let Some(image) = images.into_iter().find(|image| image.request_id == request) { return image.bytes; }
             frame_step(host, clock, deadline);
@@ -1481,8 +1487,13 @@ mod tests {
         let layer = layer_ui::occurrence_token(host.session.engine().document().working.occurrence.unwrap());
         let original = thumbnail(&mut host, &clock, 1, layer);
         for attempt in 0..4u64 {
+            let committed = host.session.engine().metrics().committed_strokes;
+            let checkpoint = host.session.engine().checkpoint();
             stroke(&mut host, clock.get()).unwrap();
             let painted = thumbnail(&mut host, &clock, 10 + attempt * 2, layer);
+            assert_eq!(host.session.engine().metrics().committed_strokes, committed + 1);
+            assert_ne!(host.session.engine().checkpoint(), checkpoint);
+            assert!(host.deferred_contacts.is_empty() && !host.session.engine().has_active_stroke());
             assert_ne!(painted, original, "the stroke changes the thumbnail");
             host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
             let undone = thumbnail(&mut host, &clock, 11 + attempt * 2, layer);
@@ -2524,15 +2535,16 @@ mod tests {
         }
         assert!(host.last_pen.is_none());
         let clock = std::cell::Cell::new(21_000_000);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let publication_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while host.session.engine().has_active_stroke() || host.session.engine().has_pending_input()
-            || host.session.engine().raster_backing_pending()
+            || host.session.engine().has_pending_document_edits() || host.session.engine().raster_backing_pending()
             || crate::test_support::active_source(host.session.engine().document()).raster.try_data().is_none()
         {
-            frame_step(&mut host, &clock, deadline);
+            frame_step(&mut host, &clock, publication_deadline);
         }
         assert_eq!(host.session.engine().metrics().committed_strokes, 1);
         assert!(!host.session.engine().has_active_stroke());
+        assert!(!crate::test_support::active_source(host.session.engine().document()).raster.is_empty());
         assert!(host.session.engine().can_undo());
         let checkpoint = host.session.engine().checkpoint();
         let before = crate::test_support::active_source(host.session.engine().document()).raster.clone();
@@ -2547,6 +2559,7 @@ mod tests {
             .unwrap();
         let camera = json!(host.session.state().camera);
         let paint_start = host.paint_start_sequence();
+        let correction_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         host.pointer_batch_updates(
             PointerBatch {
                 id: 7,
@@ -2562,11 +2575,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(host.paint_start_sequence(), paint_start, "corrected down samples do not start another contact");
-        frame_step(&mut host, &clock, deadline);
-        while host.session.engine().has_pending_input() || host.session.engine().raster_backing_pending()
+        frame_step(&mut host, &clock, correction_deadline);
+        while host.session.engine().has_pending_input() || host.session.engine().has_pending_document_edits()
+            || host.session.engine().raster_backing_pending()
             || crate::test_support::active_source(host.session.engine().document()).raster.try_data().is_none()
         {
-            frame_step(&mut host, &clock, deadline);
+            frame_step(&mut host, &clock, correction_deadline);
         }
         let after = &crate::test_support::active_source(host.session.engine().document()).raster;
         assert_ne!(
@@ -2591,7 +2605,10 @@ mod tests {
         assert_eq!(json!(host.session.state().camera), camera);
         host.session.require_document_idle().unwrap();
         host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
-        frame_step(&mut host, &clock, deadline);
+        frame_step(&mut host, &clock, publication_deadline);
+        while host.session.engine().has_pending_document_edits() {
+            frame_step(&mut host, &clock, publication_deadline);
+        }
         assert!(crate::test_support::active_source(host.session.engine().document()).raster.is_empty());
         assert!(!host.session.engine().can_undo(), "correction adds no undo entry");
     }

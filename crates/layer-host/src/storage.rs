@@ -30,22 +30,23 @@ impl StorageRoots {
     /// The installation's temporary folder is set from the result.
     pub fn resolve(platform: impl FnOnce() -> Result<Self, String>) -> Result<Self, String> {
         let roots = Self::chosen(std::env::var_os(STORAGE_OVERRIDE).map(PathBuf::from), platform)?;
+        layer_core::temp_files::set_directory(roots.temp.clone())?;
+        Ok(roots)
+    }
+
+    fn chosen(directory: Option<PathBuf>, platform: impl FnOnce() -> Result<Self, String>) -> Result<Self, String> {
+        let roots = match directory {
+            Some(directory) if directory.is_absolute() => Self::within(&directory),
+            Some(name) => Self::within(&platform()?.temp.join(name)),
+            None => platform()?,
+        };
         if [&roots.config, &roots.data, &roots.state, &roots.cache, &roots.temp]
             .iter()
             .any(|path| !path.is_absolute())
         {
             return Err("App storage folders must be absolute paths".into());
         }
-        layer_core::temp_files::set_directory(roots.temp.clone())?;
         Ok(roots)
-    }
-
-    fn chosen(directory: Option<PathBuf>, platform: impl FnOnce() -> Result<Self, String>) -> Result<Self, String> {
-        Ok(match directory {
-            Some(directory) if directory.is_absolute() => Self::within(&directory),
-            Some(name) => Self::within(&platform()?.temp.join(name)),
-            None => platform()?,
-        })
     }
 
     /// Removes what earlier processes left in the temporary folder. Only the
@@ -130,6 +131,6 @@ mod tests {
     #[test]
     fn relative_platform_folders_are_refused() {
         let relative = StorageRoots { state: PathBuf::from("state"), ..StorageRoots::within(&std::env::temp_dir().join("capy")) };
-        assert!(StorageRoots::resolve(|| Ok(relative)).is_err());
+        assert!(StorageRoots::chosen(None, || Ok(relative)).is_err());
     }
 }

@@ -63,6 +63,7 @@ pub(crate) struct Recorder {
     pub(crate) max_dimension: Option<u32>,
     pub(crate) crop_overlay: Option<layer_render::CropOverlay>,
     pub(crate) paper_overlay: Option<layer_render::PaperOverlay>,
+    pub(crate) paper_overlay_pending: bool,
     pub(crate) frame_scene: Option<SceneSnapshot>,
     pub(crate) evaluation: EvaluationContext,
     pub(crate) rebuilds: usize,
@@ -92,6 +93,7 @@ impl CanvasRenderer for Recorder {
     }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) { self.paper_overlay = overlay; }
+    fn paper_overlay_ready(&self, _paper: &layer_core::paper::PaperBinding) -> bool { !self.paper_overlay_pending }
     fn set_telemetry_enabled(&mut self, enabled: bool) {
         self.telemetry_enabled = enabled;
     }

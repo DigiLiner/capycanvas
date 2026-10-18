@@ -498,10 +498,13 @@ mod tests {
         let source_view=source.create_view(&Default::default());
         let output=page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let view=output.create_view(&Default::default());
-        let acc=sampler.create(&r.device,SamplingRequest {inverse,size,nearest:false},&view,&r.empty_view,&sampling_uniform(&r.device)).unwrap();
+        let uniform=sampling_uniform(&r.device);
+        let acc=sampler.create(&r.device,SamplingRequest {inverse,size,nearest:false},&view,&r.empty_view,&uniform).unwrap();
+        assert_eq!(acc.uniform,uniform);
+        assert_eq!(uniform.size(),112);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
         sampler.initialize(&mut encoder,&acc);
-        let mut encoded=0;let mut peak_parameters=0;
+        let mut encoded=0;let mut peak_parameters=None::<usize>;
         let tiles=crate::page_coordinates(source_bounds(acc.inverse,acc.size,false,acc.stretch,extent)).count() as u64;
         let phases=std::iter::once(SamplingPhase::Denominator {extent}).chain(crate::page_coordinates(source_bounds(acc.inverse,acc.size,false,acc.stretch,extent)).map(|tile| {
             let origin=tile.map(|v|v*256);let tile_extent=std::array::from_fn(|axis|(extent[axis]-origin[axis]).min(256));
@@ -510,9 +513,10 @@ mod tests {
         for phase in phases {for step in 0.. {
             if sampler.encode_step(&r.device,&mut encoder,&mut uploads,&acc,&phase,step).unwrap().is_none() {break;}
             encoded+=1;
+            assert_eq!(acc.uniform,uniform);
             if let Some(report)=r.device.generate_allocator_report() {
                 let parameters=report.allocations.iter().filter(|allocation|allocation.name=="image-object sampling parameters").count();
-                peak_parameters=peak_parameters.max(parameters);
+                peak_parameters=Some(peak_parameters.unwrap_or(0).max(parameters));
                 assert_eq!(parameters,1);
             }
             if encoded%8==0 {
@@ -529,7 +533,7 @@ mod tests {
         assert!(exact<=tiles+2*u64::from(border.columns+border.lines)+1,"one tent dispatch per source tile plus boundary denominators: {exact} for {tiles} tiles");
         assert!(acc.storage_bytes()<3*1024*1024);
         assert!(acc.storage_bytes()<=ObjectSampler::working_bytes(inverse,size,false).unwrap());
-        eprintln!("12MP sampling useful={exact}, cartesian={cartesian}, completed passes={encoded}, peak parameter allocations={peak_parameters}, retained bytes={}",acc.storage_bytes());
+        eprintln!("12MP sampling useful={exact}, cartesian={cartesian}, completed passes={encoded}, reported peak parameter allocations={peak_parameters:?}, retained bytes={}",acc.storage_bytes());
     }
     #[test]
     fn unminified_full_tile_uses_three_bounded_passes_and_preserves_exact_samples() {

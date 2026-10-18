@@ -29,7 +29,7 @@ Grid toolLabel(std::shared_ptr<WorkspaceData> const& data,J const& item,bool bol
     ColumnDefinition glyph;glyph.Width({16,GridUnitType::Pixel});row.ColumnDefinitions().Append(glyph);
     ColumnDefinition text;text.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(text);
     row.Children().Append(icon(str(item,L"icon"),data->theme()));
-    auto title=label(data,str(item,L"label"),bold);title.TextTrimming(TextTrimming::CharacterEllipsis);
+    auto title=label(data,str(item,L"label"),bold);title.LineStackingStrategy(LineStackingStrategy::BlockLineHeight);title.TextTrimming(TextTrimming::CharacterEllipsis);
     title.VerticalAlignment(VerticalAlignment::Center);
     if(trailingName){title.TextAlignment(TextAlignment::Right);title.LineHeight(18);}
     if(retainedTitle)*retainedTitle=title;Grid::SetColumn(title,1);row.Children().Append(title);return row;
@@ -48,7 +48,7 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
     double arrangedWidth=-1;
     ToolSetView(std::shared_ptr<WorkspaceData> data,hstring panel,std::function<J()> projection):data(std::move(data)),panel(std::move(panel)),projection(std::move(projection)){}
     void init(){
-        root.Spacing(6);list.Spacing(2);
+        root.UseLayoutRounding(false);root.Spacing(6);list.Spacing(2);
         auto weak=weak_from_this();
         divider.Height(1);divider.Margin({4,0,4,0});divider.Background(data->brush(L"settings_secondary"));divider.Opacity(.3);
         AutomationProperties::SetAutomationId(divider,L"tool-set-divider");
@@ -91,8 +91,6 @@ struct ToolSetView : std::enable_shared_from_this<ToolSetView> {
             }else if(group){
                 pick.Padding({6,0,6,0});pick.Content(toolLabel(data,item,true,true,&title));
             }else{
-                // Match Web's full-width stroke over a compact icon/name row.
-                // A fixed preview column squeezes names in narrow dock columns.
                 pick.Padding({6,3,6,3});pick.MinHeight(34);
                 Grid content;
                 RowDefinition stroke;stroke.Height({1,GridUnitType::Auto});content.RowDefinitions().Append(stroke);

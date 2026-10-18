@@ -35,6 +35,11 @@ function WindowCommand([string]$Id) {
 function Check-MenuHover([int]$Height) {
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width ([int](1400*$scale)) -Height ([int]($Height*$scale))
+    Add-Type -AssemblyName System.Windows.Forms
+    $work=[Windows.Forms.Screen]::FromHandle($drawingWindow).WorkingArea
+    $windowWidth=[int](1400*$scale);$windowHeight=[int]($Height*$scale)
+    $left=$work.Left+[int][Math]::Max(0,($work.Width-$windowWidth)/2);$top=$work.Top+[int]($work.Height/4)
+    if(![CapyWindowExercise]::MoveWindow($drawingWindow,$left,$top,$windowWidth,$windowHeight,$true)){throw 'The owned menu window did not move'}
     Check-Geometry
     $type=[System.Windows.Automation.ControlType]::MenuItem
     $markers=@('new_document','undo','zoom_in')

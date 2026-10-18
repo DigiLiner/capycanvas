@@ -241,6 +241,11 @@ step and late corrections therefore include the healed pixels. Replays use the
 same kernels and ordering. Abandoning the job resolves its pending revisions as
 failures so history and save cannot wait forever.
 
+The two-second sensor-correction window begins once the completed stroke's own
+raster revision has published its backing. A corrected replay starts a new
+window when its replacement revision publishes. Other GPU work never restarts
+that window; the next stroke or a history step closes it.
+
 - **Healing Brush** (`BrushExecution::Heal`) paints the Clone Stamp's copy while
   the pen is down, with the same source, disc and options. At pen-up each page
   the stroke painted becomes `S + h` over the page as the stroke found it: `S` is

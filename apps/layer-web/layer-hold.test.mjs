@@ -264,6 +264,55 @@ export async function checkLayerHolding({call, evaluate, settle}) {
       assert.equal(await evaluate("document.querySelector('#layer-rows').scrollTop"),stopped,"cancelled drag stops edge scrolling");
       assert.deepEqual(await order(),scrollingOrder);
     }
+    const lockedPickup = async (id, owner, label) => {
+      const row = `#layer-rows .layer-row[data-layer="${id}"]`;
+      const locked = () => evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${id}).locked`);
+      for (const theme of ["light","dark"]) {
+        await send({type:"set_theme",theme});
+        await send({type:"layer",action:{op:"lock",id:owner,value:true}});
+        assert.equal(await locked(),true,`${label}/${theme}: effective lock`);
+        assert.equal(await evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${id}).can_drop_below`),true,"locked row remains a drop surface");
+        const before = await order();
+        const targetId = Number(before.find(value=>Number(value)!==id && Number(value)!==owner));
+        for (const pointer of ["mouse","pen","touch"]) {
+          device=pointer;
+          for (const part of ["layer-name","layer-grip"]) {
+            await evaluate("document.querySelector('#layer-rows').scrollTop=0");await wait();
+            const from=await rect(`${row} .${part}`), to=await rect(`#layer-rows .layer-row[data-layer="${targetId}"]`);
+            await input("down",{x:from.x+from.width/2,y:from.y+from.height/2});
+            await input("move",{x:from.x+from.width/2,y:to.y+to.height-3});
+            await capture(`locked-${label}-${theme}-${device}-${part}`);
+            assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),0,`${label}/${theme}/${device}/${part}: locked source cannot pick up`);
+            assert.equal(await evaluate("document.querySelectorAll('.layer-drop-before,.layer-drop-after,.layer-drop-into,.layer-drop-attach').length"),0,"locked source cannot preview a drop");
+            await input("up");assert.deepEqual(await order(),before,"locked contact preserves order");
+            assert.equal(await evaluate(`parseFloat(document.querySelector('${row}').parentElement.style.getPropertyValue('--swipe'))`),0,"vertical locked contact leaves the row at rest");
+          }
+        }
+        assert.equal(await evaluate(`document.querySelector('${row} .layer-grip').ariaDisabled`),"true","locked grip remains visibly disabled");
+        await send({type:"invoke",command:"undo"});assert.equal(await locked(),false,"Undo unlocks the effective source");
+        await send({type:"invoke",command:"redo"});assert.equal(await locked(),true,"Redo restores the effective lock");
+        await send({type:"layer",action:{op:"lock",id:owner,value:false}});
+        assert.equal(await locked(),false);assert.equal(await evaluate(`document.querySelector('${row} .layer-grip').ariaDisabled`),"false");
+        for (const pointer of ["mouse","pen","touch"]) {
+          device=pointer;
+          await evaluate("document.querySelector('#layer-rows').scrollTop=0");await wait();
+          const from=await rect(`${row} .layer-grip`), to=await rect(`#layer-rows .layer-row[data-layer="${targetId}"]`);
+          await input("down",{x:from.x+from.width/2,y:from.y+from.height/2});
+          await input("move",{x:to.x+to.width/2,y:to.y+to.height-3});
+          assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1,`${label}/${theme}/${device}: unlocking restores grip pickup`);
+          await input("up");assert.notDeepEqual(await order(),before);
+          await send({type:"invoke",command:"undo"});assert.deepEqual(await order(),before);
+          await send({type:"invoke",command:"redo"});assert.notDeepEqual(await order(),before);
+          await send({type:"invoke",command:"undo"});assert.deepEqual(await order(),before);
+        }
+      }
+    };
+    const own = Number((await order())[0]);await lockedPickup(own,own,"own");
+    await send({type:"layer",action:{op:"new",group:true,clipped:false}});
+    const owner=await evaluate("Number(layerApp.state().layer_tools.editing_layer.id)");
+    await send({type:"layer",action:{op:"new",group:false,clipped:false}});
+    const child=await evaluate("Number(layerApp.state().layer_tools.editing_layer.id)");
+    await lockedPickup(child,owner,"parent");
   console.log("PASS: layer range/group/delete, checked drag, thumbnail squircles and outer editing borders, mask link, accessibility, edge scrolling, direct body menus, grip reorder and undo/redo");
   } finally {
     if(down)await input(device==="touch"?"cancel":"up");

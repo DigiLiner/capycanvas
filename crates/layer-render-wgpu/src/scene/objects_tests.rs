@@ -151,7 +151,7 @@ fn object_read_mapping_preserves_f64_relative_coordinates_and_requested_density(
     let (doc, owner, _) = document([16; 2], vec![object]);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [16; 2];
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     for side in [0.25, 0.5, 1., 2.] {
         let request = canonical_request(&r, &mut scene, &doc, owner, ObjectWindow { origin: [1_048_576.125, 0.], side, size: [8; 2] });
         let mut cache = super::super::object_cache::ObjectCache::default();
@@ -173,7 +173,7 @@ fn private_canonical_jobs_yield_and_cancel_before_publication() {
     let (mut doc, owner, children) = document([64; 2], vec![object]);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [64; 2];
-    let mut compositor=Scene::new(&r);
+    let mut compositor=Scene::new(&r).unwrap();
     let mut cache = super::super::object_cache::ObjectCache::default();
     let request = canonical_request(&r, &mut compositor, &doc, owner, ObjectWindow { origin: [0.; 2], side: 1., size: [16; 2] });
     assert!(cache.resolve_collection(&r,doc.scene(),&request).unwrap().is_none());
@@ -311,7 +311,7 @@ fn simultaneous_photo_results_bound_batches_and_survive_deferred_retries() {
     let (doc, _, _) = document([768; 2], objects);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [768; 2];
-    let mut compositor=Scene::new(&r);
+    let mut compositor=Scene::new(&r).unwrap();
     let mut cache = super::super::object_cache::ObjectCache::default();
     let requests: Vec<_> = [[0., 0.], [256., 0.], [0., 256.], [256., 256.]].into_iter()
         .zip(doc.scene().order().iter().copied()).map(|(origin,owner)| canonical_request(&r, &mut compositor, &doc, owner, ObjectWindow { origin, side: 1., size: [256; 2] })).collect();
@@ -457,7 +457,7 @@ fn live_object_read_defers_without_inline_decode_then_returns_canonical_pixels()
     let (doc, owner, _) = document([128; 2], vec![object]);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [128; 2];
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let (target, _) = create_color_target(&r.device, [64; 2], "prepared reference read");
     let frame = packet(doc.scene(), [128; 2]);
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
@@ -491,7 +491,7 @@ fn cold_object_reads_advance_every_finished_tile_and_the_idle_budget_per_attempt
     let (doc, owner, _) = document([128; 2], vec![object]);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [128; 2];
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let (target, _) = create_color_target(&r.device, [128; 2], "prepared reference read");
     let frame = packet(doc.scene(), [128; 2]);
     let mut attempts = 0;
@@ -615,7 +615,7 @@ fn overlapping_sibling_images_keep_bounded_residency_and_composite_order() {
         doc.artwork.compositions.get_mut(doc.artwork.root).unwrap().blend=blend;
         let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();r.document_extent=[256;2];
         let (target,_) = create_color_target(&r.device,[256;2],"overlapping sibling images");
-        let mut scene=Scene::new(&r);let start=std::time::Instant::now();let mut peak=0;
+        let mut scene=Scene::new(&r).unwrap();let start=std::time::Instant::now();let mut peak=0;
         loop {
             assert!(start.elapsed()<std::time::Duration::from_secs(40),"ordered sibling images make bounded progress");
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
@@ -649,7 +649,7 @@ fn unfinished_collection_cancels_changed_content_and_display_visibility_but_keep
     let mut object=ImageObject::new(image([256;2],[171,37,83,190]));object.interpolation=ImageInterpolation::Nearest;
     let (mut doc,owner,handles)=document([256;2],vec![object.clone(),object]);
     let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();r.document_extent=[256;2];
-    let mut scene=Scene::new(&r);scene.object_display=true;
+    let mut scene=Scene::new(&r).unwrap();scene.object_display=true;
     let content=scene.object_spatial.content(doc.scene(),owner).unwrap();
     let request=scene.collection_job(&r,packet(doc.scene(),[256;2]),owner,content,ObjectWindow {origin:[0.;2],side:1.,size:[256;2]});
     let mut cache=super::super::object_cache::ObjectCache::default();cache.resolve_collection(&r,doc.scene(),&request).unwrap();
@@ -706,7 +706,7 @@ fn deferred_collection_construction_discards_unencoded_prefix_and_reuses_scratch
     let mut object=ImageObject::new(image([256;2],[171,37,83,190]));object.interpolation=ImageInterpolation::Nearest;
     let (doc,owner,_)=document([256;2],vec![object]);
     let r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
-    let mut scene=Scene::new(&r);scene.object_query=true;
+    let mut scene=Scene::new(&r).unwrap();scene.object_query=true;
     for _ in 0..12 {
         scene.alloc(&r,wgpu::Color::TRANSPARENT);
         assert!(matches!(scene.object_tile(&r,packet(doc.scene(),[256;2]),owner,[0;2]),Err(GpuRasterError::DeferredObjectWork)));
@@ -941,7 +941,7 @@ fn overlapping_canonical_windows_sample_only_their_uncovered_content() {
     let (doc, owner, _, _) = tablet_scene(false, 4, false);
     let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     r.document_extent = [4248, 2832];
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     scene.object_spatial.prepare(doc.scene());
     let content = scene.object_spatial.content(doc.scene(), owner).unwrap();
     let evaluate = |r: &mut WgpuRasterizer, scene: &mut Scene, origin: [f64; 2]| {
@@ -968,7 +968,7 @@ fn overlapping_canonical_windows_sample_only_their_uncovered_content() {
     assert_eq!(pieces.len(), 1);
     let (shifted, pieces) = evaluate(&mut r, &mut scene, [1112., 400.]);
     assert!(pieces.len() == 2 && pieces.iter().all(|bounds| !bounds.intersect(DocRect { min: [1112, 400], max: [2136, 1424] }).is_empty()));
-    let mut empty = Scene::new(&r);
+    let mut empty = Scene::new(&r).unwrap();
     let (fresh, _) = evaluate(&mut r, &mut empty, [1112., 400.]);
     assert!(shifted * 3 < fresh * 2, "half of the shifted window is reused: {shifted} of {fresh} taps (first {first})");
     let (covered, _) = evaluate(&mut r, &mut scene, [856., 400.]);

@@ -44,8 +44,8 @@ impl crate::WgpuRasterizer {
     ) -> Result<NativeTransfer, GpuRasterError> {
         let mut scene = self
             .scene
-            .take()
-            .unwrap_or_else(|| crate::scene::Scene::new(self));
+            .take().map(Ok)
+            .unwrap_or_else(|| crate::scene::Scene::new(self))?;
         let result = scene.prepare_native_transfer(self, space);
         self.scene = Some(scene);
         result
@@ -97,8 +97,8 @@ impl crate::WgpuRasterizer {
     ) -> Result<(), GpuRasterError> {
         let mut scene = self
             .scene
-            .take()
-            .unwrap_or_else(|| crate::scene::Scene::new(self));
+            .take().map(Ok)
+            .unwrap_or_else(|| crate::scene::Scene::new(self))?;
         let mut encoder = crate::submission::CommandEncoder::new(&self.device, &Default::default());
         std::mem::swap(&mut self.uploads, &mut self.restore_uploads);
         let result = encode(self, &mut scene, &mut encoder);
@@ -613,15 +613,19 @@ fn storage_texture_entry(binding: u32, format: wgpu::TextureFormat) -> wgpu::Bin
 /// Optional native feature for exact in-place SDR publication. Check formats as
 /// well as the extension bit; hosts without it retain separate candidates.
 pub fn native_in_place_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    in_place_features(adapter.features(), |format| adapter.get_texture_format_features(format))
+}
+
+fn in_place_features(features: wgpu::Features, mut format_features: impl FnMut(wgpu::TextureFormat) -> wgpu::TextureFormatFeatures) -> wgpu::Features {
     let feature = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
-    if adapter.features().contains(feature)
+    if features.contains(feature)
         && [
             wgpu::TextureFormat::Rgba32Float,
             wgpu::TextureFormat::R32Float,
         ]
         .into_iter()
         .all(|format| {
-            let caps = adapter.get_texture_format_features(format);
+            let caps = format_features(format);
             caps.allowed_usages
                 .contains(wgpu::TextureUsages::STORAGE_BINDING)
                 && caps

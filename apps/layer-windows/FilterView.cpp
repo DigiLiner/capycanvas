@@ -44,7 +44,7 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
     std::optional<hstring> searchDraft;
     void send(J action){if(!data->updating)data->dispatch(O({{L"type",S(L"filter_picker")},{L"action",action}}));}
     void init(){
-        auto weak=weak_from_this();root.Padding({8,8,8,8});root.RowSpacing(split?0:data->panelMetric(L"control_spacing"));
+        auto weak=weak_from_this();root.Padding({8,8,8,8});root.UseLayoutRounding(false);
         header.Visibility(split?Visibility::Collapsed:Visibility::Visible);
         AutomationProperties::SetAutomationId(root,L"filter-picker");
         auto title=[source=std::weak_ptr<WorkspaceData>(data)]{if(auto current=source.lock())return str(find(array(current->model,L"panels"),L"id",L"adjustments"),L"title");return hstring();};
@@ -82,10 +82,10 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
         AutomationProperties::SetAutomationId(toggle,L"filter-search-toggle");header.Children().Append(toggle);root.Children().Append(header);
         list.Content(rows);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
         list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);
-        AutomationProperties::SetAutomationId(list,L"filter-list");rows.Spacing(2);Grid::SetRow(list,1);root.Children().Append(list);
+        AutomationProperties::SetAutomationId(list,L"filter-list");Grid::SetRow(list,1);root.Children().Append(list);
         timer=root.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(200));
         timer.Tick([weak](auto&&,auto&&){if(auto self=weak.lock())self->preview();});
-        root.Loaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->timer.Start();self->preview();}});
+        root.Loaded([weak](auto&&,auto&&){if(auto self=weak.lock();self&&self->data->previews){self->timer.Start();self->preview();}});
         root.Unloaded([weak](auto&&,auto&&){if(auto self=weak.lock()){self->timer.Stop();RemoveFilterPreviewView(self->data->previews,reinterpret_cast<uint64_t>(self.get()));}});
     }
     void refresh(){
@@ -132,7 +132,7 @@ struct FiltersView : std::enable_shared_from_this<FiltersView> {
                 StackPanel marks;marks.Orientation(Orientation::Horizontal);marks.Spacing(4);marks.Margin({0,0,4,0});
                 if(flag(choice,L"animated")){auto animation=icon(L"animation",data->theme(),12);animation.Opacity(.55);marks.Children().Append(animation);}
                 marks.Children().Append(icon(str(choice,L"icon",L"adjustments"),data->theme()));caption.Children().Append(marks);
-                auto text=label(data,str(choice,L"label"));text.TextTrimming(TextTrimming::CharacterEllipsis);text.TextAlignment(TextAlignment::Right);
+                auto text=label(data,str(choice,L"label"));text.LineStackingStrategy(LineStackingStrategy::BlockLineHeight);text.LineHeight(18);text.TextTrimming(TextTrimming::CharacterEllipsis);text.TextAlignment(TextAlignment::Right);
                 Grid::SetColumn(text,1);caption.Children().Append(text);content.Children().Append(caption);pick.Content(content);
                 previews.push_back({str(choice,L"id"),pick,preview,text,headingText});
                 AutomationProperties::SetAutomationId(pick,L"filter-"+str(choice,L"id"));
@@ -155,11 +155,11 @@ FrameworkElement FiltersPanel(std::shared_ptr<WorkspaceData> const& data,Binding
     if(scrollMetrics)*scrollMetrics=[weak=std::weak_ptr(view)]{
         if(auto view=weak.lock()){
             double unit=0;for(auto const& row:view->previews)if(row.button.IsLoaded()&&row.button.ActualHeight()>0){auto margin=row.button.Margin();unit=row.button.ActualHeight()+margin.Top+margin.Bottom+view->rows.Spacing();break;}
-            return O({{L"fixed_height",N((view->split?16.:20.+view->header.ActualHeight()))},{L"unit_height",N(unit)}});
+            auto padding=view->root.Padding();return O({{L"fixed_height",N(padding.Top+padding.Bottom+(view->split?0:view->header.ActualHeight()))},{L"unit_height",N(unit)}});
         }return J{};
     };
     if(contentHeight)*contentHeight=[weak=std::weak_ptr(view)]{
-        if(auto view=weak.lock())return (view->split?16.:20.+view->header.ActualHeight())+view->list.ExtentHeight();
+        if(auto view=weak.lock()){auto padding=view->root.Padding();return padding.Top+padding.Bottom+(view->split?0:view->header.ActualHeight())+view->list.ExtentHeight();}
         return -1.;
     };
     return view->root;

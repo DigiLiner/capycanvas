@@ -12,6 +12,12 @@ Capy Canvas allocates painted regions in tiles, retains their GPU textures, and
 tracks which composition results an edit invalidates. Shaders draw the marks,
 apply effects and combine layers into the visible image.
 
+On Windows, memory admission queries the active adapter: DXGI local budget and
+usage for DX12, or Vulkan device-local heap budget and usage through
+`VK_EXT_memory_budget`. Both are bounded by available system memory. Missing
+budget information refuses admission rather than treating installed memory as
+available capacity.
+
 ## Stored pixels and the viewport
 
 [`WgpuRasterizer`](../../crates/layer-render-wgpu/src/lib.rs) stores painted layer
@@ -22,6 +28,12 @@ those pages. Composite images and filter intermediates have their own storage,
 so sparse paint pages do not make total memory independent of document size.
 These pages are software-managed regions of the document, separate from the
 small on-chip tiles used internally by some GPU architectures.
+
+Native raster restoration stages color, mask and watercolor wetness pages in
+separate typed vectors. [The restore path](../../crates/layer-render-wgpu/src/raster.rs)
+publishes them only after every tile upload and the final cached batch succeed.
+A failed decode or upload leaves every live page intact; decoding holds one CPU
+tile at a time.
 
 ### Layer extents and the canvas window
 
@@ -262,10 +274,11 @@ Native filter input gathers retain completed pages across these retries; a
 partial input never marks its filter output valid. Authored edits, new contacts
 and changes to input interpretation discard that unfinished gather.
 Before a cold live object can interrupt composition, the renderer copies the
-accepted viewport inputs on the GPU and retains their geometry. Source uploads,
-paint and private sampling can submit while later filter windows await prepared
-image tiles. The viewport uses those retained inputs until a complete composition
-publishes; its evaluated object revision advances with that publication. Completed
+accepted viewport inputs on the GPU and retains their geometry. Physical copies
+are unique per source texture and mip, while logical sampling views remain
+available. Source uploads, paint and private sampling can submit while later
+filter windows await prepared image tiles. The viewport uses those retained
+inputs until a complete composition publishes; its evaluated object revision advances with that publication. Completed
 internal regions remain valid through submitted retries and release copied
 private results. Discarded submissions still invalidate their cache writes. Jobs
 that defer release their abandoned native scratch slots and material-page
@@ -292,7 +305,12 @@ submission. Native builds continue to suballocate mapped chunks. The Safari
 
 Viewport presentation and staging uploads return mapping failures to their host.
 A device removed during buffer allocation must not unwind the render owner; the
-host can reconstruct its GPU while retaining the shared document session. Uploads
+host can reconstruct its GPU while retaining the shared document session. Disabled
+coverage and changed-cell buffers use zero initialization without mapping during
+construction. Nonzero uniforms and native transfer tables return mapping failures
+from construction. Scene replacement retains its cached resources until the
+replacement succeeds. Optional save-preview failures leave captured project
+serialization available. Uploads
 continue to reuse the staging belt and never wait for GPU completion on the UI
 thread. Work submitted on its own while a frame is recording, such as native
 raster restoration, uses a separate belt: finishing the shared belt for it would
@@ -718,7 +736,8 @@ the same raw source representation when it crosses the identity pose.
 Each cached source level records its color and material representation. Returning
 to ordinary display can retain a finer raw level within the existing budget;
 reopening Transform repairs its changed pages instead of decoding the whole photo.
-Reduction and direct sampling reuse only matching representations.
+Source-pixel damage invalidates retained levels independently of composition
+interpretation changes. Reduction and direct sampling reuse only matching representations.
 Neighbor mappings share at most 64 scratch pages within a frame. Neighbor color
 is mapped only where wetness can contribute, and the material pass borrows that
 color only for empty centers. Tiles outside mapped wetness bounds take the

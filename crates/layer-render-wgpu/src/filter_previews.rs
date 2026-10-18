@@ -77,7 +77,7 @@ impl FilterPreviews {
         self.cancelled |= self.request.is_some();
     }
     fn new(r: &mut WgpuRasterizer) -> Result<Self, GpuRasterError> {
-        let scene = Scene::new(r);
+        let scene = Scene::new(r)?;
         let shader = r.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("filter preview content probe"),
             source: wgpu::ShaderSource::Wgsl(include_str!("filter_probe.wgsl").into()),
@@ -122,7 +122,7 @@ impl FilterPreviews {
         let (tx, rx) = mpsc::channel();
         Ok(Self {
             scene,
-            source_scene: Scene::new(r),
+            source_scene: Scene::new(r)?,
             probe_next: 0,
             probe_tiles: Vec::new(),
             probe_batch_size: 1,
@@ -1175,7 +1175,7 @@ mod tests {
         let capture=|r:&mut WgpuRasterizer,doc:&Document,source:Option<FilterPreviewSource>,output:scene::Output|{
             let (texture,_)=create_color_target(&r.device,extent,"preview input regression");
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-            let mut scene=Scene::new(r);
+            let mut scene=Scene::new(r).unwrap();
             if let Some(source)=source {
                 let mut request=request(doc,owner,1,extent,crate::test_support::view(extent),vec![Arc::new(fixture("exposure").preview().unwrap())]);
                 request.source=source;
@@ -1202,7 +1202,7 @@ mod tests {
         let query=previews.analysis_queries.last().unwrap();
         let (texture,_)=create_color_target(&r.device,extent,"preview analysis input regression");
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        Scene::new(&r).capture_region(&mut r,FramePacket{scene:query.snapshot.view(),..crate::test_support::packet(doc.scene(),extent)},
+        Scene::new(&r).unwrap().capture_region(&mut r,FramePacket{scene:query.snapshot.view(),..crate::test_support::packet(doc.scene(),extent)},
             &texture,PixelRect::full(extent),scene::Output::EffectInput(candidate),&mut encoder).unwrap();
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
         assert!(crate::test_support::max_error(&crate::test_support::float_pixels(&r,&texture),&raw)<1e-6,
@@ -1241,7 +1241,7 @@ mod tests {
         let query=previews.analysis_queries.last().unwrap();
         let (texture,_)=create_color_target(&r.device,extent,"new attached analysis input regression");
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        Scene::new(&r).capture_region(&mut r,FramePacket{scene:query.snapshot.view(),..crate::test_support::packet(doc.scene(),extent)},
+        Scene::new(&r).unwrap().capture_region(&mut r,FramePacket{scene:query.snapshot.view(),..crate::test_support::packet(doc.scene(),extent)},
             &texture,PixelRect::full(extent),scene::Output::EffectInput(candidate),&mut encoder).unwrap();
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
         assert!(crate::test_support::max_error(&crate::test_support::float_pixels(&r,&texture),&expected)<1e-6,

@@ -30,6 +30,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
     hstring viewKey,historyKey,choicesKey,currentKey,checkerKey;Imaging::WriteableBitmap checker{nullptr};
     std::optional<uint64_t> selected;bool editing=false,animate=true;int columns=6;uint64_t reportGeneration=0;
     std::optional<Drag> drag;Microsoft::UI::Dispatching::DispatcherQueueTimer scrollTimer{nullptr};double scrollCarry=0;
+    bool ignoreClick=false;uint64_t gestureGeneration=0;
     J view()const{return object(data->model,L"palette_panel");}
     J files()const{return object(data->model,L"windows_palettes");}
     J current()const{return object(object(data->model,L"color_panel"),L"definition");}
@@ -268,14 +269,14 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         Tile t;t.id=id;t.node=tileButton(L"");t.patch=paint();t.node.Content(t.patch);auto weak=weak_from_this();
         AutomationProperties::SetAutomationId(t.node,L"palette-swatch-"+to_hstring(id));
         t.node.Click([weak,id](auto&&,auto&&){if(auto self=weak.lock()){
-            if(self->drag&&(self->drag->started||self->drag->held))return;
+            if(self->ignoreClick||(self->drag&&(self->drag->started||self->drag->held)))return;
             if(self->editing){self->commitName();if(self->editing)return;}
             self->library(O({{L"op",S(L"use")},{L"id",N(double(id))}}));self->sync();
         }});
         t.node.ContextRequested([weak,id](auto&&,ContextRequestedEventArgs const& e){e.Handled(true);if(auto self=weak.lock();self&&!(self->drag&&self->drag->started)){
             auto s=self->swatch(id);self->menu(O({{L"kind",S(L"color")},{L"id",N(double(id))}}),self->tiles.at(id).node,s?str(*s,L"name"):L"");
         }});
-        t.node.IsHoldingEnabled(false);
+        t.node.IsHoldingEnabled(false);t.node.ManipulationMode(ManipulationModes::None);
         t.node.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak,id](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){
             if(auto self=weak.lock())self->press(e,id);})),true);
         return t;
@@ -284,6 +285,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         if(drag||!tiles.contains(id))return;auto point=e.GetCurrentPoint(root);
         auto type=point.PointerDeviceType();bool mouse=type==Microsoft::UI::Input::PointerDeviceType::Mouse;
         if(mouse&&!point.Properties().IsLeftButtonPressed())return;
+        ignoreClick=false;++gestureGeneration;
         auto node=tiles.at(id).node;auto local=e.GetCurrentPoint(node).Position();
         Drag d;d.pointer=point.PointerId();d.id=id;d.palette=uint64_t(num(view(),L"palette"));d.point=point.Position();d.grab=local;
         if(!node.CapturePointer(e.Pointer()))return;
@@ -366,7 +368,12 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         drag->generation=0;update();
     }
     void finish(bool cancel){
-        if(!drag)return;auto d=std::move(*drag);drag.reset();
+        if(!drag)return;auto d=std::move(*drag);ignoreClick=d.started||d.held;drag.reset();
+        if(ignoreClick){auto generation=gestureGeneration;
+            root.DispatcherQueue().TryEnqueue(Microsoft::UI::Dispatching::DispatcherQueuePriority::Low,[weak=weak_from_this(),generation]{
+                if(auto self=weak.lock();self&&self->gestureGeneration==generation&&!self->drag)self->ignoreClick=false;
+            });
+        }
         if(scrollTimer){scrollTimer.Stop();scrollTimer=nullptr;}
         if(d.hold)d.hold.CompleteGesture();
         if(tiles.contains(d.id))tiles.at(d.id).node.ReleasePointerCaptures();
@@ -477,7 +484,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         tooltip(history,data->caption(L"palettes",L"history_help"));
         normal.Children().Append(history);normal.Children().Append(divider());
         scroll.MinHeight(84);scroll.MaxHeight(172);scroll.HorizontalScrollMode(ScrollMode::Disabled);scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
-        scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Hidden);scroll.Content(grid);AutomationProperties::SetAutomationId(grid,L"palette-swatches");AutomationProperties::SetName(grid,data->caption(L"palettes",L"saved"));
+        scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(scroll);scroll.Content(grid);AutomationProperties::SetAutomationId(grid,L"palette-swatches");AutomationProperties::SetName(grid,data->caption(L"palettes",L"saved"));
         normal.Children().Append(scroll);body.Children().Append(normal);body.Children().Append(overlays);
         expanded.Visibility(Visibility::Collapsed);AutomationProperties::SetAutomationId(expanded,L"palette-history-expanded");overlays.Children().Append(expanded);
         chooser.RowSpacing(6);chooser.Visibility(Visibility::Collapsed);AutomationProperties::SetAutomationId(chooser,L"palette-chooser");
@@ -491,7 +498,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         tooltip(more,data->caption(L"palettes",L"new_import"));AutomationProperties::SetAutomationId(more,L"palette-library-add");
         more.Click([weak](auto&&,auto&&){if(auto self=weak.lock())self->menu(O({{L"kind",S(L"library")}}),self->more,self->data->caption(L"palettes",L"title"));});
         Grid::SetColumn(more,1);searchRow.Children().Append(more);chooser.Children().Append(searchRow);
-        Grid resultsHost;list.Spacing(0);results.Content(list);results.HorizontalScrollMode(ScrollMode::Disabled);results.VerticalScrollBarVisibility(ScrollBarVisibility::Hidden);
+        Grid resultsHost;list.Spacing(0);results.Content(list);results.HorizontalScrollMode(ScrollMode::Disabled);results.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(results);
         AutomationProperties::SetAutomationId(list,L"palette-list");AutomationProperties::SetName(list,data->caption(L"palettes",L"title"));resultsHost.Children().Append(results);
         empty=label(data,data->copyCaption(L"palettes",L"no_matches"));empty.Opacity(.55);empty.HorizontalAlignment(HorizontalAlignment::Center);empty.VerticalAlignment(VerticalAlignment::Center);empty.IsHitTestVisible(false);
         empty.Visibility(Visibility::Collapsed);resultsHost.Children().Append(empty);Grid::SetRow(resultsHost,1);chooser.Children().Append(resultsHost);
@@ -533,7 +540,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         root.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){if(auto self=weak.lock())self->moved(e);})),true);
         root.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){if(auto self=weak.lock())self->released(e);})),true);
         root.AddHandler(UIElement::PointerCanceledEvent(),box_value(PointerEventHandler([weak](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){
-            if(auto self=weak.lock();self&&self->drag&&self->drag->pointer==e.Pointer().PointerId())self->finish(true);})),true);
+            if(auto self=weak.lock();self&&self->drag&&self->drag->pointer==e.Pointer().PointerId()){self->finish(true);e.Handled(true);}})),true);
         root.AddHandler(UIElement::PointerCaptureLostEvent(),box_value(PointerEventHandler([weak](winrt::Windows::Foundation::IInspectable const&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();if(!self||!self->drag||self->drag->pointer!=e.Pointer().PointerId())return;
             if(e.GetCurrentPoint(self->root).IsInContact())self->finish(true);else self->released(e);})),true);

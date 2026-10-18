@@ -11,6 +11,8 @@
 namespace CapyUi {
 struct FilterPreviewCache;
 std::shared_ptr<FilterPreviewCache> CreateFilterPreviewCache(PreviewTransport);
+void RefreshFilterPreviewContext(std::shared_ptr<FilterPreviewCache> const&,
+    winrt::hstring const& epoch,winrt::hstring const& source);
 void RefreshFilterPreviews(std::shared_ptr<FilterPreviewCache> const&,
     uint64_t view,winrt::hstring const& epoch,int width,int height,std::vector<winrt::hstring> const& visible);
 void RemoveFilterPreviewView(std::shared_ptr<FilterPreviewCache> const&,uint64_t view);

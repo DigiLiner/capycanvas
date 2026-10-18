@@ -231,9 +231,7 @@ impl Sources {
         let radius = source.watercolor.map_or(0, |w| w.radius());
         if radius > 0 { damage = damage.expand(radius, extent); }
         let levels = PixelRect::full(source.levels_extent());
-        source.damage = if changed { levels.into() } else {
-            damage.intersect(PixelRect::full(extent)).map(|region| region.translated(phase)).union(Damage::from_regions(regrown)).intersect(levels)
-        };
+        source.damage = damage.intersect(PixelRect::full(extent)).map(|region| region.translated(phase)).union(Damage::from_regions(regrown)).intersect(levels);
         for level in source.levels.values_mut() {
             let damaged = |c: [u32; 2]| source.damage.regions.iter().fold(PixelRect::EMPTY, |rect, region| rect.union(region.intersect(page_rect(c))));
             for (c, rect) in level.stale.iter_mut() { *rect = rect.union(damaged(*c)); }
@@ -244,6 +242,7 @@ impl Sources {
                 rect.is_empty()
             });
         }
+        if changed { source.damage = levels.into(); }
     }
     pub fn complete_texture(&self, scene: SceneView<'_>, target: SourceTarget, extent: [u32; 2], level: u32) -> Option<&wgpu::Texture> {
         let SourceTarget::Paint(paint) = target else { return None; };

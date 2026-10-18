@@ -65,7 +65,9 @@ RGB. Histogram shows how often each value occurs.
 
 Source and channel selectors occupy one toolbar above the graph. Log counts
 changes Histogram's height or Waveform's trace brightness; its toggle and
-clipping buttons sit beside the status below the graph. The graph's tooltip
+clipping buttons sit beside the status below the graph. The toggle and its
+caption share a 24-pixel target. Status and axis labels use secondary text at
+55% opacity. The graph's tooltip
 contains detailed counts. In floating documents, Waveform includes nonpositive
 values on its bottom rail. Its scale labels overlay the graph so the trace uses
 the full panel width.
@@ -185,6 +187,8 @@ subtitle. Image objects, masks, selections and effect layers do not offer this c
 Properties gives the layer name its own heading, with the smaller, muted
 layer type below it. On raster and image object layers, **Add Filter** sits at the
 right of that second row with an **fx+** icon, its text label and a menu arrow.
+The heading has a 4-unit gap below it; the layer-type row has a 6-unit gap
+before the parameter controls.
 Filter, mask, selection and group properties omit this button. The Layers footer
 uses the same icon.
 Its Add Filter button shares the other footer buttons' theme color and flat style,

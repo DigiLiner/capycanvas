@@ -285,7 +285,10 @@ with Add to Library; adding it reuses an equal stored image.
   own bind group, so the canvas shader and camera are unchanged. It shades the
   Paper's baked tile by its slope, white facing the light and black away from
   it, while Scale changes and for 1.2 s after a paper is chosen, then fades out
-  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)).
+  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)). The visible interval
+  starts after the viewport has encoded the relief; waiting for the paper bake
+  or its presentation pipeline does not consume that interval. Replacing the
+  renderer resends the relief and preserves its remaining visible interval.
 - **Memory** is one byte per texel: 2.3 MB for a 128 mm watercolor tile at
   300 ppi, 4.3 MB for a 175 mm laid or washi tile, and at most 16 MB.
 
@@ -314,7 +317,8 @@ keep their Solid Color.
 | --- | --- |
 | Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
 | GTK | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview. `native_paper_picker_relief_and_scale` walks it in both themes. |
-| Web, Android, Apple, Windows | Build and paint on Paper. Until ported after GTK review, Texture is a list of built-in papers, Scale is a slider and there is no library or Import. |
+| Windows | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, and shared relief preview. Image decoding and library files use native workers. |
+| Web, Android, Apple | Build and paint on Paper. Until ported after GTK review, Texture is a list of built-in papers, Scale is a slider and there is no library or Import. |
 
 ## Measurements
 
@@ -365,3 +369,9 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | Picker previews | Shipped for built-in papers, made at import for imported ones | Rendering previews on the GPU at run time. It needs a request and readback path on every host for images that never change between releases; a test keeps the shipped previews equal to their bakes. |
 | Library index | A small index file beside the papers | The workspace database. Papers are app-wide, not per workspace, and the index keeps the folder self-contained. |
 | Tile actions | Rename, Delete and Add to Library in each tile's menu | Buttons in the picker. They would show for every paper while applying to one. |
+
+The Windows Paper picker marks the current tile and publishes its selected state
+to accessibility clients.
+The picker groups its tiles under the shared Texture label for accessibility.
+Paper parameter uploads and bake admission return GPU mapping errors through
+preparation, so hosts can retire a lost renderer through the usual recovery path.

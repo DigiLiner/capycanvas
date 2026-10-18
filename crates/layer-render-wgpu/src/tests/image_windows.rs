@@ -95,6 +95,8 @@ fn capture(
     scene
         .capture_region(r, packet, &target, crop, scene::Output::Artwork(None), &mut encoder)
         .unwrap();
+    let planned=scene::Scene::capture_image_bound(packet.scene,crop);
+    assert!(scene.image_cache_bytes()<=planned,"crop={crop:?} actual={} planned={planned}",scene.image_cache_bytes());
     r.uploads.finish(&encoder);
     encoder.submit(&r.queue);
     crate::layer_tests::page_bytes(r, &target)
@@ -132,7 +134,7 @@ fn image_windows_match_full_composition_with_halos_masks_and_clipping() {
             set_entries(&mut document, vec![group, outside]);
             let packet = crate::test_support::packet(document.scene(), extent);
             r.submit(packet).unwrap(); // Initializes real mask pages and renderer metadata.
-            let mut scene = scene::Scene::new(&r);
+            let mut scene = scene::Scene::new(&r).unwrap();
             let full = capture(&mut r, &mut scene, packet, PixelRect::full(extent));
             let full_cache = scene.image_cache_bytes();
             for crop in [
@@ -186,16 +188,16 @@ fn image_windows_keep_document_sampler_dependencies_complete() {
     set_entries(&mut document, entries);
     let packet = FramePacket { view: test_view(), ..crate::test_support::packet(document.scene(), extent) };
     r.submit(packet).unwrap();
-    let mut scene = scene::Scene::new(&r);
+    let mut scene = scene::Scene::new(&r).unwrap();
     let full = capture(&mut r, &mut scene, packet, PixelRect::full(extent));
     let cache = scene.image_cache_bytes();
     let crop = PixelRect::new(271, 3, 295, 19);
     let pixels = capture(&mut r, &mut scene, packet, crop);
-    assert_eq!(
-        scene.image_cache_bytes(),
-        cache,
-        "global remapping must retain the declared full input"
-    );
+    let full_window=scene::Scene::capture_window(packet.scene,PixelRect::full(extent),extent);
+    let crop_window=scene::Scene::capture_window(packet.scene,crop,extent);
+    assert_eq!(crop_window,full_window,"global remapping must retain the declared full input");
+    assert_eq!(crop_window.in_frame(extent),PixelRect::full(extent));
+    assert!(scene.image_cache_bytes()<cache,"global input must not force a full output allocation");
     for y in 0..crop.height() as usize {
         let a = y * crop.width() as usize * 16;
         let b = ((y + crop.min_y() as usize) * extent[0] as usize + crop.min_x() as usize) * 16;
@@ -224,7 +226,7 @@ fn retained_off_frame_source_blurs_into_frame_and_matches_larger_reference() {
     let document = make([32, 32], [-32, 0]);
     let reference = make([96, 64], [0, 16]);
     let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
-    let mut scene = scene::Scene::new(&r);
+    let mut scene = scene::Scene::new(&r).unwrap();
     let actual = capture(&mut r, &mut scene, crate::test_support::packet(document.scene(), [32, 32]), PixelRect::full([32, 32]));
     assert!(scene::Scene::capture_window(document.scene(), PixelRect::full([32, 32]), [32, 32]).min[0] < 0);
     let expected = capture(&mut r, &mut scene, crate::test_support::packet(reference.scene(), [96, 64]), PixelRect::new(32, 16, 64, 48));

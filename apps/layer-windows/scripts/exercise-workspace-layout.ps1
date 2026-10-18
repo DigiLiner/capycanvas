@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable)
+param([Parameter(Mandatory)][string]$Executable,[ValidateSet('dark','light')][string]$Theme='dark')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -TypeDefinition @'
@@ -24,25 +24,27 @@ function Panel-Menu([string]$Id){
 try{
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
+    [IO.Directory]::CreateDirectory($env:CAPY_STORAGE_DIR)|Out-Null
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme=$Theme}|ConvertTo-Json -Depth 4))
     $env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/workspace-review.json'),(@{process_id=$review.Id;run=$run}|ConvertTo-Json))
     Write-Output "Owned workspace review $($review.Id)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Review did not start' 45
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    Wait-Until {$script:drawing=Owned-DrawingWindow $review;$null -ne $drawing -and (Model).brush_ready -and (Model).state.theme -eq $Theme} 'Review did not start' 45
+    $root=$drawing.Root
     $ids=@('file','edit','image','layer','select','filter','view','window')
-    $scale=[CapyWorkspaceHeader]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyWorkspaceHeader]::GetDpiForWindow($drawing.Handle)/96.
     foreach($size in @(@{width=744;compact=$true},@{width=1200;compact=$false},@{width=744;compact=$true})){
         $entry=& (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File' -Inspect
         $entry.SetFocus();Wait-Until {$entry.Current.HasKeyboardFocus} 'Could not focus the visible menu entry'
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width ([int]($size.width*$scale)) -Height ([int](700*$scale))
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Resize -Width ([int]($size.width*$scale)) -Height ([int](700*$scale))
         $entryId=if($size.compact){'application-menus'}else{'application-menu-file'}
         Wait-Until {[System.Windows.Automation.AutomationElement]::FocusedElement.Current.AutomationId -eq $entryId} 'Responsive header did not retain menu keyboard focus'
     }
     foreach($size in @(@{width=744;compact=$true},@{width=1200;compact=$false})){
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width ([int]($size.width*$scale)) -Height ([int](700*$scale))
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Resize -Width ([int]($size.width*$scale)) -Height ([int](700*$scale))
         $entryId=if($size.compact){'application-menus'}else{'application-menu-file'}
         Wait-Until {$entry=Find $entryId -Type ([System.Windows.Automation.ControlType]::Button);$entry -and !$entry.Current.IsOffscreen} 'Header did not switch between compact and expanded menus'
         $last=-1
@@ -94,9 +96,9 @@ try{
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action 'Test stroke'
     Wait-Until {[uint64](Control 'renderer-stat-2').Current.Name -gt 0} 'Visible Diagnostics did not collect drawing submissions'
     if(((Control 'renderer-stat-0').GetRuntimeId() -join ':') -ne $cpuIdentity){throw 'Stats updates replaced native metric rows'}
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1500 -Height 1000
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Action Resize -Width 1500 -Height 1000
     Wait-Until {$null -ne (Find 'renderer-stat-6')} 'Resize removed Diagnostics content'
-    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'diagnostics.png') -ClientOnly *> (Join-Path $run 'diagnostics.json')
+    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $drawing.Handle.ToInt64() -Output (Join-Path $run 'diagnostics.png') -ClientOnly *> (Join-Path $run 'diagnostics.json')
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
     (Control (Panel-Menu 'stats').label -Name -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {$null -eq (Find 'renderer-stat-0')} 'Hidden Diagnostics retained visible widgets'

@@ -96,7 +96,7 @@ impl SnapshotGpu {
                 let region = page_rect(coordinate).intersect(PixelRect::full(extent));
                 let (tiles, capture) = snapshot.with_region_gpu([region.min_x(), region.min_y(), region.width(), region.height()], 8 * 1024 * 1024,
                     |r, packet, _, encoder| {
-                        let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+                        let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
                         let result = scene.capture_raw_tile(r, packet, coordinate, &plan, &planes, encoder);
                         r.scene = Some(scene);
                         result

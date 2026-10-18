@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn independent_pointwise_tiles_share_a_compute_pass() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let image = Image::new(&r, display_mips::Plan::at([PAGE_SIZE; 2], 0), "pointwise source");
     let color = [0.2_f32, 0.1, 0.05, 0.5];
     let bytes: Vec<_> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|_| color.into_iter().flat_map(f32::to_le_bytes)).collect();
@@ -40,7 +40,7 @@ fn independent_pointwise_tiles_share_a_compute_pass() {
 #[test]
 fn normal_composition_converts_in_its_final_destination() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let color = [0.2_f32, 0.1, 0.05, 0.5];
     let image = Image::new(&r, display_mips::Plan::at([PAGE_SIZE; 2], 0), "normal source");
     let bytes: Vec<_> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|_| color.into_iter().flat_map(f32::to_le_bytes)).collect();
@@ -73,7 +73,7 @@ fn normal_composition_converts_in_its_final_destination() {
 #[test]
 fn complete_compute_composition_replaces_the_clear_but_partial_writes_preserve_it() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let image = Image::new(&r, display_mips::Plan::at([PAGE_SIZE; 2], 0), "composition source");
     let color = [0.2_f32, 0.1, 0.05, 0.5];
     let bytes: Vec<_> = (0..PAGE_SIZE * PAGE_SIZE).flat_map(|_| color.into_iter().flat_map(f32::to_le_bytes)).collect();
@@ -109,7 +109,7 @@ fn complete_compute_composition_replaces_the_clear_but_partial_writes_preserve_i
 fn effect_grids_preserve_document_coordinates_and_partial_edge_centers() {
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let extent = [1091, 613];
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let mut program = (*crate::tests::fixture("exposure").program()).clone();
     program.kind = layer_core::EffectKind::Generator;
     program.entry = "grid_probe".into();
@@ -199,7 +199,7 @@ fn authored_spatial_references_preserve_builtin_windows_and_orientation() {
     use layer_core::{EffectInstance, EffectValue, authored::*};
     use super::Image;
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let extent = [64, 48];
     let cases: &[(&str, &[(&str, f32)])] = &[
         ("gaussian_blur", &[("sigma", 2.75)]),
@@ -308,7 +308,8 @@ fn authored_spatial_references_preserve_builtin_windows_and_orientation() {
         }}}
         let resized = render(&mut r, &mut scene, 4, false, false);
         for y in 16..32 {for x in 16..48 {for channel in 0..4 {
-            assert!((resized[(y*5+2)*192+x*3+1][channel]-full[y*64+x][channel]).abs()<3e-5, "{id}: anisotropic size {x}/{y}/{channel}");
+            let actual=resized[(y*5+2)*192+x*3+1][channel];let expected=full[y*64+x][channel];
+            assert!((actual-expected).abs()<3e-5, "{id}: anisotropic size {x}/{y}/{channel}: {actual} != {expected}");
         }}}
         let reflected = render(&mut r, &mut scene, 2, false, false);
         for y in 0..48 {for x in 0..64 {for channel in 0..4 {
@@ -325,7 +326,7 @@ fn authored_spatial_references_preserve_builtin_windows_and_orientation() {
 fn multipass_opacity_reads_original_finite_support_independently_of_intermediate_support() {
     use layer_core::authored::{Artwork, EffectApplication, Occurrence, OccurrenceContent, PortableId};
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let size = [80, 64];
     let allocation = DocRect { min: [-17, -15], max: [63, 49] };
     let support = DocRect { min: [-9, -7], max: [55, 41] };
@@ -396,7 +397,7 @@ fn multipass_opacity_reads_original_finite_support_independently_of_intermediate
 fn encoded_effect_jobs_retain_distinct_spatial_mappings_and_parameters_before_submission() {
     use layer_core::authored::{Affine64, Artwork, EffectApplication, Occurrence, OccurrenceContent, PortableId};
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-    let mut scene = Scene::new(&r);
+    let mut scene = Scene::new(&r).unwrap();
     let size = [32, 24];
     let plan = display_mips::Plan::at(size, 0);
     let input = Image::new(&r, plan, "immutable effect reference");

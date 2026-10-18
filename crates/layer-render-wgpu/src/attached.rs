@@ -156,6 +156,9 @@ impl CanvasRenderer for AttachedRenderer {
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_paper_overlay(overlay); }
     }
+    fn paper_overlay_ready(&self, paper: &layer_core::paper::PaperBinding) -> bool {
+        self.0.as_ref().is_some_and(|gpu| gpu.paper_overlay_ready(paper))
+    }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) {
         if let Some(gpu) = self.0.as_mut() { gpu.set_crop_overlay(overlay); }
     }

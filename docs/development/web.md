@@ -166,7 +166,14 @@ their extent and sRGB pixel array.
 
 Histogram and Waveform are workspace panels, including the Photo workspace's
 scope tabs. `src/scopes.rs` publishes shared normalized plots and bounded RGBA
-waveforms only when their data or display settings change. `histogram.js` retains
+waveforms only when their data or display settings change. Scope captions and
+choice labels invalidate their intrinsic measurement copy when they change;
+plot publications and control values retain that copy. Scope graphs use the
+available panel space while their controls keep their measured height. Their
+raster follows the actual graph bounds; intrinsic copies keep the natural plot
+height. Log counts keeps a 24-pixel label target. Secondary status, axis and
+layer metadata use one color derived from the published text at 55% opacity.
+Toolbar fitting preserves fractional widget widths. `histogram.js` retains
 the native canvases; Properties updates their embedded plots without replacing
 focused numeric fields. Calibration, Auto Levels and targeted Curves edits use
 shared actions and the existing canvas pointer path.
@@ -181,10 +188,10 @@ node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-clie
 ```
 
 The launcher fixture uses Bash; `LAYER_TEST_BASH` selects its executable
-(default `/bin/bash`). On Windows, set it before the same Node commands:
+(default `/bin/bash`). On Windows, set it in Git Bash before those commands:
 
-```powershell
-$env:LAYER_TEST_BASH = 'C:/Program Files/Git/bin/bash.exe'
+```bash
+export LAYER_TEST_BASH='C:/Program Files/Git/bin/bash.exe'
 ```
 
 `workspace-motion.sh web --numeric-controls` checks panel slider and editor
@@ -255,6 +262,14 @@ selects offscreen Vulkan; other hosts keep their native GPU backend. Without
 `--headless` Chrome opens on the current Wayland display. `LAYER_TEST_VERBOSE=1`
 prints browser diagnostics, `LAYER_TEST_THEME=light` or `dark` selects the initial
 theme, and journeys that save captures write them to `LAYER_TEST_ARTIFACTS`.
+
+Worker tracing uses `prepareWorkers` in `tools/cdp.mjs`. Register each observer
+before starting attachment or reloading the page. The helper installs observers
+at the worker's first script boundary and releases its startup pause once.
+
+Run `node --test tools/cdp.test.mjs` with Chrome available (`CHROME` may name
+its executable). It checks module-worker preparation and CDP teardown using a
+private profile and loopback fixture, without the app, Wasm or WebGPU requests.
 
 On macOS, enable Safari's Develop > Allow Remote Automation once, start
 `safaridriver -p 4444`, and run `node apps/layer-web/safari-test.mjs` against the
@@ -351,7 +366,9 @@ including after a language change; other objects use deterministic JSON.
 `--panel-controls` captures Tool Settings, Properties, Histogram, Waveform, Proof and Palettes
 in light and dark themes at 242- and 320-pixel panel widths. It checks 8-pixel
 content edges, shared dropdown columns, 4-pixel peer gaps on both axes, 24-pixel
-controls, 36-pixel sliders, editor focus and squircle radii.
+controls, 36-pixel sliders, editor focus and squircle radii. Panel captions start
+at the row top and end above the slider hit area. Properties checks the 4-pixel
+gap after its heading and the 6-pixel gap before the parameter group.
 
 `--pointwise-effects` checks Hue range pages and Colorize value retention,
 Threshold and Photo Filter controls, Invert/Desaturate insertion, slider history,
@@ -369,7 +386,12 @@ only for submitted work; an idle queue can precede required pipeline readiness.
 `--layer-relationships` exercises contextual attachment controls, clipping rails,
 effect links, hidden owners, group modes and normalized saved-selection drops.
 It checks narrow and wide panels in both themes; `--layers` includes this journey.
-Use `--layer-hold` and `--layer-swipes` for the related input paths.
+Use separate `--layer-hold` and `--layer-swipes` invocations for the related input
+paths. Layer grips retain their layout while shared effective locks disable
+pickup; parent locks use the same published row state. Drop-surface availability
+remains independent of source pickup. The holding journey checks locked body
+and grip contacts, unlock restoration and exact Undo/Redo in both themes with
+mouse, pen and touch.
 `--layer-properties-drawer` checks the combined Layers/Properties body in both
 themes, including native layer creation, sizing, overflow, scroll restoration,
 swipe actions, filter summaries and a custom toolbar opener.

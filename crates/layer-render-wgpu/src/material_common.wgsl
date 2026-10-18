@@ -120,7 +120,7 @@ fn stroke_increment(previous: f32, next: f32) -> f32 {
 }
 
 fn grouped_opacity() -> bool {
-    return style.canvas_opacity.z < 1.0
+    return contact_feature(65536u,style.canvas_opacity.z < 1.0)
         && (MATERIAL_OPERATION == OP_DEPOSIT || MATERIAL_OPERATION == OP_COVERAGE || MATERIAL_OPERATION == OP_CLONE);
 }
 
@@ -160,5 +160,5 @@ fn material_alpha_locked(result:MaterialOutput, original:vec4<f32>)->MaterialOut
 fn pointwise_aggregate()->bool {
     return (MATERIAL_OPERATION==OP_DEPOSIT || MATERIAL_OPERATION==OP_COVERAGE)
         && contact_feature(64u,style.contact_a.z>0.5) && !contact_uniform()
-        && contact_feature(8192u,style.material_a.w>0.5);
+        && contact_feature(8192u,style.material_a.w>0.5) && style.material_a.w>0.5;
 }

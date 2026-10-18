@@ -75,3 +75,40 @@ if($LASTEXITCODE -ne 0){throw 'Canvas queue test failed.'}
   if(!$rejected){throw "Unknown fixture selector was accepted: $request"}
  }
 }
+
+& (Join-Path $PSScriptRoot '../tests/workspace-publisher-query.ps1')
+
+& (Join-Path $PSScriptRoot '../tests/application-menu.ps1')
+
+& {
+ $tokens=$null;$errors=$null
+ $source=[IO.File]::ReadAllText((Join-Path $PSScriptRoot 'exercise-workspace-pickup.ps1'),[Text.Encoding]::UTF8)
+ $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+ if($errors.Count){throw 'Workspace pickup fixture parse failed'}
+ foreach($name in @('Floating-Point','Floating-Toolbar')){
+  $helper=$ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true)
+  if($helper.Count -ne 1){throw "Expected one $name helper"}
+  Invoke-Expression $helper[0].Extent.Text
+ }
+ $preview=@{x=546;y=48;width=108;height=280};$area=@{x=256;y=48;width=688;height=846}
+ foreach($case in @(
+  @{at=@{x=600;y=318};density=1;expected=@{x=600;y=601}},
+  @{at=@{x=1139;y=706};density=1.5;expected=@{x=1139;y=1130}},
+  @{at=@{x=1439;y=865};density=2;expected=@{x=1439;y=1431}},
+  @{at=@{x=1091;y=128};preview=@{x=982;y=-302;width=218;height=440};density=1;expected=@{x=600;y=681}}
+ )){
+  $bounds=if($case.preview){$case.preview}else{$preview}
+  $point=Floating-Point $case.at $bounds $area $case.density
+  if($point.x -ne $case.expected.x -or $point.y -ne $case.expected.y){throw 'Floating destination did not preserve the native grip offset at the current density'}
+ }
+ $model='{"workspace_update":{"revision":12,"drag":null},"state":{"workspace":{"layout":{"floating":[{"root":{"kind":"tabs","id":2,"panels":["toolbar"]}}]}}},"layout":{"groups":[{"id":2,"panels":["toolbar"],"floating":true}]}}'|ConvertFrom-Json
+ if(!(Floating-Toolbar $model 11)){throw 'Committed floating toolbar was rejected'}
+ if(Floating-Toolbar $model 12){throw 'Stale floating layout passed release'}
+ $model.workspace_update.drag=[pscustomobject]@{group=@{id=2}}
+ if(Floating-Toolbar $model 11){throw 'Held floating preview passed release'}
+ $model.workspace_update.drag=$null;$model.state.workspace.layout.floating=@()
+ if(Floating-Toolbar $model 11){throw 'Resolved-only floating preview passed release'}
+ $model.state.workspace.layout.floating=@([pscustomobject]@{root=@{kind='tabs';id=2;panels=@('toolbar')}})
+ $model.layout.groups[0].floating=$false
+ if(Floating-Toolbar $model 11){throw 'Docked toolbar passed floating release'}
+}

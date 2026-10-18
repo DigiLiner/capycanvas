@@ -291,7 +291,7 @@ impl SnapshotRenderer {
         if view.order().iter().any(|&h| view.object_layer(h).is_some()) {
             required.compute.extend(r.scene_pipelines.objects.pipelines().into_iter().cloned());
         }
-        let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+        let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
         let prepared = (|| {
             if !matches!(self.scope, SceneScope::Raw(_)) {
                 for (layers, execution) in scene::startup_effect_chains(view) {
@@ -546,7 +546,7 @@ impl SnapshotRenderer {
         let mut consume=Some(consume);
         self.with_region_gpu([x, y, width, height], reserved_bytes, |r, packet, region, encoder| {
             let (target, _) = create_color_target(&r.device, [width, height], "snapshot region");
-            let mut scene = r.scene.take().unwrap_or_else(|| scene::Scene::new(r));
+            let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
             let captured = scene.capture_region(r, packet, &target, region, output, encoder);
             r.scene = Some(scene);
             captured?;
@@ -581,7 +581,7 @@ impl SnapshotRenderer {
             match result {
                 Err(GpuRasterError::DeferredObjectWork)=> {
                     let r=&mut self.renderer;
-                    let mut scene=r.scene.take().unwrap_or_else(||scene::Scene::new(r));
+                    let mut scene=r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
                     let result=scene.drain_exact_objects_async(r).await;
                     r.scene=Some(scene);
                     result?;
@@ -616,7 +616,7 @@ impl SnapshotRenderer {
         let material_pages = if self.backing.values().any(|data| data.watercolor.is_some()) {
             scene::Scene::MATERIAL_CACHE_PAGES as u64
         } else { 0 };
-        let mut planned = scene::Scene::capture_image_bound(view, window)
+        let mut planned = scene::Scene::capture_image_bound(view, region)
             .saturating_add(scene::Scene::geometry_bytes(self.renderer.scene.as_ref()))
             .saturating_add(reserved_bytes)
             .saturating_add(self.renderer.analysis_bytes())
@@ -759,7 +759,7 @@ impl SnapshotRenderer {
                 let work=async {
                     let (r,packet,region,mut encoder)=self.prepare_region_gpu(region,reserved)?;
                     if let Some(selection)=selection {r.selection_clip.prepare_region(&r.device,&mut encoder,extent,selection,Some(region))?;}
-                    let mut scene=r.scene.take().unwrap_or_else(||scene::Scene::new(r));
+                    let mut scene=r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
                     let result=scene.capture_query_tiles(r,packet,region,output,preview,tiles_per_submission,&mut encoder,|r,view,region,encoder| {
                         control.check()?;consume(r,view,region,encoder)
                     }).await;

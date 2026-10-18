@@ -68,7 +68,9 @@ fn deferred_transforms_present_rotated_views_and_navigators_without_intermediate
              if (x / 2 + y / 3) % 2 == 0 { 40 } else { 220 }, 255])).into())); }
         occurrence_mut(&mut doc,0).opacity = opacity;
         let mut r = WgpuRasterizer::native_headless_without(doc.composition().color, omitted).unwrap();
-        assert_eq!(r.device.float32_filterable(), omitted.is_empty());
+        assert_eq!(r.device.float32_filterable(),
+            r.adapter.features().contains(wgpu::Features::FLOAT32_FILTERABLE)
+                && !omitted.contains(wgpu::Features::FLOAT32_FILTERABLE));
         let mut exact = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         exact.test.reference = true;
         let mut frame = packet(doc.scene(), extent);
@@ -557,4 +559,38 @@ fn moving_pixels_invalidate_the_cut_only_when_its_coverage_changes() {
             assert_eq!(r.readback_srgb_rgba8().unwrap(),exact.readback_srgb_rgba8().unwrap());
         }
     }
+}
+#[test]
+fn mapped_display_backup_shares_one_immutable_copy() {
+    let doc = document();
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut frame = packet(doc.scene(), doc.composition().size);
+    frame.view.document_to_surface = [0.25, 0., 0., 0.25, 0., 0.];
+    r.submit(frame).unwrap();
+    frame.composite_all = false;
+    r.set_transform_preview(Some(&layer_render::TransformPreview {
+        transaction: 1, target: source_at(&doc,0), moving: true, selection: None,
+        transform: ImageTransform::affine(Affine::translation(Point { x: 10., y: 0. })),
+    })).unwrap();
+    r.submit(frame).unwrap();
+    let cache = r.scale_display.as_ref().unwrap();
+    assert!(matches!(cache.placed, Some(Presentation::Mapped(_))));
+    let source = cache.view().texture().clone();
+    let before = pixels(&r, &source);
+    assert!(before.iter().flatten().any(|value| *value != 0.));
+    let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+    let backup = cache.backup(&r, &mut encoder).unwrap();
+    encoder.submit(&r.queue);
+    assert_eq!(backup.views[0], backup.views[1]);
+    assert_eq!(backup.views[0], backup.views[2]);
+    assert_eq!(backup.bytes, texture_bytes(backup.views[0].texture()));
+    assert_eq!(backup.views[0].texture().format(), source.format());
+    assert_eq!(backup.views[0].texture().size(), source.size());
+    assert_eq!(backup.views[0].texture().mip_level_count(), 1);
+    for view in &backup.views { assert_eq!(pixels(&r, view.texture()), before); }
+    assert_eq!(source.format(), wgpu::TextureFormat::Rgba32Float);
+    r.queue.write_texture(source.as_image_copy(), &vec![0; (source.width()*source.height()*16) as usize],
+        wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(source.width()*16),rows_per_image:None}, source.size());
+    assert!(pixels(&r, &source).iter().flatten().all(|value| *value == 0.));
+    for view in &backup.views { assert_eq!(pixels(&r, view.texture()), before); }
 }

@@ -9,16 +9,19 @@ if($app.ProcessName -ne 'CapyCanvas'){throw 'Expected an isolated CapyCanvas rev
 if(!$OutputDirectory){$OutputDirectory=Split-Path -Parent $StateFile}
 [IO.Directory]::CreateDirectory($OutputDirectory)|Out-Null
 function Model {
-    try {$snapshot=Get-Content -LiteralPath $StateFile -Raw|ConvertFrom-Json;if($snapshot.process_id -eq $ProcessId){return $snapshot.model}}catch{}
+    $snapshot=Read-Snapshot $StateFile
+    if($snapshot.process_id -ne $ProcessId){throw 'Review snapshot process owner mismatch'}
+    return $snapshot.model
 }
 function Wait-Until([scriptblock]$Condition,[string]$Message,[int]$Seconds=8){
     $watch=[Diagnostics.Stopwatch]::StartNew()
     do{try{if(& $Condition){return}}catch{};Start-Sleep -Milliseconds 75}while($watch.Elapsed.TotalSeconds -lt $Seconds)
     throw $Message
 }
-Wait-Until {$app.Refresh();$app.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Review startup did not complete' 45
+$native=@{window=$null}
+Wait-Until {$native.window=Owned-DrawingWindow $app;$null -ne $native.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Review startup did not complete' 45
 if(!(Model).windows_isolated_settings){throw 'Use an isolated review settings profile'}
-$root=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+$root=$native.window.Root;$drawingWindow=$native.window.Handle
 function Find([string]$Value,$Type=[System.Windows.Automation.ControlType]::Button,[switch]$Id){
     $property=if($Id){[System.Windows.Automation.AutomationElement]::AutomationIdProperty}else{[System.Windows.Automation.AutomationElement]::NameProperty}
     $condition=[System.Windows.Automation.PropertyCondition]::new($property,$Value)
@@ -44,7 +47,8 @@ function Arranged([string]$Id,$Type){
     $hit.item
 }
 function Reveal-Control([string]$Id,[string]$RootId,$Type,[double]$Height,[double]$Scale){
-    $entry=Control $Id $Type -Id;$entry.SetFocus()
+    $entry=Control $Id $Type -Id
+    $entry.SetFocus()
     Wait-Until {$entry.Current.HasKeyboardFocus} "Tool control did not receive focus: $Id"
     $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker
     $node=$walker.GetParent($entry);$scroll=$null;$viewport=$null
@@ -53,17 +57,37 @@ function Reveal-Control([string]$Id,[string]$RootId,$Type,[double]$Height,[doubl
         if($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern) -and $pattern.Current.VerticallyScrollable){$scroll=$pattern;$viewport=$node}
         $node=$walker.GetParent($node)
     }
+    $panel=@((Model).layout.groups|Where-Object active -eq 'tool_settings')
+    if($panel.Count -ne 1){throw 'Tool panel does not have one active native group'}
+    $panelBounds=Native-Bounds $panel[0].id $Scale -Group
     for($step=0;$step -lt 20;$step++){
-        $field=Find $RootId $null -Id;$bounds=$field.Current.BoundingRectangle
+        $field=Control $RootId $null -Id;$bounds=$field.Current.BoundingRectangle
         $clip=if($viewport){$viewport.Current.BoundingRectangle}else{$root.Current.BoundingRectangle}
+        $clip.Intersect($panelBounds)
         $clip.Inflate(1,1)
-        if(!$field.Current.IsOffscreen -and $clip.Contains($bounds) -and $bounds.Height/$Scale -ge $Height-1){return (Arranged $RootId $null)}
+        if(!$field.Current.IsOffscreen -and $clip.Contains($bounds) -and $bounds.Height/$Scale -ge $Height-1){
+            return (Arranged $RootId $null)
+        }
         if(!$scroll){throw "Partially visible control has no scroll container: $Id"}
-        $below=$bounds.Top -ge ($clip.Top+$clip.Bottom)/2
-        $direction=if($bounds.Top -ge $clip.Bottom){[System.Windows.Automation.ScrollAmount]::LargeIncrement}elseif($bounds.Bottom -le $clip.Top){[System.Windows.Automation.ScrollAmount]::LargeDecrement}elseif($below){[System.Windows.Automation.ScrollAmount]::SmallIncrement}else{[System.Windows.Automation.ScrollAmount]::SmallDecrement}
+        $navigationBounds=Native-Bounds $RootId $Scale
+        $below=$navigationBounds.Top -ge ($clip.Top+$clip.Bottom)/2
+        $direction=if($navigationBounds.Top -ge $clip.Bottom){[System.Windows.Automation.ScrollAmount]::LargeIncrement}elseif($navigationBounds.Bottom -le $clip.Top){[System.Windows.Automation.ScrollAmount]::LargeDecrement}elseif($below){[System.Windows.Automation.ScrollAmount]::SmallIncrement}else{[System.Windows.Automation.ScrollAmount]::SmallDecrement}
         $before=$scroll.Current.VerticalScrollPercent
-        $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,$direction)
-        Wait-Until {[Math]::Abs($scroll.Current.VerticalScrollPercent-$before) -gt .01} "Control $Id did not scroll fully into view"
+        try{
+            $scroll.Scroll([System.Windows.Automation.ScrollAmount]::NoAmount,$direction)
+            Wait-Until {[Math]::Abs($scroll.Current.VerticalScrollPercent-$before) -gt .01} "Control $Id did not scroll fully into view"
+        }catch{
+            try{
+                $revealFailureRecord=[ordered]@{step=$step;id=$Id;root_id=$RootId;expected_height=$Height;scale=$Scale;field_bounds=$bounds;clip=$clip;panel_bounds=$panelBounds;navigation_bounds=$navigationBounds;direction=[string]$direction;before_percent=$before}
+                try{$failedViewport=$viewport.Current;$revealFailureRecord.viewport=@{automation_id=$failedViewport.AutomationId;class_name=$failedViewport.ClassName;runtime_id=@($viewport.GetRuntimeId())}}catch{$revealFailureRecord.viewport_error=$_.Exception.Message}
+                try{$failedScroll=$scroll.Current;$revealFailureRecord.scroll_current=@{percent=$failedScroll.VerticalScrollPercent;view_size=$failedScroll.VerticalViewSize;vertically_scrollable=$failedScroll.VerticallyScrollable}}catch{$revealFailureRecord.scroll_error=$_.Exception.Message}
+                try{$failedField=$field.Current;$revealFailureRecord.field_current=@{bounds=$failedField.BoundingRectangle;offscreen=$failedField.IsOffscreen}}catch{$revealFailureRecord.field_error=$_.Exception.Message}
+                try{$failedWorkspace=Workspace-Root;$revealFailureRecord.native_publication=$failedWorkspace.Current.ItemStatus}catch{$revealFailureRecord.native_publication_error=$_.Exception.Message}
+                try{$failedOrigin=[CapyRowPointer+Point]::new();$failedHandle=[IntPtr]$root.Current.NativeWindowHandle;$revealFailureRecord.client_origin=@{native_window_handle=$failedHandle.ToInt64();available=[CapyRowPointer]::ClientToScreen($failedHandle,[ref]$failedOrigin);point=$failedOrigin}}catch{$revealFailureRecord.client_origin_error=$_.Exception.Message}
+                $revealFailureRecord|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $OutputDirectory 'reveal-control-scroll-failure.json') -Encoding utf8
+            }catch{}
+            throw
+        }
     }
     throw "Control $Id remained clipped after scrolling"
 }
@@ -93,6 +117,11 @@ function Select-Tool([string]$Id,[switch]$Cancel){
         if($Id -eq 'scale_rotate'){return (Model).state.layer_tools.tool -eq 'transform'}
         @((Model).state.commands|Where-Object {$_.id -eq $Id -and $_.selected}).Count -eq 1
     } "Tool did not activate: $Id"
+    if((Model).state.customization.drawer){
+        $canvas=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'drawing-canvas'))
+        $canvas.SetFocus();[CapyRowPointer]::Key($ProcessId,0x1B)
+        Wait-Until {$null -eq (Model).state.customization.drawer -and !(Find 'tool-drawer' $null -Id)} 'Tool drawer did not dismiss after selection'
+    }
 }
 function Check-Projection {
     # Both the snapshot and XAML can advance while asynchronous raster work settles.
@@ -112,7 +141,7 @@ function Check-Projection {
             $groups=@($state.tool_set.groups);$subtools=@($state.tool_set.subtools)
             if($groups.Count -and $subtools.Count){
                 $above=(Find ('tool-group-'+($groups.Count-1)) -Id).Current.BoundingRectangle;$below=(Find 'tool-subtool-0' -Id).Current.BoundingRectangle
-                $scale=[CapyRowPointer]::GetDpiForWindow($app.MainWindowHandle)/96
+                $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96
                 if(($below.Top-$above.Bottom)/$scale -lt 12){return $false}
             }
             foreach($setting in $state.tool_settings){
@@ -152,7 +181,7 @@ function Check-Projection {
 $toolGeometry=@()
 function Check-Geometry([string]$Tool){
     $state=(Model).state
-    $scale=[CapyRowPointer]::GetDpiForWindow($app.MainWindowHandle)/96.
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
     $tonal=@($state.tool_extra|Where-Object {$_.Choice.id -eq 'tonal-tones'}).Count -gt 0
     $rows=@()
     foreach($setting in $state.tool_settings){
@@ -168,7 +197,7 @@ function Check-Geometry([string]$Tool){
         $captions=$field.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Text))
         $caption=@($captions|Where-Object {$_.Current.Name -eq $setting.label})[0]
         if($caption -and [Math]::Abs((Native-Bounds ('number-caption-tool-setting-'+$setting.id) $scale).Left-$bounds.Left) -gt 1){throw "Tool $Tool field $($setting.id) indents its plain caption"}
-        $rows+=@{id=$setting.id;bounds=$bounds;entry=$value;kind=$setting.numeric.kind}
+        $rows+=@{id=$setting.id;height=$expected;bounds=$bounds;entry=$value;kind=$setting.numeric.kind}
     }
     $actionRows=@()
     foreach($group in @($state.tool_actions|Where-Object row|Group-Object row)){
@@ -196,13 +225,13 @@ function Check-Geometry([string]$Tool){
     $script:toolGeometry+=@{tool=$Tool;theme=$state.theme;dpi=96*$scale;rows=$rows;action_rows=$actionRows}
     $script:toolGeometry|ConvertTo-Json -Depth 8|Set-Content (Join-Path $OutputDirectory 'tool-settings-geometry.json')
     $group=@((Model).layout.groups|Where-Object active -eq 'tool_settings')[0]
-    $origin=[CapyRowPointer+Point]::new();[CapyRowPointer]::ClientToScreen($app.MainWindowHandle,[ref]$origin)|Out-Null
+    $origin=[CapyRowPointer+Point]::new();[CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)|Out-Null
     @{client_origin=$origin;panel=(Native-Bounds $group.id $scale -Group);dpi=96*$scale}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture-layout.json'))
-    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $app.MainWindowHandle.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture.json'))
+    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture.json'))
     if($rows.Count -gt 5){
-        $first=$state.tool_settings[0];$expected=if($first.numeric.kind -eq 'slider'){36}else{24}
-        $null=Reveal-Number $first.id $expected $scale
-        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $app.MainWindowHandle.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'-top.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-top-capture.json'))
+        $first=$rows[0]
+        $null=Reveal-Number $first.id $first.height $scale
+        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'-top.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-top-capture.json'))
     }
 }
 if(!@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'}).Count){
@@ -256,6 +285,10 @@ Wait-Until {[Math]::Abs((Value 'flow')-$markerFlow) -lt .0001} 'Detached draft o
 Invoke-Id 'tool-group-0'
 Wait-Until {(Model).state.tool_set.groups[0].selected} 'Pen group did not restore'
 if(((Field 'flow').GetRuntimeId() -join ':') -eq $original){throw 'Changing tools retained an old draft context'}
+if(!@((Model).layout.groups|Where-Object active -eq 'layers').Count){
+    Invoke-Id 'column-icon-layers'
+    Wait-Until {@((Model).layout.groups|Where-Object active -eq 'layers').Count -gt 0} 'Layers column did not open'
+}
 # Target changes must discard drafts even when the numeric schema is identical.
 Draft 'flow' '88'
 $oldTarget=(Model).state.layer_tools.editing_layer.id
@@ -377,13 +410,6 @@ Wait-Until {((Model).state.commands|Where-Object id -eq 'show_rulers').selected 
 Check-Projection
 $check.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
 Select-Tool 'pen'
-# A toolbar selection can open a drawer; its outside-contact dismissal would
-# consume the controlled stroke. Dismiss it explicitly before testing artwork.
-if((Model).state.customization.drawer){
-    $canvas=$root.FindFirst([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'drawing-canvas'))
-    $canvas.SetFocus();[CapyRowPointer]::Key($ProcessId,0x1B)
-    Wait-Until {$null -eq (Model).state.customization.drawer} 'Tool drawer did not dismiss before the stroke'
-}
 Wait-Until {(Model).brush_ready} 'Selected pen did not become ready'
 Invoke-Control 'Test stroke'
 Wait-Until {@((Model).state.commands|Where-Object {$_.id -eq 'undo' -and $_.enabled}).Count -eq 1} 'Controlled stroke did not complete'

@@ -118,9 +118,9 @@ export async function captureWindowsEditor({manifest,output,evaluate,call}) {
         return n.id;
       };
       const elements=[...document.querySelectorAll('button,summary,.panel,.panel-group,.group-tabs,.tool-choice-button,.brush-preview,#header,#document-title,.workspace-switcher,.layer-row,.layer-name,.layer-meta,.layer-grip,.layer-thumbnail canvas,.layer-header,.layer-options,.layer-flags,.layer-footer')]
-        .filter(n=>{const b=n.getBoundingClientRect(),visible=n.matches('.tool-choice-button')?visibleRect(n):b;return getComputedStyle(n).visibility==='visible'&&visible.width>0&&visible.height>0&&b.bottom>0&&b.top<innerHeight})
+        .filter(n=>{const visible=visibleRect(n);return getComputedStyle(n).visibility==='visible'&&visible.width>0&&visible.height>0})
         .map(n=>({id:n.matches('.tool-choice-button')?'tool-'+(n.parentElement.classList.contains('tool-groups')?'group':'subtool')+'-'+[...n.parentElement.children].indexOf(n):elementId(n),classes:n.className,name:n.getAttribute('aria-label')||n.textContent.trim(),command:n.dataset.command,
-          bounds:n.matches('.tool-choice-button')?visibleRect(n):rect(n),unclipped_bounds:rect(n),style:Object.fromEntries(['fontFamily','fontSize','fontWeight','lineHeight','padding','gap'].map(k=>[k,getComputedStyle(n)[k]]))}));
+          bounds:visibleRect(n),unclipped_bounds:rect(n),style:Object.fromEntries(['fontFamily','fontSize','fontWeight','lineHeight','padding','gap'].map(k=>[k,getComputedStyle(n)[k]]))}));
       return JSON.parse(JSON.stringify({viewport:[innerWidth,innerHeight],scale:devicePixelRatio,canvas:[layerApp.canvas.width,layerApp.canvas.height],
         adapter:{vendor:adapter.info.vendor,architecture:adapter.info.architecture,isFallbackAdapter:adapter.info.isFallbackAdapter},
         theme:layerApp.state().theme,palette:layerApp.state().palette,document:layerApp.state().tabs[0],camera:layerApp.state().camera,layout,elements},(_,v)=>typeof v==='bigint'?v.toString():v));
@@ -159,7 +159,7 @@ export async function captureWindowsEditor({manifest,output,evaluate,call}) {
     }
     const panelVisible=id=>fixture.layout.groups.some(g=>g.active===id);
     const toolSet=compare('Tool Set',fixture.tool_set,metrics.elements.filter(e=>/^tool-(group|subtool)-/.test(e.id)),1.01,true,panelVisible('brushes'));
-    const isHeader=id=>/^(application-(menu[s-]|primary-menu$)|workspace-switch|header-workspace-menu$|header-overflow-[0-2]$|document-title$|zen-button$|fullscreen$|settings-button$)/.test(id);
+    const isHeader=id=>/^(application-(menu[s-]|primary-menu$)|workspace-switch|header-workspace-menu$|header-overflow-[0-2]$|document-title$|zen-capy$|fullscreen$|settings-button$)/.test(id);
     const header=compare('Header',fixture.header,metrics.elements.filter(e=>isHeader(e.id)),2.01);
     const layerId=id=>/^layer-(row-[0-9]+|[0-9]+-(content|mask|thumbnail|mask-thumbnail|visibility|selection|label|meta|drag)|controls|options|flags|footer|blend)$/.test(id);
     assert.equal(fixture.layers?.some(e=>e.id.startsWith('layer-row-')),panelVisible('layers'),'Native Layers rows must match shared visibility');

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import {prepareWorkers} from '../../tools/cdp.mjs';
 
 export async function tracePipelineCalls(cdp) {
-  const calls=[],jobs=[],workers=new Set(),failures=[],pending=new Map(),detached=new Set();
-  let closing=false,holdTransforms=false;
+  const calls=[],jobs=[],workers=new Set(),detached=new Set();
+  let holdTransforms=false;
   const held=new Set(),liveWorkers=new Set();
   const debug=message=>{if(process.env.LAYER_TEST_VERBOSE)console.log('Pipeline trace:',message)};
   const source=`(()=>{
@@ -65,6 +66,12 @@ export async function tracePipelineCalls(cdp) {
       };
     }
   })()`;
+  const preparation=prepareWorkers(cdp,async session=>{
+    await cdp.call('Runtime.addBinding',{name:'__capyPipelineTrace'},session);
+    const result=await cdp.call('Runtime.evaluate',{expression:source+';globalThis.__holdTransform='+holdTransforms},session);
+    if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));
+    debug('injected '+session);
+  });
   const receive=cdp.receive;
   cdp.receive=message=>{
     receive(message);
@@ -80,24 +87,11 @@ export async function tracePipelineCalls(cdp) {
       const session=message.params.sessionId;
       liveWorkers.add(session);
       debug('attached '+session+' '+message.params.targetInfo.url);
-      const task=(async()=>{
-        try{
-          await cdp.call('Runtime.enable',{},session);debug('enabled '+session);
-          await cdp.call('Runtime.addBinding',{name:'__capyPipelineTrace'},session);
-          const result=await cdp.call('Runtime.evaluate',{expression:source+';globalThis.__holdTransform='+holdTransforms},session);
-          if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));
-          debug('injected '+session);
-        }catch(error){if(!detached.has(session)&&!closing)failures.push(String(error));}
-        finally{
-          if(!detached.has(session))try{await cdp.call('Runtime.runIfWaitingForDebugger',{},session);debug('released '+session)}catch(error){if(!detached.has(session)&&!closing)failures.push(String(error))}
-        }
-      })();
-      pending.set(session,task);task.then(()=>pending.delete(session),error=>{pending.delete(session);if(!detached.has(session)&&!closing)failures.push(String(error));});
     }
   };
   await cdp.call('Runtime.addBinding',{name:'__capyPipelineTrace'});
   const {identifier}=await cdp.call('Page.addScriptToEvaluateOnNewDocument',{source});
-  await cdp.call('Target.setAutoAttach',{autoAttach:true,waitForDebuggerOnStart:true,flatten:true,filter:[{type:'worker'},{exclude:true}]});
+  await preparation.start();
   debug('auto-attach ready');
   return {
     calls,jobs,
@@ -116,8 +110,7 @@ export async function tracePipelineCalls(cdp) {
       held.clear();
     },
     async check(stage,{worker=false}={}){
-      await Promise.all([...pending].filter(([session])=>!detached.has(session)).map(([_session,task])=>task));
-      assert.deepEqual(failures,[],`${stage}: worker instrumentation succeeded`);
+      await preparation.check();
       if(worker){
         assert.ok(jobs.some(record=>record.task==='TransformPixels'),`${stage}: native paint TransformPixels worker job was observed`);
         assert.ok(calls.some(record=>record.realm==='worker'),`${stage}: worker GPU pipelines were observed`);
@@ -127,11 +120,12 @@ export async function tracePipelineCalls(cdp) {
       assert.deepEqual(calls.filter(record=>!record.method.endsWith('Async')),[],`${stage}: no immediate GPU pipeline creation in page or workers`);
     },
     async close(){
-      closing=true;
       if(holdTransforms)await this.releaseTransforms();
-      await cdp.call('Target.setAutoAttach',{autoAttach:false,waitForDebuggerOnStart:false,flatten:true});
-      await cdp.call('Page.removeScriptToEvaluateOnNewDocument',{identifier});
-      cdp.receive=receive;
+      try { await preparation.close(); }
+      finally {
+        try { await cdp.call('Page.removeScriptToEvaluateOnNewDocument',{identifier}); }
+        finally { cdp.receive=receive; }
+      }
     },
   };
 }

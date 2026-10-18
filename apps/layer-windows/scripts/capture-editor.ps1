@@ -86,8 +86,12 @@ function Settle {
         }elseif($readout -and !$readout.Current.IsOffscreen){return $false}
         # A stable model does not imply that asynchronous GPU readbacks reached
         # the visible Image controls. Require each visible raster row's previews.
-        $visibleRows=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) |
-            Where-Object {!$_.Current.IsOffscreen -and $_.Current.AutomationId -match '^layer-row-[0-9]+$'})
+        $layerLists=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'layer-list'))
+        $visibleRows=@(foreach($list in $layerLists){
+            $list.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) |
+                Where-Object {!$_.Current.IsOffscreen -and $_.Current.AutomationId -match '^layer-row-[0-9]+$'}
+        })
         $layersVisible=@($m.layout.groups|Where-Object active -eq 'layers').Count -gt 0
         if(($visibleRows.Count -gt 0) -ne $layersVisible){return $false}
         foreach($row in $visibleRows){

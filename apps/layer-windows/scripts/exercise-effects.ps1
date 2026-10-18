@@ -133,7 +133,10 @@ function Tap-Point([int]$Index){
 function Pointer-Session([scriptblock]$Body){
     [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
     [CapyRowPointer]::Initialize([uint32]$review.Id)
-    try{& $Body}finally{[CapyRowPointer]::Dispose()}
+    try{& $Body}catch{
+        try{Capture 'pointer-failure-before-cleanup' -WithModel -Composed}catch{}
+        throw
+    }finally{[CapyRowPointer]::Dispose()}
 }
 function Stops{@((Property 'gradient').value.value.stops)}
 function Gradient-Json{(Property 'gradient').value.value|ConvertTo-Json -Depth 10 -Compress}
@@ -290,7 +293,7 @@ function Check-PropertyValueScrub {Pointer-Session {
         $scrubText=($expected*100).ToString('F1',[Globalization.CultureInfo]::InvariantCulture)+' %'
         [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 60
         for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step);Start-Sleep -Milliseconds 35}
-        try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $scrubText} "$device value scrub did not preview exact $expected with fixed readout $scrubText"}catch{throw "$device scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value), focus=$([System.Windows.Automation.AutomationElement]::FocusedElement.Current.AutomationId): $_"}
+        try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $scrubText} "$device value scrub did not preview exact $expected with fixed readout $scrubText"}catch{throw "$device scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value): $_"}
         Write-Host "$device fine live=$((Property 'opacity').value.value), expected=$expected"
         [CapyRowPointer]::Up()
         Start-Sleep -Milliseconds 250
@@ -302,8 +305,7 @@ function Check-PropertyValueScrub {Pointer-Session {
         [CapyRowPointer]::Down($device,$x,$y);Start-Sleep -Milliseconds 60
         for($step=1;$step -le 6;$step++){[CapyRowPointer]::Move($x,$y-5*$step);Start-Sleep -Milliseconds 35}
         Wait-Until {[Math]::Abs((Property 'opacity').value.value-$expected) -lt 1e-6} "$device canceled value scrub did not preview exact $expected"
-        $focused=[System.Windows.Automation.AutomationElement]::FocusedElement
-        Write-Host "$device scrub Escape focus=$($focused.Current.AutomationId), name=$($focused.Current.Name), before=$before, preview=$((Property 'opacity').value.value)"
+        Write-Host "$device scrub Escape before=$before, preview=$((Property 'opacity').value.value)"
         [CapyRowPointer]::Key(0x1B)
         Wait-Until {(Property 'opacity').value.value -eq $before} "$device Escape did not cancel while the contact remained held"
         Write-Host "$device scrub after held Escape=$((Property 'opacity').value.value)"
@@ -534,8 +536,7 @@ function Check-CurveGestures {
         catch{throw "Held Up: initial=$($point[1]), expected=$($point[1]+5/255), actual=$((Property 'rgb').value.value[1][1]), count=$((Property 'rgb').value.value.Count), selected=$((Property 'rgb').curve.selected), step=$((Property 'rgb').curve.numeric.step)"}
         Invoke 'Undo' -Name;Wait-Until {(Curve-Json) -eq $original} 'A held arrow was not one Undo'
         Tap-Point 1
-        $focused=[System.Windows.Automation.AutomationElement]::FocusedElement
-        @{graph_focus=(Control 'property-rgb-curve').Current.HasKeyboardFocus;focused_id=$focused.Current.AutomationId;focused_name=$focused.Current.Name;focused_type=$focused.Current.ControlType.ProgrammaticName;selected=(Property 'rgb').curve.selected;points=(Property 'rgb').value.value}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'curve-delete-focus.json')
+        @{graph_focus=(Control 'property-rgb-curve').Current.HasKeyboardFocus;selected=(Property 'rgb').curve.selected;points=(Property 'rgb').value.value}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $run 'curve-delete-focus.json')
         [CapyRowPointer]::Key(0x2E)
         Wait-Until {(Property 'rgb').value.value.Count -eq 2} 'Delete did not remove the selected point'
         Invoke 'Undo' -Name;Wait-Until {(Curve-Json) -eq $original} 'Delete was not one Undo'
