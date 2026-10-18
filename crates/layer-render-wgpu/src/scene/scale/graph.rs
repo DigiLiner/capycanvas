@@ -209,7 +209,8 @@ impl Graph {
         let mut all = HashSet::new();
         Expression::visit(&root, &mut all);
         let mut eligible: Vec<_> = all.into_iter().filter(|n| !Arc::ptr_eq(n, &root)
-            && matches!(n.as_ref(), Expression::Objects {..} | Expression::Vector { .. } | Expression::Combine { .. } | Expression::Effect { .. })).collect();
+            && matches!(n.as_ref(), Expression::Objects {..} | Expression::Vector { .. } | Expression::Combine { .. } | Expression::Effect { .. })
+            && !matches!(n.as_ref(), Expression::Combine { front, .. } if matches!(front.as_ref(), Expression::VectorPreview { .. }))).collect();
         eligible.sort_by_cached_key(|n| (n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
         eligible.truncate((budget / plan.level_bytes(plan.level)) as usize);
         let wanted: HashSet<_> = eligible.into_iter().collect();
@@ -305,9 +306,7 @@ impl stack::Compositor for Builder<'_> {
             vec![Arc::new(Expression::Objects {content,preview:self.sources.is_some_and(|sources|sources.object_moving==Some(index))})]
         } else if self.packet.scene.vector_layer(index).is_some() {
             let vector = Arc::new(Expression::Vector { owner: index, offset: self.packet.scene.occurrence_offset64(index).map(f64::to_bits) });
-            if self.sources.is_some_and(|sources| sources.preview_layers.contains(&index)) {
-                vec![Expression::combine(Arc::new(Expression::VectorPreview { owner: index }), vector, layer_core::LayerBlend::Normal, 0)]
-            } else { vec![vector] }
+            vec![Expression::combine(Arc::new(Expression::VectorPreview { owner: index }), vector, layer_core::LayerBlend::Normal, 0)]
         } else { vec![self.source(index, false)] };
         if layer.mask.as_ref().is_some_and(|m| m.enabled) {
             Ok(vec![Expression::combine(Expression::over(&output), self.source(index, true), layer_core::LayerBlend::Normal, 32)])
@@ -376,7 +375,7 @@ impl Evaluator<'_> {
                 return Ok(Value::Image { view: image.view.clone(), slot: None, opacity: 1., plan: image.plan, preview: None, encode: false });
         }
         let append = matches!(node.as_ref(), Expression::Vector { .. }) && self.cache.graph.branches.get(node).is_some_and(|branch| branch.image.is_some()
-            && page_coordinates(region).all(|c| branch.stale.contains(&c)));
+            && !branch.stale.is_empty() && page_coordinates(region).all(|c| branch.stale.contains(&c) || branch.valid.contains(&c)));
         let output = if let Some(branch) = self.cache.graph.branches.get_mut(node) {
             let image = branch.image.get_or_insert_with(|| Image::new(self.r, self.input, "composition branch"));
             Some(Target { view: image.view.clone(), slot: None, plan: image.plan })
@@ -402,7 +401,8 @@ impl Evaluator<'_> {
                     let back = compositor.evaluate(back)?;
                     (compositor.evaluate(front)?, back)
                 };
-                compositor.draw(front, back, layer_core::LayerBlend::ALL[*blend as usize], *flags, output)?
+                if *blend == 0 && *flags == 0 && matches!(front, Value::Color(c) if c == [0.; 4]) { compositor.materialize(back, output)? }
+                else { compositor.draw(front, back, layer_core::LayerBlend::ALL[*blend as usize], *flags, output)? }
             }
             Expression::Effect { input, chain, masks, .. } => compositor.effect(input, chain, masks, output)?,
         }))?;

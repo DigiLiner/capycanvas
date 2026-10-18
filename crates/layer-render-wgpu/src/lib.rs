@@ -888,7 +888,7 @@ pub struct WgpuRasterizer {
     paper_export: Option<paper::ExportShade>,
     vector_preview: Option<layer_render::VectorPreview>,
     vector_preview_shown: Option<(OccurrenceHandle, u64, DocRect)>,
-    vector_preview_layers: std::collections::HashSet<OccurrenceHandle>,
+    vector_preview_drawn: Option<layer_render::VectorPreview>,
     vector_preview_damage: Vec<DocRect>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
@@ -1277,7 +1277,7 @@ impl WgpuRasterizer {
             paper_export: None,
             vector_preview: None,
             vector_preview_shown: None,
-            vector_preview_layers: Default::default(),
+            vector_preview_drawn: None,
             vector_preview_damage: Vec::new(),
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
@@ -3610,7 +3610,6 @@ impl CanvasRenderer for WgpuRasterizer {
     fn set_selection_overlay(&mut self, overlay: Option<layer_render::SelectionOverlay>) { self.selection_overlay = overlay; }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
     fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) {
-        if let Some(preview) = &preview { self.vector_preview_layers.insert(preview.owner); }
         self.vector_preview = preview;
     }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
@@ -3899,11 +3898,12 @@ impl WgpuRasterizer {
         let shown = self.vector_preview.as_ref().map(|p| (p.owner, p.revision, scene::preview_bounds(packet.scene, p)));
         let preview_changed = shown.map(|(o, r, _)| (o, r)) != self.vector_preview_shown.map(|(o, r, _)| (o, r));
         if preview_changed {
-            for (_, _, bounds) in self.vector_preview_shown.iter().chain(shown.iter()) {
+            for bounds in scene::preview_damage(packet.scene, self.vector_preview_drawn.as_ref(), self.vector_preview.as_ref()) {
                 let rect = bounds.in_frame(packet.document_extent);
-                if !rect.is_empty() { self.vector_preview_damage.push(*bounds); self.document_damage.push(rect); }
+                if !rect.is_empty() { self.vector_preview_damage.push(bounds); self.document_damage.push(rect); }
             }
             self.vector_preview_shown = shown;
+            self.vector_preview_drawn = self.vector_preview.clone();
         }
         let packet = FramePacket { composite_all: packet.composite_all && object_damage.is_none(), ..packet };
         self.metrics.frame_composited_pages.clear();

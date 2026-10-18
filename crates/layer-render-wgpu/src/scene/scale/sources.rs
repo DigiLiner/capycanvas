@@ -100,7 +100,6 @@ pub(crate) struct Sources {
     pub(in crate::scene) object_refinements: BTreeMap<super::super::object_cache::DamageKey, Damage>,
     pub(in crate::scene) vector_preview: Option<(OccurrenceHandle, Arc<layer_core::authored::vector::PathItem>, DocRect)>,
     pub(in crate::scene) preview_damage: Vec<DocRect>,
-    pub(in crate::scene) preview_layers: std::collections::HashSet<OccurrenceHandle>,
 }
 impl Sources {
     pub(crate) fn published(&mut self, id: SourceTarget, data: Arc<RasterData>) {

@@ -138,6 +138,33 @@ pub(crate) fn preview_bounds(scene: SceneView<'_>, preview: &layer_render::Vecto
     let [x0, y0, x1, y1] = preview.path.bounds();
     DocRect { min: [(x0 + offset[0]).floor() as i64 - 16, (y0 + offset[1]).floor() as i64 - 16], max: [(x1 + offset[0]).ceil() as i64 + 16, (y1 + offset[1]).ceil() as i64 + 16] }
 }
+fn half_widths(path: &PathItem) -> Option<(f64, &layer_core::authored::vector::Subpath, Option<&layer_core::authored::vector::WidthProfile>)> {
+    let stroke = path.style.strokes().next()?;
+    Some((stroke.width * 0.5, path.geometry.subpaths().first()?, stroke.profile.as_deref()))
+}
+pub(crate) fn preview_damage(scene: SceneView<'_>, old: Option<&layer_render::VectorPreview>, new: Option<&layer_render::VectorPreview>) -> Vec<DocRect> {
+    let whole = |p: &layer_render::VectorPreview| preview_bounds(scene, p);
+    let (Some(old), Some(new)) = (old, new) else { return old.into_iter().chain(new).map(whole).collect() };
+    let changed_style = old.owner != new.owner || old.path.style.entries.len() != new.path.style.entries.len()
+        || old.path.style.entries.iter().zip(new.path.style.entries.iter()).any(|(a, b)| match (a, b) {
+            (PaintEntry::Stroke(a), PaintEntry::Stroke(b)) => a.paint != b.paint || a.cap != b.cap || a.join != b.join,
+            (a, b) => a != b,
+        });
+    let (Some((old_half, old_line, old_profile)), Some((new_half, new_line, new_profile)), false) = (half_widths(&old.path), half_widths(&new.path), changed_style) else { return vec![whole(old), whole(new)] };
+    let width = |half: f64, profile: Option<&layer_core::authored::vector::WidthProfile>, i: usize| profile.map_or([half; 2], |p| p.at(i as u32, 0.).map(|f| f * half));
+    let shared = old_line.len().min(new_line.len());
+    let first = (0..shared).find(|&i| old_line.anchor(i) != new_line.anchor(i) || width(old_half, old_profile, i) != width(new_half, new_profile, i)).unwrap_or(shared).saturating_sub(1);
+    let offset = scene.occurrence_offset64(new.owner);
+    let mut bounds: Option<[f64; 4]> = None;
+    for (line, half, profile) in [(old_line, old_half, old_profile), (new_line, new_half, new_profile)] {
+        for i in first..line.len() {
+            let p = line.anchor(i).point;
+            let r = width(half, profile, i).into_iter().fold(0., f64::max) + 2.;
+            bounds = Some(layer_core::authored::vector::union(bounds, [p[0] - r, p[1] - r, p[0] + r, p[1] + r]));
+        }
+    }
+    bounds.map(|[x0, y0, x1, y1]| DocRect { min: [(x0 + offset[0]).floor() as i64 - 1, (y0 + offset[1]).floor() as i64 - 1], max: [(x1 + offset[0]).ceil() as i64 + 1, (y1 + offset[1]).ceil() as i64 + 1] }).into_iter().collect()
+}
 pub(super) fn edit_damage(before: &VectorObject, after: &VectorObject) -> Vec<[f64; 4]> {
     if before.same_root(after) { return Vec::new(); }
     let old: HashSet<usize> = before.chunks().iter().map(chunk_key).collect();
@@ -196,7 +223,6 @@ impl Scene {
     pub(super) fn vector_damage(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>) {
         self.scale_sources.vector_preview = r.vector_preview.as_ref().zip(r.vector_preview_shown).map(|(p, (_, _, bounds))| (p.owner, p.path.clone(), bounds));
         self.scale_sources.preview_damage = r.vector_preview_damage.clone();
-        self.scale_sources.preview_layers = r.vector_preview_layers.iter().copied().filter(|h| packet.scene.vector_layer(*h).is_some()).collect();
         self.vectors.begin_frame();
         self.vectors.retain(packet.scene);
         let palette = Self::vector_palette(r, packet);
