@@ -60,10 +60,11 @@ export async function checkImageLayers({call,evaluate,settle}) {
     await evaluate('(async()=>{imageLayers.saved=new Uint8Array(await(await imageLayers.handle.getFile()).arrayBuffer())})()');
     return readPackage(evaluate,'imageLayers.saved');
   };
-  const pasteImage=async(width,height,color,offset=[0,0])=>{
+  const pasteImage=async(width,height,color,offset=[0,0],stroke=null)=>{
     await click(await evaluate('({x:innerWidth/2,y:3})'));await wait('document.hasFocus()');
     const bytes=png(width,height,()=>color,3).toString('base64');
     await evaluate(`(async()=>{const bytes=Uint8Array.from(atob('${bytes}'),c=>c.charCodeAt(0));await navigator.clipboard.write([new ClipboardItem({'image/png':new Blob([bytes],{type:'image/png'})})]);})()`);
+    if(stroke)await drag(stroke,'pen');
     await chord('v');
     await wait(`layerApp.state().canvas_bar?.context.kind==='placement'`);
     if(offset[0]||offset[1]){const [w,h]=await size(),a=await screen(w/2-width/4,h/2-height/4),b=await screen(w/2-width/4+offset[0],h/2-height/4+offset[1]);await drag(line(a,b));}
@@ -106,8 +107,7 @@ export async function checkImageLayers({call,evaluate,settle}) {
     const ink=(await state()).layers.find(l=>l.editing).id;
     await invoke('pen');await send(`{type:'select_brush',id:1}`);await send(`{type:'set_brush_size',value:30}`);
     await send(`{type:'color',action:{op:'set_slot',slot:'foreground',color:{space:'Srgb',rgba:[${GREEN.map(v=>v/255)},1]}}}`);
-    await drag(line(await screen(40,430),await screen(180,430)),'pen');await idle();
-    await pasteImage(240,180,RED);
+    await pasteImage(240,180,RED,[0,0],line(await screen(40,430),await screen(180,430)));
     await pasteImage(240,180,BLUE,[120,90]);
     const objects=() => state().then(s=>s.layers.filter(l=>l.object));
     const [front,back]=await objects(),layer=back.id;
