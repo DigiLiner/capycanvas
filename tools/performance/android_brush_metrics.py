@@ -3,10 +3,11 @@ import math
 import bisect
 
 
-def input_completions(report):
-    fields = report["input_fields"]
-    events = [dict(zip(fields, row)) for row in report["inputs"]]
-    processed = sorted(event["event_ns"] for event in events if event["phase"] in (1, 2))
+def input_completions(report, processed_timestamps=None):
+    if processed_timestamps is None:
+        events = [dict(zip(report["input_fields"], row)) for row in report["inputs"]]
+        processed_timestamps = sorted(event["event_ns"] for event in events if event["phase"] in (1, 2))
+    processed = processed_timestamps
     motion = report["motion"]
     intervals = motion.get("active_intervals_ns", [[motion["begin_ns"], motion["end_ns"]]])
     last_input = -1

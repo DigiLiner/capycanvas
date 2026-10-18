@@ -981,7 +981,7 @@ final class NativeOwner: @unchecked Sendable {
                     e: costs[0], f: costs[1], g: costs[2], h: costs[3], i: costs[4], j: latestTracedInput))
                 if let observation {
                     observation.record(FrameTraceEvent(kind: .consumedPaint, a: now,
-                        b: capy_apple_consumed_paint_ns(handle)))
+                        b: capy_apple_consumed_paint_ns(handle), c: capy_apple_submitted_canvas_updates(handle)))
                 }
                 if let trace { collectGpuTiming(trace) }
             }

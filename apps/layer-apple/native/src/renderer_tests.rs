@@ -9,6 +9,27 @@ fn install(app: &App) {
 }
 
 #[test]
+fn canvas_update_counter_observes_paint_without_advancing_it() {
+    assert_eq!(unsafe { capy_apple_submitted_canvas_updates(std::ptr::null()) }, 0);
+    for platform in [0, 1] {
+        let app = App::new(platform);
+        assert_eq!(unsafe { capy_apple_submitted_canvas_updates(app.0) }, 0);
+        install(&app);
+        app.draw_until_idle();
+        let before = unsafe { capy_apple_submitted_canvas_updates(app.0) };
+        let pixels = app.pixels();
+        app.stroke();
+        app.draw_until_idle();
+        let painted = unsafe { capy_apple_submitted_canvas_updates(app.0) };
+        assert!(painted > before);
+        assert_ne!(app.pixels(), pixels);
+        assert_eq!(unsafe { capy_apple_submitted_canvas_updates(app.0) }, painted);
+        assert_eq!(unsafe { capy_apple_frame(app.0, 3_000_000_000, 3_000_000_000, std::ptr::null_mut()) }, 0);
+        assert_eq!(unsafe { capy_apple_submitted_canvas_updates(app.0) }, painted);
+    }
+}
+
+#[test]
 fn renderer_failure_retains_sources_history_settings_and_durable_recovery_on_both_apple_hosts() {
     for platform in [0, 1] {
         for fault in ["restart", "device_loss", "validation"] {

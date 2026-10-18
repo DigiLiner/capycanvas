@@ -220,6 +220,7 @@ int32_t capy_apple_frame(CapyApple *app, uint64_t now_ns, uint64_t presentation_
                         uint64_t *costs);
 /* Last consumed real Down/Move timestamp; serial owner only, zero for NULL. */
 uint64_t capy_apple_consumed_paint_ns(const CapyApple *app);
+uint64_t capy_apple_submitted_canvas_updates(const CapyApple *app);
 uint64_t capy_apple_camera_revision(const CapyApple *app);
 void capy_apple_shader_input(const CapyApple *app);
 uint32_t capy_apple_canvas_bar_hold(const CapyApple *app);

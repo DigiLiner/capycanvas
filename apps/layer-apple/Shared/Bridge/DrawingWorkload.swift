@@ -187,8 +187,8 @@ import Foundation
             store.native?.pointer(id: contact, tool: 0, button: 0, records: batch, predicted: false, revision: revision)
             deliveredBatches += 1; deliveredSamples += UInt64(batch.count / 9)
             if plan.document != nil && measurementStarted != 0 {
-                if batch[8] == 1 { record(9, d: contact) }
-                if batch.last == 3 { record(10, d: contact) }
+                if batch[8] == 1 { record(9, d: contact, e: FrameTrace.timestamp(batch[7])) }
+                if batch.last == 3 { record(10, d: contact, e: FrameTrace.timestamp(batch[batch.count - 2])) }
             }
             lastRecord = Array(batch.suffix(9))
             lastContact = lastRecord[8] == 3 ? nil : contact

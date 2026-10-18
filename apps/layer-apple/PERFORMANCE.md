@@ -157,6 +157,22 @@ Canvas presentation callbacks do not measure cached native chrome.
 
 ## Reading the report
 
+- **Canvas updates.** `workload.canvas_update_progress` joins the shared
+  renderer's submission counter and consumed real-input timestamp to each
+  drawable's actual presentation. It reuses the Android nonempty-update
+  accounting inside complete contacts, using their source Down/Up timestamps.
+  The last frame before the first contact supplies the counter baseline;
+  opening the workload document may replace the renderer during setup.
+  Presentation bounds queue completion from above, so `completed_per_s` and
+  `input_updates_per_s_lower_bound` are conservative rate bounds. Gap statistics
+  describe these observed presentation bounds, not exact GPU finish times.
+  Viewport-only frames, repeated input, late completions and ambiguous records
+  cannot inflate the counts. Counter resets during the measured cohort
+  invalidate the measurement; incomplete contact boundaries or absent counter
+  metadata are unavailable.
+  Deferred canvas work can advance the counter, so this does not prove input
+  pixel inclusion or physical Pencil latency. GPU timestamp probes remain off
+  when `CAPY_TRACE_GPU=0`.
 - **CPU.** Owner queue age runs from display-link admission to owner execution;
   owner service includes the bridge and snapshot work. The five Rust stages are
   CPU preparation, drawable acquisition, viewport submission, present call and
@@ -227,7 +243,7 @@ the `CACurrentMediaTime` clock, and frame IDs are admission timestamps.
 | 10 activity | time, display-link awake flag |
 | 11 workload | time, phase, profile ID, phase-dependent counters |
 | 14 GPU clock | recorder time before, Metal CPU nanoseconds, Metal GPU ticks, recorder time after |
-| 15 consumed paint | frame ID, latest real Down/Move timestamp consumed by the shared engine |
+| 15 consumed paint | frame ID, latest real Down/Move timestamp consumed by the shared engine, submitted nonempty canvas-update counter |
 
 The analyzer converts GPU ticks with the paired clock samples, following Apple's
 [GPU timestamp conversion](https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time).
@@ -236,7 +252,7 @@ diameter × 1000, prediction flag), 1 warm-up, 2 measurement begins,
 3 measurement ends, 4 postlude ends, 5 failure, 6 producer sample, 7 photo prime
 begins, 8 photo prime Undo restored, 9 measured contact Down, 10 measured contact
 Up. Phase 8 records a successful-restoration flag; phases 9 and 10 record the
-synthetic contact number. Phases 2, 3
+synthetic contact number and source input timestamp in nanoseconds. Phases 2, 3
 and 6 record cumulative real sample and batch counts and the largest producer
 lateness since the previous sample.
 

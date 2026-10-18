@@ -3392,6 +3392,38 @@ latency or a reference-tier target. Current evidence is in
 `latest-Apple-integrated-Release-preparation/runtime-current175b-opacity-GPU0-photo20-Light-Mac/`
 and `M4-current175b-Opacity-Release-photo-Light/` beside it.
 
+The counter observation following `9fefe503e` measures the same normal Release
+photo workload on 2026-10-18 with GPU queries disabled. The readonly renderer
+counter distinguishes nonempty canvas submissions from viewport-only frames;
+each original advancing frame is joined to its positive presentation callback.
+Three source Down/Up intervals contribute 17.9875 active seconds, including
+contact-start delays. Presentation supplies an upper bound on completion time,
+so the rates below are conservative lower bounds.
+
+| Device | Completed nonempty updates/s | Fresh-associated updates/s | Fresh completion-gap p99, ms | First fresh completion upper bounds by contact, ms |
+| --- | ---: | ---: | ---: | --- |
+| M2 Pro Mac mini, 90 Hz | 89.284 | 89.229 | 11.111 | 61.375 / 61.430 / 50.375 |
+| M4 iPad Pro, 120 Hz | 117.582 | 117.470 | 16.667 | 41.084 / 45.319 / 45.371 |
+
+Both captures retain all 4320 samples, priming Undo and three complete source
+contacts, with no measured missing or zero-time callbacks, rejected input,
+render errors or dropped records. Nine Mac and six iPad submissions complete
+outside their contact windows and receive no completion credit. The iPad's third
+contact retains incomplete presentation-edge coverage; it is not a display-rate
+qualification. Generic canvas counts may include refinement; fresh-associated
+counts require newly consumed real input but do not prove its pixels are shown.
+Neither diagnostic qualifies exact GPU timing, physical Pencil latency, sustained
+acceptance or the reference tier.
+
+The original collectors failed while importing the analyzer's new helper.
+Their failures remain recorded; the same captures were analyzed offline without
+another app run. A setup renderer replacement before priming supplies a new
+pre-contact counter baseline; a reset during the measured cohort remains invalid.
+The normal Mac/device archives are `d17e02f1`/`2c267fb5`. Evidence is in
+`latest-Apple-integrated-Release-preparation/runtime-CanvasCounter-GPU0-photo20-Light-Mac/Mac-photo-light-candidate/finite-offline-qualification.json`
+and `M4-CanvasCounter-Release-photo-Light/CanvasCounter-photo20-Light-offline-recovery-summary.json`
+beside `latest-Apple-integrated-Release-preparation/`.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

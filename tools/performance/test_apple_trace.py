@@ -1,5 +1,6 @@
 import unittest
-from apple_trace import analyze, calibrate_gpu, motion_windows
+from apple_trace import analyze, calibrate_gpu, motion_windows, canvas_update_progress, workload_contact_intervals
+from collections import defaultdict
 
 
 def record(kind, *values):
@@ -15,6 +16,131 @@ def header(**changes):
     return {**dict(schema=1, platform=0, configuration="release", duration_seconds=10, started_ns=0,
                    capacity=100, record_stride_bytes=88, dropped_records=0,
                    gpu_timing_requested=True, input_source="platform"), **changes}
+
+
+class CanvasUpdateChecks(unittest.TestCase):
+    begin, end = 1_000_000_000, 7_000_000_000
+
+    def events(self, values):
+        result = []
+        for index, (time, raster, stamp, presented) in enumerate(values):
+            result += [frame(time), record(15, time, stamp, raster),
+                       record(3, time, time, time, index + 1, 1),
+                       record(4, time, presented, presented + 1, index + 1)]
+        return result
+
+    def report(self, events, **changes):
+        grouped = defaultdict(list)
+        for event in events: grouped[event[0]].append(event[1:])
+        return canvas_update_progress(header(raster_update_counter=True, **changes), grouped, [[self.begin, self.end]])
+
+    def baseline(self):
+        return [(500_000_000, 5, 400_000_000, 503_000_000)]
+
+    def test_viewport_only_and_stale_refinement_do_not_count_as_fresh_input(self):
+        viewport = self.report(self.events(self.baseline() + [
+            (1_100_000_000, 5, 1_050_000_000, 1_103_000_000)]))
+        self.assertEqual(viewport["completed"], 0)
+        self.assertEqual(viewport["input_updates_per_s_lower_bound"], 0)
+        refinement = self.report(self.events(self.baseline() + [
+            (1_100_000_000, 6, 400_000_000, 1_103_000_000)]))
+        self.assertEqual(refinement["completed"], 1)
+        self.assertEqual(refinement["input_updates_per_s_lower_bound"], 0)
+
+    def test_later_raster_work_can_complete_previously_consumed_input_once(self):
+        result = self.report(self.events(self.baseline() + [
+            (1_100_000_000, 5, 1_050_000_000, 1_103_000_000),
+            (1_200_000_000, 6, 1_050_000_000, 1_203_000_000),
+            (1_300_000_000, 7, 1_050_000_000, 1_303_000_000)]))
+        self.assertEqual(result["availability"], "observed")
+        self.assertEqual(result["completed"], 2)
+        self.assertAlmostEqual(result["completed_per_s"], 2 / 6)
+        self.assertAlmostEqual(result["input_updates_per_s_lower_bound"], 1 / 6)
+        self.assertEqual(result["completion_gap_ms"]["max"], 100)
+
+    def test_unpresented_advance_cannot_be_credited_to_later_input(self):
+        values = self.baseline() + [
+            (900_000_000, 6, 400_000_000, 903_000_000),
+            (1_100_000_000, 6, 1_050_000_000, 1_103_000_000)]
+        events = [r for r in self.events(values) if not (r[0] in (3, 4) and r[1] == 900_000_000)]
+        result = self.report(events)
+        self.assertEqual(result["availability"], "observed")
+        self.assertEqual(result["completed"], 0)
+        self.assertEqual(result["input_updates_per_s_lower_bound"], 0)
+        later = self.events(values + [(1_200_000_000, 7, 1_050_000_000, 1_203_000_000)])
+        result = self.report([r for r in later if not (r[0] in (3, 4) and r[1] == 900_000_000)])
+        self.assertEqual(result["completed"], 1)
+        self.assertAlmostEqual(result["input_updates_per_s_lower_bound"], 1 / 6)
+
+    def test_setup_presentation_failure_is_retained_outside_contact_validity(self):
+        values = [(500_000_000, 5, 400_000_000, 0),
+                  (1_100_000_000, 6, 1_050_000_000, 1_103_000_000)]
+        result = self.report(self.events(values))
+        self.assertEqual(result["availability"], "observed")
+        self.assertEqual(result["completed"], 1)
+        self.assertEqual(result["outside_contact_presentation_errors"], {"zero_presentation": 1})
+
+    def test_completed_workload_reports_counter_with_source_contact_boundaries(self):
+        events = self.events(self.baseline() + [(1_100_000_000, 6, 1_050_000_000, 1_103_000_000)])
+        events += [record(11, self.begin - 1, 2, 21),
+                   record(11, self.begin + 20, 9, 21, 1, self.begin),
+                   record(11, self.end + 30, 10, 21, 1, self.end),
+                   record(11, self.end + 40, 3, 21)]
+        result = analyze(header(raster_update_counter=True, workload={
+            "name": "photo", "measurement_seconds": 6, "measured_contacts": 1}), events)
+        progress = result["workload"]["canvas_update_progress"]
+        self.assertEqual(progress["availability"], "observed")
+        self.assertEqual(progress["active_input_seconds"], 6)
+        self.assertEqual(progress["completed"], 1)
+
+    def test_fresh_completion_gaps_have_millisecond_units(self):
+        result = self.report(self.events(self.baseline() + [
+            (1_100_000_000, 6, 1_050_000_000, 1_103_000_000),
+            (1_200_000_000, 7, 1_150_000_000, 1_203_000_000)]))
+        self.assertEqual(result["input_completion_gap_ms"]["max"], 100)
+        self.assertAlmostEqual(result["input_updates_per_s_lower_bound"], 2 / 6)
+
+    def test_completion_after_input_window_is_pending(self):
+        result = self.report(self.events(self.baseline() + [
+            (6_900_000_000, 6, 6_850_000_000, 7_010_000_000)]))
+        self.assertEqual(result["submitted"], 1)
+        self.assertEqual(result["completed"], 0)
+        self.assertEqual(result["pending_at_input_end"], 1)
+        self.assertEqual(result["input_updates_per_s_lower_bound"], 0)
+
+    def test_ambiguous_missing_zero_and_regressing_observations_are_invalid(self):
+        events = self.events(self.baseline() + [(1_100_000_000, 6, 1_050_000_000, 1_103_000_000)])
+        variants = [events + [events[-1]], events[:-1],
+                    events[:-1] + [record(4, 1_100_000_000, 0, 1_104_000_000, 2)],
+                    self.events(self.baseline() + [(1_100_000_000, 4, 1_050_000_000, 1_103_000_000)])]
+        for variant in variants:
+            with self.subTest(variant=variant):
+                result = self.report(variant)
+                self.assertEqual(result["availability"], "invalid")
+                self.assertNotIn("completed_per_s", result)
+
+    def test_setup_renderer_reset_uses_the_last_precontact_baseline(self):
+        events = self.events([(200_000_000, 136, 0, 203_000_000)] + self.baseline() + [
+            (1_100_000_000, 6, 1_050_000_000, 1_103_000_000)])
+        result = self.report(events)
+        self.assertEqual(result["availability"], "observed")
+        self.assertEqual(result["completed"], 1)
+        events += self.events([(1_200_000_000, 2, 1_050_000_000, 1_203_000_000)])
+        self.assertEqual(self.report(events)["availability"], "invalid")
+
+    def test_callback_delivery_order_does_not_change_frame_accounting(self):
+        events = self.events(self.baseline() + [(1_100_000_000, 6, 1_050_000_000, 1_103_000_000)])
+        self.assertEqual(self.report(events), self.report(list(reversed(events))))
+
+    def test_actual_contact_timestamps_and_complete_boundaries_are_required(self):
+        markers = [[self.begin + 20, 9, 21, 1, self.begin],
+                   [self.end + 30, 10, 21, 1, self.end]]
+        self.assertEqual(workload_contact_intervals(markers, 1), [[self.begin, self.end]])
+        self.assertEqual(workload_contact_intervals(markers[:-1], 1), [])
+        self.assertEqual(workload_contact_intervals(markers + [markers[-1]], 1), [])
+        grouped = defaultdict(list)
+        self.assertEqual(canvas_update_progress(header(), grouped, [[self.begin, self.end]])["availability"], "unavailable")
+        self.assertEqual(canvas_update_progress(header(raster_update_counter=True), grouped, [])["availability"], "unavailable")
 
 
 class ReportChecks(unittest.TestCase):

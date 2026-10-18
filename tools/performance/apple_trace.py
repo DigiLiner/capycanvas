@@ -10,6 +10,7 @@ import collections
 import json
 import math
 from pathlib import Path
+from android_brush_metrics import completion_window, input_completions
 
 NS_PER_MS = 1_000_000
 BUDGET_NS = 1_000_000_000 / 120
@@ -161,6 +162,100 @@ def consumed_paint_progress(grouped, begin=None, end=None):
             "consumed_timestamp_to_present_ms": distribution(presented - value for presented, value in progress),
             "presented_progress_intervals_ms": distribution(b[0] - a[0] for a, b in zip(progress, progress[1:])),
             "scope": "Engine-consumed Down/Move timestamp progress associated with actual presented callbacks; not physical input-to-pixel latency or guaranteed fresh pixels"}
+
+
+def canvas_update_progress(header, grouped, intervals):
+    if not header.get("raster_update_counter"):
+        return {"availability": "unavailable", "reason": "No renderer update counter"}
+    if not intervals or any(not 0 < a < b for a, b in intervals) or any(
+            a[1] > b[0] for a, b in zip(intervals, intervals[1:])):
+        return {"availability": "unavailable", "reason": "No complete active-input intervals"}
+    frames, counters, acquired, callbacks = (collections.defaultdict(list) for _ in range(4))
+    for row in grouped[1]: frames[row[0]].append(row)
+    for row in grouped[15]: counters[row[0]].append(row)
+    for row in grouped[3]:
+        if row[4]: acquired[row[0]].append(row)
+    for row in grouped[4]: callbacks[(row[0], row[3])].append(row)
+    completions, presentations, consumed = [], [], set()
+    initial_raster = None
+    last_raster = last_input_stamp = 0
+    invalid = collections.Counter()
+    outside_errors = collections.Counter()
+    begin, end = intervals[0][0], intervals[-1][1]
+    baseline = next((key for key in sorted(frames, reverse=True) if frames[key][0][2] < begin), None)
+    if baseline is None:
+        return {"availability": "unavailable", "reason": "No pre-input counter baseline"}
+    identities = [baseline] + [key for key in sorted(frames) if begin <= frames[key][0][2] < end]
+    for identity in identities:
+        if len(frames[identity]) != 1 or len(counters[identity]) != 1:
+            invalid["ambiguous_frame_or_counter"] += 1
+            continue
+        frame, counter = frames[identity][0], counters[identity][0]
+        raster, stamp = counter[2], counter[1]
+        if initial_raster is None: initial_raster = raster
+        advanced = raster > last_raster and raster > initial_raster
+        if raster < last_raster or stamp < last_input_stamp or stamp > frame[3]:
+            invalid["regressing_counter_or_future_input"] += 1
+        last_raster = max(last_raster, raster)
+        last_input_stamp = max(last_input_stamp, stamp)
+        if stamp: consumed.add(stamp)
+        if not acquired[identity]: continue
+        errors = invalid if any(a <= frame[2] < b for a, b in intervals) else outside_errors
+        if len(acquired[identity]) != 1:
+            errors["ambiguous_drawable"] += 1
+            continue
+        key = (identity, acquired[identity][0][3])
+        if len(callbacks[key]) != 1:
+            errors["missing_or_duplicate_callback"] += 1
+            continue
+        presented = callbacks[key][0][1]
+        if not presented:
+            errors["zero_presentation"] += 1
+            continue
+        if presented <= frame[2]:
+            errors["noncausal_presentation"] += 1
+            continue
+        presentations.append([identity, frame[2], presented, raster, stamp])
+        if advanced: completions.append(presentations[-1])
+    if any(a[2] >= b[2] for a, b in zip(completions, completions[1:])):
+        invalid["nonincreasing_presentations"] += 1
+    if invalid or header.get("dropped_records"):
+        return {"availability": "invalid", "errors": dict(invalid),
+                "dropped_records": header.get("dropped_records", 0)}
+    if not presentations:
+        return {"availability": "unavailable", "reason": "No joined drawable presentations"}
+    snapshot = lambda at: {"submitted_frames": sum(r[1] < at for r in completions),
+                           "completed_frames": sum(r[2] < at for r in completions)}
+    report = {"motion": {"begin_ns": begin, "end_ns": end, "active_intervals_ns": intervals},
+              "completions": completions, "renderer_before": {"rows": [{"label": "Frames", "value": initial_raster or 0}]},
+              "display_before": snapshot(begin), "display_after_input": snapshot(end)}
+    progress = completion_window(report)
+    for key in ["snapshot_submitted_per_s", "snapshot_completed_per_s", "snapshot_pending"]:
+        del progress[key]
+    fresh = input_completions(report, sorted(consumed))
+    gaps = progress.pop("completion_gaps_ms")
+    return {"availability": "observed", **progress,
+            "outside_contact_presentation_errors": dict(outside_errors),
+            "completion_gap_ms": distribution(gaps, divisor=1),
+            "input_updates_per_s_lower_bound": sum(map(len, fresh)) / progress["active_input_seconds"],
+            "first_fresh_update_completion_upper_bound_ms": [
+                (rows[0][2] - interval[0]) / NS_PER_MS if rows else None
+                for rows, interval in zip(fresh, intervals)],
+            "input_completion_gap_ms": distribution(
+                b[2] - a[2] for rows in fresh for a, b in zip(rows, rows[1:])),
+            "scope": "Presentation bounds queue completion above; rates bound completed nonempty submissions below, not exact GPU finish times or guaranteed input pixels"}
+
+
+def workload_contact_intervals(markers, expected):
+    contacts = collections.defaultdict(list)
+    for row in markers:
+        if row[1] in (9, 10): contacts[row[3]].append(row)
+    if not expected or len(contacts) != expected: return []
+    intervals = []
+    for rows in contacts.values():
+        if len(rows) != 2 or [r[1] for r in rows] != [9, 10]: return []
+        intervals.append([rows[0][4], rows[1][4]])
+    return sorted(intervals)
 
 
 def analyze(header, events, target_hz=120):
@@ -328,6 +423,7 @@ def analyze(header, events, target_hz=120):
         complete = len(begins) == len(ends) == 1 and not failed and ends[0][0] > begins[0][0]
         report = {"specification": header["workload"], "measurement_completed": complete,
                   "postlude_observed": any(r[1] == 4 for r in markers), "failure_recorded": failed,
+                  "canvas_update_progress": {"availability": "unavailable", "reason": "No complete workload interval"},
                   "engine_consumed_paint_progress": {"availability": "unavailable", "reason": "No complete workload interval"}}
         if complete:
             begin, end = begins[0], ends[0]
@@ -342,6 +438,8 @@ def analyze(header, events, target_hz=120):
             memory_rows = [r for r in memory if begin[0] <= r[0] <= end[0]]
             scheduler = [r[5] for r in markers if r[1] in (3, 6) and begin[0] <= r[0] <= end[0]]
             report.update({
+                "canvas_update_progress": canvas_update_progress(header, grouped,
+                    workload_contact_intervals(markers, header["workload"].get("measured_contacts", 0))),
                 "engine_consumed_paint_progress": consumed_paint_progress(grouped, begin[0], end[0]),
                 "measured_seconds": (end[0] - begin[0]) / 1e9,
                 "delivered_nonpredicted_samples": end[3] - begin[3],
@@ -422,6 +520,7 @@ def motion_windows(header, events, windows, target_hz):
         coverage = bool(times and times[0] - begin <= budget * 2e6 and end - times[-1] <= budget * 2e6)
         results.append({"window": window, "presented_frames": len(times), "presentations_per_s": hz,
             "engine_consumed_paint_progress": consumed_paint_progress(grouped, begin, end),
+            "canvas_update_progress": canvas_update_progress(header, grouped, [[begin, end]]),
             "interval_ms": intervals, "fully_ready_at_begin": full_ready, "readiness_loss_records": readiness_losses,
             "frame_error_records": errors, "missing_presentation_callbacks": missing,
             "zero_time_presentations": zero, "duplicate_presentation_records": duplicates,
