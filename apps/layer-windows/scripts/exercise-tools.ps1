@@ -227,11 +227,11 @@ function Check-Geometry([string]$Tool){
     $group=@((Model).layout.groups|Where-Object active -eq 'tool_settings')[0]
     $origin=[CapyRowPointer+Point]::new();[CapyRowPointer]::ClientToScreen($drawingWindow,[ref]$origin)|Out-Null
     @{client_origin=$origin;panel=(Native-Bounds $group.id $scale -Group);dpi=96*$scale}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture-layout.json'))
-    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture.json'))
+    & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'.png')) -ClientOnly -CaptureOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-capture.json'))
     if($rows.Count -gt 5){
         $first=$rows[0]
         $null=Reveal-Number $first.id $first.height $scale
-        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'-top.png')) -ClientOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-top-capture.json'))
+        & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $ProcessId -WindowHandle $drawingWindow.ToInt64() -Output (Join-Path $OutputDirectory ('tool-'+$Tool+'-top.png')) -ClientOnly -CaptureOnly *> (Join-Path $OutputDirectory ('tool-'+$Tool+'-top-capture.json'))
     }
 }
 if(!@((Model).layout.groups|Where-Object {$_.panels -contains 'tool_settings'}).Count){

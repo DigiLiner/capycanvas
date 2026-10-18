@@ -38,9 +38,17 @@ function Artwork-Pixels{
   $foregroundClass=try{[System.Windows.Automation.AutomationElement]::FromHandle($foreground).Current.ClassName}catch{'unavailable'}
   throw "The owned drawing must be foreground for composed artwork samples (actual HWND=$($foreground.ToInt64()), PID=$foregroundOwner, class='$foregroundClass'; expected HWND=$($drawingWindow.ToInt64()), PID=$($review.Id))"
  }
- $bounds=(Control 'drawing-canvas').Current.BoundingRectangle;$camera=(Model).state.camera
+ $bounds=$sampleCanvas.Current.BoundingRectangle;$camera=(Model).state.camera
  if($bounds -ne $sampleProjection.bounds -or (Json @($camera.viewport,$camera.translation,$camera.zoom,$camera.rotation,$camera.flipped)) -ne $sampleCamera){throw "The camera or arranged canvas moved during the image artwork comparison (bounds '$($sampleProjection.bounds)' -> '$bounds'; camera '$sampleCamera' -> '$(Json @($camera.viewport,$camera.translation,$camera.zoom,$camera.rotation,$camera.flipped))')"}
+ if($envelope.IntersectsWith($sampleBar.Current.BoundingRectangle)){throw 'The canvas action bar overlaps the artwork comparison region'}
  Sample-ObjectArtwork $bounds $samplePoints
+}
+function Set-CanvasBarVisible([bool]$Visible){
+ if([bool]((Model).state.commands|Where-Object id -eq 'show_canvas_action_bar').selected -ne $Visible){
+  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'View'
+  Invoke-Id 'show_canvas_action_bar'
+ }
+ Wait-Until {[bool]((Model).state.commands|Where-Object id -eq 'show_canvas_action_bar').selected -eq $Visible -and ($Visible -or (Model).state.canvas_bar.placement -eq 'bottom_edge')} 'The canvas action bar did not reach its requested visibility and placement'
 }
 function Park{
  $at=Point 'settings-button';[CapyRowPointer]::Hover($at.x,$at.y)
@@ -59,11 +67,17 @@ function Assert-ImageTransform([string]$Name,$Before,$After){
 }
 function Author-Image([string]$Name,$Before,[scriptblock]$Edit){
  Park;$pixels=Wait-StablePixels {Artwork-Pixels};$revision=(Model).state.document_file.revision
+ @{before=$pixels}|ConvertTo-Json|Set-Content (Join-Path $run ("image-$Name-pixels.json"))
  & $Edit
  Wait-Until {(Model).state.document_file.revision -ne $revision -and ((Model).state.commands|Where-Object id -eq 'undo').enabled} "$Name did not commit an image edit"
  Park;Wait-Until {Opaque-ImageChanged $pixels (Artwork-Pixels)} "$Name did not change the composed opaque artwork"
  $changed=Wait-StablePixels {Artwork-Pixels};Capture "image-$Name-$Device-$Theme" -WithModel -Composed
- Assert-ImageHistory 'Undo' {(Artwork-Pixels) -eq $pixels};Assert-ImageHistory 'Redo' {(Artwork-Pixels) -eq $changed}
+ try{Assert-ImageHistory 'Undo' {(Artwork-Pixels) -eq $pixels};Assert-ImageHistory 'Redo' {(Artwork-Pixels) -eq $changed}}
+ catch{
+  $actual=Artwork-Pixels
+  @{before=$pixels;edited=$changed;current=$actual;difference=(Pixel-Difference $pixels $actual)}|ConvertTo-Json|Set-Content (Join-Path $run ("image-$Name-pixels.json"))
+  throw
+ }
  $path=Join-Path $run ("image-$Name.capy");Save-ProjectAs $path;$after=Package $path
  Assert-ImageTransform $Name $Before $after
  $after
@@ -90,13 +104,14 @@ function Menu-Item([string]$Name){
  $hit=@{item=$null};Wait-Until {$hit.item=Find $Name -Name -Type ([System.Windows.Automation.ControlType]::MenuItem);$hit.item -and !$hit.item.Current.IsOffscreen} "Missing menu item: $Name"
  $hit.item
 }
-function Choose([string]$Name){
- $item=Menu-Item $Name;$item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+function Choose-Item($Item){
+ $Item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
  Wait-Until {
   $closed=try{$item.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$true}
   $closed -and [CapyRowPointer]::GetForegroundWindow() -eq $drawingWindow
  } 'The invoked row menu did not dismiss and return foreground to its owned drawing'
 }
+function Choose([string]$Name){Choose-Item (Menu-Item $Name)}
 function Context([string]$Id){
  $at=Point $Id
  if($Device -eq 'mouse'){[CapyRowPointer]::RightClick($at.x,$at.y)}
@@ -119,7 +134,7 @@ function Chord([uint16[]]$Modifiers,[uint16]$Key){
 function Paste-In-Place{
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'edit'
  (Control 'menu-paste-special' -Type ([System.Windows.Automation.ControlType]::MenuItem)).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
- Invoke-Id 'paste_in_place'
+ Choose-Item (Control 'paste_in_place' -Type ([System.Windows.Automation.ControlType]::MenuItem) -Arranged)
 }
 function Requests{@((Model).state.requests).Count}
 function Paste-Image([string]$Name,[int[]]$Rgb,[int]$Width,[int]$Height){
@@ -182,9 +197,12 @@ try{
  $checks.layer_reorder='passed'
  Tap "layer-$front-name";Wait-Until {(Row $front).selected -and !(Row $back).selected} 'The front Object layer did not select'
  Chord @() 0x4f;Wait-Until {((Model).state.commands|Where-Object id -eq 'move').selected} 'O did not choose Move'
+ Set-CanvasBarVisible $false
  $authoredSource=Join-Path $run 'image-before-authoring.capy';Save-ProjectAs $authoredSource
  $authored=Package $authoredSource
- $sampleProjection=@{camera=(Model).state.camera;bounds=(Control 'drawing-canvas' -Arranged).Current.BoundingRectangle}
+ $sampleCanvas=Control 'drawing-canvas' -Arranged
+ $sampleBar=Control 'canvas-action-bar' -Arranged
+ $sampleProjection=@{camera=(Model).state.camera;bounds=$sampleCanvas.Current.BoundingRectangle}
  $camera=$sampleProjection.camera;$sampleCamera=Json @($camera.viewport,$camera.translation,$camera.zoom,$camera.rotation,$camera.flipped)
  $corners=@(foreach($point in @(@(0,0),@(1,0),@(0,1),@(1,1))){,(Screen-Point (Image-Point $authored $point[0] $point[1]) $sampleProjection)})
  $xs=@($corners|ForEach-Object {$_[0]});$ys=@($corners|ForEach-Object {$_[1]})
@@ -215,7 +233,11 @@ try{
  $authored=Author-Image 'scale' $authored {
   Drag-Image (Screen-Point (Image-Point $authored 1 1)) (Screen-Point (Image-Point $authored 1.25 1.25))
  }
- $authored=Author-Image 'rotate' $authored {Invoke-Id 'canvas-bar-transform_rotate_right'}
+ $authored=Author-Image 'rotate' $authored {
+  Set-CanvasBarVisible $true
+  Invoke-Id 'canvas-bar-transform_rotate_right'
+  Set-CanvasBarVisible $false
+ }
  $checks.image_affine_authoring='passed'
  $copyManifest=$authored
  Park;$originalPixels=Wait-StablePixels {Artwork-Pixels}
@@ -303,6 +325,6 @@ try{
  $checks.evidence=$run;[PSCustomObject]$checks|ConvertTo-Json
 }catch{
  if($imagePixels -and $review -and !$review.HasExited){try{@{before=$imagePixels;current=(Artwork-Pixels)}|ConvertTo-Json|Set-Content (Join-Path $run 'conversion-failure-pixels.json')}catch{}}
- if($review -and !$review.HasExited){try{Capture 'failure' -WithModel}catch{}}
+ if($review -and !$review.HasExited){try{Capture 'failure' -WithModel -Composed}catch{}}
  [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw
 }finally{[CapyRowPointer]::Dispose();Exit-CapyEnvironment}

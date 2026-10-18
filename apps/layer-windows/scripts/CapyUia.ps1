@@ -117,13 +117,13 @@ function Screen-Pixels([int]$X,[int]$Y,[string]$Path='',[switch]$Cursor) {
     }finally{$graphics.Dispose();$bitmap.Dispose()}
 }
 function Wait-StablePixels([scriptblock]$Sample){
-    $watch=[Diagnostics.Stopwatch]::StartNew();$last=& $Sample;$stable=0
+    $watch=[Diagnostics.Stopwatch]::StartNew();$last=& $Sample;$stable=0;$comparisons=0
     do{
-        Start-Sleep -Milliseconds 100;$next=& $Sample
+        Start-Sleep -Milliseconds 100;$next=& $Sample;$comparisons++
         if($next -eq $last){$stable++}else{$stable=0};$last=$next
         if($stable -ge 3){return $last}
     }while($watch.Elapsed.TotalSeconds -lt 5)
-    throw 'Canvas pixels did not settle for comparison'
+    throw "Canvas pixels did not settle for comparison ($comparisons comparisons, $stable consecutive matches, $([Math]::Round($watch.Elapsed.TotalSeconds,3)) seconds)"
 }
 function Find([string]$Value,[switch]$Name,$Within=$root,$Type,[switch]$Visible){
     $property=if($Name){[System.Windows.Automation.AutomationElement]::NameProperty}else{[System.Windows.Automation.AutomationElement]::AutomationIdProperty}
@@ -252,7 +252,7 @@ function Capture([string]$Name,[switch]$WithModel,[switch]$Composed){
     $handle=[IntPtr]$root.Current.NativeWindowHandle;$owner=[uint32]0
     [CapyWindowApi]::GetWindowThreadProcessId($handle,[ref]$owner)|Out-Null
     if($owner -ne $review.Id){throw 'The capture window no longer belongs to the owned process'}
-    & (Join-Path $script:CapyScripts 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $handle.ToInt64() -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed:$Composed *> (Join-Path $run ($Name+'.json'))
+    & (Join-Path $script:CapyScripts 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $handle.ToInt64() -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed:$Composed -CaptureOnly:($Name -ne 'failure') *> (Join-Path $run ($Name+'.json'))
     $workspace=Workspace-Root
     if($workspace -and ('CapyRowPointer' -as [type])){@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow($handle)}|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run ($Name+'-layout.json'))}
     if($WithModel){(Model)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))}

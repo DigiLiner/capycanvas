@@ -135,7 +135,7 @@ function Select-Draft($Control,[string]$Text){
 }
 function Capture-Window($Window,[string]$Name){
  Use-Window $Window;Start-Sleep -Milliseconds 250
- & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $Window.hwnd -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed *> (Join-Path $run ($Name+'-capture.json'))
+ & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -WindowHandle $Window.hwnd -Output (Join-Path $run ($Name+'.png')) -ClientOnly -Composed -CaptureOnly:($Name -ne 'failure') *> (Join-Path $run ($Name+'-capture.json'))
  $workspace=Workspace-Root
  if($workspace){@{presentation=($workspace.Current.ItemStatus|ConvertFrom-Json);dpi=[CapyRowPointer]::GetDpiForWindow([IntPtr]$Window.hwnd)}|ConvertTo-Json -Depth 15|Set-Content (Join-Path $run ($Name+'-layout.json'))}
  (Fresh-Model $Window)|ConvertTo-Json -Depth 80|Set-Content (Join-Path $run ($Name+'-model.json'))

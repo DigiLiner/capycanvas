@@ -287,7 +287,12 @@ history and Unicode save/reopen. Run each `-Device mouse|pen|touch`
 variant with `-Theme dark` and `-Theme light`.
 The [shared renderer tests](../../crates/layer-render-wgpu/tests/object_layer_consumers.rs)
 check conversion pixels with at most one 8-bit display level of error per channel;
-Undo and Redo require exact pixels.
+Undo and Redo require exact pixels. Screen samples retain the arranged canvas
+control and verify its live bounds and camera before each comparison. Repeated
+UI Automation tree searches must not consume the pixel-stability deadline. The
+image-row journey hides the optional bar during artwork comparisons so its
+blurred background stays outside the samples. It restores the bar to activate
+Rotate, then hides it again; Undo and Redo still require exact pixels.
 
 ### Where files live
 
@@ -725,6 +730,10 @@ that take `-ProcessId` attach to an app you launched with `CAPY_TRACE_UI=1` and 
 disposable profile (see [diagnosis](#diagnose-a-running-app)). Device-specific
 fixtures take `-Device mouse|pen|touch`. Results, captures and profiles stay under
 ignored `artifacts/windows`.
+
+Routine fixture captures use `inspect-window.ps1 -CaptureOnly` for the image,
+window title and responsiveness. They retain separate model and layout evidence. Failure captures keep the full
+control-name inventory. Run the inspector without that switch to request it directly.
 
 `exercise-navigator.ps1 -Executable <path>` checks Navigator commands, live
 preview pixels, exact Undo, retained controls, resizing and both themes in one

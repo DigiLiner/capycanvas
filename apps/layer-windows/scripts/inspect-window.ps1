@@ -1,4 +1,4 @@
-param([int]$ProcessId, [string]$Output = 'artifacts/windows/window.png', [switch]$ClientOnly, [switch]$Composed, [long]$WindowHandle=0)
+param([int]$ProcessId, [string]$Output = 'artifacts/windows/window.png', [switch]$ClientOnly, [switch]$Composed, [long]$WindowHandle=0, [switch]$CaptureOnly)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Drawing
 Add-Type -TypeDefinition @'
@@ -19,6 +19,7 @@ $p.Refresh()
 $handle=if($WindowHandle){[IntPtr]$WindowHandle}else{$p.MainWindowHandle}
 if($handle -eq 0){throw 'The process has no main window yet.'}
 $root=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
+if(!$CaptureOnly){
 for($attempt=1;;$attempt++){
     try{
         $nodes=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
@@ -29,7 +30,10 @@ for($attempt=1;;$attempt++){
         Start-Sleep -Milliseconds 200
     }
 }
-[pscustomobject]@{title=$root.Current.Name;responding=$p.Responding;elements=@($names)} | ConvertTo-Json -Depth 4
+}
+$details=[ordered]@{title=$root.Current.Name;responding=$p.Responding}
+if(!$CaptureOnly){$details.elements=@($names)}
+[pscustomobject]$details | ConvertTo-Json -Depth 4
 [CapyWindowCapture]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
 $rect=New-Object CapyWindowCapture+Rect
 if($ClientOnly){[CapyWindowCapture]::GetClientRect($handle,[ref]$rect)|Out-Null}else{[CapyWindowCapture]::GetWindowRect($handle,[ref]$rect)|Out-Null}
