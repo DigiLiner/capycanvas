@@ -200,6 +200,16 @@ replaces only that filter's rows. The suite has no baseline-update mode.
 A deliberate white-balance coefficient change from `.8` to `.7` must fail;
 restoring `.8` must pass.
 
+Run `cargo test --locked -p layer-render-wgpu saved_vector_render_contract` on a
+hardware GPU for vector layers. It renders the fixed
+[`vector-objects.capy`](../../crates/layer-core/src/package/codec/fixtures/vector-objects.capy)
+at 256×192 against a linear RGBA F32
+[image](../../crates/layer-render-wgpu/src/fixtures/vector-renders.rgba32f)
+captured on the same GPU, within a maximum error of 0.002 and RMS of 0.0002, under
+the same rules. The coverage kernel's `vector::tests` compare every fill rule,
+stroke join and cap, width profile and level against an exact supersampled
+reference.
+
 Spatial evaluation changes also run the renderer's `scene::scale::tests::effects::gaussian`
 references, including sigmas above editor bounds, source-edge mass, neutral
 values, HDR, native and reduced evaluation. Preserved-package tests cover future

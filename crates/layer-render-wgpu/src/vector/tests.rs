@@ -23,11 +23,12 @@ fn path(subpaths: Vec<Subpath>, entries: Vec<PaintEntry>, rule: FillRule) -> Pat
     item
 }
 fn frame(level: u32) -> Frame { let scale = 1. / f64::from(1 << level); Frame { scale, origin: [0.; 2], clip: [-4, -4, 64, 64] } }
-fn round_stroke(width: f64, profile: Option<WidthProfile>) -> PaintEntry {
+fn stroke(width: f64, cap: Cap, join: Join, profile: Option<WidthProfile>) -> PaintEntry {
     let mut stroke = Stroke::new(paint([0.1, 0.2, 0.9, 1.]), width);
-    stroke.cap = Cap::Round; stroke.join = Join::Round; stroke.profile = profile.map(Arc::new);
+    stroke.cap = cap; stroke.join = join; stroke.profile = profile.map(Arc::new);
     PaintEntry::Stroke(stroke)
 }
+fn round_stroke(width: f64, profile: Option<WidthProfile>) -> PaintEntry { stroke(width, Cap::Round, Join::Round, profile) }
 
 fn scenes() -> Vec<(&'static str, PathItem)> {
     let star: Vec<[f64; 2]> = (0..10).map(|i| { let a = i as f64 * std::f64::consts::PI / 5.; let r = if i % 2 == 0 { 100. } else { 38. }; [128. + r * a.sin(), 130. - r * a.cos()] }).collect();
@@ -35,6 +36,7 @@ fn scenes() -> Vec<(&'static str, PathItem)> {
     let fill = |rgba| PaintEntry::Fill(Fill { paint: paint(rgba), unknown: None });
     let blob = smooth(&[[40., 60.], [200., 30.], [230., 190.], [120., 240.], [20., 170.]], true);
     let hole = smooth(&[[90., 110.], [150., 100.], [160., 160.], [100., 170.]], true);
+    let open_point = || corners(&[[0., 0.]], false);
     vec![
         ("nonzero star", path(vec![corners(&star, true)], vec![fill([0.8, 0.3, 0.1, 1.])], FillRule::NonZero)),
         ("even-odd pentagram", path(vec![corners(&(0..5).map(|i| star[(i * 4) % 10]).collect::<Vec<_>>(), true)], vec![fill([0.2, 0.6, 0.3, 0.8])], FillRule::EvenOdd)),
@@ -45,6 +47,13 @@ fn scenes() -> Vec<(&'static str, PathItem)> {
             vec![round_stroke(14., Some(WidthProfile::new(vec![WidthKnot::new(0, 0., 0., 0.), WidthKnot::new(1, 0.5, 1., 1.), WidthKnot::new(2, 1., 0.05, 0.05)]).unwrap()))], FillRule::NonZero)),
         ("thick round stroke over fill", path(vec![blob], vec![fill([0.9, 0.9, 0.2, 1.]), round_stroke(40., None)], FillRule::NonZero)),
         ("miter outline", path(vec![corners(&[[30., 200.], [128., 40.], [226., 200.]], false)], vec![PaintEntry::Stroke(Stroke::new(paint([0., 0., 0., 1.]), 12.))], FillRule::NonZero)),
+        ("bevel zigzag with square caps", path(vec![corners(&[[20., 60.], [80., 200.], [140., 40.], [200., 210.], [240., 90.]], false)], vec![stroke(14., Cap::Square, Join::Bevel, None)], FillRule::NonZero)),
+        ("closed miter star", path(vec![corners(&star, true)], vec![stroke(10., Cap::Butt, Join::Miter, None)], FillRule::NonZero)),
+        ("rounded rectangle outline", PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![open_point()]).unwrap()), Arc::new(Style::new(vec![fill([0.9, 0.8, 0.3, 0.9]), stroke(12., Cap::Butt, Join::Miter, None)])))
+            .with_shape(LiveShape { kind: ShapeKind::Rectangle { radii: [0., 20., 40., 8.] }, center: [128., 128.], size: [180., 120.], rotation: 0.3 }).unwrap()),
+        ("one-sided round caps on miter joins", path(vec![corners(&[[30., 50.], [120., 210.], [150., 60.], [230., 120.]], false), smooth(&[[20., 230.], [200., 236.]], false)],
+            vec![stroke(16., Cap::Round, Join::Miter, Some(WidthProfile::new(vec![WidthKnot::new(0, 0., 0., 1.), WidthKnot::new(2, 1., 1., 0.2), WidthKnot::new(3, 1., 0.5, 0.5)]).unwrap()))], FillRule::NonZero)),
+        ("round joins with butt caps", path(vec![corners(&[[30., 200.], [90., 40.], [170., 220.], [230., 60.]], false)], vec![stroke(18., Cap::Butt, Join::Round, None)], FillRule::NonZero)),
     ]
 }
 
@@ -110,22 +119,23 @@ fn emulate(batch: &Batch, pool: &[u32]) -> Vec<[f64; 4]> {
     out
 }
 
-fn fine(item: &PathItem, level: u32) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<([f64; 2], f64)>>) {
+fn fine(item: &PathItem, level: u32) -> (Vec<Vec<[f64; 2]>>, Vec<(Vec<([f64; 2], [f64; 2])>, bool)>) {
     let scale = 1. / f64::from(1 << level);
     let map = |p: [f64; 2]| [p[0] * scale, p[1] * scale];
+    let stroke = item.style.strokes().next();
     let mut rings = Vec::new();
     let mut lines = Vec::new();
     let mut base = 0u32;
     for subpath in item.geometry.subpaths() {
+        let width = |s: u32, t: f64| stroke.map_or([0.; 2], |k| k.profile.as_ref().map_or([1.; 2], |w| w.at(s, t)).map(|f| f * k.width * 0.5 * scale));
         let mut ring = vec![map(subpath.anchor(0).point())];
-        let mut line = vec![(map(subpath.anchor(0).point()), 0u32, 0.)];
+        let mut line = vec![(map(subpath.anchor(0).point()), width(base, 0.))];
         for (i, segment) in subpath.segments().enumerate() {
-            segment.map(map).flatten(0.002, |p, t| { ring.push(p); line.push((p, base + i as u32, t)); });
+            segment.map(map).flatten(0.002, |p, t| { ring.push(p); line.push((p, width(base + i as u32, t))); });
         }
         base += subpath.segment_count() as u32;
         rings.push(ring);
-        let stroke = item.style.strokes().next();
-        lines.push(line.into_iter().map(|(p, s, t)| (p, stroke.map_or(0., |k| k.width * 0.5 * scale * k.profile.as_ref().map_or(1., |w| w.at(s, t)[0])))).collect());
+        lines.push((line, subpath.closed));
     }
     (rings, lines)
 }
@@ -140,22 +150,99 @@ fn winding(rings: &[Vec<[f64; 2]>], p: [f64; 2]) -> i32 {
     }}
     w
 }
-fn inside_stroke(lines: &[Vec<([f64; 2], f64)>], p: [f64; 2]) -> bool {
-    lines.iter().any(|line| line.windows(2).any(|w| {
+
+enum Piece { Polygon(Vec<[f64; 2]>), Disc([f64; 2], f64) }
+impl Piece {
+    fn bounds(&self) -> [f64; 4] {
+        match self {
+            Piece::Polygon(points) => points.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]),
+            Piece::Disc(c, r) => [c[0] - r, c[1] - r, c[0] + r, c[1] + r],
+        }
+    }
+    fn contains(&self, p: [f64; 2]) -> bool {
+        match self {
+            Piece::Polygon(points) => winding(std::slice::from_ref(points), p) != 0,
+            Piece::Disc(c, r) => (p[0] - c[0]).hypot(p[1] - c[1]) <= *r,
+        }
+    }
+}
+fn offset(p: [f64; 2], n: [f64; 2], s: f64) -> [f64; 2] { [p[0] + n[0] * s, p[1] + n[1] * s] }
+fn sector(center: [f64; 2], from: [f64; 2], sweep: f64, radius: f64) -> Piece {
+    let start = from[1].atan2(from[0]);
+    Piece::Polygon(std::iter::once(center).chain((0..=64).map(|k| { let a = start + sweep * f64::from(k) / 64.; [center[0] + radius * a.cos(), center[1] + radius * a.sin()] })).collect())
+}
+fn stroke_pieces(line: &[([f64; 2], [f64; 2])], closed: bool, stroke: &Stroke) -> Vec<Piece> {
+    let mut points = line.to_vec();
+    points.dedup_by(|a, b| (a.0[0] - b.0[0]).hypot(a.0[1] - b.0[1]) < 1e-9);
+    if closed && points.len() > 2 && (points[0].0[0] - points[points.len() - 1].0[0]).hypot(points[0].0[1] - points[points.len() - 1].0[1]) < 1e-9 { points.pop(); }
+    let n = points.len();
+    let cap = |(p, [l, r]): ([f64; 2], [f64; 2]), o: [f64; 2]| {
+        let (normal, h) = ([o[1], -o[0]], (l + r) * 0.5);
+        match stroke.cap {
+            Cap::Butt => None,
+            Cap::Square => Some(Piece::Polygon(vec![offset(p, normal, l), offset(offset(p, normal, l), o, h), offset(offset(p, normal, -r), o, h), offset(p, normal, -r)])),
+            Cap::Round => Some(sector(offset(p, normal, (l - r) * 0.5), normal, std::f64::consts::PI, h)),
+        }
+    };
+    if n == 1 {
+        let (p, [l, r]) = points[0];
+        let h = (l + r) * 0.5;
+        return match stroke.cap {
+            Cap::Butt => Vec::new(),
+            Cap::Square => vec![Piece::Polygon(vec![[p[0] - h, p[1] - h], [p[0] + h, p[1] - h], [p[0] + h, p[1] + h], [p[0] - h, p[1] + h]])],
+            Cap::Round => vec![Piece::Disc(p, h)],
+        };
+    }
+    let closed = closed && n > 2;
+    let direction = |i: usize| { let (a, b) = (points[i % n].0, points[(i + 1) % n].0); let l = (b[0] - a[0]).hypot(b[1] - a[1]); [(b[0] - a[0]) / l, (b[1] - a[1]) / l] };
+    let left = |d: [f64; 2]| [d[1], -d[0]];
+    let mut pieces = Vec::new();
+    for i in 0..if closed { n } else { n - 1 } {
+        let ((a, wa), (b, wb)) = (points[i], points[(i + 1) % n]);
+        let normal = left(direction(i));
+        pieces.push(Piece::Polygon(vec![offset(a, normal, wa[0]), offset(b, normal, wb[0]), offset(b, normal, -wb[1]), offset(a, normal, -wa[1])]));
+    }
+    for i in if closed { 0..n } else { 1..n - 1 } {
+        let (p, w) = points[i];
+        let (d0, d1) = (direction(i + n - 1), direction(i));
+        let (n0, n1) = (left(d0), left(d1));
+        let side = if d1[0] * n0[0] + d1[1] * n0[1] < 0. { 1. } else { -1. };
+        let (width, inner) = if side > 0. { (w[0], w[1]) } else { (w[1], w[0]) };
+        let (e0, e1) = (offset(p, n0, side * width), offset(p, n1, side * width));
+        pieces.push(Piece::Polygon(vec![p, offset(p, n0, -side * inner), offset(p, n1, -side * inner)]));
+        let cos = 1. + n0[0] * n1[0] + n0[1] * n1[1];
+        pieces.push(match stroke.join {
+            Join::Round => sector(p, [n0[0] * side, n0[1] * side], (n0[0] * n1[1] - n0[1] * n1[0]).atan2(n0[0] * n1[0] + n0[1] * n1[1]), width),
+            Join::Miter if (2. / cos).sqrt() <= stroke.miter_limit => Piece::Polygon(vec![p, e0, offset(p, [n0[0] + n1[0], n0[1] + n1[1]], side * width / cos), e1]),
+            _ => Piece::Polygon(vec![p, e0, e1]),
+        });
+    }
+    if !closed {
+        let (end, start) = (direction(n - 2), direction(0));
+        pieces.extend(cap(points[n - 1], end));
+        pieces.extend(cap((points[0].0, [points[0].1[1], points[0].1[0]]), [-start[0], -start[1]]));
+    }
+    pieces
+}
+fn inside_stroke(lines: &[(Vec<([f64; 2], [f64; 2])>, bool)], p: [f64; 2]) -> bool {
+    lines.iter().any(|(line, _)| line.windows(2).any(|w| {
         let (a, b) = (w[0].0, w[1].0);
         let d = [b[0] - a[0], b[1] - a[1]];
         let l2 = d[0] * d[0] + d[1] * d[1];
         let t = if l2 > 0. { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / l2).clamp(0., 1.) } else { 0. };
         let q = [a[0] + d[0] * t - p[0], a[1] + d[1] * t - p[1]];
-        (q[0] * q[0] + q[1] * q[1]).sqrt() <= w[0].1 + (w[1].1 - w[0].1) * t
+        (q[0] * q[0] + q[1] * q[1]).sqrt() <= w[0].1[0] + (w[1].1[0] - w[0].1[0]) * t
     }))
 }
 fn reference(item: &PathItem, level: u32) -> Vec<[f64; 4]> {
     let (rings, lines) = fine(item, level);
     let colors = colors(item);
+    let pieces: Vec<(Piece, [f64; 4])> = item.style.strokes().next().filter(|s| s.join != Join::Round || s.cap != Cap::Round)
+        .map(|s| lines.iter().flat_map(|(line, closed)| stroke_pieces(line, *closed, s)).map(|piece| { let b = piece.bounds(); (piece, b) }).collect()).unwrap_or_default();
     let n = 8;
     (0..SIZE * SIZE).map(|i| {
         let (x, y) = (f64::from(i % SIZE), f64::from(i / SIZE));
+        let near: Vec<&Piece> = pieces.iter().filter(|(_, b)| b[0] <= x + 1. && b[2] >= x && b[1] <= y + 1. && b[3] >= y).map(|(piece, _)| piece).collect();
         let mut color = [0f64; 4];
         for (entry, paint) in item.style.entries.iter().enumerate() {
             let mut hits = 0;
@@ -163,7 +250,8 @@ fn reference(item: &PathItem, level: u32) -> Vec<[f64; 4]> {
                 let p = [x + (sx as f64 + 0.5) / n as f64, y + (sy as f64 + 0.5) / n as f64];
                 let inside = match paint {
                     PaintEntry::Fill(_) => { let w = winding(&rings, p); if item.fill_rule == FillRule::EvenOdd { w % 2 != 0 } else { w != 0 } }
-                    _ => inside_stroke(&lines, p),
+                    _ if pieces.is_empty() => inside_stroke(&lines, p),
+                    _ => near.iter().any(|piece| piece.contains(p)),
                 };
                 hits += usize::from(inside);
             }}
@@ -188,9 +276,9 @@ fn compare(a: &[[f64; 4]], b: &[[f64; 4]]) -> (f64, f64) {
 
 #[test]
 fn binned_coverage_matches_the_exact_reference() {
+    let mut failures = Vec::new();
     for level in [0, 1] {
         for (name, item) in scenes() {
-            if name == "miter outline" { continue; }
             let (geometry, batch) = batch(&item, level);
             let emulated = emulate(&batch, &geometry.words);
             let expected = reference(&item, level);
@@ -199,25 +287,10 @@ fn binned_coverage_matches_the_exact_reference() {
             worst.sort_by(|a, b| b.0.total_cmp(&a.0));
             eprintln!("{name} level {level} worst: {:?}", worst[..4].iter().map(|(e, i)| (format!("{e:.3}"), i % SIZE, i / SIZE, format!("{:.3}/{:.3}", emulated[*i as usize][3], expected[*i as usize][3]))).collect::<Vec<_>>());
             eprintln!("{name} level {level}: max {max:.4} mean {mean:.5} tiles {} commands {}", batch.tile_count(), batch.command_count());
-            assert!(mean < 0.004 && max < 0.35, "{name} level {level}: max {max} mean {mean}");
+            if !(mean < 0.004 && max < 0.35) { failures.push(format!("{name} level {level}: max {max} mean {mean}")); }
         }
     }
-}
-
-#[test]
-fn outlines_close_and_stay_inside_their_stroke() {
-    let (name, item) = scenes().pop().unwrap();
-    let (geometry, batch) = batch(&item, 0);
-    let emulated = emulate(&batch, &geometry.words);
-    let (_, lines) = fine(&item, 0);
-    let covered = emulated.iter().filter(|c| c[3] > 0.99).count();
-    let outside = emulated.iter().enumerate().filter(|(i, c)| c[3] > 0.01 && !inside_stroke(&lines, [f64::from(*i as u32 % SIZE) + 0.5, f64::from(*i as u32 / SIZE) + 0.5]) && {
-        let (x, y) = (f64::from(*i as u32 % SIZE) + 0.5, f64::from(*i as u32 / SIZE) + 0.5);
-        ![[-1., 0.], [1., 0.], [0., -1.], [0., 1.]].iter().any(|o: &[f64; 2]| inside_stroke(&lines, [x + o[0], y + o[1]]))
-    }).count();
-    eprintln!("{name}: covered {covered} stray {outside}");
-    assert!(covered > 3000);
-    assert!(outside < 400, "{name}: {outside} pixels outside a round stroke of the same width");
+    assert!(failures.is_empty(), "{failures:#?}");
 }
 
 #[test]

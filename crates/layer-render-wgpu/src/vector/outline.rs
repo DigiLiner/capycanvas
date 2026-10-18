@@ -19,7 +19,7 @@ fn arc(out: &mut Vec<[f64; 2]>, center: [f64; 2], from: [f64; 2], to: [f64; 2], 
     for i in 1..count { let a = a0 + sweep * i as f64 / count as f64; out.push([center[0] + radius * a.cos(), center[1] + radius * a.sin()]); }
 }
 
-fn side(points: &[Point], closed: bool, stroke: &Stroke, scale: f64, left: bool) -> Vec<[f64; 2]> {
+fn side(points: &[Point], closed: bool, stroke: &Stroke, left: bool) -> Vec<[f64; 2]> {
     let n = points.len();
     let segments = if closed { n } else { n - 1 };
     let direction = |i: usize| unit(sub(points[(i + 1) % n].p, points[i].p)).unwrap_or([1., 0.]);
@@ -42,12 +42,12 @@ fn side(points: &[Point], closed: bool, stroke: &Stroke, scale: f64, left: bool)
             if dot(previous, d) > 0.9995 {
                 let m = unit([pn[0] + normal[0], pn[1] + normal[1]]).unwrap_or(normal);
                 out.push(add(points[a].p, m, sign * w / dot(m, normal).max(0.5)));
-            } else if turn > 0. {
+            } else if turn < 0. {
                 out.push(previous_end); out.push(points[a].p); out.push(start);
             } else {
                 out.push(previous_end);
                 match stroke.join {
-                    Join::Round => arc(&mut out, points[a].p, sub(previous_end, points[a].p), sub(start, points[a].p), w, !left),
+                    Join::Round => arc(&mut out, points[a].p, sub(previous_end, points[a].p), sub(start, points[a].p), w, left),
                     Join::Miter => {
                         let m = unit([pn[0] + normal[0], pn[1] + normal[1]]).unwrap_or(normal);
                         let ratio = 1. / dot(m, normal).max(1e-9);
@@ -60,21 +60,19 @@ fn side(points: &[Point], closed: bool, stroke: &Stroke, scale: f64, left: bool)
         }
         out.push(end);
     }
-    let _ = scale;
     out
 }
 
-fn cap(out: &mut Vec<[f64; 2]>, at: &Point, outward: [f64; 2], cap: Cap) {
+fn cap(out: &mut Vec<[f64; 2]>, p: [f64; 2], [left, right]: [f64; 2], outward: [f64; 2], cap: Cap) {
     let normal = left_of(outward);
-    let from = add(at.p, normal, -at.right);
-    let to = add(at.p, normal, at.left);
+    let (from, to) = (add(p, normal, left), add(p, normal, -right));
+    let radius = (left + right) * 0.5;
     match cap {
         Cap::Butt => {}
-        Cap::Square => { out.push(add(from, outward, at.right)); out.push(add(to, outward, at.left)); }
+        Cap::Square => { out.push(add(from, outward, radius)); out.push(add(to, outward, radius)); }
         Cap::Round => {
-            let radius = (at.left + at.right) * 0.5;
-            let center = add(at.p, normal, (at.left - at.right) * 0.5);
-            arc(out, center, sub(from, center), sub(to, center), radius, false);
+            let center = add(p, normal, (left - right) * 0.5);
+            arc(out, center, sub(from, center), sub(to, center), radius, true);
         }
     }
 }
@@ -110,15 +108,15 @@ pub(crate) fn outline(path: &PathItem, stroke: &Stroke, frame: &Frame) -> Vec<Ve
             continue;
         }
         let closed = subpath.closed && points.len() > 2;
-        let left = side(&points, closed, stroke, frame.scale, true);
-        let mut right = side(&points, closed, stroke, frame.scale, false);
+        let left = side(&points, closed, stroke, true);
+        let mut right = side(&points, closed, stroke, false);
         right.reverse();
         if closed { polygons.push(left); polygons.push(right); continue; }
         let mut ring = left;
         let last = points.len() - 1;
-        cap(&mut ring, &points[last], unit(sub(points[last].p, points[last - 1].p)).unwrap_or([1., 0.]), stroke.cap);
+        cap(&mut ring, points[last].p, [points[last].left, points[last].right], unit(sub(points[last].p, points[last - 1].p)).unwrap_or([1., 0.]), stroke.cap);
         ring.extend(right);
-        cap(&mut ring, &points[0], unit(sub(points[0].p, points[1].p)).unwrap_or([-1., 0.]), stroke.cap);
+        cap(&mut ring, points[0].p, [points[0].right, points[0].left], unit(sub(points[0].p, points[1].p)).unwrap_or([-1., 0.]), stroke.cap);
         polygons.push(ring);
     }
     polygons

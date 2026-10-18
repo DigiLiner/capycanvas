@@ -137,5 +137,29 @@ fn saved_render_contracts(angular_only:bool) {
     assert_eq!(checked,if angular_only {16}else{132});
 }
 
+#[test]
+fn saved_vector_render_contract() {
+    const VECTOR_EXTENT: [u32; 2] = [256, 192];
+    let rasterizer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    assert_ne!(rasterizer.adapter().get_info().device_type, wgpu::DeviceType::Cpu, "Saved render contracts require a hardware GPU");
+    let gpu = rasterizer.snapshot_gpu();
+    let fixture: &[u8] = include_bytes!("../../layer-core/src/package/codec/fixtures/vector-objects.capy");
+    let backing = layer_core::package::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(fixture))).unwrap();
+    let layer_core::package::codec::OpenOutcome::Candidate { artwork, .. } = layer_core::package::codec::open(backing, Default::default(), &std::sync::atomic::AtomicBool::new(false)).unwrap() else { panic!("The vector fixture must reopen") };
+    let document = Document::from_artwork(artwork).unwrap();
+    let output: Vec<f32> = gpu.capture_scene(document.snapshot(), SceneScope::All, Default::default()).unwrap()
+        .read_region([0, 0, VECTOR_EXTENT[0], VECTOR_EXTENT[1]]).unwrap().into_iter().flatten().collect();
+    let baseline = include_bytes!("fixtures/vector-renders.rgba32f");
+    assert_eq!(baseline.len(), output.len() * 4);
+    let (mut peak, mut square) = (0f64, 0f64);
+    for (actual, expected) in output.iter().zip(baseline.chunks_exact(4)) {
+        let error = f64::from(*actual) - f64::from(f32::from_le_bytes(expected.try_into().unwrap()));
+        peak = peak.max(error.abs());
+        square += error * error;
+    }
+    let rms = (square / output.len() as f64).sqrt();
+    assert!(peak <= 0.002 && rms <= 0.0002, "vector drift: maximum {peak}, RMS {rms}. Preserve the released baseline; fix the regression or version the authored meaning.");
+}
+
 #[path = "painterly_contract_tests.rs"]
 mod painterly_contract;
