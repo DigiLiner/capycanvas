@@ -916,7 +916,7 @@ resources-parameter-channel-mixer-constant = Konstanta
 resources-parameter-channel-mixer-monochrome = Monokrom
 resources-parameter-paper-color = Warna
 resources-parameter-paper-texture = Tekstur
-resources-parameter-paper-relief = Relief
+resources-parameter-paper-texture-visibility = Visibilitas tekstur
 resources-parameter-paper-light = Cahaya
 resources-parameter-paper-through-paint = Terlihat menembus cat
 

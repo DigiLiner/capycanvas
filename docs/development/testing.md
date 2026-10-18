@@ -523,6 +523,9 @@ are your task, and remove an entry when you fix it.
   `canvas_bar_queries_answer_for_the_current_bar`,
   `thumbnail_work_left_for_canvas_frames_wakes_the_host`, and
   `warp_opens_over_a_large_filled_selection`.
+- GTK `native_panel_value_scrub_input` on unmodified `fa32b31db`: the touch
+  pass stops receiving value-drag updates after 8 px and leaves Brush size at
+  120 px; the mouse pass completes.
 - GTK `native_selection_pen_input`, `native_toolbar_components_narrow_input`,
   `native_workspace_motion_input`, and `native_workspace_switcher_input`
   (intermittent). `native_workspace_resize_input` presents below its rate

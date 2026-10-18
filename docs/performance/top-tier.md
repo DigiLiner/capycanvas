@@ -105,7 +105,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Edge-Preserving Smooth slider | 120, soft | | |
 | Animated or warping filter: Domain Warp, Ripple | 120, soft | **Unqualified.** 9504 × 6336 on the 2376 × 1584 display grid of a non-reference Mali-G57 MC2 tablet: Ripple 58.8 ms, Domain Warp 74.4 ms, from 7.5–8.5 s. Fit between 25% and 50% still evaluates at document resolution; reference tablet unmeasured | [Animated filters diagnostic](mid-tier.md#animated-filters-diagnostic), 2026-10-18; [Windows Domain Warp comparison](#windows-domain-warp-comparison) |
 | Fill layer or gradient-fill edit | 120, soft | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
-| Paper Relief, Light and Shows through paint drag | 120 | Unmeasured on the reference tablet | [Paper lighting diagnostic](mid-tier.md#paper-lighting-diagnostic) does not qualify this tier |
+| Paper Texture visibility, Light and Shows through paint drag | 120 | Unmeasured on the reference tablet | [Paper lighting diagnostic](mid-tier.md#paper-lighting-diagnostic) does not qualify this tier |
 | Navigation with proof or tone guide shown | 120 | | |
 | Navigation with exact artwork sampling (61 MP) | 120 | **Not met.** 48.43–49.89 canvas presents/s; interval p99 25.00 ms | [Exact artwork samples](#exact-artwork-samples), 2026-10-02 |
 | Web Histogram pan, statistics pending / Exact settled (61 MP) | 120 | **Not met.** Chrome surface 111.27–112.40 / 111.96–113.88 presents/s; p99 gaps 16.67–25.00 / 16.67 ms | [Web scopes](#web-scopes), 2026-10-03 |

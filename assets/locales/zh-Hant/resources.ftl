@@ -604,7 +604,7 @@ resources-parameter-channel-mixer-constant = 常數
 resources-parameter-channel-mixer-monochrome = 單色
 resources-parameter-paper-color = 色彩
 resources-parameter-paper-texture = 紋理
-resources-parameter-paper-relief = 凹凸
+resources-parameter-paper-texture-visibility = 紋理可見度
 resources-parameter-paper-light = 光照
 resources-parameter-paper-through-paint = 透過顏料顯示
 

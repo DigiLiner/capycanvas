@@ -136,7 +136,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Saved-selection overlay opacity | 60 | **Unqualified.** 7.78–21.71 completed updates/s; whole-screen proxy 59.21–59.62 presents/s, p99 16.85–33.33 ms; independent canvas presentation unmeasured | [Fixed filter controls](#fixed-filter-controls), 2026-10-04 |
 | Animated or warping filter: Domain Warp, Ripple | 60, soft | | |
 | Fill layer or gradient-fill edit | 60, soft | **Not met** for Solid Color opacity: screen 47.44 presents/s, p99 ≤49.98 ms; renderer 32.51 fresh completed updates/s. Gradient unmeasured | [Solid Color fills](#solid-color-fills) |
-| Paper Relief, Light and Shows through paint drag | 60 | Unmeasured on the reference tablet; a mid-tier-class XP-Pen updates a 12 MP canvas 59.8–69.2 times/s | [Paper lighting diagnostic](mid-tier.md#paper-lighting-diagnostic) |
+| Paper Texture visibility, Light and Shows through paint drag | 60 | Unmeasured on the reference tablet; a mid-tier-class XP-Pen updates a 12 MP canvas 59.8–69.2 times/s | [Paper lighting diagnostic](mid-tier.md#paper-lighting-diagnostic) |
 | Navigation with Shadows/Highlights or Clarity | 60 | **Unqualified on current M3.** 52.398–59.826 completed updates/s; first contact below 57/s for both guides; presentation unmeasured | [BUILD20 selected canvas comparison](#build20-selected-canvas-comparison) |
 | Navigation with proof or tone guide shown | 60 | | |
 | Gradient drag | 60 | | |

@@ -487,7 +487,7 @@ resources-parameter-channel-mixer-constant = Sabit
 resources-parameter-channel-mixer-monochrome = Tek renk
 resources-parameter-paper-color = Renk
 resources-parameter-paper-texture = Doku
-resources-parameter-paper-relief = Kabartma
+resources-parameter-paper-texture-visibility = Doku görünürlüğü
 resources-parameter-paper-light = Işık
 resources-parameter-paper-through-paint = Boyanın altından görünür
 

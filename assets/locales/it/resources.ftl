@@ -488,7 +488,7 @@ resources-parameter-channel-mixer-constant = Costante
 resources-parameter-channel-mixer-monochrome = Monocromatico
 resources-parameter-paper-color = Colore
 resources-parameter-paper-texture = Grana
-resources-parameter-paper-relief = Rilievo
+resources-parameter-paper-texture-visibility = Visibilità della texture
 resources-parameter-paper-light = Luce
 resources-parameter-paper-through-paint = Visibile attraverso il colore
 

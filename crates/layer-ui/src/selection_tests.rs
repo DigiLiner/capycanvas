@@ -10,7 +10,7 @@ mod selection_tools_checks {
         for control in controls {
             let fill = control.numeric.resolve(5.5, NumericOperation::Format).unwrap().fill;
             for operation in [NumericOperation::Position { position: fill },
-                NumericOperation::Scrub { origin: 5., pixels: 2. }, NumericOperation::Expression { text: "5.5".into() }] {
+                NumericOperation::Scrub { origin: 5., pixels: 2., fine: false }, NumericOperation::Expression { text: "5.5".into() }] {
                 let result = control.numeric.resolve(5., operation).unwrap();
                 assert_eq!(result.value, 6.);
                 s.dispatch(UiAction::SetToolSetting { id: control.id.into(), value: result.value as f32 }).unwrap();

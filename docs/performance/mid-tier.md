@@ -87,7 +87,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Saved spatial lengths beyond editor bounds, including Gaussian sigma >85 | 90, soft | Unmeasured | Full authored lengths need moving-frame qualification; earlier capped-value measurements do not apply |
 | Animated or warping filter: Domain Warp, Ripple | 90, soft | **Unqualified.** Non-reference Mali-G57 MC2 tablet, 6000 × 4000 at Fit: Ripple 87.6 ms, Domain Warp 113.1 ms per animated frame, from 3.3–3.8 s; reference tablet unmeasured | [Animated filters diagnostic](#animated-filters-diagnostic), 2026-10-18 |
 | Fill layer or gradient-fill edit | 90, soft | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
-| Paper Relief, Light and Shows through paint drag | 90 | **Unqualified.** Non-reference XP-Pen, 24 MP: 55.6–60.9 completed canvas updates/s, UI 83.1–88.9/s; reference tablet unmeasured | [Paper lighting diagnostic](#paper-lighting-diagnostic), 2026-10-18 |
+| Paper Texture visibility, Light and Shows through paint drag | 90 | **Unqualified.** Non-reference XP-Pen, 24 MP: 55.6–60.9 completed canvas updates/s, UI 83.1–88.9/s; reference tablet unmeasured | [Paper lighting diagnostic](#paper-lighting-diagnostic), 2026-10-18 |
 | Navigation with proof or tone guide shown | 90 | | |
 | Gradient drag | 90 | | |
 | Figure or ruler drag | 90 | | |
@@ -1211,16 +1211,17 @@ Measured on 2026-10-18 on an XP-Pen Magic Note Pad (MNP1095), whose Helio G99
 class SoC and Mali-G57 MC2 match this tier's hardware; it is not the reference
 tablet, and its panel ran at 90 Hz. `AndroidCanvasBarBenchmarkTest` with
 `-e scenarios paper` opens the synthetic tier photo, shows a rough Paper with
-Relief raised, and drags each Paper control for 5 s in Properties with OS
-injected touch: Relief, a circle around the Light dial, and Shows through paint
-between 20% and 80% (Relief and Light at 100% Shows through paint). The
+Texture visibility raised, and drags each Paper control for 5 s in Properties
+with OS injected touch: Texture visibility, a circle around the Light dial, and
+Shows through paint between 20% and 80% (the first two at 100% Shows through
+paint). The
 benchmark APK was built from `fa32b31db` with the paper lighting changes;
 thermal status stayed 0. Rates are completed canvas updates per second and
 UI frames per second.
 
 | Drag | 12 MP canvas | 24 MP canvas | UI |
 | --- | ---: | ---: | ---: |
-| Relief | 59.8 | 55.6 | 83.1–88.3 |
+| Texture visibility | 59.8 | 55.6 | 83.1–88.3 |
 | Light dial | 69.2 | 58.8 | 88.2–88.8 |
 | Shows through paint | 68.3 | 60.9 | 88.9–89.1 |
 

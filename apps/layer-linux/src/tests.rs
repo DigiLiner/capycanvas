@@ -8570,6 +8570,7 @@ fn native_panel_slider_input() {
 #[test]
 #[ignore = "private Wayland display, native mouse/touch/pen value scrubs"]
 fn native_panel_value_scrub_input() {
+    const SHIFT: u32 = 0xffe1;
     let app = native_test_app("art.capycanvas.PanelValueScrubs");
     let w = fixture_workspace(&app);
     w.window.maximize();
@@ -8621,15 +8622,17 @@ fn native_panel_value_scrub_input() {
                 input.perform(serde_json::json!([contact(device, "move", from), contact(device, "down", from),
                     contact(device, "move", [from[0], from[1] - 20.]), contact(device, "move", [from[0], from[1] - 4.])]));
                 assert!((field.value() - initial - (expected - initial) / 5.).abs() < 0.00001,
-                    "{device} an active drag fine tunes inside the initial click threshold");
+                    "{device} an active drag moves in whole steps inside the initial click threshold");
                 let readout = find_css(field.upcast_ref(), "number-readout").unwrap().downcast::<gtk::Label>().unwrap();
                 assert_eq!(readout.text(), if field == &size { "121.0 px" } else { "61.0 %" },
                     "integer values keep their decimal during a drag");
-                input.perform(serde_json::json!([contact(device, "move", [from[0], from[1] - 2.])]));
-                assert!((field.value() - initial - (expected - initial) / 10.).abs() < 0.00001);
+                input.perform(serde_json::json!([contact(device, "move", [from[0], from[1] - 1.])]));
+                assert!((field.value() - initial).abs() < 0.00001, "{device} a wiggle keeps the whole value");
+                input.perform(serde_json::json!([{ "key": SHIFT, "down": true }, contact(device, "move", [from[0], from[1] - 21.])]));
+                assert!((field.value() - initial - (expected - initial) / 10.).abs() < 0.00001, "{device} Shift fine tunes ten times slower");
                 assert_eq!(readout.text(), if field == &size { "120.5 px" } else { "60.5 %" });
-                input.perform(serde_json::json!([contact(device, "move", from)]));
-                assert!((field.value() - initial).abs() < 0.00001, "{device} returning to the origin restores the value before release");
+                input.perform(serde_json::json!([contact(device, "move", [from[0], from[1] - 1.]), { "key": SHIFT, "down": false }]));
+                assert!((field.value() - initial).abs() < 0.00001, "{device} returning to the Shift point restores the value before release");
                 assert_eq!(readout.text(), if field == &size { "120.0 px" } else { "60.0 %" });
                 let mut events = vec![contact(device, "up", from)];
                 if device == "pen" { events.push(serde_json::json!({ "pen": "leave" })); }
@@ -8660,11 +8663,11 @@ fn native_panel_value_scrub_input() {
             assert!(!descendant::<gtk::Entry>(&size).unwrap().is_mapped());
             w.dispatch(UiAction::SetToolSetting { id: "size".into(), value: 1000. });
             let from = screen_point(&display, &w.window, [0.5, 0.5]);
-            input.perform(serde_json::json!([contact(device, "move", from), contact(device, "down", from),
-                contact(device, "move", [from[0], from[1] - 20.]), contact(device, "move", [from[0], from[1] + 2.])]));
+            input.perform(serde_json::json!([{ "key": SHIFT, "down": true }, contact(device, "move", from), contact(device, "down", from),
+                contact(device, "move", [from[0], from[1] - 20.]), contact(device, "move", [from[0], from[1] + 20.])]));
             assert_eq!(size.value(), 999.5, "{device} fine fractions resume below the large-pixel threshold");
             assert_eq!(readout.text(), "999.5 px");
-            let mut events = vec![contact(device, "up", [from[0], from[1] + 2.])];
+            let mut events = vec![contact(device, "up", [from[0], from[1] + 20.]), serde_json::json!({ "key": SHIFT, "down": false })];
             if device == "pen" { events.push(serde_json::json!({ "pen": "leave" })); }
             input.perform(serde_json::Value::Array(events));
         }

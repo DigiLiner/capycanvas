@@ -2122,7 +2122,7 @@
             "default": {"kind":"number","value":0},
             "key": "relief",
             "kind": {"decimals":0,"kind":"number","max":300,"min":0,"step":1,"unit":"%"},
-            "label": {"message":"resources-parameter-paper-relief"}
+            "label": {"message":"resources-parameter-paper-texture-visibility"}
           },
           {
             "default": {"kind":"number","value":225},

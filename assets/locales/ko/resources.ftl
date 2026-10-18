@@ -604,7 +604,7 @@ resources-parameter-channel-mixer-constant = 상수
 resources-parameter-channel-mixer-monochrome = 단색
 resources-parameter-paper-color = 색상
 resources-parameter-paper-texture = 질감
-resources-parameter-paper-relief = 요철
+resources-parameter-paper-texture-visibility = 텍스처 표시량
 resources-parameter-paper-light = 빛
 resources-parameter-paper-through-paint = 물감 사이로 보임
 

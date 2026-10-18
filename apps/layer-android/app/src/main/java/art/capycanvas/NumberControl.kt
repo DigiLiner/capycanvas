@@ -4,6 +4,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -148,7 +149,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     }
     val currentValue by rememberUpdatedState(shown.getDouble("value"))
     val beginScrub by rememberUpdatedState<(Double) -> Unit>({ origin -> scrubOrigin = origin; beginEdit(); scrubbing = true })
-    val moveScrub by rememberUpdatedState<(Double, Double) -> Unit>({ origin, pixels -> apply(obj("type" to "scrub", "origin" to origin, "pixels" to pixels)) })
+    val moveScrub by rememberUpdatedState<(Double, Double, Boolean) -> Unit>({ origin, pixels, fine -> apply(obj("type" to "scrub", "origin" to origin, "pixels" to pixels, "fine" to fine)) })
     val settleScrub by rememberUpdatedState<(Double, Boolean) -> Unit>({ origin, cancel ->
         scrubbing = false
         if (cancel) {
@@ -170,7 +171,11 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         if (!enabled) return@pointerInput
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
-            val origin = currentValue
+            val start = currentValue
+            var origin = start
+            var fine = currentEvent.keyboardModifiers.isShiftPressed
+            var base = 0f
+            var last = 0f
             scrubCancelled = false
             val y = valueBounds.top + down.position.y
             var moved = false; var released = false
@@ -181,15 +186,19 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                     val change = event.changes.firstOrNull { it.id == down.id } ?: break
                     if (change.isConsumed) break
                     val pixels = (y - valueBounds.top - change.position.y) / density
+                    if (event.keyboardModifiers.isShiftPressed != fine) {
+                        origin = shown.getDouble("value"); base = last; fine = !fine
+                    }
+                    last = pixels
                     if (!change.pressed) {
-                        if (moved) { moveScrub(origin, pixels.toDouble()); change.consume() }
+                        if (moved) { moveScrub(origin, (pixels - base).toDouble(), fine); change.consume() }
                         released = true; break
                     }
                     if (!moved && kotlin.math.abs(pixels) <= viewConfiguration.touchSlop / density) continue
-                    if (!moved) { moved = true; beginScrub(origin) }
-                    change.consume(); moveScrub(origin, pixels.toDouble())
+                    if (!moved) { moved = true; beginScrub(start) }
+                    change.consume(); moveScrub(origin, (pixels - base).toDouble(), fine)
                 }
-            } finally { if (moved && !scrubCancelled) settleScrub(origin, !released) }
+            } finally { if (moved && !scrubCancelled) settleScrub(start, !released) }
         }
     }
     val commit by rememberUpdatedState<(Boolean) -> Boolean>({ finish(it) })

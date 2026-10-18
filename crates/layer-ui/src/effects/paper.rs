@@ -243,7 +243,7 @@ mod tests {
         let view = properties(&document, Default::default(), &PaperLibrary::default(), &l);
         assert_eq!(view.title, "Paper");
         assert_eq!(view.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", TEXTURE, SCALE, paper::RELIEF, paper::LIGHT, paper::THROUGH_PAINT]);
-        assert_eq!(view.controls.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()[3..], ["Relief", "Light", "Shows through paint"]);
+        assert_eq!(view.controls.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()[3..], ["Texture visibility", "Light", "Shows through paint"]);
         assert_eq!(view.controls.iter().map(|c| c.disabled).collect::<Vec<_>>(), [false, false, false, false, true, true], "a flat paper has nothing to light");
         let PropertyKind::Number { numeric } = &view.controls[4].kind else { panic!("light is a number") };
         assert_eq!((numeric.kind, numeric.min, numeric.max), (NumericKind::Dial, 0., 360.));

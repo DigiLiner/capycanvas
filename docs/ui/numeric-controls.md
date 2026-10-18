@@ -18,9 +18,12 @@ entry without changing the effect application.
   input character counts must not choose compact field widths.
 - Wider integers and continuous values: label left and a plain, tappable value
   right; a native slider underneath. Tapping the value enters text editing.
-  Panel values also accept vertical mouse, touch and pen drags for fine
-  adjustment: up increases, down decreases, and four logical pixels equal one
-  field step. Escape or native cancellation restores the starting value.
+  Panel values also accept vertical mouse, touch and pen drags: up increases,
+  down decreases, four logical pixels equal one field step, and the value snaps
+  as the slider does. Holding Shift during the drag, as in Blender and Krita,
+  moves ten times slower and keeps fractions; pressing or releasing Shift
+  mid-drag continues from the current value. Escape or native cancellation
+  restores the starting value.
   Edit Color numbers adjust by vertical drag without a slider
   ([color picking](color-picker.md#edit-color)).
 - Directions that wrap use a dial in a slider row. The label sits at the top
@@ -92,8 +95,9 @@ logarithmic slider over 0.5–2048 px. Opacity is displayed as a percentage;
 the pressure slider uses a linear range.
 Control schema comparisons include the logarithmic offset as part of the slider curve.
 
-`NumericOperation` handles formatting, stepping, fine value scrubbing, native
-values, normalized slider positions, dial points and typed expressions. Sliders
+`NumericOperation` handles formatting, stepping, value scrubbing with its
+`fine` flag, native values, normalized slider positions, dial points and typed
+expressions. Sliders
 send positions in 0–1; dials send the pointer's offset from their center and
 their radius, and `NumericKind::Dial` wraps every result into its range.
 Mapping, quantization, validation and
@@ -107,9 +111,9 @@ through 32 px, matching the brush-size threshold, then snap to whole pixels.
 Percentages keep tenths within five percentage points of either soft-range edge
 and snap to whole percentages elsewhere. Angles snap to whole degrees.
 Other units retain their declared resolution; whole-count fields stay integers.
-Text entry retains fractional values independently of slider snapping. Fine
-scrubbing also keeps fractions, except pixel magnitudes above 1000 px snap to
-whole pixels. Settled readouts omit trailing fractional zeroes. Panel value drags
+Text entry retains fractional values independently of slider snapping. Value
+scrubs snap like the slider; Shift scrubs keep fractions, except pixel
+magnitudes above 1000 px snap to whole pixels. Settled readouts omit trailing fractional zeroes. Panel value drags
 use the shared fixed-decimal `scrub_text` until release or cancellation; whole
 pixel values of 1000 px or more omit the decimal during dragging. Release restores
 the settled readout without changing the value. Compact readouts keep at most
@@ -241,7 +245,8 @@ native drags along both vertical edges of the panel slider hit area, value
 editing with fractions above the pixel threshold, whole-pixel slider snapping
 and label double-click reset in both themes, with workspace captures
 in `artifacts/ui/panel-sliders/`. `native_panel_value_scrub_input` checks mouse
-and touch value scrubs in both themes, fixed decimals during motion and trimmed
+and touch value scrubs in both themes, whole steps without Shift and tenths
+with it, fixed decimals during motion and trimmed
 zeroes after release, precise Escape cancellation, click editing, Properties
 label reset and one Undo per
 scrub. Run it separately with `LAYER_PANEL_CONTACT=pen` and `--tablet` for pen

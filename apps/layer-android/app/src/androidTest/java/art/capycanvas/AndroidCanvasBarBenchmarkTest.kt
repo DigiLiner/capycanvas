@@ -848,11 +848,11 @@ class AndroidCanvasBarBenchmarkTest {
                 fun value(key: String) = state().getJSONObject("layer_properties").array("controls").objects()
                     .first { it.getString("key") == key }.getJSONObject("value").getDouble("value")
                 fun slider() = findTag("number-value-relief")?.let { (root, value) ->
-                    generateSequence(value.parent) { it.parent }.firstNotNullOfOrNull { row -> row.find(hasTag("number-slider-Relief"))?.let { root to it } }
+                    generateSequence(value.parent) { it.parent }.firstNotNullOfOrNull { row -> row.find(hasTag("number-slider-Texture visibility"))?.let { root to it } }
                 }
                 val track = settledControl("Relief slider", ::slider)
                 val start = track.left + track.width() * .2 - host.surfaceOrigin.x to track.centerY() - host.surfaceOrigin.y.toDouble()
-                interactionSnapshot("paper-relief-before", "number-slider-Relief", ::slider)
+                interactionSnapshot("paper-relief-before", "number-slider-Texture visibility", ::slider)
                 drag(start, 250) { t -> track.width() * .1 * t / .25 to 0.0 }
                 host.awaitMain("Relief gesture changes its value", 10_000, condition = { value("relief") != 100.0 })
                 invoke("undo")
@@ -866,7 +866,7 @@ class AndroidCanvasBarBenchmarkTest {
                     sampler.join()
                 }
                 check(reliefValues.size > 1) { "Relief did not change during motion" }
-                interactionSnapshot("paper-relief-after", "number-slider-Relief", ::slider)
+                interactionSnapshot("paper-relief-after", "number-slider-Texture visibility", ::slider)
                 val dial = settledControl("Light dial", { findTag("number-dial-light") })
                 val center = dial.centerX() - host.surfaceOrigin.x to dial.centerY() - host.surfaceOrigin.y.toDouble()
                 val inside = dial.width() * .4

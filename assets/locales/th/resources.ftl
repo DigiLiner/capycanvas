@@ -488,7 +488,7 @@ resources-parameter-channel-mixer-constant = ค่าคงที่
 resources-parameter-channel-mixer-monochrome = ขาวดำ
 resources-parameter-paper-color = สี
 resources-parameter-paper-texture = พื้นผิว
-resources-parameter-paper-relief = ลายนูน
+resources-parameter-paper-texture-visibility = การมองเห็นพื้นผิว
 resources-parameter-paper-light = แสง
 resources-parameter-paper-through-paint = มองเห็นผ่านสี
 

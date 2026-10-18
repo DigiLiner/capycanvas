@@ -17,7 +17,7 @@ the library, lighting, rendering, saved data and what each host has.
 | First version | Later |
 | --- | --- |
 | Paper layer with Color, Texture and Scale | Lighting the thickness of paint with the paper |
-| Relief, Light and Shows through paint, lighting the canvas and exports | Paper lighting in New drawing |
+| Texture visibility, Light and Shows through paint, lighting the canvas and exports | Paper lighting in New drawing |
 | One resolution per drawing, 300 ppi by default | Texture parameters in Properties and saved variations |
 | Thirteen built-in papers from eight programs | Portable user texture programs, shared with a portable custom-filter contract |
 | Every grain brush follows the paper | Per-brush textures |
@@ -37,12 +37,12 @@ the library, lighting, rendering, saved data and what each host has.
    canvas, following the slider at once, so its scale can be judged against
    the drawing. The same shading shows for a moment after a paper is chosen.
    It never appears in the artwork or export.
-4. **Light the paper.** Relief raises the texture on the canvas and in
+4. **Light the paper.** Texture visibility raises the texture on the canvas and in
    exports, lit from the upper left. Light turns where the light comes from,
    and Shows through paint sets how much texture shows through the paint: at
    100% the whole picture is lit like paint on rough paper, at 0% paint hides
-   the texture it covers. Light and Shows through paint are dimmed while Relief
-   is 0.
+   the texture it covers. Light and Shows through paint are dimmed while
+   Texture visibility is 0.
 5. **Draw.** Pencils, charcoal, pastels and textured paint brushes catch the
    tooth. Texture strength in Tool Settings still sets how much a brush reacts.
    Bristol and hot press break a pencil line only lightly; rough breaks it
@@ -60,12 +60,12 @@ the library, lighting, rendering, saved data and what each host has.
 | Image Size | Unchanged. It shows 300 ppi for a drawing without a resolution. |
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
 | Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name and opens Choose Texture unless the layer is locked. Add mask in the footer and the row menu's Add mask, mask-from-selection and Paste mask items are disabled while Paper is selected. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
-| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%; Relief, a slider from 0 to 300%; Light, a [dial](../ui/numeric-controls.md) with its angle; Shows through paint, a slider from 0 to 100%. Double-clicking a label returns it to its default: Scale 100%, Relief 0%, Light 225° (upper left) and Shows through paint 100%. Light and Shows through paint are disabled while Relief is 0. |
+| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%; Texture visibility, a slider from 0 to 300%; Light, a [dial](../ui/numeric-controls.md) with its angle; Shows through paint, a slider from 0 to 100%. Double-clicking a label returns it to its default: Scale 100%, Texture visibility 0%, Light 225° (upper left) and Shows through paint 100%. Light and Shows through paint are disabled while Texture visibility is 0. |
 | Choose Texture | A dialog with Edit Color's size, title and footer. One grid of squircle tiles, each preview at its own size with the paper's name below: the thirteen built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
-| Canvas | The lit relief while Relief is above 0. On a flat paper, relief shading while Scale changes and for a moment after a paper is chosen. |
+| Canvas | The lit relief while Texture visibility is above 0. On a flat paper, relief shading while Scale changes and for a moment after a paper is chosen. |
 | Tool Settings | Texture strength, unchanged. Brushes have no texture picker or texture scale. |
 
-Choosing a paper is one undo step, and so is each Scale, Relief, Light or
+Choosing a paper is one undo step, and so is each Scale, Texture visibility, Light or
 Shows through paint drag. The paper
 feature adds no preference. A Properties title shows only the layer name when
 it matches the layer type, so Paper is not titled "Paper (Paper)" and a Solid
@@ -127,7 +127,7 @@ when none exists inserts it at the bottom, regardless of the selected group.
 | --- | --- | --- |
 | `color` | Color | Opaque. Declared as the program's constant color, so Paper keeps the startup background, clear folding and color thumbnails of Solid Color. |
 | `texture` | Texture (new) | A built-in program with its values, or an imported image. Defaults to the paper last chosen in Choose Texture, or Drawing paper. |
-| `relief` | Number, 0–300% | How far the texture stands out on the canvas and in exports. 100% lights the paper's own relief as the brushes feel it. 0 leaves the paper flat. |
+| `relief` | Number, 0–300% | Texture visibility: how far the texture stands out on the canvas and in exports. 100% lights the paper's own relief as the brushes feel it. 0 leaves the paper flat. |
 | `light` | Angle, 0–360° | Where the light comes from, in degrees clockwise from the drawing's +x axis; 225° is the upper left. It turns with the artwork. |
 | `through_paint` | Number, 0–100% | How much texture shows through paint above the paper. |
 
@@ -337,7 +337,7 @@ height texture is the tooth the brushes feel, so what a pencil catches and what
 the light shows agree.
 
 - **Shade.** Each pixel is multiplied in linear light by
-  `S = 1 − Relief · (slope · light direction)`, from the paper's slope at that
+  `S = 1 − visibility · (slope · light direction)`, from the paper's slope at that
   point. Slopes average to zero over a sheet, so the paper keeps its tone and
   only turns lighter towards the light and darker away from it. Brightening
   stops at the brightest channel's limit, so highlights never shift hue
@@ -358,10 +358,10 @@ the light shows agree.
   `(1 − α) + α · Shows through paint`, where α is the paint's coverage.
   Exports capture the paint above the paper a second time for α, and match the
   canvas.
-- **Edits are cheap.** Relief, Light and Shows through paint change no
+- **Edits are cheap.** Texture visibility, Light and Shows through paint change no
   composited pixel, so dragging them only presents the canvas again. The one
   edit that moves the paper into or out of the composite, Shows through paint
-  crossing 100% or Relief crossing 0, recomposites once.
+  crossing 100% or Texture visibility crossing 0, recomposites once.
 - **The scale preview gives way.** A lit paper already shows its relief, so
   changing Scale or the texture does not flash the preview over it.
 
@@ -419,10 +419,11 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | Layer type | A fill program | A dedicated Paper occurrence. It was removed once already; a fill reuses every layer rule. |
 | Visible relief on the Paper layer | No | It would make Paper a textured generator, losing the constant-color shortcuts, and paint covers it anyway. The simpler option wins. |
 | Where relief shows | Lighting of the finished picture, with Shows through paint | Shading only the Paper's own pixels: paint, even thin washes, would hide the paper's texture entirely, unlike paint on real paper. |
-| Light control | A dial beside its value | A slider hides that 0° and 360° meet. One circle setting Relief by radius and Light by angle hides the relief amount and is hard to set precisely. |
-| Shadow strength | Relief alone | A separate strength: in the slope model the shading is the relief, so two controls would change the same thing. |
+| Light control | A dial beside its value | A slider hides that 0° and 360° meet. One circle setting Texture visibility by radius and Light by angle hides the amount and is hard to set precisely. |
+| Shadow strength | Texture visibility alone | A separate strength: in the slope model the shading is the relief, so two controls would change the same thing. |
 | Lighting blend | Multiply in linear light, fixed | A blend-mode choice. Overlay and soft light change the sheet's tone and hue; a lit surface reflects in proportion to its light. |
 | Name | Shows through paint | Texture on paint or Paint coverage: neither says what 0% and 100% do. |
+| Name of the lighting amount | Texture visibility | Relief: painters did not read it as how much texture shows, or 0% as none. Texture strength already names how brushes catch the tooth. |
 | Which paper a stroke uses | Nearest Paper at or below the target | One Paper per drawing needs pinning and refusals across every structural command. |
 | Texture parameters in Properties | Presets only | The simpler option wins for now. Presets with Scale cover the papers artists choose between; exposing parameters adds controls, text and frozen ranges for every program. |
 | Paper preview on the canvas | Brief relief shading when the paper or its Scale changes | Thumbnails alone: a thumbnail cannot show scale relative to the drawing, which is the judgement Scale exists for. Shading while Choose Texture is open: it needs hover to preview a tile, which touch screens lack, and keeps another state. |

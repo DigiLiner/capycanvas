@@ -73,7 +73,7 @@ mod selection_refine_checks {
             let numeric = s.state.layer_tools.selection_resize.as_ref().unwrap().numeric.clone();
             let fill = numeric.resolve(5.5, NumericOperation::Format).unwrap().fill;
             for operation in [NumericOperation::Position { position: fill },
-                NumericOperation::Scrub { origin: 5., pixels: 2. }, NumericOperation::Expression { text: "5.5".into() }] {
+                NumericOperation::Scrub { origin: 5., pixels: 2., fine: false }, NumericOperation::Expression { text: "5.5".into() }] {
                 let result = numeric.resolve(5., operation).unwrap();
                 assert!((result.value - if kind == RefineKind::Feather { 5.5 } else { 6. }).abs() < 1e-9);
                 selection_action(&mut s, SelectionAction::ResizeRadius { radius: result.value as f32 });

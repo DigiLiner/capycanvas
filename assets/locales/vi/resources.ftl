@@ -488,7 +488,7 @@ resources-parameter-channel-mixer-constant = Hằng số
 resources-parameter-channel-mixer-monochrome = Đơn sắc
 resources-parameter-paper-color = Màu
 resources-parameter-paper-texture = Kết cấu
-resources-parameter-paper-relief = Độ nổi
+resources-parameter-paper-texture-visibility = Độ hiện kết cấu
 resources-parameter-paper-light = Ánh sáng
 resources-parameter-paper-through-paint = Hiện qua lớp màu
 

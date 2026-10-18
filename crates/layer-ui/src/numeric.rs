@@ -148,6 +148,8 @@ const DIAL_SNAP_DEGREES: f64 = 15.;
 const DIAL_SNAP_RADII: f64 = 2.;
 const DIAL_CENTER_RADII: f64 = 0.15;
 const FRACTIONAL_PIXEL_SCRUB_LIMIT: f64 = 1000.;
+const SCRUB_PIXELS_PER_STEP: f64 = 4.;
+const FINE_SCRUB_SLOWDOWN: f64 = 10.;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NumericControl {
@@ -396,9 +398,11 @@ impl NumericControl {
         }
         let formatting = matches!(operation, NumericOperation::Format);
         let slider = matches!(operation, NumericOperation::Position { .. });
-        let scrub = matches!(operation, NumericOperation::Scrub { .. });
+        let fine_scrub = matches!(operation, NumericOperation::Scrub { fine: true, .. });
+        let coarse_scrub = matches!(operation, NumericOperation::Scrub { fine: false, .. });
         let same_position = (self.min..=self.max).contains(&value)
             && matches!(&operation, NumericOperation::Position { position } if self.position_matches_value(*position, value));
+        let unmoved_scrub = matches!(&operation, NumericOperation::Scrub { pixels, .. } if *pixels == 0.);
         let mut resolved = match operation {
             NumericOperation::Format => value,
             NumericOperation::Step { steps } => {
@@ -407,9 +411,9 @@ impl NumericControl {
                 }
                 value + steps * self.step
             }
-            NumericOperation::Scrub { origin, pixels } => {
+            NumericOperation::Scrub { origin, pixels, fine } => {
                 if !origin.is_finite() || !pixels.is_finite() { return Err(NumericError::FiniteNumber); }
-                origin + pixels * self.step / 4.
+                origin + pixels * self.step / SCRUB_PIXELS_PER_STEP / if fine { FINE_SCRUB_SLOWDOWN } else { 1. }
             }
             NumericOperation::Value { value } => value,
             NumericOperation::Position { position } => {
@@ -430,9 +434,9 @@ impl NumericControl {
         }
         // Formatting an externally supplied value must never change it.
         if same_position { resolved = value; }
-        else if !formatting {
-            let resolution = if slider { self.slider_resolution(resolved) }
-                else if scrub { self.scrub_resolution(resolved) } else { self.fine_resolution() };
+        else if !formatting && !unmoved_scrub {
+            let resolution = if slider || coarse_scrub { self.slider_resolution(resolved) }
+                else if fine_scrub { self.scrub_resolution(resolved) } else { self.fine_resolution() };
             resolved = self.quantized(resolved, resolution);
         }
         let shown = if resolved == 0.0 {
@@ -557,6 +561,8 @@ pub enum NumericOperation {
     Scrub {
         origin: f64,
         pixels: f64,
+        #[serde(default)]
+        fine: bool,
     },
     Expression {
         text: String,
@@ -591,38 +597,45 @@ impl NumericRequest {
 mod tests {
     use super::*;
     #[test]
-    fn value_scrubs_use_small_unit_steps_independently_of_slider_mapping() {
+    fn value_scrubs_snap_like_sliders_unless_the_precision_key_is_held() {
         let brush = NumericControl::brush_size();
-        let scrub = |spec: &NumericControl, origin, pixels| spec.resolve(origin, NumericOperation::Scrub { origin, pixels }).unwrap().value;
-        assert_eq!(scrub(&brush, 120., 4.), 121.);
-        assert_eq!(scrub(&brush, 120., -4.), 119.);
+        let scrub = |spec: &NumericControl, origin, pixels, fine| spec.resolve(origin, NumericOperation::Scrub { origin, pixels, fine }).unwrap().value;
+        assert_eq!(scrub(&brush, 120., 4., false), 121.);
+        assert_eq!(scrub(&brush, 120., -4., false), 119.);
+        assert_eq!(scrub(&brush, 120., 1., false), 120., "a wiggle keeps the whole pixel");
         let percent = NumericControl::percent();
-        assert_eq!(scrub(&percent, 0.5, 2.), 0.505);
-        assert_eq!(scrub(&percent, 0.5, 20.), 0.55);
+        assert_eq!(scrub(&percent, 0.5, 1., false), 0.5, "a wiggle keeps the whole percent");
+        assert_eq!(scrub(&percent, 0.5, 4., false), 0.51);
+        assert_eq!(scrub(&percent, 0.5, 20., false), 0.55);
+        assert_eq!(scrub(&percent, 0.5, 4., true), 0.501, "the precision key moves ten times slower in tenths");
+        assert_eq!(scrub(&percent, 0.5, 40., true), 0.51);
+        assert!((scrub(&brush, 120., 2., true) - 120.1).abs() < 1e-9);
         let mut extended = percent.clone();
         extended.min = -100.; extended.max = 100.;
-        assert!((scrub(&extended, 2., 4.) - 2.01).abs() < 1e-12);
-        assert_eq!(scrub(&percent, 0.999, 400.), 1.);
-        assert_eq!(scrub(&brush, 1., -400.), 0.5);
+        assert!((scrub(&extended, 2., 4., false) - 2.01).abs() < 1e-12);
+        assert_eq!(scrub(&percent, 0.999, 400., false), 1.);
+        assert_eq!(scrub(&brush, 1., -400., false), 0.5);
+        assert_eq!(brush.resolve(1005., NumericOperation::Scrub { origin: 999.5, pixels: 0., fine: false }).unwrap().value, 999.5,
+            "returning to the start keeps its exact value");
         for (origin, pixels) in [(f64::NAN, 1.), (1., f64::INFINITY)] {
-            assert_eq!(percent.resolve(1., NumericOperation::Scrub { origin, pixels }).unwrap_err(), NumericError::FiniteNumber);
+            assert_eq!(percent.resolve(1., NumericOperation::Scrub { origin, pixels, fine: false }).unwrap_err(), NumericError::FiniteNumber);
         }
     }
     #[test]
     fn large_pixel_scrubs_snap_to_integers_without_restricting_typed_fractions() {
         let brush = NumericControl::brush_size();
         for (origin, pixels, expected, readout) in [
-            (999., 2., 999.5, "999.5 px"),
-            (999., 4., 1000., "1000 px"),
-            (1000., 2., 1001., "1001 px"),
-            (1000., -2., 999.5, "999.5 px"),
-            (1200., 2., 1201., "1201 px"),
-            (1200., -2., 1200., "1200 px"),
-            (1200.5, 4., 1202., "1202 px"),
-            (1200.5, -4., 1200., "1200 px"),
-            (2047.5, 20., 2048., "2048 px"),
+            (999., 20., 999.5, "999.5 px"),
+            (999., 40., 1000., "1000 px"),
+            (1000., 20., 1001., "1001 px"),
+            (1000., -20., 999.5, "999.5 px"),
+            (1200., 20., 1201., "1201 px"),
+            (1200., -20., 1200., "1200 px"),
+            (1200.5, 40., 1202., "1202 px"),
+            (1200.5, -40., 1200., "1200 px"),
+            (2047.5, 200., 2048., "2048 px"),
         ] {
-            let result = brush.resolve(origin, NumericOperation::Scrub { origin, pixels }).unwrap();
+            let result = brush.resolve(origin, NumericOperation::Scrub { origin, pixels, fine: true }).unwrap();
             assert_eq!(result.value, expected, "{origin} with {pixels}px motion");
             assert_eq!(result.scrub_text, readout);
             assert_eq!(brush.resolve(result.value, NumericOperation::Format).unwrap().scrub_text, readout);
@@ -636,12 +649,12 @@ mod tests {
         let mut scaled = NumericControl::number(-20., 20., 0.01, 3).unit("px");
         scaled.scale = 100.;
         for origin in [-12., 12.] {
-            let result = scaled.resolve(origin, NumericOperation::Scrub { origin, pixels: 2. * origin.signum() }).unwrap();
+            let result = scaled.resolve(origin, NumericOperation::Scrub { origin, pixels: 20. * origin.signum(), fine: true }).unwrap();
             assert!((result.value - origin - 0.01 * origin.signum()).abs() < 1e-12);
             assert_eq!(result.scrub_text, format!("{:.0} px", result.value * scaled.scale));
         }
         let degrees = NumericControl::number(-2000., 2000., 1., 1).unit("°");
-        assert_eq!(degrees.resolve(1200., NumericOperation::Scrub { origin: 1200., pixels: 2. }).unwrap().value, 1200.5);
+        assert_eq!(degrees.resolve(1200., NumericOperation::Scrub { origin: 1200., pixels: 20., fine: true }).unwrap().value, 1200.5);
     }
     #[test]
     fn dials_point_where_pressed_snap_near_the_dial_and_wrap() {
@@ -923,7 +936,7 @@ mod compact_tests {
         let slider = spec.resolve(spec.min, NumericOperation::Position { position: fill }).unwrap();
         assert!((slider.value * spec.scale - 13.).abs() < 1e-10);
         assert!(spec.values_equal(slider.value, f64::from(slider.value as f32)));
-        let scrub = NumericControl::brush_size().resolve(120., NumericOperation::Scrub { origin: 120., pixels: 2. }).unwrap();
+        let scrub = NumericControl::brush_size().resolve(120., NumericOperation::Scrub { origin: 120., pixels: 20., fine: true }).unwrap();
         assert_eq!(scrub.value, 120.5);
         assert_eq!(scrub.text, "120.5 px");
         for (spec, value) in [(NumericControl::brush_size(), 120.5), (NumericControl::percent(), 0.355),

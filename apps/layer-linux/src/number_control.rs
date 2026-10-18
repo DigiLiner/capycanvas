@@ -990,6 +990,15 @@ impl NumberControl {
             if panel { gesture.current_event().and_then(|event| event.position()).zip(origin_y.get()).map_or(dy, |((_, y), origin)| y - origin) }
             else { dy }
         }));
+        let precision = std::rc::Rc::new(Cell::new((false, 0., 0., 0.)));
+        let shifted = |gesture: &gtk::GestureDrag| gesture.current_event_state().contains(gtk::gdk::ModifierType::SHIFT_MASK);
+        let scrub = std::rc::Rc::new(glib::clone!(#[strong] precision, move |control: &Self, gesture: &gtk::GestureDrag, dy: f64| {
+            let fine = shifted(gesture);
+            let (was, base, last, from) = precision.get();
+            let (base, from) = if fine == was { (base, from) } else { (last, control.value()) };
+            precision.set((fine, base, dy, from));
+            NumericOperation::Scrub { origin: from, pixels: base - dy, fine }
+        }));
         drag.connect_drag_begin(glib::clone!(
             #[weak(rename_to=control)]
             self,
@@ -997,8 +1006,10 @@ impl NumberControl {
             origin,
             #[strong] origin_y,
             #[strong] active,
+            #[strong] precision,
             move |g, _, _| {
                 active.set(false);
+                precision.set((shifted(g), 0., 0., control.value()));
                 origin_y.set(g.current_event().and_then(|event| event.position()).map(|(_, y)| y));
                 if !panel && !crate::input::touch_or_pen(g) {
                     g.set_state(gtk::EventSequenceState::Denied);
@@ -1023,6 +1034,7 @@ impl NumberControl {
             origin,
             #[strong] active,
             #[strong] offset,
+            #[strong] scrub,
             move |g, dx, dy| {
                 let dy = offset(g, dy);
                 if !control.input_valid() || (!active.get() && !control.drag_check_threshold(0, 0, if panel { 0 } else { dx as i32 }, dy as i32)) {
@@ -1031,12 +1043,11 @@ impl NumberControl {
                 active.set(true);
                 if panel { control.set_scrubbing(true); }
                 g.set_state(gtk::EventSequenceState::Claimed);
-                control.apply(if panel { NumericOperation::Scrub { origin: origin.get(), pixels: -dy } }
-                    else { NumericOperation::Position { position: origin.get() - dy / 200. } });
+                control.apply(if panel { scrub(&control, g, dy) } else { NumericOperation::Position { position: origin.get() - dy / 200. } });
             }
         ));
-        drag.connect_drag_end(glib::clone!(#[weak(rename_to=control)] self, #[strong] origin, #[strong] active, #[strong] offset, move |gesture, _, dy| {
-            if active.replace(false) && panel { control.apply(NumericOperation::Scrub { origin: origin.get(), pixels: -offset(gesture, dy) }); }
+        drag.connect_drag_end(glib::clone!(#[weak(rename_to=control)] self, #[strong] active, #[strong] offset, #[strong] scrub, move |gesture, _, dy| {
+            if active.replace(false) && panel { control.apply(scrub(&control, gesture, offset(gesture, dy))); }
             control.set_scrubbing(false);
         }));
         drag.connect_cancel(glib::clone!(#[weak(rename_to=control)] self, #[strong] origin, #[strong] active, move |_, _| {

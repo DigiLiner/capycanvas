@@ -312,10 +312,10 @@ class AndroidInteractionTest {
                 layerAction(obj("op" to "select", "id" to paper, "mask" to false))
                 group("properties").let { if (it.optString("active") != "properties") action(obj("type" to "select_panel_tab", "group" to it.getInt("id"), "panel" to "properties")) }
                 customize(obj("type" to "close_expanded"))
-                waitFor("Properties shows the paper's relief") { shown("number-slider-Relief") && state().getJSONObject("customization").isNull("expanded") }
+                waitFor("Properties shows the paper's relief") { shown("number-slider-Texture visibility") && state().getJSONObject("customization").isNull("expanded") }
                 assertTrue("A flat paper has no light to turn or hide", disabled("light") && disabled("through_paint"))
                 screenshot("validation/paper/lighting-flat-$theme.png")
-                val relief = bounds("number-slider-Relief")
+                val relief = bounds("number-slider-Texture visibility")
                 tap(Offset(relief.left + relief.width * .5f, relief.center.y))
                 waitFor("Relief raises the paper") { value("relief") > 0 && !disabled("light") && !disabled("through_paint") }
                 val dial = bounds("number-dial-light")
