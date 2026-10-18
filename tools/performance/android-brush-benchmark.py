@@ -145,6 +145,8 @@ def main():
             requested["canvas"] = [args.canvas_width, args.canvas_height]
         if args.fixture_layers is not None:
             requested["fixture_layers"] = args.fixture_layers
+        if args.paint_layer_name:
+            del requested["paint_layer_index"]
         if args.navigation_between_strokes:
             requested.update(navigation_between_strokes=True, navigation_settle_ms=args.navigation_settle_ms)
         if args.live_filter:

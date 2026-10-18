@@ -275,8 +275,10 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             check(paintLayerIndex in 0 until photoLayers)
             val insertedPaintIndex = state().array("layers").objects().indexOfFirst { it.getBoolean("selected") }
             check(insertedPaintIndex >= 0)
-            repeat((insertedPaintIndex - paintLayerIndex).coerceAtLeast(0)) { invoke("raise_layer") }
-            repeat((paintLayerIndex - insertedPaintIndex).coerceAtLeast(0)) { invoke("lower_layer") }
+            if (paintLayerName == null) {
+                repeat((insertedPaintIndex - paintLayerIndex).coerceAtLeast(0)) { invoke("raise_layer") }
+                repeat((paintLayerIndex - insertedPaintIndex).coerceAtLeast(0)) { invoke("lower_layer") }
+            }
             var attachmentFixture: JSONObject? = null
             var liveFilterFixture: JSONObject? = null
             val liveFilter = arguments.getString("liveFilter", "")!!

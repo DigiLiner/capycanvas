@@ -746,6 +746,14 @@ presentation. The default preset list is the dry brushes;
 the default workspace keeps Stats closed. `--stats` opens Stats and enables GPU
 timing; use `--trace --stats` for GPU phase diagnostics. Report these runs
 separately because Stats changes the workspace and adds measurement work.
+
+To ink on a crowded vector layer, generate a fixture with
+`cargo run --release -p layer-core --example crowded_vector_fixture -- OUT.capy 4248 2832 10000`
+(add `--paint` for the raster control, an empty paint layer over the same
+hatching), push it under `/data/local/tmp`, and pass `--photo` with it,
+`--canvas-width 4248 --canvas-height 2832`, `--paint-layer-name Ink` and
+`--fixture-layers 4` (5 for the control). A named layer keeps its place under the
+translucent Tones layer, so the run paints below another layer.
 `Capy GPU native capture ns` measures GPU validation, native encoding and
 canonical promotion after paint and before prediction. It excludes CPU
 preparation and backing-worker readback. A scope that cannot fit the current
