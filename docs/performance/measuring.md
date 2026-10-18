@@ -333,7 +333,10 @@ smudge and Liquify presets. The photo opens as a Perceptual document;
 `--color-mode two_tone` constrains the empty paint layer; `full_color` is the
 default. The benchmark draws a 200 Hz
 stylus ellipse at Fit zoom, three 10 s strokes, with the default 16 ms
-prediction.
+prediction. `--strength`, `--opacity` and `--smoothing` set those tool controls
+from 0 to 1, and `--tilt` holds the pen at a fixed tilt in radians; the report
+checks each against the app's state. High Smoothing lengthens the stroke
+preview, so measure prediction changes with it as well as with the default.
 Qualification runs keep the default workspace. `--trace` enables bounded GPU
 timestamps and phase attribution without opening Stats. `--stats` opens Stats
 and enables timestamp sampling even without a trace. Record diagnostic runs

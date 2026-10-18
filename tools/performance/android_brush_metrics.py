@@ -136,6 +136,12 @@ def validate_setup(info, requested):
             actual["layer_color_mode"] = options[index] if type(index) is int and 0 <= index < len(options) else None
         else:
             actual["layer_color_mode"] = state.get("layer_tools", {}).get("color_mode", {}).get("value")
+    settings = {field.get("id"): field.get("value") for field in state.get("tool_settings", [])}
+    for key, value in (("strength", info.get("strength")), ("opacity", info.get("opacity")), ("tilt", info.get("tilt")),
+                       ("smoothing", settings.get("smoothing_strength"))):
+        if key in requested:
+            expected[key] = round(requested[key], 5)
+            actual[key] = None if value is None else round(value, 5)
     if "stats_panel" in requested:
         expected["stats_panel"] = requested["stats_panel"]
         actual["stats_panel"] = info.get("stats_panel", True)

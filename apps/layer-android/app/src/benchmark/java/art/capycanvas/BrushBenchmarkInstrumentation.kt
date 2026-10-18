@@ -55,8 +55,10 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val strength = arguments.getString("strength")?.toDouble()
             val opacity = arguments.getString("opacity")?.toDouble()
             val tilt = arguments.getString("tilt")?.toFloat()
+            val smoothing = arguments.getString("smoothing")?.toDouble()
             check(strength == null || strength in 0.0..1.0)
             check(opacity == null || opacity in 0.0..1.0)
+            check(smoothing == null || smoothing in 0.0..1.0)
             check(tilt == null || tilt in 0f..1.57f)
             val duration = arguments.getString("durationMs", "10000")!!.toInt()
             val repeats = arguments.getString("repeats", "3")!!.toInt()
@@ -413,6 +415,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
             val sizePreparation = prepared(obj("type" to "set_brush_size", "value" to size))
             strength?.let { action(obj("type" to "set_brush_strength", "value" to it)) }
             opacity?.let { action(obj("type" to "set_brush_opacity", "value" to it)) }
+            smoothing?.let { action(obj("type" to "set_tool_setting", "id" to "smoothing_strength", "value" to it)) }
             arguments.getString("paintLoad")?.let {
                 val load = it.toDouble()
                 check(load in 0.0..1.0)
@@ -562,7 +565,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 "brush_ready_ns" to brushReadyNs, "brush_ready_ms" to (brushReadyNs - brushSelectedNs) / 1e6,
                 "brush_preparation" to selection, "size_preparation" to sizePreparation, "size_idle_ms" to sizeIdleMs,
                 "brush_size" to size, "mode" to mode, "prediction" to prediction, "speed" to speed,
-                "strength" to strength, "opacity" to opacity, "tilt" to tilt,
+                "strength" to strength, "opacity" to opacity, "tilt" to tilt, "smoothing" to smoothing,
                 "orientation" to if (tilt != null) -PI/2 else if (mode == "tilt") .5 else 0.0,
                 "memory_snapshots" to memorySnapshots,
                 "stats_panel" to statsPanel,

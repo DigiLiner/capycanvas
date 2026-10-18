@@ -49,6 +49,9 @@ def main():
     p.add_argument("--contact-ms", type=int, default=100, help="Contact duration in pauses mode")
     p.add_argument("--settle-delay-ms", type=int, default=0, help="Delay before navigation in settle mode")
     p.add_argument("--paint-load", type=float, help="Bristle paint supply, 0 to 1; omit for the preset default")
+    for name, help in (("strength", "Brush Strength"), ("opacity", "Brush Opacity"), ("smoothing", "Curve fit Smoothing")):
+        p.add_argument(f"--{name}", type=float, help=f"{help}, 0 to 1; omit for the preset default")
+    p.add_argument("--tilt", type=float, help="Fixed pen tilt in radians, 0 to 1.57")
     p.add_argument("--speed", type=float, default=1)
     p.add_argument("--prediction", choices=["true", "false"], default="true")
     p.add_argument("--horizon", type=int, default=16, help="Engine prediction lookahead in ms")
@@ -95,8 +98,11 @@ def main():
         p.error("--image-count must be between 1 and 32")
     if not 0 <= args.memory_idle_ms <= 120000 or (args.memory_idle_ms and (not args.memory or args.mode == "pinch")):
         p.error("--memory-idle-ms requires --memory, a stroke mode, and 0..120000 ms")
-    if args.paint_load is not None and not 0 <= args.paint_load <= 1:
-        p.error("--paint-load must be between 0 and 1")
+    for name in ("paint_load", "strength", "opacity", "smoothing"):
+        if getattr(args, name) is not None and not 0 <= getattr(args, name) <= 1:
+            p.error(f"--{name.replace('_', '-')} must be between 0 and 1")
+    if args.tilt is not None and not 0 <= args.tilt <= 1.57:
+        p.error("--tilt must be between 0 and 1.57")
     if not 0 <= args.paint_layer_index < args.photo_layers:
         p.error("--paint-layer-index must be between 0 and --photo-layers minus 1")
     if not 0 < args.effect_radius <= 85:
@@ -132,6 +138,7 @@ def main():
         requested.update(wait_for_warmup=args.wait_for_warmup, warmup_idle_ms=args.warmup_idle_ms, size_idle_ms=args.size_idle_ms,
                          probe_presets=[int(value) for value in args.probe_presets.split(",")] if args.probe_presets else [])
         requested.update(workload=args.workload, effect_radius=args.effect_radius, color_mode=args.color_mode)
+        requested.update({name: getattr(args, name) for name in ("strength", "opacity", "tilt", "smoothing") if getattr(args, name) is not None})
         if args.workload.startswith("objects"):
             requested.update(image_count=args.image_count, image_sources=args.image_sources)
         if args.canvas_width is not None:
@@ -187,6 +194,9 @@ def main():
                     "-e", "liveFilterDisabled", str(args.live_filter_disabled).lower()]
         if args.paint_load is not None:
             cmd += ["-e", "paintLoad", str(args.paint_load)]
+        for name in ("strength", "opacity", "tilt", "smoothing"):
+            if getattr(args, name) is not None:
+                cmd += ["-e", name, str(getattr(args, name))]
         if args.paint_layer_name:
             cmd += ["-e", "paintLayerName", args.paint_layer_name]
         if args.zoom is not None:
