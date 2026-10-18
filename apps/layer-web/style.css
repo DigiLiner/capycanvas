@@ -883,6 +883,7 @@ body[data-theme="dark"] .toolbar-manager .destructive-action { color: #ff7b63; }
 .document-dialog .document-size > :is(select,input,.number-field) { min-width:0; max-width:100%; }
 .document-dialog .document-size:has(> input[type=checkbox]) { flex-wrap:nowrap; justify-content:flex-start; }
 .document-dialog .document-size > input[type=checkbox] { order:-1; flex:none; }
+.document-dialog .number-spin .number-entry { width:96px; }
 .document-dialog h2 { margin:0; font-size:1.15em; }
 .document-dialog footer { display:flex; gap:8px; justify-content:flex-end; }
 .document-dialog .document-note { margin:-8px 0 0; color:var(--settings-secondary); font-size:.9em; }

@@ -383,7 +383,7 @@ impl NewDocumentSettings {
         let selected = presets.iter().find(|preset| preset.options == self.defaults).map(|preset| preset.id);
         NewDocumentForm {
             options: self.defaults,
-            resolution: crate::NumericControl { unit: "ppi".into(),
+            resolution: crate::NumericControl { unit: "ppi".into(), kind: crate::NumericKind::Number,
                 ..crate::NumericControl::number(1., f64::from(MAX_NEW_DOCUMENT_RESOLUTION), 1., 0) },
             text: NewDocumentText::new(localization), selected,
             backgrounds: vec![(DocumentBackground::White, localization.text(MessageId::DOCUMENTS_WHITE)),

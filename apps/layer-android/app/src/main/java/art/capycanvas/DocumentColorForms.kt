@@ -33,6 +33,7 @@ import org.json.JSONObject
     var options by remember { mutableStateOf(JSONObject(model.getJSONObject("options").toString())) }
     var width by remember { mutableStateOf(options.getJSONArray("extent").getInt(0).toString()) }
     var height by remember { mutableStateOf(options.getJSONArray("extent").getInt(1).toString()) }
+    var resolution by remember { mutableStateOf(options.getInt("resolution").toString()) }
     var preset by remember { mutableStateOf(model.objectOrNull("selected")?.toString() ?: "custom") }
     val text=model.getJSONObject("text")
     val appearance=remember(options.toString(), host.languageTag) { JSONObject(Native.documentAppearance(options.toString(), host.languageTag)) }
@@ -41,14 +42,16 @@ import org.json.JSONObject
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val w = width.toIntOrNull(); val h = height.toIntOrNull()
+    val w = width.toIntOrNull(); val h = height.toIntOrNull(); val ppi = resolution.toIntOrNull()
+    val ppiControl = model.getJSONObject("resolution")
     val valid = w != null && h != null && w in 1..spec.getInt("max_dimension") && h in 1..spec.getInt("max_dimension")
+        && ppi != null && ppi >= ppiControl.getDouble("min") && ppi <= ppiControl.getDouble("max")
     fun color(field: String, value: String) {
         options = JSONObject(options.toString()).apply { getJSONObject("color").put(field, value) }
     }
     AlertDialog(onDismissRequest = { if (!saving) onDismiss() }, title = { Text(spec.getString("new_title")) },
         confirmButton = { TextButton(enabled = valid && !saving, modifier = Modifier.testTag("new-document-create"), onClick = {
-            val selected = JSONObject(options.toString()).put("extent", JSONArray(listOf(w!!, h!!)))
+            val selected = JSONObject(options.toString()).put("extent", JSONArray(listOf(w!!, h!!))).put("resolution", ppi!!)
             scope.launch {
                 saving = true
                 try {
@@ -69,12 +72,15 @@ import org.json.JSONObject
                     presets.objects().firstOrNull { it.getJSONObject("id").toString() == id }?.let { chosen ->
                         options = JSONObject(chosen.getJSONObject("options").toString())
                         width = options.getJSONArray("extent").getInt(0).toString(); height = options.getJSONArray("extent").getInt(1).toString()
+                        resolution = options.getInt("resolution").toString()
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CoreTextField(width, { width = it }, label = { Text(spec.getString("width_label")) }, modifier = Modifier.weight(1f).testTag("new-document-width"), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                     CoreTextField(height, { height = it }, label = { Text(spec.getString("height_label")) }, modifier = Modifier.weight(1f).testTag("new-document-height"), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 }
+                CoreTextField(resolution, { resolution = it }, label = { Text(text.getString("resolution") + " (" + ppiControl.getString("unit") + ")") },
+                    modifier = Modifier.fillMaxWidth().testTag("new-document-resolution"), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 val spaces = model.getJSONArray("spaces")
                 ColorChoice(text.getString("space"), (0 until spaces.length()).map { spaces.getJSONArray(it).let { a -> a.getString(0) to a.getString(1) } }, options.getJSONObject("color").getString("space")) { color("space", it) }
                 ColorChoice(text.getString("depth"), model.getJSONArray("depths").let { a -> (0 until a.length()).map { a.getJSONArray(it).let { c -> c.getString(0) to c.getString(1) } } }, options.getJSONObject("color").getString("depth")) { color("depth", it) }

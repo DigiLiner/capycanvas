@@ -454,6 +454,19 @@ class AndroidFeatureParityTest {
         assertNotNull("DocumentsUI Save", save)
         assertTrue(save!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
     }
+    @Test fun newDocumentCreatesTheChosenResolution() {
+        compose.waitUntil(60_000) { state().array("commands").objects().first { it.getString("id") == "new_document" }.getBoolean("enabled") }
+        compose.onNodeWithTag("application-menu-file").performClick()
+        compose.onNodeWithText("New…").performClick()
+        shown("new-document-resolution")
+        compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("new-document-resolution")), useUnmergedTree = true).performTextReplacement("600")
+        compose.onNodeWithTag("new-document-create").performClick()
+        awaitDocument()
+        action(obj("type" to "invoke", "command" to "image_size"))
+        compose.waitUntil(60_000) { state().getJSONObject("layer_tools").optJSONObject("image_size")?.optDouble("resolution") == 600.0 }
+        action(obj("type" to "image_size", "action" to obj("op" to "cancel")))
+        compose.waitUntil(15_000) { state().getJSONObject("layer_tools").isNull("image_size") }
+    }
     @Test fun documentSafSaveReopenAndExportPreservePaint() {
         compose.waitUntil(60_000) { state().array("commands").objects().first { it.getString("id") == "new_document" }.getBoolean("enabled") }
         compose.onNodeWithTag("application-menu-file").performClick()

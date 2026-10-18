@@ -79,6 +79,32 @@ export async function checkBlending({call,evaluate,settle}) {
     assert.equal(await evaluate(note),'Physically based');
     await evaluate(`document.querySelector('${dialog} [data-document-action=create]').click()`);
     await wait(`!document.querySelector('${dialog}')&&${selected('blend_linear')}`);
+
+    const create=async(ppi,remember)=>{
+      await invoke('new_document');
+      await wait(`!!${field('resolution')}`);
+      await evaluate(`(n=>{n.value=${JSON.stringify(String(ppi))};n.dispatchEvent(new Event('input',{bubbles:true}));})(${field('resolution')})`);
+      if(remember)await evaluate(`${field('remember')}.click()`);
+      await evaluate(`document.querySelector('${dialog} [data-document-action=create]').click()`);
+      await wait(`!document.querySelector('${dialog}')`);
+    };
+    await invoke('new_document');
+    await wait(`!!${field('resolution')}`);
+    const remembered=parseFloat(await evaluate(`${field('resolution')}.value`));
+    assert.ok(remembered>0&&remembered!==600,`New Drawing shows its default resolution: ${remembered}`);
+    await evaluate(`document.querySelector('${dialog} [data-document-action=cancel]').click()`);
+    await wait(`!document.querySelector('${dialog}')`);
+    await create(600,true);
+    await invoke('image_size');
+    await wait('layerApp.state().layer_tools.image_size?.resolution===600');
+    await send({type:'image_size',action:{op:'cancel'}});
+    await wait('!layerApp.state().layer_tools.image_size');
+    await invoke('new_document');
+    await wait(`!!${field('resolution')}`);
+    assert.equal(parseFloat(await evaluate(`${field('resolution')}.value`)),600,'remembered defaults keep the chosen resolution');
+    await evaluate(`document.querySelector('${dialog} [data-document-action=cancel]').click()`);
+    await wait(`!document.querySelector('${dialog}')`);
+    await create(remembered,true);
   } finally {
     if(theme)await send({type:'set_theme',theme});
   }

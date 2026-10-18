@@ -96,6 +96,11 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
         number.classList.add("document-size");number.entry.dataset.documentField=i?"height":"width";number.entry.required=true;
         number.update(value);form.append(number);return number;
       });
+      let resolution=model.options.resolution;
+      const ppi=numberField(model.resolution,()=>model.text.resolution,next=>{resolution=next;edited();});
+      ppi.classList.add("document-size");ppi.entry.dataset.documentField="resolution";ppi.entry.required=true;
+      ppi.update(resolution);form.append(ppi);
+      const numbers=[...fields,ppi];
       const space=select("space",()=>model.text.space,model.spaces,model.options.color.space);
       const depth=select("depth",()=>model.text.depth,model.depths,model.options.color.depth);
       const blending=select("blending",()=>model.blending.label,model.blending.choices.map(c=>[c.id,c.label]),model.options.blend_space);
@@ -103,18 +108,19 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
       const summary=element("p","document-color-summary"),note=element("p","document-color-note");form.append(summary,note);
       const background=select("background",()=>model.text.background,model.backgrounds,model.options.background);
       let chosen=model.options.blend_space;
-      const read=()=>({extent:[...dimensions],color:{space:space.value,depth:depth.value},background:background.value,blend_space:chosen});
+      const read=()=>({extent:[...dimensions],color:{space:space.value,depth:depth.value},background:background.value,blend_space:chosen,resolution});
       const describe=()=>{const appearance=app.new_document_appearance(read());
         blending.disabled=!appearance.blending_editable;blending.value=appearance.blending;
         blendingNote.textContent=appearance.blending_help;summary.textContent=appearance.summary;
         note.textContent=appearance.note??"";note.hidden=appearance.note==null;
       };
       const edited=()=>{preset.value="custom";remove.disabled=true;};
-      for(const number of fields)number.entry.addEventListener("input",edited);
+      for(const number of numbers)number.entry.addEventListener("input",edited);
       for(const input of [space,depth,background])input.addEventListener("change",()=>{edited();describe();});
       blending.onchange=()=>{chosen=blending.value;edited();describe();};
       preset.onchange=()=>{const p=selectedPreset();remove.disabled=!p?.remove;if(!p)return;
-        fields.forEach((number,i)=>{dimensions[i]=p.options.extent[i];number.cancelEditing();number.update(dimensions[i]);});space.value=p.options.color.space;depth.value=p.options.color.depth;background.value=p.options.background;chosen=p.options.blend_space;describe();
+        fields.forEach((number,i)=>{dimensions[i]=p.options.extent[i];number.cancelEditing();number.update(dimensions[i]);});
+        resolution=p.options.resolution;ppi.cancelEditing();ppi.update(resolution);space.value=p.options.color.space;depth.value=p.options.color.depth;background.value=p.options.background;chosen=p.options.blend_space;describe();
       };
       describe();
       const name=field("preset-name",()=>model.text.preset_name,element("input"));name.maxLength=64;
@@ -128,7 +134,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
       };
       const error=element("p","error-message");form.append(error);
       const footer=element("footer"),cancelNew=button(()=>model.text.cancel,()=>finish(null));cancelNew.dataset.documentAction="cancel";footer.append(cancelNew);
-      const create=button(()=>model.text.create,()=>{if(!fields.every(number=>number.commit())||!form.reportValidity())return;const options=read();try{
+      const create=button(()=>model.text.create,()=>{if(!numbers.every(number=>number.commit())||!form.reportValidity())return;const options=read();try{
         applyChange(app.dispatch({type:"new_document_preferences",action:{type:"remember",options,name:name.value,defaults:remember.checked}}));
         finish(options);
       }catch(e){error.textContent=String(e);}},"suggested-action");create.dataset.documentAction="create";

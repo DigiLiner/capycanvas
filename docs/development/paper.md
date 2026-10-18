@@ -324,7 +324,7 @@ keep their Solid Color.
 | Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
 | GTK | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the picker, drawing targets, masks and sheet creation in both themes. |
 | Windows | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding and library files use native workers. The Layers Paper fixture covers the row in both themes. |
-| Web, Android, Apple | Build and paint on Paper and offer the Add paper row. Texture is a list of built-in papers, Scale is a slider and there is no library or Import. Web's `--paper-rows`, Android's missing-Paper and fill-row journeys, and Apple's shared Add Paper journeys cover the layer controls. |
+| Web, Android, Apple | Build and paint on Paper, offer the Add paper row and show Resolution in New drawing. Texture is a list of built-in papers, Scale is a slider and there is no library or Import. Web's `--paper-rows`, Android's missing-Paper and fill-row journeys, and Apple's shared Add Paper journeys cover the layer controls; Web's `--blending` and Android's `newDocumentCreatesTheChosenResolution` cover Resolution. |
 
 ## Measurements
 
