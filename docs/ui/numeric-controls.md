@@ -23,13 +23,17 @@ entry without changing the effect application.
   field step. Escape or native cancellation restores the starting value.
   Edit Color numbers adjust by vertical drag without a slider
   ([color picking](color-picker.md#edit-color)).
-- Directions that wrap use a dial: label left, a 40-unit round dial, then the
-  plain, tappable value. Pressing or dragging points the dial where the pointer
-  is. Within twice the dial's radius it snaps to 15° steps; farther out it
-  turns freely, and a press at its center keeps the value. Values wrap at 360°.
-  Double-clicking the label or the dial restores the default; on GTK, arrow keys
-  and the scroll wheel also step it. GTK and Android draw the dial; Web, Apple
-  and Windows show only the value field. Paper's Light is a dial.
+- Directions that wrap use a dial in a slider row. The label sits at the top
+  left and the plain, tappable value at the bottom right, as for a slider; in
+  place of the track, a round dial ends where tracks end. The dial is the row's
+  height less the 4-unit control spacing above and below. Its face uses the
+  track color and a dot in the slider fill grey points toward the angle.
+  Pressing or dragging points the dial where the pointer is. Within twice the
+  dial's radius it snaps to 15° steps; farther out it turns freely, and a press
+  at its center keeps the value. Values wrap at 360°. Double-clicking the label
+  or the dial restores the default; on GTK, arrow keys and the scroll wheel also
+  step it. GTK and Android draw the dial; Web, Apple and Windows show only the
+  value field. Paper's Light is a dial.
 - In Preferences the complete name/description/value header is above the
   slider. Rows expand for descriptions; the numeric content is capped at
   600 logical pixels. Surrounding groups share the same width so labels align.

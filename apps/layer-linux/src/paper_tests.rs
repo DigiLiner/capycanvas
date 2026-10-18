@@ -558,7 +558,13 @@ fn native_paper_lighting() {
     pump(500);
     save_snapshot(&w, 200, || path("paper-lighting-lit"));
     let dial = find_css(light.upcast_ref(), "number-dial").unwrap();
-    assert_eq!((dial.width(), dial.height()), (40, 40), "the Light dial is drawn at its proposed size");
+    let metrics = layer_ui::PANEL_CONTROL_METRICS;
+    let size = (metrics.slider_height - 2. * metrics.control_spacing) as i32;
+    assert_eq!((dial.width(), dial.height()), (size, size), "the Light dial fits a slider row's height");
+    assert_eq!(light.height(), relief.height(), "the Light row is as tall as a slider row");
+    let end = |widget: &gtk::Widget| widget.compute_bounds(&w.window).map(|bounds| bounds.x() + bounds.width()).unwrap();
+    let track = find_css(relief.upcast_ref(), "number-track").unwrap();
+    assert!((end(&dial) - end(&track)).abs() < 1., "the dial ends where the sliders end: {} {}", end(&dial), end(&track));
     let lit = ui_session(&w).engine().checkpoint();
     input.click(screen_point(&dial, &w.window, [0.08, 0.5]));
     until(|| state(&w).layer_properties.controls.iter().any(|c| c.key == "light" && c.value == EffectValue::Number(180.)), "a press on the dial's left edge lights from the left");

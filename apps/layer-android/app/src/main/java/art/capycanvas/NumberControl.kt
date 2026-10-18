@@ -22,10 +22,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.stateDescription
@@ -86,8 +84,8 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
     val focus = LocalFocusManager.current
     val requester = remember { FocusRequester() }
     val ranged = control.getString("kind") == "slider"
-    val dial = control.getString("kind") == "dial" && !settings && !inline && !toolbar && !valueOnly
-    val panel = ranged && !settings && !inline && !toolbar && !valueOnly
+    val dial = control.getString("kind") == "dial"
+    val panel = (ranged || dial) && !settings && !inline && !toolbar && !valueOnly
     val displayKey = if (ranged) "edit" else "text"
     fun resolve(value: Double, op: JSONObject): JSONObject {
         val request = obj("control" to control, "value" to value, "operation" to op)
@@ -168,7 +166,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
         if (handler != null) host.numberKeyHandler = handler
         onDispose { if (handler != null && host.numberKeyHandler === handler) host.numberKeyHandler = null }
     }
-    val fineDrag = if (!panel && !dial) Modifier else Modifier.pointerInput(control.toString(), enabled) {
+    val fineDrag = if (!panel) Modifier else Modifier.pointerInput(control.toString(), enabled) {
         if (!enabled) return@pointerInput
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
@@ -242,7 +240,7 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 host.textComposition.update(requester, text, focused)
                 if (dirty) onText(it)
             }
-        }, Modifier.then(if (panel || dial) Modifier.width(68.dp) else if (inline && valueOnly && !toolbar) Modifier.fillMaxWidth() else if (inline) Modifier.width(fixedWidth) else if (ranged) Modifier.widthIn(min = 48.dp, max = 100.dp).width(IntrinsicSize.Min) else if(compact) Modifier.width(fixedWidth) else Modifier.width(if (presentedText != null || control.optString("unit").isNotEmpty()) 80.dp else 60.dp)).height(height)
+        }, Modifier.then(if (panel) Modifier.width(68.dp) else if (inline && valueOnly && !toolbar) Modifier.fillMaxWidth() else if (inline) Modifier.width(fixedWidth) else if (ranged) Modifier.widthIn(min = 48.dp, max = 100.dp).width(IntrinsicSize.Min) else if(compact) Modifier.width(fixedWidth) else Modifier.width(if (presentedText != null || control.optString("unit").isNotEmpty()) 80.dp else 60.dp)).height(height)
             .onGloballyPositioned { fieldBounds = it.boundsInRoot(); if (toolbar && focused) host.toolbarEditorBounds = fieldBounds }
             .focusRequester(requester).onFocusChanged {
                 if (focused && !it.isFocused) { finish(); if (heldKey != null) endEdit() }
@@ -285,35 +283,22 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
             val edit = shown.getString("edit"); text = TextFieldValue(edit, TextRange(0, edit.length)); editing = true
         }.padding(horizontal = valuePadding).testTag("number-value-$id"), contentAlignment = if (toolbar && !showUnits) Alignment.Center else Alignment.CenterEnd) { Text(shown.getString(if (scrubbing) "scrub_text" else "text"), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis) }
     }
-    if (dial) {
+    if (panel) {
         val reset = {
             finish(cancel = true)
             if (onReset != null) onReset() else if (!control.isNull("default_value")) apply(obj("type" to "expression", "text" to ""))
         }
         Column(modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(label, Modifier.weight(1f).padding(start = if (compact) 0.dp else 6.dp)
-                    .pointerInput(enabled, onReset, control.toString()) { if (enabled) detectTapGestures(onDoubleTap = { reset() }) },
-                    color = if (enabled) colors.text else colors.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                AngleDial(shown.getDouble("value") * control.getDouble("scale"), enabled, colors.input, colors.secondary,
-                    Modifier.size(40.dp).then(contact).semantics { contentDescription = label; stateDescription = shown.getString("text") }.testTag("number-dial-$id"),
-                    onDoubleTap = reset) { position, radius -> if (finish()) apply(obj("type" to "dial", "x" to position.x.toDouble(), "y" to position.y.toDouble(), "radius" to radius.toDouble())) }
-                valueControl()
-            }
-            errorCaption?.let { Text(it, Modifier.testTag("number-error-$id"), color = colors.accent, fontSize = 12.sp) }
-        }
-        return
-    }
-    if (panel) {
-        Column(modifier.fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(36.dp)) {
                 Text(label, Modifier.fillMaxWidth().padding(start = if(compact)0.dp else 6.dp, end = 76.dp).align(Alignment.TopStart)
-                    .pointerInput(enabled, onReset, control.toString()) { if (enabled) detectTapGestures(onDoubleTap = {
-                        finish(cancel = true)
-                        if (onReset != null) onReset() else if (!control.isNull("default_value")) apply(obj("type" to "expression", "text" to ""))
-                    }) }, color = if (enabled) colors.text else colors.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    .pointerInput(enabled, onReset, control.toString()) { if (enabled) detectTapGestures(onDoubleTap = { reset() }) },
+                    color = if (enabled) colors.text else colors.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Box(Modifier.align(Alignment.BottomEnd)) { valueControl() }
-                EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) },
+                if (dial) AngleDial(shown.getDouble("value") * control.getDouble("scale"), enabled, colors.input, colors.sliderFill,
+                    Modifier.align(Alignment.CenterEnd).padding(end = 76.dp).size(metrics.sliderHeight - metrics.spacing * 2).then(contact)
+                        .semantics { contentDescription = label; stateDescription = shown.getString("text") }.testTag("number-dial-$id"),
+                    onDoubleTap = reset) { position, radius -> if (finish()) apply(obj("type" to "dial", "x" to position.x.toDouble(), "y" to position.y.toDouble(), "radius" to radius.toDouble())) }
+                else EditorSlider(shown.number("fill"), { if (finish()) apply(obj("type" to "position", "position" to it)) },
                     Modifier.fillMaxWidth().padding(start = 36.dp, end = 76.dp).align(Alignment.BottomStart).then(contact).testTag("number-slider-$label"),
                     enabled = enabled, label = label, height = 16.dp, inactiveTrackColor = colors.input, showThumb = false, activeTrackColor = colors.sliderFill)
             }
@@ -378,15 +363,10 @@ internal fun numericFailureCopy(error: Exception, language: String, fallback: St
                 }
             }
         }) {
-        val radius = size.minDimension / 2f - 1f
+        val radius = size.minDimension / 2f
         val angle = Math.toRadians(degrees)
         val direction = Offset(kotlin.math.cos(angle).toFloat(), kotlin.math.sin(angle).toFloat())
         drawCircle(face, radius)
-        drawCircle(ink.copy(alpha = .35f), radius, style = Stroke(1.dp.toPx()))
-        val dome = radius * .52f
-        drawCircle(Brush.radialGradient(listOf(Color(0xFFFAFAFA), Color(0xFF6B6B73)), center + direction * (dome * .5f), dome * 1.15f), dome)
-        val sun = center + direction * (radius * .8f)
-        drawCircle(Color(0xFFF7B329), radius * .17f, sun)
-        drawCircle(Color.Black.copy(alpha = .55f), radius * .17f, sun, style = Stroke(1.dp.toPx()))
+        drawCircle(ink, radius * .22f, center + direction * (radius * .55f))
     }
 }

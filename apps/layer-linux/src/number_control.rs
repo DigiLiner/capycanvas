@@ -3,7 +3,7 @@ use gtk::{glib, prelude::*, subclass::prelude::*};
 use layer_ui::{NumericControl, NumericKind, NumericOperation};
 use std::cell::{Cell, OnceCell, RefCell};
 
-const DIAL_SIZE: i32 = 40;
+const DIAL_SIZE: i32 = (layer_ui::PANEL_CONTROL_METRICS.slider_height - 2. * layer_ui::PANEL_CONTROL_METRICS.control_spacing) as i32;
 
 mod imp {
     use super::*;
@@ -562,9 +562,10 @@ impl NumberControl {
         if !inline {
             header.append(&labels);
         }
-        let panel_grid = (panel && spec.kind == NumericKind::Slider).then(gtk::Grid::new);
+        let panel_grid = (panel && matches!(spec.kind, NumericKind::Slider | NumericKind::Dial)).then(gtk::Grid::new);
         if let Some(grid) = &panel_grid {
             header.add_css_class("number-header");
+            header.set_valign(gtk::Align::Start);
             grid.attach(&header, 0, 0, 1, 1);
             control.append(grid);
         } else { control.append(&header); }
@@ -733,7 +734,7 @@ impl NumberControl {
             }
             if spec.kind == NumericKind::Dial {
                 let dial = control.build_dial();
-                header.append(&dial);
+                if let Some(grid) = &panel_grid { grid.attach(&dial, 0, 0, 2, 2); } else { header.append(&dial); }
                 control.imp().dial.set(dial).unwrap();
             }
             if let Some(grid) = &panel_grid { grid.attach(&stack, 1, 0, 1, 2); }
@@ -899,6 +900,7 @@ impl NumberControl {
             .content_width(DIAL_SIZE)
             .content_height(DIAL_SIZE)
             .focusable(true)
+            .halign(gtk::Align::End)
             .valign(gtk::Align::Center)
             .build();
         dial.add_css_class("number-dial");
@@ -968,34 +970,12 @@ impl NumberControl {
         self.apply(NumericOperation::Dial { x: x - width / 2., y: y - height / 2., radius: width.min(height) / 2. });
     }
     fn draw_dial(&self, area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32) {
-        use std::f64::consts::TAU;
-        let (cx, cy) = (f64::from(width) / 2., f64::from(height) / 2.);
-        let radius = f64::from(width.min(height)) / 2. - 1.;
-        let ink = area.color();
-        let alpha = if area.is_sensitive() { 1. } else { 0.4 };
-        let [r, g, b] = [ink.red(), ink.green(), ink.blue()].map(f64::from);
-        cr.arc(cx, cy, radius, 0., TAU);
-        cr.set_source_rgba(r, g, b, 0.08 * alpha);
-        let _ = cr.fill_preserve();
-        cr.set_source_rgba(r, g, b, (if area.has_visible_focus() { 0.7 } else { 0.22 }) * alpha);
-        cr.set_line_width(if area.has_visible_focus() { 2. } else { 1. });
-        let _ = cr.stroke();
+        let radius = f64::from(width.min(height)) / 2.;
         let angle = (self.value() * self.spec().scale).to_radians();
-        let (x, y) = (angle.cos(), angle.sin());
-        let dome = radius * 0.52;
-        let light = gtk::cairo::RadialGradient::new(cx + x * dome * 0.5, cy + y * dome * 0.5, 0., cx, cy, dome * 1.15);
-        light.add_color_stop_rgba(0., 0.98, 0.98, 0.98, alpha);
-        light.add_color_stop_rgba(1., 0.42, 0.42, 0.45, alpha);
-        cr.arc(cx, cy, dome, 0., TAU);
-        let _ = cr.set_source(&light);
+        cr.arc(f64::from(width) / 2. + angle.cos() * radius * 0.55, f64::from(height) / 2. + angle.sin() * radius * 0.55, radius * 0.22, 0., std::f64::consts::TAU);
+        let ink = area.color();
+        cr.set_source_rgba(ink.red().into(), ink.green().into(), ink.blue().into(), ink.alpha().into());
         let _ = cr.fill();
-        let (sx, sy, sun) = (cx + x * radius * 0.8, cy + y * radius * 0.8, radius * 0.17);
-        cr.arc(sx, sy, sun, 0., TAU);
-        cr.set_source_rgba(0.97, 0.7, 0.16, alpha);
-        let _ = cr.fill_preserve();
-        cr.set_source_rgba(0., 0., 0., 0.55 * alpha);
-        cr.set_line_width(1.);
-        let _ = cr.stroke();
     }
     fn install_value_gestures(&self, display: &gtk::Button) {
         let panel = self.has_css_class("number-panel");

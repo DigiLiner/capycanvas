@@ -319,7 +319,9 @@ class AndroidInteractionTest {
                 tap(Offset(relief.left + relief.width * .5f, relief.center.y))
                 waitFor("Relief raises the paper") { value("relief") > 0 && !disabled("light") && !disabled("through_paint") }
                 val dial = bounds("number-dial-light")
-                assertEquals("The Light dial is drawn at its proposed size", 40f, dial.width / density, .5f)
+                assertEquals("The Light dial fits a slider row", 28f, dial.height / density, .5f)
+                assertEquals("The dial ends where the sliders end", bounds("number-value-light").right - 76 * density, dial.right, 1.5f)
+                assertEquals("The dial sits centered in a slider-height row", bounds("number-value-light").bottom - 18 * density, dial.center.y, 1.5f)
                 tap(Offset(dial.left + dial.width * .08f, dial.center.y))
                 waitFor("A press on the dial's left edge lights from the left") { value("light") == 180.0 }
                 reveal("number-slider-Shows through paint")
