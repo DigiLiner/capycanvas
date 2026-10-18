@@ -610,7 +610,7 @@ mod tests {
         let edit=Edit::SetRaster {target,revision:revision.clone()};let mut candidate=before.clone();candidate.apply(edit.clone()).unwrap();
         assert!(editor.preview(edit.clone()).is_err());assert_eq!(editor.document(),&before);assert_eq!(editor.checkpoint(),checkpoint);
         assert!(editor.perform(edit).is_err());assert_eq!(editor.document(),&before);assert_eq!(editor.checkpoint(),checkpoint);
-        assert!(editor.amend_raster(target,revision).is_err());assert_eq!(editor.document(),&before);assert_eq!(editor.checkpoint(),checkpoint);
+        assert!(editor.amend(Edit::SetRaster{target,revision}).is_err());assert_eq!(editor.document(),&before);assert_eq!(editor.checkpoint(),checkpoint);
         editor.undo().unwrap();assert!(editor.document().artwork.images().unwrap()[&first.id()].same_owner(&first));
     }
     #[test]

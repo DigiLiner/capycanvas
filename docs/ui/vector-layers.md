@@ -8,11 +8,15 @@
 ## Drawing
 
 Plain round dry brushes draw on a vector layer: G-Pen, whose pressure sets the
-width, and Monoline, which keeps one width. While the
-pen is down the line shows as a provisional path; at pen-up it is fitted to
-cubic segments with a pressure width profile and added as one path in one undo
-step. Other brushes refuse the stroke with a notice, and the canvas cursor shows
-the refusal before contact.
+width, and Monoline, which keeps one width. The line follows the same Smoothing,
+pressure curve, rulers and late stylus pressure updates as the brush does on a
+paint layer. While the pen is down it shows as a provisional path; at pen-up it
+is fitted to as few cubic segments as stay within half a screen pixel of the
+drawn line, with smooth anchors where curves meet and corners where the line
+turns sharply, and added as one path in one undo step. Its width profile keeps
+pressure changes to the same half pixel. Pressure updates that arrive after
+pen-up reshape that path within its undo step. Other brushes refuse the stroke
+with a notice, and the canvas cursor shows the refusal before contact.
 
 ## Figures
 
@@ -130,6 +134,15 @@ its paths are written back unchanged when the drawing is saved.
 
 ## Tests
 
+`vector_strokes_smooth_and_weigh_input_like_raster_strokes` in
+[`canvas.rs`](../../crates/layer-engine/src/canvas.rs) checks that a vector line
+takes the raster stroke's dabs, and
+`hand_drawn_lines_keep_few_anchors_within_tolerance` and
+`late_pressure_corrections_replay_the_line` in
+[`vector_stroke.rs`](../../crates/layer-engine/src/vector_stroke.rs) bound the
+fitted anchors, widths and corrections.
+`vector_lines_land_under_the_pen_on_moved_layers`,
+`late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step`,
 `move_tool_selects_drags_and_deletes_vector_paths`,
 `arrange_commands_restack_selected_paths_one_step_at_a_time`,
 `figure_shapes_on_vector_layers_become_selected_editable_paths`,

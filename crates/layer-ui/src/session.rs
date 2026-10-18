@@ -4167,7 +4167,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.input_pending = true;
             return Ok(());
         }
-        if self.vector_lines.active() || (event.phase == PenPhase::Down && self.vector_drawing_layer().is_some()) {
+        if self.vector_lines.active() || self.vector_lines.corrects(&event) || (event.phase == PenPhase::Down && self.vector_drawing_layer().is_some()) {
             if let Err(error) = self.vector_line_pen(event) { self.notify(error); }
             self.input_pending = true;
             return Ok(());
@@ -4539,6 +4539,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.sync_crop_overlay();
         self.sync_paper_preview(now_ns);
         self.sync_moving_pixels();
+        self.sync_vector_line_preview();
         let clone_source = self.engine.clone_source();
         self.engine
             .render_frame_for(now_ns, presentation_ns)

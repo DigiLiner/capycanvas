@@ -3,14 +3,18 @@ use layer_core::authored::vector::{Cap, Eraser, ItemId, Join, Paint, PaintEntry,
 use layer_engine::{SampleFlags, VectorStroke};
 use std::sync::Arc;
 
-struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, tolerance: f64 }
+const LINE_TOLERANCE: f64 = 0.5;
+
+struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, tolerance: f64, stale: bool }
+struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
 struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, whole: bool }
 
 #[derive(Default)]
-pub(super) struct VectorLines { line: Option<Line>, erasing: Option<Erasing>, revision: u64 }
+pub(super) struct VectorLines { line: Option<Line>, drawn: Option<Drawn>, erasing: Option<Erasing>, revision: u64 }
 impl VectorLines {
     pub fn active(&self) -> bool { self.line.is_some() }
     pub fn erasing(&self) -> bool { self.erasing.is_some() }
+    pub fn corrects(&self, event: &PenEvent) -> bool { self.drawn.as_ref().is_some_and(|drawn| drawn.line.stroke.corrects(event)) }
 }
 
 fn path(id: ItemId, paint: &Paint, line: (layer_core::authored::vector::PathGeometry, Option<layer_core::authored::vector::WidthProfile>, f64)) -> PathItem {
@@ -96,22 +100,21 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_interaction.changed = true;
     }
     pub(super) fn vector_line_pen(&mut self, event: PenEvent) -> Result<(), String> {
-        if event.flags.contains(SampleFlags::PREDICTED) || event.flags.contains(SampleFlags::CORRECTION) { return Ok(()); }
+        if event.flags.contains(SampleFlags::CORRECTION) { return self.correct_vector_line(event); }
+        if event.flags.contains(SampleFlags::PREDICTED) { return Ok(()); }
         match event.phase {
             PenPhase::Down => {
                 self.cancel_vector_line();
+                self.vector_lines.drawn = None;
                 let Some(layer) = self.vector_drawing_layer() else { return Ok(()) };
                 if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
-                let brush = self.engine.configured_brush().clone();
+                let brush = self.engine.configured_brush();
                 let space = self.engine.document().composition().color.space;
                 let [r, g, b, a] = brush.color_rgba_linear;
                 let color = layer_core::color::RgbColor::from_linear(space, [r, g, b, (a * brush.opacity).clamp(0., 1.)]).map_err(|e| e.to_string())?;
-                let transform = self.state.camera.input_transform();
-                let [m0, m1, m2, m3, _, _] = transform.surface_to_document;
-                let scale = f64::from((m0 * m3 - m1 * m2).abs().sqrt()).max(1e-6);
-                let stroke = VectorStroke::new(self.vector_lines.revision + 1, brush, transform, self.engine.configured_pressure_curve().clone());
-                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), tolerance: 0.25 * scale });
-                self.push_vector_sample(event);
+                let offset = self.engine.document().scene().occurrence_offset64(layer);
+                let stroke = self.engine.begin_vector_stroke(self.vector_lines.revision + 1, event, offset);
+                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), tolerance: LINE_TOLERANCE * self.document_per_surface_pixel(), stale: true });
             }
             PenPhase::Move => self.push_vector_sample(event),
             PenPhase::Up => {
@@ -119,15 +122,18 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.finish_vector_line()?;
             }
             PenPhase::Cancel => self.cancel_vector_line(),
-            _ => {}
+            PenPhase::Hover => {}
         }
         Ok(())
     }
     fn push_vector_sample(&mut self, event: PenEvent) {
         let Some(line) = &mut self.vector_lines.line else { return };
-        if !line.stroke.push(event) { return; }
-        let samples = line.stroke.preview();
-        let Some(preview) = layer_engine::polyline(&samples) else { return };
+        line.stale |= self.engine.push_vector_stroke(&mut line.stroke, event);
+    }
+    pub(super) fn sync_vector_line_preview(&mut self) {
+        let Some(line) = &mut self.vector_lines.line else { return };
+        if !std::mem::take(&mut line.stale) { return; }
+        let Some(preview) = layer_engine::polyline(&line.stroke.preview()) else { return };
         self.vector_lines.revision += 1;
         let preview = layer_render::VectorPreview { owner: line.layer, path: Arc::new(path(ItemId(1), &line.paint, preview)), revision: self.vector_lines.revision };
         self.engine.backend_mut().set_vector_preview(Some(preview));
@@ -137,9 +143,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn finish_vector_line(&mut self) -> Result<(), String> {
         let Some(line) = self.vector_lines.line.take() else { return Ok(()) };
-        let samples = line.stroke.finish();
         let result = (|| {
-            let Some(fitted) = layer_engine::fit_line(&samples, line.tolerance) else { return Ok(()) };
+            let Some(fitted) = layer_engine::fit_line(&line.stroke.samples(), line.tolerance) else { return Ok(()) };
             let document = self.engine.document();
             let object = document.scene().vector_layer(line.layer).ok_or("The vector layer was removed")?;
             let id = object.allocate_id();
@@ -147,9 +152,32 @@ impl<R: CanvasRenderer> UiSession<R> {
             let edit = document.vector_object_edit(line.layer, drawn).map_err(|e| e.to_string())?;
             self.layer_edit(edit)?;
             self.layer_interaction.changed = true;
+            if line.stroke.awaits_corrections() { self.vector_lines.drawn = Some(Drawn { line, id, checkpoint: self.engine.checkpoint() }); }
             Ok(())
         })();
         self.engine.backend_mut().set_vector_preview(None);
         result
+    }
+    fn correct_vector_line(&mut self, event: PenEvent) -> Result<(), String> {
+        if let Some(line) = &mut self.vector_lines.line {
+            line.stale |= self.engine.push_vector_stroke(&mut line.stroke, event);
+            return Ok(());
+        }
+        let Some(mut drawn) = self.vector_lines.drawn.take() else { return Ok(()) };
+        if drawn.checkpoint != self.engine.checkpoint() || !self.engine.push_vector_stroke(&mut drawn.line.stroke, event) {
+            if drawn.checkpoint == self.engine.checkpoint() && drawn.line.stroke.awaits_corrections() { self.vector_lines.drawn = Some(drawn); }
+            return Ok(());
+        }
+        let Some(fitted) = layer_engine::fit_line(&drawn.line.stroke.samples(), drawn.line.tolerance) else { return Ok(()) };
+        let document = self.engine.document();
+        let object = document.scene().vector_layer(drawn.line.layer).ok_or("The vector layer was removed")?;
+        let Some(position) = object.find(drawn.id) else { return Ok(()) };
+        let corrected = object.replace([(position, Some(Record::Path(path(drawn.id, &drawn.line.paint, fitted))))]);
+        let edit = document.vector_object_edit(drawn.line.layer, corrected).map_err(|e| e.to_string())?;
+        self.engine.amend_edit(edit).map_err(|e| e.to_string())?;
+        self.layer_interaction.changed = true;
+        drawn.checkpoint = self.engine.checkpoint();
+        if drawn.line.stroke.awaits_corrections() { self.vector_lines.drawn = Some(drawn); }
+        Ok(())
     }
 }

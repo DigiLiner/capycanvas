@@ -2619,18 +2619,13 @@ impl Editor {
                 .operations = Default::default();
         }
     }
-    pub fn amend_raster(
-        &mut self,
-        target: SourceTarget,
-        revision: raster::RasterRevision,
-    ) -> Result<(), DocumentError> {
+    pub fn amend(&mut self, edit: Edit) -> Result<(), DocumentError> {
         let next =
             self.next_checkpoint
                 .checked_add(1)
                 .ok_or(DocumentError::InvalidLayerOperation(
                     "Document history exhausted",
                 ))?;
-        let edit=Edit::SetRaster {target,revision};
         if edit.requires_history_admission(&self.document) {
             self.document=self.prepare_history_edit(edit,history_budget::BYTE_BUDGET)?.0;
         }else {self.document.apply(edit)?;}
@@ -2821,7 +2816,7 @@ mod tests {
         assert_eq!(editor.document().target_raster(target), Some(&after));
         let snapshot = editor.document().clone();
         editor
-            .amend_raster(target, raster::RasterRevision::pending())
+            .amend(Edit::SetRaster { target, revision: raster::RasterRevision::pending() })
             .unwrap();
         assert_eq!(snapshot.target_raster(target), Some(&after));
         editor.undo().unwrap();

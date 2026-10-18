@@ -492,6 +492,13 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     pub fn allocate_stroke_id(&mut self) -> StrokeId {
         self.editor.allocate_stroke_id()
     }
+    pub fn amend_edit(&mut self, edit: Edit) -> Result<(), DocumentError> {
+        self.require_renderer_color(edit.resulting_color(self.document().composition().color))?;
+        let image = edit.changes_image(self.editor.document());
+        self.editor.amend(edit)?;
+        self.composite_all |= image;
+        Ok(())
+    }
     pub fn preview_edit(&mut self, edit: Edit) -> Result<(), DocumentError> {
         self.require_renderer_color(edit.resulting_color(self.document().composition().color))?;
         let image = edit.changes_image(self.editor.document());
@@ -1060,7 +1067,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         };
         let layer = stroke.target;
         let publication = layer_core::raster::RasterRevision::pending();
-        self.editor.amend_raster(layer, publication.clone())?;
+        self.editor.amend(Edit::SetRaster { target: layer, revision: publication.clone() })?;
         self.completed_publication = Some(publication);
         self.rebuild_completed = true;
         self.completed_at = None;
@@ -1724,6 +1731,32 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         Ok(())
     }
 
+    pub(crate) fn stroke_brush(&self, event: &PenEvent) -> BrushSnapshot {
+        let mut brush = self.settings.brush.clone();
+        brush.stabilization.input_scale = self.view.document_to_surface[0].hypot(self.view.document_to_surface[1]).max(f32::EPSILON);
+        if !matches!(event.tool, ToolKind::Pen | ToolKind::Brush | ToolKind::Pencil | ToolKind::Airbrush) {
+            brush.stabilization.pressure_fall_micros = 0;
+        }
+        brush
+    }
+
+    pub(crate) fn event_transform(&self, event: &PenEvent) -> ViewTransform {
+        self.transforms.iter().rev().find(|item| item.revision == event.view_revision).copied()
+            .unwrap_or_else(|| *self.transforms.back().expect("one transform is always retained"))
+    }
+
+    pub(crate) fn snap_to_ruler(&self, event: &PenEvent, transform: &mut ViewTransform, active: Option<layer_core::RulerConstraint>) -> Option<layer_core::RulerConstraint> {
+        let point = transform.map(event.surface_position);
+        let mut ruler = if event.phase == PenPhase::Down {
+            self.settings.ruler_snapping.and_then(|reach| layer_core::choose_ruler(self.document().rulers(), point, reach))
+        } else { active };
+        if let Some(snap) = &mut ruler {
+            if !event.flags.contains(SampleFlags::PREDICTED) { snap.resolve(point); }
+            transform.surface_to_document = snap.transform(transform.surface_to_document);
+        }
+        ruler
+    }
+
     fn process_event(&mut self, event: PenEvent) -> Result<(), EngineError<B::Error>> {
         if event.phase != PenPhase::Up || self.pending_up.is_none() || event.flags.contains(SampleFlags::CORRECTION) {
             self.metrics.input_events = self.metrics.input_events.saturating_add(1);
@@ -1739,32 +1772,8 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             }
             return Ok(());
         }
-        let mut transform = self
-            .transforms
-            .iter()
-            .rev()
-            .find(|item| item.revision == event.view_revision)
-            .copied()
-            .unwrap_or_else(|| {
-                *self
-                    .transforms
-                    .back()
-                    .expect("one transform is always retained")
-            });
-
-        let point = transform.map(event.surface_position);
-        let mut ruler = if event.phase == PenPhase::Down {
-            self.settings.ruler_snapping
-                .and_then(|reach| layer_core::choose_ruler(self.document().rulers(), point, reach))
-        } else {
-            self.active_ruler_constraint()
-        };
-        if let Some(snap) = &mut ruler {
-            if !event.flags.contains(SampleFlags::PREDICTED) {
-                snap.resolve(point);
-            }
-            transform.surface_to_document = snap.transform(transform.surface_to_document);
-        }
+        let mut transform = self.event_transform(&event);
+        let ruler = self.snap_to_ruler(&event, &mut transform, self.active_ruler_constraint());
         if let Some(active) = &mut self.active_stroke {
             active.ruler = ruler;
         }
@@ -1798,14 +1807,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     return Ok(());
                 }
                 let id = self.editor.allocate_stroke_id();
-                let mut brush = self.settings.brush.clone();
-                brush.stabilization.input_scale = self.view.document_to_surface[0].hypot(self.view.document_to_surface[1]).max(f32::EPSILON);
-                if !matches!(
-                    event.tool,
-                    ToolKind::Pen | ToolKind::Brush | ToolKind::Pencil | ToolKind::Airbrush
-                ) {
-                    brush.stabilization.pressure_fall_micros = 0;
-                }
+                let mut brush = self.stroke_brush(&event);
                 let mut feedback = self.settings.instant_feedback;
                 if is_mask {
                     // Coverage brushes use the same tip/dynamics, not pigment or fluid state.
@@ -5645,6 +5647,47 @@ mod tests {
         let stroke = engine.completed_stroke.as_ref().unwrap();
         assert_eq!(stroke.brush.diameter, BrushSnapshot::default().diameter);
         assert_eq!(stroke.brush.stabilization, BrushSnapshot::default().stabilization);
+    }
+
+    #[test]
+    fn vector_strokes_smooth_and_weigh_input_like_raster_strokes() {
+        for tool in [ToolKind::Pen, ToolKind::Mouse] {
+            let (mut input, mut engine) = engine("vector smoothing", 1024, 512);
+            let mut brush = default_brush(DefaultBrushPreset::GPen);
+            brush.stabilization.strength = 0.5;
+            brush.stabilization.adjust_by_speed = true;
+            engine.set_brush(brush).unwrap();
+            engine.set_view(ViewState { document_to_surface: [2., 0., 0., 2., 0., 0.], ..view(1024, 512) },
+                ViewTransform { revision: 2, surface_to_document: [0.5, 0., 0., 0.5, 0., 0.] });
+            let events: Vec<PenEvent> = (0..120u64).map(|i| {
+                let mut sample = event(i + 1, if i == 0 { PenPhase::Down } else if i == 119 { PenPhase::Up } else { PenPhase::Move }, 100. + i as f32 * 3.);
+                sample.view_revision = 2;
+                sample.tool = tool;
+                sample.timestamp_ns = 1_000_000_000 + i * 4_000_000;
+                sample.surface_position.y = 200. + (i as f32 * 0.05).sin() * 60.;
+                sample.pressure = 0.9 - 0.7 * (i as f32 / 119.);
+                sample
+            }).collect();
+            let mut vector = engine.begin_vector_stroke(1, events[0], [0.; 2]);
+            for sample in &events[1..] { engine.push_vector_stroke(&mut vector, *sample); }
+            for sample in &events {
+                input.push(*sample).unwrap();
+                engine.render_frame_for(sample.timestamp_ns, sample.timestamp_ns + 8_000_000).unwrap();
+            }
+            if engine.pending_up.is_some() {
+                let now = 1_000_000_000 + 119 * 4_000_000 + u64::from(pen_up_settlement_micros(&engine.settings.brush.stabilization)) * 1000;
+                engine.render_frame_for(now, now + 8_000_000).unwrap();
+            }
+            let stroke = engine.completed_stroke.as_ref().unwrap();
+            assert_eq!(vector.brush(), &stroke.brush, "{tool:?}");
+            let mut raster = Vec::new();
+            DabGenerator::generate(stroke, layer_core::color::RgbSpace::Srgb, &mut raster);
+            let centers = |samples: Vec<crate::VectorSample>| samples.into_iter().map(|(p, r)| [p[0] as f32, p[1] as f32, r as f32]).collect::<Vec<_>>();
+            let expected: Vec<_> = raster.iter().map(|dab| [dab.center.x, dab.center.y, dab.radii[0]]).collect();
+            let drawn = centers(vector.samples());
+            assert_eq!(drawn.len(), expected.len(), "{tool:?}");
+            for (a, b) in drawn.iter().zip(&expected) { assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3), "{tool:?}: {a:?} vs {b:?}"); }
+        }
     }
 
     #[test]

@@ -27,8 +27,7 @@ fn vector_layers_draw_fitted_lines_with_one_undo_step() {
     let (_, path) = object.paths().next().unwrap();
     let anchors = path.geometry.anchor_count();
     let stroke = path.style.strokes().next().unwrap();
-    eprintln!("anchors {anchors}, width {}, knots {:?}", stroke.width, stroke.profile.as_ref().map(|p| p.knots().len()));
-    assert!((2..30).contains(&anchors), "fitting keeps few anchors: {anchors}");
+    assert!((2..=8).contains(&anchors), "fitting keeps few anchors: {anchors}");
     assert!(stroke.profile.is_some(), "pressure becomes a width profile");
     assert_ne!(s.engine.document().revision, revision);
     assert_eq!(s.state.notice, None);
@@ -40,6 +39,58 @@ fn vector_layers_draw_fitted_lines_with_one_undo_step() {
     s.dispatch(UiAction::Invoke { command: CommandId::Redo }).unwrap();
     s.frame(5_100_000_000, 5_100_000_000).unwrap();
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 2);
+}
+
+#[test]
+fn vector_lines_land_under_the_pen_on_moved_layers() {
+    use layer_core::{Edit, authored::RecordChange};
+    let (mut s, layer) = vector_session();
+    let document = s.engine.document();
+    let mut occurrence = document.scene().occurrence(layer).unwrap().clone();
+    occurrence.offset = [40, -25];
+    let edit = Edit::Occurrence(RecordChange::replace(&document.artwork.occurrences, layer, Some(occurrence)).unwrap());
+    s.engine.apply_edit(edit).unwrap();
+    let points: Vec<Point> = (0..=12).map(|i| surface_at(&s, [300. + f64::from(i) * 10., 200. + f64::from(i) * 5.])).collect();
+    press(&mut s, 1, &points);
+    let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let (_, path) = object.paths().next().unwrap();
+    let [ox, oy] = s.engine.document().scene().occurrence_offset64(layer);
+    let anchors = path.geometry.subpaths()[0].to_vec();
+    let [start, end] = [anchors[0].point(), anchors[anchors.len() - 1].point()].map(|[x, y]| [x + ox, y + oy]);
+    assert!((start[0] - 300.).hypot(start[1] - 200.) < 1.5, "{start:?}");
+    assert!((end[0] - 420.).hypot(end[1] - 260.) < 1.5, "{end:?}");
+}
+
+#[test]
+fn late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step() {
+    let (mut s, layer) = vector_session();
+    let estimated = SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::ESTIMATED.0);
+    let events: Vec<PenEvent> = (0..40u64).map(|i| {
+        let phase = if i == 0 { PenPhase::Down } else if i == 39 { PenPhase::Up } else { PenPhase::Move };
+        let mut e = event(&s, i + 1, phase, 0.15);
+        e.surface_position.x = 150. + i as f32 * 6.;
+        e.flags = estimated;
+        e
+    }).collect();
+    for (i, e) in events.iter().enumerate() {
+        s.pen(*e).unwrap();
+        s.frame((i as u64 + 1) * 10_000_000, (i as u64 + 1) * 10_000_000).unwrap();
+    }
+    let widest = |s: &UiSession<Recorder>| {
+        let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+        assert_eq!(object.path_count(), 1);
+        let (_, path) = object.paths().next().unwrap();
+        path.style.strokes().next().unwrap().width
+    };
+    let before = widest(&s);
+    for (i, e) in events.iter().enumerate() {
+        s.pen(PenEvent { pressure: 0.9, flags: SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::CORRECTION.0), ..*e }).unwrap();
+        s.frame((50 + i as u64) * 10_000_000, (50 + i as u64) * 10_000_000).unwrap();
+    }
+    assert!(widest(&s) > before * 2., "{} vs {before}", widest(&s));
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 0, "the line and its corrections are one step");
 }
 
 fn surface_at(s: &UiSession<Recorder>, doc: [f64; 2]) -> Point {
