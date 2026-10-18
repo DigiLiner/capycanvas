@@ -3510,6 +3510,43 @@ independent process/desktop closure precedes the unchanged reporter on the same
 capture. Raw data and summary are in
 `artifacts/windows/port-20261010/pencil-final-prepared-a3f7d2e9/`.
 
+### Windows Pencil after sampler binding repair, 2026-10-18
+
+The same laptop, driver, project and original uninstrumented workload ran the
+normal Release at `f147c48b7`. Executable/DLL SHA-256 prefixes are
+`7A146C5C3FF7`/`5793073B82E7`; DXC and Xaml are unchanged. The official Release
+build and original native input checks pass. All 4,564 inputs are consumed with
+zero unmatched records or statistics errors. Artwork, camera, controls and Undo
+checks pass; actual measured input is 215.3–216.6 Hz.
+
+| Measured contact | Submitted frames/s | Input-to-frame-return p99, ms | Pen-down to frame return, ms |
+| --- | ---: | ---: | ---: |
+| 1 | 209.69 | 23.27 | 35.42 |
+| 2 | 211.24 | 23.27 | 36.33 |
+| 3 | 211.34 | 20.93 | 25.48 |
+
+Pooled input-to-frame return is 2.40 ms median, 6.20 ms p95, 23.27 ms p99 and
+51.21 ms maximum. Submitted-frame intervals have p99 6.41 ms and maximum
+48.92 ms. Contact-start native render spans are 19.16, 20.28 and 7.59 ms;
+corresponding injection-to-host arrival spans are 15.89, 15.69 and 17.60 ms.
+The following acquisition waits are 0.30, 0.54 and 1.07 ms.
+
+A separate instrumented pre-fix stack sampled `capy_frame` during display
+reduction, inside D3D12 sampler-index-buffer allocation for a page bind group.
+That capture supplies attribution only; debugger pauses invalidate its timing.
+The repair places the unchanged sampler in retained uniform-record bindings,
+removing sampler allocation from changing reduction page bindings. This run
+also includes upstream page-clear batching, Watercolor and Paper changes, so
+the observed before/after improvement does not isolate the sampler repair.
+
+Contact-start delay is reduced, but this short software-timestamp run does not
+establish physical Wacom latency, scanout latency, presented fps, long-running
+stability or reference-tier targets. The known wrapper log-sentinel failure is
+retained; independent process/desktop closure and the unchanged reporter on the
+same data pass. Raw traces, summary and contact correlation are in
+`artifacts/windows/port-20261010/pencil-post-sampler-fix-8608f94b/`;
+the attribution stack is in `pencil-cdb-final-680bad93/` beside it.
+
 ## iPadOS 17 compatibility diagnostics
 
 The 2026-10-17 older-device GPU-counter candidate is based on `86a0fd0e4`;
