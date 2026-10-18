@@ -3389,6 +3389,42 @@ Comparison and full source/runtime/ownership closure:
 Current EXE/DLL prefixes are `371C35B30BF7`/`AC8122F54893`;
 normal Release qualification is `55F6B17F6D8E`.
 
+### Windows Pencil input, 2026-10-18
+
+The Surface Laptop 5, i7-1255U and Intel Iris Xe D3D12 driver
+32.0.101.7085 ran the normal Release sources now committed in `509e4a1a9`,
+including shader specialization `10d515055`. The build began at `26a1ec0a3`
+with the same three frozen regression files. Executable/DLL SHA-256 prefixes
+are `4E0AC4825C23`/`6DF248B8DB3B`; DXC is `9A5100511E12`.
+
+The existing plain 8192 × 6336 project, 4 px Pencil, Immediate presentation,
+maximum frame latency 1 and private display are unchanged. One process runs a
+one-second priming contact, then three nominal six-second contacts at 240 Hz.
+Each contact is undone to the original drawing before the next. Actual measured
+input rates are 215.8–216.3 Hz; all 4,564 inputs, including priming, are consumed
+with zero unmatched records. Artwork, camera, controls and Undo checks pass.
+
+| Measured contact | Submitted frames/s | Input-to-frame-return p99, ms | Pen-down to frame return, ms |
+| --- | ---: | ---: | ---: |
+| 1 | 205.98 | 52.48 | 83.28 |
+| 2 | 206.12 | 57.96 | 83.66 |
+| 3 | 207.49 | 49.02 | 82.07 |
+
+The three contacts retain every initial moving sample. Pooled input-to-frame
+return is 3.70 ms median, 9.85 ms p95, 57.09 ms p99 and 113.24 ms maximum.
+Submitted-frame intervals have p99 7.93 ms and maximum 49.34 ms. The first
+native render spans are 66.38–66.87 ms, followed by acquisition waits of
+26.96–36.37 ms. The trace does not identify the blocking operation. These
+contact-start pauses remain unresolved; shader specialization does not by itself
+establish that native input stutter is fixed.
+
+These are software timestamps and submitted frames, not presented fps, physical
+Wacom latency or a reference-tier qualification. No PresentMon or per-frame UI
+tracing is enabled. The known wrapper log-sentinel failure is preserved;
+independent process/desktop closure precedes the unchanged reporter on the same
+capture. Raw data and summary are in
+`artifacts/windows/port-20261010/pencil-final-prepared-a3f7d2e9/`.
+
 ## iPadOS 17 compatibility diagnostics
 
 The 2026-10-17 older-device GPU-counter candidate is based on `86a0fd0e4`;
