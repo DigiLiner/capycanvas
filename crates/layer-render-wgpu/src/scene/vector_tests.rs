@@ -136,8 +136,10 @@ fn crowded_vector_layer_drawing_frames() {
         let (mut editor, layer) = document(extent, records);
         let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
         let start = std::time::Instant::now();
-        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        let mut opening = vec![timed(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) }).1];
+        while r.has_pending_work() { opening.push(timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).1); }
         let open = start.elapsed().as_secs_f64() * 1e3;
+        eprintln!("open over {} frames, longest wall {:.1} ms", opening.len(), opening.iter().copied().fold(0., f64::max));
         let initial = display(&r);
         let mut frames = Vec::new();
         let mut points = Vec::new();
@@ -179,6 +181,24 @@ fn crowded_vector_layer_drawing_frames() {
         eprintln!("{count} strokes: open {open:.0} ms; drawing frame cpu p50 {:.2} p95 {:.2} ms, wall p50 {:.2} p95 {:.2} ms; commit perform {perform:.2} ms frame cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms frame cpu {:.2} wall {:.2} ms",
             percentile(&mut cpu, 0.5), percentile(&mut cpu, 0.95), percentile(&mut wall, 0.5), percentile(&mut wall, 0.95), commit.0, commit.1, undo.0, undo.1);
     }
+}
+
+#[test]
+fn crowded_layers_derive_across_frames_and_settle_to_the_exact_render() {
+    let extent = [2000u32, 1500u32];
+    let records: Vec<Record> = crate::vector::bench::scene_b([2000., 1500.], 20_000).into_iter().map(Record::Path).collect();
+    let (editor, _) = document(extent, records);
+    let doc = editor.document();
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    r.submit(packet(doc.scene(), extent)).unwrap();
+    r.wait_idle().unwrap();
+    let derived = |r: &WgpuRasterizer| r.scene.as_ref().unwrap().vectors.layers.values().flat_map(|layer| layer.items.iter().flatten()).filter(|item| !item.derived.is_empty()).count();
+    let first = derived(&r);
+    assert!(r.has_pending_work() && first < 20_000, "one frame derived {first} of 20000 paths");
+    submit_ready(&mut r, FramePacket { composite_all: false, ..packet(doc.scene(), extent) });
+    let shown = display(&r);
+    let exact = native(&mut r, doc);
+    assert!(max_error(&shown, &exact) < 1e-5, "the settled display must match the exact render: {}", max_error(&shown, &exact));
 }
 
 #[test]

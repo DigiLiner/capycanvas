@@ -169,7 +169,7 @@ impl Scene {
         blob: &Arc<layer_core::raster::TileBlob>, space: layer_core::color::RgbSpace, destination: layer_core::color::RgbSpace,
         pixels: sources::PreparedSourcePixels,
     ) -> Result<crate::source_access::RawTile, GpuRasterError> { decode_prepared_raster(r, encoder, blob, space, destination, pixels) }
-    pub(crate) fn objects_pending(&self) -> bool { self.object_results.pending() }
+    pub(crate) fn objects_pending(&self) -> bool { self.object_results.pending() || self.vectors_deferred() }
     pub(crate) fn object_edit_damage(before: SceneView<'_>, after: SceneView<'_>, extent: [u32; 2]) -> Option<scale::Damage> {
         edited_damage(before, after, extent)
     }

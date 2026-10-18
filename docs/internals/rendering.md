@@ -341,6 +341,13 @@ then either draws appended front paths over its previous pixels or copies them
 and redraws only the tiles the changed paths cover, gathering just the paths
 that reach those tiles; a page where most tiles change renders whole.
 
+Display windows derive new geometry for at most 6 ms per frame. A window that
+runs out draws the paths it has and is damaged again, and pending object work
+keeps frames coming until every visible path is derived, so opening or zooming a
+crowded layer fills in over several frames instead of stalling one; on the Web
+host this keeps the browser's single thread responsive. Exact captures, exports
+and thumbnails derive everything they draw.
+
 Derived geometry has a 256 MiB budget. Over budget, the cache drops geometry
 not drawn in the last two frames, scanning the layer only when a whole level
 has gone unused or it has grown by an eighth of the budget since the last scan,

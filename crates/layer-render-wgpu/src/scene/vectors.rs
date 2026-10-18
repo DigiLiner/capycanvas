@@ -7,14 +7,16 @@ const CELL: f64 = 256.;
 const POOL_BYTES: u64 = 128 << 20;
 const DERIVED_BYTES: usize = 256 << 20;
 const MOTION_PIXELS: u64 = 4 << 20;
+const DERIVE_TIME: std::time::Duration = std::time::Duration::from_millis(6);
 type Colors = Arc<[[f32; 4]]>;
 type PreviewGeometry = ((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Colors);
 
 struct Derived { level: u32, offset: [i64; 2], geometry: Arc<LevelGeometry>, base: Option<u32>, used: u64 }
 struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Colors, derived: Vec<Derived>, seen: u64, hidden: bool }
 impl Item {
+    fn derived(&self, level: u32, offset: [i64; 2]) -> Option<usize> { self.derived.iter().position(|d| d.level == level && d.offset == offset) }
     fn derived_at(&mut self, level: u32, offset: [i64; 2], frame: &Frame, bytes: &mut usize) -> usize {
-        if let Some(at) = self.derived.iter().position(|d| d.level == level && d.offset == offset) { return at; }
+        if let Some(at) = self.derived(level, offset) { return at; }
         let geometry = Arc::new(tiles::derive(&self.path, frame));
         *bytes += geometry.bytes();
         self.derived.push(Derived { level, offset, geometry, base: None, used: 0 });
@@ -258,12 +260,15 @@ pub(super) struct Vectors {
     evicted: u64,
     trimmed: usize,
     levels: HashMap<(VectorHandle, u32), u64>,
+    deadline: Option<web_time::Instant>,
+    deferred: bool,
 }
 pub(super) struct MotionImage { pub key: (OccurrenceHandle, usize, u32, [i64; 2]), pub window: DocRect, pub image: super::Image }
 #[derive(Clone)]
 pub(super) struct VectorJob { pub batch: Batch, pub output: wgpu::TextureView, pub base: Option<(wgpu::TextureView, [i32; 2])> }
 
 impl Scene {
+    pub(super) fn vectors_deferred(&self) -> bool { self.vectors.deferred }
     pub(super) fn vector_palette(r: &WgpuRasterizer, packet: FramePacket<'_>) -> (layer_core::color::RgbSpace, layer_core::BlendSpace) {
         (r.device.working_space(), packet.blend_space)
     }
@@ -326,7 +331,11 @@ impl Scene {
 }
 
 impl Vectors {
-    pub fn begin_frame(&mut self) { self.frame += 1; }
+    pub fn begin_frame(&mut self) {
+        self.frame += 1;
+        self.deadline = None;
+        self.deferred = false;
+    }
     pub fn retain(&mut self, scene: SceneView<'_>) {
         let live: HashSet<VectorHandle> = scene.order().iter().filter_map(|h| scene.vector_handle(*h)).collect();
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
@@ -370,7 +379,7 @@ impl Vectors {
         let layer = self.layers.get_mut(&handle)?;
         layer.update(object, palette, pool);
         let slots: Vec<u32> = layer.change.appended()?.iter().copied().filter(|slot| layer.items[*slot as usize].as_ref().is_some_and(|item| !item.hidden)).collect();
-        let entries = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent);
+        let (entries, _) = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent, false);
         let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
         let mut batch = Batch::default();
         let side = 1i64 << level;
@@ -430,7 +439,7 @@ impl Vectors {
                 if !item.hidden && masked(item.bounds) { slots.push(*slot); }
             }
         }}
-        let entries = self.entries(handle, slots, offset, level, extent);
+        let (entries, _) = self.entries(handle, slots, offset, level, extent, false);
         let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
         let mut batch = Batch::default();
         batch.build_within(&layers, level_origin, size, Some(&mask));
@@ -444,24 +453,30 @@ impl Vectors {
         let layer = self.layers.entry(handle).or_default();
         layer.update(object, palette, pool);
         let slots = items.iter().filter_map(|id| layer.ids.get(id).copied()).collect();
-        let entries = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent);
+        let (entries, _) = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent, false);
         let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
         let side = 1i64 << level;
         batch.build(&layers, origin.map(|v| v.div_euclid(side)), size);
         batch
     }
-    fn entries(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2]) -> Vec<(Arc<LevelGeometry>, u32, Colors)> {
+    fn entries(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2], budgeted: bool) -> (Vec<(Arc<LevelGeometry>, u32, Colors)>, bool) {
         let frame = level_frame(offset, level, extent);
         let integer_offset = offset.map(|v| v as i64);
         let frame_number = self.frame;
         self.levels.insert((handle, level), frame_number);
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
-        let Some(layer) = self.layers.get_mut(&handle) else { return Vec::new() };
+        let Some(layer) = self.layers.get_mut(&handle) else { return (Vec::new(), false) };
+        let mut skipped = false;
         let mut keyed: Vec<(u64, u32)> = slots.into_iter().map(|s| (layer.order(layer.items[s as usize].as_ref().unwrap()), s)).collect();
         keyed.sort_unstable_by_key(|(order, _)| std::cmp::Reverse(*order));
         let mut entries = Vec::with_capacity(keyed.len());
         for (_, slot) in keyed {
             let item = layer.items[slot as usize].as_mut().unwrap();
+            if budgeted && item.derived(level, integer_offset).is_none() {
+                let now = web_time::Instant::now();
+                if self.deadline.is_some_and(|deadline| now > deadline) { skipped = true; continue; }
+                self.deadline.get_or_insert(now + DERIVE_TIME);
+            }
             let at = item.derived_at(level, integer_offset, &frame, &mut layer.derived_bytes);
             let derived = &mut item.derived[at];
             derived.used = frame_number;
@@ -480,7 +495,7 @@ impl Vectors {
             let Some(base) = derived.base else { continue };
             entries.push((derived.geometry.clone(), base, item.colors.clone()));
         }
-        entries
+        (entries, skipped)
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent, color domain and provisional path")]
     fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>, display: bool) -> Batch {
@@ -509,7 +524,13 @@ impl Vectors {
                 slots.push(*slot);
             }
         }}
-        let mut entries = self.entries(handle, slots, offset, level, extent);
+        let (mut entries, skipped) = self.entries(handle, slots, offset, level, extent, display);
+        if skipped {
+            self.deferred = true;
+            let layer = self.layers.get_mut(&handle).unwrap();
+            layer.pending.full = true;
+            layer.pending.damage.push([window[0], window[1], window[0] + span[0], window[1] + span[1]]);
+        }
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
         let frame = Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] };
