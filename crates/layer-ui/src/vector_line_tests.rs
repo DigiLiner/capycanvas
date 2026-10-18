@@ -188,6 +188,71 @@ fn figure_shapes_on_vector_layers_become_selected_editable_paths() {
 }
 
 #[test]
+fn move_tool_nudges_duplicates_and_copies_paths() {
+    let (mut s, layer) = vector_session();
+    draw_line(&mut s, 1, 30);
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let start = |s: &UiSession<Recorder>, id| { let o = object(s); o.record(o.find(id).unwrap()).unwrap().path().unwrap().geometry.subpaths()[0].anchor(0).point() };
+    let id = object(&s).paths().next().unwrap().1.id;
+    let origin = start(&s, id);
+    invoke(&mut s, CommandId::Move);
+    let at = surface_at(&s, origin);
+    press(&mut s, 100, &[at, at]);
+    let nudge = |s: &mut UiSession<Recorder>, shift: bool| for pressed in [true, false] {
+        s.input(UiInput::Key { key: "arrowright".into(), pressed, repeat: false, modifiers: Modifiers { shift, ..Modifiers::default() }, editing: false, divider: None }).unwrap();
+    };
+    nudge(&mut s, false);
+    nudge(&mut s, true);
+    assert_eq!(start(&s, id), [origin[0] + 11., origin[1]], "arrows nudge by one pixel, ten with Shift");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert_eq!(start(&s, id), [origin[0] + 1., origin[1]], "each nudge is one undo step");
+
+    let at = surface_at(&s, start(&s, id));
+    s.interaction.modifiers = Modifiers { alt: true, ..Modifiers::default() };
+    press(&mut s, 200, &[at, Point { x: at.x + 10., y: at.y }, Point { x: at.x + 30., y: at.y + 20. }]);
+    s.interaction.modifiers = Modifiers::default();
+    let copied = object(&s);
+    assert_eq!(copied.path_count(), 2, "Alt-drag leaves the original and drags a copy");
+    assert_eq!(start(&s, id), [origin[0] + 1., origin[1]], "the original stays");
+    let copy = *s.engine.document().working.vector_items.as_ref().unwrap().items.iter().next().unwrap();
+    assert_ne!(copy, id, "the copy is selected");
+    assert_eq!(copied.paths().next().unwrap().1.id, copy, "the copy is in front");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(3_000_000_000, 3_000_000_000).unwrap();
+    assert_eq!(object(&s).path_count(), 1, "one undo removes the dragged copy");
+
+    let at = surface_at(&s, start(&s, id));
+    press(&mut s, 300, &[at, at]);
+    let request = |s: &UiSession<Recorder>| s.state.requests.iter().find_map(|r| match &r.kind { HostRequestKind::Document { request } => Some((r.id, request.clone())), _ => None }).unwrap().0;
+    let copy_clip = |s: &mut UiSession<Recorder>, command| {
+        invoke(s, command);
+        let id = request(s);
+        let capture = s.capture_clipboard(id).unwrap();
+        let extent = [capture.crop[2], capture.crop[3]];
+        let clip = capture.finish("paths".into(), layer_core::color::source::rgba8_source(extent, |_, _| [0; 4]), vec![]).unwrap();
+        s.complete_document_request(id, Ok(true)).unwrap();
+        clip
+    };
+    let clip = copy_clip(&mut s, CommandId::Copy);
+    assert!(clip.layers.as_ref().is_some_and(|layers| layers.paths && layers.scene.view().vector_layer(layers.roots[0]).unwrap().path_count() == 1));
+    s.paste_clip(&clip, PasteMode::InPlace).unwrap();
+    let pasted = object(&s);
+    assert_eq!(pasted.path_count(), 2, "pasting onto a vector layer adds the paths");
+    let new = *s.engine.document().working.vector_items.as_ref().unwrap().items.iter().next().unwrap();
+    assert_ne!(new, id);
+    assert_eq!(start(&s, new), start(&s, id), "Paste in Place keeps the position");
+    copy_clip(&mut s, CommandId::Cut);
+    assert_eq!(object(&s).path_count(), 1, "Cut removes the selected paths");
+    assert!(object(&s).find(new).is_none());
+    s.dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }).unwrap();
+    s.paste_clip(&clip, PasteMode::InPlace).unwrap();
+    let pasted_layer = s.engine.document().working.occurrence.unwrap();
+    assert_ne!(pasted_layer, layer);
+    assert_eq!(s.engine.document().scene().vector_layer(pasted_layer).map(|o| o.path_count()), Some(1), "pasting elsewhere makes a vector layer");
+}
+
+#[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {
     use layer_core::authored::vector::*;

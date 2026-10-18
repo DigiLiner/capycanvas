@@ -7,7 +7,7 @@ const HIT_SLOP: f64 = 6.;
 const CLICK: f64 = 3.;
 
 enum Gesture {
-    Drag { layer: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, start: [f64; 2], offset: [f64; 2] },
+    Drag { layer: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, start: [f64; 2], offset: [f64; 2], nudge: Option<String>, original: Option<VectorObject> },
     Marquee { layer: OccurrenceHandle, start: [f64; 2], end: [f64; 2], adding: bool },
 }
 
@@ -72,8 +72,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 };
                 let items = self.select_vector_items(layer, items)?;
                 if items.contains(&id) {
+                    let (items, original) = if self.interaction.modifiers.alt { self.preview_vector_copies(layer, &items)? } else { (items, None) };
                     self.engine.backend_mut().set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [0.; 2] }));
-                    self.vector_moves.gesture = Some(Gesture::Drag { layer, items, start: point, offset: [0.; 2] });
+                    self.vector_moves.gesture = Some(Gesture::Drag { layer, items, start: point, offset: [0.; 2], nudge: None, original });
                 }
                 Ok(true)
             }
@@ -81,7 +82,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let Some(gesture) = &mut self.vector_moves.gesture else { return Ok(false) };
                 let mut motion = None;
                 match gesture {
-                    Gesture::Drag { layer, items, start, offset } => {
+                    Gesture::Drag { layer, items, start, offset, .. } => {
                         *offset = [point[0] - start[0], point[1] - start[1]];
                         motion = Some(layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset });
                     }
@@ -96,23 +97,60 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => Ok(self.vector_moves.gesture.is_some()),
         }
     }
+    fn preview_vector_copies(&mut self, layer: OccurrenceHandle, items: &BTreeSet<ItemId>) -> Result<(Arc<BTreeSet<ItemId>>, Option<VectorObject>), String> {
+        let doc = self.engine.document();
+        let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?.clone();
+        let (copies, records) = object.copies(items, &object);
+        let edit = doc.vector_object_edit(layer, object.insert_front(records)).map_err(|e| e.to_string())?;
+        self.engine.preview_edit(edit).map_err(|e| e.to_string())?;
+        Ok((Arc::new(copies), Some(object)))
+    }
+    fn restore_vector_original(&mut self, layer: OccurrenceHandle, original: Option<VectorObject>) -> Result<(), String> {
+        let Some(original) = original else { return Ok(()) };
+        let edit = self.engine.document().vector_object_edit(layer, original).map_err(|e| e.to_string())?;
+        self.engine.preview_edit(edit).map_err(|e| e.to_string())
+    }
+    pub(super) fn vector_nudge(&mut self, key: &str, pressed: bool, allowed: bool, modifiers: Modifiers) -> Result<bool, String> {
+        let held = match &self.vector_moves.gesture { Some(Gesture::Drag { nudge: Some(held), .. }) => Some(held.clone()), _ => None };
+        if !pressed { return if held.as_deref() == Some(key) { self.finish_vector_move().map(|()| true) } else { Ok(false) }; }
+        if allowed && key == "escape" && held.is_some() { return Ok(self.cancel_vector_move()); }
+        let step = if modifiers.shift { 10. } else { 1. };
+        let delta = match key { "arrowleft" => [-step, 0.], "arrowright" => [step, 0.], "arrowup" => [0., -step], "arrowdown" => [0., step], _ => return Ok(false) };
+        if !allowed || modifiers.command || modifiers.alt || (self.vector_moves.gesture.is_some() && held.is_none()) || self.vector_move_layer().is_none() || !self.vector_paths_editable() { return Ok(false); }
+        if held.as_deref().is_some_and(|held| held != key) { self.finish_vector_move()?; }
+        let selection = self.selected_vector_items().cloned().ok_or("Select paths first")?;
+        let gesture = self.vector_moves.gesture.get_or_insert_with(|| Gesture::Drag { layer: selection.layer, items: selection.items.clone(), start: [0.; 2], offset: [0.; 2], nudge: None, original: None });
+        let Gesture::Drag { layer, items, offset, nudge, .. } = gesture else { return Ok(false) };
+        *nudge = Some(key.into());
+        *offset = [offset[0] + delta[0], offset[1] + delta[1]];
+        let motion = layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset };
+        self.engine.backend_mut().set_vector_motion(Some(motion));
+        self.layer_interaction.changed = true;
+        Ok(true)
+    }
     pub(super) fn cancel_vector_move(&mut self) -> bool {
         let Some(gesture) = self.vector_moves.gesture.take() else { return false };
-        if matches!(gesture, Gesture::Drag { .. }) { self.engine.backend_mut().set_vector_motion(None); }
+        if let Gesture::Drag { layer, original, .. } = gesture {
+            self.engine.backend_mut().set_vector_motion(None);
+            let _ = self.restore_vector_original(layer, original);
+        }
         self.layer_interaction.changed = true;
         true
     }
     fn finish_vector_move(&mut self) -> Result<(), String> {
         let Some(gesture) = self.vector_moves.gesture.take() else { return Ok(()) };
         let result = match gesture {
-            Gesture::Drag { layer, items, offset, .. } if offset != [0.; 2] => (|| {
-                let doc = self.engine.document();
-                let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
+            Gesture::Drag { layer, items, offset, original, .. } if offset != [0.; 2] => (|| {
+                let object = self.engine.document().scene().vector_layer(layer).ok_or("The vector layer was removed")?.clone();
                 let moved = object.transform_items(&items, Affine64([1., 0., 0., 1., offset[0], offset[1]])).map_err(str::to_string)?;
-                let edit = doc.vector_object_edit(layer, moved).map_err(|e| e.to_string())?;
-                self.layer_edit(edit)
+                let copied = original.is_some();
+                self.restore_vector_original(layer, original)?;
+                let edit = self.engine.document().vector_object_edit(layer, moved).map_err(|e| e.to_string())?;
+                self.layer_edit(edit)?;
+                if copied { self.select_vector_items(layer, (*items).clone())?; }
+                Ok(())
             })(),
-            Gesture::Drag { .. } => Ok(()),
+            Gesture::Drag { layer, original, .. } => self.restore_vector_original(layer, original),
             Gesture::Marquee { layer, start, end, adding } => {
                 let reach = CLICK * self.document_per_surface_pixel();
                 let doc = self.engine.document();

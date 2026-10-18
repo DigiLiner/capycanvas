@@ -1378,6 +1378,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 if hold_allowed && self.navigation_key(&key, pressed, &mut reply)? { return Ok(reply); }
                 if self.object_nudge(&key, pressed, hold_allowed && self.state.preferences.capture.is_none(), modifiers)?
+                    || self.vector_nudge(&key, pressed, hold_allowed && self.state.preferences.capture.is_none(), modifiers)?
                     || self.transform_nudge(&key, pressed, hold_allowed && self.state.preferences.capture.is_none(), modifiers)? {
                     self.refresh_commands();
                     reply.change = self.changed(regions::BRUSH | regions::DOCUMENT | regions::COMMANDS, true);

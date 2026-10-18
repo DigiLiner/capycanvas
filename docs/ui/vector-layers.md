@@ -44,6 +44,14 @@ With **Move** on a vector layer and no pixel selection:
 - Pressing empty canvas and dragging draws a marquee that selects the paths it
   fully encloses; Shift adds them. A click on empty canvas clears the selection.
 - A dashed box marks the selection's bounds.
+- Arrow keys nudge the selected paths by one pixel, ten with Shift; a held key
+  previews the move and commits it as one undo step on release.
+- Alt-dragging a path drags copies of the selected paths, placed in front, and
+  leaves the originals; the copies become the selection.
+- **Copy** and **Cut** with selected paths and no pixel selection copy those
+  paths. **Paste** onto an unlocked vector layer adds them in front with new
+  identities and selects them; elsewhere it adds a vector layer holding them.
+  Other applications receive a PNG of the copied paths.
 - **Clear Selected** (Delete) removes the selected paths.
 - **Edit > Arrange** and the Move tool options restack the selected paths within
   their layer: Bring to front, Bring forward, Send backward and Send to back.
@@ -60,7 +68,8 @@ restored with a session.
 
 `move_tool_selects_drags_and_deletes_vector_paths`,
 `arrange_commands_restack_selected_paths_one_step_at_a_time`,
-`figure_shapes_on_vector_layers_become_selected_editable_paths` and
+`figure_shapes_on_vector_layers_become_selected_editable_paths`,
+`move_tool_nudges_duplicates_and_copies_paths` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

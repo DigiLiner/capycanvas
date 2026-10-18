@@ -642,6 +642,20 @@ impl VectorObject {
         }
         Ok(self.edit_chunks(edits))
     }
+    pub fn selected(&self, ids: &BTreeSet<ItemId>) -> Vec<PathItem> {
+        let mut positions: Vec<Position> = self.positions(ids).into_iter()
+            .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 })).collect();
+        positions.sort_unstable();
+        positions.into_iter().filter_map(|p| self.record(p).and_then(Record::path).cloned()).collect()
+    }
+    pub fn copies(&self, ids: &BTreeSet<ItemId>, target: &VectorObject) -> (BTreeSet<ItemId>, Vec<Record>) {
+        let mut fresh = BTreeSet::new();
+        let records = self.selected(ids).into_iter().map(|path| {
+            let id = loop { let id = target.allocate_id(); if fresh.insert(id) { break id; } };
+            Record::Path(PathItem { id, unknown: retained(&path.unknown, true), ..path })
+        }).collect();
+        (fresh, records)
+    }
     pub fn present(&self, ids: &BTreeSet<ItemId>) -> BTreeSet<ItemId> {
         self.positions(ids).into_iter().flat_map(|(chunk, indices)| indices.into_iter().filter_map(move |i| self.chunks()[chunk].records()[i].id())).collect()
     }

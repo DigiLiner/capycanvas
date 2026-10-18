@@ -49,6 +49,8 @@ pub struct PixelClip {
 pub struct LayerClip {
     pub scene: Arc<SceneSnapshot>,
     pub roots: Vec<OccurrenceHandle>,
+    /// Selected paths of one vector layer rather than whole layers.
+    pub paths: bool,
 }
 impl PixelClip {
     pub fn convert_layers(&mut self, color: DocumentColor, max_bytes: usize, mut cancelled: impl FnMut() -> bool) -> Result<(), String> {
@@ -60,7 +62,7 @@ impl PixelClip {
         }
         let mut scene = document.snapshot();
         Arc::make_mut(&mut scene).context = layers.scene.context.clone();
-        self.layers = Some(Arc::new(LayerClip { scene, roots: layers.roots.clone() }));
+        self.layers = Some(Arc::new(LayerClip { scene, roots: layers.roots.clone(), paths: layers.paths }));
         Ok(())
     }
     pub fn document(&self, localization: &Localizer) -> Result<layer_core::Document, String> {
@@ -259,7 +261,7 @@ impl ClipboardCapture {
             let mut document = layer_core::Document::from_artwork(artwork).map_err(error)?;
             let (edit, roots) = document.import_layers_edit(&layers.scene, &layers.roots, None, 0, [0; 2]).map_err(error)?;
             document.apply(edit).map_err(error)?;
-            *layers = LayerClip { scene: document.snapshot(), roots };
+            *layers = LayerClip { scene: document.snapshot(), roots, paths: layers.paths };
         }
         Ok(PixelClip {
             nonce,
@@ -283,6 +285,7 @@ pub(super) struct PendingCut {
     target: Option<SourceTarget>,
     layers: Vec<OccurrenceHandle>,
     pixels: Vec<OccurrenceHandle>,
+    paths: bool,
     working: layer_core::WorkingState,
 }
 
@@ -319,6 +322,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if self.selection_masks.target().is_some() {
             return Some(l.text(MessageId::COMMANDS_RETURN_TO_THE_ARTWORK_FIRST));
+        }
+        if self.copies_paths(command) {
+            return (command == CommandId::Cut && !self.vector_paths_editable()).then(|| l.text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED));
         }
         if self.copies_layers(command) {
             let roots = self.clipboard_layer_roots();
@@ -459,6 +465,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             _ => CommandId::Copy,
         };
         refused(self.copy_refusal(command))?;
+        if self.copies_paths(command) { return self.capture_paths(cut); }
         if self.copies_layers(command) { return self.capture_layers(cut); }
         let crop = self.clipboard_crop()?;
         let selection = self.engine.document().working.selection.clone();
@@ -477,7 +484,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.files.cut = cut.then(|| PendingCut {
                     epoch: self.state.document_file.epoch, revision: document.revision, layer: active,
                     target: Some(target), layers: Vec::new(),
-                    pixels: Vec::new(), working: document.working.clone(),
+                    pixels: Vec::new(), paths: false, working: document.working.clone(),
                 });
                 let mut mask_scene = (*scene).clone();
                 let color = &mut mask_scene.artwork.compositions.get_mut(mask_scene.artwork.root).unwrap().color;
@@ -504,7 +511,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             revision: self.engine.document().revision,
             layer: active.expect("cut requires an active paint layer"),
             target: document.working.target,
-            layers: Vec::new(), pixels: Vec::new(), working: document.working.clone(),
+            layers: Vec::new(), pixels: Vec::new(), paths: false, working: document.working.clone(),
         });
         Ok(self.pixel_capture(scene, scope, crop, coverage, original, policy, name))
     }
@@ -521,6 +528,20 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
     }
 
+    fn copies_paths(&self, command: CommandId) -> bool {
+        matches!(command, CommandId::Copy | CommandId::Cut) && self.engine.document().working.selection.is_none()
+            && self.selected_vector_items().is_some() && !matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_)))
+    }
+    fn capture_paths(&mut self, cut: bool) -> Result<ClipboardCapture, String> {
+        let selection = self.selected_vector_items().cloned().ok_or("Select paths first")?;
+        let document = self.engine.document();
+        let handle = document.scene().vector_handle(selection.layer).ok_or("The vector layer was removed")?;
+        let object = document.scene().vector(handle).ok_or("The vector layer was removed")?;
+        let paths = layer_core::authored::vector::VectorObject::from_records(object.selected(&selection.items).into_iter().map(layer_core::authored::vector::Record::Path).collect());
+        let mut scene = (*self.engine.scene_snapshot()).clone();
+        *scene.artwork.vectors.get_mut(handle).ok_or("The vector layer was removed")? = paths;
+        self.capture_layer_clip(cut, vec![selection.layer], Arc::new(scene), true)
+    }
     fn copies_layers(&self, command: CommandId) -> bool {
         matches!(command, CommandId::Copy | CommandId::Cut)
             && (self.engine.document().working.selection.is_none()
@@ -542,11 +563,14 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     fn capture_layers(&mut self, cut: bool) -> Result<ClipboardCapture, String> {
-        self.require_raster_snapshot()?;
         let roots = self.clipboard_layer_roots();
-        let document = self.engine.document();
         let scene = self.engine.scene_snapshot();
-        let layers = Arc::new(LayerClip { scene: scene.clone(), roots: roots.clone() });
+        self.capture_layer_clip(cut, roots, scene, false)
+    }
+    fn capture_layer_clip(&mut self, cut: bool, roots: Vec<OccurrenceHandle>, scene: Arc<SceneSnapshot>, paths: bool) -> Result<ClipboardCapture, String> {
+        self.require_raster_snapshot()?;
+        let document = self.engine.document();
+        let layers = Arc::new(LayerClip { scene: scene.clone(), roots: roots.clone(), paths });
         let mut members = document.layer_subtrees(&roots);
         let mut public = (*scene).clone();
         for id in &roots {
@@ -571,8 +595,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.files.cut = cut.then(|| PendingCut {
             epoch: self.state.document_file.epoch, revision: document.revision,
             layer: document.working.occurrence.unwrap_or(roots[0]), target: document.working.target,
-            layers: document.layer_subtrees(&roots).into_iter().collect(),
-            pixels: Vec::new(), working: document.working.clone(),
+            layers: if paths { Vec::new() } else { document.layer_subtrees(&roots).into_iter().collect() },
+            pixels: Vec::new(), paths, working: document.working.clone(),
         });
         if let Some(selection) = document.working.selection.clone() {
             let pixels: Vec<_> = document.layer_subtrees(&roots).into_iter().filter(|&id|
@@ -611,6 +635,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             || cut.working != document.working
         {
             self.notify("The drawing changed while cutting, so the pixels were copied but not erased");
+        } else if cut.paths {
+            if let Err(error) = self.delete_selected_vector_items() { self.notify(error); }
         } else if !cut.pixels.is_empty() {
             if let Err(error) = self.cut_layer_pixels(&cut.pixels) { self.notify(error); }
         } else if !cut.layers.is_empty() {
@@ -719,6 +745,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         if matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_))) {
             return self.paste_mask_sources(vec![(clip.source_for(self.engine.document().composition().color), position)]);
         }
+        if mode != PasteMode::Into && let Some(layers) = clip.layers.as_ref().filter(|layers| layers.paths)
+            && let Some(target) = self.vector_paste_layer() {
+            return self.paste_paths(layers, target, position, clip.origin);
+        }
         if mode != PasteMode::Into && let Some(layers) = &clip.layers
             && layers.scene.view().composition().color == self.engine.document().composition().color {
             self.require_document_idle()?;
@@ -738,6 +768,35 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.insert_pasted(vec![(clip.name.clone(), source)], |_, _| position)
     }
 
+    fn vector_paste_layer(&self) -> Option<OccurrenceHandle> {
+        let document = self.engine.document();
+        let layer = document.working.occurrence?;
+        (document.scene().vector_layer(layer).is_some() && !document.is_locked(layer) && !matches!(document.working.target, Some(SourceTarget::Coverage(_)))).then_some(layer)
+    }
+    fn paste_paths(&mut self, layers: &LayerClip, target: OccurrenceHandle, position: Point, origin: [i64; 2]) -> Result<(), String> {
+        use layer_core::authored::vector::Record;
+        self.require_document_idle()?;
+        let source_view = layers.scene.view();
+        let root = *layers.roots.first().ok_or("The clipboard holds no paths")?;
+        let source = source_view.vector_layer(root).ok_or("The clipboard holds no paths")?;
+        let document = self.engine.document();
+        let object = document.scene().vector_layer(target).ok_or("The vector layer was removed")?;
+        let [sx, sy] = source_view.occurrence_offset64(root);
+        let [tx, ty] = document.scene().occurrence_offset64(target);
+        let delta = [f64::from(position.x) - origin[0] as f64 + sx - tx, f64::from(position.y) - origin[1] as f64 + sy - ty];
+        let all = source.paths().map(|(_, path)| path.id).collect();
+        let (ids, records) = source.copies(&all, object);
+        let shift = layer_core::authored::Affine64([1., 0., 0., 1., delta[0], delta[1]]);
+        let records = records.into_iter().map(|record| match record {
+            Record::Path(path) => path.transformed(shift).map(Record::Path),
+            other => Ok(other),
+        }).collect::<Result<Vec<_>, _>>().map_err(str::to_string)?;
+        let edit = document.vector_object_edit(target, object.insert_front(records)).map_err(error)?;
+        self.layer_edit(edit)?;
+        self.select_vector_items(target, ids)?;
+        self.refresh_commands();
+        Ok(())
+    }
     pub fn paste_layer_sources(
         &mut self,
         sources: Vec<(String, SourceImage)>,

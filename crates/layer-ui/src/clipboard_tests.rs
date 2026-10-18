@@ -55,7 +55,7 @@ mod clipboard_checks {
         let mut document = Document::from_artwork(artwork).unwrap();
         let (roots, edit) = document.import_object_layers_edit(images, None, 0).unwrap();
         document.apply(edit).unwrap();
-        clip.layers = Some(Arc::new(clipboard::LayerClip { scene: document.snapshot(), roots }));
+        clip.layers = Some(Arc::new(clipboard::LayerClip { scene: document.snapshot(), roots, paths: false }));
     }
 
     fn translation(s: &UiSession<Recorder>) -> [f32; 2] {
@@ -1368,7 +1368,7 @@ mod clipboard_checks {
             select(&mut s, Some(selection.clone()));
             let before = s.engine.document().clone();
             let mut copied = clip([20, 10], [100, 50], before.composition().color);
-            if linked { copied.layers = Some(Arc::new(crate::session::clipboard::LayerClip { scene: before.snapshot(), roots: vec![owner] })); }
+            if linked { copied.layers = Some(Arc::new(crate::session::clipboard::LayerClip { scene: before.snapshot(), roots: vec![owner], paths: false })); }
             assert!(s.command(CommandId::Cut).enabled, "alpha lock applies to paint, not mask coverage");
             s.paste_clip(&copied, PasteMode::Paste).unwrap();
             s.frame(2, 2).unwrap();
