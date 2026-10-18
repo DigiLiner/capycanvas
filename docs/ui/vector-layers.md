@@ -23,7 +23,9 @@ contact.
 The line is fitted while it is drawn, a bounded amount each frame, so pen-up
 fits only its last segments. Each segment reaches as far as one cubic stays
 within the tolerance, with a minimax refinement when least squares narrowly
-misses it. Each smooth anchor is placed by trying the last few points before
+misses it. The tolerance holds between samples too: each chord's farthest
+point from the curve is solved exactly, and chords beside a sharp turn are
+also checked for overshoot. Each smooth anchor is placed by trying the last few points before
 that reach and a few tangents between the arriving and leaving directions, and
 keeping the one that lets the next segment reach farthest. A decision that
 would depend on input not yet drawn waits, and late pressure updates undo only
@@ -153,11 +155,13 @@ takes the raster stroke's dabs and shows its predicted preview on every frame,
 `vector_line_previews_reach_predicted_samples_without_drawing_them` checks the
 session forwards platform predictions to the preview only, and
 `hand_drawn_lines_keep_few_anchors_within_tolerance`,
+`recorded_lines_stay_within_tolerance_between_samples`,
 `fitting_while_drawing_matches_fitting_at_pen_up` and
 `late_pressure_corrections_replay_the_line` in
 [`vector_stroke.rs`](../../crates/layer-engine/src/vector_stroke.rs) bound the
-fitted anchors, widths and corrections and check that fitting while drawing
-gives the same path as fitting at pen-up.
+fitted anchors, widths and corrections, check recorded Movink strokes against
+the drawn line between samples, and check that fitting while drawing gives the
+same path as fitting at pen-up.
 `vector_lines_land_under_the_pen_on_moved_layers`,
 `late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step`,
 `move_tool_selects_drags_and_deletes_vector_paths`,

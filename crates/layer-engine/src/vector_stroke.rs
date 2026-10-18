@@ -73,6 +73,7 @@ impl VectorStroke {
             self.dabs.clear();
             self.finalized = 0;
             self.finalize();
+            self.fit.extend(&samples(self.dabs.iter()));
         }
         changed
     }
@@ -252,9 +253,28 @@ fn chord_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     let t = if length > 0. { (dot(sub(p, a), ab) / length).clamp(0., 1.) } else { 0. };
     distance(p, add(a, scale(ab, t)))
 }
+fn bulge(c: &[[f64; 2]; 4], a: [f64; 2], b: [f64; 2], from: f64, to: f64) -> f64 {
+    let along = unit(sub(b, a));
+    let [q0, q1, q2, q3] = c.map(|p| along[0] * p[1] - along[1] * p[0]);
+    let (linear, square, cube) = (3. * (q1 - q0), 3. * (q2 - 2. * q1 + q0), q3 - 3. * q2 + 3. * q1 - q0);
+    let discriminant = square * square - 3. * cube * linear;
+    let turns = if cube.abs() > 1e-12 && discriminant >= 0. {
+        let root = discriminant.sqrt();
+        [(-square - root) / (3. * cube), (-square + root) / (3. * cube)]
+    } else if square.abs() > 1e-12 { [-linear / (2. * square); 2] } else { [(from + to) * 0.5; 2] };
+    let mut turns = turns.into_iter().filter(|t| *t > from && *t < to).peekable();
+    if turns.peek().is_none() { return 0.; }
+    turns.map(|t| chord_distance(bezier(c, t), a, b)).fold(0., f64::max)
+}
 fn worst(points: &[[f64; 2]], u: &[f64], c: &[[f64; 2]; 4]) -> f64 {
+    let sharp = |i: usize| i > 0 && i + 1 < points.len() && dot(unit(sub(points[i], points[i - 1])), unit(sub(points[i + 1], points[i]))) < 0.85;
     let vertices = (1..points.len() - 1).map(|i| distance(bezier(c, u[i]), points[i]));
-    let chords = (0..points.len() - 1).map(|i| chord_distance(bezier(c, (u[i] + u[i + 1]) * 0.5), points[i], points[i + 1]));
+    let chords = (0..points.len() - 1).map(|i| {
+        let overshoot = if sharp(i) || sharp(i + 1) {
+            [0.25, 0.75].map(|f| chord_distance(bezier(c, u[i] + (u[i + 1] - u[i]) * f), points[i], points[i + 1])).into_iter().fold(0., f64::max)
+        } else { 0. };
+        bulge(c, points[i], points[i + 1], u[i], u[i + 1]).max(overshoot)
+    });
     vertices.chain(chords).fold(0., f64::max)
 }
 fn segment(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>, tolerance: f64) -> Option<Segment> {
@@ -270,10 +290,12 @@ fn segment(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>,
         if error <= tolerance || (iteration > 0 && error > tolerance * 4.) { break; }
     }
     if best.is_none() && points.len() <= 3 {
-        let span = distance(first, last) / 3.;
         let start = left.unwrap_or_else(|| unit(sub(points[1], first)));
         let end = right.unwrap_or_else(|| unit(sub(last, points[points.len() - 2])));
-        let cubic = [first, add(first, scale(start, span)), sub(last, scale(end, span)), last];
+        let handled = |span: f64| [first, add(first, scale(start, span)), sub(last, scale(end, span)), last];
+        let mut span = distance(first, last) / 3.;
+        while span > tolerance * 1e-3 && worst(points, &u, &handled(span)) > tolerance { span *= 0.5; }
+        let cubic = handled(span);
         return Some(Segment { error: worst(points, &u, &cubic), cubic, u });
     }
     best
@@ -305,10 +327,10 @@ fn refined(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>,
     Some(found)
 }
 fn fits(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>, tolerance: f64) -> bool {
-    points.len() <= 2 || refined(points, left, right, tolerance).is_some_and(|s| s.error <= tolerance)
+    refined(points, left, right, tolerance).is_some_and(|s| s.error <= tolerance)
 }
 
-const LOOKBACK: usize = 8;
+const BACKS: [usize; 5] = [0, 1, 2, 4, 8];
 const FRAME_WORK: usize = 512;
 const BLENDS: [f64; 5] = [0., 0.25, 0.5, 0.75, 1.];
 
@@ -346,7 +368,7 @@ impl Run<'_> {
         match (search.good, search.high) {
             (None, _) => {
                 let from = search.from.clamp(start + 1, last);
-                if self.fits(start, from, left, None) { search.good = Some(from); }
+                if from == start + 1 || self.fits(start, from, left, None) { search.good = Some(from); }
                 else if search.retry { search.from = start + 1 + (from - start - 1) / 2; }
                 else { return Some(None); }
             }
@@ -382,10 +404,10 @@ impl Run<'_> {
                 }
                 return None;
             }
-            while decision.candidate < (LOOKBACK + 1) * BLENDS.len() {
+            while decision.candidate < BACKS.len() * BLENDS.len() {
                 let (back, blend) = (decision.candidate / BLENDS.len(), BLENDS[decision.candidate % BLENDS.len()]);
                 decision.candidate += 1;
-                let Some(end) = longest.checked_sub(back).filter(|end| *end > start) else { continue };
+                let Some(end) = longest.checked_sub(BACKS[back]).filter(|end| *end > start) else { continue };
                 let (arriving, leaving) = match decision.sides {
                     Some((at, arriving, leaving)) if at == end => (arriving, leaving),
                     _ => {
@@ -427,26 +449,33 @@ fn ahead(points: &[[f64; 2]], from: usize, reach: f64, open: bool) -> Option<([f
     Some((unit(sub(points[j], points[from])), j))
 }
 
-fn merged(samples: &[Sample], tolerance: f64) -> Vec<Sample> {
-    let mut kept: Vec<Sample> = Vec::with_capacity(samples.len());
-    for sample in samples {
-        if let Some(last) = kept.last_mut() && distance(last.0, sample.0) < tolerance * 0.25 { last.1 = last.1.max(sample.1); continue; }
-        kept.push(*sample);
-    }
-    kept
-}
-
 #[derive(Clone, Debug)]
-struct LineFit { tolerance: f64, reach: f64, kept: Vec<Sample>, angles: Vec<(f64, usize)>, corners: Vec<usize>, examined: usize, pieces: Vec<Piece>, pending: Option<Decision>, wait: usize }
+struct LineFit {
+    tolerance: f64, reach: f64, kept: Vec<Sample>, points: Vec<[f64; 2]>, group: usize, angles: Vec<(f64, usize)>, corners: Vec<usize>, examined: usize,
+    pieces: Vec<Piece>, pending: Option<Decision>, wait: usize,
+}
 impl LineFit {
     fn new(tolerance: f64, reach: f64) -> Self {
-        Self { tolerance, reach, kept: Vec::new(), angles: vec![(0., 0)], corners: vec![0], examined: 1, pieces: Vec::new(), pending: None, wait: 0 }
+        Self { tolerance, reach, kept: Vec::new(), points: Vec::new(), group: 0, angles: vec![(0., 0)], corners: vec![0], examined: 1, pieces: Vec::new(), pending: None, wait: 0 }
+    }
+    fn take(&mut self, samples: &[Sample]) {
+        if self.group > 0 && self.group >= samples.len() { return self.extend(samples); }
+        self.kept.pop();
+        self.points.pop();
+        for (i, sample) in samples.iter().enumerate().skip(self.group) {
+            if let Some(last) = self.kept.last_mut() && distance(last.0, sample.0) < self.tolerance * 0.25 { last.1 = last.1.max(sample.1); continue; }
+            self.kept.push(*sample);
+            self.points.push(sample.0);
+            self.group = i;
+        }
     }
     fn extend(&mut self, samples: &[Sample]) {
-        let kept = merged(samples, self.tolerance);
-        let same = self.kept.iter().zip(&kept).take_while(|(a, b)| a.0 == b.0).count();
-        if same < self.kept.len() { self.rollback(same); }
-        self.kept = kept;
+        let earlier = std::mem::take(&mut self.kept);
+        self.points.clear();
+        self.group = 0;
+        self.take(samples);
+        let same = earlier.iter().zip(&self.kept).take_while(|(a, b)| a.0 == b.0).count();
+        if same < earlier.len() { self.rollback(same); }
     }
     fn rollback(&mut self, changed: usize) {
         let angled = self.angles.iter().position(|&(_, seen)| seen >= changed).unwrap_or(self.angles.len()).min(changed);
@@ -457,15 +486,15 @@ impl LineFit {
         let cutoff = changed.min(examined);
         let valid = self.pieces.iter().position(|piece| piece.seen >= cutoff).unwrap_or(self.pieces.len());
         self.pieces.truncate(valid);
-        self.pending = None;
+        if self.pending.as_ref().is_some_and(|decision| decision.first + decision.seen >= cutoff) { self.pending = None; }
         self.wait = 0;
     }
     fn advance(&mut self, samples: &[Sample], budget: usize) {
-        self.extend(samples);
+        self.take(samples);
         self.progress(true, budget);
     }
     fn progress(&mut self, open: bool, budget: usize) {
-        let points: Vec<[f64; 2]> = self.kept.iter().map(|s| s.0).collect();
+        let points = std::mem::take(&mut self.points);
         let visible = if open { points.len().saturating_sub(1) } else { points.len() };
         while self.angles.len() < visible {
             let i = self.angles.len();
@@ -517,6 +546,7 @@ impl LineFit {
             };
             self.pieces.push(Piece { start: piece.start + first, end: piece.end + first, hint: piece.hint + first, seen: piece.seen + first, ..piece });
         }
+        self.points = points;
     }
     fn fitted(&self, samples: &[Sample]) -> Option<(PathGeometry, Option<WidthProfile>, f64)> {
         let half = samples.iter().map(|s| s.1).fold(0., f64::max);
@@ -528,6 +558,7 @@ impl LineFit {
         if last > 0 && fit.kept[last].0 != end {
             fit.rollback(last);
             fit.kept[last].0 = end;
+            fit.points[last] = end;
         }
         if last == 0 {
             let geometry = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(fit.kept[0].0)], false)]).ok()?;
@@ -679,6 +710,33 @@ mod tests {
                 assert_eq!(stroke.fitted(), LineFit::new(0.5, stroke.fit.reach).fitted(&stroke.samples()), "{label}");
             }
         }
+    }
+    #[test]
+    fn recorded_lines_stay_within_tolerance_between_samples() {
+        let records = crate::recording::read(std::fs::File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/movink14.capystrokes")).unwrap()).unwrap();
+        let mut contact: Vec<(PenEvent, ViewTransform)> = Vec::new();
+        let mut checked = 0;
+        for record in records {
+            let crate::recording::Record::Raw { event, transform, .. } = record else { continue };
+            if event.phase == PenPhase::Hover || event.flags.contains(SampleFlags::PREDICTED) { continue; }
+            if event.phase == PenPhase::Down { contact.clear(); }
+            contact.push((event, transform));
+            if event.phase != PenPhase::Up || contact[0].0.phase != PenPhase::Down || contact.len() > 250 { continue; }
+            let tolerance = 0.5 * f64::from(transform.surface_to_document[0]).hypot(f64::from(transform.surface_to_document[1]));
+            let mut stroke = drawn(&[], 0.);
+            stroke.fit = LineFit::new(tolerance, stroke.fit.reach.max(tolerance * 8.));
+            for (event, transform) in &contact {
+                if event.flags.contains(SampleFlags::CORRECTION) { stroke.correct(*event); } else { stroke.push(*event, *transform); }
+            }
+            let samples = stroke.samples();
+            let (geometry, _, _) = stroke.fitted().unwrap();
+            let curve: Vec<[f64; 2]> = geometry.segments().flat_map(|s| (0..=128).map(move |i| s.point(i as f64 / 128.))).collect();
+            let away = curve.iter().map(|q| samples.windows(2).map(|w| chord_distance(*q, w[0].0, w[1].0)).fold(f64::INFINITY, f64::min)).fold(0., f64::max);
+            let label = format!("recorded contact ending at sample {}: {} segments, {away:.3} from the drawn line, {:.3} to the farthest sample, tolerance {tolerance:.3}", event.sequence, geometry.segment_count(), deviation(&geometry, &samples));
+            assert!(away <= tolerance * 1.02 && deviation(&geometry, &samples) <= tolerance * 1.25, "{label}");
+            checked += 1;
+        }
+        assert!(checked > 40, "{checked}");
     }
     #[test]
     fn late_pressure_corrections_replay_the_line() {
