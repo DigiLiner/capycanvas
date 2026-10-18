@@ -25,7 +25,7 @@ fn local_canvas_load(document_position: vec2<f32>) -> vec4<f32> {
         || any(document_position >= render_target.document_extent.xy) {
         return vec4<f32>(0.0);
     }
-    if material_sources.header.x == 1u {
+    if MATERIAL_GATHERED {
         let page = vec2<u32>(floor(document_position / 256.0));
         let local = vec2<i32>(floor(document_position)) - vec2<i32>(page * 256u);
         for (var index = 0u; index < material_sources.header.y; index += 1u) {
@@ -422,52 +422,92 @@ fn wet_fragment(
     );
 }
 
-fn paint_fragment(fragment_position: vec4<f32>) -> MaterialOutput {
-    let world = render_target.origin_extent.xy + fragment_position.xy;
+fn smudge_fragment(fragment_position: vec2<f32>, world: vec2<f32>, first: u32, count: u32) -> MaterialOutput {
+    let original = canvas_load(world);
+    let trace = trace_smudge(world, first, count);
+    var dragged = vec4<f32>(0.0);
+    if material_sources.header.x == 2u {
+        dragged = textureLoad(reservoir_texture, vec2<i32>(floor(fragment_position)), 0);
+    } else {
+        dragged = blurred_canvas_sample(trace.coordinate, style.material_b.z);
+    }
+    var influence = trace.influence;
+    var coverage = 0.0;
+    if style.canvas_opacity.z < 1.0 {
+        var previous = dry_coverage(vec2<i32>(floor(fragment_position)));
+        if style.canvas_opacity.w > 0.5 { previous = 0.0; }
+        coverage = previous + (1.0 - previous) * influence;
+        influence = stroke_increment(previous, coverage);
+    }
+    return MaterialOutput(
+        mix_smudged_material(original, dragged, influence),
+        vec4<f32>(coverage, 0.0, 0.0, 1.0),
+        vec4<f32>(0.0),
+    );
+}
+
+fn smudge_gathered(world: vec2<f32>) -> vec4<f32> {
+    return blurred_canvas_sample(trace_smudge(world, style.operation.x, style.operation.y).coordinate, style.material_b.z);
+}
+
+fn liquify_fragment(fragment_position: vec2<f32>, world: vec2<f32>, first: u32, count: u32) -> MaterialOutput {
+    if material_sources.header.x == 2u {
+        return MaterialOutput(
+            textureLoad(reservoir_texture, vec2<i32>(floor(fragment_position)), 0),
+            vec4<f32>(0.0), vec4<f32>(0.0),
+        );
+    }
+    return MaterialOutput(
+        canvas_sample(deform_coordinate(world, first, count)),
+        vec4<f32>(0.0),
+        vec4<f32>(0.0),
+    );
+}
+
+fn liquify_gathered(world: vec2<f32>) -> vec4<f32> {
+    return canvas_sample(deform_coordinate(world, style.operation.x, style.operation.y));
+}
+
+fn material_result(fragment_position:vec4<f32>)->MaterialOutput {
+    let world=render_target.origin_extent.xy+fragment_position.xy;
+    var result=operation_fragment(fragment_position.xy,world,style.operation.x,style.operation.y);
+    if style.color.a>0.5 {
+        result=material_alpha_locked(result,canvas_load(world));
+    }
+    result.color=layer_color(result.color,WORKING_LUMA,style.color_mode.x,style.color_mode.y);
+    result.color=working_clamp(result.color);
+    return result;
+}
+
+@fragment
+fn reservoir_fragment(@builtin(position) fragment_position: vec4<f32>) -> @location(0) vec4<f32> {
     let first = style.operation.x;
     let count = style.operation.y;
-    if MATERIAL_OPERATION == OP_WATERCOLOR {
-        return watercolor_fragment(fragment_position.xy, world, first, count);
+    if count == 0u {
+        return vec4<f32>(0.0);
     }
-    if MATERIAL_OPERATION == OP_WET {
-        return wet_fragment(fragment_position.xy, world, first, count);
-    }
-    if MATERIAL_OPERATION == OP_SMUDGE {
-        let original = canvas_load(world);
-        let trace = trace_smudge(world, first, count);
-        var dragged = vec4<f32>(0.0);
-        if material_sources.header.x == 2u {
-            dragged = textureLoad(reservoir_texture, vec2<i32>(floor(fragment_position.xy)), 0);
-        } else {
-            dragged = blurred_canvas_sample(trace.coordinate, style.material_b.z);
-        }
-        var influence = trace.influence;
-        var coverage = 0.0;
-        if style.canvas_opacity.z < 1.0 {
-            var previous = dry_coverage(vec2<i32>(floor(fragment_position.xy)));
-            if style.canvas_opacity.w > 0.5 { previous = 0.0; }
-            coverage = previous + (1.0 - previous) * influence;
-            influence = stroke_increment(previous, coverage);
-        }
-        return MaterialOutput(
-            mix_smudged_material(original, dragged, influence),
-            vec4<f32>(coverage, 0.0, 0.0, 1.0),
-            vec4<f32>(0.0),
+    let reservoir_size = vec2<f32>(textureDimensions(reservoir_texture));
+    let local = fragment_position.xy / reservoir_size * 2.0 - vec2<f32>(1.0);
+    var carried = textureLoad(
+        reservoir_texture,
+        clamp(vec2<i32>(floor(fragment_position.xy)), vec2<i32>(0), vec2<i32>(reservoir_size) - 1),
+        0,
+    );
+    for (var offset = 0u; offset < count; offset += 1u) {
+        let dab = dabs[first + offset];
+        let scaled = local * dab.radii;
+        let world = dab.center + rotate(scaled, dab.rotation.x, dab.rotation.y);
+        let coverage = contact_coverage(dab, world);
+        if coverage <= 0.0 { continue; }
+        let pull = clamp(dab.material.y, 0.0, 1.0);
+        let pickup = blurred_canvas_load(world - dab.motion * pull, style.material_b.z);
+        if !working_has_color(pickup.a) { continue; }
+        let exchange = reservoir_exchange_amount(dab, coverage);
+        let alpha_exchange = exchange * (1.0 - style.material_a.w * 0.5);
+        carried = vec4<f32>(
+            mix_color(carried.rgb, pickup.rgb / pickup.a, exchange),
+            replenished_reservoir_alpha(carried.a, pickup.a, alpha_exchange),
         );
     }
-    if MATERIAL_OPERATION == OP_LIQUIFY {
-        if material_sources.header.x == 2u {
-            return MaterialOutput(
-                textureLoad(reservoir_texture, vec2<i32>(floor(fragment_position.xy)), 0),
-                vec4<f32>(0.0), vec4<f32>(0.0),
-            );
-        }
-        return MaterialOutput(
-            canvas_sample(deform_coordinate(world, first, count)),
-            vec4<f32>(0.0),
-            vec4<f32>(0.0),
-        );
-    }
-
-    return pointwise_paint_fragment(fragment_position);
+    return carried;
 }

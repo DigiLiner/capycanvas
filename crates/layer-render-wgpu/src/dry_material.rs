@@ -29,13 +29,22 @@ pub(super) const FINE_TIP_RADIUS: f32 = 8.;
 pub(super) const DISPLAY_INPUT_SETS: usize = 8;
 pub(super) const AGGREGATE: u32 = 8192;
 pub(super) const FINE_TIP: u32 = 16384;
+/// Contact flags that destination-material modules are specialized for; any
+/// other contact evaluates the flags each dab carries.
+pub(super) const MATERIAL_CONTACTS: [u32; 3] = [0, 128, u32::MAX];
 
-pub(super) fn shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule> {
+pub(super) fn material_contact_slot(style: &layer_render::DabStyle) -> usize {
+    let flags = contact_flags(style.contact) | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 };
+    MATERIAL_CONTACTS.iter().position(|&key| key == flags).unwrap_or(MATERIAL_CONTACTS.len() - 1)
+}
+
+/// A destination-material module for one operation and contact specialization.
+pub(super) fn material_shader(device: &PipelineDevice, entries: Entries, flags: u32, operation: MaterialOperation) -> Deferred<wgpu::ShaderModule> {
     let device = device.clone();
     Deferred::new(move || {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("layer destination brush shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_source(device.working_space(), device.float_sampling_wgsl(), include_str!("material_brush.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(material_source(device.working_space(), device.float_sampling_wgsl(), entries, flags, operation)),
         })
     })
 }
@@ -58,25 +67,29 @@ fn destination(start: Start) -> Cow<'static, str> {
     }
 }
 
-pub(super) fn shader_source(space: layer_core::color::RgbSpace, float_sampling: &str, material: &str) -> Cow<'static, str> {
-    compose_wgsl(&[
-        &working_color::source(space), include_str!("blend_modes.wgsl"), float_sampling, &destination(Start::Sampled), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"),
-        include_str!("material_common.wgsl"), include_str!("material_clone.wgsl"),
-        include_str!("material_pointwise.wgsl"), include_str!("material_transport.wgsl"),
-        include_str!("material_contact.wgsl"), material, include_str!("material_compute.wgsl"),
-        &coverage_source(u32::MAX), include_str!("selection_clip.wgsl"),
-    ])
+/// The entry points a destination-material module provides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Entries {
+    /// Dry compute kernels.
+    Kernel(Start),
+    /// The material fragment and the wet reservoir exchange.
+    Fragment,
+    /// Distant samples gathered for Liquify and Smudge.
+    Gather,
 }
 
 pub(super) fn coverage_source(flags:u32)->Cow<'static,str> {
+    let has=|bit:u32| flags==u32::MAX || flags&bit!=0;
     let relief_contact=if flags==u32::MAX || flags&FINE_TIP!=0 {include_str!("relief_fine.wgsl")} else {include_str!("relief_coarse.wgsl")};
     if flags!=u32::MAX && flags&64!=0 {
         compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("contact_field.wgsl"),
-            include_str!("relief.wgsl"),relief_contact,include_str!("dry_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
+            include_str!("relief.wgsl"),relief_contact,include_str!("bristle_absent.wgsl"),include_str!("dry_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
     } else {
+        let relief=if has(64) {compose_wgsl(&[include_str!("relief.wgsl"),relief_contact])} else {include_str!("relief_absent.wgsl").into()};
         compose_wgsl(&[include_str!("brush_math.wgsl"),include_str!("analytic_coverage.wgsl"),
             include_str!("brush_coverage.wgsl"),include_str!("contact_field.wgsl"),
-            include_str!("contact.wgsl"),include_str!("relief.wgsl"),relief_contact,include_str!("bristle.wgsl"),
+            if has(1) {include_str!("contact.wgsl")} else {include_str!("contact_absent.wgsl")},&relief,
+            if has(512) {include_str!("bristle.wgsl")} else {include_str!("bristle_absent.wgsl")},
             include_str!("brush_footprint.wgsl"),include_str!("brush_alpha.wgsl")])
     }
 }
@@ -87,17 +100,39 @@ pub(super) fn specialize_contact(source: Cow<'static,str>, flags:u32)->Cow<'stat
         &format!("const CONTACT_FLAGS: u32 = {flags}u;")).into()
 }
 
-pub(super) fn kernel_source(space:layer_core::color::RgbSpace,float_sampling:&str,start:Start,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
-    let leaf=if flags!=u32::MAX && flags&64!=0 {include_str!("dry_material_contact.wgsl")} else {include_str!("material_contact.wgsl")};
-    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_modes.wgsl"),float_sampling,
-        &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),
-        include_str!("retouch_sample.wgsl"),include_str!("material_common.wgsl"),include_str!("material_clone.wgsl"),
-        include_str!("material_pointwise.wgsl"),leaf,
-        "fn material_result(p:vec4<f32>)->MaterialOutput {return pointwise_material_result(p);}",
-        include_str!("material_compute.wgsl"),&coverage_source(flags),include_str!("selection_clip.wgsl")]);
-    specialize_contact(source,flags)
+pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&str,entries:Entries,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
+    use MaterialOperation as M;
+    let kernel=matches!(entries,Entries::Kernel(_));
+    let start=if let Entries::Kernel(start)=entries {start} else {Start::Sampled};
+    let leaf=if flags==u32::MAX || flags&(64|512)==512 {include_str!("material_contact.wgsl")} else {include_str!("dry_material_contact.wgsl")};
+    let clone=if operation==M::Clone {compose_wgsl(&[include_str!("retouch_sample.wgsl"),include_str!("material_clone.wgsl")])} else {include_str!("clone_absent.wgsl").into()};
+    let operation_source:Cow<'static,str>=match operation {
+        M::Deposit|M::Coverage|M::Clone => compose_wgsl(&[include_str!("material_pointwise.wgsl"),
+            "fn material_result(p:vec4<f32>)->MaterialOutput {return pointwise_material_result(p);}"]),
+        _ => {
+            let name=match operation {M::Liquify=>"liquify",M::Smudge=>"smudge",M::Wet=>"wet",_=>"watercolor"};
+            let gathered=entries==Entries::Gather;
+            let mut source=format!("{}\nconst MATERIAL_GATHERED: bool = {gathered};\n\
+                fn operation_fragment(p:vec2<f32>,w:vec2<f32>,f:u32,c:u32)->MaterialOutput {{return {name}_fragment(p,w,f,c);}}\n",
+                include_str!("material_transport.wgsl"));
+            if gathered {source+=&format!("fn gathered_sample(w:vec2<f32>)->vec4<f32> {{return {name}_gathered(w);}}\n");}
+            source.into()
+        }
+    };
+    let entry=match entries {
+        Entries::Kernel(_) => include_str!("material_compute.wgsl").into(),
+        Entries::Fragment => include_str!("material_brush.wgsl").into(),
+        Entries::Gather => compose_wgsl(&[include_str!("material_brush.wgsl"),include_str!("material_gather.wgsl")]),
+    };
+    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),
+        if kernel {include_str!("blend_normal.wgsl")} else {include_str!("blend_modes.wgsl")},float_sampling,
+        &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
+        include_str!("material_common.wgsl"),&operation_source,leaf,&entry,&coverage_source(flags),include_str!("selection_clip.wgsl")]);
+    let absent=if kernel || matches!(operation,M::Deposit|M::Coverage) {0} else {64};
+    let source=specialize_contact(source,flags)
         .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32))
-        .replace("override MATERIAL_NORMAL_BLEND: bool = false;","const MATERIAL_NORMAL_BLEND: bool = true;").into()
+        .replace("override CONTACT_ABSENT: u32 = 0u;",&format!("const CONTACT_ABSENT: u32 = {absent}u;"));
+    if kernel {source.replace("override MATERIAL_NORMAL_BLEND: bool = false;","const MATERIAL_NORMAL_BLEND: bool = true;").into()} else {source.into()}
 }
 
 /// One reduced-resolution page of averaged original paint, stroke coverage
@@ -263,7 +298,7 @@ impl Pipelines {
                 let device=device.for_recipe();
                 Deferred::new(move||device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label:Some("layer specialized contact shader"),
-                    source:wgpu::ShaderSource::Wgsl(kernel_source(device.working_space(),device.float_sampling_wgsl(),start,flags,operation)),
+                    source:wgpu::ShaderSource::Wgsl(material_source(device.working_space(),device.float_sampling_wgsl(),Entries::Kernel(start),flags,operation)),
                 }))
             });
             std::array::from_fn(|index| {
@@ -287,7 +322,7 @@ impl Pipelines {
             })
         };
         let pages = Deferred::wgsl(device, "dry material pages",
-            kernel_source(device.working_space(), device.float_sampling_wgsl(), start, u32::MAX, MaterialOperation::Deposit));
+            material_source(device.working_space(), device.float_sampling_wgsl(), Entries::Kernel(start), u32::MAX, MaterialOperation::Deposit));
         let copy = Deferred::compute(device, "dry unchanged pixels", &pipeline_layouts[0], &pages, "copy_color");
         let gather = Deferred::compute(device, "dry display inputs", &pipeline_layout(&gather_layout), &pages, "gather_display");
         let kernels = make_kernels(u32::MAX);
@@ -626,7 +661,7 @@ mod tests {
         }
         for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
             for start in [Start::Stored, Start::Sampled] {
-            let source = kernel_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),start,flags,operation);
+            let source = material_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),Entries::Kernel(start),flags,operation);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
             if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
@@ -642,5 +677,75 @@ mod tests {
                     "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}}}
+        for &flags in &MATERIAL_CONTACTS {for operation in MaterialOperation::ALL {for filterable in [true, false] {
+            let sampling = crate::pipeline_device::float_sampling_wgsl(filterable);
+            let gathered = matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge);
+            let modules = [(Entries::Fragment, &["fragment_main", "reservoir_fragment"][..usize::from(operation == MaterialOperation::Wet) + 1]),
+                (Entries::Gather, &["gather_fragment"][..usize::from(gathered)])];
+            for (entries, used_entries) in modules {
+                if used_entries.is_empty() {continue;}
+                let module = naga::front::wgsl::parse_str(&material_source(Default::default(), sampling, entries, flags, operation)).unwrap();
+                validate(&module);
+                for entry in used_entries {
+                    let mut used = module.clone();
+                    used.entry_points.retain(|e| e.name == *entry);
+                    naga::compact::compact(&mut used, naga::compact::KeepUnused::No);
+                    assert!(used.overrides.iter().all(|(_, value)| value.init.is_some()),
+                        "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
+                }
+            }
+        }}}
+    }
+
+    #[test]
+    fn specialized_modules_omit_unreachable_features() {
+        use std::collections::BTreeSet;
+        let names = |files: &[&str], entries: &[&str]| -> BTreeSet<String> {
+            files.iter().flat_map(|file| file.lines()).filter_map(|line| line.strip_prefix("fn "))
+                .filter_map(|line| line.split('(').next()).filter(|name| !entries.contains(name)).map(str::to_string).collect()
+        };
+        let compiled = |entries, flags, operation, entry: &str| {
+            let source = material_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(true), entries, flags, operation);
+            let mut module = naga::front::wgsl::parse_str(&source).unwrap();
+            module.entry_points.retain(|e| e.name == entry);
+            naga::compact::compact(&mut module, naga::compact::KeepUnused::No);
+            module.functions.iter().filter_map(|(_, f)| f.name.clone()).collect::<BTreeSet<_>>()
+        };
+        let relief = names(&[include_str!("relief.wgsl"), include_str!("relief_fine.wgsl")], &["relief_contact"]);
+        let bristle = names(&[include_str!("bristle.wgsl")], &["bristles_enabled", "bristle_footprint"]);
+        let clone = names(&[include_str!("retouch_sample.wgsl"), include_str!("material_clone.wgsl")], &["clone_source_at"]);
+        let blend = names(&[include_str!("blend_modes.wgsl")], &["blend"]);
+        let pointwise = names(&[include_str!("material_pointwise.wgsl")], &[]);
+        let fragments = ["liquify_fragment", "smudge_fragment", "wet_fragment", "watercolor_fragment"];
+        let absent = |present: &BTreeSet<String>, feature: &BTreeSet<String>, what: &str| {
+            let found: Vec<_> = present.intersection(feature).collect();
+            assert!(found.is_empty(), "{what} reaches {found:?}");
+        };
+        let retouching = [layer_core::DefaultBrushPreset::CloneStamp, layer_core::DefaultBrushPreset::HealingBrush];
+        for preset in layer_core::CONTACT_BRUSH_PRESETS.into_iter().chain(retouching) {
+            let brush = layer_core::default_brush(preset);
+            let uniform = brush.rendering.accumulation == BrushAccumulation::Uniform;
+            let flags = contact_flags(brush.contact) | if uniform { 128 } else { 0 };
+            let operation = if retouching.contains(&preset) { MaterialOperation::Clone } else if uniform { MaterialOperation::Coverage } else { MaterialOperation::Deposit };
+            for extra in [0, AGGREGATE, FINE_TIP] {
+                let present = compiled(Entries::Kernel(Start::Stored), flags | extra, operation, "compute_color");
+                let what = format!("{preset:?} kernel {:#x}", flags | extra);
+                if flags & 64 == 0 { absent(&present, &relief, &what); }
+                if flags & 512 == 0 { absent(&present, &bristle, &what); }
+                if operation != MaterialOperation::Clone { absent(&present, &clone, &what); }
+                absent(&present, &blend, &what);
+            }
+        }
+        for flags in [0, 128] {for operation in [MaterialOperation::Liquify, MaterialOperation::Smudge, MaterialOperation::Wet, MaterialOperation::Watercolor] {
+            let what = format!("{operation:?} fragment {flags:#x}");
+            let present = compiled(Entries::Fragment, flags, operation, "fragment_main");
+            for feature in [&relief, &bristle, &clone, &pointwise] { absent(&present, feature, &what); }
+            let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
+            assert_eq!(operations.len(), 1, "{what} reaches {operations:?}");
+            if matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge) {
+                let present = compiled(Entries::Gather, flags, operation, "gather_fragment");
+                for feature in [&relief, &bristle, &clone, &pointwise] { absent(&present, feature, &format!("{operation:?} gather {flags:#x}")); }
+            }
+        }}
     }
 }

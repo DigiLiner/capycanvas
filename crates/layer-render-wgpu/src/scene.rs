@@ -2251,7 +2251,7 @@ impl Pipelines {
             move || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some("layer scene"),
-                    source: wgpu::ShaderSource::Wgsl(compose_wgsl(&[&working_color::shader(&device), &crate::view_color::hdr_shader(device.working_space(), layer_core::color::RgbSpace::Srgb), include_str!("blend_modes.wgsl"), include_str!("scene_vertex.wgsl"), include_str!("scene.wgsl"), "@group(1) @binding(3) var scene_extra:texture_2d<f32>; fn gradient_record(base:u32,index:u32)->vec4<f32>{return textureLoad(scene_extra,vec2<i32>(i32(index),0),0);}", include_str!("float_number.wgsl"), crate::gradient::SOURCE, include_str!("scene_constant.wgsl")])),
+                    source: wgpu::ShaderSource::Wgsl(compose_wgsl(&[&working_color::shader(&device), &crate::view_color::hdr_shader(device.working_space(), layer_core::color::RgbSpace::Srgb), include_str!("blend_codes.wgsl"), include_str!("blend_modes.wgsl"), include_str!("scene_vertex.wgsl"), include_str!("scene.wgsl"), "@group(1) @binding(3) var scene_extra:texture_2d<f32>; fn gradient_record(base:u32,index:u32)->vec4<f32>{return textureLoad(scene_extra,vec2<i32>(i32(index),0),0);}", include_str!("float_number.wgsl"), crate::gradient::SOURCE, include_str!("scene_constant.wgsl")])),
                 })
             }
         });

@@ -751,6 +751,7 @@ fn shader_source(
     let blend_code=if normal {"0u"} else {"u32(controls.y)"};
     let mut source = working_color::source(space);
     source.push_str(&crate::view_color::hdr_shader(space, layer_core::color::RgbSpace::Srgb));
+    source.push_str(include_str!("blend_codes.wgsl"));
     source.push_str(include_str!("blend_modes.wgsl"));
     source.push_str(include_str!("scene_vertex.wgsl"));
     let space_id = layer_core::color::RgbSpace::ALL

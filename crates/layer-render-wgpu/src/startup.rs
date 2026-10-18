@@ -176,28 +176,24 @@ impl Requirements {
                 plan.state.watercolor_wetness,
                 plan.state.coverage,
             );
-            self.render
-                .push(r.pipelines.material[kind.index(plan.material)].clone());
+            self.render.push(r.pipelines.material(style, plan.material, kind).clone());
             if preview {
                 // A single predicted destination batch on a simple canvas reads
                 // persistent coverage but writes only its disposable color.
                 if !plan.state.watercolor_wetness {
-                    self.render.push(
-                        r.pipelines.material[MaterialPipelineKind::Color.index(plan.material)]
-                            .clone(),
-                    );
+                    self.render.push(r.pipelines.material(style, plan.material, MaterialPipelineKind::Color).clone());
                 }
             }
         }
         if plan.reservoir {
-            self.render.push(r.pipelines.reservoir.clone());
+            self.render.push(r.pipelines.reservoir(style).clone());
         }
         if let Some(index) = match style.execution {
             BrushExecution::Liquify => Some(0),
             BrushExecution::Smudge => Some(1),
             _ => None,
         } {
-            self.render.push(r.pipelines.material_gather[index].clone());
+            self.render.push(r.pipelines.material_gather(style, index).clone());
         }
         if plan.stroke_edge {
             self.render.push(r.pipelines.stroke_edge.clone());
@@ -1092,7 +1088,7 @@ mod gpu_tests {
             let plan = BrushPassPlan::for_device(&style, &renderer.device);
             if mode == BrushBlendMode::Multiply {
                 assert!(!dry_material::dry_material_compute_eligible(&style));
-                assert!(renderer.pipelines.material[MaterialPipelineKind::Coverage.index(plan.material)].ready(),
+                assert!(renderer.pipelines.material(&style, plan.material, MaterialPipelineKind::Coverage).ready(),
                     "non-normal fragment must be compiled before painting");
             } else {
                 assert!(renderer.pipelines.dry_material.selected_kernel(&style, plan.material, true, 0).ready(),

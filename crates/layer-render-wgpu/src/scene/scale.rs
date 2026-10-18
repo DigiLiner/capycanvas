@@ -130,7 +130,7 @@ impl Pipelines {
         let shader = Deferred::wgsl(
             device,
             "display resolution composition",
-            compose_wgsl(&[&working_color::shader(device), device.float_sampling_wgsl(), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")]),
+            compose_wgsl(&[&working_color::shader(device), device.float_sampling_wgsl(), include_str!("../blend_codes.wgsl"), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")]),
         );
         Self {
             records: records_layout,

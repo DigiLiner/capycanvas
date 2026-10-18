@@ -303,9 +303,9 @@ impl WgpuRasterizer {
             });
             pass.set_scissor_rect(local.min_x(), local.min_y(), local.width(), local.height());
             pass.set_pipeline(self.pipelines.material(
+                &batch.style,
                 plan.material,
-                !from_persistent && plan.state.watercolor_wetness,
-                coverage_view.is_some(),
+                MaterialPipelineKind::for_attachments(!from_persistent && plan.state.watercolor_wetness, coverage_view.is_some()),
             ));
             pass.set_bind_group(
                 0,

@@ -377,3 +377,8 @@ fn bristle_paint(dab: Dab, world: vec2<f32>, paper: f32) -> BristleDeposit {
     let track = bristle_track(dab, pose, lens, far.point, leaving, mix(first, last, leaving), origin);
     return bristle_material(track, dab.color.rgb, dab.material.z, paper, coverage, margin);
 }
+
+fn bristle_footprint(dab: Dab, world: vec2<f32>, paper: f32) -> f32 {
+    let paint = bristle_paint(dab, world, paper);
+    return select(paint.opacity * paint.coverage, 0.0, paint.held);
+}

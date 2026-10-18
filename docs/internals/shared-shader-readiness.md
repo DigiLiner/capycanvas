@@ -24,8 +24,10 @@ prepare on first use. Unused filter programs retain recipes. Shared pipeline
 recipes deduplicate work and prepared handles survive tool changes; a first
 selection can wait for compilation, while later selections reuse those handles.
 Startup cannot fail because of shaders needed only by an unused brush.
-Non-dry material recipes declare dry contact absent so their shaders exclude
-dry relief. Deposit and coverage retain their captured contact capabilities.
+Each material operation compiles its own modules, specialized for brushes
+without contact; other contacts share a module that reads each dab's flags.
+Non-dry operations exclude dry relief. Deposit and coverage retain their
+captured contact capabilities.
 Material recipes use the captured contact flags and accumulation mode, with
 separate entries for destination targets, gathering and reservoir exchange.
 Readiness requests only the entries used by the selected pass plan, including

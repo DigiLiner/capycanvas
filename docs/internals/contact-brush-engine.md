@@ -152,11 +152,13 @@ share those contact flags. Compute recipes use the same eligibility rule in
 readiness and deposition.
 
 Pointwise deposition and transported materials share their compositing helpers
-but compile separate dependency sets. Dry contact modules omit bristle and
-neighborhood transport code; legacy brushes retain those evaluators. Contact
-features and material operation are module constants, so unrelated branches do
-not enter the device compiler. Dry kernels only serve normal blending, so the
-blend-mode switch is a module constant too. Aggregate and ordered deposition share one
+but compile separate dependency sets. Each module serves one material operation
+and one set of contact flags. A branch on a module constant still hands every
+function it calls to the device compiler, so a module composes stub entry points
+for the features it cannot reach: relief, bristles, evolving contact, retouch
+sampling and, in dry kernels, which only serve normal blending, the blend-mode
+formulas. Destination fragments for brushes without contact omit contact
+evaluation; any other contact evaluates each dab's flags. Aggregate and ordered deposition share one
 contact loop, selected by the existing batch marker. They compile separate
 variants so ordered compositing does not increase the fast path's register
 requirements. The small-contact antialiasing variant also remains separate. Normal pointwise brushes

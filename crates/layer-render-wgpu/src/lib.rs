@@ -476,10 +476,6 @@ impl MaterialOperation {
         Self::Clone,
     ];
 
-    fn constants(self) -> [(&'static str, f64); 2] {
-        let dry = matches!(self, Self::Deposit | Self::Coverage);
-        [("MATERIAL_OPERATION", self as u32 as f64), ("CONTACT_ABSENT", f64::from(u32::from(!dry) << 6))]
-    }
 }
 
 /// What a material pass reads besides its destination page.
@@ -857,11 +853,11 @@ struct TextureSet {
 struct Pipelines {
     dry_material: dry_material::Pipelines,
     direct: [Deferred<wgpu::RenderPipeline>; DirectPipelineKind::COUNT],
-    material: [Deferred<wgpu::RenderPipeline>;
-        MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT],
-    material_gather: [Deferred<wgpu::RenderPipeline>; 2],
+    material: [[Deferred<wgpu::RenderPipeline>;
+        MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_CONTACTS.len()],
+    material_gather: [[Deferred<wgpu::RenderPipeline>; 2]; dry_material::MATERIAL_CONTACTS.len()],
     watercolor_transport: [Deferred<wgpu::ComputePipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
-    reservoir: Deferred<wgpu::RenderPipeline>,
+    reservoir: [Deferred<wgpu::RenderPipeline>; dry_material::MATERIAL_CONTACTS.len()],
     stroke_edge: Deferred<wgpu::RenderPipeline>,
     watercolor_composite: Deferred<wgpu::RenderPipeline>,
     watercolor_compute: (wgpu::BindGroupLayout, Deferred<wgpu::ComputePipeline>),
@@ -875,11 +871,19 @@ impl Pipelines {
 
     fn material(
         &self,
+        style: &layer_render::DabStyle,
         operation: MaterialOperation,
-        watercolor: bool,
-        coverage: bool,
-    ) -> &wgpu::RenderPipeline {
-        &self.material[MaterialPipelineKind::for_attachments(watercolor, coverage).index(operation)]
+        kind: MaterialPipelineKind,
+    ) -> &Deferred<wgpu::RenderPipeline> {
+        &self.material[dry_material::material_contact_slot(style)][kind.index(operation)]
+    }
+
+    fn material_gather(&self, style: &layer_render::DabStyle, index: usize) -> &Deferred<wgpu::RenderPipeline> {
+        &self.material_gather[dry_material::material_contact_slot(style)][index]
+    }
+
+    fn reservoir(&self, style: &layer_render::DabStyle) -> &Deferred<wgpu::RenderPipeline> {
+        &self.reservoir[dry_material::material_contact_slot(style)]
     }
 }
 
@@ -3043,7 +3047,7 @@ impl WgpuRasterizer {
                 target,
                 wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             );
-            pass.set_pipeline(&self.pipelines.reservoir);
+            pass.set_pipeline(self.pipelines.reservoir(&batch.style));
             pass.set_bind_group(
                 0,
                 &self.style_bind_group,
@@ -5104,7 +5108,7 @@ impl StyleGpu {
     }
 }
 
-/// A blend as `blend_modes.wgsl` reads it: the `LayerBlend` code in bits 0-7,
+/// A blend as `blend_codes.wgsl` encodes it: the `LayerBlend` code in bits 0-7,
 /// Perceptual documents in bit 8 and float documents in bit 9.
 /// Normal needs no flags, so its code is always 0; a clipped Pass Through
 /// group composites isolated, as Normal.
@@ -5494,7 +5498,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     let advanced_brush = advanced_brush_shader(device);
     // Native hosts request this feature only after checking Float32 read/write
     // storage support. Each dry invocation owns exactly one destination texel.
-    let material_shader = dry_material::shader(device);
     let dry_material = dry_material::Pipelines::new(device, [layouts.target, layouts.material, layouts.advanced_texture],
         device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES));
     let stroke_edge_shader = {
@@ -5677,37 +5680,27 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             "layer watercolor brush with wetness state",
         ),
     ];
-    // Keep each destination operation in a separate optimized shader. Compiling
-    // their combined control flow can hold a native driver call for seconds,
-    // delaying newly selected tools and final compiler shutdown. Attachment
-    // variants still share one shader module and the same brush calculations.
-    let material = std::array::from_fn(|index| {
+    // Each destination operation and contact specialization compiles its own
+    // module; attachment variants of one operation share it.
+    let paint_shaders: [[_; MaterialOperation::ALL.len()]; dry_material::MATERIAL_CONTACTS.len()] = std::array::from_fn(|slot|
+        MaterialOperation::ALL.map(|operation| dry_material::material_shader(device, dry_material::Entries::Fragment, dry_material::MATERIAL_CONTACTS[slot], operation)));
+    let material = std::array::from_fn(|slot| std::array::from_fn(|index| {
         let operation = MaterialOperation::ALL[index / MaterialPipelineKind::COUNT];
         let (targets, label) = material_targets[index % MaterialPipelineKind::COUNT].clone();
         let (device, layout, shader) = (
             device.clone(),
             material_pipeline_layout.clone(),
-            material_shader.clone(),
+            paint_shaders[slot][operation as usize].clone(),
         );
         Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_targets_with_constants_recipe(
-                mode,
-                &device,
-                &layout,
-                &shader,
-                "fragment_main",
-                &targets,
-                &operation.constants(),
-                label,
-            )
+            fullscreen_pipeline_targets_with_constants_recipe(mode, &device, &layout, &shader, "fragment_main", &targets, &[], label)
         })
-    });
-    let material_gather = std::array::from_fn(|index| {
-        let operation = [MaterialOperation::Liquify, MaterialOperation::Smudge][index];
+    }));
+    let material_gather = std::array::from_fn(|slot| [MaterialOperation::Liquify, MaterialOperation::Smudge].map(|operation| {
         let (device, layout, shader) = (
             device.clone(),
             material_pipeline_layout.clone(),
-            material_shader.clone(),
+            dry_material::material_shader(device, dry_material::Entries::Gather, dry_material::MATERIAL_CONTACTS[slot], operation),
         );
         Deferred::pipeline(move |mode| {
             fullscreen_pipeline_targets_with_constants_recipe(
@@ -5721,11 +5714,11 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                &operation.constants(),
+                &[],
                 "gather distant material samples",
             )
         })
-    });
+    }));
     let watercolor_transport = std::array::from_fn(|step| {
         let (device, layout, shader) = (
             device.clone(),
@@ -5743,25 +5736,25 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             })
         })
     });
-    let reservoir = {
+    let reservoir = std::array::from_fn(|slot| {
         let (device, layout, shader) = (
             device.clone(),
             material_pipeline_layout.clone(),
-            material_shader.clone(),
+            paint_shaders[slot][MaterialOperation::Wet as usize].clone(),
         );
         Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_targets_with_constants_recipe(
+            fullscreen_pipeline_recipe(
                 mode,
                 &device,
                 &layout,
                 &shader,
                 "reservoir_fragment",
-                &[Some(wgpu::ColorTargetState { format: device.working_format(), blend: None, write_mask: wgpu::ColorWrites::ALL })],
-                &MaterialOperation::Wet.constants()[1..],
+                None,
+                device.working_format(),
                 "layer brush reservoir exchange",
             )
         })
-    };
+    });
     let stroke_edge = {
         let (device, layout, shader) = (
             device.clone(),

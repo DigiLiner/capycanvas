@@ -358,7 +358,7 @@ impl WgpuRasterizer {
                 &gather.fields[next].1,
                 wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             );
-            pass.set_pipeline(&self.pipelines.material_gather[operation.unwrap()]);
+            pass.set_pipeline(self.pipelines.material_gather(&batch.style, operation.unwrap()));
             pass.set_bind_group(
                 0,
                 &self.style_bind_group,

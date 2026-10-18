@@ -10,10 +10,12 @@ another. CI runs only the window-free shared suites, the Wasm check, the Apple
 project check and the license check ([releasing](releasing.md#continuous-integration)),
 so run the checks for every area your change touches.
 
-The renderer's `dry_material::tests::pipeline_overrides_are_used_by_the_entry_point`
-also runs in CI without a GPU. It validates each generated dry-material shader,
-the destination, gather and reservoir entries, and the advanced direct and mask
-fragment entries. It checks pipeline constants against the overrides used by
+The renderer's `dry_material::tests::every_kernel_entry_resolves_its_overrides`
+also runs in CI without a GPU. It validates each generated dry-material kernel
+and the destination, gather and reservoir modules of every material operation.
+`specialized_modules_omit_unreachable_features` requires every specialized
+module to leave out the relief, bristle, retouch, blend-mode, pointwise and other
+operation code it cannot reach. The first test checks pipeline constants against the overrides used by
 each entry point, including called helpers. Supply only constants used by that
 entry point: Safari versions can reject unused overrides even when the module
 declares them. This catches the dry-brush recipe mismatch; browser compiler

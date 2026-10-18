@@ -540,10 +540,10 @@ fn native_alpha_reuse_only_read_write_dry_kernels_bind_writable_cells() {
                 .then_some((variable.name.clone(), variable.binding.as_ref().map(|binding| (binding.group, binding.binding))))
         }).collect::<Vec<_>>()
     };
-    let fragment = crate::dry_material::shader_source(r.device.working_space(), r.device.float_sampling_wgsl(), include_str!("../../material_brush.wgsl"));
+    let fragment = crate::dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), crate::dry_material::Entries::Fragment, u32::MAX, MaterialOperation::Deposit);
     assert_eq!(writable(&fragment), vec![], "fragment dry evaluation writes no cell flags");
     for start in [Start::Stored, Start::Sampled] {
-        let kernel = crate::dry_material::kernel_source(r.device.working_space(), r.device.float_sampling_wgsl(), start, u32::MAX, MaterialOperation::Deposit);
+        let kernel = crate::dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), crate::dry_material::Entries::Kernel(start), u32::MAX, MaterialOperation::Deposit);
         let expected = if start == Start::Stored { vec![(Some("changed_cells".into()), Some((0, 3)))] } else { vec![] };
         assert_eq!(writable(&kernel), expected, "{start:?} dry kernel cell flags");
     }
@@ -809,7 +809,7 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
         r.queue.write_texture(texture.as_image_copy(),&bytes,wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(16),rows_per_image:Some(1)},texture.size());
         let components=new.map(|v|format!("bitcast<f32>({}u)",v.to_bits())).join(",");
         let source=format!("{}\n@compute @workgroup_size(1) fn comparison_test() {{load_dry_destination(vec2<u32>(0u));store_dry_color(vec2<u32>(0u),vec4<f32>({components}));}}",
-            crate::dry_material::kernel_source(r.device.working_space(),r.device.float_sampling_wgsl(),crate::dry_material::Start::Stored,u32::MAX,MaterialOperation::Deposit));
+            crate::dry_material::material_source(r.device.working_space(),r.device.float_sampling_wgsl(),crate::dry_material::Entries::Kernel(crate::dry_material::Start::Stored),u32::MAX,MaterialOperation::Deposit));
         let shader=r.device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("actual in-place store compare helper"),
             source:wgpu::ShaderSource::Wgsl(source.into())});
         let pipeline=r.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {label:Some("tracked one-pixel bit compare"),layout:None,module:&shader,entry_point:Some("comparison_test"),compilation_options:Default::default(),cache:None});

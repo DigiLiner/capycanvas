@@ -1,12 +1,6 @@
-// Layer blend modes on straight colors. A blend code holds the LayerBlend
-// discriminant in bits 0-7, the Perceptual blend space in bit 8 and float
-// documents in bit 9. Float documents clamp no result; Unit modes clamp their
-// operands to [0, 1]. Perceptual Soft Light is Photoshop's formula, and Linear
-// Soft Light the W3C one.
-const BLEND_PERCEPTUAL: u32 = 256u;
-const BLEND_FLOAT: u32 = 512u;
-const BLEND_DIVISOR: f32 = .00006103515625;
-fn blend_mode(code: u32) -> u32 { return code & 255u; }
+// Layer blend modes on straight colors. Float documents clamp no result; Unit
+// modes clamp their operands to [0, 1]. Perceptual Soft Light is Photoshop's
+// formula, and Linear Soft Light the W3C one.
 fn blend_luma(code: u32) -> vec3<f32> {
     return select(WORKING_LUMA, vec3<f32>(.3,.59,.11), (code & BLEND_PERCEPTUAL) != 0u);
 }
