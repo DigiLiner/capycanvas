@@ -504,3 +504,42 @@ fn layer_tiles_beside_the_largest_offset_keep_their_exact_pixels() {
     let far = layer_core::offsets::MAX_OFFSET - 5;
     assert_eq!(tiles(far), tiles(far.rem_euclid(i64::from(PAGE_SIZE))));
 }
+
+#[test]
+fn watercolor_transport_preserves_multitile_prediction_commit_and_restore() {
+    let mut layer = paint_document([512; 2], "multitile transport");
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let send = |r: &mut WgpuRasterizer, layer: &Document, dabs: &[Dab], batches: &[DabBatch], reset| {
+        r.submit(FramePacket { dabs, dab_batches: batches, reset_layers: reset,
+            ..crate::test_support::packet(layer.scene(), [512; 2]) }).unwrap();
+        r.readback_srgb_rgba8().unwrap()
+    };
+    let original = send(&mut r, &layer, &[], &[], true);
+    let mut ink = dab([0.1, 0.3, 0.8, 1.]);
+    ink.center = Point { x: 256., y: 256. };
+    ink.radii = [160.; 2];
+    ink.material = [0.8, 1., 1., 1.];
+    let mut stroke = batch(target(&layer));
+    stroke.style = preset_style(layer_core::DefaultBrushPreset::WetWatercolor);
+    stroke.damage = ink.bounds();
+    let mut preview = stroke.clone(); preview.kind = DabBatchKind::Preview;
+    let prediction = send(&mut r, &layer, &[ink], &[preview.clone()], false);
+    assert_ne!(prediction, original);
+    assert_eq!(r.preview_pages.len(), 4);
+    assert_eq!(r.preview_watercolor_wetness_pages.len(), 4);
+    assert!(paint(&layer).raster.is_empty());
+    let mut moved = ink; moved.center = Point { x: 320., y: 320. };
+    preview.damage = moved.bounds();
+    send(&mut r, &layer, &[moved], &[preview.clone()], false);
+    assert!(paint(&layer).raster.is_empty());
+    let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+    r.encode_watercolor_transport(&mut encoder, 0, &preview,
+        &[pixel_rect(preview.damage, [512; 2])], true).unwrap();
+    assert_eq!(encoder.pass_count(), u64::from(WATERCOLOR_TRANSPORT_STEPS));
+    r.uploads.finish(&encoder);
+    encoder.submit(&r.queue);
+    assert_eq!(send(&mut r, &layer, &[], &[], false), original);
+    paint_mut(&mut layer).raster = layer_core::raster::RasterRevision::pending();
+    let accepted = send(&mut r, &layer, &[ink], &[stroke], false);
+    assert_eq!(send(&mut r, &layer, &[], &[], true), accepted);
+}

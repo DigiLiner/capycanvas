@@ -94,6 +94,12 @@ finite indexed tables rather than independent feature branches. The textured
 direct and material shaders also compose the same `brush_coverage.wgsl`
 functions for tip and grain coverage.
 
+Watercolor transport batches resident page dispatches within each of its three
+compute steps. Each step reads unchanged pigment and wetness and swaps their
+active sides after all pages finish. Borrowed decoded neighborhoods are consumed
+before another source preparation can evict them. Region uniforms and scratch
+jobs retain their capacity across batches.
+
 ## Current frame path
 
 ### Brush color coordinates

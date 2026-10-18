@@ -204,7 +204,7 @@ impl Requirements {
         }
         if plan.state.watercolor_wetness {
             self.compute.push(r.pipelines.watercolor_compute.1.clone());
-            self.render
+            self.compute
                 .extend(r.pipelines.watercolor_transport.iter().cloned());
             self.render.push(r.pipelines.watercolor_composite.clone());
         }

@@ -33,6 +33,10 @@ struct Target {
 @group(2) @binding(7) var wet_right: texture_2d<f32>;
 @group(2) @binding(8) var wet_up: texture_2d<f32>;
 @group(2) @binding(9) var wet_down: texture_2d<f32>;
+@group(2) @binding(10) var color_output: texture_storage_2d<rgba32float, write>;
+@group(2) @binding(11) var wetness_output: texture_storage_2d<r32float, write>;
+struct TransportRegion { bounds: vec4<u32>, }
+@group(2) @binding(12) var<uniform> region: TransportRegion;
 @group(3) @binding(0) var conductance_texture: texture_2d<f32>;
 @group(3) @binding(1) var conductance_sampler: sampler;
 
@@ -42,16 +46,6 @@ const TRANSPORT_STEP_SCALES: array<f32, 3> = array<f32, 3>(
     0.31,
     0.18,
 );
-
-@vertex
-fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
-    var positions = array<vec2<f32>, 3>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>( 3.0, -1.0),
-        vec2<f32>(-1.0,  3.0),
-    );
-    return vec4<f32>(positions[vertex_index], 0.0, 1.0);
-}
 
 fn rotate(point: vec2<f32>, cosine: f32, sine: f32) -> vec2<f32> {
     return vec2<f32>(
@@ -193,12 +187,11 @@ fn exchange(
 }
 
 struct TransportOutput {
-    @location(0) color: vec4<f32>,
-    @location(1) wetness: vec4<f32>,
+    color: vec4<f32>,
+    wetness: vec4<f32>,
 }
 
-@fragment
-fn fragment_main(@builtin(position) position: vec4<f32>) -> TransportOutput {
+fn transport_result(position: vec4<f32>) -> TransportOutput {
     let world = render_target.origin_extent.xy + position.xy;
     // The destination pixel is always in the center page. Direct loads avoid
     // three general cross-page address/switch sequences per fragment; only the
@@ -328,4 +321,13 @@ fn fragment_main(@builtin(position) position: vec4<f32>) -> TransportOutput {
         layer_color(mix(center, next_pigment, clip),WORKING_LUMA,style.color_mode.x,style.color_mode.y),
         vec4<f32>(mix(center_wet, select(next_wetness, 0.0, style.color.a > 0.5 && center.a == 0.0), clip), 0.0, 0.0, 1.0),
     );
+}
+
+@compute @workgroup_size(8, 8)
+fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
+    let coordinate = invocation.xy + region.bounds.xy;
+    if any(coordinate >= region.bounds.zw) { return; }
+    let result = transport_result(vec4<f32>(vec2<f32>(coordinate) + 0.5, 0.0, 1.0));
+    textureStore(color_output, vec2<i32>(coordinate), result.color);
+    textureStore(wetness_output, vec2<i32>(coordinate), result.wetness);
 }

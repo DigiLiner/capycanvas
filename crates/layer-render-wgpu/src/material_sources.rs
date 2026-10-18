@@ -6,14 +6,29 @@ use super::*;
 use layer_core::{Point, Rect};
 use wgpu::util::DeviceExt;
 
-/// Dry contact metadata changes each batch, but its storage does not. One
-/// ordered upload replaces a separate GPU allocation/upload for every tile.
+/// Aligned material tile uniforms retain their allocation across batches.
 #[derive(Default)]
-pub(super) struct DryRecords {
+pub(super) struct TileRecords {
     buffer: Option<wgpu::Buffer>,
     stride: u64,
 }
-impl DryRecords {
+impl TileRecords {
+    pub fn prepare(&mut self, device: &wgpu::Device, count: usize) -> Result<u64, GpuRasterError> {
+        self.stride = u64::from(device.limits().min_uniform_buffer_offset_alignment.max(256));
+        let used = (count as u64).checked_mul(self.stride)
+            .filter(|size| *size <= device.limits().max_buffer_size)
+            .ok_or(GpuRasterError::SizeOverflow)?;
+        if used > 0 && self.buffer.as_ref().is_none_or(|buffer| buffer.size() < used) {
+            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("reusable material tile records"),
+                size: used.next_power_of_two().min(device.limits().max_buffer_size),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        Ok(used)
+    }
+
     pub fn storage_bytes(&self) -> u64 { self.buffer.as_ref().map_or(0, wgpu::Buffer::size) }
 
     pub fn offset(&self, index: usize) -> u32 { (index as u64 * self.stride) as u32 }
@@ -225,19 +240,8 @@ impl WgpuRasterizer {
     ) -> Result<(), GpuRasterError> {
         if !pointwise(&batch.style) { return Ok(()); }
         let records_buffer = &mut self.dry_records;
-        records_buffer.stride = u64::from(self.device.limits().min_uniform_buffer_offset_alignment.max(256));
-        let used = (records.clone().count() as u64).checked_mul(records_buffer.stride)
-            .filter(|size| *size <= self.device.limits().max_buffer_size)
-            .ok_or(GpuRasterError::SizeOverflow)?;
+        let used = records_buffer.prepare(&self.device, records.clone().count())?;
         if used == 0 { return Ok(()); }
-        if records_buffer.buffer.as_ref().is_none_or(|buffer| buffer.size() < used) {
-            let size = used.next_power_of_two().min(self.device.limits().max_buffer_size);
-            records_buffer.buffer = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("reusable dry material tile records"), size,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-        }
         // Serialize directly into pooled mapped storage: no intermediate byte
         // vector or second CPU copy on the drawing path.
         self.uploads.write_mapped(encoder, records_buffer.buffer.as_ref().unwrap(), 0, used, |mapped| {

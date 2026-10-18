@@ -3075,6 +3075,52 @@ establish no native frame rate or tier qualification.
 Source, binaries, raw CSVs and the retained earlier failed runs are under
 `artifacts/apple/port-oct13-regenerated/source-audit/partial-opacity-specialized-kernel-correction/M2Pro-proxy-preparation/monotonic-phase-clock-preparation/`.
 
+A separate optimized M2 Pro comparison on 2026-10-18 batches watercolor
+transport in compute passes instead of opening a render pass per page. Both
+controls use shared source `9a2dba37f` plus the `75644d71a` reservoir
+specialization, a 9504 × 6336 photo, a 1600 × 1000 offscreen target, Wet
+Watercolor at 320 px and opacity 0.66, and eight samples per update. Two
+900-frame setup runs precede three matched pairs of 225 moving updates,
+lasting 7.049–7.819 seconds. All original assertions pass, and the native
+painted-root records match byte for byte.
+
+| Metric | Median before → after |
+| --- | --- |
+| Completed updates/s | 28.778 → 31.912 |
+| Per-run completion p99 | 53.074 → 45.211 ms |
+| Per-run CPU wall p99 | 17.786 → 12.497 ms |
+
+All three pairs improve these metrics. These are queue-completed offscreen
+updates, without native presentation or physical input; thermal state was not
+sampled. The result does not qualify a tier or native frame rate. Source,
+binaries and raw results remain under
+`artifacts/apple/port-oct13-regenerated/source-audit/watercolor-transport-batched-compute-source-preparation/`.
+
+A native comparison uses the preserved ordinary Release controls and
+`75644d71a` plus this transport change, with unchanged Swift code. Each run
+uses the synthetic 2K Wet Watercolor profile at 320 px, ten seconds of warm-up,
+thirty seconds of measurement and ten seconds of postlude. GPU timing is off;
+thermal state stays nominal. Both hosts actually display the dark theme;
+light-theme verification of these builds remains unavailable.
+
+| Host | Presented frames/s before → after | Cadence overruns before → after | Admission → presentation p99 before → after |
+| --- | --- | --- | --- |
+| M2 Pro Mac mini, 90 Hz | 87.399 → 86.999 | 53 → 56 | 32.953 → 32.955 ms |
+| M4 iPad Pro, 120 Hz | 97.173 → 116.125 | 682 → 93 | 34.209 → 28.454 ms |
+
+Both hosts retain zero render errors, rejected inputs and missing or zero-time
+presentation callbacks. Mac cadence does not improve. The measured
+receipt-to-first-associated-presentation proxy p99 increases on both hosts:
+39.544 → 41.739 ms on Mac and 31.079 → 34.280 ms on iPad. For associated
+receipts, receipt-to-admission p99 also increases, while the same frames'
+admission-to-presentation p99 is essentially unchanged. Unmatched receipts remain
+in the raw results, with
+different association rates on iPad. These associations do not identify the
+first displayed paint sample or establish physical input latency. The short
+2K diagnostic does not qualify the sustained, full-canvas or native-chrome
+targets. Signed products, captures and per-receipt components remain under
+`artifacts/apple/port-oct13-regenerated/source-audit/current763-ordinary-Rust-archive-preparation/transport-compute-Release-refresh/`.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

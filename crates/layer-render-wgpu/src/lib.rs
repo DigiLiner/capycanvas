@@ -730,6 +730,13 @@ impl BrushReservoir {
 }
 
 // Scratch descriptors retain capacity, but never retain page resources after encoding.
+struct WatercolorTransportJob {
+    coordinate: [u32; 2],
+    local: PixelRect,
+    record_offset: u32,
+    sources: wgpu::BindGroup,
+}
+
 struct MaterialJob {
     coordinate: [u32; 2],
     local: PixelRect,
@@ -853,7 +860,7 @@ struct Pipelines {
     material: [Deferred<wgpu::RenderPipeline>;
         MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT],
     material_gather: [Deferred<wgpu::RenderPipeline>; 2],
-    watercolor_transport: [Deferred<wgpu::RenderPipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
+    watercolor_transport: [Deferred<wgpu::ComputePipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
     reservoir: Deferred<wgpu::RenderPipeline>,
     stroke_edge: Deferred<wgpu::RenderPipeline>,
     watercolor_composite: Deferred<wgpu::RenderPipeline>,
@@ -1007,7 +1014,10 @@ pub struct WgpuRasterizer {
     material_layout: wgpu::BindGroupLayout,
     empty_material_input: bindings::MaterialInput,
     material_source_meta: wgpu::Buffer,
-    dry_records: material_sources::DryRecords,
+    dry_records: material_sources::TileRecords,
+    transport_records: material_sources::TileRecords,
+    transport_regions: Vec<PixelRect>,
+    transport_jobs: Vec<WatercolorTransportJob>,
     material_jobs: Vec<MaterialJob>,
     dry_jobs: Vec<dry_material::Job>,
     dry_display_inputs: Vec<dry_material::DisplayInputs>,
@@ -1174,7 +1184,12 @@ impl WgpuRasterizer {
         let edge_layout = fragment_textures_layout(&device, 10, "layer post-stroke edge sources");
         let watercolor_layout = bindings::layout(&device, "layer watercolor pigment and wetness neighborhood",
             &(0..10).map(|i| bindings::texture(i, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, false)).collect::<Vec<_>>());
-        let transport_layout = fragment_textures_layout(&device, 10, "layer watercolor transport sources");
+        let transport_layout = bindings::layout(&device, "layer watercolor transport sources",
+            &(0..10).map(|i| bindings::texture(i, wgpu::ShaderStages::COMPUTE, false)).chain([
+                bindings::storage_texture(10, wgpu::ShaderStages::COMPUTE, device.working_format(), wgpu::StorageTextureAccess::WriteOnly),
+                bindings::storage_texture(11, wgpu::ShaderStages::COMPUTE, device.scalar_format(), wgpu::StorageTextureAccess::WriteOnly),
+                bindings::buffer(12, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Uniform, true, NonZeroU64::new(160)),
+            ]).collect::<Vec<_>>());
         let style_alignment = device.limits().min_uniform_buffer_offset_alignment as u64;
         let style_stride =
             (mem::size_of::<StyleGpu>() as u64).div_ceil(style_alignment) * style_alignment;
@@ -1375,6 +1390,9 @@ impl WgpuRasterizer {
             empty_material_input: Default::default(),
             material_source_meta,
             dry_records: Default::default(),
+            transport_records: Default::default(),
+            transport_regions: Vec::new(),
+            transport_jobs: Vec::new(),
             material_jobs: Vec::new(),
             dry_jobs: Vec::with_capacity(SOURCE_SLOTS),
             dry_display_inputs: Vec::new(),
@@ -2721,14 +2739,14 @@ impl WgpuRasterizer {
     }
 
     fn transport_bind_group(
-        &mut self,
+        &self,
         layer_id: SourceTarget,
         coordinate: [u32; 2],
         preview: bool,
-        encoder: &mut crate::submission::CommandEncoder,
+        color_output: &wgpu::TextureView,
+        wetness_output: &wgpu::TextureView,
     ) -> Result<wgpu::BindGroup, GpuRasterError> {
         let offsets = [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]];
-        self.prepare_raw_neighborhood(layer_id, coordinate, offsets.map(Some), preview, encoder)?;
         let layer = self
             .paint_layers
             .iter()
@@ -2752,8 +2770,35 @@ impl WgpuRasterizer {
                 .map(|p| &p.active().view)
                 .unwrap_or(&self.empty_scalar_view)
         });
-        Ok(views_group(&self.device, "layer watercolor transport sources", &self.transport_layout,
-            colors.iter().chain(&wetness).copied()))
+        Ok(bindings::group(&self.device, "layer watercolor transport sources", &self.transport_layout,
+            colors.iter().chain(&wetness).copied().map(wgpu::BindingResource::TextureView).chain([
+                wgpu::BindingResource::TextureView(color_output),
+                wgpu::BindingResource::TextureView(wetness_output),
+                wgpu::BindingResource::Buffer(self.transport_records.binding()),
+            ])))
+    }
+
+    fn encode_watercolor_transport_jobs(
+        &self,
+        encoder: &mut crate::submission::CommandEncoder,
+        batch_index: usize,
+        batch: &DabBatch,
+        step: u32,
+        texture: &wgpu::BindGroup,
+        jobs: &[WatercolorTransportJob],
+    ) {
+        if jobs.is_empty() { return; }
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("layer nonlinear watercolor capillary relaxation"), timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipelines.watercolor_transport[step as usize]);
+        pass.set_bind_group(0, &self.style_bind_group, &[batch_index as u32 * self.style_stride as u32]);
+        pass.set_bind_group(3, texture, &[]);
+        for job in jobs {
+            pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, job.coordinate)]);
+            pass.set_bind_group(2, &job.sources, &[job.record_offset]);
+            pass.dispatch_workgroups(job.local.width().div_ceil(8), job.local.height().div_ceil(8), 1);
+        }
     }
 
     fn encode_watercolor_transport(
@@ -2778,6 +2823,25 @@ impl WgpuRasterizer {
         }
 
         let updated = unique_page_coordinates(damages);
+        let mut regions = mem::take(&mut self.transport_regions);
+        let mut pending = mem::take(&mut self.transport_jobs);
+        regions.clear();
+        pending.clear();
+        let result = (|| {
+        regions.extend(updated.iter().map(|coordinate| damages.iter().fold(PixelRect::EMPTY, |combined, damage| {
+            combined.union(damage.intersect(page_rect(*coordinate)))
+        }).page_local(*coordinate)));
+        let used = self.transport_records.prepare(&self.device, updated.len())?;
+        if used == 0 { return Ok(()); }
+        self.uploads.write_mapped(encoder, self.transport_records.binding().buffer, 0, used, |mapped| {
+            mapped.slice(..).fill(0);
+            for (index, local) in regions.iter().enumerate() {
+                let offset = self.transport_records.offset(index) as usize;
+                for (i, word) in [local.min_x(), local.min_y(), local.max_x(), local.max_y()].into_iter().enumerate() {
+                    mapped.slice(offset + i * 4..offset + i * 4 + 4).copy_from_slice(&word.to_le_bytes());
+                }
+            }
+        })?;
         let texture_key = Self::texture_set_key(&batch.style);
         let transport_texture_bind_group = self
             .texture_sets
@@ -2847,9 +2911,23 @@ impl WgpuRasterizer {
                     .collect::<Vec<_>>()
             };
 
-            for job in &jobs {
-                let bind_group =
-                    self.transport_bind_group(batch.target, job.coordinate, preview, encoder)?;
+            for (index, job) in jobs.iter().enumerate() {
+                let local = regions[index];
+                if local.is_empty() { continue; }
+                let borrowed = (self.tiled_sources.contains_key(&batch.target) || self.native_backing(batch.target).is_some())
+                    && [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].into_iter().any(|[dx, dy]| {
+                        let [x, y] = [job.coordinate[0] as i32 + dx, job.coordinate[1] as i32 + dy];
+                        if x < 0 || y < 0 { return false; }
+                        let at = [x as u32, y as u32];
+                        !(preview && self.preview_page(at).is_some())
+                            && !self.paint_layers.iter().find(|layer| layer.id == batch.target).unwrap().pages.iter().any(|page| page.coordinate == at)
+                    });
+                if borrowed {
+                    self.encode_watercolor_transport_jobs(encoder, batch_index, batch, step, &transport_texture_bind_group, &pending);
+                    pending.clear();
+                }
+                self.prepare_raw_neighborhood(batch.target, job.coordinate,
+                    [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].map(Some), preview, encoder)?;
                 let (color_destination, wetness_destination) =
                     if preview {
                         let color = self
@@ -2887,57 +2965,18 @@ impl WgpuRasterizer {
                             wetness.surface(job.wetness_destination_secondary),
                         )
                     };
-                let page_damage = damages.iter().fold(PixelRect::EMPTY, |combined, damage| {
-                    combined.union(damage.intersect(page_rect(job.coordinate)))
+                let sources = self.transport_bind_group(batch.target, job.coordinate, preview,
+                    &color_destination.view, &wetness_destination.view)?;
+                pending.push(WatercolorTransportJob {
+                    coordinate: job.coordinate, local, record_offset: self.transport_records.offset(index), sources,
                 });
-                let local = page_damage.page_local(job.coordinate);
-                if local.is_empty() {
-                    continue;
+                if borrowed {
+                    self.encode_watercolor_transport_jobs(encoder, batch_index, batch, step, &transport_texture_bind_group, &pending);
+                    pending.clear();
                 }
-                let color_attachments = [
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &color_destination.view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &wetness_destination.view,
-                        resolve_target: None,
-                        depth_slice: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                ];
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("layer nonlinear watercolor capillary relaxation"),
-                    color_attachments: &color_attachments,
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_scissor_rect(local.min_x(), local.min_y(), local.width(), local.height());
-                pass.set_pipeline(&self.pipelines.watercolor_transport[step as usize]);
-                pass.set_bind_group(
-                    0,
-                    &self.style_bind_group,
-                    &[batch_index as u32 * self.style_stride as u32],
-                );
-                pass.set_bind_group(
-                    1,
-                    self.paint_target_binding(&batch.style),
-                    &[self.layer_target_offset(batch.target, job.coordinate)],
-                );
-                pass.set_bind_group(2, &bind_group, &[]);
-                pass.set_bind_group(3, &transport_texture_bind_group, &[]);
-                pass.draw(0..3, 0..1);
             }
+            self.encode_watercolor_transport_jobs(encoder, batch_index, batch, step, &transport_texture_bind_group, &pending);
+            pending.clear();
 
             if preview {
                 for job in jobs {
@@ -2975,6 +3014,12 @@ impl WgpuRasterizer {
             }
         }
         Ok(())
+        })();
+        pending.clear();
+        regions.clear();
+        self.transport_jobs = pending;
+        self.transport_regions = regions;
+        result
     }
 
     fn encode_reservoir_update(
@@ -3604,7 +3649,7 @@ impl CanvasRenderer for WgpuRasterizer {
             + m.composite_storage_bytes
             + self.thumbnails.storage_bytes()
             + self.portable_blend.byte_len()
-            + 160 + self.dry_records.storage_bytes()
+            + 160 + self.dry_records.storage_bytes() + self.transport_records.storage_bytes()
             + self.dry_display_inputs.len() as u64 * dry_material::DisplayInputs::storage_bytes()
             + self.material_gather.as_ref().map_or(0, material_sources::Gather::storage_bytes)
             + self.device.effect_resources.lock().unwrap().bytes()
@@ -5187,8 +5232,8 @@ fn create_style_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 
 fn create_texture_layout(device: &wgpu::Device, filterable: bool) -> wgpu::BindGroupLayout {
     bindings::layout(device, "layer sampled texture layout", &[
-        bindings::texture(0, wgpu::ShaderStages::FRAGMENT, filterable),
-        bindings::sampler(1, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
+        bindings::texture(0, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, filterable),
+        bindings::sampler(1, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, wgpu::SamplerBindingType::Filtering),
     ])
 }
 
@@ -5688,27 +5733,14 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             watercolor_transport_shader.clone(),
         );
         Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_targets_with_constants_recipe(
-                mode,
-                &device,
-                &layout,
-                &shader,
-                "fragment_main",
-                &[
-                    Some(wgpu::ColorTargetState {
-                        format: device.working_format(),
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: device.scalar_format(),
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::RED,
-                    }),
-                ],
-                &[("TRANSPORT_PASS", step as f64)],
-                "layer nonlinear watercolor capillary relaxation",
-            )
+            mode.compute(&device, &wgpu::ComputePipelineDescriptor {
+                label: Some("layer nonlinear watercolor capillary relaxation"),
+                layout: Some(&layout), module: &shader, entry_point: Some("compute_main"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[("TRANSPORT_PASS", step as f64)], ..Default::default()
+                },
+                cache: None,
+            })
         })
     });
     let reservoir = {
