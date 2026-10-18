@@ -642,6 +642,8 @@ proof are under `artifacts/dry-defaults-final/midtop/`.
 
 Except for G-Pen and the current dry-media rows, measured on 2026-09-27 at `be5a7c38` with the [brush benchmark](measuring.md#how-to-measure). Each result is three 10 s strokes of a 200 Hz stylus ellipse at Fit zoom, at pressure 1 with 16 ms prediction, painting into an empty layer above the photo. The measured value is the median of the three strokes' completed updates per second, followed by the range across strokes. The gap is the interval between update starts. A brush meets its target when the median reaches it and the gap p99 is at most two frame budgets. The ellipse is 520 × 299 px at 16.0% zoom.
 
+Multiply Glaze and the very complex material rows were measured on 2026-10-18 with the same profile, using release benchmark builds of `1382cea74` with the shader composition of `10d515055`; their gap is the completion-gap p99.
+
 The older 2048 px simple-brush rows are above the 1536 px guarantee and do not
 classify performance at the guaranteed size. G-Pen, Pencil, Pointy Pencil and Charcoal have current 1536 px measurements; the remaining
 simple brushes retain unqualified rows.
@@ -671,23 +673,23 @@ simple brushes retain unqualified rows.
 | Textured Flat (15) | Complex | 1024 px | 25.5 updates/s (25.4–25.5); gap p99 107.0 ms | **Not met** |
 | Dry Scumble (16) | Complex | 1024 px | 14.0 updates/s (14.0–14.3); gap p99 144.9 ms | **Not met** |
 | Transparent Glaze (18) | Complex | 1024 px | 22.0 updates/s (22.0–22.1); gap p99 82.7 ms | **Not met** |
-| Multiply Glaze (14) | Complex | 1024 px | 11.5 updates/s (11.4–11.5); gap p99 133.0 ms | **Not met** |
+| Multiply Glaze (14) | Complex | 1024 px | 11.2 updates/s (11.0–11.4); input 11.2/s; completion-gap p99 134.7 ms | **Not met** |
 | Dual Texture (9) | Complex | 1024 px | 6.2 updates/s (6.2–6.2); gap p99 201.8 ms | **Not met** |
 | Spray (8) | Complex | 1024 px | 5.9 updates/s (5.5–6.5); gap p99 266.9 ms | **Not met** |
 | Opaque Gouache (19) | Very complex | 512 px | **Crashed**: native allocator out of memory (Scudo map failure) | **Not met** |
-| Watercolor Wash (20) | Very complex | 512 px | 0.60 (0.60–0.60) fresh updates/s; completion-gap p99 1536.52–1726.83 ms, Full color | **Not met**; [layer color modes](#layer-color-modes) |
-| Wet Watercolor (21) | Very complex | 512 px | **Crashed**: native abort (SIGABRT) during the stroke | **Not met** |
-| Loaded Oil (22) | Very complex | 512 px | **Crashed**: native allocator out of memory (Scudo map failure) | **Not met** |
-| Palette Knife (23) | Very complex | 512 px | **Stopped**: canvas GPU out of memory | **Not met** |
-| Wet Round (11) | Very complex | 512 px | **Crashed**: native allocator out of memory (Scudo map failure) | **Not met** |
+| Watercolor Wash (20) | Very complex | 512 px | **Crashed**: native allocator out of memory (Scudo map failure) | **Not met**; [layer color modes](#layer-color-modes) |
+| Wet Watercolor (21) | Very complex | 512 px | **Crashed**: native allocator out of memory (Scudo map failure) | **Not met** |
+| Loaded Oil (22) | Very complex | 512 px | **Stopped**: canvas GPU out of memory | **Not met** |
+| Palette Knife (23) | Very complex | 512 px | 0.4 updates/s (0.4–0.4); input 0.4/s; completion-gap p99 3443.8 ms | **Not met** |
+| Wet Round (11) | Very complex | 512 px | 0.5 updates/s (0.5–0.5); input 0.5/s; completion-gap p99 3935.3 ms | **Not met** |
 | Natural Blender (24) | Very complex | 512 px | **Crashed**: native allocator out of memory (Scudo map failure) | **Not met** |
-| Smudge (10) | Very complex | 512 px | **Stopped**: canvas GPU out of memory | **Not met** |
-| Liquify Push (12) | Very complex | 512 px | 1.2 updates/s (1.2–1.3); gap p99 3288.4 ms | **Not met** |
-| Liquify Twirl Clockwise (36) | Very complex | 512 px | 6.6 updates/s (6.3–7.1); gap p99 228.1 ms | **Not met** |
-| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 6.4 updates/s (6.2–6.5); gap p99 236.1 ms | **Not met** |
-| Liquify Pinch (37) | Very complex | 512 px | 3.8 updates/s (3.8–4.1); gap p99 429.0 ms | **Not met** |
-| Liquify Expand (38) | Very complex | 512 px | 3.8 updates/s (3.7–3.9); gap p99 456.8 ms | **Not met** |
-| Liquify Crystals (39) | Very complex | 512 px | 1.4 updates/s (1.4–1.4); gap p99 2078.1 ms | **Not met** |
+| Smudge (10) | Very complex | 512 px | 0.6 updates/s (0.6–0.7); input 0.6/s; completion-gap p99 2989.1 ms | **Not met** |
+| Liquify Push (12) | Very complex | 512 px | 0.8 updates/s (0.7–0.8); input 0.8/s; completion-gap p99 3205.8 ms | **Not met** |
+| Liquify Twirl Clockwise (36) | Very complex | 512 px | 9.0 updates/s (9.0–9.2); input 9.0/s; completion-gap p99 190.8 ms | **Not met** |
+| Liquify Twirl Counterclockwise (13) | Very complex | 512 px | 9.1 updates/s (8.9–9.6); input 9.0/s; completion-gap p99 177.1 ms | **Not met** |
+| Liquify Pinch (37) | Very complex | 512 px | 5.3 updates/s (5.1–5.5); input 5.3/s; completion-gap p99 261.5 ms | **Not met** |
+| Liquify Expand (38) | Very complex | 512 px | 5.4 updates/s (5.2–5.5); input 5.3/s; completion-gap p99 268.6 ms | **Not met** |
+| Liquify Crystals (39) | Very complex | 512 px | 1.0 updates/s (1.0–1.0); input 1.0/s; completion-gap p99 1722.0 ms | **Not met** |
 | Clone Stamp (40) | Very complex | 512 px | 115.7 fresh updates/s; completion gap p99 15.2 ms | **Met for drawing** |
 | Healing Brush (41) | Very complex | 512 px | 113.7 fresh updates/s; completion gap p99 15.2 ms | **Met for drawing** |
 | Spot Healing Brush (42) | Very complex | 512 px | 119.7 fresh updates/s; completion gap p99 13.6 ms | **Met for drawing** |
