@@ -4,6 +4,7 @@ param(
  [Parameter(Mandatory)][string]$OutputDirectory,
  [string]$PresentMon=(Join-Path $env:USERPROFILE '.local/tools/presentmon/2.5.1/PresentMon-2.5.1-x64.exe'),
  [int]$Diameter=18,
+ [ValidateSet('G-Pen','Pencil')][string]$BrushPreset='G-Pen',
  [int]$Seconds=10,
  [switch]$SkipPresentMon,
  [ValidateSet('hand','zoom','rotate_view')][string]$NavigationMode,
@@ -11,6 +12,8 @@ param(
  [string]$ObjectPreflight
 )
 $ErrorActionPreference='Stop'
+$brushSeries=$PSBoundParameters.ContainsKey('BrushPreset')
+if($brushSeries -and ($NavigationMode -or $ObjectMotionMode -or !$SkipPresentMon -or $Seconds -lt 5)){throw 'Brush series requires pen input, -SkipPresentMon and at least five measured seconds per contact'}
 if($NavigationMode -and $ObjectMotionMode){throw 'Choose one motion workload'}
 if($ObjectMotionMode -and (!$ObjectPreflight -or !$SkipPresentMon)){throw 'Object motion requires its preflight and -SkipPresentMon'}
 if($NavigationMode -and !$SkipPresentMon){throw 'Navigation capture uses bounded host traces; specify -SkipPresentMon'}
@@ -40,7 +43,7 @@ try{
  Enter-CapyEnvironment @('CAPY_LATENCY_TRACE')
  $env:CAPY_STORAGE_DIR=Join-Path $OutputDirectory 'profile'
  $env:CAPY_LATENCY_TRACE='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
- if($NavigationMode -or $ObjectMotionMode){@{language=@{Explicit='en'};theme=$(if($ObjectMotionMode){$objectPlan.theme}else{'dark'})}|ConvertTo-Json|Set-Content (Settings-File)}
+ if($NavigationMode -or $ObjectMotionMode -or $brushSeries){@{language=@{Explicit='en'};theme=$(if($ObjectMotionMode){$objectPlan.theme}else{'dark'})}|ConvertTo-Json|Set-Content (Settings-File)}
  $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $OutputDirectory 'stderr.log')
 }finally{Exit-CapyEnvironment}
 $review.Id|Set-Content (Join-Path $OutputDirectory 'process-id.txt')
@@ -55,8 +58,41 @@ Wait-Until {
  $canvas=Find 'drawing-canvas' -Visible;$field=Find 'tool-setting-size'
  $root.Current.Name -eq $projectTitle -and $canvas -and $canvas.Current.IsEnabled -and ($ObjectMotionMode -or ($field -and $field.Current.IsEnabled)) -and !(Find 'canvas-status' -Visible)
 } 'The requested drawing did not become ready for pen input' 90
-if($NavigationMode -or $ObjectMotionMode){
+if($NavigationMode -or $ObjectMotionMode -or $brushSeries){
  Add-Type -Path (Join-Path $repo 'apps/layer-windows/scripts/RowPointerDriver.cs')
+}
+ function Navigation-Focus {
+  [CapyWindowApi]::SetForegroundWindow($window)|Out-Null
+  (Control 'drawing-canvas').SetFocus()
+  Wait-Until {(Control 'drawing-canvas').Current.HasKeyboardFocus -and [CapyRowPointer]::GetForegroundWindow() -eq $window} 'Navigation canvas did not acquire owned keyboard focus'
+ }
+ function Navigation-Command([string]$Label) {
+  Navigation-Focus;[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x4b)
+  Wait-Until {$search=Find 'command-search' -Visible;$search -and $search.Current.HasKeyboardFocus} 'Command search did not open'
+  (Control 'command-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Label)
+  Wait-Until {$row=Find 'command-result-0' -Visible;$row -and $row.Current.Name -eq $Label -and $row.Current.IsEnabled} "Command search did not resolve $Label"
+  Invoke-Id 'command-result-0'
+  Wait-Until {!(Find 'command-search' -Visible)} "Command search did not close after $Label"
+ }
+ function Navigation-State([bool]$ExpectedUndo=$false,[bool]$ExpectedRedo=$false,[bool]$Modified=$false) {
+  $chosen=@{items=@()}
+  Wait-Until {$chosen.items=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$navigationLabel))|Where-Object {$_.Current.AutomationId -like 'tool-subtool-*' -and $_.Current.ItemStatus -eq 'Selected'});$chosen.items.Count -eq 1} 'The selected navigation tool is not exposed by its native tool-set state'
+  $selected=$chosen.items[0]
+  $entry=& (Join-Path $repo 'apps/layer-windows/scripts/open-application-menu.ps1') -Root $root -Name 'Edit' -PassThru
+  $undo=Control 'undo' -Arranged
+  $redo=Control 'redo' -Arranged
+  $state=[ordered]@{title=$root.Current.Name;tool=$selected.Current.Name;tool_id=$selected.Current.AutomationId;tool_status=$selected.Current.ItemStatus;undo=$undo.Current.IsEnabled;redo=$redo.Current.IsEnabled;camera_readout=(Control 'canvas-camera').Current.Name}
+  [CapyRowPointer]::Key([uint32]$review.Id,0x1b)
+  Wait-Until {$item=Find 'undo' -Visible;!$item} 'Edit commands did not close'
+  $parentOpen=try{$entry.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem -and !$entry.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$false}
+  if($parentOpen){[CapyRowPointer]::Key([uint32]$review.Id,0x1b);Wait-Until {try{$entry.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$true}} 'The compact application menu did not close'}
+  $expectedTitle=if($Modified){'• '+$projectTitle}else{$projectTitle}
+  if($state.title -ne $expectedTitle -or $state.undo -ne $ExpectedUndo -or $state.redo -ne $ExpectedRedo){throw 'The selected tool, drawing title or Undo/Redo history differs from the expected contact state'}
+  Navigation-Focus
+  [pscustomobject]$state
+ }
+
+if($NavigationMode -or $ObjectMotionMode){
  Add-Type -AssemblyName WindowsBase
  $run=$OutputDirectory;$CapyPopups=$true
  $navigationLabel=@{hand='Hand';zoom='Zoom';rotate_view='Rotate view'}[$NavigationMode]
@@ -99,35 +135,6 @@ if($NavigationMode -or $ObjectMotionMode){
   while($node -and $node.Current.NativeWindowHandle -ne $Region.bridge_hwnd){$node=[System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($node)}
   if(!$node -or $node.Current.ProcessId -ne $review.Id){throw "Motion point $Point is outside the owned canvas native subtree"}
   $hit
- }
- function Navigation-Focus {
-  [CapyWindowApi]::SetForegroundWindow($window)|Out-Null
-  (Control 'drawing-canvas').SetFocus()
-  Wait-Until {(Control 'drawing-canvas').Current.HasKeyboardFocus -and [CapyRowPointer]::GetForegroundWindow() -eq $window} 'Navigation canvas did not acquire owned keyboard focus'
- }
- function Navigation-Command([string]$Label) {
-  Navigation-Focus;[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x4b)
-  Wait-Until {$search=Find 'command-search' -Visible;$search -and $search.Current.HasKeyboardFocus} 'Command search did not open'
-  (Control 'command-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Label)
-  Wait-Until {$row=Find 'command-result-0' -Visible;$row -and $row.Current.Name -eq $Label -and $row.Current.IsEnabled} "Command search did not resolve $Label"
-  Invoke-Id 'command-result-0'
-  Wait-Until {!(Find 'command-search' -Visible)} "Command search did not close after $Label"
- }
- function Navigation-State {
-  $chosen=@{items=@()}
-  Wait-Until {$chosen.items=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$navigationLabel))|Where-Object {$_.Current.AutomationId -like 'tool-subtool-*' -and $_.Current.ItemStatus -eq 'Selected'});$chosen.items.Count -eq 1} 'The selected navigation tool is not exposed by its native tool-set state'
-  $selected=$chosen.items[0]
-  $entry=& (Join-Path $repo 'apps/layer-windows/scripts/open-application-menu.ps1') -Root $root -Name 'Edit' -PassThru
-  $undo=Control 'undo' -Arranged
-  $redo=Control 'redo' -Arranged
-  $state=[ordered]@{title=$root.Current.Name;tool=$selected.Current.Name;tool_id=$selected.Current.AutomationId;tool_status=$selected.Current.ItemStatus;undo=$undo.Current.IsEnabled;redo=$redo.Current.IsEnabled;camera_readout=(Control 'canvas-camera').Current.Name}
-  [CapyRowPointer]::Key([uint32]$review.Id,0x1b)
-  Wait-Until {$item=Find 'undo' -Visible;!$item} 'Edit commands did not close'
-  $parentOpen=try{$entry.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem -and !$entry.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$false}
-  if($parentOpen){[CapyRowPointer]::Key([uint32]$review.Id,0x1b);Wait-Until {try{$entry.Current.IsOffscreen}catch [System.Windows.Automation.ElementNotAvailableException]{$true}} 'The compact application menu did not close'}
-  if($state.title -ne $projectTitle -or $state.undo -or $state.redo){throw 'Navigation changed the accessible clean drawing or empty Undo/Redo history'}
-  Navigation-Focus
-  [pscustomobject]$state
  }
  if($NavigationMode){
   Navigation-Command $navigationLabel
@@ -200,9 +207,16 @@ if($NavigationMode -or $ObjectMotionMode){
  }
  $brushName=$null
 }else{
-Invoke-Id 'tool-subtool-0'
-$brushName=(Control 'tool-subtool-0').Current.Name
-if($brushName -notmatch 'G[- ]?Pen'){throw "Expected G-Pen, got $brushName"}
+if($brushSeries){
+ $CapyPopups=$true;$navigationLabel=$BrushPreset
+ Navigation-Command $BrushPreset
+ Wait-Until {$chosen=@($root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$BrushPreset))|Where-Object {$_.Current.AutomationId -like 'tool-subtool-*' -and $_.Current.ItemStatus -eq 'Selected'});$chosen.Count -eq 1 -and $chosen[0].Current.IsEnabled -and (Control 'drawing-canvas').Current.IsEnabled -and !(Find 'canvas-status' -Visible)} 'The selected brush did not become ready'
+ $brushName=$BrushPreset
+}else{
+ Invoke-Id 'tool-subtool-0'
+ $brushName=(Control 'tool-subtool-0').Current.Name
+ if($brushName -notmatch 'G[- ]?Pen'){throw "Expected G-Pen, got $brushName"}
+}
 $size=Control 'tool-setting-size';$size.SetFocus();$size.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue([string]$Diameter)
 (Control 'tool-setting-opacity').SetFocus();Fit-Canvas
 Wait-Until {$committedSize=Find 'tool-setting-size';$committedSize -and $committedSize.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq "$Diameter px"} 'Brush size was not committed'
@@ -213,9 +227,11 @@ $canvas=Control 'drawing-canvas' -Arranged
 Wait-Until {$canvas.Current.IsEnabled -and !(Find 'canvas-status' -Visible)} 'The canvas stopped being ready before the stroke'
 $bounds=$canvas.Current.BoundingRectangle
 $cx=[int]($bounds.X+$bounds.Width/2);$cy=[int]($bounds.Y+$bounds.Height/2)
+if($brushSeries){$brushCamera=(Control 'canvas-camera').Current.Name}
 if(!$ObjectMotionMode -and ($cx-200 -le $bounds.Left -or $cx+200 -ge $bounds.Right -or $cy-120 -le $bounds.Top -or $cy+120 -ge $bounds.Bottom)){throw 'The pen path exceeds the arranged canvas'}
 $meta=Read-Snapshot $probe
 $capture=[ordered]@{process_id=$review.Id;brush_name=$brushName;diameter=$Diameter;project_sha256=(Get-FileHash $Project).Hash;exe_sha256=(Get-FileHash $Executable).Hash;dll_sha256=(Get-FileHash (Join-Path $directory 'layer_windows.dll')).Hash;surface=$meta;seconds=$Seconds;rate_hz=240;center=@($cx,$cy);radii=@(200,120);qpc_frequency=[Diagnostics.Stopwatch]::Frequency;display=(& (Join-Path $repo 'apps/layer-windows/scripts/probe-displays.ps1')|ConvertFrom-Json)}
+if($brushSeries){$capture.brush_motion=[ordered]@{preset=$BrushPreset;contacts=@();observations=@();ui_trace_enabled=$false};if(Trace-File 'ui-state'){throw 'Brush measurement forbids per-frame UI tracing'}}
 if($NavigationMode){$capture.navigation=[ordered]@{mode=$NavigationMode;contacts=@();observations=@();ui_trace_enabled=$false;observation_scope='Native selected tool, clean title and disabled Undo/Redo before/after each contact; exact camera translation/work-area/session checkpoint unavailable';raw_visual_review='required'}}
 if($ObjectMotionMode){$capture.object_motion=[ordered]@{mode=$ObjectMotionMode;preflight_sha256=(Get-FileHash $ObjectPreflight).Hash;scope=$objectPlan.scope;path=$objectPath;contacts=@();ui_trace_enabled=$false;raw_visual_review='required'};if(Trace-File 'ui-state'){throw 'Object motion forbids per-frame UI tracing'}}
 $capture|ConvertTo-Json -Depth 12|Set-Content (Join-Path $OutputDirectory 'capture.json')
@@ -303,6 +319,31 @@ if($NavigationMode){
  [IO.File]::WriteAllLines((Join-Path $OutputDirectory 'injected.csv'),$combined)
  [CapyRowPointer]::Dispose()
  if((Get-FileHash $Project).Hash -ne $capture.project_sha256 -or (Trace-File 'ui-state')){throw 'Object measurement modified its source or enabled UI tracing'}
+}elseif($brushSeries){
+ $capture.seconds=1+3*$Seconds
+ $combined=[Collections.Generic.List[string]]::new();$combined.Add('index,qpc_before,qpc_after,x,y');$offset=0
+ foreach($contact in 0..3){
+  $before=Navigation-State $false ($contact -gt 0)
+  Wait-Until {(Control 'tool-setting-size').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq "$Diameter px" -and !(Find 'canvas-status' -Visible)} 'The measured brush size or readiness changed'
+  if((Control 'drawing-canvas' -Arranged).Current.BoundingRectangle -ne $bounds -or (Control 'canvas-camera').Current.Name -ne $brushCamera){throw 'The measured brush camera or arranged canvas changed'}
+  Navigation-Focus
+  $duration=if($contact -eq 0){1}else{$Seconds};$file="injected-$contact.csv"
+  [WindowsPenMotion]::Run([uint32]$review.Id,$cx,$cy,200,120,$duration,240,(Join-Path $OutputDirectory $file))
+  Wait-Until {$root.Current.Name -eq ('• '+$projectTitle) -and !(Find 'canvas-status' -Visible)} 'The brush contact did not change the drawing'
+  $painted=Navigation-State $true $false $true
+  Navigation-Command 'Undo'
+  Wait-Until {$root.Current.Name -eq $projectTitle -and !(Find 'canvas-status' -Visible)} 'Brush Undo did not restore the clean drawing'
+  $restored=Navigation-State $false $true
+  if($restored.camera_readout -ne $before.camera_readout -or (Control 'drawing-canvas' -Arranged).Current.BoundingRectangle -ne $bounds){throw 'Brush contact or Undo changed the camera or arranged canvas'}
+  $rows=@(Import-Csv (Join-Path $OutputDirectory $file))
+  if($rows.Count -ne $duration*240+1){throw 'Brush injection did not complete its contact'}
+  foreach($row in $rows){$combined.Add("$offset,$($row.qpc_before),$($row.qpc_after),$($row.x),$($row.y)");$offset++}
+  $capture.brush_motion.contacts+=@{first_index=$offset-$rows.Count;count=$rows.Count;seconds=$duration;measured=$contact -gt 0;file=$file;artwork_changed=$true;restored=$true}
+  $capture.brush_motion.observations+=@{contact=$contact;before=$before;painted=$painted;restored=$restored}
+  $capture|ConvertTo-Json -Depth 12|Set-Content (Join-Path $OutputDirectory 'capture.json')
+ }
+ [IO.File]::WriteAllLines((Join-Path $OutputDirectory 'injected.csv'),$combined)
+ if((Get-FileHash $Project).Hash -ne $capture.project_sha256 -or (Trace-File 'ui-state')){throw 'Brush measurement changed its source or enabled UI tracing'}
 }else{
 [WindowsPenMotion]::Run([uint32]$review.Id,$cx,$cy,200,120,$Seconds,240,(Join-Path $OutputDirectory 'injected.csv'))
 }

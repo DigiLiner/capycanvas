@@ -15,15 +15,16 @@ function csv(file) {
   return rows.filter(Boolean).map(line => Object.fromEntries(line.split(',').map((v, i) => [keys[i], Number(v)])));
 }
 function motionFrames(meta, inputs, consumed, frames, injected) {
-  if (meta.navigation && meta.object_motion) throw Error('Ambiguous motion workload');
-  const workload = meta.object_motion ?? meta.navigation;
+  if ([meta.navigation, meta.object_motion, meta.brush_motion].filter(Boolean).length > 1) throw Error('Ambiguous motion workload');
+  const workload = meta.brush_motion ?? meta.object_motion ?? meta.navigation;
   if (!workload) return null;
   if (meta.object_motion && (!['move', 'scale', 'rotate', 'placement'].includes(workload.mode) || !/^[A-Fa-f0-9]{64}$/.test(workload.preflight_sha256 ?? ''))) throw Error('Missing Object motion qualification');
+  if (meta.brush_motion && (!['G-Pen', 'Pencil'].includes(workload.preset) || workload.contacts?.some(c => c.artwork_changed !== true || c.restored !== true))) throw Error('Missing brush selection, artwork or restoration evidence');
   if (workload.ui_trace_enabled !== false) throw Error('Navigation requires explicit disabled UI trace metadata');
   const series = workload.contacts;
   if (!Array.isArray(series) || series.length !== 4 || series[0].measured !== false || !Number.isFinite(series[0].seconds) || series[0].seconds < 1
       || series.slice(1).some(c => c.measured !== true || !Number.isFinite(c.seconds) || c.seconds < 5)) throw Error('Incomplete navigation series: priming and three measured contacts of at least five seconds are required');
-  if (!injected || (!meta.object_motion && !['hand', 'zoom', 'rotate_view'].includes(workload.mode))) throw Error('Missing navigation injection metadata');
+  if (!injected || (!meta.object_motion && !meta.brush_motion && !['hand', 'zoom', 'rotate_view'].includes(workload.mode))) throw Error('Missing navigation injection metadata');
   if (consumed.some((p, i) => p.sequence !== inputs[i].sequence)) throw Error('Navigation consumption order mismatch');
   if (meta.object_motion && series.some(c => c.artwork_changed !== true || c.package_validated !== true || c.restored !== true)) throw Error('Object motion contact lacks artwork, package or restoration evidence');
   const source = new Map(), contacts = [], groups = new Map(), byFrame = new Map(frames.map(f => [f.frame, f]));
@@ -124,7 +125,8 @@ export function analyze(directory) {
       observed.set(f.displayed_present, next.acquire_start_ns / 1e6);
     }
   }
-  const navigation = motionFrames(meta, inputs, consumed, frames, injected);
+  const motion = motionFrames(meta, inputs, consumed, frames, injected);
+  const navigation = meta.brush_motion ? null : motion;
   const noPresent = {down: 0, move: 0, up: 0};
   const delivery = [], queue = [], submit = [], display = [], observation = [], latest = new Map();
   let unmatched = 0;
@@ -134,8 +136,12 @@ export function analyze(directory) {
     const newPresent = f.last_present && byFrame.get(c.frame - 1)?.last_present !== f.last_present;
     if (!newPresent && !navigation) throw Error('Consumed input has no new present');
     if (!newPresent) noPresent[{1: 'down', 2: 'move', 3: 'up'}[p.phase]]++;
-    if (navigation && ((p.arrival_ns - p.sample_ns) / 1e6 < -.1 || f.render_start_ns < p.arrival_ns)) throw Error('Inconsistent navigation timestamp domains');
-    if (navigation && !navigation.source.get(c.sequence).measured) continue;
+    if (motion && ((p.arrival_ns - p.sample_ns) / 1e6 < -.1 || f.render_start_ns < p.arrival_ns)) throw Error('Inconsistent navigation timestamp domains');
+    if (motion && !motion.source.get(c.sequence).measured) continue;
+    if (meta.brush_motion) {
+      const contact = motion.contacts[motion.source.get(c.sequence).contact];
+      (contact.samples ??= []).push({phase: p.phase, input_to_frame_return_ms: (f.render_end_ns - p.sample_ns) / 1e6});
+    }
     delivery.push((p.arrival_ns - p.sample_ns) / 1e6);
     queue.push((f.render_start_ns - p.arrival_ns) / 1e6);
     submit.push((f.render_end_ns - p.sample_ns) / 1e6);
@@ -149,6 +155,12 @@ export function analyze(directory) {
   if (unmatched) throw Error('Consumed pen input has no completed host frame');
   if (delivery.some(v => v < -.1) || queue.some(v => v < 0) || display.some(v => v < -.1)
       || observation.some(v => v < -.1)) throw Error('Inconsistent timestamp domains or presentation mapping');
+  if (meta.brush_motion) for (const contact of motion.contacts) {
+    const samples = contact.samples ?? [];
+    contact.input_to_frame_return_ms = distribution(samples.map(p => p.input_to_frame_return_ms));
+    contact.phases = Object.fromEntries([[1, 'down'], [2, 'move'], [3, 'up']].map(([phase, name]) => [name, distribution(samples.filter(p => p.phase === phase).map(p => p.input_to_frame_return_ms))]));
+    delete contact.samples;
+  }
   const active = frames.filter(f => latest.has(f.frame));
   const newest = map => distribution(active.flatMap(f => {
     const t = map.get(f.last_present);
@@ -156,6 +168,8 @@ export function analyze(directory) {
   }));
   return {
     scope: meta.object_motion ? 'OS-injected Object motion and renderer submissions; inferred motion, excluding per-frame affine truth, physical input and actual presentation rate' : navigation ? 'OS-injected navigation input and renderer submissions; inferred motion, excluding physical input and actual presentation rate' : 'OS-injected pen to DXGI-reported presentation, excluding physical digitizer, scanout position and panel response',
+    ...(meta.brush_motion ? {brush_motion: {preset: meta.brush_motion.preset, contacts: motion.contacts,
+      renderer_frame_intervals_ms: distribution(motion.intervals), true_presented_fps: null, target_met: null, ui_trace_enabled: false}} : {}),
     ...(navigation ? {[meta.object_motion ? 'object_motion' : 'navigation']: {mode: (meta.object_motion ?? meta.navigation).mode, contacts: navigation.contacts,
       rate_basis: 'Distinct submitted present IDs in frames consuming net-distinct navigation input, with intervening gaps retained within each contact',
       motion_inference: meta.object_motion ? 'Net injected endpoint displacement in a preflight-qualified Object gesture; exact per-frame object affine and displayed pixels are unavailable' : meta.navigation.mode === 'zoom' ? 'Net injected horizontal displacement per consumed frame' : 'Net injected endpoint displacement per consumed frame; exact camera movement and Rotate angle are unavailable',

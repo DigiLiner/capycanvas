@@ -587,9 +587,8 @@ mod tests {
         };
         let instance = wgpu::Instance::new(descriptor);
         let adapter = pollster::block_on(wgpu::util::initialize_adapter_from_env(&instance, None)).unwrap();
-        let features = (adapter.features() & (wgpu::Features::TIMESTAMP_QUERY
-            | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::FLOAT32_FILTERABLE
-            | wgpu::Features::FLOAT32_BLENDABLE)) | native_tiles::native_in_place_features(&adapter);
+        let features = rendering_features(&adapter) | adapter.features()
+            & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             required_features: features,
             required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),

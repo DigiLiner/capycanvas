@@ -473,6 +473,15 @@ a presentation observation upper bound is available in that mode. These software
 timings exclude physical digitizer and panel response. Per-window traces use
 `latency-<pid>-<window>` names. PresentMon needs administrator rights.
 
+For an in-process warmed brush series, add `-BrushPreset Pencil -Seconds 6
+-SkipPresentMon` (or explicitly select `G-Pen`). Command search selects the shared
+preset, then the native selected state, committed size and ready canvas must agree.
+One one-second priming contact and three measured contacts run in the same process,
+with Undo restoring the clean drawing between contacts. UI tracing stays disabled.
+The report retains all raw inputs and measured Down/Move/Up tails, excludes priming
+from measured latency, and never joins frame intervals across contacts. Omitting
+`-BrushPreset` keeps the original single-contact G-Pen workload.
+
 The opt-in native latency trace also writes `-presentations.csv`, including idle
 canvas presentations. It buffers at most 65,536 records and writes only after
 input and rendering stop. Keep idle diagnostic intervals separate from moving

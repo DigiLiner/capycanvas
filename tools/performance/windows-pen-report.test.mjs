@@ -222,3 +222,53 @@ test('Object motion rejects stationary injected coordinates and lost consumption
  const consumed=prefix+'-consumed.csv';fs.writeFileSync(consumed,fs.readFileSync(consumed,'utf8').replace('2,2\n',''));
  assert.throws(()=>analyze(dir),/Incomplete pen consumption/);
 });
+
+function brushFixture(t) {
+ const f=navigationFixture(t),file=path.join(f.dir,'capture.json'),meta=JSON.parse(fs.readFileSync(file,'utf8'));
+ meta.brush_motion={preset:'Pencil',ui_trace_enabled:false,contacts:meta.navigation.contacts.map(c=>({...c,artwork_changed:true,restored:true}))};delete meta.navigation;
+ fs.writeFileSync(file,JSON.stringify(meta));
+ const rows=fs.readFileSync(f.prefix+'-frames.csv','utf8').trim().split('\n');
+ fs.writeFileSync(f.prefix+'-frames.csv',rows.map((row,i)=>{if(!i)return row;const fields=row.split(',');fields[5]=String(i);return fields.join(',');}).join('\n')+'\n');
+ return {...f,file,meta};
+}
+
+test('brush series excludes priming statistics but retains every measured phase and contact boundary',t=>{
+ const {dir}=brushFixture(t),r=analyze(dir);
+ assert.equal(r.inputs,42);assert.equal(r.consumed,42);assert.equal(r.navigation,undefined);
+ assert.equal(r.brush_motion.contacts.length,4);assert.equal(r.brush_motion.contacts[0].input_to_frame_return_ms,null);
+ assert.equal(r.input_to_frame_return_ms.count,39);
+ for(const contact of r.brush_motion.contacts.slice(1)){
+  assert.equal(contact.input_to_frame_return_ms.count,13);
+  assert.equal(contact.phases.down.count,1);assert.equal(contact.phases.move.count,11);assert.equal(contact.phases.up.count,1);
+  assert.equal(contact.input_to_frame_return_ms.max_ms,5);
+  assert.equal(contact.frame_intervals_ms.max_ms,500);
+ }
+ assert.equal(r.brush_motion.true_presented_fps,null);assert.equal(r.brush_motion.target_met,null);
+});
+
+test('brush series preserves strict new-present and complete consumption guards including priming and pen-up',t=>{
+ for(const index of [1,3,16]){
+  const {dir,prefix}=brushFixture(t),file=prefix+'-frames.csv',rows=fs.readFileSync(file,'utf8').trim().split('\n');
+  const fields=rows[index].split(',');fields[5]=String(index-1);rows[index]=fields.join(',');fs.writeFileSync(file,rows.join('\n')+'\n');
+  assert.throws(()=>analyze(dir),/no new present/);
+ }
+ const {dir,prefix}=brushFixture(t);fs.writeFileSync(prefix+'-consumed.csv',fs.readFileSync(prefix+'-consumed.csv','utf8').replace('2,2\n',''));
+ assert.throws(()=>analyze(dir),/Incomplete pen consumption/);
+});
+
+test('brush series rejects wrong selection, missing restoration, UI tracing and mixed workloads',t=>{
+ const {dir,file,meta}=brushFixture(t);
+ for(const change of [m=>m.brush_motion.preset='Eraser',m=>m.brush_motion.contacts[2].restored=false,m=>m.brush_motion.contacts[3].artwork_changed=false,m=>m.brush_motion.ui_trace_enabled=true,m=>m.navigation=m.brush_motion]){
+  const copy=structuredClone(meta);change(copy);fs.writeFileSync(file,JSON.stringify(copy));
+  assert.throws(()=>analyze(dir),/brush selection|disabled UI trace|Ambiguous/);
+ }
+});
+
+test('brush series keeps a long final pen-up latency in measured contact and aggregate statistics',t=>{
+ const {dir,prefix}=brushFixture(t),file=prefix+'-frames.csv',rows=fs.readFileSync(file,'utf8').trim().split('\n');
+ const fields=rows.at(-1).split(',');fields[4]=String(Number(fields[4])+123e6);rows[rows.length-1]=fields.join(',');fs.writeFileSync(file,rows.join('\n')+'\n');
+ const r=analyze(dir);
+ assert.equal(r.brush_motion.contacts[3].phases.up.max_ms,128);
+ assert.equal(r.brush_motion.contacts[3].input_to_frame_return_ms.max_ms,128);
+ assert.equal(r.input_to_frame_return_ms.max_ms,128);
+});
