@@ -3,10 +3,81 @@ import SwiftUI
 
 @MainActor private final class ChoiceGeometry { var frames: [String: CGRect] = [:] }
 
-/// Production shared choices with actual Rust blend names, in invisible hosts.
-@main struct ChoiceCaptures {
-    @MainActor static func main() async throws {
-        _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+/// Shared choices in invisible hosts and production properties in owned windows.
+@main final class ChoiceCaptures: NativeWorkspaceInputFixture {
+    @MainActor private static func element(_ root: NSObject, identifier: String, depth: Int = 0) -> NSObject? {
+        guard depth < 32 else { return nil }
+        let id = NSSelectorFromString("accessibilityIdentifier")
+        if root.responds(to: id), root.perform(id)?.takeUnretainedValue() as? String == identifier { return root }
+        let children = NSSelectorFromString("accessibilityChildren")
+        guard root.responds(to: children) else { return nil }
+        for child in root.perform(children)?.takeUnretainedValue() as? [NSObject] ?? [] {
+            if let found = element(child, identifier: identifier, depth: depth + 1) { return found }
+        }
+        return nil
+    }
+    @MainActor private static func bounds(_ element: NSObject) -> CGRect {
+        let selector = NSSelectorFromString("accessibilityFrame")
+        guard element.responds(to: selector) else { return .zero }
+        let invoke = unsafeBitCast(element.method(for: selector), to: (@convention(c) (AnyObject, Selector) -> CGRect).self)
+        return invoke(element, selector)
+    }
+    @MainActor private static func addFilter(platform: UInt32, theme: String,
+        width: CGFloat, directory: URL) async throws -> JSON {
+        let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil), managedWorkspaces: false)
+        try await wait("Production layer properties", seconds: 15, failure: { store.failure }) {
+            !store.catalog.isNull && !store.state["layer_properties"]["add_filter"].isNull
+        }
+        try await store.apply(["type": "set_theme", "theme": theme])
+        try await wait("Properties theme", seconds: 15, failure: { store.failure }) { store.state["theme"].string == theme }
+        let palette = EditorPalette(source: store.state["palette"])
+        let textSize = store.catalog["text_size_pt"].number * 4 / 3
+        let window = NSWindow(contentRect: CGRect(x: 100, y: 100, width: width, height: 240),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.contentView = nil; window.close() }
+        window.appearance = NSAppearance(named: theme == "dark" ? .darkAqua : .aqua)
+        let content = LayerPropertiesPanel(store: store)
+            .padding(6).frame(width: width, height: 240, alignment: .topLeading)
+            .font(.system(size: textSize)).foregroundStyle(palette["text"]).background(palette["panel"])
+            .environment(\.colorScheme, theme == "dark" ? .dark : .light)
+            .environment(\.editorPalette, palette).environment(\.editorPopupStore, store)
+            .environment(\.capyNativeCopy, store.catalog["native_copy"])
+            .environment(\.capyCommonCopy, store.bootstrap["common"])
+            .environment(\.capyInterfaceLanguage, store.interfaceLanguage)
+            .modifier(EditorPopoverHost())
+        let host = NSHostingView(rootView: content); window.contentView = host
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        try await drain(0.3)
+        try await wait("Visible production Add Filter", seconds: 5, failure: { store.failure }) {
+            window.isVisible && window.isKeyWindow && element(host, identifier: "properties-add-filter") != nil
+        }
+        guard let button = element(host, identifier: "properties-add-filter") else {
+            throw HostFailure(message: "Mounted production Add Filter button must expose its bounds")
+        }
+        let frame = bounds(button), caption = store.state["layer_properties"]["add_filter"]["title"].string
+        try require(!caption.isEmpty && frame.width > 0 && frame.height > 0, "Production Add Filter must expose caption and nonzero bounds")
+        let advance = EditorTextMetrics.width(caption, size: textSize, weight: .bold)
+        let natural = advance + 2 * 16 + 2 * store.panelMetrics.spacing + 2 * 6
+        let pixel = 1 / window.backingScaleFactor
+        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
+            throw HostFailure(message: "No properties bitmap")
+        }
+        window.appearance?.performAsCurrentDrawingAppearance { host.cacheDisplay(in: host.bounds, to: bitmap) }
+        let name = "properties-\(platform)-\(theme)-\(Int(width))"
+        try bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent("native-\(name).png"))
+        let measurement = JSON(["name": name, "platform": platform, "theme": theme, "width": width, "height": 240,
+            "caption": caption, "text_size": textSize, "caption_advance": advance, "natural_button_width": natural,
+            "button_bounds": ["x": frame.minX, "y": frame.minY, "width": frame.width, "height": frame.height],
+            "scale": Double(bitmap.pixelsWide) / width])
+        try measurement.encoded().write(to: directory.appendingPathComponent(name + ".json"), atomically: true, encoding: .utf8)
+        try require(frame.width >= natural - 0.001 && frame.width <= natural + pixel + 0.001,
+            "Add Filter must allocate both sixteen-point icons, shared gaps, caption and padding: actual=\(frame.width), natural=\(natural)")
+        try require(abs(frame.height - 24) < 0.5, "Add Filter must retain its twenty-four-point control height")
+        return measurement
+    }
+
+    @MainActor static func run() async throws {
         precondition(NSImage(named: "icon-chevron-down") != nil, "Set CAPY_TEST_ASSETS_APP")
         let directory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CAPY_CHOICE_CAPTURES"]!)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -42,16 +113,16 @@ import SwiftUI
                                 PropertyChoiceRow {
                                     Text("Blend mode").lineLimit(1)
                                     EditorChoice(label: "Blend mode", options: options, selected: selected,
-                                        identifier: "property", background: palette["input"], compact: true) { _ in }
+                                        identifier: "property", background: palette["input"]) { _ in }
                                 }.frame(width: width - 12, height: 24).disabled(!enabled)
                                     .opacity(enabled ? 1 : 0.4).offset(x: 6, y: 6)
-                                EditorChoice(label: "Channel", options: options, selected: selected,
+                                EditorChoice(label: "Configuration layer", options: options, selected: selected,
                                     identifier: "wide", background: palette["input"]) { _ in }
-                                    .frame(width: width - 12, height: 34).disabled(!enabled)
-                                    .opacity(enabled ? 1 : 0.4).offset(x: 6, y: 56)
+                                    .frame(width: width - 12, height: 24)
+                                    .offset(x: 6, y: 56)
                                 EditorChoice(label: "Layer blend mode", options: options, selected: selected,
-                                    identifier: "compact", background: palette["input"], compact: true) { _ in }
-                                    .frame(width: (width - 18) / 2, height: 24).disabled(!enabled).offset(x: 6, y: 106)
+                                    identifier: "compact", background: palette["input"], presentation: .layerMenu) { _ in }
+                                    .frame(width: (width - 12 - store.panelMetrics.spacing) / 2, height: 24).disabled(!enabled).offset(x: 6, y: 106)
                             }.frame(width: width, height: height, alignment: .topLeading)
                                 .coordinateSpace(name: "choice-capture").environment(\.measureChoices, true)
                                 .onPreferenceChange(ChoiceFrames.self) { geometry.frames = $0 }
@@ -65,16 +136,17 @@ import SwiftUI
                             let name = "\(platform)-\(theme)-\(Int(width))-\(selected)-\(enabled ? "enabled" : "disabled")"
                             try bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent("native-\(name).png"))
                             precondition(geometry.frames.count == 9)
-                            for identifier in ["property", "compact"] {
+                            for identifier in ["property", "wide", "compact"] {
                                 let bounds = geometry.frames[identifier]!, text = geometry.frames[identifier + ":text"]!
-                                precondition(abs(bounds.height - 24) < 0.5 && abs(text.minX - bounds.minX - 6) < 0.5,
-                                    "Compact choices must share twenty-four-point height and six-point field padding")
+                                precondition(abs(bounds.height - 24) < 0.5
+                                    && abs(text.minX - bounds.minX - (identifier == "compact" ? 6 : 10)) < 0.5
+                                    && abs(text.width - bounds.width + 28) < 0.5,
+                                    "Choices must retain their height and role-specific text insets")
                             }
-                            precondition(abs(geometry.frames["wide"]!.height - 34) < 0.5,
-                                "Standalone choices must preserve their native height")
                             fixtures.append(JSON(["name": name, "platform": platform, "width": width, "height": height,
                                 "scale": Double(bitmap.pixelsWide) / width, "theme": theme, "text_size": textSize,
-                                "palette": store.state["palette"].raw, "options": options, "selected": selected,
+                                "palette": store.state["palette"].raw, "panel_metrics": store.catalog["panel_metrics"].raw,
+                                "options": options, "selected": selected,
                                 "enabled": enabled, "frames": geometry.frames.mapValues {
                                     ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] }]))
                         }
@@ -85,5 +157,26 @@ import SwiftUI
         try JSON(["schema": 1, "fixtures": fixtures.map(\.raw)])
             .encoded().write(to: directory.appendingPathComponent("fixtures.json"), atomically: true, encoding: .utf8)
         print("Captured \(fixtures.count) property, full-width and compact choice combinations")
+        try require(fixtures.count == 48, "All original choice captures must complete before visible properties")
+        NSApp.setActivationPolicy(.accessory)
+        var properties: [JSON] = []
+        for platform: UInt32 in [0, 1] {
+            for theme in ["light", "dark"] {
+                for width: CGFloat in [160, 226, 320] {
+                    properties.append(try await addFilter(platform: platform, theme: theme, width: width, directory: directory))
+                }
+            }
+        }
+        try JSON(["schema": 1, "properties": properties.map(\.raw)])
+            .encoded().write(to: directory.appendingPathComponent("properties.json"), atomically: true, encoding: .utf8)
+        note("PASS: \(properties.count) production Add Filter allocations")
+    }
+    @MainActor static func main() {
+        _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
+        Task { @MainActor in
+            do { try await run(); exit(0) }
+            catch { note("FAIL: \(error)"); exit(1) }
+        }
+        NSApp.run()
     }
 }

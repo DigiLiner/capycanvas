@@ -15,15 +15,15 @@ struct LayerPropertiesPanel: View {
                 .accessibilityIdentifier("properties-layer-name")
             if !view["layer_type"].string.isEmpty || !view["add_filter"].isNull {
                 HStack(spacing: store.panelMetrics.spacing) {
-                    Text(view["layer_type"].string).font(.system(size: store.catalog["text_size_pt"].number * 0.9)).foregroundStyle(palette["text"].opacity(0.55))
+                    Text(view["layer_type"].string).font(.system(size: store.catalog["text_size_pt"].number * 4 / 3 * 0.9)).foregroundStyle(palette["text"].opacity(0.55))
                         .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).help(view["layer_type"].string)
                         .accessibilityIdentifier("properties-layer-type")
                     if !view["add_filter"].isNull {
                         EditorMenuButton(menu: { AppleContextMenu(view["add_filter"]) { store.dispatch($0) } }, identifier: "properties-filter-menu") {
                             HStack(spacing: store.panelMetrics.spacing) {
                                 SharedIcon(name: "add-filter")
-                                Text(view["add_filter"]["title"].string)
-                                SharedIcon(name: "chevron-down").frame(width: 12, height: 12)
+                                Text(view["add_filter"]["title"].string).fontWeight(.bold)
+                                SharedIcon(name: "chevron-down")
                             }.padding(.horizontal, 6).frame(height: 24)
                         }.fixedSize(horizontal: true, vertical: false)
                             .buttonStyle(EditorControlButtonStyle()).accessibilityIdentifier("properties-add-filter")
@@ -37,7 +37,7 @@ struct LayerPropertiesPanel: View {
                         if pages.count > 1 {
                             EditorChoice(label: view["title"].string, options: pages.map { $0["label"].string },
                                 selected: pages.firstIndex { $0["id"].string == view["page"].string } ?? 0, identifier: "properties-page",
-                                background: palette["input"], compact: true) {
+                                background: palette["input"]) {
                                 store.dispatch(["type": "effect", "action": ["op": "select_page", "layer": layer, "page": pages[$0]["id"].string]])
                             }
                         }
@@ -93,7 +93,7 @@ struct LayerPropertiesPanel: View {
         let importer = actions.first { $0["action"]["op"].string == "import_lookup" }
         return HStack(spacing: store.panelMetrics.spacing) {
             EditorChoice(label: view["resource_label"].string, options: labels, selected: selected ?? presets.count,
-                identifier: "property-resource-choice", background: palette["input"], compact: true) { index in
+                identifier: "property-resource-choice", background: palette["input"], ellipsis: true) { index in
                 if presets.indices.contains(index) { effect(presets[index]["action"]) }
             }.help(view["resource_name"].string)
             if let importer {
@@ -152,7 +152,7 @@ private struct PropertyField: View {
                 Text(label).lineLimit(1)
                 EditorChoice(label: label, options: control["kind"]["options"].array.map(\.string),
                     selected: Int(value.uint), identifier: "property-" + key,
-                    background: EditorPalette(source: store.state["palette"])["input"], compact: true) { change($0, revision: revision) }
+                    background: EditorPalette(source: store.state["palette"])["input"]) { change($0, revision: revision) }
             }
         case "color":
             HStack(spacing: store.panelMetrics.spacing) {

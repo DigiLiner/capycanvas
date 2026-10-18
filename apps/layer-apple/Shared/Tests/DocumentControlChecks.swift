@@ -628,6 +628,10 @@ extension XCTestCase {
         let ppi = app.textFields["number-entry-image-size-resolution"], sizeApply = app.buttons["image-size-apply"]
         XCTAssertTrue(ppi.waitForExistence(timeout: 15))
         XCTAssertEqual(ppi.value as? String, "600 ppi")
+        #if os(iOS)
+        XCTAssertTrue(app.staticTexts.matching(identifier: "image-size-resample")
+            .matching(NSPredicate(format: "label == %@", "Resample")).firstMatch.exists)
+        #endif
         XCTAssertFalse(sizeApply.isEnabled, "Inspecting the created resolution has no pending document edit")
         let size = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         size.name = "created-drawing-resolution"; size.lifetime = .keepAlways; add(size)

@@ -28,7 +28,7 @@ struct AdjustmentPanel: View {
                     SharedIcon(name: categories.first { $0["id"].string == picker["category"].string }?["icon"].string ?? "adjustments")
                     EditorChoice(label: store.catalog["native_copy"]["color"]["category"].string, options: categories.map { $0["label"].string },
                         selected: categories.firstIndex { $0["id"].stableKey == picker["category"].stableKey } ?? 0,
-                        identifier: "filter-category", background: palette["input"], compact: true, bold: true) {
+                        identifier: "filter-category", background: palette["input"], bold: true) {
                         send(["op": "category", "category": categories[$0]["id"].raw])
                     }.frame(maxWidth: .infinity)
                 }

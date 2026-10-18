@@ -303,6 +303,8 @@ CAPY_APPLE_PHOTO_JPEG=/path/to/photo.jpg cargo test -p layer-apple --lib \
 
 ### Live interface language
 
+Panel choices use the shared 24-point height and input fill. Ordinary select labels clip; resource, proof and layer-blend labels ellipsize. Label weight and disabled appearance follow the control role. The layer-blend menu centers its label and uses the shared twelve-point chevron with six-point trailing padding. Ordinary selects include the reference browser’s inner margins, giving text insets of ten and eighteen points.
+
 The focused Mac command context carries the published language and shared headings
 with its editor. Standard File, Edit and View headings use public native action
 roles; Window uses the designated windows menu. Reconcile shared titles after

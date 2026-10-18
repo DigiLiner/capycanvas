@@ -72,7 +72,7 @@ private struct SizeForm: View {
         number(view["resolution_label"].string, value: view["resolution"].number, control: view["resolution_numeric"], op: "resolution")
         Toggle(view["constrain_label"].string, isOn: Binding(get: { view["constrain"].bool }, set: { choose(["op": "constrain", "constrain": $0]) }))
             .accessibilityIdentifier("image-size-constrain")
-        Picker(view["resample_label"].string, selection: Binding(get: { view["resample"].string }, set: { choose(["op": "resample", "resample": $0]) })) {
+        FormPicker(view["resample_label"].string, selection: Binding(get: { view["resample"].string }, set: { choose(["op": "resample", "resample": $0]) })) {
             ForEach(view["resamples"].array.indices, id: \.self) { index in
                 Text(view["resamples"][index]["label"].string).tag(view["resamples"][index]["resample"].string)
             }

@@ -205,7 +205,7 @@ private extension ToolSettingsControls {
         return PropertyChoiceRow(labelWidth: store.panelLabelWidth(labels)) {
             Text(label).lineLimit(1)
             EditorChoice(label: label, options: commands.map { $0["label"].string }, selected: commands.firstIndex { $0["selected"].bool } ?? 0,
-                identifier: "tool-action-group-" + group.id, background: palette["input"], compact: true, menu: { open in
+                identifier: "tool-action-group-" + group.id, background: palette["input"], menu: { open in
                     open(AppleContextMenu(JSON(["sections": [commands.map { command in
                         ["label": command["label"].raw, "enabled": command["enabled"].raw, "selected": command["selected"].raw,
                          "identifier": "tool-action-" + command["id"].string, "action": ["type": "invoke", "command": command["id"].raw]]
@@ -287,13 +287,13 @@ private struct PickerSettingsRows: View {
         VStack(alignment:.leading,spacing:store.panelMetrics.spacing) {
             PropertyChoiceRow(labelWidth:store.panelLabelWidth(labels)) {
                 Text(labels[0]).lineLimit(1)
-                EditorChoice(label:labels[0],options:source,selected:picker["layer"].bool ? 1 : 0,identifier:"picker-setting-source",background:EditorPalette(source:store.state["palette"])["input"],compact:true) {
+                EditorChoice(label:labels[0],options:source,selected:picker["layer"].bool ? 1 : 0,identifier:"picker-setting-source",background:EditorPalette(source:store.state["palette"])["input"]) {
                     store.dispatch(["type":"color_picker","action":["kind":"source","layer":$0==1]])
                 }
             }
             PropertyChoiceRow(labelWidth:store.panelLabelWidth(labels)) {
                 Text(labels[1]).lineLimit(1)
-                EditorChoice(label:labels[1],options:sizes.map { width in copy["sizes"].array.first { $0[0].uint==width }?[1].string ?? "" },selected:sizes.firstIndex(of:picker["sample_width"].uint) ?? 0,identifier:"picker-setting-size",background:EditorPalette(source:store.state["palette"])["input"],compact:true) {
+                EditorChoice(label:labels[1],options:sizes.map { width in copy["sizes"].array.first { $0[0].uint==width }?[1].string ?? "" },selected:sizes.firstIndex(of:picker["sample_width"].uint) ?? 0,identifier:"picker-setting-size",background:EditorPalette(source:store.state["palette"])["input"]) {
                     store.dispatch(["type":"set_color_sample_size","width":sizes[$0]])
                 }
             }

@@ -6,8 +6,6 @@ import SwiftUI
     var choices: [String: CGRect] = [:]
 }
 
-/// Real shared NumberControls and Rust formatting, on invisible AppKit surfaces.
-/// This covers both Apple presets, not UIKit pixels or physical input delivery.
 @main struct NumberControlCaptures {
     @MainActor static func main() async throws {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.prohibited)
@@ -82,11 +80,14 @@ import SwiftUI
                 let name = "\(platform)-\(theme)"
                 try bitmap.representation(using: .png, properties: [:])!.write(to: directory.appendingPathComponent("native-\(name).png"))
                 let controls = try rows.map { item in JSON(["label": item.0, "control": item.1.raw,
+                    "labels": NativeTextContext.numericLabels(item.0, language: store.interfaceLanguage).raw,
                     "value": item.2, "enabled": item.3, "formatted": try store.resolveNumber(item.1, value: item.2, operation: ["type": "format"]).raw,
-                    "minimum": try store.resolveNumber(item.1, value: item.1["min"].number, operation: ["type": "format"]).raw]).raw }
+                    "minimum": try store.resolveNumber(item.1, value: item.1["min"].number, operation: ["type": "format"]).raw,
+                    "maximum": try store.resolveNumber(item.1, value: item.1["max"].number, operation: ["type": "format"]).raw]).raw }
                 let fixture = JSON(["schema": 1, "name": name, "width": width, "height": height,
                     "column_widths": widths, "scale": Double(bitmap.pixelsWide) / width, "theme": theme,
-                    "palette": store.state["palette"].raw, "text_size": store.catalog["text_size_pt"].number * 4 / 3,
+                    "palette": store.state["palette"].raw, "panel_metrics": store.catalog["panel_metrics"].raw,
+                    "text_size": store.catalog["text_size_pt"].number * 4 / 3,
                     "rows": controls, "frames": geometry.frames.mapValues {
                         ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] }])
                 try fixture.encoded().write(to: directory.appendingPathComponent("native-\(name).json"), atomically: true, encoding: .utf8)
@@ -149,21 +150,27 @@ import SwiftUI
                 let host = NSHostingView(rootView: content); window.contentView = host
                 for _ in 0..<40 { host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(5)) }
                 let roots = geometry.frames.filter { $0.key.hasSuffix(":root") }.sorted { $0.value.minY < $1.value.minY }
+                let groups = Dictionary(uniqueKeysWithValues: store.state["tool_settings"].array.map {
+                    ("tool-" + $0["id"].string + ":root", $0["group"].string)
+                })
                 precondition(!roots.isEmpty, "Mounted \(panelID) must expose numeric controls")
                 for (_, bounds) in roots {
                     precondition(abs(bounds.minX - 8) < 0.5 && abs(bounds.maxX - width + 8) < 0.5,
                         "\(panelID) must share the eight-point content rails: \(bounds)")
                 }
                 for pair in zip(roots, roots.dropFirst()) {
-                    precondition(abs(pair.1.value.minY - pair.0.value.maxY - 4) < 0.5,
-                        "\(panelID) independent numeric rows must have a four-point gap")
+                    let heading = panelID == "tool_settings" && !(groups[pair.1.key] ?? "").isEmpty
+                        && groups[pair.0.key] != groups[pair.1.key]
+                    let spacing = store.panelMetrics.spacing + (heading ? store.panelMetrics.height : 0)
+                    precondition(abs(pair.1.value.minY - pair.0.value.maxY - spacing) < 0.5,
+                        "\(panelID) numeric row spacing must retain its shared section heading: \(pair.0.key)/\(pair.1.key)")
                 }
                 if panelID == "properties" {
                     let choice = geometry.choices["property-blend"]!, text = geometry.choices["property-blend:text"]!
                     precondition(abs(choice.height - 24) < 0.5 && abs(choice.maxX - width + 8) < 0.5,
                         "Property choices must share compact height and the right content rail")
-                    precondition(abs(text.minX - choice.minX - 6) < 0.5,
-                        "Property choice text must use six-point field padding")
+                    precondition(abs(text.minX - choice.minX - 10) < 0.5,
+                        "Property choice text must use the select disclosure inset")
                 }
                 guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
                     throw HostFailure(message: "No mounted panel capture")
@@ -200,12 +207,14 @@ import SwiftUI
         }
         func setting() -> JSON { store.state["tool_settings"].array.first { $0["id"].string == "gap_closing" } ?? JSON() }
         precondition(!setting().isNull, "Auto select must expose Close gaps")
+        NSApp.setActivationPolicy(.accessory)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 226, height: 700),
-            styleMask: [.borderless], backing: .buffered, defer: false)
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        defer { window.contentView = nil; window.close() }
+        defer { window.contentView = nil; window.close(); NSApp.setActivationPolicy(.prohibited) }
         let host = NSHostingView(rootView: ToolSettingsControls(store: store).frame(width: 226, height: 700))
         window.contentView = host
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         try await settle(); host.layoutSubtreeIfNeeded()
         func fields(_ view: NSView) -> [NSTextField] {
             (view as? NSTextField).map { [$0] } ?? view.subviews.flatMap(fields)

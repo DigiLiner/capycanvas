@@ -94,7 +94,7 @@ struct LayerPanel: View {
             HStack(spacing: store.panelMetrics.spacing) {
                 let blends = store.catalog["layer_blends"].array.map(\.string)
                 EditorChoice(label: store.catalog["native_copy"]["layers"]["blend"].string, options: blends,
-                    selected: blends.firstIndex(of: current["blend_label"].string) ?? -1, identifier: "layer-blend", background: palette["input"], compact: true,
+                    selected: blends.firstIndex(of: current["blend_label"].string) ?? -1, identifier: "layer-blend", background: palette["input"], presentation: .layerMenu,
                     menu: { [store, id = current["id"].raw] show in
                         store.query(["type": "layer_blend_menu", "id": id]) { menu in
                             if !menu.isNull { show(AppleContextMenu(menu) { store.dispatch($0) }) }
@@ -334,7 +334,7 @@ private struct LayerRow: View {
             LayerButton(icon: layer["visible"].bool && !layer["visibility_blocked"].bool ? "eye" : "eye-hidden", label: visibilityLabel, height: 36) {
                 perform { store.dispatch(["type": "set_layer_visibility", "id": id, "visible": !layer["visible"].bool]) }
             }.opacity(layer["visibility_blocked"].bool ? 0.35 : 1)
-            LayerButton(icon: layer["selection_icon"].string, label: store.catalog["native_copy"]["layers"]["select_row_help"].string, height: 36) {
+            LayerButton(icon: layer["selection_icon"].string, label: store.catalog["native_copy"]["layers"]["select_row_help"].string, selected: layer["selected"].bool, height: 36) {
                 selectRow(toggle: true)
             }.accessibilityAddTraits(layer["selected"].bool ? .isSelected : [])
             HStack(spacing: 2) {

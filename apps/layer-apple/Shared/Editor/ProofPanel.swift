@@ -199,7 +199,7 @@ private struct PrintProofControls: View {
                 let label=controller.form["print_controls"].array.first { $0["id"].string=="simulation" }?["label"].string ?? ""
                 Text(label).lineLimit(1)
                 EditorChoice(label:label,options:simulations.map { $0["label"].string },selected:simulations.firstIndex { $0["value"].string==simulation } ?? 0,
-                    identifier:"proof-simulation",background:EditorPalette(source:store.state["palette"])["input"],compact:true) { index in
+                    identifier:"proof-simulation",background:EditorPalette(source:store.state["palette"])["input"],ellipsis:true) { index in
                     let value=simulations[index]["value"].string
                     change(recipe.replacing("simulate_paper", with: JSON(value == "paper_and_ink")).replacing("simulate_black_ink", with: JSON(value != "colors")))
                 }
@@ -208,7 +208,7 @@ private struct PrintProofControls: View {
                 let label=controller.form["print_controls"].array.first { $0["id"].string=="intent" }?["label"].string ?? ""
                 Text(label).lineLimit(1)
                 EditorChoice(label:label,options:intents.map { $0["label"].string },selected:intents.firstIndex { $0["value"].string==recipe["conversion"]["intent"].string } ?? 0,
-                    identifier:"proof-intent",background:EditorPalette(source:store.state["palette"])["input"],compact:true) { index in
+                    identifier:"proof-intent",background:EditorPalette(source:store.state["palette"])["input"],ellipsis:true) { index in
                     change(recipe.replacing("conversion", with: recipe["conversion"].replacing("intent", with: intents[index]["value"])))
                 }
             }

@@ -79,9 +79,9 @@ struct ScopeControl: View {
             if !tonal {
                 HStack(spacing: 4) {
                     EditorChoice(label: copy["sampler"]["source"].string, options: view["sources"].array.map(\.string),
-                        selected: Int(view["source"].uint), identifier: "scope-\(kind)-source", background: palette["input"], compact: true) { select("source", $0) }
+                        selected: Int(view["source"].uint), identifier: "scope-\(kind)-source", background: palette["input"]) { select("source", $0) }
                     EditorChoice(label: copy["color"]["channel"].string, options: view["channels"].array.map(\.string),
-                        selected: Int(view["channel"].uint), identifier: "scope-\(kind)-channel", background: palette["input"], compact: true) {
+                        selected: Int(view["channel"].uint), identifier: "scope-\(kind)-channel", background: palette["input"]) {
                         select(waveform ? "waveform_channel" : "channel", $0)
                     }
                 }

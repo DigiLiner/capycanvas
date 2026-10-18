@@ -18,13 +18,15 @@ struct PropertyChoiceRow: Layout {
 }
 
 struct EditorChoice: View {
+    enum Presentation { case select, layerMenu }
     let label: String
     let options: [String]
     let selected: Int
     let identifier: String
     let background: Color
-    var compact = false
+    var ellipsis = false
     var bold = false
+    var presentation: Presentation = .select
     var menu: ((@escaping @MainActor (AppleContextMenu) -> Void) -> Void)? = nil
     let select: (Int) -> Void
     @State private var choosing = false
@@ -32,20 +34,26 @@ struct EditorChoice: View {
     @Environment(\.isEnabled) private var enabled
     var body: some View {
         Button { if let menu { menu { model = $0; choosing = true } } else { choosing = true } } label: {
-            ChoiceLabelLayout(ellipsis: compact) {
+            ChoiceLabelLayout(ellipsis: ellipsis || presentation == .layerMenu, presentation: presentation) {
                 ForEach(options.indices, id: \.self) { Text(options[$0]).hidden().accessibilityHidden(true) }
                 Text(options.indices.contains(selected) ? options[selected] : label).lineLimit(1)
-            }.fontWeight(compact || bold ? .bold : .regular).clipped()
+            }.fontWeight(bold || presentation == .layerMenu ? .bold : .regular).clipped()
                 .modifier(ChoiceMeasurement(id: identifier + ":text"))
-                .padding(.leading, compact ? 6 : 14).padding(.trailing, compact ? 22 : 26)
-                .frame(height: compact ? 24 : 34)
+                .padding(.leading, presentation == .select ? 10 : 6).padding(.trailing, presentation == .select ? 18 : 22)
+                .frame(height: 24)
                 .overlay(alignment: .trailing) {
-                    ChoiceArrow().stroke(style: StrokeStyle(lineWidth: 2, lineCap: .butt, lineJoin: .miter))
-                        .frame(width: 16, height: 16)
-                    .modifier(ChoiceMeasurement(id: identifier + ":arrow"))
+                    if presentation == .layerMenu {
+                        SharedIcon(name: "chevron-down", size: 12)
+                            .modifier(ChoiceMeasurement(id: identifier + ":arrow"))
+                            .padding(.trailing, 6)
+                    } else {
+                        ChoiceArrow().stroke(style: StrokeStyle(lineWidth: 2, lineCap: .butt, lineJoin: .miter))
+                            .frame(width: 16, height: 16)
+                            .modifier(ChoiceMeasurement(id: identifier + ":arrow"))
+                    }
                 }
                 .background(background, in: SquircleShape.control).contentShape(Rectangle())
-        }.buttonStyle(EditorControlButtonStyle()).opacity(enabled ? 1 : 0.7)
+        }.buttonStyle(EditorControlButtonStyle()).opacity(enabled || presentation != .layerMenu ? 1 : 0.36)
             .modifier(ChoiceMeasurement(id: identifier))
             .accessibilityLabel(label).accessibilityValue(options.indices.contains(selected) ? options[selected] : "")
             .accessibilityIdentifier(identifier)
@@ -70,10 +78,9 @@ private struct ChoiceArrow: Shape {
     }
 }
 
-/// Intrinsic size comes from all option labels, but the selected label alone
-/// controls painting. The web's property select clips; compact selects ellipsize.
 private struct ChoiceLabelLayout: Layout {
     let ellipsis: Bool
+    let presentation: EditorChoice.Presentation
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
         let natural = sizes.map(\.width).max() ?? 0
@@ -83,7 +90,7 @@ private struct ChoiceLabelLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         for (index, view) in subviews.enumerated() {
             // Match the select's text baseline; the disclosure stays centered.
-            view.place(at: CGPoint(x: bounds.minX, y: bounds.midY + 1), anchor: .leading,
+            view.place(at: CGPoint(x: bounds.minX, y: bounds.midY + (presentation == .select ? 1 : 0)), anchor: .leading,
                 proposal: ProposedViewSize(width: ellipsis && index == subviews.count - 1 ? bounds.width : nil,
                     height: bounds.height))
         }
