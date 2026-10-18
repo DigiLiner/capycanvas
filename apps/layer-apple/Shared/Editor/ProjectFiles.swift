@@ -372,7 +372,6 @@ import UIKit
         guard let id = requestID, let native = store?.native else { fail("The canvas is unavailable"); return }
         let editor = ExportController(native: native, request: id, preferences: preferences) { [weak self] task, recipe, destination, color in
             guard let self, self.requestID == id else { task?.cancel(); return }
-            self.exportEditor = nil
             guard let task else { self.finish(); return }
             self.activeTask = task
             let type = Self.exportType(recipe["format"].string)
@@ -400,6 +399,7 @@ import UIKit
                     }
                 }
             }
+            self.exportEditor = nil
             if self.dialogs?.exportOptions != nil { self.exportDismissed() }
         }
         exportEditor = editor

@@ -1,4 +1,6 @@
 import Foundation
+import Combine
+import AppKit
 import QuartzCore
 import ImageIO
 import UniformTypeIdentifiers
@@ -99,15 +101,22 @@ import UniformTypeIdentifiers
         return profile
     }
     @MainActor static func main() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        precondition(StorageLocations.installation != nil, "Private installation storage must initialize")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("capy-export-owner-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
+        let firstStore = EditorStore(platform: 0,
+            persistence: EditorPersistence(root: root.appendingPathComponent("state-0")), managedWorkspaces: false)
+        try await CapyTest.wait("Shared copy startup", failure: { firstStore.failure }) { !firstStore.bootstrap.isNull }
         let profile = try await io { try library(root) }
         let cmyk = try await io { try ColorPreferencesStore(locations: nil).importProfile(
             URL(fileURLWithPath: "/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc")) }
         for platform: UInt32 in [0,1] {
             let directory = root.appendingPathComponent("state-\(platform)")
-            let store = EditorStore(platform: platform, persistence: EditorPersistence(root: directory), managedWorkspaces: false)
+            let store = platform == 0 ? firstStore
+                : EditorStore(platform: platform, persistence: EditorPersistence(root: directory), managedWorkspaces: false)
             let native = store.native!
             let surface = attachSurface(store, CGSize(width: 128, height: 128))
             defer { native.detach(); withExtendedLifetime(surface) {} }
@@ -125,7 +134,11 @@ import UniformTypeIdentifiers
                         do { try FileManager.default.copyItem(at: url, to: destination); done(destination) }
                         catch { preconditionFailure("Fixture provider: \(error)") }
                     } else { done(nil) }
-                } : nil, exportOptions: { _ in }))
+                } : nil))
+            let dismissal = store.projectFiles.$exportEditor.sink { [weak files = store.projectFiles] editor in
+                if editor == nil { files?.exportDismissed() }
+            }
+            defer { withExtendedLifetime(dismissal) {} }
             func invoke(_ command: String) async throws { try await store.apply(["type": "invoke", "command": command]) }
             func idle(allowError: Bool = false) async throws {
                 try await wait("Document completion", store: store) { !store.projectFiles.busy && store.state["requests"].array.isEmpty }
@@ -223,8 +236,16 @@ import UniformTypeIdentifiers
                 editor.choose(editor.recipe.replacing("format", with: JSON("Png"))); try await idle()
                 try image(destination!, type:.png, depth:8, extent:[64,48])
             }
-            try require(store.state["document_file"].stableKey == state && (try Data(contentsOf:master)) == original,
-                "All output operations preserve master bytes, location and dirty state")
+            let expectedState = try JSON.decode(state).replacing("export_uri", with: JSON(destination!.absoluteString))
+            let currentState = store.state["document_file"]
+            let masterBytesUnchanged = try Data(contentsOf: master) == original
+            if currentState.stableKey != expectedState.stableKey || !masterBytesUnchanged {
+                let failure = JSON(["expected_document_file": expectedState.raw, "actual_document_file": currentState.raw,
+                    "master_bytes_unchanged": masterBytesUnchanged, "commands": store.state["commands"].raw])
+                FileHandle.standardError.write(Data(("Export master state: " + failure.stableKey + "\n").utf8))
+            }
+            try require(currentState.stableKey == expectedState.stableKey && masterBytesUnchanged,
+                "All output operations preserve master bytes, location and dirty state, and remember the last successful export")
             print("PASS platform \(platform): PNG/TIFF/JPEG, comparison, profile/resize/16-bit output, named presets, picker cancellation, retry and master preservation")
         }
     }

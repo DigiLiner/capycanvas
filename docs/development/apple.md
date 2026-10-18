@@ -218,6 +218,8 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   unavailable. Present a Mac file panel from the topmost attached sheet of its
   drawing window. A second sheet attached to the base window waits for the first
   to close, so a preview that remains open during delivery must own its Save panel.
+  Arm export delivery before publishing preview dismissal; dismissal observers
+  can run synchronously.
   Blocked editor content must also be hidden from accessibility while the
   presented controls retain their own identifiers.
 - **Independent publications.** Handle small `layer-host` packets such as
