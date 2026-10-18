@@ -283,7 +283,8 @@ impl Scene {
     pub(super) fn vector_damage(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>) {
         self.scale_sources.vector_preview = r.vector_preview.as_ref().zip(r.vector_preview_shown).map(|(p, (_, _, bounds))| (p.owner, p.path.clone(), bounds));
         self.scale_sources.preview_damage = r.vector_preview_damage.clone();
-        self.scale_sources.vector_motion = r.vector_motion_drawn.clone().filter(|_| !r.vector_motion_presented);
+        self.scale_sources.vector_motion = r.vector_motion_drawn.clone().filter(|_| r.vector_motion_split.is_none());
+        self.scale_sources.motion_split = r.vector_motion_split.clone();
         self.scale_sources.motion_damage = r.vector_motion_damage.clone();
         self.vectors.begin_frame();
         self.vectors.retain(packet.scene);
@@ -304,7 +305,7 @@ impl Scene {
         Some((&image.image.view, image.window, image.image.plan.level, image.image.plan.size))
     }
     pub(super) fn prepare_presented_motion(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, encoder: &mut crate::submission::CommandEncoder) -> Result<(), GpuRasterError> {
-        let Some((motion, bounds)) = r.vector_motion_drawn.clone().filter(|_| r.vector_motion_presented) else { return Ok(()) };
+        let Some((motion, bounds)) = r.vector_motion_drawn.clone().filter(|_| r.vector_motion_split.is_some()) else { return Ok(()) };
         let extent = packet.document_extent;
         let area = bounds.in_frame(extent);
         let display = r.scale_display.as_ref().map_or(0, |cache| cache.plan.level);
@@ -568,9 +569,25 @@ pub(crate) fn motion_shift(motion: &layer_render::VectorMotion, level: u32) -> [
     let side = 1i64 << level;
     motion.offset.map(|v| (v / side as f64).round() as i64 * side)
 }
-pub(crate) fn motion_presentable(scene: SceneView<'_>, owner: OccurrenceHandle) -> bool {
-    scene.parent(owner).is_none() && scene.children(None).iter().copied().find(|h| scene.visible(*h)) == Some(owner)
-        && scene.occurrence(owner).is_some_and(|o| o.blend == layer_core::LayerBlend::Normal && o.opacity == 1. && !o.attachment.is_clip() && !o.mask.as_ref().is_some_and(|m| m.enabled))
+pub(crate) type MotionSplit = Arc<(layer_core::authored::SceneScope, layer_core::authored::SceneScope)>;
+pub(crate) fn motion_split(scene: SceneView<'_>, owner: OccurrenceHandle) -> Option<MotionSplit> {
+    let plain = |h: OccurrenceHandle| scene.occurrence(h).is_some_and(|o| o.blend == layer_core::LayerBlend::Normal
+        && !o.attachment.is_clip() && !o.mask.as_ref().is_some_and(|m| m.enabled));
+    let ancestors: Vec<_> = std::iter::successors(scene.parent(owner), |h| scene.parent(*h)).collect();
+    if std::iter::once(owner).chain(ancestors.iter().copied()).any(|h| !plain(h) || scene.occurrence(h).is_some_and(|o| o.opacity != 1.) || !scene.attached_effects(h).is_empty()) { return None; }
+    let position = scene.position(owner)?;
+    let (mut above, mut below) = (Vec::new(), Vec::new());
+    for (at, &h) in scene.order().iter().enumerate() {
+        if ancestors.contains(&h) { above.push(h); below.push(h); continue; }
+        if at >= position { below.push(h); continue; }
+        let drawn = scene.visible(h) && scene.occurrence(h).is_some_and(|o| o.is_artwork());
+        let reads_below = scene.effect(h).is_some_and(|e| e.program.kind == layer_core::EffectKind::Adjustment)
+            || scene.occurrence(h).is_some_and(|o| o.blend != layer_core::LayerBlend::Normal)
+            || scene.clipping_base(h).and_then(|base| scene.position(base)).is_some_and(|base| base >= position);
+        if drawn && reads_below { return None; }
+        above.push(h);
+    }
+    Some(Arc::new((layer_core::authored::SceneScope::Members(above.into()), layer_core::authored::SceneScope::Members(below.into()))))
 }
 pub(crate) fn motion_bounds(scene: SceneView<'_>, motion: &layer_render::VectorMotion) -> DocRect {
     let Some(object) = scene.vector_layer(motion.owner) else { return DocRect::default() };

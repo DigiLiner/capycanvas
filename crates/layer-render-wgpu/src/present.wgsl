@@ -15,6 +15,8 @@ struct Camera {
     mapped: Resample,
     motion: vec4<f32>,
     motion_offset: vec4<f32>,
+    split: vec4<f32>,
+    split_size: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var moved: texture_2d<f32>;
@@ -32,6 +34,8 @@ struct PaperShade { tile: vec4<f32>, light: vec4<f32>, paper: vec4<f32>, state: 
 @group(0) @binding(15) var paper_slope: texture_2d<f32>;
 @group(0) @binding(16) var paper_sampler: sampler;
 @group(0) @binding(17) var moving_paths: texture_2d<f32>;
+@group(0) @binding(18) var above_paths: texture_2d<f32>;
+@group(0) @binding(19) var below_paths: texture_2d<f32>;
 
 // The backing buffer follows the display's native orientation. All artwork,
 // cursor and UI geometry continues to use the host's logical viewport.
@@ -142,7 +146,7 @@ fn paper_composite(composite: vec4<f32>, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f
 fn source_at(source: u32, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, linear: bool) -> vec4<f32> {
     if source == 2u { return mapped_at(p, dx, dy, linear); }
     if source == 1u { return placed_at(p, dx, dy, linear); }
-    let grid = moving_over(p, grid_artwork_at(p, dx, dy));
+    let grid = moving_between(p, grid_artwork_at(p, dx, dy));
     if linear { return canvas_linear(grid); }
     return grid;
 }
@@ -151,13 +155,18 @@ fn artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     if camera.placed_options.y!=0. { return placed_at(p,dx,dy,false); }
     return grid_artwork_at(p,dx,dy);
 }
-fn moving_over(p: vec2<f32>, below: vec4<f32>) -> vec4<f32> {
-    if camera.motion.w == 0. { return below; }
+fn moving_between(p: vec2<f32>, composite: vec4<f32>) -> vec4<f32> {
+    if camera.split.w == 0. { return composite; }
+    let s = (p - camera.split.xy) / camera.split.z;
+    if any(s < vec2<f32>(0.)) || any(s >= camera.split_size.xy) { return composite; }
+    let below = sample_float(below_paths, linear_sampler, s / camera.split_size.xy, 0.);
+    let above = sample_float(above_paths, linear_sampler, s / camera.split_size.xy, 0.);
     let q = (p - camera.motion_offset.xy - camera.motion.xy) / camera.motion.z;
     let size = camera.motion_offset.zw;
-    if any(q < vec2<f32>(-1.)) || any(q > size + 1.) { return below; }
-    let above = sample_float(moving_paths, linear_sampler, q / size, 0.);
-    return above + below * (1. - above.a);
+    var moving = vec4<f32>(0.);
+    if all(q >= vec2<f32>(-1.)) && all(q <= size + 1.) { moving = sample_float(moving_paths, linear_sampler, q / size, 0.); }
+    let lower = moving + below * (1. - moving.a);
+    return above + lower * (1. - above.a);
 }
 fn grid_artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     let scale = f32(cache.scale);

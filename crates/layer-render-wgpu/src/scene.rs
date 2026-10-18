@@ -30,7 +30,7 @@ mod objects;
 mod object_cache;
 mod object_spatial;
 mod vectors;
-pub(crate) use vectors::{motion_bounds, motion_presentable, motion_shift, preview_bounds, preview_damage};
+pub(crate) use vectors::{MotionSplit, motion_bounds, motion_shift, motion_split, preview_bounds, preview_damage};
 mod bake;
 pub(crate) mod resample;
 pub(crate) mod scale;

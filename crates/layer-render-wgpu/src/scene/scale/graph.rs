@@ -184,6 +184,7 @@ pub(super) struct Branch {
 #[derive(Default)]
 pub(super) struct Graph {
     pub root: Option<Node>,
+    pub motion: Option<[Node; 2]>,
     branches: HashMap<Node, Branch>,
     effects: HashMap<OccurrenceHandle, (metadata::Metadata, u64)>,
     revision: u64,
@@ -193,7 +194,7 @@ pub(super) struct Graph {
 impl Graph {
     pub fn objects(&self)->&object_spatial::SpatialIndex {&self.objects}
     pub fn without_pixels(&self) -> Self {
-        Self { root: self.root.clone(), branches: HashMap::new(), effects: self.effects.clone(),
+        Self { root: self.root.clone(), motion: None, branches: HashMap::new(), effects: self.effects.clone(),
             revision: self.revision, blend_space: self.blend_space, objects:self.objects.clone() }
     }
     pub fn prepare(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, sources: &Sources, plan: display_mips::Plan, budget: u64) -> Result<(), GpuRasterError> {
@@ -207,13 +208,24 @@ impl Graph {
                 self.effects.insert(handle, (metadata, self.revision));
             }
         }
-        let root = compose(packet, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), Some(&mut self.objects))?;
+        self.motion = match &sources.motion_split {
+            Some(split) => {
+                let half = |scope| compose(FramePacket { scene: packet.scene.with_scope(scope), ..packet }, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), None)
+                    .map(|node| Arc::new(Expression::Combine { front: node, back: Expression::color([0.; 4]), blend: 0, flags: 0 }));
+                Some([half(&split.0)?, half(&split.1)?])
+            }
+            None => None,
+        };
+        let root = match &self.motion {
+            Some([above, below]) => Expression::combine(above.clone(), below.clone(), layer_core::LayerBlend::Normal, 0),
+            None => compose(packet, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), Some(&mut self.objects))?,
+        };
         let mut all = HashSet::new();
         Expression::visit(&root, &mut all);
         let mut eligible: Vec<_> = all.into_iter().filter(|n| !Arc::ptr_eq(n, &root)
             && matches!(n.as_ref(), Expression::Objects {..} | Expression::Vector { .. } | Expression::Combine { .. } | Expression::Effect { .. })
             && !matches!(n.as_ref(), Expression::Combine { front, .. } if matches!(front.as_ref(), Expression::VectorPreview { .. } | Expression::VectorMotion { .. }))).collect();
-        eligible.sort_by_cached_key(|n| (n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
+        eligible.sort_by_cached_key(|n| (!self.motion.as_ref().is_some_and(|motion| motion.contains(n)), n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
         eligible.truncate((budget / plan.level_bytes(plan.level)) as usize);
         let wanted: HashSet<_> = eligible.into_iter().collect();
         let mut reusable: Vec<_> = self.branches.extract_if(|node, _| !wanted.contains(node))
@@ -229,6 +241,11 @@ impl Graph {
         }
         self.root = Some(root);
         Ok(())
+    }
+    pub fn branch_image(&self, node: &Node, pages: &[[u32; 2]]) -> Option<(&wgpu::TextureView, display_mips::Plan)> {
+        let branch = self.branches.get(node)?;
+        let image = branch.image.as_ref()?;
+        pages.iter().all(|page| branch.valid.contains(page)).then_some((&image.view, image.plan))
     }
     pub fn reserved_bytes(&self, plan: display_mips::Plan) -> u64 { self.branches.len() as u64 * plan.level_bytes(plan.level) }
     pub fn storage_bytes(&self) -> u64 {

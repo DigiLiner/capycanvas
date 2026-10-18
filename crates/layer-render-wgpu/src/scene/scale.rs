@@ -1028,6 +1028,12 @@ impl Cache {
             width, height, (1 << (root.coarse_level - root.value.plan.level)) as f32, 2.,
             root.value.opacity, 1., root.value.outside, f32::from(root.value.encode), r, g, b, a]
     }
+    pub(crate) fn motion_layers(&self) -> Option<[(&wgpu::TextureView, display_mips::Plan); 2]> {
+        let pages: Vec<_> = page_coordinates(self.plan.bounds).collect();
+        let layer = |node: &graph::Node| self.graph.branch_image(node, &pages);
+        let [above, below] = self.graph.motion.as_ref()?;
+        Some([layer(above)?, layer(below)?])
+    }
     pub fn resample_values(&self) -> [u8; scene::resample::UNIFORM_BYTES as usize] {
         match &self.placed { Some(Presentation::Mapped(mapped)) => mapped.values, _ => [0; scene::resample::UNIFORM_BYTES as usize] }
     }
@@ -1098,7 +1104,8 @@ impl Cache {
         let invalid = tiles.map_or_else(|| Damage::from(dirty), |_| Damage::from_regions(r.document_damage.iter().copied()
             .chain(r.transform_damage.iter().map(|&(target, region)|
                 brush_tiles::document_damage(packet.scene, target, region, packet.document_extent)))))
-            .union(root.damage(&scene.scale_sources, self.plan));
+            .union(root.damage(&scene.scale_sources, self.plan))
+            .union(if self.motion_layers().is_none() && self.graph.motion.is_some() { Damage::from(self.plan.bounds) } else { Damage::EMPTY });
         if objects || packet.scene.order().iter().any(|&owner| packet.scene.vector_layer(owner).is_some()) { self.valid.retain(|c| !invalid.intersects(page_rect(*c))); }
         self.refined.retain(|c| !invalid.intersects(page_rect(*c)));
         let regions = invalid.update_regions(self.plan, &self.valid);

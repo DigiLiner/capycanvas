@@ -102,6 +102,7 @@ pub(crate) struct Sources {
     pub(in crate::scene) preview_damage: Vec<DocRect>,
     pub(in crate::scene) vector_motion: Option<(layer_render::VectorMotion, DocRect)>,
     pub(in crate::scene) motion_damage: Vec<DocRect>,
+    pub(in crate::scene) motion_split: Option<super::super::MotionSplit>,
 }
 impl Sources {
     pub(crate) fn published(&mut self, id: SourceTarget, data: Arc<RasterData>) {

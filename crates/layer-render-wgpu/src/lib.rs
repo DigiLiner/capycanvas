@@ -893,7 +893,7 @@ pub struct WgpuRasterizer {
     vector_motion: Option<layer_render::VectorMotion>,
     vector_motion_drawn: Option<(layer_render::VectorMotion, DocRect)>,
     vector_motion_damage: Vec<DocRect>,
-    vector_motion_presented: bool,
+    vector_motion_split: Option<scene::MotionSplit>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
     selection_paint_revision: u64,
@@ -1286,7 +1286,7 @@ impl WgpuRasterizer {
             vector_motion: None,
             vector_motion_drawn: None,
             vector_motion_damage: Vec::new(),
-            vector_motion_presented: false,
+            vector_motion_split: None,
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
             selection_paint_revision: 0,
@@ -1478,15 +1478,17 @@ impl WgpuRasterizer {
     pub(crate) fn display_geometry(&self)->Option<&wgpu::Buffer> {
         self.display_backup.as_ref().map(|backup|&backup.geometry).or_else(||self.scale_display.as_ref().map(|cache|&cache.geometry))
     }
-    pub(crate) fn display_motion(&self)->Option<(&wgpu::TextureView,[f32;8],DocRect)> {
-        let (motion, bounds) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_presented)?;
+    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;3],[f32;16],DocRect)> {
+        let (motion, bounds) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_split.is_some())?;
         let (view, window, level, size) = self.scene.as_ref()?.presented_motion(motion)?;
+        let [(above, plan), (below, _)] = self.scale_display.as_ref()?.motion_layers()?;
         let [x, y] = window.min.map(|v| v as f32);
-        let side = (1u32 << level) as f32;
         let [w, h] = size.map(|v| v as f32);
+        let [sx, sy] = plan.doc_bounds.min.map(|v| v as f32);
+        let [sw, sh] = plan.size.map(|v| v as f32);
         let offset = motion.offset.map(|v| v as f32);
         let moved = DocRect { min: [0, 1].map(|i| (bounds.min[i] as f64 + motion.offset[i]).floor() as i64 - 2), max: [0, 1].map(|i| (bounds.max[i] as f64 + motion.offset[i]).ceil() as i64 + 2) };
-        Some((view, [x, y, side, 1., offset[0], offset[1], w, h], moved))
+        Some(([view, above, below], [x, y, (1u32 << level) as f32, 1., offset[0], offset[1], w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0.], moved))
     }
     pub(crate) fn display_placement(&self)->[f32;20] {
         self.display_backup.as_ref().map_or_else(||self.scale_display.as_ref().unwrap().placement_values(),|backup|backup.placement)
@@ -3934,15 +3936,15 @@ impl WgpuRasterizer {
                 let unchanged = self.vector_motion_drawn.as_ref().filter(|(old, _)| old.owner == motion.owner && Arc::ptr_eq(&old.items, &motion.items));
                 (motion.clone(), unchanged.map_or_else(|| scene::motion_bounds(packet.scene, motion), |(_, bounds)| *bounds))
             });
-            let presented = drawn.as_ref().is_some_and(|(motion, _)| scene::motion_presentable(packet.scene, motion.owner));
+            let split = drawn.as_ref().and_then(|(motion, _)| scene::motion_split(packet.scene, motion.owner));
             let moved = |drawn: &Option<(layer_render::VectorMotion, DocRect)>, presented: bool| drawn.iter().filter(move |_| !presented)
                 .map(|(motion, bounds)| bounds.translated(scene::motion_shift(motion, 0))).map(|bounds| DocRect { min: bounds.min.map(|v| v - 64), max: bounds.max.map(|v| v + 64) }).collect::<Vec<_>>();
-            for bounds in moved(&self.vector_motion_drawn, self.vector_motion_presented).into_iter().chain(moved(&drawn, presented)) {
+            for bounds in moved(&self.vector_motion_drawn, self.vector_motion_split.is_some()).into_iter().chain(moved(&drawn, split.is_some())) {
                 let rect = bounds.in_frame(packet.document_extent);
                 if !rect.is_empty() { self.vector_motion_damage.push(bounds); self.document_damage.push(rect); }
             }
             self.vector_motion_drawn = drawn;
-            self.vector_motion_presented = presented;
+            self.vector_motion_split = split;
         }
         let packet = FramePacket { composite_all: packet.composite_all && object_damage.is_none(), ..packet };
         self.metrics.frame_composited_pages.clear();

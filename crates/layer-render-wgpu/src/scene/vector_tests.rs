@@ -271,10 +271,10 @@ fn presented(r: &WgpuRasterizer, view: layer_render::ViewState) -> Vec<u8> {
     crate::layer_tests::page_bytes(r, &texture)
 }
 #[test]
-fn moving_paths_show_at_their_offset_and_hand_off_to_the_committed_move() {
+fn moving_paths_show_at_their_offset_under_other_layers_and_hand_off_to_the_committed_move() {
     use std::collections::BTreeSet;
     let extent = [1200u32, 900u32];
-    for (zoom, opacity) in [(1f32, 1f32), (0.5, 1.), (1., 0.99), (0.5, 0.99)] {
+    for (zoom, blend, opacity) in [(1f32, layer_core::LayerBlend::Normal, 1f32), (0.5, layer_core::LayerBlend::Normal, 1.), (1., layer_core::LayerBlend::Multiply, 1.), (0.5, layer_core::LayerBlend::Normal, 0.8)] {
         let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
         let mut records: Vec<Record> = (0..6).map(|i| stroke(9000 + i, &[[200. + i as f64 * 60., 300.], [400. + i as f64 * 50., 500.]], 9., [0.9, 0.2, 0.1, 0.6])).collect();
         records.extend(crate::vector::bench::scene_b([1200., 900.], 1500).into_iter().map(Record::Path));
@@ -282,10 +282,17 @@ fn moving_paths_show_at_their_offset_and_hand_off_to_the_committed_move() {
         let mut occurrence = editor.document().scene().occurrence(layer).unwrap().clone();
         occurrence.opacity = opacity;
         editor.perform(layer_core::Edit::Occurrence(layer_core::RecordChange::replace(&editor.document().artwork.occurrences, layer, Some(occurrence)).unwrap())).unwrap();
+        let cover = VectorObject::from_records(vec![shape(1, [150., 350., 700., 520.], [0.1, 0.3, 0.9, 0.5])]);
+        let (upper, edit) = editor.document().create_vector_layer_edit("Above", cover, None, 0).unwrap();
+        editor.perform(edit).unwrap();
+        let mut occurrence = editor.document().scene().occurrence(upper).unwrap().clone();
+        occurrence.blend = blend;
+        editor.perform(layer_core::Edit::Occurrence(layer_core::RecordChange::replace(&editor.document().artwork.occurrences, upper, Some(occurrence)).unwrap())).unwrap();
+        let split = blend == layer_core::LayerBlend::Normal && opacity == 1.;
         let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
         submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
-        let shown = |r: &WgpuRasterizer| if opacity == 1. { presented(r, view).into_iter().map(f32::from).collect::<Vec<_>>() } else { display(r).into_iter().flatten().collect() };
-        let tolerance = if opacity == 1. { 1.5 } else { 1e-5 };
+        let shown = |r: &WgpuRasterizer| if split { presented(r, view).into_iter().map(f32::from).collect::<Vec<_>>() } else { display(r).into_iter().flatten().collect() };
+        let tolerance = if split { 1.5 } else { 1e-5 };
         let close = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0., f32::max);
         let original = shown(&r);
         let items: Arc<BTreeSet<ItemId>> = Arc::new((9000..9006).map(ItemId).collect());
@@ -300,18 +307,18 @@ fn moving_paths_show_at_their_offset_and_hand_off_to_the_committed_move() {
             submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         }
         let error = close(&shown(&r), &expected);
-        assert!(error < tolerance, "moving paths at zoom {zoom}, opacity {opacity} must show where the move puts them: {error}");
-        assert_eq!(max_error(&display(&r), &display(&fresh)) > 0.1, opacity == 1., "only a top layer presents moving paths without recompositing them");
+        assert!(error < tolerance, "moving paths at zoom {zoom} under a {blend:?} layer must show where the move puts them: {error}");
+        assert_eq!(max_error(&display(&r), &display(&fresh)) > 0.1, split, "drags under normal layers present moving paths without recompositing them");
         r.set_vector_motion(None);
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
-        assert!(close(&shown(&r), &original) < tolerance, "cancelling a move restores the layer at zoom {zoom}, opacity {opacity}");
+        assert!(close(&shown(&r), &original) < tolerance, "cancelling a move restores the layer at zoom {zoom} under a {blend:?} layer");
         r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [38., -22.] }));
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         editor.perform(editor.document().vector_object_edit(layer, moved_object).unwrap()).unwrap();
         r.set_vector_motion(None);
         submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
         let error = close(&shown(&r), &expected);
-        assert!(error < tolerance, "committing the move looks like its preview at zoom {zoom}, opacity {opacity}: {error}");
+        assert!(error < tolerance, "committing the move looks like its preview at zoom {zoom} under a {blend:?} layer: {error}");
     }
 }
 
@@ -325,6 +332,9 @@ fn crowded_vector_layer_edit_frames() {
     let count = 50_000u64;
     let records: Vec<Record> = crate::vector::bench::scene_b([4000., 3000.], count).into_iter().map(Record::Path).collect();
     let (mut editor, layer) = document(extent, records);
+    let tones = VectorObject::from_records((0..12).map(|i| shape(i + 1, [300. * i as f64, 200., 300. * i as f64 + 220., 2900.], [0.2, 0.4, 0.9, 0.3])).collect());
+    let (_, edit) = editor.document().create_vector_layer_edit("Tones", tones, None, 0).unwrap();
+    editor.perform(edit).unwrap();
     let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
     submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
     let object = editor.document().scene().vector_layer(layer).unwrap().clone();

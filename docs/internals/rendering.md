@@ -346,12 +346,16 @@ draws above the cached layer, damaging only the part of the line that changed.
 A drag arrives through `set_vector_motion` with the moving item IDs and an
 offset. The cached layer leaves those paths out, repainting their tiles once,
 and the moving paths render once into a texture at the display level. When the
-vector layer is the top visible root layer with normal blending, full opacity
-and no mask, the viewport presenter draws that texture over the composite at
-the sub-pixel offset, so drag frames recomposite no pages. Otherwise the
-composition graph copies the texture at the offset rounded to the level's
-pixels above the cached layer. Moving paths draw above the rest of their layer
-until the move commits.
+vector layer, its groups and every layer above it blend normally at full
+opacity, with no mask, attached filter, adjustment layer or clipping that reaches
+down to it, the composition graph splits its root into the layers above and
+everything below, the rest of the vector layer included, and keeps both as
+window-sized branches. The viewport presenter then draws above, moving paths
+and below at the sub-pixel offset, so drag frames recomposite no pages; the
+split costs one window recomposite when the drag starts. Otherwise the
+composition graph copies the moving texture at the offset rounded to the
+level's pixels above the cached layer. Moving paths draw above the rest of
+their layer until the move commits.
 
 ## Native SDR working color
 
