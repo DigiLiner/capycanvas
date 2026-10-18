@@ -342,10 +342,12 @@ and redraws only the tiles the changed paths cover, gathering just the paths
 that reach those tiles; a page where most tiles change renders whole.
 
 Display windows derive new geometry for at most 6 ms per frame. A window that
-runs out draws the paths it has and is damaged again, and pending object work
-keeps frames coming until every visible path is derived, so opening or zooming a
-crowded layer fills in over several frames instead of stalling one; on the Web
-host this keeps the browser's single thread responsive. Exact captures, exports
+runs out draws the paths it has once and waits; later frames derive its
+remaining paths within the same budget without drawing or compositing it, and
+the window repaints exactly once when complete. Pending object work keeps frames
+coming until every visible path is derived, so opening or zooming a crowded
+layer fills in over several frames instead of stalling one; on the Web host this
+keeps the browser's single thread responsive. Exact captures, exports
 and thumbnails derive everything they draw.
 
 Derived geometry has a 256 MiB budget. Over budget, the cache drops geometry

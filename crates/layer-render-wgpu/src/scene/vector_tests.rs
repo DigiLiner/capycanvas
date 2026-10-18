@@ -212,8 +212,11 @@ fn crowded_layers_derive_across_frames_and_settle_to_the_exact_render() {
     r.wait_idle().unwrap();
     let derived = |r: &WgpuRasterizer| r.scene.as_ref().unwrap().vectors.layers.values().flat_map(|layer| layer.items.iter().flatten()).filter(|item| !item.derived.is_empty()).count();
     let first = derived(&r);
+    let opened = r.metrics.composited_pixels;
     assert!(r.has_pending_work() && first < 20_000, "one frame derived {first} of 20000 paths");
     submit_ready(&mut r, FramePacket { composite_all: false, ..packet(doc.scene(), extent) });
+    let settled = r.metrics.composited_pixels - opened;
+    assert!(settled <= opened + opened / 2, "frames that only derive composite nothing until the window is complete: {settled} after {opened}");
     let shown = display(&r);
     let exact = native(&mut r, doc);
     assert!(max_error(&shown, &exact) < 1e-5, "the settled display must match the exact render: {}", max_error(&shown, &exact));

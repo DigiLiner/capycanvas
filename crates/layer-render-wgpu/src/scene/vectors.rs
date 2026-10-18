@@ -262,7 +262,10 @@ pub(super) struct Vectors {
     levels: HashMap<(VectorHandle, u32), u64>,
     deadline: Option<web_time::Instant>,
     deferred: bool,
+    waiting: Vec<Waiting>,
 }
+#[derive(Clone, Copy, PartialEq)]
+struct Waiting { owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2] }
 pub(super) struct MotionImage { pub key: (OccurrenceHandle, usize, u32, [i64; 2]), pub window: DocRect, pub image: super::Image }
 #[derive(Clone)]
 pub(super) struct VectorJob { pub batch: Batch, pub output: wgpu::TextureView, pub base: Option<(wgpu::TextureView, [i32; 2])> }
@@ -297,9 +300,11 @@ impl Scene {
         self.vectors.begin_frame();
         self.vectors.retain(packet.scene);
         let palette = Self::vector_palette(r, packet);
+        let complete = self.vectors.advance(packet.scene, palette);
         for &owner in packet.scene.order() {
             let excluded = r.vector_motion_drawn.as_ref().filter(|(motion, _)| motion.owner == owner).map(|(motion, _)| &motion.items);
-            let rects = self.vectors.damage(packet.scene, owner, palette, excluded);
+            let mut rects = self.vectors.damage(packet.scene, owner, palette, excluded);
+            rects.extend(complete.iter().filter(|(window, _)| *window == owner).map(|(_, rect)| *rect));
             if rects.is_empty() { continue; }
             let extent = packet.document_extent;
             let rects = coalesce(rects.into_iter().map(|rect| rect.in_frame(extent)).filter(|rect| !rect.is_empty()).collect());
@@ -344,6 +349,52 @@ impl Vectors {
             if !keep { for item in layer.items.iter().flatten() { for d in &item.derived { if let Some(b) = d.base { pool.release(b, &d.geometry); } } } }
             keep
         });
+    }
+    fn advance(&mut self, scene: SceneView<'_>, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Vec<(OccurrenceHandle, DocRect)> {
+        let mut complete = Vec::new();
+        for waiting in std::mem::take(&mut self.waiting) {
+            if self.deadline.is_some_and(|deadline| web_time::Instant::now() > deadline) {
+                self.deferred = true;
+                self.waiting.push(waiting);
+                continue;
+            }
+            let Some((handle, slots, offset)) = self.window_slots(scene, waiting, palette, true) else { continue };
+            if self.entries(handle, slots, offset, waiting.level, waiting.extent, true).1 {
+                self.deferred = true;
+                self.waiting.push(waiting);
+            } else {
+                let span = waiting.size.map(|v| i64::from(v) << waiting.level);
+                complete.push((waiting.owner, DocRect { min: waiting.origin, max: [waiting.origin[0] + span[0], waiting.origin[1] + span[1]] }));
+            }
+        }
+        complete
+    }
+    fn window_slots(&mut self, scene: SceneView<'_>, at: Waiting, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), display: bool) -> Option<(VectorHandle, Vec<u32>, [f64; 2])> {
+        let handle = scene.vector_handle(at.owner)?;
+        let object = scene.vector(handle)?;
+        let offset = scene.occurrence_offset64(at.owner);
+        self.stamp += 1;
+        let stamp = self.stamp;
+        let side = (1i64 << at.level) as f64;
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let layer = self.layers.entry(handle).or_default();
+        layer.update(object, palette, pool);
+        let x0 = (at.origin[0] - offset[0].floor() as i64) as f64;
+        let y0 = (at.origin[1] - offset[1].floor() as i64) as f64;
+        let window = [x0, y0, x0 + f64::from(at.size[0]) * side, y0 + f64::from(at.size[1]) * side];
+        let [cx0, cy0, cx1, cy1] = cells([window[0] - 16., window[1] - 16., window[2] + 16., window[3] + 16.]);
+        let mut slots = Vec::new();
+        for y in cy0..cy1 { for x in cx0..cx1 {
+            for slot in layer.grid.get(&[x, y]).into_iter().flatten() {
+                let item = layer.items[*slot as usize].as_mut().unwrap();
+                if item.seen == stamp { continue; }
+                item.seen = stamp;
+                let b = item.bounds;
+                if (display && item.hidden) || b[2] < window[0] - 16. || b[0] > window[2] + 16. || b[3] < window[1] - 16. || b[1] > window[3] + 16. { continue; }
+                slots.push(*slot);
+            }
+        }}
+        Some((handle, slots, offset))
     }
     pub fn damage(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), excluded: Option<&Arc<BTreeSet<ItemId>>>) -> Vec<DocRect> {
         let Some(handle) = scene.vector_handle(owner) else { return Vec::new() };
@@ -500,36 +551,14 @@ impl Vectors {
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent, color domain and provisional path")]
     fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>, display: bool) -> Batch {
         let mut batch = Batch::default();
-        let Some(handle) = scene.vector_handle(owner) else { return batch };
-        let Some(object) = scene.vector(handle) else { return batch };
-        let offset = scene.occurrence_offset64(owner);
-        self.stamp += 1;
-        let stamp = self.stamp;
+        let at = Waiting { owner, origin, level, size, extent };
+        let Some((handle, slots, offset)) = self.window_slots(scene, at, palette, display) else { return batch };
         let side = 1i64 << level;
         let level_origin = [origin[0].div_euclid(side), origin[1].div_euclid(side)];
-        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
-        let layer = self.layers.entry(handle).or_default();
-        layer.update(object, palette, pool);
-        let window = [(origin[0] - offset[0].floor() as i64) as f64, (origin[1] - offset[1].floor() as i64) as f64];
-        let span = [f64::from(size[0]) * side as f64, f64::from(size[1]) * side as f64];
-        let [cx0, cy0, cx1, cy1] = cells([window[0] - 16., window[1] - 16., window[0] + span[0] + 16., window[1] + span[1] + 16.]);
-        let mut slots = Vec::new();
-        for y in cy0..cy1 { for x in cx0..cx1 {
-            for slot in layer.grid.get(&[x, y]).into_iter().flatten() {
-                let item = layer.items[*slot as usize].as_mut().unwrap();
-                if item.seen == stamp { continue; }
-                item.seen = stamp;
-                let b = item.bounds;
-                if (display && item.hidden) || b[2] < window[0] - 16. || b[0] > window[0] + span[0] + 16. || b[3] < window[1] - 16. || b[1] > window[1] + span[1] + 16. { continue; }
-                slots.push(*slot);
-            }
-        }}
         let (mut entries, skipped) = self.entries(handle, slots, offset, level, extent, display);
-        if skipped {
+        if skipped && !self.waiting.contains(&at) {
             self.deferred = true;
-            let layer = self.layers.get_mut(&handle).unwrap();
-            layer.pending.full = true;
-            layer.pending.damage.push([window[0], window[1], window[0] + span[0], window[1] + span[1]]);
+            self.waiting.push(at);
         }
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
