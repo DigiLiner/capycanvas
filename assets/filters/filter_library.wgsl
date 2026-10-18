@@ -266,12 +266,10 @@ fn capy_iridescence(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     return fx_rgba(mix(rgb,fx_preserve_luma(film,l),fx_parameter(b,0u).x/100.),c.a);
 }
 fn capy_domain_warp(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
-    let octaves=3u;let time=fx_time(b);let scale=fx_period(fx_parameter(b,1u).x);
-    let q=fma(vec2<f32>(time),vec2<f32>(.17,-.23),p/scale);
+    let octaves=3u;let time=fx_time(b);let q=p/fx_period(fx_parameter(b,1u).x)+vec2<f32>(time*.17,-time*.23);
     let bend=vec2<f32>(fx_fbm(q,octaves,3u),fx_fbm(q+19.3,octaves,31u));
-    let bent=fma(bend,vec2<f32>(1.4),q);
-    let warp=vec2<f32>(fx_fbm(bent,octaves,71u),fx_fbm(bent+7.9,octaves,113u));
-    return fx_sample(fma(warp,vec2<f32>(fx_parameter(b,0u).x),p));
+    let warp=vec2<f32>(fx_fbm(q+bend*1.4,octaves,71u),fx_fbm(q+bend*1.4+7.9,octaves,113u));
+    return fx_sample(p+warp*fx_parameter(b,0u).x);
 }
 fn capy_gradient_fill(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let extent=fx_extent();let delta=p-extent*vec2(fx_parameter(b,68u).x,fx_parameter(b,69u).x)/100.;

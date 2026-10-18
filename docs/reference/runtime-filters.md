@@ -218,9 +218,8 @@ Each parameter declares its semantic `dimension`: `scalar` (the default),
 `count`, `angle`, `time`, `source_pixels`, `composition_pixels` or `normalized`.
 Counts require whole bounds and values. Posterize Levels and Kaleidoscope Segments
 are counts. Denoise exposes Strength and uses an internal radius of two composition units;
-Domain Warp uses three internal noise octaves. Its phase, noise feedback and
-final displacement use explicit fused multiply-add operations. The shared FBM
-noise and hash retain their existing evaluation. Built-in pixel lengths are
+Domain Warp uses three internal noise octaves. The shared FBM noise and hash
+retain their existing evaluation. Built-in pixel lengths are
 composition units when inserted, then follow the saved effect reference mapping.
 Image resize composes that mapping and keeps authored values and reference extent;
 explicit distances and implicit periods scale together. Displayed `unit` labels
