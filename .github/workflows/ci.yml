@@ -34,6 +34,8 @@ jobs:
       - run: python3 tools/build/gtk-runtime/test-configure.py
       - run: node --test apps/layer-linux/package.test.mjs tools/build/development-profile.test.mjs
       - run: apps/layer-linux/run.sh --help
+      - run: python3 tools/build/gtk-runtime/test-runtime.py target/gtk-runtime/prefix target/gtk-runtime/gtk-4.24.1/subprojects
+      - run: CARGO_NET_OFFLINE=true apps/layer-linux/run.sh --help
   licenses:
     runs-on: ubuntu-24.04
     steps:

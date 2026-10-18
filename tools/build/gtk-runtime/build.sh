@@ -8,10 +8,12 @@ mkdir -p "$gtk_build" "$gtk_prefix/lib" "$gtk_prefix/share/doc/capycanvas-gtk/so
 gtk_docs="$gtk_prefix/share/doc/capycanvas-gtk"
 gtk_archive=gtk-4.24.1.tar.xz
 glib_archive=glib-2.90.1.tar.xz
+pango_archive=pango-1.58.2.tar.xz
 python3 "$gtk_recipe/check-env.py"
 for gtk_source in \
     "$gtk_archive e98abe720e16129c8c0f50761dee0a2e9ae2478055e31018f6cf977fcf6513e9 https://download.gnome.org/sources/gtk/4.24" \
-    "$glib_archive 93c941aa17d5eb1d53fe838365f29a8b4e539c222a256d974ec8f30fc413e396 https://download.gnome.org/sources/glib/2.90"; do
+    "$glib_archive 93c941aa17d5eb1d53fe838365f29a8b4e539c222a256d974ec8f30fc413e396 https://download.gnome.org/sources/glib/2.90" \
+    "$pango_archive 342385b6ca3b7c73455d7c80a13b7dbe4489e00bc3bd4c5bd6ed4dce421e374a https://download.gnome.org/sources/pango/1.58"; do
     read -r gtk_source_file gtk_source_hash gtk_source_url <<< "$gtk_source"
     if [[ ! -f "$gtk_build/$gtk_source_file" ]]; then
         if [[ -f "$gtk_recipe/sources/$gtk_source_file" ]]; then
@@ -61,6 +63,15 @@ python3 "$gtk_recipe/configure.py" "$gtk_build/glib-build" "$gtk_build/glib-2.90
     -Dlibelf=disabled -Ddtrace=disabled -Dsystemtap=disabled -Dglib_debug=disabled
 ninja -C "$gtk_build/glib-build" -j "${CAPY_BUILD_JOBS:-8}"
 export PKG_CONFIG_PATH="$gtk_build/glib-build/meson-uninstalled${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+if [[ ! -d "$gtk_build/pango-1.58.2" ]]; then tar -xf "$gtk_build/$pango_archive" -C "$gtk_build"; fi
+python3 "$gtk_recipe/configure.py" "$gtk_build/pango-build" "$gtk_build/pango-1.58.2" \
+    --prefix=/usr --libdir=lib --buildtype=release --default-library=shared \
+    "-Dc_args=$gtk_c_args" "-Dc_link_args=${LDFLAGS:-}" --wrap-mode="$gtk_wrap_mode" \
+    "-Dpkg_config_path=$PKG_CONFIG_PATH" \
+    -Ddocumentation=false -Dman-pages=false -Dintrospection=disabled \
+    -Dbuild-testsuite=false -Dbuild-examples=false -Dxft=disabled -Dsysprof=disabled -Dlibthai=enabled
+ninja -C "$gtk_build/pango-build" -j "${CAPY_BUILD_JOBS:-8}"
+export PKG_CONFIG_PATH="$gtk_build/pango-build/meson-uninstalled:$PKG_CONFIG_PATH"
 python3 "$gtk_recipe/configure.py" "$gtk_build/build" "$gtk_build/gtk-4.24.1" \
     --buildtype=release "-Dc_args=$gtk_c_args" "-Dc_link_args=${LDFLAGS:-}" \
     "-Dpkg_config_path=$PKG_CONFIG_PATH" \
@@ -80,6 +91,12 @@ for gtk_family in glib gobject gio gmodule gthread; do
     patchelf --set-rpath '$ORIGIN' "$gtk_prefix/lib/$gtk_library.new"
     mv -f "$gtk_prefix/lib/$gtk_library.new" "$gtk_prefix/lib/$gtk_library"
 done
+for gtk_family in pango pangocairo pangoft2; do
+    gtk_library="lib$gtk_family-1.0.so.0"
+    cp "$gtk_build/pango-build/pango/$gtk_library" "$gtk_prefix/lib/$gtk_library.new"
+    patchelf --set-rpath '$ORIGIN' "$gtk_prefix/lib/$gtk_library.new"
+    mv -f "$gtk_prefix/lib/$gtk_library.new" "$gtk_prefix/lib/$gtk_library"
+done
 cp "$gtk_build/build/gtk/libgtk-4.so.1.2400.1" "$gtk_prefix/lib/libgtk-4.so.1.new"
 patchelf --set-rpath '$ORIGIN' "$gtk_prefix/lib/libgtk-4.so.1.new"
 mv -f "$gtk_prefix/lib/libgtk-4.so.1.new" "$gtk_prefix/lib/libgtk-4.so.1"
@@ -88,6 +105,9 @@ cp "$gtk_build/$gtk_archive" "$gtk_docs/sources/"
 cp "$gtk_build/$glib_archive" "$gtk_docs/sources/"
 mkdir -p "$gtk_docs/glib"
 cp "$gtk_build/glib-2.90.1/COPYING" "$gtk_docs/glib/"
+cp "$gtk_build/$pango_archive" "$gtk_docs/sources/"
+mkdir -p "$gtk_docs/pango"
+cp "$gtk_build/pango-1.58.2/COPYING" "$gtk_docs/pango/"
 cp "$gtk_recipe/pad-event-surface.patch" "$gtk_recipe/tablet-proximity-cursor.patch" "$gtk_recipe/build.sh" "$gtk_recipe/configure.py" "$gtk_recipe/check-env.py" "$gtk_docs/"
 python3 - "$gtk_prefix" "$gtk_build/gtk-4.24.1/subprojects" <<'PY'
 import configparser, hashlib, json, pathlib, shutil, sys
@@ -100,9 +120,13 @@ files = ['lib/libgtk-4.so.1', 'share/doc/capycanvas-gtk/COPYING',
          'share/doc/capycanvas-gtk/tablet-proximity-cursor.patch', 'share/doc/capycanvas-gtk/build.sh',
          'share/doc/capycanvas-gtk/configure.py', 'share/doc/capycanvas-gtk/check-env.py',
          'share/doc/capycanvas-gtk/sources/glib-2.90.1.tar.xz',
-         'share/doc/capycanvas-gtk/glib/COPYING']
+         'share/doc/capycanvas-gtk/glib/COPYING',
+         'share/doc/capycanvas-gtk/sources/pango-1.58.2.tar.xz',
+         'share/doc/capycanvas-gtk/pango/COPYING']
 files += [f'lib/lib{name}-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]
-dependencies = dict(glib=dict(version='2.90.1', source='https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz'))
+files += [f'lib/lib{name}-1.0.so.0' for name in ['pango', 'pangocairo', 'pangoft2']]
+dependencies = dict(glib=dict(version='2.90.1', source='https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz'),
+                    pango=dict(version='1.58.2', source='https://download.gnome.org/sources/pango/1.58/pango-1.58.2.tar.xz'))
 for name in ['libtiff', 'libjpeg-turbo']:
     wrap = configparser.ConfigParser(interpolation=None)
     wrap.read(projects / (name + '.wrap'))

@@ -69,6 +69,10 @@ in both themes.
 
 CI's Arch job installs the package recipe's dependencies into a fresh Arch
 container, tests SDK validation, and builds the default GTK development launcher.
+It verifies the private GTK/GLib/Pango library paths and text/codec behavior,
+then repeats the launcher build offline. Changes to the runtime recipe or SDK
+setup run these same checks and the source regressions in the
+[runtime guide](../../tools/build/gtk-runtime/README.md#build-and-validate).
 GPU journeys still run through the private display on hardware.
 
 Run the rows that match your change, then walk the affected user journeys on each

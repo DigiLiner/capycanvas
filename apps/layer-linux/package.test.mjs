@@ -160,6 +160,7 @@ test("runtime staging relocates every private library in the checksum manifest",
   writeFileSync(join(bin, "bash"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const files = {};
   const names = ["libgtk-4.so.1", ...["glib", "gobject", "gio", "gmodule", "gthread"].map(name => `lib${name}-2.0.so.0`)];
+  names.push(...["pango", "pangocairo", "pangoft2"].map(name => `lib${name}-1.0.so.0`));
   for (const name of names) {
     writeFileSync(join(prefix, "lib", name), name);
     files[`lib/${name}`] = createHash("sha256").update(name).digest("hex");

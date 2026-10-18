@@ -1,7 +1,7 @@
 # Packaged GTK runtime
 
 The Linux packager and development launcher invoke `build.sh BUILD_DIRECTORY PREFIX`
-and use the resulting GTK 4.24.1 and GLib 2.90.1 libraries.
+and use the resulting GTK 4.24.1, GLib 2.90.1 and Pango 1.58.2 libraries.
 `pad-event-surface.patch` backports
 [GTK !10171](https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/10171) at commit
 `c6613dd0ad4e1bde77b6cd2e48cfcc80c8e63f33`, with its focus/device guard extended
@@ -74,14 +74,18 @@ It rejects the unpatched source and missing producer guards when an event has
 no target. Native pen journeys still run through the private compositor in the
 [Linux guide](../../../docs/development/linux.md#tests).
 
-The source archive is pinned by SHA-256. TIFF and JPEG use GTK's checksum-pinned
+The GTK, GLib and Pango source archives are pinned by SHA-256. TIFF and JPEG use GTK's checksum-pinned
 Meson wraps and link statically into the local GTK library. System TIFF and JPEG
 development packages are unnecessary. TIFF enables JPEG and deflate compression;
 its optional JBIG, LERC, LZMA, WebP and Zstandard dependencies are disabled.
 
 Install the [Linux prerequisites](../../../docs/development/linux.md#prerequisites).
-The builder checks the actual native headers and GLib resource compiler before
-compilation. It uses the installed SDK; extracted packages under the build cache
+The builder checks the native tools, the remaining SDK package versions, actual
+headers and GLib resource compiler before source downloads or compilation.
+GLib and Pango build first; GTK resolves their uninstalled pkg-config files
+explicitly, including when reconfiguring an existing cache. System Pango 1.57
+therefore does not prevent building GTK, which needs Pango 1.58 or newer.
+The builder uses the installed SDK; extracted packages under the build cache
 do not supply tools, headers or libraries.
 The runtime builder neither installs system packages nor replaces system GTK.
 The prefix contains the libraries, source archives,
@@ -93,8 +97,11 @@ package cache from these shipped sources, so they need no codec downloads.
 `CAPY_GTK_BUILD_DIR` can select another cache. The launcher selects the bundled
 library using an executable-relative path that survives relocation and symlinks.
 Applications can replace the local library with a compatible rebuilt version.
-GLib is bundled so GTK 4.24 runs on systems with older GLib, including Omarchy.
-Each private library resolves its siblings through `$ORIGIN`; system GTK and GLib
+GLib and Pango are bundled so GTK 4.24 runs with the documented older system SDK,
+including Omarchy. Pango includes its Cairo and FreeType libraries and Thai
+dictionary support; the fonts, shaping, rasterization and Wayland SDK remain
+system dependencies with version requirements checked before the build.
+Each private library resolves its siblings through `$ORIGIN`; system GTK, GLib and Pango
 remain untouched. Libadwaita and GTK's remaining shared dependencies stay system
 requirements.
 When a recipe introduces options absent from a configured cache, setup uses
@@ -111,3 +118,8 @@ bash share/doc/capycanvas-gtk/build.sh "$PWD/gtk-build" "$PWD/gtk-prefix"
 
 Package smoke validation checks the actual mapped GTK library path;
 source-file presence alone is not the startup qualification.
+`test-runtime.py` also checks private Pango's version and loaded path, lays out
+multilingual text, loads system libadwaita against all nine private libraries,
+and validates source/license checksums with `LD_LIBRARY_PATH` unset. CI builds
+the launcher from a clean Arch SDK, runs this probe and repeats the launcher
+build offline to catch incomplete source or dependency declarations.

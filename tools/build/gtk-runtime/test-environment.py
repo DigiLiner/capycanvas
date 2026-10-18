@@ -23,12 +23,17 @@ class EnvironmentTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('')
         for tool in ['pkg-config', 'meson', 'ninja', 'patchelf', 'glslc',
-                     'sassc', 'glib-compile-resources', 'curl', 'patch', 'tar']:
+                     'wayland-scanner', 'glib-compile-resources', 'curl', 'patch', 'tar', 'xz']:
             path = self.bin / tool
             path.write_text('#!/bin/sh\nexit 0\n')
             path.chmod(0o755)
         flags = shlex.join(['-I' + str(self.include)])
-        (self.bin / 'pkg-config').write_text('#!/bin/sh\nprintf "%s\\n" ' + shlex.quote(flags) + '\n')
+        (self.bin / 'pkg-config').write_text('#!/bin/sh\ncase "$1" in\n'
+            '--modversion) printf "1.26.0\\n" ;;\n'
+            '--variable=wayland_scanner) printf "%s\\n" ' + shlex.quote(str(self.bin / 'wayland-scanner')) + ' ;;\n'
+            '--cflags) printf "%s\\n" ' + shlex.quote(flags) + ' ;;\nesac\n')
+        (self.bin / 'meson').write_text('#!/bin/sh\nprintf "1.8.0\\n"\n')
+        (self.bin / 'wayland-scanner').write_text('#!/bin/sh\nprintf "wayland-scanner 1.26.0\\n" >&2\n')
         self.env = {**os.environ, 'PATH': str(self.bin),
                     'CC': shutil.which('cc'), 'CXX': shutil.which('c++'),
                     'CPPFLAGS': '', 'CFLAGS': '-nostdinc'}
@@ -66,6 +71,33 @@ class EnvironmentTest(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Missing native build tools: glib-compile-resources', result.stderr)
+
+    def test_old_meson_is_rejected_before_compilation(self):
+        (self.bin / 'meson').write_text('#!/bin/sh\nprintf "1.7.2\\n"\n')
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Meson >= 1.8 is required; found 1.7.2', result.stderr)
+
+    def test_mismatched_wayland_scanner_is_rejected_before_compilation(self):
+        (self.bin / 'wayland-scanner').write_text('#!/bin/sh\nprintf "wayland-scanner 1.25.0\\n" >&2\n')
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Wayland scanner 1.25.0 must match client 1.26.0', result.stderr)
+        self.assertIn('one coherent distribution SDK', result.stderr)
+
+    def test_missing_native_dependency_is_reported_before_downloading_sources(self):
+        (self.bin / 'pkg-config').write_text('#!/bin/sh\n[ "$2" != "harfbuzz >= 11.0.0" ]\n')
+        for tool in ['dirname', 'realpath', 'mkdir']:
+            (self.bin / tool).symlink_to(shutil.which(tool))
+        (self.bin / 'python3').symlink_to(sys.executable)
+        downloaded = self.root / 'downloaded'
+        (self.bin / 'curl').write_text('#!/bin/sh\nprintf attempted > ' + shlex.quote(str(downloaded)) + '\nexit 99\n')
+        result = subprocess.run([shutil.which('bash'), str(Path(__file__).with_name('build.sh')),
+            str(self.root / 'build'), str(self.root / 'prefix')], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Missing or outdated native development packages: harfbuzz >= 11.0.0', result.stderr)
+        self.assertIn('docs/development/linux.md#prerequisites', result.stderr)
+        self.assertFalse(downloaded.exists())
 
 
 if __name__ == '__main__':

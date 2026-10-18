@@ -16,11 +16,29 @@ For the Flatpak runtime, signed downloads and update repository, see
 Install a recent stable Rust toolchain, a C/C++ toolchain, `pkg-config`, and the
 GTK 4.22+, libadwaita 1.9 and Wayland development packages. Enabled API features
 are declared in [`apps/layer-linux/Cargo.toml`](../../apps/layer-linux/Cargo.toml).
-The launcher builds its own [GTK 4.24.1 and GLib runtime](../../tools/build/gtk-runtime/README.md),
-which needs Meson, Ninja, `patchelf`, `glslc`, `sassc`, Wayland protocol files,
+The launcher builds its own [GTK 4.24.1, GLib 2.90.1 and Pango 1.58.2 runtime](../../tools/build/gtk-runtime/README.md),
+which needs Meson 1.8+, Ninja, `patchelf`, `glslc`, `xz`, Wayland's scanner and protocol files,
 DRM headers and GTK's development dependencies. Its TIFF and JPEG libraries build from
 checksum-pinned sources and link statically; their system development packages
 are unnecessary. The first build downloads those sources; later builds use the cache.
+The bundled libraries supply GTK's newer GLib and Pango requirements; the system
+SDK supplies their remaining dependencies. The builder checks tools, package
+versions, native headers and the resource compiler before downloading or compiling.
+The main SDK minimums are:
+
+| Dependency | Minimum version |
+| --- | --- |
+| System GTK development headers / libadwaita | 4.22 / 1.9 |
+| Meson | 1.8 |
+| Cairo / Fontconfig / HarfBuzz | 1.18.2 / 2.17.0 / 11.0.0 |
+| Wayland / Wayland protocols | 1.24.0 / 1.48 |
+
+The Wayland scanner must match the installed Wayland client version.
+
+`python3 tools/build/gtk-runtime/check-env.py` checks the full native prerequisite
+set without building. If it fails, complete the distribution setup below before
+running the launcher again.
+
 Photo codecs and ICC color management are Rust crates; no libjpeg-turbo,
 LittleCMS or HEIF system packages are needed.
 
@@ -29,8 +47,9 @@ On Fedora:
 ```bash
 sudo dnf install gcc gcc-c++ pkgconf-pkg-config python3 curl patch tar \
   gtk4-devel libadwaita-devel wayland-devel libpng-devel zlib-devel \
-  libffi-devel libmount-devel pcre2-devel \
-  meson ninja-build patchelf glslc sassc wayland-protocols-devel libdrm-devel vulkan-headers
+  libffi-devel libmount-devel pcre2-devel cairo-devel fontconfig-devel freetype-devel \
+  harfbuzz-devel fribidi-devel libthai-devel \
+  meson ninja-build patchelf glslc xz wayland-protocols-devel libdrm-devel vulkan-headers
 ```
 
 On Arch Linux or Omarchy:
@@ -49,7 +68,7 @@ GTK still requires its native toolkit libraries, fonts and Wayland/Vulkan
 interfaces. These are Linux host requirements, separate from the portable
 Rust core. Fedora splits development headers into `-devel` packages; Arch
 includes them with the libraries. `glslc` is provided by Fedora's `glslc`
-package and Arch's `shaderc` package. `sassc` is a build tool on both.
+package and Arch's `shaderc` package.
 
 ```bash
 pkg-config --modversion gtk4 libadwaita-1 wayland-client
@@ -488,14 +507,14 @@ gives it the application ID `art.capycanvas.CapyCanvas` and the `capycanvas`
 folders; every other build runs as `art.capycanvas.CapyCanvas.Devel` with
 `capycanvas-devel` folders, so it never shares a running instance or files with
 an installed package ([storage](../internals/storage.md)). It also builds a
-pinned GTK 4.24.1 with the [tablet patches](../../tools/build/gtk-runtime/README.md)
-and GLib 2.90.1, cached in
+pinned GTK 4.24.1 with the [tablet patches](../../tools/build/gtk-runtime/README.md),
+GLib 2.90.1 and Pango 1.58.2, cached in
 `target/gtk-runtime` (`CAPY_GTK_BUILD_DIR` overrides it). The `bin/capycanvas`
 executable finds the bundled `libgtk-4.so.1` through its embedded library path.
-System GTK and GLib are never replaced; libadwaita and the remaining dependencies
+System GTK, GLib and Pango are never replaced; libadwaita and the remaining dependencies
 stay system requirements, so this is a native bundle for compatible distributions. The
 [Flatpak](releasing.md#linux-flatpak) uses the GNOME runtime for those dependencies.
-`share/doc/capycanvas-gtk` carries the GTK and GLib sources,
+`share/doc/capycanvas-gtk` carries the GTK, GLib and Pango sources,
 patches, licenses, checksums and a rebuild script.
 
 The output holds the executable, desktop entry, AppStream metainfo, `.capy` MIME

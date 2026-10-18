@@ -4,10 +4,10 @@
 
 `capycanvas-git/` contains the AUR recipe and `.SRCINFO`. It builds upstream Git
 with desktop integration, runtime filters, original license notices and a private
-patched GTK 4.24.1 and GLib libraries. A Wayland session and a hardware Vulkan
-driver are required; older system GTK libraries remain untouched.
+patched GTK 4.24.1, GLib 2.90.1 and Pango 1.58.2 runtime. A Wayland session and a
+hardware Vulkan driver are required; older system GTK libraries remain untouched.
 
-The recipe downloads checksum-pinned GTK, GLib and codec sources through makepkg.
+The recipe downloads checksum-pinned GTK, GLib, Pango and codec sources through makepkg.
 `prepare()` fetches Rust dependencies and original license notices; compilation
 and checks run offline. Filters install under `/usr/share/capycanvas/filters`.
 The native packager strips application debug data; makepkg preserves the bundled

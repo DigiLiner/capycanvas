@@ -242,7 +242,8 @@ including build/dev dependencies and non-Linux targets. An allowed license is
 not permission to omit its copyright notices or other distribution conditions.
 
 The native frontend uses GTK, libadwaita and their system dependencies. Normal
-Linux packages include replaceable GTK 4.24.1 and GLib 2.90.1 libraries. GTK has
+Linux packages include replaceable GTK 4.24.1, GLib 2.90.1 and Pango 1.58.2 libraries,
+under LGPL-2.1-or-later. GTK has
 tablet-pad focus and pen-entry cursor fixes. The pad patch backports Jerome Abela's
 [GTK !10171](https://gitlab.gnome.org/GNOME/gtk/-/merge_requests/10171), commit
 `c6613dd0ad4e1bde77b6cd2e48cfcc80c8e63f33`, and extends its focus/device checks to

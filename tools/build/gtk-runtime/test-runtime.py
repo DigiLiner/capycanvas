@@ -12,6 +12,7 @@ import tempfile
 prefix, projects = map(lambda path: Path(path).resolve(), sys.argv[1:])
 library = prefix / 'lib/libgtk-4.so.1'
 libraries = [library, *[prefix / f'lib/lib{name}-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]]
+libraries += [prefix / f'lib/lib{name}-1.0.so.0' for name in ['pango', 'pangocairo', 'pangoft2']]
 for path in libraries:
     dynamic = subprocess.check_output(['readelf', '-d', str(path)], text=True)
     assert '(RUNPATH)' in dynamic and 'Library runpath: [$ORIGIN]' in dynamic, dynamic
@@ -25,6 +26,9 @@ for filename, digest in manifest['files'].items():
 for name in ['libtiff', 'libjpeg-turbo']:
     assert name in manifest['dependencies'], name
     assert f'share/doc/capycanvas-gtk/{name}/LICENSE.md' in manifest['files'], name
+assert manifest['dependencies']['pango']['version'] == '1.58.2'
+assert 'share/doc/capycanvas-gtk/sources/pango-1.58.2.tar.xz' in manifest['files']
+assert 'share/doc/capycanvas-gtk/pango/COPYING' in manifest['files']
 
 source = r'''
 #define _GNU_SOURCE
@@ -62,6 +66,18 @@ int main (int argc, char **argv)
   Dl_info info;
   g_assert_true (dladdr (dlsym (RTLD_DEFAULT, "gdk_texture_new_from_bytes"), &info));
   g_assert_cmpstr (realpath (info.dli_fname, NULL), ==, argv[1]);
+  g_assert_true (dladdr (dlsym (RTLD_DEFAULT, "pango_version"), &info));
+  g_assert_cmpstr (realpath (info.dli_fname, NULL), ==, argv[2]);
+  g_assert_cmpint (pango_version (), >=, 15802);
+  PangoContext *context = pango_font_map_create_context (pango_cairo_font_map_get_default ());
+  PangoLayout *layout = pango_layout_new (context);
+  pango_layout_set_text (layout, "Paint 日本語 العربية ภาษาไทย", -1);
+  int width, height;
+  pango_layout_get_pixel_size (layout, &width, &height);
+  g_assert_cmpint (width, >, 0);
+  g_assert_cmpint (height, >, 0);
+  g_object_unref (layout);
+  g_object_unref (context);
   const guint8 rgba[] = {255, 0, 0, 255, 255, 0, 0, 255,
                         255, 0, 0, 255, 255, 0, 0, 255};
   GBytes *pixels = g_bytes_new_static (rgba, sizeof rgba);
@@ -95,7 +111,8 @@ int main (int argc, char **argv)
 }
 '''
 flags = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'gtk4'], text=True))
-flags = [flag for flag in flags if flag not in ['-lgtk-4', '-lglib-2.0', '-lgobject-2.0', '-lgio-2.0', '-lgmodule-2.0', '-lgthread-2.0']]
+flags = [flag for flag in flags if flag not in ['-lgtk-4', '-lglib-2.0', '-lgobject-2.0', '-lgio-2.0', '-lgmodule-2.0', '-lgthread-2.0',
+                                               '-lpango-1.0', '-lpangocairo-1.0', '-lpangoft2-1.0']]
 with tempfile.TemporaryDirectory(prefix='capy-gtk-codecs-') as directory:
     test = Path(directory) / 'test.c'
     test.write_text(source)
@@ -106,11 +123,12 @@ with tempfile.TemporaryDirectory(prefix='capy-gtk-codecs-') as directory:
                     *map(str, libraries), *flags, '-ldl', '-Wl,-rpath,' + str(prefix / 'lib')], check=True)
     env = dict(os.environ)
     env.pop('LD_LIBRARY_PATH', None)
-    subprocess.run([str(executable), str(library)], env=env, check=True)
+    subprocess.run([str(executable), str(library), str(prefix / 'lib/libpango-1.0.so.0')], env=env, check=True)
     subprocess.run([sys.executable, '-c',
                     """import ctypes, os, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 names = ['libgtk-4.so.1', *['lib' + name + '-2.0.so.0' for name in ['glib', 'gobject', 'gio', 'gmodule', 'gthread']]]
+names += ['lib' + name + '-1.0.so.0' for name in ['pango', 'pangocairo', 'pangoft2']]
 for name in names:
     ctypes.CDLL(str(root / name), mode=os.RTLD_NOW | os.RTLD_GLOBAL)
 ctypes.CDLL('libadwaita-1.so.0', mode=os.RTLD_NOW)
@@ -120,4 +138,4 @@ for name in names:
     assert loaded == {str(root / name)}, (name, loaded)
 """, str(prefix / 'lib')],
                    env=env, check=True)
-    print('PASS: private GTK/GLib and system libadwaita resolve without LD_LIBRARY_PATH')
+    print('PASS: private GTK/GLib/Pango, multilingual layout and system libadwaita resolve without LD_LIBRARY_PATH')
