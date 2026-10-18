@@ -1615,3 +1615,52 @@ fn warp_selected_nodes_follow_one_pen_drag_without_repeating_shared_controls() {
     assert_eq!(s.engine.document(), &document);
 }
 
+
+#[test]
+fn transform_mode_and_grid_controls_do_not_wait_for_unrelated_backing() {
+    let mut s = filled_selection_session();
+    invoke(&mut s, CommandId::ScaleRotate);
+    let pose = s.engine.transform_preview().unwrap().transform.placement.outer;
+    let artwork = s.engine.document().artwork.clone();
+    let checkpoint = s.engine.checkpoint();
+    s.renderer_mut().settling = true;
+    for command in [CommandId::TransformWarp, CommandId::WarpGridFive] {
+        let context = s.state.canvas_bar.as_ref().unwrap().context;
+        s.dispatch(UiAction::CanvasBarEdit { context, action: Box::new(UiAction::Invoke { command }) }).unwrap();
+        assert!(s.command(command).selected);
+        assert!(s.deferred_edits.is_empty());
+        assert!(s.engine.raster_backing_pending());
+        assert_eq!(s.engine.transform_preview().unwrap().transform.placement.outer, pose);
+        assert_eq!(s.engine.document().artwork, artwork);
+        assert_eq!(s.engine.checkpoint(), checkpoint);
+    }
+    assert_eq!(s.warp_cells(), Some(layer_core::MeshMap::PRESETS[2]));
+    s.dispatch(UiAction::Invoke { command: CommandId::ApplyTransform }).unwrap();
+    assert!(!s.deferred_edits.is_empty(), "pixel publication still waits for backing");
+}
+
+#[test]
+fn transform_controls_do_not_overtake_an_earlier_held_contact() {
+    let mut s = filled_selection_session();
+    invoke(&mut s, CommandId::ScaleRotate);
+    let checkpoint = s.engine.checkpoint();
+    s.renderer_mut().settling = true;
+    s.renderer_mut().painting_unready = true;
+    let position = layer_core::Affine(s.state.camera.view().document_to_surface).map(Point { x: 200., y: 200. });
+    for (sequence, phase) in [(1, PenPhase::Down), (2, PenPhase::Up)] {
+        let mut input = event(&s, sequence, phase, 0.5); input.surface_position = position;
+        s.pen(input);
+    }
+    assert!(s.holding_input());
+    s.dispatch(UiAction::Invoke { command: CommandId::TransformWarp }).unwrap();
+    assert_eq!(s.deferred_edits.len(), 3);
+    s.frame(30_000_000, 30_000_000).unwrap();
+    assert!(s.command(CommandId::TransformFree).selected);
+    assert_eq!(s.deferred_edits.len(), 3);
+    s.renderer_mut().settling = false;
+    s.renderer_mut().painting_unready = false;
+    for frame in 4..8 { s.frame(frame * 10_000_000, frame * 10_000_000).unwrap(); }
+    assert!(!s.holding_input() && s.deferred_edits.is_empty());
+    assert!(s.command(CommandId::TransformWarp).selected, "{}; mode={:?}, contact={}", s.rendering_diagnostics(), s.transform_mode(), s.pen_contact);
+    assert_eq!(s.engine.checkpoint(), checkpoint);
+}

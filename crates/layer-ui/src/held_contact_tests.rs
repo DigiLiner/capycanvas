@@ -21,11 +21,14 @@ fn predicted(s: &UiSession<Recorder>, sequence: u64) -> PenEvent {
 }
 
 #[test]
-fn a_contact_held_for_painting_paints_before_the_edits_that_follow_it() {
+fn a_completed_contact_waits_for_painting_before_the_edits_that_follow_it() {
     let mut s = held_session();
     let committed = s.engine.metrics().committed_strokes;
     let diameter = s.state.brush.diameter;
     for (sequence, phase) in [(1, PenPhase::Down), (2, PenPhase::Move), (3, PenPhase::Up)] {
+        if phase == PenPhase::Up {
+            s.deferred_edits[0].held_since = Some(Instant::now() - HOLD - Duration::from_millis(1));
+        }
         s.pen(event(&s, sequence, phase, 0.5));
     }
     s.pen(predicted(&s, 4));
@@ -93,6 +96,20 @@ fn cancelled_expired_and_oversized_held_contacts_are_discarded() {
     s.pen(event(&s, 11 + HELD_SAMPLES as u64, PenPhase::Up, 0.5));
     settle(&mut s);
     assert_eq!(s.engine.metrics().committed_strokes, committed + 1, "the device paints again after its discarded contact ends");
+}
+
+#[test]
+fn completed_contacts_keep_the_held_queue_bounded() {
+    let mut s = held_session();
+    let committed = s.engine.metrics().committed_strokes;
+    for contact in 0..HELD_SAMPLES / 2 + 1 {
+        for (step, phase) in [(0, PenPhase::Down), (1, PenPhase::Up)] {
+            s.pen(event(&s, (contact * 2 + step) as u64, phase, 0.5));
+        }
+    }
+    assert_eq!(s.deferred_edits.len(), HELD_SAMPLES);
+    assert!(s.discarded_contacts.is_empty());
+    assert_eq!(s.engine.metrics().committed_strokes, committed);
 }
 
 #[test]

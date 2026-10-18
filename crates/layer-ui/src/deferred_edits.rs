@@ -36,6 +36,14 @@ fn configures_brush(action: &UiAction) -> bool {
     }
 }
 
+fn configures_transform(action: &UiAction) -> bool {
+    match action {
+        UiAction::ToolbarEdit { action, .. } | UiAction::CanvasBarEdit { action, .. } => configures_transform(action),
+        UiAction::Invoke { command } => matches!(transform_choice(*command), Some(TransformChoice::Mode(..) | TransformChoice::Cells(_))),
+        _ => false,
+    }
+}
+
 impl<R: CanvasRenderer> UiSession<R> {
     fn defer_edit(&mut self, input: EditInput) {
         self.queue_edit(input, None);
@@ -55,7 +63,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             return;
         }
         let holding = self.holding_input();
-        let contact_end = self.held_contact(event.device_id).filter(|_| !starts_contact(&event)).map(|start| {
+        let contact = self.held_contact(event.device_id).filter(|_| !starts_contact(&event));
+        if real(&event) && event.phase == PenPhase::Up && let Some(start) = contact {
+            self.deferred_edits[start].held_since = None;
+        }
+        let contact_end = contact.map(|start| {
             start + 1 + self.deferred_edits.iter().skip(start + 1)
                 .rposition(|edit| matches!(&edit.input, EditInput::Pen { event: queued, .. } if queued.device_id == event.device_id))
                 .map_or(0, |last| last + 1)
@@ -66,7 +78,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.deferred_edits.insert(position, edit);
         }
         let samples = self.deferred_edits.iter().filter(|edit| matches!(edit.input, EditInput::Pen { .. })).count();
-        if samples > HELD_SAMPLES && let Some(index) = self.deferred_edits.iter().position(|edit| edit.held_since.is_some()) {
+        if samples > HELD_SAMPLES && let Some(index) = self.deferred_edits.iter().position(|edit|
+            matches!(&edit.input, EditInput::Pen { event, .. } if starts_contact(event))) {
             self.discard_held_contact(index);
         }
         if holding != self.holding_input() { self.refresh_commands(); }
@@ -172,8 +185,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let history = matches!(action, UiAction::Invoke { command: CommandId::Undo | CommandId::Redo });
         !self.deferred_edits.is_empty() || self.painted_selections.busy()
             || (history && (self.region_tools.publishing_edit() || self.files.pending.is_some()))
-            || ((self.engine.raster_backing_pending() || self.engine.has_pending_input())
-                && !held_actions::selects_tool(action) && !configures_brush(action))
+            || (self.engine.raster_backing_pending() && !held_actions::selects_tool(action) && !configures_brush(action)
+                && !(configures_transform(action) && self.files.pending.is_none() && !self.region_tools.publishing_edit()))
+            || (self.engine.has_pending_input() && !held_actions::selects_tool(action) && !configures_brush(action))
     }
     pub(super) fn defers(&self, action: &UiAction) -> bool {
         self.deferrable(action) && self.edits_pending(action)
@@ -196,11 +210,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 deferred.pop_front();
                 continue;
             }
-            if self.engine.raster_backing_pending() || self.files.pending.is_some()
+            if (self.engine.raster_backing_pending()
+                && !matches!(&edit.input, EditInput::Action(action) if configures_transform(action))) || self.files.pending.is_some()
                 || matches!(&edit.input, EditInput::Pen { event, .. } if starts_contact(event) && !self.paint_ready())
                 || (matches!(&edit.input, EditInput::Action(action) if !configures_brush(action))
                     && (self.painted_selections.busy() || self.region_tools.publishing_edit()
-                        || self.engine.has_pending_input() || self.engine.has_active_stroke()))
+                        || self.input_pending || self.engine.has_pending_input() || self.engine.has_active_stroke()))
             {
                 break;
             }
