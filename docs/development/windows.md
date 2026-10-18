@@ -274,6 +274,16 @@ Choose Texture from the Paper row and from Properties: its size against Edit
 Color, keyboard choice, Cancel, Use Texture with one Undo, Rename and Delete
 in the open dialog, a seeded library paper scrolled into view and a refused
 Use Texture after the drawing changes.
+The Paper fixtures maximize their owned window and wait for two full rows in
+the Layers viewport before comparing row heights; UIA bounds are clipped to
+that viewport. Reacquire the current Layers list with bounded polling after
+selection changes, since WinUI can replace its automation peer.
+Read the pending choice with one selected-button query scoped to the active
+texture grid. Repeated full-window searches can exhaust the original polling
+deadline after the native selection has already changed.
+Compare `edit-color-dialog-frame` and `texture-dialog-frame`, since focusing a
+selected library texture can scroll its title out of view. The outer dialog
+peer includes the popup backdrop. Check the frame size again on that library reopen.
 Run `exercise-layer-pickup.ps1 -Executable <path> -Device mouse -Theme dark`;
 repeat with `-Device pen` and `-Device touch`, each with `-Theme light` too.
 The UIA helper resolves the current `layer-list` for row searches; explicit

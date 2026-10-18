@@ -13,6 +13,7 @@ inline ContentDialog pickerDialog(std::shared_ptr<WorkspaceData> const& data,Xam
     dialog.Resources().Insert(box_value(L"ContentDialogPadding"),box_value(Thickness{0,0,0,0}));
     dialog.Background(data->brush(L"dialog"));dialog.Content(root);
     AutomationProperties::SetAutomationId(dialog,id);
+    AutomationProperties::SetAutomationId(root,id+L"-frame");
     inheritLanguage(root,data);
     for(auto height:{GridLength{1,GridUnitType::Star},GridLength{1,GridUnitType::Auto}}){RowDefinition row;row.Height(height);root.RowDefinitions().Append(row);}
     root.Children().Append(page);Grid::SetRow(footer,1);root.Children().Append(footer);

@@ -167,6 +167,15 @@ try {
     $root=$native.window.Root;$drawingWindow=$native.window.Handle
     if(!@((Model).layout.groups|Where-Object {$_.active -eq 'layers'}).Count){Invoke 'Layers' -Name}
     if($Paper -or $PaperLight){
+        $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
+        $paperViewport=@{bounds=$null;stable=0}
+        $paperScale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+        Wait-Until {
+            $list=Find 'layer-list' -Visible;$bounds=if($list){$list.Current.BoundingRectangle}else{$null}
+            if(!$bounds -or $bounds.IsEmpty -or $bounds.Height/$paperScale -lt 80){$paperViewport.stable=0;return $false}
+            if($bounds -eq $paperViewport.bounds){$paperViewport.stable++}else{$paperViewport.bounds=$bounds;$paperViewport.stable=0}
+            $paperViewport.stable -ge 2
+        } 'Paper row geometry requires a stable viewport for two 40-DIP rows'
         . (Join-Path $PSScriptRoot 'layer-relationships.ps1')
         Test-LayerPaper -Light:$PaperLight
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved

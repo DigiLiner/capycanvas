@@ -43,7 +43,7 @@ function Seed-PaperLibrary{
 }
 function Texture-Visible([int]$Index,$Edit,[double]$Scale){
     $tile=(Control "texture-tile-$Index" -Arranged).Current;$cancel=(Control 'texture-cancel' -Arranged).Current.BoundingRectangle;$r=$tile.BoundingRectangle
-    !$tile.IsOffscreen -and $r.Top -ge $Edit.top-20*$Scale-1 -and $r.Bottom -le $cancel.Top-17*$Scale+1
+    !$tile.IsOffscreen -and $r.Top -ge $Edit.top-1 -and $r.Bottom -le $cancel.Top-17*$Scale+1
 }
 function Texture-Paper{@((Model).state.layers|Where-Object {$_.paper})[-1]}
 function Texture-Control{@((Model).state.layer_properties.controls|Where-Object {$_.paper})[0]}
@@ -59,16 +59,28 @@ function Texture-Click([string]$Id){
 }
 function Texture-Closed([string]$Message){Wait-Until {!(Find 'texture-apply')} $Message}
 function Texture-Pending{
-    $count=(Texture-Tiles).Count
-    for($i=0;$i -lt $count;$i++){$tile=Find "texture-tile-$i";if($tile -and $tile.Current.ItemStatus -eq 'Selected'){return $i}}
+    $grid=Find 'texture-grid' -Visible
+    if(!$grid){return -1}
+    $selected=[System.Windows.Automation.AndCondition]::new(
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Button),
+        [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ItemStatusProperty,'Selected'))
+    foreach($tile in $grid.FindAll([System.Windows.Automation.TreeScope]::Descendants,$selected)){
+        if($tile.Current.AutomationId -match '^texture-tile-([0-9]+)$'){return [int]$Matches[1]}
+    }
     -1
 }
 function Texture-Ready{
     Wait-Until {$tiles=Texture-Tiles;$tiles.Count -and !@(0..($tiles.Count-1)|Where-Object {$tiles[$_].id -and (Find "texture-preview-$_").Current.ItemStatus -ne 'Ready'}).Count} 'Texture previews did not load' 30
 }
-function Texture-Span([string]$Prefix){
-    $title=(Control "$Prefix-title" -Arranged).Current.BoundingRectangle;$apply=(Control "$Prefix-apply" -Arranged).Current.BoundingRectangle
-    [ordered]@{top=$title.Top;bottom=$apply.Bottom;right=$apply.Right;height=$apply.Bottom-$title.Top;button=$apply.Height}
+function Texture-Span([string]$Prefix,$Expected){
+    $frame=Control "$Prefix-dialog-frame" -Arranged
+    $null=Control "$Prefix-title" -Within $frame
+    $bounds=$frame.Current.BoundingRectangle;$window=$root.Current.BoundingRectangle
+    $apply=(Control "$Prefix-apply" -Within $frame -Arranged).Current.BoundingRectangle
+    if($frame.Current.ClassName -eq 'Popup' -or !$bounds.Contains($apply) -or $bounds.Width -ge $window.Width -or $bounds.Height -ge $window.Height){throw 'Picker geometry requires the dialog frame inside its owned window'}
+    $span=[ordered]@{top=$bounds.Top;bottom=$bounds.Bottom;right=$bounds.Right;height=$bounds.Height;button=$apply.Height;class=$frame.Current.ClassName}
+    if($Expected -and ([Math]::Abs($span.height-$Expected.height) -gt 1 -or [Math]::Abs($span.right-$Expected.right) -gt 1)){throw "Choose Texture is not the size of Edit Color: $($span.height) vs $($Expected.height)"}
+    $span
 }
 function Texture-Menu([int]$Index,[string]$Op){
     $tile=(Control "texture-tile-$Index" -Arranged).Current.BoundingRectangle
@@ -98,10 +110,9 @@ function Test-PaperTexture{
     Texture-Ready;$revision=(Model).state.document_file.revision
     $tiles=Texture-Tiles;$current=[int](Texture-Control).value.value
     if((Texture-Pending) -ne $current){throw 'Choose Texture did not start on the current texture'}
-    $span=Texture-Span 'texture'
+    $span=Texture-Span 'texture' $edit
     $preview=(Control "texture-preview-$current" -Arranged).Current.BoundingRectangle
     [ordered]@{edit_color=$edit;texture=$span;preview=$preview;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run "texture-dialog-geometry-$theme.json")
-    if([Math]::Abs($span.height-$edit.height) -gt 1 -or [Math]::Abs($span.right-$edit.right) -gt 1){throw "Choose Texture is not the size of Edit Color: $($span.height) vs $($edit.height)"}
     if([Math]::Abs($span.button/$scale-34) -gt .5 -or [Math]::Abs($preview.Width/$scale-96) -gt .5){throw 'Footer buttons or texture previews are not at their native size'}
     Capture "texture-dialog-$theme" -WithModel
     Wait-Until {(Control "texture-tile-$current").Current.HasKeyboardFocus} 'The pending tile did not take keyboard focus'
@@ -172,7 +183,7 @@ function Test-PaperTexture{
         Texture-Open "layer-texture-$paper"
         if((Texture-Pending) -ne $library){throw 'Choose Texture did not start on the library paper'}
         Wait-Until {Texture-Visible $library $edit $scale} 'Choose Texture did not scroll the pending library paper into view'
-        Texture-Ready;Capture "texture-dialog-library-$theme" -WithModel
+        Texture-Ready;$null=Texture-Span 'texture' $edit;Capture "texture-dialog-library-$theme" -WithModel
         Invoke 'texture-cancel';Texture-Closed 'Cancel did not close Choose Texture on the library paper'
         Relationship-Undo
         Wait-Until {(Relationship-Layer $paper).paper.id -eq $original} 'One Undo did not restore the texture after the library paper'
@@ -200,9 +211,13 @@ function Test-PaperTexture{
     if((Relationship-Layer $paper).paper.id -ne $original){throw 'The texture journey left the texture changed'}
 }
 function Paper-Geometry {
-    $button=Control 'layer-add-paper' -Arranged
+    $list=Control 'layer-list'
+    $viewport=$list.Current.BoundingRectangle
+    if($list.Current.IsOffscreen -or $viewport.IsEmpty -or $viewport.Width -le 0 -or $viewport.Height -le 0){$list=Find 'layer-list' -Visible}
+    if(!$list){throw 'Paper geometry requires the current visible layer list'}
+    $button=Control 'layer-add-paper' -Within $list -Arranged
     $last=@((Model).state.layers)[-1]
-    $row=Control "layer-row-$($last.id)" -Arranged
+    $row=Control "layer-row-$($last.id)" -Within $list -Arranged
     $b=$button.Current.BoundingRectangle;$r=$row.Current.BoundingRectangle
     @{button=$b;last_row=$r;theme=(Model).state.theme}|ConvertTo-Json|Set-Content (Join-Path $run "paper-geometry-$((Model).state.theme).json")
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
@@ -277,14 +292,16 @@ function Test-LayerPaper([switch]$Light) {
         Relationship-Undo
         $first=$inserted[-1];$last=$inserted[0]
         Relationship-Layers
-        $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        $list=Control 'layer-list' -Arranged
+        $scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
         $scroll.SetScrollPercent(-1,0)
-        $null=Control "layer-$first-name" -Arranged;Invoke "layer-$first-name"
+        $null=Control "layer-$first-name" -Within $list -Arranged;Invoke "layer-$first-name"
         Wait-Until {(Model).state.layer_tools.editing_layer.id -eq $first} 'Cleanup range anchor did not select'
-        $scroll=(Control 'layer-list').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+        $list=Control 'layer-list' -Arranged
+        $scroll=$list.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
         $scroll.SetScrollPercent(-1,100)
-        $endpoint=Control "layer-$last-name" -Arranged
-        $viewport=(Control 'layer-list').Current.BoundingRectangle
+        $endpoint=Control "layer-$last-name" -Within $list -Arranged
+        $viewport=$list.Current.BoundingRectangle
         if($endpoint.Current.BoundingRectangle.Top -lt $viewport.Top -or $endpoint.Current.BoundingRectangle.Bottom -gt $viewport.Bottom){throw 'Cleanup range endpoint is outside the list viewport'}
         $bounds=$endpoint.Current.BoundingRectangle
         [CapyRowPointer]::Hover([int]($bounds.X+$bounds.Width/2),[int]($bounds.Y+$bounds.Height/2))
