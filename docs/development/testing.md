@@ -610,10 +610,6 @@ are your task, and remove an entry when you fix it.
   unmodified `8a819ffa1` passes the light-theme calibrations, then a later save
   finds no `document` request (`NoSuchElementException` at
   `CapyDeviceTest.kt:360`) on MovinkPad 11 and Huion Kamvas Pad 12.
-- Headed Web `--tonal-controls` on unmodified `8a819ffa1`: Auto leaves the
-  bounded-range fixture unchanged ("Valid Auto changes the uncorrected
-  bounded-range fixture"), and `LAYER_TONAL_PHASE=calibration` cannot find
-  `.curve-editor circle:nth-child(2)` after reopening the drawing.
 - Windows `exercise-layers.ps1` on Iris Xe fails "Outer editing edge did not use
   the accent color": the PrintWindow thumbnail probe reads `#A94EC1` for palette
   `#A94DC1`. The `-Relationships` variant passes that check in dark theme, then
