@@ -31,6 +31,14 @@ brushes, resolution model and library that use the result.
   features longer than about 5 mm get no more than a few micrometers; formation
   clouds and cockling are not tooth. A large-scale term makes whole patches of
   the sheet unreachable and shows as blotches in every stroke.
+- **Give each surface its own fine tooth.** A contact breaks up only where
+  heights vary across the tip. Relief made of plateaus, sparse fibers or
+  features near the tip's size engages the whole contact at once and fills it
+  solid. Every program models what its sheet is made of below about 0.3 mm:
+  cotton fibers and felt imprints, calendered pores, laid grain, grit, kozo
+  fibers or pulp clumps. Its depth sets how soon the paper fills under
+  pressure; smooth papers have less of it, not none. At 300 ppi a texel is
+  85 µm, so fibers are drawn as bundles about a texel wide.
 - **Only what the surfaces need.** There are no stages, buffers, image inputs or
   user programs. Each was checked against the ten surfaces below; see
   [decisions](#decisions).
@@ -312,8 +320,10 @@ amplitudes are tooth depths tuned by eye, not measurements
 ([measurements](paper.md#measurements)). Drawing paper has the height spread of
 the paper the app had before Paper, so each dry-media brush keeps its tooth
 contrast; the other papers were tuned against it in the
-[paper gallery](#validation-and-tests). Each 300 ppi tile bakes in under 4 ms
-on an NVIDIA RTX PRO 6000; mobile bake times are not measured.
+[paper gallery](#validation-and-tests). Bristol and hot press fill sooner than
+Drawing paper; rough, handmade and canvas leave more paper white. Each 300 ppi
+tile bakes in under 4 ms on an NVIDIA RTX PRO 6000; mobile bake times are not
+measured.
 
 ### Hot-press, cold-press and rough watercolor
 
@@ -322,8 +332,8 @@ Rough is never rolled, cold press passes cold rollers and hot press passes hot
 rollers, which flatten the felt peaks
 ([Jackson's Art](https://www.jacksonsart.com/a-guide-to-paper)). One program
 models the felt as warped cell mounds that pressing flattens to a plateau, with
-fine grain and cotton fibers on top; once pressing has erased the felt, the
-grain and fibers remain.
+cotton fibers and the curly imprints of the felt's wool on top. Pressing
+flattens the fibers with the felt, so hot press keeps faint, flush fibers.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -343,10 +353,10 @@ fn capy_watercolor(p: vec2f, b: u32) -> f32 {
     let cells = tx_cells(q, vec2f(felt), 0.9, seed + 1u);
     let mounds = 1.0 - cells.x * cells.x;
     let tooth = tx_fbm(p, vec2f(0.3 * felt), 3u, seed + 2u);
-    let pressed = tx_smin(mounds, mix(1.2, 0.4, pressing), mix(0.25, 0.6, pressing)) + 0.35 * tooth;
-    let grain = tx_fbm(p, vec2f(0.25), 3u, seed + 3u);
-    let fibers = tx_fibers(p, 1.0, 0.02, 2.0, 0.0, 0.0, 0.4, seed + 4u);
-    return mix(120.0, 10.0, pressing) * pressed + mix(16.0, 4.0, pressing) * grain + 10.0 * fibers;
+    let pressed = tx_smin(mounds, mix(1.2, 0.4, pressing), mix(0.25, 0.6, pressing)) + mix(0.6, 0.35, pressing) * tooth;
+    let cotton = tx_smin(tx_fibers(p, 2.0, 0.08, 2.0, 0.0, 0.0, 0.5, seed + 3u), mix(1.0, 0.2, pressing), 0.15);
+    let wool = tx_fibers(q, 3.0, 0.1, 1.0, 0.0, 0.0, 1.0, seed + 4u);
+    return mix(120.0, 10.0, pressing) * pressed + mix(40.0, 44.0, pressing) * cotton - mix(30.0, 16.0, pressing) * wool;
 }
 ```
 
@@ -364,7 +374,7 @@ slightly stretched fine tooth, partly aligned fibers and a calender plateau.
 | `finish` | % | 0–100 | 35 |
 | `seed` | count | 0–16777215 | 1 |
 
-Presets: Drawing paper (`tooth` 0.35, `finish` 35), Bristol (0.2, 90). Period
+Presets: Drawing paper (`tooth` 0.35, `finish` 35), Bristol (0.2, 55). Period
 64 mm.
 
 ```wgsl
@@ -386,7 +396,9 @@ thicker pulp beside them. Across 205 Rembrandt sheets the mean chain spacing is
 24.8 mm, with a spread of 0.86 mm within a sheet
 ([Johnson et al.](https://people.ece.cornell.edu/johnson/JSEH.pdf)). Laid lines
 run at roughly one per millimeter. Jittered line positions give the irregular
-spacing; a whole number of chain intervals fits the 175 mm period.
+spacing; a whole number of chain intervals fits the 175 mm period. The pulp
+grain is streaked along the laid wires, so the laid lines stay the dominant
+pattern.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -404,8 +416,9 @@ fn capy_laid(p: vec2f, b: u32) -> f32 {
     let wires = tx_lines(p, laid, 0.04, laid, 0.04, seed);
     let chains = tx_lines(p.yx, chain, 0.06, 0.6, 0.15, seed + 1u);
     let shadow = exp(-pow(chains.y / 3.0, 2.0));
-    let felt = tx_fbm(tx_warp(p, 0.3, vec2f(1.5), seed + 2u), vec2f(0.7), 4u, seed + 3u);
-    return 12.0 * wires.x * (1.0 - chains.x) - 8.0 * chains.x + 5.0 * shadow + 10.0 * felt;
+    let felt = tx_fbm(tx_warp(p, 0.3, vec2f(1.5), seed + 2u), vec2f(0.7), 3u, seed + 3u);
+    let grain = tx_fbm(p, vec2f(0.15, 0.6), 2u, seed + 4u);
+    return 22.0 * wires.x * (1.0 - chains.x) - 8.0 * chains.x + 5.0 * shadow + 14.0 * felt + 26.0 * grain;
 }
 ```
 
@@ -416,7 +429,7 @@ lines" that accepts heavy layering
 ([Canson](https://en.canson.com/expert-advice/selecting-your-pastel-paper));
 its geometry is unpublished. The program places two staggered oval dimples in
 each cell, so the stagger survives any whole number of rows, and leaves rims
-between them.
+of felted fibers between them.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -444,8 +457,8 @@ fn capy_honeycomb(p: vec2f, b: u32) -> f32 {
             }
         }
     }
-    let felt = tx_fbm(p, vec2f(0.3 * pitch), 3u, seed + 2u);
-    return 30.0 * (1.0 - dimple) + 8.0 * felt;
+    let felt = tx_fibers(p, pitch, 0.05, 6.0, 0.0, 0.0, 0.6, seed + 2u);
+    return 40.0 * (1.0 - dimple) + 25.0 * felt;
 }
 ```
 
@@ -473,7 +486,7 @@ fn capy_sanded(p: vec2f, b: u32) -> f32 {
     let size = 0.6 + 0.8 * grains.z;
     let grain = size * tx_thread(grains.x, 0.6 * size);
     let binder = tx_fbm(p, vec2f(0.5), 3u, seed + 1u);
-    return 22.0 * tx_smin(1.3 * grain, 0.75, 0.2) + 6.0 * binder;
+    return 40.0 * tx_smin(1.3 * grain, 0.9, 0.2) + 8.0 * binder;
 }
 ```
 
@@ -484,7 +497,9 @@ Kozo fibers average 10 mm long and 25–35 µm wide
 Unryu adds long fibers "swirled onto the wet kozo"
 ([Legion Paper](https://legionpaper.com/unryu)). Fibers are gathered from
 neighboring cells; the swirled strands are ordinary fibers drawn in warped
-coordinates, which bends them along the warp field.
+coordinates, which bends them along the warp field. The surface is a web of
+fiber bundles over soft pulp, partly aligned in one direction, as fibers settle
+when the sheet is formed by rocking the mould.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
@@ -502,10 +517,10 @@ fn capy_washi(p: vec2f, b: u32) -> f32 {
     let density = fx_parameter(b, 1u).x;
     let strands = fx_parameter(b, 2u).x / 100.0;
     let seed = u32(fx_parameter(b, 3u).x);
-    let pulp = tx_fbm(p, vec2f(0.5), 3u, seed + 2u);
-    let fibers = tx_fibers(p, fiber, 0.03, density, 0.0, 0.0, 0.5, seed + 3u);
+    let pulp = tx_fbm(p, vec2f(0.4), 3u, seed + 2u);
+    let fibers = tx_fibers(p, 0.6 * fiber, 0.1, 1.5 * density, 0.0, 0.5, 0.4, seed + 3u);
     let swirl = tx_fibers(tx_warp(p, 6.0, vec2f(30.0), seed + 4u), 4.0 * fiber, 0.3, 0.01 * strands, 0.0, 0.0, 1.0, seed + 5u);
-    return 10.0 * pulp + 8.0 * fibers + 12.0 * swirl;
+    return 22.0 * pulp + 18.0 * fibers + 16.0 * swirl;
 }
 ```
 
@@ -514,8 +529,9 @@ fn capy_washi(p: vec2f, b: u32) -> f32 {
 Inclusions are mixed into the vat or sprinkled on and covered with a thin
 second layer of pulp before the sheet air-dries
 ([Atlas of Making](https://atlasofmaking.kenjiliu.com/papers/leaf-paper)).
-Irregular, warped pulp gives the uneven surface; each sparse cell may hold one
-petal or seed, and offsetting its signed distance drapes pulp past its edge.
+Irregular, warped pulp gives the uneven surface, with pulp clumps of many sizes
+and coarse plant fibers; each sparse cell may hold one petal or seed, and
+offsetting its signed distance drapes pulp past its edge.
 Inclusions stay low so that pencil reaches the pulp around them.
 
 | Parameter | Unit | Range | Default |
@@ -531,7 +547,9 @@ fn capy_handmade(p: vec2f, b: u32) -> f32 {
     let amount = fx_parameter(b, 0u).x / 100.0;
     let size = fx_parameter(b, 1u).x;
     let seed = u32(fx_parameter(b, 2u).x);
-    let felt = tx_fbm(tx_warp(p, 0.8, vec2f(3.0), seed), vec2f(1.6), 5u, seed + 2u);
+    let q = tx_warp(p, 1.2, vec2f(2.0), seed);
+    let fine = tx_fbm(q, vec2f(0.7), 4u, seed + 7u);
+    let felt = (tx_noise(q, vec2f(1.6), seed + 2u) + 0.9375 * fine) / 1.9375;
     let g = tx_grid(vec2f(3.0 * size));
     let c = tx_cell(g, p);
     var lump = 0.0;
@@ -547,8 +565,9 @@ fn capy_handmade(p: vec2f, b: u32) -> f32 {
             lump = max(lump, (0.4 + 0.6 * s.z) * smoothstep(0.5 * size, -0.2 * size, shape));
         }
     }
-    let fibers = tx_fibers(p, 2.5, 0.03, 2.0, 0.0, 0.0, 0.4, seed + 5u);
-    return 34.0 * felt + 14.0 * lump + 10.0 * fibers;
+    let fibers = tx_fibers(p, 2.5, 0.08, 3.0, 0.0, 0.0, 0.6, seed + 5u);
+    let flocs = abs(fine - 0.2);
+    return 40.0 * felt + 20.0 * lump + 20.0 * fibers + 92.0 * flocs;
 }
 ```
 

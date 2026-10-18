@@ -16,6 +16,6 @@ fn capy_honeycomb(p: vec2f, b: u32) -> f32 {
             }
         }
     }
-    let felt = tx_fbm(p, vec2f(0.3 * pitch), 3u, seed + 2u);
-    return 30.0 * (1.0 - dimple) + 8.0 * felt;
+    let felt = tx_fibers(p, pitch, 0.05, 6.0, 0.0, 0.0, 0.6, seed + 2u);
+    return 40.0 * (1.0 - dimple) + 25.0 * felt;
 }

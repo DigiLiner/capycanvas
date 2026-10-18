@@ -2,7 +2,9 @@ fn capy_handmade(p: vec2f, b: u32) -> f32 {
     let amount = fx_parameter(b, 0u).x / 100.0;
     let size = fx_parameter(b, 1u).x;
     let seed = u32(fx_parameter(b, 2u).x);
-    let felt = tx_fbm(tx_warp(p, 0.8, vec2f(3.0), seed), vec2f(1.6), 5u, seed + 2u);
+    let q = tx_warp(p, 1.2, vec2f(2.0), seed);
+    let fine = tx_fbm(q, vec2f(0.7), 4u, seed + 7u);
+    let felt = (tx_noise(q, vec2f(1.6), seed + 2u) + 0.9375 * fine) / 1.9375;
     let g = tx_grid(vec2f(3.0 * size));
     let c = tx_cell(g, p);
     var lump = 0.0;
@@ -18,6 +20,7 @@ fn capy_handmade(p: vec2f, b: u32) -> f32 {
             lump = max(lump, (0.4 + 0.6 * s.z) * smoothstep(0.5 * size, -0.2 * size, shape));
         }
     }
-    let fibers = tx_fibers(p, 2.5, 0.03, 2.0, 0.0, 0.0, 0.4, seed + 5u);
-    return 34.0 * felt + 14.0 * lump + 10.0 * fibers;
+    let fibers = tx_fibers(p, 2.5, 0.08, 3.0, 0.0, 0.0, 0.6, seed + 5u);
+    let flocs = abs(fine - 0.2);
+    return 40.0 * felt + 20.0 * lump + 20.0 * fibers + 92.0 * flocs;
 }

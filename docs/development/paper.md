@@ -38,7 +38,8 @@ the library, rendering, saved data and what each host has.
    or export.
 4. **Draw.** Pencils, charcoal, pastels and textured paint brushes catch the
    tooth. Texture strength in Tool Settings still sets how much a brush reacts.
-   Hot press barely breaks a pencil line; rough breaks it everywhere.
+   Bristol and hot press break a pencil line only lightly; rough breaks it
+   everywhere.
 5. **Import a paper.** Import… in the picker accepts an image file, adds it to
    the library and applies it.
 6. **Resize, crop, rotate or flip the image.** The tooth stays attached to the
@@ -183,7 +184,10 @@ any other Paper bakes it into paint, as for any fill.
 - **Calibration.** Drawing paper gives every dry-media brush the tooth contrast
   of the single built-in paper that preceded Paper, so a 300 ppi drawing keeps
   its pencil, charcoal, chalk, pastel and crayon character. The other papers
-  were tuned against it with every dry-media brush at three pressures. Program
+  were tuned against it with every dry-media brush at three pressures. Every
+  paper has tooth finer than a pencil tip, shaped like its own surface, so
+  none fills a contact solid at medium pressure; smooth papers fill sooner,
+  rough ones later. Program
   heights are tooth depths: a pencil reaches about 30–50 µm below the paper's
   middle, so deeper valleys stay white at any pressure.
 - **Previews.** Toolbar strength and slider previews read the active drawing's
