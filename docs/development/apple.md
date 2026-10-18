@@ -658,10 +658,14 @@ from the render queue. Check minimize/restore with retained pixels and history,
 and inspect Main Thread Checker output when changing this boundary.
 
 Metal surface configuration runs inside a balanced Core Animation transaction
-with implicit actions disabled. The render worker commits after releasing the
-layer lock, including error returns and Rust unwinding; it needs no run loop to
-publish attach, resize or color-format changes. `tests/managed-display.swift`
-observes the real background layer setter and checks the scoped transaction,
-rendered pixels, display tags, resize, layer replacement and unchanged saved
-artwork for both Apple policies. Retain `CA_DEBUG_TRANSACTIONS=1` diagnostics when
-checking this boundary, and measure affected resize motion in Release.
+with implicit actions disabled. View-backed layers configure and commit on the
+main queue; standalone layers configure on their calling owner without a run
+loop. The layer lock is released before dispatch and before transaction commit,
+including error returns and Rust unwinding. Rendering, pipeline creation and
+drawable acquisition stay on the render owner. `tests/metal-layer-threading.swift`
+checks the actual setters' thread and transaction scope on view-backed and
+standalone layers, including resized reattachment, without opening a window.
+`tests/managed-display.swift` retains its standalone background-setter, rendered
+pixel, display-tag, resize, layer-replacement and unchanged saved-artwork checks
+for both Apple policies. Retain `CA_DEBUG_TRANSACTIONS=1` diagnostics when checking
+this boundary, and measure affected resize motion in Release.

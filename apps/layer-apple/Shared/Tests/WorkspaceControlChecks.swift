@@ -22,9 +22,8 @@ extension XCTestCase {
     }
     @MainActor func workspaceActivate(_ element: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
-        #if os(macOS)
         if element.isHittable {
-            element.click()
+            element.clickOrTap()
         } else {
             // SwiftUI's offset controls inside a scroll view can have a valid
             // visible frame without an XCTest hit point. Use measured editor
@@ -37,11 +36,8 @@ extension XCTestCase {
                 return
             }
             window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-                dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY)).click()
+                dx: frame.midX - window.frame.minX, dy: frame.midY - window.frame.minY)).clickOrTap()
         }
-        #else
-        element.tap()
-        #endif
     }
     @MainActor private func workspaceText(_ field: XCUIElement, _ value: String) {
         workspaceActivate(field)

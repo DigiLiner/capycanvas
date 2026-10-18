@@ -3262,6 +3262,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "cfg_aliases",
+ "dispatch2",
  "gpu-allocator",
  "hashbrown 0.17.1",
  "libc",

@@ -109,6 +109,7 @@ gles = [
 ]
 internal_error_panic = []
 metal = [
+    "dep:dispatch2",
     "naga/msl-out",
     "dep:arrayvec",
     "dep:block2",
@@ -389,6 +390,12 @@ features = [
     "min_const_generics",
 ]
 optional = true
+
+[target.'cfg(target_vendor = "apple")'.dependencies.dispatch2]
+version = "0.3.1"
+features = ["std"]
+optional = true
+default-features = false
 
 [target.'cfg(target_vendor = "apple")'.dependencies.objc2]
 version = "0.6.3"

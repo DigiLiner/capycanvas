@@ -146,10 +146,22 @@ precision, publication, rendering or presentation algorithm is changed.
 `wgpu-metal-layer-transactions.patch` wraps Metal surface configuration in an
 explicit Core Animation transaction with implicit actions disabled. A scope guard
 commits after releasing the layer mutex, including on early return or Rust
-unwind. Render workers need no run loop to commit layer configuration; attach,
+unwind. Standalone layers need no run loop to commit configuration; attach,
 resize, color-format changes and surface recovery use the same path. The managed
 display fixture observes the real background layer setter and retains its pixel,
 color-tag, resize and saved-document assertions.
+
+`wgpu-metal-view-backed-configuration.patch` extends that transaction fix for
+layers backed by UIKit or AppKit views. It recognizes `UIView`/`NSView` delegates
+on the layer or its ancestors and synchronously configures those layer properties
+and commits their transaction on the main queue. The layer mutex is released
+before dispatch and before transaction commit. Rust panics are caught inside the
+main-queue callback and resumed on the calling owner, preserving its error
+boundary without unwinding through the dispatch C callback. Standalone layers and layers with
+non-view delegates configure directly on their calling thread. Drawable acquisition,
+pipeline creation and GPU work remain on the render owner; no per-frame main-queue
+handoff is added. The Metal-only `dispatch2` dependency uses its synchronous queue
+API with the already pinned registry version.
 
 `wgpu-metal-main-thread.patch` prevents Metal surface acquisition on a render
 worker from querying an AppKit view or window. The hosting-window helper only

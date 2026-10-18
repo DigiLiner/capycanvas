@@ -251,20 +251,25 @@ impl Drop for LayerConfiguration {
     }
 }
 
-impl crate::Surface for super::Surface {
-    type A = super::Api;
+fn layer_is_view_backed(start: Retained<objc2_quartz_core::CALayer>) -> bool {
+    let classes = [objc2::runtime::AnyClass::get(c"UIView"), objc2::runtime::AnyClass::get(c"NSView")];
+    let mut current = Some(start);
+    while let Some(layer) = current {
+        if let Some(delegate) = layer.delegate() {
+            if classes.iter().flatten().any(|class| delegate.isKindOfClass(class)) { return true; }
+        }
+        current = layer.superlayer();
+    }
+    false
+}
 
-    unsafe fn configure(
+impl super::Surface {
+    unsafe fn configure_layer(
         &self,
         device: &super::Device,
         config: &crate::SurfaceConfiguration,
     ) -> Result<(), crate::SurfaceError> {
-        log::debug!("build swapchain {config:?}");
-
         let caps = &device.shared.private_texture_format_caps;
-        *self.swapchain_format.write() = Some(config.format);
-        *self.extent.write() = config.extent;
-
         CATransaction::begin();
         let _transaction = LayerConfiguration;
         CATransaction::setDisableActions(true);
@@ -356,6 +361,38 @@ impl crate::Surface for super::Surface {
         }
 
         Ok(())
+    }
+}
+
+impl crate::Surface for super::Surface {
+    type A = super::Api;
+
+    unsafe fn configure(
+        &self,
+        device: &super::Device,
+        config: &crate::SurfaceConfiguration,
+    ) -> Result<(), crate::SurfaceError> {
+        log::debug!("build swapchain {config:?}");
+        *self.swapchain_format.write() = Some(config.format);
+        *self.extent.write() = config.extent;
+        let view_backed = {
+            let layer = self.render_layer.lock();
+            layer_is_view_backed(Retained::into_super(layer.clone()))
+        };
+        if view_backed && objc2::MainThreadMarker::new().is_none() {
+            let mut result = None;
+            dispatch2::DispatchQueue::main().exec_sync(|| {
+                result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                    self.configure_layer(device, config)
+                })));
+            });
+            match result.unwrap() {
+                Ok(result) => result,
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        } else {
+            unsafe { self.configure_layer(device, config) }
+        }
     }
 
     unsafe fn unconfigure(&self, _device: &super::Device) {
