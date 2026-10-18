@@ -484,6 +484,12 @@ checks the asynchronous packet boundary.
 These fail on `main` independently of your change. Don't chase them unless they
 are your task, and remove an entry when you fix it.
 
+- On Apple Metal, `saved_artwork_render_contracts` fails the Painterly reference
+  comparison: maximum error 0.129347831, RMS 0.005649724. The unchanged stock
+  shader produces the same output. Near-equal variance scores select different
+  neighborhoods from the NVIDIA Vulkan reference; the original images and
+  tolerances remain required.
+
 - `layer-render-wgpu --test merge`: seven of nine tests fail pixel comparisons
   on an unmodified `b3f6f8e51` export, with maximum differences of 56–166 U8
   codes. Stroke-only, adjustment, clipping, merge, hidden-pixel and placed-photo

@@ -5,8 +5,13 @@ import QuartzCore
 
 struct MetalCanvas: UIViewRepresentable {
     let store: EditorStore
-    func makeUIView(context: Context) -> CanvasView { CanvasView(store: store) }
-    func updateUIView(_ view: CanvasView, context: Context) {}
+    @Environment(\.scenePhase) private var phase
+    func makeUIView(context: Context) -> CanvasView {
+        let view = CanvasView(store: store)
+        view.setSceneActive(phase == .active)
+        return view
+    }
+    func updateUIView(_ view: CanvasView, context: Context) { view.setSceneActive(phase == .active) }
     static func dismantleUIView(_ view: CanvasView, coordinator: ()) { view.stop() }
 }
 
@@ -17,6 +22,7 @@ final class CanvasView: UIView {
     private var screenReport: ScreenReport?
     private static let longPress = UILongPressGestureRecognizer()
     private lazy var frames = CanvasFrameDriver(store: store)
+    private var sceneActive = false
     private var attached = false
     private var drawableExtent = CGSize.zero
     private var sceneGeometry: NSKeyValueObservation?
@@ -70,6 +76,7 @@ final class CanvasView: UIView {
             self.becomeFirstResponder()
         }
         store.interruptInput = { [weak self] in self?.interruptContacts() }
+        frames.canPresent = { [weak self] in self?.sceneActive == true && self?.window != nil }
         frames.setPaused = { [weak self] paused in self?.displayLink?.isPaused = paused }
         frames.submittedViewport = { [weak self] in self?.updateAccessibility() }
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)),
@@ -202,6 +209,11 @@ final class CanvasView: UIView {
         displayLink?.invalidate(); displayLink = nil
         if attached { store.native?.detach(); attached = false }
         contacts.removeAll(); ignoredContacts.removeAll()
+    }
+    func setSceneActive(_ active: Bool) {
+        guard sceneActive != active else { return }
+        sceneActive = active
+        wake()
     }
     func wake() { frames.wake() }
     private func updateAccessibility() {

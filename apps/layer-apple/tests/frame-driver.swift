@@ -97,6 +97,30 @@ import Foundation
         store.native!.complete(revision: 7)
         await drainMainQueue()
         assert(paused && store.cameraRevision == 7 && store.canvasSubmitted && submissions == 2)
+        do {
+            let store = EditorStore(), native = store.native!
+            let frames = CanvasFrameDriver(store: store)
+            var sceneActive = true, paused = true
+            frames.canPresent = { sceneActive }
+            frames.setPaused = { paused = $0 }
+            frames.activate()
+            frames.tick(target: 11)
+            sceneActive = false
+            native.complete(again: true)
+            await drainMainQueue()
+            assert(paused && native.admissions == [true] && native.completions.isEmpty,
+                "A pending completion must stay paused after scene deactivation without another tick")
+            sceneActive = true
+            frames.wake()
+            assert(!paused, "Opening the scene gate must wake the paused display link")
+            frames.tick(target: 12)
+            assert(native.admissions == [true, true] && native.completions.count == 1,
+                "The first real tick after scene activation must submit exactly one frame")
+            native.complete()
+            await drainMainQueue()
+            assert(paused && store.canvasSubmitted && native.admissions == [true, true],
+                "The resumed idle frame must preserve canvas readiness without free-running")
+        }
         print("Shared frame-driver checks passed: admission, wake, detach, replacement and visibility")
     }
 }

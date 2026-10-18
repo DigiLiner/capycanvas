@@ -19,7 +19,8 @@ struct WorkspaceStartupNotice: View {
         if !workspaces.presented && (workspaces.visibleError != nil || workspaces.error == nil && (workspaces.readOnly || !workspaces.ready)) {
             EditorNotice(message: workspaces.visibleError
                 ?? (workspaces.view["owner_lost"].bool ? "Workspace ownership needs recovery."
-                    : workspaces.readOnly ? "Saving workspace…" : "Opening workspace…"),
+                    : workspaces.readOnly ? (workspaces.store?.bootstrap["recovery"]["saving_workspace"].string ?? "")
+                        : (workspaces.store?.bootstrap["recovery"]["opening_workspace"].string ?? "")),
                 working: workspaces.busy || workspaces.error == nil && !workspaces.ready) {
                 if workspaces.error != nil || workspaces.view["owner_lost"].bool {
                     Button(copy["header"]["retry"].string) { workspaces.send(["type": "retry"]) }.disabled(workspaces.busy)

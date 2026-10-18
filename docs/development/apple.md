@@ -535,6 +535,15 @@ xcrun swiftc -parse-as-library apps/layer-apple/Shared/Bridge/CanvasFrameDriver.
   apps/layer-apple/tests/frame-driver.swift -o "$TMPDIR/capy-frame-driver" && "$TMPDIR/capy-frame-driver"
 ```
 
+The iPad canvas admits frames only while its scene is active and its view is in
+a window. Scene changes update the presentation gate before waking the driver;
+pending completions cannot restart an inactive display link. The frame-driver
+fixture checks gate loss during a pending frame and admission after reopening.
+The drawing lifecycle stress journeys check backgrounding and resuming on iPad.
+
+Workspace opening and saving notices read the active bootstrap's recovery copy
+and refresh with the interface language.
+
 The AppKit `tests/native-menu-titles.swift` fixture pairs with
 `macOS/Platform/NativeMenuTitles.swift` and checks translated headings, reordered
 menus, unrelated titles, ambiguous roles and retained native actions.
