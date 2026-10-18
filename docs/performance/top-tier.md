@@ -3064,15 +3064,42 @@ clock and seed settlement, a 9504 × 6336 photo, 1600 × 1000 offscreen target,
 three measured runs per variant and brush retain all input, artwork and exact
 Undo/Redo assertions. Measured motion lasts 6.087–7.012 seconds per run.
 
-| Brush | Median completed updates/s, before → after | Median per-run completion p99, before → after |
+| Brush | Median completed updates/s, before → after | Median per-run p99 update duration, before → after |
 | --- | --- | --- |
 | G-Pen | 174.37 → 195.30 | 8.236 → 8.008 ms |
 | Eraser | 169.26 → 184.12 | 9.920 → 9.566 ms |
 
 These are queue-completed offscreen updates, without native input or display
-presentation. They establish no native frame rate or tier qualification.
+presentation. Thermal state was not sampled in this comparison. The results
+establish no native frame rate or tier qualification.
 Source, binaries, raw CSVs and the retained earlier failed runs are under
 `artifacts/apple/port-oct13-regenerated/source-audit/partial-opacity-specialized-kernel-correction/M2Pro-proxy-preparation/monotonic-phase-clock-preparation/`.
+
+Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
+`wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
+seconds of measurement and ten seconds of postlude. These private optimized
+apps contain the integration patches on the `8a819ffa1` Rust base and final
+`cc6d1ab48` Swift; they do not cover the later built-in Paper artwork changes.
+The 2048 × 2048 synthetic documents use a 24 px G-Pen or 320 px Wet Watercolor.
+Metal presentation callbacks are enabled and GPU timestamp queries disabled.
+
+| Host and profile | Measured seconds | Presented drawables | Active interval p99 | Intervals over cadence tolerance |
+| --- | --- | --- | --- | --- |
+| M2 Pro Mac, 90 Hz, ink | 30.019 | 2593 | 22.222 ms | 34 |
+| M2 Pro Mac, 90 Hz, wet-watercolor | 29.9973 | 2617 | 22.222 ms | 57 |
+| M4 iPad Pro, 120 Hz, ink | 30.008 | 3503 | 12.500 ms | 46 |
+| M4 iPad Pro, 120 Hz, wet-watercolor | 30.0084 | 3251 | 16.667 ms | 342 |
+
+Thermal state remains nominal. Measured intervals contain no render errors,
+rejected input batches, missing presentation callbacks or zero-time callbacks.
+Startup accounting is separate; the Mac ink trace has two startup zero-time
+presentations. The Mac watercolor trace retains the analyzer's short-duration
+warning. These short synthetic runs do not qualify the reference canvas, brush
+sizes, sustained drawing or physical input latency. Native chrome motion is
+unmeasured and cadence overruns remain. No target is reported as met. Raw
+traces, exact source and binary identities, initial blocked
+attempts and analyzer reports are in
+`artifacts/apple/port-oct13-regenerated/source-audit/native-Release-workload-presentation-diagnostics/`.
 
 The stamp-preview check on 2026-10-17 used an optimized build, a 9504 × 6336
 sRGB 8-bit photo and a 1200 × 870 logical viewport at 2× scale. Recognizing wrapped
