@@ -223,6 +223,10 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
 - **Independent publications.** Handle small `layer-host` packets such as
   `{command_search, revision}` in `EditorSnapshotState.receive` without promoting
   the content revision or refreshing retained panels and thumbnails.
+- **Retained panels.** Resolve each workspace container by stable ID and read its
+  indexed panel values together before constructing lazy content. Observe
+  expansion separately for placement and input admission. Removed containers
+  withdraw their native sources; surviving containers keep live metadata.
 - **Visibility queries.** Attach queries such as `canvas_bar_layout` to an always
   present container; `.task` and `.onAppear` do not run on an empty SwiftUI `Group`.
 - **Layer relationships.** Draw shared endpoints over measured row and content

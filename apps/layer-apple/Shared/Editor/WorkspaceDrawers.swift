@@ -11,14 +11,26 @@ struct WorkspaceCollapsedColumns: View {
                     .modifier(GlassConnection(key: "column:\(column["id"].uint):\(connection[0].string)", connection: connection[1]))
                     .accessibilityIdentifier("column-connection-\(column["id"].uint)-\(connection[0].string)")
             }
-            WorkspaceCollapsedColumn(store: store, column: column).placed(column["bounds"])
+            WorkspaceCollapsedColumn(store: store, id: column["id"].uint)
                 .environment(\.workspaceLayer, 160).zIndex(160)
         }
     }
 }
 private struct WorkspaceCollapsedColumn: View {
     @ObservedObject var store: EditorStore
+    let id: UInt64
+    var body: some View {
+        if let column = store.snapshot["layout"]["collapsed"].array.first(where: { $0["id"].uint == id }) {
+            WorkspaceCollapsedColumnContent(store: store, column: column, panels: column["groups"].array.map { group in
+                group["icons"].array.map { store.panel($0["panel"].string) }
+            }).placed(column["bounds"])
+        }
+    }
+}
+private struct WorkspaceCollapsedColumnContent: View {
+    @ObservedObject var store: EditorStore
     let column: JSON
+    let panels: [[JSON]]
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var openSources: [DrawerSource] {
         guard !column["open"].isNull else { return [] }
@@ -37,7 +49,7 @@ private struct WorkspaceCollapsedColumn: View {
                 let bottom = column["groups"].array.map { $0["bounds"].rect.maxY }.max() ?? clip.rect.minY
                 ZStack(alignment: .topLeading) {
                     ForEach(column["groups"].array.indices, id: \.self) { index in
-                        let group = column["groups"][index]
+                        let group = column["groups"][index], panels = self.panels[index]
 
                         if index > 0 {
                             Rectangle().fill(palette["text"].opacity(0.3))
@@ -46,7 +58,7 @@ private struct WorkspaceCollapsedColumn: View {
                         }
                         ForEach(group["icons"].array.indices, id: \.self) { index in
                             let icon = group["icons"][index]
-                            let panel = store.panel(icon["panel"].string)
+                            let panel = panels[index]
                             let source = store.contentDrawers.sources[String(column["id"].uint)]
                             let presented = source?.anchor["origin"].string == panel["id"].string
                             let selected = !column["open"].isNull ? group["active"].string == panel["id"].string : presented
@@ -97,7 +109,8 @@ private struct WorkspaceContentDrawer: View {
     @ObservedObject var drawer: ContentDrawerPresentation
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     var body: some View {
-        let placement = drawer.geometry["placement"], connection = drawer.geometry["connection"]
+        let placement = drawer.geometry["placement"], connection = drawer.geometry["connection"], tabs = drawer.model["tabs"]
+        let panels = tabs["panels"].array.map { drawer.panel($0) }
         if !placement.isNull {
             ZStack(alignment: .topLeading) {
                 if !connection.isNull {
@@ -108,9 +121,8 @@ private struct WorkspaceContentDrawer: View {
                     ForEach(placement["columns"].array.indices, id: \.self) { index in
                         let bounds = placement["columns"][index]
                         VStack(spacing: 0) {
-                            let tabs = drawer.model["tabs"]
                             if !tabs.isNull {
-                                WorkspacePanelHeader(store: store, group: tabs.replacing("id", with: tabs["group"]), drawer: true)
+                                WorkspacePanelHeader(store: store, group: tabs.replacing("id", with: tabs["group"]), panels: panels, drawer: true)
                             }
                             GeometryReader { clip in
                                 if !drawer.model["layer_properties"].isNull {
@@ -177,7 +189,7 @@ private struct LayerInspector: View {
         let pageHeight = max(0, height - footerHeight), palette = EditorPalette(source: store.state["palette"])
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
-                LayerPanel(store: store, panel: store.panel("layers"), drawerPagePosition: drawer.pagePosition)
+                LayerPanel(store: store, panel: drawer.panel(JSON("layers")), drawerPagePosition: drawer.pagePosition)
                     .environment(\.measuresWorkspacePanel, true)
                     .frame(width: width, height: max(pageHeight, measurement["fixed_height"].number + measurement["unit_height"].number))
                     .offset(y: -drawer.pagePosition * pageHeight).allowsHitTesting(!open).accessibilityHidden(open)

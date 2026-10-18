@@ -17,13 +17,8 @@ struct WorkspacePanels: View {
             }
             ForEach(groups, id: \.workspaceGroupID) { group in
                 if !store.snapshot["chrome_hidden"].bool || group["floating"].bool {
-                    let expanded = workspace.expansion["group"].uint == group["id"].uint ? workspace.expansion : JSON()
-                    WorkspacePanelGroup(store: store, group: group, expansion: expanded)
-                        .environment(\.workspaceGesturesEnabled, workspace.expansion.isNull || !expanded.isNull)
+                    WorkspacePanelGroup(store: store, workspace: workspace, id: group["id"].uint)
                         .environment(\.workspaceLayer, groups.firstIndex(where: { $0.workspaceGroupID == group.workspaceGroupID }) ?? 0)
-                        .modifier(WorkspacePlacement(motion: store.workspaceMotion, group: group,
-                            bounds: expanded.isNull ? group["bounds"] : expanded["bounds"], clipsGroup: true))
-                        .allowsHitTesting(workspace.expansion.isNull || !expanded.isNull)
                     if workspace.expansion.isNull {
                         ForEach(group["resize_handles"].array.indices, id: \.self) { index in
                             let handle = group["resize_handles"][index]
@@ -89,11 +84,27 @@ struct WorkspaceResizeHandle: View {
 
 private struct WorkspacePanelGroup: View {
     @ObservedObject var store: EditorStore
+    @ObservedObject var workspace: WorkspacePresentation
+    let id: UInt64
+    var body: some View {
+        if let group = store.snapshot["layout"]["groups"].array.first(where: { $0["id"].uint == id }) {
+            let expansion = workspace.expansion["group"].uint == id ? workspace.expansion : JSON()
+            WorkspacePanelGroupContent(store: store, group: group, expansion: expansion,
+                panels: group["panels"].array.map { store.panel($0.string) })
+                .environment(\.workspaceGesturesEnabled, workspace.expansion.isNull || !expansion.isNull)
+                .modifier(WorkspacePlacement(motion: store.workspaceMotion, group: group,
+                    bounds: expansion.isNull ? group["bounds"] : expansion["bounds"], clipsGroup: true))
+                .allowsHitTesting(workspace.expansion.isNull || !expansion.isNull)
+        }
+    }
+}
+private struct WorkspacePanelGroupContent: View {
+    @ObservedObject var store: EditorStore
     let group: JSON
     let expansion: JSON
+    let panels: [JSON]
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
-    private func panel(_ id: JSON) -> JSON { store.panel(id.string) }
-    private var active: JSON { panel(group["active"]) }
+    private var active: JSON { panels.first { $0["id"].string == group["active"].string } ?? JSON() }
     private var radius: CGFloat {
         !group["tiles"].isNull && !group["tabs_visible"].bool ? group["tiles"]["tile_corner_radius"].number : SquircleShape.surfaceRadius
     }
@@ -143,7 +154,7 @@ private struct WorkspacePanelGroup: View {
     }
     private func preview(tiles: JSON) -> some View {
         VStack(spacing: 0) {
-            if group["tabs_visible"].bool { WorkspacePanelHeader(store: store, group: group, glass: expansion.isNull) }
+            if group["tabs_visible"].bool { WorkspacePanelHeader(store: store, group: group, panels: panels, glass: expansion.isNull) }
             if !tiles.isNull { WorkspaceToolbar(store: store, panel: active, geometry: tiles, vertical: group["axis"].string == "vertical") }
             else {
                 PanelControls(store: store, panel: active)

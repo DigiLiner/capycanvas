@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkspacePanelHeader: View {
     @ObservedObject var store: EditorStore
     let group: JSON
+    let panels: [JSON]
     var drawer = false
     var glass = false
     @Environment(\.workspaceClip) private var clip
@@ -27,7 +28,7 @@ struct WorkspacePanelHeader: View {
                 context: JSON(["kind": "group", "group": group["id"].raw])))
     }
     private func tabs(available: CGFloat) -> some View {
-        WorkspacePanelTabs(store: store, slide: store.workspace.tabSlide, group: group, drawer: drawer, available: available, fill: tab)
+        WorkspacePanelTabs(store: store, slide: store.workspace.tabSlide, group: group, panels: panels, drawer: drawer, available: available, fill: tab)
     }
 }
 
@@ -35,6 +36,7 @@ private struct WorkspacePanelTabs: View {
     @ObservedObject var store: EditorStore
     let slide: WorkspaceTabSlide
     let group: JSON
+    let panels: [JSON]
     let drawer: Bool
     let available: CGFloat
     let fill: Color?
@@ -51,7 +53,6 @@ private struct WorkspacePanelTabs: View {
         return style(store.state["workspace"]["layout"]) == "automatic"
     }
     private var tabs: [JSON] {
-        let panels = group["panels"].array.map { store.panel($0.string) }
         guard automatic, available > 0 else { store.workspace.fittedTabs[group["id"].uint] = nil; return panels }
         let size = store.catalog["text_size_pt"].number > 0 ? store.catalog["text_size_pt"].number * 4 / 3 : 44 / 3
         let widths = panels.map { [38 + EditorTextMetrics.width($0["title"].string, size: size, weight: .bold), 36] }

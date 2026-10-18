@@ -3,6 +3,8 @@
 import AppKit
 import SwiftUI
 
+@MainActor private final class RetirementSources { var values: [String: WorkspaceSource] = [:] }
+
 @main struct WorkspaceTabChecks {
     @MainActor static func main() async throws {
         _ = NSApplication.shared
@@ -19,8 +21,8 @@ import SwiftUI
                               styleMask: [.borderless], backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         defer { window.contentView = nil; window.close() }
-        func wait(_ message: String, _ condition: () -> Bool) async throws {
-            let deadline = Date().addingTimeInterval(10)
+        func wait(_ message: String, seconds: TimeInterval = 10, _ condition: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(seconds)
             while !condition() {
                 window.contentView?.layoutSubtreeIfNeeded()
                 guard Date() < deadline else {
@@ -137,8 +139,7 @@ import SwiftUI
         // Cancellation and a new drag can overlap owner acknowledgements. An
         // old completion must not erase the newer gesture's frozen geometry.
         try await store.apply(["type": "invoke", "command": "undo_workspace"])
-        if collapsed {
-            // Workspace history retires transient drawers; reopen for the next gesture.
+        if collapsed && !store.snapshot["layout"]["groups"].array.contains(where: { $0["id"].uint == group }) {
             try await store.apply(["type": "customize", "action": ["type": "toggle_column_drawer", "group": group, "panel": "toolbar"]])
         }
         previous = []; stableSince = Date()
@@ -165,5 +166,48 @@ import SwiftUI
         try await store.apply(["type": "customize", "action": ["type": "set_tab_style", "group": group, "style": "icon"]])
         try await wait("Shared icon-only tab widths") { frames().count == 3 && frames().allSatisfy { $0.bounds.width == 36 } }
         print("PASS: platform \(platform), \(theme) \(collapsed ? "drawer" : "docked") tabs: clipped natural widths, frozen hits, reversal, release, undo/redo, cancellation/restart, 36-point icon tabs")
+        let arrangement = store.state["workspace"]
+        for panel in store.snapshot["panels"].array {
+            try await store.apply(["type": "customize", "action": ["type": "set_panel_visible", "panel": panel["id"].raw, "visible": false]])
+        }
+        let replacement = store.state["workspace"]
+        try require(store.snapshot["layout"]["groups"].array.isEmpty && store.snapshot["layout"]["collapsed"].array.isEmpty,
+            "The shared visibility actions must produce an empty replacement layout")
+        func retire<Root: View>(_ root: Root, kind: String) async throws {
+            let sources = RetirementSources()
+            func containers() -> [WorkspaceSource] {
+                sources.values.values.filter { source in
+                    let kind = (try? JSON.decode(source.item))?["kind"].string ?? ""
+                    return ["panel", "group", "column"].contains(kind)
+                }
+            }
+            let retained = NSHostingView(rootView: root.frame(width: 1200, height: 870)
+                .coordinateSpace(name: "editor-workspace")
+                .onPreferenceChange(WorkspaceSources.self) { sources.values = $0 })
+            window.contentView = retained
+            try await wait("Retained \(kind) content") {
+                containers().contains { (try? JSON.decode($0.item))?["kind"].string == kind }
+            }
+            try await store.apply(["type": "restore_workspace", "workspace": replacement.raw])
+            try await wait("Replacement panel index") {
+                store.snapshot["layout"]["groups"].array.isEmpty && store.snapshot["layout"]["collapsed"].array.isEmpty
+                    && store.snapshot["panels"].array.isEmpty
+            }
+            try await wait("Retired \(kind) sources", seconds: 5) { containers().isEmpty }
+            try require(containers().isEmpty, "A retained lazy body must withdraw its retired container and panel sources")
+            print("PASS: platform \(platform), \(theme): retained production \(kind) content retires after workspace replacement")
+        }
+        try await store.apply(["type": "restore_workspace", "workspace": arrangement.raw])
+        if collapsed {
+            try require(store.snapshot["layout"]["collapsed"].array.contains { column in
+                column["groups"].array.contains { $0["group"].uint == group }
+            }, "The column retirement case must mount the fixture's collapsed group")
+            try await retire(WorkspaceCollapsedColumns(store: store).body, kind: "column")
+        } else {
+            try require(store.snapshot["layout"]["groups"].array.contains {
+                $0["id"].uint == group && $0["tabs_visible"].bool && $0["panels"].array.count > 1
+            }, "The group retirement case must mount the fixture's real tabs")
+            try await retire(WorkspacePanels(store: store, workspace: store.workspace).body, kind: "group")
+        }
     }
 }
