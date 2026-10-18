@@ -50,13 +50,15 @@ struct LayerPropertiesPanel: View {
                     if index == 0 || control["section_id"].stableKey != controls[index - 1]["section_id"].stableKey {
                         if !control["section"].isNull { Text(control["section"].string).fontWeight(.bold).padding(.top, index > 0 ? 2 : 0) }
                     }
-                    if control["kind"]["kind"].string == "curve" {
-                        CurveProperty(store: store, layer: layer, control: control)
-                            .id("\(epoch):\(layer):\(control["key"].string):\(control["curve"]["domain"].stableKey)")
-                    } else {
-                        PropertyField(store: store, layer: layer, epoch: epoch, control: control, labelWidth: store.panelLabelWidth(controls.filter { $0["kind"]["kind"].string == "choice" }.map { $0["label"].string }))
-                            .id("\(epoch):\(layer):\(control["key"].string):\(control["kind"]["kind"].string)")
-                    }
+                    Group {
+                        if control["kind"]["kind"].string == "curve" {
+                            CurveProperty(store: store, layer: layer, control: control)
+                                .id("\(epoch):\(layer):\(control["key"].string):\(control["curve"]["domain"].stableKey)")
+                        } else {
+                            PropertyField(store: store, layer: layer, epoch: epoch, control: control, labelWidth: store.panelLabelWidth(controls.filter { $0["kind"]["kind"].string == "choice" }.map { $0["label"].string }))
+                                .id("\(epoch):\(layer):\(control["key"].string):\(control["kind"]["kind"].string)")
+                        }
+                    }.disabled(control["disabled"].bool).opacity(control["disabled"].bool && view["enabled"].bool ? 0.4 : 1)
                 }
             }.disabled(!view["enabled"].bool).opacity(view["enabled"].bool ? 1 : 0.4)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("layer-properties")

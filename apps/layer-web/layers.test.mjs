@@ -332,6 +332,84 @@ async function checkScaleRelief({call,evaluate,settle,theme,directory}) {
   assert.equal(await scale(),before,'A Scale drag is one Undo step');
 }
 
+async function checkPaperLighting({call,evaluate,settle,theme,directory}) {
+  const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
+  const wait=(condition,timeout=10000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
+  const field=key=>`document.querySelector('[data-property-key="${key}"]')`;
+  const value=key=>evaluate(`layerApp.state().layer_properties.controls.find(c=>c.key===${JSON.stringify(key)}).value.value`);
+  const point=(selector,fx=.5,fy=.5)=>evaluate(`(()=>{const n=${selector};n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width*${fx},y:r.y+r.height*${fy}}})()`);
+  const mouse=(type,p,{clickCount=1,modifiers=0}={})=>call('Input.dispatchMouseEvent',{type,...p,modifiers,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount});
+  const drag=async(points,modifiers=[])=>{
+    await mouse('mousePressed',points[0],{modifiers:modifiers[0]??0});await settle();
+    for(const [index,p] of points.entries())if(index){await call('Input.dispatchMouseEvent',{type:'mouseMoved',...p,modifiers:modifiers[index]??0,button:'left',buttons:1});await settle();}
+    await mouse('mouseReleased',points.at(-1),{modifiers:modifiers.at(-1)??0});await settle();
+  };
+  const key=async(name,code,modifiers=0)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:name,code,modifiers,windowsVirtualKeyCode:{Enter:13,Shift:16,ArrowLeft:37,ArrowRight:39}[name]});await settle();};
+  const undo=()=>send({type:'invoke',command:'undo'});
+  const capture=async name=>{
+    await evaluate('layerApp.app.wait_for_canvas()');await settle();
+    await writeFile(`${directory}/${name}-${theme}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+    const clip=await evaluate(`(()=>{const r=document.querySelector('.effect-properties').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,scale:3}})()`);
+    await writeFile(`${directory}/${name}-properties-${theme}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png',clip})).data,'base64'));
+  };
+  const lighting=()=>evaluate(`(()=>{const light=${field('light')},relief=${field('relief')},through=${field('through_paint')},dial=light.querySelector('.number-dial-face'),style=getComputedStyle(dial);
+    const box=n=>n.getBoundingClientRect(),d=box(dial),track=box(relief.querySelector('.number-track')),row=box(light);
+    return{disabled:[light,through].map(n=>n.classList.contains('disabled')),opacity:Number(getComputedStyle(light).opacity),tab:dial.tabIndex,ariaDisabled:dial.getAttribute('aria-disabled'),role:dial.getAttribute('role'),valueText:dial.getAttribute('aria-valuetext'),
+      size:[d.width,d.height],rowHeights:[row.height,box(relief).height],centered:Math.abs(d.top+d.height/2-(row.top+row.height/2)),end:d.right-track.right,radius:style.borderRadius,corner:style.cornerShape??'',
+      dot:parseFloat(getComputedStyle(dial,'::after').width)/d.width,labelEnd:box(light.querySelector('.number-title')).right<=d.left}})()`);
+  const paper=await evaluate('Number(layerApp.state().layers.find(l=>l.paper).id)');
+  await send({type:'layer',action:{op:'select',id:paper,mask:false}});
+  await wait(`!!${field('light')}?.querySelector('.number-dial-face')`);
+  assert.equal(await value('relief'),0,'Paper starts flat');
+  const flat=await lighting();
+  assert.deepEqual([flat.disabled,flat.opacity,flat.tab,flat.ariaDisabled,flat.role],[[true,true],.4,-1,'true','slider'],'A flat paper dims Light and Shows through paint');
+  const dialCenter=await point(`${field('light')}.querySelector('.number-dial-face')`);
+  await drag([dialCenter,{x:dialCenter.x-14,y:dialCenter.y}]);
+  assert.equal(await value('light'),225,'A disabled dial accepts no input');
+  await capture('paper-lighting-flat');
+  await mouse('mousePressed',await point(`${field('relief')}.querySelector('.number-value')`));await mouse('mouseReleased',await point(`${field('relief')}.querySelector('.number-value')`));await settle();
+  await evaluate(`(()=>{const n=${field('relief')}.querySelector('.number-entry');n.value='150';n.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+  await key('Enter','Enter');
+  await wait(`!${field('light')}.classList.contains('disabled')`);
+  const lit=await lighting();
+  assert.deepEqual([lit.disabled,lit.opacity,lit.tab,lit.ariaDisabled],[[false,false],1,0,'false'],'Texture visibility turns on the lighting controls');
+  assert.deepEqual(lit.size,[28,28],'The dial is a slider row less the control spacing above and below');
+  assert.equal(lit.rowHeights[0],lit.rowHeights[1],'The Light row is as tall as a slider row');
+  assert.ok(lit.centered<.5,`The dial is centered in its row: ${lit.centered}`);
+  assert.ok(Math.abs(lit.end)<.5,`The dial ends where the slider tracks end: ${lit.end}`);
+  assert.equal(lit.radius,'50%');assert.ok(['','round','superellipse(1)'].includes(lit.corner),`The dial is a true circle: ${lit.corner}`);
+  assert.ok(Math.abs(lit.dot-.22)<.01,`The dot's radius is 0.22 of the dial's: ${lit.dot}`);
+  assert.equal(lit.labelEnd,true,'The label stops before the dial');
+  assert.equal(lit.valueText,'225 °');
+  await capture('paper-lighting-lit');
+  const dial=`${field('light')}.querySelector('.number-dial-face')`;
+  await drag([await point(dial,.08,.5)]);
+  assert.equal(await value('light'),180,"A press on the dial's left edge lights from the left");
+  const top=await point(dial,.5,.08),center=await point(dial);
+  await drag([top,{x:center.x+30,y:center.y-20},{x:center.x+200,y:center.y}]);
+  assert.equal(await value('light'),0,'Dragging keeps turning the dial after the pointer leaves it');
+  await undo();assert.equal(await value('light'),180,'One drag is one step');
+  await key('Shift','ShiftLeft');await evaluate(`${dial}.focus()`);
+  const focus=await evaluate(`(()=>{const n=${dial};return{focused:document.activeElement===n,visible:n.matches(':focus-visible'),ring:getComputedStyle(n).boxShadow,active:document.activeElement?.outerHTML.slice(0,120)}})()`);
+  assert.equal(focus.focused&&focus.visible,true,`The dial takes keyboard focus: ${JSON.stringify(focus)}`);assert.notEqual(focus.ring,'none','Keyboard focus shows a ring');
+  await capture('paper-lighting-focus');
+  await key('ArrowRight','ArrowRight');assert.equal(await value('light'),181);
+  await key('ArrowLeft','ArrowLeft',8);assert.equal(await value('light'),166,'Shift steps by 15°');
+  await undo();assert.equal(await value('light'),181,'Each key press is one step');await undo();assert.equal(await value('light'),180);
+  for(const clickCount of [1,2]){await mouse('mousePressed',center,{clickCount});await mouse('mouseReleased',center,{clickCount});}
+  await settle();await wait(`layerApp.state().layer_properties.controls.find(c=>c.key==='light').value.value===225`);
+  await undo();assert.equal(await value('light'),180,'Double-clicking the dial restores the default in one step');
+  const readout=await point(`${field('relief')}.querySelector('.number-value')`);
+  await drag([readout,{x:readout.x,y:readout.y-10},{x:readout.x,y:readout.y-21}]);
+  assert.equal(await value('relief'),155,'A scrub snaps to whole percent');
+  await drag([readout,{x:readout.x,y:readout.y-10},{x:readout.x,y:readout.y-20}],[8,8,8]);
+  assert.ok(Math.abs(await value('relief')-155.5)<1e-9,`Shift scrubs ten times slower and keeps fractions: ${await value('relief')}`);
+  await drag([readout,{x:readout.x,y:readout.y-20},{x:readout.x,y:readout.y-60},{x:readout.x,y:readout.y-100}],[0,8,8,0]);
+  assert.ok(Math.abs(await value('relief')-167)<1e-9,`Changing Shift mid-scrub continues from the current value: ${await value('relief')}`);
+  for(let step=0;step<5;step++)await undo();
+  assert.equal(await value('relief'),0);assert.equal(await value('light'),225);
+  await wait(`${field('light')}.classList.contains('disabled')`);
+}
 async function checkTextureChoice({call,evaluate,settle,theme,directory,device}) {
   const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
   const invoke=command=>send({type:'invoke',command});
@@ -479,6 +557,7 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
   const bounds=()=>evaluate("(()=>{const n=document.querySelector('#layer-add-paper');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});
+    await checkPaperLighting({call,evaluate,settle,theme,directory});
     await checkTextureChoice({call,evaluate,settle,theme,directory,device});
     await checkScaleRelief({call,evaluate,settle,theme,directory});
     assert.equal(await missing(),false,'Paper suppresses Add paper');
@@ -607,5 +686,5 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
     for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
     await layer({op:'new',group:false,clipped:false});
   }
-  console.log('PASS: Scale relief while dragging and hidden after release; Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, no Paper mask, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
+  console.log('PASS: Paper lighting (disabled while flat, Light dial row geometry, press, drag past the dial, keys, focus ring and double-click reset as single Undo steps, snapped and Shift scrubs); Scale relief while dragging and hidden after release; Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, no Paper mask, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
 }

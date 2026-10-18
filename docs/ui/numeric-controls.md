@@ -34,9 +34,10 @@ entry without changing the effect application.
   Pressing or dragging points the dial where the pointer is. Within twice the
   dial's radius it snaps to 15° steps; farther out it turns freely, and a press
   at its center keeps the value. Values wrap at 360°. Double-clicking the label
-  or the dial restores the default; on GTK, arrow keys and the scroll wheel also
-  step it. GTK and Android draw the dial; Web, Apple and Windows show only the
-  value field. Paper's Light is a dial.
+  or the dial restores the default. Arrow keys step a focused dial on GTK and
+  Web, GTK also steps it with the scroll wheel, and VoiceOver adjusts it on
+  Apple. GTK, Android, Web and Apple draw the dial; Windows shows only the value
+  field. Paper's Light is a dial.
 - In Preferences the complete name/description/value header is above the
   slider. Rows expand for descriptions; the numeric content is capped at
   600 logical pixels. Surrounding groups share the same width so labels align.

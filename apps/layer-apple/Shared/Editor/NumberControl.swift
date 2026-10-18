@@ -22,7 +22,8 @@ struct NumberControl: View {
     @State private var numericLabels = JSON()
     @State private var showsEntry = false
     @State private var horizontalDrag: Bool?
-    @State private var valueOrigin: Double?
+    @State private var dialDrag: Bool?
+    @State private var valueScrub: ValueScrub?
     @State private var valueDragCancelled = false
     @FocusState private var scrubFocused: Bool
     @GestureState private var contact = false
@@ -32,7 +33,8 @@ struct NumberControl: View {
     @Environment(\.isEnabled) private var enabled
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var slider: Bool { control["kind"].string == "slider" }
-    private var compactPanel: Bool { panel && slider && !inline && !valueOnly && toolbar == nil }
+    private var dial: Bool { control["kind"].string == "dial" }
+    private var compactPanel: Bool { panel && (slider || dial) && !inline && !valueOnly && toolbar == nil }
     private var spinWidth: CGFloat {
         compact && !slider ? max(24, EditorTextMetrics.width(inlineMeasure, size: store.catalog["text_size_pt"].number * 4 / 3, weight: .regular, monospacedDigits: true)) : entryWidth
     }
@@ -71,8 +73,13 @@ struct NumberControl: View {
                         .modifier(NumberControlMeasurement(id: key + ":label"))
                         .onTapGesture(count: 2, perform: resetValue)
                         .frame(maxHeight: .infinity, alignment: .top)
-                    sliderTrack.padding(.leading, 36).padding(.trailing, 76)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
+                    if dial {
+                        angleDial.padding(.trailing, 76)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    } else {
+                        sliderTrack.padding(.leading, 36).padding(.trailing, 76)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
                     Group {
                         if showsEntry || field.dirty { numericEntry }
                         else { valueButton }
@@ -130,14 +137,14 @@ struct NumberControl: View {
             valueReadout.focusable().focusEffectDisabled().focused($scrubFocused)
                 .highPriorityGesture(valueDrag)
                 .onKeyPress(.escape) {
-                    guard valueOrigin != nil else { return .ignored }
+                    guard valueScrub != nil else { return .ignored }
                     cancelDrag(); return .handled
                 }
         } else { valueReadout }
     }
     private var valueReadout: some View {
         Button { showsEntry = true } label: {
-            Text(formatted[valueOrigin == nil ? "text" : "scrub_text"].string).monospacedDigit().lineLimit(1)
+            Text(formatted[valueScrub == nil ? "text" : "scrub_text"].string).monospacedDigit().lineLimit(1)
                 .frame(maxWidth: inline || valueOnly || toolbar != nil ? .infinity : nil, alignment: valueOnly ? .center : .trailing)
                 .padding(.horizontal, 6).frame(height: 24)
         }.buttonStyle(EditorControlButtonStyle()).opacity(enabled ? 1 : 0.36)
@@ -188,6 +195,42 @@ struct NumberControl: View {
                 }
             }.accessibilityIdentifier("number-track-" + key)
     }
+    private var angleDial: some View {
+        let diameter = store.panelMetrics.sliderHeight - 2 * store.panelMetrics.spacing
+        let angle = CGFloat(formatted["value"].number * control["scale"].number) * .pi / 180
+        let face = palette["input"], panelColor = palette["panel"], ink: Color = palette["text"].opacity(0.5)
+        return Canvas { context, size in
+            let radius = min(size.width, size.height) / 2
+            let dot = CGPoint(x: size.width / 2 + cos(angle) * radius * 0.55, y: size.height / 2 + sin(angle) * radius * 0.55)
+            let mark = Path(ellipseIn: CGRect(x: dot.x - radius * 0.22, y: dot.y - radius * 0.22, width: radius * 0.44, height: radius * 0.44))
+            context.fill(Path(ellipseIn: CGRect(x: size.width / 2 - radius, y: size.height / 2 - radius, width: radius * 2, height: radius * 2)), with: .color(face))
+            context.fill(mark, with: .color(panelColor))
+            context.fill(mark, with: .color(ink))
+        }.frame(width: diameter, height: diameter).contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).updating($contact) { _, active, _ in active = true }.onChanged { event in
+                guard enabled else { cancelDrag(); return }
+                if dialDrag == nil {
+                    dialDrag = commit()
+                    if dialDrag == true { gestureChange?("down", field.value) { field.error = $0 } }
+                }
+                if dialDrag == true { pointDial(event.location, diameter: diameter, phase: "move") }
+            }.onEnded { event in
+                guard enabled else { cancelDrag(); return }
+                if dialDrag == true { pointDial(event.location, diameter: diameter, phase: "up") }
+                dialDrag = nil
+            })
+            .simultaneousGesture(TapGesture(count: 2).onEnded { resetValue() })
+            .modifier(NumberControlMeasurement(id: key + ":dial"))
+            .accessibilityElement().accessibilityLabel(label)
+            .accessibilityValue(formatted["text"].string)
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: step(1)
+                case .decrement: step(-1)
+                @unknown default: break
+                }
+            }.accessibilityIdentifier("number-dial-" + key)
+    }
     private var numericEntry: some View {
         NumericTextField(label: numericLabels["edit"].string,
             text: Binding(get: { field.text }, set: { field.text = $0; field.dirty = true }),
@@ -196,7 +239,7 @@ struct NumberControl: View {
             submit: finish, cancel: cancel, step: step)
             .focusedValue(\.editorTextCommit, { _ = commit() })
             .frame(width: valueOnly || inline || toolbar != nil ? nil : compactPanel ? 56 : slider ? 80 : spinWidth)
-            .padding(.horizontal, 6).frame(height: compact ? store.panelMetrics.height : valueOnly || slider ? 24 : 32)
+            .padding(.horizontal, 6).frame(height: compact ? store.panelMetrics.height : valueOnly || slider || compactPanel ? 24 : 32)
             .background(palette["input"], in: SquircleShape.control)
             .modifier(NumberControlMeasurement(id: key + ":entry"))
             .accessibilityHint(field.error ?? "")
@@ -234,7 +277,7 @@ struct NumberControl: View {
         do {
             formatted = try resolveNumber(value: field.value, operation: ["type": "format"])
             if let presentedText { formatted = formatted.replacing("text", with: JSON(presentedText)).replacing("edit", with: JSON(presentedText)) }
-            if !field.dirty && !editing { field.text = formatted[slider ? "edit" : "text"].string }
+            if !field.dirty && !editing { field.text = formatted[slider || compactPanel ? "edit" : "text"].string }
         } catch { field.error = error.localizedDescription }
     }
     private func measureInlineRange() {
@@ -259,46 +302,49 @@ struct NumberControl: View {
     @discardableResult private func commit() -> Bool {
         guard !NativeTextContext.composing else { return false }
         guard field.dirty else { return true }
-        return resolve(["type": "expression", "text": field.text])
+        return resolve(["type": "expression", "text": field.text]) != nil
     }
     private func step(_ direction: Int) {
         guard commit() else { return }
         _ = resolve(["type": "step", "steps": direction])
     }
     private func cancelDrag() {
-        if valueOrigin != nil { valueDragCancelled = true; settleValueDrag(cancel: true) }
-        if horizontalDrag == true { gestureChange?("cancel", field.value) { field.error = $0 } }
-        horizontalDrag = nil
+        if valueScrub != nil { valueDragCancelled = true; settleValueDrag(cancel: true) }
+        if horizontalDrag == true || dialDrag == true { gestureChange?("cancel", field.value) { field.error = $0 } }
+        horizontalDrag = nil; dialDrag = nil
     }
     private var valueDrag: some Gesture {
         DragGesture(minimumDistance: 6, coordinateSpace: .global)
             .updating($contact) { _, active, _ in active = true }
             .onChanged { event in
                 guard enabled, !valueDragCancelled else { return }
-                if valueOrigin == nil {
+                if valueScrub == nil {
                     guard commit() else { valueDragCancelled = true; return }
-                    valueOrigin = field.value; scrubFocused = true
+                    valueScrub = ValueScrub(start: field.value, fine: ThumbnailSelectionLoad.modifiers().shift); scrubFocused = true
                     gestureChange?("down", field.value) { field.error = $0 }
                 }
-                if let origin = valueOrigin {
-                    _ = resolve(["type": "scrub", "origin": origin, "pixels": -Double(event.translation.height)], phase: "move")
-                }
+                scrub(-Double(event.translation.height), phase: "move")
             }.onEnded { event in
-                if let origin = valueOrigin, !valueDragCancelled {
-                    _ = resolve(["type": "scrub", "origin": origin, "pixels": -Double(event.translation.height)], phase: "up")
-                    valueOrigin = nil; format()
+                if valueScrub != nil, !valueDragCancelled {
+                    scrub(-Double(event.translation.height), phase: "up")
+                    valueScrub = nil; format()
                 }
                 valueDragCancelled = false
             }
     }
+    private func scrub(_ pixels: Double, phase: String) {
+        guard var current = valueScrub else { return }
+        if let next = resolve(current.operation(pixels: pixels, fine: ThumbnailSelectionLoad.modifiers().shift), phase: phase) { current.value = next }
+        valueScrub = current
+    }
     private func settleValueDrag(cancel: Bool) {
-        guard let origin = valueOrigin else { return }
-        valueOrigin = nil
+        guard let start = valueScrub?.start else { return }
+        valueScrub = nil
         if cancel {
-            if let gestureChange { gestureChange("cancel", origin) { field.error = $0 } }
-            else if Float(origin) != Float(field.value) {
-                let token = field.submit(origin)
-                change(origin) { error in field.complete(token, error: error); format() }
+            if let gestureChange { gestureChange("cancel", start) { field.error = $0 } }
+            else if Float(start) != Float(field.value) {
+                let token = field.submit(start)
+                change(start) { error in field.complete(token, error: error); format() }
             }
         }
         format()
@@ -314,7 +360,13 @@ struct NumberControl: View {
         field.dirty = false; showsEntry = false; editing = false
         _ = resolve(["type": "position", "position": min(1, max(0, position))], phase: phase)
     }
-    @discardableResult private func resolve(_ operation: [String: Any], phase: String? = nil) -> Bool {
+    private func pointDial(_ point: CGPoint, diameter: CGFloat, phase: String) {
+        guard enabled else { return }
+        field.dirty = false; showsEntry = false; editing = false
+        let radius = diameter / 2
+        _ = resolve(["type": "dial", "x": Double(point.x - radius), "y": Double(point.y - radius), "radius": Double(radius)], phase: phase)
+    }
+    @discardableResult private func resolve(_ operation: [String: Any], phase: String? = nil) -> Double? {
         do {
             let result = try resolveNumber(value: field.value, operation: operation)
             field.dirty = false; field.error = nil
@@ -329,10 +381,24 @@ struct NumberControl: View {
                 change(next) { error in field.complete(token, error: error); format() }
             }
             format()
-            return true
+            return next
         } catch {
             field.error = error.localizedDescription
-            return false
+            return nil
+        }
+    }
+    private struct ValueScrub {
+        let start: Double
+        var value: Double
+        private var origin: Double
+        private var fine: Bool
+        private var base = 0.0
+        private var last = 0.0
+        init(start: Double, fine: Bool) { self.start = start; value = start; origin = start; self.fine = fine }
+        mutating func operation(pixels: Double, fine: Bool) -> [String: Any] {
+            if fine != self.fine { origin = value; base = last; self.fine = fine }
+            last = pixels
+            return ["type": "scrub", "origin": origin, "pixels": pixels - base, "fine": fine]
         }
     }
 }

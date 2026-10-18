@@ -171,7 +171,7 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
     const footer=scopeFooter({state,element,button,icon,dispatch,kind:'tonal_histogram'});
     const model=c=>({controls:c.curve,points:c.value.value,plot:c.plot,marker:null,modified:c.modified});
     const editor=createCurveEditor({element,button,icon,numberField,dispatch,target:{kind:"effect",layer,key},
-      initial:model(initial),label:initial.label,enabled:()=>state().layer_properties.enabled,histogram,footer,reset:true});
+      initial:model(initial),label:initial.label,enabled:()=>{const view=state().layer_properties;return view.enabled&&!view.controls.find(c=>c.key===key)?.disabled;},histogram,footer,reset:true});
     return {...editor,update:c=>editor.update(model(c),c.label)};
   }
   function refresh(){
@@ -240,7 +240,7 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
       contentChanged("properties");
     }
     body.classList.toggle("disabled",!view.enabled);
-    for(const c of view.controls){const field=fields.get(c.key);field?.update(c);field?.disable?.(!view.enabled);}
+    for(const c of view.controls){const field=fields.get(c.key);field?.update(c);field?.disable?.(!view.enabled||!!c.disabled);field?.node.classList.toggle("disabled",view.enabled&&!!c.disabled);}
   }
   return {refresh,refreshHistograms(){if(state().layer_properties.histogram)tonal.refresh();for(const field of fields.values())field.refreshHistogram?.();},dispose(){tonal.dispose();groupMenus.forEach(menu=>menu.remove());for(const field of fields.values())field.dispose?.();disposePreviews();clearInterval(statsTimer);disposeRecording();}};
 }

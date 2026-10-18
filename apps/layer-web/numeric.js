@@ -36,10 +36,17 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   };
   const minus = step(-1, "minus", initialCaptions.decrease), plus = step(1, "plus", initialCaptions.increase);
   const ranged = control.kind === "slider";
-  panel = panel && ranged && !inline && !valueOnly;
+  panel = panel && (ranged || control.kind === "dial") && !inline && !valueOnly;
+  const spin = !ranged && !panel, buttonValue = !spin || valueOnly;
   if (panel) root.classList.add('number-panel');
-  const buttonValue = ranged || valueOnly;
+  const dial = panel && !ranged ? node("div", "number-dial-face") : null;
   if (ranged) { if (panel) track.append(slider); else track.append(minus, slider, plus); root.append(track); }
+  else if (dial) {
+    dial.tabIndex = 0; dial.title = label;
+    dial.setAttribute("role", "slider"); dial.setAttribute("aria-label", label);
+    dial.setAttribute("aria-valuemin", control.min * control.scale); dial.setAttribute("aria-valuemax", control.max * control.scale);
+    root.append(dial);
+  }
   else {
     valueBox.classList.add("number-spin"); valueBox.append(minus, plus);
     const samples=widthSamples||[control.min,control.max].map(value=>resolve({control,value,operation:{type:"format"}}).text);
@@ -83,7 +90,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     gesture = true;root.onEditPhase?.('down');window.addEventListener('blur',blurGesture);
   };
   root.addEventListener('pointerdown', e => {
-    if(e.button || !(e.target===slider || e.target.closest('.number-step')))return;
+    if(e.button || !(e.target===slider || e.target===dial || e.target.closest('.number-step')))return;
     document.activeElement?.blur?.();
     beginGesture();if(!gesture)return;
     const end = event => {
@@ -102,7 +109,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
       if(scrub){finishScrub(true);return;}
       if(!cancelled){root.onEditPhase?.('cancel');cancelled=true;}finish(true);return;
     }
-    if((e.target===entry&&['ArrowUp','ArrowDown'].includes(e.key)) || (e.target===slider&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key))){
+    if((e.target===entry&&['ArrowUp','ArrowDown'].includes(e.key)) || ((e.target===slider||e.target===dial)&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','PageUp','PageDown','Home','End'].includes(e.key))){
       if(heldKey&&heldKey!==e.key)finishGesture();
       beginGesture();heldKey=e.key;
     }
@@ -112,10 +119,11 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   function show(next) {
     value = next.value; display = next; valueButton.textContent = scrubbing ? next.scrub_text : next.text;
     if (valueOnly) valueBox.querySelector('.number-measure').textContent = next.text;
-    if (!editing) entry.value = ranged ? next.edit : next.text;
+    if (!editing) entry.value = spin ? next.text : next.edit;
     entry.setAttribute("aria-valuenow", value * control.scale);
     slider.value = next.fill; slider.style.setProperty("--fill", `${next.fill * 100}%`);
     slider.setAttribute("aria-valuetext", next.text);
+    if (dial) { dial.style.setProperty("--angle", `${value * control.scale}deg`); dial.setAttribute("aria-valuenow", value * control.scale); dial.setAttribute("aria-valuetext", next.text); }
     minus.disabled = disabled || value <= control.min; plus.disabled = disabled || value >= control.max;
   }
   function clearError() {
@@ -144,7 +152,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     if (!editing) return true;
     if (!cancel && (composingKey({target:entry}) || !apply({ type: "expression", text: entry.value }))) return false;
     editing = false;clearError();
-    entry.value = ranged ? display.edit : display.text;
+    entry.value = spin ? display.text : display.edit;
     if (buttonValue && !(gesture && heldKey && !cancelled)) { entry.hidden = true; valueButton.hidden = false; }
     return true;
   }
@@ -154,7 +162,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     scrub = null;scrubbing = false;suppressClick = contact.moved;
     if(contact.moved){
       if(cancel){
-        value = contact.origin;
+        value = contact.start;
         if(root.onEditPhase)finishGesture('cancel');else if(!disposed)onChange(value);
       }else finishGesture();
       root.format();
@@ -162,28 +170,58 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     if(valueButton.hasPointerCapture(contact.id))valueButton.releasePointerCapture(contact.id);
   }
   if(panel){
+    const scrubTo=e=>{
+      const pixels=scrub.y-e.clientY;
+      if(e.shiftKey!==scrub.fine)Object.assign(scrub,{fine:e.shiftKey,origin:value,base:scrub.last});
+      scrub.last=pixels;
+      apply({type:'scrub',origin:scrub.origin,pixels:pixels-scrub.base,fine:scrub.fine});
+    };
     valueButton.addEventListener('pointerdown',e=>{
       if(e.button || disabled || scrub || !finish())return;
-      suppressClick=false;scrub={id:e.pointerId,y:e.clientY,origin:value,moved:false};
+      suppressClick=false;scrub={id:e.pointerId,y:e.clientY,start:value,origin:value,fine:e.shiftKey,base:0,last:0,moved:false};
       valueButton.setPointerCapture(e.pointerId);
     });
     valueButton.addEventListener('pointermove',e=>{
       if(scrub?.id!==e.pointerId)return;
-      const pixels=scrub.y-e.clientY;
-      if(!scrub.moved && Math.abs(pixels)<6)return;
+      if(!scrub.moved && Math.abs(scrub.y-e.clientY)<6)return;
       if(!scrub.moved){scrub.moved=true;scrubbing=true;beginGesture();}
-      e.preventDefault();apply({type:'scrub',origin:scrub.origin,pixels});
+      e.preventDefault();scrubTo(e);
     });
     valueButton.addEventListener('pointerup',e=>{
       if(scrub?.id!==e.pointerId)return;
-      if(scrub.moved)apply({type:'scrub',origin:scrub.origin,pixels:scrub.y-e.clientY});
+      if(scrub.moved)scrubTo(e);
       finishScrub();
     });
     for(const type of ['pointercancel','lostpointercapture'])valueButton.addEventListener(type,()=>finishScrub(true));
-    title.addEventListener('dblclick',e=>{
+    const reset=e=>{
       if(disabled)return;e.preventDefault();finish(true);
+      if(gesture)finishGesture();
       if(root.onReset)root.onReset();else if(typeof control.default_value==='number')apply({type:'expression',text:''});
-    });
+    };
+    title.addEventListener('dblclick',reset);
+    if(dial){
+      let contact=null;
+      const point=e=>{const b=dial.getBoundingClientRect();apply({type:'dial',x:e.clientX-b.x-b.width/2,y:e.clientY-b.y-b.height/2,radius:Math.min(b.width,b.height)/2});};
+      dial.addEventListener('pointerdown',e=>{
+        if(e.button || disabled || !finish())return;
+        e.preventDefault();dial.focus({preventScroll:true});
+        contact=e.pointerId;dial.setPointerCapture(e.pointerId);point(e);
+      });
+      dial.addEventListener('pointermove',e=>{if(contact===e.pointerId){e.preventDefault();point(e);}});
+      for(const type of ['pointerup','pointercancel','lostpointercapture'])dial.addEventListener(type,()=>{contact=null;});
+      dial.addEventListener('dblclick',reset);
+      const dialKey=e=>{
+        if(composingKey(e) || disabled || e.ctrlKey || e.metaKey || e.altKey)return null;
+        const stride=e.shiftKey?15:1;
+        return {ArrowRight:stride,ArrowUp:stride,ArrowLeft:-stride,ArrowDown:-stride,PageUp:45,PageDown:-45,Home:0}[e.key]??null;
+      };
+      dial.addEventListener('keydown',e=>{
+        const steps=dialKey(e);if(steps==null)return;
+        e.preventDefault();e.stopPropagation();
+        if(e.key==='Home')reset(e);else if(finish())apply({type:'step',steps});
+      });
+      dial.addEventListener('keyup',e=>{if(dialKey(e)!=null)e.stopPropagation();});
+    }
   }
   entry.addEventListener("focus", () => { editing = true; });
   entry.addEventListener("input", () => { editing = true; });
@@ -194,7 +232,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
       e.preventDefault(); e.stopPropagation();
       if (finish(e.key === "Escape")) { entry.blur(); if (buttonValue) valueButton.focus(); }
     } else if (e.key === "Tab" && !finish()) e.preventDefault();
-    else if (!ranged && ["ArrowUp", "ArrowDown"].includes(e.key)) {
+    else if (spin && ["ArrowUp", "ArrowDown"].includes(e.key)) {
       e.preventDefault(); if (finish()) apply({ type: "step", steps: e.key === "ArrowUp" ? 1 : -1 });
     }
   });
@@ -203,7 +241,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     if(!display || next!==value || text!==presented){presented=text;const result=resolve({control,value:next,operation:{type:'format'}});if(text!=null)result.text=result.edit=text;show(result);}
   };
   root.getValue = () => value;
-  root.setDisabled = next => { if (disabled === next) return; if(next){finishScrub(true);finishGesture('cancel');}disabled = next; entry.disabled = next; valueButton.disabled = next; slider.disabled = next; show(display); };
+  root.setDisabled = next => { if (disabled === next) return; if(next){finishScrub(true);finishGesture('cancel');}disabled = next; entry.disabled = next; valueButton.disabled = next; slider.disabled = next; if (dial) { dial.tabIndex = next ? -1 : 0; dial.setAttribute("aria-disabled", String(next)); } show(display); };
   root.setDescription = text => {
     labels.querySelector('.number-description')?.remove();
     if (text) { const p = node("p", "number-description"); p.textContent = text; labels.append(p); }
@@ -214,6 +252,7 @@ export function createNumberField({ control, label, labels: captions, resolve, e
     title.textContent = title.title = next;
     if (inline) root.title = next;
     entry.setAttribute("aria-label", next); slider.setAttribute("aria-label", next);
+    if (dial) { dial.title = next; dial.setAttribute("aria-label", next); }
     valueButton.setAttribute("aria-label", text.edit);
     minus.setAttribute("aria-label", text.decrease); plus.setAttribute("aria-label", text.increase);
     if (errorReason != null && errorCaption) entry.title = errorCaption(errorReason);
@@ -227,10 +266,10 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   root.commit = () => finish();
   root.dispose = () => {disposed=true;finishScrub(true);finishGesture('cancel');finish(true);};
   entry.hidden = buttonValue; valueButton.hidden = !buttonValue;
-  if (!ranged) { entry.setAttribute("role", "spinbutton"); entry.setAttribute("aria-valuemin", control.min * control.scale); entry.setAttribute("aria-valuemax", control.max * control.scale); }
+  if (spin) { entry.setAttribute("role", "spinbutton"); entry.setAttribute("aria-valuemin", control.min * control.scale); entry.setAttribute("aria-valuemax", control.max * control.scale); }
   root.update(value);
   root.panel = panel;
-  if(panel)captureSliderContacts(root);
+  if(panel&&ranged)captureSliderContacts(root);
   return root;
 }
 

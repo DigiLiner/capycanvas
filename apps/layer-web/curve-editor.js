@@ -36,7 +36,7 @@ export function createCurveEditor({element,button,icon,numberField,dispatch,targ
   const position=(e,g)=>[e.clientX-g.rect.left-g.inset,e.clientY-g.rect.top-g.inset];
   const contact=(phase,e)=>{if(drag)send({kind:'contact',...drag.owner,phase,point:e?position(e,drag.geometry):[0,0],extent:drag.geometry.extent});};
   const cancel=()=>{const owner=drag?.owner??held;drag=null;held=null;if(owner)send({kind:'contact',epoch:owner.epoch,phase:'cancel',point:[0,0],extent:[1,1]});};
-  graph.onpointerdown=e=>{if(e.button)return;e.preventDefault();e.stopPropagation();graph.focus({preventScroll:true});cancel();pressCount=control.points.length;
+  graph.onpointerdown=e=>{if(e.button||!enabled())return;e.preventDefault();e.stopPropagation();graph.focus({preventScroll:true});cancel();pressCount=control.points.length;
     drag={id:e.pointerId,geometry:geometry(),owner:current()};graph.setPointerCapture(e.pointerId);contact('down',e);};
   graph.onpointermove=e=>{if(drag?.id===e.pointerId){e.preventDefault();contact('move',e);}};
   graph.onpointerup=e=>{if(drag?.id===e.pointerId){contact('up',e);drag=null;graph.releasePointerCapture(e.pointerId);}};
@@ -47,7 +47,7 @@ export function createCurveEditor({element,button,icon,numberField,dispatch,targ
   graph.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();cancel();remove(e);};
   const keyEvent=(e,pressed)=>{
     if(composingKey(e)||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Delete','Backspace','Escape'].includes(e.key))return;
-    if(pressed&&(e.ctrlKey||e.metaKey||e.altKey))return;
+    if(pressed&&(e.ctrlKey||e.metaKey||e.altKey||!enabled()))return;
     e.preventDefault();e.stopPropagation();const owner=held?.key_event===e.key?held:current();
     if(pressed)held={...owner,key_event:e.key};
     send({kind:'key',epoch:owner.epoch,key_event:e.key,pressed,repeat:e.repeat,modifiers:{command:e.ctrlKey||e.metaKey,shift:e.shiftKey,alt:e.altKey}});

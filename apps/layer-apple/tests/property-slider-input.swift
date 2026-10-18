@@ -15,7 +15,7 @@ import QuartzCore
         let cases = [("", "brush-size"), ("", "brush-opacity"), ("", "tool-document"),
             ("curves", "point"), ("", "opacity"), ("", "layer-opacity"),
             ("brightness_contrast", "brightness"),
-            ("gradient_map", "position"), ("gradient_map", "stop-draft")]
+            ("gradient_map", "position"), ("gradient_map", "stop-draft"), ("", "light")]
             .filter { filter.isEmpty || $0.1.hasPrefix(filter) }
         try require(!cases.isEmpty, "No property cases match \(filter)")
         for platform: UInt32 in [0, 1] {
@@ -31,11 +31,16 @@ import QuartzCore
                 }
                 let toolControl = mode == "tool-document"
                 if toolControl { try await action(["type": "invoke", "command": "auto_select"]) }
+                if mode == "light" {
+                    func lit() -> Bool { store.state["layer_properties"]["controls"].array.contains { $0["key"].string == "light" } }
+                    for row in store.state["layers"].array where !lit() { try await action(["type": "select_layer", "id": row["id"].uint]) }
+                    try require(lit(), "The Paper layer must expose its Light dial")
+                }
                 let layer = store.state["layer_properties"]["layer"].uint
                 let brushControl = mode == "brush-size" || mode == "brush-opacity"
                 let defaultValues = JSON(store.state["layer_properties"]["controls"].array.map { $0["value"].raw }).stableKey
                 let key = effect == "curves" ? "rgb" : effect == "gradient_map" ? "gradient"
-                    : effect == "brightness_contrast" ? "brightness" : "opacity"
+                    : effect == "brightness_contrast" ? "brightness" : mode == "light" ? "light" : "opacity"
                 let identifier = toolControl ? "tool-tolerance" : brushControl ? (mode == "brush-size" ? "Brush size" : "Brush opacity")
                     : mode == "layer-opacity" ? mode : effect == "gradient_map"
                     ? "gradient-strip"
@@ -213,6 +218,41 @@ import QuartzCore
                     try require(points().stableKey == original, "Curve removal must retain one-step Undo/Redo")
                     try require(store.failure == nil, store.failure ?? "")
                     note("PASS: platform \(platform), native curve insertion/selection/removal and history")
+                    continue
+                }
+                if mode == "light" {
+                    func dial() throws -> CGRect {
+                        guard let bounds = geometry.frames[identifier + ":dial"], let root = geometry.frames[identifier + ":root"] else {
+                            throw HostFailure(message: "Missing native Light dial")
+                        }
+                        try require(abs(root.height - 36) < 0.5 && abs(bounds.width - 28) < 0.5 && abs(bounds.height - 28) < 0.5,
+                            "The Light dial must be a slider row's height less its control spacing: root=\(root), dial=\(bounds)")
+                        try require(abs(root.maxX - 76 - bounds.maxX) < 0.5 && abs(bounds.midY - root.midY) < 0.5,
+                            "The Light dial must end where slider tracks end: root=\(root), dial=\(bounds)")
+                        return bounds
+                    }
+                    let original = value()
+                    let flat = try dial()
+                    try event(.leftMouseDown, at: CGPoint(x: flat.maxX - 2, y: flat.midY), marker: host, number: 1); try await drain()
+                    try event(.leftMouseDragged, at: CGPoint(x: flat.midX, y: flat.midY + 80), marker: host, number: 1); try await drain()
+                    try event(.leftMouseUp, at: CGPoint(x: flat.midX, y: flat.midY + 80), marker: host, number: 1); try await drain()
+                    try require(value() == original && store.failure == nil, "A flat paper's Light dial must refuse input: \(value())")
+                    try await action(["type": "effect", "action": ["op": "set", "layer": layer, "key": "relief", "value": ["kind": "number", "value": 150]]])
+                    try require(!store.state["layer_properties"]["controls"].array.first { $0["key"].string == key }!["disabled"].bool,
+                        "Texture visibility must enable Light")
+                    let turning = try dial()
+                    let far = CGPoint(x: turning.midX, y: turning.midY + 80)
+                    try event(.leftMouseDown, at: CGPoint(x: turning.maxX - 2, y: turning.midY), marker: host, number: 1); try await drain()
+                    try require(abs(value()) < 0.0001, "A press must point the light where pressed: \(value())")
+                    try event(.leftMouseDragged, at: far, marker: host, number: 1); try await drain()
+                    try event(.leftMouseUp, at: far, marker: host, number: 1); try await drain()
+                    try require(abs(value() - 90) < 0.0001, "A drag outside the dial must keep turning it: \(value())")
+                    try await action(["type": "invoke", "command": "undo"])
+                    try require(value() == original, "One Undo must restore the whole dial turn: \(value())")
+                    try await action(["type": "invoke", "command": "redo"])
+                    try require(abs(value() - 90) < 0.0001, "One Redo must restore the dial turn: \(value())")
+                    try require(store.failure == nil, store.failure ?? "")
+                    note("PASS: platform \(platform), Light dial geometry, flat-paper refusal, pointing, outside drag and one-step history")
                     continue
                 }
                 let markerY = (geometry.frames["gradient-strip:track"]?.minY ?? 0) + 38

@@ -74,3 +74,79 @@ test('accepting an unchanged presented value clears a prior refusal without reso
   const h=harness(t),number=createNumberField(h.options);number.update(4,'canonical presented text');const entry=refuse(number);
   entry.value='canonical presented text';entry.dispatch('input');const operations=h.operations.length;assert.equal(number.commit(),true);assert.equal(h.operations.length,operations);assert.equal(entry.title,'');assert.equal(entry.getAttribute('aria-invalid'),null);number.relabel('Breite');assert.deepEqual(h.captions,[]);assert.deepEqual(h.changes,[]);
 });
+
+function contactElements(number){
+  const find=(node,cls)=>node.classList?.contains(cls)?node:node.children.map(child=>find(child,cls)).find(Boolean);
+  for(const node of [number.valueButton,find(number,'number-dial-face')].filter(Boolean)){
+    node.captured=new Set();node.setPointerCapture=id=>node.captured.add(id);node.hasPointerCapture=id=>node.captured.has(id);node.releasePointerCapture=id=>node.captured.delete(id);
+    node.getBoundingClientRect=()=>({x:100,y:40,width:28,height:28});
+  }
+  return find(number,'number-dial-face');
+}
+
+test('a panel dial sits in a slider row and one press or drag relative to its centre is one gesture',async t=>{
+  const h=harness(t),control={...h.options.control,kind:'dial',min:0,max:360,step:1,default_value:225},phases=[],listeners={};
+  globalThis.window={addEventListener:(type,listener)=>(listeners[type]??=new Set()).add(listener),removeEventListener:(type,listener)=>listeners[type]?.delete(listener)};
+  const number=createNumberField({...h.options,control,label:'Light'});number.onEditPhase=phase=>phases.push([phase,h.operations.length]);
+  const dial=contactElements(number);
+  const contact=(type,extra)=>{if(type==='pointerdown')number.dispatch(type,{target:dial,...extra});dial.dispatch(type,extra);if(type==='pointerup')for(const listener of [...listeners.pointerup??[]])listener(extra);};
+  assert.ok(number.classList.contains('number-panel'),'the dial uses the panel slider row');
+  assert.equal(number.valueButton.hidden,false,'the value stays a plain tappable readout');
+  assert.equal(number.querySelector('.number-step'),null,'panel dials have no step buttons');
+  assert.deepEqual(['role','aria-label','aria-valuemin','aria-valuemax'].map(name=>dial.getAttribute(name)),['slider','Light','0','360']);
+  assert.equal(dial.tabIndex,0);
+  h.operations.length=0;
+  contact('pointerdown',{button:0,pointerId:3,clientX:100,clientY:40});
+  assert.ok(dial.captured.has(3),'the dial keeps the contact after it leaves the face');assert.equal(h.doc.activeElement,dial);
+  contact('pointermove',{pointerId:3,clientX:300,clientY:54});
+  contact('pointermove',{pointerId:4,clientX:0,clientY:0});
+  contact('pointerup',{pointerId:3});
+  contact('pointermove',{pointerId:3,clientX:0,clientY:0});
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.deepEqual(h.operations.map(r=>r.operation),[{type:'dial',x:-14,y:-14,radius:14},{type:'dial',x:186,y:0,radius:14}]);
+  assert.deepEqual(phases,[['down',0],['up',2]],'the press opens the gesture before the first dial operation and release closes it');
+  h.operations.length=0;phases.length=0;const stopped=[];
+  for(const [key,shiftKey] of [['ArrowRight',false],['ArrowDown',false],['ArrowUp',true],['PageDown',false],['a',false]]){
+    const event={key,shiftKey,stopPropagation:()=>stopped.push(key)};
+    number.dispatch('keydown',{target:dial,...event});dial.dispatch('keydown',event);number.dispatch('keyup',{target:dial,key});
+  }
+  assert.deepEqual(h.operations.map(r=>r.operation.steps),[1,-1,15,-45]);assert.deepEqual(stopped,['ArrowRight','ArrowDown','ArrowUp','PageDown']);
+  assert.deepEqual(phases.map(([phase])=>phase),['down','up','down','up','down','up','down','up'],'each held key is one gesture');
+  assert.equal(dial.getAttribute('aria-valuetext'),String(number.getValue()));
+  number.setDisabled(true);h.operations.length=0;phases.length=0;
+  contact('pointerdown',{button:0,pointerId:5,clientX:100,clientY:40});dial.dispatch('keydown',{key:'ArrowRight'});
+  assert.deepEqual([h.operations,phases],[[],[]],'a disabled dial accepts no input');assert.equal(dial.tabIndex,-1);assert.equal(dial.getAttribute('aria-disabled'),'true');
+  number.relabel('Licht');assert.deepEqual([dial.title,dial.getAttribute('aria-label')],['Licht','Licht']);
+});
+
+test('outside panels a dial keeps a plain value field',t=>{
+  const h=harness(t),number=createNumberField({...h.options,control:{...h.options.control,kind:'dial',max:360},panel:false});
+  assert.equal(number.classList.contains('number-panel'),false);assert.equal(contactElements(number),undefined);
+  assert.equal(number.entry.hidden,false);assert.equal(number.entry.getAttribute('role'),'spinbutton');
+});
+
+test('Shift scrubs finely and changing it mid-drag continues from the current value without a jump',t=>{
+  const h=harness(t),scrubs=[];
+  const resolve=request=>{const {operation}=request;if(operation.type==='scrub')scrubs.push(operation);
+    const value=operation.type==='scrub'?operation.origin+operation.pixels/(operation.fine?40:4):request.value;return {value,text:String(value),edit:String(value),scrub_text:String(value),fill:value/10};};
+  const number=createNumberField({...h.options,control:{...h.options.control,max:1000},resolve}),phases=[];number.onEditPhase=phase=>phases.push(phase);
+  contactElements(number);number.update(5);
+  const move=(clientY,shiftKey=false)=>number.valueButton.dispatch('pointermove',{pointerId:1,clientY,shiftKey});
+  number.valueButton.dispatch('pointerdown',{button:0,pointerId:1,clientY:100,shiftKey:false});
+  move(97);move(80);move(40,true);move(0,true);move(-40);
+  number.valueButton.dispatch('pointerup',{pointerId:1,clientY:-40,shiftKey:false});
+  assert.deepEqual(scrubs,[
+    {type:'scrub',origin:5,pixels:20,fine:false},
+    {type:'scrub',origin:10,pixels:40,fine:true},
+    {type:'scrub',origin:10,pixels:80,fine:true},
+    {type:'scrub',origin:12,pixels:40,fine:false},
+    {type:'scrub',origin:12,pixels:40,fine:false},
+  ]);
+  assert.equal(number.getValue(),22);assert.deepEqual(phases,['down','up']);
+  scrubs.length=0;phases.length=0;
+  number.valueButton.dispatch('pointerdown',{button:0,pointerId:2,clientY:0,shiftKey:true});
+  number.valueButton.dispatch('pointermove',{pointerId:2,clientY:-80,shiftKey:false});
+  number.valueButton.dispatch('pointercancel',{pointerId:2});
+  assert.deepEqual(scrubs,[{type:'scrub',origin:22,pixels:80,fine:false}],'a press made with Shift switches to normal speed from the press point');
+  assert.equal(number.getValue(),22,'cancelling restores the value from before the drag');assert.deepEqual(phases,['down','cancel']);
+});

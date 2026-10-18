@@ -218,9 +218,9 @@ export async function checkPointwiseEffects({call,evaluate,settle,motion=true,wi
           const editor=await evaluate(`(()=>{const n=document.querySelector('${field}'),e=n.entry.getBoundingClientRect(),t=n.slider.getBoundingClientRect();return {width:e.width,height:e.height,gap:e.left-t.right}})()`);
           assert.equal(editor.width,68);assert.equal(editor.height,24);assert.equal(editor.gap,8);await key('Escape',27);
           for(const device of ['mouse','pen','touch'])for(const cancel of [false,true]) {
-            const p=await evaluate(`(()=>{const n=document.querySelector('${field} .number-value');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`),end={x:p.x,y:p.y-9};
-            const contact=async(type,point)=>device==='touch'?call('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'||type==='touchCancel'?[]:[{id:1,...point}]}):call('Input.dispatchMouseEvent',{type,...point,pointerType:device,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,force:.7});
-            await contact(device==='touch'?'touchStart':'mousePressed',p);await contact(device==='touch'?'touchMove':'mouseMoved',{x:p.x,y:p.y-8});await settle();
+            const p=await evaluate(`(()=>{const n=document.querySelector('${field} .number-value');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`),end={x:p.x,y:p.y-90};
+            const contact=async(type,point)=>device==='touch'?call('Input.dispatchTouchEvent',{type,modifiers:8,touchPoints:type==='touchEnd'||type==='touchCancel'?[]:[{id:1,...point}]}):call('Input.dispatchMouseEvent',{type,...point,modifiers:8,pointerType:device,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,force:.7});
+            await contact(device==='touch'?'touchStart':'mousePressed',p);await contact(device==='touch'?'touchMove':'mouseMoved',{x:p.x,y:p.y-80});await settle();
             assert.match(await evaluate(`document.querySelector('${field} .number-value').textContent`),/29\.0/,'Scrub keeps decimal width for whole values');
             await contact(device==='touch'?'touchMove':'mouseMoved',end);await settle();
             assert.ok(Math.abs((await value('reds_hue')).value-origin-2.3)<1e-5,`${device} fine vertical scrub`);
