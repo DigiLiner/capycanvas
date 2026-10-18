@@ -93,7 +93,7 @@ impl Cache {
     }
 
     pub fn has_pending_work(&self, r: &WgpuRasterizer) -> bool {
-        if r.artwork_frame.as_ref().is_some_and(|frame| frame.scene.view().order().iter().any(|h| frame.scene.view().object_layer(*h).is_some())) { return false; }
+        if r.artwork_frame.as_ref().is_some_and(|frame| frame.scene.view().order().iter().any(|h| frame.scene.view().object_layer(*h).is_some() || frame.scene.view().vector_layer(*h).is_some())) { return false; }
         self.ready && r.moving_layer.is_none() && !self.transform.as_ref().is_some_and(|p| p.moving)
             && self.next_missing_page().is_some()
     }
@@ -102,7 +102,7 @@ impl Cache {
         &mut self, scene: &mut Scene, r: &mut WgpuRasterizer, packet: FramePacket<'_>,
         encoder: &mut crate::submission::CommandEncoder, commands: &mut Commands,
     ) -> Result<PixelRect, GpuRasterError> {
-        if packet.scene.order().iter().any(|h| packet.scene.object_layer(*h).is_some()) { return Ok(PixelRect::EMPTY); }
+        if packet.scene.order().iter().any(|h| packet.scene.object_layer(*h).is_some() || packet.scene.vector_layer(*h).is_some()) { return Ok(PixelRect::EMPTY); }
         self.admit_hierarchy(r, packet, encoder, commands)?;
         let mut image = self.exact_tile.get_or_insert_with(|| Image::new(r,
             display_mips::Plan::at(exact_strip(packet.document_extent), 0), "exact composition working strip")).clone();

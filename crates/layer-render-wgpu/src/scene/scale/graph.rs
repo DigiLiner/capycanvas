@@ -177,6 +177,7 @@ pub(super) struct Branch {
     image: Option<Image>,
     valid: BTreeSet<[u32; 2]>,
     initialized:BTreeSet<[u32;2]>,
+    stale: BTreeSet<[u32; 2]>,
 }
 #[derive(Default)]
 pub(super) struct Graph {
@@ -216,8 +217,11 @@ impl Graph {
             .filter_map(|(_, branch)| branch.image.filter(|image| image.plan == plan)).collect();
         for node in wanted {
             let dirty = node.damage(sources, plan);
-            let branch = self.branches.entry(node).or_insert_with(|| Branch { image: reusable.pop(), valid: BTreeSet::new(),initialized:BTreeSet::new() });
+            let branch = self.branches.entry(node).or_insert_with(|| Branch { image: reusable.pop(), valid: BTreeSet::new(),initialized:BTreeSet::new(), stale: BTreeSet::new() });
             if branch.image.as_ref().is_some_and(|image| image.plan != plan) { branch.image = None; branch.valid.clear();branch.initialized.clear(); }
+            let before = branch.valid.len();
+            branch.stale.clear();
+            if before > 0 { branch.stale.extend(branch.valid.iter().copied().filter(|c| dirty.intersects(page_rect(*c)))); }
             branch.valid.retain(|c| !dirty.intersects(page_rect(*c)));
         }
         self.root = Some(root);
@@ -371,6 +375,8 @@ impl Evaluator<'_> {
             && let Some(image) = &branch.image {
                 return Ok(Value::Image { view: image.view.clone(), slot: None, opacity: 1., plan: image.plan, preview: None, encode: false });
         }
+        let append = matches!(node.as_ref(), Expression::Vector { .. }) && self.cache.graph.branches.get(node).is_some_and(|branch| branch.image.is_some()
+            && page_coordinates(region).all(|c| branch.stale.contains(&c)));
         let output = if let Some(branch) = self.cache.graph.branches.get_mut(node) {
             let image = branch.image.get_or_insert_with(|| Image::new(self.r, self.input, "composition branch"));
             Some(Target { view: image.view.clone(), slot: None, plan: image.plan })
@@ -384,7 +390,7 @@ impl Evaluator<'_> {
         let result = self.with_region(evaluation,|compositor|Ok(match node.as_ref() {
             Expression::Color(c) => Value::Color(c.map(f32::from_bits)),
             Expression::Objects {content,preview} => compositor.objects(content,*preview,output)?,
-            Expression::Vector { owner, .. } => compositor.vector(*owner, output)?,
+            Expression::Vector { owner, .. } => compositor.vector(*owner, output, append)?,
             Expression::VectorPreview { owner } => compositor.vector_preview(*owner, output)?,
             Expression::Source { id, frame, extent, outside } => compositor.source(*id, *frame, *extent, f32::from_bits(*outside))?,
             Expression::Opacity { input, opacity } => compositor.evaluate(input)?.with_opacity(f32::from_bits(*opacity)),
@@ -403,6 +409,7 @@ impl Evaluator<'_> {
         if let Some(branch) = self.cache.graph.branches.get_mut(node) {
             let bounds = branch.image.as_ref().unwrap().plan.doc_bounds.in_frame(self.cache.plan.extent);
             let complete:Vec<_>=page_coordinates(evaluation.in_frame(self.cache.plan.extent)).filter(|c|page_rect(*c).intersect(bounds).intersect(evaluation.in_frame(self.cache.plan.extent))==page_rect(*c).intersect(bounds)).collect();
+            for c in &complete { branch.stale.remove(c); }
             branch.valid.extend(complete.iter().copied());branch.initialized.extend(complete);
         }
         Ok(result)

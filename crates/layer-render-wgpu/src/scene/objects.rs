@@ -62,11 +62,12 @@ pub(super) fn edited_damage(before: SceneView<'_>, after: SceneView<'_>, extent:
             changed = true;
             if !after.visible(owner) && !before.visible(owner) { continue; }
             let offset = after.occurrence_offset64(owner);
-            for rect in super::vectors::edit_damage(previous, next) {
+            let rects = super::vectors::edit_damage(previous, next).into_iter().map(|rect| {
                 let rect = [rect[0] + offset[0] - 16., rect[1] + offset[1] - 16., rect[2] + offset[0] + 16., rect[3] + offset[1] + 16.];
-                damage.regions.push(PixelRect::new(rect[0].floor().clamp(0., f64::from(extent[0])) as u32, rect[1].floor().clamp(0., f64::from(extent[1])) as u32,
-                    rect[2].ceil().clamp(0., f64::from(extent[0])) as u32, rect[3].ceil().clamp(0., f64::from(extent[1])) as u32));
-            }
+                PixelRect::new(rect[0].floor().clamp(0., f64::from(extent[0])) as u32, rect[1].floor().clamp(0., f64::from(extent[1])) as u32,
+                    rect[2].ceil().clamp(0., f64::from(extent[0])) as u32, rect[3].ceil().clamp(0., f64::from(extent[1])) as u32)
+            }).filter(|rect| !rect.is_empty()).collect();
+            damage.regions.extend(super::vectors::coalesce(rects).into_iter().map(|rect| rect.intersect(PixelRect::full(extent))));
             continue;
         }
         if after.object_layer(owner).is_none() { return None; }

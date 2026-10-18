@@ -114,3 +114,87 @@ fn provisional_strokes_draw_over_the_cached_layer_and_hand_off_without_change() 
     submit_ready(&mut r, FramePacket { composite_all: true, ..packet(editor.document().scene(), [300, 200]) });
     assert!(max_error(&display(&r), &drawn) < 1e-5, "committing the stroke must look the same as its preview");
 }
+
+fn timed(r: &mut WgpuRasterizer, frame: FramePacket<'_>) -> (f64, f64) {
+    let start = std::time::Instant::now();
+    r.submit(frame).unwrap();
+    let cpu = start.elapsed().as_secs_f64() * 1e3;
+    r.wait_idle().unwrap();
+    (cpu, start.elapsed().as_secs_f64() * 1e3)
+}
+fn percentile(values: &mut [f64], p: f64) -> f64 { values.sort_by(f64::total_cmp); values[((values.len() - 1) as f64 * p) as usize] }
+
+#[test]
+#[ignore = "crowded vector layer drawing benchmark"]
+fn crowded_vector_layer_drawing_frames() {
+    use layer_render::CanvasRenderer;
+    let extent = [4000u32, 3000u32];
+    let zoom: f32 = std::env::var("VECTOR_ZOOM").ok().and_then(|v| v.parse().ok()).unwrap_or(0.4);
+    let view = layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [zoom, 0., 0., zoom, 160. - 1200. * (zoom - 0.4).max(0.), -1300. * (zoom - 0.4).max(0.)] };
+    for count in [10_000u64, 50_000] {
+        let records: Vec<Record> = crate::vector::bench::scene_b([4000., 3000.], count).into_iter().map(Record::Path).collect();
+        let (mut editor, layer) = document(extent, records);
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        let start = std::time::Instant::now();
+        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        let open = start.elapsed().as_secs_f64() * 1e3;
+        let initial = display(&r);
+        let mut frames = Vec::new();
+        let mut points = Vec::new();
+        let loop_start = std::time::Instant::now();
+        for i in 0..120u64 {
+            points.push([1200. + i as f64 * 9., 1400. + (i as f64 * 0.1).sin() * 300.]);
+            let anchors: Vec<_> = points.iter().map(|p| Anchor::corner(*p)).collect();
+            let mut stroke = Stroke::new(paint([0.8, 0.1, 0.1, 1.]), 6.);
+            stroke.cap = Cap::Round; stroke.join = Join::Round;
+            let path = PathItem::new(ItemId(u64::MAX - 1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])));
+            r.set_vector_preview(Some(layer_render::VectorPreview { owner: layer, path: Arc::new(path), revision: i + 1 }));
+            frames.push(timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }));
+            let mut extra = 0;
+            while r.has_pending_work() && extra < 50 { r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap(); r.wait_idle().unwrap(); extra += 1; }
+            assert!(extra < 50, "drawing frames settle");
+        }
+        eprintln!("120 drawing frames took {:.1} ms; changed {} pixels", loop_start.elapsed().as_secs_f64() * 1e3, display(&r).iter().zip(&initial).filter(|(a, b)| (a[0] - b[0]).abs() > 0.05).count());
+        let Some(layer_render::VectorPreview { path, .. }) = r.vector_preview.clone() else { unreachable!() };
+        let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![Record::Path(PathItem { id: ItemId(u64::MAX - 2), ..(*path).clone() })]);
+        let start = std::time::Instant::now();
+        editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
+        let perform = start.elapsed().as_secs_f64() * 1e3;
+        r.set_vector_preview(None);
+        let commit = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        let start = std::time::Instant::now();
+        editor.undo().unwrap();
+        let undo_perform = start.elapsed().as_secs_f64() * 1e3;
+        let undo = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        let (mut cpu, mut wall): (Vec<f64>, Vec<f64>) = frames.into_iter().unzip();
+        eprintln!("{count} strokes: open {open:.0} ms; drawing frame cpu p50 {:.2} p95 {:.2} ms, wall p50 {:.2} p95 {:.2} ms; commit perform {perform:.2} ms frame cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms frame cpu {:.2} wall {:.2} ms",
+            percentile(&mut cpu, 0.5), percentile(&mut cpu, 0.95), percentile(&mut wall, 0.5), percentile(&mut wall, 0.95), commit.0, commit.1, undo.0, undo.1);
+    }
+}
+
+#[test]
+fn appended_strokes_at_zoomed_out_levels_match_a_fresh_render() {
+    let extent = [1200u32, 900u32];
+    let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [0.5, 0., 0., 0.5, 0., 0.] };
+    let records: Vec<Record> = crate::vector::bench::scene_b([1200., 900.], 2000).into_iter().map(Record::Path).collect();
+    let (mut editor, layer) = document(extent, records);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    for (i, id) in [9001u64, 9002, 9003].into_iter().enumerate() {
+        let y = 200. + i as f64 * 180.;
+        let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![stroke(id, &[[100., y], [600., y + 90.], [1100., y]], 7., [0.9, 0.2, 0.1, 0.7])]);
+        editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+    }
+    let mut fresh = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut fresh, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let (a, b) = (display(&r), display(&fresh));
+    let error = max_error(&a, &b);
+    let width = r.scale_display.as_ref().unwrap().texture().width() as usize;
+    let bad: Vec<usize> = a.iter().zip(&b).enumerate().filter(|(_, (x, y))| (0..4).any(|k| (x[k] - y[k]).abs() > 1e-3)).map(|(i, _)| i).collect();
+    if !bad.is_empty() {
+        let (xs, ys): (Vec<usize>, Vec<usize>) = bad.iter().map(|i| (i % width, i / width)).unzip();
+        eprintln!("differing {} texels in x {}..{} y {}..{} (texture width {width})", bad.len(), xs.iter().min().unwrap(), xs.iter().max().unwrap(), ys.iter().min().unwrap(), ys.iter().max().unwrap());
+    }
+    assert!(error < 1e-5, "appended strokes must match a full render: {error}");
+}

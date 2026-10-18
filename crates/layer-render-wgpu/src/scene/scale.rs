@@ -1099,7 +1099,7 @@ impl Cache {
             .chain(r.transform_damage.iter().map(|&(target, region)|
                 brush_tiles::document_damage(packet.scene, target, region, packet.document_extent)))))
             .union(root.damage(&scene.scale_sources, self.plan));
-        if objects { self.valid.retain(|c| !invalid.intersects(page_rect(*c))); }
+        if objects || packet.scene.order().iter().any(|&owner| packet.scene.vector_layer(owner).is_some()) { self.valid.retain(|c| !invalid.intersects(page_rect(*c))); }
         self.refined.retain(|c| !invalid.intersects(page_rect(*c)));
         let regions = invalid.update_regions(self.plan, &self.valid);
         let changed = regions.iter().fold(PixelRect::EMPTY, |a, b| a.union(*b));
@@ -1480,7 +1480,7 @@ impl Evaluator<'_> {
         let material = Target { view, slot: Some(Slot::Cache(slot)), plan }.value();
         self.draw(material, value, layer_core::LayerBlend::Normal, 128, None)
     }
-    fn vector(&mut self, owner: OccurrenceHandle, output: Option<Target>) -> Result<Value, GpuRasterError> {
+    fn vector(&mut self, owner: OccurrenceHandle, output: Option<Target>, append: bool) -> Result<Value, GpuRasterError> {
         self.commands.flush(self.r, self.encoder)?;
         let mut target = self.target();
         let side = 1u32 << target.plan.level;
@@ -1488,10 +1488,25 @@ impl Evaluator<'_> {
         let size = bounds.size().map_err(|_| GpuRasterError::ExtentUnsupported)?;
         target.plan.doc_bounds = bounds; target.plan.size = size.map(|v| v.div_ceil(side)); target.plan.bounds = PixelRect::full(size);
         let plan = target.plan;
-        let batch = self.scene.vectors.batch(self.packet.scene, owner, bounds.min, plan.level, plan.size, self.packet.document_extent, Scene::vector_palette(self.r, self.packet));
-        self.r.encode_clear(self.encoder, &target.view, "vector layer");
+        let palette = Scene::vector_palette(self.r, self.packet);
+        let base = output.as_ref().filter(|output| append && output.plan.level == plan.level).map(|output| {
+            let texels = paint_transform::texel_rect(output.plan.doc_bounds.local(bounds), side);
+            (output.view.clone(), [texels[0] as i32, texels[1] as i32])
+        });
+        let appended = base.as_ref().and_then(|_| self.scene.vectors.append_batch(self.packet.scene, owner, bounds.min, plan.level, plan.size, self.packet.document_extent, palette));
+        let (batch, base) = match appended {
+            Some(batch) => (batch, base),
+            None => (self.scene.vectors.batch(self.packet.scene, owner, bounds.min, plan.level, plan.size, self.packet.document_extent, palette), None),
+        };
+        if base.is_some() {
+            let texels = base.as_ref().unwrap().1;
+            self.encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo { texture: output.as_ref().unwrap().view.texture(), mip_level: 0, origin: wgpu::Origin3d { x: texels[0] as u32, y: texels[1] as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo { texture: target.view.texture(), mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                wgpu::Extent3d { width: plan.size[0], height: plan.size[1], depth_or_array_layers: 1 });
+        } else { self.r.encode_clear(self.encoder, &target.view, "vector layer"); }
         if batch.tile_count() > 0 {
-            self.scene.jobs.push(super::Job::Vector(Box::new(super::vectors::VectorJob { batch, output: target.view.clone(), base: None })));
+            self.scene.jobs.push(super::Job::Vector(Box::new(super::vectors::VectorJob { batch, output: target.view.clone(), base })));
             self.encode_scene_jobs()?;
         }
         self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)

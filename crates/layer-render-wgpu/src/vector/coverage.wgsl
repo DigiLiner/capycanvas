@@ -1,4 +1,4 @@
-struct Params { size: vec2<u32>, tiles: u32, columns: u32, base: u32, pad: u32, origin: vec2<i32> }
+struct Params { size: vec2<u32>, tiles: u32, columns: u32, base: u32, pad: u32, origin: vec2<i32>, base_origin: vec2<i32>, pad2: vec2<u32> }
 struct Tile { origin: vec2<i32>, start: u32, end: u32 }
 struct Command { header: u32, start: u32, backdrop: i32, color: u32 }
 
@@ -96,7 +96,7 @@ fn main(@builtin(workgroup_id) group: vec3<u32>, @builtin(local_invocation_id) l
     if params.base != 0u {
         for (var k = 0u; k < PIXELS; k++) {
             let texel = first + vec2<i32>(i32(k), 0);
-            if all(texel >= vec2<i32>(0)) && all(vec2<u32>(texel) < params.size) { color[k] = textureLoad(base, texel, 0); }
+            if all(texel >= vec2<i32>(0)) && all(vec2<u32>(texel) < params.size) { color[k] = textureLoad(base, texel + params.base_origin, 0); }
         }
     }
     var coverage = array<f32, 4>(0.0, 0.0, 0.0, 0.0);

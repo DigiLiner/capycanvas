@@ -3,7 +3,7 @@ pub(crate) mod tiles;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
-mod bench;
+pub(crate) mod bench;
 
 use crate::{GpuRasterError, Uploads, deferred::Deferred, pipeline_device::PipelineDevice};
 use std::collections::BTreeMap;
@@ -184,7 +184,7 @@ impl Kernel {
         let stage = wgpu::ShaderStages::COMPUTE;
         let read = wgpu::BufferBindingType::Storage { read_only: true };
         let layout = crate::bindings::layout(device, "vector coverage", &[
-            crate::bindings::buffer(0, stage, wgpu::BufferBindingType::Uniform, false, wgpu::BufferSize::new(32)),
+            crate::bindings::buffer(0, stage, wgpu::BufferBindingType::Uniform, false, wgpu::BufferSize::new(48)),
             crate::bindings::buffer(1, stage, read, false, None),
             crate::bindings::buffer(2, stage, read, false, None),
             crate::bindings::buffer(3, stage, read, false, None),
@@ -207,20 +207,21 @@ impl Kernel {
     }
     #[expect(clippy::too_many_arguments, reason = "One dispatch binds its batch, scratch buffers, geometry and both textures")]
     pub fn encode(&self, device: &PipelineDevice, encoder: &mut wgpu::CommandEncoder, uploads: &mut Uploads, scratch: &mut [Option<wgpu::Buffer>; 4], batch: &Batch, pool: &wgpu::Buffer,
-        base: Option<&wgpu::TextureView>, empty: &wgpu::TextureView, output: &wgpu::TextureView) -> Result<(), GpuRasterError> {
+        base: Option<(&wgpu::TextureView, [i32; 2])>, empty: &wgpu::TextureView, output: &wgpu::TextureView) -> Result<(), GpuRasterError> {
         if batch.tiles.is_empty() { return Ok(()); }
         let tiles = batch.tiles.len() as u32;
         let columns = tiles.min(32768);
         let rows = tiles.div_ceil(columns);
-        let params: [u32; 8] = [batch.size[0], batch.size[1], tiles, columns, u32::from(base.is_some()), 0, batch.origin[0] as i32 as u32, batch.origin[1] as i32 as u32];
-        let sizes = [32, batch.tiles.len() * 16, batch.commands.len() * 16, batch.colors.len().max(1) * 16];
+        let base_origin = base.map_or([0; 2], |(_, origin)| origin);
+        let params: [u32; 12] = [batch.size[0], batch.size[1], tiles, columns, u32::from(base.is_some()), 0, batch.origin[0] as i32 as u32, batch.origin[1] as i32 as u32, base_origin[0] as u32, base_origin[1] as u32, 0, 0];
+        let sizes = [48, batch.tiles.len() * 16, batch.commands.len() * 16, batch.colors.len().max(1) * 16];
         let buffers: Vec<wgpu::Buffer> = (0..4).map(|i| Self::buffer(scratch, device, i, sizes[i] as u64)).collect();
-        write_words(uploads, encoder, &buffers[0], params.into_iter(), 8)?;
+        write_words(uploads, encoder, &buffers[0], params.into_iter(), 12)?;
         write_words(uploads, encoder, &buffers[1], batch.tiles.iter().flat_map(|t| t.map(|v| v as u32)), batch.tiles.len() * 4)?;
         write_words(uploads, encoder, &buffers[2], batch.commands.iter().flatten().copied(), batch.commands.len() * 4)?;
         if !batch.colors.is_empty() { write_words(uploads, encoder, &buffers[3], batch.colors.iter().flatten().map(|v| v.to_bits()), batch.colors.len() * 4)?; }
         let binding = crate::bindings::group(device, "vector coverage", &self.layout, buffers.iter().map(|b| b.as_entire_binding())
-            .chain([pool.as_entire_binding(), wgpu::BindingResource::TextureView(base.unwrap_or(empty)), wgpu::BindingResource::TextureView(output)]).collect::<Vec<_>>());
+            .chain([pool.as_entire_binding(), wgpu::BindingResource::TextureView(base.map_or(empty, |(view, _)| view)), wgpu::BindingResource::TextureView(output)]).collect::<Vec<_>>());
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vector coverage"), timestamp_writes: None });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &binding, &[]);

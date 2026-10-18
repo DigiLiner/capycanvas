@@ -3897,7 +3897,8 @@ impl WgpuRasterizer {
         if let Some(damage) = &object_damage { self.document_damage.extend(damage.regions.iter().copied()); }
         self.vector_preview_damage.clear();
         let shown = self.vector_preview.as_ref().map(|p| (p.owner, p.revision, scene::preview_bounds(packet.scene, p)));
-        if shown.map(|(o, r, _)| (o, r)) != self.vector_preview_shown.map(|(o, r, _)| (o, r)) {
+        let preview_changed = shown.map(|(o, r, _)| (o, r)) != self.vector_preview_shown.map(|(o, r, _)| (o, r));
+        if preview_changed {
             for (_, _, bounds) in self.vector_preview_shown.iter().chain(shown.iter()) {
                 let rect = bounds.in_frame(packet.document_extent);
                 if !rect.is_empty() { self.vector_preview_damage.push(*bounds); self.document_damage.push(rect); }
@@ -3957,7 +3958,7 @@ impl WgpuRasterizer {
         };
         self.validate_and_prepare_brush_resources(packet.dab_batches)?;
         let blending_changed = std::mem::replace(&mut self.blend_space, packet.blend_space) != packet.blend_space;
-        let unchanged = self.artwork_frame.as_ref().is_some_and(|frame|
+        let unchanged = !preview_changed && self.artwork_frame.as_ref().is_some_and(|frame|
             frame.same_artwork(packet));
         if packet.commit_rasters && (!unchanged || packet.composite_all || packet.reset_layers || self.object_deferred
             || self.scene.as_ref().is_some_and(|scene|scene.objects_pending())

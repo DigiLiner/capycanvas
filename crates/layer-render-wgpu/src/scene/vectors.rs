@@ -19,6 +19,7 @@ struct LayerCache {
     grid: HashMap<[i32; 2], Vec<u32>>,
     chunks: HashMap<usize, u32>,
     palette: Option<(layer_core::color::RgbSpace, layer_core::BlendSpace)>,
+    appended: Option<Vec<u32>>,
 }
 
 fn chunk_key(chunk: &layer_core::authored::Resource<layer_core::authored::vector::VectorChunk>) -> usize { Arc::as_ptr(chunk.storage()) as usize }
@@ -59,6 +60,10 @@ impl LayerCache {
     }
     fn update(&mut self, object: &VectorObject, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), pool: &mut Pool) -> Vec<[f64; 4]> {
         if self.root.same_root(object) && self.palette == Some(palette) { return Vec::new(); }
+        self.appended = None;
+        let first = self.root.chunks().is_empty() && self.items.iter().all(Option::is_none);
+        let mut added = Vec::new();
+        let mut other = !first && self.palette.is_some() && self.palette != Some(palette);
         let mut damage = Vec::new();
         if self.palette != Some(palette) {
             self.palette = Some(palette);
@@ -86,20 +91,27 @@ impl LayerCache {
                         common.push((*rank, slot));
                     }
                     (_, Some(slot)) => {
+                        other = true;
                         damage.push(self.remove(slot, pool).bounds);
                         damage.push(self.insert(path.clone(), chunk, index as u32, palette));
                     }
-                    (_, None) => damage.push(self.insert(path.clone(), chunk, index as u32, palette)),
+                    (_, None) => { damage.push(self.insert(path.clone(), chunk, index as u32, palette)); added.push(path.id); }
                 }
             }
         }
         for id in previous.keys().filter(|id| !seen.contains(*id)) {
-            if let Some(slot) = self.ids.get(id).copied() { damage.push(self.remove(slot, pool).bounds); }
+            if let Some(slot) = self.ids.get(id).copied() { other = true; damage.push(self.remove(slot, pool).bounds); }
         }
         let mut ranks: Vec<usize> = common.iter().map(|(rank, _)| *rank).collect();
         if !ranks.is_sorted() {
+            other = true;
             ranks.sort_unstable();
             for ((rank, slot), expected) in common.iter().zip(ranks) { if *rank != expected { damage.push(self.items[*slot as usize].as_ref().unwrap().bounds); } }
+        }
+        if !first && !other && !added.is_empty() {
+            let set: HashSet<ItemId> = added.iter().copied().collect();
+            let leading = object.records().take_while(|(_, record)| record.id().is_some_and(|id| set.contains(&id))).count();
+            if leading == added.len() { self.appended = Some(added.iter().filter_map(|id| self.ids.get(id).copied()).collect()); }
         }
         self.root = object.clone();
         damage
@@ -107,6 +119,20 @@ impl LayerCache {
     fn order(&self, item: &Item) -> u64 { u64::from(self.chunks.get(&item.chunk).copied().unwrap_or(0)) << 32 | u64::from(item.index) }
 }
 
+pub(super) fn coalesce(rects: Vec<PixelRect>) -> Vec<PixelRect> {
+    if rects.len() <= 32 { return rects; }
+    let mut pages = std::collections::BTreeSet::new();
+    for rect in rects.iter().filter(|r| !r.is_empty()) { pages.extend(page_coordinates(*rect).map(|[x, y]| [y, x])); }
+    let mut spans: Vec<PixelRect> = Vec::new();
+    for [y, x] in pages {
+        let page = page_rect([x, y]);
+        match spans.last_mut() {
+            Some(last) if last.min_y() == page.min_y() && last.max_x() == page.min_x() => *last = last.union(page),
+            _ => spans.push(page),
+        }
+    }
+    spans
+}
 pub(crate) fn preview_bounds(scene: SceneView<'_>, preview: &layer_render::VectorPreview) -> DocRect {
     let offset = scene.occurrence_offset64(preview.owner);
     let [x0, y0, x1, y1] = preview.path.bounds();
@@ -145,7 +171,7 @@ pub(super) struct Vectors {
     buffers: [Option<wgpu::Buffer>; 4],
 }
 #[derive(Clone)]
-pub(super) struct VectorJob { pub batch: Batch, pub output: wgpu::TextureView, pub base: Option<wgpu::TextureView> }
+pub(super) struct VectorJob { pub batch: Batch, pub output: wgpu::TextureView, pub base: Option<(wgpu::TextureView, [i32; 2])> }
 
 impl Scene {
     pub(super) fn vector_palette(r: &WgpuRasterizer, packet: FramePacket<'_>) -> (layer_core::color::RgbSpace, layer_core::BlendSpace) {
@@ -178,8 +204,9 @@ impl Scene {
             let rects = self.vectors.damage(packet.scene, owner, palette);
             if rects.is_empty() { continue; }
             let extent = packet.document_extent;
+            let rects = coalesce(rects.into_iter().map(|rect| rect.in_frame(extent)).filter(|rect| !rect.is_empty()).collect());
             let damage = self.scale_sources.object_damage.entry(Some(owner)).or_insert(scale::Damage::EMPTY);
-            for rect in rects { let rect = rect.in_frame(extent); if !rect.is_empty() { damage.regions.push(rect); } }
+            damage.regions.extend(rects.into_iter().map(|rect| rect.intersect(PixelRect::full(extent))));
         }
         self.vectors.trim();
     }
@@ -219,6 +246,43 @@ impl Vectors {
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
     pub fn batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Batch {
         self.batch_with(scene, owner, origin, level, size, extent, palette, None)
+    }
+    #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
+    pub fn append_batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Option<Batch> {
+        let handle = scene.vector_handle(owner)?;
+        let object = scene.vector(handle)?;
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let layer = self.layers.get_mut(&handle)?;
+        layer.update(object, palette, pool);
+        let slots = layer.appended.clone()?;
+        let offset = scene.occurrence_offset64(owner);
+        let side = 1i64 << level;
+        let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
+        let frame = Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] };
+        let integer_offset = offset.map(|v| v as i64);
+        let mut keyed: Vec<(u64, u32)> = slots.iter().map(|s| (layer.order(layer.items[*s as usize].as_ref().unwrap()), *s)).collect();
+        keyed.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        let mut entries = Vec::with_capacity(keyed.len());
+        for (_, slot) in keyed {
+            let item = layer.items[slot as usize].as_mut()?;
+            let at = match item.derived.iter().position(|d| d.level == level && d.offset == integer_offset) {
+                Some(at) => at,
+                None => {
+                    let geometry = Arc::new(tiles::derive(&item.path, &frame));
+                    self.derived_bytes += geometry.bytes();
+                    item.derived.push(Derived { level, offset: integer_offset, geometry, base: None, used: 0 });
+                    item.derived.len() - 1
+                }
+            };
+            let derived = &mut item.derived[at];
+            derived.used = self.frame;
+            if derived.base.is_none() { derived.base = pool.allocate(&derived.geometry); }
+            entries.push((derived.geometry.clone(), derived.base?, item.colors.clone()));
+        }
+        let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
+        let mut batch = Batch::default();
+        batch.build(&layers, [origin[0].div_euclid(side), origin[1].div_euclid(side)], size);
+        Some(batch)
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent, color domain and provisional path")]
     fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>) -> Batch {
@@ -314,7 +378,7 @@ impl Vectors {
     pub fn encode(&mut self, r: &mut WgpuRasterizer, encoder: &mut wgpu::CommandEncoder, job: &VectorJob) -> Result<(), GpuRasterError> {
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let buffer = pool.flush(&r.device, encoder, &mut r.uploads)?;
-        r.scene_pipelines.vector.encode(&r.device, encoder, &mut r.uploads, &mut self.buffers, &job.batch, &buffer, job.base.as_ref(), &r.empty_view, &job.output)
+        r.scene_pipelines.vector.encode(&r.device, encoder, &mut r.uploads, &mut self.buffers, &job.batch, &buffer, job.base.as_ref().map(|(view, origin)| (view, *origin)), &r.empty_view, &job.output)
     }
     pub fn trim(&mut self) {
         if self.derived_bytes <= DERIVED_BYTES { return; }
