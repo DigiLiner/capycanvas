@@ -450,6 +450,7 @@ extension XCTestCase {
         XCTAssertFalse(app.buttons["menu-Help"].exists)
         let file = app.buttons["menu-File"]
         XCTAssertTrue(file.waitForExistence(timeout: 10))
+        XCTAssertTrue(XCUIDevice.shared.supportsPointerInteraction)
         let window = workspaceViewport(in: app), origin = window.frame.origin
         let fileFrame = file.frame, editFrame = app.buttons["menu-Edit"].frame
         XCTAssertGreaterThan(editFrame.minX, fileFrame.maxX)
@@ -457,26 +458,31 @@ extension XCTestCase {
             dx: (fileFrame.maxX + editFrame.minX) / 2 - origin.x,
             dy: fileFrame.minY + fileFrame.height * 0.85 - origin.y))
         let headings = Dictionary(uniqueKeysWithValues: ["Edit", "Image", "Select"].map { heading in
-            let frame = app.buttons["menu-" + heading].frame
-            return (heading, window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
-                dx: frame.midX - origin.x, dy: frame.minY + frame.height * 0.85 - origin.y)))
+            let button = app.buttons["menu-" + heading], frame = button.frame
+            return (heading, (button: button, coordinate: window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: frame.midX - origin.x, dy: frame.minY + frame.height * 0.85 - origin.y))))
         })
-        file.click()
-        XCTAssertTrue(app.buttons["command-new_document"].waitForExistence(timeout: 5))
-        for heading in ["Edit", "Image", "Select"] {
-            gap.click(forDuration: 0.05, thenDragTo: headings[heading]!, withVelocity: .slow, thenHoldForDuration: 0.5)
-            let command = ["Edit": "scale_rotate", "Image": "image_size", "Select": "select_all"][heading]!
-            XCTAssertTrue(app.buttons["command-" + command].waitForExistence(timeout: 5))
+        for hovering in [true, false] {
+            file.hover()
             XCTAssertFalse(app.buttons["command-new_document"].exists)
-            if heading == "Image" {
-                XCTAssertTrue(app.buttons["command-image_size"].exists)
-                XCTAssertTrue(app.buttons["command-canvas_size"].exists)
-            } else if heading == "Select" {
-                XCTAssertTrue(app.buttons["command-select_all"].exists)
-                XCTAssertFalse(app.buttons["command-fill_selection"].exists)
+            file.click()
+            XCTAssertTrue(app.buttons["command-new_document"].waitForExistence(timeout: 5))
+            for heading in ["Edit", "Image", "Select"] {
+                if hovering { headings[heading]!.button.hover() }
+                else { gap.click(forDuration: 0.05, thenDragTo: headings[heading]!.coordinate, withVelocity: .slow, thenHoldForDuration: 0.5) }
+                let command = ["Edit": "scale_rotate", "Image": "image_size", "Select": "select_all"][heading]!
+                XCTAssertTrue(app.buttons["command-" + command].waitForExistence(timeout: 5))
+                XCTAssertFalse(app.buttons["command-new_document"].exists)
+                if heading == "Image" {
+                    XCTAssertTrue(app.buttons["command-image_size"].exists)
+                    XCTAssertTrue(app.buttons["command-canvas_size"].exists)
+                } else if heading == "Select" {
+                    XCTAssertTrue(app.buttons["command-select_all"].exists)
+                    XCTAssertFalse(app.buttons["command-fill_selection"].exists)
+                }
             }
+            workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).click()
         }
-        workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).tap()
         workspaceActivate(app.buttons["settings-button"])
         XCTAssertTrue(app.staticTexts["settings-page-about"].waitForExistence(timeout: 10))
         workspaceActivate(app.staticTexts["settings-page-about"])

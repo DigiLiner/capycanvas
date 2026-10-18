@@ -658,8 +658,10 @@ superview coordinates, including flipped and offset containers.
 `tests/header-native-input.swift` mounts the editor to check ordinary and Zen
 Capy press ownership, activation, stable bounds and focus-loss cleanup, as well
 as title-bar customization. The About/application-menu and title-bar drawer
-journeys run in both themes; the iPad menu journey checks pointer activation and
-held-pointer motion between open headings using recorded coordinates.
+journeys run in both themes; the iPad menu journey moves the pointer onto a closed
+heading before clicking, then checks free hover and held-pointer motion between
+open headings. Use element hover for free motion and recorded coordinates for
+held-pointer motion; retain the closed-menu and resulting command assertions.
 Layer pickup consumes the shared effective lock, including inherited group locks.
 A locked row retains context input; unlocking cannot promote its existing capture.
 Locking an admitted contact retires it and any drag preview before another move.
