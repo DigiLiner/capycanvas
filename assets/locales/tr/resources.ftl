@@ -394,6 +394,7 @@ resources-path-corners = Köşeler
 resources-path-corners-sharp = Sivri
 resources-path-corners-round = Yuvarlak
 resources-path-corners-beveled = Pahlı
+resources-path-mixed = { $label } (karışık)
 resources-layer-menu-new-selection-layer-in-group = Grupta yeni seçim katmanı…
 resources-layer-menu-organize = Düzenle
 resources-layer-menu-paste-mask = Maskeyi yapıştır

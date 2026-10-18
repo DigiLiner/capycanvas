@@ -392,6 +392,7 @@ resources-path-corners = Углы
 resources-path-corners-sharp = Острые
 resources-path-corners-round = Скруглённые
 resources-path-corners-beveled = Срезанные
+resources-path-mixed = { $label } (разные)
 resources-layer-menu-new-selection-layer-in-group = Новый слой выделения в группе…
 resources-layer-menu-organize = Упорядочить
 resources-layer-menu-paste-mask = Вставить маску

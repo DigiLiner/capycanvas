@@ -61,3 +61,76 @@ fn native_vector_draw_move_and_delete() {
     d.capture_canvas("vector-deleted.png");
     d.finish();
 }
+
+fn pen_points(d: &mut Driver, points: &[[f32; 2]]) {
+    let points: Vec<[f32; 2]> = points.iter().map(|p| canvas_point(d, *p)).collect();
+    let mut script = vec![serde_json::json!({"pen":"move","point":points[0]}), serde_json::json!({"pen":"down","point":points[0]})];
+    script.extend(points[1..].iter().map(|p| serde_json::json!({"pen":"move","point":p})));
+    script.extend([serde_json::json!({"pen":"up"}), serde_json::json!({"pen":"leave"})]);
+    d.input.perform(serde_json::Value::Array(script));
+}
+fn tool(d: &Driver, tool: LayerCanvasTool) {
+    d.w.dispatch(UiAction::Layer { action: LayerAction::Tool { tool } });
+    pump(200);
+}
+
+#[test]
+#[ignore = "isolated native-input.js --native-test=native_vector_tools --tablet"]
+fn native_vector_tools() {
+    use layer_core::{FigurePaint, FigureShape};
+    let mut d = Driver::new("art.capycanvas.VectorTools");
+    d.w.dispatch(UiAction::Layer { action: LayerAction::NewVector });
+    d.w.dispatch(UiAction::SetColor { rgba: [0.85, 0.35, 0.1, 1.] });
+    pump(300);
+    tool(&d, LayerCanvasTool::Figure { shape: FigureShape::Rectangle, paint: FigurePaint::Both });
+    pen_points(&mut d, &[[400., 400.], [600., 520.], [800., 640.]]);
+    let rectangle = until_paths(&d, "a Figure rectangle", |paths| paths.len() == 1)[0].clone();
+    assert!(rectangle.shape.is_some(), "the rectangle keeps its live shape");
+    d.capture_canvas("vector-figure.png");
+
+    tool(&d, LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline });
+    for at in [[1000., 400.], [1150., 650.], [1300., 420.]] { pen_points(&mut d, &[at, at]); pump(80); }
+    pen_points(&mut d, &[[1450., 640.], [1520., 700.]]);
+    pump(200);
+    d.capture_canvas("vector-path-drafting.png");
+    d.input.key(0xff0d);
+    let drawn = until_paths(&d, "a finished path", |paths| paths.len() == 2);
+    assert_eq!(drawn[0].geometry.anchor_count(), 4);
+    d.capture_canvas("vector-path.png");
+
+    d.w.dispatch(UiAction::Invoke { command: CommandId::EditPoints });
+    pump(200);
+    let first = start(&drawn[0]);
+    canvas_drag(&mut d, first, [first[0] - 60., first[1] + 120.], true);
+    until_paths(&d, "an anchor drag", |paths| paths.iter().any(|p| p.id == drawn[0].id && (start(p)[0] - first[0] + 60.).abs() < 2.));
+    d.capture_canvas("vector-edit-points.png");
+
+    let layer = occurrence_token(ui_session(&d.w).engine().document().working.occurrence.unwrap());
+    let blue = layer_core::color::RgbColor::new(Default::default(), [0.1, 0.3, 0.9, 1.]).unwrap();
+    d.w.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "path_outline_color".into(), value: layer_core::EffectValue::Color(blue) } });
+    d.w.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "path_width".into(), value: layer_core::EffectValue::Number(12.) } });
+    until_paths(&d, "restyling the path", |paths| paths.iter().any(|p| p.id == drawn[0].id && p.style.strokes().last().is_some_and(|s| s.width == 12.)));
+    d.capture_canvas("vector-properties.png");
+
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Move });
+    pump(200);
+    let [x0, y0, x1, y1] = rectangle.bounds().map(|v| v as f32);
+    canvas_drag(&mut d, [x0 - 30., y0 - 30.], [x1 + 30., y1 + 30.], true);
+    pump(300);
+    d.capture_canvas("vector-frame.png");
+    canvas_drag(&mut d, [x1, y1], [x1 + 120., y1 + 80.], true);
+    until_paths(&d, "scaling with the frame", |paths| paths.iter().any(|p| p.id == rectangle.id && p.bounds()[2] > f64::from(x1) + 100.));
+    d.capture_canvas("vector-scaled.png");
+
+    d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
+    pump(200);
+    pen_points(&mut d, &(0..40).map(|i| [300. + i as f32 * 25., 900. + (i as f32 * 0.3).sin() * 40.]).collect::<Vec<_>>());
+    let inked = until_paths(&d, "an inked line", |paths| paths.len() == 3);
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Eraser });
+    d.w.dispatch(UiAction::SetBrushSize { value: 24. });
+    pump(200);
+    pen_points(&mut d, &[[800., 820.], [805., 900.], [810., 980.]]);
+    until_paths(&d, "erasing across the line", |paths| paths.len() == 4 && paths.iter().any(|p| p.id == inked[0].id));
+    d.capture_canvas("vector-erased.png");
+    d.finish();
+}

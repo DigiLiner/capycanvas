@@ -766,6 +766,7 @@ resources-path-corners = Sudut
 resources-path-corners-sharp = Tajam
 resources-path-corners-round = Bulat
 resources-path-corners-beveled = Terpotong
+resources-path-mixed = { $label } (campuran)
 
 resources-layer-menu-new-selection-layer-in-group = Lapisan Seleksi Baru dalam Grup…
 

@@ -392,6 +392,7 @@ resources-path-corners = Cantos
 resources-path-corners-sharp = Agudos
 resources-path-corners-round = Arredondados
 resources-path-corners-beveled = Chanfrados
+resources-path-mixed = { $label } (misto)
 resources-layer-menu-new-selection-layer-in-group = Nova camada de seleção no grupo…
 resources-layer-menu-organize = Organizar
 resources-layer-menu-paste-mask = Colar máscara

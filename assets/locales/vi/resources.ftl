@@ -392,6 +392,7 @@ resources-path-corners = Góc
 resources-path-corners-sharp = Nhọn
 resources-path-corners-round = Tròn
 resources-path-corners-beveled = Vát
+resources-path-mixed = { $label } (hỗn hợp)
 resources-layer-menu-new-selection-layer-in-group = Lớp vùng chọn mới trong nhóm…
 resources-layer-menu-organize = Sắp xếp
 resources-layer-menu-paste-mask = Dán mặt nạ

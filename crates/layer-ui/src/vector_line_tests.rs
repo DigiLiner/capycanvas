@@ -257,9 +257,13 @@ fn move_tool_nudges_duplicates_and_copies_paths() {
 fn properties_restyle_every_selected_path_in_one_undo_step() {
     use layer_core::{EffectValue, authored::vector::{Cap, Join, PaintEntry}};
     let (mut s, layer) = vector_session();
-    for first in [1, 100] { draw_line(&mut s, first, 30); }
+    for (first, size) in [(1, 10.), (100, 30.)] {
+        s.dispatch(UiAction::SetBrushSize { value: size }).unwrap();
+        draw_line(&mut s, first, 30);
+    }
     let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
     assert!(s.state.layer_properties.controls.iter().all(|c| !c.key.starts_with("path_")), "path properties need selected paths");
+    let label = |s: &UiSession<Recorder>, key: &str| s.state.layer_properties.controls.iter().find(|c| c.key == key).map(|c| c.label.clone()).unwrap();
     let ids: std::collections::BTreeSet<_> = object(&s).paths().map(|(_, p)| p.id).collect();
     invoke(&mut s, CommandId::Move);
     let corners = { let [x0, y0, x1, y1] = object(&s).bounds().unwrap(); [surface_at(&s, [x0 - 5., y0 - 5.]), surface_at(&s, [x1 + 5., y1 + 5.])] };
@@ -267,6 +271,7 @@ fn properties_restyle_every_selected_path_in_one_undo_step() {
     assert_eq!(s.engine.document().working.vector_items.as_ref().map(|selection| (*selection.items).clone()), Some(ids.clone()));
     let keys: Vec<&str> = s.state.layer_properties.controls.iter().map(|c| c.key.as_str()).filter(|k| k.starts_with("path_")).collect();
     assert_eq!(keys, ["path_fill", "path_outline", "path_outline_color", "path_width", "path_ends", "path_corners"]);
+    assert_eq!((label(&s, "path_width"), label(&s, "path_outline_color")), ("Outline width (mixed)".to_string(), "Outline color".to_string()), "differing values say so");
     let token = occurrence_token(layer);
     let set = |s: &mut UiSession<Recorder>, key: &str, value: EffectValue| s.dispatch(UiAction::Effect { action: EffectAction::Set { layer: token, key: key.into(), value } }).unwrap();
     let red = layer_core::color::RgbColor::new(Default::default(), [0.9, 0.1, 0.1, 1.]).unwrap();
@@ -281,6 +286,7 @@ fn properties_restyle_every_selected_path_in_one_undo_step() {
         s.dispatch(UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Set { layer: token, key: "path_width".into(), value: EffectValue::Number(width) }) } }).unwrap();
     }
     assert!(object(&s).paths().all(|(_, p)| p.style.strokes().last().unwrap().width == 12.), "a width drag sets every selected path");
+    assert_eq!(label(&s, "path_width"), "Outline width");
     s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
     s.frame(8_000_000_000, 8_000_000_000).unwrap();
     assert_eq!(object(&s), styled, "a drag is one undo step");

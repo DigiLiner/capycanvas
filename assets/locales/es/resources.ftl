@@ -392,6 +392,7 @@ resources-path-corners = Esquinas
 resources-path-corners-sharp = Agudas
 resources-path-corners-round = Redondeadas
 resources-path-corners-beveled = Biseladas
+resources-path-mixed = { $label } (mixto)
 resources-layer-menu-new-selection-layer-in-group = Nueva capa de selección en el grupo…
 resources-layer-menu-organize = Organizar
 resources-layer-menu-paste-mask = Pegar máscara

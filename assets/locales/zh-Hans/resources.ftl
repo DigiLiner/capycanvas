@@ -454,6 +454,7 @@ resources-path-corners = 转角
 resources-path-corners-sharp = 尖角
 resources-path-corners-round = 圆角
 resources-path-corners-beveled = 斜角
+resources-path-mixed = { $label }（混合）
 
 resources-layer-menu-new-selection-layer-in-group = 在组内新建选区图层…
 

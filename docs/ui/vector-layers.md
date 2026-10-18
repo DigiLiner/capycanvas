@@ -29,7 +29,8 @@ brush opacity sets the color's alpha. Transparent paint is refused.
 
 With paths selected, the layer's Properties add Fill, Fill color, Outline,
 Outline color, Outline width, Line ends (Flat, Round, Square) and Corners
-(Sharp, Round, Beveled). They show the front-most selected path. An edit applies
+(Sharp, Round, Beveled). They show the front-most selected path, and a label
+ends in "(mixed)" when the selected paths differ. An edit applies
 to every selected path: colors change the first fill and the top outline, a path
 whose style holds more fills or outlines keeps the others, and paths that shared
 a style keep sharing one. Turning Fill or Outline on adds the background or
@@ -143,8 +144,11 @@ its paths are written back unchanged when the drawing is saved.
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two
 G-Pen lines with tablet input, drags one, undoes, selects the other with a
-marquee and deletes it. Run it with `--tablet` once per theme through
-`CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)). On a tablet,
+marquee and deletes it. `native_vector_tools` draws a Figure rectangle and a
+Path, drags an anchor with Edit Points, restyles the path, scales the rectangle
+with the Move frame and cuts a G-Pen line with the eraser. Run them with `--tablet` once per theme through
+`CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)); both write their
+captures to the run's `input` directory. On a tablet,
 `AndroidVectorLayerTest#gPenLinesDrawMoveAndUndoOnVectorLayers` draws, drags and
 undoes a G-Pen line with stylus events in both themes and checks the screen
 ([Android](../development/android.md#device-tests)).

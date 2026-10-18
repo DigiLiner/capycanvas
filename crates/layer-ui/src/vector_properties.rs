@@ -15,12 +15,43 @@ const JOINS: [Join; 3] = [Join::Miter, Join::Round, Join::Bevel];
 
 pub(super) fn is_path_property(key: &str) -> bool { key.starts_with("path_") }
 
+fn values(style: &Style) -> [Option<EffectValue>; 7] {
+    let fill = style.entries.iter().find_map(|entry| if let PaintEntry::Fill(fill) = entry { Some(fill) } else { None });
+    let outline = style.strokes().last();
+    [
+        Some(EffectValue::Toggle(fill.is_some())),
+        fill.and_then(|fill| fill.paint.rgb()).map(EffectValue::Color),
+        Some(EffectValue::Toggle(outline.is_some())),
+        outline.and_then(|stroke| stroke.paint.rgb()).map(EffectValue::Color),
+        outline.map(|stroke| EffectValue::Number(stroke.width as f32)),
+        outline.map(|stroke| EffectValue::Choice(CAPS.iter().position(|cap| *cap == stroke.cap).unwrap_or(0) as u32)),
+        outline.map(|stroke| EffectValue::Choice(JOINS.iter().position(|join| *join == stroke.join).unwrap_or(0) as u32)),
+    ]
+}
+
 pub(super) fn controls(doc: &Document, layer: OccurrenceHandle, l: &Localizer) -> Vec<PropertyControl> {
     let Some(selection) = doc.working.vector_items.as_ref().filter(|selection| selection.layer == layer) else { return Vec::new() };
-    let Some(path) = doc.scene().vector_layer(layer).and_then(|object| object.selected(&selection.items).into_iter().next()) else { return Vec::new() };
+    let paths = doc.scene().vector_layer(layer).map(|object| object.selected(&selection.items)).unwrap_or_default();
+    let Some(path) = paths.first() else { return Vec::new() };
+    let front = values(&path.style);
+    let mut mixed = [false; 7];
+    let mut seen: Vec<*const Style> = vec![Arc::as_ptr(&path.style)];
+    for other in &paths[1..] {
+        if seen.contains(&Arc::as_ptr(&other.style)) { continue; }
+        if seen.len() < 64 { seen.push(Arc::as_ptr(&other.style)); }
+        for (flag, (a, b)) in mixed.iter_mut().zip(front.iter().zip(values(&other.style))) { *flag |= *a != b; }
+    }
     let fill = path.style.entries.iter().find_map(|entry| if let PaintEntry::Fill(fill) = entry { fill.paint.rgb() } else { None });
     let outline = path.style.strokes().last();
-    let unchanged = |key: &str, label: MessageId, kind: PropertyKind, value: EffectValue| PropertyControl::new(key, &l.text(label), kind, value.clone(), value);
+    let unchanged = |key: &str, label: MessageId, kind: PropertyKind, value: EffectValue| {
+        let at = [FILL, FILL_COLOR, OUTLINE, OUTLINE_COLOR, WIDTH, ENDS, CORNERS].iter().position(|k| *k == key).unwrap();
+        let label = if mixed[at] {
+            let mut args = FluentArgs::new();
+            args.set("label", l.text(label).to_string());
+            l.format(MessageId::RESOURCES_PATH_MIXED, &args)
+        } else { l.text(label).to_string() };
+        PropertyControl::new(key, &label, kind, value.clone(), value)
+    };
     let mut controls = vec![unchanged(FILL, MessageId::RESOURCES_PATH_FILL, PropertyKind::Toggle, EffectValue::Toggle(fill.is_some()))];
     controls.extend(fill.map(|color| unchanged(FILL_COLOR, MessageId::RESOURCES_PATH_FILL_COLOR, PropertyKind::Color { opaque: false }, EffectValue::Color(color))));
     controls.push(unchanged(OUTLINE, MessageId::RESOURCES_PATH_OUTLINE, PropertyKind::Toggle, EffectValue::Toggle(outline.is_some())));

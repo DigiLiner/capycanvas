@@ -454,6 +454,7 @@ resources-path-corners = 角
 resources-path-corners-sharp = とがり
 resources-path-corners-round = 丸
 resources-path-corners-beveled = 面取り
+resources-path-mixed = { $label }（混在）
 
 resources-layer-menu-new-selection-layer-in-group = グループ内に新規選択範囲レイヤー…
 

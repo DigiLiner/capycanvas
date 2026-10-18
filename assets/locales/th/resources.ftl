@@ -392,6 +392,7 @@ resources-path-corners = มุม
 resources-path-corners-sharp = แหลม
 resources-path-corners-round = มน
 resources-path-corners-beveled = ตัดมุม
+resources-path-mixed = { $label } (หลายค่า)
 resources-layer-menu-new-selection-layer-in-group = เลเยอร์พื้นที่เลือกใหม่ในกลุ่ม…
 resources-layer-menu-organize = จัดระเบียบ
 resources-layer-menu-paste-mask = วางมาสก์

@@ -454,6 +454,7 @@ resources-path-corners = 모서리
 resources-path-corners-sharp = 뾰족
 resources-path-corners-round = 둥글게
 resources-path-corners-beveled = 깎기
+resources-path-mixed = { $label } (혼합)
 
 resources-layer-menu-new-selection-layer-in-group = 그룹에 새 선택 영역 레이어 만들기…
 

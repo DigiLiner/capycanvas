@@ -103,3 +103,12 @@
     crowded tiles it changes.
   - Tier canvases, presented-frame rates and the session cost on device remain
     unmeasured.
+  - These Huion rows predate the split drag preview, which draws above, moving
+    paths and below in the presenter wherever the stack allows, and the 6 ms
+    per-frame derivation budget that spreads opening and zooming a crowded layer
+    over several frames. On the desktop RTX PRO 6000 the split brings drag frames
+    under another layer to 0.05–0.08 ms p50 and opening 50,000 paths to 24 frames,
+    the longest 44.7 ms; neither is measured on a tablet.
+  - Scale and rotate drags with the Move frame, Edit Points drags, Properties
+    scrubs and eraser strokes preview by re-deriving the edited paths each frame;
+    none is measured on a tablet.
