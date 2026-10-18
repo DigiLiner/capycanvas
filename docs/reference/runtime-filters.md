@@ -651,6 +651,22 @@ See [the Tent Blur package](../../examples/filters/tent-blur/README.md) and
 [web packaging](../development/web-packaging.md). All shaders added here are original code;
 no third-party shader implementation was imported.
 
+## Painterly
+
+Painterly uses four overlapping quadrants, each sampled on a 3 x 3 grid at
+half-radius intervals. Alpha weights the straight-color means and central
+moments. The quadrant means blend continuously with inverse-fourth-power
+variance weights and a 0.000001 variance floor. This avoids abrupt changes when
+two quadrants have almost equal variance. These weights are internal artistic
+tuning under the [evolving rendering policy](../development/illustration-filters-proposal.md#release-policy-small-saved-controls-evolving-artistic-rendering).
+
+Saved Radius and Strength retain their ranges and units. Sampling still uses
+the saved spatial reference and clamps to the source support; output alpha is
+the input alpha, and zero Strength returns the input. Independent pairwise
+variance tests cover partial alpha, source edges and signed float HDR. A separate
+near-tie test checks continuous output. Reviewed appearance samples remain in
+the saved-artwork render comparisons; unrelated filter tolerances stay fixed.
+
 ## Validation
 
 Run the changed-layer checks in [Testing](../development/testing.md). Core tests

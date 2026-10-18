@@ -136,3 +136,6 @@ fn saved_render_contracts(angular_only:bool) {
     assert_eq!(compared,baseline.len());
     assert_eq!(checked,if angular_only {16}else{132});
 }
+
+#[path = "painterly_contract_tests.rs"]
+mod painterly_contract;

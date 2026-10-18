@@ -3599,6 +3599,32 @@ same data pass. Raw traces, summary and contact correlation are in
 `artifacts/windows/port-20261010/pencil-post-sampler-fix-8608f94b/`;
 the attribution stack is in `pencil-cdb-final-680bad93/` beside it.
 
+### Windows Painterly control diagnostic, 2026-10-18
+
+On the same Intel Iris Xe laptop, a Debug headless capture at `082083b64`
+plus the Painterly candidate compares the previous shader with weighted central
+variance and continuous quadrant blending. The executable SHA-256 begins
+`DAFA74BD9C48`. Both variants use the same renderer, 1920 × 1080 F32 source,
+one warm-up and 20 actual Strength changes between 80 and 100 per radius.
+
+| Radius | Previous GPU median, ms | Candidate GPU median, ms | Previous completion p95, ms | Candidate completion p95, ms |
+| --- | ---: | ---: | ---: | ---: |
+| 5 | 27.93 | 41.27 | 37.78 | 54.07 |
+| 16, maximum | 25.67 | 35.04 | 35.63 | 45.67 |
+
+Candidate completion maxima are 77.19 and 67.20 ms. Alpha is unchanged;
+independent GPU tests cover signed HDR, transparent samples, edges and near-tie
+continuity. The appearance review accepts the continuous blend while preserving
+broad color and edge structure. The two Painterly reference rows change with
+that behavior; other saved-render rows and tolerances remain unchanged.
+
+This diagnostic measures completion after a parameter change, including waiting
+in the test runner. It is not a native presented-control measurement or a Release
+performance qualification. It does not establish live painted-ink age, settling,
+resumed drawing, or a reference-tier Slow-filter exception. Raw images, exact
+fixed-fixture output and timing rows are retained in
+`artifacts/windows/port-20261010/painterly-1080-control-504f8293287248668e1f602181da537e/`.
+
 ## iPadOS 17 compatibility diagnostics
 
 The 2026-10-17 older-device GPU-counter candidate is based on `86a0fd0e4`;

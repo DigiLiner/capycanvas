@@ -186,16 +186,37 @@ fn capy_chromatic_aberration(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let offset=fx_axis(fx_parameter(b,1u).x)*fx_parameter(b,0u).x;let red=fx_sample(p+offset);let blue=fx_sample(p-offset);
     return vec4<f32>(red.r,c.g,blue.b,max(c.a,max(red.a,blue.a)));
 }
-// Four overlapping quadrant statistics, using a fixed 3x3 quadrature in each.
-// This bounded painterly approximation is independent of radius in tap count.
 fn capy_painterly(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
-    let radius=fx_parameter(b,0u).x;var best=1e10;var result=fx_straight(c);
+    let radius=fx_parameter(b,0u).x;
+    let variance_floor:f32=0.000001;
+    var least=1e30;var result=vec3<f32>(0.);var weight_sum=0.;
     for(var quadrant=0u;quadrant<4u;quadrant+=1u){
         let sign=vec2<f32>(select(-1.,1.,(quadrant&1u)!=0u),select(-1.,1.,(quadrant&2u)!=0u));
-        var sum=vec3<f32>(0.);var square=vec3<f32>(0.);var total=0.;
-        for(var y=0u;y<3u;y+=1u){for(var x=0u;x<3u;x+=1u){let v=fx_sample(p+sign*vec2<f32>(f32(x),f32(y))*.5*radius);sum+=v.rgb;square+=v.rgb*fx_straight(v);total+=v.a;}}
-        if total>.0001{let mean=sum/total;let variance=dot(max(vec3<f32>(0.),square/total-mean*mean),vec3<f32>(1.));if variance<best{best=variance;result=mean;}}
-    }return vec4<f32>(mix(c.rgb,result*c.a,fx_parameter(b,1u).x/100.),c.a);
+        var sum=vec3<f32>(0.);var total=0.;var center=vec3<f32>(0.);var moment=vec3<f32>(0.);
+        for(var y=0u;y<3u;y+=1u){for(var x=0u;x<3u;x+=1u){
+            let v=fx_sample(p+sign*vec2<f32>(f32(x),f32(y))*.5*radius);
+            sum+=v.rgb;
+            let next=total+v.a;
+            if v.a>0. && next>0. {
+                let value=fx_straight(v);let delta=value-center;
+                let gain=v.a/next;moment+=(delta*(total*gain))*delta;center+=delta*gain;
+            }
+            total=next;
+        }}
+        if total>.0001 {
+            let variance=dot(max(moment/total,vec3<f32>(0.)),vec3<f32>(1.));
+            if variance<least {
+                let ratio=(variance+variance_floor)/(least+variance_floor);
+                let square=ratio*ratio;let scale=square*square;
+                result*=scale;weight_sum*=scale;least=variance;
+            }
+            let ratio=(least+variance_floor)/(variance+variance_floor);
+            let square=ratio*ratio;let weight=square*square;
+            result+=(sum/total)*weight;weight_sum+=weight;
+        }
+    }
+    if weight_sum>0. {result/=weight_sum;} else {result=fx_straight(c);}
+    return vec4<f32>(mix(c.rgb,result*c.a,fx_parameter(b,1u).x/100.),c.a);
 }
 fn capy_solarize(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{let rgb=fx_rgb(c);return fx_rgba(mix(rgb,select(rgb,1.-rgb,rgb>vec3<f32>(fx_parameter(b,0u).x/100.)),fx_parameter(b,1u).x/100.),c.a);}
 fn capy_kaleidoscope(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
