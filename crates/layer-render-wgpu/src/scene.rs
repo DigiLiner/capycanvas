@@ -580,6 +580,15 @@ impl Scene {
         Ok(tile)
     }
 
+    fn watercolor_nearby(r: &WgpuRasterizer, packet: FramePacket<'_>, target: SourceTarget,
+        stored: Option<&PaintLayer>, c: [u32; 2], preview: bool,
+    ) -> bool {
+        stored.is_some_and(|stored| r.watercolor_style(target, packet.dab_batches).is_some()
+            && stored.watercolor_wetness_pages.iter()
+                .chain(r.preview_watercolor_wetness_pages.iter().filter(|_| preview))
+                .any(|p| p.coordinate[0].abs_diff(c[0]) <= 1 && p.coordinate[1].abs_diff(c[1]) <= 1))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_page(
         &mut self,
@@ -595,20 +604,7 @@ impl Scene {
         let target = packet.scene.source_target(handle).unwrap();
         let preview = r.preview_layer_id == Some(target)
             && !r.preview_damage.intersect(page_rect(c)).is_empty();
-        let wet_nearby = stored.is_some_and(|stored| r.watercolor_style(target, packet.dab_batches).is_some()
-            && stored
-                .watercolor_wetness_pages
-                .iter()
-                .chain(
-                    r.preview_watercolor_wetness_pages
-                        .iter()
-                        .filter(|_| preview),
-                )
-                .any(|p| {
-                    p.coordinate[0].abs_diff(c[0]) <= 1
-                        && p.coordinate[1].abs_diff(c[1]) <= 1
-                }));
-        if wet_nearby {
+        if Self::watercolor_nearby(r, packet, target, stored, c, preview) {
             let binding = self.watercolor_binding(r, packet.scene, target, stored.unwrap(), c, preview)?;
             // Aligned pages already cover the layer tile. Only a translated
             // or converted page needs an intermediate and placement.

@@ -407,7 +407,10 @@ impl Scene {
                 }
                 let entry = &self.scale_sources.entries[&id];
                 let mut scratch = [None; 2];
-                let (source, base, reduced_preview, over, empty) = if placement.is_some() || phase != [0; 2] || (entry.watercolor.is_some() && !entry.raw_material)
+                let preview = r.preview_layer_id == Some(id) && !r.preview_damage.intersect(page_rect(tile)).is_empty();
+                let wet_nearby = entry.watercolor.is_some() && !entry.raw_material
+                    && Self::watercolor_nearby(r, packet, id, r.paint_layers.iter().find(|layer| layer.id == id), tile, preview);
+                let (source, base, reduced_preview, over, empty) = if placement.is_some() || phase != [0; 2] || wet_nearby
                     || (r.preview_contribution && r.preview_layer_id==Some(id)) {
                     let (color, flow, pigment) = match &placement {
                         Some(offset) => { let (page, pigment) = self.placed_material_inputs(r, packet, handle, *offset, tile)?; (page, None, pigment) }

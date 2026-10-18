@@ -46,6 +46,60 @@ fn display_level_updates_and_dirty_regions_batch_compute_passes() {
 }
 
 #[test]
+fn first_watercolor_contact_on_empty_layer_batches_source_reduction() {
+    use layer_engine::{CanvasEngine, PenPhase, SampleFlags, ViewTransform, input_queue};
+    let mut doc = document_at([2048; 2]);
+    let ink = paint_occurrence(&mut doc, "ink", None);
+    insert_occurrence(&mut doc, ink, 0);
+    doc.working.occurrence = Some(ink);
+    doc.working.target = Some(source_at(&doc, 0));
+    let mut view = crate::test_support::view([256; 2]);
+    view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
+    let (mut input, consumer) = input_queue(64);
+    let renderer = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut engine = CanvasEngine::new(renderer, doc, consumer, view,
+        ViewTransform { revision: 0, surface_to_document: [8., 0., 0., 8., 0., 0.] }).unwrap();
+    let mut brush = layer_core::default_brush(DefaultBrushPreset::WatercolorWash);
+    brush.diameter = 50.;
+    engine.set_brush(brush).unwrap();
+    let settle = |engine: &mut CanvasEngine<WgpuRasterizer>| {
+        let deadline = std::time::Instant::now() + READBACK_TIMEOUT;
+        loop {
+            engine.render_frame().unwrap();
+            engine.backend_mut().wait_idle().unwrap();
+            if !engine.has_pending_input() && !engine.backend().has_pending_work() { break; }
+            assert!(std::time::Instant::now() < deadline);
+        }
+    };
+    settle(&mut engine);
+    let original = display_pixels(engine.backend());
+    for contact in 0..2 {
+        let before = [engine.backend().metrics.dabs, engine.backend().metrics.command_passes];
+        input.push(crate::test_support::pen(contact * 2 + 1, PenPhase::Down, [96.; 2], SampleFlags::PRIMARY)).unwrap();
+        engine.render_frame().unwrap();
+        engine.backend_mut().wait_idle().unwrap();
+        let metrics = &engine.backend().metrics;
+        assert!(metrics.dabs > before[0]);
+        let passes = metrics.command_passes - before[1];
+        assert!(passes <= 64, "first watercolor contact {contact} must batch cold source pages: {passes} passes");
+        let painted = display_pixels(engine.backend());
+        assert_ne!(painted, original);
+        assert_eq!(painted.last(), original.last(), "distant photo pixels stay unchanged");
+        input.push(crate::test_support::pen(contact * 2 + 2, PenPhase::Up, [96.; 2], SampleFlags::PRIMARY)).unwrap();
+        settle(&mut engine);
+        let mut exact = WgpuRasterizer::new_native_headless(engine.document().composition().color).unwrap();
+        exact.test.reference = true;
+        exact.submit(packet(engine.document().scene(), [2048; 2])).unwrap();
+        let expected = pixels(&exact, crate::test_support::document_texture(&exact));
+        let error = quality(&display_pixels(engine.backend()), &expected, engine.backend().scale_display.as_ref().unwrap().plan);
+        assert!(error[2] < 2e-5, "committed watercolor: {error:?}");
+        engine.undo().unwrap();
+        settle(&mut engine);
+        assert!(crate::test_support::max_error(&display_pixels(engine.backend()), &original) < 2e-5);
+    }
+}
+
+#[test]
 fn strokes_and_replays_repair_only_touched_pages() {
     use layer_engine::{CanvasEngine, InstantFeedbackConfig, PenEvent, PenPhase,
         SampleFlags, ViewTransform, input_queue};

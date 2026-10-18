@@ -3341,6 +3341,39 @@ neither presented frame rate nor a reference-tier pass. Raw rows, source hashes,
 cold results and limitations are in
 `artifacts/apple/port-oct13-regenerated/source-audit/painterly-continuous-weighting-proposal/optimized-cost-control/upstream52b8-controls/run1/`.
 
+A matched normal Release comparison on 2026-10-18 measures the cold watercolor
+source-reduction change on the same 61 MP photo workload. The control contains
+`956dff895`; the candidate changes only the shared renderer's material-scratch
+selection. Aligned pages outside the existing wet-page neighborhood reduce
+their ordinary color inputs directly. The new 2048² first-contact regression
+fails at 105 command passes before the change and passes the unchanged 64-pass
+bound for both first contact and the contact after Undo, with committed pixels
+checked against the exact renderer and unchanged distant photo pixels.
+
+On the M2 Pro Mac mini's 90 Hz display, first-contact CPU preparation falls from
+96.681 to 7.412 ms. The largest positive presentation interval in that contact
+falls from 166.668 to 22.222 ms. The first admitted contact frame presents
+180.901 ms after Down in the control and 54.967 ms after Down in the candidate;
+that association does not prove physical input-to-pixel latency. Both complete
+all 4320 samples and three contacts without input rejection or rendering errors.
+Both retain their original strict workload failure: the first drawable of the
+third contact receives a zero presentation timestamp. No callback is discarded,
+no guard is relaxed and neither run qualifies a frame-rate target. The actual
+traces, reviewed original captures and closed-process proofs are in
+`latest-Apple-integrated-Release-preparation/source-reduction-normal-pair-summary.json`.
+
+The matching M4 iPad Pro normal Release pair passes both original workload
+guards. First-contact CPU preparation falls from 75.809 to 4.592 ms and its
+marker-window presentation gap from 141.670 to 25.000 ms. First-contact
+presentation rate changes from 116.531 to 119.500/s. Later contact rates change
+from 114.514/114.998 to 112.834/112.823/s; their boundary coverage remains
+incomplete, so neither pair qualifies completed brush throughput or the tier.
+Both retain all 4320 samples, zero missing or zero-time measured callbacks and
+the unchanged reference photo. Original captures show the photo, painted ink
+and populated layer thumbnails. Matched phase analysis and limitations are in
+`M4-source-reduction-Release-photo-Light-matched-pair/matched-contact-phase-analysis.json`
+beside `latest-Apple-integrated-Release-preparation/`.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

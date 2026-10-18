@@ -739,6 +739,10 @@ transparent target and reduction share ordered compute batches; scratch pages
 can be reused after their reduction. Their pipelines are prepared with the
 document. Projective display resampling uses the same mapped sampler in the
 existing compute batches.
+Aligned source reduction evaluates watercolor material only beside wet pages,
+including the existing neighboring-page halo and current prediction. Other
+pages reduce their ordinary color inputs directly, so first contact on an empty
+layer does not clear a material scratch texture for every page of the document.
 Display resampling and composition share ordered batches too. A placed
 layer over a constant backdrop resamples directly into its final output.
 

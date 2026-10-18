@@ -27,6 +27,9 @@ actual composed display shaders and rejects per-page sampler ownership.
 
 The renderer's `first_watercolor_frame_batches_page_initialization` bounds the
 passes needed for the first contact across four tiles.
+`first_watercolor_contact_on_empty_layer_batches_source_reduction` bounds cold
+source preparation above a photo, repeats after Undo and checks the committed
+pixels against the exact renderer.
 `page_zero_copies_reclear_both_formats_and_reduced_extents` checks exact zero
 pixels, preview invalidation and zero render/compute passes when reusing full
 and reduced paint and scalar pages.
@@ -502,12 +505,6 @@ checks the asynchronous packet boundary.
 
 These fail on `main` independently of your change. Don't chase them unless they
 are your task, and remove an entry when you fix it.
-
-- On Apple Metal, `saved_artwork_render_contracts` fails the Painterly reference
-  comparison: maximum error 0.129347831, RMS 0.005649724. The unchanged stock
-  shader produces the same output. Near-equal variance scores select different
-  neighborhoods from the NVIDIA Vulkan reference; the original images and
-  tolerances remain required.
 
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
   `saved_artwork_render_contracts` reports
