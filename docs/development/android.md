@@ -318,9 +318,16 @@ manual save checkpoints and undo/redo after an actual process death.
   `-e systemInput true` uses OS injection where the device allows it.
   `#missingPaperRowSharesLayerScrollingAndNativeActivation` checks Add paper
   against ordinary row geometry, hover and cancelled presses, activation,
-  history, scrolling and an empty stack in both themes.
+  history, scrolling and an empty stack in both themes. With a finger it then
+  walks Choose Texture from the Paper row and Properties: its size against Edit
+  Color, Cancel, Use Texture with one Undo, Escape and a locked Paper.
   `#selectingFillRowsKeepsPropertiesAndDrawingTargets` checks fill selection,
-  painting on the layer above and existing mask selection.
+  painting on the layer above, existing mask selection and the texture
+  thumbnail after a Paper mask.
+- `AndroidFeatureParityTest#paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`
+  imports through Import… in Choose Texture, deletes through the open dialog's
+  tile menu and adds the drawing's own paper back with Add to Library; pass
+  `-e theme light` or `dark`.
 - `AndroidRasterTest#paperTextureChangesRetainImmediatePencilContacts` changes
   built-in Paper textures and immediately sends whole Pencil contacts while
   preparation is pending. It checks painted pixels and exact Undo/Redo in both

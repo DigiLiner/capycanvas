@@ -4,6 +4,7 @@ import init, { WebApp, WebGpu, configure_raster_worker, configure_gpu_diagnostic
 import { createRasterWorker } from "./raster-worker-client.js";
 import { createPaintPairIcon } from './color-controls.js';
 import { configureColorEditor, refreshColorEditors } from './color-editor.js';
+import { refreshTextureDialogs } from './paper-picker.js';
 import { createDocumentStorage } from "./document-storage.js";
 import { workspaceStore, modulePromise, setWorkspaceWake } from "./workspace-preload.js";
 import { createWorkspaceManager } from "./workspace-manager.js";
@@ -312,7 +313,7 @@ function applyChange(change) {
     if (workspaceModelRevision === presentation.model_revision)
       queueWorkspacePresentation(presentation);
   }
-  if (change.regions) refreshColorEditors();
+  if (change.regions) { refreshColorEditors(); refreshTextureDialogs(); }
   if (change.canvas_wake) wake();
   if (change.regions && !workspaceGesture?.started) wake();
 }

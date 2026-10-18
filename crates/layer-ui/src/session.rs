@@ -142,7 +142,7 @@ pub use renderer_lifecycle::ThumbnailRequests;
 pub use document_files::*;
 pub use effects::{
     GradientDestination, GradientEdit, GradientControls, AdjustmentChoice, EffectAction, FilterCategoryChoice, FilterPickerAction, FilterPickerState,
-    LayerPropertiesView, PaperPickerView, PaperTileView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, PropertyActionView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
+    LayerPropertiesView, LayerPaper, PaperPickerView, PaperTileView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, PropertyActionView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
 };
 pub use filter_loading::FilterLoadState;
 
@@ -354,6 +354,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         &self.state.localization
     }
 
+    pub fn paper_preview(&self, id: &str) -> Option<std::sync::Arc<[u8]>> { self.papers.preview(id) }
     pub fn localization_generation(&self) -> u64 { self.localization_generation }
     pub fn renderer_generation(&self) -> u64 { self.renderer_generation }
     pub fn preferences_revision(&self) -> u64 { self.preferences_revision }
@@ -5922,6 +5923,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let parameter = fx.program.parameters.iter().find(|p| p.key.as_ref() == key)?;
                 Some(LayerFillColor { key: key.to_string(), color: fx.constant_color()?, opaque: parameter.opaque })
             }),
+            paper: scene.effect(id).and_then(|fx| effects::layer_paper(fx, &self.papers, !locked, &self.state.localization)),
             opacity: l.opacity,
             selected: !self.selection_masks.quick() && selected.contains(&id),
             load_selection_tooltip: "Use this layer as the current selection; keep the saved layer unchanged",
@@ -6001,7 +6003,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 alpha_locked: false, locked: false, relationship: None, right_swipe: None, pass_through: false, reference: false, group: false, object: false,
                 can_drop_below: false, drag_from_handle: false, drag_from_body: &[], depth: 0, collapsed: false, blend: layer_core::LayerBlend::Normal.code(),
                 blend_label: effects::blend_label(layer_core::LayerBlend::Normal, &self.state.localization).to_string(),
-                paint_revision: self.selection_masks.preview_revision(None), mask_revision: 0, mask_id: None, fill_color: None,
+                paint_revision: self.selection_masks.preview_revision(None), mask_revision: 0, mask_id: None, fill_color: None, paper: None,
             };
             self.state.layer_tools.editing_layer = Some(row.clone());
             self.state.layers.insert(0, row);

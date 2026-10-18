@@ -1088,7 +1088,7 @@ pub unsafe extern "C" fn capy_snapshot(host: *mut CapyHost, info: *mut CapySnaps
             windows_recovery: host.documents.as_ref().and_then(|d| d.recovery.as_ref()).map(|service| service.status(host.native.session.localization())),
             windows_tabs: host.documents.as_ref().map(|d| d.tabs_view(&host.native)),
             windows_palettes: host.documents.as_ref().map(|d| d.palettes.status()),
-            windows_papers: host.documents.as_ref().map(|d| d.papers.status(&host.native)),
+            windows_papers: host.documents.as_ref().map(|d| d.papers.status()),
             windows_tab_styles: {
                 let layout = &host.native.session.state().workspace.layout;
                 layout
@@ -1626,8 +1626,7 @@ pub unsafe extern "C" fn capy_presentation_stats(host: *const CapyHost, values: 
 pub unsafe extern "C" fn capy_paper_previews(host: *mut CapyHost, json: *const c_char) -> *mut crate::previews::CapyPreview {
     let mut result = std::ptr::null_mut();
     guard(host, |host| {
-        let key = host.documents.as_ref().map(|documents| documents.papers.key(&host.native)).unwrap_or_default();
-        let packet = crate::previews::paper_previews(&host.native, unsafe { read_json(json) }?, &key)?;
+        let packet = crate::previews::paper_previews(&host.native, unsafe { read_json(json) }?)?;
         result = Box::into_raw(Box::new(packet));
         Ok(0)
     });

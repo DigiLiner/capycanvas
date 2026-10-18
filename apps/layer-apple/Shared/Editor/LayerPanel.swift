@@ -364,6 +364,7 @@ private struct LayerRow: View {
                     }.foregroundStyle(palette["text"]).disabled(layer["locked"].bool)
                     thumbnail(mask: true)
                 }
+                if !layer["paper"].isNull { texture(layer["paper"]) }
             }.padding(.leading, min(CGFloat(layer["depth"].uint) * 8, 24))
             VStack(alignment: .leading, spacing: 0) {
                 LayerName(store: store, layer: layer, preview: preview, allowsAction: { interaction?.contact.consumeClick() != true })
@@ -450,12 +451,7 @@ private struct LayerRow: View {
                 }
             }.frame(width: 30, height: 30)
                 .overlay {
-                    Path { edge in
-                        let bounds = CGRect(x: 0, y: 0, width: 30, height: 30)
-                        edge.addPath(SquircleShape.tile.path(in: bounds))
-                        edge.addPath(SquircleShape.tile.inset(by: 1).path(in: bounds))
-                    }.fill(editing ? palette["accent"] : palette["text"].opacity(0.1), style: FillStyle(eoFill: true))
-                        .allowsHitTesting(false)
+                    thumbnailEdge(editing ? palette["accent"] : palette["text"].opacity(0.1))
                     LayerThumbnailOutline(progress: editing ? 1 : 0, color: palette["accent"])
                         .animation(reduceMotion ? nil : .timingCurve(0.25, 0.46, 0.45, 0.94, duration: 0.2), value: editing)
                         .allowsHitTesting(false)
@@ -469,6 +465,27 @@ private struct LayerRow: View {
             .accessibilityValue(thumbnailCaptureStatus(mask: mask))
             .accessibilityAddTraits((mask ? layer["mask_selected"].bool : layer["content_selected"].bool) ? .isSelected : [])
             .modifier(LayerRowMeasurement(id: id, part: mask ? \.mask : \.content, enabled: !preview))
+    }
+    private func thumbnailEdge(_ color: Color) -> some View {
+        Path { edge in
+            let bounds = CGRect(x: 0, y: 0, width: 30, height: 30)
+            edge.addPath(SquircleShape.tile.path(in: bounds))
+            edge.addPath(SquircleShape.tile.inset(by: 1).path(in: bounds))
+        }.fill(color, style: FillStyle(eoFill: true)).allowsHitTesting(false)
+    }
+    private func texture(_ paper: JSON) -> some View {
+        let label = store.catalog["native_copy"]["paper"]["choose"].string
+        return Button {
+            perform {
+                store.layer(["op": "select", "id": id, "mask": false])
+                if paper["editable"].bool { store.papers.choose(layer: id) }
+            }
+        } label: {
+            PaperPreview(previews: store.papers.previews, id: paper["id"].raw as? String, side: 28)
+                .frame(width: 30, height: 30).overlay { thumbnailEdge(palette["text"].opacity(0.1)) }
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).help(label).accessibilityLabel(label).accessibilityValue(paper["label"].string)
+            .accessibilityIdentifier("layer-texture-\(id)")
     }
     private func selectRow(toggle: Bool = false) {
         let keys = ThumbnailSelectionLoad.modifiers()

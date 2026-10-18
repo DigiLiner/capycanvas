@@ -24,12 +24,8 @@ impl Service {
     pub(crate) fn new(wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         Self { signal:crate::workspace_async::Signal::new(move || wake()), pending: None, initialized: false, generation: 0, imports:Default::default() }
     }
-    pub(crate) fn key(&self, host: &NativeHost) -> String {
-        let state = host.session.state();
-        format!("{}:{}:{:?}:{}", state.document_file.epoch, host.session.engine().document().revision, state.layer_properties.layer, self.generation)
-    }
-    pub(crate) fn status(&self, host: &NativeHost) -> serde_json::Value {
-        serde_json::json!({"key":self.key(host), "generation":self.generation.to_string(), "busy":self.pending.is_some()})
+    pub(crate) fn status(&self) -> serde_json::Value {
+        serde_json::json!({"generation":self.generation.to_string(), "busy":self.pending.is_some()})
     }
     fn start(&mut self, host: &NativeHost, request: Option<u32>, job: impl FnOnce() -> Result<Outcome, PaperLibraryError> + Send + 'static) -> Result<(), String> {
         let (send, receive) = mpsc::channel();
@@ -200,8 +196,10 @@ mod tests {
         let id = layer_ui::paper_library::paper_identity(&image).unwrap();
         let entry = PaperEntry { id:id.clone(), name:"Library scan".into(), bytes:64, preview:vec![127; 96*96].into() };
         let mut replacement = new_host();replacement.session.inherit_window_state(&host.session).unwrap();host = replacement;
-        let checkpoint = host.session.engine().checkpoint();
-        send.send(Ok(Outcome::Imported(layer, id, image, vec![entry]))).unwrap();service.poll(&mut host).unwrap();
+        let checkpoint = host.session.engine().checkpoint();let generation = service.status()["generation"].clone();
+        send.send(Ok(Outcome::Imported(layer, id.clone(), image, vec![entry]))).unwrap();service.poll(&mut host).unwrap();
+        assert_ne!(service.status()["generation"], generation);
+        assert!(host.session.paper_preview(&id).is_some());
         assert_eq!(host.session.engine().checkpoint(), checkpoint);
         assert_eq!(host.session.engine().document().paper(None).texture, layer_core::paper::default_texture());
         assert!(host.session.state().settings.new_document.paper.is_none());

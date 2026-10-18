@@ -46,7 +46,7 @@ private struct ColorEditingHost: View {
     var body: some View {
         Color.clear.allowsHitTesting(false)
             .sheet(isPresented: Binding(get: { !session.picking }, set: { if !$0 && !session.picking { session.close(apply: false) } }), onDismiss: { store?.focusCanvas?() }) {
-                ColorEditor(session: session).modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
+                ColorEditor(session: session).modifier(EditorDialogPresentation(identifier: "edit-color-dialog"))
             }
             .overlay(alignment: .topLeading) { if session.picking, let store { ColorPickStrip(store: store, session: session) } }
     }
@@ -55,7 +55,6 @@ private struct ColorEditingHost: View {
 struct ColorEditor: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
     @Environment(\.capyNativeCopy) private var nativeCopy
-    @Environment(\.capyCommonCopy) private var commonCopy
     @Environment(\.editorPopupStore) private var store
     @Environment(\.displayScale) private var displayScale
     @ObservedObject var session: ColorEditorSession
@@ -72,7 +71,7 @@ struct ColorEditor: View {
             ZStack(alignment: .bottom) {
                 EditorScrollView {
                     VStack(spacing: 16) {
-                        Text(copy["edit"].string).font(.headline).frame(maxWidth: .infinity)
+                        EditorDialogTitle(text: copy["edit"].string)
                         ColorEditorLayout {
                             head
                             VStack(spacing: 12) { ColorEditorWheel(session: session, side: 236); shapes }
@@ -82,10 +81,8 @@ struct ColorEditor: View {
                 }
                 if sheetOpen { swatchSheet.transition(.move(edge: .bottom)) }
             }.clipped()
-            Divider()
-            footer.padding(.horizontal, 20).padding(.vertical, 12)
-        }.frame(minWidth: 380, idealWidth: 800, maxWidth: 860, minHeight: 420, idealHeight: 500, maxHeight: 620)
-            .onChange(of: interfaceLanguage) { _, _ in session.relocalize(); session.refreshSwatches(sheetOpen: sheetOpen) }
+            footer
+        }.onChange(of: interfaceLanguage) { _, _ in session.relocalize(); session.refreshSwatches(sheetOpen: sheetOpen) }
             .onChange(of: focused) { previous, _ in if let previous { commit(previous) } }
             #if os(macOS)
             .onPasteCommand(of: [.utf8PlainText]) { providers in
@@ -209,12 +206,16 @@ struct ColorEditor: View {
             .frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("color-editor-error")
     }
     private var footer: some View {
-        HStack(spacing: 6) {
+        EditorDialogFooter(label: copy["use_color"].string, identifiers: (cancel: "color-cancel", apply: "color-use"),
+            cancelsOnEscape: !sheetOpen, blocked: session.blocked,
+            cancel: { session.close(apply: false) }, apply: { commitFocused(); session.close(apply: true) }) {
             if sheetOpen {
                 HStack(spacing: 6) {
                     HStack(spacing: 0) {
-                        ColorSwatch(rgba: view["current"]["rgba"]).frame(width: 22, height: 22)
-                        ColorSwatch(rgba: view["new"]["rgba"]).frame(width: 22, height: 22)
+                        ColorSwatch(rgba: view["current"]["rgba"]).frame(width: 36, height: 32)
+                            .accessibilityLabel(copy["current"].string).accessibilityIdentifier("color-footer-current")
+                        ColorSwatch(rgba: view["new"]["rgba"]).frame(width: 36, height: 32)
+                            .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-footer-new")
                     }.clipShape(SquircleShape.control)
                     Text(view["hex"].string).monospacedDigit()
                 }
@@ -227,11 +228,6 @@ struct ColorEditor: View {
             }.buttonStyle(EditorControlButtonStyle()).help(sheetOpen ? copy["close_swatches"].string : copy["all_swatches"].string)
                 .accessibilityLabel(sheetOpen ? copy["close_swatches"].string : copy["all_swatches"].string)
                 .accessibilityIdentifier("color-swatches")
-            Button(commonCopy["cancel"].string) { session.close(apply: false) }.buttonStyle(.bordered)
-                .keyboardShortcut(sheetOpen ? nil : .cancelAction).accessibilityIdentifier("color-cancel")
-            Button(copy["use_color"].string) { commitFocused(); session.close(apply: true) }
-                .buttonStyle(.borderedProminent).tint(palette.accent)
-                .disabled(session.blocked).keyboardShortcut(.defaultAction).accessibilityIdentifier("color-use")
         }
     }
     private var swatchSheet: some View {

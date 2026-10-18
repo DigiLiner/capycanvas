@@ -161,10 +161,15 @@ extension XCTestCase {
         waitForExpectations(timeout: 10)
         #endif
 
+        let pair = element("color-current").frame.union(element("color-new").frame)
         workspaceActivate(app.buttons["color-swatches"])
         let search = app.textFields["color-sheet-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10), "The chevron opens every swatch")
         XCTAssertTrue(element("color-tile-sheet").waitForExistence(timeout: 10))
+        let footerPair = element("color-footer-current").frame.union(element("color-footer-new").frame)
+        XCTAssertEqual(footerPair.width / footerPair.height, pair.width / pair.height, accuracy: 0.05,
+            "The footer pair keeps the Current and New proportions: \(pair) \(footerPair)")
+        XCTAssertEqual(footerPair.height, app.buttons["color-swatches"].frame.height, accuracy: 0.5, "The footer pair matches the footer buttons")
         attachEditor(in: app, name: "edit-color-sheet-\(theme)")
         workspaceActivate(app.buttons["color-sheet-close"])
         XCTAssertTrue(search.waitForNonExistence(timeout: 10))
@@ -219,6 +224,7 @@ extension XCTestCase {
         workspaceActivate(thumbnail)
         let use = app.buttons["color-use"]
         XCTAssertTrue(use.waitForExistence(timeout: 10), "Paper's thumbnail opens Edit Color on its color")
+        let editColorSize = app.descendants(matching: .any)["edit-color-dialog"].firstMatch.frame.size
         XCTAssertEqual(colorValueText("hex", in: app).uppercased(), "#FFFFFF")
         let current = elementPixel(app.descendants(matching: .any)["color-current"].firstMatch, in: app)
         XCTAssertTrue(min(current.0, current.1, current.2) >= 250, "Current shows Paper's white: \(current)")
@@ -238,6 +244,55 @@ extension XCTestCase {
         pixels({ r, g, b in r >= 250 && g <= 5 && b <= 5 }, "Use Color sets the fill")
         editorHistory("Undo", in: app)
         pixels({ r, g, b in min(r, g, b) >= 250 }, "Undo restores the fill")
+
+        let texture = paper.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-texture-")).firstMatch
+        XCTAssertTrue(texture.waitForExistence(timeout: 10), "Paper rows show their texture")
+        XCTAssertEqual(texture.label, "Choose Texture")
+        XCTAssertGreaterThan(texture.frame.minX, thumbnail.frame.maxX, "The texture follows the content thumbnail")
+        func expectTexture(_ name: String) {
+            expectation(for: NSPredicate(format: "value == %@", name), evaluatedWith: texture)
+            waitForExpectations(timeout: 10)
+        }
+        func expectPending(_ tile: XCUIElement) {
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: tile)
+            waitForExpectations(timeout: 10)
+        }
+        expectTexture("Drawing paper")
+        let white = editorPixels(in: app)
+        let dialog = app.descendants(matching: .any)["texture-dialog"].firstMatch
+        let drawingPaper = app.buttons["texture-tile-3"], rough = app.buttons["texture-tile-2"]
+        workspaceActivate(texture)
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10), "The texture thumbnail opens Choose Texture")
+        XCTAssertEqual(dialog.frame.width, editColorSize.width, accuracy: 1, "Choose Texture keeps the Edit Color width")
+        XCTAssertEqual(dialog.frame.height, editColorSize.height, accuracy: 1, "Choose Texture keeps the Edit Color height")
+        expectPending(drawingPaper)
+        attachEditor(in: app, name: "texture-dialog-\(theme)")
+        workspaceActivate(rough); expectPending(rough)
+        XCTAssertFalse(drawingPaper.isSelected)
+        workspaceActivate(app.buttons["texture-cancel"])
+        XCTAssertTrue(dialog.waitForNonExistence(timeout: 10))
+        expectTexture("Drawing paper"); expectPixels(white, in: app)
+        workspaceActivate(texture)
+        XCTAssertTrue(dialog.waitForExistence(timeout: 10))
+        expectPending(drawingPaper); XCTAssertFalse(rough.isSelected, "Cancel forgets the pending texture")
+        workspaceActivate(rough); expectPending(rough)
+        workspaceActivate(app.buttons["texture-apply"])
+        XCTAssertTrue(dialog.waitForNonExistence(timeout: 10))
+        expectTexture("Rough")
+        editorHistory("Undo", in: app)
+        expectTexture("Drawing paper"); expectPixels(white, in: app)
+
+        layerContext("Add mask", on: thumbnail, in: app)
+        let mask = paper.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-mask")).firstMatch
+        XCTAssertTrue(mask.waitForExistence(timeout: 10))
+        XCTAssertGreaterThan(texture.frame.minX, mask.frame.maxX, "The texture follows the Paper mask")
+        attachEditor(in: app, name: "texture-row-mask-\(theme)")
+        editorHistory("Undo", in: app)
+        XCTAssertTrue(mask.waitForNonExistence(timeout: 10))
+        layerContext("Lock editing", on: thumbnail, in: app)
+        workspaceActivate(texture)
+        XCTAssertFalse(dialog.waitForExistence(timeout: 3), "A locked Paper keeps its texture")
+        editorHistory("Undo", in: app)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 }

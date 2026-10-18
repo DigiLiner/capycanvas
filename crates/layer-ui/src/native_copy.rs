@@ -339,6 +339,8 @@ pub struct PaperCopy {
     pub import_accept: String,
     pub rename_title: String,
     pub rename: Arc<str>,
+    pub choose: Arc<str>,
+    pub use_texture: Arc<str>,
     pub extensions: Vec<String>,
 }
 impl PaperCopy {
@@ -346,6 +348,8 @@ impl PaperCopy {
         Self { import_accept:l.text(MessageId::DOCUMENTS_IMPORT_ACCEPT).to_string(),
             rename_title:l.text(MessageId::RESOURCES_PAPER_RENAME_TITLE).to_string(),
             rename:l.text(MessageId::WORKSPACE_RENAME),
+            choose:l.text(MessageId::RESOURCES_PAPER_CHOOSE),
+            use_texture:l.text(MessageId::RESOURCES_PAPER_USE),
             extensions:layer_color::photo::extensions().map(|suffix| format!(".{suffix}")).collect() }
     }
 }

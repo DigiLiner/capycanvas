@@ -122,7 +122,7 @@ pub(crate) struct Editor {
     values: gtk::Box,
     recent: gtk::Box,
     bottom_stack: gtk::Stack,
-    mini_current: ColorPatch,
+    pub(crate) mini_current: ColorPatch,
     mini_new: ColorPatch,
     mini_hex: gtk::Label,
     pub(crate) swatches: gtk::Button,
@@ -168,6 +168,7 @@ impl Editor {
         let dialog = adw::Dialog::builder().content_width(720).width_request(320).height_request(300).build();
         dialog.set_widget_name("edit-color-dialog");
         dialog.add_css_class("edit-color-dialog");
+        dialog.add_css_class("picker-dialog");
         let title = gtk::Label::new(None);
         title.add_css_class("title-4");
         title.set_halign(gtk::Align::Center);
@@ -296,7 +297,7 @@ impl Editor {
         values.append(&validation);
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 24);
         let page = gtk::Box::new(gtk::Orientation::Vertical, 16);
-        page.add_css_class("edit-color-body");
+        page.add_css_class("dialog-page");
         page.append(&title);
         page.append(&body);
         let right = gtk::Box::new(gtk::Orientation::Vertical, 14);
@@ -309,7 +310,8 @@ impl Editor {
             .hexpand(true)
             .child(&recent)
             .build();
-        let (mini_pair, mini_current, mini_new) = pair(18, 22);
+        let (mini_pair, mini_current, mini_new) = pair(38, 32);
+        mini_pair.set_valign(gtk::Align::Center);
         let mini_hex = gtk::Label::new(None);
         mini_hex.add_css_class("edit-color-number");
         let mini = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -329,7 +331,7 @@ impl Editor {
         apply_button.add_css_class("suggested-action");
         apply_button.set_widget_name("edit-color-apply");
         let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        bottom.add_css_class("edit-color-bottom");
+        bottom.add_css_class("dialog-footer");
         bottom.append(&bottom_stack);
         bottom.append(&swatches);
         bottom.append(&cancel);
@@ -378,7 +380,7 @@ impl Editor {
         })));
         sheet_slide.set_easing(adw::Easing::EaseOutCubic);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.add_css_class("edit-color-content");
+        content.add_css_class("dialog-content");
         content.append(&overlay);
         content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         content.append(&crate::squircle::Squircles::new(&bottom));

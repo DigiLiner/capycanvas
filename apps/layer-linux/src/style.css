@@ -197,11 +197,12 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .image-selector button { min-width: 48px; min-height: 48px; padding: 8px; border-radius: calc(32px * var(--corner-fit)); background: alpha(var(--window-fg-color), .04); }
 .image-selector button:hover { background: alpha(var(--window-fg-color), .08); }
 .image-selector button:checked { background: var(--selection-bg); box-shadow: inset 0 0 0 2px var(--accent-bg-color); }
-.paper-preview { border-radius: var(--control-radius); }
-.paper-picker { padding: 6px; }
-.paper-picker flowboxchild { padding: 6px; border-radius: calc(32px * var(--corner-fit)); }
-.paper-picker flowboxchild:hover { background: alpha(var(--window-fg-color), .08); }
-.paper-picker flowboxchild:selected { background: var(--selection-bg); box-shadow: inset 0 0 0 2px var(--accent-bg-color); color: inherit; }
+.paper-preview { border-radius: calc(14px * var(--corner-fit)); }
+.texture-grid flowboxchild { padding: 0; border-radius: var(--control-radius); background: none; color: inherit; }
+.texture-tile { padding: 3px; border-radius: calc(51px * var(--corner-fit)); }
+.texture-tile .paper-preview { border-radius: calc(48px * var(--corner-fit)); background: alpha(var(--window-fg-color), .06); }
+.texture-grid flowboxchild:hover .texture-tile { background: alpha(currentColor, .10); }
+.texture-grid flowboxchild:selected .texture-tile { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .number-preference button.number-value, .number-preference entry.number-entry { min-height: 34px; padding: 0 9px; }
 .number-preference .number-track { margin-top: 3px; }
 .number-preference scale trough { background: alpha(var(--window-fg-color), .12); }
@@ -422,16 +423,16 @@ popover.command-bar entry { background: var(--input-bg); }
 popover.command-bar list { padding: 0; background: transparent; }
 popover.command-bar row { min-height: 24px; padding: var(--command-gap) var(--command-inset); margin: 0; }
 window.canvas-preview-dialog floating-sheet > dimming, window.canvas-preview-dialog bottom-sheet > dimming { background-color: transparent; }
-.edit-color-content { background: var(--dialog-bg-color); }
-.edit-color-body { padding: 20px; }
-.edit-color-bottom { padding: 16px 20px 20px; }
+.dialog-content { background: var(--dialog-bg-color); }
+.dialog-page { padding: 20px; }
+.dialog-footer { padding: 16px 20px 20px; }
 .edit-color-sheet { padding: 20px 20px 0; background: var(--dialog-bg-color); }
 .edit-color-sheet-body { padding-bottom: 16px; }
-.edit-color-dialog entry, .edit-color-dialog button { transition: none; }
-.edit-color-dialog button { font-weight: 400; }
+.picker-dialog entry, .picker-dialog button { transition: none; }
+.picker-dialog button { font-weight: 400; }
 .edit-color-dialog .choice-well { padding: 4px; background: alpha(var(--window-fg-color), .06); }
 .edit-color-dialog .choice-well button { font-weight: 500; }
-.edit-color-bottom > button { min-height: 34px; padding: 0 16px; border-radius: var(--control-radius); font-weight: 500; }
+.dialog-footer > button { min-height: 34px; padding: 0 16px; border-radius: var(--control-radius); font-weight: 500; }
 .edit-color-pair { border-radius: var(--control-radius); border: 1px solid alpha(currentColor, .12); }
 .edit-color-pair button.edit-color-revert { padding: 0; min-width: 0; min-height: 0; border: 0; border-radius: 0; background: none; box-shadow: none; }
 button.edit-color-pick { min-width: 48px; min-height: 48px; padding: 0; border-radius: var(--control-radius); }

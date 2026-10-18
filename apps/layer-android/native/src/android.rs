@@ -1574,3 +1574,17 @@ pub extern "system" fn Java_art_capycanvas_Native_strokeRecordingData(
         });
     or_throw(&mut env, result, std::ptr::null_mut())
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_art_capycanvas_Native_paperPreview(
+    mut env: JNIEnv,
+    _: JClass,
+    handle: jlong,
+    id: JString,
+) -> jni::sys::jbyteArray {
+    let result = read(&mut env, &id).and_then(|id| match unsafe { app(handle) }.host.session.paper_preview(&id) {
+        Some(preview) => env.byte_array_from_slice(&preview).map(|a| a.into_raw()).map_err(error),
+        None => Ok(std::ptr::null_mut()),
+    });
+    or_throw(&mut env, result, std::ptr::null_mut())
+}

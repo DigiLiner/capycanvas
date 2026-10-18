@@ -21,12 +21,13 @@ final class NativePaperTask: @unchecked Sendable {
 
 final class NativePaperPreviews: @unchecked Sendable {
     private let handle: OpaquePointer
-    init(_ handle: OpaquePointer) { self.handle = handle }
+    private let ids: [String]
+    init(_ handle: OpaquePointer, ids: [String]) { self.handle = handle; self.ids = ids }
     deinit { let handle = handle; NativeProjectTask.io.async { capy_paper_previews_free(handle) } }
-    struct Decoded: @unchecked Sendable { let images: [Int: CGImage] }
+    struct Decoded: @unchecked Sendable { let images: [String: CGImage] }
     func decode() -> Decoded {
-        var images: [Int:CGImage] = [:]
-        for index in 0..<capy_paper_previews_count(handle) {
+        var images: [String:CGImage] = [:]
+        for index in 0..<min(ids.count,capy_paper_previews_count(handle)) {
             var bytes: UnsafePointer<UInt8>?, count = 0
             let side = Int(capy_paper_previews_read(handle,index,&bytes,&count))
             guard let bytes, side > 0, count == side * side else { continue }
@@ -35,15 +36,50 @@ final class NativePaperPreviews: @unchecked Sendable {
                 let image = CGImage(width:side,height:side,bitsPerComponent:8,bitsPerPixel:8,bytesPerRow:side,
                     space:CGColorSpaceCreateDeviceGray(),bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.none.rawValue),
                     provider:provider,decode:nil,shouldInterpolate:true,intent:.relativeColorimetric) else { continue }
-            images[index] = image
+            images[ids[index]] = image
         }
         return Decoded(images:images)
+    }
+}
+
+@MainActor final class PaperPreviewCache: ObservableObject {
+    @Published private(set) var images: [String:CGImage] = [:]
+    private weak var store: EditorStore?
+    private var requested = Set<String>()
+    init(store: EditorStore) { self.store = store }
+    func load(_ id: String) async {
+        guard !requested.contains(id), let native = store?.native else { return }
+        requested.insert(id)
+        let previews: NativePaperPreviews? = await withCheckedContinuation { done in
+            native.paperPreviews(ids:[id]) { done.resume(returning:$0) }
+        }
+        let decoded = await Task.detached(priority:.utility) { previews?.decode() }.value
+        if let image = decoded?.images[id] { images[id] = image } else { requested.remove(id) }
+    }
+}
+
+struct PaperPreview: View {
+    @ObservedObject var previews: PaperPreviewCache
+    let id: String?
+    let side: CGFloat
+    var body: some View {
+        Group {
+            if let id, let image = previews.images[id] { Image(decorative:image,scale:1).resizable().frame(width:side,height:side) }
+            else { SharedIcon(name:"layer-paper-symbolic",size:side / 2) }
+        }.frame(width:side,height:side).clipShape(SquircleShape.tile)
+            .task(id:id) { if let id { await previews.load(id) } }
     }
 }
 
 struct PaperRename: Identifiable {
     let id = UUID()
     let action: JSON
+}
+
+struct PaperTexture: Identifiable {
+    let id = UUID()
+    let layer: UInt64
+    let epoch: UInt64
 }
 
 @MainActor final class PaperController: ObservableObject {
@@ -57,10 +93,13 @@ struct PaperRename: Identifiable {
     private var active = Set<UInt64>()
     private var cancelled = Set<UInt64>()
     private var reloadPending = false
+    private var afterTexture: JSON?
+    let previews: PaperPreviewCache
     @Published var rename: PaperRename?
+    @Published var texture: PaperTexture?
     @Published private(set) var generation: UInt64 = 0
     @Published private(set) var busy = false
-    init(store: EditorStore, directory: URL?) { self.store = store; self.directory = directory }
+    init(store: EditorStore, directory: URL?) { self.store = store; self.directory = directory; previews = PaperPreviewCache(store:store) }
     var common: JSON { store?.bootstrap["common"] ?? JSON() }
     var copy: JSON { store?.catalog["native_copy"]["paper"] ?? JSON() }
     func receive() {
@@ -124,6 +163,15 @@ struct PaperRename: Identifiable {
             rename = PaperRename(action:item["action"])
         } else { store.dispatch(["type":"effect","action":item["action"].raw]) }
     }
+    func choose(layer: UInt64) {
+        guard let store else { return }
+        texture = PaperTexture(layer:layer,epoch:store.state["document_file"]["epoch"].uint)
+    }
+    func closeTexture(then item: JSON? = nil) { afterTexture = item; texture = nil }
+    func textureClosed() {
+        store?.focusCanvas?()
+        if let item = afterTexture { afterTexture = nil; action(item) }
+    }
     func renamed(_ name: String, completion: @escaping @MainActor (String?) -> Void) {
         guard let rename, let store else { return }
         var action = rename.action.object; action["name"] = name
@@ -135,9 +183,15 @@ struct PaperRename: Identifiable {
 }
 
 struct PaperFiles: ViewModifier {
+    let store: EditorStore
     @ObservedObject var controller: PaperController
     func body(content: Content) -> some View {
-        content.sheet(item:$controller.rename) { draft in PaperNameForm(controller:controller,draft:draft).modifier(EditorPopupPresentation()) }
+        content.sheet(item:controller.texture == nil ? $controller.rename : Binding<PaperRename?>.constant(nil)) { draft in
+            PaperNameForm(controller:controller,draft:draft).modifier(EditorPopupPresentation())
+        }
+            .sheet(item:$controller.texture,onDismiss:{ controller.textureClosed() }) { request in
+                TextureDialog(store:store,controller:controller,request:request).modifier(EditorDialogPresentation(identifier:"texture-dialog"))
+            }
             .overlay(alignment:.top) {
                 if controller.busy {
                     HStack { ProgressView(); Button(controller.common["cancel"].string) { controller.cancelWork() } }
@@ -180,65 +234,125 @@ private struct PaperNameForm: View {
     }
 }
 
-struct PaperPicker: View {
+struct PaperTextureButton: View {
+    @ObservedObject var store: EditorStore
+    let layer: UInt64
+    let control: JSON
+    var body: some View {
+        let tile = control["paper"]["tiles"][Int(control["value"]["value"].uint)], label = control["label"].string
+        Button { store.papers.choose(layer:layer) } label: {
+            HStack { PaperPreview(previews:store.papers.previews,id:tile["id"].raw as? String,side:28); Text(tile["label"].string).lineLimit(1); Spacer(minLength:0) }
+                .contentShape(Rectangle())
+        }.buttonStyle(EditorControlButtonStyle()).help(label).accessibilityLabel(label)
+            .accessibilityValue(tile["label"].string)
+            .accessibilityIdentifier("property-" + control["key"].string)
+    }
+}
+
+private struct TextureDialog: View {
+    @Environment(\.capyNativeCopy) private var nativeCopy
     @ObservedObject var store: EditorStore
     @ObservedObject var controller: PaperController
-    let layer: UInt64
-    let epoch: UInt64
-    let control: JSON
-    let select: (Int) -> Void
-    @State private var open = false
-    @State private var images: [Int:CGImage] = [:]
-    private var tiles: [JSON] { control["paper"]["tiles"].array }
-    private var selected: Int { Int(control["value"]["value"].uint) }
-    private var key: String { "\(epoch):\(layer):\(controller.generation):\(control.stableKey)" }
-    @ViewBuilder private func thumbnail(_ index:Int,_ side:CGFloat) -> some View {
-        if let image = images[index] { Image(decorative:image,scale:1).resizable().frame(width:side,height:side) }
-        else { SharedIcon(name:"layer-fill-symbolic").frame(width:side,height:side) }
+    let request: PaperTexture
+    @State private var started = false
+    @State private var pending: String?
+    @State private var width: CGFloat = 0
+    @FocusState private var focused: Bool
+    private var control: JSON {
+        let properties = store.state["layer_properties"]
+        guard store.state["document_file"]["epoch"].uint == request.epoch, properties["layer"].optionalUInt == request.layer else { return JSON() }
+        return properties["controls"].array.first { !$0["paper"].isNull } ?? JSON()
     }
+    private var ids: [String?] { control["paper"]["tiles"].array.map { $0["id"].raw as? String } }
+    private var selected: Int { Int(control["value"]["value"].uint) }
     var body: some View {
-        Button { open.toggle() } label: {
-            HStack { thumbnail(selected,28); Text(tiles.indices.contains(selected) ? tiles[selected]["label"].string : control["label"].string); Spacer(); SharedIcon(name:"chevron-down") }.contentShape(Rectangle())
-        }.buttonStyle(EditorControlButtonStyle()).accessibilityLabel(control["label"].string)
-            .accessibilityValue(tiles.indices.contains(selected) ? tiles[selected]["label"].string : "")
-            .accessibilityIdentifier("property-" + control["key"].string)
-            .editorPopover(isPresented:$open) {
-                VStack(alignment:.leading,spacing:8) {
-                    ScrollView {
-                        LazyVGrid(columns:[GridItem(.adaptive(minimum:72),spacing:4)],spacing:4) {
-                            ForEach(tiles.indices,id:\.self) { index in
-                                Button { select(index); open = false } label: {
-                                    VStack { thumbnail(index,64); Text(tiles[index]["label"].string).font(.caption).lineLimit(2) }
-                                        .frame(width:72).frame(minHeight:88).contentShape(Rectangle())
-                                }.buttonStyle(EditorControlButtonStyle(selected:index == selected))
-                                    .accessibilityLabel(tiles[index]["label"].string)
-                                    .accessibilityAddTraits(index == selected ? .isSelected : [])
-                                    .accessibilityIdentifier("paper-tile-\(index)")
-                                    .contextMenu {
-                                        ForEach(tiles[index]["actions"].array.indices,id:\.self) { action in
-                                            let item = tiles[index]["actions"][action]
-                                            Button(item["label"].string) { open = false; controller.action(item) }
-                                        }
-                                    }
-                            }
-                        }
-                    }.frame(maxHeight:360)
-                    if !control["paper"]["import"].isNull {
-                        Button(control["paper"]["import"]["label"].string) { open = false; controller.action(control["paper"]["import"]) }
-                            .accessibilityIdentifier("paper-import")
-                    }
-                }.padding(8).frame(width:336)
-                    .accessibilityElement(children:.contain).accessibilityIdentifier("paper-picker")
+        let control = self.control, tiles = control["paper"]["tiles"].array
+        VStack(spacing:0) {
+            ScrollViewReader { proxy in
+                EditorScrollView {
+                    VStack(spacing:16) {
+                        EditorDialogTitle(text:nativeCopy["paper"]["choose"].string)
+                        LazyVGrid(columns:[GridItem(.adaptive(minimum:102,maximum:102),spacing:12,alignment:.top)],spacing:14) {
+                            ForEach(tiles.indices,id:\.self) { index in tile(tiles[index],index:index).id(index) }
+                        }.frame(maxWidth:672)
+                            .onGeometryChange(for:CGFloat.self) { $0.size.width } action: { width = $0 }
+                            .focusable().focused($focused).focusEffectDisabled()
+                            .onKeyPress(keys:[.leftArrow,.rightArrow,.upArrow,.downArrow]) { press in move(press.key) }
+                    }.padding(20).frame(maxWidth:.infinity)
+                }.onChange(of:started) { _, _ in reveal(proxy) }
+                    .onChange(of:pending) { _, _ in reveal(proxy) }
             }
-            .task(id:key) {
-                guard let native = store.native else { return }
-                let previews: NativePaperPreviews? = await withCheckedContinuation { done in
-                    native.paperPreviews(layer:layer,epoch:epoch) { done.resume(returning:$0) }
+            EditorDialogFooter(label:nativeCopy["paper"]["use_texture"].string,identifiers:(cancel:"texture-cancel",apply:"texture-apply"),
+                cancel:{ controller.closeTexture() },apply:useTexture) {
+                let item = control["paper"]["import"]
+                if !item.isNull {
+                    Button(item["label"].string) { controller.closeTexture(then:item) }.buttonStyle(.bordered)
+                        .accessibilityIdentifier("texture-import")
                 }
-                guard let previews else { images = [:]; return }
-                let decoded = await Task.detached(priority:.utility) { previews.decode() }.value
-                guard !Task.isCancelled else { return }
-                images = decoded.images
+                Spacer(minLength:8)
             }
+        }.onChange(of:JSON([control["paper"]["tiles"].raw,control["value"].raw]).stableKey,initial:true) { _, _ in follow() }
+            .onAppear { focused = true }
+            .sheet(item:$controller.rename) { draft in PaperNameForm(controller:controller,draft:draft).modifier(EditorPopupPresentation()) }
+    }
+    private func tile(_ item: JSON, index: Int) -> some View {
+        let id = item["id"].raw as? String, actions = item["actions"].array
+        return TextureTile(previews:controller.previews,id:id,label:item["label"].string,pending:started && pending == id) { pending = id }
+            .accessibilityIdentifier("texture-tile-\(index)")
+            .contextMenu {
+                ForEach(actions.indices,id:\.self) { action in
+                    Button(actions[action]["label"].string) { controller.action(actions[action]) }
+                }
+            }
+    }
+    private func reveal(_ proxy: ScrollViewProxy) {
+        if started, let index = ids.firstIndex(of:pending) { proxy.scrollTo(index) }
+    }
+    private func follow() {
+        guard !control.isNull else { return }
+        let ids = self.ids
+        if !started || !ids.contains(pending) {
+            pending = ids.indices.contains(selected) ? ids[selected] : nil
+            started = true
+        }
+    }
+    private func move(_ key: KeyEquivalent) -> KeyPress.Result {
+        let ids = self.ids, columns = max(1,Int((width + 12) / 114))
+        guard started, let index = ids.firstIndex(of:pending) else { return .ignored }
+        let next = index + (key == .leftArrow ? -1 : key == .rightArrow ? 1 : key == .upArrow ? -columns : columns)
+        if ids.indices.contains(next) { pending = ids[next] }
+        return .handled
+    }
+    private func useTexture() {
+        let control = self.control
+        if started, !control.isNull, let index = ids.firstIndex(of:pending), index != selected {
+            store.effect(request.layer,epoch:request.epoch,key:control["key"].string,
+                action:["op":"set","value":["kind":"choice","value":index]]) { if let error = $0 { store.failure = error } }
+        }
+        controller.closeTexture()
+    }
+}
+
+private struct TextureTile: View {
+    @Environment(\.editorPopupStore) private var store
+    let previews: PaperPreviewCache
+    let id: String?
+    let label: String
+    let pending: Bool
+    let select: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        let palette = EditorPalette(source:store?.state["palette"] ?? JSON())
+        Button(action:select) {
+            VStack(spacing:6) {
+                PaperPreview(previews:previews,id:id,side:96)
+                    .background(palette["text"].opacity(0.06),in:SquircleShape.tile)
+                    .padding(3)
+                    .background { if hovering { SquircleShape.tile.fill(palette["text"].opacity(0.1)) } }
+                    .overlay { if pending { SquircleShape.tile.strokeBorder(palette.accent,lineWidth:2) } }
+                Text(label).font(.caption).multilineTextAlignment(.center).lineLimit(2).frame(width:102)
+            }.contentShape(Rectangle())
+        }.buttonStyle(.plain).onHover { hovering = $0 }
+            .help(label).accessibilityLabel(label).accessibilityAddTraits(pending ? .isSelected : [])
     }
 }

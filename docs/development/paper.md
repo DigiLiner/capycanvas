@@ -28,10 +28,10 @@ the library, rendering, saved data and what each host has.
 1. **New drawing.** The dialog shows Width, Height and Resolution (300 ppi by
    default) beside the existing presets, Background and Blending. The drawing
    starts with a Paper layer under an empty layer. Its texture is the paper
-   last chosen in the picker, at its real size.
-2. **Choose a paper.** Tapping the Paper layer opens Properties, titled Paper:
-   Color, a Texture tile and Scale. The Texture tile opens the paper picker;
-   choosing a paper applies it.
+   last chosen, at its real size.
+2. **Choose a paper.** The Paper row in Layers shows its color and, beside it,
+   its texture. Tapping the texture, or the Texture tile in Properties, opens
+   Choose Texture; Use Texture applies the chosen paper.
 3. **Scale the paper.** Dragging Scale shades the paper's relief over the
    canvas so its scale can be judged against the drawing. The same shading
    shows for a moment after a paper is chosen. It never appears in the artwork
@@ -40,8 +40,8 @@ the library, rendering, saved data and what each host has.
    tooth. Texture strength in Tool Settings still sets how much a brush reacts.
    Bristol and hot press break a pencil line only lightly; rough breaks it
    everywhere.
-5. **Import a paper.** Import… in the picker accepts an image file, adds it to
-   the library and applies it.
+5. **Import a paper.** Import… in Choose Texture accepts an image file, adds it
+   to the library and applies it.
 6. **Resize, crop, rotate or flip the image.** The tooth stays attached to the
    marks already drawn, and Scale reports its new value.
 
@@ -49,12 +49,12 @@ the library, rendering, saved data and what each host has.
 
 | Component | Controls |
 | --- | --- |
-| New drawing | Resolution (ppi) beside Width and Height, 300 by default and kept in saved presets. There is no paper choice: a new drawing uses the paper last chosen in the picker. |
+| New drawing | Resolution (ppi) beside Width and Height, 300 by default and kept in saved presets. There is no paper choice: a new drawing uses the paper last chosen. |
 | Image Size | Unchanged. It shows 300 ppi for a drawing without a resolution. |
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
-| Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
-| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name; Scale, a logarithmic slider from 25% to 400%. Double-clicking the Scale label returns to 100%. |
-| Paper picker | One grid: the thirteen built-in papers, imported papers, then Import…. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete. |
+| Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name, after the mask when there is one, and opens Choose Texture unless the layer is locked. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
+| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%. Double-clicking the Scale label returns to 100%. |
+| Choose Texture | A dialog with Edit Color's size, title and footer. One grid of squircle tiles, each preview at its own size with the paper's name below: the thirteen built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
 | Canvas | Relief shading while Scale changes and for a moment after a paper is chosen. |
 | Tool Settings | Texture strength, unchanged. Brushes have no texture picker or texture scale. |
 
@@ -118,7 +118,7 @@ when none exists inserts it at the bottom, regardless of the selected group.
 | Value | Kind | Rule |
 | --- | --- | --- |
 | `color` | Color | Opaque. Declared as the program's constant color, so Paper keeps the startup background, clear folding and color thumbnails of Solid Color. |
-| `texture` | Texture (new) | A built-in program with its values, or an imported image. Defaults to the paper last chosen in the picker, or Drawing paper. |
+| `texture` | Texture (new) | A built-in program with its values, or an imported image. Defaults to the paper last chosen in Choose Texture, or Drawing paper. |
 
 Paper's spatial reference maps paper millimeters to drawing pixels, and it is
 the only stored scale. Scale is a Paper property read from it: the mapping's
@@ -221,23 +221,26 @@ still finds its paper in the library. Hosts that have paper storage report the
 library to the session ([`paper_library.rs`](../../crates/layer-ui/src/paper_library.rs));
 a host without it shows only the built-in papers and no Import.
 
-New drawings use the paper last chosen in the picker. That is remembered with
+New drawings use the paper last chosen in Choose Texture. That is remembered with
 the other new-drawing state, not offered as a setting; an imported paper is
 read when the library loads. If it was deleted, the default paper is used.
 
-### Picker
+### Choose Texture
 
-One shared view model, presented by each host: a single grid with the
+One shared view model, presented by each host in a dialog that shares Edit
+Color's shell: a single grid with the
 built-in papers (Hot press, Cold press, Rough, Drawing paper, Bristol, Ingres,
 Pastel paper, Sanded pastel, Washi, Unryu, Handmade paper, Canvas and Linen),
-then imported papers, then Import…. When the selected Paper
+then imported papers, with Import… at the left of the footer. When the selected Paper
 uses an embedded image that is not in the library, that paper comes first with
 Add to Library. Tiles show 16 mm of each paper under raking light with its
 name. Built-in previews are made from their bakes by a test and ship with the
 app ([texture programs](texture-programs.md#validation-and-tests)); an imported
-paper's preview is made from its image when it is imported. Choosing a tile
-applies it; choosing an imported paper that is not in memory reads it on a
-worker first. Imported papers take their names from their files; Rename and
+paper's preview is made from its image when it is imported. Hosts request
+previews by paper id and keep them per id, since a paper's preview never
+changes. Choosing a tile marks it; Use Texture applies it, and an imported
+paper that is not in memory is read on a worker first. The open dialog follows
+library changes and keeps the marked paper by id. Imported papers take their names from their files; Rename and
 Delete sit in their context menu, as for palettes, and Add to Library sits in
 the drawing's own paper's menu. There is no separate library panel.
 
@@ -264,7 +267,7 @@ repeats as a grid that pencil shading reveals.
 ### Drawings and the library
 
 Choosing an imported paper embeds its image in the drawing, so files open
-anywhere. A paper embedded in someone else's drawing shows first in the picker
+anywhere. A paper embedded in someone else's drawing shows first in Choose Texture
 with Add to Library; adding it reuses an equal stored image.
 
 ## Rendering and performance
@@ -322,11 +325,11 @@ keep their Solid Color.
 | Area | State |
 | --- | --- |
 | Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
-| GTK | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the picker, drawing targets, masks and sheet creation in both themes. |
-| Windows | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding and library files use native workers. The Layers Paper fixture covers the row in both themes. |
-| Apple | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Native workers handle image decoding and library files. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
-| Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO; Texture is a list, so library papers appear as choices but Import and the tile actions have no control yet. `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it. |
-| Web | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lives in the raster worker's IndexedDB store, which decodes, converts and encodes papers off the page thread; the page lists it after the canvas starts and runs every Paper request through the shared session capture and adoption. Texture is a list, so library papers appear as choices but Import and the tile actions have no control yet. `--paper-library`, `--paper-rows` and `--blending` cover the library, layer controls and Resolution. |
+| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the dialog, the row thumbnails, drawing targets, masks and sheet creation in both themes. |
+| Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows and Choose Texture in both themes. |
+| Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Native workers handle image decoding and library files. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
+| Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO. Choose Texture opens from Properties and the Paper row, with Import, Delete and Add to Library; Rename has no prompt yet. `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the texture dialog, missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it. |
+| Web | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lives in the raster worker's IndexedDB store, which decodes, converts and encodes papers off the page thread; the page lists it after the canvas starts and runs every Paper request through the shared session capture and adoption. Choose Texture opens from Properties and the Paper row, with Import, Delete and Add to Library; Rename has no prompt yet. `--paper-library`, `--paper-rows` and `--blending` cover the library, Choose Texture, layer controls and Resolution. |
 
 ## Measurements
 
@@ -358,28 +361,29 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | Visible relief on the Paper layer | No | It would make Paper a textured generator, losing the constant-color shortcuts, and paint covers it anyway. The simpler option wins. |
 | Which paper a stroke uses | Nearest Paper at or below the target | One Paper per drawing needs pinning and refusals across every structural command. |
 | Texture parameters in Properties | Presets only | The simpler option wins for now. Presets with Scale cover the papers artists choose between; exposing parameters adds controls, text and frozen ranges for every program. |
-| Paper preview on the canvas | Brief relief shading when the paper or its Scale changes | Thumbnails alone: a thumbnail cannot show scale relative to the drawing, which is the judgement Scale exists for. Shading while the picker is open: it needs hover to preview a tile, which touch screens lack, and keeps another state. |
+| Paper preview on the canvas | Brief relief shading when the paper or its Scale changes | Thumbnails alone: a thumbnail cannot show scale relative to the drawing, which is the judgement Scale exists for. Shading while Choose Texture is open: it needs hover to preview a tile, which touch screens lack, and keeps another state. |
 | Scale model | One stored scale, read as Scale against the paper resolution | A scale value stored relative to the resolution when the Paper was made: after resampling to 200% it would still read 100%, and resetting it would do nothing. A scale tied live to the current resolution: changing only the resolution would rescale the tooth under the marks already drawn. A scale in pixels: the same paper would look different at every resolution and 100% could not mean real size. |
 | Low resolutions | Below 150 ppi counts as 300 | Using the value as written. Photos, screenshots and web images carry 72 or 96 ppi by default, which would make tooth four times too fine and imported textures four times too large. |
 | Control name | Scale | Size. Next to a paper, Size reads as the sheet's dimensions; Scale is the word texture controls use in Procreate and Photoshop. |
 | Scale range | 25–400% | A separate, wider typed range. Real papers near their own size need nothing beyond it, and image commands can still take Scale outside it. |
-| Picker tiles | Relief under raking light | A graphite stroke across each tile. It needs a brush render per tile, while raking light already shows the texture and its depth. |
-| Picker layout | One grid, with the drawing's own paper first only when it is not in the library | Separate sections for this drawing, built-in and imported papers. The drawing's paper is usually already in the grid, so the section repeats it. |
+| Choosing a paper | Choose Texture, a dialog like Edit Color, opened from Properties and from the texture thumbnail on the Paper row | A popover that applies on tap, from Properties only. It was hard to discover, and Use Texture and Cancel match Edit Color. |
+| Texture tiles | Relief under raking light | A graphite stroke across each tile. It needs a brush render per tile, while raking light already shows the texture and its depth. |
+| Texture layout | One grid, with the drawing's own paper first only when it is not in the library | Separate sections for this drawing, built-in and imported papers. The drawing's paper is usually already in the grid, so the section repeats it. |
 | Built-in papers | Thirteen | Fourteen, adding Bristol vellum and raw linen. Bristol vellum sits between Drawing paper and Bristol with little visible difference, and painters draw on primed linen rather than raw. |
 | Paper in New drawing | None; the paper last chosen | A picker in the dialog. It adds a second place to choose paper for a choice the Paper layer already makes. |
-| Library management | Rename and Delete in the picker | A library panel: a handful of imported papers does not need one. Delete alone: imported names come from file names such as scan_0042.png. |
+| Library management | Rename and Delete in Choose Texture | A library panel: a handful of imported papers does not need one. Delete alone: imported names come from file names such as scan_0042.png. |
 | Resolution controls | New drawing and Image Size | A resolution field on Paper or on import. New drawing and Image Size are where painting and photo apps put resolution, and a second field would let the paper disagree with the drawing. |
 | App-wide library | Yes, small | Imports stored only in drawings. Every new drawing would need the file imported again, and new drawings could not start on a chosen paper. |
 | Seamless import | Variance-preserving edge blend | Requiring tileable images. Most scans are not tileable, and the seam grid shows in every shaded area. |
 | Brush textures | Every grain brush follows Paper | Keeping bundled grains per brush. That keeps five grain fields, the CPU generators and textures that ignore the chosen paper. |
 | Per-brush textures | Later | They need typed overrides and library references for a minority case. |
 | Disk cache for bakes | None | The simpler option wins while bakes stay within the shader preparation they wait behind. |
-| Picker previews | Shipped for built-in papers, made at import for imported ones | Rendering previews on the GPU at run time. It needs a request and readback path on every host for images that never change between releases; a test keeps the shipped previews equal to their bakes. |
+| Texture previews | Shipped for built-in papers, made at import for imported ones | Rendering previews on the GPU at run time. It needs a request and readback path on every host for images that never change between releases; a test keeps the shipped previews equal to their bakes. |
 | Library index | A small index file beside the papers | The workspace database. Papers are app-wide, not per workspace, and the index keeps the folder self-contained. |
-| Tile actions | Rename, Delete and Add to Library in each tile's menu | Buttons in the picker. They would show for every paper while applying to one. |
+| Tile actions | Rename, Delete and Add to Library in each tile's menu | Buttons in the dialog. They would show for every paper while applying to one. |
 
-The Windows Paper picker marks the current tile and publishes its selected state
-to accessibility clients.
-The picker groups its tiles under the shared Texture label for accessibility.
+Choose Texture names its grid with the dialog title for accessibility, and the
+marked tile reports its selected state; the Paper row's texture thumbnail is
+named Choose Texture and describes the current paper.
 Paper parameter uploads and bake admission return GPU mapping errors through
 preparation, so hosts can retire a lost renderer through the usual recovery path.

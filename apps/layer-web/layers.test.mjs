@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
 
@@ -297,6 +297,129 @@ export async function checkLayerRelationships({call,evaluate,settle}) {
   console.log('PASS: contextual attachment, neutral adjacent FX links, darker accent rail, inherited eye, backgroundless FX, saved Selection normalized drops, collapsed owner, themes, custom/neutral accents, narrow/wide, scroll');
 }
 
+async function checkTextureChoice({call,evaluate,settle,theme,directory,device}) {
+  const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
+  const invoke=command=>send({type:'invoke',command});
+  const wait=(condition,timeout=10000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
+  const box=selector=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()`);
+  const click=async selector=>{const r=await box(selector),p={x:r.x+r.width/2,y:r.y+r.height/2};for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...p,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();};
+  const key=async(name,code)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:name,code,windowsVirtualKeyCode:{Enter:13,Escape:27,End:35,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40}[name],...(type==='keyDown'&&name==='Enter'?{text:'\r'}:{})});await settle();};
+  const capture=async name=>writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+  const paper=await evaluate('Number(layerApp.state().layers.find(l=>l.paper).id)'),ink=await evaluate('Number(layerApp.state().layers.find(l=>!l.paper).id)');
+  const row=`.layer-row[data-layer="${paper}"]`,thumbnail=`${row} .layer-texture`,dialog='#texture-dialog[open]',opened=`!!document.querySelector('${dialog}')`,closed=`!document.querySelector('${dialog}')`;
+  const tile=index=>`${dialog} .texture-tile[data-texture-tile="${index}"]`;
+  const texture=()=>evaluate(`(()=>{const s=layerApp.state(),control=s.layer_properties.controls.find(c=>c.paper);return{paper:s.layers.find(l=>Number(l.id)===${paper}).paper,layer:Number(s.layer_properties.layer),value:control?Number(control.value.value):null,labels:control?.paper.tiles.map(t=>t.label)??[],import:control?.paper.import?.label??null,revision:String(s.document_file.revision)}})()`);
+  const pending=()=>evaluate(`[...document.querySelectorAll('${dialog} .texture-tile')].findIndex(n=>n.getAttribute('aria-checked')==='true')`);
+  const editColor=async()=>{
+    await evaluate(`[...document.querySelectorAll('button[aria-label="Edit Color"]')].find(b=>b.getBoundingClientRect().width>0).click()`);
+    await wait(`document.querySelector('.color-dialog[open] .color-wheel')?.width>0`);await settle();
+    const shell=await box('.color-dialog[open]');
+    await evaluate(`document.querySelector('.color-dialog[open] .color-cancel').click()`);await wait(`!document.querySelector('.color-dialog[open]')`);
+    return shell;
+  };
+  const layout=()=>evaluate(`(()=>{const d=document.querySelector('${dialog}'),r=d.getBoundingClientRect(),title=d.querySelector('.dialog-title'),t=title.getBoundingClientRect(),tiles=[...d.querySelectorAll('.texture-tile')],frame=n=>n.querySelector('.texture-frame'),top=tiles[0].getBoundingClientRect().top,preview=frame(tiles[0]).querySelector('canvas'),p=preview.getBoundingClientRect(),footer=d.querySelector('.dialog-footer'),page=d.querySelector('.dialog-page');
+    return{shell:{x:r.x,y:r.y,width:r.width,height:r.height},title:title.textContent,titleCenter:t.left+t.width/2-(r.left+r.width/2),columns:tiles.filter(n=>n.getBoundingClientRect().top===top).length,frames:tiles.every(n=>frame(n).getBoundingClientRect().width===102&&frame(n).getBoundingClientRect().height===102),preview:[p.width,p.height,preview.width],
+      rings:tiles.map(n=>getComputedStyle(frame(n)).outlineStyle==='solid'&&getComputedStyle(frame(n)).outlineWidth==='2px'),captions:tiles.map(n=>n.querySelector('.texture-caption').textContent),focused:tiles.indexOf(document.activeElement),
+      buttons:[...footer.querySelectorAll('button')].filter(n=>!n.hidden).map(n=>[n.textContent,n.getBoundingClientRect().height]),divider:getComputedStyle(footer).borderTopWidth,scrolls:page.scrollHeight>page.clientHeight}})()`);
+  await send({type:'layer',action:{op:'select',id:paper,mask:false}});
+  const shell=await editColor(),initial=await texture(),last=initial.labels.length-1,other=(initial.value+2)%initial.labels.length;
+  assert.equal(initial.paper?.editable,true,'Paper rows publish their editable texture');
+  await send({type:'layer',action:{op:'select',id:ink,mask:false}});
+  const rowLayout=await evaluate(`(()=>{const row=document.querySelector('${row}'),t=row.querySelector('.layer-texture'),visible=[...row.querySelector('.layer-thumbnails').children].filter(n=>!n.hidden&&n.getBoundingClientRect().width>0),r=t.getBoundingClientRect(),p=t.querySelector('.paper-preview').getBoundingClientRect();
+    return{id:t.id,last:visible.at(-1)===t,afterContent:row.querySelector('.layer-thumbnail').getBoundingClientRect().right<=r.left,beforeName:r.right<=row.querySelector('.layer-text').getBoundingClientRect().left,size:[r.width,r.height],preview:[p.width,p.height],canvas:!!t.querySelector('canvas'),border:getComputedStyle(t).borderTopWidth,editing:t.classList.contains('editing-target'),title:t.title,label:t.ariaLabel,description:t.getAttribute('aria-description'),others:[...document.querySelectorAll('.layer-row:not([data-layer="${paper}"]) .layer-texture')].every(n=>n.hidden)}})()`);
+  assert.deepEqual(rowLayout,{id:`layer-texture-${paper}`,last:true,afterContent:true,beforeName:true,size:[30,30],preview:[28,28],canvas:true,border:'1px',editing:false,title:'Choose Texture',label:'Choose Texture',description:initial.paper.label,others:true},'Paper rows show their texture immediately left of the name');
+  await click(thumbnail);await wait(opened);await settle();
+  const selected=await texture();
+  assert.equal(selected.layer,paper,'The texture thumbnail selects its Paper');
+  assert.equal(await evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${paper}).selected`),true);
+  const shown=await layout();
+  for(const side of ['x','y','width','height'])assert.ok(Math.abs(shown.shell[side]-shell[side])<=1,`Choose Texture matches the Edit Color dialog ${side}: ${JSON.stringify([shown.shell,shell])}`);
+  assert.equal(shown.title,'Choose Texture');assert.ok(Math.abs(shown.titleCenter)<=1,'The title is centered');
+  assert.deepEqual(shown.captions,initial.labels,'One tile per texture, in order');
+  assert.equal(shown.columns,Math.min(6,initial.labels.length),'Six tiles per row at full width');
+  assert.equal(shown.frames,true,'Tiles are 102 by 102');
+  assert.deepEqual(shown.preview,[96,96,96],'Previews show at their own size');
+  assert.deepEqual(shown.rings,initial.labels.map((_,i)=>i===initial.value),'Only the current texture carries the ring');
+  assert.equal(shown.focused,initial.value,'Keyboard focus starts on the current texture');
+  assert.deepEqual(shown.buttons,[...(initial.import?[[initial.import,34]]:[]),['Cancel',34],['Use Texture',34]]);assert.equal(shown.divider,'1px');
+  assert.equal(shown.scrolls,true,'The grid scrolls inside the dialog');
+  await click(tile(other));
+  assert.equal(await pending(),other,'A tap moves the pending texture');
+  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('${tile(other)} .texture-frame')).backgroundColor`),'rgba(0, 0, 0, 0)','Hover tints the tile frame');
+  assert.deepEqual(await texture(),selected,'Choosing a tile does not edit the drawing');
+  await capture(`texture-dialog-${theme}`);
+  await click(`${dialog} #texture-cancel`);await wait(closed);
+  assert.deepEqual(await texture(),selected,'Cancel changes nothing');
+  const property=await evaluate(`(()=>{const n=document.querySelector('#property-texture'),r=n.getBoundingClientRect(),p=n.querySelector('.paper-preview').getBoundingClientRect();return{name:n.querySelector('.property-texture-name').textContent,title:n.title,description:n.getAttribute('aria-description'),preview:[p.width,p.height],canvas:!!n.querySelector('canvas'),inset:p.left-r.left,height:r.height,select:!!document.querySelector('[data-property-key="texture"] select')}})()`);
+  assert.deepEqual(property,{name:initial.paper.label,title:'Texture',description:initial.paper.label,preview:[28,28],canvas:true,inset:6,height:28,select:false},'Properties shows the texture as one button');
+  await capture(`texture-rows-${theme}`);
+  await click('#property-texture');await wait(opened);
+  assert.equal(await pending(),initial.value,'Reopening starts from the current texture');
+  const columns=(await layout()).columns;
+  let expected=initial.value;
+  for(const [name,next] of [['ArrowRight',v=>v+1],['ArrowDown',v=>v+columns],['ArrowLeft',v=>v-1],['ArrowUp',v=>v-columns],['End',()=>last],['ArrowDown',v=>v+columns],['Home',()=>0],['ArrowUp',v=>v-columns]]) {
+    const target=next(expected);if(target>=0&&target<=last)expected=target;await key(name,name);
+    assert.equal(await pending(),expected,`${name} moves the pending texture`);
+    assert.equal(await evaluate('document.activeElement.dataset.textureTile'),String(expected),`${name} moves keyboard focus`);
+  }
+  await key('Escape','Escape');await wait(closed);
+  assert.deepEqual(await texture(),selected,'Escape changes nothing');
+  await click('#property-texture');await wait(opened);await click(`${dialog} #texture-apply`);await wait(closed);
+  assert.deepEqual(await texture(),selected,'Use Texture without a new choice edits nothing');
+  await click('#property-texture');await wait(opened);await click(tile(other));await click(`${dialog} #texture-apply`);await wait(closed);
+  const applied=await texture();
+  assert.deepEqual([applied.value,applied.paper.label],[other,initial.labels[other]],'Use Texture applies the pending texture');
+  assert.deepEqual(await evaluate(`[document.querySelector('#property-texture .property-texture-name').textContent,document.querySelector('${thumbnail}').getAttribute('aria-description')]`),[initial.labels[other],initial.labels[other]]);
+  await invoke('undo');assert.equal((await texture()).value,initial.value,'One Undo restores the texture');
+  await invoke('redo');assert.equal((await texture()).value,other);
+  await invoke('undo');
+  const [step,offset]=initial.value<last?['ArrowRight',1]:['ArrowLeft',-1];
+  await click(thumbnail);await wait(opened);await key(step,step);await key('Enter','Enter');await wait(closed);
+  assert.equal((await texture()).value,initial.value+offset,'Enter uses the pending texture');
+  await invoke('undo');assert.equal((await texture()).value,initial.value);
+  const german=await readFile(new URL('../../assets/locales/de/resources.ftl',import.meta.url),'utf8'),copy=name=>german.split('\n').find(line=>line.startsWith(`${name} = `)).slice(name.length+3);
+  const settings=await evaluate('JSON.stringify(layerApp.state().settings)'),language=async(saved,tag)=>{await send({type:'restore_saved_settings',saved});await wait(`!layerApp.app.language_pending()&&document.documentElement.lang===${JSON.stringify(tag)}`,30000);await settle();};
+  await click(thumbnail);await wait(opened);await click(tile(0));
+  await evaluate(`window.textureDialogNode=document.querySelector('${dialog}')`);
+  await language(await evaluate(`JSON.stringify({...layerApp.state().settings,language:{Explicit:'de'}})`),'de');
+  const relabeled=await evaluate(`(()=>{const d=document.querySelector('${dialog}');return{same:d===textureDialogNode,title:d.querySelector('.dialog-title').textContent,label:d.ariaLabel,buttons:[...d.querySelectorAll('.dialog-footer button:not([hidden])')].map(n=>n.textContent),captions:[...d.querySelectorAll('.texture-caption')].map(n=>n.textContent),labels:layerApp.state().layer_properties.controls.find(c=>c.paper).paper.tiles.map(t=>t.label),cancel:layerApp.app.bootstrap_view().common.cancel,focused:document.activeElement?.dataset.textureTile}})()`);
+  assert.deepEqual(relabeled,{same:true,title:copy('resources-paper-choose'),label:copy('resources-paper-choose'),buttons:[...(initial.import?[copy('resources-paper-import')]:[]),relabeled.cancel,copy('resources-paper-use')],captions:relabeled.labels,labels:relabeled.labels,cancel:relabeled.cancel,focused:'0'},'A language change relabels the open dialog');
+  assert.notDeepEqual(relabeled.captions,initial.labels);assert.equal(await pending(),0,'Relabeling keeps the pending texture');
+  await capture(`texture-dialog-de-${theme}`);
+  await language(settings,'en');
+  await click(`${dialog} #texture-cancel`);await wait(closed);
+  assert.equal((await texture()).value,initial.value);
+  await click(thumbnail);await wait(opened);await click(tile(other));
+  await send({type:'layer',action:{op:'select',id:ink,mask:false}});
+  await click(`${dialog} #texture-apply`);await wait(closed);
+  assert.equal(await evaluate("document.querySelector('#status').textContent"),await evaluate('layerApp.app.bootstrap_view().action_failed'),'Use Texture reports a dialog whose Paper left Properties');
+  await send({type:'layer',action:{op:'select',id:paper,mask:false}});
+  assert.equal((await texture()).value,initial.value,'A stale dialog edits nothing');
+  await send({type:'layer',action:{op:'add_mask',id:paper,replace:false}});
+  const order=await evaluate(`(()=>{const row=document.querySelector('${row}'),x=n=>n.getBoundingClientRect(),[content,mask]=[...row.querySelectorAll('.layer-thumbnail')].map(x),link=x(row.querySelector('.layer-link')),texture=x(row.querySelector('.layer-texture'));return[mask.width>0,content.right<=link.left,link.right<=mask.left,mask.right<=texture.left,texture.right<=x(row.querySelector('.layer-text')).left]})()`);
+  assert.deepEqual(order,[true,true,true,true,true],'A Paper mask sits between the content and texture thumbnails');
+  await capture(`texture-row-mask-${theme}`);
+  await click(thumbnail);await wait(opened);await click(`${dialog} #texture-cancel`);await wait(closed);
+  await invoke('undo');
+  await send({type:'layer',action:{op:'lock',id:paper,value:true}});await send({type:'layer',action:{op:'select',id:ink,mask:false}});
+  assert.equal((await texture()).paper.editable,false,'Locking Paper makes its texture read-only');
+  await click(thumbnail);await new Promise(resolve=>setTimeout(resolve,250));
+  assert.equal(await evaluate(opened),false,'A locked Paper does not open Choose Texture');
+  assert.equal(await evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${paper}).selected`),true,'The locked texture thumbnail still selects its Paper');
+  await send({type:'layer',action:{op:'lock',id:paper,value:false}});
+  if(!device) {
+    await call('Emulation.setDeviceMetricsOverride',{width:700,height:900,deviceScaleFactor:1,mobile:false});await settle();
+    const narrowShell=await editColor();
+    await evaluate(`document.querySelector('${thumbnail}').click()`);await wait(opened);await settle();
+    const narrow=await layout();
+    for(const side of ['x','y','width','height'])assert.ok(Math.abs(narrow.shell[side]-narrowShell[side])<=1,`Narrow Choose Texture matches Edit Color ${side}: ${JSON.stringify([narrow.shell,narrowShell])}`);
+    assert.ok(narrow.columns<6&&narrow.frames,'Narrow dialogs wrap full-size tiles');
+    await capture(`texture-dialog-narrow-${theme}`);
+    await evaluate(`document.querySelector('${dialog} #texture-cancel').click()`);await wait(closed);
+    await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});await settle();
+  }
+}
+
 export async function checkPaperRows({call,evaluate,settle,device=false}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/paper-ports/web';
   await mkdir(directory,{recursive:true});
@@ -310,6 +433,7 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
   const bounds=()=>evaluate("(()=>{const n=document.querySelector('#layer-add-paper');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});
+    await checkTextureChoice({call,evaluate,settle,theme,directory,device});
     assert.equal(await missing(),false,'Paper suppresses Add paper');
     const initialCount=(await rows()).length;
     await evaluate(`document.querySelector('.layer-footer [aria-label="New layer"]').focus()`);
@@ -440,5 +564,5 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
     for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
     await layer({op:'new',group:false,clipped:false});
   }
-  console.log('PASS: Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
+  console.log('PASS: Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, mask order, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
 }

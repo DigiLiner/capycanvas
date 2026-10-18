@@ -160,9 +160,14 @@ fn apple_paper_retired_cancelled_and_replaced_requests_do_not_edit_the_current_d
 fn apple_paper_preview_leases_outlive_the_editor_and_match_shared_pixels() {
     let app=App::new(1);app.action(json!({"type":"select_layer","id":layer(&app)}));
     let state=unsafe { &*app.0 }.host.session.state();
-    let expected:Vec<_>=state.layer_properties.controls.iter().find_map(|control|control.paper.as_ref()).unwrap()
-        .tiles.iter().map(|tile|tile.preview.clone()).collect();
-    let previews=unsafe { capy_apple_paper_previews(app.0,layer(&app),state.document_file.epoch) };assert!(!previews.is_null());drop(app);
+    let mut ids:Vec<String>=state.layer_properties.controls.iter().find_map(|control|control.paper.as_ref()).unwrap()
+        .tiles.iter().filter_map(|tile|tile.id.as_deref().map(str::to_string)).collect();
+    ids.push("missing".into());
+    let expected:Vec<_>=ids.iter().map(|id|unsafe { &*app.0 }.host.session.paper_preview(id)).collect();
+    assert_eq!(expected.iter().filter(|image|image.is_some()).count(),13);
+    let json=std::ffi::CString::new(serde_json::to_string(&ids).unwrap()).unwrap();
+    assert!(unsafe { capy_apple_paper_previews(app.0,std::ptr::null()) }.is_null());
+    let previews=unsafe { capy_apple_paper_previews(app.0,json.as_ptr()) };assert!(!previews.is_null());drop(app);
     assert_eq!(unsafe { capy_paper_previews_count(previews) },expected.len());
     for (index,image) in expected.iter().enumerate() {
         let mut bytes=std::ptr::null();let mut count=0;

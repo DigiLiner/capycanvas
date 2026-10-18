@@ -150,7 +150,7 @@ private struct PropertyField: View {
         case "choice" where !control["paper"].isNull:
             PropertyChoiceRow(labelWidth: labelWidth) {
                 Text(label).lineLimit(1)
-                PaperPicker(store: store, controller: store.papers, layer: layer, epoch: epoch, control: control) { change($0, revision: revision) }
+                PaperTextureButton(store: store, layer: layer, control: control)
             }
         case "choice":
             PropertyChoiceRow(labelWidth: labelWidth) {

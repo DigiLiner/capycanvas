@@ -35,6 +35,7 @@ namespace CapyUi {
 struct StrokeRecording;
 struct ScopeFeed;
 struct ColorStrip;
+struct PaperPreviewCache;
 void captureTextComposition(TextBox const& entry,std::function<void(bool)> localizationInput={});
 bool textComposing(DependencyObject element);
 bool focusedTextComposing(XamlRoot const& root);
@@ -206,6 +207,7 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
     J state,catalog,model;
     std::shared_ptr<FilterPreviewCache> previews;
     std::shared_ptr<LayerThumbnailCache> thumbnails;
+    std::shared_ptr<PaperPreviewCache> papers;
     PreviewTransport query;
     uint64_t windowId=0;bool glassSurfaces=false;A drawerSources;
     std::shared_ptr<StrokeRecording> strokes;

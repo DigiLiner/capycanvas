@@ -29,7 +29,7 @@ export function chooseColor({app, color, slot, element, button, opaque = false})
     editor = next.editor; view = next.view; return next.error;
   };
   return new Promise(resolve => {
-    const root = element('dialog', 'color-dialog'), body = element('div', 'color-editor-body');
+    const root = element('dialog', 'color-dialog picker-dialog'), body = element('div', 'color-editor-body dialog-page');
     bindCopy(root, () => copy.edit, 'ariaLabel');
     const wheelBox = element('div', 'color-editor-wheel'), stage = element('div', 'color-editor-stage'), canvas = element('canvas', 'color-wheel');
     bindCopy(canvas, () => copy.wheel, 'ariaLabel');
@@ -49,7 +49,7 @@ export function chooseColor({app, color, slot, element, button, opaque = false})
       shapes.append(node); return node;
     });
     const left = element('div', 'color-editor-left'); left.append(wheelBox, shapes);
-    const title = element('h2', 'color-editor-title', () => copy.edit);
+    const title = element('h2', 'color-editor-title dialog-title', () => copy.edit);
     const current = button('', () => act({op:'revert'}), 'color-current'), fresh = element('span', 'color-new');
     bindCopy(current, () => copy.current, 'title'); bindCopy(current, () => copy.current, 'ariaLabel'); bindCopy(fresh, () => copy.new, 'ariaLabel');
     const pair = element('div', 'color-pair'); pair.append(current, fresh);
@@ -90,15 +90,15 @@ export function chooseColor({app, color, slot, element, button, opaque = false})
     const recent = element('div', 'color-recent'), mini = element('div', 'color-mini'), miniPair = element('div', 'color-pair'), miniCurrent = element('span'), miniNew = element('span'), miniHex = element('span', 'color-mini-hex');
     miniPair.append(miniCurrent, miniNew); mini.append(miniPair, miniHex); mini.hidden = true;
     const more = button('', () => showSheet(sheet.hidden), 'color-swatches'); more.append(icon('chevron-down'));
-    const cancel = button(() => common.cancel, () => root.close(), 'color-cancel');
+    const cancel = button(() => common.cancel, () => root.close(), 'color-cancel dialog-button');
     const apply = button(() => copy.use_color, () => {
       if (apply.disabled) return;
       if (app.state().document_file.epoch === epoch) result = {color: view.value, intensity: view.stops ?? null};
       root.close();
     }, 'suggested-action');
-    const footer = element('footer', 'color-editor-bottom'); footer.append(recent, mini, more, cancel, apply);
+    const footer = element('footer', 'dialog-footer'); footer.append(recent, mini, more, cancel, apply);
     const page = element('div', 'color-editor-page'); page.append(body, sheet);
-    const content = element('div', 'color-editor'); content.append(page, footer);
+    const content = element('div', 'dialog-content'); content.append(page, footer);
     root.append(content); document.body.append(root);
     const strip = button('', () => { if (app.color_preview().picker.editor) dispatch({type:'color_picker', action:{kind:'toggle'}}); }, 'color-strip');
     const stripPair = element('span', 'color-pair'), stripOriginal = element('span'), stripSample = element('span'), stripHex = element('span', 'color-strip-hex'), stripEv = element('span', 'color-strip-ev'), stripSpace = element('span', 'color-strip-space'), stripValues = element('span', 'color-strip-values');

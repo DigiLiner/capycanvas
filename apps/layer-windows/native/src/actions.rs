@@ -7,6 +7,9 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub(crate) enum Action {
+    Failure {
+        windows_failure: Failure,
+    },
     Proof {
         windows_proof_action: layer_ui::proof_panel::ProofAction,
         windows_epoch: String,
@@ -20,6 +23,11 @@ pub(crate) enum Action {
         action: UiAction,
     },
     Ordinary(UiAction),
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Failure {
+    ActionFailed,
 }
 #[derive(Deserialize)]
 pub(crate) struct TabCapture {
@@ -45,7 +53,7 @@ impl Action {
     pub(crate) fn allowed_while_workspace_blocked(&self) -> bool {
         let action = match self {
             Self::Ordinary(action) | Self::Document { action, .. } => action,
-            Self::TabDrag { .. } | Self::Proof { .. } => return false,
+            Self::TabDrag { .. } | Self::Proof { .. } | Self::Failure { .. } => return false,
         };
         matches!(
             action,
@@ -75,6 +83,11 @@ impl Action {
     }
     pub(crate) fn dispatch(self, host: &mut NativeHost) -> Result<(), String> {
         let action = match self {
+            Self::Failure { windows_failure: Failure::ActionFailed } => {
+                host.session.raise_message_notice(layer_ui::MessageId::COMMON_ACTION_FAILED);
+                host.invalidate_snapshot();
+                return Ok(());
+            }
             Self::Proof {
                 windows_proof_action,
                 windows_epoch,
@@ -262,6 +275,18 @@ mod tests {
         )
         .unwrap();
         assert!(malformed.dispatch(&mut host).is_err());
+    }
+    #[test]
+    fn refused_widget_results_raise_the_shared_failure_notice() {
+        let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        let document = host.session.engine().document().clone();
+        let failure: Action = serde_json::from_value(serde_json::json!({"windows_failure":"action_failed"})).unwrap();
+        assert!(!failure.allowed_while_workspace_blocked());
+        failure.dispatch(&mut host).unwrap();
+        let text = host.session.localization().text(layer_ui::MessageId::COMMON_ACTION_FAILED);
+        assert_eq!(host.session.state().notice.as_ref().map(|notice| notice.text.as_str()), Some(&*text));
+        assert_eq!(host.session.engine().document(), &document);
+        assert!(serde_json::from_value::<Action>(serde_json::json!({"windows_failure":"other"})).is_err());
     }
     #[test]
     fn stale_notice_timeouts_are_quiet_but_stale_accepts_fail() {

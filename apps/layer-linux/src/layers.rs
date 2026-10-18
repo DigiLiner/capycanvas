@@ -12,13 +12,16 @@ mod connections;
 
 struct LayerCopy {
     layer: layer_ui::native_copy::LayerCopy,
+    choose_texture: std::sync::Arc<str>,
     reference: std::sync::Arc<str>,
     load_selection: std::sync::Arc<str>,
 }
 impl LayerCopy {
     fn new(localization: &layer_ui::Localizer) -> Self {
+        let copy = layer_ui::NativeCopy::new(localization);
         Self {
-            layer: layer_ui::NativeCopy::new(localization).layers,
+            layer: copy.layers,
+            choose_texture: copy.paper.choose,
             reference: localization.text(layer_ui::MessageId::COMMAND_SELECTION_REFERENCE),
             load_selection: localization.text(layer_ui::MessageId::RESOURCES_SELECTION_MENU_LOAD_SELECTION),
         }
@@ -63,6 +66,7 @@ pub struct LayerPanel {
 #[derive(Clone)]
 struct Row {
     copy: Rc<RefCell<LayerCopy>>,
+    owner: Rc<RefCell<Weak<Workspace>>>,
     id: Cell<u64>,
     bound: Cell<bool>,
     swipe: crate::swipe_row::SwipeRow,
@@ -78,6 +82,8 @@ struct Row {
     load_selection: gtk::Button,
     mask: gtk::Button,
     link: gtk::Button,
+    texture: gtk::Button,
+    texture_thumbnail: crate::paper_picker::PaperThumbnail,
     name: gtk::Label,
     name_stack: gtk::Stack,
     name_entry: gtk::Entry,
@@ -521,6 +527,16 @@ impl LayerPanel {
                 thumbnails.append(&link);
                 let (mask, mask_image, _) = thumbnail(copy.borrow().layer.edit_mask.as_ref());
                 thumbnails.append(&mask);
+                let texture_thumbnail = crate::paper_picker::PaperThumbnail::new(28);
+                let texture = gtk::Button::builder().child(&texture_thumbnail.image).valign(gtk::Align::Center).visible(false).build();
+                for class in ["flat", "layer-icon", "layer-thumbnail"] { texture.add_css_class(class); }
+                texture.connect_clicked(glib::clone!(#[weak] item, #[strong] owner, move |_| {
+                    let Some(row) = row_state(&item) else { return };
+                    let Some(w) = owner.borrow().upgrade() else { return };
+                    w.dispatch(row_button_action(&row, 2));
+                    if row.paper.is_some_and(|paper| paper.editable) { crate::paper_picker::open(&w, row.id); }
+                }));
+                thumbnails.append(&texture);
                 root.append(&thumbnails);
                 let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 text.set_hexpand(true);
@@ -898,6 +914,7 @@ impl LayerPanel {
                     item.as_ptr() as usize,
                     Row {
                         copy: copy.clone(),
+                        owner: owner.clone(),
                         id: Cell::new(0),
                         bound: Cell::new(false),
                         swipe,
@@ -913,6 +930,8 @@ impl LayerPanel {
                         load_selection,
                         mask,
                         link,
+                        texture,
+                        texture_thumbnail,
                         name,
                         name_stack,
                         name_entry,
@@ -1626,6 +1645,13 @@ impl Row {
         });
         self.link.set_visible(s.has_mask);
         self.mask.set_visible(s.has_mask);
+        self.texture.set_visible(s.paper.is_some());
+        self.texture.set_widget_name(&format!("layer-texture-{}", s.id));
+        if let Some(paper) = &s.paper {
+            caption(&self.texture, copy.choose_texture.as_ref());
+            self.texture.update_property(&[gtk::accessible::Property::Description(&paper.label)]);
+            if let Some(w) = self.owner.borrow().upgrade() { self.texture_thumbnail.show(&w, paper.id.as_ref()); }
+        }
         crate::icons::set_button(&self.link, if s.mask_linked { "layer-link-symbolic" } else { "layer-unlink-symbolic" });
         self.link.set_sensitive(!s.locked);
         caption(&self.link, if s.mask_linked { copy.layer.unlink_mask.as_ref() } else { copy.layer.link_mask_to_layer.as_ref() });

@@ -23,7 +23,7 @@ fn native_layer_thumbnail_squircles() {
     place_source::wait_layer_thumbnail(&w, fill);
     pump(250);
     let row = widgets(w.layer_panel.root.upcast_ref()).find(|widget| widget.is_mapped() && widget.widget_name() == format!("art-layer-{paint}")).unwrap();
-    let thumbnails = descendants::<gtk::Button>(&row).into_iter().filter(|button| button.has_css_class("layer-thumbnail")).collect::<Vec<_>>();
+    let thumbnails = descendants::<gtk::Button>(&row).into_iter().filter(|button| button.has_css_class("layer-thumbnail") && button.is_visible()).collect::<Vec<_>>();
     assert_eq!(thumbnails.len(), 2);
     let render = |widget: &gtk::Widget| {
         let snapshot = gtk::Snapshot::new();
@@ -84,6 +84,16 @@ fn native_layer_thumbnail_squircles() {
                 }
             }
         }
+        let paper = state(&w).layers.into_iter().find(|row| row.paper.is_some()).unwrap().id;
+        let paper_texture = widgets(w.layer_panel.root.upcast_ref()).find(|widget| widget.is_mapped() && widget.widget_name() == format!("layer-texture-{paper}")).unwrap();
+        let texture = render(descendant::<gtk::Image>(&paper_texture).unwrap().upcast_ref());
+        let mut download = gdk::TextureDownloader::new(&texture);
+        download.set_format(gdk::MemoryFormat::R8g8b8a8);
+        let (pixels, stride) = download.download_bytes();
+        let alpha = |x: usize, y: usize| pixels[y * stride + x * 4 + 3];
+        assert_eq!([texture.width(), texture.height()], [28, 28]);
+        assert!([(0, 0), (27, 0), (0, 27), (27, 27)].into_iter().all(|(x, y)| alpha(x, y) == 0), "{theme:?}: the paper texture corners are clipped");
+        assert_eq!((alpha(3, 3), alpha(14, 14)), (255, 255), "{theme:?}: the paper texture is a squircle");
         let preview = crate::layers::drag_preview(&row, state(&w).palette.panel).unwrap();
         let snapshot = gtk::Snapshot::new();
         preview.snapshot(&snapshot, row.width() as f64, row.height() as f64);

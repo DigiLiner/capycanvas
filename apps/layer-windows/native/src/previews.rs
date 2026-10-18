@@ -174,27 +174,22 @@ fn pack_layer_thumbnails(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PaperQuery {
-    key: String,
-    indices: Vec<usize>,
+    ids: Vec<String>,
 }
-pub(crate) fn paper_previews(host: &NativeHost, json: &str, key: &str) -> Result<CapyPreview, String> {
+pub(crate) fn paper_previews(host: &NativeHost, json: &str) -> Result<CapyPreview, String> {
     let query: PaperQuery = serde_json::from_str(json).map_err(|error| error.to_string())?;
-    if query.indices.len() > 8 { return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).to_string()); }
+    if query.ids.len() > 8 { return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput).to_string()); }
     let mut bytes = Vec::new();
     let mut images = Vec::new();
     let size = layer_core::paper::PREVIEW_SIZE;
-    if query.key == key && let Some(picker) = host.session.state().layer_properties.controls.iter().find_map(|control| control.paper.as_ref()) {
-        for index in query.indices {
-            let tile = picker.tiles.get(index).ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput).to_string())?;
-            if let Some(preview) = &tile.preview {
-                if preview.len() != size * size { return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).to_string()); }
-                let offset = bytes.len();
-                bytes.extend(preview.iter().flat_map(|&value| [value, value, value, 255]));
-                images.push(serde_json::json!({"index":index, "offset":offset}));
-            }
-        }
+    for id in query.ids {
+        let Some(preview) = host.session.paper_preview(&id) else { continue };
+        if preview.len() != size * size { return Err(std::io::Error::from(std::io::ErrorKind::InvalidData).to_string()); }
+        let offset = bytes.len();
+        bytes.extend(preview.iter().flat_map(|&value| [value, value, value, 255]));
+        images.push(serde_json::json!({"id":id, "offset":offset}));
     }
-    CapyPreview::packet(serde_json::json!({"key":key, "size":size, "images":images}), bytes)
+    CapyPreview::packet(serde_json::json!({"size":size, "images":images}), bytes)
 }
 
 #[cfg(test)]
@@ -421,23 +416,17 @@ mod tests {
         }
     }
     #[test]
-    fn paper_packets_are_bounded_binary_and_discard_stale_property_requests() {
-        let mut host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
-        let layer = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(host.session.engine().document().scene(), None).unwrap());
-        host.dispatch(layer_ui::UiAction::SelectLayer { id:layer }).unwrap();
-        let picker = host.session.state().layer_properties.controls.iter().find_map(|control| control.paper.as_ref()).unwrap();
-        let (index, expected) = picker.tiles.iter().enumerate().find_map(|(index, tile)| tile.preview.clone().map(|preview| (index, preview))).unwrap();
-        let query = serde_json::json!({"key":"current", "indices":[index]}).to_string();
-        let packet = paper_previews(&host, &query, "current").unwrap();
+    fn paper_packets_are_bounded_binary_and_skip_unknown_papers() {
+        let host = NativeHost::new(layer_ui::Platform::Windows).unwrap();
+        let expected = host.session.paper_preview("rough").unwrap();
+        let query = serde_json::json!({"ids":["missing", "rough"]}).to_string();
+        let packet = paper_previews(&host, &query).unwrap();
         let metadata: serde_json::Value = serde_json::from_str(packet.metadata.to_str().unwrap()).unwrap();
-        assert_eq!(metadata["images"], serde_json::json!([{"index":index,"offset":0}]));
+        assert_eq!(metadata["images"], serde_json::json!([{"id":"rough","offset":0}]));
         assert_eq!(packet.bytes.len(), expected.len()*4);
         for (pixel, value) in packet.bytes.as_chunks::<4>().0.iter().zip(expected.iter()) { assert_eq!(pixel, &[*value,*value,*value,255]); }
-        let stale = paper_previews(&host, &query, "replacement").unwrap();
-        assert!(stale.bytes.is_empty());
-        assert_eq!(serde_json::from_str::<serde_json::Value>(stale.metadata.to_str().unwrap()).unwrap()["images"], serde_json::json!([]));
-        for query in [serde_json::json!({"key":"current","indices":[usize::MAX]}),serde_json::json!({"key":"current","indices":vec![0;9]}),serde_json::json!({"key":"current","indices":[index],"extra":true})] {
-            assert!(paper_previews(&host, &query.to_string(), "current").is_err());
+        for query in [serde_json::json!({"ids":vec!["rough";9]}),serde_json::json!({"ids":["rough"],"extra":true}),serde_json::json!({"indices":[0]})] {
+            assert!(paper_previews(&host, &query.to_string()).is_err());
         }
     }
 

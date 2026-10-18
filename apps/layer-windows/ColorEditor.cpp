@@ -4,7 +4,7 @@
 #include "ColorWheel.h"
 #include "Checker.h"
 #include "WorkspaceQuery.h"
-#include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>
+#include "PickerDialog.h"
 #include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
@@ -115,19 +115,9 @@ struct Editor:std::enable_shared_from_this<Editor>{
 
     void init(XamlRoot const& xaml,bool canPick){
         auto weak=weak_from_this();
-        dialog=ContentDialog();dialog.XamlRoot(xaml);
-        dialog.RequestedTheme(data->theme()==L"dark"?ElementTheme::Dark:ElementTheme::Light);
-        dialog.Resources().Insert(box_value(L"ContentDialogMaxWidth"),box_value(760.));
-        dialog.Resources().Insert(box_value(L"ContentDialogMinWidth"),box_value(300.));
-        dialog.Resources().Insert(box_value(L"ContentDialogMaxHeight"),box_value(100000.));
-        dialog.Resources().Insert(box_value(L"ContentDialogPadding"),box_value(Thickness{0,0,0,0}));
-        dialog.Background(data->brush(L"dialog"));dialog.Content(root);
-        AutomationProperties::SetAutomationId(dialog,L"edit-color-dialog");
-        inheritLanguage(root,data);
-        for(auto height:{GridLength{1,GridUnitType::Star},GridLength{1,GridUnitType::Auto}}){RowDefinition row;row.Height(height);root.RowDefinitions().Append(row);}
+        dialog=pickerDialog(data,xaml,root,page,footer,L"edit-color-dialog");
         buildBody(canPick);buildFooter();buildSheet();
-        page.Children().Append(bodyScroll);page.Children().Append(sheetHost);root.Children().Append(page);
-        Grid::SetRow(footer,1);root.Children().Append(footer);
+        page.Children().Append(bodyScroll);page.Children().Append(sheetHost);
         page.SizeChanged([weak](auto&&,SizeChangedEventArgs const& e){if(auto self=weak.lock()){
             auto size=e.NewSize();self->sheet.Width(size.Width);self->sheet.Height(size.Height);
             RectangleGeometry clip;clip.Rect({0,0,size.Width,size.Height});self->page.Clip(clip);
@@ -148,9 +138,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
 
     void buildBody(bool canPick){
         auto weak=weak_from_this();
-        title.FontFamily(FontFamily(L"Segoe UI"));title.FontWeight(winrt::Windows::UI::Text::FontWeights::Bold());title.FontSize(data->textSize()*1.05);
-        title.HorizontalAlignment(HorizontalAlignment::Center);title.Foreground(data->brush(L"text"));AutomationProperties::SetAutomationId(title,L"edit-color-title");
-        AutomationProperties::SetHeadingLevel(title,Automation::Peers::AutomationHeadingLevel::Level1);
+        pickerTitle(data,title,L"edit-color-title");
         buildWheel();
         shapes.Orientation(Orientation::Horizontal);shapes.Spacing(2);shapes.Padding({4,4,4,4});shapes.CornerRadius({17,17,17,17});
         shapes.Background(data->tint(L"text",15));shapes.HorizontalAlignment(HorizontalAlignment::Center);
@@ -166,8 +154,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         }
         left.RowSpacing(6);left.VerticalAlignment(VerticalAlignment::Top);for(int i=0;i<2;++i){RowDefinition row;row.Height(GridLength{1,GridUnitType::Auto});left.RowDefinitions().Append(row);}
         left.Children().Append(wheelBox);Grid::SetRow(shapes,1);left.Children().Append(shapes);
-        for(int column=0;column<2;++column){ColumnDefinition definition;definition.Width({54,GridUnitType::Pixel});pair.ColumnDefinitions().Append(definition);}
-        pair.CornerRadius({6,6,6,6});pair.BorderThickness({1,1,1,1});pair.BorderBrush(data->tint(L"text",31));
+        framePair(pair,54);
         current=button(data,L"",[weak]{if(auto self=weak.lock())self->act(O({{L"op",S(L"revert")}}));});
         current.Height(48);current.HorizontalAlignment(HorizontalAlignment::Stretch);current.CornerRadius({0,0,0,0});
         current.Resources().Insert(box_value(L"ButtonBackgroundPointerOver"),nullptr);current.Resources().Insert(box_value(L"ButtonBackgroundPressed"),nullptr);
@@ -202,7 +189,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         AutomationProperties::SetLiveSetting(status,Automation::Peers::AutomationLiveSetting::Polite);
         for(int i=0;i<2;++i)values.RowDefinitions().Append(RowDefinition());
         Grid::SetRow(status,1);values.Children().Append(rows);values.Children().Append(status);
-        body.Padding({20,20,20,20});body.ColumnSpacing(24);body.RowSpacing(14);
+        body.Padding({PickerPadding,PickerPadding,PickerPadding,PickerPadding});body.ColumnSpacing(24);body.RowSpacing(14);
         for(FrameworkElement part:{FrameworkElement(title),FrameworkElement(left),FrameworkElement(head),FrameworkElement(values)})body.Children().Append(part);
         bodyGate.Content(body);bodyGate.IsTabStop(false);bodyGate.HorizontalContentAlignment(HorizontalAlignment::Stretch);bodyGate.VerticalContentAlignment(VerticalAlignment::Stretch);
         bodyScroll.Content(bodyGate);bodyScroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);bodyScroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);mouseScrollbars(bodyScroll);
@@ -359,20 +346,22 @@ struct Editor:std::enable_shared_from_this<Editor>{
         return node;
     }
 
+    void framePair(Grid const& frame,double width){
+        for(int column=0;column<2;++column){ColumnDefinition definition;definition.Width({width,GridUnitType::Pixel});frame.ColumnDefinitions().Append(definition);}
+        frame.CornerRadius({6,6,6,6});frame.BorderThickness({1,1,1,1});frame.BorderBrush(data->tint(L"text",31));
+    }
     void buildFooter(){
         auto weak=weak_from_this();
-        for(auto width:{GridLength{1,GridUnitType::Star},GridLength{1,GridUnitType::Auto},GridLength{1,GridUnitType::Auto},GridLength{1,GridUnitType::Auto}}){
-            ColumnDefinition definition;definition.Width(width);footer.ColumnDefinitions().Append(definition);
-        }
-        footer.ColumnSpacing(8);footer.Padding({20,16,20,20});footer.BorderThickness({0,1,0,0});footer.BorderBrush(data->tint(L"text",31));
+        pickerFooter(data,footer,{GridUnitType::Star,GridUnitType::Auto,GridUnitType::Auto,GridUnitType::Auto});
         recent.Orientation(Orientation::Horizontal);recent.Spacing(4);
         recentFrame.Children().Append(recent);recentFrame.VerticalAlignment(VerticalAlignment::Center);
         RectangleGeometry clip;recentFrame.Clip(clip);
         recentFrame.SizeChanged([](auto&& sender,SizeChangedEventArgs const& e){
             RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});sender.template as<Grid>().Clip(clip);
         });
-        for(int column=0;column<2;++column){ColumnDefinition definition;definition.Width({18,GridUnitType::Pixel});miniPair.ColumnDefinitions().Append(definition);}
-        miniCurrent.Height(22);miniNew.Height(22);Grid::SetColumn(miniNew,1);miniPair.CornerRadius({4,4,4,4});
+        framePair(miniPair,38);miniPair.VerticalAlignment(VerticalAlignment::Center);
+        AutomationProperties::SetAutomationId(miniCurrent,L"edit-color-mini-current");AutomationProperties::SetAutomationId(miniNew,L"edit-color-mini-new");
+        miniCurrent.Height(32);miniNew.Height(32);Grid::SetColumn(miniNew,1);
         miniPair.Children().Append(miniCurrent);miniPair.Children().Append(miniNew);
         miniHex.Foreground(data->brush(L"text"));miniHex.VerticalAlignment(VerticalAlignment::Center);miniHex.FontWeight(winrt::Windows::UI::Text::FontWeights::Medium());
         mini.Orientation(Orientation::Horizontal);mini.Spacing(8);mini.VerticalAlignment(VerticalAlignment::Center);
@@ -382,15 +371,8 @@ struct Editor:std::enable_shared_from_this<Editor>{
         more.Width(34);more.Height(34);moreGlyph=icon(L"chevron-down",data->theme());moreGlyph.RenderTransformOrigin({.5f,.5f});
         RotateTransform turn;turn.Angle(180);moreGlyph.RenderTransform(turn);more.Content(moreGlyph);
         AutomationProperties::SetAutomationId(more,L"edit-color-swatches");Grid::SetColumn(more,1);footer.Children().Append(more);
-        cancel=button(data,data->common(L"cancel"),[weak]{if(auto self=weak.lock())self->close(false);});
-        cancel.MinHeight(34);cancel.Padding({16,0,16,0});cancel.Background(buttonBackground(data));cancel.FontWeight(winrt::Windows::UI::Text::FontWeights::Medium());
-        AutomationProperties::SetAutomationId(cancel,L"edit-color-cancel");Grid::SetColumn(cancel,2);footer.Children().Append(cancel);
-        apply=button(data,copy(L"use_color"),[weak]{if(auto self=weak.lock();self&&self->apply.IsEnabled())self->close(true);});
-        apply.MinHeight(34);apply.Padding({16,0,16,0});apply.Background(accent(data));apply.Foreground(data->brush(L"accent_foreground"));
-        apply.FontWeight(winrt::Windows::UI::Text::FontWeights::Medium());
-        apply.Resources().Insert(box_value(L"ButtonBackgroundPointerOver"),accent(data));apply.Resources().Insert(box_value(L"ButtonForegroundPointerOver"),data->brush(L"accent_foreground"));
-        apply.Resources().Insert(box_value(L"ButtonBackgroundPressed"),accent(data));apply.Resources().Insert(box_value(L"ButtonForegroundPressed"),data->brush(L"accent_foreground"));
-        AutomationProperties::SetAutomationId(apply,L"edit-color-apply");Grid::SetColumn(apply,3);footer.Children().Append(apply);
+        cancel=pickerButton(data,L"edit-color-cancel",2,false,[weak]{if(auto self=weak.lock())self->close(false);});footer.Children().Append(cancel);
+        apply=pickerButton(data,L"edit-color-apply",3,true,[weak]{if(auto self=weak.lock();self&&self->apply.IsEnabled())self->close(true);});footer.Children().Append(apply);
     }
 
     void buildSheet(){
@@ -520,9 +502,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         values.VerticalAlignment(VerticalAlignment::Top);
     }
     void fit(){
-        auto xaml=root.XamlRoot();if(!xaml)return;auto size=xaml.Size();
-        double width=std::max(280.,std::min(720.,double(size.Width)-24));
-        root.Width(width);root.MaxHeight(std::max(240.,double(size.Height)-24));
+        auto width=fitPicker(root);if(!width)return;
         bool next=width<NarrowWidth;if(next!=narrow)arrange(next);
         queueDraw();
     }
@@ -531,12 +511,12 @@ struct Editor:std::enable_shared_from_this<Editor>{
         auto edit=copy(L"edit");title.Text(edit);AutomationProperties::SetName(dialog,edit);AutomationProperties::SetName(root,edit);
         currentCaption.Text(copy(L"current"));newCaption.Text(copy(L"new"));
         AutomationProperties::SetName(current,copy(L"current"));tooltip(current,copy(L"current"));AutomationProperties::SetName(fresh,copy(L"new"));
+        AutomationProperties::SetName(miniCurrent,copy(L"current"));AutomationProperties::SetName(miniNew,copy(L"new"));
         AutomationProperties::SetName(pick,copy(L"pick_canvas"));tooltip(pick,copy(L"pick_canvas"));
         for(auto const& node:{hexCopy,formRows[0].copy,formRows[1].copy,formRows[2].copy}){AutomationProperties::SetName(node,copy(L"copy"));tooltip(node,copy(L"copy"));}
         for(auto const& row:formRows)tooltip(row.format,copy(L"format"));
         intensityName.Text(copy(L"intensity_ev"));
-        cancel.Content(box_value(data->common(L"cancel")));AutomationProperties::SetName(cancel,data->common(L"cancel"));
-        apply.Content(box_value(copy(L"use_color")));AutomationProperties::SetName(apply,copy(L"use_color"));
+        pickerLabel(cancel,data->common(L"cancel"));pickerLabel(apply,copy(L"use_color"));
         search.PlaceholderText(copy(L"swatch_search"));AutomationProperties::SetName(search,copy(L"swatch_search"));
         AutomationProperties::SetName(sheetClose,copy(L"close_swatches"));tooltip(sheetClose,copy(L"close_swatches"));
         auto swatches=sheetOpen?copy(L"close_swatches"):copy(L"all_swatches");AutomationProperties::SetName(more,swatches);tooltip(more,swatches);

@@ -145,6 +145,13 @@ try {
     Wait-Until {Find 'edit-color-sheet-empty'} 'An unmatched search did not explain itself'
     $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('')
     Wait-Until {Find 'edit-color-sheet-tile-0'} 'The sheet did not list swatches'
+    $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
+    $old=(Control 'edit-color-mini-current' -Arranged).Current.BoundingRectangle;$new=(Control 'edit-color-mini-new' -Arranged).Current.BoundingRectangle;$cancel=(Control 'edit-color-cancel' -Arranged).Current.BoundingRectangle
+    @{current=$old;new=$new;cancel=$cancel;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run "sheet-footer-$Theme.json")
+    foreach($half in @($old,$new)){
+        if([Math]::Abs($half.Width/$scale-38) -gt .5 -or [Math]::Abs($half.Height/$scale+2-$cancel.Height/$scale) -gt .5 -or [Math]::Abs(($half.Y+$half.Height/2)-($cancel.Y+$cancel.Height/2)) -gt 1){throw 'The footer Current|New pair is not two 38-DIP halves inside a frame as tall as the footer buttons'}
+    }
+    if([Math]::Abs($new.Left-$old.Right) -gt 1){throw 'The footer Current|New halves do not touch'}
     Capture "sheet-$Theme"
     Invoke 'edit-color-sheet-tile-0'
     Wait-Until {(Shown 'edit-color-hex') -ne '#FFFFFF'} 'A sheet swatch did not set the draft'

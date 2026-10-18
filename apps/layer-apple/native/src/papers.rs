@@ -158,14 +158,14 @@ pub unsafe extern "C" fn capy_paper_free(task: *mut CapyPaperTask) {
 
 pub struct CapyPaperPreviews { images: Vec<Option<Arc<[u8]>>> }
 /// # Safety
-/// app is exclusive on its serial owner. Returned previews own immutable allocations independent of app.
+/// app is exclusive on its serial owner; ids is a readable NUL-terminated JSON array of paper ids.
+/// Returned previews own immutable allocations independent of app, in the order of ids.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_paper_previews(app: *mut CapyApple, layer: u64, epoch: u64) -> *mut CapyPaperPreviews {
+pub unsafe extern "C" fn capy_apple_paper_previews(app: *mut CapyApple, ids: *const c_char) -> *mut CapyPaperPreviews {
     let Some(app) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut() };
-    let state = app.host.session.state();
-    if state.document_file.epoch != epoch || state.layer_properties.layer != Some(layer) { return std::ptr::null_mut(); }
-    let Some(picker) = state.layer_properties.controls.iter().find_map(|control| control.paper.as_ref()) else { return std::ptr::null_mut() };
-    Box::into_raw(Box::new(CapyPaperPreviews { images: picker.tiles.iter().map(|tile| tile.preview.clone()).collect() }))
+    let Some(ids) = (!ids.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(ids) }.to_str().ok()).flatten()
+        .and_then(|ids| serde_json::from_str::<Vec<String>>(ids).ok()) else { return std::ptr::null_mut() };
+    Box::into_raw(Box::new(CapyPaperPreviews { images: ids.iter().map(|id| app.host.session.paper_preview(id)).collect() }))
 }
 /// # Safety
 /// previews remains live throughout this call.

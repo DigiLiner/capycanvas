@@ -2,7 +2,7 @@
 #include "EffectControls.h"
 #include "NativeMenus.h"
 #include "ScopesView.h"
-#include "BitmapUpload.h"
+#include "TextureDialog.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 using namespace CapyEffects;
 namespace {
@@ -57,125 +57,34 @@ hstring actionId(J const& action){
     auto role=str(action,L"role");
     return L"property-action-"+str(action,L"op")+(role.empty()?hstring():L"-"+role);
 }
-struct PaperPicker : std::enable_shared_from_this<PaperPicker> {
+struct TextureField : std::enable_shared_from_this<TextureField> {
     std::shared_ptr<Property> property;
-    Button pick{nullptr};Image thumbnail;TextBlock name;
-    Flyout flyout;Grid grid;ScrollViewer scroll;
-    Microsoft::UI::Dispatching::DispatcherQueue dispatcher{Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread()};
-    struct Tile {Button control;Image image;std::shared_ptr<BitmapUpload> upload;bool loaded=false,pending=false;};
-    std::vector<Tile> tiles;hstring schema,resources;bool busy=false,open=false,rebuilding=false;
-    explicit PaperPicker(std::shared_ptr<Property> p):property(std::move(p)){}
-    ~PaperPicker(){if(open){flyout.Hide();data()->popup(false);}for(auto& tile:tiles)tile.upload->Close();}
+    Button pick{nullptr};std::shared_ptr<PaperThumbnail> thumbnail;TextBlock name{nullptr};
+    explicit TextureField(std::shared_ptr<Property> p):property(std::move(p)){}
     std::shared_ptr<WorkspaceData> data()const{return property->data;}
-    hstring key()const{return str(object(data()->model,L"windows_papers"),L"key");}
     void init(){
         auto weak=weak_from_this();
-        pick=button(data(),property->label(),[]{});pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
+        pick=button(data(),property->label(),[weak]{if(auto self=weak.lock())self->open();});
+        pick.HorizontalAlignment(HorizontalAlignment::Stretch);pick.HorizontalContentAlignment(HorizontalAlignment::Stretch);
         pick.MinHeight(data()->controlHeight());pick.Padding({6,3,6,3});pick.Background(data()->brush(L"input"));
         AutomationProperties::SetAutomationId(pick,property->id());
-        Grid row;row.ColumnSpacing(data()->panelMetric(L"group_spacing"));ColumnDefinition picture;picture.Width({1,GridUnitType::Auto});row.ColumnDefinitions().Append(picture);ColumnDefinition title;title.Width({1,GridUnitType::Star});row.ColumnDefinitions().Append(title);
-        thumbnail.Width(28);thumbnail.Height(28);thumbnail.Stretch(Stretch::UniformToFill);Grid swatch;swatch.Children().Append(icon(L"layer-fill-symbolic",data()->theme(),28));swatch.Children().Append(thumbnail);row.Children().Append(swatch);
-        name=label(data(),L"",false,false);name.VerticalAlignment(VerticalAlignment::Center);name.TextTrimming(TextTrimming::CharacterEllipsis);Grid::SetColumn(name,1);row.Children().Append(name);pick.Content(row);
-        grid.ColumnSpacing(6);grid.RowSpacing(6);for(int i=0;i<4;++i){ColumnDefinition column;column.Width({84,GridUnitType::Pixel});grid.ColumnDefinitions().Append(column);}
-        AutomationProperties::SetAutomationId(grid,L"paper-picker");
-        scroll.Content(grid);scroll.MaxHeight(520);scroll.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);scroll.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-        flyout.Content(scroll);pick.Flyout(flyout);
-        flyout.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){self->open=true;self->data()->popup(true);self->request();}});
-        flyout.Closed([weak](auto&&,auto&&){if(auto self=weak.lock()){self->open=false;self->data()->popup(false);}});
+        Grid row;row.ColumnSpacing(data()->panelMetric(L"group_spacing"));
+        for(auto unit:{GridUnitType::Auto,GridUnitType::Star}){ColumnDefinition column;column.Width({1,unit});row.ColumnDefinitions().Append(column);}
+        thumbnail=PaperThumbnail::Create(data(),28,14);AutomationProperties::SetAutomationId(thumbnail->root,property->id()+L"-preview");row.Children().Append(thumbnail->root);
+        name=label(data(),L"",false,false);name.VerticalAlignment(VerticalAlignment::Center);name.TextTrimming(TextTrimming::CharacterEllipsis);
+        Grid::SetColumn(name,1);row.Children().Append(name);pick.Content(row);
     }
-    void act(J action){
+    void open(){
         if(!property->current()||data()->updating||!flag(property->view(),L"enabled"))return;
-        flyout.Hide();
-        if(str(action,L"op")==L"rename_paper"){rename(action);return;}
-        data()->dispatchDocument(O({{L"type",S(L"effect")},{L"action",action}}),to_hstring(uint64_t(property->epoch)));
-    }
-    fire_and_forget rename(J action){
-        auto lifetime=shared_from_this();auto identity=property->identity();
-        ContentDialog dialog;dialog.XamlRoot(pick.XamlRoot());dialog.Title(box_value(data()->caption(L"paper",L"rename_title")));
-        dialog.PrimaryButtonText(data()->common(L"save"));dialog.CloseButtonText(data()->common(L"cancel"));dialog.DefaultButton(ContentDialogButton::Primary);
-        dialog.RequestedTheme(data()->theme()==L"light"?ElementTheme::Light:ElementTheme::Dark);
-        TextBox input;input.Header(box_value(data()->common(L"name")));input.Text(str(action,L"name"));input.MaxLength(64);AutomationProperties::SetAutomationId(input,L"paper-rename-name");
-        auto validate=[source=data(),dialog=make_weak(dialog),input=make_weak(input)]{auto view=dialog.get();auto entry=input.get();if(view&&entry)view.IsPrimaryButtonEnabled(source->caption(O({{L"type",S(L"paper_name_error")},{L"name",S(entry.Text())}})).empty());};
-        input.TextChanged([validate](auto&&,auto&&){validate();});validate();dialog.Content(input);
-        input.Loaded([weak=make_weak(input)](auto&&,auto&&){if(auto input=weak.get()){input.Focus(FocusState::Programmatic);input.SelectAll();}});
-        data()->popup(true);
-        try{auto result=co_await dialog.ShowAsync();if(result==ContentDialogResult::Primary&&property->current()&&property->identity()==identity){
-            action.Insert(L"name",S(input.Text()));data()->dispatchDocument(O({{L"type",S(L"effect")},{L"action",action}}),to_hstring(uint64_t(property->epoch)));
-        }}catch(hresult_error const&){}
-        data()->popup(false);
-    }
-    void rebuild(J const& paper){
-        rebuilding=true;
-        for(auto& tile:tiles)tile.upload->Close();tiles.clear();grid.Children().Clear();grid.RowDefinitions().Clear();
-        auto list=array(paper,L"tiles");auto import=object(paper,L"import");uint32_t count=list.Size()+(import.Size()?1:0);auto weak=weak_from_this();
-        for(uint32_t i=0;i<count;++i){
-            if(i%4==0){RowDefinition row;row.Height({1,GridUnitType::Auto});grid.RowDefinitions().Append(row);}
-            bool importing=i==list.Size();auto item=importing?import:list.GetObjectAt(i);auto title=str(item,L"label");
-            auto tile=button(data(),title,[weak,i,importing,item]{if(auto self=weak.lock()){
-                if(importing)self->act(object(item,L"action"));else{self->flyout.Hide();self->property->set(N(i));}
-            }});tile.Width(84);tile.Padding({6,6,6,6});tile.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-            AutomationProperties::SetAutomationId(tile,importing?L"paper-import":L"paper-tile-"+to_hstring(i));tooltip(tile,title);
-            StackPanel content;content.Spacing(4);Image image;image.Width(72);image.Height(72);image.Stretch(Stretch::UniformToFill);
-            if(importing)content.Children().Append(icon(str(item,L"icon"),data()->theme(),28));else{
-                Grid picture;picture.Width(72);picture.Height(72);picture.Children().Append(icon(L"layer-fill-symbolic",data()->theme(),28));picture.Children().Append(image);content.Children().Append(picture);tiles.push_back({tile,image,BitmapUpload::Create()});
-                auto actions=array(item,L"actions");if(actions.Size()){
-                    MenuFlyout menu;AutomationProperties::SetAutomationId(menu,L"paper-tile-menu");
-                    for(auto value:actions){auto spec=value.GetObject();MenuFlyoutItem command;command.Text(str(spec,L"label"));
-                        auto action=object(spec,L"action");AutomationProperties::SetAutomationId(command,L"paper-"+str(action,L"op")+L"-"+to_hstring(i));
-                        command.Click([weak,action](auto&&,auto&&){if(auto self=weak.lock())self->act(action);});menu.Items().Append(command);
-                    }tile.ContextFlyout(menu);
-                }
-            }
-            auto caption=label(data(),title,false,false);caption.FontWeight(winrt::Windows::UI::Text::FontWeights::Normal());caption.TextWrapping(TextWrapping::WrapWholeWords);caption.TextAlignment(TextAlignment::Center);caption.MaxLines(2);caption.LineHeight(16);content.Children().Append(caption);tile.Content(content);
-            Grid::SetColumn(tile,i%4);Grid::SetRow(tile,i/4);grid.Children().Append(tile);
-        }
-        rebuilding=false;
-    }
-    void sources(){
-        if(rebuilding)return;
-        auto selected=uint32_t(num(object(property->model(),L"value"),L"value"));
-        for(size_t i=0;i<tiles.size();++i){auto& tile=tiles[i];auto source=tile.upload->Image();if(tile.image.Source()!=source)tile.image.Source(source);
-            bool chosen=i==selected;tile.control.Background(chosen?CapyUi::selected(data()):clear());AutomationProperties::SetItemStatus(tile.control,chosen?data()->caption(L"search",L"selected"):L"");
-        }
-        auto source=selected<tiles.size()?tiles[selected].upload->Image():nullptr;if(thumbnail.Source()!=source)thumbnail.Source(source);
-    }
-    void receive(PreviewPacket packet,hstring const& requested,std::vector<uint32_t> const& indices){
-        busy=false;
-        for(auto index:indices)if(index<tiles.size())tiles[index].pending=false;
-        if(!packet||!property->current())return;
-        if(requested!=key()){request();return;}
-        auto status=J::Parse(to_hstring(capy_preview_metadata(packet.get())));if(str(status,L"key")!=requested)return;
-        auto images=array(status,L"images");int size=int(num(status,L"size"));if(size<1||size>512||images.Size()>8)return;
-        auto weak=weak_from_this();size_t bytes=size_t(size)*size*4*images.Size();
-        for(auto index:indices)if(index<tiles.size())tiles[index].loaded=true;
-        for(auto value:images){auto image=value.GetObject();auto index=uint32_t(num(image,L"index"));if(index>=tiles.size()||std::find(indices.begin(),indices.end(),index)==indices.end())continue;
-            auto upload=tiles[index].upload;std::weak_ptr<BitmapUpload> expected=upload;tiles[index].pending=true;tiles[index].loaded=false;
-            auto offset=size_t(num(image,L"offset"));
-            upload->Submit({BitmapUpload::ReadPacket(packet),offset,bytes,size,size,false,true,
-                [weak,index,expected,requested]{auto self=weak.lock();return self&&self->property->current()&&self->key()==requested&&index<self->tiles.size()&&self->tiles[index].upload==expected.lock();},
-                [weak,index,expected](bool accepted){if(auto self=weak.lock();self&&index<self->tiles.size()&&self->tiles[index].upload==expected.lock()){
-                    self->tiles[index].pending=false;self->tiles[index].loaded=accepted;self->sources();self->request();
-                }}});
-        }
-        sources();request();
-    }
-    void request(){
-        if(busy||rebuilding||!property->current()||!data()->query)return;
-        auto selected=uint32_t(num(object(property->model(),L"value"),L"value"));std::vector<uint32_t> indices;
-        if(selected<tiles.size()&&!tiles[selected].loaded&&!tiles[selected].pending)indices.push_back(selected);
-        if(open)for(uint32_t i=0;i<tiles.size()&&indices.size()<8;++i)if(i!=selected&&!tiles[i].loaded&&!tiles[i].pending)indices.push_back(i);
-        if(indices.empty())return;auto requested=key();if(requested.empty())return;
-        A values;for(auto index:indices){values.Append(N(index));tiles[index].pending=true;}
-        busy=true;auto weak=weak_from_this();auto queue=dispatcher;
-        if(!data()->query(CanvasQueryKind::Papers,to_string(O({{L"key",S(requested)},{L"indices",values}}).Stringify()),[weak,queue,requested,indices](PreviewPacket packet){
-            queue.TryEnqueue([weak,packet=std::move(packet),requested,indices]{if(auto self=weak.lock())self->receive(packet,requested,indices);});
-        })){busy=false;for(auto index:indices)tiles[index].pending=false;}
+        ChooseTexture(data(),pick,property->layer);
     }
     void refresh(){
-        auto model=property->model();AutomationProperties::SetName(grid,str(model,L"label"));auto paper=object(model,L"paper");auto next=paper.Stringify();auto library=str(object(data()->model,L"windows_papers"),L"generation");
-        if(next!=schema||library!=resources){schema=next;resources=library;rebuild(paper);}
-        auto options=array(object(model,L"kind"),L"options");auto selected=uint32_t(num(object(model,L"value"),L"value"));if(selected<options.Size())name.Text(options.GetStringAt(selected));
-        AutomationProperties::SetName(pick,str(model,L"label"));pick.IsEnabled(property->current()&&flag(property->view(),L"enabled"));sources();request();
+        auto model=property->model();auto title=str(model,L"label");
+        auto tiles=array(object(model,L"paper"),L"tiles");auto selected=uint32_t(num(object(model,L"value"),L"value"));
+        auto tile=selected<tiles.Size()?tiles.GetObjectAt(selected):J{};
+        thumbnail->show(tile.GetNamedValue(L"id",JsonValue::CreateNullValue()),str(tile,L"label"));name.Text(str(tile,L"label"));
+        AutomationProperties::SetName(pick,title);AutomationProperties::SetHelpText(pick,str(tile,L"label"));tooltip(pick,title);
+        pick.IsEnabled(property->current()&&flag(property->view(),L"enabled"));
     }
 };
 struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
@@ -243,9 +152,9 @@ struct PropertiesView : std::enable_shared_from_this<PropertiesView> {
             return field;
         }
         if(type==L"choice"&&object(c,L"paper").Size()){
-            auto picker=std::make_shared<PaperPicker>(property);picker->init();
-            bindings.emplace_back([picker]{picker->refresh();});
-            return propertyRow(property,picker->pick,bindings);
+            auto texture=std::make_shared<TextureField>(property);texture->init();
+            bindings.emplace_back([texture]{texture->refresh();});
+            return propertyRow(property,texture->pick,bindings);
         }
         if(type==L"choice"){
             ComboBox choices;choices.MinWidth(0);choices.MinHeight(data->controlHeight());choices.Height(data->controlHeight());

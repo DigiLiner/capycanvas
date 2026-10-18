@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.getOrNull
 import android.graphics.Bitmap
 import android.view.WindowManager
 import org.json.JSONArray
@@ -460,6 +461,15 @@ class AndroidFeatureParityTest {
         fun library() = picker()?.array("tiles")?.objects().orEmpty().flatMap { it.array("actions").objects() }.map { it.getJSONObject("action") }
             .filter { it.getString("op") == "rename_paper" }
         fun idle() = state().array("requests").objects().none { it.getJSONObject("kind").getString("type") == "paper" }
+        fun tiles() = picker()!!.array("tiles").objects()
+        fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        fun dialogOpen() = compose.onAllNodesWithTag("texture-dialog").fetchSemanticsNodes().isNotEmpty()
+        fun tileMenu(index: Int, op: String) {
+            compose.onNodeWithTag("texture-tile-$index").performScrollTo().performTouchInput { longClick() }
+            shown("texture-action-$op")
+        }
+        val theme = androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("theme") ?: "light"
+        action(obj("type" to "set_theme", "theme" to theme))
         val paper = state().array("layers").objects().map { it.getLong("id") }.first { id -> action(obj("type" to "select_layer", "id" to id)); texture() != null }
         compose.waitUntil(30_000) { picker()?.isNull("import") == false }
         for (entry in library()) action(obj("type" to "effect", "action" to obj("op" to "delete_paper", "id" to entry.getString("id"))))
@@ -479,17 +489,56 @@ class AndroidFeatureParityTest {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         instrumentation.addMonitor(monitor)
         try {
-            action(obj("type" to "effect", "action" to obj("op" to "import_paper", "layer" to paper)))
+            compose.onNodeWithTag("property-texture").performClick()
+            shown("texture-import")
+            val dialog = bounds("texture-dialog")
+            val import = bounds("texture-import")
+            val density = compose.activity.resources.displayMetrics.density
+            assertEquals("Import… starts the footer", dialog.left + 20 * density, import.left, 1.5f)
+            assertEquals("Import… shares the footer row", bounds("texture-cancel").center.y, import.center.y, 1f)
+            capture("texture-import-$theme")
+            compose.onNodeWithTag("texture-import").performClick()
+            compose.waitUntil(5_000) { !dialogOpen() }
             compose.waitUntil(60_000) { idle() && library().size == 1 }
             assertEquals(listOf("image/*"), picked.get().getStringArrayExtra(android.content.Intent.EXTRA_MIME_TYPES)?.toList() ?: listOf(picked.get().type))
             assertTrue(state().getJSONObject("document_file").getBoolean("modified"))
             val id = library().single().getString("id")
+            assertEquals("Import applies the new paper", id, tiles()[texture()!!.getJSONObject("value").getInt("value")].optString("id"))
+            compose.onNodeWithTag("layer-rows").performScrollToIndex(state().array("layers").objects().indexOfFirst { it.getLong("id") == paper })
+            compose.onNodeWithTag("layer-texture-$paper").performClick()
+            shown("texture-dialog")
+            val cotton = tiles().indexOfFirst { it.optString("id") == id }
+            compose.onNodeWithTag("texture-tile-$cotton").assertIsDisplayed().assertIsSelected()
             val imported = state().getJSONObject("document_file").getLong("revision")
             action(obj("type" to "effect", "action" to obj("op" to "rename_paper", "id" to id, "name" to "Cotton rag")))
             compose.waitUntil(30_000) { idle() && picker()!!.array("tiles").objects().any { it.getString("label") == "Cotton rag" } }
-            action(obj("type" to "effect", "action" to obj("op" to "delete_paper", "id" to id)))
+            compose.onNode(hasTestTag("texture-tile-$cotton") and hasText("Cotton rag")).assertIsDisplayed().assertIsSelected()
+            capture("texture-imported-$theme")
+            tileMenu(cotton, "delete_paper")
+            compose.onNodeWithTag("texture-action-rename_paper").assertDoesNotExist()
+            capture("texture-imported-menu-$theme")
+            compose.onNodeWithTag("texture-action-delete_paper").performClick()
             compose.waitUntil(30_000) { idle() && library().isEmpty() }
             assertEquals("Library edits leave the drawing unchanged", imported, state().getJSONObject("document_file").getLong("revision"))
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Cotton rag").fetchSemanticsNodes().isEmpty() }
+            assertTrue("The dialog stays open through library changes", dialogOpen())
+            val own = tiles().indexOfFirst { it.isNull("id") }
+            assertEquals("The drawing's own paper comes first", 0, own)
+            compose.onNodeWithTag("texture-tile-$own").assertIsSelected()
+            tileMenu(own, "add_paper")
+            capture("texture-own-menu-$theme")
+            compose.onNodeWithTag("texture-action-add_paper").performClick()
+            compose.waitUntil(30_000) { idle() && library().size == 1 && tiles().none { it.isNull("id") } }
+            val added = library().single().getString("id")
+            val kept = tiles().indexOfFirst { it.optString("id") == added }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("texture-tile-$kept").fetchSemanticsNodes().singleOrNull()?.config?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Selected) == true }
+            capture("texture-added-$theme")
+            tileMenu(kept, "delete_paper")
+            compose.onNodeWithTag("texture-action-delete_paper").performClick()
+            compose.waitUntil(30_000) { idle() && library().isEmpty() }
+            compose.onNodeWithTag("texture-cancel").performClick()
+            compose.waitUntil(5_000) { !dialogOpen() }
+            assertEquals("Cancel keeps the drawing", imported, state().getJSONObject("document_file").getLong("revision"))
             assertNull(host.hostError)
         } finally {
             instrumentation.removeMonitor(monitor)

@@ -234,6 +234,10 @@ impl PaperLibrary {
     pub fn entry_of(&self, image: &Image) -> Option<&PaperEntry> {
         self.entries.iter().flatten().find(|entry| paper_image_id(&entry.id) == Some(image.id()))
     }
+    pub fn preview(&self, id: &str) -> Option<Arc<[u8]>> {
+        layer_core::paper::built_in_papers().iter().find(|paper| &*paper.id == id).map(|paper| paper.preview.clone())
+            .or_else(|| self.entries.iter().flatten().find(|entry| entry.id == id).map(|entry| entry.preview.clone()))
+    }
 }
 
 #[cfg(test)]

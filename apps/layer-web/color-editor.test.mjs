@@ -88,7 +88,13 @@ export async function checkColorEditor({call,evaluate,settle}) {
     };
     await slide(true);
     await wait(`document.activeElement===document.querySelector('${dialog} .color-sheet input')`);
-    const reach=await evaluate(`[document.querySelector('${dialog} .color-sheet-body').getBoundingClientRect().bottom,document.querySelector('${dialog} .color-sheet').getBoundingClientRect().bottom,document.querySelector('${dialog} .color-editor-page').getBoundingClientRect().bottom,document.querySelector('${dialog} .color-editor-bottom').getBoundingClientRect().top]`);
+    const pairs=await evaluate(`(()=>{const d=document.querySelector('${dialog}'),box=n=>n.getBoundingClientRect(),size=n=>[box(n).width,box(n).height],mini=d.querySelector('.color-mini .color-pair'),main=d.querySelector('.color-editor-head .color-pair'),m=box(mini),cancel=box(d.querySelector('.color-cancel')),style=n=>[getComputedStyle(n).borderRadius,getComputedStyle(n,'::after').boxShadow];return{mini:size(mini),halves:[...mini.children].map(size),main:size(main),center:m.top+m.height/2-(cancel.top+cancel.height/2),style:style(mini),mainStyle:style(main),hex:box(d.querySelector('.color-mini-hex')).left-m.right}})()`);
+    assert.deepEqual([pairs.mini,pairs.halves,pairs.main],[[76,34],[[38,34],[38,34]],[108,48]],`the footer Current|New pair takes the main pair's proportions at button height ${JSON.stringify(pairs)}`);
+    assert.ok(Math.abs(pairs.center)<=.5,`the footer pair centers on the footer buttons ${JSON.stringify(pairs)}`);
+    assert.deepEqual(pairs.style,pairs.mainStyle,'the footer pair keeps the main pair border and radius');
+    assert.notEqual(pairs.style[1],'none','the pair border paints above both halves');
+    assert.ok(pairs.hex>0,'the hex label follows the footer pair');
+    const reach=await evaluate(`[document.querySelector('${dialog} .color-sheet-body').getBoundingClientRect().bottom,document.querySelector('${dialog} .color-sheet').getBoundingClientRect().bottom,document.querySelector('${dialog} .color-editor-page').getBoundingClientRect().bottom,document.querySelector('${dialog} .dialog-footer').getBoundingClientRect().top]`);
     assert.ok(Math.abs(reach[0]-reach[3])<=1,`the swatch list reaches the divider ${JSON.stringify(reach)}`);
     await call('Input.insertText',{text:'zzzz-no-color'});await settle();
     assert.ok(await evaluate(`!!document.querySelector('${dialog} .color-sheet-empty')`));

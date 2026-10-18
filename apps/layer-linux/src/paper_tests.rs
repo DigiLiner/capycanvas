@@ -27,6 +27,28 @@ fn texture(w: &Rc<Workspace>) -> layer_core::TextureSource {
     ui_session(w).engine().document().paper(None).texture
 }
 
+fn texture_dialog(w: &Rc<Workspace>, opener: &gtk::Button) -> (adw::Dialog, gtk::FlowBox) {
+    click(opener);
+    until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "texture-dialog" && dialog.is_mapped()), "Choose Texture opens");
+    pump(300);
+    let dialog = w.window.visible_dialog().unwrap();
+    let grid: gtk::FlowBox = named(dialog.upcast_ref(), "texture-grid");
+    (dialog, grid)
+}
+
+fn texture_button(dialog: &adw::Dialog, name: &str) -> gtk::Button {
+    named(dialog.upcast_ref(), &format!("texture-{name}"))
+}
+
+fn content_size(dialog: &adw::Dialog) -> (i32, i32) {
+    let content = dialog.child().unwrap();
+    (content.width(), content.height())
+}
+
+fn pending(grid: &gtk::FlowBox) -> Option<i32> {
+    grid.selected_children().first().map(|child| child.index())
+}
+
 #[test]
 #[ignore = "private Wayland display and hardware GPU"]
 #[allow(deprecated)]
@@ -58,18 +80,35 @@ fn native_paper_picker_relief_and_scale() {
     assert_eq!(properties.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", "texture", "scale"]);
     save_snapshot(&w, 200, || path("paper-properties"));
 
-    let button: gtk::MenuButton = named(w.window.upcast_ref(), "property-texture");
+    let button: gtk::Button = named(w.window.upcast_ref(), "property-texture");
     assert!(button.is_mapped(), "the Texture tile is visible in Properties");
-    button.popup();
-    pump(300);
-    let popover = button.popover().unwrap();
-    super::zoom_readout::save_widget(&popover, &path("paper-picker"));
-    let grid: gtk::FlowBox = descendant(&popover).unwrap();
-    assert_eq!(grid.selected_children().first().map(|c| c.index()), Some(3), "Drawing paper is selected");
+    let (dialog, grid) = texture_dialog(&w, &button);
+    save_snapshot(&w, 200, || path("texture-dialog"));
+    assert_eq!(dialog.title(), "Choose Texture");
+    assert_eq!(grid.observe_children().n_items(), 13);
+    assert_eq!(pending(&grid), Some(3), "Drawing paper is selected");
+    let size = content_size(&dialog);
+    assert_eq!(size, (720, 455), "Choose Texture matches Edit Color");
+    let tile = grid.child_at_index(0).unwrap();
+    let preview = named::<gtk::Image>(tile.upcast_ref(), "texture-preview");
+    assert_eq!((preview.width(), preview.height()), (96, 96), "previews show at their own size");
+    let footer = |name: &str| texture_button(&dialog, name).compute_bounds(&dialog).unwrap();
+    assert!(footer("import").x() < footer("cancel").x() && footer("cancel").x() < footer("apply").x(), "Import, Cancel, Use Texture");
+    assert_eq!(texture_button(&dialog, "import").label().as_deref(), Some("Import…"));
+    assert_eq!(texture_button(&dialog, "apply").label().as_deref(), Some("Use Texture"));
     let before = ui_session(&w).engine().checkpoint();
-    grid.child_at_index(2).unwrap().activate();
-    pump(100);
-    assert!(!popover.is_visible(), "choosing a paper closes the picker");
+    grid.select_child(&grid.child_at_index(2).unwrap());
+    click(&texture_button(&dialog, "cancel"));
+    until(|| !dialog.is_mapped(), "Cancel closes Choose Texture");
+    assert_eq!(ui_session(&w).engine().checkpoint(), before, "Cancel changes nothing");
+    let (dialog, grid) = texture_dialog(&w, &button);
+    assert_eq!(content_size(&dialog), size);
+    assert_eq!(pending(&grid), Some(3), "a cancelled choice is not kept");
+    grid.select_child(&grid.child_at_index(2).unwrap());
+    save_snapshot(&w, 100, || path("texture-dialog-chosen"));
+    assert_eq!(texture(&w), layer_core::paper::default_texture(), "nothing changes before Use Texture");
+    click(&texture_button(&dialog, "apply"));
+    until(|| !dialog.is_mapped(), "Use Texture closes Choose Texture");
     assert_eq!(texture(&w), layer_core::paper::built_in_paper("rough").unwrap().texture);
     pump(250);
     save_snapshot(&w, 50, || path("paper-relief-rough"));
@@ -91,10 +130,9 @@ fn native_paper_picker_relief_and_scale() {
         [v, v, v, 255]
     }).collect();
     gtk::gdk::MemoryTexture::new(400, 300, gtk::gdk::MemoryFormat::R8g8b8a8, &glib::Bytes::from_owned(pixels), 1600).save_to_png(&scan).unwrap();
-    button.popup();
-    pump(300);
-    let import: gtk::FlowBoxChild = named(popover.upcast_ref(), "paper-import");
-    import.activate();
+    let (dialog, _) = texture_dialog(&w, &button);
+    click(&texture_button(&dialog, "import"));
+    until(|| !dialog.is_mapped(), "Import closes Choose Texture");
     let file = chooser();
     file.set_file(&gtk::gio::File::for_path(&scan)).unwrap();
     pump(150);
@@ -108,18 +146,15 @@ fn native_paper_picker_relief_and_scale() {
     let remembered = ui_session(&w).state().settings.new_document.paper.clone().unwrap();
     assert_eq!(remembered.len(), 64, "new drawings start on the imported paper");
     pump(1800);
-    let picker = || {
-        let button: gtk::MenuButton = named(w.window.upcast_ref(), "property-texture");
-        button.popup();
-        pump(300);
-        let popover = button.popover().unwrap();
-        let grid: gtk::FlowBox = descendant(&popover).unwrap();
-        (popover, grid)
-    };
-    let (popover, _) = picker();
-    super::zoom_readout::save_widget(&popover, &path("paper-picker-imported"));
+    let button: gtk::Button = named(w.window.upcast_ref(), "property-texture");
+    let (textures, grid) = texture_dialog(&w, &button);
+    assert_eq!(pending(&grid), Some(13), "the imported paper is chosen");
+    let scroller = grid.ancestor(gtk::ScrolledWindow::static_type()).unwrap();
+    let chosen = grid.child_at_index(13).unwrap().compute_bounds(&scroller).unwrap();
+    assert!(chosen.y() >= 0. && chosen.y() + chosen.height() <= scroller.height() as f32, "the chosen paper is scrolled into view: {chosen:?}");
+    save_snapshot(&w, 200, || path("texture-dialog-imported"));
+    let caption = |index: i32| grid.child_at_index(index).and_then(|child| child.tooltip_text()).unwrap_or_default();
     let menu = |index: i32, label: &str| {
-        let (_, grid) = picker();
         let child = grid.child_at_index(index).unwrap();
         let press = child.observe_controllers().iter::<glib::Object>().filter_map(Result::ok)
             .find_map(|controller| controller.downcast::<gtk::GestureClick>().ok()).expect("the tile has a menu");
@@ -135,13 +170,19 @@ fn native_paper_picker_relief_and_scale() {
     named::<adw::EntryRow>(dialog.upcast_ref(), "paper-rename-name").set_text("Cotton rag");
     pump(100);
     response(&w, "rename");
-    until(|| tiles()[13].label.as_ref() == "Cotton rag", "the paper is renamed");
+    until(|| tiles()[13].label.as_ref() == "Cotton rag" && caption(13) == "Cotton rag", "the paper is renamed in the open dialog");
+    assert!(textures.is_mapped() && pending(&grid) == Some(13));
     menu(13, "Delete");
-    until(|| tiles().len() == 14 && tiles()[0].label.as_ref() == "This drawing’s paper", "the drawing keeps its deleted paper");
+    until(|| tiles().len() == 14 && tiles()[0].label.as_ref() == "This drawing’s paper" && caption(0) == "This drawing’s paper", "the drawing keeps its deleted paper");
+    assert_eq!(pending(&grid), Some(0), "the choice follows the drawing's paper");
     assert!(matches!(texture(&w), layer_core::TextureSource::Image(_)));
+    save_snapshot(&w, 200, || path("texture-dialog-own"));
     menu(0, "Add to Library");
     until(|| tiles().len() == 14 && tiles()[13].label.as_ref() == state(&w).document_file.title(), "the drawing's paper returns to the library");
     assert_eq!(state(&w).layer_properties.controls[1].value, EffectValue::Choice(13));
+    until(|| pending(&grid) == Some(13), "the open dialog follows the library");
+    click(&texture_button(&textures, "cancel"));
+    until(|| !textures.is_mapped(), "Choose Texture closes");
 
     let ink = layer_ui::occurrence_token(ui_session(&w).engine().document().scene().order()[0]);
     w.dispatch(UiAction::SelectLayer { id: ink });
@@ -159,6 +200,47 @@ fn native_paper_picker_relief_and_scale() {
     ready(&w);
     assert_eq!(ui_session(&w).engine().checkpoint(), before, "the import, Scale and the choice are one step each");
     assert_eq!(texture(&w), layer_core::paper::default_texture());
+
+    let row = || state(&w).layers.into_iter().find(|row| row.id == paper).unwrap();
+    assert_eq!(row().paper.unwrap().label.as_ref(), "Drawing paper");
+    let thumbnails = || {
+        let row: gtk::Box = named(w.window.upcast_ref(), &format!("art-layer-{paper}"));
+        let buttons: Vec<gtk::Button> = descendants::<gtk::Button>(row.upcast_ref()).into_iter().filter(|b| b.has_css_class("layer-thumbnail") && b.is_visible()).collect();
+        let name = descendants::<gtk::Label>(row.upcast_ref()).into_iter().find(|label| label.has_css_class("layer-name")).unwrap();
+        let x = |widget: &gtk::Widget| widget.compute_bounds(&row).unwrap();
+        assert!(buttons.windows(2).all(|pair| x(pair[0].upcast_ref()).x() + x(pair[0].upcast_ref()).width() <= x(pair[1].upcast_ref()).x()));
+        let last = x(buttons.last().unwrap().upcast_ref());
+        assert!(last.x() + last.width() <= x(name.upcast_ref()).x(), "the texture sits left of the name");
+        buttons
+    };
+    w.dispatch(UiAction::SelectLayer { id: ink });
+    ready(&w);
+    let buttons = thumbnails();
+    assert_eq!(buttons.len(), 2, "Paper shows its color and its texture");
+    assert_eq!(buttons[1].widget_name(), format!("layer-texture-{paper}"));
+    assert_eq!(buttons[1].tooltip_text().as_deref(), Some("Choose Texture"));
+    save_snapshot(&w, 200, || path("paper-row-texture"));
+    let (dialog, grid) = texture_dialog(&w, &buttons[1]);
+    assert_eq!(state(&w).layer_properties.layer, Some(paper), "the texture thumbnail selects its Paper");
+    assert_eq!(pending(&grid), Some(3));
+    grid.select_child(&grid.child_at_index(4).unwrap());
+    click(&texture_button(&dialog, "apply"));
+    until(|| !dialog.is_mapped(), "Use Texture closes Choose Texture");
+    assert_eq!(texture(&w), layer_core::paper::built_in_paper("bristol").unwrap().texture);
+    until(|| row().paper.unwrap().id.as_deref() == Some("bristol"), "the row shows the chosen texture");
+    w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: paper, replace: false } });
+    ready(&w);
+    let buttons = thumbnails();
+    assert_eq!(buttons.len(), 3, "a Paper mask sits between its color and its texture");
+    assert_eq!(buttons[2].widget_name(), format!("layer-texture-{paper}"));
+    save_snapshot(&w, 200, || path("paper-row-texture-mask"));
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Lock { id: paper, value: true } });
+    ready(&w);
+    assert!(!row().paper.unwrap().editable);
+    click(&thumbnails()[1]);
+    pump(300);
+    assert!(w.window.visible_dialog().is_none(), "a locked Paper keeps its texture");
 }
 
 #[test]

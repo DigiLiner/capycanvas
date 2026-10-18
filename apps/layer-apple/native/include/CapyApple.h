@@ -60,7 +60,7 @@ void capy_paper_cancel(const CapyPaperTask *task);
 void capy_paper_free(CapyPaperTask *task);
 typedef struct CapyPaperPreviews CapyPaperPreviews;
 /* Owner captures immutable grayscale leases; read/decode/free away from UI/input. */
-CapyPaperPreviews *capy_apple_paper_previews(CapyApple *app, uint64_t layer, uint64_t epoch);
+CapyPaperPreviews *capy_apple_paper_previews(CapyApple *app, const char *ids);
 size_t capy_paper_previews_count(const CapyPaperPreviews *previews);
 uint32_t capy_paper_previews_read(const CapyPaperPreviews *previews, size_t index, const uint8_t **bytes, size_t *count);
 void capy_paper_previews_free(CapyPaperPreviews *previews);

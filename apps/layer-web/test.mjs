@@ -361,7 +361,7 @@ try {
     [process.argv.includes("--selection"), () => checkSelectedPainting({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--layer-relationships"), () => checkLayerRelationships({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--paper-rows"), () => checkPaperRows({call,evaluate,settle}), checkErrors],
-    [process.argv.includes("--paper-library"), () => checkPaperLibrary({evaluate,settle}), checkErrors],
+    [process.argv.includes("--paper-library"), () => checkPaperLibrary({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--layers"), () => checkLayers({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--toolbar-manager"), () => checkToolbarManager({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--tab-styles"), () => checkTabStyles({ call, evaluate, settle }), checkErrors],

@@ -139,7 +139,7 @@ pub use session::{
     DEFAULT_DOCUMENT_EXTENT,
     DocumentColorOperation, DocumentIdleReason, ExportRepeat, DocumentHostError, DocumentHostErrorCopy, HostRequestFailure, DocumentExport, DocumentFileState, DocumentLocation, DocumentRequest, EffectAction, FilterCategoryChoice,
     FilterLoadState, FilterPickerAction, FilterPickerState, LayerPropertiesView, PropertyDisclosure, LayerDrawerSizing,
-    MAX_NEW_DOCUMENT_DIMENSION, PaperPickerView, PaperTileView, PropertyControl, PropertyKind, PropertyPageView, PropertyActionView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
+    MAX_NEW_DOCUMENT_DIMENSION, LayerPaper, PaperPickerView, PaperTileView, PropertyControl, PropertyKind, PropertyPageView, PropertyActionView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
 };
 pub use stats::{StatRow, StatsView};
 
@@ -1327,6 +1327,7 @@ pub struct LayerState {
     pub mask_revision: u64,
     pub mask_id: Option<u64>,
     pub fill_color: Option<LayerFillColor>,
+    pub paper: Option<LayerPaper>,
 }
 
 impl LayerState {

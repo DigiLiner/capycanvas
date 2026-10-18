@@ -265,6 +265,7 @@ class AndroidInteractionTest {
                 waitFor("Native activation inserts Paper") { state().getJSONObject("layer_properties").getString("title") == "Paper" && state().getJSONObject("layer_tools").isNull("add_paper") }
                 assertEquals("Paper is last", editingLayer(), layerStates().last().getLong("id"))
                 assertTrue("Painting targets the layer above Paper", layerStates().dropLast(1).any { it.getBoolean("drawing") })
+                if (pointer == MotionEvent.TOOL_TYPE_FINGER) chooseTexture(theme)
                 command("undo")
                 scroll(layerStates().size)
                 waitFor("One Undo restores the add row") { shown("layer-add-paper") }
@@ -288,6 +289,128 @@ class AndroidInteractionTest {
         } finally { action(obj("type" to "set_theme", "theme" to originalTheme)) }
     }
 
+    private fun chooseTexture(theme: String) {
+        val paper = layerStates().last().getLong("id")
+        fun texture() = layerStates().first { it.getLong("id") == paper }.getJSONObject("paper")
+        fun control() = state().getJSONObject("layer_properties").array("controls").objects().first { !it.isNull("paper") }
+        fun current() = control().getJSONObject("value").getInt("value")
+        fun chosen(index: Int): Boolean { var on = false; onMain { on = tagged("texture-tile-$index")?.second?.config?.getOrNull(SemanticsProperties.Selected) == true }; return on }
+        fun scrollToPaper() { revealLayers(); onMain { find("layer-rows")!!.config[SemanticsActions.ScrollToIndex].action!!.invoke(layerStates().size - 1) }; settle() }
+        fun open(tag: String) {
+            tap(bounds(tag).center)
+            waitFor("Choose Texture opens from $tag") { shown("texture-dialog") && exists("texture-tile-0") }
+            settle()
+        }
+        fun layout(tag: String): Rect {
+            var result = Rect.Zero
+            onMain { tagged(tag)!!.second.let { result = Rect(it.positionInRoot, androidx.compose.ui.geometry.Size(it.size.width.toFloat(), it.size.height.toFloat())) } }
+            return result
+        }
+        fun close(tag: String) { tap(bounds(tag).center); waitFor("Choose Texture closes with $tag") { !exists("texture-dialog") }; settle() }
+        tool = MotionEvent.TOOL_TYPE_FINGER
+        scrollToPaper()
+        waitFor("Paper row shows its texture") { shown("layer-texture-$paper") }
+        val thumbnail = bounds("layer-texture-$paper")
+        val color = bounds("layer-content-$paper")
+        assertEquals("The texture tile is a row thumbnail", 30f, thumbnail.width / density, .5f)
+        assertEquals("The texture tile matches the color thumbnail", color.height, thumbnail.height, 1f)
+        assertEquals("Both thumbnails share a center line", color.center.y, thumbnail.center.y, 1f)
+        assertTrue("The texture follows the color thumbnail", thumbnail.left >= color.right)
+        val row = bounds("layer-row-$paper")
+        var name: Rect? = null
+        onMain { name = owner.find { hasLabel(layerStates().last().getString("label"))(it) && row.contains(it.boundsInRoot.center) }?.boundsInRoot }
+        assertTrue("The texture sits left of the name", thumbnail.right < name!!.left)
+        assertTrue("An unlocked Paper can choose a texture", texture().getBoolean("editable"))
+        screenshot("validation/paper/texture-row-$theme.png")
+        open("layer-texture-$paper")
+        assertEquals("The row thumbnail selects the Paper", paper, editingLayer())
+        val revision = state().getJSONObject("document_file").getLong("revision")
+        val start = current()
+        val tiles = control().getJSONObject("paper").array("tiles").objects()
+        assertTrue("Every paper has a tile", tiles.indices.all { exists("texture-tile-$it") })
+        assertTrue("The current paper starts chosen", chosen(start))
+        val dialog = bounds("texture-dialog")
+        assertEquals("The title is centered", dialog.center.x, bounds("texture-dialog-title").center.x, 1.5f)
+        for (tag in listOf("texture-cancel", "texture-use")) assertEquals("$tag is a footer button", 34f, bounds(tag).height / density, .5f)
+        assertEquals("Use Texture ends the footer", dialog.right - 20 * density, bounds("texture-use").right, 1.5f)
+        assertTrue("The grid scrolls above the divider", bounds("texture-grid").bottom <= bounds("texture-dialog-divider").top + 1)
+        assertTrue("Tiles keep their 102dp frame", layout("texture-tile-0").width >= 102 * density - 1)
+        val grid = bounds("texture-grid")
+        val opened = layout("texture-tile-$start")
+        assertTrue("The current paper opens in view: $opened / $grid", opened.top >= grid.top - 1 && opened.bottom <= grid.bottom + 1)
+        assertTrue("The grid at Edit Color's height scrolls", layout("texture-tile-${tiles.size - 1}").bottom - layout("texture-tile-0").top > grid.height)
+        if (layout("texture-tile-0").top >= grid.top - 1)
+            assertTrue("A row peeks above the footer", tiles.indices.map { layout("texture-tile-$it") }.any { it.top < grid.bottom - 1 && it.bottom > grid.bottom + 1 })
+        screenshot("validation/paper/texture-dialog-$theme.png")
+        val other = if (start + 1 < tiles.size) start + 1 else start - 1
+        tap(bounds("texture-tile-$other").center)
+        waitFor("A tap only moves the pending choice") { chosen(other) && !chosen(start) }
+        settle()
+        screenshot("validation/paper/texture-dialog-pending-$theme.png")
+        assertEquals("Choosing a tile changes nothing yet", start, current())
+        close("texture-cancel")
+        assertEquals("Cancel keeps the texture", start, current())
+        assertEquals("Cancel leaves the document untouched", revision, state().getJSONObject("document_file").getLong("revision"))
+        action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "properties"))
+        waitFor("Properties shows the texture") { shown("property-texture") }
+        screenshot("validation/paper/texture-property-$theme.png")
+        open("property-texture")
+        assertTrue("Reopening starts on the current paper", chosen(start) && !chosen(other))
+        assertEquals("Both entries open the same dialog", dialog.height, bounds("texture-dialog").height, 1f)
+        tap(bounds("texture-tile-$other").center)
+        waitFor("pending choice") { chosen(other) }
+        close("texture-use")
+        waitFor("Use Texture applies the paper") { current() == other }
+        assertEquals(tiles[other].getString("label"), texture().getString("label"))
+        assertEquals(tiles[other].optString("id"), texture().optString("id"))
+        command("undo")
+        waitFor("One Undo restores the paper") { current() == start }
+        scrollToPaper()
+        open("layer-texture-$paper")
+        tap(bounds("texture-tile-$other").center)
+        waitFor("pending choice") { chosen(other) }
+        pressKey(KeyEvent.KEYCODE_ENTER)
+        waitFor("Enter uses the texture") { !exists("texture-dialog") && current() == other }
+        command("undo")
+        waitFor("Undo restores the paper") { current() == start }
+        val last = tiles.size - 1
+        if (start != last) {
+            action(obj("type" to "effect", "action" to obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to last))))
+            waitFor("The last paper applies") { current() == last }
+            open("layer-texture-$paper")
+            val revealed = layout("texture-tile-$last")
+            val viewport = bounds("texture-grid")
+            assertTrue("Opening scrolls the current paper into view: $revealed / $viewport", chosen(last) && revealed.top >= viewport.top - 1 && revealed.bottom <= viewport.bottom + 1)
+            screenshot("validation/paper/texture-dialog-scrolled-$theme.png")
+            close("texture-cancel")
+            command("undo")
+            waitFor("Undo restores the first paper") { current() == start }
+        }
+        tap(bounds("layer-content-$paper").center)
+        waitFor("Edit Color opens from the Paper color") { shown("color-editor") }
+        settle()
+        assertEquals("Choose Texture has Edit Color's width", bounds("color-editor").width, dialog.width, 1.5f)
+        assertEquals("Choose Texture has Edit Color's height", bounds("color-editor").height, dialog.height, 1.5f)
+        screenshot("validation/paper/texture-edit-color-$theme.png")
+        tap(bounds("color-cancel").center)
+        waitFor("Edit Color closes") { !exists("color-editor") }
+        onMain { host.textureDialog = TextureDialogRequest(paper, true) }
+        waitFor("Choose Texture opens in its own window") { findTag("texture-dialog")?.first?.view?.rootView?.hasWindowFocus() == true }
+        assertNotSame("A windowed request uses a native dialog", activity.window.decorView, findTag("texture-dialog")!!.first.view.rootView)
+        pressKey(KeyEvent.KEYCODE_ESCAPE)
+        waitFor("Escape cancels the windowed dialog") { findTag("texture-dialog") == null && host.dialogKeyHandler == null }
+        assertEquals("Escape keeps the texture", start, current())
+        layerAction(obj("op" to "lock", "id" to paper, "value" to true))
+        assertFalse("A locked Paper cannot change texture", texture().getBoolean("editable"))
+        scrollToPaper()
+        tap(bounds("layer-texture-$paper").center)
+        SystemClock.sleep(400); settle()
+        assertFalse("A locked Paper opens no dialog", exists("texture-dialog"))
+        assertEquals("The locked thumbnail still selects the Paper", paper, editingLayer())
+        command("undo")
+        waitFor("Paper unlocked") { texture().getBoolean("editable") }
+    }
+
     @Test fun selectingFillRowsKeepsPropertiesAndDrawingTargets() {
         customize(obj("type" to "close_expanded"))
         revealLayers()
@@ -306,6 +429,11 @@ class AndroidInteractionTest {
             layerAction(obj("op" to "add_mask", "id" to fill, "replace" to false))
             layerAction(obj("op" to "select", "id" to fill, "mask" to false))
             waitFor("A fill's own mask owns painting") { layerStates().first { it.getLong("id") == fill }.getBoolean("mask_selected") }
+            if (effect == "paper") {
+                waitFor("Paper mask and texture shown") { shown("layer-mask-$fill") && shown("layer-texture-$fill") }
+                assertTrue("The texture follows the mask", bounds("layer-texture-$fill").left >= bounds("layer-mask-$fill").right)
+                screenshot("validation/paper/texture-row-mask.png")
+            } else assertFalse("Only Paper rows show a texture", exists("layer-texture-$fill"))
             assertFalse("A fill mask prevents drawing on a layer above", layerStates().any { it.getLong("id") != fill && it.getBoolean("drawing") })
             command("undo")
             layerAction(obj("op" to "delete", "id" to ink))

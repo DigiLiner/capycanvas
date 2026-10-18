@@ -106,7 +106,7 @@ struct EditorView<Canvas: View>: View {
         .modifier(WorkspaceDialogs(store: store))
         .modifier(SizeDialogs(store: store))
         .modifier(PaletteFiles(controller: store.palettes))
-        .modifier(PaperFiles(controller: store.papers))
+        .modifier(PaperFiles(store: store, controller: store.papers))
         .modifier(StrokeRecordingFiles(recording: store.strokeRecording))
         .modifier(ColorEditingPresentation(controller: store.colorEditing))
         .sheet(isPresented: Binding(get: { !store.snapshot["preferences"].isNull }, set: { if !$0 { store.dispatch(["type": "close_settings"]) } }), onDismiss: { store.focusCanvas?() }) {

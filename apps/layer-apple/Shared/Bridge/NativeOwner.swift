@@ -430,8 +430,11 @@ final class NativeOwner: @unchecked Sendable {
             }
         }
     }
-    func paperPreviews(layer: UInt64, epoch: UInt64, completion: @escaping @Sendable (NativePaperPreviews?) -> Void) {
-        queue.async { [self] in completion(capy_apple_paper_previews(handle,layer,epoch).map(NativePaperPreviews.init)) }
+    func paperPreviews(ids: [String], completion: @escaping @Sendable (NativePaperPreviews?) -> Void) {
+        guard let text = try? JSON(ids).encoded() else { completion(nil); return }
+        queue.async { [self] in
+            completion(text.withCString { capy_apple_paper_previews(handle,$0) }.map { NativePaperPreviews($0,ids:ids) })
+        }
     }
     func projectTask(kind: NativeProjectTask.Kind, expected: (UInt64, UInt64)? = nil,
         placement: JSON? = nil,

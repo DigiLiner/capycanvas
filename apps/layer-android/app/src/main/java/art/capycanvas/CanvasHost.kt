@@ -150,6 +150,8 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
     internal var colorPreview by mutableStateOf<JSONObject?>(null)
         private set
     internal var colorEditor by mutableStateOf<ColorEditorRequest?>(null)
+    internal var textureDialog by mutableStateOf<TextureDialogRequest?>(null)
+    internal val paperPreviews = PaperPreviews(this)
     internal var keymapFile by mutableStateOf<JSONObject?>(null)
     private var modelSnapshot: JSONObject? = null // Native owner only.
     var surfaceReady by mutableStateOf(false)
@@ -400,8 +402,8 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
         publishedHostError = error
         hostError = error
     }
-    internal var colorKeyHandler: ((android.view.KeyEvent) -> Boolean)? = null
-    internal fun commandFocus() = if (editingText || colorKeyHandler != null) "text" else if (palettes.focus != null) "palette" else "canvas"
+    internal var dialogKeyHandler: ((android.view.KeyEvent) -> Boolean)? = null
+    internal fun commandFocus() = if (editingText || dialogKeyHandler != null) "text" else if (palettes.focus != null) "palette" else "canvas"
     fun dispatch(action: JSONObject) {
         // Capture the editor owner before a menu action opens a native dialog.
         val focus = if (action.optString("type") == "invoke" && action.optString("command") == "search_commands") commandFocus() else null

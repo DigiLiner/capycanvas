@@ -1,12 +1,13 @@
 import {liveCopy,bindCopy} from './localization.js';
 import { composingKey } from "./text-input.js";
 import { chooseColor } from "./color-editor.js";
+import { chooseTexture, paperThumbnail } from "./paper-picker.js";
 import { addScrollbar } from "./scrollbars.js";
 let thumbnailRequest=0n;
 const thumbnailPending=new Map();
 // Layer widgets only. Selection, references, hierarchy and menu policy are Rust.
 export function createLayerPanel({ app, catalog, state, panel, element, button, icon, dispatch, applyChange, message, numberField, wake, dismissContext, openMenu, contentChanged = () => {} }) {
-  const copy=liveCopy(app,"catalog").native_copy.layers;
+  const copy=liveCopy(app,"catalog").native_copy.layers,paperCopy=liveCopy(app,"catalog").native_copy.paper;
   const send = action => dispatch({ type: "layer", action });
   const header = element("div", "layer-header"), footer = element("div", "layer-footer");
   header.dataset.control = "layer_opacity"; footer.dataset.control = "layer_actions";
@@ -172,7 +173,13 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     const content = thumb(false), mask = thumb(true);
     const linkAction = () => ({ op: "link_mask", id: get().id, value: !get().mask_linked });
     const link = glyphButton("link", ()=>get().mask_linked?copy.unlink_mask:copy.link_mask_to_layer, () => send(linkAction()), "layer-link", linkAction);
-    thumbnails.append(gutter, content.b, link, mask.b);
+    const texture = glyphButton("paper", ()=>paperCopy.choose, () => {
+      send({ op: "select", id: get().id, mask: false });
+      if (get().paper?.editable) chooseTexture({ app, layer: get().id, state, dispatch, element, button, icon, message });
+    }, "layer-thumbnail layer-texture");
+    texture.id = `layer-texture-${layer.id}`;
+    const texturePreview = paperThumbnail({ app, element, icon, size: 28 }); texture.replaceChildren(texturePreview.node);
+    thumbnails.append(gutter, content.b, link, mask.b, texture);
     const text = element("div", "layer-text"), name = element("span", "layer-name"), meta = element("span", "layer-meta"); text.append(name, meta);
     const lock = element("span", "layer-lock"), grip = element("span", "layer-grip"); grip.append(icon("grip"));
     const load=button('',e=>{e.stopPropagation();dispatch({type:'selection',action:{op:'load_layer',id:get().id,mode:'new',inverted:false}});},'layer-icon selection-layer-load');
@@ -181,7 +188,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     row.onclick = e => { if (!e.target.closest("button,input")) send({op:"select_row", id:get().id, extend:e.shiftKey, toggle:e.ctrlKey || e.metaKey}); };
     name.ondblclick = e => { e.stopPropagation(); if(get().can_rename) send({ op: "begin_rename", id: get().id }); };
     menu(row, get); menu(mask.b, get, true);
-    Object.assign(record, { load, eye, check, thumbnails, content, mask, link, name, text, meta, lock, grip });
+    Object.assign(record, { load, eye, check, thumbnails, content, mask, link, texture, texturePreview, name, text, meta, lock, grip });
     const actions = element("div", "layer-swipe-actions"), actionButtons = new Map();
     root.append(actions, row);
     record.refreshSwipe = () => {
@@ -425,6 +432,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       else if (r.content.b.childElementCount !== 1 || !r.content.image.isConnected) r.content.b.replaceChildren(r.content.image);
       r.mask.b.hidden = r.link.hidden = !layer.has_mask; r.mask.image.style.opacity = layer.mask_enabled ? 1 : .4;
       r.link.replaceChildren(icon(layer.mask_linked ? "link" : "unlink")); r.link.disabled = layer.locked; r.link.setAttribute("aria-pressed", String(layer.mask_linked)); r.link.title = r.link.ariaLabel = layer.mask_linked ? copy.unlink_mask : copy.link_mask_to_layer;
+      r.texture.hidden = !layer.paper;
+      if (layer.paper) { r.texturePreview.show(layer.paper.id); r.texture.setAttribute("aria-description", layer.paper.label); }
       r.name.textContent = layer.label; r.name.title = layer.label;
       r.meta.textContent = layer.description;
       r.meta.hidden = !r.meta.textContent; r.lock.replaceChildren(icon(layer.locked ? "lock" : "alpha-lock")); r.lock.style.opacity = layer.locked || layer.alpha_locked ? 1 : 0;

@@ -13,6 +13,45 @@ struct EditorFittedPresentation: ViewModifier {
     }
 }
 
+struct EditorDialogPresentation: ViewModifier {
+    let identifier: String
+    func body(content: Content) -> some View {
+        content.frame(minWidth: 380, idealWidth: 800, maxWidth: 860, minHeight: 420, idealHeight: 500, maxHeight: 620)
+            .accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
+            .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
+    }
+}
+
+struct EditorDialogTitle: View {
+    let text: String
+    var body: some View { Text(text).font(.headline).frame(maxWidth: .infinity) }
+}
+
+struct EditorDialogFooter<Leading: View>: View {
+    @Environment(\.capyCommonCopy) private var commonCopy
+    @Environment(\.editorPopupStore) private var store
+    let label: String
+    let identifiers: (cancel: String, apply: String)
+    var cancelsOnEscape = true
+    var blocked = false
+    let cancel: () -> Void
+    let apply: () -> Void
+    @ViewBuilder let leading: () -> Leading
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            HStack(spacing: 6) {
+                leading()
+                Button(commonCopy["cancel"].string, action: cancel).buttonStyle(.bordered)
+                    .keyboardShortcut(cancelsOnEscape ? .cancelAction : nil).accessibilityIdentifier(identifiers.cancel)
+                Button(label, action: apply)
+                    .buttonStyle(.borderedProminent).tint(EditorPalette(source: store?.state["palette"] ?? JSON()).accent)
+                    .disabled(blocked).keyboardShortcut(.defaultAction).accessibilityIdentifier(identifiers.apply)
+            }.padding(.horizontal, 20).padding(.vertical, 12)
+        }
+    }
+}
+
 /// Keep text on an opaque surface from the same shared palette. Drawing content
 /// must not change the contrast of a popup while it is open.
 struct EditorPopupSurface<S: Shape>: ViewModifier {

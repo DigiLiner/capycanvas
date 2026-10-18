@@ -7,7 +7,8 @@ mod gradient;
 #[path = "effects/paper.rs"]
 mod paper;
 pub use gradient::{GradientDestination,GradientEdit,GradientControls};
-pub use paper::{PaperPickerView,PaperTileView};
+pub use paper::{LayerPaper,PaperPickerView,PaperTileView};
+pub(crate) use paper::layer_paper;
 pub use curves::{CurveAxis,CurveAxisView,CurveControls,CurveCoordinateControl,CurveDomain};
 pub(super) use curves::PropertyEditorState;
 use crate::paper_library::PaperRequest;

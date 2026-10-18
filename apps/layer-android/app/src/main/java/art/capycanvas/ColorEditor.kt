@@ -38,8 +38,6 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -48,6 +46,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -61,7 +60,6 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
@@ -173,9 +171,9 @@ private val Shapes = listOf("circle" to "OKLCH", "square" to "HSB", "triangle" t
         if (pickerActive) PickStrip(host, editor, view, pickerState!!, rendition)
         return
     }
-    val wide = LocalConfiguration.current.screenWidthDp >= 744
+    val wide = colorEditorWide()
     val invalidOpen = editing != null && errorTarget == editing && error != null
-    val currentKeyHandler by rememberUpdatedState<(AndroidKeyEvent) -> Boolean> { event ->
+    val keys = { event: AndroidKeyEvent ->
         if (host.editingText || host.textComposition.owns(event)) false
         else if (event.keyCode == AndroidKeyEvent.KEYCODE_ESCAPE) {
             if (event.action == AndroidKeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -194,162 +192,158 @@ private val Shapes = listOf("circle" to "OKLCH", "square" to "HSB", "triangle" t
             true
         } else false
     }
-    val keyHandler = remember(host, request) { { event: AndroidKeyEvent -> currentKeyHandler(event) } }
-    val cardFocus = remember { FocusRequester() }
-    DisposableEffect(host, keyHandler) {
-        host.colorKeyHandler = keyHandler
-        onDispose { if (host.colorKeyHandler === keyHandler) host.colorKeyHandler = null }
-    }
-    LaunchedEffect(Unit) { cardFocus.requestFocus() }
-    val card = @Composable {
-        Surface(Modifier.padding(16.dp).widthIn(max = 720.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp - 32).dp)
-            .focusRequester(cardFocus).onPreviewKeyEvent { keyHandler(it.nativeKeyEvent) }.focusable()
-            .testTag("color-editor"), shape = SquircleShape(20.dp), color = colors.settingsBackground) {
-            Column {
-                Box(Modifier.weight(1f, fill = false).clipToBounds()) {
-                    val body = @Composable {
-                        val title = @Composable { Text(copy.getString("edit"), Modifier.fillMaxWidth().testTag("color-editor-title"), fontWeight = FontWeight.Bold, fontSize = 16.sp, textAlign = TextAlign.Center) }
-                        val wheel = @Composable { modifier: Modifier ->
-                            Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                DialogWheel(host, editor, view, if (wide) 232f else 208f) { act(obj("op" to "wheel", "action" to it)) }
-                                Row(Modifier.clip(TileShape).background(colors.text.copy(alpha = .06f)).padding(4.dp).testTag("color-shapes"), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    val choices = view.array("shapes").objects()
-                                    Shapes.forEachIndexed { index, (shape, label) ->
-                                        val selected = choices.getOrNull(index)?.optBoolean("selected") == true
-                                        Row(Modifier.height(26.dp).clip(TileShape).background(if (selected) colors.headerActive else Color.Transparent)
-                                            .clickable(role = Role.RadioButton) { act(obj("op" to "wheel", "action" to obj("op" to "shape", "shape" to shape))) }
-                                            .padding(horizontal = 8.dp).semantics { this.selected = selected; contentDescription = copy.getString(shape) }.testTag("color-shape-choice-$shape"),
-                                            verticalAlignment = Alignment.CenterVertically) {
-                                            SharedIcon("color-$shape", null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp))
-                                            Text(label, fontWeight = FontWeight.Medium)
-                                        }
-                                    }
-                                }
+    PickerDialog(host, request.windowed, "color-editor", keys, { close(null) }, page = {
+        val body = @Composable {
+            val title = @Composable { DialogTitle(copy.getString("edit"), "color-editor-title") }
+            val wheel = @Composable { modifier: Modifier ->
+                Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(WheelGap)) {
+                    DialogWheel(host, editor, view, wheelSize(wide)) { act(obj("op" to "wheel", "action" to it)) }
+                    Row(Modifier.clip(TileShape).background(colors.text.copy(alpha = .06f)).padding(ShapeInset).testTag("color-shapes"), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        val choices = view.array("shapes").objects()
+                        Shapes.forEachIndexed { index, (shape, label) ->
+                            val selected = choices.getOrNull(index)?.optBoolean("selected") == true
+                            Row(Modifier.height(ShapeRow).clip(TileShape).background(if (selected) colors.headerActive else Color.Transparent)
+                                .clickable(role = Role.RadioButton) { act(obj("op" to "wheel", "action" to obj("op" to "shape", "shape" to shape))) }
+                                .padding(horizontal = 8.dp).semantics { this.selected = selected; contentDescription = copy.getString(shape) }.testTag("color-shape-choice-$shape"),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                SharedIcon("color-$shape", null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp))
+                                Text(label, fontWeight = FontWeight.Medium)
                             }
                         }
-                        val header = @Composable {
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    Row(Modifier.clip(ControlShape).border(1.dp, colors.divider, ControlShape).testTag("color-pair")) {
-                                        Box(Modifier.size(54.dp, 48.dp).background(displayColor(view.getJSONObject("current"))).clickable { act(obj("op" to "revert")) }
-                                            .semantics { contentDescription = copy.getString("current") }.testTag("color-current"))
-                                        Box(Modifier.size(54.dp, 48.dp).background(displayColor(view.getJSONObject("new"))).semantics { contentDescription = copy.getString("new") }.testTag("color-new"))
-                                    }
-                                    if (!request.windowed) IconButton({
-                                        picking = true; seenPicking = false
-                                        val metrics = context.resources.displayMetrics
-                                        host.dispatch(obj("type" to "color_picker", "action" to obj("kind" to "editor", "original" to view.getJSONObject("value"),
-                                            "touch_offset" to (metrics.ydpi * 10f / 25.4f).coerceIn(36f * metrics.density, 64f * metrics.density))))
-                                    }, Modifier.size(48.dp).clip(ControlShape).background(colors.button).testTag("color-pick")) {
-                                        SharedIcon("eyedropper", copy.getString("pick_canvas"), Modifier.size(24.dp))
-                                    }
-                                    Spacer(Modifier.weight(1f))
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        view.objectOrNull("hex_note")?.let { note -> Badge(note.getString("text"), Modifier.testTag("color-hex-note")) }
-                                        ValueCell(view.getString("hex"), view.getString("hex"), copy.getString("hex"), "hex", editing == "hex", errorTarget == "hex" && error != null, true,
-                                            { editing = "hex" }, { text -> if (act(obj("op" to "text", "text" to text), "hex")) editing = null }, { if (errorTarget == "hex") { error = null; errorTarget = null; refused = null }; editing = null })
-                                        CopyButton(copy, "color-copy-hex") { copyText(context, view.getString("hex")) }
-                                    }
-                                }
-                                Row(Modifier.width(108.dp)) {
-                                    Text(copy.getString("current"), Modifier.weight(1f), color = colors.secondary, fontSize = 11.sp, textAlign = TextAlign.Center)
-                                    Text(copy.getString("new"), Modifier.weight(1f), color = colors.secondary, fontSize = 11.sp, textAlign = TextAlign.Center)
-                                }
-                            }
-                        }
-                        val rows = @Composable {
-                            val formNames = view.array("rows").objects().flatMap { it.array("forms").objects().map { form -> form.getString("label") } }
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                view.array("rows").objects().forEachIndexed { row, shown ->
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            var open by remember { mutableStateOf(false) }
-                                            Box {
-                                                Row(Modifier.clip(ControlShape).clickable { open = true }.padding(horizontal = 6.dp, vertical = 6.dp).testTag("color-format-$row")
-                                                    .semantics { contentDescription = shown.getString("label") }, verticalAlignment = Alignment.CenterVertically) {
-                                                    Box { formNames.forEach { name -> Text(name, Modifier.alpha(if (name == shown.getString("label")) 1f else 0f), maxLines = 1) } }
-                                                    Spacer(Modifier.width(4.dp)); SharedIcon("chevron-down", null, Modifier.size(12.dp))
-                                                }
-                                                DropdownMenu(open, { open = false }) {
-                                                    shown.array("forms").objects().forEach { form ->
-                                                        DropdownMenuItem(text = { Text(form.getString("label"), fontWeight = if (form.getString("form") == shown.getString("form")) FontWeight.Bold else FontWeight.Normal) },
-                                                            modifier = Modifier.testTag("color-form-${form.getString("form")}"), onClick = { open = false; act(obj("op" to "form", "row" to row, "form" to form.getString("form"))) })
-                                                    }
-                                                }
-                                            }
-                                            if (!shown.isNull("space")) Badge(shown.getString("space"))
-                                        }
-                                        shown.array("values").objects().forEachIndexed { index, value ->
-                                            val name = "$row-$index"
-                                            val target = obj("kind" to "value", "row" to row, "index" to index)
-                                            ValueCell(value.getString("text"), value.getString("edit"), value.getString("name"), name, editing == name, errorTarget == name && error != null, false,
-                                                { editing = name }, { text -> if (act(obj("op" to "value", "row" to row, "index" to index, "text" to text), name)) editing = null },
-                                                { if (errorTarget == name) { error = null; errorTarget = null; refused = null }; editing = null },
-                                                { pixels, speed -> act(obj("op" to "scrub", "target" to target, "pixels" to pixels, "speed" to speed), name) },
-                                                { cancel -> act(obj("op" to "end_scrub", "cancel" to cancel), name) })
-                                        }
-                                        CopyButton(copy, "color-copy-$row") { copyText(context, shown.getString("copy")) }
-                                    }
-                                }
-                                view.objectOrNull("intensity")?.let { value ->
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(copy.getString("intensity_ev"), Modifier.weight(1f).padding(start = 6.dp))
-                                        val target = obj("kind" to "intensity")
-                                        ValueCell(value.getString("text"), value.getString("edit"), value.getString("name"), "ev", editing == "ev", errorTarget == "ev" && error != null, false,
-                                            { editing = "ev" }, { text -> if (act(obj("op" to "intensity", "text" to text), "ev")) editing = null },
-                                            { if (errorTarget == "ev") { error = null; errorTarget = null; refused = null }; editing = null },
-                                            { pixels, speed -> act(obj("op" to "scrub", "target" to target, "pixels" to pixels, "speed" to speed), "ev") },
-                                            { cancel -> act(obj("op" to "end_scrub", "cancel" to cancel), "ev") }, wide = true)
-                                        Spacer(Modifier.width(28.dp))
-                                    }
-                                }
-                                if (error != null) Text(error!!, Modifier.padding(top = 6.dp).testTag("color-editor-error"), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
-                            }
-                        }
-                        Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            title()
-                            if (wide) Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                                wheel(Modifier)
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) { header(); rows() }
-                            } else Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                header(); wheel(Modifier.align(Alignment.CenterHorizontally)); rows()
-                            }
-                        }
-                    }
-                    body()
-                    androidx.compose.animation.AnimatedVisibility(sheet, Modifier.matchParentSize(), enter = slideInVertically(tween(250, easing = EaseOutCubic)) { it }, exit = slideOutVertically(tween(250, easing = EaseOutCubic)) { it }) {
-                        SwatchSheet(host, editor, view, { text -> runCatching { send(obj("op" to "search", "text" to text)) } }, { color -> act(obj("op" to "color", "color" to color)) }) { sheet = false }
                     }
                 }
-                HorizontalDivider(Modifier.testTag("color-editor-divider"), color = colors.divider)
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (sheet) Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(Modifier.clip(ControlShape)) {
-                            Box(Modifier.size(18.dp, 22.dp).background(displayColor(view.getJSONObject("current"))))
-                            Box(Modifier.size(18.dp, 22.dp).background(displayColor(view.getJSONObject("new"))))
+            }
+            val header = @Composable {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ColorPair(view, 54.dp, 48.dp, Modifier.testTag("color-pair"),
+                            Modifier.clickable { act(obj("op" to "revert")) }.semantics { contentDescription = copy.getString("current") }.testTag("color-current"),
+                            Modifier.semantics { contentDescription = copy.getString("new") }.testTag("color-new"))
+                        if (!request.windowed) IconButton({
+                            picking = true; seenPicking = false
+                            val metrics = context.resources.displayMetrics
+                            host.dispatch(obj("type" to "color_picker", "action" to obj("kind" to "editor", "original" to view.getJSONObject("value"),
+                                "touch_offset" to (metrics.ydpi * 10f / 25.4f).coerceIn(36f * metrics.density, 64f * metrics.density))))
+                        }, Modifier.size(48.dp).clip(ControlShape).background(colors.button).testTag("color-pick")) {
+                            SharedIcon("eyedropper", copy.getString("pick_canvas"), Modifier.size(24.dp))
                         }
-                        Text(view.getString("hex"))
-                    } else RecentRow(host, view, Modifier.weight(1f)) { color -> act(obj("op" to "color", "color" to color)) }
-                    Box(Modifier.size(34.dp).clip(ControlShape).background(colors.button).clickable { sheet = !sheet }
-                        .semantics { contentDescription = copy.getString(if (sheet) "close_swatches" else "all_swatches") }.testTag("color-swatches"), contentAlignment = Alignment.Center) {
-                        SharedIcon("chevron-down", null, Modifier.size(16.dp).rotate(if (sheet) 0f else 180f))
+                        Spacer(Modifier.weight(1f))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            view.objectOrNull("hex_note")?.let { note -> Badge(note.getString("text"), Modifier.testTag("color-hex-note")) }
+                            ValueCell(view.getString("hex"), view.getString("hex"), copy.getString("hex"), "hex", editing == "hex", errorTarget == "hex" && error != null, true,
+                                { editing = "hex" }, { text -> if (act(obj("op" to "text", "text" to text), "hex")) editing = null }, { if (errorTarget == "hex") { error = null; errorTarget = null; refused = null }; editing = null })
+                            CopyButton(copy, "color-copy-hex") { copyText(context, view.getString("hex")) }
+                        }
                     }
-                    val footerButton = Modifier.height(34.dp)
-                    val footerPadding = PaddingValues(horizontal = 16.dp)
-                    Button({ close(null) }, footerButton.testTag("color-cancel"), shape = ControlShape, contentPadding = footerPadding,
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.button, contentColor = colors.text)) { Text(common.getString("cancel"), fontWeight = FontWeight.Medium) }
-                    Button({ close(view.getJSONObject("value") to (if (view.isNull("stops")) null else view.number("stops"))) }, footerButton.testTag("color-use"),
-                        enabled = !invalidOpen, shape = ControlShape, contentPadding = footerPadding) { Text(copy.getString("use_color"), fontWeight = FontWeight.Medium) }
+                    Row(Modifier.width(108.dp)) {
+                        Text(copy.getString("current"), Modifier.weight(1f), color = colors.secondary, fontSize = 11.sp, textAlign = TextAlign.Center)
+                        Text(copy.getString("new"), Modifier.weight(1f), color = colors.secondary, fontSize = 11.sp, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            val rows = @Composable {
+                val formNames = view.array("rows").objects().flatMap { it.array("forms").objects().map { form -> form.getString("label") } }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    view.array("rows").objects().forEachIndexed { row, shown ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                var open by remember { mutableStateOf(false) }
+                                Box {
+                                    Row(Modifier.clip(ControlShape).clickable { open = true }.padding(horizontal = 6.dp, vertical = 6.dp).testTag("color-format-$row")
+                                        .semantics { contentDescription = shown.getString("label") }, verticalAlignment = Alignment.CenterVertically) {
+                                        Box { formNames.forEach { name -> Text(name, Modifier.alpha(if (name == shown.getString("label")) 1f else 0f), maxLines = 1) } }
+                                        Spacer(Modifier.width(4.dp)); SharedIcon("chevron-down", null, Modifier.size(12.dp))
+                                    }
+                                    DropdownMenu(open, { open = false }) {
+                                        shown.array("forms").objects().forEach { form ->
+                                            DropdownMenuItem(text = { Text(form.getString("label"), fontWeight = if (form.getString("form") == shown.getString("form")) FontWeight.Bold else FontWeight.Normal) },
+                                                modifier = Modifier.testTag("color-form-${form.getString("form")}"), onClick = { open = false; act(obj("op" to "form", "row" to row, "form" to form.getString("form"))) })
+                                        }
+                                    }
+                                }
+                                if (!shown.isNull("space")) Badge(shown.getString("space"))
+                            }
+                            shown.array("values").objects().forEachIndexed { index, value ->
+                                val name = "$row-$index"
+                                val target = obj("kind" to "value", "row" to row, "index" to index)
+                                ValueCell(value.getString("text"), value.getString("edit"), value.getString("name"), name, editing == name, errorTarget == name && error != null, false,
+                                    { editing = name }, { text -> if (act(obj("op" to "value", "row" to row, "index" to index, "text" to text), name)) editing = null },
+                                    { if (errorTarget == name) { error = null; errorTarget = null; refused = null }; editing = null },
+                                    { pixels, speed -> act(obj("op" to "scrub", "target" to target, "pixels" to pixels, "speed" to speed), name) },
+                                    { cancel -> act(obj("op" to "end_scrub", "cancel" to cancel), name) })
+                            }
+                            CopyButton(copy, "color-copy-$row") { copyText(context, shown.getString("copy")) }
+                        }
+                    }
+                    view.objectOrNull("intensity")?.let { value ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(copy.getString("intensity_ev"), Modifier.weight(1f).padding(start = 6.dp))
+                            val target = obj("kind" to "intensity")
+                            ValueCell(value.getString("text"), value.getString("edit"), value.getString("name"), "ev", editing == "ev", errorTarget == "ev" && error != null, false,
+                                { editing = "ev" }, { text -> if (act(obj("op" to "intensity", "text" to text), "ev")) editing = null },
+                                { if (errorTarget == "ev") { error = null; errorTarget = null; refused = null }; editing = null },
+                                { pixels, speed -> act(obj("op" to "scrub", "target" to target, "pixels" to pixels, "speed" to speed), "ev") },
+                                { cancel -> act(obj("op" to "end_scrub", "cancel" to cancel), "ev") }, wide = true)
+                            Spacer(Modifier.width(28.dp))
+                        }
+                    }
+                    if (error != null) Text(error!!, Modifier.padding(top = 6.dp).testTag("color-editor-error"), color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                }
+            }
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                title()
+                if (wide) Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    wheel(Modifier)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) { header(); rows() }
+                } else Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    header(); wheel(Modifier.align(Alignment.CenterHorizontally)); rows()
                 }
             }
         }
+        body()
+        androidx.compose.animation.AnimatedVisibility(sheet, Modifier.matchParentSize(), enter = slideInVertically(tween(250, easing = EaseOutCubic)) { it }, exit = slideOutVertically(tween(250, easing = EaseOutCubic)) { it }) {
+            SwatchSheet(host, editor, view, { text -> runCatching { send(obj("op" to "search", "text" to text)) } }, { color -> act(obj("op" to "color", "color" to color)) }) { sheet = false }
+        }
+    }) {
+        if (sheet) Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ColorPair(view, 38.dp, 34.dp, Modifier.testTag("color-mini-pair"))
+            Text(view.getString("hex"))
+        } else RecentRow(host, view, Modifier.weight(1f)) { color -> act(obj("op" to "color", "color" to color)) }
+        Box(Modifier.size(34.dp).clip(ControlShape).background(colors.button).clickable { sheet = !sheet }
+            .semantics { contentDescription = copy.getString(if (sheet) "close_swatches" else "all_swatches") }.testTag("color-swatches"), contentAlignment = Alignment.Center) {
+            SharedIcon("chevron-down", null, Modifier.size(16.dp).rotate(if (sheet) 0f else 180f))
+        }
+        DialogButton(common.getString("cancel"), "color-cancel") { close(null) }
+        DialogButton(copy.getString("use_color"), "color-use", accent = true, enabled = !invalidOpen) {
+            close(view.getJSONObject("value") to (if (view.isNull("stops")) null else view.number("stops")))
+        }
     }
-    if (request.windowed) Dialog({ close(null) }, DialogProperties(usePlatformDefaultWidth = false)) { Box(contentAlignment = Alignment.Center) { card() } }
-    else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .32f)).pointerInput(Unit) {
-            awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume(); do { val event = awaitPointerEvent(); event.changes.forEach { it.consume() } } while (event.changes.any { it.pressed }) }
-        }.testTag("color-editor-scrim"))
-        card()
+}
+
+private val WheelGap = 6.dp
+private val ShapeRow = 26.dp
+private val ShapeInset = 4.dp
+private fun wheelSize(wide: Boolean) = if (wide) 232f else 208f
+@Composable private fun colorEditorWide() = LocalConfiguration.current.screenWidthDp >= 744
+
+@Composable internal fun colorEditorBodyHeight(): Dp {
+    val wheel = wheelSize(colorEditorWide()).dp + WheelGap + ShapeRow + ShapeInset * 2
+    if (colorEditorWide()) return wheel
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current
+    with(LocalDensity.current) {
+        val line = measurer.measure("", style).size.height.toDp()
+        val caption = measurer.measure("", style.copy(fontSize = 11.sp)).size.height.toDp()
+        val row = maxOf(line + 12.dp, 28.dp)
+        return 48.dp + 2.dp + caption + 14.dp + wheel + 14.dp + row * 3 + 4.dp
+    }
+}
+
+@Composable private fun ColorPair(view: JSONObject, width: Dp, height: Dp, modifier: Modifier, current: Modifier = Modifier, new: Modifier = Modifier) {
+    val colors = LocalPalette.current
+    Row(modifier.clip(ControlShape).border(1.dp, colors.divider, ControlShape)) {
+        Box(Modifier.size(width, height).background(displayColor(view.getJSONObject("current"))).then(current))
+        Box(Modifier.size(width, height).background(displayColor(view.getJSONObject("new"))).then(new))
     }
 }
 

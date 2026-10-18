@@ -283,6 +283,36 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
 }
 
 #[test]
+fn paper_rows_name_their_texture_and_previews_resolve_by_identity() {
+    use crate::paper_library::{PaperEntry, paper_identity};
+    let mut s = session(Platform::Gtk);
+    let layer = paper_layer(&s);
+    let row = |s: &UiSession<Recorder>| s.state.layers.iter().find(|row| row.id == layer).unwrap().paper.clone().unwrap();
+    assert_eq!(row(&s), crate::LayerPaper { id: Some("drawing_paper".into()), label: "Drawing paper".into(), editable: true });
+    assert!(s.state.layers.iter().filter(|row| row.id != layer).all(|row| row.paper.is_none()));
+    assert_eq!(s.paper_preview("drawing_paper"), Some(layer_core::paper::built_in_paper("drawing_paper").unwrap().preview.clone()));
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    assert_eq!(row(&s).id.as_deref(), Some("rough"));
+    s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
+    let tiles = paper_control(&s, "texture").paper.unwrap().tiles;
+    assert_eq!(tiles[2].id.as_deref(), Some("rough"));
+    assert!(tiles.iter().all(|tile| tile.id.as_deref().and_then(|id| s.paper_preview(id)).is_some()));
+    let image = gray_paper(40);
+    let id = paper_identity(&image).unwrap();
+    s.set_paper_library(vec![PaperEntry { id: id.clone(), name: "scan".into(), bytes: 64, preview: vec![7; 96 * 96].into() }]).unwrap();
+    s.paper_loaded(&id, image).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(13) } }).unwrap();
+    s.paper_loaded(&id, gray_paper(40)).unwrap();
+    assert_eq!(row(&s), crate::LayerPaper { id: Some(id.as_str().into()), label: "scan".into(), editable: true });
+    assert_eq!(s.paper_preview(&id).as_deref(), Some(&[7; 96 * 96][..]));
+    s.set_paper_library(Vec::new()).unwrap();
+    assert_eq!(row(&s), crate::LayerPaper { id: None, label: "This drawing’s paper".into(), editable: true });
+    assert_eq!(s.paper_preview(&id), None);
+    s.dispatch(UiAction::Layer { action: LayerAction::Lock { id: layer, value: true } }).unwrap();
+    assert!(!row(&s).editable);
+}
+
+#[test]
 fn a_late_library_read_cannot_replace_a_newer_paper_choice() {
     use crate::paper_library::{PaperEntry, paper_identity};
     for platform in [Platform::Gtk, Platform::Mac, Platform::Ios, Platform::Windows] {

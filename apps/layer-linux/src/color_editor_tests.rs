@@ -275,6 +275,10 @@ fn native_color_editor_visual_audit() {
         assert_eq!(editor.sheet.compute_bounds(&overlay).unwrap().y(), 0.);
         assert_eq!(scroll.y() + scroll.height(), overlay.height() as f32, "the swatch list reaches the divider");
         audit(&w, &editor, &output, &format!("sheet-{theme:?}"));
+        let bounds = |widget: gtk::Widget| widget.compute_bounds(&editor.dialog).unwrap();
+        let (pair, footer) = (bounds(editor.current.parent().unwrap()), bounds(editor.mini_current.parent().unwrap()));
+        assert!((pair.width() / pair.height() - footer.width() / footer.height()).abs() < 0.05, "the footer pair keeps the Current and New proportions: {pair:?} {footer:?}");
+        assert_eq!(footer.height(), bounds(editor.swatches.clone().upcast()).height(), "the footer pair matches the footer buttons");
         slide(false);
         until(|| !editor.sheet.is_visible(), "the closed sheet hides");
         w.window.unmaximize();

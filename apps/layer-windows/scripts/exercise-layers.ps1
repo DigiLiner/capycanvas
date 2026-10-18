@@ -155,6 +155,7 @@ try {
     Enter-CapyEnvironment
     $env:CAPY_STORAGE_DIR=Join-Path $run 'profile'
     $env:CAPY_TRACE_UI='1';$env:CAPY_SMOKE_TEST='1';$env:CAPY_TEST_DISPLAY='1';$env:CAPY_TEST_PRIMARY='1'
+    if($Paper -or $PaperLight){. (Join-Path $PSScriptRoot 'layer-paper.ps1');Seed-PaperLibrary}
     $stderr=Join-Path $run 'stderr.log'
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
@@ -167,7 +168,6 @@ try {
     if(!@((Model).layout.groups|Where-Object {$_.active -eq 'layers'}).Count){Invoke 'Layers' -Name}
     if($Paper -or $PaperLight){
         . (Join-Path $PSScriptRoot 'layer-relationships.ps1')
-        . (Join-Path $PSScriptRoot 'layer-paper.ps1')
         Test-LayerPaper -Light:$PaperLight
         & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         [PSCustomObject]@{paper='passed';themes=$(if($PaperLight){'light'}else{'dark/light'});evidence=$run;scope='WARP UI and synthetic input; hardware performance unverified'}|ConvertTo-Json

@@ -89,6 +89,9 @@ impl WebApp {
         let rendition = self.session.effective_sdr_rendition();
         serialize(&layer_ui::SwatchSheetView::new(&state.color_library, &query, current, |color| colors.mapped_swatch(color, rendition), self.session.localization()))
     }
+    pub fn paper_preview(&self, id: String) -> Option<Vec<u8>> {
+        self.session.paper_preview(&id).map(|preview| preview.to_vec())
+    }
     /// Small cached UI raster only; the painting canvas remains on WebGPU.
     pub fn color_field_pixels(&self, side: u32) -> Result<Vec<u8>, JsValue> {
         color_field(&self.session.state().preview_colors(), side,

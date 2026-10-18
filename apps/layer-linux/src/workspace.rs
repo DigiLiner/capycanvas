@@ -944,6 +944,7 @@ pub struct Workspace {
     opacity: crate::number_control::NumberControl,
     color: Rc<crate::color_editor::ColorButton>,
     pub(crate) color_editors: RefCell<Vec<Rc<crate::color_editor::Editor>>>,
+    pub(crate) texture_dialog: RefCell<Option<Rc<crate::paper_picker::TextureDialog>>>,
     pub(crate) color_strip: crate::color_editor::Strip,
     tool_settings: crate::tool_panels::ToolSettings,
     pub(crate) canvas_bar: crate::canvas_bar::CanvasBar,
@@ -1299,6 +1300,7 @@ impl Workspace {
             opacity,
             color,
             color_editors: RefCell::default(),
+            texture_dialog: RefCell::default(),
             color_strip,
             tool_settings,
             pressure_calibration,
@@ -2807,6 +2809,7 @@ impl Workspace {
         if regions & regions::DOCUMENT != 0 {
             self.layer_panel.refresh(&state);
             self.effects.refresh(self, &state);self.effects.refresh_histograms(self,&state);
+            crate::paper_picker::refresh(self, &state);
             if let Some(tab) = state.tabs.first() {
                 let modified = if state.document_file.modified {
                     "• "

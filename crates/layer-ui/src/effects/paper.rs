@@ -12,10 +12,15 @@ pub struct PaperPickerView {
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PaperTileView {
+    pub id: Option<Arc<str>>,
     pub label: Arc<str>,
-    #[serde(skip)]
-    pub preview: Option<Arc<[u8]>>,
     pub actions: Vec<PropertyActionView>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LayerPaper {
+    pub id: Option<Arc<str>>,
+    pub label: Arc<str>,
+    pub editable: bool,
 }
 
 #[derive(Clone)]
@@ -26,30 +31,38 @@ pub(crate) enum PaperChoice {
 pub(crate) struct PaperOption {
     pub label: Arc<str>,
     pub choice: PaperChoice,
-    pub preview: Option<Arc<[u8]>>,
-    pub library: Option<String>,
+    pub id: Option<Arc<str>>,
+    pub imported: bool,
 }
 
 pub(crate) fn paper_options(current: &TextureSource, papers: &PaperLibrary, l: &Localizer) -> (Vec<PaperOption>, usize) {
     let built_in = paper::built_in_papers().iter().map(|paper| PaperOption {
-        label: resource_label(&paper.label, l), choice: PaperChoice::Texture(paper.texture.clone()), preview: Some(paper.preview.clone()), library: None,
+        label: resource_label(&paper.label, l), choice: PaperChoice::Texture(paper.texture.clone()), id: Some(paper.id.clone()), imported: false,
     });
     let imported = papers.entries.iter().flatten().map(|entry| PaperOption {
         label: entry.name.as_str().into(),
         choice: papers.image(&entry.id).map_or_else(|| PaperChoice::Library(entry.id.clone()), |image| PaperChoice::Texture(TextureSource::Image(image.clone()))),
-        preview: Some(entry.preview.clone()), library: Some(entry.id.clone()),
+        id: Some(entry.id.as_str().into()), imported: true,
     });
     let mut options: Vec<_> = built_in.chain(imported).collect();
-    let current_entry = match current { TextureSource::Image(image) => papers.entry_of(image).map(|entry| entry.id.clone()), _ => None };
-    let selected = options.iter().position(|option| match (&option.choice, &option.library) {
-        (_, Some(id)) => current_entry.as_ref() == Some(id),
-        (PaperChoice::Texture(texture), None) => texture == current,
-        _ => false,
+    let current_entry = match current { TextureSource::Image(image) => papers.entry_of(image).map(|entry| entry.id.as_str()), _ => None };
+    let selected = options.iter().position(|option| match &option.choice {
+        _ if option.imported => option.id.as_deref() == current_entry,
+        PaperChoice::Texture(texture) => texture == current,
+        PaperChoice::Library(_) => false,
     }).unwrap_or_else(|| {
-        options.insert(0, PaperOption { label: l.text(MessageId::RESOURCES_PAPER_OWN), choice: PaperChoice::Texture(current.clone()), preview: None, library: None });
+        options.insert(0, PaperOption { label: l.text(MessageId::RESOURCES_PAPER_OWN), choice: PaperChoice::Texture(current.clone()), id: None, imported: false });
         0
     });
     (options, selected)
+}
+
+pub(crate) fn layer_paper(effect: layer_core::EffectView, papers: &PaperLibrary, editable: bool, l: &Localizer) -> Option<LayerPaper> {
+    if !paper::is_paper(effect.program) { return None; }
+    let current = effect.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => Some(texture), _ => None })?;
+    let (mut options, selected) = paper_options(current, papers, l);
+    let option = options.swap_remove(selected);
+    Some(LayerPaper { id: option.id, label: option.label, editable })
 }
 
 pub(super) fn choice(application: &EffectApplication, papers: &PaperLibrary) -> Option<String> {
@@ -131,16 +144,16 @@ pub(super) fn controls(token: u64, application: &EffectApplication, document: &D
     let library = papers.entries.is_some();
     let picker = PaperPickerView {
         tiles: options.iter().enumerate().map(|(index, option)| PaperTileView {
+            id: option.id.clone(),
             label: option.label.clone(),
-            preview: option.preview.clone(),
-            actions: match &option.library {
-                Some(id) => vec![
-                    action(MessageId::RESOURCES_PAPER_RENAME, None, EffectAction::RenamePaper { id: id.clone(), name: option.label.to_string() }),
-                    action(MessageId::COMMON_DELETE, None, EffectAction::DeletePaper { id: id.clone() }),
+            actions: match &option.id {
+                Some(id) if option.imported => vec![
+                    action(MessageId::RESOURCES_PAPER_RENAME, None, EffectAction::RenamePaper { id: id.to_string(), name: option.label.to_string() }),
+                    action(MessageId::COMMON_DELETE, None, EffectAction::DeletePaper { id: id.to_string() }),
                 ],
-                None if library && index == 0 && option.preview.is_none() && matches!(current, TextureSource::Image(_)) =>
+                None if library && index == 0 && matches!(current, TextureSource::Image(_)) =>
                     vec![action(MessageId::RESOURCES_PAPER_ADD, None, EffectAction::AddPaper { layer: token })],
-                None => Vec::new(),
+                _ => Vec::new(),
             },
         }).collect(),
         import: library.then(|| action(MessageId::RESOURCES_PAPER_IMPORT, Some("layer-folder-open-symbolic"), EffectAction::ImportPaper { layer: token })),

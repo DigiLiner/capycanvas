@@ -7,6 +7,7 @@ import {strokeRecordingControl} from './stroke-recording.js';
 import {colorButton, colorCss} from './color-controls.js';
 import {filterPreviewView} from './filter-previews.js';
 import {gradientEditor} from './gradient.js';
+import {chooseTexture,paperThumbnail} from './paper-picker.js';
 // Views of the shared Rust effect/property schema; no filter-specific UI logic.
 export function createEffectPanels({app,wake,catalog,state,panels,element,button,icon,dispatch,numberField,contentChanged,splitPicker=false,message,openMenu}) {
   const copy=liveCopy(app,"catalog").native_copy.color,common=liveCopy(app,"bootstrap_view").common;
@@ -222,6 +223,9 @@ export function createEffectPanels({app,wake,catalog,state,panels,element,button
           },refreshHistogram:()=>curve.refreshHistogram(),dispose:()=>curve.dispose()};
         }
         else if(c.kind.kind==="toggle"){const n=element("input");n.type="checkbox";n.onchange=()=>change(n.checked);field={node:row(()=>state().layer_properties.controls.find(v=>v.key===c.key)?.label??"",n),update:c=>n.checked=c.value.value,disable:x=>n.disabled=x};}
+        else if(c.kind.kind==="choice"&&c.paper){const thumbnail=paperThumbnail({app,element,icon,size:28}),name=element("span","property-texture-name"),n=button("",()=>chooseTexture({app,layer:state().layer_properties.layer,state,dispatch,element,button,icon,message}),"property-texture");
+          n.id="property-texture";n.append(thumbnail.node,name);
+          field={node:row(()=>state().layer_properties.controls.find(v=>v.key===c.key)?.label??"",n),update:c=>{const tile=c.paper.tiles[c.value.value];thumbnail.show(tile?.id??null);name.textContent=tile?.label??"";n.title=n.ariaLabel=c.label;n.setAttribute("aria-description",tile?.label??"");},disable:x=>n.disabled=x};}
         else if(c.kind.kind==="choice"){const n=element("select");c.kind.options.forEach((label,i)=>{const o=element("option","",()=>state().layer_properties.controls.find(v=>v.key===c.key)?.kind.options[i]??"");o.value=i;n.append(o);});n.onchange=()=>change(Number(n.value));field={node:row(()=>state().layer_properties.controls.find(v=>v.key===c.key)?.label??"",n),update:c=>n.value=c.value.value,disable:x=>n.disabled=x};}
         else if(c.kind.kind==="color"){const n=colorButton({app,opaque:c.kind.opaque,label:()=>state().layer_properties.controls.find(v=>v.key===c.key)?.label??"",element,button,change,current:()=>`${state().document_file.epoch}:${state().layer_properties.layer}`});let input=n.node,bucket;
           if(c.color_action){bucket=button("",()=>dispatch(c.color_action));bucket.dataset.action=`${c.key.replaceAll("_","-")}-bucket`;bindCopy(bucket,()=>copy.use_selected,"title");bindCopy(bucket,()=>copy.use_selected,"ariaLabel");bucket.append(icon("fill"));input=element("div","color-action-property");input.append(n.node,bucket);}

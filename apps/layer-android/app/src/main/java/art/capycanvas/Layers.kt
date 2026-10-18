@@ -21,6 +21,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.collapse
@@ -463,7 +464,7 @@ internal class LayerSwipe {
             val operation=if(group)obj("op" to "collapse","id" to id) else obj("op" to "select","id" to id,"mask" to mask)
             val windowed=inSeparateWindow()
             val label=if(group) host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString(if(layer.getBoolean("collapsed")) "expand" else "collapse") else if(mask) host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("edit_mask") else if(layer.optBoolean("selection_layer")) host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("edit_selection") else host.catalog.getJSONObject("native_copy").getJSONObject("layers").getString("edit_content")
-            ActionTip(host,label,obj("type" to "layer","action" to operation),Modifier.size(30.dp).then(if(!mask && !preview) Modifier.testTag("layer-content-$id").onGloballyPositioned { contentBounds(it.boundsInRoot(),shift) } else Modifier)) {
+            ActionTip(host,label,obj("type" to "layer","action" to operation),Modifier.size(30.dp).then(if(preview) Modifier else if(mask) Modifier.testTag("layer-mask-$id") else Modifier.testTag("layer-content-$id").onGloballyPositioned { contentBounds(it.boundsInRoot(),shift) })) {
             Box(Modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().then(if(mask && !preview) Modifier.onGloballyPositioned { maskBounds=it.boundsInRoot() } else Modifier)
                 .then(if(group || preview) Modifier else Modifier.pointerInput(id,mask) {
@@ -505,30 +506,7 @@ internal class LayerSwipe {
                     else Modifier.size(24.dp),tint=colors.text)
                 }
             }
-                Spacer(Modifier.matchParentSize().graphicsLayer().drawWithCache {
-                    val radius=size.minDimension/2
-                    val contour=Path().apply { addSquircle(Rect(Offset.Zero,size),radius,radius,radius,radius) }.asAndroidPath()
-                    val transform=android.graphics.Matrix()
-                    fun edge(path:Path,outside:Float,inside:Float) {
-                        val target=path.asAndroidPath();target.rewind();target.fillType=android.graphics.Path.FillType.EVEN_ODD
-                        fun add(inset:Float) {
-                            transform.setScale((size.width-2*inset)/size.width,(size.height-2*inset)/size.height,size.width/2,size.height/2)
-                            target.addPath(contour,transform)
-                        }
-                        add(outside);add(inside)
-                    }
-                    val base=Path().apply { edge(this,0f,1.dp.toPx()) }
-                    val outline=Path()
-                    onDrawBehind {
-                        drawPath(base,if(selected) colors.accent else colors.text.copy(alpha=.1f))
-                        val progress=selection.value
-                        if(progress>0) {
-                            edge(outline,(-4+3*progress).dp.toPx(),(-4+6*progress).dp.toPx())
-                            drawPath(outline,colors.accent.copy(alpha=progress))
-                        }
-                        if(!mask && (attachment || highlight=="attach")) drawRect(colors.accent,style=androidx.compose.ui.graphics.drawscope.Stroke(2*density))
-                    }
-                })
+                ThumbnailEdge(selected,{ selection.value },!mask && (attachment || highlight=="attach"))
             }
             }
         }
@@ -542,6 +520,22 @@ internal class LayerSwipe {
                 Modifier.size(10.dp,24.dp),enabled=!layer.getBoolean("locked"),iconSize=10.dp,
                 action=obj("type" to "layer","action" to obj("op" to "link_mask","id" to id,"value" to !layer.getBoolean("mask_linked"))))
             thumb(true)
+        }
+        layer.optJSONObject("paper")?.let { paper ->
+            val windowed=inSeparateWindow()
+            val choose=host.catalog.getJSONObject("native_copy").getJSONObject("paper").getString("choose")
+            HoverTip(choose,Modifier.size(30.dp)) {
+                Box(Modifier.fillMaxSize()) {
+                    Box(Modifier.fillMaxSize().clip(TileShape).combinedClickable(onClick={
+                        host.layer(obj("op" to "select","id" to id,"mask" to false))
+                        if(paper.optBoolean("editable")) host.textureDialog=TextureDialogRequest(id,windowed)
+                    },onLongClick={openContext(false)}).semantics { contentDescription=choose; stateDescription=paper.getString("label") }
+                        .then(if(preview) Modifier else Modifier.testTag("layer-texture-$id")),contentAlignment=Alignment.Center) {
+                        PaperPreview(host,paper.paperId(),28.dp)
+                    }
+                    ThumbnailEdge(false,{ 0f },false)
+                }
+            }
         }
         Column(Modifier.weight(1f).padding(start=6.dp)) {
             if(rename==id && !preview) {
@@ -564,6 +558,34 @@ internal class LayerSwipe {
         }
         }
     }
+}
+
+@Composable private fun BoxScope.ThumbnailEdge(selected:Boolean,selection:()->Float,attached:Boolean) {
+    val colors=LocalPalette.current
+    Spacer(Modifier.matchParentSize().graphicsLayer().drawWithCache {
+        val radius=size.minDimension/2
+        val contour=Path().apply { addSquircle(Rect(Offset.Zero,size),radius,radius,radius,radius) }.asAndroidPath()
+        val transform=android.graphics.Matrix()
+        fun edge(path:Path,outside:Float,inside:Float) {
+            val target=path.asAndroidPath();target.rewind();target.fillType=android.graphics.Path.FillType.EVEN_ODD
+            fun add(inset:Float) {
+                transform.setScale((size.width-2*inset)/size.width,(size.height-2*inset)/size.height,size.width/2,size.height/2)
+                target.addPath(contour,transform)
+            }
+            add(outside);add(inside)
+        }
+        val base=Path().apply { edge(this,0f,1.dp.toPx()) }
+        val outline=Path()
+        onDrawBehind {
+            drawPath(base,if(selected) colors.accent else colors.text.copy(alpha=.1f))
+            val progress=selection()
+            if(progress>0) {
+                edge(outline,(-4+3*progress).dp.toPx(),(-4+6*progress).dp.toPx())
+                drawPath(outline,colors.accent.copy(alpha=progress))
+            }
+            if(attached) drawRect(colors.accent,style=androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+        }
+    })
 }
 
 @Composable private fun LayerConnections(layers:List<JSONObject>,connections:List<JSONObject>,thumbnails:Map<Long,LayerThumbnail>,modifier:Modifier) {

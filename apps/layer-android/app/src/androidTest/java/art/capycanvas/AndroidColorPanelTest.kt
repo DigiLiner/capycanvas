@@ -307,13 +307,23 @@ class AndroidColorPanelTest {
             val rising = opening.dropWhile { it <= rest + 1f }
             assertTrue("the sheet slides up from below: $opening / $rest", rising.isNotEmpty() && rising.zipWithNext().all { (a, b) -> b <= a + 1f })
             assertEquals("the swatch list reaches the divider", box("color-editor-divider").top, box("color-sheet-list").bottom, 1.5f)
+            val mini = box("color-mini-pair")
+            assertEquals("the footer pair has the main pair's proportions", 76f * density, mini.width, 1.5f)
+            assertEquals("the footer pair is as tall as the buttons", box("color-cancel").height, mini.height, 1f)
+            assertEquals("the footer pair centers on the buttons", box("color-cancel").center.y, mini.center.y, 1f)
             instrumentation.runOnMainSync { assertTrue(findTag("color-sheet-search")!!.second.config[SemanticsActions.SetText].action!!.invoke(AnnotatedString("zzzz-no-color"))) }
             waitFor("no swatches match") { findTag("color-sheet-empty") != null }
             instrumentation.runOnMainSync { assertTrue(findTag("color-sheet-search")!!.second.config[SemanticsActions.SetText].action!!.invoke(AnnotatedString(""))) }
             waitFor("swatches listed") { findTag("color-sheet-tile") != null }
+            instrumentation.runOnMainSync {
+                activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(findTag("color-sheet-search")!!.first.view.windowToken, 0)
+            }
+            waitFor("soft keyboard leaves the footer visible") { androidx.core.view.ViewCompat.getRootWindowInsets(findTag("color-editor")!!.first.view)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) != true }
+            settle()
             fullCapture("edit-color-sheet-$theme")
             click("color-sheet-tile"); settle()
             assertFalse(description("color-value-hex").endsWith("#FFFFFF"))
+            fullCapture("edit-color-sheet-picked-$theme")
             val closing = slide(false)
             assertTrue("the sheet slides down: $closing / $rest", closing.any { it > rest + 1f } && closing.dropWhile { it <= rest + 1f }.zipWithNext().all { (a, b) -> b >= a - 1f })
             waitFor("sheet closed") { findTag("color-sheet-search") == null }
@@ -394,7 +404,7 @@ class AndroidColorPanelTest {
                 assertTrue(state().array("requests").objects().none { it.getJSONObject("kind").getString("type") == "document" })
             }
             instrumentation.runOnMainSync { editSlot(host, "foreground", windowed) }
-            waitFor("focused color editor") { host.colorKeyHandler != null && findTag("color-editor")?.first?.view?.rootView?.hasWindowFocus() == true }
+            waitFor("focused color editor") { host.dialogKeyHandler != null && findTag("color-editor")?.first?.view?.rootView?.hasWindowFocus() == true }
             assertEquals(windowed, findTag("color-editor")!!.first.view.rootView !== activity.window.decorView)
             publish("#123456"); pressKey(KeyEvent.KEYCODE_V, control)
             waitFor("color paste") { hex() == "#123456" }
@@ -423,7 +433,7 @@ class AndroidColorPanelTest {
                 var details = ""
                 instrumentation.runOnMainSync {
                     val input = findTag("color-value-hex-input")
-                    details = "$theme/$windowed editingText=${host.editingText}, input=${input != null}, focused=${input?.second?.config?.getOrNull(SemanticsProperties.Focused)}, editor=${host.colorEditor != null}, handler=${host.colorKeyHandler != null}, imeBefore=$imeVisible, imeNow=${input?.first?.view?.let { androidx.core.view.ViewCompat.getRootWindowInsets(it)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) }}"
+                    details = "$theme/$windowed editingText=${host.editingText}, input=${input != null}, focused=${input?.second?.config?.getOrNull(SemanticsProperties.Focused)}, editor=${host.colorEditor != null}, handler=${host.dialogKeyHandler != null}, imeBefore=$imeVisible, imeNow=${input?.first?.view?.let { androidx.core.view.ViewCompat.getRootWindowInsets(it)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) }}"
                 }
                 throw AssertionError("Escape did not retire native hex input: $details", failure)
             }
@@ -439,7 +449,7 @@ class AndroidColorPanelTest {
             click("color-sheet-close")
             waitFor("swatch search retired") { !host.editingText && findTag("color-sheet-search") == null }
             click("color-cancel")
-            waitFor("color keyboard owner retired") { host.colorKeyHandler == null && findTag("color-editor") == null }
+            waitFor("color keyboard owner retired") { host.dialogKeyHandler == null && findTag("color-editor") == null }
             assertEquals(foreground, colors().getJSONObject("foreground").toString())
             unchanged()
         }

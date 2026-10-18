@@ -269,7 +269,7 @@ has no measured relief, so it uses the 100 µm reference.
 - **Seams and relief:** a headless GPU test bakes every preset, requires its
   wrap to be no rougher than its interior and orders the watercolor and drawing
   presets by relief.
-- **Previews:** the [picker](paper.md#picker) previews of the built-in papers
+- **Previews:** the [Choose Texture](paper.md#choose-texture) previews of the built-in papers
   are made from their bakes. `write_built_in_paper_previews` in
   [`paper.rs`](../../crates/layer-render-wgpu/src/paper.rs) regenerates
   [`paper_previews.gray`](../../assets/filters/paper_previews.gray), and

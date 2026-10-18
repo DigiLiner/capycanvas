@@ -437,30 +437,32 @@ private final class PaperCaptureGate: @unchecked Sendable {
                     try await pressID("layer-properties-disclosure",containerID:"tool-drawer")
                 }
                 try await pressID("property-texture",containerID:"tool-drawer")
-                try await wait("Registered native Paper popup") {
-                    popupElement("paper-picker") != nil && store.workspace.languageInputBusy
+                try await wait("Presented native Choose Texture dialog") {
+                    popupElement("texture-dialog") != nil && store.papers.texture != nil
                 }
             }
             func clickTile(_ index: Int) async throws {
-                guard let tile = popupElement("paper-tile-\(index)") else { throw HostFailure(message:"Missing native Paper tile") }
+                guard let tile = popupElement("texture-tile-\(index)") else { throw HostFailure(message:"Missing native Paper tile") }
                 let frame = paperBounds(tile)
                 try require(frame.width > 0 && frame.height > 0, "Measured native Paper tile")
                 let screenPoint = CGPoint(x:frame.midX,y:frame.midY)
-                guard let popup = NSApp.windows.first(where: { paperElement($0,"paper-tile-\(index)") != nil }),
-                    let content = popup.contentView else { throw HostFailure(message:"Owned Paper popup window") }
+                guard let popup = NSApp.windows.first(where: { paperElement($0,"texture-tile-\(index)") != nil }),
+                    let content = popup.contentView else { throw HostFailure(message:"Owned Choose Texture window") }
                 let local = content.convert(popup.convertPoint(fromScreen:screenPoint),from:nil)
                 for type: NSEvent.EventType in [.leftMouseDown,.leftMouseUp] {
                     nextEvent += 1
                     try event(type,at:local,marker:content,number:nextEvent)
                     try await drain(0.05)
                 }
-                try await wait("Paper tile closes its child popup") { popupElement("paper-picker") == nil }
+                guard let apply = popupElement("texture-apply") else { throw HostFailure(message:"Missing Use Texture") }
+                try require(paperPress(apply), "Use Texture accepts press")
+                try await wait("Use Texture closes Choose Texture") { popupElement("texture-dialog") == nil && store.papers.texture == nil }
                 try require(paperElement(host,"layer-properties-disclosure") != nil && paperElement(host,"property-texture") != nil,
-                    "Child Paper contact retains the parent Layers drawer and properties")
+                    "Choose Texture retains the parent Layers drawer and properties")
             }
-            func preview(_ lease: NativePaperPreviews, index: Int) async throws -> Data {
+            func preview(_ lease: NativePaperPreviews, id: String) async throws -> Data {
                 try await fileIO {
-                    guard let image = lease.decode().images[index], image.bitsPerPixel == 8,
+                    guard let image = lease.decode().images[id], image.bitsPerPixel == 8,
                         let data = image.dataProvider?.data else { throw HostFailure(message:"Immutable gray Paper preview") }
                     let bytes = data as Data
                     try require(bytes.count == image.width * image.height && bytes.count <= 1024 * 1024,
@@ -526,12 +528,12 @@ private final class PaperCaptureGate: @unchecked Sendable {
                 let id = libraryAction("rename_paper")["action"]["id"].string
                 try require(!id.isEmpty, "Shared library identity")
                 let lease: NativePaperPreviews? = await withCheckedContinuation { done in
-                    store.native!.paperPreviews(layer:store.state["layer_properties"]["layer"].uint,
-                        epoch:store.state["document_file"]["epoch"].uint) { done.resume(returning:$0) }
+                    store.native!.paperPreviews(ids:[id]) { done.resume(returning:$0) }
                 }
                 guard let lease else { throw HostFailure(message:"Native immutable preview lease") }
                 let previewIndex = Int(control()["value"]["value"].uint)
-                let originalPreview = try await preview(lease,index:previewIndex)
+                try require(control()["paper"]["tiles"][previewIndex]["id"].string == id, "The current tile names its library identity")
+                let originalPreview = try await preview(lease,id:id)
                 let diskPreview = try await fileIO {
                     let file = try FileHandle(forReadingFrom:directory.appendingPathComponent(id + ".preview"))
                     defer { try? file.close() }
@@ -638,7 +640,7 @@ private final class PaperCaptureGate: @unchecked Sendable {
                 store.papers.action(libraryAction("delete_paper")); try await idle()
                 try await wait("Deleted library entry remains authored Paper") { libraryAction("rename_paper").isNull && !libraryAction("add_paper").isNull }
                 try require(store.state["document_file"]["modified"].bool == libraryDirty,"Delete preserves authored dirty state before Save As")
-                try require(try await preview(lease,index:previewIndex) == originalPreview, "Retained immutable preview survives deletion")
+                try require(try await preview(lease,id:id) == originalPreview, "Retained immutable preview survives deletion")
                 let deletedPixels = try await pixels(), deletedPackage = try await paperPackage(theme + "-deleted")
                 try require(deletedPixels == imported && deletedPackage == importedPackage && checkpoint() == importedCheckpoint,
                     "Rename and Delete preserve exact authored Paper, pixels and checkpoint")

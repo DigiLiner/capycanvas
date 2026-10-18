@@ -100,18 +100,36 @@ extension XCTestCase {
         let papers = ["Hot press", "Cold press", "Rough", "Drawing paper", "Bristol", "Ingres", "Pastel paper",
             "Sanded pastel", "Washi", "Unryu", "Handmade paper", "Canvas", "Linen"]
         XCTAssertTrue(texture.waitForExistence(timeout: 10)); expectPaperValue(texture, "Drawing paper")
+        let textureDialog = app.descendants(matching: .any)["texture-dialog"].firstMatch
+        func chooseTexture(_ index: Int) {
+            let option = app.buttons["texture-tile-\(index)"]
+            revealEditorControl(option, in: app.scrollViews.containing(.button, identifier: option.identifier).firstMatch)
+            workspaceActivate(option)
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: option)
+            waitForExpectations(timeout: 10)
+        }
         var previousPaper = "Drawing paper"
         for (index, name) in papers.enumerated() {
             revealEditorControl(texture, in: propertyScroll); workspaceActivate(texture)
+            XCTAssertTrue(textureDialog.waitForExistence(timeout: 10))
             if index == 0 {
-                let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "paper-tile-"))
+                let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "texture-tile-"))
                 XCTAssertEqual(options.count, papers.count)
-                for (option, label) in papers.enumerated() { XCTAssertEqual(app.buttons["paper-tile-\(option)"].label, label) }
+                for (option, label) in papers.enumerated() { XCTAssertEqual(app.buttons["texture-tile-\(option)"].label, label) }
+                XCTAssertTrue(app.buttons["texture-tile-3"].isSelected, "Choose Texture starts on the current texture")
+                chooseTexture(2)
+                workspaceActivate(app.buttons["texture-cancel"])
+                XCTAssertTrue(textureDialog.waitForNonExistence(timeout: 10))
+                expectPaperValue(texture, "Drawing paper")
+                revealEditorControl(texture, in: propertyScroll); workspaceActivate(texture)
+                XCTAssertTrue(textureDialog.waitForExistence(timeout: 10))
+                XCTAssertTrue(app.buttons["texture-tile-3"].isSelected, "Reopening forgets the cancelled choice")
+                attachEditor(in: app, name: "texture-dialog-" + theme)
             }
-            let option = app.buttons["paper-tile-\(index)"]
-            let menuScroll = app.scrollViews.containing(.button, identifier: option.identifier).firstMatch
-            revealEditorControl(option, in: menuScroll); workspaceActivate(option)
-            XCTAssertTrue(drawer.exists, "A child menu choice outside its parent must preserve the tool drawer")
+            chooseTexture(index)
+            workspaceActivate(app.buttons["texture-apply"])
+            XCTAssertTrue(textureDialog.waitForNonExistence(timeout: 10))
+            XCTAssertTrue(drawer.exists, "Choose Texture preserves the tool drawer")
             expectPaperValue(texture, name)
             editorMenu(in: app, menu: "Edit", id: "undo", label: "Undo"); reopenToolDrawer("Filters panel"); expectPaperValue(texture, previousPaper)
             editorMenu(in: app, menu: "Edit", id: "redo", label: "Redo"); reopenToolDrawer("Filters panel"); expectPaperValue(texture, name)
@@ -456,7 +474,7 @@ extension XCTestCase {
         workspaceActivate(painter)
         expectation(for:NSPredicate(format:"selected == YES"),evaluatedWith:painter);waitForExpectations(timeout:15)
         let texture = app.buttons["property-texture"]
-        let picker = app.descendants(matching:.any)["paper-picker"].firstMatch
+        let chooser = app.descendants(matching:.any)["texture-dialog"].firstMatch
         let footer = app.buttons["layer-properties-disclosure"]
         func properties() {
             if !footer.exists { workspaceActivate(app.buttons["Layers panel"]) }
@@ -471,30 +489,38 @@ extension XCTestCase {
             }
             XCTAssertTrue(texture.waitForExistence(timeout:10))
         }
-        func openPicker() {
+        func openChooser() {
             properties()
             revealEditorControl(texture,in:app.scrollViews.containing(.any,identifier:"layer-properties").firstMatch)
-            workspaceActivate(texture);XCTAssertTrue(picker.waitForExistence(timeout:10))
+            workspaceActivate(texture);XCTAssertTrue(chooser.waitForExistence(timeout:10))
+        }
+        func closeChooser(_ button: String = "texture-cancel") {
+            workspaceActivate(app.buttons[button]);XCTAssertTrue(chooser.waitForNonExistence(timeout:10))
         }
         func tile(_ label: String) -> XCUIElement {
-            app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","paper-tile-",label)).firstMatch
+            app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","texture-tile-",label)).firstMatch
         }
         func revealTile(_ tile: XCUIElement) {
             revealEditorControl(tile,in:app.scrollViews.containing(.button,identifier:tile.identifier).firstMatch)
         }
+        func useTile(_ item: XCUIElement) {
+            workspaceActivate(item)
+            expectation(for:NSPredicate(format:"selected == YES"),evaluatedWith:item);waitForExpectations(timeout:10)
+            closeChooser("texture-apply")
+        }
         func chooseTile(_ label: String) {
-            openPicker();let item=tile(label);XCTAssertTrue(item.waitForExistence(timeout:10));revealTile(item)
-            workspaceActivate(item);XCTAssertTrue(picker.waitForNonExistence(timeout:10));expect(texture,value:label)
+            openChooser();let item=tile(label);XCTAssertTrue(item.waitForExistence(timeout:10));revealTile(item)
+            useTile(item);expect(texture,value:label)
         }
         func context(_ label: String, action: String) {
-            openPicker();let item=tile(label);XCTAssertTrue(item.waitForExistence(timeout:10));revealTile(item)
+            openChooser();let item=tile(label);XCTAssertTrue(item.waitForExistence(timeout:10));revealTile(item)
             #if os(macOS)
             item.rightClick();let command=app.menuItems[action].firstMatch
             #else
             item.press(forDuration:0.8);let command=app.buttons[action].firstMatch
             #endif
             XCTAssertTrue(command.waitForExistence(timeout:10));workspaceActivate(command)
-            XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+            XCTAssertTrue(chooser.exists,"Tile actions keep Choose Texture open")
         }
         func sample() -> Data { editorPixels(in:app,at:CGPoint(x:0.5,y:0.65)) }
         func settledSample() -> Data {
@@ -522,7 +548,7 @@ extension XCTestCase {
         }
         properties();expect(texture,value:"Drawing paper")
         let original=settledSample()
-        openPicker();workspaceActivate(app.buttons["paper-import"])
+        openChooser();workspaceActivate(app.buttons["texture-import"]);XCTAssertTrue(chooser.waitForNonExistence(timeout:10))
         #if os(macOS)
         let open=app.windows.buttons["OKButton"].firstMatch
         XCTAssertTrue(open.waitForExistence(timeout:20));captureState("import-cancel-chooser")
@@ -534,7 +560,7 @@ extension XCTestCase {
         XCTAssertTrue(cancel.waitForNonExistence(timeout:15))
         #endif
         properties();expect(texture,value:"Drawing paper");samePixels(original);noError()
-        openPicker();workspaceActivate(app.buttons["paper-import"])
+        openChooser();workspaceActivate(app.buttons["texture-import"]);XCTAssertTrue(chooser.waitForNonExistence(timeout:10))
         #if os(macOS)
         XCTAssertTrue(open.waitForExistence(timeout:20));goToFolder(photo,in:app)
         expectation(for:NSPredicate(format:"enabled == YES"),evaluatedWith:open);waitForExpectations(timeout:15)
@@ -549,12 +575,12 @@ extension XCTestCase {
         XCTAssertTrue(file.waitForNonExistence(timeout:20))
         #endif
         properties();expect(texture,value:fileName);noError()
-        openPicker()
+        openChooser()
         let importedTile=tile(fileName)
         XCTAssertTrue(importedTile.waitForExistence(timeout:20));revealTile(importedTile)
         XCTAssertTrue(importedTile.isSelected)
         let thumbnailBefore=try await ordinaryPaperThumbnail(importedTile,name:"paper-native-import-preview-"+theme)
-        workspaceActivate(importedTile);XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        useTile(importedTile)
         let imported=settledSample()
         editorMenu(in:app,menu:"Edit",id:"undo",label:"Undo");properties();expect(texture,value:"Drawing paper")
         editorMenu(in:app,menu:"Edit",id:"redo",label:"Redo");properties();expect(texture,value:fileName)
@@ -568,6 +594,7 @@ extension XCTestCase {
         dismissEditorKeyboard(in:app)
         #endif
         workspaceActivate(dialog.buttons["Cancel"]);XCTAssertTrue(dialog.waitForNonExistence(timeout:10))
+        XCTAssertTrue(tile(fileName).exists);closeChooser()
         expect(texture,value:fileName);samePixels(imported)
         context(fileName,action:"Rename…")
         XCTAssertTrue(dialog.waitForExistence(timeout:10));replaceEditorText(name,with:" ",in:app)
@@ -584,24 +611,28 @@ extension XCTestCase {
         dismissEditorKeyboard(in:app)
         #endif
         workspaceActivate(app.buttons["paper-name-save"]);XCTAssertTrue(dialog.waitForNonExistence(timeout:20))
+        XCTAssertTrue(tile("Rag").waitForExistence(timeout:10),"The open chooser follows the renamed tile")
+        XCTAssertTrue(tile("Rag").isSelected,"The pending choice keeps its renamed tile");closeChooser()
         expect(texture,value:"Rag");samePixels(imported);noError()
         context("Rag",action:"Delete")
-        expect(texture,value:"This drawing’s paper");samePixels(imported)
-        openPicker();XCTAssertFalse(tile("Rag").exists)
         let retained=tile("This drawing’s paper")
+        XCTAssertTrue(retained.waitForExistence(timeout:10));XCTAssertFalse(tile("Rag").exists)
+        XCTAssertTrue(retained.isSelected,"The pending choice falls back to the current tile");closeChooser()
+        expect(texture,value:"This drawing’s paper");samePixels(imported)
+        openChooser();XCTAssertFalse(tile("Rag").exists)
         XCTAssertTrue(retained.exists);XCTAssertTrue(retained.isSelected);captureState("deleted-material-retained")
-        workspaceActivate(retained)
-        context("This drawing’s paper",action:"Add to Library")
+        useTile(retained)
+        context("This drawing’s paper",action:"Add to Library");closeChooser()
         expectation(for:NSPredicate { _,_ in
             let value=texture.value as? String ?? "";return !value.isEmpty && value != "This drawing’s paper"
         },evaluatedWith:texture);waitForExpectations(timeout:20)
         let addedName=try XCTUnwrap(texture.value as? String)
         samePixels(imported);noError()
-        openPicker();let added=tile(addedName);XCTAssertTrue(added.waitForExistence(timeout:15));revealTile(added)
+        openChooser();let added=tile(addedName);XCTAssertTrue(added.waitForExistence(timeout:15));revealTile(added)
         XCTAssertTrue(added.isSelected)
         let thumbnailAfter=try await ordinaryPaperThumbnail(added,name:"paper-native-added-preview-"+theme)
         XCTAssertEqual(thumbnailAfter,thumbnailBefore,"Add retains the same visible imported material thumbnail pixels")
-        workspaceActivate(added);XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        useTile(added)
         chooseTile("Rough");editorMenu(in:app,menu:"Edit",id:"undo",label:"Undo")
         properties();expect(texture,value:addedName)
         editorMenu(in:app,menu:"Edit",id:"redo",label:"Redo");properties();expect(texture,value:"Rough")
@@ -613,9 +644,9 @@ extension XCTestCase {
             XCTAssertTrue(history.exists);XCTAssertFalse(history.isEnabled,"New drawing starts with empty authored history")
         }
         workspaceActivate(painter);properties();expect(texture,value:addedName)
-        openPicker();XCTAssertTrue(tile(addedName).isSelected)
+        openChooser();XCTAssertTrue(tile(addedName).isSelected)
         _=try await ordinaryPaperThumbnail(tile(addedName),name:"paper-native-warm-new-preview-"+theme)
-        workspaceActivate(tile(addedName));XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        useTile(tile(addedName))
         noError();attachEditor(in:app,name:"paper-native-remembered-warm-new-"+theme)
         let scope=XCTAttachment(string:"Ordinary full app, real native menus/context actions/system chooser/provider; exact displayed crops/thumbnail samples and native values only. Add stores current Paper Image material. New is warm; cold Load/startup, SourceImage/package byte equality, physical Pencil/present/performance remain separate gates. Own input token: "+token)
         scope.name="paper-native-scope-"+theme;scope.lifetime = .keepAlways;add(scope)
@@ -698,14 +729,14 @@ extension XCTestCase {
         expectation(for:NSPredicate(format:"value == %@","Cold paper"),evaluatedWith:texture);waitForExpectations(timeout:20)
         revealEditorControl(texture,in:app.scrollViews.containing(.any,identifier:"layer-properties").firstMatch)
         workspaceActivate(texture)
-        let picker=app.descendants(matching:.any)["paper-picker"].firstMatch
-        XCTAssertTrue(picker.waitForExistence(timeout:10))
-        let tile=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","paper-tile-","Cold paper")).firstMatch
+        let chooser=app.descendants(matching:.any)["texture-dialog"].firstMatch
+        XCTAssertTrue(chooser.waitForExistence(timeout:10))
+        let tile=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","texture-tile-","Cold paper")).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout:15))
         revealEditorControl(tile,in:app.scrollViews.containing(.button,identifier:tile.identifier).firstMatch)
         XCTAssertTrue(tile.isSelected)
         _=try await ordinaryPaperThumbnail(tile,name:"paper-cold-library-preview-" + theme)
-        workspaceActivate(tile);XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        workspaceActivate(app.buttons["texture-apply"]);XCTAssertTrue(chooser.waitForNonExistence(timeout:10))
         XCTAssertFalse(app.staticTexts["Canvas error"].exists);XCTAssertFalse(app.alerts.firstMatch.exists)
         let scope=XCTAttachment(string:"Fresh process and fresh prelaunch settings+papers-only profile; initial raw screen precedes controls. Native value/selection/history coverage only; visually compare initial canvas and tile against retained shared seed PNG/96x96 preview. Canvas ready is not a first hardware-present acknowledgment. Explicit New after this initial load is warm and covered separately. Storage input: " + storage)
         scope.name="paper-cold-scope-" + theme;scope.lifetime = .keepAlways;add(scope)

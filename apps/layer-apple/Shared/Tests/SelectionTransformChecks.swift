@@ -416,7 +416,7 @@ extension XCTestCase {
         return action
     }
 
-    @MainActor private func layerContext(_ label: String, on element: XCUIElement, in app: XCUIApplication) {
+    @MainActor func layerContext(_ label: String, on element: XCUIElement, in app: XCUIApplication) {
         #if os(macOS)
         element.rightClick()
         #else

@@ -117,7 +117,9 @@ Web, Android, Apple and Windows use the stateless `editor_open`, `editor`,
   slides a sheet up over the page, and back down when closed, with every recent
   color and palette, searchable by palette name, color name or hex
   (`SwatchSheetView`), with + to add the new color to a palette. The sheet's list
-  scrolls down to the divider above the buttons.
+  scrolls down to the divider above the buttons. While the sheet is open, the
+  bottom row starts with Current and New at the buttons' height, in the
+  proportions of the pair above the rows, then the hex.
 - The eyedropper hides the dialog and starts the session's editor-mode picker
   (`ColorPickerAction::Editor`). The paint and color history do not change; a
   pick publishes `color_picker.picked` and the dialog returns with it. A strip

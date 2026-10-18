@@ -480,9 +480,13 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
   setup and autosave finish before the runner reloads it. Every pen point must
   reach the canvas without a recovery dialog covering it.
 - `--paper-rows` runs the same Add paper layout, input, history and fill-mask
-  checks as the desktop journey, in both themes.
-- `--paper-library` imports an image through the file chooser, then renames,
-  relists and deletes it, checking that library edits leave the drawing alone.
+  checks as the desktop journey, in both themes, and walks Choose Texture from
+  the Paper row and Properties: its size against Edit Color, Cancel, Use Texture
+  with one Undo, a locked Paper and a Paper with a mask.
+- `--paper-library` imports an image with Import… in Choose Texture, then
+  renames, relists and deletes it through the open dialog's tile menu, adds the
+  drawing's own paper back with Add to Library, and checks that library edits
+  leave the drawing alone.
   The raster worker keeps the library in IndexedDB and decodes, converts and
   encodes papers there.
 - Check the journey table in `device.test.mjs` before choosing a flag. With

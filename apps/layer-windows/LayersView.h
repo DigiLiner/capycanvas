@@ -3,6 +3,7 @@
 #include "LayerThumbnails.h"
 #include "NativeMenus.h"
 #include "LayerRowDrag.h"
+#include "TextureDialog.h"
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Animation.h>
 #include <optional>
@@ -46,14 +47,15 @@ struct LayerRow : std::enable_shared_from_this<LayerRow> {
     void swipe(double offset);
     double revealWidth()const;
     bool canSwipe()const;
-    Button eye{nullptr},check{nullptr},content{nullptr},load{nullptr},mask{nullptr},link{nullptr},name{nullptr},grip{nullptr};
+    Button eye{nullptr},check{nullptr},content{nullptr},load{nullptr},mask{nullptr},link{nullptr},texture{nullptr},name{nullptr},grip{nullptr};
     Border indent,dropMark,contentSymbol,groupMode;
     Grid contentTile,maskTile;
     Image lockImage;
     ContentControl contentThumbnail,maskThumbnail;
-    ThumbnailEdge contentEdge,maskEdge;
+    ThumbnailEdge contentEdge,maskEdge,textureEdge;
+    std::shared_ptr<PaperThumbnail> texturePreview;
     ImageBrush contentPreview,maskPreview;
-    Canvas contentFrame,maskFrame;
+    Canvas contentFrame,maskFrame,textureFrame;
     TextBlock title{nullptr},meta{nullptr};
     TextBox rename;
     bool renaming=false,committing=false;
@@ -72,6 +74,7 @@ struct LayerRow : std::enable_shared_from_this<LayerRow> {
     void context(bool mask,UIElement const& anchor);
     bool loadThumbnail(bool mask);
     void editFill();
+    void chooseTexture();
     void highlight(int position, bool attachment = false);
 };
 struct ElementFactory : implements<ElementFactory,IElementFactory> {
