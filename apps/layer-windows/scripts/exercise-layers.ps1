@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Executable,[switch]$Relationships)
+param([Parameter(Mandatory)][string]$Executable,[switch]$Relationships,[switch]$Paper,[switch]$PaperLight)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyCaptureDelay=250
@@ -165,6 +165,14 @@ try {
     [CapyLayersCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
     $root=$native.window.Root;$drawingWindow=$native.window.Handle
     if(!@((Model).layout.groups|Where-Object {$_.active -eq 'layers'}).Count){Invoke 'Layers' -Name}
+    if($Paper -or $PaperLight){
+        . (Join-Path $PSScriptRoot 'layer-relationships.ps1')
+        . (Join-Path $PSScriptRoot 'layer-paper.ps1')
+        Test-LayerPaper -Light:$PaperLight
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
+        [PSCustomObject]@{paper='passed';themes=$(if($PaperLight){'light'}else{'dark/light'});evidence=$run;scope='WARP UI and synthetic input; hardware performance unverified'}|ConvertTo-Json
+        return
+    }
     if($Relationships){
         . (Join-Path $PSScriptRoot 'layer-relationships.ps1')
         Test-LayerRelationships
@@ -330,7 +338,7 @@ try {
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
     [PSCustomObject]@{layer_color_modes_and_local_filters='passed';thumbnail_paint_and_exact_undo='passed';row_retention='passed';header_and_lock_controls='passed';native_toggle_states_and_history='passed';keyboard_layer_and_mask_menus='passed';independent_selection='passed';mask_thumbnail='passed';rename_duplicate_delete_undo='passed';mask_controls_clipping_references='passed';group_collapse_hidden_target_and_ungroup='passed';virtualized_rows_and_recycling='passed';theme_and_document_replacement='passed';focused_draft_committed_before_close='passed';zero_exit='passed'}|ConvertTo-Json
 }catch{
-    if($Relationships -and $review -and !$review.HasExited){try{Capture 'relationships-failure' -Composed -WithModel}catch{}}
+    if(($Relationships -or $Paper -or $PaperLight) -and $review -and !$review.HasExited){try{Capture 'relationships-failure' -Composed -WithModel}catch{}}
     [IO.File]::WriteAllText((Join-Path $run 'failure.txt'),($_|Out-String)+$_.ScriptStackTrace);throw
 }finally{
     Exit-CapyEnvironment

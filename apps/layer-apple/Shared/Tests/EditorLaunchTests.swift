@@ -58,6 +58,8 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testMaskActionsAndHistory() { checkMaskActionsAndHistory(in: editorCaptureApplication()) }
 
     @MainActor func testLayerContentActionsAndHistory() { checkLayerContentActionsAndHistory(in: editorCaptureApplication()) }
+    @MainActor func testAddPaper() { checkAddPaper(in: editorCaptureApplication(), theme: "light") }
+    @MainActor func testAddPaperDark() { checkAddPaper(in: editorCaptureApplication(), theme: "dark") }
     @MainActor func testLayerPropertiesDrawer() { checkLayerPropertiesDrawer(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testLayerPropertiesDrawerDark() { checkLayerPropertiesDrawer(in: editorCaptureApplication(), theme: "dark") }
 

@@ -257,6 +257,9 @@ output; a row drop uses shared insertion policy. Native drag feedback uses the s
 normalized destination and release revalidates the original hit. Right swipes dispatch
 the shared row action. `exercise-layers.ps1 -Relationships` checks these interactions
 and their undo history in both themes, alongside the existing pickup fixture variants.
+`exercise-layers.ps1 -Paper` checks the missing-Paper row's placement, native
+activation, scrolling and undo history in both themes; `-PaperLight` runs the
+light-theme scrolling, history and empty-stack cases.
 Run `exercise-layer-pickup.ps1 -Executable <path> -Device mouse -Theme dark`;
 repeat with `-Device pen` and `-Device touch`, each with `-Theme light` too.
 The UIA helper resolves the current `layer-list` for row searches; explicit

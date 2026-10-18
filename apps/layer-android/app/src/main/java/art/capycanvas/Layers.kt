@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.collapse
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.Modifier
@@ -101,12 +102,13 @@ internal class LayerSwipe {
     val active = view.objectOrNull("editing_layer")
     val controls = view.getJSONObject("controls")
     val layers = state.array("layers").objects()
+    val addPaper = view.objectOrNull("add_paper")
     var headerHeight by remember { mutableFloatStateOf(0f) }
     var footerHeight by remember { mutableFloatStateOf(0f) }
     var rowHeight by remember { mutableFloatStateOf(40f) }
     val fixedHeight = headerHeight + footerHeight
     val measured = if (headerHeight > 0f && footerHeight > 0f)
-        PanelContentSize(fixedHeight + layers.size * rowHeight, fixedHeight, rowHeight) else null
+        PanelContentSize(fixedHeight + (layers.size + if (addPaper != null) 1 else 0) * rowHeight, fixedHeight, rowHeight) else null
     SideEffect { measured?.let(onContent) }
     val currentLayers by rememberUpdatedState(layers)
     val list = listState
@@ -250,6 +252,16 @@ internal class LayerSwipe {
                             held={contactHeld=it},cancelContext={menuGeneration++; menu=null},
                             drag={point,finished,cancelled -> moveLayer(id,point,finished,cancelled)})
                     }
+                    }
+                    if (addPaper != null) item(key="add-paper") {
+                        Row(Modifier.fillMaxWidth().heightIn(min=40.dp).clipToBounds().testTag("layer-add-paper")
+                            .onSizeChanged { rowHeight = it.height / density.density }
+                            .clickable(role=Role.Button) { host.dispatch(obj("type" to "effect", "action" to addPaper.getJSONObject("action"))) }
+                            .padding(horizontal=6.dp,vertical=2.dp), verticalAlignment=Alignment.CenterVertically,
+                            horizontalArrangement=Arrangement.spacedBy(panelMetrics().group,Alignment.CenterHorizontally)) {
+                            SharedIcon(iconName(addPaper.getString("icon")),null,Modifier.size(16.dp))
+                            Text(addPaper.getString("label"),Modifier.weight(1f,fill=false),maxLines=1,overflow=TextOverflow.Ellipsis)
+                        }
                     }
                 }
                 LayerConnections(layers,view.array("connections").objects(),thumbnails,Modifier.matchParentSize())

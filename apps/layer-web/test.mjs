@@ -93,7 +93,7 @@ import { checkEditor } from "./editor.test.mjs";
 import { checkColumnSizing } from "./columns.test.mjs";
 import { checkFullscreen } from "./fullscreen.test.mjs";
 import { checkParity } from "./parity.mjs";
-import { checkLayers, checkSelectedPainting, checkLayerRelationships } from "./layers.test.mjs";
+import { checkLayers, checkSelectedPainting, checkLayerRelationships, checkPaperRows } from "./layers.test.mjs";
 import { checkAdjustments, checkCurves } from "./effects.test.mjs";
 import { checkPreferences, checkSettingsParity, checkLiveLanguage } from "./preferences.test.mjs";
 import {checkLiveHistogramLanguage,checkLiveWorkspaceLanguage,checkLiveDeliveryLanguage,checkLiveProofLanguage,checkLiveColorFormLanguage,checkLiveToolbarLanguage,checkLiveEffectLanguage,checkLiveToolLanguage} from "./localization-journey.test.mjs";
@@ -357,6 +357,7 @@ try {
     [process.argv.includes("--adjustments"), () => checkAdjustments({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--selection"), () => checkSelectedPainting({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--layer-relationships"), () => checkLayerRelationships({ call, evaluate, settle }), checkErrors],
+    [process.argv.includes("--paper-rows"), () => checkPaperRows({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--layers"), () => checkLayers({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--toolbar-manager"), () => checkToolbarManager({ call, evaluate, settle }), checkErrors],
     [process.argv.includes("--tab-styles"), () => checkTabStyles({ call, evaluate, settle }), checkErrors],

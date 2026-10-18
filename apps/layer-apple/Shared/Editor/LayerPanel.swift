@@ -10,6 +10,7 @@ struct LayerPanel: View {
     @State private var filterPopupID = UUID()
     @StateObject private var scrollPosition = EditorScrollPosition()
     @State private var retainedOffset: CGFloat?
+    @State private var paperHover = false
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var view: JSON { store.state["layer_tools"] }
     private var current: JSON { view["editing_layer"] }
@@ -44,6 +45,22 @@ struct LayerPanel: View {
                                         store.layerThumbnails.hide(thumbnailToken)
                                         if interaction.menuSource == .row(row.id) { closeMenu() }
                                     }
+                            }
+                            if !view["add_paper"].isNull {
+                                Button {
+                                    let action = view["add_paper"]["action"]
+                                    if !action.isNull { store.dispatch(["type": "effect", "action": action.raw]) }
+                                } label: {
+                                    HStack(spacing: store.panelMetrics.group) {
+                                        SharedIcon(name: view["add_paper"]["icon"].string)
+                                        Text(view["add_paper"]["label"].string).fontWeight(.regular).lineLimit(1)
+                                    }.padding(.horizontal, 6).padding(.vertical, 2)
+                                        .frame(maxWidth: .infinity, minHeight: 40).contentShape(Rectangle())
+                                }.buttonStyle(EditorControlButtonStyle(active: paperHover, corner: .radius(0)))
+                                    .onHover { paperHover = $0 }
+                                    .onDisappear { paperHover = false }
+                                    .accessibilityIdentifier("layer-add-paper")
+                                    .modifier(PanelBodyMeasurement(panel: "layers", part: "row-unit", kind: .unit))
                             }
                         }.scrollTargetLayout().coordinateSpace(name: "layer-rows")
                             .background(NativeReorderInput(model: interaction))

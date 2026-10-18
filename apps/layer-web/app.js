@@ -1604,7 +1604,8 @@ function keyInput(e, pressed, divider = null) {
     editing:
       composingKey(e) ||
       (e.target instanceof Element &&
-        !!e.target.closest("input,select,textarea,[contenteditable]:not([contenteditable=false])")),
+        (!!e.target.closest("input,select,textarea,[contenteditable]:not([contenteditable=false])") ||
+          (!e.ctrlKey && !e.metaKey && !e.altKey && ["Enter", " "].includes(e.key) && !!e.target.closest("button,summary")))),
     divider,
   });
   if (reply.handled) {

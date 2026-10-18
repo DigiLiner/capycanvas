@@ -191,6 +191,82 @@ class AndroidInteractionTest {
         finally { if (::scenario.isInitialized) scenario.close() }
     }
 
+    @Test fun missingPaperRowSharesLayerScrollingAndNativeActivation() {
+        val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
+        action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+        fun scroll(index: Int) {
+            action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+            onMain { find("layer-rows")!!.config[SemanticsActions.ScrollToIndex].action!!.invoke(index) }
+            settle()
+        }
+        try {
+            assertFalse("Existing Paper suppresses the add row", exists("layer-add-paper"))
+            val paper = layerStates().last().getLong("id")
+            layerAction(obj("op" to "select", "id" to paper, "mask" to false))
+            assertEquals("Paper", state().getJSONObject("layer_properties").getString("title"))
+            layerAction(obj("op" to "delete", "id" to paper))
+            for (theme in listOf("light", "dark")) for (pointer in pointerTools) {
+                action(obj("type" to "set_theme", "theme" to theme))
+                scroll(layerStates().size)
+                waitFor("Missing Paper exposes the add row") { shown("layer-add-paper") }
+                val row = bounds("layer-add-paper")
+                assertEquals("Add Paper uses standard layer height", 40f, row.height / density, 1f)
+                assertEquals("Add Paper fills the list width", bounds("layer-rows").width, row.width, density)
+                val caption = textBounds("Add paper")!!
+                assertEquals("Caption is vertically centered", row.center.y, caption.center.y, density)
+                if (pointer == MotionEvent.TOOL_TYPE_STYLUS) screenshot("validation/paper/add-paper-$theme.png")
+                tool = pointer
+                tap(row.center)
+                waitFor("Native activation inserts Paper") { state().getJSONObject("layer_properties").getString("title") == "Paper" && state().getJSONObject("layer_tools").isNull("add_paper") }
+                assertEquals("Paper is last", editingLayer(), layerStates().last().getLong("id"))
+                assertTrue("Painting targets the layer above Paper", layerStates().dropLast(1).any { it.getBoolean("drawing") })
+                command("undo")
+                scroll(layerStates().size)
+                waitFor("One Undo restores the add row") { shown("layer-add-paper") }
+                command("redo")
+                action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+                waitFor("Redo restores Paper") { !exists("layer-add-paper") }
+                command("undo")
+            }
+            repeat(18) { layerAction(obj("op" to "new", "group" to false, "clipped" to false)) }
+            scroll(0)
+            assertFalse("Add Paper scrolls out with the layer list", shown("layer-add-paper"))
+            scroll(layerStates().size)
+            waitFor("The last scroll item is Add Paper") { shown("layer-add-paper") }
+            screenshot("validation/paper/add-paper-scrolled.png")
+            layerStates().map { it.getLong("id") }.forEach { layerAction(obj("op" to "delete", "id" to it)) }
+            scroll(0)
+            waitFor("An empty stack still offers Add Paper") { layerStates().isEmpty() && shown("layer-add-paper") }
+            tap(bounds("layer-add-paper").center)
+            waitFor("The empty stack accepts Paper") { layerStates().size == 1 && state().getJSONObject("layer_tools").isNull("add_paper") }
+            assertEquals("Paper", state().getJSONObject("layer_properties").getString("title"))
+        } finally { action(obj("type" to "set_theme", "theme" to originalTheme)) }
+    }
+
+    @Test fun selectingFillRowsKeepsPropertiesAndDrawingTargets() {
+        action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+        for ((effect, title) in listOf("paper" to "Paper", "solid_color" to "Solid Color", "gradient_fill" to "Gradient Fill")) {
+            action(obj("type" to "effect", "action" to obj("op" to "insert", "effect" to effect)))
+            val fill = editingLayer()
+            layerAction(obj("op" to "new", "group" to false, "clipped" to false))
+            val ink = editingLayer()
+            action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+            onMain { find("layer-rows")!!.config[SemanticsActions.ScrollToIndex].action!!.invoke(layerStates().indexOfFirst { it.getLong("id") == fill }) }
+            waitFor("Fill row visible") { shown("layer-row-$fill") }
+            tool = MotionEvent.TOOL_TYPE_FINGER
+            tap(bounds("layer-row-$fill").center)
+            waitFor("Fill properties retain editing selection") { editingLayer() == fill && state().getJSONObject("layer_properties").getString("title") == title }
+            assertEquals("The unmasked layer above the selected fill receives paint", listOf(ink), layerStates().filter { it.getBoolean("drawing") }.map { it.getLong("id") })
+            layerAction(obj("op" to "add_mask", "id" to fill, "replace" to false))
+            layerAction(obj("op" to "select", "id" to fill, "mask" to false))
+            waitFor("A fill's own mask owns painting") { layerStates().first { it.getLong("id") == fill }.getBoolean("mask_selected") }
+            assertFalse("A fill mask prevents drawing on a layer above", layerStates().any { it.getLong("id") != fill && it.getBoolean("drawing") })
+            command("undo")
+            layerAction(obj("op" to "delete", "id" to ink))
+            if (effect != "paper") layerAction(obj("op" to "delete", "id" to fill))
+        }
+    }
+
     @Test fun imageRowsTouchPickingMenusAndRefusalActions() {
         fun image(name: String, color: Int, width: Int, height: Int) = java.io.File(activity.cacheDir, name).also { file ->
             val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)

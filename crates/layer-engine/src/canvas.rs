@@ -2694,7 +2694,7 @@ mod tests {
             layer_core::authored::Occurrence::new(layer_core::authored::OccurrenceContent::Paint(paint.handle), name));
         let handle = occurrence.handle;
         let stack = document.composition().result;
-        let mut entries = document.artwork.stacks.get(stack).unwrap().clone(); entries.entries.insert(position, handle);
+        let mut entries = document.artwork.stacks.get(stack).unwrap().clone(); entries.entries.insert(document.content_insertion(None, position).0, handle);
         (handle, target, vec![Edit::Paint(paint), Edit::Occurrence(occurrence),
             Edit::Stack(layer_core::RecordChange::replace(&document.artwork.stacks, stack, Some(entries)).unwrap())])
     }

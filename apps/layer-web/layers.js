@@ -57,6 +57,11 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
   flags.insertBefore(attachment, flags.lastChild);
   header.append(flags);
   const rows = element("div", "layer-rows"); rows.id = "layer-rows"; rows.dataset.control = "layers";
+  const addPaper = button("", () => {
+    const action = state().layer_tools.add_paper?.action;
+    if (action) dispatch({ type: "effect", action });
+  }, "layer-row");
+  addPaper.id = "layer-add-paper";
   const list = element("div", "layer-list");
   const connections = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   connections.classList.add("layer-connections"); connections.setAttribute("aria-hidden", "true");
@@ -372,6 +377,14 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       const id = String(layer.id); if (!records.has(id)) records.set(id, makeRow(layer));
       place(records.get(id).root);
     }
+    if (view.add_paper) {
+      const action = view.add_paper;
+      if (addPaper.ariaLabel !== action.label) {
+        addPaper.ariaLabel = action.label;
+        addPaper.replaceChildren(icon(nameIcon(action.icon)), element("span", "layer-name", action.label));
+      }
+      place(addPaper);
+    } else addPaper.remove();
     state().layers.forEach(layer => {
       const r = records.get(String(layer.id)); r.layer = layer;
       const {paint_revision,mask_revision,...presentation}=layer;
@@ -423,7 +436,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     });
     // Bitmap revisions do not change row geometry. Native text, hierarchy and
     // controls do, including when this retained panel is currently offscreen.
-    const next = JSON.stringify([view.quick_mask,current?.selection_layer,view.rename_layer?.toString(), state().layers.map(({paint_revision,mask_revision,...row})=>row)],
+    const next = JSON.stringify([view.quick_mask,current?.selection_layer,view.rename_layer?.toString(),view.add_paper, state().layers.map(({paint_revision,mask_revision,...row})=>row)],
       (_,value)=>typeof value==="bigint"?String(value):value);
     if (next !== measurementKey) { measurementKey=next; contentChanged("layers"); }
     scheduleConnections();

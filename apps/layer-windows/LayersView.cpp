@@ -9,6 +9,7 @@ using namespace CapyLayers;
 namespace CapyLayers {
 UIElement ElementFactory::GetElement(ElementFactoryGetArgs const& args){
     auto view=owner.lock();if(!view)return Border();
+    if(args.Data().try_as<J>())return view->addPaper;
     auto row=std::make_shared<LayerRow>();row->owner=view;row->data=view->data;
     row->id=unbox_value<double>(args.Data());row->epoch=view->epoch;row->init();if(view->pickup)view->pickup->Attach(row);row->refresh();
     view->rows.emplace(row->root.as<::IUnknown>().get(),row);return row->root;
@@ -104,25 +105,13 @@ void LayersView::init(){
     StackLayout layout;layout.Orientation(Orientation::Vertical);layout.Spacing(0);repeater.Layout(layout);repeater.ItemsSource(source);
     repeater.HorizontalCacheLength(.0);repeater.VerticalCacheLength(.5);
     addPaper=button(data,L"",[weak]{if(auto self=weak.lock();self&&!self->data->updating){
-        auto action=object(object(self->view(),L"add_paper"),L"action");
-        if(action.Size())self->data->dispatchDocument(O({{L"type",S(L"effect")},{L"action",action}}),epochOf(self->data));
+        auto action=object(self->view(),L"add_paper");
+        if(action.Size())self->data->dispatchDocument(O({{L"type",S(L"effect")},{L"action",action.GetNamedValue(L"action")}}),epochOf(self->data));
     }});
     addPaper.MinHeight(LayerRowHeight);addPaper.Padding(LayerRowPadding);addPaper.CornerRadius({0});
-    addPaper.HorizontalAlignment(HorizontalAlignment::Stretch);addPaper.FontWeight(Windows::UI::Text::FontWeights::Normal());
+    addPaper.FontWeight(Windows::UI::Text::FontWeights::Normal());addPaper.HorizontalAlignment(HorizontalAlignment::Stretch);
     AutomationProperties::SetAutomationId(addPaper,L"layer-add-paper");
-    StackPanel paperContent;paperContent.Orientation(Orientation::Horizontal);paperContent.Spacing(data->panelMetric(L"group_spacing"));
-    ContentControl paperIcon;paperIcon.IsTabStop(false);paperIcon.IsHitTestVisible(false);
-    auto paperLabel=label(data,L"",false,false);paperLabel.VerticalAlignment(VerticalAlignment::Center);
-    paperContent.Children().Append(paperIcon);paperContent.Children().Append(paperLabel);addPaper.Content(paperContent);
-    controls.emplace_back([weak,paperIcon,paperLabel,key=std::make_shared<hstring>()](J,J){if(auto self=weak.lock()){
-        auto action=object(self->view(),L"add_paper");auto title=str(action,L"label");
-        self->addPaper.Visibility(action.Size()?Visibility::Visible:Visibility::Collapsed);
-        AutomationProperties::SetName(self->addPaper,title);paperLabel.Text(title);
-        auto next=self->data->theme()+L":"+str(action,L"icon");
-        if(action.Size()&&*key!=next){*key=next;paperIcon.Content(icon(str(action,L"icon"),self->data->theme()));}
-    }});
-    rowsHost.Children().Append(repeater);rowsHost.Children().Append(addPaper);
-    list.Content(rowsHost);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
+    list.Content(repeater);list.HorizontalScrollMode(ScrollingScrollMode::Disabled);
     list.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);list.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(list);
     AutomationProperties::SetAutomationId(list,L"layer-scroll-container");listFrame.Children().Append(list);
     connectionOverlay.IsHitTestVisible(false);AutomationProperties::SetAccessibilityView(connectionOverlay,Automation::Peers::AccessibilityView::Raw);
@@ -214,6 +203,14 @@ void LayersView::refresh(){
     }
     opacityGate.IsEnabled(flag(capabilities,L"opacity"));for(auto const& bind:opacityBindings)bind();
     for(auto const& bind:controls)bind(active,capabilities);
+    auto paper=object(view(),L"add_paper");addPaper.Visibility(paper.Size()?Visibility::Visible:Visibility::Collapsed);
+    auto nextPaperKey=data->theme()+paper.Stringify();
+    if(paper.Size()&&paperKey!=nextPaperKey){
+        paperKey=nextPaperKey;StackPanel face;face.Orientation(Orientation::Horizontal);face.Spacing(data->panelMetric(L"group_spacing"));
+        face.HorizontalAlignment(HorizontalAlignment::Center);face.VerticalAlignment(VerticalAlignment::Center);
+        face.Children().Append(icon(str(paper,L"icon"),data->theme()));face.Children().Append(label(data,str(paper,L"label")));
+        addPaper.Content(face);AutomationProperties::SetName(addPaper,str(paper,L"label"));
+    }
     std::vector<double> ids;
     for(auto value:array(data->state,L"layers")){
         auto layer=value.GetObject();ids.push_back(num(layer,L"id"));
@@ -222,11 +219,16 @@ void LayersView::refresh(){
     // the affected items. ItemsRepeater creates native widgets near the viewport.
     for(uint32_t i=0;i<ids.size();i++){
         double id=ids[i];
-        if(i<source.Size()&&unbox_value<double>(source.GetAt(i))==id)continue;
-        for(uint32_t j=i+1;j<source.Size();j++)if(unbox_value<double>(source.GetAt(j))==id){source.RemoveAt(j);break;}
+        if(i<source.Size()&&unbox_value_or<double>(source.GetAt(i),-1.)==id)continue;
+        if(i<source.Size()&&source.GetAt(i).try_as<J>()){source.SetAt(i,box_value(id));continue;}
+        for(uint32_t j=i+1;j<source.Size();j++)if(unbox_value_or<double>(source.GetAt(j),-1.)==id){source.RemoveAt(j);break;}
         source.InsertAt(i,box_value(id));
     }
-    while(source.Size()>ids.size())source.RemoveAtEnd();
+    while(source.Size()>ids.size()+(paper.Size()?1:0))source.RemoveAtEnd();
+    if(paper.Size()){
+        if(source.Size()==ids.size())source.Append(paper);
+        else if(!source.GetAt(uint32_t(ids.size())).try_as<J>())source.SetAt(uint32_t(ids.size()),paper);
+    }
     for(auto const& [element,row]:rows)row->refresh();
     if(menuTarget&&(menuOpen||menuPending)&&!panelRow(data->state,*menuTarget).Size()){
         ++menuGeneration;menuPending=false;menuOpen=false;if(menu)menu.Hide();
@@ -358,15 +360,10 @@ void LayersView::context(double id,bool mask,UIElement const& anchor,std::option
 namespace CapyLayers {
 void LayersView::revealEditing(){
     if(!revealTarget||list.ActualHeight()<=0)return;
-    for(auto const& [key,row]:rows)if(row->id==*revealTarget&&row->current()&&row->root.IsLoaded()){
-        auto rect=row->root.TransformToVisual(list).TransformBounds({0,0,float(row->root.ActualWidth()),float(row->root.ActualHeight())});
-        if(rect.Height<=0)return;
-        double delta=rect.Y<0?rect.Y:std::max(0.,double(rect.Y+rect.Height)-list.ActualHeight());revealTarget.reset();
-        if(std::abs(delta)>.5){ScrollingScrollOptions options(ScrollingAnimationMode::Disabled,ScrollingSnapPointsMode::Ignore);list.ScrollTo(0,std::max(0.,list.VerticalOffset()+delta),options);}
-        return;
+    auto target=*revealTarget;revealTarget.reset();
+    for(uint32_t i=0;i<source.Size();++i)if(unbox_value_or<double>(source.GetAt(i),-1.)==target){
+        auto element=repeater.GetOrCreateElement(i);element.UpdateLayout();element.StartBringIntoView();return;
     }
-    for(uint32_t i=0;i<source.Size();++i)if(unbox_value<double>(source.GetAt(i))==*revealTarget){repeater.GetOrCreateElement(i);return;}
-    revealTarget.reset();
 }
 J LayersView::scrollAnchor()const{
     J anchor;double top=0;
@@ -389,7 +386,7 @@ bool LayersView::restoreAnchor(J const& anchor){
         return false;
     }
     auto layers=array(data->state,L"layers");
-    for(uint32_t i=0;i<layers.Size();++i)if(num(layers.GetObjectAt(i),L"id")==id){repeater.GetOrCreateElement(i).StartBringIntoView();return false;}
+    for(uint32_t i=0;i<layers.Size();++i)if(num(layers.GetObjectAt(i),L"id")==id){auto element=repeater.GetOrCreateElement(i);element.UpdateLayout();element.StartBringIntoView();return false;}
     return true;
 }
 }

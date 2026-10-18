@@ -395,7 +395,8 @@ svg { width: 16px; height: 16px; flex: none; display: block; }
 .layer-connections svg { width: 12px; height: 12px; }
 .layer-connections [data-kind="clip"] { color: var(--relationship); stroke-width: 2px; }
 .layer-connections [data-kind="effect"] { stroke-width: 1px; }
-.layer-row { display: flex; align-items: center; gap: 2px; min-height: 40px; padding: 2px 6px; flex: none; border-radius: 0; }
+.layer-row, .panel button.layer-row { display: flex; align-items: center; gap: 2px; min-height: 40px; padding: 2px 6px; flex: none; border-radius: 0; line-height: normal; }
+button.layer-row { justify-content: center; gap: var(--panel-group-spacing); font-weight: 400; }
 .layer-row.selected { background: var(--selection); }
 .layer-row > .layer-icon { height: auto; align-self: stretch; }
 .layer-thumbnails { display: flex; align-items: center; gap: 2px; flex: none; }

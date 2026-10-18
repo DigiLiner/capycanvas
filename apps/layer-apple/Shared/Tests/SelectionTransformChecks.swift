@@ -424,6 +424,68 @@ extension XCTestCase {
         XCTAssertTrue(app.buttons["number-value-tool-transform_x"].waitForNonExistence(timeout: 5))
     }
 
+    @MainActor func checkAddPaper(in app: XCUIApplication, theme: String) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
+        app.launch(); capturePaintEditor(in: app, theme: theme)
+        let rows = artworkRows(in: app)
+        let add = app.buttons["layer-add-paper"]
+        let paper = rows.matching(NSPredicate(format: "label CONTAINS %@", "Paper")).firstMatch
+        XCTAssertTrue(paper.waitForExistence(timeout: 10))
+        XCTAssertFalse(add.exists)
+        let paintID = rows.matching(NSPredicate(format: "value == %@", "Drawing target")).firstMatch.identifier
+        XCTAssertFalse(paintID.isEmpty)
+        let paint = rows[paintID]
+        let original = editorPixels(in: app)
+        layerContext("Delete layer", on: paper.buttons["Edit layer content"], in: app)
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertEqual(add.label, "Add paper")
+        XCTAssertEqual(rows.count, 1)
+        expectation(for: NSPredicate { _, _ in add.isHittable && paint.frame.height > 0 }, evaluatedWith: add)
+        waitForExpectations(timeout: 10)
+        XCTAssertGreaterThanOrEqual(add.frame.minY, paint.frame.maxY - 1)
+        XCTAssertEqual(add.frame.height, paint.frame.height, accuracy: 1)
+        expectation(for: NSPredicate { _, _ in self.editorPixels(in: app) != original }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        let before = editorPixels(in: app)
+        workspaceActivate(add)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertTrue(paper.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(paper.frame.minY, paint.frame.maxY - 1)
+        XCTAssertTrue(paper.buttons["Edit layer content"].isSelected)
+        XCTAssertEqual(paint.value as? String, "Drawing target")
+        expectPixels(original, in: app)
+        editorHistory("Undo", in: app)
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); expectPixels(before, in: app)
+        editorHistory("Redo", in: app)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 10)); expectPixels(original, in: app)
+        editorHistory("Undo", in: app)
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
+        XCTAssertTrue(rows["layer-row-0"].waitForExistence(timeout: 10))
+        XCTAssertFalse(add.exists, "Selection-mask editing must not offer paper")
+        editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        layerContext("Delete layer", on: paint.buttons["Edit layer content"], in: app)
+        expectation(for: NSPredicate(format: "count == 0"), evaluatedWith: rows)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(add.exists && add.isHittable)
+        workspaceActivate(add)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertTrue(paper.waitForExistence(timeout: 5))
+        XCTAssertTrue(paper.buttons["Edit layer content"].isSelected)
+        XCTAssertEqual(rows.matching(NSPredicate(format: "value == %@", "Drawing target")).count, 0)
+        editorHistory("Undo", in: app)
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertEqual(rows.count, 0)
+        editorHistory("Redo", in: app)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+        attachEditor(in: app, name: "add-paper-\(theme)")
+    }
+
     @MainActor func checkMaskActionsAndHistory(in app: XCUIApplication) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
         app.launch(); capturePaintEditor(in: app)

@@ -89,10 +89,11 @@ struct LayersView : std::enable_shared_from_this<LayersView> {
     CompositionTarget::Rendering_revoker connectionFrame;
     UIElement outsideSurface{nullptr};
     PointerEventHandler outsidePress{nullptr};
-    StackPanel header,tools,footer,rowsHost;
+    StackPanel header,tools,footer;
     ScrollView list;
     ItemsRepeater repeater;
     Button blend{nullptr},addPaper{nullptr};
+    hstring paperKey;
     TextBlock blendLabel{nullptr};
     ContentControl opacityGate;
     Bindings opacityBindings;

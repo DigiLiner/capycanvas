@@ -294,3 +294,122 @@ export async function checkLayerRelationships({call,evaluate,settle}) {
   await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
   console.log('PASS: contextual attachment, neutral adjacent FX links, darker accent rail, inherited eye, backgroundless FX, saved Selection normalized drops, collapsed owner, themes, custom/neutral accents, narrow/wide, scroll');
 }
+
+export async function checkPaperRows({call,evaluate,settle}) {
+  const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/paper-ports/web';
+  await mkdir(directory,{recursive:true});
+  const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
+  const layer=action=>send({type:'layer',action});
+  const invoke=command=>send({type:'invoke',command});
+  const rows=()=>evaluate('layerApp.state().layers.map(l=>({id:Number(l.id),label:l.label,drawing:l.drawing,mask_selected:l.mask_selected}))');
+  const missing=()=>evaluate("!!document.querySelector('#layer-add-paper')");
+  const mouse=async(type,x,y)=>{await call('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();};
+  const bounds=()=>evaluate("(()=>{const n=document.querySelector('#layer-add-paper');n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
+  for(const theme of ['light','dark']) {
+    await send({type:'set_theme',theme});
+    assert.equal(await missing(),false,'Paper suppresses Add paper');
+    const initialCount=(await rows()).length;
+    await evaluate(`document.querySelector('.layer-footer [aria-label="New layer"]').focus()`);
+    for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13,...(type==='keyDown'?{text:'\r'}:{})});
+    await settle();assert.equal((await rows()).length,initialCount+1,'Existing footer button keeps native Enter activation');
+    await invoke('undo');
+    let all=await rows();
+    let paper=all.find(l=>l.label==='Paper').id;
+    assert.equal(String(all.at(-1).id),String(paper),'Paper is the bottom row');
+    await layer({op:'delete',id:paper});
+    assert.equal(await missing(),true,'Deleting Paper offers Add paper');
+    const geometry=await evaluate("(()=>{const n=document.querySelector('#layer-add-paper'),s=getComputedStyle(n),r=n.getBoundingClientRect(),previous=n.previousElementSibling,p=previous.getBoundingClientRect();return{tag:n.tagName,last:n===n.parentElement.lastElementChild,parent:n.parentElement.id,height:r.height,rowHeight:p.height,top:r.top,bottom:p.bottom,weight:s.fontWeight,radius:s.borderRadius,align:s.justifyContent,label:n.ariaLabel}})()");
+    assert.deepEqual({tag:geometry.tag,last:geometry.last,parent:geometry.parent,height:geometry.height,weight:geometry.weight,radius:geometry.radius,align:geometry.align,label:geometry.label},{tag:'BUTTON',last:true,parent:'layer-rows',height:40,weight:'400',radius:'0px',align:'center',label:'Add paper'});
+    assert.equal(geometry.height,geometry.rowHeight,'Add paper matches ordinary row height');
+    assert.equal(geometry.top,geometry.bottom,'Add paper immediately follows the last layer');
+    const textSize=await evaluate("document.documentElement.style.getPropertyValue('--ui-text-size')");
+    try {
+      await evaluate("document.documentElement.style.setProperty('--ui-text-size','24px')");await settle();
+      const enlarged=await evaluate("(()=>{const n=document.querySelector('#layer-add-paper'),r=n.getBoundingClientRect(),previous=n.previousElementSibling,p=previous.getBoundingClientRect(),label=n.querySelector('.layer-name'),l=label.getBoundingClientRect(),range=document.createRange();range.selectNodeContents(label);const text=range.getBoundingClientRect();return{font:getComputedStyle(label).fontSize,height:r.height,rowHeight:p.height,top:r.top,previousBottom:p.bottom,textTop:text.top,textBottom:text.bottom,textLeft:text.left,textRight:text.right,labelTop:l.top,labelBottom:l.bottom,labelLeft:l.left,labelRight:l.right,rowTop:r.top,rowBottom:r.bottom}})()");
+      assert.equal(enlarged.font,'24px');assert.equal(enlarged.height,enlarged.rowHeight,'Enlarged Add paper matches the standard row height');
+      assert.equal(enlarged.top,enlarged.previousBottom,'Enlarged rows keep their vertical spacing');
+      assert.ok(enlarged.textTop>=enlarged.labelTop-.5&&enlarged.textBottom<=enlarged.labelBottom+.5,'Enlarged text fits its unclipped label line box');
+      assert.ok(enlarged.textLeft>=enlarged.labelLeft-.5&&enlarged.textRight<=enlarged.labelRight+.5,'Enlarged text fits its label width');
+      assert.ok(enlarged.textTop>=enlarged.rowTop+2&&enlarged.textBottom<=enlarged.rowBottom-2,'Enlarged text fits inside row padding');
+    } finally {
+      await evaluate(`document.documentElement.style.setProperty('--ui-text-size',${JSON.stringify(textSize)})`);await settle();
+    }
+    const point=await bounds();
+    await mouse('mouseMoved',point.x,point.y);
+    assert.equal(await evaluate("document.querySelector('#layer-add-paper').matches(':hover')"),true);
+    await mouse('mousePressed',point.x,point.y);
+    assert.equal(await evaluate("document.querySelector('#layer-add-paper').matches(':active')"),true);
+    await mouse('mouseMoved',point.x-400,point.y);
+    await mouse('mouseReleased',point.x-400,point.y);
+    assert.equal(await missing(),true,'Releasing outside cancels Add paper');
+    for(const [key,code,value,text] of [['Enter','Enter',13,'\r'],[' ','Space',32,' ']]) {
+      await evaluate("document.querySelector('#layer-add-paper').focus()");
+      assert.equal(await evaluate("document.activeElement.id"),'layer-add-paper','Add paper receives keyboard focus');
+      await call('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:value,text});
+      await call('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:value});await settle();
+      assert.equal(await missing(),false,`${code} activates Add paper`);
+      await invoke('undo');assert.equal(await missing(),true);
+    }
+    for(const device of ['touch','pen']) {
+      const contact=async(phase,p)=>{
+        if(device==='touch')await call('Input.dispatchTouchEvent',{type:{down:'touchStart',move:'touchMove',up:'touchEnd'}[phase],touchPoints:phase==='up'?[]:[{id:1,...p}]});
+        else await call('Input.dispatchMouseEvent',{type:{down:'mousePressed',move:'mouseMoved',up:'mouseReleased'}[phase],...p,pointerType:'pen',button:'left',buttons:phase==='up'?0:1,clickCount:1,force:phase==='up'?0:.7});
+        await settle();
+      };
+      const start=await bounds(),outside={x:start.x-400,y:start.y};
+      const before=(await rows()).length;
+      await contact('down',start);await contact('move',outside);await contact('up',outside);
+      assert.equal(await missing(),true,`${device} release outside cancels Add paper`);
+      assert.equal((await rows()).length,before);
+      const tap=await bounds();await contact('down',tap);await contact('up',tap);
+      assert.equal(await missing(),false,`${device} tap adds Paper`);
+      assert.equal((await rows()).length,before+1,`${device} tap adds exactly one Paper`);
+      await invoke('undo');assert.equal(await missing(),true,`${device} insertion is one Undo step`);
+      assert.equal((await rows()).length,before);
+    }
+    const activate=await bounds();await mouse('mousePressed',activate.x,activate.y);await mouse('mouseReleased',activate.x,activate.y);
+    assert.equal(await missing(),false,'Pointer activates Add paper');
+    all=await rows();paper=all.find(l=>l.label==='Paper').id;
+    assert.equal(String(all.at(-1).id),String(paper));
+    await invoke('undo');assert.equal(await missing(),true);
+    await invoke('redo');assert.equal(await missing(),false);
+    const ink=all.find(l=>l.id!==paper).id;
+    await layer({op:'select',id:paper,mask:false});
+    assert.deepEqual((await rows()).filter(l=>l.drawing).map(l=>l.id),[ink],'Unmasked Paper draws into ink above');
+    await layer({op:'add_mask',id:paper,replace:false});
+    await layer({op:'select',id:paper,mask:false});
+    assert.equal((await rows()).find(l=>l.id===paper).mask_selected,true,'Masked Paper selects its mask');
+    await invoke('undo');
+    await layer({op:'select',id:ink,mask:false});await layer({op:'group_selected'});
+    await layer({op:'select',id:paper,mask:false});
+    assert.equal((await rows()).some(l=>l.drawing),false,'A group above Paper blocks fallback drawing');
+    await invoke('undo');
+    for(const program of ['solid_color','gradient_fill']) {
+      await send({type:'effect',action:{op:'insert',effect:program}});
+      const fill=(await rows()).find(l=>l.label===(program==='solid_color'?'Solid Color':'Gradient Fill')).id;
+      await layer({op:'new',group:false,clipped:false});
+      const above=await evaluate('Number(layerApp.state().layer_tools.editing_layer.id)');
+      await layer({op:'select',id:fill,mask:false});
+      assert.deepEqual((await rows()).filter(l=>l.drawing).map(l=>l.id),[above],`${program} draws into ink above`);
+      await layer({op:'add_mask',id:fill,replace:false});await layer({op:'select',id:fill,mask:false});
+      assert.equal((await rows()).find(l=>l.id===fill).mask_selected,true,`${program} selects its existing mask`);
+      await layer({op:'delete',id:fill});await layer({op:'delete',id:above});
+    }
+    for(const row of await rows())await layer({op:'delete',id:row.id});
+    assert.equal((await rows()).length,0);
+    assert.equal(await missing(),true,'An empty drawing offers Add paper');
+    let position=await bounds();await mouse('mousePressed',position.x,position.y);await mouse('mouseReleased',position.x,position.y);
+    assert.equal((await rows()).length,1);assert.equal(await missing(),false);
+    paper=(await rows())[0].id;
+    for(let i=0;i<20;i++)await layer({op:'new',group:false,clipped:false});
+    await layer({op:'delete',id:paper});
+    position=await bounds();
+    assert.equal(await evaluate("(()=>{const n=document.querySelector('#layer-rows'),b=document.querySelector('#layer-add-paper').getBoundingClientRect(),r=n.getBoundingClientRect();return n.scrollHeight>n.clientHeight&&n.scrollTop>0&&b.bottom<=r.bottom+1&&b.top>=r.top})()"),true,'Add paper scrolls after the bottom layer');
+    const capture=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/add-paper-${theme}.png`,Buffer.from(capture.data,'base64'));
+    await mouse('mousePressed',position.x,position.y);await mouse('mouseReleased',position.x,position.y);
+    assert.equal(await missing(),false);assert.equal((await rows()).at(-1).label,'Paper');
+    for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
+    await layer({op:'new',group:false,clipped:false});
+  }
+  console.log('PASS: Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
+}
