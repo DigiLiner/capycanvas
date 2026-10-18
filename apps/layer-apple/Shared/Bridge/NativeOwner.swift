@@ -976,6 +976,10 @@ final class NativeOwner: @unchecked Sendable {
                 (layer as? ObservedMetalLayer)?.observation = nil
                 observation?.record(FrameTraceEvent(kind: .frame, a: now, b: target, c: start, d: FrameTrace.now(),
                     e: costs[0], f: costs[1], g: costs[2], h: costs[3], i: costs[4], j: latestTracedInput))
+                if let observation {
+                    observation.record(FrameTraceEvent(kind: .consumedPaint, a: now,
+                        b: capy_apple_consumed_paint_ns(handle)))
+                }
                 if let trace { collectGpuTiming(trace) }
             }
             do {

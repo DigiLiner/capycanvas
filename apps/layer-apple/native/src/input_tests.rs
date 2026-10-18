@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn consumed_paint_timestamp_advances_only_after_real_input_reaches_the_engine() {
+    assert_eq!(unsafe { capy_apple_consumed_paint_ns(std::ptr::null()) }, 0);
+    for platform in [0, 1] {
+        let app = fixtures::selection_app(platform);
+        app.action(json!({"type":"select_brush","id":layer_core::DefaultBrushPreset::GPen as u32}));
+        app.action(json!({"type":"set_brush_size","value":4}));
+        app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
+        app.draw_until_idle();
+        assert_eq!(unsafe { capy_apple_consumed_paint_ns(app.0) }, 0);
+        let [x, y] = fixtures::surface(&app, [20., 20.]);
+        for (offset, phase, timestamp, predicted, consumed) in [
+            (0., 1., 1_000_000_000u64, 0, 1_000_000_000),
+            (8., 2., 1_080_000_000, 1, 1_000_000_000),
+            (2., 2., 1_020_000_000, 0, 1_020_000_000),
+            (2., 3., 1_040_000_000, 0, 1_020_000_000),
+        ] {
+            let previous = unsafe { capy_apple_consumed_paint_ns(app.0) };
+            let record = [x + offset, y, 0.8, 0., 0., 0., 0., timestamp as f64, phase];
+            assert_eq!(unsafe {
+                capy_apple_pointer(app.0, 1, 0, 0, record.as_ptr(), record.len(), predicted,
+                    capy_apple_camera_revision(app.0))
+            }, 0);
+            assert!(unsafe { &*app.0 }.host.session.engine().has_pending_input());
+            assert_eq!(unsafe { capy_apple_consumed_paint_ns(app.0) }, previous,
+                "Receipt and enqueueing do not acknowledge engine consumption");
+            let events = unsafe { &*app.0 }.host.session.engine().metrics().input_events;
+            fixtures::until(&app, "Pointer input did not reach the engine", || {
+                !unsafe { &*app.0 }.host.session.engine().has_pending_input()
+            });
+            assert!(unsafe { &*app.0 }.host.session.engine().metrics().input_events > events);
+            assert_eq!(unsafe { capy_apple_consumed_paint_ns(app.0) }, consumed,
+                "Only consumed real Down/Move samples advance the timestamp");
+        }
+    }
+}
+
+#[test]
 fn mac_manual_prediction_paints_ahead_of_pen_and_mouse_without_committing_the_tip() {
     for tool in [0, 1] {
         for milliseconds in [0, 64] {

@@ -3121,6 +3121,53 @@ first displayed paint sample or establish physical input latency. The short
 targets. Signed products, captures and per-receipt components remain under
 `artifacts/apple/port-oct13-regenerated/source-audit/current763-ordinary-Rust-archive-preparation/transport-compute-Release-refresh/`.
 
+The same signed `7e3a522e4` transport candidates also complete one ten-minute
+GPU0 watercolor run per host on 2026-10-18, with the same 2K/320 px profile and
+dark appearance. Mac measures 600.001 seconds and 52,141 presentations; M4
+measures 600.008 seconds and 69,577 presentations. Each has about 135,000 real
+input samples, nominal thermal state throughout, and zero measured render
+errors, rejected inputs, missing/zero-time callbacks, duplicate presentations or
+dropped records. One startup zero-time callback per host remains outside the
+measured interval.
+
+Peak physical footprint is 1.641 GB on Mac and 1.452 GB on M4; measured
+first-to-last growth is 687 MB and 408 MB respectively. Continued authored
+painting and history are included; no memory plateau or leak conclusion follows.
+This closes the ten-minute stability/accounting observation for this profile,
+with full-canvas, native chrome, light appearance and physical latency still
+unqualified. Traces and captures remain in `sustained600/` under the same
+artifact directory.
+
+The Apple `photo` workload uses the same 9504 × 6336 reference photo,
+with an empty paint layer above it, explicit 512 px Wet Watercolor and package
+sRGB U8 color. One six-second priming contact is settled and undone before
+three six-second pressure-1 contacts, separated by one-second lifts. These are
+synthetic owner inputs, with no supplied prediction.
+
+On `1a8cc3b75` plus the consumed-paint trace and workload changes, all four
+Mac/M4 light/dark observations complete the 4,320 measured samples, priming
+Undo and three contact boundaries without rejected input or readiness loss.
+M4 has no missing or zero-time measured callbacks in either theme. Its light
+contacts measure 106.67/109.17/111.17 presentations/s, and dark contacts
+102.31/103.31/105.82/s. Interval p99 is about 16.667 ms in both themes; these
+miss the 114 presentations/s qualification floor.
+
+Mac records one zero-time measured callback in each theme, on the first frame
+after the third contact resumes. Both have normal CPU owner service and no
+resize or readiness loss; the trace does not identify the compositor cause.
+The light first contact separately has a 177.779 ms presentation gap. Mac's
+90 Hz display cannot qualify the top-tier display floor. These results leave
+presentation qualification open; they are not four passing qualification runs.
+
+The new counter distinguishes engine-consumed real Down/Move timestamps from
+receipts; associating that counter with a presentation still does not prove
+fresh pixels or physical input latency. M4 captures show the photo, painted
+layer and matching thumbnails in both themes. Mac's dark capture shows the
+photo and paint but placeholder layer thumbnails after the ten-second postlude;
+its failed light case has no retained screenshot. Evidence remains under
+`reference-photo-Release-refresh/runtime/` and `runtime-Dark/` beside the
+transport artifacts.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

@@ -266,5 +266,109 @@ class ReportChecks(unittest.TestCase):
         self.assertEqual(result["correction_owner_queue_ms"]["count"], 1)
 
 
+class ConsumedPaintChecks(unittest.TestCase):
+    def fixture(self, values=(9_000_000, 19_000_000, 29_000_000)):
+        events = []
+        for index, value in enumerate(values, 1):
+            time = index * 10_000_000
+            events += [frame(time), record(15, time, value),
+                       record(3, time, 0, 0, index, 1), record(4, time, time + 3_000_000, 0, index)]
+        return events
+
+    def report(self, events):
+        return analyze(header(), events)["engine_consumed_paint_progress"]
+
+    def test_repeated_consumption_and_duplicate_drawables_do_not_inflate_progress(self):
+        events = self.fixture((9_000_000, 9_000_000, 29_000_000))
+        events += [events[3], record(4, 30_000_000, 34_000_000, 0, 4)]
+        result = self.report(events)
+        self.assertEqual(result["presented_engine_consumed_progress"], 2)
+        self.assertEqual(result["counts"]["repeated_counter"], 1)
+        self.assertEqual(result["counts"]["duplicate_presentation_records"], 1)
+        self.assertEqual(result["counts"]["repeated_presented_counter"], 2)
+        self.assertEqual(result["consumed_timestamp_to_present_ms"]["max"], 4)
+        delayed = [e for e in events if not (e[0] == 4 and e[1] == 10_000_000)]
+        result = self.report(delayed)
+        self.assertEqual(result["presented_engine_consumed_progress"], 2)
+        self.assertEqual(result["counts"]["missing_presentation_callbacks"], 1)
+        self.assertEqual(result["consumed_timestamp_to_present_ms"]["max"], 14)
+
+    def test_missing_zero_and_duplicate_counter_samples_remain_explicit(self):
+        events = [e for e in self.fixture((0, 19_000_000, 29_000_000)) if not (e[0] == 15 and e[1] == 20_000_000)]
+        events.append(record(15, 30_000_000, 29_000_000))
+        result = self.report(events)
+        self.assertEqual(result["presented_engine_consumed_progress"], 0)
+        self.assertEqual(result["counts"]["zero_counter"], 1)
+        self.assertEqual(result["counts"]["missing_counter"], 1)
+        self.assertEqual(result["counts"]["duplicate_counter"], 1)
+        self.assertEqual(result["counts"]["presentations_without_valid_counter"], 3)
+
+    def test_dropped_zero_and_conflicting_presentations_are_not_zero_latency(self):
+        events = [e for e in self.fixture() if e[0] != 4]
+        events += [record(4, 20_000_000, 0, 0, 2),
+                   record(4, 30_000_000, 33_000_000, 0, 3), record(4, 30_000_000, 34_000_000, 0, 3)]
+        result = self.report(events)
+        self.assertEqual(result["counts"]["missing_presentation_callbacks"], 1)
+        self.assertEqual(result["counts"]["zero_time_presentations"], 1)
+        self.assertEqual(result["counts"]["conflicting_presentation_identities"], 1)
+        self.assertEqual(result["presented_engine_consumed_progress"], 0)
+        self.assertIsNone(result["consumed_timestamp_to_present_ms"]["max"])
+
+    def test_callback_arrival_order_is_not_presentation_order(self):
+        events = self.fixture()
+        callbacks = [e for e in events if e[0] == 4]
+        events = [e for e in events if e[0] != 4] + callbacks[::-1]
+        self.assertEqual(self.report(events)["presented_engine_consumed_progress"], 3)
+        events = [e for e in events if e[0] != 4] + [record(4, 10_000_000, 40_000_000, 0, 1), *callbacks[1:]]
+        result = self.report(events)
+        self.assertEqual(result["presented_engine_consumed_progress"], 2)
+        self.assertEqual(result["counts"]["regressing_presented_counter"], 1)
+
+    def test_regression_future_and_noncausal_times_remain_visible(self):
+        events = self.fixture((9_000_000, 8_000_000, 33_000_000))
+        result = self.report(events)
+        self.assertEqual(result["counts"]["regressing_counter"], 1)
+        self.assertEqual(result["counts"]["future_counter"], 1)
+        self.assertEqual(result["presented_engine_consumed_progress"], 1)
+        events = [e for e in self.fixture() if not (e[0] == 4 and e[1] == 10_000_000)]
+        events.append(record(4, 10_000_000, 8_000_000, 0, 1))
+        self.assertEqual(self.report(events)["counts"]["noncausal_presentations"], 1)
+        after_admission = self.report(self.fixture((11_000_000, 21_000_000, 31_000_000)))
+        self.assertEqual(after_admission["presented_engine_consumed_progress"], 3)
+        self.assertEqual(after_admission["counts"]["future_counter"], 0)
+
+    def test_old_trace_is_unavailable_and_receipt_proxy_stays_separate(self):
+        events = [record(2, 100, 200, 300, 90, 95, 1, 0, 2, 0, 1),
+                  frame(400, receipt=100), record(4, 400, 1_000_100)]
+        result = analyze(header(), events)
+        self.assertEqual(result["engine_consumed_paint_progress"]["availability"], "unavailable")
+        self.assertEqual(result["engine_consumed_paint_progress"]["presented_engine_consumed_progress"], 0)
+        self.assertIsNone(result["engine_consumed_paint_progress"]["consumed_timestamp_to_present_ms"]["max"])
+        self.assertEqual(result["presentation"]["first_associated_present_per_owner_receipt_proxy_ms"]["count"], 1)
+
+    def test_workload_and_motion_windows_keep_prior_counter_baseline_and_edges(self):
+        begin, end = 20_000_000, 40_000_000
+        events = self.fixture((9_000_000, 9_000_000, 29_000_000))
+        events += [record(11, begin, 2, 1), record(11, end, 3, 1)]
+        result = analyze(header(workload={"name": "ink"}), events)
+        self.assertEqual(result["engine_consumed_paint_progress"]["presented_engine_consumed_progress"], 2)
+        self.assertEqual(result["workload"]["engine_consumed_paint_progress"]["presented_engine_consumed_progress"], 1)
+        scale = 300
+        scaled = []
+        for event in events:
+            if event[0] in (1, 15, 3, 4):
+                row = event.copy()
+                for index in {1: (1, 2, 3, 4), 15: (1, 2), 3: (1,), 4: (1, 2)}[row[0]]:
+                    row[index] *= scale
+                scaled.append(row)
+        window = {"begin_ns": begin * scale, "end_ns": end * scale, "motion_witness": "retained"}
+        observed = motion_windows(header(), scaled, [window], 90)[0]["engine_consumed_paint_progress"]
+        self.assertEqual(observed["presented_engine_consumed_progress"], 1)
+        late = [e for e in self.fixture() if not (e[0] == 4 and e[1] == 30_000_000)]
+        late += [record(4, 30_000_000, end + 1, 0, 3), record(11, begin, 2, 1), record(11, end, 3, 1)]
+        scoped = analyze(header(workload={"name": "ink"}), late)["workload"]["engine_consumed_paint_progress"]
+        self.assertEqual(scoped["counts"]["presentations_outside_interval"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

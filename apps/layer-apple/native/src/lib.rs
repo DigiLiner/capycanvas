@@ -938,6 +938,13 @@ pub unsafe extern "C" fn capy_apple_shader_input(app: *const CapyApple) {
 }
 
 /// # Safety
+/// Valid handle on its serial owner, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_consumed_paint_ns(app: *const CapyApple) -> u64 {
+    unsafe { app.as_ref() }.map_or(0, |a| a.host.session.engine().metrics().last_consumed_paint_ns)
+}
+
+/// # Safety
 /// Valid handle, read on its serial owner.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_apple_camera_revision(app: *const CapyApple) -> u64 {

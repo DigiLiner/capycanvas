@@ -24,7 +24,7 @@ import Dispatch
         defer { try? FileManager.default.removeItem(at: directory) }
         let output = directory.appendingPathComponent("frames.jsonl")
         let exported = FrameTrace(duration: 30, capacity: 2, platform: 1, output: output)
-        exported.record(FrameTraceEvent(kind: .frame, a: 42))
+        exported.record(FrameTraceEvent(kind: .consumedPaint, a: 42, b: 21))
         exported.finish()
         let deadline = Date().addingTimeInterval(5)
         while !FileManager.default.fileExists(atPath: output.path) && Date() < deadline {
@@ -35,6 +35,8 @@ import Dispatch
         assert(header["process_identifier"] as? Int32 == ProcessInfo.processInfo.processIdentifier)
         assert(header["clock"] as? String == "CACurrentMediaTime nanoseconds")
         assert(lines.count == 2, "Atomic export must pair the process header with its frame records")
+        let event = try JSONSerialization.jsonObject(with: Data(lines[1].utf8)) as! [UInt64]
+        assert(Array(event.prefix(3)) == [15, 42, 21], "Consumed-paint records must preserve their wire kind and timestamps")
         print("Frame trace checks passed: concurrent capacity, freeze, late presentation and process-tagged export")
     }
 }

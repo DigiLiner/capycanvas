@@ -69,6 +69,100 @@ def calibrate_gpu(clocks, samples):
     return calibrated, diagnostics
 
 
+def consumed_paint_progress(grouped, begin=None, end=None):
+    """Associate engine-consumed timestamps with actual drawable presentations."""
+    def scoped(time):
+        return (begin is None or time >= begin) and (end is None or time < end)
+    def presented_in_scope(time):
+        return (begin is None or time >= begin) and (end is None or time <= end)
+    frames, samples, callbacks = (collections.defaultdict(list) for _ in range(3))
+    for row in grouped[1]:
+        frames[row[0]].append(row)
+    for row in grouped[15]:
+        samples[row[0]].append(row)
+    for row in grouped[4]:
+        callbacks[(row[0], row[3])].append(row)
+    acquired = {(r[0], r[3]) for r in grouped[3] if r[4] and scoped(r[0])}
+    counts = collections.Counter()
+    valid, advancing = {}, set()
+    high_water = 0
+    for admission in sorted(frames.keys() | samples.keys()):
+        frame_rows, counter_rows = frames[admission], samples[admission]
+        reasons = []
+        if len(frame_rows) != 1:
+            reasons.append("missing_frame" if not frame_rows else "duplicate_frame")
+        if len(counter_rows) != 1:
+            reasons.append("missing_counter" if not counter_rows else "duplicate_counter")
+        value = counter_rows[0][1] if len(counter_rows) == 1 else None
+        if value is not None:
+            if not value:
+                reasons.append("zero_counter")
+            elif len(frame_rows) == 1 and value > frame_rows[0][3]:
+                reasons.append("future_counter")
+            elif value < high_water:
+                reasons.append("regressing_counter")
+            elif value == high_water:
+                reasons.append("repeated_counter")
+            elif len(frame_rows) == 1:
+                high_water = value
+                if scoped(admission):
+                    advancing.add(value)
+            if len(frame_rows) == 1 and value and not any(
+                    reason in reasons for reason in ("future_counter", "regressing_counter")):
+                valid[admission] = value
+        if scoped(admission):
+            counts.update(reasons)
+            counts["frame_admissions"] += bool(frame_rows)
+            counts["counter_records"] += len(counter_rows)
+    candidates = []
+    for key, records in sorted(callbacks.items()):
+        admission, drawable = key
+        if not scoped(admission):
+            counts["presentations_from_outside_frame_interval"] += sum(
+                r[1] > 0 and presented_in_scope(r[1]) for r in records)
+            continue
+        counts["presentation_callback_records"] += len(records)
+        counts["duplicate_presentation_records"] += len(records) - 1
+        counts["zero_time_presentations"] += sum(not r[1] for r in records)
+        times = {r[1] for r in records}
+        if len(times) != 1:
+            counts["conflicting_presentation_identities"] += 1
+        presented = records[0][1]
+        if admission not in frames:
+            counts["presentations_without_frame"] += 1
+        if admission not in valid:
+            counts["presentations_without_valid_counter"] += 1
+        elif presented and (presented < admission or presented < valid[admission]):
+            counts["noncausal_presentations"] += 1
+        elif presented and not presented_in_scope(presented):
+            counts["presentations_outside_interval"] += 1
+        elif presented and len(times) == 1:
+            candidates.append((presented, admission, drawable, valid[admission]))
+    counts["missing_presentation_callbacks"] = len(acquired - callbacks.keys())
+    progress, shown_high_water = [], 0
+    for presented, admission, drawable, value in sorted(candidates):
+        reason = None
+        if value <= shown_high_water or value not in advancing:
+            reason = "repeated_presented_counter" if value >= shown_high_water else "regressing_presented_counter"
+            counts[reason] += 1
+        else:
+            progress.append((presented, value))
+        shown_high_water = max(shown_high_water, value)
+    names = ("frame_admissions", "counter_records", "missing_frame", "duplicate_frame", "missing_counter",
+             "duplicate_counter", "zero_counter", "future_counter", "regressing_counter", "repeated_counter",
+             "presentation_callback_records", "duplicate_presentation_records", "zero_time_presentations",
+             "conflicting_presentation_identities", "presentations_without_frame", "presentations_without_valid_counter",
+             "noncausal_presentations", "presentations_outside_interval", "presentations_from_outside_frame_interval",
+             "missing_presentation_callbacks", "repeated_presented_counter", "regressing_presented_counter")
+    return {"availability": "observed" if grouped[15] else "unavailable",
+            "counts": {name: counts[name] for name in names},
+            "distinct_advancing_consumed_timestamps": len(advancing),
+            "presented_engine_consumed_progress": len(progress),
+            "consumed_timestamp_to_present_ms": distribution(presented - value for presented, value in progress),
+            "presented_progress_intervals_ms": distribution(b[0] - a[0] for a, b in zip(progress, progress[1:])),
+            "scope": "Engine-consumed Down/Move timestamp progress associated with actual presented callbacks; not physical input-to-pixel latency or guaranteed fresh pixels"}
+
+
 def analyze(header, events, target_hz=120):
     if header.get("schema") != 1:
         raise ValueError("Unsupported trace schema")
@@ -218,6 +312,7 @@ def analyze(header, events, target_hz=120):
             "first_associated_present_per_owner_receipt_proxy_ms": distribution(associations.values()),
             "first_associated_present_per_correction_receipt_proxy_ms": distribution(correction_associations.values()),
         },
+        "engine_consumed_paint_progress": consumed_paint_progress(grouped),
         "input_owner_queue_ms": distribution(r[1] - r[0] for r in inputs.values() if r[1] >= r[0]),
         "correction_owner_queue_ms": distribution(r[1] - r[0] for r in inputs.values() if r[6] == 2 and r[1] >= r[0]),
         "memory": {"samples": len(memory), "footprint_bytes": distribution([r[1] for r in memory], divisor=1),
@@ -232,7 +327,8 @@ def analyze(header, events, target_hz=120):
         failed = any(r[1] == 5 for r in markers)
         complete = len(begins) == len(ends) == 1 and not failed and ends[0][0] > begins[0][0]
         report = {"specification": header["workload"], "measurement_completed": complete,
-                  "postlude_observed": any(r[1] == 4 for r in markers), "failure_recorded": failed}
+                  "postlude_observed": any(r[1] == 4 for r in markers), "failure_recorded": failed,
+                  "engine_consumed_paint_progress": {"availability": "unavailable", "reason": "No complete workload interval"}}
         if complete:
             begin, end = begins[0], ends[0]
             admitted = [r for r in frames.values() if begin[0] <= r[0] < end[0]]
@@ -246,6 +342,7 @@ def analyze(header, events, target_hz=120):
             memory_rows = [r for r in memory if begin[0] <= r[0] <= end[0]]
             scheduler = [r[5] for r in markers if r[1] in (3, 6) and begin[0] <= r[0] <= end[0]]
             report.update({
+                "engine_consumed_paint_progress": consumed_paint_progress(grouped, begin[0], end[0]),
                 "measured_seconds": (end[0] - begin[0]) / 1e9,
                 "delivered_nonpredicted_samples": end[3] - begin[3],
                 "delivered_nonpredicted_batches": end[4] - begin[4],
@@ -292,6 +389,9 @@ def analyze(header, events, target_hz=120):
 
 
 def motion_windows(header, events, windows, target_hz):
+    grouped = collections.defaultdict(list)
+    for event in events:
+        grouped[event[0]].append(event[1:])
     results = []
     for window in windows:
         begin, end = window["begin_ns"], window["end_ns"]
@@ -321,6 +421,7 @@ def motion_windows(header, events, windows, target_hz):
         budget = 1000 / target_hz
         coverage = bool(times and times[0] - begin <= budget * 2e6 and end - times[-1] <= budget * 2e6)
         results.append({"window": window, "presented_frames": len(times), "presentations_per_s": hz,
+            "engine_consumed_paint_progress": consumed_paint_progress(grouped, begin, end),
             "interval_ms": intervals, "fully_ready_at_begin": full_ready, "readiness_loss_records": readiness_losses,
             "frame_error_records": errors, "missing_presentation_callbacks": missing,
             "zero_time_presentations": zero, "duplicate_presentation_records": duplicates,

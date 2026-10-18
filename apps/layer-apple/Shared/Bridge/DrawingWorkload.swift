@@ -7,6 +7,8 @@ import Foundation
     private let plan: DrawingWorkloadPlan
     private var timer: Timer?
     private var preparing = false
+    private var restoringPrime = false
+    private var baselineLayers = ""
     private var started: UInt64 = 0
     private var measurementStarted: UInt64 = 0
     private var finished = false
@@ -21,7 +23,7 @@ import Foundation
 
     init(store: EditorStore, plan: DrawingWorkloadPlan) {
         self.store = store; self.plan = plan
-        record(0, d: UInt64(plan.extent), e: UInt64(plan.extent), f: UInt64(plan.paintLayers),
+        record(0, d: UInt64(plan.documentExtent[0]), e: UInt64(plan.documentExtent[1]), f: UInt64(plan.paintLayers),
             g: UInt64(plan.brush), h: UInt64(plan.diameter * 1000), i: plan.predicts ? 1 : 0)
         let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -45,6 +47,34 @@ import Foundation
             }
         }
     }
+    private func checkpoint() async throws {
+        guard let store else { throw CancellationError() }
+        let saved = await withCheckedContinuation { continuation in
+            store.flushPersistence { continuation.resume(returning: $0) }
+        }
+        guard saved else { throw HostFailure(message: "The workload checkpoint did not complete") }
+    }
+    private var layerRevisions: String {
+        JSON(store?.state["layers"].array.map {
+            [$0["id"].raw, $0["paint_revision"].raw, $0["mask_revision"].raw]
+        } ?? []).stableKey
+    }
+    private func restorePrime() async throws {
+        try await checkpoint()
+        guard layerRevisions != baselineLayers else {
+            throw HostFailure(message: "The priming stroke did not change the paint layer")
+        }
+        try await action(["type": "invoke", "command": "undo"])
+        try await checkpoint()
+        guard layerRevisions == baselineLayers else {
+            throw HostFailure(message: "Undo did not restore the workload baseline")
+        }
+        nextSample = 0; maximumLateness = 0; lastReport = 0
+        started = FrameTrace.now(); measurementStarted = started
+        record(8, d: 1)
+        record(2, d: deliveredSamples, e: deliveredBatches)
+        restoringPrime = false
+    }
     private func prepare() async throws {
         guard let native = store?.native else { throw CancellationError() }
         let job: NativeProjectTask = try await withCheckedThrowingContinuation { continuation in
@@ -53,11 +83,12 @@ import Foundation
                 else { continuation.resume(throwing: HostFailure(message: error ?? "Workload document preparation failed")) }
             }
         }
-        let extent = plan.extent
+        let extent = plan.documentExtent
         let color = plan.color
+        let source = plan.document.map { URL(fileURLWithPath: $0) }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             NativeProjectTask.io.async {
-                do { try job.read(from: nil, options: JSON(["extent": [extent, extent],
+                do { try job.read(from: source, options: JSON(["extent": extent,
                     "color": color, "background": "White"])); continuation.resume() }
                 catch { continuation.resume(throwing: error) }
             }
@@ -70,7 +101,7 @@ import Foundation
         }
         // Seven translucent underpaint layers plus the active paint layer in
         // the 4K cases. These remain visible and participate in composition.
-        for layer in 0..<(plan.paintLayers - 1) {
+        for layer in 0..<(source == nil ? plan.paintLayers - 1 : 0) {
             try await action(["type": "set_color", "rgba": [Double(layer % 3) * 0.3 + 0.1, 0.25, 0.55, 0.2]])
             try await action(["type": "invoke", "command": "select_all"])
             try await action(["type": "invoke", "command": "fill_selection"])
@@ -81,6 +112,7 @@ import Foundation
         try await action(["type": "set_brush_size", "value": plan.diameter])
         try await action(["type": "set_color", "rgba": [0.08, 0.2, 0.55, 1.0]])
         try await action(["type": "invoke", "command": "fit_canvas"])
+        if let theme = plan.theme { try await action(["type": "set_theme", "theme": theme]) }
         if let level = ProcessInfo.processInfo.environment["CAPY_WORKLOAD_TRANSPARENCY"] {
             guard let index = ["off", "low", "medium", "high"].firstIndex(of: level) else {
                 throw HostFailure(message: "CAPY_WORKLOAD_TRANSPARENCY must be off, low, medium or high")
@@ -90,11 +122,28 @@ import Foundation
         guard let store, store.state["layers"].array.count == plan.paintLayers + 1 else {
             throw HostFailure(message: "The workload layer count does not match its specification")
         }
+        if let theme = plan.theme, store.state["theme"].string != theme {
+            throw HostFailure(message: "The workload theme was not applied")
+        }
+        if source != nil {
+            let tab = store.state["tabs"].array.first { $0["active"].bool }
+            let paint = store.state["layers"].array.first
+            guard tab?["width"].uint == UInt64(extent[0]), tab?["height"].uint == UInt64(extent[1]),
+                paint?["selected"].bool == true, paint?["editing"].bool == true,
+                paint?["drawing"].bool == true, paint?["object"].bool == false,
+                store.state["brush"]["preset"].uint == UInt64(plan.brush),
+                Float(store.state["brush"]["diameter"].number) == Float(plan.diameter) else {
+                throw HostFailure(message: "The reference photo, empty paint target or brush does not match the workload")
+            }
+            try await checkpoint()
+            baselineLayers = layerRevisions
+        }
         started = FrameTrace.now()
         record(1)
+        if source != nil { record(7) }
     }
     private func tick() {
-        guard !finished else { return }
+        guard !finished, !restoringPrime else { return }
         guard let store, store.failure == nil else { finish(failed: true); return }
         let now = FrameTrace.now()
         if started == 0 {
@@ -110,16 +159,22 @@ import Foundation
             return
         }
         let elapsed = Double(now - started) / 1e9
-        if measurementStarted == 0 && elapsed >= DrawingWorkloadPlan.warmupSeconds {
+        if plan.document == nil && measurementStarted == 0 && elapsed >= DrawingWorkloadPlan.warmupSeconds {
             measurementStarted = now; record(2, d: deliveredSamples, e: deliveredBatches)
         }
-        if measurementStarted != 0 && Double(now - measurementStarted) >= plan.seconds * 1e9 {
+        if plan.document == nil && measurementStarted != 0 && Double(now - measurementStarted) >= plan.seconds * 1e9 {
             finish(failed: false); return
         }
-        let due = Int(floor(elapsed * Double(DrawingWorkloadPlan.samplesPerSecond)))
+        var due = Int(floor(elapsed * Double(DrawingWorkloadPlan.samplesPerSecond)))
         // Bound a delayed producer's catch-up allocation. Abort and report an
         // invalid run instead of dropping a second of input to make it faster.
         guard due - nextSample < DrawingWorkloadPlan.samplesPerSecond else { finish(failed: true); return }
+        if plan.document != nil {
+            if measurementStarted != 0 && elapsed >= plan.seconds && nextSample == Int(plan.seconds) * DrawingWorkloadPlan.samplesPerSecond {
+                finish(failed: false); return
+            }
+            due = min(due, measurementStarted == 0 ? plan.contactSamples - 1 : Int(plan.seconds) * DrawingWorkloadPlan.samplesPerSecond - 1)
+        }
         guard due >= nextSample else { return }
         let camera = store.state["camera"], revision = store.cameraRevision
         let zoom = camera["zoom"].number
@@ -131,6 +186,10 @@ import Foundation
             guard let contact, !batch.isEmpty else { return }
             store.native?.pointer(id: contact, tool: 0, button: 0, records: batch, predicted: false, revision: revision)
             deliveredBatches += 1; deliveredSamples += UInt64(batch.count / 9)
+            if plan.document != nil && measurementStarted != 0 {
+                if batch[8] == 1 { record(9, d: contact) }
+                if batch.last == 3 { record(10, d: contact) }
+            }
             lastRecord = Array(batch.suffix(9))
             lastContact = lastRecord[8] == 3 ? nil : contact
             batch.removeAll(keepingCapacity: true)
@@ -161,6 +220,17 @@ import Foundation
         if now - lastReport >= 1_000_000_000 {
             record(6, d: deliveredSamples, e: deliveredBatches, f: maximumLateness)
             lastReport = now; maximumLateness = 0
+        }
+        if plan.document != nil {
+            if measurementStarted == 0 && nextSample == plan.contactSamples {
+                restoringPrime = true
+                Task { [weak self] in
+                    do { try await self?.restorePrime() }
+                    catch { self?.store?.failure = error.localizedDescription; self?.finish(failed: true) }
+                }
+            } else if measurementStarted != 0 && elapsed >= plan.seconds {
+                finish(failed: false)
+            }
         }
     }
     private func finish(failed: Bool) {

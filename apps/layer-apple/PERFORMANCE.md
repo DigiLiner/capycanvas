@@ -97,6 +97,28 @@ DerivedData directory, and run one workload per device.
   space and depth (default `Srgb` and `U8`, for example `ProPhoto` and `U16`).
   `CAPY_WORKLOAD_TRANSPARENCY` sets panel transparency (`off`, `low`, `medium`,
   `high`).
+- `CAPY_WORKLOAD_THEME` applies `light` or `dark` through the shared settings
+  action and verifies the resulting appearance before input starts. Workloads
+  use fresh preferences, so staging settings under `CAPY_STORAGE_DIR` does not
+  select their theme.
+
+The `photo` profile uses an owned current-format package named by the absolute
+`CAPY_WORKLOAD_DOCUMENT` path inside the private app container. Prepare the
+9504 × 6336 reference photo as the bottom visible layer, one empty active paint
+layer above it and hidden Paper. Verify the package's topology and source hashes
+before launch. Set `CAPY_WORKLOAD_BRUSH` and `CAPY_WORKLOAD_DIAMETER` explicitly;
+retain the preset's default spacing and settings. The package supplies document
+color, so `CAPY_WORKLOAD_SPACE` and `CAPY_WORKLOAD_DEPTH` are rejected.
+
+This profile has a fixed twenty-second measurement: three six-second contacts
+at pressure 1 separated by one-second lifts. Before measurement, one six-second
+contact primes the brush. The ordinary persistence barrier settles that contact;
+Undo and a second barrier must restore the original layer revisions. Failed
+restoration aborts the run. `CAPY_WORKLOAD_SECONDS` must be absent or `20`.
+The trace records the prime, successful restoration and each measured contact's
+Down/Up boundaries. These are synthetic native-owner inputs, not physical Pencil
+samples. Match the actual package, extent, target, brush, theme and captures to
+the trace before using the contact windows for qualification.
 
 ```sh
 xcodebuild -quiet -project apps/layer-apple/CapyCanvas.xcodeproj \
@@ -153,14 +175,21 @@ Canvas presentation callbacks do not measure cached native chrome.
   software scheduling delay, not input-to-pixel latency.
 - **Input.** The first presentation after each real input batch is a receipt
   proxy; it does not prove those samples reached the pixels. Predicted and
-  correction batches are reported separately.
+  correction batches are reported separately. `engine_consumed_paint_progress`
+  instead joins each frame's shared-engine Down/Move timestamp to its actual
+  presented callbacks. It counts distinct advancing timestamps once and retains
+  missing, repeated, regressing, future and invalid-presentation counts. Older
+  traces without that counter report it as unavailable. Engine consumption is
+  separate from receipt; it still does not prove physical input latency or that
+  every consumed sample changed the displayed pixels.
 - **Other.** Reports give p50/p95/p99/max, overflow and invalid counts, display
   capability, memory footprint and thermal state. Empty measurements are null.
   Footprint includes startup growth and the recorder's own storage.
 
-Full recorded readiness requires canvas, loaded UI catalog and shader flags.
+Recorded canvas readiness requires canvas and shader flags (mask 9).
 `tests/persistence-owner.swift` checks that an owner frame exports the catalog
-flag. Traces missing a required flag cannot establish full readiness.
+flag independently. Traces missing a required canvas flag cannot establish
+readiness.
 
 Canvas traces do not measure cached native chrome. Resizing or scrolling a
 cached Core Animation layer can change its displayed geometry without a new
@@ -198,12 +227,16 @@ the `CACurrentMediaTime` clock, and frame IDs are admission timestamps.
 | 10 activity | time, display-link awake flag |
 | 11 workload | time, phase, profile ID, phase-dependent counters |
 | 14 GPU clock | recorder time before, Metal CPU nanoseconds, Metal GPU ticks, recorder time after |
+| 15 consumed paint | frame ID, latest real Down/Move timestamp consumed by the shared engine |
 
 The analyzer converts GPU ticks with the paired clock samples, following Apple's
 [GPU timestamp conversion](https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time).
 Workload phases: 0 configuration (width, height, paint layers, brush ID,
 diameter × 1000, prediction flag), 1 warm-up, 2 measurement begins,
-3 measurement ends, 4 postlude ends, 5 failure, 6 producer sample. Phases 2, 3
+3 measurement ends, 4 postlude ends, 5 failure, 6 producer sample, 7 photo prime
+begins, 8 photo prime Undo restored, 9 measured contact Down, 10 measured contact
+Up. Phase 8 records a successful-restoration flag; phases 9 and 10 record the
+synthetic contact number. Phases 2, 3
 and 6 record cumulative real sample and batch counts and the largest producer
 lateness since the previous sample.
 

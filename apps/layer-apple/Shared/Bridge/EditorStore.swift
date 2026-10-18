@@ -119,7 +119,7 @@ import Darwin
             colorPreferences = ColorPreferencesStore(locations: storage.locations)
             let usesWorkspaceLibrary = managedWorkspaces && storage.locations != nil
             native = try NativeOwner(platform: platform, persistence: storage,
-                traceDuration: workload.map { $0.seconds + 140 }, workload: workload?.metadata,
+                traceDuration: workload.map { $0.seconds + ($0.document == nil ? 140 : 240) }, workload: workload?.metadata,
                 managedWorkspaces: usesWorkspaceLibrary) { [weak self] snapshot, failure in
                 DispatchQueue.main.async { self?.receive(snapshot, failure) }
             }

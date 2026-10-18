@@ -7,7 +7,7 @@ import Darwin
 struct FrameTraceEvent {
     enum Kind: UInt8 {
         case tick, frame, input, drawable, presented, memory, display, gpu, gpuStatus, state, activity, workload
-        case gpuClock = 14
+        case gpuClock = 14, consumedPaint
     }
     let kind: Kind
     var a: UInt64 = 0, b: UInt64 = 0, c: UInt64 = 0, d: UInt64 = 0, e: UInt64 = 0

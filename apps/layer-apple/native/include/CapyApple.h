@@ -218,6 +218,8 @@ int32_t capy_apple_gesture(CapyApple *app, float x, float y, float scale, float 
    receives 5 nanosecond durations: paint, acquire, viewport, present, poll. */
 int32_t capy_apple_frame(CapyApple *app, uint64_t now_ns, uint64_t presentation_ns,
                         uint64_t *costs);
+/* Last consumed real Down/Move timestamp; serial owner only, zero for NULL. */
+uint64_t capy_apple_consumed_paint_ns(const CapyApple *app);
 uint64_t capy_apple_camera_revision(const CapyApple *app);
 void capy_apple_shader_input(const CapyApple *app);
 uint32_t capy_apple_canvas_bar_hold(const CapyApple *app);
