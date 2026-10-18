@@ -787,9 +787,10 @@ the focused header journeys also check placement cancellation and keyboard input
 - **Unlocked desktop, one at a time.** Fixtures need an unlocked interactive
   desktop and foreground input. Run them sequentially.
 - **Resolve the drawing window.** Use `Owned-DrawingWindow` from `CapyUia.ps1` at
-  startup and after reopening. Keep its root and HWND for input, sizing and
-  captures; `Process.MainWindowHandle` can select an input-indicator overlay
-  in the same process.
+  startup and after reopening. Keep its root and HWND for input, sizing,
+  captures and window close; `Process.MainWindowHandle` can select an input-indicator
+  overlay in the same process. Startup-close checks resolve this window without
+  waiting for brush readiness.
 - **Wait for layout.** Before injecting input, wait for both the published state
   and the arranged control bounds, then check that the hit belongs to the owned
   app. Use `Control -Arranged` from `CapyUia.ps1` when locating a pointer target.

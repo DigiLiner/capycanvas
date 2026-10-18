@@ -126,12 +126,12 @@ the current dependencies, so a previous tool's ready flag cannot authorize the
 new tool. Hosts pass every sample to `UiSession::pen`. A contact begun before
 `CanvasRenderer::paint_ready` holds whole in the session's ordered edit queue,
 with its drawing and camera, and is delivered once the current document and
-brush are prepared. The queue discards only a contact held longer than 5 s or
-beyond 4096 samples, and a Cancel discards its held contact. Tool and brush
-changes made after the contact began queue behind it, so the stroke keeps the
-brush it began with. While samples are held, document snapshots such as Save
-wait, and parking, suspension and renderer replacement retire them with the
-queue, so they never reach another drawing.
+brush are prepared. Only unfinished contacts expire after 5 s; completed contacts
+wait for preparation. The queue remains bounded to 4096 samples, and a Cancel
+discards its held contact. Tool and brush changes made after the contact began
+queue behind it, so the stroke keeps the brush it began with. While samples are
+held, document snapshots such as Save wait, and parking, suspension and renderer
+replacement retire them with the queue, so they never reach another drawing.
 
 A loaded Paper waits until earlier drawing work finishes. Its decoded pending
 image keeps shared frame demand active until the choice is applied or rejected.

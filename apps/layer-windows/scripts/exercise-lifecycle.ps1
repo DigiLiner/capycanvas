@@ -48,7 +48,7 @@ function Wait-Canvas {
 }
 function Lose-Gpu {
     if(!$RecoverGpu){return}
-    (Button 'Test GPU loss').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Control 'Test GPU loss' -Name -Type ([System.Windows.Automation.ControlType]::Button)).GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
 function Minimize {
     [CapyWindowLifecycle]::ShowWindowAsync($handle,6)|Out-Null
@@ -67,6 +67,9 @@ function Close-Drawing([string]$Choice) {
         Wait-Canvas
     }
 }
+function Request-WindowClose {
+    if(![CapyWindowApi]::PostMessage($handle,0x10,[UIntPtr]::Zero,[IntPtr]::Zero)){throw 'Owned drawing window rejected Close'}
+}
 function Check-Closed {
     if(!$review.WaitForExit(5000)){throw 'Lifecycle close exceeded five seconds after authorization'}
     if($review.ExitCode -ne 0){throw ("Native exit code: 0x{0:X8}" -f [uint32]($review.ExitCode -band 0xffffffffL))}
@@ -83,28 +86,29 @@ try {
         $null=$review.Handle # Keep exit-code observation valid after a fast close.
         [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/lifecycle-review.pid'),[string]$review.Id)
         Write-Output "Owned lifecycle review $($review.Id), scenario=$scenario"
+        $native=@{window=$null}
         if($scenario -eq 'startup'){
-            Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero} 'Startup window did not appear' 45
+            Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window} 'Startup window did not appear' 45
+            $root=$native.window.Root;$handle=$native.window.Handle
             $startupBeforeReady=!(Model).brush_ready
-            $review.CloseMainWindow()|Out-Null
+            Request-WindowClose
             Check-Closed
             continue
         }
-        Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Review did not start' 45
+        Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready} 'Review did not start' 45
         if(!(Model).windows_isolated_settings){throw 'Lifecycle review requires an isolated profile'}
-        $handle=$review.MainWindowHandle
-        $root=[System.Windows.Automation.AutomationElement]::FromHandle($handle)
+        $root=$native.window.Root;$handle=$native.window.Handle
         if($scenario -eq 'warming'){
             Start-Sleep -Milliseconds 1250 # Exercise close during speculative shader warmup.
             Lose-Gpu
-            $review.CloseMainWindow()|Out-Null
+            Request-WindowClose
             Check-Closed
             continue
         }
         if($scenario -eq 'clean'){
             Lose-Gpu
             Minimize
-            $review.CloseMainWindow()|Out-Null
+            Request-WindowClose
             Check-Closed
             continue
         }
@@ -113,7 +117,7 @@ try {
             Wait-Until {(Model).state.document_file.modified} 'Controlled stroke did not dirty the document'
             Lose-Gpu
             Minimize
-            $review.CloseMainWindow()|Out-Null
+            Request-WindowClose
             Check-Closed
             continue
         }
