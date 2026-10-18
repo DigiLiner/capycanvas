@@ -235,7 +235,7 @@ extension XCTestCase {
         selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
         let presets = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "brush-"))
         let order = presets.allElementsBoundByIndex.map(\.label)
-        XCTAssertEqual(Array(order.prefix(3)), ["G-Pen", "Rough G-Pen", "Blotty Ink"])
+        XCTAssertEqual(Array(order.prefix(3)), ["G-Pen", "Monoline", "Rough G-Pen"])
         selectPaintPreset("Pen", group: "Pen", preset: "Blotty Ink", in: app)
         XCTAssertTrue(presets.matching(NSPredicate(format: "label == %@", "Blotty Ink")).firstMatch.isSelected)
         XCTAssertEqual(presets.allElementsBoundByIndex.map(\.label), order)

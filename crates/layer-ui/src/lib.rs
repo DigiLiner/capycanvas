@@ -964,7 +964,7 @@ impl CommandId {
             Self::FrequencySeparation => "frequency-separation",
         })
     }
-    pub const TOOLS: [Self; 35] = [
+    pub const TOOLS: [Self; 36] = [
         Self::SelectionBrush,
         Self::TonalSelect,
         Self::DrawingBrush,
@@ -990,6 +990,7 @@ impl CommandId {
         Self::ColorSelect,
         Self::Move,
         Self::ScaleRotate,
+        Self::EditPoints,
         Self::Crop,
         Self::Hand,
         Self::Zoom,
