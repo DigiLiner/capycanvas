@@ -398,6 +398,9 @@ reopening without slider motion.
 Before pixel assertions or screenshots, await `brush_ready()` for required canvas
 pipelines, then frame and submitted-queue completion. `wait_for_canvas()` waits
 only for submitted work; an idle queue can precede required pipeline readiness.
+Exact comparisons of presented pixels also await `!canvas_work_pending()`. At 50%
+zoom and below the canvas shows reduced composition until idle refinement
+presents the exact result, which can differ by one 8-bit step at a few pixels.
 
 `--layer-relationships` exercises contextual attachment controls, clipping rails,
 effect links, hidden owners, group modes and normalized saved-selection drops.

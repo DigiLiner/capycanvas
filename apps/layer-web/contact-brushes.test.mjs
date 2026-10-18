@@ -33,6 +33,7 @@ export async function checkContactBrushes({call, evaluate, settle}, photoUrl) {
     await action({type:'set_color',rgba:[0.08,0.015,0.25,1]});
     const region = await evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]/2)*r.width/c.viewport[0],y:r.y+(a[1]+a[3]/2)*r.height/c.viewport[1],width:Math.min(500,a[2]*r.width/c.viewport[0]*.7),height:Math.min(280,a[3]*r.height/c.viewport[1]*.55)}})()`);
     const shot = async () => {
+      await wait('!layerApp.app.canvas_work_pending()');
       await settle();
       await evaluate('layerApp.canvas.getContext("webgpu").getConfiguration().device.queue.onSubmittedWorkDone()');
       await settle();
