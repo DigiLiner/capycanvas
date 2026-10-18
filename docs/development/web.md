@@ -307,6 +307,7 @@ reloading its corrupted workspace and preference fixtures.
 | --- | --- |
 | Editor smoke, drawing, pen | `--editor`, `--pen`, `--prediction`, `--raster`, `--color-mixing` |
 | Enclose and Fill | `--enclose-fill` |
+| Vector layers | `--vector-tools` |
 | Canvas bar, notices, footer zoom | `--canvas-bar`, `--notices`, `--zoom-controls`, `--zoom-readout`, `--zoom-tool-settings`, `--move-selection` |
 | Retouching | `--clone`, `--heal` |
 | Color | `--color-panel`, `--color-wheel-resize`, `--color-picker`, `--palettes`, `--scopes-smoke`, `--scopes`, `--tonal-controls` |

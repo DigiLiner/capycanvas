@@ -163,5 +163,9 @@ with the Move frame and cuts a G-Pen line with the eraser. Run them with `--tabl
 `CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)); both write their
 captures to the run's `input` directory. On a tablet,
 `AndroidVectorLayerTest#gPenLinesDrawMoveAndUndoOnVectorLayers` draws, drags and
-undoes a G-Pen line with stylus events in both themes and checks the screen
-([Android](../development/android.md#device-tests)).
+undoes a G-Pen line with stylus events in both themes and checks the screen, and
+`vectorToolsDrawEditRestyleScaleAndErase` walks the same tools as
+`native_vector_tools` ([Android](../development/android.md#device-tests)). On
+Web, `tools/performance/workspace-motion.sh web --vector-tools` walks them with
+pen events in both themes and checks presented pixels; headless Chrome omits
+WebGPU pixels from screenshots, so run it headed ([Web](../development/web.md)).
