@@ -229,7 +229,8 @@ fn layer_pickup_requires_a_resting_row_and_a_handle_for_direct_contacts() {
         assert!(!row.can_drag(kind, false, false));
         assert!(!row.can_drag(kind, true, false));
     }
-    row.can_drop_below = false;
+    row.drag_from_handle = false;
+    row.drag_from_body = &[];
     assert!(!row.can_drag(crate::PointerKind::Mouse, true, true));
     assert!(!row.can_drag(crate::PointerKind::Touch, true, true));
     assert!(!row.can_drag(crate::PointerKind::Pen, true, true));
@@ -242,10 +243,12 @@ fn serialized_layer_body_drag_devices_match_shared_pickup_policy() {
         let verify=|s:&UiSession<Recorder>|{for row in &s.state.layers {
             let serialized = serde_json::to_value(row).unwrap();
             let devices = serialized["drag_from_body"].as_array().unwrap();
-            assert_eq!(devices, &if row.can_drop_below&&!row.locked { vec![serde_json::json!("mouse")] } else { vec![] });
+            let handle = serialized["drag_from_handle"].as_bool().unwrap();
+            assert_eq!(handle, row.can_drop_below&&!row.locked);
+            assert_eq!(devices, &if handle { vec![serde_json::json!("mouse")] } else { vec![] });
             for kind in [crate::PointerKind::Mouse, crate::PointerKind::Touch, crate::PointerKind::Pen] {
                 assert_eq!(devices.contains(&serde_json::to_value(kind).unwrap()), row.can_drag(kind, false, true));
-                assert_eq!(row.can_drag(kind,true,true),row.can_drop_below&&!row.locked);
+                assert_eq!(row.can_drag(kind,true,true),handle);
             }
         }};
         verify(&s);

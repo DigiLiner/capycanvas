@@ -201,7 +201,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
     const revealWidth = () => Math.min(root.clientWidth || 216, get().swipe_actions.length * 72);
     let offset = 0, drag, suppressClick, settling = false;
     const atRest = () => offset === 0 && !settling;
-    record.refreshGrip = () => { grip.hidden = !get().can_drop_below || !atRest(); grip.ariaDisabled = String(get().locked); };
+    const pickup = (handle, device) => handle ? get().drag_from_handle : get().drag_from_body.includes(device);
+    record.refreshGrip = () => { grip.hidden = !get().can_drop_below || !atRest(); grip.ariaDisabled = String(!get().drag_from_handle); };
     const settled = e => {
       if (e.target !== row || e.propertyName !== "transform" || row.getAnimations().some(animation =>
         animation.transitionProperty === "transform" && !["finished", "idle"].includes(animation.playState))) return;
@@ -224,7 +225,8 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       if (suppressClick) { row.removeEventListener("click", suppressClick, true); suppressClick = null; }
       if (e.button || !e.isPrimary || e.target.closest("input") || (!get().can_drop_below && !get().swipe_actions.some(action => action.enabled) && !get().right_swipe)) return;
       drag = { x: e.clientX, y: e.clientY, top: row.getBoundingClientRect().top, pointer: e.pointerId,
-        canDrag: atRest() && get().can_drop_below && !get().locked && (grip.contains(e.target) || get().drag_from_body.includes(e.pointerType)),
+        handle: grip.contains(e.target), device: e.pointerType,
+        canDrag: atRest() && pickup(grip.contains(e.target), e.pointerType),
         direct: e.pointerType !== "mouse" && !grip.contains(e.target), held: false, origin: offset };
       // Follow fast mouse exits before pickup without retargeting ordinary
       // button clicks. Capture the row only once movement becomes a drag.
@@ -258,7 +260,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
         }
         return;
       }
-      if (!drag.canDrag || !atRest() || !get().can_drop_below || get().locked) return;
+      if (!drag.canDrag || !atRest()) return;
       if (!drag.ghost && Math.hypot(e.clientX-drag.x, e.clientY-drag.y) > 6) {
         dismissContext();
         row.setPointerCapture(e.pointerId); drag.ghost = row.cloneNode(true); drag.ghost.classList.add("layer-drag-preview");
@@ -327,6 +329,10 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       }
     };
     record.cancelDrag = () => finish({type:"pointercancel"});
+    record.retireIneligibleDrag = () => {
+      if (!drag?.canDrag || pickup(drag.handle, drag.device)) return;
+      if (drag.ghost) finish({type:"pointercancel"}); else drag.canDrag = false;
+    };
     row.addEventListener("pointerup", finish); row.addEventListener("pointercancel", finish);
     row.addEventListener("lostpointercapture", e => {
       // Transferring implicit touch/pen capture from a grip or child control
@@ -386,7 +392,7 @@ export function createLayerPanel({ app, catalog, state, panel, element, button, 
       place(addPaper);
     } else addPaper.remove();
     state().layers.forEach(layer => {
-      const r = records.get(String(layer.id)); r.layer = layer;
+      const r = records.get(String(layer.id)); r.layer = layer; r.retireIneligibleDrag();
       const {paint_revision,mask_revision,...presentation}=layer;
       const key=JSON.stringify([presentation,view.rename_layer===layer.id],(_,value)=>typeof value==="bigint"?String(value):value);
       // Keep the latest thumbnail revisions above, but retain unchanged row

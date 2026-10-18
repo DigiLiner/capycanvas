@@ -56,7 +56,10 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         return false;
     }
     bool movable(J const& row)const{
-        return flag(row,L"can_drop_below")&&!flag(row,L"locked");
+        if(grip)return flag(row,L"drag_from_handle");
+        auto kind=device==NativeInput::PointerDeviceType::Mouse?L"mouse":device==NativeInput::PointerDeviceType::Pen?L"pen":L"touch";
+        for(auto value:array(row,L"drag_from_body"))if(value.GetString()==kind)return true;
+        return false;
     }
     bool current()const{
         auto owner=view.lock();if(!owner||epoch!=epochOf(owner->data)||!surface.IsLoaded()||list.Visibility()!=Visibility::Visible)return false;
@@ -168,9 +171,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             if(row->renaming||inside(original,row->rename)||inside(original,row->swipeActions)||!row->current())return;
             source=row;id=row->id;epoch=row->epoch;pointer=e.Pointer();device=point.PointerDeviceType();
             grip=inside(original,row->grip);mask=inside(original,row->mask);initialSwipe=row->swipeOffset;
-            auto kind=device==NativeInput::PointerDeviceType::Mouse?L"mouse":device==NativeInput::PointerDeviceType::Pen?L"pen":L"touch";
-            pickup=initialSwipe==0&&movable(row->model())&&grip;
-            if(initialSwipe==0&&movable(row->model()))for(auto value:array(row->model(),L"drag_from_body"))if(value.GetString()==kind)pickup=true;
+            pickup=initialSwipe==0&&movable(row->model());
             for(auto const& [key,other]:owner->rows)if(other!=row)other->swipe(0);
             origin=position=point.Position();initialScroll=list.VerticalOffset();windowHandle=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
             for(auto node=original;node&&node!=surface;node=VisualTreeHelper::GetParent(node))

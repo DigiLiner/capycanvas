@@ -5943,7 +5943,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             group: l.kind() == LayerKind::Group,
             object: l.kind() == LayerKind::Object,
             can_drop_below: can_reorder,
-            drag_from_body: if locked || !can_reorder { &[] } else { &[PointerKind::Mouse] },
+            drag_from_handle: can_reorder && !locked,
+            drag_from_body: if can_reorder && !locked { &[PointerKind::Mouse] } else { &[] },
             depth: self.layer_interaction.depth(doc, id),
             collapsed: self.layer_interaction.collapsed.contains(&id),
             blend: l.blend.code(),
@@ -5988,7 +5989,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 load_selection_tooltip: "Finish Quick Mask and use it as the current selection",
                 editing: true, drawing: true, has_mask: false, mask_enabled: false, mask_linked: false,
                 alpha_locked: false, locked: false, relationship: None, right_swipe: None, pass_through: false, reference: false, group: false, object: false,
-                can_drop_below: false, drag_from_body: &[], depth: 0, collapsed: false, blend: layer_core::LayerBlend::Normal.code(),
+                can_drop_below: false, drag_from_handle: false, drag_from_body: &[], depth: 0, collapsed: false, blend: layer_core::LayerBlend::Normal.code(),
                 blend_label: effects::blend_label(layer_core::LayerBlend::Normal, &self.state.localization).to_string(),
                 paint_revision: self.selection_masks.preview_revision(None), mask_revision: 0, mask_id: None, fill_color: None,
             };

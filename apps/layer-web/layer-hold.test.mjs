@@ -305,6 +305,20 @@ export async function checkLayerHolding({call, evaluate, settle}) {
           await send({type:"invoke",command:"redo"});assert.notDeepEqual(await order(),before);
           await send({type:"invoke",command:"undo"});assert.deepEqual(await order(),before);
         }
+        for (const pointer of ["mouse","pen","touch"]) {
+          device=pointer;
+          await evaluate("document.querySelector('#layer-rows').scrollTop=0");await wait();
+          const from=await rect(`${row} .layer-grip`), to=await rect(`#layer-rows .layer-row[data-layer="${targetId}"]`);
+          await input("down",{x:from.x+from.width/2,y:from.y+from.height/2});
+          await input("move",{x:to.x+to.width/2,y:to.y+to.height-3});
+          assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),1,`${label}/${theme}/${device}: grip pickup before the lock`);
+          await send({type:"layer",action:{op:"lock",id:owner,value:true}});
+          assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),0,`${label}/${theme}/${device}: locking mid-drag retires the preview`);
+          await input("move",{x:to.x+to.width/2,y:to.y+3});
+          assert.equal(await evaluate("document.querySelectorAll('.layer-drag-preview').length"),0,`${label}/${theme}/${device}: a retired drag stays retired`);
+          await input("up");assert.deepEqual(await order(),before,`${label}/${theme}/${device}: a retired drag preserves order`);
+          await send({type:"layer",action:{op:"lock",id:owner,value:false}});
+        }
       }
     };
     const own = Number((await order())[0]);await lockedPickup(own,own,"own");

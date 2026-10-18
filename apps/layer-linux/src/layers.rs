@@ -84,6 +84,20 @@ struct Row {
     meta: gtk::Label,
     lock: gtk::Image,
     grip: gtk::Image,
+    pickups: [Pickup; 2],
+}
+#[derive(Clone)]
+struct Pickup {
+    source: gtk::DragSource,
+    handle: bool,
+    dragging: Rc<Cell<Option<layer_ui::PointerKind>>>,
+}
+impl Pickup {
+    fn retire_if_ineligible(&self, row: &LayerState) {
+        if self.dragging.get().is_some_and(|kind| !row.can_drag(kind, self.handle, true)) {
+            self.source.drag_cancel();
+        }
+    }
 }
 fn button(icon: &str, tooltip: &str) -> gtk::Button {
     let b = crate::icons::button(icon);
@@ -197,7 +211,7 @@ fn row_drag(
     handle: bool,
     owner: &Rc<RefCell<Weak<Workspace>>>,
     context: &gtk::PopoverMenu,
-) -> gtk::DragSource {
+) -> Pickup {
     let source = gtk::DragSource::new();
     let contact = Rc::new(Cell::new(None));
     source.set_actions(gdk::DragAction::MOVE);
@@ -213,11 +227,16 @@ fn row_drag(
             source.set_state(gtk::EventSequenceState::Claimed);
         }
     }));
+    let dragging = Rc::new(Cell::new(None));
     source.connect_end(glib::clone!(#[strong] contact, move |_, _| contact.set(None)));
     source.connect_cancel(glib::clone!(#[strong] contact, move |_, _| contact.set(None)));
+    source.connect_drag_end(glib::clone!(#[strong] dragging, move |_, _, _| dragging.set(None)));
+    source.connect_drag_cancel(glib::clone!(#[strong] dragging, move |_, _, _| { dragging.set(None); false }));
     source.connect_prepare(glib::clone!(
         #[strong]
         contact,
+        #[strong]
+        dragging,
         #[weak]
         item,
         #[weak]
@@ -249,12 +268,13 @@ fn row_drag(
                 .widget()?
                 .compute_point(&root, &gtk::graphene::Point::new(x as f32, y as f32))?;
             source.set_icon(preview.as_ref(), hotspot.x() as i32, hotspot.y() as i32);
+            dragging.set(Some(kind));
             Some(gdk::ContentProvider::for_value(
                 &format!("capy-layer:{}", row.id).to_value(),
             ))
         }
     ));
-    source
+    Pickup { source, handle, dragging }
 }
 /// Snapshot once at pickup; thumbnail refreshes never mutate the drag image.
 pub(crate) fn drag_preview(
@@ -719,7 +739,7 @@ impl LayerPanel {
                 ));
                 name_entry.add_controller(keys);
                 let drag = row_drag(item, &root, &name_stack, false, &owner, &context);
-                root.add_controller(drag);
+                root.add_controller(drag.source.clone());
                 let grip_drag = row_drag(
                     item,
                     &root,
@@ -728,7 +748,7 @@ impl LayerPanel {
                     &owner,
                     &context,
                 );
-                grip.add_controller(grip_drag.clone());
+                grip.add_controller(grip_drag.source.clone());
                 for (widget, is_mask) in [
                     (root.clone().upcast::<gtk::Widget>(), false),
                     (mask.clone().upcast(), true),
@@ -796,7 +816,7 @@ impl LayerPanel {
                     hold.set_propagation_phase(gtk::PropagationPhase::Capture);
                     hold.connect_pressed(hold_menu.clone());
                     widget.add_controller(hold.clone());
-                    if widget == grip { hold.group_with(&grip_drag); }
+                    if widget == grip { hold.group_with(&grip_drag.source); }
                 }
                 let drop = gtk::DropTarget::new(String::static_type(), gdk::DragAction::MOVE);
                 drop.set_preload(true);
@@ -899,6 +919,7 @@ impl LayerPanel {
                         meta,
                         lock,
                         grip,
+                        pickups: [drag, grip_drag],
                     },
                 );
             }
@@ -1611,6 +1632,7 @@ impl Row {
         self.mask_image
             .set_opacity(if s.mask_enabled { 1. } else { 0.4 });
         self.grip.set_visible(s.can_drop_below);
+        for pickup in &self.pickups { pickup.retire_if_ineligible(s); }
         if s.group {
             self.content.add_css_class("layer-folder");
             caption(&self.content, if s.collapsed { copy.layer.expand.as_ref() } else { copy.layer.collapse.as_ref() });

@@ -320,7 +320,7 @@ void LayerRow::refresh(){
     body.ColumnDefinitions().GetAt(10).Width({flag(layer,L"can_drop_below")?14.:12.,GridUnitType::Pixel});
     body.ColumnDefinitions().GetAt(11).Width({flag(layer,L"can_drop_below")?16.:0.,GridUnitType::Pixel});
     grip.Visibility(swipeOffset==0&&flag(layer,L"can_drop_below")?Visibility::Visible:Visibility::Collapsed);
-    grip.Opacity(flag(layer,L"can_drop_below")?.6:0);grip.IsEnabled(flag(layer,L"can_drop_below")&&!flag(layer,L"locked"));
+    grip.Opacity(flag(layer,L"can_drop_below")?.6:0);grip.IsEnabled(flag(layer,L"drag_from_handle"));
     hstring details=str(layer,L"description");
     meta.Text(details);meta.Visibility(details.empty()?Visibility::Collapsed:Visibility::Visible);
     bool editing=renameTarget(data)==id;

@@ -1620,6 +1620,44 @@ class AndroidInteractionTest {
         }
     }
 
+    @Test fun lockedLayerRowsRefusePickupAndRetireActiveDrags() {
+        action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+        fun ids() = state().array("layers").objects().map { it.getLong("id") }
+        fun layer(value: JSONObject) = action(obj("type" to "layer", "action" to value))
+        val original = ids()
+        var edits = 0
+        try {
+            repeat(2) { layer(obj("op" to "new", "group" to false, "clipped" to false)); edits++ }
+            val before = ids()
+            val source = before[0]; val target = before[1]
+            fun lock(value: Boolean) { layer(obj("op" to "lock", "id" to source, "value" to value)); edits++; settle() }
+            for (pointer in pointerTools) for (handle in listOf(true, false)) {
+                tool = pointer
+                val press = bounds("layer-row-$source").let { Offset(if (handle) it.right - 12 * density else it.center.x, it.center.y) }
+                val destination = bounds("layer-row-$target").let { Offset(it.right - 12 * density, it.bottom - 3 * density) }
+                lock(true)
+                event(MotionEvent.ACTION_DOWN, press); event(MotionEvent.ACTION_MOVE, destination); settle()
+                assertFalse("$pointer/handle=$handle: a locked row cannot be picked up", exists("layer-drag-preview"))
+                event(MotionEvent.ACTION_UP); settle()
+                assertEquals("$pointer/handle=$handle: a locked contact preserves order", before, ids())
+                lock(false)
+                if (!handle) continue
+                event(MotionEvent.ACTION_DOWN, press); event(MotionEvent.ACTION_MOVE, destination); settle()
+                assertTrue("$pointer: an unlocked handle picks up", exists("layer-drag-preview"))
+                lock(true)
+                event(MotionEvent.ACTION_MOVE, destination + Offset(0f, -2 * density)); settle()
+                assertFalse("$pointer: locking mid-drag retires the preview", exists("layer-drag-preview"))
+                event(MotionEvent.ACTION_UP); settle()
+                assertEquals("$pointer: a retired drag preserves order", before, ids())
+                lock(false)
+            }
+        } finally {
+            if (contact) event(MotionEvent.ACTION_CANCEL)
+            repeat(edits) { action(obj("type" to "invoke", "command" to "undo")) }
+            assertEquals(original, ids())
+        }
+    }
+
     @Test fun layerBodiesReserveTouchAndPenForScrollingUntilHeld() {
         action(obj("type" to "select_panel_tab","group" to 43,"panel" to "layers"))
         val original=state().array("layers").objects().map { it.getLong("id") }

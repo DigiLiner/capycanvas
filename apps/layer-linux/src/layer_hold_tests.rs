@@ -455,6 +455,17 @@ fn native_layer_hold_input() {
     input.perform(serde_json::json!([{"touch":"move","point":target},{"key":65307,"down":true},{"key":65307,"down":false},{"touch":"up"}]));
     assert_eq!(order(), scrolling_order, "Escape cancels grip native DND");
     assert!(ui_session(&w).engine().can_redo(), "cancelled grip DND preserves history");
+    input.perform(serde_json::json!([{"touch":"down","point":start},{"touch":"move","point":[start[0]-2.,start[1]]},{"touch":"move","point":[start[0]-slop*3.,start[1]]}]));
+    assert!(drag.drag().is_some(), "{theme:?}/{floating}: lock journey starts native touch grip DND");
+    let lock = |value| w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Lock { id: scrolling_order[1], value } });
+    lock(true);
+    pump(120);
+    assert!(drag.drag().is_none(), "{theme:?}/{floating}: locking mid-drag retires native grip DND");
+    input.perform(serde_json::json!([{"touch":"move","point":target},{"touch":"up"}]));
+    pump(180);
+    assert_eq!(order(), scrolling_order, "a retired grip DND preserves order");
+    lock(false);
+    pump(120);
     let b = bounds(&find_css(&row(scrolling_order[1]), "layer-name").unwrap());
     let start = [b.x() + b.width() / 2., b.y() + b.height() / 2.];
     input.perform(

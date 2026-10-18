@@ -55,11 +55,13 @@ their existing rules.
 Pen includes stylus contacts such as Apple Pencil. Do not infer mouse behavior
 from “not touch,” the absence of a touch sequence, or synthesized mouse events
 when the native API provides the original device type.
-Layer snapshots publish `drag_from_body` from Rust. Native clients use those
-device capabilities and latch pickup eligibility at the start of a contact;
-closing a swipe cannot turn that same contact into a reorder.
-Shared pickup validation rejects locked rows, including inherited locks.
-Their body device list is empty; destination drop eligibility stays separate.
+Layer snapshots publish `drag_from_handle` and `drag_from_body` from Rust.
+Every client reads those instead of the row's lock or drop flags, latches
+pickup eligibility at the start of a contact, and retires an active drag preview
+when its row stops being eligible; closing a swipe cannot turn that same contact
+into a reorder. Shared pickup validation rejects locked rows, including inherited
+locks: their handle is disabled and their body device list is empty. Destination
+drop eligibility stays separate.
 
 GTK and Web mouse/pen feedback on hold-to-reorder tiles (including toolbar/drawer
 tiles and collapsed-column panel icons) is the regular pointer before pickup,

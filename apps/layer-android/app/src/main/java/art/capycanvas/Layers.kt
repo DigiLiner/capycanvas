@@ -363,7 +363,8 @@ internal class LayerSwipe {
                 val row=latest
                 val kind=when(down.type) { PointerType.Mouse -> "mouse"; PointerType.Stylus,PointerType.Eraser -> "pen"; else -> "touch" }
                 val handle=resting && gripBounds.contains(origin+down.position)
-                val directDrag=resting && row.getBoolean("can_drop_below") && (handle || kind in row.array("drag_from_body").values())
+                fun pickup(row:JSONObject)=if(handle)row.getBoolean("drag_from_handle") else kind in row.array("drag_from_body").values()
+                var directDrag=resting && pickup(row)
                 if(handle)down.consume()
                 val secondary=currentEvent.buttons.isSecondaryPressed
                 contactMenus=down.type!=PointerType.Mouse || secondary
@@ -406,7 +407,11 @@ internal class LayerSwipe {
                         if(!change.pressed) { released=true; break }
                         continue
                     }
-                    if (!secondary && latest.getBoolean("can_drop_below") && directDrag && resting && !dragging && change.pressed &&
+                    if (directDrag && !pickup(latest)) {
+                        directDrag=false
+                        if (dragging) { drag(origin+down.position,true,true); dragging=false }
+                    }
+                    if (!secondary && directDrag && resting && !dragging && change.pressed &&
                         moved) { dragging=true; holdEligible=false }
                     if (dragging) { change.consume(); drag(origin+change.position,!change.pressed,false); if(!change.pressed)dragging=false }
                     if (longPressed) change.consume()
