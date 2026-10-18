@@ -638,3 +638,4 @@ menu-rotate-and-flip = 旋轉與翻轉
 menu-color-management = 色彩管理
 command-pen-pressure = 筆壓…
 command-smoothing-adjust-speed = 依速度調整
+command-erase-whole-paths = 擦除整條路徑

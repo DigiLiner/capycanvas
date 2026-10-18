@@ -545,3 +545,80 @@ fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
         assert!(decoded.iter().zip(object.chunks()).all(|(a, b)| a.records() == b.records()) && decoded.len() == object.chunks().len(), "every state round-trips exactly");
     }
 }
+
+fn ink(id: u64, anchors: Vec<Anchor>, closed: bool, profile: Option<WidthProfile>) -> PathItem {
+    let mut stroke = Stroke::new(color(0.2), 8.);
+    (stroke.cap, stroke.join, stroke.profile) = (Cap::Round, Join::Round, profile.map(Arc::new));
+    PathItem::new(ItemId(id), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, closed)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])))
+}
+fn samples(path: &PathItem) -> Vec<([f64; 2], [f64; 2])> {
+    let profile = path.style.strokes().next().unwrap().profile.clone();
+    let mut out = Vec::new();
+    let mut base = 0u32;
+    for subpath in path.geometry.subpaths() {
+        for (i, segment) in subpath.segments().enumerate() {
+            for k in 0..=200 { let t = f64::from(k) / 200.; out.push((segment.point(t), profile.as_ref().map_or([1.; 2], |p| p.at(base + i as u32, t)))); }
+        }
+        base += subpath.segment_count() as u32;
+    }
+    out
+}
+
+#[test]
+fn erasing_cuts_centerlines_into_pieces_that_keep_their_shape_and_widths() {
+    let curve = vec![
+        Anchor::new([0., 0.], [0.; 2], [30., -40.], AnchorKind::CORNER),
+        Anchor::new([100., 0.], [-30., -30.], [30., 30.], AnchorKind::SYMMETRIC),
+        Anchor::new([200., 40.], [-20., 0.], [0.; 2], AnchorKind::CORNER),
+    ];
+    let profile = WidthProfile::new(vec![WidthKnot::new(0, 0., 0.1, 0.2), WidthKnot::new(0, 0.7, 1., 0.8), WidthKnot::new(1, 0.4, 0.5, 1.), WidthKnot::new(1, 1., 0.2, 0.1)]).unwrap();
+    let path = ink(1, curve, false, Some(profile));
+    let original = samples(&path);
+    let eraser = Eraser { from: [100., -40.], to: [100., 40.], radius: 6. };
+    let pieces = path.erased(&eraser).expect("the eraser crosses the path");
+    assert_eq!(pieces.len(), 2, "one crossing leaves two pieces");
+    for piece in &pieces {
+        piece.validate().unwrap();
+        for (point, width) in samples(piece) {
+            let (nearest, expected) = original.iter().min_by(|a, b| { let d = |q: &[f64; 2]| (q[0] - point[0]).hypot(q[1] - point[1]); d(&a.0).total_cmp(&d(&b.0)) }).unwrap();
+            assert!((nearest[0] - point[0]).hypot(nearest[1] - point[1]) < 0.5, "piece points lie on the original curve");
+            assert!((width[0] - expected[0]).abs() < 0.02 && (width[1] - expected[1]).abs() < 0.02, "widths follow the original profile: {width:?} vs {expected:?}");
+            assert!(eraser.from[0] - point[0] >= 6. - 1e-3 || point[0] - eraser.from[0] >= 6. - 1e-3, "nothing inside the eraser remains");
+        }
+    }
+    assert!(path.erased(&Eraser { from: [400., 0.], to: [400., 10.], radius: 6. }).is_none(), "a miss leaves the path alone");
+    assert_eq!(path.erased(&Eraser { from: [-10., 0.], to: [210., 20.], radius: 80. }), Some(Vec::new()), "covering everything removes the path");
+
+    let square = ink(2, [[0., 0.], [50., 0.], [50., 50.], [0., 50.]].map(Anchor::corner).to_vec(), true, None);
+    let opened = square.erased(&Eraser { from: [25., -5.], to: [25., 5.], radius: 3. }).unwrap();
+    assert_eq!(opened.len(), 1, "cutting a closed path once opens it");
+    let subpath = &opened[0].geometry.subpaths()[0];
+    assert!(!subpath.closed);
+    assert_eq!(subpath.len(), 6, "the open piece runs from the cut through every corner back to the cut");
+    assert!((subpath.anchor(0).point()[0] - 28.).abs() < 1e-3 && (subpath.anchor(5).point()[0] - 22.).abs() < 1e-3);
+
+    let compound = PathItem::new(ItemId(3), Arc::new(PathGeometry::new(vec![
+        Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([100., 0.])], false),
+        Subpath::new(&[Anchor::corner([0., 50.]), Anchor::corner([100., 50.])], false),
+    ]).unwrap()), square.style.clone());
+    let cut = compound.erased(&Eraser { from: [50., -5.], to: [50., 5.], radius: 3. }).unwrap();
+    assert_eq!(cut.len(), 1, "a compound path stays one path");
+    assert_eq!(cut[0].geometry.subpaths().len(), 3);
+}
+
+#[test]
+fn erasing_a_layer_splits_or_removes_only_touched_paths_with_fresh_ids() {
+    let object = VectorObject::from_records((1..=100).map(|i| Record::Path(plain_line(i, [0., i as f64 * 10.], [200., i as f64 * 10.], 2.))).collect());
+    let mut index = VectorIndex::default();
+    let eraser = Eraser { from: [100., 5.], to: [100., 52.], radius: 4. };
+    let near = index.near(&object, eraser.bounds());
+    let split = object.erase(&near, &eraser, false).unwrap();
+    split.validate().unwrap();
+    assert_eq!(split.path_count(), 105, "five crossed lines split in two");
+    let order: Vec<u64> = split.paths().map(|(_, p)| p.id.0).take(11).collect();
+    assert_eq!(order[..2], [1, order[1]], "a split keeps the first piece's identity in place");
+    assert!(order[1] > 100, "the second piece gets a new identity");
+    let whole = object.erase(&index.near(&object, eraser.bounds()), &eraser, true).unwrap();
+    assert_eq!(whole.path_count(), 95, "Whole Path removes every touched path");
+    assert!(object.erase(&index.near(&object, [500., 500., 510., 510.]), &Eraser { from: [505., 505.], to: [505., 505.], radius: 5. }, false).is_none());
+}

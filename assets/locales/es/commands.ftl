@@ -642,3 +642,4 @@ menu-rotate-and-flip = Girar y voltear
 menu-color-management = Gestión del color
 command-pen-pressure = Presión del lápiz…
 command-smoothing-adjust-speed = Ajustar por velocidad
+command-erase-whole-paths = Borrar trazados completos

@@ -17,7 +17,7 @@ type SelectionBounds = (VectorObject, Arc<BTreeSet<ItemId>>, Option<[f64; 4]>);
 pub(super) struct VectorMoves {
     gesture: Option<Gesture>,
     bounds: RefCell<Option<SelectionBounds>>,
-    index: VectorIndex,
+    pub(super) index: VectorIndex,
 }
 
 impl<R: CanvasRenderer> UiSession<R> {

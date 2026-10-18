@@ -641,3 +641,4 @@ menu-rotate-and-flip = Ruota e rifletti
 menu-color-management = Gestione del colore
 command-pen-pressure = Pressione della penna…
 command-smoothing-adjust-speed = Regola in base alla velocità
+command-erase-whole-paths = Cancella tracciati interi

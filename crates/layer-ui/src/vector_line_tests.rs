@@ -58,7 +58,7 @@ fn press(s: &mut UiSession<Recorder>, first: u64, points: &[Point]) {
 }
 
 #[test]
-fn vector_layers_take_vector_brushes_refuse_erasing_and_refresh_their_thumbnail() {
+fn the_eraser_cuts_or_removes_vector_paths_in_one_undo_step() {
     let (mut s, layer) = vector_session();
     let prohibited = |s: &mut UiSession<Recorder>| { s.cursor_input(Some(event(s, 1, PenPhase::Hover, 0.))); s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)) };
     assert!(!prohibited(&mut s), "G-Pen draws on a vector layer");
@@ -66,11 +66,27 @@ fn vector_layers_take_vector_brushes_refuse_erasing_and_refresh_their_thumbnail(
     let before = revision(&s);
     draw_line(&mut s, 1, 30);
     assert_ne!(revision(&s), before, "a new path refreshes the layer thumbnail");
+    let drawn = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let subpath = &drawn.paths().next().unwrap().1.geometry.subpaths()[0];
+    let middle = subpath.segment(subpath.segment_count() / 2).point(0.5);
     invoke(&mut s, CommandId::Eraser);
-    assert!(prohibited(&mut s), "erasing paths is not available");
-    draw_line(&mut s, 100, 30);
-    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 1, "the eraser draws no path");
-    assert!(s.state.notice.is_some());
+    s.dispatch(UiAction::SetBrushSize { value: 8. }).unwrap();
+    assert!(!prohibited(&mut s), "the eraser works on vector layers");
+    assert!(s.state.tool_actions.iter().any(|action| action.command == CommandId::EraseWholePaths));
+    let across = |s: &UiSession<Recorder>| [-40., 0., 40.].map(|dy| surface_at(s, [middle[0], middle[1] + dy]));
+    let points = across(&s);
+    press(&mut s, 100, &points);
+    let cut = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    assert_eq!(cut.path_count(), 2, "Touched Part splits the line where the eraser crosses it");
+    assert_eq!(s.state.notice, None);
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(5_000_000_000, 5_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &drawn, "one undo step restores the line");
+    invoke(&mut s, CommandId::EraseWholePaths);
+    assert!(s.state.settings.erase_whole_paths);
+    let points = across(&s);
+    press(&mut s, 200, &points);
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 0, "Whole Path removes the touched line");
 }
 
 #[test]

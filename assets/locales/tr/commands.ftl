@@ -639,3 +639,4 @@ menu-rotate-and-flip = Döndür ve Çevir
 menu-color-management = Renk Yönetimi
 command-pen-pressure = Kalem basıncı…
 command-smoothing-adjust-speed = Hıza göre ayarla
+command-erase-whole-paths = Yolların tamamını sil

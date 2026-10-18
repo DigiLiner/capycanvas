@@ -643,3 +643,4 @@ menu-rotate-and-flip = Girar e inverter
 menu-color-management = Gerenciamento de cores
 command-pen-pressure = Pressão da caneta…
 command-smoothing-adjust-speed = Ajustar pela velocidade
+command-erase-whole-paths = Apagar caminhos inteiros

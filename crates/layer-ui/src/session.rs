@@ -966,14 +966,11 @@ impl<R: CanvasRenderer> UiSession<R> {
         let Some(event) = self.cursor.event else {
             return false;
         };
-        let erasing = self.state.brush.tool == Tool::Eraser
-            || self.state.colors.transparent()
-            || event.tool == layer_engine::ToolKind::Eraser
-            || event.flags.contains(layer_engine::SampleFlags::INVERTED);
+        let erasing = self.state.brush.tool == Tool::Eraser || self.state.colors.transparent() || self.erasing_event(&event);
         let painting = self.layer_interaction.tool == LayerCanvasTool::Paint || self.selection_brush_active();
         let blocked = if self.selection_masks.target().is_some() { self.mask_brush_reason().is_some() }
             else { self.layer_interaction.tool.draws()
-            && if painting { self.engine.document().drawing_target().is_none() && self.vector_drawing_layer().is_none() }
+            && if painting { self.engine.document().drawing_target().is_none() && self.vector_drawing_layer().is_none() && self.vector_erasing_layer(erasing).is_none() }
                 else { self.engine.document().drawing_content().is_none() } };
         let contact = self.interaction.pointer.is_some_and(|p| p.paint);
         let mode = if !painting && self.state.settings.cursor.has_tool() {
@@ -2622,12 +2619,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::SmoothingAdjustSpeed => {
                 self.smoothing_available()
             }
+            CommandId::EraseWholePaths => self.vector_erasing_layer(false).is_some(),
             _ => true,
         };
         let selection = self.layer_interaction.tool.selection_tool();
         let selection_mode = self.effective_selection_mode();
         let selected = (id == CommandId::CenterZoomClicks && self.state.settings.zoom_tool.center_clicked_point)
             || (id == CommandId::SmoothingAdjustSpeed && self.engine.configured_brush().stabilization.adjust_by_speed)
+            || (id == CommandId::EraseWholePaths && self.state.settings.erase_whole_paths)
             || (id == CommandId::QuickMask && self.selection_masks.quick())
             || (id == CommandId::SelectionOutline && self.selection_tools.options.display.outline)
             || (id == CommandId::MaskOverlay && self.selection_tools.options.display.overlay)
@@ -4147,6 +4146,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.input_pending = true;
             return Ok(());
         }
+        if self.vector_lines.erasing() || (event.phase == PenPhase::Down && self.vector_erasing_layer(self.erasing_event(&event)).is_some()) {
+            if let Err(error) = self.vector_erase_pen(event) { self.notify(error); }
+            self.input_pending = true;
+            return Ok(());
+        }
         if self.vector_lines.active() || (event.phase == PenPhase::Down && self.vector_drawing_layer().is_some()) {
             if let Err(error) = self.vector_line_pen(event) { self.notify(error); }
             self.input_pending = true;
@@ -4851,6 +4855,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.edit_brush(tool_settings::COLOR_MIXING, f32::from(space as u8))?;
                 Ok((BRUSH, false))
             }
+            CommandId::EraseWholePaths => {
+                self.state.settings.erase_whole_paths ^= true;
+                Ok((SETTINGS | BRUSH | COMMANDS, false))
+            }
             CommandId::SmoothingAdjustSpeed => {
                 let value = f32::from(u8::from(!self.engine.configured_brush().stabilization.adjust_by_speed));
                 self.edit_brush(tool_settings::SMOOTHING_SPEED, value)?;
@@ -5519,12 +5527,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             let moving = tool == LayerCanvasTool::Move;
             let guides = matches!(tool, LayerCanvasTool::Ruler { .. }) || (moving && self.selected_ruler().is_some());
             let mixing = tool == LayerCanvasTool::Paint && tool_settings::mixes_color(self.engine.configured_brush());
+            let erasing_paths = tool == LayerCanvasTool::Paint && self.vector_erasing_layer(false).is_some();
             moving
                 .then_some(CommandId::MoveLeaveCopy)
                 .into_iter()
                 .chain(moving.then_some(CommandId::TransformSnapping))
                 .chain(guides.then_some([CommandId::ShowRulers, CommandId::SnapRulers, CommandId::DeleteRuler]).into_iter().flatten())
                 .chain(mixing.then_some(tool_settings::COLOR_MIXING_COMMANDS).into_iter().flatten())
+                .chain(erasing_paths.then_some(CommandId::EraseWholePaths))
                 .map(|command| ToolSettingAction {
                     command,
                     checkable: command.is_toggle(),

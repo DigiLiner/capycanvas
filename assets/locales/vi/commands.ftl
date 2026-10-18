@@ -640,3 +640,4 @@ menu-rotate-and-flip = Xoay và lật
 menu-color-management = Quản lý màu
 command-pen-pressure = Lực nhấn bút…
 command-smoothing-adjust-speed = Điều chỉnh theo tốc độ
+command-erase-whole-paths = Xóa toàn bộ đường

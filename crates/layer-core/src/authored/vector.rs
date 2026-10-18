@@ -2,7 +2,9 @@ use super::{Affine64, PortableId, Resource};
 use crate::color::RgbColor;
 use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, OnceLock}};
 
+mod erase;
 mod index;
+pub use erase::Eraser;
 pub use index::VectorIndex;
 
 pub const ANCHOR_RUN: usize = 256;
@@ -647,27 +649,29 @@ impl VectorObject {
     pub fn allocate_id(&self) -> ItemId {
         loop { let id = ItemId::random(); if !self.contains(id) { return id; } }
     }
-    pub fn insert_front(&self, records: Vec<Record>) -> Self {
+    pub fn insert_front(&self, records: Vec<Record>) -> Self { self.insert(records, true) }
+    fn insert(&self, records: Vec<Record>, front: bool) -> Self {
         if records.is_empty() { return self.clone(); }
-        let mut edits = BTreeMap::new();
         if self.chunks().is_empty() { return Self::from_records(records); }
-        let first = &self.chunks()[0];
-        if first.records().len() + records.len() <= CHUNK_RECORDS {
-            let mut joined = records;
-            joined.extend(first.records().iter().cloned());
-            edits.insert(0, joined);
-            return self.edit_chunks(edits);
+        let at = if front { 0 } else { self.chunks().len() - 1 };
+        let edge = self.chunks()[at].records();
+        if edge.len() + records.len() <= CHUNK_RECORDS {
+            let joined = if front { records.into_iter().chain(edge.iter().cloned()).collect() } else { edge.iter().cloned().chain(records).collect() };
+            return self.edit_chunks(BTreeMap::from([(at, joined)]));
         }
-        let mut chunks = pack(records);
-        chunks.extend(self.chunks().iter().cloned());
+        let mut chunks = self.chunks().to_vec();
+        if front { chunks.splice(0..0, pack(records)); } else { chunks.extend(pack(records)); }
         Self::from_chunks(chunks)
     }
     pub fn replace(&self, changes: impl IntoIterator<Item = (Position, Option<Record>)>) -> Self {
-        let mut grouped: BTreeMap<u32, Vec<(u32, Option<Record>)>> = BTreeMap::new();
-        for (position, record) in changes { grouped.entry(position.chunk).or_default().push((position.index, record)); }
+        self.splice(changes.into_iter().map(|(position, record)| (position, record.into_iter().collect())).collect())
+    }
+    pub fn splice(&self, changes: BTreeMap<Position, Vec<Record>>) -> Self {
+        let mut grouped: BTreeMap<u32, Vec<(u32, Vec<Record>)>> = BTreeMap::new();
+        for (position, records) in changes { grouped.entry(position.chunk).or_default().push((position.index, records)); }
         let edits = grouped.into_iter().map(|(chunk, changes)| {
-            let mut records: Vec<Option<Record>> = self.chunks()[chunk as usize].records().iter().cloned().map(Some).collect();
-            for (index, record) in changes { records[index as usize] = record; }
+            let mut records: Vec<Vec<Record>> = self.chunks()[chunk as usize].records().iter().cloned().map(|record| vec![record]).collect();
+            for (index, replacement) in changes { records[index as usize] = replacement; }
             (chunk as usize, records.into_iter().flatten().collect())
         }).collect();
         self.edit_chunks(edits)

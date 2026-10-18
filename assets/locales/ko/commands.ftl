@@ -638,3 +638,4 @@ menu-rotate-and-flip = 회전 및 뒤집기
 menu-color-management = 색상 관리
 command-pen-pressure = 필압…
 command-smoothing-adjust-speed = 속도에 따라 조정
+command-erase-whole-paths = 패스 전체 지우기

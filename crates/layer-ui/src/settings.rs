@@ -106,6 +106,8 @@ pub struct Settings {
     pub hold_keys: Option<Vec<crate::shortcuts::HoldKey>>,
     #[serde(skip_serializing_if = "EraserEnd::is_default")]
     pub eraser_end: EraserEnd,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub erase_whole_paths: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keymap: Option<crate::keymaps::KeymapRef>,
     /// Per-preset slider values, shared by every placement of that slider.
@@ -143,6 +145,7 @@ impl Default for Settings {
             hold_keys: None,
             pen_buttons: BTreeMap::new(),
             eraser_end: EraserEnd::default(),
+            erase_whole_paths: false,
             keymap: None,
             slider_bookmarks: BTreeMap::new(),
         }

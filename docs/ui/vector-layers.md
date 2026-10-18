@@ -10,8 +10,18 @@
 Plain round dry brushes, such as G-Pen, draw on a vector layer. While the
 pen is down the line shows as a provisional path; at pen-up it is fitted to
 cubic segments with a pressure width profile and added as one path in one undo
-step. The eraser and other brushes refuse the stroke with a notice, and the
-canvas cursor shows the refusal before contact.
+step. Other brushes refuse the stroke with a notice, and the canvas cursor shows
+the refusal before contact.
+
+## Erasing
+
+The Eraser, transparent paint and the pen's eraser end erase paths on a vector
+layer. By default the eraser cuts paths where it covers their centerline: the
+part under the eraser goes, the rest keeps its exact curve and widths, and a cut
+closed path becomes open. The first piece keeps the path's identity and the
+others get new ones. With **Erase whole paths** checked in the tool options, the
+eraser removes every path it touches instead. The eraser's width is the brush
+size, and one stroke is one undo step.
 
 ## Moving paths
 
@@ -32,8 +42,9 @@ restored with a session.
 
 ## Tests
 
-`move_tool_selects_drags_and_deletes_vector_paths` in
-[`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) covers
+`move_tool_selects_drags_and_deletes_vector_paths` and
+`the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
+[`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two
 G-Pen lines with tablet input, drags one, undoes, selects the other with a
 marquee and deletes it. Run it with `--tablet` once per theme through

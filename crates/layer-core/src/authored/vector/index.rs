@@ -1,4 +1,4 @@
-use super::{ItemId, PathItem, Resource, VectorChunk, VectorObject};
+use super::{ItemId, PathItem, Position, Resource, VectorChunk, VectorObject};
 use std::{collections::{BTreeSet, HashMap, HashSet}, sync::Arc};
 
 const CELL: f64 = 256.;
@@ -84,6 +84,10 @@ impl VectorIndex {
         self.update(object);
         self.candidates([point[0] - slop, point[1] - slop, point[0] + slop, point[1] + slop]).into_iter()
             .filter_map(|at| self.path(at)).find(|path| path.hit(point, slop)).map(|path| path.id)
+    }
+    pub fn near(&mut self, object: &VectorObject, area: [f64; 4]) -> Vec<Position> {
+        self.update(object);
+        self.candidates(area).into_iter().map(|(chunk, index)| Position { chunk, index }).collect()
     }
     pub fn within(&mut self, object: &VectorObject, area: [f64; 4]) -> BTreeSet<ItemId> {
         self.update(object);

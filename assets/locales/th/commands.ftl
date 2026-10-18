@@ -638,3 +638,4 @@ menu-rotate-and-flip = หมุนและพลิก
 menu-color-management = การจัดการสี
 command-pen-pressure = แรงกดปากกา…
 command-smoothing-adjust-speed = ปรับตามความเร็ว
+command-erase-whole-paths = ลบเส้นพาธทั้งเส้น

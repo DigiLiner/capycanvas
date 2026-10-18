@@ -642,3 +642,4 @@ menu-rotate-and-flip = Drehen und spiegeln
 menu-color-management = Farbverwaltung
 command-pen-pressure = Stiftdruck…
 command-smoothing-adjust-speed = Nach Geschwindigkeit anpassen
+command-erase-whole-paths = Ganze Pfade radieren
