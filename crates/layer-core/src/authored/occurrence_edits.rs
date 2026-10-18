@@ -94,7 +94,7 @@ impl Document {
         let scene=self.scene();let Some(original)=scene.occurrence(id) else{return Some(DocumentError::MissingOccurrence(id));};
         if !matches!(original.content,OccurrenceContent::Stack(_)){return Some(invalid("Choose a group"));}
         if self.is_locked(id){return Some(DocumentError::ProtectedOccurrence(id));}
-        if blend==crate::LayerBlend::PassThrough && (original.attachment!=Attachment::None || !scene.attached_effects(id).is_empty() || scene.order().iter().any(|h|scene.clipping_base(*h)==Some(id))) {return Some(invalid("Release the group's clipping and effects before using Pass Through"));}
+        if blend==crate::LayerBlend::PassThrough && (original.attachment!=Attachment::None || !scene.attached_effects(id).is_empty() || !scene.clipped(id).is_empty()) {return Some(invalid("Release the group's clipping and effects before using Pass Through"));}
         None
     }
     pub fn group_blend_edit(&self,id:OccurrenceHandle,blend:crate::LayerBlend)->Result<Edit,DocumentError> {

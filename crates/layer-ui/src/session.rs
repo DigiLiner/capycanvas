@@ -5902,7 +5902,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let can_reorder = !layer_core::paper::is_paper_layer(scene, id);
             let drawing = drawing_owner == Some(id) || self.selection_masks.target() == Some(layer_core::SelectionTarget::Saved(id));
             let can_delete = doc.can_delete_layers(&if collapsed.contains(&id) {
-                scene.order().iter().copied().filter(|h| *h == id || layer_core::descends_from(scene, *h, Some(id))).collect()
+                std::iter::once(id).chain(scene.descendants(id)).collect::<Vec<_>>()
             } else { vec![id] });
             LayerState {
             id: occurrence_token(id),

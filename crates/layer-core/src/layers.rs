@@ -492,8 +492,10 @@ impl SceneView<'_> {
         scene.order().iter().copied().filter(|h|selected.contains(h)).collect()
     }
     pub fn layer_subtrees(self, roots: &[OccurrenceHandle]) -> BTreeSet<OccurrenceHandle> {
-        let scene=self;
-        scene.order().iter().copied().filter(|h|roots.contains(h)||roots.iter().any(|r|descends_from(scene,*h,Some(*r)))||scene.effect_owner(*h).is_some_and(|owner|roots.contains(&owner)||roots.iter().any(|r|descends_from(scene,owner,Some(*r))))).collect()
+        let mut members:BTreeSet<_>=roots.iter().copied().filter(|h|self.position(*h).is_some()).flat_map(|h|std::iter::once(h).chain(self.descendants(h))).collect();
+        let effects:Vec<_>=members.iter().flat_map(|h|self.attached_effects(*h).iter().copied()).collect();
+        members.extend(effects);
+        members
     }
     pub fn composition_members(self,roots:&[OccurrenceHandle])->BTreeSet<OccurrenceHandle> {
         let scene=self;let mut members:BTreeSet<_>=roots.iter().copied().collect();
@@ -826,12 +828,10 @@ impl Document {
         }
         let promote: BTreeSet<_> = ids.iter().copied().filter(|id|
             scene.occurrence(*id).is_some_and(|o| o.kind() == LayerKind::Group)
-                && scene.order().iter().any(|h| !ids.contains(h) && descends_from(scene, *h, Some(*id)))).collect();
+                && scene.descendants(*id).iter().any(|h| !ids.contains(h))).collect();
         for &id in &promote { self.validate_ungroup(id, &ids, &promote)?; }
-        for &id in scene.order() {
-            if !ids.contains(&id) && scene.attachment_target(id).is_some_and(|target| ids.contains(&target)) && self.is_locked(id) {
-                return Err(DocumentError::ProtectedOccurrence(id));
-            }
+        for &target in &ids {
+            if let Some(id) = scene.attached(target).find(|id| !ids.contains(id) && self.is_locked(*id)) { return Err(DocumentError::ProtectedOccurrence(id)); }
         }
         Ok((ids, promote))
     }
@@ -940,7 +940,7 @@ impl Document {
             || !(group.passes_through() || group.blend == LayerBlend::Normal)
             || group.attachment != crate::Attachment::None && !scene.attachment_target(id).is_some_and(|h| deleted.contains(&h))
             || scene.attached_effects(id).iter().any(|h| !deleted.contains(h))
-            || scene.order().iter().any(|h| !deleted.contains(h) && scene.clipping_base(*h) == Some(id)) {
+            || scene.clipped(id).iter().any(|h| !deleted.contains(h)) {
             return Err(DocumentError::InvalidLayerOperation("Remove the group mask, blend and opacity effects before ungrouping"));
         }
         let mut children = scene.children(Some(id)).to_vec();

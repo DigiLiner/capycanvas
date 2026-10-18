@@ -16,6 +16,7 @@ pub struct SceneIndex {
     effect_owners:Vec<Option<OccurrenceHandle>>,
     attached_effects:Vec<Vec<OccurrenceHandle>>,
     clipping_bases:Vec<Option<OccurrenceHandle>>,
+    clipped:Vec<Vec<OccurrenceHandle>>,
     authored_ids:BTreeSet<PortableId>,
 }
 impl SceneIndex {
@@ -25,7 +26,7 @@ impl SceneIndex {
         if !matches!(shape.validate(root,Default::default())?,Support::Editable){return Err("Artwork is outside the editable subset".into());}
         let n=artwork.occurrences.capacity();
         let mut index=Self {order:Vec::with_capacity(artwork.occurrences.len()),positions:vec![None;n],parents:vec![None;n],containing:vec![None;n],
-            paint_uses:vec![None;artwork.paint.capacity()],object_uses:vec![None;artwork.objects.capacity()],vector_uses:vec![None;artwork.vectors.capacity()],coverage_uses:vec![None;artwork.coverage.capacity()],selection_uses:vec![None;artwork.selections.capacity()],effect_owners:vec![None;n],attached_effects:vec![Vec::new();n],clipping_bases:vec![None;n],
+            paint_uses:vec![None;artwork.paint.capacity()],object_uses:vec![None;artwork.objects.capacity()],vector_uses:vec![None;artwork.vectors.capacity()],coverage_uses:vec![None;artwork.coverage.capacity()],selection_uses:vec![None;artwork.selections.capacity()],effect_owners:vec![None;n],attached_effects:vec![Vec::new();n],clipping_bases:vec![None;n],clipped:vec![Vec::new();n],
             authored_ids:shape.objects.keys().chain(artwork.extensions.records.keys()).copied().chain(std::iter::once(artwork.id)).collect()};
         fn visit(a:&Artwork,index:&mut SceneIndex,stack:StackHandle,parent:Option<OccurrenceHandle>)->Result<(),String>{
             for &h in &a.stacks.get(stack).ok_or("Missing stack")?.entries {
@@ -54,7 +55,9 @@ impl SceneIndex {
                     Attachment::Clip=>{
                         if adjustment||o.passes_through(){return Err("Only isolated content can clip".into());}
                         if barrier{return Err("A stack adjustment cannot split a clipping run".into());}
-                        index.clipping_bases[h.index() as usize]=Some(base.ok_or("Clipped content needs paint or an isolated group below")?);
+                        let target=base.ok_or("Clipped content needs paint or an isolated group below")?;
+                        index.clipping_bases[h.index() as usize]=Some(target);
+                        index.clipped[target.index() as usize].push(h);
                         owner=eligible.then_some(h);
                     }
                     Attachment::None=>{
@@ -206,7 +209,15 @@ impl<'a> SceneView<'a> {
     #[inline]
     pub fn clipping_base(self,h:OccurrenceHandle)->Option<OccurrenceHandle>{self.index.clipping_bases.get(h.index() as usize).copied().flatten()}
     #[inline]
+    pub fn clipped(self,base:OccurrenceHandle)->&'a [OccurrenceHandle]{self.index.clipped.get(base.index() as usize).map_or(&[],Vec::as_slice)}
+    #[inline]
     pub fn attachment_target(self,h:OccurrenceHandle)->Option<OccurrenceHandle>{self.effect_owner(h).or_else(||self.clipping_base(h))}
+    pub fn attached(self,target:OccurrenceHandle)->impl Iterator<Item=OccurrenceHandle>+'a{self.attached_effects(target).iter().chain(self.clipped(target)).copied()}
+    pub fn descendants(self,h:OccurrenceHandle)->Vec<OccurrenceHandle>{
+        let mut found=Vec::new();let mut pending=self.children(Some(h)).to_vec();
+        while let Some(child)=pending.pop(){found.push(child);pending.extend_from_slice(self.children(Some(child)));}
+        found
+    }
     #[inline]
     pub fn eligible_target(self,h:OccurrenceHandle)->bool{self.occurrence(h).is_some_and(|o|matches!(o.content,OccurrenceContent::Paint(_)|OccurrenceContent::Objects(_)|OccurrenceContent::Vector(_)|OccurrenceContent::Stack(_))&&!o.passes_through())}
     #[inline]
