@@ -213,6 +213,18 @@ try {
     $thumbnail=Control "layer-$($paper.id)-thumbnail" -Arranged
     @{layer_id=$paper.id;paint_revision=$thumbnailRevision;artwork=$thumbnailDocument;camera=$thumbnailCamera;status=$thumbnail.Current.ItemStatus;runtime_id=($thumbnail.GetRuntimeId() -join ':');bounds=$thumbnail.Current.BoundingRectangle;visual_review='Required: Ready does not establish thumbnail pixel content'}|ConvertTo-Json -Depth 12|Set-Content (Join-Path $run 'paper-thumbnail-proof.json')
     Capture "paper-thumbnail-ready-$Theme" -WithModel -Composed
+    $origin=[CapyWindowCapture+Point]::new()
+    if(![CapyWindowCapture]::ClientToScreen($drawingWindow,[ref]$origin)){throw 'Paper thumbnail client origin unavailable'}
+    $bounds=$thumbnail.Current.BoundingRectangle
+    $expected=[Drawing.ColorTranslator]::FromHtml('#DCECFB')
+    $shot=[Drawing.Bitmap]::new((Join-Path $run "paper-thumbnail-ready-$Theme.png"))
+    try{
+        foreach($fx in @(.2,.3,.38)){foreach($fy in @(.2,.3,.38)){
+            $x=[int]($bounds.X+$bounds.Width*$fx)-$origin.x;$y=[int]($bounds.Y+$bounds.Height*$fy)-$origin.y
+            $pixel=$shot.GetPixel($x,$y)
+            if([Math]::Abs([int]$pixel.R-$expected.R) -gt 2 -or [Math]::Abs([int]$pixel.G-$expected.G) -gt 2 -or [Math]::Abs([int]$pixel.B-$expected.B) -gt 2){throw "The Ready Paper thumbnail did not show its fill at ($x,$y): $($pixel.R),$($pixel.G),$($pixel.B)"}
+        }}
+    }finally{$shot.Dispose()}
 
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}

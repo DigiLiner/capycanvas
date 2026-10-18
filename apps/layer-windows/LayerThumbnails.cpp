@@ -36,6 +36,7 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
                 images.emplace(id,Tile{L"",readback.item.target,BitmapUpload::Create(),++clock});
             }
             auto& tile=images.at(id);tile.key=L"";auto bitmap=tile.upload;std::weak_ptr<BitmapUpload> weakBitmap=bitmap;
+            bitmap->Clear();
             bitmap->Submit({BitmapUpload::ReadPacket(packet),readback.offset,8*4096,32,32,true,false,
                 [weak,generation,id,revision,weakBitmap]{
                     auto self=weak.lock();if(!self||self->epoch!=generation)return false;

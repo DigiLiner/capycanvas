@@ -697,7 +697,10 @@ premultiplied BGRA. The UI submits `SoftwareBitmapSource.SetBitmapAsync` and
 resumes after completion without blocking the dispatcher. Document,
 setting and extent changes retire the source and its buffers. Retired buffers
 are not reused while native readers may still hold them. A completed frame from
-the same context may appear while a newer frame is pending.
+the same context may appear while a newer frame is pending. Layer thumbnails
+retire the source for each new revision so retained WinUI fills display the new
+pixels. `exercise-color-editor.ps1` checks the Paper fill in the composed
+thumbnail outside its type badge; Ready alone does not check pixel content.
 Log counts shares the compact footer
 with precision and clipping controls. The `layout-dark` and `layout-light` theme
 variants check both scope panels in every registered language at 1100 and 1500
