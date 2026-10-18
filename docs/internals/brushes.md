@@ -303,7 +303,10 @@ the GPU finishes it. A frame therefore consumes input only until its committed
 contacts reach 512 such passes; a slower device keeps the rest of the input queued
 for the next frame instead of building one frame from its whole backlog. Watercolor
 transport runs once per frame, so a device that falls behind now runs it as often
-as one that keeps up.
+as one that keeps up. A replay that repaints a whole stroke, after a late sensor
+correction, an end taper or a renderer rebuild, is submitted in windows of at most
+512 passes that never split one watercolor update; the layer is captured once,
+after the last window, so the result matches a single-frame replay.
 
 These choices target both performance and energy use. On mobile hardware, memory
 traffic and CPU/driver overhead contribute to power consumption alongside GPU

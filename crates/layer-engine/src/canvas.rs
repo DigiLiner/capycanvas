@@ -29,18 +29,17 @@ use std::{collections::VecDeque, fmt, sync::Arc};
 mod corrections;
 #[path = "color_transition.rs"]
 mod color_transition;
-#[path = "bake_steps.rs"]
-mod bake_steps;
+#[path = "frame_steps.rs"]
+mod frame_steps;
 
 struct PreparedFrame {
     reset: bool,
     time: f32,
-    bake: Option<bake_steps::BakeSteps>,
+    steps: Option<frame_steps::FrameSteps>,
 }
 
 const TRANSFORM_HISTORY: usize = 16;
 const INPUT_BATCH: usize = 4096;
-const MATERIAL_PAGE_PASSES_PER_FRAME: u32 = 512;
 const STROKE_POINT_CAPACITY: usize = 65_536;
 const DAB_CAPACITY: usize = 32_768;
 const BATCH_CAPACITY: usize = 64;
@@ -1450,15 +1449,16 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         let time = timestamp_ns.filter(|now| *now != 0).map_or(self.animation_time, |now| {
             self.animation_seed + now.saturating_sub(*self.animation_origin_ns.get_or_insert(now)) as f32 * 1e-9
         });
-        let bake = self.dabs.is_empty().then(|| bake_steps::BakeSteps::new(self.document(), &self.batches)).flatten();
-        self.submit_prepared_frame(PreparedFrame { reset: rebuilt, time, bake })
+        let steps = frame_steps::FrameSteps::new(self.document(), &self.batches, &self.dabs);
+        self.submit_prepared_frame(PreparedFrame { reset: rebuilt, time, steps })
     }
 
     fn submit_prepared_frame(
         &mut self,
         frame: PreparedFrame,
     ) -> Result<(), EngineError<B::Error>> {
-        let step = frame.bake.map(|bake| bake.next(self.document(), &self.batches));
+        let document = self.editor.document();
+        let step = frame.steps.map(|steps| steps.next(document, &self.batches));
         let commit_rasters = step.as_ref().is_none_or(|(_, next)| next.is_none());
         let scene = self.scene_preview.as_ref().map_or_else(|| self.editor.document().scene(), |preview| preview.scene.view());
         let packet = FramePacket {
@@ -1469,7 +1469,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             inspect_mask: self.editor.document().working.inspect_mask,
             selection_overlays: Some(&self.editor.document().working.selection_overlays),
             dabs: &self.dabs,
-            dab_batches: step.as_ref().map_or(&self.batches, |(batch, _)| std::slice::from_ref(batch)),
+            dab_batches: step.as_ref().map_or(&self.batches, |(batches, _)| batches),
             restore_rasters: &self.restore_rasters,
             reset_layers: frame.reset,
             commit_rasters,
@@ -1494,7 +1494,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.metrics.frames = self.metrics.frames.saturating_add(1);
         if result.is_ok() && !commit_rasters {
             self.restore_rasters.clear();
-            self.pending_frame = Some(PreparedFrame { reset: false, time: frame.time, bake: step.unwrap().1 });
+            self.pending_frame = Some(PreparedFrame { reset: false, time: frame.time, steps: step.unwrap().1 });
             return Ok(());
         }
         self.dabs.clear();
@@ -1714,9 +1714,9 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             if matches!(event.phase, PenPhase::Up | PenPhase::Cancel) {
                 break;
             }
-            if self.active_stroke.as_ref().is_some_and(|stroke| sequential_material(stroke.style.execution)) {
+            if self.active_stroke.as_ref().is_some_and(|stroke| stroke.style.execution != BrushExecution::Dry && !stroke.style.execution.retouches()) {
                 self.advance_finalized_prefix();
-                if persistent_material_page_passes(&self.batches) >= MATERIAL_PAGE_PASSES_PER_FRAME {
+                if frame_steps::material_page_passes(&self.batches) >= frame_steps::MATERIAL_PAGE_PASSES_PER_FRAME {
                     break;
                 }
             }
@@ -2515,27 +2515,6 @@ fn clone_mapping(document: &Document, layer: SourceTarget, retouch: Retouch, off
     retouch.cloning(offset, flip, layer_core::offsets::point(document.target_offset(layer)))
 }
 
-fn persistent_material_page_passes(batches: &[DabBatch]) -> u32 {
-    batches
-        .iter()
-        .filter(|batch| batch.kind == DabBatchKind::Persistent && sequential_material(batch.style.execution))
-        .map(|batch| covered_tiles(batch.damage))
-        .sum()
-}
-
-fn sequential_material(execution: BrushExecution) -> bool {
-    execution != BrushExecution::Dry && !execution.retouches()
-}
-
-fn covered_tiles(rect: Rect) -> u32 {
-    if rect.is_empty() {
-        return 0;
-    }
-    let tile = layer_core::raster::TILE_SIZE as f32;
-    let span = |min: f32, max: f32| ((max / tile).ceil() - (min.max(0.) / tile).floor()).max(0.) as u32;
-    span(rect.min.x, rect.max.x) * span(rect.min.y, rect.max.y)
-}
-
 fn push_batches(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBatch) {
     if batch.style.execution == BrushExecution::Smudge {
         let original_first = batch.first_dab;
@@ -3060,7 +3039,7 @@ mod tests {
             }
             self.preview.clear();
             self.styles.clear();
-            self.material_page_passes = persistent_material_page_passes(packet.dab_batches);
+            self.material_page_passes = frame_steps::material_page_passes(packet.dab_batches);
             for batch in packet.dab_batches {
                 self.styles.push(batch.style.clone());
                 let start = batch.first_dab as usize;
@@ -6369,35 +6348,80 @@ mod tests {
         assert!(engine.backend().preview.is_empty());
     }
 
+    const MATERIAL_STROKE_SAMPLES: usize = 3000;
+
+    fn material_stroke(preset: DefaultBrushPreset, taper: f32) -> (InputProducer<PenEvent>, CanvasEngine<RecordingRenderer>) {
+        let mut brush = default_brush(preset);
+        brush.diameter = 512.;
+        brush.taper.end_distance_diameters = taper;
+        let (producer, mut engine) = engine("material stroke", 4096, 4096);
+        engine.set_brush(brush).unwrap();
+        engine.set_instant_feedback(InstantFeedbackConfig { enabled: true, ..Default::default() }).unwrap();
+        (producer, engine)
+    }
+
+    fn queue_material_samples(producer: &mut InputProducer<PenEvent>, samples: std::ops::Range<usize>) {
+        let count = MATERIAL_STROKE_SAMPLES;
+        for index in samples {
+            let t = index as f32 / (count - 1) as f32;
+            let phase = if index == 0 { PenPhase::Down } else if index + 1 == count { PenPhase::Up } else { PenPhase::Move };
+            let mut sample = event(index as u64 + 1, phase, 256. + 3584. * (t * 3.).fract());
+            sample.surface_position.y = 256. + 3584. * t;
+            producer.push(sample).unwrap();
+        }
+    }
+
+    fn assert_replays_completed_stroke(engine: &CanvasEngine<RecordingRenderer>, preset: DefaultBrushPreset) {
+        let stroke = engine.completed_stroke.as_ref().unwrap();
+        let mut replay = Vec::new();
+        DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
+        assert_eq!(engine.backend().persistent, replay, "{preset:?}");
+    }
+
+    #[test]
+    fn material_replays_are_submitted_in_bounded_windows() {
+        for preset in [DefaultBrushPreset::OpaqueGouache, DefaultBrushPreset::WatercolorWash] {
+            for rebuild in [false, true] {
+                let (mut producer, mut engine) = material_stroke(preset, if rebuild { 0. } else { 1. });
+                let mut clock = MATERIAL_STROKE_SAMPLES as u64;
+                let mut largest = 0;
+                let mut drain = |engine: &mut CanvasEngine<RecordingRenderer>| {
+                    while engine.has_pending_input() || engine.has_pending_document_edits() {
+                        assert!(clock < 10 * MATERIAL_STROKE_SAMPLES as u64, "{preset:?} replay did not finish");
+                        engine.render_frame_at(clock * 1_000_000).unwrap();
+                        largest = largest.max(engine.backend().material_page_passes);
+                        clock += 1;
+                    }
+                };
+                queue_material_samples(&mut producer, 0..MATERIAL_STROKE_SAMPLES / 2);
+                drain(&mut engine);
+                if rebuild {
+                    engine.recover_failed_rasters().unwrap();
+                }
+                queue_material_samples(&mut producer, MATERIAL_STROKE_SAMPLES / 2..MATERIAL_STROKE_SAMPLES);
+                drain(&mut engine);
+                assert!(largest <= 2 * frame_steps::MATERIAL_PAGE_PASSES_PER_FRAME, "{preset:?} rebuild {rebuild}: {largest}");
+                assert_replays_completed_stroke(&engine, preset);
+            }
+        }
+    }
+
     #[test]
     fn material_input_backlog_is_consumed_in_bounded_frames() {
         for preset in [DefaultBrushPreset::OpaqueGouache, DefaultBrushPreset::NaturalBlender, DefaultBrushPreset::WatercolorWash, DefaultBrushPreset::LiquifyPush] {
-            let mut brush = default_brush(preset);
-            brush.diameter = 512.;
-            let (mut producer, mut engine) = engine("material backlog", 4096, 4096);
-            engine.set_brush(brush).unwrap();
-            engine.set_instant_feedback(InstantFeedbackConfig { enabled: true, ..Default::default() }).unwrap();
-            let count = 3000;
-            for index in 0..count {
-                let t = index as f32 / (count - 1) as f32;
-                let phase = if index == 0 { PenPhase::Down } else if index + 1 == count { PenPhase::Up } else { PenPhase::Move };
-                let mut sample = event(index as u64 + 1, phase, 256. + 3584. * (t * 3.).fract());
-                sample.surface_position.y = 256. + 3584. * t;
-                producer.push(sample).unwrap();
-            }
+            let (mut producer, mut engine) = material_stroke(preset, 0.);
+            let count = MATERIAL_STROKE_SAMPLES;
+            queue_material_samples(&mut producer, 0..count);
             let mut frames = 0;
             while engine.completed_stroke.is_none() {
                 assert!(frames < 1000, "{preset:?} backlog did not drain");
                 engine.render_frame_at((count as u64 + frames) * 1_000_000).unwrap();
                 let passes = engine.backend().material_page_passes;
-                assert!(engine.completed_stroke.is_some() || passes <= MATERIAL_PAGE_PASSES_PER_FRAME * 5 / 4, "{preset:?} frame {frames}: {passes}");
+                assert!(engine.completed_stroke.is_some() || passes <= frame_steps::MATERIAL_PAGE_PASSES_PER_FRAME * 5 / 4, "{preset:?} frame {frames}: {passes}");
                 frames += 1;
             }
             assert!(frames > 3, "{preset:?} drained in {frames} frames");
-            let stroke = engine.completed_stroke.as_ref().unwrap();
-            let mut replay = Vec::new();
-            DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
-            assert_eq!(engine.backend().persistent, replay, "{preset:?}");
+            assert_replays_completed_stroke(&engine, preset);
         }
     }
 

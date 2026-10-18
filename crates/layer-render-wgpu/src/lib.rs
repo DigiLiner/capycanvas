@@ -4512,7 +4512,12 @@ impl WgpuRasterizer {
         if let Some(started) = started { cpu_phases[1] = started.elapsed().as_secs_f64() * 1000.; }
         trace_phase.next(c"capy.capture");
         self.telemetry.phase_end(0, &mut encoder);
-        let native_commit = match settled_commit { Some(frame) => Some(frame), None => self.encode_native_rasters(packet.scene, &mut encoder)? };
+        let replay_window = !packet.commit_rasters && packet.dab_batches.iter().any(|batch| batch.kind == DabBatchKind::Persistent);
+        let native_commit = match settled_commit {
+            Some(frame) => Some(frame),
+            None if replay_window => None,
+            None => self.encode_native_rasters(packet.scene, &mut encoder)?,
+        };
         if let Some(started) = started { cpu_phases[2] = started.elapsed().as_secs_f64() * 1000.; }
         if !packet.commit_rasters {
             for (batch,tiles) in original_batches.iter().zip(&batch_tiles).filter(|(b,_)|b.kind!=DabBatchKind::Preview) {
