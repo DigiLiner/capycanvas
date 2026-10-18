@@ -1,23 +1,11 @@
 use super::*;
-use layer_core::color::source::SourceImage;
-use layer_ui::paper_library::{PaperEntry, PaperRequest};
+use layer_host::papers::PaperTask;
+use layer_ui::paper_library::PaperResult;
 use std::{fs::File, mem::ManuallyDrop, os::fd::FromRawFd, path::PathBuf,
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 
-enum PaperResult {
-    Entries(Vec<PaperEntry>),
-    Loaded(String, SourceImage),
-    Imported(u64, String, SourceImage, Vec<PaperEntry>),
-}
 pub struct CapyPaperTask {
-    request: u32,
-    action: Option<PaperRequest>,
-    directory: PathBuf,
-    epoch: u64,
-    document: layer_core::authored::PortableId,
-    image: Option<Arc<SourceImage>>,
-    retained: Vec<layer_core::Image>,
-    localization: Arc<layer_ui::Localizer>,
+    task: PaperTask,
     cancelled: AtomicBool,
     result: Mutex<Option<Result<PaperResult, String>>>,
 }
@@ -27,77 +15,17 @@ impl CapyPaperTask {
         if request != 0 && expected_epoch != session.state().document_file.epoch {
             return Err(layer_ui::DocumentDeliveryCopy::new(session.localization()).change_in_progress.to_string());
         }
-        let action = if request == 0 { None } else {
-            Some(session.state().requests.iter().find_map(|item| match &item.kind {
-                layer_ui::HostRequestKind::Paper { request: action } if item.id == request => Some(action.clone()),
-                _ => None,
-            }).ok_or_else(|| layer_ui::paper_library::PaperLibraryError::Unsupported.message(session.localization()))?)
-        };
-        let image = match &action {
-            Some(PaperRequest::Add { layer, .. }) => session.paper_image(*layer),
-            _ => None,
-        };
-        let retained=if matches!(&action,Some(PaperRequest::Load { .. } | PaperRequest::Import { .. })) {session.paper_sources()}else{Vec::new()};
-        Ok(Self { request, action, directory, epoch: session.state().document_file.epoch,
-            document: session.engine().document().artwork.id, image, retained,
-            localization: session.localization().clone(), cancelled: AtomicBool::new(false), result: Mutex::new(None) })
+        Ok(Self { task: PaperTask::capture(session, (request != 0).then_some(request), directory)?,
+            cancelled: AtomicBool::new(false), result: Mutex::new(None) })
     }
     fn work(&self, fd: i32, name: &str) -> Result<PaperResult, String> {
-        use layer_host::papers;
-        let failed = |error: layer_ui::paper_library::PaperLibraryError| error.message(&self.localization);
-        if self.cancelled.load(Ordering::Relaxed) { return Ok(PaperResult::Entries(papers::list(&self.directory)?)); }
-        Ok(match &self.action {
-            None => PaperResult::Entries(papers::list(&self.directory)?),
-            Some(PaperRequest::Load { id }) => PaperResult::Loaded(id.clone(), papers::canonical_source(id,papers::load(&self.directory,id)?,&self.retained)?),
-            Some(PaperRequest::Import { layer }) => {
-                if fd < 0 { return Err(failed(layer_ui::paper_library::PaperLibraryError::Unsupported)); }
-                let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
-                let mut images = layer_ui::ImageImportBatch::new(Default::default(), layer_core::color::RgbSpace::ProPhoto, Default::default());
-                images.read(layer_core::Cancellable { inner: &*file, cancelled: || self.cancelled.load(Ordering::Relaxed) },
-                    name, &self.cancelled).map_err(|e| e.to_string())?;
-                let (_, source) = images.take_sources(false)?.into_iter().next()
-                    .ok_or_else(|| failed(layer_ui::paper_library::PaperLibraryError::Unsupported))?;
-                let (id, image, entries) = papers::import(&self.directory, &source, name,
-                    &|| self.cancelled.load(Ordering::Relaxed)).map_err(failed)?;
-                let image=papers::canonical_source(&id,image,&self.retained)?;
-                PaperResult::Imported(*layer, id, image, entries)
-            }
-            Some(PaperRequest::Add { name, .. }) => {
-                let image = self.image.as_ref().ok_or_else(|| failed(layer_ui::paper_library::PaperLibraryError::Unsupported))?;
-                PaperResult::Entries(papers::store(&self.directory, image, name).map_err(failed)?.1)
-            }
-            Some(PaperRequest::Rename { id, name }) => PaperResult::Entries(papers::rename(&self.directory, id, name)?),
-            Some(PaperRequest::Delete { id }) => PaperResult::Entries(papers::delete(&self.directory, id)?),
-        })
+        let file = (fd >= 0).then(|| ManuallyDrop::new(unsafe { File::from_raw_fd(fd) }));
+        self.task.work(file.as_deref().map(|file| (file, name)), &self.cancelled)
     }
     fn apply(&self, app: &mut CapyApple) -> Result<(), String> {
-        let mut result = self.result.lock().unwrap_or_else(|e| e.into_inner());
-        let result = result.take().ok_or_else(|| layer_ui::paper_library::PaperLibraryError::Unsupported.message(&self.localization))?;
-        let session = &mut app.host.session;
-        if self.request != 0 && !session.state().requests.iter().any(|item| item.id == self.request) { return Ok(()); }
-        let matches = self.epoch == session.state().document_file.epoch && self.document == session.engine().document().artwork.id;
-        let cancelled = self.cancelled.load(Ordering::Relaxed);
-        let previous = session.state().revision;
-        let applied = match result {
-            Ok(PaperResult::Entries(entries)) => session.set_paper_library(entries).map(Some),
-            Ok(PaperResult::Loaded(id, image)) if !cancelled => session.paper_loaded(&id, image).map(Some),
-            Ok(PaperResult::Imported(layer, id, image, entries)) => {
-                if matches && !cancelled { session.paper_imported(layer, entries, &id, image).map(Some) }
-                else { session.set_paper_library(entries).map(Some) }
-            }
-            Ok(PaperResult::Loaded(..)) => Ok(None),
-            Err(_) if cancelled => Ok(None),
-            Err(error) => Err(error),
-        };
-        let error = match applied {
-            Ok(Some(change)) => { app.host.apply_change(previous, change); None },
-            Ok(None) => None,
-            Err(error) => Some(error),
-        };
-        if self.request != 0 {
-            app.host.dispatch(layer_ui::UiAction::CompleteRequest { id: self.request, error })?;
-        } else if let Some(error) = error { return Err(error); }
-        Ok(())
+        let result = self.result.lock().unwrap_or_else(|e| e.into_inner()).take()
+            .ok_or_else(|| layer_ui::paper_library::PaperLibraryError::Unsupported.message(app.host.session.localization()))?;
+        self.task.apply(&mut app.host, result, self.cancelled.load(Ordering::Relaxed))
     }
 }
 
