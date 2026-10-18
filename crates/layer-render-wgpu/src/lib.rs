@@ -66,11 +66,14 @@ mod object_image_mips;
 mod moving_projection;
 use moving_projection::MovingProjection;
 pub use scene::sources::PreparedSourcePixels as PreparedImagePixels;
-pub use object_image_mips::prepare_image_tile;
+pub use object_image_mips::{prepare_image_tile, prepare_raster_tile};
 pub use object_sampling::prepare_nearest_coordinates;
 #[cfg(target_arch = "wasm32")]
 pub type BrowserImageDecoder = std::rc::Rc<dyn Fn(Arc<layer_core::color::source::SourceImage>, [u32; 2], layer_core::color::RgbSpace)
     -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PreparedImagePixels, String>>>>>;
+#[cfg(target_arch="wasm32")]
+pub type BrowserRasterDecoder = std::rc::Rc<dyn Fn(Arc<layer_core::raster::TileBlob>, layer_core::color::RgbSpace, layer_core::color::RgbSpace)
+    -> std::pin::Pin<Box<dyn std::future::Future<Output=Result<PreparedImagePixels,String>>>>>;
 #[cfg(target_arch="wasm32")]
 pub type BrowserNearestCoordinateDecoder = std::rc::Rc<dyn Fn([f64;6],[u32;2],u32,u32)
     -> std::pin::Pin<Box<dyn std::future::Future<Output=Result<Arc<Vec<u8>>,String>>>>>;
@@ -950,8 +953,11 @@ pub struct WgpuRasterizer {
     moving_images_waiting: bool,
     moving_decode: Option<(layer_core::color::RgbSpace, object_image_mips::MipDecodeQueue)>,
     failed_image_tiles: Vec<moving_projection::FailedImageTile>,
+    failed_raster_tiles: Vec<(std::sync::Weak<layer_core::raster::TileBlob>,layer_core::color::RgbSpace,layer_core::color::RgbSpace,String)>,
     #[cfg(target_arch = "wasm32")]
     browser_image_decoder: Option<BrowserImageDecoder>,
+    #[cfg(target_arch="wasm32")]
+    browser_raster_decoder: Option<BrowserRasterDecoder>,
     #[cfg(target_arch = "wasm32")]
     browser_nearest_coordinate_decoder: Option<BrowserNearestCoordinateDecoder>,
     #[cfg(target_arch = "wasm32")]
@@ -1336,8 +1342,11 @@ impl WgpuRasterizer {
             moving_images_waiting: false,
             moving_decode: None,
             failed_image_tiles: Vec::new(),
+            failed_raster_tiles: Vec::new(),
             #[cfg(target_arch = "wasm32")]
             browser_image_decoder: None,
+            #[cfg(target_arch="wasm32")]
+            browser_raster_decoder: None,
             #[cfg(target_arch = "wasm32")]
             browser_nearest_coordinate_decoder: None,
             #[cfg(target_arch = "wasm32")]
@@ -1759,6 +1768,7 @@ impl WgpuRasterizer {
         };
         startup.compiler.require(&transforms.mesh_pipelines(), startup::BRUSH)
             & startup.compiler.require(self.scene_pipelines.resample.mesh.iter(), startup::BRUSH)
+            & startup.compiler.require(self.scene_pipelines.fine_resample.mesh.iter(), startup::BRUSH)
     }
 
     pub(crate) fn background_pipeline_ready(&self, pipeline: &deferred::Deferred<wgpu::ComputePipeline>) -> bool {
@@ -3332,6 +3342,7 @@ impl WgpuRasterizer {
         if let Some(result) = self.browser_image_result.borrow_mut().take() {
             if let Some((_,queue)) = &mut self.moving_decode { queue.complete_external(result); }
         }
+        if !self.source_tiles.borrow().can_upload_bytes(scene::sources::FLOAT_TILE_BYTES) { return Ok(None); }
         let Some(prepared) = self.moving_decode.as_mut().and_then(|(_,queue)| queue.poll()) else { return Ok(None); };
         let prepared = match prepared {
             object_image_mips::PreparedImageWork::Image(prepared) => prepared,
@@ -3339,20 +3350,31 @@ impl WgpuRasterizer {
                 if let Some(destination) = destination.upgrade() { *destination.lock().unwrap() = Some(pixels); }
                 return Ok(None);
             },
+            object_image_mips::PreparedImageWork::Raster(prepared) => {
+                if prepared.destination!=self.device.working_space() {return Ok(None);}
+                let pixels=match prepared.pixels {
+                    Ok(pixels)=>pixels,
+                    Err(error)=> {
+                        let weak=Arc::downgrade(&prepared.blob);
+                        self.failed_raster_tiles.retain(|(blob,space,destination,_)|blob.strong_count()>0
+                            && !(blob.ptr_eq(&weak) && *space==prepared.space && *destination==prepared.destination));
+                        self.failed_raster_tiles.push((weak,prepared.space,prepared.destination,error));
+                        return Ok(None);
+                    },
+                };
+                scene::Scene::decode_prepared_raster(self,encoder,&prepared.blob,prepared.space,prepared.destination,pixels)?;
+                return Ok(None);
+            },
         };
-        let pixels = match prepared.pixels {
-            Ok(pixels) => pixels,
-            Err(error) => {
-                self.failed_image_tiles.push((prepared.id, Arc::downgrade(&prepared.source), prepared.coordinate, self.device.working_space(), error.clone()));
-                return Err(GpuRasterError::Color(error));
-            }
-        };
+        if !object_image_mips::retain_image_decode(&prepared,self.device.working_space(),&mut self.failed_image_tiles) {return Ok(None);}
+        let pixels=prepared.pixels.map_err(GpuRasterError::Color)?;
         let tile = scene::Scene::decode_prepared(self, encoder, &prepared.source, prepared.coordinate, pixels)?;
         Ok(Some(PreparedImageUpload {id:prepared.id, source:prepared.source, coordinate:prepared.coordinate, tile}))
     }
     pub(crate) fn drain_image_decodes(&mut self, encoder: &mut submission::CommandEncoder) -> Result<(), GpuRasterError> {
         self.drain_image_decode(encoder)?;
-        while self.moving_decode.as_ref().is_some_and(|(_, queue)| queue.ready()) { self.drain_image_decode(encoder)?; }
+        while self.moving_decode.as_ref().is_some_and(|(_, queue)| queue.ready())
+            && self.source_tiles.borrow().can_upload_bytes(scene::sources::FLOAT_TILE_BYTES) { self.drain_image_decode(encoder)?; }
         Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -3381,9 +3403,8 @@ impl WgpuRasterizer {
         #[cfg(target_arch="wasm32")]
         if self.browser_image_decoder.is_none() { return Err(GpuRasterError::Color("Image preparation worker unavailable".into())); }
         let space = self.device.working_space();
-        let weak = Arc::downgrade(&source);
-        if let Some((_,_,_,_,error)) = self.failed_image_tiles.iter().find(|(owner,stored,tile,context,_)| *owner == id && stored.ptr_eq(&weak) && *tile == coordinate && *context == space) {
-            return Err(GpuRasterError::Color(error.clone()));
+        if let Some(error)=object_image_mips::image_decode_failure(&self.failed_image_tiles,id,&source,coordinate,space) {
+            return Err(GpuRasterError::Color(error.to_owned()));
         }
         if self.moving_decode.as_ref().is_some_and(|(context,_)| *context != space) {
             self.moving_decode = None;
@@ -3392,6 +3413,25 @@ impl WgpuRasterizer {
         }
         let requested = self.moving_decode.get_or_insert_with(|| (space, object_image_mips::MipDecodeQueue::new(&self.device))).1.request(id, source, coordinate);
         #[cfg(target_arch = "wasm32")]
+        self.dispatch_browser_image_decode()?;
+        Ok(requested)
+    }
+    pub(crate) fn request_raster_decode(&mut self, blob: Arc<layer_core::raster::TileBlob>, source: layer_core::color::RgbSpace) -> Result<bool, GpuRasterError> {
+        scene::sources::validate_raster(&blob, source)?;
+        #[cfg(target_arch="wasm32")]
+        if self.browser_raster_decoder.is_none() && !self.snapshot_worker { return Err(GpuRasterError::Color("Raster preparation worker unavailable".into())); }
+        let space = self.device.working_space();
+        let weak=Arc::downgrade(&blob);
+        if let Some((_,_,_,error))=self.failed_raster_tiles.iter().find(|(stored,from,to,_)|stored.ptr_eq(&weak) && *from==source && *to==space) {
+            return Err(GpuRasterError::Color(error.clone()));
+        }
+        if self.moving_decode.as_ref().is_some_and(|(context,_)| *context != space) {
+            self.moving_decode = None;
+            #[cfg(target_arch="wasm32")]
+            { self.browser_image_result = Default::default(); self.browser_image_wake = Default::default(); }
+        }
+        let requested = self.moving_decode.get_or_insert_with(|| (space, object_image_mips::MipDecodeQueue::new(&self.device))).1.request_raster(blob, source, space);
+        #[cfg(target_arch="wasm32")]
         self.dispatch_browser_image_decode()?;
         Ok(requested)
     }
@@ -3424,6 +3464,16 @@ impl WgpuRasterizer {
                     Box::pin(async move {
                         let pixels = callback(request.source.clone(),request.coordinate,space).await;
                         object_image_mips::PreparedImageWork::Image(object_image_mips::PreparedMipTile {id:request.id,source:request.source,coordinate:request.coordinate,pixels})
+                    })
+                },
+                object_image_mips::MipDecodeRequest::Raster(request) => {
+                    let callback = self.browser_raster_decoder.clone();
+                    if callback.is_none() && !self.snapshot_worker {return Err(GpuRasterError::Color("Raster preparation worker unavailable".into()));}
+                    let cache=self.device.source_samples.clone();
+                    Box::pin(async move {
+                        let pixels = if let Some(callback)=callback {callback(request.blob.clone(), request.space, request.destination).await}
+                            else {object_image_mips::prepare_raster_tile(&request.blob,request.space,&cache)};
+                        object_image_mips::PreparedImageWork::Raster(object_image_mips::PreparedRasterTile {blob:request.blob,space:request.space,destination:request.destination,pixels})
                     })
                 },
                 object_image_mips::MipDecodeRequest::Coordinates(request) => {
@@ -4030,7 +4080,7 @@ impl WgpuRasterizer {
             let side=if display_request.evaluation==scene::scale::Evaluation::Native {1.} else {f64::from(1u32<<display_request.plan.level)};
             let cold=scene.live_objects_cold(self,packet.scene,bounds,side);
             self.scene=Some(scene);
-            if cold? && self.display_backup.is_none() && !self.object_deferred {
+            if (cold? || display_request.evaluation.fine_capacity().is_some()) && self.display_backup.is_none() && !self.object_deferred {
                 let mut encoder=submission::CommandEncoder::new(&self.device,&Default::default());
                 self.display_backup=self.scale_display.as_ref().and_then(|cache|cache.backup(self,&mut encoder));
                 if self.display_backup.is_some() {encoder.submit(&self.queue);}
@@ -4710,7 +4760,7 @@ impl WgpuRasterizer {
             .is_some_and(|p| p.transform.placement.mesh.is_some())
             && !self.mesh_pipelines_ready();
         if let Some(preview) = self.transform_preview.clone().filter(|_| !self.awaiting_meshes) {
-            let level = self.scale_display.as_ref().filter(|cache| cache.evaluation == scene::scale::Evaluation::Display).map(|cache| cache.plan.level).filter(|level| *level > 0);
+            let level = self.scale_display.as_ref().filter(|cache| cache.evaluation != scene::scale::Evaluation::Native).map(|cache| cache.plan.level).filter(|level| *level > 0);
             let mut transforms = self.transforms.take().expect("retained transform renderer");
             let result = transforms.update_preview(self, &mut encoder, &preview, packet.scene, level);
             self.transforms = Some(transforms);
@@ -4799,7 +4849,9 @@ impl WgpuRasterizer {
                     dirty = dirty.union(pixel_rect(rect, packet.document_extent));
                 }
             }
-            let result = scene.compose(self, packet, &batch_tiles, dirty, &mut encoder, composite_tiles.as_ref());
+            let result = if self.transforms.as_ref().is_some_and(|t|t.waiting_for_display_input(self.scale_display.as_ref().and_then(|cache|cache.evaluation.fine_capacity()))) {
+                Err(GpuRasterError::DeferredObjectWork)
+            } else {scene.compose(self, packet, &batch_tiles, dirty, &mut encoder, composite_tiles.as_ref())};
             self.scene = Some(scene);
             let published=match result {
                 Err(GpuRasterError::DeferredObjectWork)=> {
@@ -4831,6 +4883,7 @@ impl WgpuRasterizer {
             reset || blending_changed, &mut encoder);
         self.navigator = navigator;
         result?;
+        if let Some(transforms)=&mut self.transforms {transforms.finish_frame();}
         let mut refined = false;
         if navigator_revision == self.navigator.revision && dirty.is_empty() && !animated && original_batches.is_empty() && packet.dabs.is_empty()
             && self.background_ready.load(std::sync::atomic::Ordering::Acquire)
@@ -4852,7 +4905,7 @@ impl WgpuRasterizer {
         if self.transform_preview.is_none() && !reset && packet.dabs.is_empty()
             && packet.dab_batches.is_empty() && packet.restore_rasters.is_empty()
             && let Some((layer, selection)) = self.moving_pixels.clone()
-            && let Some(level) = self.scale_display.as_ref().filter(|cache| cache.evaluation == scene::scale::Evaluation::Display).map(|cache| cache.plan.level).filter(|level| *level > 0)
+            && let Some(level) = self.scale_display.as_ref().filter(|cache| cache.evaluation != scene::scale::Evaluation::Native).map(|cache| cache.plan.level).filter(|level| *level > 0)
         {
             let mut transforms = self.transforms.take().unwrap();
             let result = transforms.prepare_standby(self, &mut encoder, packet.scene, layer, &selection, level);
@@ -6491,6 +6544,7 @@ mod lut3d_tests;
 impl WgpuRasterizer {
     pub fn set_snapshot_worker(&mut self, worker: snapshot::BrowserSnapshot) { self.snapshot_worker_callback = Some(worker); }
     pub fn set_browser_image_decoder(&mut self, worker: BrowserImageDecoder) { self.browser_image_decoder = Some(worker); }
+    pub fn set_browser_raster_decoder(&mut self, worker: BrowserRasterDecoder) { self.browser_raster_decoder = Some(worker); }
     #[cfg(target_arch = "wasm32")]
     pub fn set_browser_nearest_coordinate_decoder(&mut self, worker: BrowserNearestCoordinateDecoder) { self.browser_nearest_coordinate_decoder = Some(worker); }
 }

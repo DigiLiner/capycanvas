@@ -1,7 +1,7 @@
 //! Affine, perspective and mesh cut-and-place over a bounded set of immutable
 //! source views. Manual Float32 interpolation applies selection and
 //! premultiplied color together.
-use crate::submission::ColorPass;
+use crate::{submission::ColorPass, GpuRasterError};
 use super::{Deferred, PipelineDevice, Uploads};
 use layer_core::{ImageTransform, Interpolation, Projective};
 
@@ -30,6 +30,16 @@ pub(super) struct TransformTile<'a> {
 
 pub struct TransformSource {
     binding: wgpu::BindGroup,
+}
+
+pub(super) struct IdentityDisplay<'a> {
+    pub target:&'a wgpu::TextureView,
+    pub source:&'a TransformSource,
+    pub bounds:[i32;4],
+    pub coordinate:[u32;2],
+    pub origin:[u32;2],
+    pub extent:[u32;2],
+    pub part:Part,
 }
 
 pub(super) struct TiledTransformRecord<'a> {
@@ -435,6 +445,22 @@ impl PixelTransform {
     /// Draw prepared jobs straight into a display level, `side` layer pixels
     /// per texel, keeping its other texels. Each draw's scissor holds the
     /// job's texels.
+    pub(super) fn encode_identity_display_scratch(&mut self, device:&PipelineDevice, uploads:&mut Uploads,
+        encoder:&mut crate::submission::CommandEncoder, request:IdentityDisplay<'_>,
+    )->Result<(),GpuRasterError> {
+        let IdentityDisplay {target,source,bounds,coordinate,origin,extent,part}=request;
+        let previous=self.next_record;
+        self.next_record=0;
+        let record=TiledTransformRecord {source_size:[super::PAGE_SIZE;2],
+            origin:std::array::from_fn(|i|i64::from(coordinate[i]*super::PAGE_SIZE)-i64::from(origin[i])),
+            sources:std::slice::from_ref(&coordinate),texels:[origin[0],origin[1],super::PAGE_SIZE,super::PAGE_SIZE],unmoved:true,clear:false};
+        let prepared=self.prepare_tiled(device,uploads,encoder,bounds,0.,&ImageTransform::default(),1,
+            std::slice::from_ref(&record),Some((DisplayLevel {side:1,opacity:1.,extent,backdrop:[0.;4],encode:false},part)));
+        self.next_record=previous;
+        let offset=prepared.map_err(GpuRasterError::InvalidTransform)?;
+        self.encode_display(device,encoder,target,1,offset,&[BatchDraw {source,job:0,scissor:record.texels}]);
+        Ok(())
+    }
     pub(super) fn encode_display(
         &self,
         device: &wgpu::Device,

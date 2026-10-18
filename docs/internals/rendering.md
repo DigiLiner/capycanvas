@@ -630,6 +630,17 @@ backdrop folded into the same pass. Groups, masks, clipping and other blends
 use the ordinary composition rules and branch cache. Mask transactions still
 evaluate native coverage before that composition.
 
+Large paint previews keep a level-one source pyramid and bind at most 48
+original source-page coordinates for each output region. The planner retains
+its exact sampling geometry and classifies at most 48 regions per frame;
+unfinished subdivisions resume without changing the accepted display. Partial
+output stays private until its region is complete. A matching existing fine
+source keeps its admitted capacity; new allocations still pass budget admission.
+Native spare pages and superseded outputs remain charged until their submitted
+GPU work completes. The 608 MiB composition budget includes live and retiring
+fine resources; the optional complete display pyramid keeps its separate
+admission budget.
+
 Display reconstruction selects prefiltered source detail from the local
 transform footprint. Split selections and footprint boundaries use four samples;
 partial edge texels retain their actual centers. Mesh triangles draw color

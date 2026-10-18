@@ -32,7 +32,8 @@ pub(crate) struct Resample {
     pub area: Deferred<wgpu::ComputePipeline>,
 }
 impl Resample {
-    pub fn new(device: &PipelineDevice) -> Self {
+    pub fn new(device: &PipelineDevice) -> Self { Self::with_fine(device, false) }
+    pub fn with_fine(device: &PipelineDevice, fine: bool) -> Self {
         let layout = crate::bindings::layout(device, "display resample", &[
             crate::bindings::float_texture(0, wgpu::ShaderStages::COMPUTE, device),
             crate::bindings::storage_texture(
@@ -56,14 +57,23 @@ impl Resample {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let shader = Deferred::wgsl(device, "display resample", compose_wgsl(&[&crate::working_color::shader(device), device.float_sampling_wgsl(), include_str!("../area_sample.wgsl"), include_str!("../mapped_sample.wgsl"), include_str!("../display_resample.wgsl")]));
-        let mesh_layout = crate::bindings::layout(device, "mesh resample", &[
+        let shader = Deferred::wgsl(device, "display resample", shader_source(device.working_space(),device.float32_filterable(),false));
+        let mut mesh_entries = vec![
             crate::bindings::float_texture(0, wgpu::ShaderStages::FRAGMENT, device),
             crate::bindings::buffer(2, wgpu::ShaderStages::VERTEX_FRAGMENT, wgpu::BufferBindingType::Uniform,
                 false, wgpu::BufferSize::new(UNIFORM_BYTES)),
             crate::bindings::float_texture(3, wgpu::ShaderStages::FRAGMENT, device),
             crate::bindings::sampler(4, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
-        ]);
+        ];
+        if fine {
+            mesh_entries.push(crate::bindings::float_texture(5, wgpu::ShaderStages::FRAGMENT, device));
+            mesh_entries.push(crate::bindings::buffer(6, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Storage { read_only:true }, false, wgpu::BufferSize::new(48)));
+        }
+        let mesh_layout = crate::bindings::layout(device, "mesh resample", &mesh_entries);
+        let area_shader = shader.clone();
+        let shader = if fine {
+            Deferred::wgsl(device, "tiled base resample", shader_source(device.working_space(),device.float32_filterable(),true))
+        } else { shader.clone() };
         let mesh_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh resample"), bind_group_layouts: &[Some(&mesh_layout)], immediate_size: 0,
         });
@@ -98,7 +108,7 @@ impl Resample {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
-        let area = Deferred::compute(device, "display area resample", &pipeline_layout, &shader, "resample_affine_area");
+        let area = Deferred::compute(device, "display area resample", &pipeline_layout, &area_shader, "resample_affine_area");
         Self { layout, mesh_layout, sampler, mesh, area }
     }
     pub fn values(request: Request<'_>) -> Result<[u8; UNIFORM_BYTES as usize], GpuRasterError> {
@@ -171,6 +181,19 @@ impl Resample {
             ],
         })
     }
+    pub fn fine_binding(&self, device: &wgpu::Device, uniforms: &wgpu::Buffer,
+        views: &[wgpu::TextureView; 2], atlas: &wgpu::TextureView, directory: &wgpu::Buffer) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("tiled base resample"), layout: &self.mesh_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&views[0]) },
+                wgpu::BindGroupEntry { binding: 2, resource: uniforms.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&views[1]) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(atlas) },
+                wgpu::BindGroupEntry { binding: 6, resource: directory.as_entire_binding() },
+            ],
+        })
+    }
     pub fn encode_mesh(&self, encoder: &mut crate::submission::CommandEncoder, binding: &wgpu::BindGroup,
         target: &wgpu::TextureView, texels: [u32; 4], mesh: Option<(&paint_transform::MeshBuffers,std::ops::Range<u32>)>, kept: bool,
     ) {
@@ -189,4 +212,29 @@ impl Resample {
         }
     }
 
+}
+
+fn shader_source(space:layer_core::color::RgbSpace,filterable:bool,fine:bool)->std::borrow::Cow<'static,str> {
+    let color=crate::working_color::source(space);
+    let mapped=include_str!("../mapped_sample.wgsl");
+    let mapped=if fine {mapped.replace("fn mapped_source(","fn contiguous_mapped_source(")} else {mapped.to_owned()};
+    compose_wgsl(&[&color,crate::pipeline_device::float_sampling_wgsl(filterable),include_str!("../area_sample.wgsl"),&mapped,
+        if fine {include_str!("../fine_source_sample.wgsl")} else {""},include_str!("../display_resample.wgsl")])
+}
+#[cfg(test)]
+mod program_tests {
+    use super::*;
+    #[test]
+    fn fine_page_programs_validate_in_every_working_space_and_sampling_mode() {
+        for space in layer_core::color::RgbSpace::ALL {
+            for filterable in [false,true] {
+                let source=shader_source(space,filterable,true);
+                let module=naga::front::wgsl::parse_str(&source).unwrap_or_else(|e|panic!("{space:?}/{filterable}: {}",e.emit_to_string(&source)));
+                naga::valid::Validator::new(naga::valid::ValidationFlags::all(),naga::valid::Capabilities::all()).validate(&module).unwrap();
+                for entry in ["background_color","background_color_kept","mesh_color","mesh_color_kept","resample_projective","resample_projective_kept"] {
+                    assert!(module.entry_points.iter().any(|point|point.name==entry));
+                }
+            }
+        }
+    }
 }

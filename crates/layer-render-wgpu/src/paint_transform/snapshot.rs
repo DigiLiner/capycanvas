@@ -23,6 +23,7 @@ pub(super) struct TileSnapshot {
         layer_core::raster::RasterPlane,
     )>,
     pub bounds: PixelRect,
+    pub decode_id: layer_core::authored::PortableId,
 }
 /// A destination rectangle and the source pages its samples read.
 pub(crate) struct Footprint {
@@ -92,6 +93,37 @@ impl TileSnapshot {
             )
             .map_err(GpuRasterError::InvalidTransform)?;
         Ok(source)
+    }
+    pub fn prepare_pages(&self, r: &mut WgpuRasterizer, coordinates: &[[u32;2]], encoder: &mut crate::submission::CommandEncoder) -> Result<Vec<Arc<()>>, GpuRasterError> {
+        let mut leases = Vec::new();
+        let mut pending = false;
+        for coordinate in coordinates.iter().copied().filter(|c| self.contains(*c) && !self.pages.contains_key(c)) {
+            #[cfg(not(target_arch="wasm32"))]
+            if let Some((data, space, plane)) = &self.backing
+                && let Some(tile) = data.tiles.get(&layer_core::raster::TileKey {plane:*plane,coordinate}) {
+                let blob = match tile.try_backing() {
+                    Some(Ok(blob)) => blob,
+                    Some(Err(error)) => return Err(GpuRasterError::Effect(error)),
+                    None => {pending=true;continue;},
+                };
+                let view = r.source_tiles.borrow().prepared_raster_view(&blob, *space).cloned();
+                if let Some(view) = view { leases.extend(r.source_tiles.borrow().lease(&view)); }
+                else {r.request_raster_decode(blob, *space)?;pending=true;}
+                continue;
+            }
+            if let Some(base) = &self.base {
+                let bounds = page_rect(coordinate).intersect(source_access::paint_base_bounds(base));
+                let local = PixelRect::new(bounds.min_x()-base.offset[0],bounds.min_y()-base.offset[1],bounds.max_x()-base.offset[0],bounds.max_y()-base.offset[1]);
+                let mut ready = true;
+                for source_coordinate in page_coordinates(local) {
+                    let view = r.source_tiles.borrow().prepared_view(base.image.storage(),source_coordinate).cloned();
+                    if let Some(view) = view {leases.extend(r.source_tiles.borrow().lease(&view));}
+                    else {r.request_image_decode(self.decode_id,base.image.storage().clone(),source_coordinate)?;ready=false;pending=true;}
+                }
+                if ready && let Some(tile) = r.paint_base_tile(base,coordinate,encoder)? {leases.extend(r.source_tiles.borrow().lease(&tile.view));}
+            }
+        }
+        if pending {Err(GpuRasterError::DeferredObjectWork)} else {Ok(leases)}
     }
     /// The original page at `coordinate`, decoded if it is not captured, or
     /// None where the layer has no pixels.
@@ -166,8 +198,8 @@ impl<F: Fn([u32; 2]) -> bool> Splitter<F> {
                 continue;
             }
             let mut required = Vec::with_capacity(TRANSFORM_SLOTS + 1);
-            if self.original { required.extend(page_coordinates(region).filter(|c| (self.contains)(*c))); }
             let query = DocRect::from(region).translated(self.offset.map(|v| -v)).to_rect();
+            if self.original { required.extend(page_coordinates(pixel_rect(query, [self.bounds.max_x(),self.bounds.max_y()]).intersect(self.bounds)).filter(|c| (self.contains)(*c))); }
             self.map.footprints_rect(query, |[x0,y0,x1,y1]| {
                 let support = self.map.support;
                 let footprint = PixelRect::new(
@@ -654,6 +686,7 @@ pub(crate) struct DisplayInputs {
     pub sampling: [wgpu::TextureView; 2],
     uniforms: wgpu::Buffer,
     binding: Option<wgpu::BindGroup>,
+    pub fine: Option<super::fine::FineInputs>,
 }
 impl DisplayInputs {
     pub fn new(
@@ -678,10 +711,18 @@ impl DisplayInputs {
                 mapped_at_creation: false,
             }),
             binding: None,
+            fine: None,
         }
+    }
+    pub fn new_fine(r:&WgpuRasterizer,extent:[u32;2],phase:[u32;2],kept:bool,capacity:usize,pages:std::collections::VecDeque<PixelRect>)->Result<Self,GpuRasterError> {
+        let mut input=Self::new(r,1,extent,phase,kept);
+        input.level=0;
+        input.fine=Some(super::fine::FineInputs::new(r,capacity,kept,input.storage_bytes(),pages)?);
+        Ok(input)
     }
     pub fn storage_bytes(&self) -> u64 {
         self.image.storage_bytes() + self.kept.as_ref().map_or(0, display_mips::Image::storage_bytes) + resample::UNIFORM_BYTES
+            + self.fine.as_ref().map_or(0,super::fine::FineInputs::storage_bytes)
     }
     #[allow(clippy::too_many_arguments)]
     pub fn draw(
@@ -694,6 +735,13 @@ impl DisplayInputs {
         texels: [u32; 4],
         mesh: Option<&MeshBuffers>,
     ) -> Result<(), GpuRasterError> {
+        if let Some(fine)=&self.fine {
+            fine.write_directory(r,encoder,self.phase)?;
+            r.uploads.write(encoder,&self.uniforms,values)?;
+            let binding=pass.fine_binding(&r.device,&self.uniforms,&self.sampling,&fine.view,&fine.directory);
+            pass.encode_mesh(encoder,&binding,level,texels,mesh.map(|mesh|(mesh,mesh.range_for_region(layer_core::Rect::UNBOUNDED))),self.kept.is_some());
+            return Ok(());
+        }
         r.uploads.write(encoder, &self.uniforms, values)?;
         let binding = self.binding.get_or_insert_with(|| pass.mesh_binding(&r.device, &self.uniforms, &self.sampling));
         pass.encode_mesh(encoder, binding, level, texels, mesh.map(|mesh|(mesh,mesh.range_for_region(layer_core::Rect::UNBOUNDED))), self.kept.is_some());

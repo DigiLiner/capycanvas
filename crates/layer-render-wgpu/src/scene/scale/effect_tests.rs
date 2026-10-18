@@ -49,7 +49,7 @@ fn assert_spatial_storage_reserved(r: &WgpuRasterizer, frame: FramePacket<'_>) {
     let cache = r.scale_display.as_ref().unwrap();
     let objects=r.scene.as_ref().map(|scene|&scene.object_spatial);
     let input = input_plan(cache.plan, frame.scene,objects);
-    let images = graph::scratch_images(frame, cache.plan.level, r.device.working_space(),objects).unwrap();
+    let images = graph::scratch_images(frame, cache.plan.level, r.device.working_space(),objects,None).unwrap();
     let reserved = input.level_bytes(input.level) * (images - 1);
     let actual = cache.output.iter().map(|image| texture_bytes(&image.texture)).sum::<u64>();
     assert!(actual <= reserved, "spatial scratch storage={actual}, reservation={reserved}, images={images}");

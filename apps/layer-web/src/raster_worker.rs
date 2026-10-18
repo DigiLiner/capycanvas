@@ -88,7 +88,7 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
             }
             chunks.push(count);
         }
-        let metadata=serde_json::to_string(&ImageDecode {interpretation,destination,extent:source.extent,coordinate,profiles:chunks}).map_err(|e|e.to_string())?;
+        let metadata=serde_json::to_string(&ImageDecode::Image {interpretation,destination,extent:source.extent,coordinate,profiles:chunks}).map_err(|e|e.to_string())?;
         let result=JsFuture::from(call("image-decode",&metadata,&buffers).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
         let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
         if matches!(source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_)) {
@@ -98,6 +98,21 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
             if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*16 {return Err("Invalid prepared working tile extent".into());}
             Ok(layer_render_wgpu::PreparedImagePixels::PremultipliedWorkingPixels(std::sync::Arc::new(bytes)))
         }
+    })));
+    renderer.set_browser_raster_decoder(Rc::new(|blob,space,_destination| Box::pin(async move {
+        documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
+        let start=js_sys::Date::now();
+        while !blob.compressed_ready()? {
+            if js_sys::Date::now()-start>30_000. {return Err("Image backing timed out".into());}
+            documents::yield_browser().await.map_err(|e|format!("{e:?}"))?;
+        }
+        let buffers=js_sys::Array::new();
+        buffers.push(&js_sys::Uint8Array::from(blob.compressed()?.as_ref()));
+        let metadata=serde_json::to_string(&ImageDecode::Raster {descriptor:blob.descriptor,space}).map_err(|e|e.to_string())?;
+        let result=JsFuture::from(call("image-decode",&metadata,&buffers).map_err(|e|format!("{e:?}"))?).await.map_err(|e|format!("{e:?}"))?;
+        let bytes=result.dyn_into::<js_sys::Uint8Array>().map_err(|_|"Missing prepared image pixels")?.to_vec();
+        if bytes.len()!=(TILE_SIZE*TILE_SIZE) as usize*4*blob.descriptor.depth().bytes() {return Err("Invalid prepared source tile extent".into());}
+        Ok(layer_render_wgpu::PreparedImagePixels::NativeSamples(std::sync::Arc::new(bytes)))
     })));
     renderer.set_browser_nearest_coordinate_decoder(Rc::new(|inverse,size,first,count| Box::pin(async move {
         if count>65536 {return Err("Oversized Nearest coordinate request".into());}
@@ -237,12 +252,15 @@ pub(super) fn install(renderer: &mut WgpuRasterizer) {
 }
 
 #[derive(Serialize,Deserialize)]
-struct ImageDecode {
-    interpretation:layer_core::color::source::SourceInterpretation<layer_core::color::ProfileReference>,
-    destination:layer_core::color::RgbSpace,
-    extent:[u32;2],
-    coordinate:[u32;2],
-    profiles:Vec<usize>,
+enum ImageDecode {
+    Image {
+        interpretation:layer_core::color::source::SourceInterpretation<layer_core::color::ProfileReference>,
+        destination:layer_core::color::RgbSpace,
+        extent:[u32;2],
+        coordinate:[u32;2],
+        profiles:Vec<usize>,
+    },
+    Raster {descriptor:PixelDescriptor,space:layer_core::color::RgbSpace},
 }
 #[derive(Serialize,Deserialize)]
 struct NearestCoordinates {inverse:[f64;6],size:[u32;2],first:u32,count:u32}
@@ -259,26 +277,38 @@ pub fn raster_worker_image_decode(metadata:&str,buffers:js_sys::Array)->Result<V
     use std::sync::Arc;
     if metadata.len()>16*1024 {return Err(js("Oversized image preparation metadata"));}
     let request:ImageDecode=serde_json::from_str(metadata).map_err(js)?;
-    if request.profiles.len()>1 || buffers.length()==0 {return Err(js("Invalid image preparation payloads"));}
-    let expected=request.profiles.iter().try_fold(1usize,|sum,count|sum.checked_add(*count)).ok_or_else(||js("Image preparation chunk overflow"))?;
-    if expected!=buffers.length() as usize {return Err(js("Incomplete image preparation payloads"));}
-    let mut profiles=Vec::<Arc<[u8]>>::new();let mut at=1;
-    for count in request.profiles {
-        let mut bytes=Vec::new();
-        for _ in 0..count {
-            let block=buffers.get(at).dyn_into::<js_sys::Uint8Array>()?;at+=1;
-            if block.length() as usize>layer_core::package::MAX_RANGE_BYTES || bytes.len()+block.length() as usize>layer_core::color::source::MAX_PROFILE_BYTES {return Err(js("Oversized image profile payload"));}
-            bytes.extend_from_slice(&block.to_vec());
-        }
-        profiles.push(bytes.into());
-    }
-    let interpretation=request.interpretation.clone().with_profile(request.interpretation.profile.resolve(&profiles).map_err(js)?);
-    let compressed=buffers.get(0).dyn_into::<js_sys::Uint8Array>()?;
-    if compressed.length() as usize>layer_core::package::MAX_RANGE_BYTES {return Err(js("Oversized image tile payload"));}
-    let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),interpretation.descriptor(),compressed.to_vec().into()).map_err(js)?);
-    let source=SourceImage {extent:request.extent,resolution:None,interpretation,tiles:[(request.coordinate,tile)].into()};
-    let pixels=layer_render_wgpu::prepare_image_tile(&source,request.coordinate,request.destination,
-        &layer_core::raster::DecodedTileCache::new(4*1024*1024),None).map_err(js)?;
+    let cache=layer_core::raster::DecodedTileCache::new(4*1024*1024);
+    let pixels=match request {
+        ImageDecode::Raster {descriptor,space} => {
+            if buffers.length()!=1 {return Err(js("Invalid image preparation payloads"));}
+            let compressed=buffers.get(0).dyn_into::<js_sys::Uint8Array>()?;
+            if compressed.length() as usize>layer_core::package::MAX_RANGE_BYTES {return Err(js("Oversized image tile payload"));}
+            let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),descriptor,compressed.to_vec().into()).map_err(js)?);
+            layer_render_wgpu::prepare_raster_tile(&tile,space,&cache).map_err(js)?
+        },
+        ImageDecode::Image {interpretation,destination,extent,coordinate,profiles:chunks} => {
+            if chunks.len()>1 || buffers.length()==0 {return Err(js("Invalid image preparation payloads"));}
+            let expected=chunks.iter().try_fold(1usize,|sum,count|sum.checked_add(*count)).ok_or_else(||js("Image preparation chunk overflow"))?;
+            if expected!=buffers.length() as usize {return Err(js("Incomplete image preparation payloads"));}
+            let mut profiles=Vec::<Arc<[u8]>>::new();let mut at=1;
+            for count in chunks {
+                let mut bytes=Vec::new();
+                for _ in 0..count {
+                    let block=buffers.get(at).dyn_into::<js_sys::Uint8Array>()?;at+=1;
+                    if block.length() as usize>layer_core::package::MAX_RANGE_BYTES || bytes.len()+block.length() as usize>layer_core::color::source::MAX_PROFILE_BYTES {return Err(js("Oversized image profile payload"));}
+                    bytes.extend_from_slice(&block.to_vec());
+                }
+                profiles.push(bytes.into());
+            }
+            let interpretation=interpretation.clone().with_profile(interpretation.profile.resolve(&profiles).map_err(js)?);
+            let compressed=buffers.get(0).dyn_into::<js_sys::Uint8Array>()?;
+            if compressed.length() as usize>layer_core::package::MAX_RANGE_BYTES {return Err(js("Oversized image tile payload"));}
+            let tile=Arc::new(TileBlob::from_verified_resource(layer_core::PortableId::random(),interpretation.descriptor(),compressed.to_vec().into()).map_err(js)?);
+            let source=SourceImage {extent,resolution:None,interpretation,tiles:[(coordinate,tile)].into()};
+            layer_render_wgpu::prepare_image_tile(&source,coordinate,destination,
+                &cache,None).map_err(js)?
+        },
+    };
     match pixels {
         layer_render_wgpu::PreparedImagePixels::NativeSamples(bytes)|layer_render_wgpu::PreparedImagePixels::PremultipliedWorkingPixels(bytes)=>Ok(bytes.as_ref().clone()),
     }

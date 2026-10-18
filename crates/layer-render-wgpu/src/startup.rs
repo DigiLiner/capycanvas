@@ -509,6 +509,7 @@ impl WgpuRasterizer {
             current.render.extend(self.transforms.as_ref().unwrap().pipelines());
             current.compute.extend(self.transforms.as_ref().unwrap().display_pipelines());
             current.render.extend(self.scene_pipelines.resample.mesh.iter().cloned());
+            current.render.extend(self.scene_pipelines.fine_resample.mesh.iter().cloned());
             current.compute.extend(self.selection_clip.pipelines().map(Clone::clone));
         }
         if let Some(retouch) = self.retouch.as_ref().filter(|r| r.prepared()) {
@@ -996,7 +997,8 @@ mod gpu_tests {
         assert!(transforms.mesh_pipelines().into_iter().all(|p| !p.ready()),
             "ordinary transforms must not prepare unused warp meshes");
         let meshes: Vec<_> = transforms.mesh_pipelines().into_iter()
-            .chain(renderer.scene_pipelines.resample.mesh.iter().cloned()).collect();
+            .chain(renderer.scene_pipelines.resample.mesh.iter().cloned())
+            .chain(renderer.scene_pipelines.fine_resample.mesh.iter().cloned()).collect();
         assert!(!renderer.mesh_pipelines_ready(), "first warp use must request its cold dependencies");
         crate::test_support::wait_startup(&mut renderer, deadline, |_| meshes.iter().all(|p| p.ready()),
             format_args!("Warp mesh demand compilation timed out"));

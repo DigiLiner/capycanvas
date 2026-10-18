@@ -1944,7 +1944,7 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
         [a*0.8,a*0.2,a*0.6,a]}).collect();
     crate::test_support::upload_page(&r,&source,&colors.iter().flatten().flat_map(|v|f32::to_le_bytes(*v)).collect::<Vec<_>>());
     let extent=[256;2];let plan=display_mips::Plan::at(extent,0);let texels=[3,5,113,83];
-    let resample=&r.scene_pipelines.resample;
+    let resample=r.scene_pipelines.resample.clone();
     for encode in [false,true] {
         let moved=ImageTransform {placement:LayerPlacement::from_projective(
             Projective([0.9,0.07,-16.,-0.05,1.1,-12.,0.001,-0.0002,1.])),..Default::default()};
@@ -1955,22 +1955,32 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
         let uniforms=r.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:None,contents:&values,usage:wgpu::BufferUsages::UNIFORM});
         let compute=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let fragment=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
+        let tiled=crate::test_support::page_texture(&r,wgpu::TextureFormat::Rgba32Float);
         let source=source.create_view(&Default::default());
         let compute_view=compute.create_view(&Default::default());let fragment_view=fragment.create_view(&Default::default());
         let binding=resample.binding(&r.device,&uniforms,0,[&source,&compute_view,&r.empty_view]);
-        let reference=resample.mesh_binding(&r.device,&uniforms,&[source,r.empty_view.clone()]);
+        let reference=resample.mesh_binding(&r.device,&uniforms,&[source.clone(),r.empty_view.clone()]);
+        let mut fine=crate::paint_transform::fine::FineInputs::new(&r,1,false,0,Default::default()).unwrap();
+        fine.require([[0;2]].into_iter().collect()).unwrap();
+        let slot=fine.assign([0;2]).unwrap();
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+        encoder.copy_texture_to_texture(source.texture().as_image_copy(),fine.texture.as_image_copy(),source.texture().size());
+        fine.written(slot,&encoder);
+        fine.write_directory(&mut r,&mut encoder,[0;2]).unwrap();
+        let fine_pass=r.scene_pipelines.fine_resample.clone();
+        let tiled_binding=fine_pass.fine_binding(&r.device,&uniforms,&[source.clone(),r.empty_view.clone()],&fine.view,&fine.directory);
+        fine_pass.encode_mesh(&mut encoder,&tiled_binding,&tiled.create_view(&Default::default()),texels,None,false);
         resample.encode(&mut encoder,&binding,texels);
         resample.encode_mesh(&mut encoder,&reference,&fragment_view,texels,None,false);
         r.uploads.finish(&encoder);encoder.submit(&r.queue);
-        let actual=pixels(&r,&compute);let expected=pixels(&r,&fragment);
+        let actual=pixels(&r,&compute);let expected=pixels(&r,&fragment);let bounded=pixels(&r,&tiled);
         assert!(actual.iter().any(|p|p[3]>0.5),"projective display samples actual semitransparent pigment");
         let rows=pixel_transform::inverse_rows(&moved).unwrap().map(|row|row.map(f64::from));
-        let mut maximum=[0f64;2];
+        let mut maximum=[0f64;3];
         for y in 0..256 {for x in 0..256 {
             let index=y*256+x;
             if x<texels[0] as usize || y<texels[1] as usize || x>=(texels[0]+texels[2]) as usize || y>=(texels[1]+texels[3]) as usize {
-                assert_eq!(actual[index],[0.;4]);assert_eq!(expected[index],[0.;4]);continue;
+                assert_eq!(actual[index],[0.;4]);assert_eq!(expected[index],[0.;4]);assert_eq!(bounded[index],[0.;4]);continue;
             }
             let [u,v]=crate::test_support::preimage(moved.placement.outer.0.map(f64::from),[x as f64+0.5,y as f64+0.5]).unwrap();
             let h=[x as f64+0.5,y as f64+0.5,1.];
@@ -1990,7 +2000,7 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
                 reference[channel]=value*opacity+[0.1,0.05,0.15][channel]*(1.-opacity);
             }
             reference[3]=opacity+0.5*(1.-opacity);
-            for (path,pixel) in [actual[index],expected[index]].into_iter().enumerate() {
+            for (path,pixel) in [actual[index],expected[index],bounded[index]].into_iter().enumerate() {
                 for channel in 0..4 {
                     let error=(f64::from(pixel[channel])-reference[channel]).abs();maximum[path]=maximum[path].max(error);
                     let color=if channel==3 {1.}else {let value=[0.8,0.2,0.6][channel];if encode {r.device.working_space().encode(value)}else{value}};
@@ -2040,4 +2050,101 @@ fn reduction_samplers_live_with_records_not_page_views() {
             &format!("@group({page_group}) @binding({last}) var area_sampler"));
         assert!(!ownership(&previous).0, "the previous per-page sampler ownership must be rejected");
     }
+}
+
+#[test]
+fn fitted_projective_preview_reuses_coarse_pixels_and_bounds_fine_source_ownership() {
+    let extent=[6000,4000];
+    let mut doc=layer_core::Document::new(layer_core::PortableId::random(),extent[0],extent[1],layer_core::DocumentNames {paint:"bounded projective source".into(),paper:"Paper".into()});
+    crate::layer_tests::placement::set_source(&mut doc,rgba8_source(extent,|_,_|[127,63,191,255]));
+    let id=crate::layer_tests::placement::target(&doc);
+    let mut r=WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let mut frame=packet(doc.scene(),extent);
+    frame.view.width_px=1920;frame.view.height_px=1080;
+    frame.view.document_to_surface=[0.27,0.,0.,0.27,0.,0.];
+    r.submit(frame).unwrap();r.wait_idle().unwrap();
+    frame.composite_all=false;
+    let mut preview=layer_render::TransformPreview {transaction:1,moving:true,target:id,selection:None,
+        transform:layer_core::ImageTransform::affine(layer_core::Affine([0.9,0.,0.,0.9,0.,0.]))};
+    r.set_transform_preview(Some(&preview)).unwrap();frame.time_seconds+=1./60.;r.submit(frame).unwrap();r.wait_idle().unwrap();
+    preview.transform.placement=layer_core::LayerPlacement::from_projective(layer_core::Projective::rect_to_quad(
+        layer_core::Rect {min:Default::default(),max:layer_core::Point {x:6000.,y:4000.}},
+        [[900.,150.],[5140.,100.],[5900.,3920.],[150.,3940.]].map(|[x,y]|layer_core::Point {x,y})).unwrap());
+    let bounded_owned=|r:&WgpuRasterizer| {
+        let cache=r.scale_display.as_ref().unwrap();let scene=r.scene.as_ref().unwrap();
+        resident_bytes_with_pool(cache,scene).saturating_sub(cache.resident_bytes())+r.navigator.storage_bytes()
+            +r.transforms.as_ref().unwrap().storage_bytes()+r.display_backup.as_ref().map_or(0,|backup|backup.bytes)
+            +r.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire)
+    };
+    let mut preparation_trace=Vec::new();
+    for _ in 0..65 {
+        r.set_transform_preview(Some(&preview)).unwrap();frame.time_seconds+=1./60.;r.submit(frame).unwrap();
+        assert!(bounded_owned(&r)<=CACHE_BYTES,"pending composition/fine owners stay within608MiB: {}",bounded_owned(&r));
+        r.wait_idle().unwrap();
+        preparation_trace.push((r.scale_display.as_ref().and_then(|cache|cache.evaluation.fine_capacity()),r.object_deferred,
+            r.transforms.as_ref().unwrap().fine_progress_bytes(),r.navigator.pending()));
+        if !r.has_pending_work() {break;}
+    }
+    assert!(!r.has_pending_work(),"immutable fine inputs finish without canceling current-pose progress: {preparation_trace:?}");
+    for _ in 0..20 {
+        preview.transform.placement=preview.transform.placement.post(layer_core::Projective::from_affine(layer_core::Affine([1.,0.,0.,1.,1.25,0.5]))).unwrap();
+        let previous=r.composite_revision;
+        r.set_transform_preview(Some(&preview)).unwrap();frame.time_seconds+=1./60.;r.submit(frame).unwrap();
+        assert!(bounded_owned(&r)<=CACHE_BYTES,"pending composition/fine owners stay within608MiB: {}",bounded_owned(&r));
+        r.wait_idle().unwrap();
+        assert!(!r.object_deferred && r.composite_revision!=previous,"each moving pose must publish fresh pixels instead of submitting its old display backup");
+        assert!(matches!(r.scale_display.as_ref().unwrap().evaluation,Evaluation::Tiled(_)));
+    }
+    let cache=r.scale_display.as_ref().unwrap();
+    assert!(matches!(cache.evaluation,Evaluation::Tiled(_)),"a fitted projective drag with its Paper backdrop must use bounded fine pages");
+    assert_eq!(cache.plan.level,1);
+    let scene=r.scene.as_ref().unwrap();
+    let owned=resident_bytes(cache,scene).saturating_sub(cache.resident_bytes())+r.navigator.storage_bytes()+r.transforms.as_ref().unwrap().storage_bytes()
+        +r.display_backup.as_ref().map_or(0,|backup|backup.bytes)+r.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire);
+    assert!(owned<=CACHE_BYTES,"bounded composition/fine-source owners stay within608MiB: {owned}");
+    let accepted=r.composite_revision;
+    preview.transform.placement=layer_core::LayerPlacement::from_projective(layer_core::Projective::rect_to_quad(
+        layer_core::Rect {min:Default::default(),max:layer_core::Point {x:6000.,y:4000.}},
+        [[2900.,100.],[3100.,100.],[5990.,3990.],[10.,3990.]].map(|[x,y]|layer_core::Point {x,y})).unwrap());
+    r.set_transform_preview(Some(&preview)).unwrap();frame.time_seconds+=1./60.;r.submit(frame).unwrap();
+    assert!(r.object_deferred && r.transforms.as_ref().unwrap().fine_progress_bytes()>0,"deep projective planning retains a partial private output");
+    assert_eq!(r.composite_revision,accepted,"partial output must not replace the accepted display");
+    assert!(bounded_owned(&r)<=CACHE_BYTES);
+    r.set_transform_preview(None).unwrap();frame.time_seconds+=1./60.;r.submit(frame).unwrap();r.wait_idle().unwrap();
+    assert!(!r.transforms.as_ref().unwrap().has_preview());
+    assert_eq!(r.transforms.as_ref().unwrap().fine_progress_bytes(),0);
+    assert_eq!(r.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire),0);
+    preview.transaction+=1;
+    for _ in 0..65 {
+        r.set_transform_preview(Some(&preview)).unwrap();frame.time_seconds+=1./60.;r.submit(frame).unwrap();
+        assert!(bounded_owned(&r)<=CACHE_BYTES);r.wait_idle().unwrap();
+        if !r.has_pending_work() {break;}
+    }
+    assert!(!r.has_pending_work(),"a canceled partial output cannot prevent the next transaction from finishing");
+    assert!(matches!(r.scale_display.as_ref().unwrap().evaluation,Evaluation::Tiled(_)));
+}
+
+#[test]
+fn fine_memory_admission_cannot_override_a_visible_native_effect() {
+    let mut doc=Document::new(PortableId::random(),6000,4000,layer_core::DocumentNames {paint:"paint".into(),paper:"Paper".into()});
+    assert!(!requires_native_effects(doc.scene(),1),"ordinary Paper does not require native filter evaluation");
+    let target=crate::layer_tests::placement::target(&doc);
+    let preview=layer_render::TransformPreview {transaction:1,moving:true,target,selection:None,transform:Default::default()};
+    let frame=packet(doc.scene(),[6000,4000]);
+    let space=doc.composition().color.space;
+    assert!(graph::scratch_images(frame,1,space,None,None).unwrap()>1);
+    assert_eq!(graph::scratch_images(frame,1,space,None,Some(target)).unwrap(),1);
+    assert!(graph::scratch_images(frame,1,space,None,Some(SourceTarget::Paint(layer_core::PaintHandle::from_index(99)))).unwrap()>1);
+    assert!(fine_source(Evaluation::Tiled(48),Some(&preview),target));
+    assert!(!fine_source(Evaluation::Display,Some(&preview),target));
+    assert!(!fine_source(Evaluation::Native,Some(&preview),target));
+    assert!(!fine_source(Evaluation::Tiled(48),None,target));
+    assert!(!fine_source(Evaluation::Tiled(48),Some(&preview),SourceTarget::Paint(layer_core::PaintHandle::from_index(99))));
+    let mut draft=crate::tests::image_windows::program(false,false);
+    Arc::make_mut(&mut draft.program).resolution=layer_core::EffectResolution::Native;
+    let effect=effect_occurrence(&mut doc,draft,"native image windows");
+    insert_occurrence(&mut doc,effect,0);
+    assert!(requires_native_effects(doc.scene(),1));
+    remove_occurrence(&mut doc,effect);
+    assert!(!requires_native_effects(doc.scene(),1));
 }

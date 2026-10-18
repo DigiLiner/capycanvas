@@ -7,6 +7,9 @@ pub(super) mod mesh;
 pub(crate) use mesh::MeshBuffers;
 use crate::scene::resample;
 pub(super) mod snapshot;
+pub(super) mod fine;
+mod fine_demand;
+mod region_batches;
 pub(crate) mod sampling;
 pub(crate) use sampling::input_level;
 use snapshot::TileSnapshot;
@@ -136,14 +139,21 @@ impl PaintTransforms {
     ) -> Result<Vec<(SourceTarget, PixelRect)>, GpuRasterError> {
         let mut damage = Vec::new();
         for (state, next) in self.0.iter_mut().zip([Some(next.clone()), next.companion(scene)]) {
+            state.fine_steps=BATCH_ORIGINAL_TILES;
+            state.fine_progress.retain(|progress|progress.valid.load(std::sync::atomic::Ordering::Acquire));
             if let Some(next) = next {
                 let extent = r.target_extent(next.target);
                 let native = level.is_none() || r.layer_masks.definitions.contains_key(&next.target);
                 damage.extend(state.update_preview(r, encoder, &next, Some((scene, next.target)), extent, native)?);
+                if !native && state.native_retirement_pending() {continue;}
                 if let Some(level) = level.filter(|_| !native) {
-                    let local = input_level(level, &next, extent);
-                    state.prepare_reduced(r, encoder, next.selection.as_ref(), Some((scene, next.target)), extent, local)?;
-                }
+                    if let Some(capacity)=r.scale_display.as_ref().and_then(|cache|cache.evaluation.fine_capacity()) {
+                        state.prepare_fine_input(r,extent,crate::scene::page_phase(scene.target_offset(next.target)),next.selection.as_ref(),capacity)?;
+                    } else {
+                        let local = input_level(level, &next, extent);
+                        state.prepare_reduced(r, encoder, next.selection.as_ref(), Some((scene, next.target)), extent, local)?;
+                    }
+                } else if state.reduced.as_ref().is_some_and(|input|input.fine.is_some()) {state.reduced=None;}
             } else { damage.extend(state.cancel_preview(r, encoder)?); }
         }
         Ok(damage)
@@ -189,7 +199,30 @@ impl PaintTransforms {
     pub fn direct_source(&self, id: SourceTarget) -> bool {
         self.0.iter().any(|t| t.preview.as_ref().is_some_and(|p| p.target == id
             && !p.transform.keep_source && p.transform.placement.mesh.is_none())
-            && !t.native_preview && t.reduced.as_ref().is_some_and(|input| input.kept.is_none()))
+            && !t.native_preview && t.reduced.as_ref().is_some_and(|input| input.kept.is_none() && input.fine.is_none()))
+    }
+    pub fn fine_compatible(&self,preview:&layer_render::TransformPreview)->bool {
+        self.0.iter().find(|state|state.displayable(preview)).is_none_or(|state|state.reduced.as_ref()
+            .is_none_or(|input|input.fine.is_some() || input.level==1))
+    }
+    pub fn finish_frame(&mut self) {
+        for state in &mut self.0 {state.fine_progress.clear();}
+    }
+    pub fn waiting_for_display_input(&self,capacity:Option<usize>)->bool {
+        self.0.iter().any(|state|state.preview.is_some() && !state.native_preview
+            && (state.native_retirement_pending() || state.reduced.is_none()
+                || capacity.is_some_and(|capacity|state.reduced.as_ref().and_then(|input|input.fine.as_ref()).is_none_or(|fine|fine.capacity!=capacity))))
+    }
+    pub fn retiring_native_bytes(&self,preview:&layer_render::TransformPreview)->u64 {
+        self.0.iter().filter(|state|state.displayable(preview)).flat_map(|state|&state.retired_native)
+            .map(|(_,lease)|lease.bytes).sum()
+    }
+    pub fn fine_progress_bytes(&self)->u64 {
+        self.0.iter().flat_map(|state|&state.fine_progress).map(|p|p.allocation.bytes).sum()
+    }
+    pub fn fine_capacity(&self,preview:&layer_render::TransformPreview)->Option<usize> {
+        self.0.iter().find(|state|state.displayable(preview)).and_then(|state|state.reduced.as_ref())
+            .and_then(|input|input.fine.as_ref()).map(|fine|fine.capacity)
     }
     pub fn input_requirements(&self, preview: &layer_render::TransformPreview, requested: u32, extent: [u32; 2]) -> (u32, bool) {
         let state = self.0.iter().find(|t| t.displayable(preview));
@@ -235,12 +268,13 @@ impl PaintTransforms {
     pub fn render_region(
         &mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
         id: SourceTarget, placement: layer_core::Affine, output: &wgpu::TextureView,
-        display: pixel_transform::DisplayLevel, target: display_mips::Plan, region: DocRect,
+        display: pixel_transform::DisplayLevel, target: display_mips::Plan, region: DocRect, fine_budget:u64,
     ) -> Result<(), GpuRasterError> {
+        let fine_budget=fine_budget.saturating_sub(self.fine_progress_bytes());
         let state = self.0.iter_mut().find(|t| t.preview.as_ref().is_some_and(|p| p.target == id)).unwrap();
         let preview = state.preview.clone().unwrap();
         let resample = r.scene_pipelines.resample.clone();
-        state.render_region(r, encoder, &preview, r.target_extent(id), placement, output, display, target, region, &resample)
+        state.render_region(r, encoder, &preview, r.target_extent(id), placement, output, display, target, region, &resample, fine_budget)
     }
 
 }
@@ -262,6 +296,9 @@ struct ImageTransformState {
     native_preview: bool,
     queried: std::collections::BTreeSet<[u32; 2]>,
     reduced: Option<snapshot::DisplayInputs>,
+    fine_progress: Vec<FineProgress>,
+    fine_steps:usize,
+    retired_native:Vec<(PreviewPages,Arc<region_batches::Allocation>)>,
     standby: Option<Standby>,
     spares: PreviewPages,
     atlases: [Option<Atlas>; 2],
@@ -271,6 +308,25 @@ struct ImageTransformState {
     /// The warp mesh last tessellated, the display tolerance it was
     /// tessellated within, if any, and its geometry.
     mesh: Option<(layer_core::LayerPlacement, Option<f32>, Arc<mesh::MeshGeometry>)>,
+}
+
+struct FineProgress {
+    preview:layer_render::TransformPreview,
+    destination:wgpu::TextureView,
+    output:wgpu::TextureView,
+    target:display_mips::Plan,
+    region:DocRect,
+    allocation:Arc<region_batches::Allocation>,
+    values:[u8;resample::UNIFORM_BYTES as usize],
+    regions:region_batches::Regions,
+    demand:fine_demand::Demand,
+    valid:Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for FineProgress {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.allocation)>1 {self.allocation.retire();}
+    }
 }
 
 #[derive(PartialEq)]
@@ -337,11 +393,15 @@ pub(crate) fn resample_map(
     inputs: &snapshot::DisplayInputs,
     level: u32,
 ) -> Result<layer_core::ImageTransform, GpuRasterError> {
+    resample_map_at(transform,placement,inputs.level,inputs.phase,level)
+}
+fn resample_map_at(transform:&layer_core::ImageTransform,placement:layer_core::Affine,input_level:u32,phase:[u32;2],level:u32)
+    ->Result<layer_core::ImageTransform,GpuRasterError> {
     let scale = |s: f32| layer_core::Projective([s, 0., 0., 0., s, 0., 0., 0., 1.]);
-    let shift = |sign: f32| layer_core::Projective([1., 0., sign * inputs.phase[0] as f32, 0., 1., sign * inputs.phase[1] as f32, 0., 0., 1.]);
+    let shift = |sign: f32| layer_core::Projective([1., 0., sign * phase[0] as f32, 0., 1., sign * phase[1] as f32, 0., 0., 1.]);
     if transform.placement.mesh.is_some() {
         let mut result = transform.clone();
-        result.source_from_owner = Some([shift(1.), scale(1. / (1u32 << inputs.level) as f32)].into_iter()
+        result.source_from_owner = Some([shift(1.), scale(1. / (1u32 << input_level) as f32)].into_iter()
             .try_fold(transform.source_from_owner.unwrap_or(layer_core::Projective::IDENTITY), layer_core::Projective::then)
             .ok_or(GpuRasterError::InvalidTransform("Invalid source placement"))?);
         return Ok(result);
@@ -349,11 +409,12 @@ pub(crate) fn resample_map(
     let moved = transform.projective().unwrap_or(layer_core::Projective::IDENTITY);
     let map = [shift(-1.), moved, layer_core::Projective::from_affine(placement), scale(1. / (1u32 << level) as f32)]
         .into_iter()
-        .try_fold(scale((1u32 << inputs.level) as f32), layer_core::Projective::then)
+        .try_fold(scale((1u32 << input_level) as f32), layer_core::Projective::then)
         .ok_or(GpuRasterError::InvalidTransform("Transform must be finite and invertible"))?;
     Ok(layer_core::ImageTransform { placement: layer_core::LayerPlacement { interpolation: layer_core::Interpolation::Linear, ..layer_core::LayerPlacement::from_projective(map) }, ..Default::default() })
 }
 
+pub(crate) fn fine_bytes(capacity:usize,kept:bool)->u64 {fine::FineInputs::bytes(capacity,kept)}
 /// Taps per axis a preview's pages average over a minified pixel: the exact
 /// count once it stops moving, since Apply may keep those pages.
 fn preview_taps(preview: &layer_render::TransformPreview) -> u32 {
@@ -518,6 +579,9 @@ impl ImageTransformState {
             native_preview: false,
             queried: Default::default(),
             reduced: None,
+            fine_progress: Vec::new(),
+            retired_native: Vec::new(),
+            fine_steps:BATCH_ORIGINAL_TILES,
             standby: None,
             spares: PreviewPages::default(),
             atlases: Default::default(),
@@ -533,6 +597,7 @@ impl ImageTransformState {
         [self.positions.pipelines.pipeline.clone()]
     }
     pub fn begin_frame(&mut self) {
+        self.retired_native.retain(|(_,lease)|Arc::strong_count(lease)>1);
         self.color.begin_frame();
         self.scalar.begin_frame();
         self.visibility.begin_frame();
@@ -547,6 +612,7 @@ impl ImageTransformState {
             + self.scalar.storage_bytes()
             + self.visibility.storage_bytes()
             + self.reduced.as_ref().map_or(0, snapshot::DisplayInputs::storage_bytes)
+            + self.fine_progress.iter().map(|p|p.allocation.bytes).sum::<u64>()
             + self
                 .captures
                 .iter()
@@ -686,6 +752,7 @@ impl ImageTransformState {
                     self.source_bounds[channel]
                 };
                 self.sources[channel] = Some(TileSnapshot {
+                    decode_id: layer_core::authored::PortableId::random(),
                     pages: pages.into_iter().collect(),
                     base: if channel == 0 { original.clone() } else { None },
                     backing: backing.as_ref().map(|(data, space)| (data.clone(), *space, planes[channel])),
@@ -1172,6 +1239,7 @@ impl ImageTransformState {
         self.sources = Default::default();
         self.atlases = Default::default();
         self.reduced = None;
+        self.fine_progress.clear();
         self.standby = None;
         // Active copies follow the overwritten paint footprint. After the
         // transaction, retain only a small reusable pool, never every area
@@ -1198,6 +1266,7 @@ impl ImageTransformState {
     }
 
     pub fn discard_preview(&mut self) {
+        self.fine_progress.clear();
         self.preview = None;
         self.native_preview = false;
         self.queried.clear();
@@ -1304,6 +1373,7 @@ impl ImageTransformState {
             self.render_source(r, encoder, next.target, &Default::default(), pixel_transform::PREVIEW_TAPS, &restored)?;
             self.retain_pages(r, next.target, &[], None);
         }
+        if !native {self.retire_native_spares(r,encoder);}
         self.native_preview = native;
         self.queried.clear();
         damage.push((
@@ -1312,9 +1382,20 @@ impl ImageTransformState {
                 .into_iter()
                 .fold(PixelRect::EMPTY, PixelRect::union),
         ));
+        if self.preview.as_ref()!=Some(next) {self.fine_progress.clear();}
         self.preview = Some(next.clone());
         self.preview_regions = regions;
         Ok(damage)
+    }
+    fn native_retirement_pending(&self)->bool {!self.retired_native.is_empty()}
+    fn retire_native_spares(&mut self,r:&WgpuRasterizer,encoder:&crate::submission::CommandEncoder) {
+        let bytes=self.spares.storage_bytes();
+        if bytes==0 {return;}
+        let pages=std::mem::take(&mut self.spares);
+        let lease=Arc::new(region_batches::Allocation {bytes,retired:r.retired_display_bytes.clone(),pending:Default::default()});
+        lease.retire();
+        let completion=lease.clone();encoder.on_submitted_work_done(move||drop(completion));
+        self.retired_native.push((pages,lease));
     }
     /// Whether this transaction's captured originals can draw `next` into a
     /// display level.
@@ -1331,8 +1412,66 @@ impl ImageTransformState {
         &mut self, r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
         next: &layer_render::TransformPreview, extent: [u32; 2], placement: layer_core::Affine,
         level: &wgpu::TextureView, display: pixel_transform::DisplayLevel, target: display_mips::Plan, region: DocRect,
-        resample: &resample::Resample,
+        resample: &resample::Resample, fine_budget:u64,
     ) -> Result<(), GpuRasterError> {
+        if self.native_retirement_pending() {return Err(GpuRasterError::DeferredObjectWork);}
+        if self.reduced.as_ref().is_some_and(|input|input.fine.is_some()) {
+            self.prepare_fine_reduced(r,encoder,next.selection.as_ref(),extent)?;
+            let side=display.side;
+            let texels=texel_rect(target.doc_bounds.local(region),side);
+            let values=self.display_record(next,extent,placement,display,target,texels)?;
+            let capacity=self.reduced.as_ref().unwrap().fine.as_ref().unwrap().capacity;
+            if next.transform.placement.mesh.is_some() {
+                let tolerance=0.5*side as f32/placement.magnification().max(1e-6);
+                let geometry=self.mesh_geometry(&next.transform.placement,Some(tolerance));
+                self.display_mesh.upload(r,encoder,&geometry)?;
+            }
+            let index=if let Some(index)=self.fine_progress.iter().position(|p|p.preview==*next && p.destination==*level
+                && p.target==target && p.region==region && p.values==values && p.valid.load(std::sync::atomic::Ordering::Acquire)) {index}
+            else {
+                let bytes=texture_bytes(level.texture());
+                if bytes>fine_budget {return Err(GpuRasterError::SourceWorkingSetExceeded);}
+                let bounds=PixelRect::new(texels[0],texels[1],texels[0]+texels[2],texels[1]+texels[3]);
+                let phase=self.reduced.as_ref().unwrap().phase;
+                let keeps=self.reduced.as_ref().unwrap().kept.is_some();
+                let triangles=next.transform.placement.mesh.as_ref().map(|_|self.mesh.as_ref().unwrap().2.sampling_triangles().collect());
+                let demand=fine_demand::Demand::new(values,keeps,phase,triangles);
+                let texture=r.device.create_texture(&wgpu::TextureDescriptor {label:Some("pending transform region"),
+                    size:level.texture().size(),mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,
+                    format:level.texture().format(),usage:level.texture().usage()|wgpu::TextureUsages::COPY_SRC|wgpu::TextureUsages::COPY_DST,
+                    view_formats:&[]});
+                let output=texture.create_view(&Default::default());
+                let allocation=Arc::new(region_batches::Allocation {bytes,retired:r.retired_display_bytes.clone(),pending:Default::default()});
+                self.fine_progress.push(FineProgress {preview:next.clone(),destination:level.clone(),output,target,region,allocation,values,demand,
+                    regions:region_batches::Regions::new(bounds),valid:Arc::new(std::sync::atomic::AtomicBool::new(true))});
+                self.fine_progress.len()-1
+            };
+            let output=self.fine_progress[index].output.clone();
+            let pass=r.scene_pipelines.fine_resample.clone();
+            loop {
+                let progress=&mut self.fine_progress[index];
+                let batch=progress.regions.prepare(capacity,&mut self.fine_steps,|output|progress.demand.pages(output,capacity))?.cloned();
+                let Some(batch)=batch else {break;};
+                let texels=[batch.output.min_x(),batch.output.min_y(),batch.output.width(),batch.output.height()];
+                self.reduced.as_mut().unwrap().fine.as_mut().unwrap().require(batch.pages.clone())?;
+                let required=batch.pages.iter().copied().collect::<Vec<_>>();
+                self.fill_fine_pages(r,encoder,&required,extent)?;
+                self.reduced.as_mut().unwrap().draw(r,&pass,encoder,&output,&values,texels,
+                    next.transform.placement.mesh.as_ref().map(|_|&self.display_mesh))?;
+                let progress=&mut self.fine_progress[index];
+                crate::submission::CacheWrite::shared(progress.valid.clone()).track(encoder);
+                let lease=progress.allocation.clone();encoder.on_submitted_work_done(move||drop(lease));
+                progress.regions.advance();
+            }
+            let origin=wgpu::Origin3d {x:texels[0],y:texels[1],z:0};
+            encoder.copy_texture_to_texture(wgpu::TexelCopyTextureInfo {origin,..output.texture().as_image_copy()},
+                wgpu::TexelCopyTextureInfo {origin,..level.texture().as_image_copy()},
+                wgpu::Extent3d {width:texels[2],height:texels[3],depth_or_array_layers:1});
+            let progress=&self.fine_progress[index];
+            crate::submission::CacheWrite::shared(progress.valid.clone()).track(encoder);
+            let lease=progress.allocation.clone();encoder.on_submitted_work_done(move||drop(lease));
+            return Ok(());
+        }
         let side = display.side;
         let mesh = next.transform.placement.mesh.clone();
         let texels = texel_rect(target.doc_bounds.local(region), side);
@@ -1355,7 +1494,8 @@ impl ImageTransformState {
         let clip = layer_core::Affine([side, 0., 0., side, 0., 0.])
             .then(placement.inverse().ok_or(GpuRasterError::InvalidTransform("Invalid layer placement"))?);
         resample::Resample::values(resample::Request { moved: &moved, kept: &kept, clip, extent, texels, display, target,
-            source: inputs.image.plan, max_lod: inputs.image.last_level()-inputs.image.plan.level, outside: 0.,
+            source: if inputs.fine.is_some() {display_mips::Plan::at([extent[0]+inputs.phase[0],extent[1]+inputs.phase[1]],0)} else {inputs.image.plan},
+            max_lod: inputs.image.last_level()-inputs.level, outside: 0.,
             keep_source: next.transform.keep_source, identity: next.transform.is_identity() })
     }
     /// Draw `part` of `drawn`, whose corners lie on texel corners, by
@@ -1480,6 +1620,86 @@ impl ImageTransformState {
         result
     }
 
+    fn fill_fine_pages(&mut self,r:&mut WgpuRasterizer,encoder:&mut crate::submission::CommandEncoder,
+        coordinates:&[[u32;2]],extent:[u32;2])->Result<(),GpuRasterError> {
+        r.drain_image_decodes(encoder)?;
+        for coordinate in coordinates.iter().copied() {
+            if self.reduced.as_ref().unwrap().fine.as_ref().unwrap().resident(coordinate) {continue;}
+            let snapshot=self.sources[0].as_ref().unwrap();
+            let _leases=snapshot.prepare_pages(r,std::slice::from_ref(&coordinate),encoder)?;
+            let input=self.reduced.as_mut().unwrap();
+            let fine=input.fine.as_mut().unwrap();
+            let index=fine.assign(coordinate)?;
+            let kept=input.kept.is_some();
+            if !kept && let Some(tile)=snapshot.original_page(r,coordinate,encoder)?
+                && tile.texture.format()==wgpu::TextureFormat::Rgba32Float {
+                let origin=fine.origin(index,0);
+                encoder.copy_texture_to_texture(tile.texture.as_image_copy(),wgpu::TexelCopyTextureInfo {
+                    origin:wgpu::Origin3d {x:origin[0],y:origin[1],z:0},..fine.texture.as_image_copy()},
+                    wgpu::Extent3d {width:PAGE_SIZE,height:PAGE_SIZE,depth_or_array_layers:1});
+            } else {
+                let selection=self.has_selection.then_some(self.selection.as_ref()).flatten();
+                let source=snapshot.binding(r,&mut self.color,std::slice::from_ref(&coordinate),selection,None,encoder)?;
+                for (part,plane) in std::iter::once((pixel_transform::Part::Selected,0))
+                    .chain(kept.then_some((pixel_transform::Part::Kept,1))) {
+                    self.color.encode_identity_display_scratch(&r.device,&mut r.uploads,encoder,pixel_transform::IdentityDisplay {
+                        target:&fine.view,source:&source,bounds:snapshot.source_bounds(),coordinate,origin:fine.origin(index,plane),extent,part})?;
+                }
+            }
+            fine.written(index,encoder);
+            encoder.on_submitted_work_done(move||drop(_leases));
+        }
+        Ok(())
+    }
+    fn prepare_fine_input(&mut self,r:&WgpuRasterizer,extent:[u32;2],phase:[u32;2],selection:Option<&layer_core::Selection>,capacity:usize)->Result<(),GpuRasterError> {
+        let kept=keeps_pixels(selection,self.sources[0].as_ref().unwrap().bounds);
+        if self.reduced.as_ref().is_some_and(|input|input.phase==phase && input.kept.is_some()==kept
+            && input.fine.as_ref().is_some_and(|fine|fine.capacity==capacity)) {return Ok(());}
+        self.fine_progress.clear();
+        if self.reduced.as_ref().is_some_and(|input|input.fine.is_some()) {
+            self.reduced=None;
+            return Err(GpuRasterError::DeferredObjectWork);
+        }
+        let snapshot=self.sources[0].as_ref().unwrap();
+        let bounds=PixelRect::full([extent[0]+phase[0],extent[1]+phase[1]]);
+        let pages=page_coordinates(snapshot.bounds).filter(|c|snapshot.contains(*c))
+            .flat_map(|c|page_coordinates(page_rect(c).intersect(PixelRect::full(extent)).translated(phase)))
+            .collect::<std::collections::BTreeSet<_>>().into_iter().map(|c|page_rect(c).intersect(bounds)).collect();
+        if self.reduced.as_ref().is_some_and(|input|input.level==1 && input.phase==phase && input.kept.is_some()==kept) {
+            let input=self.reduced.as_mut().unwrap();
+            let mut fine=fine::FineInputs::new(r,capacity,kept,input.storage_bytes(),Default::default())?;
+            fine.complete=true;input.level=0;input.fine=Some(fine);
+        } else {self.reduced=Some(snapshot::DisplayInputs::new_fine(r,extent,phase,kept,capacity,pages)?);}
+        Ok(())
+    }
+    fn prepare_fine_reduced(&mut self,r:&mut WgpuRasterizer,encoder:&mut crate::submission::CommandEncoder,
+        selection:Option<&layer_core::Selection>,extent:[u32;2])->Result<(),GpuRasterError> {
+        self.reduced.as_mut().unwrap().fine.as_mut().unwrap().restart_discarded();
+        if self.reduced.as_ref().unwrap().fine.as_ref().unwrap().complete {return Ok(());}
+        r.drain_image_decodes(encoder)?;
+        let pipelines=r.display_pipelines.take().unwrap_or_else(||display_mips::Pipelines::new(&r.device));
+        let result=(|| {
+            loop {
+                let page=self.reduced.as_ref().unwrap().fine.as_ref().unwrap().pages.front().copied();
+                let Some(page)=page else {break;};
+                let snapshot=self.sources[0].as_ref().unwrap();
+                let phase=self.reduced.as_ref().unwrap().phase;
+                let local=page.window_local(PixelRect::new(phase[0],phase[1],u32::MAX,u32::MAX)).intersect(PixelRect::full(extent));
+                let coordinates=page_coordinates(local).filter(|c|snapshot.contains(*c)).collect::<Vec<_>>();
+                let _leases=snapshot.prepare_pages(r,&coordinates,encoder)?;
+                self.reduce_page(r,encoder,&pipelines,selection,extent,1,page)?;
+                encoder.on_submitted_work_done(move||drop(_leases));
+                let fine=self.reduced.as_mut().unwrap().fine.as_mut().unwrap();
+                fine.track_coarse(encoder);fine.pages.pop_front();
+            }
+            let input=self.reduced.as_mut().unwrap();
+            for image in std::iter::once(&input.image).chain(input.kept.iter()) {image.generate_mips(&r.device,&pipelines,encoder);}
+            let fine=input.fine.as_mut().unwrap();fine.track_coarse(encoder);fine.complete=true;
+            Ok(())
+        })();
+        r.display_pipelines=Some(pipelines);
+        result
+    }
     /// Reduce one page of the reduced image from the layer pixels it covers,
     /// into the image of the pixels that move, or of those kept when the
     /// selection leaves them out, or draw both exactly where a selection edge

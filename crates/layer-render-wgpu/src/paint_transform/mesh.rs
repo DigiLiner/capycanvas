@@ -168,6 +168,12 @@ impl MeshGeometry {
     pub fn triangles(&self) -> impl Iterator<Item = [u32; 3]> + '_ {
         (0..self.quads[0] * self.quads[1]).flat_map(|q| self.quad(q))
     }
+    pub fn sampling_triangles(&self)->impl Iterator<Item=[[f32;5];3]>+'_ {
+        self.triangles().map(|triangle|triangle.map(|index| {
+            let [x,y,u,v]=self.vertices[index as usize];
+            [x,y,u,v,self.weights[index as usize]]
+        }))
+    }
 
     /// Index range of the triangles reaching the window whose first page is
     /// `page`, or its one-pixel border.
@@ -211,7 +217,7 @@ impl MeshGeometry {
         let _=self.footprint.set((region,result));
         result
     }
-    pub fn footprints_rect(&self, region: layer_core::Rect, mut visit: impl FnMut([f64; 4]) -> bool) {
+    pub fn visit_triangles_rect(&self,region:layer_core::Rect,mut visit:impl FnMut([[f32;5];3],&[[f32;5]])->bool)->bool {
         let near = [region.min.x - 1., region.min.y - 1., region.max.x + 1., region.max.y + 1.];
         for quad in self.pages.reaching(near) {
             let dest = self.destination[quad as usize];
@@ -219,23 +225,25 @@ impl MeshGeometry {
                 continue;
             }
             for triangle in self.quad(quad) {
-                let (corners, count) = clip(triangle.map(|v| {
+                let vertices=triangle.map(|v| {
                     let [x,y,u,s] = self.vertices[v as usize];
                     let weight = self.weights[v as usize].recip();
                     [x,y,u*weight,s*weight,weight]
-                }), near);
-                let mut found = [f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY];
-                for v in &corners[..count] {
-                    found = [
-                        found[0].min(v[2]/v[4]),
-                        found[1].min(v[3]/v[4]),
-                        found[2].max(v[2]/v[4]),
-                        found[3].max(v[3]/v[4]),
-                    ];
-                }
-                if found[0]<=found[2] && !visit(found.map(f64::from)) { return; }
+                });
+                let (corners,count)=clip(vertices,near);
+                if count!=0 && !visit(vertices,&corners[..count]) {return false;}
             }
         }
+        true
+    }
+    pub fn footprints_rect(&self, region: layer_core::Rect, mut visit: impl FnMut([f64; 4]) -> bool) {
+        self.visit_triangles_rect(region,|_,corners| {
+            let mut found = [f32::INFINITY,f32::INFINITY,f32::NEG_INFINITY,f32::NEG_INFINITY];
+            for v in corners {
+                found = [found[0].min(v[2]/v[4]),found[1].min(v[3]/v[4]),found[2].max(v[2]/v[4]),found[3].max(v[3]/v[4])];
+            }
+            !matches!(found[0].partial_cmp(&found[2]),Some(std::cmp::Ordering::Less|std::cmp::Ordering::Equal)) || visit(found.map(f64::from))
+        });
     }
 }
 

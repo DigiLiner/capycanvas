@@ -16,7 +16,7 @@ use std::{
     },
 };
 
-pub(super) const FLOAT_TILE_BYTES: u64 = PAGE_SIZE as u64 * PAGE_SIZE as u64 * 16;
+pub(crate) const FLOAT_TILE_BYTES: u64 = PAGE_SIZE as u64 * PAGE_SIZE as u64 * 16;
 // Resident decoded pixels and in-flight uploads have different lifetimes.
 // Retain neighboring source tiles independently of staging memory. Immutable
 // owners and equal generated tile contents share decoded pixels across revisions.
@@ -190,6 +190,9 @@ impl DecodedTiles {
     }
     pub fn mip_budget(&self) -> u64 {
         (self.limits.slots.saturating_sub(MIN_DECODED_SLOTS) as u64) * self.tile_bytes()
+    }
+    pub fn can_upload_bytes(&self, bytes: u64) -> bool {
+        self.in_flight.bytes.load(Ordering::Acquire).checked_add(bytes).is_some_and(|n| n <= self.limits.upload_bytes)
     }
     fn slot_limit(&self) -> usize {
         self.limits.slots - self.mip_reservation.div_ceil(self.tile_bytes()) as usize
@@ -574,7 +577,7 @@ fn upload_working_pixels(uploads: &mut crate::Uploads, encoder: &mut crate::subm
         })
 }
 
-pub(super) fn validate_raster(blob: &TileBlob, space: RgbSpace) -> Result<(), GpuRasterError> {
+pub(crate) fn validate_raster(blob: &TileBlob, space: RgbSpace) -> Result<(), GpuRasterError> {
     let d = blob.descriptor;
     if d.channels == 1 && d.sample == layer_core::color::SampleType::Unsigned
         && matches!(d.bits_per_channel, 8 | 16) && d.encoding == TransferEncoding::Linear

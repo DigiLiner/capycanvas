@@ -7,10 +7,14 @@ struct Resample {
     affine_taps:vec4<u32>,
     encoding:vec4<f32>,
 }
-fn bilinear(image:texture_2d<f32>,x:vec4<f32>,y:vec4<f32>,w:vec4<f32>,h:vec3<f32>,lod:f32)->vec4<f32> {
+fn mapped_source(plane:u32,q:vec2<f32>,lod:f32)->vec4<f32> {
+    if plane==1u {return pyramid_sample(kept,linear_sampler,resample.source_extent.xy,resample.options.w,q,lod,resample.options.y);}
+    return pyramid_sample(moved,linear_sampler,resample.source_extent.xy,resample.options.w,q,lod,resample.options.y);
+}
+fn bilinear(plane:u32,x:vec4<f32>,y:vec4<f32>,w:vec4<f32>,h:vec3<f32>,lod:f32)->vec4<f32> {
     let q=vec3(dot(x.xyz,h),dot(y.xyz,h),dot(w.xyz,h));
     if q.z<=0. {return vec4(0.);}
-    return bilinear_at(image,q.xy/q.z,lod);
+    return bilinear_at(plane,q.xy/q.z,lod);
 }
 fn footprint_lod(dx:vec2<f32>,dy:vec2<f32>)->f32 {
     let stretch=(length(vec2(dx.x+dy.y,dx.y-dy.x))+length(vec2(dx.x-dy.y,dx.y+dy.x)))*.5;
@@ -23,8 +27,8 @@ fn projective_lod(x:vec4<f32>,y:vec4<f32>,w:vec4<f32>,h:vec3<f32>,dx:vec2<f32>,d
     let v=(vec2(x.y,y.y)*q.z-q.xy*w.y)/denominator;
     return footprint_lod(u*dx.x+v*dx.y,u*dy.x+v*dy.y);
 }
-fn bilinear_at(image:texture_2d<f32>,q:vec2<f32>,lod:f32)->vec4<f32> {
-    return pyramid_sample(image,linear_sampler,resample.source_extent.xy,resample.options.w,q,lod,resample.options.y);
+fn bilinear_at(plane:u32,q:vec2<f32>,lod:f32)->vec4<f32> {
+    return mapped_source(plane,q,lod);
 }
 fn inside(h:vec3<f32>)->bool {
     let layer_pixel=vec2(dot(resample.clip_x.xyz,h),dot(resample.clip_y.xyz,h));
@@ -52,8 +56,8 @@ fn source_disjoint(center:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>)->bool {
 }
 fn remainder(h:vec3<f32>,lod:f32,keeps:bool)->vec4<f32> {
     var color=vec4(0.);
-    if keeps {color=bilinear(kept,resample.kept_x,resample.kept_y,resample.kept_w,h,lod);}
-    if resample.options.z!=0. {color+=bilinear(moved,resample.kept_x,resample.kept_y,resample.kept_w,h,lod);}
+    if keeps {color=bilinear(1u,resample.kept_x,resample.kept_y,resample.kept_w,h,lod);}
+    if resample.options.z!=0. {color+=bilinear(0u,resample.kept_x,resample.kept_y,resample.kept_w,h,lod);}
     return color;
 }
 const UNCOVERED=-1e38;
@@ -80,8 +84,8 @@ fn mapped_color(taps:u32,center:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>,mesh:bool,ke
     if covered && inside_clip && resample.options.z!=2. {
         var color=vec4(0.);
         if mesh {
-            if q.x>UNCOVERED {color=bilinear_at(moved,q,moved_lod);}
-        } else {color=bilinear(moved,resample.x,resample.y,resample.w,vec3(center,1.),moved_lod);}
+            if q.x>UNCOVERED {color=bilinear_at(0u,q,moved_lod);}
+        } else {color=bilinear(0u,resample.x,resample.y,resample.w,vec3(center,1.),moved_lod);}
         if (!keeps && resample.options.z==0.) || color.a==1. {return color;}
         if color.a==0. {return remainder(vec3(center,1.),original_lod,keeps);}
     }
@@ -99,8 +103,8 @@ fn mapped_color(taps:u32,center:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>,mesh:bool,ke
         var color=vec4(resample.options.w);
         if inside(h) {
             if mesh {
-                color=select(bilinear_at(moved,q+source_dx*delta.x+source_dy*delta.y,moved_lod),vec4(0.),q.x<=UNCOVERED);
-            } else {color=bilinear(moved,resample.x,resample.y,resample.w,h,moved_lod);}
+                color=select(bilinear_at(0u,q+source_dx*delta.x+source_dy*delta.y,moved_lod),vec4(0.),q.x<=UNCOVERED);
+            } else {color=bilinear(0u,resample.x,resample.y,resample.w,h,moved_lod);}
             let under=remainder(h,kept_lod,keeps);
             if resample.options.z==2. {color=under;} else {color+=under*(1.-color.a);}
         }

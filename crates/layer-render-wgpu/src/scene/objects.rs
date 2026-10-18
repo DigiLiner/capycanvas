@@ -152,6 +152,10 @@ impl Scene {
     pub(crate) fn decode_prepared(r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
         source: &Arc<SourceImage>, coordinate: [u32; 2], pixels: sources::PreparedSourcePixels,
     ) -> Result<crate::source_access::RawTile, GpuRasterError> { decode_prepared(r, encoder, source, coordinate, pixels) }
+    pub(crate) fn decode_prepared_raster(r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
+        blob: &Arc<layer_core::raster::TileBlob>, space: layer_core::color::RgbSpace, destination: layer_core::color::RgbSpace,
+        pixels: sources::PreparedSourcePixels,
+    ) -> Result<crate::source_access::RawTile, GpuRasterError> { decode_prepared_raster(r, encoder, blob, space, destination, pixels) }
     pub(crate) fn objects_pending(&self) -> bool { self.object_results.pending() }
     pub(crate) fn object_edit_damage(before: SceneView<'_>, after: SceneView<'_>, extent: [u32; 2]) -> Option<scale::Damage> {
         edited_damage(before, after, extent)
@@ -309,6 +313,18 @@ pub(crate) fn decode_prepared(r: &mut WgpuRasterizer, encoder: &mut crate::submi
     decode_inner(r, encoder, source, coordinate, Some(pixels))
 }
 
+pub(crate) fn decode_prepared_raster(r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
+    blob: &Arc<layer_core::raster::TileBlob>, space: layer_core::color::RgbSpace, destination: layer_core::color::RgbSpace,
+    pixels: sources::PreparedSourcePixels,
+) -> Result<crate::source_access::RawTile, GpuRasterError> {
+    let (tile, pending) = r.source_tiles.borrow_mut().plan_raster(r, blob, space, destination)?;
+    if let Some(mut pending) = pending {
+        pending.prepared_pixels = Some(pixels);
+        encode_pending(r, encoder, pending)?;
+    }
+    Ok(tile)
+}
+
 fn decode_inner(r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
     source: &Arc<SourceImage>, coordinate: [u32; 2], pixels: Option<sources::PreparedSourcePixels>,
 ) -> Result<crate::source_access::RawTile, GpuRasterError> {
@@ -316,6 +332,14 @@ fn decode_inner(r: &mut WgpuRasterizer, encoder: &mut crate::submission::Command
     if let Some(mut pending) = pending {
         pending.prepared_pixels = pixels;
         if r.source_tiles.borrow().uploads_full() { Scene::submit_source_uploads(r, encoder)?; }
+        encode_pending(r, encoder, pending)?;
+    }
+    Ok(tile)
+}
+
+fn encode_pending(r: &mut WgpuRasterizer, encoder: &mut crate::submission::CommandEncoder,
+    pending: sources::PendingTile,
+) -> Result<(), GpuRasterError> {
         let records = r.device.create_buffer(&wgpu::BufferDescriptor { label: Some("object image decode records"),
             size: 144, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         let binding = uniform_binding(&r.device, &r.scene_pipelines.uniforms, &records);
@@ -325,8 +349,7 @@ fn decode_inner(r: &mut WgpuRasterizer, encoder: &mut crate::submission::Command
         let bytes = r.source_tiles.get_mut().encode(&r.device, &mut r.uploads, &r.scene_pipelines.source, encoder, &pending, &binding, 0)?;
         let in_flight = r.source_tiles.borrow().charge_upload(encoder, bytes);
         r.metrics.source_upload_peak_bytes = r.metrics.source_upload_peak_bytes.max(in_flight);
-    }
-    Ok(tile)
+    Ok(())
 }
 
 #[cfg(test)]

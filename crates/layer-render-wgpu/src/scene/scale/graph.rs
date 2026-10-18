@@ -152,14 +152,16 @@ impl Expression {
             _ => false,
         }
     }
-    pub(super) fn fused_transform(&self, r: &WgpuRasterizer) -> bool {
+    fn fused_target(&self)->Option<SourceTarget> {
         match self {
-            Self::Source { id, .. } => r.transforms.as_ref().is_some_and(|t| t.display_source(*id)),
-            Self::Opacity { input, .. } => input.fused_transform(r),
-            Self::Combine { front, back, blend: 0, flags: 0 } =>
-                matches!(back.as_ref(), Self::Color(_)) && front.fused_transform(r),
-            _ => false,
+            Self::Source {id,..}=>Some(*id),
+            Self::Opacity {input,..}=>input.fused_target(),
+            Self::Combine {front,back,blend:0,flags:0} if matches!(back.as_ref(),Self::Color(_))=>front.fused_target(),
+            _=>None,
         }
+    }
+    pub(super) fn fused_transform(&self, r: &WgpuRasterizer) -> bool {
+        self.fused_target().is_some_and(|id|r.transforms.as_ref().is_some_and(|t|t.display_source(id)))
     }
 }
 
@@ -219,9 +221,10 @@ impl Graph {
     }
 }
 
-pub(super) fn scratch_images(packet: FramePacket<'_>, level: u32, space: layer_core::color::RgbSpace, objects:Option<&object_spatial::SpatialIndex>) -> Result<u64, GpuRasterError> {
+pub(super) fn scratch_images(packet: FramePacket<'_>, level: u32, space: layer_core::color::RgbSpace, objects:Option<&object_spatial::SpatialIndex>, fine:Option<SourceTarget>) -> Result<u64, GpuRasterError> {
     let mut objects=objects.cloned().unwrap_or_default();
-    Ok(u64::from(compose(packet, None, None, level, space, Some(&mut objects))?.cost().1) + 1)
+    let root=compose(packet,None,None,level,space,Some(&mut objects))?;
+    Ok(if fine.is_some() && root.fused_target()==fine {1} else {u64::from(root.cost().1)+1})
 }
 
 fn compose(
@@ -563,7 +566,7 @@ mod object_reuse_tests {
         let painted=build(&doc,&mut cache);
         assert!(before==painted);
         let packet=crate::test_support::packet(doc.scene(),doc.composition().size);
-        assert!(scratch_images(packet,2,doc.composition().color.space,Some(&cache)).unwrap()>=4);
+        assert!(scratch_images(packet,2,doc.composition().color.space,Some(&cache),None).unwrap()>=4);
         let mut planning=cache.clone();
         let planned=collection(&compose(packet,None,None,2,doc.composition().color.space,Some(&mut planning)).unwrap(),owner);
         assert!(before==planned,"scratch planning and display retain the same collection index after a paint edit");

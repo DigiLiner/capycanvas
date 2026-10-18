@@ -339,7 +339,11 @@ impl Commands {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Evaluation { Display, Native }
+pub(crate) enum Evaluation { Display, Tiled(usize), Native }
+impl Evaluation {pub fn fine_capacity(self)->Option<usize> {match self {Self::Tiled(capacity)=>Some(capacity),_=>None}}}
+fn fine_source(evaluation:Evaluation,preview:Option<&layer_render::TransformPreview>,id:SourceTarget)->bool {
+    evaluation.fine_capacity().is_some() && preview.is_some_and(|preview|preview.target==id)
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct Request {
@@ -386,6 +390,44 @@ pub(crate) struct DisplayBackup {
     pub bytes: u64,
 }
 
+fn requires_native_effects(scene:SceneView<'_>,level:u32)->bool {
+    scene.order().iter().any(|handle|scene.visible(*handle)
+        && scene.effect(*handle).is_some_and(|effect|
+            (effect.program.resolution==layer_core::EffectResolution::Native && !native_pointwise_alpha(effect.program))
+                || (effect.program.image_boundary() && level==0)))
+}
+
+fn fine_request_capacity(r:&WgpuRasterizer,packet:FramePacket<'_>,plan:display_mips::Plan)->Option<usize> {
+    #[cfg(test)]
+    if r.test.exact_display || r.test.reference {return None;}
+    let preview=r.transform_preview.as_ref()?;
+    if plan.level==0 || plan.bounds!=PixelRect::full(plan.extent) || packet.scene.target_extent(preview.target)!=plan.extent
+        || !matches!(preview.target,SourceTarget::Paint(_)) || preview.companion(packet.scene).is_some()
+        || r.layer_masks.definitions.contains_key(&preview.target)
+        || !r.transforms.as_ref()?.fine_compatible(preview) {return None;}
+    let owner=packet.scene.source_owner(preview.target)?;
+    if !packet.scene.visible(owner) || packet.scene.effect(owner).is_some() {return None;}
+    let extent=packet.scene.target_extent(preview.target);
+    if display_mips::Plan::at(extent,1).size.into_iter().any(|n|n>r.device.limits().max_texture_dimension_2d) {return None;}
+    if let Some(capacity)=r.transforms.as_ref()?.fine_capacity(preview) {return (capacity<=48).then_some(capacity);}
+    let retiring=r.transforms.as_ref().map_or(0,|t|t.retiring_native_bytes(preview));
+    let retained=r.navigator.storage_bytes()+r.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire).saturating_sub(retiring)
+        +r.display_backup.as_ref().map_or_else(||r.scale_display.as_ref().map_or(0,Cache::backup_bytes),|backup|backup.bytes)
+        +r.transforms.as_ref().map_or(0,|t|t.fine_progress_bytes()).saturating_add(plan.level_bytes(plan.level));
+    let peak=|capacity|allocation_for_mode(r,plan,packet,r.scene.as_ref().map(|scene|&scene.scale_sources),false,None,Evaluation::Tiled(capacity))
+        .into_iter().sum::<u64>().saturating_add(retained);
+
+    let mut low=1;
+    let mut high=page_coordinates(PixelRect::full(extent)).count().clamp(1,48);
+    let mut selected=None;
+    while low<=high {
+        let middle=low+(high-low)/2;
+        if peak(middle)<=CACHE_BYTES {selected=Some(middle);low=middle+1;}
+        else {high=middle.saturating_sub(1);}
+    }
+    selected
+}
+
 pub(crate) fn request(r: &WgpuRasterizer, packet: FramePacket<'_>) -> Result<Request, GpuRasterError> {
     display_mips::Plan::new(packet.document_extent)?;
     display_mips::view_bounds(packet.view, packet.document_extent, 0)?;
@@ -402,14 +444,15 @@ pub(crate) fn request(r: &WgpuRasterizer, packet: FramePacket<'_>) -> Result<Req
         let source = source_plan(input, source_frame(r.scene.as_ref().map(|s| &s.scale_sources), packet.scene, id), packet.scene.target_extent(id), r.moving_layer == packet.scene.source_owner(id));
         (plan.level == 0 && source.level == 0) || source.size.iter().all(|size| *size <= r.device.limits().max_texture_dimension_2d)
     });
+    let native_effects=requires_native_effects(packet.scene,level);
     let native = input.size.iter().any(|n| *n > r.device.limits().max_texture_dimension_2d) || !fits || records > r.device.limits().max_buffer_size.min(u64::from(u32::MAX))
         || allocation_for(r, plan, packet, None, bounded(packet.scene), None).into_iter().sum::<u64>() > CACHE_BYTES
-        || packet.scene.order().iter().any(|handle| packet.scene.visible(*handle)
-            && packet.scene.effect(*handle).is_some_and(|e| (e.program.resolution == layer_core::EffectResolution::Native && !native_pointwise_alpha(e.program))
-                || (e.program.image_boundary() && level == 0)));
+        || native_effects;
     #[cfg(test)]
     let native = native || r.test.exact_display;
-    let evaluation = if native { Evaluation::Native } else { Evaluation::Display };
+    let evaluation = if native && !native_effects {fine_request_capacity(r,packet,plan).map_or(Evaluation::Native,Evaluation::Tiled)}
+        else if native_effects {Evaluation::Native}
+        else {Evaluation::Display};
     let plan = view_plan(packet, level, evaluation).ok_or(GpuRasterError::InvalidExtent)?;
     let output_bytes = |p: display_mips::Plan| p.level_bytes(p.level) + p.level_bytes(p.level + 1) + 32;
     let material_pages = if targets(r, packet).any(|(_, id)| mapped_material(r, packet, id)) { Scene::MATERIAL_CACHE_PAGES as u64 } else { 0 };
@@ -503,7 +546,7 @@ fn source_plan(output: display_mips::Plan, frame: SourceFrame, extent: [u32; 2],
 
 fn view_plan(packet: FramePacket<'_>, level: u32, evaluation: Evaluation) -> Option<display_mips::Plan> {
     let extent = packet.document_extent;
-    if evaluation == Evaluation::Display && level > 0 && effect_radius(packet.scene, level).is_none() {
+    if evaluation != Evaluation::Native && level > 0 && effect_radius(packet.scene, level).is_none() {
         return Some(display_mips::Plan::at(extent, level));
     }
     let visible = display_mips::view_bounds(packet.view, extent, 2 << level).ok()?;
@@ -557,36 +600,42 @@ fn targets<'r, 'p: 'r>(r: &'r WgpuRasterizer, packet: FramePacket<'p>) -> impl I
     })
 }
 
+#[cfg(test)]
 fn allocation(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>) -> [u64; 2] {
     allocation_for(r, plan, packet, sources, false, None)
 }
 
 fn allocation_for(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>, streamed: bool, scene: Option<&Scene>) -> [u64; 2] {
+    allocation_for_mode(r,plan,packet,sources,streamed,scene,Evaluation::Display)
+}
+fn allocation_for_mode(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>, streamed: bool, scene: Option<&Scene>,evaluation:Evaluation) -> [u64;2] {
     let bounded = bounded(packet.scene);
     if bounded && (plan.level == 0 || !packet.scene.order().iter().any(|handle| packet.scene.visible(*handle) && packet.scene.effect(*handle).is_some())) {
-        return allocation_with_tiles(r, plan, packet, sources, streamed, scene, true);
+        return allocation_with_tiles(r, plan, packet, sources, streamed, scene, (true,evaluation));
     }
-    let untiled = allocation_with_tiles(r, plan, packet, sources, streamed, scene, false);
+    let untiled = allocation_with_tiles(r, plan, packet, sources, streamed, scene, (false,evaluation));
     if bounded && untiled.into_iter().sum::<u64>() > CACHE_BYTES {
-        allocation_with_tiles(r, plan, packet, sources, streamed, scene, true)
+        allocation_with_tiles(r, plan, packet, sources, streamed, scene, (true,evaluation))
     } else { untiled }
 }
 
 fn use_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>, streamed: bool, scene: Option<&Scene>) -> bool {
     bounded(packet.scene) && (plan.level == 0
         || !packet.scene.order().iter().any(|handle| packet.scene.visible(*handle) && packet.scene.effect(*handle).is_some())
-        || allocation_with_tiles(r, plan, packet, sources, streamed, scene, false).into_iter().sum::<u64>() > CACHE_BYTES)
+        || allocation_with_tiles(r, plan, packet, sources, streamed, scene, (false,Evaluation::Display)).into_iter().sum::<u64>() > CACHE_BYTES)
 }
 
-fn allocation_with_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>, streamed: bool, scene: Option<&Scene>, tiled: bool) -> [u64; 2] {
+fn allocation_with_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: FramePacket<'_>, sources: Option<&Sources>, streamed: bool, scene: Option<&Scene>, mode:(bool,Evaluation)) -> [u64; 2] {
+    let (tiled,evaluation)=mode;
     let scene=scene.or(r.scene.as_ref());
     let layers = packet.scene;
     let images = if tiled { scratch_images(layers) }
-        else { graph::scratch_images(packet, plan.level, r.device.working_space(),scene.map(|s|&s.object_spatial)).unwrap_or_else(|_| scratch_images(layers)) };
+        else { graph::scratch_images(packet, plan.level, r.device.working_space(),scene.map(|s|&s.object_spatial),evaluation.fine_capacity().and(r.transform_preview.as_ref().map(|preview|preview.target))).unwrap_or_else(|_| scratch_images(layers)) };
     let material = targets(r, packet).any(|(_, id)| mapped_material(r, packet, id));
     let images = images + u64::from(plan.level > 0 && material);
     let input = input_plan(plan, layers,scene.map(|s|&s.object_spatial));
     let (source_bytes, root_mips) = targets(r, packet).fold((0, 0), |(sum, largest), (_, id)| {
+        if fine_source(evaluation,r.transform_preview.as_ref(),id) {return (sum,largest);}
         let frame = source_frame(sources.or(scene.map(|s| &s.scale_sources)), layers, id);
         if streamed && frame.aligned() { return (sum, largest); }
         let source = source_plan(input, frame, packet.scene.target_extent(id), r.moving_layer == packet.scene.source_owner(id));
@@ -599,8 +648,9 @@ fn allocation_with_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: F
         r.scene.as_ref().and_then(|scene| scene.scale_commands.as_ref()).map_or(0, Commands::storage_bytes));
     let transform = transform_plans(r, plan, layers).map(|(source, kept)| {
             let records = page_coordinates(PixelRect::full(source.extent)).count() as u64 * 512;
+            let source=if evaluation.fine_capacity().is_some() {display_mips::Plan::at(source.extent,1)} else {source};
             (source.pixel_bytes_through(display_mips::MAX_LEVEL) + records * u64::from(display_mips::MAX_LEVEL))
-                * if kept { 2 } else { 1 }
+                * if kept {2} else {1} + evaluation.fine_capacity().map_or(0,|capacity|paint_transform::fine_bytes(capacity,kept))
         }).sum::<u64>();
     let output = plan.level_bytes(plan.level);
     let working = if tiled {
@@ -610,7 +660,7 @@ fn allocation_with_tiles(r: &WgpuRasterizer, plan: display_mips::Plan, packet: F
         + exact_strip_bytes(plan.extent) + u64::from(PAGE_SIZE).pow(2) * 16 * u64::from(material) * Scene::MATERIAL_CACHE_PAGES as u64];
     if plan.bounds == PixelRect::full(plan.extent) { own }
     else {
-        let overview = allocation_for(r, overview_plan(plan), packet, sources, false, scene);
+        let overview = allocation_for_mode(r, overview_plan(plan), packet, sources, false, scene,evaluation);
         [own[0] + overview[0], own[1] + overview[1]]
     }
 }
@@ -682,7 +732,7 @@ impl Cache {
             cache.evaluation == evaluation && cache.plan.extent == plan.extent && cache.plan.level == plan.level
                 && cache.plan.bounds.intersect(required) == required
                 && cache.layer_count == packet.scene.order().len()
-                && (evaluation == Evaluation::Native || allocation_for(r, cache.plan, packet, None, bounded(packet.scene), None)
+                && (evaluation == Evaluation::Native || allocation_for_mode(r, cache.plan, packet, None, bounded(packet.scene), None,evaluation)
                     .into_iter().sum::<u64>() <= CACHE_BYTES)
         };
         let unchanged = unchanged && !packet.composite_all && !packet.reset_layers && packet.restore_rasters.is_empty();
@@ -736,8 +786,8 @@ impl Cache {
             let rebuilt = !next.reuse_output;
             return (next, rebuilt);
         }
-        let bound = allocation_for(r, next.plan, packet,
-            r.scene.as_ref().filter(|_| next.source_overlap).map(|s| &s.scale_sources), next.streamed_sources, None).into_iter().sum::<u64>();
+        let bound = allocation_for_mode(r, next.plan, packet,
+            r.scene.as_ref().filter(|_| next.source_overlap).map(|s| &s.scale_sources), next.streamed_sources, None,evaluation).into_iter().sum::<u64>();
         if unchanged && old.evaluation == evaluation && old.placed.is_none() && old.plan.extent == plan.extent && bound + old.storage_bytes() <= CACHE_BYTES {
             if old.plan.level == plan.level && old.ready {
                 next.shifted = Some(Box::new(old));
@@ -793,9 +843,9 @@ impl Cache {
     }
     fn admit_source_overlap(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>) {
         if self.evaluation == Evaluation::Native { return; }
-        self.streamed_sources = bounded(packet.scene) && allocation(r, self.plan, packet, None)
+        self.streamed_sources = bounded(packet.scene) && allocation_for_mode(r,self.plan,packet,None,false,None,self.evaluation)
             .into_iter().sum::<u64>() > CACHE_BYTES;
-        self.source_overlap = allocation(r, self.plan, packet, r.scene.as_ref().map(|s| &s.scale_sources))
+        self.source_overlap = allocation_for_mode(r,self.plan,packet,r.scene.as_ref().map(|s|&s.scale_sources),false,None,self.evaluation)
             .into_iter().sum::<u64>() <= CACHE_BYTES;
         if let Some(overview) = &mut self.overview { overview.source_overlap = self.source_overlap; }
     }
@@ -819,6 +869,7 @@ impl Cache {
             .chain(self.overview.as_ref().map(|c| (input_plan(c.plan, packet.scene,Some(c.graph.objects())), c.streamed_sources)));
         let mut requested: BTreeMap<_, BTreeMap<_, _>> = targets(r, packet)
             .filter(|(_, id)| sources.entries.contains_key(id) && reduced.as_ref().is_none_or(|ids| ids.contains(id))
+                && !fine_source(self.evaluation,r.transform_preview.as_ref(),*id)
                 && !r.transforms.as_ref().is_some_and(|t| t.display_source(*id))).map(|(_, id)| {
             let frame = source_frame(Some(sources), packet.scene, id);
             (id, plans.clone().filter(|(_, streamed)| !streamed || !frame.aligned())
@@ -835,12 +886,22 @@ impl Cache {
         requested
     }
     pub(crate) fn auxiliary_budget(&self,r:&WgpuRasterizer,packet:FramePacket<'_>)->u64 {
-        let required=allocation_for(r,self.plan,packet,None,self.streamed_sources,r.scene.as_ref()).into_iter().sum::<u64>();
+        let required=allocation_for_mode(r,self.plan,packet,None,self.streamed_sources,r.scene.as_ref(),self.evaluation).into_iter().sum::<u64>();
         CACHE_BYTES.saturating_sub(required+self.graph.reserved_bytes(input_plan(self.plan,packet.scene,Some(self.graph.objects()))))
             .min(CACHE_BYTES.saturating_sub(self.working_bytes()))
     }
+    fn fine_output_budget(&self,r:&WgpuRasterizer,packet:FramePacket<'_>,scene:&Scene,commands:&Commands)->u64 {
+        let estimate=allocation_for_mode(r,self.plan,packet,self.source_overlap.then_some(&scene.scale_sources),self.streamed_sources,Some(scene),self.evaluation)
+            .into_iter().sum::<u64>()+self.graph.reserved_bytes(input_plan(self.plan,packet.scene,Some(self.graph.objects())));
+        let transforms=r.transforms.as_ref().map_or(0,|t|t.storage_bytes().saturating_sub(t.fine_progress_bytes()));
+        let actual=self.working_bytes()+scene.scale_sources.storage_bytes()+commands.storage_bytes()+transforms
+            +scene.pool.iter().map(|image|texture_bytes(&image.texture)).sum::<u64>();
+        let retained=r.navigator.storage_bytes()+r.retired_display_bytes.load(std::sync::atomic::Ordering::Acquire)
+            +r.display_backup.as_ref().map_or(0,|backup|backup.bytes);
+        CACHE_BYTES.saturating_sub(estimate.max(actual).saturating_add(retained))
+    }
     pub fn source_budget(&self, r: &WgpuRasterizer, packet: FramePacket<'_>, commands: &Commands, scene: Option<&Scene>) -> u64 {
-        let reserve = allocation_for(r, self.plan, packet, scene.map(|s|&s.scale_sources).filter(|_| self.source_overlap), self.streamed_sources, scene)[1]
+        let reserve = allocation_for_mode(r, self.plan, packet, scene.map(|s|&s.scale_sources).filter(|_| self.source_overlap), self.streamed_sources, scene,self.evaluation)[1]
             + self.spare.as_ref().map_or(0, |cache| cache.storage_bytes())
             + self.shifted.as_ref().map_or(0, |cache| cache.storage_bytes());
         let retained_records = commands.storage_bytes().saturating_sub(records_for(r, self.plan, packet.scene).next_power_of_two());
@@ -852,7 +913,7 @@ impl Cache {
     pub fn prepare_graph(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, scene: &Scene, commands: &Commands, tiles: Option<&BTreeSet<[u32; 2]>>) -> Result<(), GpuRasterError> {
         let sources=&scene.scale_sources;
         let retained_records = commands.storage_bytes().saturating_sub(records_for(r, self.plan, packet.scene).next_power_of_two());
-        let budget = CACHE_BYTES.saturating_sub(allocation_for(r, self.plan, packet, self.source_overlap.then_some(sources), self.streamed_sources, Some(scene)).into_iter().sum::<u64>()
+        let budget = CACHE_BYTES.saturating_sub(allocation_for_mode(r, self.plan, packet, self.source_overlap.then_some(sources), self.streamed_sources, Some(scene),self.evaluation).into_iter().sum::<u64>()
             + retained_records + self.spare.as_ref().map_or(0, |c| c.storage_bytes()) + self.shifted.as_ref().map_or(0, |c| c.storage_bytes()));
         let budget = if self.evaluation == Evaluation::Native { 0 } else { budget };
         self.prepare_root(r, packet, sources, budget, tiles)?;
@@ -906,6 +967,17 @@ impl Cache {
 
     pub fn view(&self) -> &wgpu::TextureView {
         self.placed.as_ref().map_or_else(|| &self.pixels.root().expect("composed output").view, |root| root.view())
+    }
+    fn backup_bytes(&self)->u64 {
+        if !self.output_complete() {return 0;}
+        let levels=match &self.placed {Some(Presentation::Placed(p))=>[0,1,p.coarse_level-p.value.plan.level],_=>[0;3]};
+        let mut unique=Vec::new();
+        [self.view(),self.next_view(),self.coarse_view()].into_iter().zip(levels).map(|(view,level)| {
+            let texture=view.texture();let level=level.min(texture.mip_level_count()-1);
+            if unique.iter().any(|(t,m)|*t==texture && *m==level) {return 0;}
+            unique.push((texture,level));
+            u64::from((texture.width()>>level).max(1))*u64::from((texture.height()>>level).max(1))*u64::from(texture.format().block_copy_size(None).unwrap())
+        }).sum()
     }
     pub fn backup(&self,r:&WgpuRasterizer,encoder:&mut crate::submission::CommandEncoder)->Option<DisplayBackup> {
         if self.placed.is_none() && self.pixels.root().is_none() {return None;}
@@ -1554,8 +1626,9 @@ impl Evaluator<'_> {
         let side = 1 << self.cache.plan.level;
         let region = self.region;
         let display = pixel_transform::DisplayLevel { side, extent: self.cache.plan.extent, opacity: source.opacity, backdrop: source.backdrop, encode: source.encode };
+        let fine_budget=self.cache.fine_output_budget(self.r,self.packet,self.scene,self.commands);
         let mut transforms = self.r.transforms.take().unwrap();
-        let result = transforms.render_region(self.r, self.encoder, source.id, source.placement, &view, display, plan, region);
+        let result = transforms.render_region(self.r, self.encoder, source.id, source.placement, &view, display, plan, region,fine_budget);
         self.r.transforms = Some(transforms);
         result?;
         Ok(Value::Image { view, slot, opacity: 1., plan, preview: None, encode: false })

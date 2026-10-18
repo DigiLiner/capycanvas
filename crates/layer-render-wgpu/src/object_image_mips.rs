@@ -210,6 +210,31 @@ pub(crate) struct ImageDecodeRequest {
     pub source:Arc<SourceImage>,
     pub coordinate:[u32;2],
 }
+pub(crate) struct RasterDecodeRequest {
+    pub blob:Arc<layer_core::raster::TileBlob>,
+    pub space:RgbSpace,
+    pub destination:RgbSpace,
+}
+pub(crate) struct PreparedRasterTile {
+    pub blob:Arc<layer_core::raster::TileBlob>,
+    pub space:RgbSpace,
+    pub destination:RgbSpace,
+    pub pixels:Result<crate::scene::sources::PreparedSourcePixels,String>,
+}
+pub fn prepare_raster_tile(blob:&Arc<layer_core::raster::TileBlob>,space:RgbSpace,cache:&layer_core::raster::DecodedTileCache)->Result<crate::scene::sources::PreparedSourcePixels,String> {
+    use layer_core::color::source::SourceChannels;
+    crate::scene::sources::validate_raster(blob,space).map_err(|error|error.to_string())?;
+    let native=cache.decode(blob)?;
+    if blob.descriptor.channels==4 {return Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(native));}
+    let channels=if blob.descriptor.channels==1 {SourceChannels::Gray} else {SourceChannels::GrayAlpha};
+    let depth=blob.descriptor.depth();
+    let row=PAGE_SIZE as usize*4*depth.bytes();
+    let mut expanded=vec![0;row*PAGE_SIZE as usize];
+    for (input,output) in native.chunks_exact(PAGE_SIZE as usize*channels.count()*depth.bytes()).zip(expanded.chunks_exact_mut(row)) {
+        crate::scene::sources::expand_source_row(input,output,channels,depth);
+    }
+    Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(Arc::new(expanded)))
+}
 pub(crate) type CoordinateResult = Result<Arc<Vec<u8>>,String>;
 pub(crate) type CoordinateDestination = Weak<std::sync::Mutex<Option<CoordinateResult>>>;
 pub(crate) struct CoordinateRequest {
@@ -221,10 +246,12 @@ pub(crate) struct CoordinateRequest {
 }
 pub(crate) enum MipDecodeRequest {
     Image(ImageDecodeRequest),
+    Raster(RasterDecodeRequest),
     Coordinates(CoordinateRequest),
 }
 pub(crate) enum PreparedImageWork {
     Image(PreparedMipTile),
+    Raster(PreparedRasterTile),
     Coordinates {destination:CoordinateDestination,pixels:CoordinateResult},
 }
 pub fn prepare_image_tile(source:&SourceImage,coordinate:[u32;2],destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoder:Option<&layer_color::WorkingDecoder>)->Result<crate::scene::sources::PreparedSourcePixels,String> {
@@ -256,7 +283,35 @@ pub(crate) struct PreparedMipTile {
     pub coordinate:[u32;2],
     pub pixels:Result<crate::scene::sources::PreparedSourcePixels,String>,
 }
-type DecodeKey = (PortableId, Weak<SourceImage>, [u32;2]);
+pub(crate) fn retain_image_decode(prepared:&PreparedMipTile,space:RgbSpace,failures:&mut Vec<crate::moving_projection::FailedImageTile>)->bool {
+    if let Err(error)=&prepared.pixels {
+        let weak=Arc::downgrade(&prepared.source);
+        failures.retain(|(id,source,coordinate,context,_)|source.strong_count()>0
+            && !(*id==prepared.id && source.ptr_eq(&weak) && *coordinate==prepared.coordinate && *context==space));
+        failures.push((prepared.id,weak,prepared.coordinate,space,error.clone()));
+        false
+    } else {true}
+}
+pub(crate) fn image_decode_failure<'a>(failures:&'a [crate::moving_projection::FailedImageTile],
+    id:PortableId,source:&Arc<SourceImage>,coordinate:[u32;2],space:RgbSpace)->Option<&'a str> {
+    let weak=Arc::downgrade(source);
+    failures.iter().find(|(owner,stored,tile,context,_)|*owner==id && stored.ptr_eq(&weak) && *tile==coordinate && *context==space)
+        .map(|(_,_,_,_,error)|error.as_str())
+}
+
+enum DecodeKey {
+    Image(PortableId,Weak<SourceImage>,[u32;2]),
+    Raster(Weak<layer_core::raster::TileBlob>,RgbSpace,RgbSpace),
+}
+impl DecodeKey {
+    fn matches(&self,other:&Self)->bool {
+        match (self,other) {
+            (Self::Image(id,a,p),Self::Image(other,b,q))=>id==other && a.ptr_eq(b) && p==q,
+            (Self::Raster(a,space,destination),Self::Raster(b,other,target))=>a.ptr_eq(b) && space==other && destination==target,
+            _=>false,
+        }
+    }
+}
 pub(crate) struct MipDecodeQueue {
     #[cfg(not(target_arch="wasm32"))]
     requests:std::sync::mpsc::SyncSender<MipDecodeRequest>,
@@ -277,6 +332,10 @@ fn contained<T>(work:impl FnOnce()->Result<T,String>)->Result<T,String> {
 #[cfg(not(target_arch="wasm32"))]
 fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoders:&mut std::collections::VecDeque<(Weak<SourceImage>,layer_color::WorkingDecoder)>)->PreparedImageWork {
     match request {
+        MipDecodeRequest::Raster(request) => {
+            let pixels=contained(||prepare_raster_tile(&request.blob,request.space,cache));
+            PreparedImageWork::Raster(PreparedRasterTile {blob:request.blob,space:request.space,destination:request.destination,pixels})
+        },
         MipDecodeRequest::Coordinates(request) => {
             let pixels=contained(|| if request.destination.strong_count()==0 {Err("Coordinate request cancelled".into())}
                 else {crate::object_sampling::prepare_nearest_coordinates(request.inverse,request.size,request.first,request.count)});
@@ -324,8 +383,8 @@ impl MipDecodeQueue {
                 loop {
                     let Ok(request)=receive.lock().unwrap().recv() else {break;};
                     let result=prepare_request(request,destination,&cache,&mut decoders);
-                    completion.fetch_add(1,Ordering::AcqRel);
                     if send.send(result).is_err() {break;}
+                    completion.fetch_add(1,Ordering::AcqRel);
                 }
             }).expect("Immutable image preparation worker");
         }
@@ -333,13 +392,17 @@ impl MipDecodeQueue {
     }
     pub(crate) fn request(&mut self,id:PortableId,source:Arc<SourceImage>,coordinate:[u32;2])->bool {
         let weak=Arc::downgrade(&source);
-        if self.outstanding.iter().flatten().any(|(owner,stored,tile)|*owner==id && stored.ptr_eq(&weak) && *tile==coordinate) {return true;}
-        self.enqueue(MipDecodeRequest::Image(ImageDecodeRequest {id,source,coordinate}),Some((id,weak,coordinate)))
+        self.enqueue(MipDecodeRequest::Image(ImageDecodeRequest {id,source,coordinate}),Some(DecodeKey::Image(id,weak,coordinate)))
+    }
+    pub(crate) fn request_raster(&mut self,blob:Arc<layer_core::raster::TileBlob>,space:RgbSpace,destination:RgbSpace)->bool {
+        let key=DecodeKey::Raster(Arc::downgrade(&blob),space,destination);
+        self.enqueue(MipDecodeRequest::Raster(RasterDecodeRequest {blob,space,destination}),Some(key))
     }
     pub(crate) fn request_coordinates(&mut self,inverse:[f64;6],size:[u32;2],first:u32,count:u32,destination:CoordinateDestination)->bool {
         self.enqueue(MipDecodeRequest::Coordinates(CoordinateRequest {inverse,size,first,count,destination}),None)
     }
     fn enqueue(&mut self,request:MipDecodeRequest,key:Option<DecodeKey>)->bool {
+        if key.as_ref().is_some_and(|key|self.outstanding.iter().flatten().any(|stored|stored.matches(key))) {return true;}
         if self.outstanding.len()>=self.capacity {return false;}
         #[cfg(not(target_arch="wasm32"))]
         if self.requests.try_send(request).is_err() {return false;}
@@ -348,15 +411,22 @@ impl MipDecodeQueue {
         self.outstanding.push(key);true
     }
     pub(crate) fn poll(&mut self)->Option<PreparedImageWork> {
+        if !self.ready() {return None;}
         #[cfg(not(target_arch="wasm32"))]
         let result=self.results.try_recv().ok()?;
         #[cfg(target_arch="wasm32")]
         let result=self.completed.take()?;
         self.ready.fetch_sub(1,Ordering::AcqRel);
-        let index=match &result {
-            PreparedImageWork::Image(tile)=>self.outstanding.iter().position(|key|key.as_ref().is_some_and(|(id,source,coordinate)|*id==tile.id && source.ptr_eq(&Arc::downgrade(&tile.source)) && *coordinate==tile.coordinate)),
-            PreparedImageWork::Coordinates {..}=>self.outstanding.iter().position(Option::is_none),
+        let key=match &result {
+            PreparedImageWork::Image(tile)=>Some(DecodeKey::Image(tile.id,Arc::downgrade(&tile.source),tile.coordinate)),
+            PreparedImageWork::Raster(tile)=>Some(DecodeKey::Raster(Arc::downgrade(&tile.blob),tile.space,tile.destination)),
+            PreparedImageWork::Coordinates {..}=>None,
         };
+        let index=self.outstanding.iter().position(|stored|match (stored,&key) {
+            (Some(stored),Some(key))=>stored.matches(key),
+            (None,None)=>true,
+            _=>false,
+        });
         if let Some(index)=index {self.outstanding.swap_remove(index);}
         Some(result)
     }
@@ -372,6 +442,41 @@ impl MipDecodeQueue {
 mod tests {
     use super::*;
     use crate::test_support::{page_texture,upload_page};
+    #[test]
+    fn obsolete_image_decode_failure_is_visible_only_to_its_requested_source_and_context() {
+        let a=layer_core::color::source::rgba8_source([1;2],|_,_|[1,2,3,255]);
+        let b=layer_core::color::source::rgba8_source([1;2],|_,_|[9,8,7,255]);
+        let (aid,bid)=(PortableId::random(),PortableId::random());
+        let weak=Arc::downgrade(&a);let mut failures=Vec::new();
+        let stale=PreparedMipTile {id:aid,source:a.clone(),coordinate:[0;2],pixels:Err("retired A decode".into())};
+        assert!(!retain_image_decode(&stale,RgbSpace::Srgb,&mut failures));
+        let current=PreparedMipTile {id:bid,source:b.clone(),coordinate:[0;2],pixels:Ok(crate::scene::sources::PreparedSourcePixels::NativeSamples(Arc::new(vec![9,8,7,255])))};
+        assert!(retain_image_decode(&current,RgbSpace::Srgb,&mut failures));
+        assert!(image_decode_failure(&failures,bid,&b,[0;2],RgbSpace::Srgb).is_none());
+        assert!(image_decode_failure(&failures,aid,&b,[0;2],RgbSpace::Srgb).is_none());
+        assert!(image_decode_failure(&failures,aid,&a,[0;2],RgbSpace::DisplayP3).is_none());
+        assert_eq!(image_decode_failure(&failures,aid,&a,[0;2],RgbSpace::Srgb),Some("retired A decode"));
+        let crate::scene::sources::PreparedSourcePixels::NativeSamples(pixels)=current.pixels.unwrap() else {panic!("Successful B retains native pixels");};
+        assert_eq!(pixels.as_slice(),[9,8,7,255]);
+        drop(stale);drop(a);assert_eq!(weak.strong_count(),0);
+    }
+    #[cfg(not(target_arch="wasm32"))]
+    #[test]
+    fn preparation_channel_delivery_precedes_readiness_publication() {
+        let (requests,_)=std::sync::mpsc::sync_channel(1);
+        let (sender,results)=std::sync::mpsc::sync_channel(1);
+        let ready=Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut queue=MipDecodeQueue {requests,results,ready:ready.clone(),outstanding:vec![None],capacity:1};
+        let target=Arc::new(std::sync::Mutex::new(None));
+        let destination=Arc::downgrade(&target);
+        assert!(sender.send(PreparedImageWork::Coordinates {destination:destination.clone(),pixels:Ok(Arc::new(vec![7]))}).is_ok());
+        assert!(queue.poll().is_none());
+        assert!(!queue.ready());assert!(queue.pending());
+        ready.fetch_add(1,Ordering::AcqRel);
+        let PreparedImageWork::Coordinates {destination:completed,pixels}=queue.poll().unwrap() else {panic!("Prepared coordinates retain their identity");};
+        assert!(completed.ptr_eq(&destination));assert_eq!(pixels.unwrap().as_slice(),[7]);
+        assert!(!queue.ready());assert!(!queue.pending());
+    }
     #[cfg(not(target_arch="wasm32"))]
     #[test]
     fn preparation_workers_bound_outstanding_tiles_deduplicate_requests_and_drop_cancelled_geometry() {
@@ -407,6 +512,23 @@ mod tests {
         }).collect();
         prepared.sort();accepted.sort();assert_eq!(prepared,accepted);
         assert!(!queue.pending());assert_eq!(cache.stats().misses,accepted.len() as u64);
+        use layer_core::color::{AlphaAssociation,PixelDescriptor,SampleType,TransferEncoding};
+        let hdr=PixelDescriptor {channels:4,bits_per_channel:32,sample:SampleType::Float,encoding:TransferEncoding::Linear,alpha:AlphaAssociation::Straight};
+        for (descriptor,input,expected) in [
+            (PixelDescriptor {bits_per_channel:16,..PixelDescriptor::COVERAGE8},vec![0x34,0x12],vec![0x34,0x12,0x34,0x12,0x34,0x12,255,255]),
+            (PixelDescriptor {channels:2,..hdr},[-2f32,0.5].into_iter().flat_map(f32::to_le_bytes).collect(),[-2f32,-2.,-2.,0.5].into_iter().flat_map(f32::to_le_bytes).collect()),
+            (hdr,[-1f32,2.,0.25,0.5].into_iter().flat_map(f32::to_le_bytes).collect(),[-1f32,2.,0.25,0.5].into_iter().flat_map(f32::to_le_bytes).collect()),
+        ] {
+            let blob=Arc::new(layer_core::raster::TileBlob::encode(descriptor,&input.repeat((PAGE_SIZE*PAGE_SIZE) as usize)).unwrap());
+            assert!(queue.request_raster(blob.clone(),RgbSpace::Srgb,RgbSpace::DisplayP3));
+            assert!(queue.request_raster(blob.clone(),RgbSpace::Srgb,RgbSpace::DisplayP3));
+            assert_eq!(queue.outstanding.len(),1);
+            let PreparedImageWork::Raster(tile)=drain(&mut queue,1).pop().unwrap() else {panic!("Raster preparation returns native samples");};
+            assert!(Arc::ptr_eq(&tile.blob,&blob));assert_eq!(tile.space,RgbSpace::Srgb);assert_eq!(tile.destination,RgbSpace::DisplayP3);
+            let crate::scene::sources::PreparedSourcePixels::NativeSamples(bytes)=tile.pixels.unwrap() else {panic!("Raster codes retain their descriptor and alpha");};
+            assert_eq!(bytes.as_slice(),expected.repeat((PAGE_SIZE*PAGE_SIZE) as usize));
+            assert!(!queue.pending());
+        }
         let destination=Arc::new(std::sync::Mutex::new(None));
         let weak=Arc::downgrade(&destination);
         assert!(queue.request_coordinates([1.,0.,0.,1.,3.,-2.],[256;2],17,4,weak.clone()));
