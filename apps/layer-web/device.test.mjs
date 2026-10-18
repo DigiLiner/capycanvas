@@ -26,6 +26,7 @@ import {checkIcons} from "./icons.test.mjs";
 import {checkWorkspaceStore} from "./workspace-store.test.mjs";
 import {checkLongPressDragging} from "./long-press-drag.test.mjs";
 import {checkLayerHolding,checkLayerSwipes} from "./layer-hold.test.mjs";
+import {checkPaperRows} from "./layers.test.mjs";
 import {checkWorkspaceResize} from "./workspace-resize.test.mjs";
 import {checkDeviceImagePlacement} from "./image-placement-device.test.mjs";
 import {checkCanvasBar} from "./canvas-bar-journey.test.mjs";
@@ -196,6 +197,7 @@ try {
     [process.argv.includes("--workspace-resize"), () => checkWorkspaceResize({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--long-press-drag"), () => checkLongPressDragging({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--layer-swipes"), () => checkLayerSwipes({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--paper-rows"), () => checkPaperRows({call,evaluate,settle,device:true}), checkErrors],
     [process.argv.includes("--layer-hold"), () => checkLayerHolding({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--drawer-drag"), () => checkDrawerDragging({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--medium-tiles"), () => checkMediumTiles({call,evaluate,settle}), checkErrors],

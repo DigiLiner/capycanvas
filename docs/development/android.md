@@ -316,6 +316,11 @@ manual save checkpoints and undo/redo after an actual process death.
   readout, effects and retouching, each with mouse, finger and stylus. It
   dispatches typed `MotionEvent`s through the native views;
   `-e systemInput true` uses OS injection where the device allows it.
+  `#missingPaperRowSharesLayerScrollingAndNativeActivation` checks Add paper
+  against ordinary row geometry, hover and cancelled presses, activation,
+  history, scrolling and an empty stack in both themes.
+  `#selectingFillRowsKeepsPropertiesAndDrawingTargets` checks fill selection,
+  painting on the layer above and existing mask selection.
 - [`AndroidWorkspaceManagerTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidWorkspaceManagerTest.kt)
   and [`AndroidWorkspaceSwitcherTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidWorkspaceSwitcherTest.kt):
   persistence, menus and window lifecycle. `AndroidWorkspaceOwnershipTest`

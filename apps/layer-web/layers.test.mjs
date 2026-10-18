@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
 
 export async function checkSelectedPainting({call, evaluate, settle}) {
   const action = value => evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);
@@ -295,12 +297,13 @@ export async function checkLayerRelationships({call,evaluate,settle}) {
   console.log('PASS: contextual attachment, neutral adjacent FX links, darker accent rail, inherited eye, backgroundless FX, saved Selection normalized drops, collapsed owner, themes, custom/neutral accents, narrow/wide, scroll');
 }
 
-export async function checkPaperRows({call,evaluate,settle}) {
+export async function checkPaperRows({call,evaluate,settle,device=false}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/paper-ports/web';
   await mkdir(directory,{recursive:true});
   const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
   const layer=action=>send({type:'layer',action});
   const invoke=command=>send({type:'invoke',command});
+  const wait=condition=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+5000;function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
   const rows=()=>evaluate('layerApp.state().layers.map(l=>({id:Number(l.id),label:l.label,drawing:l.drawing,mask_selected:l.mask_selected}))');
   const missing=()=>evaluate("!!document.querySelector('#layer-add-paper')");
   const mouse=async(type,x,y)=>{await call('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',buttons:type==='mousePressed'?1:0,clickCount:1});await settle();};
@@ -311,7 +314,7 @@ export async function checkPaperRows({call,evaluate,settle}) {
     const initialCount=(await rows()).length;
     await evaluate(`document.querySelector('.layer-footer [aria-label="New layer"]').focus()`);
     for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key:'Enter',code:'Enter',windowsVirtualKeyCode:13,...(type==='keyDown'?{text:'\r'}:{})});
-    await settle();assert.equal((await rows()).length,initialCount+1,'Existing footer button keeps native Enter activation');
+    await settle();await wait(`layerApp.state().layers.length===${initialCount+1}`);assert.equal((await rows()).length,initialCount+1,'Existing footer button keeps native Enter activation');
     await invoke('undo');
     let all=await rows();
     let paper=all.find(l=>l.label==='Paper').id;
@@ -347,6 +350,7 @@ export async function checkPaperRows({call,evaluate,settle}) {
       assert.equal(await evaluate("document.activeElement.id"),'layer-add-paper','Add paper receives keyboard focus');
       await call('Input.dispatchKeyEvent',{type:'keyDown',key,code,windowsVirtualKeyCode:value,text});
       await call('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:value});await settle();
+      await wait("!document.querySelector('#layer-add-paper')");
       assert.equal(await missing(),false,`${code} activates Add paper`);
       await invoke('undo');assert.equal(await missing(),true);
     }
@@ -362,12 +366,35 @@ export async function checkPaperRows({call,evaluate,settle}) {
       assert.equal(await missing(),true,`${device} release outside cancels Add paper`);
       assert.equal((await rows()).length,before);
       const tap=await bounds();await contact('down',tap);await contact('up',tap);
+      await wait("!document.querySelector('#layer-add-paper')");
       assert.equal(await missing(),false,`${device} tap adds Paper`);
       assert.equal((await rows()).length,before+1,`${device} tap adds exactly one Paper`);
       await invoke('undo');assert.equal(await missing(),true,`${device} insertion is one Undo step`);
       assert.equal((await rows()).length,before);
     }
+    if(device&&process.env.CAPY_ANDROID_SERIAL) {
+      const shell=(...args)=>promisify(execFile)(process.env.ADB??'adb',['-s',process.env.CAPY_ANDROID_SERIAL,'shell',...args]);
+      const screen=await evaluate('({ratio:devicePixelRatio,width:screen.width,height:screen.height})');
+      const probe=[Math.round(screen.width*screen.ratio/2),Math.round(screen.height*screen.ratio/2)];
+      await evaluate(`(()=>{const n=document.createElement('div');n.id='paper-calibration';n.style.cssText='position:fixed;inset:0;z-index:2147483647';n.addEventListener('pointerdown',e=>{window.paperCalibration={x:e.clientX,y:e.clientY};e.preventDefault();e.stopPropagation()});document.body.append(n)})()`);
+      try {
+        await shell('input','touchscreen','tap',...probe.map(String));await wait('window.paperCalibration');
+        const calibration=await evaluate('paperCalibration');
+        await evaluate("document.querySelector('#paper-calibration').remove()");
+        const p=await bounds(),before=(await rows()).length;
+        await evaluate("document.querySelector('#layer-add-paper').addEventListener('pointerdown',e=>{window.paperOsPointer=e.pointerType},{once:true})");
+        const physical=[Math.round(probe[0]+(p.x-calibration.x)*screen.ratio),Math.round(probe[1]+(p.y-calibration.y)*screen.ratio)];
+        await shell('input','touchscreen','tap',...physical.map(String));
+        await wait("!document.querySelector('#layer-add-paper')");
+        assert.equal(await evaluate('paperOsPointer'),'touch','OS touch reaches Add paper');
+        assert.equal((await rows()).length,before+1,'OS touch adds exactly one Paper');
+        await invoke('undo');assert.equal(await missing(),true,'OS insertion is one Undo step');
+      } finally {
+        await evaluate("document.querySelector('#paper-calibration')?.remove();delete window.paperCalibration;delete window.paperOsPointer");
+      }
+    }
     const activate=await bounds();await mouse('mousePressed',activate.x,activate.y);await mouse('mouseReleased',activate.x,activate.y);
+    await wait("!document.querySelector('#layer-add-paper')");
     assert.equal(await missing(),false,'Pointer activates Add paper');
     all=await rows();paper=all.find(l=>l.label==='Paper').id;
     assert.equal(String(all.at(-1).id),String(paper));
@@ -399,6 +426,7 @@ export async function checkPaperRows({call,evaluate,settle}) {
     assert.equal((await rows()).length,0);
     assert.equal(await missing(),true,'An empty drawing offers Add paper');
     let position=await bounds();await mouse('mousePressed',position.x,position.y);await mouse('mouseReleased',position.x,position.y);
+    await wait("!document.querySelector('#layer-add-paper')");
     assert.equal((await rows()).length,1);assert.equal(await missing(),false);
     paper=(await rows())[0].id;
     for(let i=0;i<20;i++)await layer({op:'new',group:false,clipped:false});
@@ -407,6 +435,7 @@ export async function checkPaperRows({call,evaluate,settle}) {
     assert.equal(await evaluate("(()=>{const n=document.querySelector('#layer-rows'),b=document.querySelector('#layer-add-paper').getBoundingClientRect(),r=n.getBoundingClientRect();return n.scrollHeight>n.clientHeight&&n.scrollTop>0&&b.bottom<=r.bottom+1&&b.top>=r.top})()"),true,'Add paper scrolls after the bottom layer');
     const capture=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/add-paper-${theme}.png`,Buffer.from(capture.data,'base64'));
     await mouse('mousePressed',position.x,position.y);await mouse('mouseReleased',position.x,position.y);
+    await wait("!document.querySelector('#layer-add-paper')");
     assert.equal(await missing(),false);assert.equal((await rows()).at(-1).label,'Paper');
     for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
     await layer({op:'new',group:false,clipped:false});

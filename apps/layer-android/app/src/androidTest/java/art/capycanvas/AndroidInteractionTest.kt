@@ -191,12 +191,28 @@ class AndroidInteractionTest {
         finally { if (::scenario.isInitialized) scenario.close() }
     }
 
+    private fun revealLayers() {
+        if (group("layers").getString("active") != "layers")
+            action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+    }
+
     @Test fun missingPaperRowSharesLayerScrollingAndNativeActivation() {
         val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
-        action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+        customize(obj("type" to "close_expanded"))
+        revealLayers()
         fun scroll(index: Int) {
-            action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+            revealLayers()
             onMain { find("layer-rows")!!.config[SemanticsActions.ScrollToIndex].action!!.invoke(index) }
+            settle()
+        }
+        fun hover(at: Offset, pointer: Int, action: Int) {
+            val now = SystemClock.uptimeMillis()
+            val motion = MotionEvent.obtain(now, now, action, 1,
+                arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = pointer }),
+                arrayOf(MotionEvent.PointerCoords().apply { x = at.x; y = at.y }),
+                0, 0, 1f, 1f, 0, 0, if (pointer == MotionEvent.TOOL_TYPE_MOUSE) InputDevice.SOURCE_MOUSE else InputDevice.SOURCE_STYLUS, 0)
+            try { onMain { owner.view.dispatchGenericMotionEvent(motion) } }
+            finally { motion.recycle() }
             settle()
         }
         try {
@@ -211,11 +227,40 @@ class AndroidInteractionTest {
                 waitFor("Missing Paper exposes the add row") { shown("layer-add-paper") }
                 val row = bounds("layer-add-paper")
                 assertEquals("Add Paper uses standard layer height", 40f, row.height / density, 1f)
+                assertEquals("Add Paper matches an actual ordinary layer row", bounds("layer-row-${layerStates().last().getLong("id")}").height, row.height, density)
                 assertEquals("Add Paper fills the list width", bounds("layer-rows").width, row.width, density)
                 val caption = textBounds("Add paper")!!
                 assertEquals("Caption is vertically centered", row.center.y, caption.center.y, density)
                 if (pointer == MotionEvent.TOOL_TYPE_STYLUS) screenshot("validation/paper/add-paper-$theme.png")
                 tool = pointer
+                val before = layerStates().map { it.getLong("id") }
+                val beforeWorkspace = workspace()
+                val beforeCustomization = state().getJSONObject("customization").toString()
+                assertTrue("Paper interactions begin without panel configuration", state().getJSONObject("customization").isNull("expanded"))
+                fun unchanged(label: String) {
+                    assertEquals("$label preserves the workspace", beforeWorkspace, workspace())
+                    assertEquals("$label preserves customization", beforeCustomization, state().getJSONObject("customization").toString())
+                }
+                val pointerName = listOf("mouse", "finger", "stylus")[pointerTools.indexOf(pointer)]
+                if (pointer != MotionEvent.TOOL_TYPE_FINGER) {
+                    hover(row.center, pointer, MotionEvent.ACTION_HOVER_ENTER)
+                    hover(row.center, pointer, MotionEvent.ACTION_HOVER_MOVE)
+                    screenshot("validation/paper/add-paper-hover-$theme-$pointerName.png")
+                    assertEquals("Hover does not insert Paper", before, layerStates().map { it.getLong("id") })
+                    unchanged("Hover")
+                    hover(row.center, pointer, MotionEvent.ACTION_HOVER_EXIT)
+                    unchanged("Hover exit")
+                }
+                event(MotionEvent.ACTION_DOWN, row.center)
+                SystemClock.sleep(android.view.ViewConfiguration.getLongPressTimeout() + 100L)
+                screenshot("validation/paper/add-paper-held-$theme-$pointerName.png")
+                assertEquals("Holding the native row does not insert Paper", before, layerStates().map { it.getLong("id") })
+                unchanged("Held contact")
+                event(MotionEvent.ACTION_CANCEL)
+                settle()
+                assertEquals("Cancelled contact does not insert Paper", before, layerStates().map { it.getLong("id") })
+                unchanged("Cancelled contact")
+                assertTrue("Cancelled contact leaves Add Paper available", shown("layer-add-paper"))
                 tap(row.center)
                 waitFor("Native activation inserts Paper") { state().getJSONObject("layer_properties").getString("title") == "Paper" && state().getJSONObject("layer_tools").isNull("add_paper") }
                 assertEquals("Paper is last", editingLayer(), layerStates().last().getLong("id"))
@@ -224,7 +269,7 @@ class AndroidInteractionTest {
                 scroll(layerStates().size)
                 waitFor("One Undo restores the add row") { shown("layer-add-paper") }
                 command("redo")
-                action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+                revealLayers()
                 waitFor("Redo restores Paper") { !exists("layer-add-paper") }
                 command("undo")
             }
@@ -244,13 +289,14 @@ class AndroidInteractionTest {
     }
 
     @Test fun selectingFillRowsKeepsPropertiesAndDrawingTargets() {
-        action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+        customize(obj("type" to "close_expanded"))
+        revealLayers()
         for ((effect, title) in listOf("paper" to "Paper", "solid_color" to "Solid Color", "gradient_fill" to "Gradient Fill")) {
             action(obj("type" to "effect", "action" to obj("op" to "insert", "effect" to effect)))
             val fill = editingLayer()
             layerAction(obj("op" to "new", "group" to false, "clipped" to false))
             val ink = editingLayer()
-            action(obj("type" to "select_panel_tab", "group" to 43, "panel" to "layers"))
+            revealLayers()
             onMain { find("layer-rows")!!.config[SemanticsActions.ScrollToIndex].action!!.invoke(layerStates().indexOfFirst { it.getLong("id") == fill }) }
             waitFor("Fill row visible") { shown("layer-row-$fill") }
             tool = MotionEvent.TOOL_TYPE_FINGER
