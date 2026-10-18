@@ -184,7 +184,7 @@ Pure unit tests need no browser or GPU:
 
 ```bash
 node --test apps/layer-web/{run,package,frame,pointer,workspace-client,canvas-bar,notice,zoom-readout,export-controls,size-dialog,text-input,localization}.test.mjs
-node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
+node --test apps/layer-web/{numeric,histogram,gpu-diagnostics,raster-worker-client,pipeline-wait,workspace-manager-copy,toolbar-components-copy,color-controls-copy,document-color-copy}.test.mjs
 ```
 
 The launcher fixture uses Bash; `LAYER_TEST_BASH` selects its executable
