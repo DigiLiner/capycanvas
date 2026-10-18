@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
+import Combine
 #else
 import UIKit
 #endif
@@ -44,6 +45,7 @@ import UIKit
     private var queuedOpens: [PhotoItem] = []
     #if os(macOS)
     weak var presentationWindow: NSWindow?
+    private var exportDismissal: AnyCancellable?
     #endif
     var closeWindow: (() -> Void)?
     private var handledClose = false
@@ -409,6 +411,20 @@ import UIKit
     }
     /// Present the native file picker after the export sheet has dismissed.
     func exportDismissed() {
+        guard exportDelivery != nil else { return }
+        #if os(macOS)
+        if let window = presentationWindow, window.attachedSheet != nil {
+            if exportDismissal == nil {
+                exportDismissal = NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification, object: window)
+                    .first().receive(on: DispatchQueue.main).sink { [weak self] _ in
+                        self?.exportDismissal = nil
+                        self?.exportDismissed()
+                    }
+            }
+            return
+        }
+        exportDismissal = nil
+        #endif
         let delivery = exportDelivery; exportDelivery = nil; delivery?()
     }
     private var usesExportPicker: Bool {
@@ -654,6 +670,9 @@ import UIKit
         }
     }
     private func released() {
+        #if os(macOS)
+        exportDismissal = nil
+        #endif
         requestID = nil; approved = nil; busy = false; blocksEditor = false; finishing = false
         profileCompletion = nil; pendingProfile = nil; profileError = nil; interpreting = false
         packageSummary = nil; packageImage = nil; packageSource = nil; packageCopying = false

@@ -234,6 +234,8 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   to close, so a preview that remains open during delivery must own its Save panel.
   Arm export delivery before publishing preview dismissal; dismissal observers
   can run synchronously.
+  Keep delivery armed until the drawing window has detached its export sheet.
+  Observe that window’s sheet-end notification before presenting the destination panel.
   Blocked editor content must also be hidden from accessibility while the
   presented controls retain their own identifiers.
 - **Independent publications.** Handle small `layer-host` packets such as

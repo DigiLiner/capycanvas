@@ -125,10 +125,17 @@ import UniformTypeIdentifiers
             var destination: URL? = master
             var chosenType: UTType?
             var staging: URL?
+            var deliveries = 0
+            var deliveredWhileAttached = false
+            var deliveryWindow: NSWindow?
             store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, done in done([]) }, save: { _,type,done in
+                deliveries += 1
+                deliveredWhileAttached = deliveredWhileAttached || deliveryWindow?.attachedSheet != nil
                 chosenType = type; done(destination)
             }, create: { _,done in done(JSON(["extent": [64,48], "color": ["space": "DisplayP3", "depth": "U16"], "background": "Transparent"])) },
                 export: platform == 0 ? { url,done in
+                    deliveries += 1
+                    deliveredWhileAttached = deliveredWhileAttached || deliveryWindow?.attachedSheet != nil
                     staging = url
                     if let destination {
                         do { try FileManager.default.copyItem(at: url, to: destination); done(destination) }
@@ -183,7 +190,33 @@ import UniformTypeIdentifiers
                 && editor.draft["formats"].array.map(\.string) == ["Tiff", "Jpeg"]
                 && !editor.draft["backgrounds"].array.map(\.string).contains("Preserve"), "CMYK import supplies supported output choices")
             let cmykOutput = root.appendingPathComponent("CMYK-\(platform).tiff")
-            destination = cmykOutput; editor.choose(editor.recipe); try await idle()
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 180),
+                styleMask: [.titled], backing: .buffered, defer: false)
+            let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 100),
+                styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            sheet.isReleasedWhenClosed = false
+            defer { window.endSheet(sheet); sheet.close(); window.close() }
+            store.projectFiles.presentationWindow = window
+            deliveryWindow = window
+            window.orderFront(nil)
+            window.beginSheet(sheet, completionHandler: { _ in })
+            try require(window.attachedSheet === sheet, "Owned export sheet is attached")
+            let beforeDelivery = deliveries
+            destination = cmykOutput
+            editor.choose(editor.recipe)
+            try await wait("Export dismissal while attached", store: store) { store.projectFiles.exportEditor == nil }
+            try require(deliveries == beforeDelivery && store.projectFiles.busy,
+                "Export delivery waits for native sheet detachment")
+            window.endSheet(sheet)
+            try await idle()
+            try require(window.attachedSheet == nil && !deliveredWhileAttached && deliveries == beforeDelivery + 1,
+                "Native sheet detachment delivers exactly once")
+            store.projectFiles.exportDismissed()
+            try require(deliveries == beforeDelivery + 1, "Repeated dismissal cannot deliver again")
+            deliveryWindow = nil
+            store.projectFiles.presentationWindow = nil
+            window.orderOut(nil)
             try image(cmykOutput, type: .tiff, depth: 16, extent: [64,48])
             let cmykSource = CGImageSourceCreateWithURL(cmykOutput as CFURL, nil)!
             try require(CGImageSourceCreateImageAtIndex(cmykSource, 0, nil)?.colorSpace?.model == .cmyk,
