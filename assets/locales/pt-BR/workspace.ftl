@@ -325,6 +325,7 @@ workspace-tool-description-toggle-theme = Alternar entre aparência clara e escu
 workspace-tool-description-add-layer = Criar uma nova camada de pintura
 workspace-tool-description-delete-layer = Excluir a camada ativa
 workspace-tool-description-raise-layer = Mover a camada ativa para cima
+workspace-tool-description-edit-points = Mover, adicionar e excluir as âncoras dos caminhos selecionados
 workspace-tool-description-finish-path = Adicionar o caminho que você está desenhando
 workspace-tool-description-cancel-path = Descartar o caminho que você está desenhando
 workspace-tool-description-bring-to-front = Mover os caminhos selecionados para a frente dos outros da camada

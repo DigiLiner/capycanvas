@@ -116,6 +116,7 @@ command-toggle-theme = Koyu mod
 command-add-layer = Yeni katman
 command-delete-layer = Katmanı sil
 command-raise-layer = Katmanı yükselt
+command-edit-points = Noktaları düzenle
 command-finish-path = Yolu bitir
 command-cancel-path = Yolu iptal et
 commands-draw-paths-on-a-vector-layer = Yolları bir vektör katmanında çizin

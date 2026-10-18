@@ -36,6 +36,27 @@ a style keep sharing one. Turning Fill or Outline on adds the background or
 foreground color. Each change, or each drag of a number or color, is one undo
 step.
 
+## Edit Points
+
+**Edit Points** (A), beside Move and Scale-Rotate, edits the anchors of the
+selected paths; pressing another path selects it. Squares mark the anchors,
+filled when selected, and selected anchors show their handles.
+
+- Click an anchor to select it, Shift-click to add or remove it, or drag a
+  marquee on empty canvas to select the anchors inside.
+- Drag selected anchors to move them (Shift keeps 45° steps). Drag a handle to
+  turn the curve; a smooth anchor keeps its handles in line and a symmetric one
+  mirrors them, unless Alt breaks them into a corner.
+- Drag a segment to bend it; click a segment to add an anchor without changing
+  the curve.
+- Double-click an anchor to switch it between corner and smooth.
+- **Clear Selected** (Delete) removes the selected anchors and joins their
+  neighbors; a path left with one anchor goes. Width profiles keep the widths
+  at the remaining anchors.
+
+Editing an anchor turns a rectangle or ellipse into a plain path. Each drag,
+click or deletion is one undo step.
+
 ## Path
 
 Figure's **Path** draws a path anchor by anchor on a vector layer. A click adds
@@ -110,7 +131,8 @@ layers ([Object layers](image-objects.md)).
 `rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step`,
 `monoline_draws_constant_width_vector_lines`,
 `move_frame_scales_and_rotates_selected_paths_in_one_undo_step`,
-`path_tool_builds_open_and_closed_paths_anchor_by_anchor` and
+`path_tool_builds_open_and_closed_paths_anchor_by_anchor`,
+`edit_points_moves_adds_deletes_and_switches_anchors` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

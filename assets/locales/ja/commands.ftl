@@ -116,6 +116,7 @@ command-toggle-theme = ダークモード
 command-add-layer = 新規レイヤー
 command-delete-layer = レイヤーを削除
 command-raise-layer = レイヤーを上げる
+command-edit-points = ポイントを編集
 command-finish-path = パスを確定
 command-cancel-path = パスを取り消す
 commands-draw-paths-on-a-vector-layer = パスはベクターレイヤーに描いてください。

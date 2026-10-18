@@ -353,6 +353,7 @@ impl ToolbarControl {
                         command,
                         CommandId::ScaleRotate
                             | CommandId::Move
+                            | CommandId::EditPoints
                             | CommandId::Hand
                             | CommandId::Eyedropper
                             | CommandId::Gradient

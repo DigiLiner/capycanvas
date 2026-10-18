@@ -570,6 +570,7 @@ command_ids! {
     AddLayer,
     DeleteLayer,
     RaiseLayer,
+    EditPoints,
     FinishPath,
     CancelPath,
     BringToFront,
@@ -815,6 +816,7 @@ impl CommandId {
             Self::SelectionReference => "reference",
 
             Self::Move => "move",
+            Self::EditPoints => "edit-points",
             Self::ScaleRotate | Self::TransformAgain => "transform",
             Self::TransformSnapping => "ruler-snap",
             Self::ApplyTransform => "check",
@@ -1087,6 +1089,7 @@ impl CommandId {
             Self::SelectionEditing => MessageId::COMMAND_SELECTION_EDITING,
             Self::SelectionReference => MessageId::COMMAND_SELECTION_REFERENCE,
             Self::Move => MessageId::COMMAND_MOVE,
+            Self::EditPoints => MessageId::COMMAND_EDIT_POINTS,
             Self::ScaleRotate => MessageId::COMMAND_SCALE_ROTATE,
             Self::TransformAgain => MessageId::COMMAND_TRANSFORM_AGAIN,
             Self::TransformSnapping => MessageId::COMMAND_TRANSFORM_SNAPPING,

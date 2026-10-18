@@ -116,6 +116,7 @@ command-toggle-theme = Modo oscuro
 command-add-layer = Capa nueva
 command-delete-layer = Eliminar capa
 command-raise-layer = Subir capa
+command-edit-points = Editar puntos
 command-finish-path = Terminar trazado
 command-cancel-path = Cancelar trazado
 commands-draw-paths-on-a-vector-layer = Dibuja trazados en una capa vectorial

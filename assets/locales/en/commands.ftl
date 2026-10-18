@@ -116,6 +116,7 @@ command-toggle-theme = Dark Mode
 command-add-layer = New layer
 command-delete-layer = Delete layer
 command-raise-layer = Raise layer
+command-edit-points = Edit points
 command-finish-path = Finish path
 command-cancel-path = Cancel path
 commands-draw-paths-on-a-vector-layer = Draw paths on a vector layer

@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = 在淺色與深色外觀之間切換
 workspace-tool-description-add-layer = 建立新的繪畫圖層
 workspace-tool-description-delete-layer = 刪除目前圖層
 workspace-tool-description-raise-layer = 將目前圖層上移
+workspace-tool-description-edit-points = 移動、新增和刪除所選路徑的錨點
 workspace-tool-description-finish-path = 加入正在繪製的路徑
 workspace-tool-description-cancel-path = 捨棄正在繪製的路徑
 workspace-tool-description-bring-to-front = 將所選路徑移到圖層內其他路徑之前

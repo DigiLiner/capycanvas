@@ -116,6 +116,7 @@ command-toggle-theme = โหมดมืด
 command-add-layer = เลเยอร์ใหม่
 command-delete-layer = ลบเลเยอร์
 command-raise-layer = เลื่อนเลเยอร์ขึ้น
+command-edit-points = แก้ไขจุด
 command-finish-path = เสร็จสิ้นพาธ
 command-cancel-path = ยกเลิกพาธ
 commands-draw-paths-on-a-vector-layer = วาดพาธบนเลเยอร์เวกเตอร์

@@ -116,6 +116,7 @@ command-toggle-theme = Mode sombre
 command-add-layer = Nouveau calque
 command-delete-layer = Supprimer le calque
 command-raise-layer = Monter le calque
+command-edit-points = Modifier les points
 command-finish-path = Terminer le tracé
 command-cancel-path = Annuler le tracé
 commands-draw-paths-on-a-vector-layer = Dessiner les tracés sur un calque vectoriel

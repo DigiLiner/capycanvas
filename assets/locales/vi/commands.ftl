@@ -116,6 +116,7 @@ command-toggle-theme = Chế độ tối
 command-add-layer = Lớp mới
 command-delete-layer = Xóa lớp
 command-raise-layer = Nâng lớp
+command-edit-points = Sửa điểm
 command-finish-path = Hoàn tất đường
 command-cancel-path = Hủy đường
 commands-draw-paths-on-a-vector-layer = Vẽ đường trên lớp vector

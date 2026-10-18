@@ -116,6 +116,7 @@ command-toggle-theme = 深色模式
 command-add-layer = 新建图层
 command-delete-layer = 删除图层
 command-raise-layer = 上移图层
+command-edit-points = 编辑锚点
 command-finish-path = 完成路径
 command-cancel-path = 取消路径
 commands-draw-paths-on-a-vector-layer = 请在矢量图层上绘制路径

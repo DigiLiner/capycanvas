@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = Passer de l’apparence claire à somb
 workspace-tool-description-add-layer = Créer un nouveau calque de peinture
 workspace-tool-description-delete-layer = Supprimer le calque actif
 workspace-tool-description-raise-layer = Monter le calque actif
+workspace-tool-description-edit-points = Déplacer, ajouter et supprimer les ancres des tracés sélectionnés
 workspace-tool-description-finish-path = Ajouter le tracé en cours
 workspace-tool-description-cancel-path = Abandonner le tracé en cours
 workspace-tool-description-bring-to-front = Placer les tracés sélectionnés devant les autres de leur calque

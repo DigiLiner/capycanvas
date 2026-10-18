@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = Zwischen heller und dunkler Darstellun
 workspace-tool-description-add-layer = Eine neue Malebene erstellen
 workspace-tool-description-delete-layer = Die aktive Ebene löschen
 workspace-tool-description-raise-layer = Die aktive Ebene nach oben verschieben
+workspace-tool-description-edit-points = Ankerpunkte ausgewählter Pfade verschieben, hinzufügen und löschen
 workspace-tool-description-finish-path = Den gezeichneten Pfad hinzufügen
 workspace-tool-description-cancel-path = Den gezeichneten Pfad verwerfen
 workspace-tool-description-bring-to-front = Die ausgewählten Pfade vor alle anderen ihrer Ebene stellen

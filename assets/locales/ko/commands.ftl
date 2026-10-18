@@ -116,6 +116,7 @@ command-toggle-theme = 어두운 모드
 command-add-layer = 새 레이어
 command-delete-layer = 레이어 삭제
 command-raise-layer = 레이어 위로 이동
+command-edit-points = 점 편집
 command-finish-path = 패스 완료
 command-cancel-path = 패스 취소
 commands-draw-paths-on-a-vector-layer = 패스는 벡터 레이어에 그리세요.

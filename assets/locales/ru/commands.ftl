@@ -116,6 +116,7 @@ command-toggle-theme = Тёмная тема
 command-add-layer = Новый слой
 command-delete-layer = Удалить слой
 command-raise-layer = Поднять слой
+command-edit-points = Редактировать точки
 command-finish-path = Завершить контур
 command-cancel-path = Отменить контур
 commands-draw-paths-on-a-vector-layer = Рисуйте контуры на векторном слое

@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = Switch between light and dark appearan
 workspace-tool-description-add-layer = Create a new paint layer
 workspace-tool-description-delete-layer = Delete the active layer
 workspace-tool-description-raise-layer = Move the active layer up
+workspace-tool-description-edit-points = Move, add and delete the anchors of selected paths
 workspace-tool-description-finish-path = Add the path you are drawing
 workspace-tool-description-cancel-path = Discard the path you are drawing
 workspace-tool-description-bring-to-front = Move the selected paths in front of the others in their layer

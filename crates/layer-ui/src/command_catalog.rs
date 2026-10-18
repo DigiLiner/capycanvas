@@ -1107,6 +1107,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             | C::ClearLayer
             | C::Figure
             | C::Move
+            | C::EditPoints
             | C::LassoFill
             | C::EncloseFill
             | C::FillSelection

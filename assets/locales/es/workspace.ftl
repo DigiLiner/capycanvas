@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = Alternar entre apariencia clara y oscu
 workspace-tool-description-add-layer = Crear una capa de pintura nueva
 workspace-tool-description-delete-layer = Eliminar la capa activa
 workspace-tool-description-raise-layer = Mover la capa activa hacia arriba
+workspace-tool-description-edit-points = Mover, añadir y eliminar los anclajes de los trazados seleccionados
 workspace-tool-description-finish-path = Añadir el trazado que estás dibujando
 workspace-tool-description-cancel-path = Descartar el trazado que estás dibujando
 workspace-tool-description-bring-to-front = Mover los trazados seleccionados delante de los demás de su capa

@@ -62,6 +62,7 @@ pub enum LayerCanvasTool {
     #[default]
     Paint,
     Move,
+    EditPoints,
     Transform,
     Crop,
     Select,
@@ -1652,7 +1653,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if matches!(self.layer_interaction.tool, LayerCanvasTool::Ruler { .. }) {
             return self.ruler_pen(event, p);
         }
-        if self.object_pen(event)? || self.vector_move_pen(event, p)? || self.vector_path_pen(event, p)? {
+        if self.object_pen(event)? || self.vector_move_pen(event, p)? || self.vector_path_pen(event, p)? || self.vector_points_pen(event, p)? {
             return Ok(());
         }
         if self.layer_interaction.tool == LayerCanvasTool::Transform || self.operation.moving_pixels() || self.operation.moving_layer() {
@@ -1810,7 +1811,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let tonal=self.cancel_tonal();
         let effect = self.cancel_effect_gesture()?;
         let sdr = self.cancel_sdr_gesture()?;
-        let transform = self.cancel_object_interaction()? || self.cancel_transform()? || self.cancel_vector_move() | self.cancel_vector_path();
+        let transform = self.cancel_object_interaction()? || self.cancel_transform()? || self.cancel_vector_move() | self.cancel_vector_path() | self.cancel_vector_points();
         self.cancel_ruler_gesture();
         let selection = self.selection_tools.cancel();
         let region = self.region_tools.cancellable();
@@ -1925,6 +1926,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.append_object_overlay(segments);
         self.append_vector_move_overlay(segments);
         self.append_vector_path_overlay(segments);
+        self.append_vector_points_overlay(segments);
         self.append_crop_overlay(segments);
         self.append_clone_overlay(segments);
         let transform = self.document_to_logical();

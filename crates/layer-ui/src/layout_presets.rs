@@ -100,7 +100,7 @@ impl WorkspacePreset {
                 let Command {command}=tile.control else {continue;};
                 let slot=match command {
                     C::Blend=>S::Blend, C::Lasso=>S::ManualSelection, C::AutoSelect=>S::AutomaticSelection,
-                    C::Fill=>S::Fill, C::Gradient=>S::Gradient, C::Move=>S::Operation, C::Figure=>S::Figure, C::Ruler=>S::Ruler,
+                    C::Fill=>S::Fill, C::Gradient=>S::Gradient, C::Move|C::EditPoints=>S::Operation, C::Figure=>S::Figure, C::Ruler=>S::Ruler,
                     _=>continue,
                 };
                 tile.control=ToolSlot {slot};

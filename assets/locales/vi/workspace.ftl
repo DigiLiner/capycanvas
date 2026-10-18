@@ -323,6 +323,7 @@ workspace-tool-description-toggle-theme = Chuyển giữa giao diện sáng và 
 workspace-tool-description-add-layer = Tạo lớp vẽ mới
 workspace-tool-description-delete-layer = Xóa lớp hiện tại
 workspace-tool-description-raise-layer = Di chuyển lớp hiện tại lên
+workspace-tool-description-edit-points = Di chuyển, thêm và xóa điểm neo của các đường đã chọn
 workspace-tool-description-finish-path = Thêm đường đang vẽ
 workspace-tool-description-cancel-path = Bỏ đường đang vẽ
 workspace-tool-description-bring-to-front = Đưa các đường đã chọn lên trước các đường khác trong lớp

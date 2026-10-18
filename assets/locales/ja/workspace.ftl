@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = ライトとダークの外観を切�
 workspace-tool-description-add-layer = 新規描画レイヤーを作成します。
 workspace-tool-description-delete-layer = 編集中のレイヤーを削除します。
 workspace-tool-description-raise-layer = 編集中のレイヤーを上に移動します。
+workspace-tool-description-edit-points = 選択したパスのアンカーを移動・追加・削除します。
 workspace-tool-description-finish-path = 描いているパスを追加します。
 workspace-tool-description-cancel-path = 描いているパスを破棄します。
 workspace-tool-description-bring-to-front = 選択したパスをレイヤー内の最前面に移動します。

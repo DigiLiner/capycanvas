@@ -42,7 +42,7 @@ impl ToolbarControl {
                 CommandId::Figure => G::Slot(ToolSlotId::Figure),
                 CommandId::Ruler => G::Slot(ToolSlotId::Ruler),
                 CommandId::Gradient => G::Slot(ToolSlotId::Gradient),
-                CommandId::Move => G::Slot(ToolSlotId::Operation),
+                CommandId::Move | CommandId::EditPoints => G::Slot(ToolSlotId::Operation),
                 CommandId::Fill => G::Slot(ToolSlotId::Fill),
                 CommandId::LassoFill => G::Slot(ToolSlotId::LassoFill),
                 _ => G::Brush(command.paint_tool()?),
@@ -147,7 +147,7 @@ impl ToolSlotId {
             Self::Fill => const { &[command(C::Fill), command(C::LassoFill), command(C::EncloseFill)] },
             Self::LassoFill => const { &[command(C::LassoFill), command(C::EncloseFill)] },
             Self::Blend => const { &[command(C::Blend), command(C::Clone)] },
-            Self::Operation => const { &[command(C::Move), command(C::ScaleRotate)] },
+            Self::Operation => const { &[command(C::Move), command(C::ScaleRotate), command(C::EditPoints)] },
             Self::Figure => {
                 const {
                     &[
@@ -306,6 +306,7 @@ impl ToolVariant {
             } else {
                 match tool {
                     LayerCanvasTool::Move => CommandId::Move,
+                    LayerCanvasTool::EditPoints => CommandId::EditPoints,
                     LayerCanvasTool::Transform => CommandId::ScaleRotate,
                     LayerCanvasTool::Region { fill: true, .. } => CommandId::Fill,
                     LayerCanvasTool::LassoFill => CommandId::LassoFill,

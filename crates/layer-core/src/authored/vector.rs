@@ -4,7 +4,9 @@ use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, OnceLock}};
 
 mod erase;
 mod index;
+mod points;
 pub use erase::Eraser;
+pub use points::{AnchorRef, SegmentHit};
 pub use index::VectorIndex;
 
 pub const ANCHOR_RUN: usize = 256;

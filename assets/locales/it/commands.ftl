@@ -116,6 +116,7 @@ command-toggle-theme = Modalità scura
 command-add-layer = Nuovo livello
 command-delete-layer = Elimina livello
 command-raise-layer = Alza livello
+command-edit-points = Modifica punti
 command-finish-path = Termina tracciato
 command-cancel-path = Annulla tracciato
 commands-draw-paths-on-a-vector-layer = Disegna i tracciati su un livello vettoriale

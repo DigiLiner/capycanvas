@@ -116,6 +116,7 @@ command-toggle-theme = Dunkler Modus
 command-add-layer = Neue Ebene
 command-delete-layer = Ebene löschen
 command-raise-layer = Ebene anheben
+command-edit-points = Punkte bearbeiten
 command-finish-path = Pfad abschließen
 command-cancel-path = Pfad verwerfen
 commands-draw-paths-on-a-vector-layer = Pfade auf einer Vektorebene zeichnen

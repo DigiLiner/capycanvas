@@ -535,6 +535,7 @@ pub(crate) fn tool_command(action: &UiAction) -> Option<CommandId> {
         LayerCanvasTool::LassoFill => CommandId::LassoFill,
         LayerCanvasTool::EncloseFill { .. } => CommandId::EncloseFill,
         LayerCanvasTool::Move => CommandId::Move,
+        LayerCanvasTool::EditPoints => CommandId::EditPoints,
         _ => return None,
     })
 }
@@ -568,6 +569,7 @@ pub(crate) fn defaults(id: &str) -> Vec<KeyChord> {
         "command.Eraser" => key("e", false, false),
         "command.Lasso" => key("m", false, false),
         "command.Move" => key("o", false, false),
+        "command.EditPoints" => key("a", false, false),
         "command.ScaleRotate" => key("t", true, false),
         "command.Crop" => key("c", false, false),
         "command.CropCycleOverlay" => key("o", false, false),

@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = 밝은 테마와 어두운 테마를 �
 workspace-tool-description-add-layer = 새 페인팅 레이어를 만듭니다.
 workspace-tool-description-delete-layer = 활성 레이어를 삭제합니다.
 workspace-tool-description-raise-layer = 활성 레이어를 위로 옮깁니다.
+workspace-tool-description-edit-points = 선택한 패스의 기준점을 옮기고 추가하고 삭제합니다.
 workspace-tool-description-finish-path = 그리고 있는 패스를 추가합니다.
 workspace-tool-description-cancel-path = 그리고 있는 패스를 버립니다.
 workspace-tool-description-bring-to-front = 선택한 패스를 레이어의 맨 앞으로 옮깁니다.

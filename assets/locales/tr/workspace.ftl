@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = Açık ve koyu görünüm arasında ge
 workspace-tool-description-add-layer = Yeni bir boya katmanı oluşturun
 workspace-tool-description-delete-layer = Etkin katmanı silin
 workspace-tool-description-raise-layer = Etkin katmanı yukarı taşıyın
+workspace-tool-description-edit-points = Seçili yolların bağlantı noktalarını taşıyın, ekleyin ve silin
 workspace-tool-description-finish-path = Çizdiğiniz yolu ekleyin
 workspace-tool-description-cancel-path = Çizdiğiniz yolu atın
 workspace-tool-description-bring-to-front = Seçili yolları katmandaki diğerlerinin önüne taşıyın

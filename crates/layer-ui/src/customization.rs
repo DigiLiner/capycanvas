@@ -1173,6 +1173,7 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
                 CommandId::CloneResetOffset => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_CLONE_RESET_OFFSET).to_string(),
 
                 CommandId::Move => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_MOVE).to_string(),
+                CommandId::EditPoints => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_EDIT_POINTS).to_string(),
                 CommandId::MoveLeaveCopy => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_MOVE_LEAVE_COPY).to_string(),
                 CommandId::TransformAgain => localization.text(MessageId::COMMANDS_TRANSFORM_AGAIN_HELP).to_string(),
                 CommandId::TransformSnapping => localization.text(MessageId::COMMANDS_TRANSFORM_SNAPPING_HELP).to_string(),

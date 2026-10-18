@@ -71,6 +71,8 @@ mod vector_lines;
 mod vector_moves;
 #[path = "vector_paths.rs"]
 mod vector_paths;
+#[path = "vector_points.rs"]
+mod vector_points;
 #[path = "vector_properties.rs"]
 mod vector_properties;
 #[path = "transform_frame.rs"]
@@ -276,6 +278,7 @@ pub struct UiSession<R: CanvasRenderer> {
     vector_lines: vector_lines::VectorLines,
     vector_moves: vector_moves::VectorMoves,
     vector_paths: vector_paths::VectorPaths,
+    vector_points: vector_points::VectorPoints,
     deferred_edits: std::collections::VecDeque<deferred_edits::DeferredEdit>,
     selection_masks: selection_masks::SelectionMasks,
     canvas_size: Option<canvas_size::CanvasSizeDraft>,
@@ -485,6 +488,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             vector_lines: Default::default(),
             vector_moves: Default::default(),
             vector_paths: Default::default(),
+            vector_points: Default::default(),
             deferred_edits: Default::default(),
             selection_masks: Default::default(),
             canvas_size: None,
@@ -2393,7 +2397,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         layer_core::SelectionTarget::Saved(layer) => id == CommandId::LoadSelectionLayer || !document.is_locked(layer),
                     })
             }
-            CommandId::ScaleRotate | CommandId::ClearLayer | CommandId::Figure | CommandId::Move | CommandId::LassoFill | CommandId::EncloseFill | CommandId::FillSelection | CommandId::RepairSourceProfile | CommandId::RasterizeSource
+            CommandId::ScaleRotate | CommandId::ClearLayer | CommandId::Figure | CommandId::Move | CommandId::EditPoints | CommandId::LassoFill | CommandId::EncloseFill | CommandId::FillSelection | CommandId::RepairSourceProfile | CommandId::RasterizeSource
             | CommandId::InvertLayerMask | CommandId::LayerMaskEnabled | CommandId::ApplyLayerMask
                 if self.selection_masks.target().is_some() => false,
             CommandId::InvertLayerMask | CommandId::LayerMaskEnabled | CommandId::ApplyLayerMask => {
@@ -2676,6 +2680,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         CommandId::Move,
                         LayerCanvasTool::Move | LayerCanvasTool::Transform
                     )
+                    | (CommandId::EditPoints, LayerCanvasTool::EditPoints)
                     | (CommandId::ScaleRotate, LayerCanvasTool::Transform)
                     | (CommandId::Hand, LayerCanvasTool::Hand)
                     | (CommandId::Zoom, LayerCanvasTool::Zoom)
@@ -4982,7 +4987,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.use_reference_below()?;
                 Ok((DOCUMENT | COMMANDS, true))
             }
-            CommandId::ClearSelected if self.delete_selected_vector_items()? => Ok((DOCUMENT, true)),
+            CommandId::ClearSelected if self.delete_selected_vector_points()? || self.delete_selected_vector_items()? => Ok((DOCUMENT, true)),
             CommandId::ClearSelected | CommandId::ClearOutside => {
                 self.clear_selection(command == CommandId::ClearOutside)?;
                 Ok((DOCUMENT, true))
@@ -5126,12 +5131,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.layer_action(LayerAction::Tool { tool })?;
                 Ok((BRUSH | DOCUMENT, false))
             }
-            CommandId::Lasso | CommandId::Move => {
+            CommandId::Lasso | CommandId::Move | CommandId::EditPoints => {
                 self.layer_action(LayerAction::Tool {
-                    tool: if command == CommandId::Lasso {
-                        LayerCanvasTool::Select
-                    } else {
-                        LayerCanvasTool::Move
+                    tool: match command {
+                        CommandId::Lasso => LayerCanvasTool::Select,
+                        CommandId::EditPoints => LayerCanvasTool::EditPoints,
+                        _ => LayerCanvasTool::Move,
                     },
                 })?;
                 Ok((BRUSH | DOCUMENT, true))
@@ -9056,7 +9061,7 @@ mod tests {
         invoke(&mut s, CommandId::ScaleRotate);
         assert_eq!(s.state.layer_tools.tool, LayerCanvasTool::Transform);
         assert_eq!(s.state.tool_settings.len(), 6);
-        assert_eq!(s.state.tool_set.groups.len(), 2);
+        assert_eq!(s.state.tool_set.groups.len(), 3);
         for (id, value) in [
             ("transform_x", 30.),
             ("transform_width", 1.5),

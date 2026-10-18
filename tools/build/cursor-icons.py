@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ICONS = (
     "pen", "marker", "pencil", "pastel", "paint", "watercolor", "oil-paint",
     "eraser", "airbrush", "spray", "decoration", "blend", "liquify", "clone",
-    "heal", "spot-heal", "move", "transform", "crop", "lasso", "rectangle-select",
+    "heal", "spot-heal", "move", "transform", "edit-points", "crop", "lasso", "rectangle-select",
     "ellipse-select", "polygon-select", "auto-select", "color-select",
     "selection-brush", "tonal-select", "lasso-fill", "hand", "eyedropper",
     "fill", "gradient", "gradient-radial", "gradient-reflected", "line",
@@ -25,7 +25,7 @@ HOTSPOTS = {
     "spray": (8, 8), "blend": (2.6, 11.7), "clone": (8, 14.25),
     "heal": (2.34, 13.66), "spot-heal": (4, 12), "eyedropper": (2, 14),
     "selection-brush": (5.3, 13.7), "auto-select": (2, 14), "color-select": (2, 13),
-    "lasso": (3, 13), "lasso-fill": (3, 13), "line": (2, 14), "path": (2.5, 13), "ruler": (2, 14),
+    "lasso": (3, 13), "lasso-fill": (3, 13), "line": (2, 14), "path": (2.5, 13), "edit-points": (8, 5), "ruler": (2, 14),
 }
 
 

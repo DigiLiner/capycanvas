@@ -324,6 +324,7 @@ workspace-tool-description-toggle-theme = Passa tra aspetto chiaro e scuro
 workspace-tool-description-add-layer = Crea un nuovo livello di pittura
 workspace-tool-description-delete-layer = Elimina il livello attivo
 workspace-tool-description-raise-layer = Sposta il livello attivo in alto
+workspace-tool-description-edit-points = Sposta, aggiungi ed elimina gli ancoraggi dei tracciati selezionati
 workspace-tool-description-finish-path = Aggiungi il tracciato che stai disegnando
 workspace-tool-description-cancel-path = Scarta il tracciato che stai disegnando
 workspace-tool-description-bring-to-front = Sposta i tracciati selezionati davanti agli altri del livello

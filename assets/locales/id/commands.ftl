@@ -228,6 +228,7 @@ command-add-layer = Lapisan baru
 command-delete-layer = Hapus lapisan
 
 command-raise-layer = Naikkan lapisan
+command-edit-points = Edit titik
 command-finish-path = Selesaikan jalur
 command-cancel-path = Batalkan jalur
 commands-draw-paths-on-a-vector-layer = Gambar jalur pada lapisan vektor

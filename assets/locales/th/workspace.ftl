@@ -321,6 +321,7 @@ workspace-tool-description-toggle-theme = สลับรูปลักษณ�
 workspace-tool-description-add-layer = สร้างเลเยอร์ระบายสีใหม่
 workspace-tool-description-delete-layer = ลบเลเยอร์ปัจจุบัน
 workspace-tool-description-raise-layer = ย้ายเลเยอร์ปัจจุบันขึ้น
+workspace-tool-description-edit-points = ย้าย เพิ่ม และลบจุดยึดของพาธที่เลือก
 workspace-tool-description-finish-path = เพิ่มพาธที่กำลังวาด
 workspace-tool-description-cancel-path = ทิ้งพาธที่กำลังวาด
 workspace-tool-description-bring-to-front = ย้ายพาธที่เลือกไปไว้หน้าพาธอื่นในเลเยอร์

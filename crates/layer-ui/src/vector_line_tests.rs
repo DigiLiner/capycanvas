@@ -397,6 +397,53 @@ fn path_tool_builds_open_and_closed_paths_anchor_by_anchor() {
 }
 
 #[test]
+fn edit_points_moves_adds_deletes_and_switches_anchors() {
+    use layer_core::authored::vector::AnchorKind;
+    let (mut s, layer) = vector_session();
+    draw_line(&mut s, 1, 30);
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let id = object(&s).paths().next().unwrap().1.id;
+    let subpath = |s: &UiSession<Recorder>| { let o = object(s); o.record(o.find(id).unwrap()).unwrap().path().unwrap().geometry.subpaths()[0].clone() };
+    invoke(&mut s, CommandId::Move);
+    let middle = { let sp = subpath(&s); sp.segment(sp.segment_count() / 2).point(0.5) };
+    let at = surface_at(&s, middle);
+    press(&mut s, 50, &[at, at]);
+    invoke(&mut s, CommandId::EditPoints);
+    assert_eq!(s.layer_interaction.tool, LayerCanvasTool::EditPoints);
+    let count = subpath(&s).len();
+    let mut overlay = Vec::new();
+    s.append_layer_overlay(&mut overlay);
+    assert_eq!(overlay.iter().filter(|segment| segment.marker == 1.).count(), count * 4, "every anchor of the selected path shows");
+    let first = subpath(&s).anchor(0).point();
+    let from = surface_at(&s, first);
+    let to = surface_at(&s, [first[0] + 30., first[1] + 20.]);
+    press(&mut s, 100, &[from, Point { x: (from.x + to.x) * 0.5, y: (from.y + to.y) * 0.5 }, to]);
+    let moved = subpath(&s).anchor(0).point();
+    assert!((moved[0] - first[0] - 30.).abs() < 0.5 && (moved[1] - first[1] - 20.).abs() < 0.5, "dragging an anchor moves it: {moved:?}");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert_eq!(subpath(&s).anchor(0).point(), first, "an anchor drag is one undo step");
+    let on_segment = { let sp = subpath(&s); sp.segment(0).point(0.5) };
+    let click = surface_at(&s, on_segment);
+    press(&mut s, 200, &[click, click]);
+    assert_eq!(subpath(&s).len(), count + 1, "clicking a segment adds an anchor");
+    invoke(&mut s, CommandId::ClearSelected);
+    assert_eq!(subpath(&s).len(), count, "Delete removes the selected anchor");
+    let second = surface_at(&s, subpath(&s).anchor(1).point());
+    let kind = subpath(&s).anchor(1).kind;
+    press(&mut s, 300, &[second, second]);
+    press(&mut s, 302, &[second, second]);
+    assert_ne!(subpath(&s).anchor(1).kind, kind, "a double click switches corner and smooth");
+    assert!(matches!(subpath(&s).anchor(1).kind, AnchorKind::CORNER | AnchorKind::SMOOTH));
+    let [x0, y0, x1, y1] = object(&s).items_bounds(&[id].into()).unwrap();
+    let corners = [surface_at(&s, [x0 - 20., y0 - 20.]), surface_at(&s, [(x0 + x1) * 0.5, y1 + 20.])];
+    press(&mut s, 400, &corners);
+    let expected = subpath(&s).anchors().filter(|a| a.point()[0] <= (x0 + x1) * 0.5).count();
+    invoke(&mut s, CommandId::ClearSelected);
+    assert_eq!(subpath(&s).len(), count - expected, "a marquee selects the anchors it encloses");
+}
+
+#[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {
     use layer_core::authored::vector::*;

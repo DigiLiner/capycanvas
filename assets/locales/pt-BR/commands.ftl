@@ -116,6 +116,7 @@ command-toggle-theme = Modo escuro
 command-add-layer = Nova camada
 command-delete-layer = Excluir camada
 command-raise-layer = Subir camada
+command-edit-points = Editar pontos
 command-finish-path = Concluir caminho
 command-cancel-path = Cancelar caminho
 commands-draw-paths-on-a-vector-layer = Desenhe caminhos em uma camada vetorial

@@ -326,6 +326,7 @@ workspace-tool-description-toggle-theme = Переключить светлую 
 workspace-tool-description-add-layer = Создать новый рисованный слой
 workspace-tool-description-delete-layer = Удалить активный слой
 workspace-tool-description-raise-layer = Переместить активный слой вверх
+workspace-tool-description-edit-points = Перемещать, добавлять и удалять опорные точки выбранных контуров
 workspace-tool-description-finish-path = Добавить рисуемый контур
 workspace-tool-description-cancel-path = Отменить рисуемый контур
 workspace-tool-description-bring-to-front = Поместить выбранные контуры перед остальными на слое
