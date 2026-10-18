@@ -168,6 +168,9 @@ documents-refusal-selected-changed = 닫기 전에 선택한 그림이 바뀌었
 documents-refusal-open-operation = 그림을 열기 전에 현재 작업을 마치세요.
 documents-refusal-batch-opening = 다른 파일 묶음을 아직 여는 중입니다.
 documents-refusal-open-drawings-operation = 그림을 열기 전에 현재 작업을 마치세요.
+documents-drop-empty = 가져올 파일이 없습니다.
+documents-drop-drawing-batch = 그림은 하나씩 여세요. 레이어로 추가하려면 이미지만 묶어서 끌어다 놓으세요.
+documents-drop-drawing-on-layer = 그림 파일을 열려면 캔버스에 끌어다 놓으세요.
 documents-storage-retained = { $detail }
     그림은 메모리에 보관되어 있습니다. 디스크 공간을 확보하거나 일부 탭을 닫으세요.
 documents-recovery-unavailable = 복구할 수 없습니다: { $detail }

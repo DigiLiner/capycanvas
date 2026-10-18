@@ -426,6 +426,30 @@ pub extern "C" fn capy_photo_formats() -> *mut c_char {
     CString::new(serde_json::to_string(&layer_color::photo::formats().collect::<Vec<_>>()).unwrap())
         .unwrap().into_raw()
 }
+#[unsafe(no_mangle)]
+pub extern "C" fn capy_clipboard_image_bytes() -> usize {
+    layer_ui::CLIPBOARD_IMAGE_BYTES
+}
+/// # Safety
+/// `path` is null or a readable NUL-terminated file system path for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_drawing_path(path: *const c_char) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    !path.is_null() && layer_ui::ImportIntent::is_drawing_path(std::path::Path::new(std::ffi::OsStr::from_bytes(unsafe { CStr::from_ptr(path) }.to_bytes())))
+}
+/// # Safety
+/// `json` is readable NUL-terminated UTF-8 for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_file_drop(json: *const c_char) -> *mut c_char {
+    unsafe { stateless_json(json, "Missing file drop", |source| {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Request { drawings: Vec<bool>, layer: bool }
+        let (localization, request) = control_request::<Request>(source)?;
+        let intent = layer_ui::ImportIntent::for_drop(request.drawings, request.layer).map_err(|refusal| refusal.message(&localization).to_string())?;
+        Ok(serde_json::json!({"command": intent.command()}))
+    }) }
+}
 /// # Safety
 /// Worker only. Read/validate/prepare before adoption. fd == -1 uses captured
 /// New defaults. Other fds remain caller-owned; name is NUL-terminated UTF-8.

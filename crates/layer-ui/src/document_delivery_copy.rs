@@ -76,6 +76,8 @@ impl DocumentDeliveryCopy {
     }
 }
 
+pub const CLIPBOARD_IMAGE_BYTES: usize = 512 * 1024 * 1024;
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DocumentDeliveryMessage {
@@ -122,5 +124,17 @@ impl DocumentDeliveryMessage {
             Self::MovePanel { name } => { args.set("name", name.as_str()); MessageId::DOCUMENTS_DELIVERY_MOVE_PANEL },
         };
         localization.format(id, &args)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn clipboard_image_refusal_names_the_shared_limit() {
+        let limit = format!("{} MiB", super::CLIPBOARD_IMAGE_BYTES >> 20);
+        for language in crate::UiLanguage::ALL {
+            let localization = crate::Localizer::shared(language);
+            assert!(super::DocumentDeliveryMessage::ClipboardTooLarge.message(&localization).contains(&limit), "{language:?}");
+        }
     }
 }

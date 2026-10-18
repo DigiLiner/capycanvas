@@ -27,6 +27,26 @@ fn place_at(app: &App, placement: Option<Value>) -> ProjectJob {
 }
 
 #[test]
+fn dropped_files_choose_the_shared_open_or_place_command() {
+    let drop = |drawings: Value, layer: bool| localized_stateless(capy_apple_file_drop, json!({"drawings": drawings, "layer": layer}).to_string());
+    assert_eq!(drop(json!([true]), false), json!({"command": "open_document"}));
+    assert_eq!(drop(json!([false, false]), true), json!({"command": "import_image"}));
+    let english = fixture_localization();
+    for (drawings, layer, refusal) in [
+        (json!([true, false]), false, layer_ui::FileDropRefusal::DrawingBatch),
+        (json!([true]), true, layer_ui::FileDropRefusal::DrawingOnLayer),
+        (json!([]), false, layer_ui::FileDropRefusal::Empty),
+    ] {
+        assert_eq!(drop(drawings, layer), json!({"error": refusal.message(&english).as_ref()}));
+    }
+    assert_eq!(capy_clipboard_image_bytes(), layer_ui::CLIPBOARD_IMAGE_BYTES);
+    for (path, drawing) in [(c"/Drawings/Sketch.CAPY", true), (c"/Drawings/Sketch.capy.png", false), (c"/Drawings/capy", false)] {
+        assert_eq!(unsafe { capy_drawing_path(path.as_ptr()) }, drawing);
+    }
+    assert!(!unsafe { capy_drawing_path(std::ptr::null()) });
+}
+
+#[test]
 fn photo_drop_captures_document_point_and_reuses_shared_row_validation() {
     let mut encoded = std::io::Cursor::new(Vec::new());
     let original = source(RgbSpace::DisplayP3, SampleDepth::U8);

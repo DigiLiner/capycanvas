@@ -158,6 +158,9 @@ documents-refusal-selected-changed = Die ausgewählte Zeichnung wurde vor dem Sc
 documents-refusal-open-operation = Den aktuellen Vorgang vor dem Öffnen einer Zeichnung abschließen.
 documents-refusal-batch-opening = Ein weiterer Dateistapel wird noch geöffnet.
 documents-refusal-open-drawings-operation = Den aktuellen Vorgang vor dem Öffnen von Zeichnungen abschließen.
+documents-drop-empty = Keine Dateien zum Importieren.
+documents-drop-drawing-batch = Zeichnungen einzeln öffnen; nur Bilder gemeinsam ablegen, um Ebenen hinzuzufügen.
+documents-drop-drawing-on-layer = Zeichnungsdateien auf der Leinwand ablegen, um sie zu öffnen.
 documents-storage-retained = { $detail }
     Die Zeichnung bleibt im Speicher erhalten. Speicherplatz freigeben oder einige Registerkarten schließen.
 documents-recovery-unavailable = Wiederherstellung nicht verfügbar: { $detail }

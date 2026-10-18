@@ -158,6 +158,9 @@ documents-refusal-selected-changed = Bản vẽ đã chọn thay đổi trước
 documents-refusal-open-operation = Hoàn tất thao tác hiện tại trước khi mở bản vẽ.
 documents-refusal-batch-opening = Một nhóm tệp khác vẫn đang được mở.
 documents-refusal-open-drawings-operation = Hoàn tất thao tác hiện tại trước khi mở các bản vẽ.
+documents-drop-empty = Không có tệp để nhập.
+documents-drop-drawing-batch = Mở từng bản vẽ một; để thêm lớp, hãy thả một nhóm chỉ gồm ảnh.
+documents-drop-drawing-on-layer = Thả tệp bản vẽ vào khung vẽ để mở.
 documents-storage-retained = { $detail }
     Bản vẽ được giữ trong bộ nhớ. Giải phóng dung lượng đĩa hoặc đóng bớt thẻ.
 documents-recovery-unavailable = Không thể khôi phục: { $detail }

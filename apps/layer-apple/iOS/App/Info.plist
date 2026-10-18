@@ -113,12 +113,29 @@
 				</array>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>art.capycanvas.capykeys</string>
+			<key>UTTypeDescription</key>
+			<string>Capy Canvas Keyboard Shortcuts</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>capykeys</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>SDR Photograph</string>
+			<string>Image</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
 			<key>LSHandlerRank</key>
@@ -128,6 +145,13 @@
 				<string>public.png</string>
 				<string>public.jpeg</string>
 				<string>public.tiff</string>
+				<string>public.heic</string>
+				<string>public.heif</string>
+				<string>public.avif</string>
+				<string>org.webmproject.webp</string>
+				<string>com.compuserve.gif</string>
+				<string>com.microsoft.bmp</string>
+				<string>com.ilm.openexr-image</string>
 			</array>
 		</dict>
 		<dict>

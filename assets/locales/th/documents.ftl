@@ -156,6 +156,9 @@ documents-refusal-selected-changed = ภาพวาดที่เลือก�
 documents-refusal-open-operation = ดำเนินการปัจจุบันให้เสร็จก่อนเปิดภาพวาด
 documents-refusal-batch-opening = ไฟล์อีกชุดยังเปิดไม่เสร็จ
 documents-refusal-open-drawings-operation = ดำเนินการปัจจุบันให้เสร็จก่อนเปิดภาพวาด
+documents-drop-empty = ไม่มีไฟล์ให้นำเข้า
+documents-drop-drawing-batch = เปิดภาพวาดทีละไฟล์ หากต้องการเพิ่มเลเยอร์ ให้วางเฉพาะไฟล์ภาพ
+documents-drop-drawing-on-layer = วางไฟล์ภาพวาดบนผืนผ้าใบเพื่อเปิด
 documents-storage-retained = { $detail }
     ภาพวาดยังอยู่ในหน่วยความจำ เพิ่มพื้นที่ว่างในดิสก์หรือปิดบางแท็บ
 documents-recovery-unavailable = กู้คืนไม่ได้: { $detail }

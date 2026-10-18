@@ -168,6 +168,9 @@ documents-refusal-selected-changed = 閉じる前に、選択中の描画が切�
 documents-refusal-open-operation = 描画を開く前に、現在の操作を終えてください。
 documents-refusal-batch-opening = 別のファイルの一括読み込みがまだ進行中です。
 documents-refusal-open-drawings-operation = 描画を開く前に、現在の操作を終えてください。
+documents-drop-empty = 読み込むファイルがありません。
+documents-drop-drawing-batch = 描画は1つずつ開いてください。レイヤーとして追加するには、画像だけをまとめてドロップしてください。
+documents-drop-drawing-on-layer = 描画ファイルを開くには、キャンバスにドロップしてください。
 documents-storage-retained = { $detail }
     描画はメモリ内に保持されています。ディスクの空き容量を増やすか、いくつかのタブを閉じてください。
 documents-recovery-unavailable = 復元できません: { $detail }

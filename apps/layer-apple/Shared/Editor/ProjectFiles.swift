@@ -172,7 +172,8 @@ import UIKit
                 case .failure(let error): fail(error.localizedDescription)
                 }
             }
-            if let paste = dialogs?.paste { paste(completed) } else { PhotoClipboard.read(completed) }
+            if let paste = dialogs?.paste { paste(completed) }
+            else { PhotoClipboard.read(tooLarge: store?.catalog["document_delivery_copy"]["clipboard_too_large"].string ?? "", completed) }
         }
     }
     private func copyPixels() {
@@ -517,20 +518,41 @@ import UIKit
             }
         }
     }
+    func dropAvailable(_ providers: [NSItemProvider], layer: Bool) -> Bool {
+        let command = fileDrop(providers.map(PhotoItem.declaresDrawing), layer: layer)["command"]
+        return command.isNull || store?.command(command.string)["enabled"].bool == true
+    }
     func drop(_ providers: [NSItemProvider], placement: JSON) -> Bool {
-        guard let store, !busy, externalOpen == nil, droppedPhotos == nil,
-            store.command("import_image")["enabled"].bool else { return false }
-        let items = providers.compactMap(PhotoItem.provider)
-        guard !items.isEmpty else { return false }
-        droppedPhotos = (items, placement); busy = true; blocksEditor = true
-        cancelled = false; cancelling = false
-        store.edit(["type": "invoke", "command": "import_image"]) { [weak self] message in
+        guard store != nil, !busy, externalOpen == nil, droppedPhotos == nil, !providers.isEmpty else { return false }
+        busy = true; blocksEditor = true; cancelled = false; cancelling = false
+        PhotoItem.drawings(providers[...]) { [weak self] drawings in self?.receiveDrop(providers, drawings: drawings, placement: placement) }
+        return true
+    }
+    private func receiveDrop(_ providers: [NSItemProvider], drawings: [Bool], placement: JSON) {
+        let decision = fileDrop(drawings, layer: !placement["layer"].isNull)
+        let command = decision["command"].string, opening = command == "open_document"
+        let items = providers.compactMap(opening ? PhotoItem.drawingProvider : PhotoItem.provider)
+        guard let store, !cancelled, !items.isEmpty, opening || store.command(command)["enabled"].bool else {
+            busy = false; blocksEditor = false; cancelling = false
+            if !cancelled, !decision["error"].isNull { error = decision["error"].string }
+            return
+        }
+        if opening { busy = false; blocksEditor = false; openItems(items); return }
+        droppedPhotos = (items, placement)
+        store.edit(["type": "invoke", "command": command]) { [weak self] message in
             guard let self, let message else { return }
             droppedPhotos = nil
             if requestID != nil { fail(message) }
             else { busy = false; blocksEditor = false; cancelling = false; error = message }
         }
-        return true
+    }
+    private func fileDrop(_ drawings: [Bool], layer: Bool) -> JSON {
+        do {
+            let text = try JSON(["language": store?.interfaceLanguage ?? "en", "request": ["drawings": drawings, "layer": layer]]).encoded()
+            guard let response = text.withCString({ capy_apple_file_drop($0) }) else { return JSON() }
+            defer { capy_apple_string_free(response) }
+            return try JSON.decode(String(cString: response))
+        } catch { return JSON(["error": error.localizedDescription]) }
     }
     private func place(_ task: NativeProjectTask, inputs: [PhotoItem], index: Int = 0, representation: Int = 0) {
         guard index < inputs.count else { prepare(task, url: nil) { try task.finishImages() }; return }

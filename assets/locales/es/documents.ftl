@@ -158,6 +158,9 @@ documents-refusal-selected-changed = El dibujo seleccionado cambió antes de cer
 documents-refusal-open-operation = Termina la operación actual antes de abrir un dibujo.
 documents-refusal-batch-opening = Todavía se está abriendo otro lote de archivos.
 documents-refusal-open-drawings-operation = Termina la operación actual antes de abrir dibujos.
+documents-drop-empty = No hay archivos para importar.
+documents-drop-drawing-batch = Abre los dibujos de uno en uno; suelta un lote solo de imágenes para añadir capas.
+documents-drop-drawing-on-layer = Suelta los archivos de dibujo en el lienzo para abrirlos.
 documents-storage-retained = { $detail }
     El dibujo se conserva en memoria. Libera espacio en disco o cierra algunas pestañas.
 documents-recovery-unavailable = Recuperación no disponible: { $detail }

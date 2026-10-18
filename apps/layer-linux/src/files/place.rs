@@ -14,8 +14,6 @@ use std::{
     },
 };
 
-const CLIPBOARD_FILE_LIMIT: usize = 512 * 1024 * 1024;
-
 struct TemporaryImage(PathBuf);
 impl Drop for TemporaryImage {
     fn drop(&mut self) {
@@ -49,7 +47,7 @@ async fn spool(clipboard: &gdk::Clipboard, mime: &str) -> Result<TemporaryImage,
         }
         total = total
             .checked_add(bytes.len())
-            .filter(|n| *n <= CLIPBOARD_FILE_LIMIT)
+            .filter(|n| *n <= layer_ui::CLIPBOARD_IMAGE_BYTES)
             .ok_or("The clipboard image file exceeds 512 MiB")?;
         let length = bytes.len();
         let (_, written, error) = output

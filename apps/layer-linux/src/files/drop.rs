@@ -3,7 +3,7 @@
 use crate::workspace::Workspace;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use layer_ui::{CommandId, ImageLayerDestination, LayerDropPosition, UiAction};
+use layer_ui::{FileDropRefusal, ImageLayerDestination, ImportIntent, LayerDropPosition, UiAction};
 use std::rc::Rc;
 
 pub(crate) struct Incoming {
@@ -14,40 +14,18 @@ pub(crate) struct Incoming {
     pub revision: u64,
     pub target: Option<layer_core::authored::SourceTarget>,
 }
-fn project(file: &gio::File) -> bool {
-    file.path()
-        .and_then(|p| p.extension().map(|s| s.eq_ignore_ascii_case("capy")))
-        .unwrap_or(false)
+fn intent(files: &[gio::File], onto_layer: bool) -> Result<ImportIntent, FileDropRefusal> {
+    ImportIntent::for_drop(files.iter().map(|file| file.path().is_some_and(|path| ImportIntent::is_drawing_path(&path))), onto_layer)
 }
-fn kind(files: &[gio::File]) -> Result<bool, String> {
-    if files.is_empty() {
-        return Err("No files to import".into());
-    }
-    let projects = files.iter().filter(|f| project(f)).count();
-    if projects > 0 && files.len() != 1 {
-        return Err(
-            "Open drawings one at a time; drop a batch containing only images to add layers".into(),
-        );
-    }
-    Ok(projects == 1)
-}
-fn available(w: &Workspace, open: bool) -> bool {
+fn available(w: &Workspace, intent: ImportIntent) -> bool {
     w.image_drop.borrow().is_none()
-        && w.gpu.borrow().as_ref().is_some_and(|g| {
-            g.session
-                .command(if open {
-                    CommandId::OpenDocument
-                } else {
-                    CommandId::ImportImage
-                })
-                .enabled
-        })
+        && w.gpu.borrow().as_ref().is_some_and(|g| g.session.command(intent.command()).enabled)
 }
 fn files(target: &gtk::DropTarget) -> Option<Vec<gio::File>> {
     Some(target.value()?.get::<gdk::FileList>().ok()?.files())
 }
-fn feedback_kind(target: &gtk::DropTarget) -> Option<bool> {
-    files(target).map_or(Some(false), |files| kind(&files).ok())
+fn feedback_intent(target: &gtk::DropTarget) -> Option<ImportIntent> {
+    files(target).map_or(Some(ImportIntent::Place), |files| intent(&files, true).ok())
 }
 pub(crate) fn receive(
     w: &Rc<Workspace>,
@@ -56,11 +34,8 @@ pub(crate) fn receive(
     destination: Option<ImageLayerDestination>,
 ) -> bool {
     let result = (|| {
-        let open = kind(&files)?;
-        if open && destination.is_some() {
-            return Err("Drop drawing files on the canvas to open them".into());
-        }
-        if !available(w, open) {
+        let intent = intent(&files, destination.is_some()).map_err(|refusal| refusal.message(&w.localization()).to_string())?;
+        if !available(w, intent) {
             return Err("Finish the current operation before dropping files".into());
         }
         let mut gpu = w.gpu.borrow_mut();
@@ -74,13 +49,7 @@ pub(crate) fn receive(
             revision: doc.revision,
             target: doc.active_target(),
         });
-        g.session.dispatch(UiAction::Invoke {
-            command: if open {
-                CommandId::OpenDocument
-            } else {
-                CommandId::ImportImage
-            },
-        })
+        g.session.dispatch(UiAction::Invoke { command: intent.command() })
     })();
     let accepted = result.is_ok();
     if !accepted {
@@ -98,16 +67,17 @@ pub(crate) fn install(w: &Rc<Workspace>) {
         #[upgrade_or]
         gdk::DragAction::empty(),
         move |target: &gtk::DropTarget, _: f64, _: f64| {
-            let kind = files(target).map_or(Ok(false), |files| kind(&files));
-            let valid = kind.as_ref().is_ok_and(|open| available(&w, *open));
-            w.image_drop_label.set_label(match &kind {
-                Ok(true) => "Open drawing",
-                Ok(false) => "Add images as layers",
-                Err(reason) => reason,
-            });
+            let intent = files(target).map_or(Ok(ImportIntent::Place), |files| intent(&files, false));
+            let valid = intent.is_ok_and(|intent| available(&w, intent));
+            let label: std::sync::Arc<str> = match intent {
+                Ok(ImportIntent::Open) => "Open drawing".into(),
+                Ok(ImportIntent::Place) => "Add images as layers".into(),
+                Err(refusal) => refusal.message(&w.localization()),
+            };
+            w.image_drop_label.set_label(&label);
             // A forbidden cursor alone cannot explain an unsupported batch.
             // Keep its reason visible while the pointer is over the canvas.
-            w.image_drop_label.set_visible(valid || kind.is_err());
+            w.image_drop_label.set_visible(valid || intent.is_err());
             if valid {
                 gdk::DragAction::COPY
             } else {
@@ -190,7 +160,7 @@ pub(crate) fn install_row(
             move |target: &gtk::DropTarget, y: f64| {
                 clear_row(&root);
                 let (w, id) = resolve()?;
-                if feedback_kind(target) != Some(false) || !available(&w, false) {
+                if feedback_intent(target) != Some(ImportIntent::Place) || !available(&w, ImportIntent::Place) {
                     return None;
                 }
                 let position = w.gpu.borrow().as_ref()?.session.image_layer_drop_hint(

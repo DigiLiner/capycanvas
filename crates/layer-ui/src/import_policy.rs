@@ -16,6 +16,42 @@ pub enum ImportIntent {
     Open,
     Place,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileDropRefusal {
+    Empty,
+    DrawingBatch,
+    DrawingOnLayer,
+}
+impl FileDropRefusal {
+    pub fn message(self, localization: &crate::Localizer) -> std::sync::Arc<str> {
+        localization.text(match self {
+            Self::Empty => crate::MessageId::DOCUMENTS_DROP_EMPTY,
+            Self::DrawingBatch => crate::MessageId::DOCUMENTS_DROP_DRAWING_BATCH,
+            Self::DrawingOnLayer => crate::MessageId::DOCUMENTS_DROP_DRAWING_ON_LAYER,
+        })
+    }
+}
+impl ImportIntent {
+    pub fn is_drawing_path(path: &std::path::Path) -> bool {
+        path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("capy"))
+    }
+    pub fn for_drop(drawings: impl IntoIterator<Item = bool>, onto_layer: bool) -> Result<Self, FileDropRefusal> {
+        let (files, drawings) = drawings.into_iter().fold((0usize, 0usize), |(files, drawings), drawing| (files + 1, drawings + usize::from(drawing)));
+        match (files, drawings) {
+            (0, _) => Err(FileDropRefusal::Empty),
+            (_, 0) => Ok(Self::Place),
+            (1, _) if onto_layer => Err(FileDropRefusal::DrawingOnLayer),
+            (1, _) => Ok(Self::Open),
+            _ => Err(FileDropRefusal::DrawingBatch),
+        }
+    }
+    pub fn command(self) -> crate::CommandId {
+        match self {
+            Self::Open => crate::CommandId::OpenDocument,
+            Self::Place => crate::CommandId::ImportImage,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportSource {
     #[default]
@@ -348,6 +384,21 @@ impl ImageImportBatch {
 mod tests {
     use super::*;
     use crate::session::test_support::{package_bytes, package_roundtrip};
+    #[test]
+    fn dropped_files_open_one_drawing_or_place_only_images() {
+        use std::path::Path;
+        let drawing = |names: &[&str]| names.iter().map(|name| ImportIntent::is_drawing_path(Path::new(name))).collect::<Vec<_>>();
+        assert_eq!(ImportIntent::for_drop(drawing(&["Sketch.capy"]), false), Ok(ImportIntent::Open));
+        assert_eq!(ImportIntent::for_drop(drawing(&["Sketch.CAPY"]), false), Ok(ImportIntent::Open));
+        assert_eq!(ImportIntent::for_drop(drawing(&["a.png", "b.heic", "capy"]), false), Ok(ImportIntent::Place));
+        assert_eq!(ImportIntent::for_drop(drawing(&["a.png"]), true), Ok(ImportIntent::Place));
+        assert_eq!(ImportIntent::for_drop(drawing(&["Sketch.capy", "a.png"]), false), Err(FileDropRefusal::DrawingBatch));
+        assert_eq!(ImportIntent::for_drop(drawing(&["a.capy", "b.capy"]), true), Err(FileDropRefusal::DrawingBatch));
+        assert_eq!(ImportIntent::for_drop(drawing(&["Sketch.capy"]), true), Err(FileDropRefusal::DrawingOnLayer));
+        assert_eq!(ImportIntent::for_drop(drawing(&[]), false), Err(FileDropRefusal::Empty));
+        assert_eq!(ImportIntent::Open.command(), crate::CommandId::OpenDocument);
+        assert_eq!(ImportIntent::Place.command(), crate::CommandId::ImportImage);
+    }
     fn photo_source(document: &Document) -> &SourceImage {
         document.artwork.paint.iter().find_map(|(_, _, p)| p.base.as_ref().map(|base| base.image.as_ref())).expect("photo source")
     }

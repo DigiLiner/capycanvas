@@ -310,6 +310,9 @@ documents-refusal-open-operation = Selesaikan operasi saat ini sebelum membuka g
 documents-refusal-batch-opening = Kumpulan berkas lain masih dibuka.
 
 documents-refusal-open-drawings-operation = Selesaikan operasi saat ini sebelum membuka gambar.
+documents-drop-empty = Tidak ada berkas untuk diimpor.
+documents-drop-drawing-batch = Buka gambar satu per satu; untuk menambahkan lapisan, jatuhkan kumpulan yang hanya berisi citra.
+documents-drop-drawing-on-layer = Jatuhkan berkas gambar ke kanvas untuk membukanya.
 
 documents-storage-retained = { $detail }
     Gambar tetap tersimpan dalam memori. Kosongkan ruang disk atau tutup beberapa tab.

@@ -162,7 +162,8 @@ native text paste. Web clipboard items without a supported image and Android
 items without an image URI do not discard neighboring image items. Windows falls
 back from unreadable file lists or PNG data to its Bitmap representation.
 GTK, Web and Apple try the next advertised image representation when loading
-or decoding fails. Each item contributes one successful representation. Android
+or decoding fails. GTK and Apple read another app's clipboard image off the UI
+thread and refuse one larger than the shared `CLIPBOARD_IMAGE_BYTES` (512 MiB). Each item contributes one successful representation. Android
 skips unreadable clipboard URIs while retaining neighboring images. Ordinary
 file imports remain atomic: a failed selected file prevents the whole import.
 Cancellation retires the complete batch, including sources decoded earlier.

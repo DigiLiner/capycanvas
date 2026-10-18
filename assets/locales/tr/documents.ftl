@@ -158,6 +158,9 @@ documents-refusal-selected-changed = Seçili çizim kapatılmadan önce değişt
 documents-refusal-open-operation = Çizim açmadan önce geçerli işlemi bitirin.
 documents-refusal-batch-opening = Başka bir dosya grubu hâlâ açılıyor.
 documents-refusal-open-drawings-operation = Çizimleri açmadan önce geçerli işlemi bitirin.
+documents-drop-empty = İçe aktarılacak dosya yok.
+documents-drop-drawing-batch = Çizimleri tek tek açın; katman eklemek için yalnızca görüntülerden oluşan bir grup bırakın.
+documents-drop-drawing-on-layer = Çizim dosyalarını açmak için tuvale bırakın.
 documents-storage-retained = { $detail }
     Çizim bellekte korunuyor. Diskte yer açın veya bazı sekmeleri kapatın.
 documents-recovery-unavailable = Kurtarma kullanılamıyor: { $detail }

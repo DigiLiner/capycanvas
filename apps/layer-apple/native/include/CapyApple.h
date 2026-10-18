@@ -95,6 +95,9 @@ int32_t capy_project_read(const CapyProjectTask *task, int32_t fd, const char *n
 int32_t capy_project_finish_images(const CapyProjectTask *task);
 int32_t capy_project_read_bytes(const CapyProjectTask *task, const uint8_t *bytes, size_t count, const char *name);
 char *capy_photo_formats(void);
+size_t capy_clipboard_image_bytes(void);
+bool capy_drawing_path(const char *path);
+char *capy_apple_file_drop(const char *json);
 char *capy_project_profile(const CapyProjectTask *task); /* owned JSON interpretation or null */
 int32_t capy_project_assume_profile(const CapyProjectTask *task, const char *profile_json);
 int32_t capy_project_edit_work(const CapyProjectTask *task, const char *choice_json, bool copy);

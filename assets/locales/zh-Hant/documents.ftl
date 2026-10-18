@@ -167,6 +167,9 @@ documents-refusal-selected-changed = 關閉前，所選繪圖已切換。
 documents-refusal-open-operation = 開啟繪圖前，請完成目前的操作。
 documents-refusal-batch-opening = 另一批檔案仍在開啟。
 documents-refusal-open-drawings-operation = 開啟繪圖前，請完成目前的操作。
+documents-drop-empty = 沒有要匯入的檔案。
+documents-drop-drawing-batch = 請逐一開啟繪圖；若要新增圖層，請只拖放影像。
+documents-drop-drawing-on-layer = 將繪圖檔案拖放到畫布上即可開啟。
 documents-storage-retained = { $detail }
     繪圖已保留在記憶體中。請釋放磁碟空間或關閉部分分頁。
 documents-recovery-unavailable = 無法恢復：{ $detail }

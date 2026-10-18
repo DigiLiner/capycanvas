@@ -12,7 +12,7 @@ struct PhotoDropTarget: ViewModifier {
     @State private var height: CGFloat = 0
     func body(content: Content) -> some View {
         content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-            .onDrop(of: [UTType.fileURL] + UTType.capyPhotoTypes,
+            .onDrop(of: PhotoDropDelegate.types,
                 delegate: PhotoDropDelegate(store: store, row: row, height: height, scale: scale, feedback: feedback))
             .overlay {
                 if row != nil, let position = feedback.position {
@@ -59,10 +59,10 @@ private struct PhotoDropDelegate: DropDelegate {
     let height: CGFloat
     let scale: CGFloat
     let feedback: PhotoDropFeedback
-    private var types: [UTType] { [UTType.fileURL] + UTType.capyPhotoTypes }
+    static let types: [UTType] = [UTType.fileURL, .capyProject] + UTType.capyPhotoTypes
     func validateDrop(info: DropInfo) -> Bool {
-        !store.projectFiles.busy && store.command("import_image")["enabled"].bool
-            && info.hasItemsConforming(to: types)
+        !store.projectFiles.busy && info.hasItemsConforming(to: Self.types)
+            && store.projectFiles.dropAvailable(info.itemProviders(for: Self.types), layer: row != nil)
     }
     private func fraction(_ info: DropInfo) -> Double {
         Double(min(1, max(0, info.location.y / max(1, height))))
@@ -82,6 +82,6 @@ private struct PhotoDropDelegate: DropDelegate {
         let placement: JSON
         if let row { placement = JSON(["layer": ["target": row, "fraction": fraction(info)]]) }
         else { placement = JSON(["screen": ["x": Double(info.location.x * scale), "y": Double(info.location.y * scale)]]) }
-        return store.projectFiles.drop(info.itemProviders(for: types), placement: placement)
+        return store.projectFiles.drop(info.itemProviders(for: Self.types), placement: placement)
     }
 }

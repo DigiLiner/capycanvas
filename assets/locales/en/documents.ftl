@@ -158,6 +158,9 @@ documents-refusal-selected-changed = The selected drawing changed before closing
 documents-refusal-open-operation = Finish the current operation before opening a drawing.
 documents-refusal-batch-opening = Another file batch is still opening.
 documents-refusal-open-drawings-operation = Finish the current operation before opening drawings.
+documents-drop-empty = No files to import.
+documents-drop-drawing-batch = Open drawings one at a time; drop a batch containing only images to add layers.
+documents-drop-drawing-on-layer = Drop drawing files on the canvas to open them.
 documents-storage-retained = { $detail }
     The drawing is retained in memory. Free disk space or close some tabs.
 documents-recovery-unavailable = Recovery unavailable: { $detail }

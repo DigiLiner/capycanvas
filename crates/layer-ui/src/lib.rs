@@ -9,7 +9,7 @@ pub use numeric_labels::NumericLabels;
 mod battery;
 pub use battery::{Battery, BatteryCharge, BatteryReading};
 mod document_delivery_copy;
-pub use document_delivery_copy::{DocumentDeliveryCopy, DocumentDeliveryMessage};
+pub use document_delivery_copy::{CLIPBOARD_IMAGE_BYTES, DocumentDeliveryCopy, DocumentDeliveryMessage};
 macro_rules! variants {
     ($(#[$attr:meta])* $vis:vis enum $name:ident { $($(#[$variant_attr:meta])* $variant:ident),+ $(,)? }) => {
         $(#[$attr])* $vis enum $name { $($(#[$variant_attr])* $variant),+ }
@@ -52,7 +52,7 @@ mod package_view;
 pub use package_view::{PackageView, PackagePresentation, PackageViewSummary, PackageCapabilities, PackageDisposition, PackageAction, PackageOutput};
 
 mod import_policy;
-pub use import_policy::{ImageImportBatch, ImportIntent, ImportSource, ImportOutcome, ImportedDocument, photo_document_names, read_import};
+pub use import_policy::{FileDropRefusal, ImageImportBatch, ImportIntent, ImportSource, ImportOutcome, ImportedDocument, photo_document_names, read_import};
 
 pub mod recovery;
 pub use session::session_recovery;

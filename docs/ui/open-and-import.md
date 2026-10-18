@@ -26,7 +26,10 @@ compressed bytes.
 
 A batch is atomic: one named Object layer per file, and nothing is inserted if any file
 fails or the user cancels. The error names the failed file. A batch that mixes
-projects and images is rejected. Hosts supply local files; providers without a
+projects and images is rejected. `ImportIntent::for_drop` decides for GTK and
+Apple: one `.capy` file opens as a drawing on the canvas, image-only batches are
+placed, and several drawings, a mixed batch or a drawing dropped on a layer row
+are refused with a shared message. Hosts supply local files; providers without a
 local path are rejected.
 
 Shared Rust owns destination validation, placement and history; hosts own

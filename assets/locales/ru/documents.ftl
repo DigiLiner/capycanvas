@@ -158,6 +158,9 @@ documents-refusal-selected-changed = Выбранный рисунок изме�
 documents-refusal-open-operation = Завершите текущую операцию перед открытием рисунка.
 documents-refusal-batch-opening = Другая группа файлов ещё открывается.
 documents-refusal-open-drawings-operation = Завершите текущую операцию перед открытием рисунков.
+documents-drop-empty = Нет файлов для импорта.
+documents-drop-drawing-batch = Открывайте рисунки по одному; чтобы добавить слои, перетащите только изображения.
+documents-drop-drawing-on-layer = Перетащите файлы рисунков на холст, чтобы открыть их.
 documents-storage-retained = { $detail }
     Рисунок сохранён в памяти. Освободите место на диске или закройте некоторые вкладки.
 documents-recovery-unavailable = Восстановление недоступно: { $detail }
