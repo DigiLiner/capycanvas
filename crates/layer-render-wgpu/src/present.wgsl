@@ -307,13 +307,14 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
             rgb = vec3<f32>(select(0., 1., (surface.x+surface.y) % 6. < 3.));
         }
     }
-    if cropping && !inside_crop(p) {
+    let shielded = cropping && !inside_crop(p);
+    if shielded {
         let keep = 1. - camera.crop_offset.z;
         rgb = select(rgb * keep, sdr_encode(sdr_decode(rgb, 0u) * keep, 0u), camera.viewport.z > .5);
     }
     // Signed distance to the full-window rounded rectangle; no inset/cropping.
     let coverage = window_coverage(surface);
-    let quantize=paint.a>0. && camera.composite.z==0. && camera.composite.w==0. && camera.selection.z<.5 && camera.rotation.z<.5 && !cropping;
+    let quantize=paint.a>0. && camera.composite.z==0. && camera.composite.w==0. && camera.selection.z<.5 && camera.rotation.z<.5 && !shielded;
     return view_quantize(vec4<f32>(rgb * coverage, coverage),surface,quantize);
 }
 

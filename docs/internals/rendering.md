@@ -176,9 +176,11 @@ passes a `CropOverlay` (the map from document pixels onto the crop's unit square
 and the shield opacity) to the renderer, which folds it into the presentation
 uniform. `present.wgsl` dims the canvas outside the crop and fills the part of the
 crop beyond the canvas with the transparency checkerboard; it never samples pixels
-hidden beyond the canvas. Without a crop the shader skips both on a uniform flag,
-and a handle drag changes only that uniform and the guide segments, so it costs a
-camera-change repaint. The frame, guides and handles are ordinary `CursorSegment`s.
+hidden beyond the canvas. Inside the crop, the canvas presents exactly as it does
+without one, including 8-bit display quantization. Without a crop the shader
+skips both on a uniform flag, and a handle drag changes only that uniform and the
+guide segments, so it costs a camera-change repaint. The frame, guides and
+handles are ordinary `CursorSegment`s.
 
 The viewport is the presentation of that document at the current camera position,
 zoom and rotation. The shared

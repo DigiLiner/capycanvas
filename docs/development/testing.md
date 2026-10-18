@@ -509,11 +509,6 @@ are your task, and remove an entry when you fix it.
   neighborhoods from the NVIDIA Vulkan reference; the original images and
   tolerances remain required.
 
-- Renderer failure reproduced on unmodified `5c76e202f`:
-  `the_crop_shield_dims_outside_the_crop_and_shows_added_canvas_as_transparency`
-  changes an interior blue channel from 123 to 124 because the crop shield
-  disables presentation quantization. Keep this assertion when checking
-  renderer changes.
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
   `saved_artwork_render_contracts` reports
   `domain_warp/F32` maximum drift 0.000232696533203125 against 0.0002.
