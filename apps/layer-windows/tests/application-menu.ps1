@@ -1,13 +1,14 @@
 param([string]$Helper=(Join-Path $PSScriptRoot '../scripts/open-application-menu.ps1'))
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
-function Menu-Root([bool]$DelayedButton){
-    $result=[pscustomobject]@{reads=0;delayed_button=$DelayedButton}
+function Menu-Root([string]$Mode){
+    $result=[pscustomobject]@{reads=0;mode=$Mode}
     $result|Add-Member ScriptMethod FindAll {
         param($scope,$condition)
         if($condition.Value -ne 'application-menu-file'){return}
         $this.reads++
-        $type=if($this.delayed_button -and $this.reads -ge 3){[System.Windows.Automation.ControlType]::Button}else{[System.Windows.Automation.ControlType]::MenuItem}
+        if($this.mode -eq 'changing-route' -and $this.reads -gt 2){return}
+        $type=if($this.mode -eq 'inspect' -and $this.reads -ge 3){[System.Windows.Automation.ControlType]::Button}else{[System.Windows.Automation.ControlType]::MenuItem}
         $item=[pscustomobject]@{Current=[pscustomobject]@{AutomationId='application-menu-file';Name='File';IsOffscreen=$false;IsEnabled=$true;ControlType=$type}}
         $item|Add-Member ScriptMethod GetCurrentPattern {
             param($pattern)
@@ -20,9 +21,9 @@ function Menu-Root([bool]$DelayedButton){
     $result
 }
 $failures=[Collections.Generic.List[string]]::new()
-foreach($mode in @('inspect','expanded')){
+foreach($mode in @('inspect','expanded','changing-route')){
     try{
-        $window=Menu-Root ($mode -eq 'inspect')
+        $window=Menu-Root $mode
         if($mode -eq 'inspect'){
             $entry=& $Helper -Root $window -Name File -Inspect
             if($entry.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button){throw 'Inspection returned a submenu instead of the later button'}

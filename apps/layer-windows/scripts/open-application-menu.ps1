@@ -26,12 +26,13 @@ function Submenu {
 $watch=[Diagnostics.Stopwatch]::StartNew()
 do{
     $button=Visible-Control ("application-menu-"+$id) ([System.Windows.Automation.ControlType]::Button)
-    $overflow=Menu-Button
-    if($button -or $overflow -or (!$Inspect -and (Submenu))){break}
+    $overflow=if(!$button){Menu-Button}
+    $submenu=if(!$button -and !$Inspect){Submenu}
+    if($button -or $overflow -or $submenu){break}
     Start-Sleep -Milliseconds 50
 }while($watch.Elapsed.TotalSeconds -lt 8*$(if($env:CAPY_WAIT_SCALE){[double]$env:CAPY_WAIT_SCALE}else{1}))
 if($Inspect){
-    if(!$button){$button=Menu-Button}
+    if(!$button){$button=$overflow}
     if(!$button){throw 'The application menu has no visible entry point'}
     return $button
 }
@@ -40,9 +41,7 @@ if($button){
     if($PassThru){$button}
     return
 }
-$submenu=Submenu
 if(!$submenu){
-    $overflow=Menu-Button
     if(!$overflow){throw 'The compact application menu is unavailable'}
     $overflow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $watch=[Diagnostics.Stopwatch]::StartNew()

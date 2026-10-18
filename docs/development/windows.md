@@ -218,7 +218,9 @@ heading spacing, so the final heading retains its full allocation.
 The compact `application-menus` button exposes `application-menu-<id>` entries;
 primary and recovery menus retain their ID and localized-caption lookups.
 Inspection waits for a visible button; an existing submenu completes only the
-normal expansion path. Visibility, enabled state and expansion checks remain.
+normal expansion path. Discovery retains that native entry through invocation
+so another tree read cannot discard it during a menu transition. Visibility,
+enabled state and expansion checks remain.
 
 `exercise-header.ps1` compares the Clock caption before and after moving it from
 the component bank into the title bar, including its visible width.
