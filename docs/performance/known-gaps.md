@@ -47,9 +47,9 @@
 - **Dry-media qualification remains incomplete.**
   - Size denotes the 45° writing-pose long axis. Current Strength 100%, Material
     hardness and default Smoothing 6% profiles miss the nominal Pencil, Pointy
-    and Charcoal rate targets on all native tiers. Only native Low Pointy's
-    gap meets its limit. Current native Pencil reaches 30.46–30.94/s on Low,
-    26.28–26.29/s on Mid and 61.57–61.93/s on Top.
+    and Charcoal rate targets on all native tiers. Only native Low Pencil's
+    and Pointy's gaps meet their limit. Current native Pencil reaches
+    44.02–44.76/s on Low, 38.27–39.08/s on Mid and 72.51–74.56/s on Top.
   - Compile-time aggregate specialization restores substantial throughput
     relative to the matched runtime branch. Same-APK Pencil Smoothing 0%
     diagnostics reach 54.80–55.52/s on Low, 50.91–51.63/s on Mid and
@@ -61,9 +61,11 @@
   - Passing native rows cover only their measured profiles and poses; Shading
     Pencil, Chalk and Crayon remain unmeasured. Physical input-to-present latency
     is unmeasured.
-  - First dry-brush selection remains slow despite the source refactor: TCL
-    Web Pencil takes 14.80 s and native takes 35.53 s, with driver caches retained.
-    Cached selection is quick; that does not qualify first-use latency.
+  - First dry-brush selection remains slow. After clearing app data, native
+    Pencil takes 2.49 s on Low, 1.22 s on Mid and 1.05 s on Top. On the earlier
+    build TCL Web Pencil took 14.80 s and the primed native probe 35.53 s, with
+    driver caches retained; neither has been remeasured. Cached selection is
+    quick; that does not qualify first-use latency.
 - **Liquify at 512 px** completes 28–74 updates/s on the top tier, 1.2–6.5 on
   the mid tier and 0.8–12 on the low tier.
 - **The retouching brushes at 512 px** (Clone Stamp, Healing and Spot Healing)

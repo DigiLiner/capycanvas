@@ -68,9 +68,11 @@ paper's bake as it waits for shaders.
 [The generator](../../crates/layer-engine/src/brush.rs) retains input vertices when
 curvature, pressure, tilt or twist changes enough. Its geometric tolerance is
 0.25 document pixels or 1% of the previous minor radius, whichever is larger.
-Active Curve fit further limits path error to 0.05 logical screen pixels,
-converted through the input scale. Its curve subdivision and predicted tail
-share that bound; this can increase retained work for broad contacts.
+Active Curve fit limits path error to 0.05 logical screen pixels, converted
+through the input scale, or to 1% of the previous minor radius when that is
+larger, never beyond the bound without Curve fit. Its curve subdivision samples
+at the screen bound; the radius bound only decides which samples remain
+vertices, so broad contacts are not evaluated once per input sample.
 Straight steady runs advance at half the reference diameter, at least 4 px. Pen-up
 flushes the endpoint. Segmentation follows input, and prediction clones the same
 state; rendering cadence does not decide where contacts are retained.
@@ -86,7 +88,10 @@ interval. Seven nodes integrate a polynomial of degree thirteen exactly; the
 even/odd pair identity evaluates this degree-twelve polynomial without expanding
 its square and cube. The [NIST quadrature reference](https://dlmf.nist.gov/3.5#v)
 gives the exactness criterion. This is an algebraic integral, not sparse sampling
-of the unclipped contact field. Blocks split at their four inner face boundaries, yielding at most five
+of the unclipped contact field. An ellipse interval that travels less than a
+quarter of the contact radius instead applies five-point Gauss–Legendre to the
+clamped transfer, skipping the four square roots that clip it; the quadrature
+tests hold it within two 8-bit codes of the exact integral. Blocks split at their four inner face boundaries, yielding at most five
 quadratic pieces. Flat pieces have constant contact. Neither shape uses rotated stamps.
 
 Brush recipes specialize ellipse versus block and whether any pose has quartic
@@ -104,7 +109,9 @@ Fine elliptical contacts integrate the pixel-square footprint before optical
 transfer. A moving contact uses the square's projection onto its normal; a tap
 uses a bounded two-dimensional integral. Paper remains anchored to the output
 pixel. Contacts up to four pixels in minor radius use this filtering fully,
-then blend to the point evaluator at eight pixels. These fixed pixel thresholds
+then blend to the point evaluator at eight pixels. The normal projection's three
+pieces take four Gauss–Legendre nodes each below four pixels and two from four
+pixels, where blending toward the point evaluator begins. These fixed pixel thresholds
 control antialiasing cost, independently of material softness `W`. Large brushes
 specialize the filter out of their shader.
 

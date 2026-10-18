@@ -1728,6 +1728,34 @@ the binary and source snapshot are under `artifacts/layer-modes/rebased-build/`.
 
 ### Dry-media contact model
 
+Measured on 2026-10-17 UTC with the one-kernel dry evaluator, two fine-tip
+nodes from 4 px minor radius, Curve fit vertices bounded by 1% of the contact
+radius and five-point Gauss–Legendre for short segments, applied to the control
+`1300ba9f2`. The builds alternate for
+two passes each with the profile described below, and ranges cover all six
+contacts. Optimized APK SHA-256
+`c8db6e1f2a909dea4f5d2b1266066d5c59bc6eb99c1ec9785adb4c24685c56c9`, control
+`3a7340bdd1fdf0fc9d78f50c5cca810bd5c9226d9d066e6edb1abe5263439b4d`. Thermal
+status was zero at every install. Gaps are the worst per-contact p99 between
+fresh completions.
+
+| Brush and Size | Before completed updates/s | After completed updates/s | After fresh input updates/s | After worst fresh p99 gap | After input-to-GPU p99 | 120/s, 16.7 ms fresh profile |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pencil 2048 px | 61.55–62.89 | 72.51–74.56 | 72.51–74.56 | 23.61 ms | 131.81–161.27 ms | **Not met** |
+| Pointy Pencil 2048 px | 83.16–84.20 | 95.86–97.40 | 95.86–97.40 | 18.55 ms | 104.18–131.03 ms | **Not met** |
+| Charcoal 2048 px | 59.76–60.90 | 70.10–71.43 | 70.10–71.43 | 24.98 ms | 140.82–172.66 ms | **Not met** |
+| Pastel Block 1024 px | 216.60–220.28 | 201.89–203.42 | 174.54–178.28 | 13.74 ms | 58.16–78.32 ms | Meets measured writing pose |
+
+Pastel Block's fresh rate falls from 179.80–184.81 to 174.54–178.28/s; its
+rounded tip uses neither the fewer fine-tip nodes nor the short-segment
+quadrature, so it keeps only the one-kernel cost. Selecting a brush after
+clearing app data (`--probe-presets 2,25,6`, three runs) takes Pencil 4.51 →
+1.05 s, Pointy Pencil 4.00 → 0.93 s and Chalk 1.94 → 0.46 s; a 36 px size change
+then takes 1.95 s → 41 ms. Raw runs are under
+`artifacts/dry-kernel-merge/movinkpad14/`, beside the summary script and the
+benchmark wrapper that passes tilt and opacity. The 2026-10-13 rows below
+measure the earlier build.
+
 Measured on 2026-10-13 (UTC), with the final dry defaults, unified contact loop
 and compile-time aggregate specialization based on `cbc74b304`.
 Frozen source SHA-256 `04adb5a414d5fee9148980b56487e9d211e1dcb7b497185ee8faab955f287eda`;

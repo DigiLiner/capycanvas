@@ -85,6 +85,19 @@ fn relief_piece(o: vec2<f32>, v: vec2<f32>, ray: vec4<f32>, bounds: vec2<f32>, g
     if gap-k*(profile.x+qmax*(profile.y+profile.z*qmax)) >= 1.0/style.material_a.y {
         return vec2<f32>(stroke.y-stroke.x,full);
     }
+    let half = 0.5*(stroke.y-stroke.x);
+    if ray.z*half*half < 0.015625 && !contact_feature(4096u,style.material_a.x>0.0) {
+        let m = o+v*(stroke.x+half);
+        let near = v*(0.5384693101056831*half);
+        let far = v*(0.9061798459386640*half);
+        let q = vec4<f32>(dot(m-far,m-far),dot(m-near,m-near),dot(m+near,m+near),dot(m+far,m+far));
+        let qm = dot(m,m);
+        let z = clamp((gap-k*(profile.x+q*(profile.y+profile.z*q)))*style.material_a.y,vec4<f32>(0.0),vec4<f32>(1.0));
+        let zm = clamp((gap-k*(profile.x+qm*(profile.y+profile.z*qm)))*style.material_a.y,0.0,1.0);
+        let c = z*z*(3.0-2.0*z);
+        let sum = 0.2369268850561891*(c.x+c.w)+0.4786286704993665*(c.y+c.z)+0.5688888888888889*zm*zm*(3.0-2.0*zm);
+        return vec2<f32>(sum*half,full);
+    }
     let outer = relief_range(ray,relief_inverse(gap/k,profile),stroke);
     if outer.y <= outer.x { return vec2<f32>(0.0,full); }
     let inner = relief_range(ray,relief_inverse((gap-1.0/style.material_a.y)/k,profile),outer);

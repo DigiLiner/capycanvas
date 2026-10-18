@@ -109,6 +109,7 @@ fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {
     let b=min(abs(normal.x),abs(normal.y));
     let half=0.5*(a+b);
     let flat=0.5*(a-b);
+    let taps=select(4u,2u,radius>=4.0);
     var exposure=vec2<f32>(0.0);
     var alpha=0.0;
     for(var piece=0u;piece<3u;piece+=1u) {
@@ -117,12 +118,12 @@ fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {
         if piece==2u {span=vec2<f32>(flat,half);}
         span=vec2<f32>(max(span.x,bounds.x),min(span.y,bounds.y));
         if span.y<=span.x {continue;}
-        for(var i=0u;i<4u;i+=1u) {
-            let outer=i==0u || i==3u;
-            let node=select(0.3399810435848563,0.8611363115940526,outer)*select(-1.0,1.0,i>=2u);
+        for(var i=0u;i<taps;i+=1u) {
+            let outer=taps==4u && (i==0u || i==3u);
+            let node=select(select(0.3399810435848563,0.8611363115940526,outer),0.5773502691896257,taps==2u)*select(-1.0,1.0,i>=taps/2u);
             let position=0.5*(span.x+span.y)+0.5*(span.y-span.x)*node;
             let probability=select(1.0/a,(half-abs(position))/max(a*b,0.00000001),abs(position)>flat);
-            let weight=0.5*(span.y-span.x)*select(0.6521451548625461,0.3478548451374538,outer)*probability;
+            let weight=0.5*(span.y-span.x)*select(select(0.6521451548625461,0.3478548451374538,outer),1.0,taps==2u)*probability;
             let sample=world+normal*position;
             let contact=relief_evaluate(dab,sample,paper,!contact_uniform());
             exposure+=weight*contact;

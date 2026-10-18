@@ -1449,6 +1449,31 @@ Target: **60 completed updates/s** at the guaranteed size, on the 12 MP canvas.
 
 ### Dry-media contact model
 
+Measured on 2026-10-17 UTC with the one-kernel dry evaluator, two fine-tip
+nodes from 4 px minor radius, Curve fit vertices bounded by 1% of the contact
+radius and five-point Gauss–Legendre for short segments, applied to the control
+`1300ba9f2`. The builds alternate for
+two passes each with the profile described below, and ranges cover all six
+contacts. Optimized APK SHA-256
+`c8db6e1f2a909dea4f5d2b1266066d5c59bc6eb99c1ec9785adb4c24685c56c9`, control
+`3a7340bdd1fdf0fc9d78f50c5cca810bd5c9226d9d066e6edb1abe5263439b4d`. Thermal
+status was zero at every install. Gaps are the worst per-contact p99 between
+fresh completions.
+
+| Brush and Size | Before completed updates/s | After completed updates/s | After fresh input updates/s | After worst fresh p99 gap | After input-to-GPU p99 | 60/s, 33.3 ms gate |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pencil 1024 px | 30.75–31.72 | 44.02–44.76 | 44.02–44.76 | 32.85 ms | 82.33–84.65 ms | **Not met** |
+| Pointy Pencil 1024 px | 40.51–41.43 | 49.33–50.29 | 49.33–50.29 | 28.89 ms | 72.52–84.18 ms | **Not met** |
+| Charcoal 1024 px | 28.88–29.56 | 42.55–43.55 | 42.55–43.55 | 33.48 ms | 84.19–87.99 ms | **Not met** |
+| Pastel Block 1024 px | 21.13–24.63 | 29.27–30.07 | 29.27–30.07 | 56.81 ms | 136.48–147.81 ms | **Not met** |
+
+Selecting a brush after clearing app data (`--probe-presets 2,25,6`, three runs)
+takes Pencil 9.00 → 2.49 s, Pointy Pencil 8.45 → 1.96 s and Chalk 4.06 → 0.99 s;
+a 36 px size change then takes 3.57 s → 79 ms. Raw runs are under
+`artifacts/dry-kernel-merge/tcl/`, beside the summary script and the benchmark
+wrapper that passes tilt and opacity. The 2026-10-13 rows below measure the
+earlier build.
+
 Measured on 2026-10-13 UTC, based on `cbc74b304`, with calibrated material
 pressure, restored Material hardness and compile-time aggregate specialization.
 Optimized APK SHA-256

@@ -372,7 +372,7 @@ impl DabGenerator {
             f64::from(tolerance)
         };
         let path_tolerance = if brush.stabilization.strength > 0. {
-            path_tolerance.min(0.05 / f64::from(brush.stabilization.input_scale).max(1e-6))
+            path_tolerance.min((0.05 / f64::from(brush.stabilization.input_scale).max(1e-6)).max(f64::from(radius) * 0.01))
         } else { path_tolerance };
         let dx = f64::from(current.position().x) - f64::from(start.position().x);
         let dy = f64::from(current.position().y) - f64::from(start.position().y);
@@ -1522,6 +1522,22 @@ mod tests {
         generator.finish(&large, &mut dabs);
         assert!(dabs.len() <= 4, "large straight brushes retain coarse sampling: {}", dabs.len());
         assert_eq!(dabs.last().unwrap().center.x, 1000.);
+    }
+
+    #[test]
+    fn curve_fit_retains_broad_contacts_at_their_radius_tolerance() {
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
+        brush.diameter = 1024.;
+        assert!(brush.stabilization.strength > 0.);
+        let mut generator = DabGenerator::default();
+        let mut dabs = Vec::new();
+        for i in 0..=500u32 {
+            let angle = i as f32 * 0.002;
+            let sample = crate::test_support::point(1000. * angle.sin(), 1000. * (1. - angle.cos()), 1., i * 4_000);
+            generator.append(sample, &brush, &mut dabs);
+        }
+        generator.finish(&brush, &mut dabs);
+        assert!(dabs.len() <= 12, "a broad arc keeps vertices at 1% of its radius: {}", dabs.len());
     }
 
     #[test]
