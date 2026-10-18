@@ -10,9 +10,9 @@ another. CI runs only the window-free shared suites, the Wasm check, the Apple
 project check and the license check ([releasing](releasing.md#continuous-integration)),
 so run the checks for every area your change touches.
 
-The renderer's `dry_material::tests::every_kernel_entry_resolves_its_overrides`
-also runs in CI without a GPU. It validates each generated dry-material kernel
-and the destination, gather and reservoir modules of every material operation.
+The renderer's `dry_material::tests` module also runs in CI without a GPU.
+`every_kernel_entry_resolves_its_overrides` validates each generated dry-material
+kernel and the destination, gather and reservoir modules of every material operation.
 `specialized_modules_omit_unreachable_features` requires every specialized
 module to leave out the relief, bristle, retouch, blend-mode, pointwise and other
 operation code it cannot reach. The first test checks pipeline constants against the overrides used by
