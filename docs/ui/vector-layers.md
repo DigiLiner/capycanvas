@@ -10,7 +10,8 @@
 Plain round dry brushes draw on a vector layer: G-Pen, whose pressure sets the
 width, and Monoline, which keeps one width. The line follows the same Smoothing,
 pressure curve, rulers and late stylus pressure updates as the brush does on a
-paint layer. While the pen is down it shows as a provisional path; at pen-up it
+paint layer. While the pen is down it shows as a provisional path whose tip
+reaches ahead of the stylus with the paint layer's prediction; at pen-up it
 is fitted to as few cubic segments as stay within half a screen pixel of the
 drawn line, with smooth anchors where curves meet and corners where the line
 turns sharply, and added as one path in one undo step. Its width profile keeps
@@ -134,9 +135,11 @@ its paths are written back unchanged when the drawing is saved.
 
 ## Tests
 
-`vector_strokes_smooth_and_weigh_input_like_raster_strokes` in
+`vector_strokes_smooth_weigh_and_predict_input_like_raster_strokes` in
 [`canvas.rs`](../../crates/layer-engine/src/canvas.rs) checks that a vector line
-takes the raster stroke's dabs, and
+takes the raster stroke's dabs and shows its predicted preview on every frame,
+`vector_line_previews_reach_predicted_samples_without_drawing_them` checks the
+session forwards platform predictions to the preview only, and
 `hand_drawn_lines_keep_few_anchors_within_tolerance` and
 `late_pressure_corrections_replay_the_line` in
 [`vector_stroke.rs`](../../crates/layer-engine/src/vector_stroke.rs) bound the

@@ -13,6 +13,8 @@ mod output;
 mod prediction_clock;
 #[cfg(test)]
 mod test_support;
+mod tip;
+pub(crate) use tip::{PreviewTip, TipInput, tip_times};
 
 pub(crate) const MAX_FINALIZATION_LAG_MICROS: u32 = 50_000;
 const MAX_PREDICTION_HORIZON_MICROS: u32 = 64_000;

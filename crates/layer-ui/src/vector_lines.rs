@@ -1,11 +1,11 @@
 use super::*;
 use layer_core::authored::vector::{Cap, Eraser, ItemId, Join, Paint, PaintEntry, PathItem, Record, Stroke, Style, VectorObject};
-use layer_engine::{SampleFlags, VectorStroke};
+use layer_engine::{SampleFlags, VectorSample, VectorStroke};
 use std::sync::Arc;
 
 const LINE_TOLERANCE: f64 = 0.5;
 
-struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, tolerance: f64, stale: bool }
+struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, tolerance: f64, shown: Vec<VectorSample> }
 struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
 struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, whole: bool }
 
@@ -101,7 +101,10 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn vector_line_pen(&mut self, event: PenEvent) -> Result<(), String> {
         if event.flags.contains(SampleFlags::CORRECTION) { return self.correct_vector_line(event); }
-        if event.flags.contains(SampleFlags::PREDICTED) { return Ok(()); }
+        if event.flags.contains(SampleFlags::PREDICTED) {
+            if event.phase == PenPhase::Move { self.push_vector_sample(event); }
+            return Ok(());
+        }
         match event.phase {
             PenPhase::Down => {
                 self.cancel_vector_line();
@@ -114,7 +117,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let color = layer_core::color::RgbColor::from_linear(space, [r, g, b, (a * brush.opacity).clamp(0., 1.)]).map_err(|e| e.to_string())?;
                 let offset = self.engine.document().scene().occurrence_offset64(layer);
                 let stroke = self.engine.begin_vector_stroke(self.vector_lines.revision + 1, event, offset);
-                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), tolerance: LINE_TOLERANCE * self.document_per_surface_pixel(), stale: true });
+                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), tolerance: LINE_TOLERANCE * self.document_per_surface_pixel(), shown: Vec::new() });
             }
             PenPhase::Move => self.push_vector_sample(event),
             PenPhase::Up => {
@@ -128,12 +131,14 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn push_vector_sample(&mut self, event: PenEvent) {
         let Some(line) = &mut self.vector_lines.line else { return };
-        line.stale |= self.engine.push_vector_stroke(&mut line.stroke, event);
+        self.engine.push_vector_stroke(&mut line.stroke, event);
     }
-    pub(super) fn sync_vector_line_preview(&mut self) {
+    pub(super) fn sync_vector_line_preview(&mut self, now_ns: u64, presentation_ns: u64) {
         let Some(line) = &mut self.vector_lines.line else { return };
-        if !std::mem::take(&mut line.stale) { return; }
-        let Some(preview) = layer_engine::polyline(&line.stroke.preview()) else { return };
+        let samples = line.stroke.preview(Some(now_ns), Some(presentation_ns));
+        if samples == line.shown { return; }
+        let Some(preview) = layer_engine::polyline(&samples) else { return };
+        line.shown = samples;
         self.vector_lines.revision += 1;
         let preview = layer_render::VectorPreview { owner: line.layer, path: Arc::new(path(ItemId(1), &line.paint, preview)), revision: self.vector_lines.revision };
         self.engine.backend_mut().set_vector_preview(Some(preview));
@@ -160,7 +165,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn correct_vector_line(&mut self, event: PenEvent) -> Result<(), String> {
         if let Some(line) = &mut self.vector_lines.line {
-            line.stale |= self.engine.push_vector_stroke(&mut line.stroke, event);
+            self.engine.push_vector_stroke(&mut line.stroke, event);
             return Ok(());
         }
         let Some(mut drawn) = self.vector_lines.drawn.take() else { return Ok(()) };

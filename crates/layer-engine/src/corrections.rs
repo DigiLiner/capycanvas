@@ -103,7 +103,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
                     let active = self.active_stroke.as_mut().unwrap();
                     // A late sensor update is not fresh pressure/motion. Drop
                     // preview history instead of treating delivery as input.
-                    active.prediction = PredictionState::default();
+                    active.tip.prediction = crate::feedback::PredictionState::default();
                     self.recording.event(crate::recording::Event::Reset);
                     if !active.feedback.enabled || estimate.index < self.finalized_real_points {
                         self.rebuild_corrected_active();

@@ -1,5 +1,6 @@
-use crate::input::to_stroke_point;
-use crate::{CanvasEngine, DabGenerator, PenEvent, PenPhase, PressureCurve, SampleFlags, ViewTransform};
+use crate::input::{StrokeBuilder, to_stroke_point};
+use crate::feedback::{PredictionState, PreviewTip, TipInput, finalized_count, tip_times};
+use crate::{CanvasEngine, DabGenerator, InstantFeedbackConfig, PenEvent, PenPhase, PressureCurve, SampleFlags, ViewTransform};
 use layer_core::authored::vector::{Anchor, AnchorKind, PathGeometry, Subpath, WidthKnot, WidthProfile};
 use layer_core::{BrushSnapshot, RulerConstraint, StrokeId, StrokePoint};
 use layer_render::{CanvasRenderer, Dab};
@@ -13,17 +14,21 @@ pub struct VectorStroke {
     curve: PressureCurve,
     offset: [f32; 2],
     ruler: Option<RulerConstraint>,
-    start_ns: u64,
-    replay: Vec<StrokePoint>,
+    builder: StrokeBuilder,
+    finalized: usize,
     estimates: BTreeMap<(u64, u64), (Vec<usize>, ViewTransform)>,
+    tip: PreviewTip,
+    feedback: InstantFeedbackConfig,
+    surface: [f32; 6],
     dabs: Vec<Dab>,
     id: u64,
 }
 impl VectorStroke {
-    fn new(id: u64, brush: BrushSnapshot, curve: PressureCurve, offset: [f64; 2]) -> Self {
+    fn new(id: u64, brush: BrushSnapshot, curve: PressureCurve, offset: [f64; 2], feedback: InstantFeedbackConfig, surface: [f32; 6]) -> Self {
         let mut generator = DabGenerator::new(layer_core::color::RgbSpace::Srgb);
         generator.reset_for_stroke(StrokeId(id), &brush);
-        Self { brush, generator, curve, offset: offset.map(|v| v as f32), ruler: None, start_ns: 0, replay: Vec::new(), estimates: BTreeMap::new(), dabs: Vec::new(), id }
+        Self { brush, generator, curve, offset: offset.map(|v| v as f32), ruler: None, builder: StrokeBuilder::default(), finalized: 0, estimates: BTreeMap::new(),
+            tip: PreviewTip::default(), feedback, surface, dabs: Vec::new(), id }
     }
     pub fn brush(&self) -> &BrushSnapshot { &self.brush }
     pub fn awaits_corrections(&self) -> bool { !self.estimates.is_empty() }
@@ -31,59 +36,86 @@ impl VectorStroke {
         event.flags.contains(SampleFlags::CORRECTION) && self.estimates.contains_key(&(event.device_id, event.sequence))
     }
     fn push(&mut self, event: PenEvent, transform: ViewTransform) -> bool {
-        if event.phase == PenPhase::Down { self.start_ns = event.timestamp_ns; }
-        let point = to_stroke_point(event, transform, self.curve.clone(), self.start_ns);
-        if !point.position.x.is_finite() || !point.position.y.is_finite() || self.replay.len() >= crate::canvas::MAX_CONTACT_POINTS { return false; }
+        let position = transform.map(event.surface_position);
+        if !position.x.is_finite() || !position.y.is_finite() || self.builder.real_points().len() >= crate::canvas::MAX_CONTACT_POINTS { return false; }
+        if event.phase == PenPhase::Down { self.builder.begin(event, transform, self.curve.clone()); } else { self.builder.push(event, transform, self.curve.clone()); }
+        if event.flags.contains(SampleFlags::PREDICTED) { return !self.builder.predicted_points().is_empty(); }
+        let Some(index) = self.builder.real_points().len().checked_sub(1) else { return false };
+        if self.feedback.enabled { self.tip.prediction.observe(event); }
         if event.flags.contains(SampleFlags::ESTIMATED) {
-            self.estimates.entry((event.device_id, event.sequence)).or_insert_with(|| (Vec::new(), transform)).0.push(self.replay.len());
+            self.estimates.entry((event.device_id, event.sequence)).or_insert_with(|| (Vec::new(), transform)).0.push(index);
         }
-        self.replay.push(point);
-        self.generator.append(point, &self.brush, &mut self.dabs);
+        self.finalize();
         true
+    }
+    fn finalize(&mut self) {
+        let real = self.builder.real_points();
+        let count = if self.feedback.enabled { finalized_count(real, self.finalized) } else { real.len() };
+        for point in &real[self.finalized..count] { self.generator.append(*point, &self.brush, &mut self.dabs); }
+        self.finalized = count;
     }
     fn correct(&mut self, event: PenEvent) -> bool {
         let key = (event.device_id, event.sequence);
         let Some((indices, transform)) = self.estimates.get(&key) else { return false };
-        let corrected = to_stroke_point(event, *transform, self.curve.clone(), self.start_ns);
+        let corrected = to_stroke_point(event, *transform, self.curve.clone(), 0);
         let mut changed = false;
         for &index in indices {
-            let point = StrokePoint { elapsed_micros: self.replay[index].elapsed_micros, ..corrected };
-            changed |= std::mem::replace(&mut self.replay[index], point) != point;
+            let point = StrokePoint { elapsed_micros: self.builder.real_points()[index].elapsed_micros, ..corrected };
+            changed |= self.builder.real_points()[index] != point;
+            self.builder.replace_real(index, point);
         }
         if !event.flags.contains(SampleFlags::ESTIMATED) { self.estimates.remove(&key); }
         if changed {
+            self.tip.prediction = PredictionState::default();
             self.generator.reset_for_stroke(StrokeId(self.id), &self.brush);
             self.dabs.clear();
-            for point in &self.replay { self.generator.append(*point, &self.brush, &mut self.dabs); }
+            self.finalized = 0;
+            self.finalize();
         }
         changed
     }
-    pub fn preview(&self) -> Vec<Sample> {
+    pub fn preview(&mut self, timestamp_ns: Option<u64>, presentation_timestamp_ns: Option<u64>) -> Vec<Sample> {
         let mut tail = Vec::new();
-        self.generator.clone().finish(&self.brush, &mut tail);
+        match self.builder.real_points().last().copied().filter(|_| self.feedback.enabled) {
+            Some(latest) => {
+                let builder = &self.builder;
+                let (now, requested) = tip_times(self.feedback, latest, |timestamp| builder.elapsed_micros_at(timestamp).unwrap_or(latest.elapsed_micros),
+                    timestamp_ns, presentation_timestamp_ns);
+                let real = builder.real_points();
+                let input = TipInput { real, pending: &real[self.finalized..], platform: builder.predicted_points(), brush: &self.brush, feedback: self.feedback,
+                    transform: self.surface, now, requested, ending: None };
+                self.tip.build(&self.generator, input, 0, &mut tail);
+            }
+            None => { self.generator.preview().flush_contact(&self.brush, &mut tail); }
+        }
         samples(self.dabs.iter().chain(&tail))
     }
     pub fn samples(&self) -> Vec<Sample> {
-        if self.brush.taper.end_distance_diameters > 0. && !self.replay.is_empty()
+        if self.brush.taper.end_distance_diameters > 0. && !self.builder.real_points().is_empty()
             && let Ok(stroke) = layer_core::Stroke::new(StrokeId(self.id), layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::from_index(0)),
-                layer_core::StrokeTool::Brush, self.brush.clone(), self.replay.clone()) {
+                layer_core::StrokeTool::Brush, self.brush.clone(), self.builder.real_points().to_vec()) {
             let mut dabs = Vec::new();
             DabGenerator::generate(&stroke, layer_core::color::RgbSpace::Srgb, &mut dabs);
             return samples(dabs.iter());
         }
-        self.preview()
+        let mut tail = Vec::new();
+        let mut generator = self.generator.clone();
+        for point in &self.builder.real_points()[self.finalized..] { generator.append(*point, &self.brush, &mut tail); }
+        generator.finish(&self.brush, &mut tail);
+        samples(self.dabs.iter().chain(&tail))
     }
 }
 
 impl<B: CanvasRenderer> CanvasEngine<B> {
     pub fn begin_vector_stroke(&self, id: u64, event: PenEvent, offset: [f64; 2]) -> VectorStroke {
-        let mut stroke = VectorStroke::new(id, self.stroke_brush(&event), self.configured_pressure_curve().clone(), offset);
+        let mut stroke = VectorStroke::new(id, self.stroke_brush(&event), self.configured_pressure_curve().clone(), offset,
+            self.instant_feedback(), self.view().document_to_surface);
         self.push_vector_stroke(&mut stroke, event);
         stroke
     }
     pub fn push_vector_stroke(&self, stroke: &mut VectorStroke, event: PenEvent) -> bool {
         if event.flags.contains(SampleFlags::CORRECTION) { return stroke.correct(event); }
-        if event.flags.contains(SampleFlags::PREDICTED) || !matches!(event.phase, PenPhase::Down | PenPhase::Move | PenPhase::Up) { return false; }
+        if !matches!(event.phase, PenPhase::Down | PenPhase::Move | PenPhase::Up) { return false; }
         let mut transform = self.event_transform(&event);
         stroke.ruler = self.snap_to_ruler(&event, &mut transform, stroke.ruler);
         transform.surface_to_document[4] -= stroke.offset[0];
@@ -92,7 +124,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
     }
 }
 
-fn samples<'a>(dabs: impl Iterator<Item = &'a Dab>) -> Vec<Sample> {
+pub(crate) fn samples<'a>(dabs: impl Iterator<Item = &'a Dab>) -> Vec<Sample> {
     let mut out: Vec<Sample> = Vec::new();
     for dab in dabs {
         let sample = ([f64::from(dab.center.x), f64::from(dab.center.y)], f64::from(dab.radii[0].max(0.)));
@@ -428,7 +460,7 @@ mod tests {
     fn drawn(events: &[PenEvent], strength: f32) -> VectorStroke {
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         brush.stabilization.strength = strength;
-        let mut stroke = VectorStroke::new(1, brush, PressureCurve::default(), [0.; 2]);
+        let mut stroke = VectorStroke::new(1, brush, PressureCurve::default(), [0.; 2], InstantFeedbackConfig::default(), [1., 0., 0., 1., 0., 0.]);
         for event in events {
             if event.flags.contains(SampleFlags::CORRECTION) { stroke.correct(*event); } else { stroke.push(*event, ViewTransform::IDENTITY); }
         }

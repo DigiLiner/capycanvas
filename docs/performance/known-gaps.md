@@ -119,8 +119,6 @@
     paths leave (54 ms of the 86 ms p50 on the Huion); and committing or undoing
     a long stroke across a crowded layer recomposites its pages for 50–100 ms on
     the low tier.
-  - The provisional vector line does not draw the predicted tail that the
-    raster pen previews ahead of the stylus.
   - Drawing on the top tier spends about 14 ms of CPU on every eighth frame;
     the desktop and the Mali tablets do not. The cause is not yet traced.
   - At 0.4× the low tier opens in 1.9 / 3.7 s and drags 5,000 paths at 7.0 ms

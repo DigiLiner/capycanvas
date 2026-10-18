@@ -69,12 +69,14 @@ pub(crate) struct Recorder {
     pub(crate) evaluation: EvaluationContext,
     pub(crate) rebuilds: usize,
     pub(crate) painting_unready: bool,
+    pub(crate) vector_preview: Option<layer_render::VectorPreview>,
 }
 impl CanvasRenderer for Recorder {
     type Error = BackendError;
     fn evaluation_context(&self) -> EvaluationContext { self.evaluation.clone() }
     fn seed_evaluation_context(&mut self, context: EvaluationContext) { self.evaluation = context; }
     fn set_clipping_preview(&mut self, shadows:bool, highlights:bool) {self.clipping_previews.push((shadows,highlights));}
+    fn set_vector_preview(&mut self, preview: Option<layer_render::VectorPreview>) { self.vector_preview = preview; }
     fn has_pending_submission(&self) -> bool { self.settling }
     fn paint_ready(&self, _document: &Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { !self.painting_unready }
     fn has_pending_work(&self) -> bool { self.refining }

@@ -77,6 +77,7 @@ fn fullscreen_prediction_with_wide_brushes_and_independent_clocks() {
                         .active_stroke
                         .as_mut()
                         .unwrap()
+                        .tip
                         .prediction
                         .estimate_for(
                             engine.builder.real_points(),

@@ -4509,6 +4509,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             || self.paper_preview.active()
             || (!self.rendering_suspended && self.papers.pending.as_ref().is_some_and(|pending| pending.image.is_some()))
             || self.engine.wants_continuous_frames()
+            || self.vector_lines.active()
             || self.pending_filters.is_some()
             || self.targeted_curve_busy()
             || self.auto_levels.is_some()
@@ -4539,7 +4540,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.sync_crop_overlay();
         self.sync_paper_preview(now_ns);
         self.sync_moving_pixels();
-        self.sync_vector_line_preview();
+        self.sync_vector_line_preview(now_ns, presentation_ns);
         let clone_source = self.engine.clone_source();
         self.engine
             .render_frame_for(now_ns, presentation_ns)

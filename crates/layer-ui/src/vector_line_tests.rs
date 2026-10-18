@@ -1,5 +1,6 @@
-fn vector_session() -> (UiSession<Recorder>, OccurrenceHandle) {
-    let mut s = session(Platform::Gtk);
+fn vector_session() -> (UiSession<Recorder>, OccurrenceHandle) { vector_session_on(Platform::Gtk) }
+fn vector_session_on(platform: Platform) -> (UiSession<Recorder>, OccurrenceHandle) {
+    let mut s = session(platform);
     s.select_brush(DefaultBrushPreset::GPen as u32).unwrap();
     layer(&mut s, LayerAction::NewVector);
     let layer = s.engine.document().working.occurrence.unwrap();
@@ -91,6 +92,39 @@ fn late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step() {
     s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
     s.frame(2_000_000_000, 2_000_000_000).unwrap();
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 0, "the line and its corrections are one step");
+}
+
+#[test]
+fn vector_line_previews_reach_predicted_samples_without_drawing_them() {
+    let (mut s, layer) = vector_session_on(Platform::Android);
+    s.set_platform_prediction_available(true);
+    let farthest = |path: &layer_core::authored::vector::PathItem, axis: usize, sign: f64| path.geometry.subpaths()[0].to_vec().iter().map(|anchor| anchor.point()[axis] * sign).fold(f64::MIN, f64::max) * sign;
+    let document = |s: &UiSession<Recorder>, point: Point| { let p = s.state.camera.input_transform().map(point); [f64::from(p.x), f64::from(p.y)] };
+    let (mut real, mut predicted_reach) = ([0.; 2], [0.; 2]);
+    for i in 0..30u64 {
+        let mut e = event(&s, i + 1, if i == 0 { PenPhase::Down } else { PenPhase::Move }, 0.6);
+        e.surface_position.x = 150. + i as f32 * 6.;
+        s.pen(e);
+        let mut predicted = PenEvent { sequence: e.sequence + 1_000, timestamp_ns: e.timestamp_ns + 10_000_000, flags: SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::PREDICTED.0), ..e };
+        predicted.surface_position.x += 6.;
+        predicted.surface_position.y -= if i >= 20 { 6. } else { 0. };
+        if i > 0 { s.pen(predicted); }
+        s.frame(e.timestamp_ns, predicted.timestamp_ns).unwrap();
+        real = document(&s, e.surface_position);
+        predicted_reach = document(&s, predicted.surface_position);
+    }
+    let preview = &s.engine.backend().vector_preview.as_ref().expect("the line is previewed").path;
+    let shown = [farthest(preview, 0, 1.), farthest(preview, 1, -1.)];
+    assert!(shown[0] > real[0] + (predicted_reach[0] - real[0]) * 0.5, "the preview reaches ahead: {shown:?} vs {real:?}..{predicted_reach:?}");
+    assert!(shown[1] < real[1] + (predicted_reach[1] - real[1]) * 0.5, "the preview turns with the platform prediction: {shown:?} vs {real:?}..{predicted_reach:?}");
+    let up = PenEvent { phase: PenPhase::Up, ..event(&s, 31, PenPhase::Up, 0.6) };
+    s.pen(PenEvent { surface_position: Point { x: 150. + 29. * 6., y: 300. }, ..up });
+    s.frame(up.timestamp_ns, up.timestamp_ns).unwrap();
+    let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let (_, path) = object.paths().next().unwrap();
+    let drawn = [farthest(path, 0, 1.), farthest(path, 1, -1.)];
+    assert!((drawn[0] - real[0]).abs() < 1. && (drawn[1] - real[1]).abs() < 0.5, "the drawn line ends at the pen: {drawn:?} vs {real:?}");
+    assert!(s.engine.backend().vector_preview.is_none());
 }
 
 fn surface_at(s: &UiSession<Recorder>, doc: [f64; 2]) -> Point {
