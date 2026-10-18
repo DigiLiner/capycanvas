@@ -801,7 +801,7 @@ mask offsets, contour selection geometry, every ruler kind, non-default built-in
 choices and gradient interpolations, and both color forms, using the current
 occurrence and filter data versions. Its fixed values exercise opening, editing,
 saving, reopening and compiling current filters. `builtin-contracts.json` fixes
-all 62 built-in contracts, 54 filters and 8 paper textures, and their 311 parameter keys: kinds, choice IDs,
+all 62 built-in contracts, 54 filters and 8 paper textures, and their 314 parameter keys: kinds, choice IDs,
 dimensions, accepted bounds, constraints, color domain, alpha behavior and time
 use. Parameters are keyed; control order, shader parameter order, runtime ABI
 and displayed unit labels are excluded. Choice order may change because built-in

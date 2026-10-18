@@ -1388,3 +1388,76 @@ fn raw_paint_regions_restore_only_the_unfiltered_page() {
     assert_eq!(pollster::block_on(gpu().content_bounds(request, Default::default())).unwrap(),
         layer_core::Rect::from_extent([3 * PAGE_SIZE; 2]));
 }
+
+fn gray_rough_paper(extent: [u32; 2]) -> Document {
+    let mut document = Document::new(PortableId::random(), extent[0], extent[1], layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+    set_paper(&mut document, &[("texture", layer_core::EffectValue::Texture(layer_core::paper::built_in_paper("rough").unwrap().texture.clone())),
+        ("color", layer_core::EffectValue::Color(layer_core::color::RgbColor::new(RgbSpace::Srgb, [0.6, 0.6, 0.6, 1.]).unwrap()))]);
+    document
+}
+fn set_paper(document: &mut Document, values: &[(&str, layer_core::EffectValue)]) {
+    let handle = document.scene().effect_handle(document.bottom_paper().unwrap()).unwrap();
+    let application = document.artwork.effects.get(handle).unwrap();
+    let mut draft = EffectInstance { program: application.program.clone(), values: application.values.clone() };
+    for (key, value) in values { draft.set(key, value.clone()).unwrap(); }
+    document.artwork.effects.get_mut(handle).unwrap().values = draft.values;
+}
+fn exported_green(document: &Document) -> Vec<i32> {
+    let target = SourceInterpretation { channels: SourceChannels::Rgba, depth: SampleDepth::U8, profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false };
+    let mut png = Vec::new();
+    capture(roundtrip(document)).unwrap().write_png(&mut png, &target, Default::default(), None).unwrap();
+    raw_rows(&layer_color::photo::read_photo(Cursor::new(png), Default::default()).unwrap()).chunks_exact(4).map(|p| i32::from(p[1])).collect()
+}
+fn presented_green(document: &Document) -> Vec<i32> {
+    let document = &roundtrip(document);
+    let [width, height] = document.composition().size;
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let view = layer_render::ViewState { width_px: width, height_px: height, document_to_surface: [1., 0., 0., 1., 0., 0.] };
+    r.submit(layer_render::FramePacket { view, blend_space: document.composition().blend, ..packet(document.scene(), [width, height]) }).unwrap();
+    let (texture, surface) = crate::create_target(&r.device, [width, height], wgpu::TextureFormat::Rgba8UnormSrgb, "relief canvas");
+    let mut presenter = crate::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    presenter.present(&r, &surface, view, [0., 0., 0., 1.]).unwrap();
+    crate::layer_tests::page_bytes(&r, &texture).chunks_exact(4).map(|p| i32::from(p[1])).collect()
+}
+fn assert_canvas_matches_export(document: &Document, export: &[i32], label: &str) {
+    let canvas = presented_green(document);
+    let differing = canvas.iter().zip(export).filter(|(a, b)| a.abs_diff(**b) > 2).count();
+    assert!(differing * 100 < export.len(), "{label}: the export matches the canvas, {differing} pixels differ");
+}
+
+#[test]
+fn exports_light_the_paper_like_the_canvas_and_paint_hides_what_does_not_show_through() {
+    use layer_core::{EffectValue::Number, paper::{RELIEF, THROUGH_PAINT}};
+    let extent = [96, 64];
+    for blend in layer_core::BlendSpace::ALL {
+        let mut document = gray_rough_paper(extent);
+        document.artwork.compositions.get_mut(document.artwork.root).unwrap().blend = blend;
+        let mut builder = SourceBuilder::new(extent, SourceInterpretation { channels: SourceChannels::Rgba, depth: SampleDepth::U8,
+            profile: ColorProfile::Builtin(RgbSpace::Srgb), profile_assumed: false }, 16 * 1024 * 1024).unwrap();
+        for _ in 0..extent[1] {
+            builder.push_row(&(0..extent[0]).flat_map(|x| [200, 60, 40, if x < 32 { 255 } else if x < 64 { 128 } else { 0 }]).collect::<Vec<u8>>()).unwrap();
+        }
+        paint_mut(&mut document).base = Some(layer_core::authored::PaintBase::new(Arc::new(builder.finish().unwrap()).into()));
+        let flat = exported_green(&document);
+        set_paper(&mut document, &[(RELIEF, Number(150.))]);
+        let through = exported_green(&document);
+        assert_canvas_matches_export(&document, &through, &format!("{blend:?} 100%"));
+        set_paper(&mut document, &[(THROUGH_PAINT, Number(0.))]);
+        let covered = exported_green(&document);
+        let deviation = |pixels: &[i32], columns: std::ops::Range<usize>| {
+            let rows = pixels.chunks_exact(extent[0] as usize).zip(flat.chunks_exact(extent[0] as usize));
+            rows.flat_map(|(row, plain)| row[columns.clone()].iter().zip(&plain[columns.clone()]).map(|(a, b)| a.abs_diff(*b) as f32)).sum::<f32>()
+                / (columns.len() * extent[1] as usize) as f32
+        };
+        assert!(deviation(&through, 0..32) > 1. && deviation(&through, 64..96) > 1., "{blend:?}: paint and paper show the relief at 100%");
+        let tone = |pixels: &[i32]| pixels.chunks_exact(extent[0] as usize).flat_map(|row| &row[64..96]).sum::<i32>() as f32 / (32 * extent[1]) as f32;
+        assert!((tone(&through) - tone(&flat)).abs() < 2., "{blend:?}: the relief keeps the paper's tone");
+        assert!(deviation(&covered, 0..32) < 0.1, "{blend:?}: opaque paint hides it at 0%");
+        assert!((deviation(&covered, 64..96) - deviation(&through, 64..96)).abs() < 0.1, "{blend:?}: bare paper keeps its relief");
+        let half = deviation(&covered, 32..64) / deviation(&through, 32..64);
+        assert!((0.3..0.7).contains(&half), "{blend:?}: half-covered paper shows half the relief: {half}");
+        assert_canvas_matches_export(&document, &covered, &format!("{blend:?} 0%"));
+        set_paper(&mut document, &[(THROUGH_PAINT, Number(40.))]);
+        assert_canvas_matches_export(&document, &exported_green(&document), &format!("{blend:?} 40%"));
+    }
+}

@@ -25,6 +25,10 @@ struct DisplayCache { scale: u32, coarse_scale: u32, next_scale: u32, padding: u
 @group(0) @binding(5) var<storage, read> cache: DisplayCache;
 @group(0) @binding(6) var kept: texture_2d<f32>;
 @group(0) @binding(13) var navigator: texture_2d<f32>;
+struct PaperShade { tile: vec4<f32>, light: vec4<f32>, paper: vec4<f32>, state: vec4<f32> };
+@group(0) @binding(14) var<uniform> paper_shade: PaperShade;
+@group(0) @binding(15) var paper_slope: texture_2d<f32>;
+@group(0) @binding(16) var paper_sampler: sampler;
 
 // The backing buffer follows the display's native orientation. All artwork,
 // cursor and UI geometry continues to use the host's logical viewport.
@@ -115,6 +119,29 @@ fn mapped_at(p:vec2<f32>,dx:vec2<f32>,dy:vec2<f32>,linear:bool)->vec4<f32> {
     let fraction=(high-low)/max(span,vec2(1e-20));
     let color=mapped_color(8u,(low+high)*.5,dx*fraction,dy*fraction,false,false,vec2(0.),vec2(0.),vec2(0.));
     return presentation_color(color,camera.mapped.options.x,camera.mapped.encoding.x,camera.mapped.backdrop,linear);
+}
+fn paper_slope_shade(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> f32 {
+    let size = paper_shade.tile.xy;
+    let slope = textureSampleGrad(paper_slope, paper_sampler, (p + paper_shade.tile.zw) / size, dx / size, dy / size).xy;
+    return paper_shade_factor(slope, paper_shade.light);
+}
+fn paper_relief(color: vec4<f32>, weight: f32, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
+    if paper_shade.state.x == 0. || paper_shade.state.z != 0. { return color; }
+    return paper_lit(color, paper_slope_shade(p, dx, dy), weight);
+}
+fn paper_backed(composite: vec4<f32>) -> vec4<f32> {
+    return composite + paper_shade.paper * (1. - composite.a);
+}
+fn paper_composite(composite: vec4<f32>, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
+    let weight = select(1., 1. - composite.a * (1. - paper_shade.light.w), paper_shade.state.y != 0.);
+    return paper_relief(canvas_linear(paper_backed(composite)), weight, p, dx, dy);
+}
+fn source_at(source: u32, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, linear: bool) -> vec4<f32> {
+    if source == 2u { return mapped_at(p, dx, dy, linear); }
+    if source == 1u { return placed_at(p, dx, dy, linear); }
+    let grid = grid_artwork_at(p, dx, dy);
+    if linear { return canvas_linear(grid); }
+    return grid;
 }
 fn artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     if camera.placed_options.y==2. {return mapped_at(p,dx,dy,false);}
@@ -270,13 +297,15 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
         return view_store(vec4<f32>(rgb * coverage, coverage));
     }
     // Explicit LOD keeps sampling valid across the finite-canvas boundary.
+    let dx = camera.inverse.xy * footprint;
+    let dy = camera.inverse.zw * footprint;
     var artwork: vec4<f32>;
-    if source==2u { artwork = mapped_at(p, camera.inverse.xy * footprint, camera.inverse.zw * footprint, true); }
-    else if source==1u { artwork = placed_at(p, camera.inverse.xy * footprint, camera.inverse.zw * footprint, true); }
-    else { artwork = canvas_linear(grid_artwork_at(p, camera.inverse.xy * footprint, camera.inverse.zw * footprint)); }
+    if paper_shade.state.y != 0. { artwork = paper_composite(source_at(source, p, dx, dy, false), p, dx, dy); }
+    else { artwork = paper_relief(source_at(source, p, dx, dy, true), 1., p, dx, dy); }
     let paint = proof_artwork(artwork,p);
     let checker = transparency_checker(p, 16.);
     var rgb = screen_marked(paint, view_working_rgb(paint.rgb) + vec3<f32>(checker) * (1.0 - paint.a), checker);
+    if paper_shade.state.z != 0. { rgb = paper_lit(vec4<f32>(rgb, 1.), paper_slope_shade(p, dx, dy), 1.).rgb; }
     if (bitcast<u32>(artwork.a)&0x7fffffffu)!=0u {
         let bits=bitcast<vec3<u32>>(artwork.rgb);
         let shadows=camera.composite.z!=0. && (any((bits&vec3(0x7fffffffu))==vec3(0u)) || any((bits>>vec3(31u))!=vec3(0u)));
@@ -316,27 +345,6 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
     let coverage = window_coverage(surface);
     let quantize=paint.a>0. && camera.composite.z==0. && camera.composite.w==0. && camera.selection.z<.5 && camera.rotation.z<.5 && !shielded;
     return view_quantize(vec4<f32>(rgb * coverage, coverage),surface,quantize);
-}
-
-struct PaperRelief { tile: vec4<f32>, shade: vec4<f32> };
-@group(1) @binding(1) var<uniform> paper_relief: PaperRelief;
-@group(1) @binding(2) var paper_tile: texture_2d<f32>;
-@group(1) @binding(3) var paper_sampler: sampler;
-fn paper_relief_height(p: vec2<f32>) -> f32 {
-    return textureSampleLevel(paper_tile, paper_sampler, (p + paper_relief.tile.zw) / paper_relief.tile.xy, 0.).r;
-}
-@fragment fn paper_fragment(vertex: Vertex) -> @location(0) vec4<f32> {
-    let surface = logical_surface(vertex.position.xy * camera.rotation.w);
-    let p = vec2<f32>(dot(camera.inverse.xz, surface), dot(camera.inverse.yw, surface)) + camera.offset_document.xy;
-    if any(p < vec2<f32>(0.)) || any(p >= camera.offset_document.zw) { return vec4<f32>(0.); }
-    let pixel = max(1., length(camera.inverse.xy) * camera.rotation.w);
-    let step = max(vec2<f32>(pixel), paper_relief.tile.xy / vec2<f32>(textureDimensions(paper_tile)));
-    let slope = vec2<f32>(
-        paper_relief_height(p + vec2<f32>(step.x, 0.)) - paper_relief_height(p - vec2<f32>(step.x, 0.)),
-        paper_relief_height(p + vec2<f32>(0., step.y)) - paper_relief_height(p - vec2<f32>(0., step.y))) * pixel / step;
-    let light = clamp(dot(slope, vec2<f32>(0.8, 0.6)) * paper_relief.shade.y, -1., 1.);
-    let alpha = abs(light) * paper_relief.shade.x * window_coverage(surface);
-    return view_store(vec4<f32>(view_ui_rgb(vec3<f32>(select(0., 1., light > 0.))) * alpha, alpha));
 }
 
 struct CursorVertex {
@@ -471,12 +479,12 @@ fn segment_distance(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
     let size = vec2<f32>(textureDimensions(navigator));
     let uv = (q + .5) / size;
     let footprint = fwidth(v.uv);
-    var sample = canvas_linear(sample_float(navigator, linear_sampler, uv, 0.));
+    var sample = canvas_linear(paper_backed(sample_float(navigator, linear_sampler, uv, 0.)));
     if max(footprint.x * size.x, footprint.y * size.y) > 4. {
         sample = vec4(0.);
         for (var y = 0u; y < 4u; y++) { for (var x = 0u; x < 4u; x++) {
             let offset = (vec2(f32(x), f32(y)) + .5) / 4. - .5;
-            sample += canvas_linear(sample_float(navigator, linear_sampler, uv + offset * footprint, 0.)) / 16.;
+            sample += canvas_linear(paper_backed(sample_float(navigator, linear_sampler, uv + offset * footprint, 0.))) / 16.;
         }}
     }
     let paint = proof_artwork(sample, point);
@@ -541,7 +549,7 @@ fn picker_layer_mark(p: vec2<f32>, center: vec2<f32>) -> f32 {
         let checker = transparency_checker(p, 8.);
         rgb = select(vec3(checker),view_working_rgb(v.candidate.rgb),v.candidate.a>0.);
     } else if all(point >= vec2(0.)) && all(point < camera.offset_document.zw) {
-        let paint = proof_artwork(canvas_linear(artwork_at(point,camera.inverse.xy*.5,camera.inverse.zw*.5)),point);
+        let paint = proof_artwork(paper_composite(artwork_at(point,camera.inverse.xy*.5,camera.inverse.zw*.5),point,camera.inverse.xy*.5,camera.inverse.zw*.5),point);
         let checker = transparency_checker(point, 16.);
         rgb = view_working_rgb(paint.rgb) + vec3(checker)*(1.-paint.a);
     }

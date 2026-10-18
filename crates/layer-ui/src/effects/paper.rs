@@ -98,7 +98,8 @@ impl PaperPreview {
     }
     pub fn update<R: CanvasRenderer>(&mut self, document: &Document, renderer: &R, dragging: Option<OccurrenceHandle>, now: u64) -> Option<Option<layer_render::PaperOverlay>> {
         if let Some(layer) = dragging { self.layer = Some(layer); }
-        let paper = self.layer.and_then(|layer| document.paper_surface(layer))
+        let lit = self.layer.and_then(|layer| document.scene().effect(layer)).and_then(paper::light).is_some_and(|light| light.relief > 0.);
+        let paper = self.layer.filter(|_| !lit).and_then(|layer| document.paper_surface(layer))
             .map(|surface| paper::PaperBinding { surface: Arc::new(surface), target_offset: [0; 2] });
         let ready = paper.as_ref().is_some_and(|paper| renderer.paper_overlay_ready(paper));
         let previous = self.last_frame.replace((now, ready));
@@ -131,6 +132,19 @@ fn scale_control() -> NumericControl {
 
 fn texture(application: &EffectApplication) -> Option<&TextureSource> {
     application.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => Some(texture), _ => None })
+}
+
+const ORDER: [&str; 6] = ["color", TEXTURE, SCALE, paper::RELIEF, paper::LIGHT, paper::THROUGH_PAINT];
+
+pub(super) fn arrange(controls: &mut [PropertyControl]) {
+    controls.sort_by_key(|control| ORDER.iter().position(|key| *key == control.key).unwrap_or(ORDER.len()));
+    let flat = controls.iter().any(|control| control.key == paper::RELIEF && control.value == EffectValue::Number(0.));
+    for control in controls {
+        if control.key == paper::LIGHT && let PropertyKind::Number { numeric } = &mut control.kind {
+            numeric.kind = NumericKind::Dial;
+        }
+        control.disabled = flat && matches!(control.key.as_str(), paper::LIGHT | paper::THROUGH_PAINT);
+    }
 }
 
 pub(super) fn controls(token: u64, application: &EffectApplication, document: &Document, papers: &PaperLibrary, l: &Localizer) -> Vec<PropertyControl> {
@@ -228,7 +242,12 @@ mod tests {
         let document = document();
         let view = properties(&document, Default::default(), &PaperLibrary::default(), &l);
         assert_eq!(view.title, "Paper");
-        assert_eq!(view.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", TEXTURE, SCALE]);
+        assert_eq!(view.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", TEXTURE, SCALE, paper::RELIEF, paper::LIGHT, paper::THROUGH_PAINT]);
+        assert_eq!(view.controls.iter().map(|c| c.label.as_str()).collect::<Vec<_>>()[3..], ["Relief", "Light", "Shows through paint"]);
+        assert_eq!(view.controls.iter().map(|c| c.disabled).collect::<Vec<_>>(), [false, false, false, false, true, true], "a flat paper has nothing to light");
+        let PropertyKind::Number { numeric } = &view.controls[4].kind else { panic!("light is a number") };
+        assert_eq!((numeric.kind, numeric.min, numeric.max), (NumericKind::Dial, 0., 360.));
+        assert_eq!(view.controls[4].value, EffectValue::Number(225.));
         let PropertyKind::Choice { options } = &view.controls[1].kind else { panic!("texture is a choice") };
         assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["Hot press", "Cold press", "Rough", "Drawing paper", "Bristol", "Ingres",
             "Pastel paper", "Sanded pastel", "Washi", "Unryu", "Handmade paper", "Canvas", "Linen"]);

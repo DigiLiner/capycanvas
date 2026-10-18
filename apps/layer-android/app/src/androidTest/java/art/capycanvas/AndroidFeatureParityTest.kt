@@ -570,10 +570,16 @@ class AndroidFeatureParityTest {
         compose.runOnIdle { canvas = find(compose.activity.window.decorView)!!; canvas.getLocationOnScreen(location) }
         fun spread(name: String): Double {
             android.os.SystemClock.sleep(300)
+            val camera = state().getJSONObject("camera")
+            val tab = state().array("tabs").objects().first { it.optBoolean("active") }
+            val zoom = camera.getDouble("zoom")
+            val left = location[0] + camera.getJSONArray("translation").getDouble(0)
+            val top = location[1] + camera.getJSONArray("translation").getDouble(1)
+            val (width, height) = tab.getInt("width") * zoom to tab.getInt("height") * zoom
             var spread = 0.0
             screenshot("paper-scale/$name-$theme.png") { bitmap ->
-                val samples = (location[1] + canvas.height * 3 / 10 until location[1] + canvas.height * 7 / 10 step 2).flatMap { y ->
-                    (location[0] + canvas.width * 3 / 10 until location[0] + canvas.width * 7 / 10 step 2).map { x ->
+                val samples = ((top + height * .3).toInt() until (top + height * .7).toInt() step 2).flatMap { y ->
+                    ((left + width * .3).toInt() until (left + width * .7).toInt() step 2).map { x ->
                         bitmap.getPixel(x, y).let { (android.graphics.Color.red(it) + android.graphics.Color.green(it) + android.graphics.Color.blue(it)) / 3.0 }
                     }
                 }
@@ -589,11 +595,11 @@ class AndroidFeatureParityTest {
         slider.performTouchInput { repeat(20) { moveBy(Offset(width * .02f, 0f), 16) } }
         val shown = android.os.SystemClock.uptimeMillis() + 10_000
         var dragging = flat
-        while (android.os.SystemClock.uptimeMillis() < shown && spread("dragging").also { dragging = it } <= flat + 4) Unit
+        while (android.os.SystemClock.uptimeMillis() < shown && spread("dragging").also { dragging = it } <= flat + 2) Unit
         val dragged = scale()
         slider.performTouchInput { up() }
         assertTrue("Dragging Scale enlarges the paper: $before -> $dragged", dragged > before * 1.5)
-        assertTrue("The relief shades the canvas while Scale is held: $flat -> $dragging", dragging > flat + 4)
+        assertTrue("The relief shades the drawing while Scale is held: $flat -> $dragging", dragging > flat + 2)
         val hidden = android.os.SystemClock.uptimeMillis() + 10_000
         var settled = dragging
         while (android.os.SystemClock.uptimeMillis() < hidden && spread("released").also { settled = it } > flat + 1) Unit

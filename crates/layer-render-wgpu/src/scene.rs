@@ -157,6 +157,7 @@ pub(super) struct Scene {
     object_display: bool,
     object_source_damage: scale::Damage,
     object_live: bool,
+    presented_backdrop: Option<OccurrenceHandle>,
     object_query: bool,
     native_reverse: bool,
     scale_sources: scale::Sources,
@@ -397,6 +398,7 @@ impl Scene {
             object_display: false,
             object_source_damage: scale::Damage::EMPTY,
             object_live: false,
+            presented_backdrop: None,
             object_query: false,
             positions: r.transforms.as_ref().map_or_else(|| paint_transform::mesh::Positions::new(device), paint_transform::mesh::Positions::sharing),
             position_key: None,
@@ -1462,6 +1464,14 @@ impl Scene {
         self.capture_query_region(r, packet, destination, region, output, false, encoder)
     }
 
+    pub(super) fn capture_above(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, destination: &wgpu::Texture, region: PixelRect,
+        backdrop: OccurrenceHandle, encoder: &mut crate::submission::CommandEncoder) -> Result<(), GpuRasterError> {
+        self.presented_backdrop = Some(backdrop);
+        let captured = self.capture_region(r, packet, destination, region, Output::Artwork(None), encoder);
+        self.presented_backdrop = None;
+        captured
+    }
+
     #[expect(clippy::too_many_arguments, reason = "Query capture keeps output encoding, preview mode, and destination region explicit")]
     pub(super) fn capture_query_region(
         &mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, destination: &wgpu::Texture,
@@ -1816,7 +1826,10 @@ impl Scene {
     }
 
     fn display_tile(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, tile: [u32; 2]) -> Result<usize, GpuRasterError> {
-        let mut output = self.group(r, packet, None, tile)?;
+        self.presented_backdrop = layer_core::paper::separate_paper(packet.scene).map(|(paper, _)| paper);
+        let output = self.group(r, packet, None, tile);
+        self.presented_backdrop = None;
+        let mut output = output?;
         if let Some(handle) = packet.inspect_mask
             && let Some((mask, source)) = packet.scene.mask(handle).filter(|(mask, _)| mask.enabled) {
             let m = self.mask_at(r, mask, source, packet.scene.target_offset(SourceTarget::Coverage(mask.source)), tile);

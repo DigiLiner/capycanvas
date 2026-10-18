@@ -73,7 +73,7 @@ pub struct ViewportPresenter {
     corner_radius: f32,
     picker: crate::present_picker::Picker,
     cursor_pipeline: crate::Deferred<wgpu::RenderPipeline>,
-    paper: PaperRelief,
+    shade: PaperShade,
     cursor_icons: wgpu::BindGroup,
     cursor_buffer: wgpu::Buffer,
     cursor_vertices: Vec<CursorSegment>,
@@ -100,25 +100,47 @@ pub struct ViewportPresenter {
     standalone_overview: bool,
 }
 
-const PAPER_RELIEF_OPACITY: f32 = 0.6;
-const PAPER_RELIEF_GAIN: f32 = 1.5;
+const PAPER_SHADE_SIZE: u64 = 64;
 
-struct PaperRelief {
-    layout: wgpu::BindGroupLayout,
-    pipeline: crate::Deferred<wgpu::RenderPipeline>,
+struct PaperShade {
     uniform: wgpu::Buffer,
     sampler: wgpu::Sampler,
-    drawn: Option<(wgpu::TextureView, [f32; 8], bool, wgpu::BindGroup)>,
+    flat: wgpu::TextureView,
+    view: Option<wgpu::TextureView>,
+    drawn: Option<[f32; 16]>,
 }
-impl PaperRelief {
-    fn wanted(&self, renderer: &WgpuRasterizer) -> Option<(wgpu::TextureView, [f32; 8], bool)> {
-        let priority = if renderer.paper_overlay.is_some() { crate::startup::VALIDATION } else { crate::startup::OTHER };
-        let ready = renderer.startup.as_ref().is_none_or(|startup| startup.compiler.require([&self.pipeline], priority));
-        let (view, grain, opacity, exact) = renderer.paper_overlay_tile()?;
-        ready.then(|| (view.clone(), [grain[0], grain[1], grain[2], grain[3], opacity * PAPER_RELIEF_OPACITY, PAPER_RELIEF_GAIN, 0., 0.], exact))
+impl PaperShade {
+    fn new(device: &crate::PipelineDevice) -> Self {
+        let flat = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("flat paper slope"),
+            size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::paper::SLOPE_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        }).create_view(&Default::default());
+        Self {
+            uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("paper shade"), size: PAPER_SHADE_SIZE, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+            }),
+            sampler: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("paper slope"),
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                ..Default::default()
+            }),
+            flat,
+            view: None,
+            drawn: None,
+        }
     }
     fn changed(&self, renderer: &WgpuRasterizer) -> bool {
-        self.wanted(renderer).as_ref().map(|(view, data, _)| (view, data)) != self.drawn.as_ref().map(|(view, data, _, _)| (view, data))
+        renderer.paper_shade().map(|(_, data, _)| data) != self.drawn
     }
 }
 
@@ -498,6 +520,9 @@ impl ViewportPresenter {
                 false,
                 std::num::NonZeroU64::new(crate::present_screen::UNIFORM_SIZE),
             ),
+            crate::bindings::buffer(14, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, wgpu::BufferSize::new(PAPER_SHADE_SIZE)),
+            crate::bindings::texture(15, wgpu::ShaderStages::FRAGMENT, true),
+            crate::bindings::sampler(16, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
         ]);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("viewport layout"),
@@ -523,7 +548,7 @@ impl ViewportPresenter {
                     crate::view_color::hdr_shader(device.working_space(), color.primaries()),
                     concat!(include_str!("float_number.wgsl"), "\n", include_str!("guide_luminance.wgsl"), "\n", include_str!("hdr_view.wgsl")),
                     concat!(include_str!("tetrahedron.wgsl"), "\n", include_str!("proof_view.wgsl")),
-                    [device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("mapped_sample.wgsl"), include_str!("present.wgsl")].join("\n").replace("resample.", "camera.mapped."),
+                    [device.float_sampling_wgsl(), include_str!("area_sample.wgsl"), include_str!("mapped_sample.wgsl"), include_str!("paper_shade.wgsl"), include_str!("present.wgsl")].join("\n").replace("resample.", "camera.mapped."),
                     crate::view_color::checker_shader(),
                     include_str!("present_screen.wgsl")
                 )
@@ -563,31 +588,7 @@ impl ViewportPresenter {
                 attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32, 3 => Float32, 4 => Float32],
             }),
             format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING));
-        let paper_layout = crate::bindings::layout(device, "paper relief", &[
-            crate::bindings::buffer(1, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, None),
-            crate::bindings::texture(2, wgpu::ShaderStages::FRAGMENT, true),
-            crate::bindings::sampler(3, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
-        ]);
-        let paper_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("paper relief"), bind_group_layouts: &[Some(&layout), Some(&paper_layout)], immediate_size: 0,
-        });
-        let paper = PaperRelief {
-            pipeline: surface_pipeline(device, "paper relief", &paper_pipeline_layout, &shader, ["vs_main", "paper_fragment"], None,
-                format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
-            uniform: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("paper relief"), size: 32, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
-            }),
-            sampler: device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("paper relief"),
-                address_mode_u: wgpu::AddressMode::Repeat,
-                address_mode_v: wgpu::AddressMode::Repeat,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
-            }),
-            layout: paper_layout,
-            drawn: None,
-        };
+        let shade = PaperShade::new(device);
         let cursor_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("cursor segments"),
             size: 256 * std::mem::size_of::<CursorSegment>() as u64,
@@ -659,7 +660,7 @@ impl ViewportPresenter {
             corner_radius: 0.0,
             picker: Default::default(),
             cursor_pipeline,
-            paper,
+            shade,
             cursor_icons,
             cursor_buffer,
             cursor_vertices: Vec::with_capacity(256),
@@ -825,7 +826,7 @@ impl ViewportPresenter {
             || previous.proof != self.proof_options
             || previous.screen != self.screen_options
             || self.overlays_changed
-            || self.paper.changed(renderer)
+            || self.shade.changed(renderer)
             || self.picker.changed()
             || self.camera_data.is_none_or(|old| old[62..64] != renderer.clipping_preview.map(f32::from))
             || (!self.overviews.is_empty() && previous.navigator_revision != renderer.navigator.revision)
@@ -932,7 +933,10 @@ impl ViewportPresenter {
         let coverage = selection.map_or(&renderer.unclipped, |(_, buffer)| buffer);
         let saved = renderer.selection_previews.texture.as_ref().unwrap_or(&self.empty_saved_selection);
         let selection_changed = self.selection_buffer.as_ref() != Some(coverage);
-        let bindings_changed = self.bind_group.is_none()
+        let shade = renderer.paper_shade();
+        let slope = shade.map_or(&self.shade.flat, |(view, _, _)| view);
+        let bindings_changed = self.shade.view.as_ref() != Some(slope)
+            || self.bind_group.is_none()
             || self.navigator_view.as_ref() != Some(navigator)
             || self.saved_selection_buffer.as_ref() != Some(saved)
             || self.document_extent != renderer.document_extent
@@ -960,7 +964,11 @@ impl ViewportPresenter {
                 wgpu::BindingResource::TextureView(saved),
                 self.screen_uniform.as_entire_binding(),
                 wgpu::BindingResource::TextureView(navigator),
+                self.shade.uniform.as_entire_binding(),
+                wgpu::BindingResource::TextureView(slope),
+                wgpu::BindingResource::Sampler(&self.shade.sampler),
             ]));
+            self.shade.view = Some(slope.clone());
             self.navigator_view = Some(navigator.clone());
             self.document_extent = renderer.document_extent;
             self.selection_buffer = Some(coverage.clone());
@@ -975,24 +983,12 @@ impl ViewportPresenter {
         if !det.is_finite() || det.abs() < 1.0e-12 {
             return Ok(());
         }
-        if self.paper.changed(renderer) {
+        let shade_data = shade.map(|(_, data, _)| data);
+        if shade_data != self.shade.drawn {
             self.history.valid = false;
-            self.paper.drawn = match self.paper.wanted(renderer) {
-                Some((tile, data, exact)) => {
-                    let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_ne_bytes()).collect();
-                    self.uploads.write(encoder, &self.paper.uniform, &bytes)?;
-                    let group = match &self.paper.drawn {
-                        Some((drawn, _, _, group)) if *drawn == tile => group.clone(),
-                        _ => device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("paper relief"), layout: &self.paper.layout, entries: &[
-                            wgpu::BindGroupEntry { binding: 1, resource: self.paper.uniform.as_entire_binding() },
-                            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&tile) },
-                            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.paper.sampler) },
-                        ] }),
-                    };
-                    Some((tile, data, exact, group))
-                }
-                None => None,
-            };
+            let bytes: Vec<u8> = shade_data.unwrap_or([0.; 16]).iter().flat_map(|v| v.to_ne_bytes()).collect();
+            self.uploads.write(encoder, &self.shade.uniform, &bytes)?;
+            self.shade.drawn = shade_data;
         }
         let inverse = selection
             .map_or(layer_core::Affine::IDENTITY, |(s, _)| {
@@ -1318,11 +1314,8 @@ impl ViewportPresenter {
                     pass.draw(0..3, 0..1);
                 }
                 pass.set_scissor_rect(repaint.min_x(), repaint.min_y(), repaint.width(), repaint.height());
-                if let Some((_, _, exact, group)) = &self.paper.drawn {
-                    pass.set_pipeline(&self.paper.pipeline);
-                    pass.set_bind_group(1, group, &[]);
-                    pass.draw(0..3, 0..1);
-                    renderer.paper_overlay_drawn.set(*exact);
+                if shade.is_some_and(|(_, _, flash)| flash) {
+                    renderer.paper_overlay_drawn.set(true);
                 }
                 self.picker.draw(&mut pass);
                 if !self.cursor_vertices.is_empty() {

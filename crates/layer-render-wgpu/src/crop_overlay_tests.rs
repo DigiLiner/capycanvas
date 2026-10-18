@@ -141,7 +141,7 @@ fn staged_paper_relief_follows_a_new_scale_at_once_and_reports_only_its_own_bake
             r.poll_startup().unwrap();
             let pixels = present(r);
             if r.paper_overlay_ready(paper) { return pixels; }
-            assert!(Instant::now() < deadline, "the relief pipeline and bake prepare on demand");
+            assert!(Instant::now() < deadline, "the slope pipelines and bake prepare on demand");
             std::thread::sleep(Duration::from_millis(1));
         }
     }

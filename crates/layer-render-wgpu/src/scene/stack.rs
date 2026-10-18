@@ -14,6 +14,7 @@ pub(super) trait Compositor {
     fn has_content(&self, index: OccurrenceHandle) -> bool;
     fn draw_normal(&mut self, _index: OccurrenceHandle, _output: &Self::Image) -> Result<bool, GpuRasterError> { Ok(false) }
     fn checkpoint(&mut self, _parent: Option<OccurrenceHandle>) -> Option<Checkpoint<Self::Image>> { None }
+    fn presented_backdrop(&self) -> Option<OccurrenceHandle> { None }
 }
 
 pub(super) fn has_content(r: &WgpuRasterizer, scene: layer_core::SceneView<'_>, handle: OccurrenceHandle) -> bool {
@@ -59,10 +60,11 @@ fn group_into<C: Compositor>(
     cut: Option<OccurrenceHandle>, mut output: C::Image, mut stack: Option<(C::Image, OccurrenceHandle)>,
 ) -> Result<Flow<C::Image>, GpuRasterError> {
     let stop = stop_root(scene, parent, stop_before);
+    let presented = parent.is_none().then(|| c.presented_backdrop()).flatten();
     let mut siblings = scene.members(parent).rev()
         .filter(|handle| {
             let occurrence = scene.occurrence(*handle).unwrap();
-            occurrence.is_artwork() && scene.includes(*handle) && scene.effect_owner(*handle).is_none()
+            occurrence.is_artwork() && scene.includes(*handle) && scene.effect_owner(*handle).is_none() && presented != Some(*handle)
                 && cut.is_none_or(|cut| scene.position(*handle) < scene.position(cut))
         }).peekable();
     while let Some(i) = siblings.next() {
@@ -139,7 +141,8 @@ pub(super) fn tile(
     scene: &mut Scene, r: &WgpuRasterizer, packet: FramePacket<'_>, parent: Option<OccurrenceHandle>, coordinate: [u32; 2],
 ) -> Result<usize, GpuRasterError> {
     let stop = scene.stop_before.take();
-    let result = compose(&mut Tile { scene, r, packet, coordinate, stop }, packet.scene, parent, stop);
+    let presented = scene.presented_backdrop;
+    let result = compose(&mut Tile { scene, r, packet, coordinate, stop, presented }, packet.scene, parent, stop);
     scene.stop_before = stop;
     result
 }
@@ -150,6 +153,7 @@ struct Tile<'a> {
     packet: FramePacket<'a>,
     coordinate: [u32; 2],
     stop: Option<OccurrenceHandle>,
+    presented: Option<OccurrenceHandle>,
 }
 impl Compositor for Tile<'_> {
     type Image = usize;
@@ -209,6 +213,7 @@ impl Compositor for Tile<'_> {
         let output = self.scene.image_tile(self.r, pixels.view, bounds, self.coordinate);
         Some((handle, output))
     }
+    fn presented_backdrop(&self) -> Option<OccurrenceHandle> { self.presented }
 }
 
 impl Tile<'_> {

@@ -963,6 +963,7 @@ impl EffectPanels {
                     _ => {}
                 }
             }
+            field.widget().set_sensitive(!c.disabled);
             match (field, &c.value) {
                 (Field::Number(i), EffectValue::Number(v)) => i.set_value(*v as f64),
                 (Field::Toggle(i), EffectValue::Toggle(v)) => i.set_active(*v),

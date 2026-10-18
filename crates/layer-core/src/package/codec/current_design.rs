@@ -212,6 +212,9 @@ fn saved_papers_keep_their_textures_scale_and_image_samples() {
         rows.read(2, &mut row).unwrap();
         assert_eq!(row, [2, 52, 102, 152, 202]);
         assert!((crate::paper::scale(&toned.spatial.unwrap(), [300.; 2]) - 1.).abs() < 1e-12);
+        let light = |e: &crate::EffectApplication| crate::paper::light(crate::EffectView::new(&e.program, &e.values)).unwrap();
+        assert_eq!(light(rough), crate::paper::PaperLight { relief: 1.5, angle: 300., through_paint: 0.4 });
+        assert_eq!(light(toned), crate::paper::PaperLight { relief: 0., angle: 225., through_paint: 1. });
     };
     let artwork = editable(include_bytes!("fixtures/papers.capy").to_vec());
     check(&artwork);

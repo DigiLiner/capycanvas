@@ -668,8 +668,9 @@ References: [Clip Studio Artistic](https://help.clip-studio.com/en-us/manual_en/
 
 ### Paper / Canvas Texture
 
-**Gap:** no independent paper/canvas appearance effect on finished artwork.
-Brush texture alone does not cover imported or already-painted images.
+**Gap:** a Paper layer lights the whole picture with its own texture
+([Paper lighting](paper.md#lighting)), but there is no appearance effect that
+gives a single layer or group a texture other than the drawing's paper.
 
 **Behavior:** give existing paint the visible grain or relief of a surface,
 preserving the illustration's colors and transparent background. Choose textures

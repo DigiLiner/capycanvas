@@ -386,7 +386,10 @@
   "brightness_to_opacity": {"version":1,"kind":"adjustment","alpha":"filter","space":"blending","time":false,"constraints":[],"parameters":{}},
   "paper": {"version":1,"kind":"generator","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
     "color":{"dimension":"scalar","kind":{"kind":"color"},"opaque":true},
-    "texture":{"dimension":"scalar","kind":{"kind":"texture"},"opaque":false}
+    "light":{"dimension":"angle","kind":{"kind":"number","max":360.0,"min":0.0},"opaque":false},
+    "relief":{"dimension":"scalar","kind":{"kind":"number","max":300.0,"min":0.0},"opaque":false},
+    "texture":{"dimension":"scalar","kind":{"kind":"texture"},"opaque":false},
+    "through_paint":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false}
   }},
   "watercolor": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
     "felt":{"dimension":"scalar","kind":{"kind":"number","max":5.0,"min":0.4000000059604645},"opaque":false},

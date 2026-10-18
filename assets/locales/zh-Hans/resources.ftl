@@ -604,6 +604,9 @@ resources-parameter-channel-mixer-constant = 常量
 resources-parameter-channel-mixer-monochrome = 单色
 resources-parameter-paper-color = 颜色
 resources-parameter-paper-texture = 纹理
+resources-parameter-paper-relief = 凹凸
+resources-parameter-paper-light = 光照
+resources-parameter-paper-through-paint = 透过颜料显示
 
 resources-filter-color-lookup = 颜色查找（LUT）
 resources-lookup-table = 风格

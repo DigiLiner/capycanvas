@@ -225,6 +225,59 @@ fn paper_relief_shows_while_scaling_and_briefly_after_a_choice() {
 }
 
 #[test]
+fn lighting_the_paper_is_one_step_per_drag_turns_on_a_dial_recomposites_only_to_hide_texture_and_replaces_the_scale_flash() {
+    let mut s = session(Platform::Gtk);
+    let layer = paper_layer(&s);
+    s.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
+    let number = |key: &str, operation| UiAction::Effect { action: EffectAction::Number { layer, key: key.into(), operation } };
+    let gesture = |phase, key: &str, operation| UiAction::Effect { action: EffectAction::Gesture { phase, action: Box::new(EffectAction::Number {
+        layer, key: key.into(), operation }) } };
+    let before = s.engine.checkpoint();
+    assert!(s.dispatch(number("light", NumericOperation::Value { value: 90. })).is_err(), "a flat paper has no light to turn");
+    assert_eq!(s.engine.checkpoint(), before);
+    s.frame(500_000_000, 500_000_000).unwrap();
+    let composites = s.renderer_mut().composites;
+    s.dispatch(gesture(ContactPhase::Down, "relief", NumericOperation::Value { value: 50. })).unwrap();
+    s.frame(600_000_000, 600_000_000).unwrap();
+    s.dispatch(gesture(ContactPhase::Move, "relief", NumericOperation::Value { value: 120. })).unwrap();
+    s.frame(700_000_000, 700_000_000).unwrap();
+    assert_eq!(s.renderer_mut().composites, composites, "lighting the paper recomposites nothing");
+    assert_eq!(paper_control(&s, "relief").value, layer_core::EffectValue::Number(120.));
+    assert!(!paper_control(&s, "light").disabled);
+    s.dispatch(gesture(ContactPhase::Up, "relief", NumericOperation::Value { value: 150. })).unwrap();
+    let lit = s.engine.checkpoint();
+    assert_ne!(lit, before);
+    assert_eq!(layer_core::paper::lit_paper(s.engine.document().scene()).map(|(_, light)| light.relief), Some(1.5));
+    s.dispatch(gesture(ContactPhase::Down, "light", NumericOperation::Dial { x: 10., y: 0.5, radius: 20. })).unwrap();
+    assert_eq!(paper_control(&s, "light").value, layer_core::EffectValue::Number(0.), "pointing right lights from the right");
+    s.dispatch(gesture(ContactPhase::Move, "light", NumericOperation::Dial { x: -10., y: -10.4, radius: 20. })).unwrap();
+    s.dispatch(gesture(ContactPhase::Up, "light", NumericOperation::Dial { x: -60., y: 10., radius: 20. })).unwrap();
+    assert_eq!(paper_control(&s, "light").value, layer_core::EffectValue::Number(171.), "far from the dial it turns freely");
+    s.dispatch(number("light", NumericOperation::Step { steps: 200. })).unwrap();
+    assert_eq!(paper_control(&s, "light").value, layer_core::EffectValue::Number(11.), "the direction wraps around");
+    invoke(&mut s, CommandId::Undo);
+    invoke(&mut s, CommandId::Undo);
+    assert_eq!(s.engine.checkpoint(), lit, "each drag is one step");
+    invoke(&mut s, CommandId::Undo);
+    assert_eq!(s.engine.checkpoint(), before);
+    invoke(&mut s, CommandId::Redo);
+    s.frame(1_000_000_000, 1_000_000_000).unwrap();
+    let composites = s.renderer_mut().composites;
+    s.dispatch(gesture(ContactPhase::Down, "through_paint", NumericOperation::Value { value: 100. })).unwrap();
+    s.dispatch(gesture(ContactPhase::Move, "through_paint", NumericOperation::Value { value: 60. })).unwrap();
+    s.frame(1_100_000_000, 1_100_000_000).unwrap();
+    let separated = s.renderer_mut().composites;
+    assert!(separated > composites, "once paint hides some texture, the paper leaves the composite");
+    s.dispatch(gesture(ContactPhase::Move, "through_paint", NumericOperation::Value { value: 30. })).unwrap();
+    s.frame(1_200_000_000, 1_200_000_000).unwrap();
+    assert_eq!(s.renderer_mut().composites, separated, "and the drag goes on without recompositing");
+    s.dispatch(gesture(ContactPhase::Up, "through_paint", NumericOperation::Value { value: 30. })).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert!(s.renderer_mut().paper_overlay.is_none(), "a lit paper shows its own relief instead of the flash");
+}
+
+#[test]
 fn paper_relief_waits_for_preparation_and_survives_renderer_replacement() {
     let mut s = session(Platform::Windows);
     let layer = paper_layer(&s);

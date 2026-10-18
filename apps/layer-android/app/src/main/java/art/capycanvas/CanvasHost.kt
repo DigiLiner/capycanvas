@@ -278,6 +278,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
     private var disposed = false
     private var frameInterval = 8_333_333L
     private var snapshotAt = 0L
+    private val publicationInterval = 33L
     private var lastCanvasReady = false
     private var startupCacheFinished = false
     private var lastStartupStage = -1
@@ -404,7 +405,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
     }
     internal var dialogKeyHandler: ((android.view.KeyEvent) -> Boolean)? = null
     internal fun commandFocus() = if (editingText || dialogKeyHandler != null) "text" else if (palettes.focus != null) "palette" else "canvas"
-    fun dispatch(action: JSONObject) {
+    fun dispatch(action: JSONObject, moving: Boolean = false) {
         // Capture the editor owner before a menu action opens a native dialog.
         val focus = if (action.optString("type") == "invoke" && action.optString("command") == "search_commands") commandFocus() else null
         post {
@@ -419,9 +420,15 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
             finally { if (tracing) android.os.Trace.endSection() }
             refreshLanguage()
             refreshChrome()
-            publish(true)
-            wake()
+            if (moving) presentMotion() else { publish(true); wake() }
         }
+    }
+    private var motionAt = 0L
+    private val motionPublication = Runnable { if (!disposed && handle != 0L) attempt(canvas = false) { publish(true) } }
+    private fun presentMotion() {
+        motionAt = SystemClock.uptimeMillis()
+        wake()
+        if (!worker.hasCallbacks(motionPublication)) worker.postAtTime(motionPublication, maxOf(motionAt, snapshotAt + publicationInterval))
     }
     private data class WorkspacePresentation(val preview: JSONObject?, val reply: (Any?) -> Unit)
     private var workspacePresentation: WorkspacePresentation? = null // Native owner only.
@@ -706,7 +713,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
                 val publicationStart = if (measuredFrames != null) System.nanoTime() else 0L
                 // Shader warmup needs polling, not hundreds of empty presents/s.
                 if (again || awaitingSurfaceFrame) wake(if (lastStartupStage < 2) (frameInterval / 1_000_000).coerceAtLeast(1L) else 1L)
-                publish(!again)
+                if (SystemClock.uptimeMillis() - motionAt >= publicationInterval) publish(!again)
                 if (!startupCacheFinished && lastCanvasReady) {
                     Native.finishStartupCache(handle)
                     startupCacheFinished = true
@@ -759,7 +766,7 @@ class CanvasHost(application: Application) : AndroidViewModel(application) {
     private fun publish(force: Boolean) {
         syncCanvasBar()
         val now = SystemClock.uptimeMillis()
-        if (!force && now - snapshotAt < 33) return
+        if (!force && now - snapshotAt < publicationInterval) return
         snapshotAt = now
         if (BuildConfig.DEBUG || BuildConfig.WORKSPACE_BENCHMARK) snapshotAttempts++
         val publicationStart = if (measuredPublications != null) System.nanoTime() else 0L

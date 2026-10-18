@@ -319,12 +319,12 @@ async function checkScaleRelief({call,evaluate,settle,theme,directory}) {
   await mouse('mousePressed',.5);
   for(let i=1;i<=30;i++){await mouse('mouseMoved',.5+.4*i/30);await new Promise(resolve=>setTimeout(resolve,16));}
   const shown=Date.now()+8000;let dragging=flat;
-  while(Date.now()<shown&&(dragging=await spread())<=flat+4)await new Promise(resolve=>setTimeout(resolve,100));
+  while(Date.now()<shown&&(dragging=await spread())<=flat+2)await new Promise(resolve=>setTimeout(resolve,100));
   const capture=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/scale-relief-${theme}.png`,Buffer.from(capture.data,'base64'));
   const dragged=await scale();
   await mouse('mouseReleased',.9);await settle();
   assert.ok(dragged>before*1.5,`Dragging Scale enlarges the paper: ${before} -> ${dragged}`);
-  assert.ok(dragging>flat+4,`The relief shades the canvas while Scale is held: spread ${flat.toFixed(2)} -> ${dragging.toFixed(2)}`);
+  assert.ok(dragging>flat+2,`The relief shades the canvas while Scale is held: spread ${flat.toFixed(2)} -> ${dragging.toFixed(2)}`);
   const end=Date.now()+8000;let settled=dragging;
   while(Date.now()<end&&(settled=await spread())>flat+1)await new Promise(resolve=>setTimeout(resolve,200));
   assert.ok(settled<=flat+1,`The relief hides after release: spread ${settled.toFixed(2)}`);

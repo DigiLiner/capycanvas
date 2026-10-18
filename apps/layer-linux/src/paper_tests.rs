@@ -78,7 +78,7 @@ fn native_paper_picker_relief_and_scale() {
     ready(&w);
     let properties = state(&w).layer_properties;
     assert_eq!(properties.name, "Paper");
-    assert_eq!(properties.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", "texture", "scale"]);
+    assert_eq!(properties.controls.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), ["color", "texture", "scale", "relief", "light", "through_paint"]);
     save_snapshot(&w, 200, || path("paper-properties"));
 
     let button: gtk::Button = named(w.window.upcast_ref(), "property-texture");
@@ -519,5 +519,69 @@ fn native_paper_scale_drag() {
     input.perform(serde_json::json!([{ "down": false }, { "wait_ms": 100 }, capture("scale-released-large")]));
     pump(2500);
     assert!(!ui_session(&w).engine().backend().has_paper_overlay());
+    input.finish();
+}
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+fn native_paper_lighting() {
+    glib::set_prgname(Some("capy-canvas-test"));
+    let app = native_test_app("art.capycanvas.PaperLighting");
+    let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
+    let project = layer_ui::NewDocumentOptions { extent: [1600, 1000], ..Default::default() }.project(&localization).unwrap();
+    let w = Workspace::with_project(&app, Some((project, None)));
+    apply_fixture_theme(&w);
+    w.window.maximize();
+    w.window.present();
+    ready(&w);
+    let mut input = RemoteInput::new();
+    input.ready();
+    let theme = std::env::var("CAPY_NATIVE_TEST_THEME").unwrap_or_else(|_| "default".into());
+    let directory = std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap_or_else(|_| "../../artifacts/paper".into()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = |name: &str| directory.join(format!("{name}-{theme}.png"));
+    w.dispatch(UiAction::SelectBrush { id: DefaultBrushPreset::Pencil as u32 });
+    shade(&w, [180., 200.], 0.45);
+    let paper = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(ui_session(&w).engine().document().scene(), None).unwrap());
+    w.dispatch(UiAction::SelectLayer { id: paper });
+    w.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: "texture".into(), value: EffectValue::Choice(1) } });
+    ready(&w);
+    pump(2000);
+    let control = |key: &str| named::<crate::number_control::NumberControl>(w.window.upcast_ref(), &format!("property-{key}"));
+    let (relief, light, through) = (control("relief"), control("light"), control("through_paint"));
+    assert!(relief.is_sensitive() && !light.is_sensitive() && !through.is_sensitive(), "a flat paper has nothing to light");
+    save_snapshot(&w, 200, || path("paper-lighting-flat"));
+    let before = ui_session(&w).engine().checkpoint();
+    edit_number(&relief, "150");
+    until(|| light.is_sensitive() && through.is_sensitive(), "relief turns on the lighting controls");
+    assert!(layer_core::paper::lit_paper(ui_session(&w).engine().document().scene()).is_some(), "the canvas shades the relief");
+    pump(500);
+    save_snapshot(&w, 200, || path("paper-lighting-lit"));
+    let dial = find_css(light.upcast_ref(), "number-dial").unwrap();
+    assert_eq!((dial.width(), dial.height()), (40, 40), "the Light dial is drawn at its proposed size");
+    let lit = ui_session(&w).engine().checkpoint();
+    input.click(screen_point(&dial, &w.window, [0.08, 0.5]));
+    until(|| state(&w).layer_properties.controls.iter().any(|c| c.key == "light" && c.value == EffectValue::Number(180.)), "a press on the dial's left edge lights from the left");
+    pump(300);
+    save_snapshot(&w, 200, || path("paper-lighting-left"));
+    let turned = ui_session(&w).engine().checkpoint();
+    let scroller = through.ancestor(gtk::ScrolledWindow::static_type()).and_downcast::<gtk::ScrolledWindow>().unwrap();
+    let adjustment = scroller.vadjustment();
+    adjustment.set_value(adjustment.upper() - adjustment.page_size());
+    edit_number(&through, "0");
+    until(|| layer_core::paper::separate_paper(ui_session(&w).engine().document().scene()).is_some_and(|(_, light)| light.through_paint == 0.),
+        "paint hides the texture it covers");
+    pump(500);
+    save_snapshot(&w, 200, || path("paper-lighting-covered"));
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(300);
+    assert_eq!(ui_session(&w).engine().checkpoint(), turned, "hiding the texture under paint is one step");
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(300);
+    assert_eq!(ui_session(&w).engine().checkpoint(), lit, "turning the light is one step");
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    pump(300);
+    assert_eq!(ui_session(&w).engine().checkpoint(), before, "raising the relief is one step");
+    assert!(!light.is_sensitive());
     input.finish();
 }

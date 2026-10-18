@@ -604,6 +604,9 @@ resources-parameter-channel-mixer-constant = 상수
 resources-parameter-channel-mixer-monochrome = 단색
 resources-parameter-paper-color = 색상
 resources-parameter-paper-texture = 질감
+resources-parameter-paper-relief = 요철
+resources-parameter-paper-light = 빛
+resources-parameter-paper-through-paint = 물감 사이로 보임
 
 resources-filter-color-lookup = 색상 조회(LUT)
 resources-lookup-table = 룩

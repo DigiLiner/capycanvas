@@ -850,6 +850,10 @@ Where to look:
   change invalidates size readers without rebuilding opacity or group readers.
   Add nested observation only for objects whose consumers read their fields;
   consumers that remember a whole JSON object need its replacement identity.
+  Each action publishes before the owner's next task, except moving Properties
+  gestures (`dispatch(action, moving = true)`): their moves render every frame
+  and publish at most every 33 ms, always after the last move, because a full
+  publication costs about 9 ms on a mid-tier tablet and would starve the canvas.
   `CanvasHost.actionError` holds the open error dialog's text or the refusal
   being shown; tests check it.
 - Presentation: [`native/src/android.rs`](../../apps/layer-android/native/src/android.rs)

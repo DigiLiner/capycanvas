@@ -8,6 +8,86 @@ const PAGES_PER_STEP: u32 = 4;
 const MAX_TEXELS: u32 = 4096;
 const CACHED_BAKES: usize = 6;
 const REFERENCE_RELIEF_UM: f32 = 100.;
+pub(super) const SLOPE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
+const FLASH_RELIEF: f32 = 4.;
+const FLASH_ANGLE: f32 = 225.;
+
+pub(super) struct PaperLighting {
+    pub binding: PaperBinding,
+    pub light: layer_core::paper::PaperLight,
+    pub separated: Option<[f32; 4]>,
+}
+
+pub(super) fn separated_color(scene: layer_core::authored::SceneView<'_>, working: layer_core::color::RgbSpace) -> Result<Option<[f32; 4]>, GpuRasterError> {
+    let Some((paper, _)) = layer_core::paper::separate_paper(scene) else { return Ok(None) };
+    let [r, g, b, a] = scene.effect(paper).and_then(|effect| effect.constant_color()).expect("separated paper is a constant fill")
+        .linear_in(working).map_err(GpuRasterError::Color)?;
+    let alpha = a * scene.occurrence(paper).expect("placed paper").opacity;
+    Ok(Some(scene.composition().blend.composite(working, [r * alpha, g * alpha, b * alpha, alpha])))
+}
+
+pub(super) struct ExportShade {
+    layout: wgpu::BindGroupLayout,
+    pipeline: Deferred<wgpu::RenderPipeline>,
+    sampler: wgpu::Sampler,
+}
+impl ExportShade {
+    pub fn new(device: &PipelineDevice) -> Self {
+        let layout = bindings::layout(device, "paper export", &[
+            bindings::buffer(0, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, None),
+            bindings::texture(1, wgpu::ShaderStages::FRAGMENT, false),
+            bindings::texture(2, wgpu::ShaderStages::FRAGMENT, true),
+            bindings::sampler(3, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
+            bindings::texture(4, wgpu::ShaderStages::FRAGMENT, false),
+        ]);
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("paper export"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let module = Deferred::wgsl(device, "paper export", [include_str!("paper_shade.wgsl"), include_str!("paper_export.wgsl")].join("\n"));
+        let format = device.working_format();
+        let pipeline = {
+            let (device, layout, module) = (device.for_recipe(), pipeline_layout, module);
+            Deferred::pipeline(move |mode| fullscreen_pipeline_recipe(mode, &device, &layout, &module, "paper_export", None, format, "paper export"))
+        };
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("paper export slope"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        Self { layout, pipeline, sampler }
+    }
+    pub fn encode(&self, device: &PipelineDevice, encoder: &mut wgpu::CommandEncoder, source: &wgpu::Texture, coverage: Option<&wgpu::Texture>,
+        slope: &wgpu::TextureView, tile: [f32; 4], light: layer_core::paper::PaperLight, origin: [f64; 2]) -> Result<wgpu::Texture, GpuRasterError> {
+        let [x, y] = light.direction();
+        let data = [tile[0], tile[1], tile[2], tile[3], x, y, light.relief, light.through_paint, origin[0] as f32, origin[1] as f32, 0., 0.,
+            1., f32::from(u8::from(coverage.is_some())), 0., 0.];
+        let uniform = initialized_buffer(device, &wgpu::util::BufferInitDescriptor {
+            label: Some("paper export"),
+            contents: &data.iter().flat_map(|v| v.to_ne_bytes()).collect::<Vec<_>>(),
+            usage: wgpu::BufferUsages::UNIFORM,
+        })?;
+        let (shaded, view) = create_color_target(device, [source.width(), source.height()], "paper export");
+        let input = source.create_view(&Default::default());
+        let covered = coverage.unwrap_or(source).create_view(&Default::default());
+        let group = bindings::group(device, "paper export", &self.layout, [uniform.as_entire_binding(), wgpu::BindingResource::TextureView(&input),
+            wgpu::BindingResource::TextureView(slope), wgpu::BindingResource::Sampler(&self.sampler), wgpu::BindingResource::TextureView(&covered)]);
+        let mut pass = Papers::pass(encoder, &view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT));
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        Ok(shaded)
+    }
+}
+
+pub(super) fn flash_light(opacity: f32) -> layer_core::paper::PaperLight {
+    layer_core::paper::PaperLight { relief: FLASH_RELIEF * opacity, angle: FLASH_ANGLE, through_paint: 1. }
+}
 const LOW_PERCENTILE: f64 = 0.005;
 const HIGH_PERCENTILE: f64 = 0.995;
 const PROGRAM_JITTER: f64 = 0.5;
@@ -99,6 +179,67 @@ struct Programs {
     bake: Deferred<wgpu::RenderPipeline>,
 }
 
+struct SlopePrograms {
+    layout: wgpu::BindGroupLayout,
+    slope: Deferred<wgpu::RenderPipeline>,
+    mip: Deferred<wgpu::RenderPipeline>,
+}
+impl SlopePrograms {
+    fn new(device: &PipelineDevice) -> Self {
+        let layout = bindings::layout(device, "paper slope", &[
+            bindings::buffer(0, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, None),
+            bindings::texture(1, wgpu::ShaderStages::FRAGMENT, false),
+        ]);
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("paper slope"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let module = Deferred::wgsl(device, "paper slope", include_str!("paper_slope.wgsl"));
+        let pipeline = |entry: &'static str| {
+            let (device, layout, module) = (device.for_recipe(), pipeline_layout.clone(), module.clone());
+            Deferred::pipeline(move |mode| fullscreen_pipeline_recipe(mode, &device, &layout, &module, entry, None, SLOPE_FORMAT, "paper slope"))
+        };
+        Self { slope: pipeline("paper_slope"), mip: pipeline("paper_slope_mip"), layout }
+    }
+    fn ready(&self) -> bool {
+        self.slope.ready() && self.mip.ready()
+    }
+    fn encode(&self, device: &PipelineDevice, queue: &wgpu::Queue, heights: &wgpu::TextureView, scale: f32) -> Result<wgpu::TextureView, GpuRasterError> {
+        let source = heights.texture();
+        let [width, height] = [source.width(), source.height()];
+        let levels = 32 - width.max(height).leading_zeros();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("paper slope"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: levels,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SLOPE_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let uniform = initialized_buffer(device, &wgpu::util::BufferInitDescriptor {
+            label: Some("paper slope scale"),
+            contents: &[scale, 0., 0., 0.].iter().flat_map(|v| v.to_ne_bytes()).collect::<Vec<_>>(),
+            usage: wgpu::BufferUsages::UNIFORM,
+        })?;
+        let level = |level: u32| texture.create_view(&wgpu::TextureViewDescriptor { base_mip_level: level, mip_level_count: Some(1), ..Default::default() });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("paper slope") });
+        for target in 0..levels {
+            let input = if target == 0 { heights.clone() } else { level(target - 1) };
+            let group = bindings::group(device, "paper slope", &self.layout, [uniform.as_entire_binding(), wgpu::BindingResource::TextureView(&input)]);
+            let output = level(target);
+            let mut pass = Papers::pass(&mut encoder, &output, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT));
+            pass.set_pipeline(if target == 0 { &self.slope } else { &self.mip });
+            pass.set_bind_group(0, &group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        queue.submit([encoder.finish()]);
+        Ok(texture.create_view(&Default::default()))
+    }
+}
+
 enum Stage {
     Waiting,
     Probing { readback: wgpu::Buffer, state: Arc<AtomicU8>, image: wgpu::TextureView },
@@ -115,6 +256,13 @@ struct Bake {
     priority: u8,
     used: u64,
     stage: Stage,
+    wants_slope: bool,
+    slope: Option<wgpu::TextureView>,
+}
+impl Bake {
+    fn complete(&self) -> bool {
+        matches!(self.stage, Stage::Ready { .. }) && (!self.wants_slope || self.slope.is_some())
+    }
 }
 
 pub(super) struct Papers {
@@ -123,6 +271,7 @@ pub(super) struct Papers {
     sampler: wgpu::Sampler,
     empty_image: wgpu::TextureView,
     programs: Vec<Programs>,
+    slope_programs: Option<SlopePrograms>,
     bakes: Vec<Bake>,
     clock: u64,
     submitted: Arc<AtomicBool>,
@@ -150,7 +299,7 @@ impl Papers {
             ..Default::default()
         });
         let empty_image = Self::image_texture(device, [1, 1]).create_view(&Default::default());
-        Self { layout, pipeline_layout, sampler, empty_image, programs: Vec::new(), bakes: Vec::new(), clock: 0, submitted: Arc::new(AtomicBool::new(true)) }
+        Self { layout, pipeline_layout, sampler, empty_image, programs: Vec::new(), slope_programs: None, bakes: Vec::new(), clock: 0, submitted: Arc::new(AtomicBool::new(true)) }
     }
 
     fn image_texture(device: &PipelineDevice, extent: [u32; 2]) -> wgpu::Texture {
@@ -220,13 +369,28 @@ impl Papers {
             usage: wgpu::BufferUsages::STORAGE,
         })?;
         self.bakes.retain(|b| !(matches!(b.stage, Stage::Waiting) && b.priority == priority && b.surface.texture == binding.surface.texture));
-        self.bakes.push(Bake { id: id.clone(), program, surface: binding.surface.clone(), tile, data, priority, used: clock, stage: Stage::Waiting });
+        self.bakes.push(Bake { id: id.clone(), program, surface: binding.surface.clone(), tile, data, priority, used: clock, stage: Stage::Waiting,
+            wants_slope: false, slope: None });
         while self.bakes.len() > CACHED_BAKES {
             let Some(oldest) = self.bakes.iter().enumerate().filter(|(_, b)| matches!(b.stage, Stage::Ready { .. } | Stage::Waiting))
                 .min_by_key(|(_, b)| b.used).map(|(i, _)| i) else { break };
             self.bakes.remove(oldest);
         }
         Ok(id)
+    }
+
+    pub fn require_slope(&mut self, device: &PipelineDevice, compiler: Option<&startup::Compiler>, id: &AssetId, priority: u8) {
+        let programs = self.slope_programs.get_or_insert_with(|| SlopePrograms::new(device));
+        if let Some(compiler) = compiler {
+            compiler.require([&programs.slope, &programs.mip], priority);
+        }
+        if let Some(bake) = self.bakes.iter_mut().find(|b| b.id == *id) {
+            bake.wants_slope = true;
+        }
+    }
+
+    pub fn slope(&self, id: &AssetId) -> Option<&wgpu::TextureView> {
+        self.bakes.iter().find(|b| b.id == *id)?.slope.as_ref()
     }
 
     pub fn requested(&self, id: &AssetId) -> bool {
@@ -241,17 +405,14 @@ impl Papers {
         self.bakes.iter().find_map(|b| match &b.stage { Stage::Ready { view, .. } if b.id == *id => Some(view), _ => None })
     }
 
-    pub fn nearest(&self, surface: &PaperSurface, tile: &PaperTile) -> Option<&wgpu::TextureView> {
+    pub fn nearest_slope(&self, surface: &PaperSurface, tile: &PaperTile) -> Option<(&wgpu::TextureView, f32)> {
         let orientation = |surface: &PaperSurface| surface.mapping.0[..4].iter().map(|v| v.partial_cmp(&0.)).collect::<Vec<_>>();
         let area = tile.pixels[0] * tile.pixels[1];
         self.bakes.iter()
-            .filter_map(|b| match &b.stage {
-                Stage::Ready { view, .. } if b.surface.texture == surface.texture && orientation(&b.surface) == orientation(surface) =>
-                    Some(((b.tile.pixels[0] * b.tile.pixels[1] / area).ln().abs(), view)),
-                _ => None,
-            })
+            .filter(|b| b.surface.texture == surface.texture && orientation(&b.surface) == orientation(surface))
+            .filter_map(|b| Some(((b.tile.pixels[0] * b.tile.pixels[1] / area).ln().abs(), b.slope.as_ref()?, (b.tile.pixels[0] / tile.pixels[0]) as f32)))
             .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, view)| view)
+            .map(|(_, view, stretch)| (view, stretch))
     }
 
     pub fn relief(&self, id: &AssetId) -> Option<f32> {
@@ -266,7 +427,8 @@ impl Papers {
             }
         }
         loop {
-            let Some(index) = self.bakes.iter().enumerate().filter(|(_, b)| !matches!(b.stage, Stage::Ready { .. }) && held != Some(&b.surface.texture))
+            let Some(index) = self.bakes.iter().enumerate()
+                .filter(|(_, b)| !b.complete() && (matches!(b.stage, Stage::Ready { .. }) || held != Some(&b.surface.texture)))
                 .min_by_key(|(_, b)| (b.priority, matches!(b.stage, Stage::Waiting), std::cmp::Reverse(b.used))).map(|(i, _)| i) else {
                 return Ok(());
             };
@@ -287,6 +449,14 @@ impl Papers {
     }
 
     fn step(&mut self, index: usize, device: &PipelineDevice, queue: &wgpu::Queue, wait: bool) -> Result<bool, GpuRasterError> {
+        if let Stage::Ready { view, relief } = &self.bakes[index].stage {
+            let bake = &self.bakes[index];
+            let Some(programs) = self.slope_programs.as_ref().filter(|p| bake.wants_slope && bake.slope.is_none() && (wait || p.ready())) else { return Ok(false) };
+            let scale = relief * REFERENCE_RELIEF_UM / (bake.tile.texel_mm() as f32 * 1000.);
+            let slope = programs.encode(device, queue, view, scale)?;
+            self.bakes[index].slope = Some(slope);
+            return Ok(true);
+        }
         let programs = self.programs.iter().find(|p| p.id == self.bakes[index].program).expect("prepared paper program");
         if !wait && !(programs.probe.ready() && programs.bake.ready()) {
             return Ok(false);
@@ -554,17 +724,20 @@ mod tests {
     }
 
     #[test]
-    fn a_new_scale_borrows_the_nearest_bake_of_the_same_paper_and_orientation() {
+    fn a_new_scale_borrows_the_nearest_slope_of_the_same_paper_and_orientation() {
         let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone());
         let baked = [1., 3.].map(|scale| {
             let binding = scaled(&rough, scale, false);
-            bake_binding(&mut renderer, binding.clone());
-            renderer.papers.view(&PaperTile::id_for(&binding).unwrap()).unwrap().clone()
+            renderer.require_paper_slope(&binding, startup::OTHER).unwrap();
+            renderer.papers.slope(&PaperTile::id_for(&binding).unwrap()).unwrap().clone()
         });
-        let nearest = |binding: PaperBinding| renderer.papers.nearest(&binding.surface, &PaperTile::new(&binding.surface).unwrap()).cloned();
-        assert_eq!(nearest(scaled(&rough, 1.2, false)).as_ref(), Some(&baked[0]));
-        assert_eq!(nearest(scaled(&rough, 2.5, false)).as_ref(), Some(&baked[1]));
+        let nearest = |binding: PaperBinding| renderer.papers.nearest_slope(&binding.surface, &PaperTile::new(&binding.surface).unwrap())
+            .map(|(view, stretch)| (view.clone(), stretch));
+        let (view, stretch) = nearest(scaled(&rough, 1.2, false)).unwrap();
+        assert_eq!(view, baked[0]);
+        assert!((stretch - 1. / 1.2).abs() < 1e-2, "slopes flatten as the paper stretches: {stretch}");
+        assert_eq!(nearest(scaled(&rough, 2.5, false)).map(|(view, _)| view).as_ref(), Some(&baked[1]));
         assert_eq!(nearest(scaled(&hot, 1., false)), None, "another paper is never borrowed");
         assert_eq!(nearest(scaled(&rough, 1., true)), None, "nor a flipped tile");
     }

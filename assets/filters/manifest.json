@@ -2117,6 +2117,25 @@
             "key": "texture",
             "kind": {"kind":"texture"},
             "label": {"message":"resources-parameter-paper-texture"}
+          },
+          {
+            "default": {"kind":"number","value":0},
+            "key": "relief",
+            "kind": {"decimals":0,"kind":"number","max":300,"min":0,"step":1,"unit":"%"},
+            "label": {"message":"resources-parameter-paper-relief"}
+          },
+          {
+            "default": {"kind":"number","value":225},
+            "dimension": "angle",
+            "key": "light",
+            "kind": {"decimals":0,"kind":"number","max":360,"min":0,"step":1,"unit":"°"},
+            "label": {"message":"resources-parameter-paper-light"}
+          },
+          {
+            "default": {"kind":"number","value":100},
+            "key": "through_paint",
+            "kind": {"decimals":0,"kind":"number","max":100,"min":0,"step":1,"unit":"%"},
+            "label": {"message":"resources-parameter-paper-through-paint"}
           }
         ],
         "wgsl": ["color.wgsl","paper.wgsl"]

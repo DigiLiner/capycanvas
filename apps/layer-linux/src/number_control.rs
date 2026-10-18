@@ -3,6 +3,8 @@ use gtk::{glib, prelude::*, subclass::prelude::*};
 use layer_ui::{NumericControl, NumericKind, NumericOperation};
 use std::cell::{Cell, OnceCell, RefCell};
 
+const DIAL_SIZE: i32 = 40;
+
 mod imp {
     use super::*;
     #[derive(Default)]
@@ -21,6 +23,7 @@ mod imp {
         pub display: OnceCell<gtk::Button>,
         pub stack: OnceCell<gtk::Stack>,
         pub slider: OnceCell<gtk::Scale>,
+        pub dial: OnceCell<gtk::DrawingArea>,
         pub spin: OnceCell<gtk::SpinButton>,
         pub steps: OnceCell<[gtk::Button; 2]>,
         pub compact: Cell<bool>,
@@ -728,6 +731,11 @@ impl NumberControl {
                 stack.add_named(&reserve, Some("measure"));
                 control.imp().width_reserve.set(reserve.upcast()).unwrap();
             }
+            if spec.kind == NumericKind::Dial {
+                let dial = control.build_dial();
+                header.append(&dial);
+                control.imp().dial.set(dial).unwrap();
+            }
             if let Some(grid) = &panel_grid { grid.attach(&stack, 1, 0, 1, 2); }
             else { header.append(&stack); }
             display.connect_clicked(glib::clone!(
@@ -786,6 +794,11 @@ impl NumberControl {
             control.install_value_gestures(&display);
             control.imp().display.set(display).unwrap();
             control.imp().stack.set(stack).unwrap();
+            if spec.kind == NumericKind::Dial {
+                control.set_value(spec.min);
+                control.connect_unmap(|control| control.cancel_edit());
+                return control;
+            }
             let slider = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.001);
             slider.set_draw_value(false);
             slider.set_hexpand(true);
@@ -879,6 +892,110 @@ impl NumberControl {
         imp.popover_control.get().unwrap().set_value(self.value());
         popover.popup();
         popover.present();
+    }
+    fn build_dial(&self) -> gtk::DrawingArea {
+        let dial = gtk::DrawingArea::builder()
+            .accessible_role(gtk::AccessibleRole::Slider)
+            .content_width(DIAL_SIZE)
+            .content_height(DIAL_SIZE)
+            .focusable(true)
+            .valign(gtk::Align::Center)
+            .build();
+        dial.add_css_class("number-dial");
+        dial.set_tooltip_text(Some(&self.imp().editor_title.borrow()));
+        dial.update_property(&[
+            gtk::accessible::Property::Label(&self.imp().editor_title.borrow()),
+            gtk::accessible::Property::ValueMin(self.spec().min * self.spec().scale),
+            gtk::accessible::Property::ValueMax(self.spec().max * self.spec().scale),
+        ]);
+        dial.set_draw_func(glib::clone!(#[weak(rename_to=control)] self, move |area, cr, width, height| control.draw_dial(area, cr, width, height)));
+        let drag = gtk::GestureDrag::new();
+        drag.set_button(1);
+        drag.connect_drag_begin(glib::clone!(#[weak(rename_to=control)] self, move |gesture, x, y| {
+            let Some(area) = gesture.widget() else { return };
+            area.grab_focus();
+            if !control.commit_text() {
+                gesture.set_state(gtk::EventSequenceState::Denied);
+                return;
+            }
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            control.point_dial(&area, x, y);
+        }));
+        drag.connect_drag_update(glib::clone!(#[weak(rename_to=control)] self, move |gesture, dx, dy| {
+            if let (Some(area), Some((x, y))) = (gesture.widget(), gesture.start_point()) {
+                control.point_dial(&area, x + dx, y + dy);
+            }
+        }));
+        dial.add_controller(drag);
+        let click = gtk::GestureClick::new();
+        click.set_button(1);
+        click.connect_pressed(glib::clone!(#[weak(rename_to=control)] self, move |gesture, count, _, _| {
+            if count != 2 { return; }
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            control.cancel_edit();
+            control.emit_by_name::<()>("reset-requested", &[]);
+        }));
+        dial.add_controller(click);
+        let keys = gtk::EventControllerKey::new();
+        keys.connect_key_pressed(glib::clone!(#[weak(rename_to=control)] self, #[upgrade_or] glib::Propagation::Proceed, move |_, key, _, modifiers| {
+            use gtk::gdk::Key;
+            let fine = if modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK) { 15. } else { 1. };
+            let steps = match key {
+                Key::Right | Key::Up => fine,
+                Key::Left | Key::Down => -fine,
+                Key::Page_Up => 45.,
+                Key::Page_Down => -45.,
+                Key::Home => {
+                    control.emit_by_name::<()>("reset-requested", &[]);
+                    return glib::Propagation::Stop;
+                }
+                _ => return glib::Propagation::Proceed,
+            };
+            control.apply(NumericOperation::Step { steps });
+            glib::Propagation::Stop
+        }));
+        dial.add_controller(keys);
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL | gtk::EventControllerScrollFlags::DISCRETE);
+        scroll.connect_scroll(glib::clone!(#[weak(rename_to=control)] self, #[upgrade_or] glib::Propagation::Proceed, move |_, _, dy| {
+            control.apply(NumericOperation::Step { steps: -dy });
+            glib::Propagation::Stop
+        }));
+        dial.add_controller(scroll);
+        dial
+    }
+    fn point_dial(&self, area: &gtk::Widget, x: f64, y: f64) {
+        let [width, height] = [f64::from(area.width()), f64::from(area.height())];
+        self.apply(NumericOperation::Dial { x: x - width / 2., y: y - height / 2., radius: width.min(height) / 2. });
+    }
+    fn draw_dial(&self, area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32) {
+        use std::f64::consts::TAU;
+        let (cx, cy) = (f64::from(width) / 2., f64::from(height) / 2.);
+        let radius = f64::from(width.min(height)) / 2. - 1.;
+        let ink = area.color();
+        let alpha = if area.is_sensitive() { 1. } else { 0.4 };
+        let [r, g, b] = [ink.red(), ink.green(), ink.blue()].map(f64::from);
+        cr.arc(cx, cy, radius, 0., TAU);
+        cr.set_source_rgba(r, g, b, 0.08 * alpha);
+        let _ = cr.fill_preserve();
+        cr.set_source_rgba(r, g, b, (if area.has_visible_focus() { 0.7 } else { 0.22 }) * alpha);
+        cr.set_line_width(if area.has_visible_focus() { 2. } else { 1. });
+        let _ = cr.stroke();
+        let angle = (self.value() * self.spec().scale).to_radians();
+        let (x, y) = (angle.cos(), angle.sin());
+        let dome = radius * 0.52;
+        let light = gtk::cairo::RadialGradient::new(cx + x * dome * 0.5, cy + y * dome * 0.5, 0., cx, cy, dome * 1.15);
+        light.add_color_stop_rgba(0., 0.98, 0.98, 0.98, alpha);
+        light.add_color_stop_rgba(1., 0.42, 0.42, 0.45, alpha);
+        cr.arc(cx, cy, dome, 0., TAU);
+        let _ = cr.set_source(&light);
+        let _ = cr.fill();
+        let (sx, sy, sun) = (cx + x * radius * 0.8, cy + y * radius * 0.8, radius * 0.17);
+        cr.arc(sx, sy, sun, 0., TAU);
+        cr.set_source_rgba(0.97, 0.7, 0.16, alpha);
+        let _ = cr.fill_preserve();
+        cr.set_source_rgba(0., 0., 0., 0.55 * alpha);
+        cr.set_line_width(1.);
+        let _ = cr.stroke();
     }
     fn install_value_gestures(&self, display: &gtk::Button) {
         let panel = self.has_css_class("number-panel");
@@ -1036,6 +1153,10 @@ impl NumberControl {
         if let Some(slider) = imp.slider.get() {
             slider.set_value(result.fill);
         }
+        if let Some(dial) = imp.dial.get() {
+            dial.update_property(&[gtk::accessible::Property::ValueNow(value * self.spec().scale), gtk::accessible::Property::ValueText(&result.text)]);
+            dial.queue_draw();
+        }
         if let Some(spin) = imp.spin.get()
             && (spin.value() != value * self.spec().scale || text_changed) {
             spin.set_value(value * self.spec().scale);
@@ -1119,6 +1240,7 @@ impl NumberControl {
         }));
         let imp = self.imp();
         let mut targets: Vec<gtk::Widget> = imp.slider.get().map(|widget| widget.clone().upcast()).into_iter().collect();
+        targets.extend(imp.dial.get().map(|widget| widget.clone().upcast()));
         targets.extend(imp.display.get().map(|widget| widget.clone().upcast()));
         targets.extend(imp.entry.get().map(|widget| widget.clone().upcast()));
         targets.extend(imp.spin.get().map(|widget| widget.clone().upcast()));

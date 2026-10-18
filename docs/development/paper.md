@@ -10,13 +10,14 @@ paper library lets artists choose, import and reuse them. Brushes own no grain
 textures.
 
 This guide covers what artists see, the resolution model, the layer, brushes,
-the library, rendering, saved data and what each host has.
+the library, lighting, rendering, saved data and what each host has.
 
 ## Scope
 
 | First version | Later |
 | --- | --- |
-| Paper layer with Color, Texture and Scale | Visible relief on the canvas, through the planned [Paper / Canvas Texture](illustration-filters-proposal.md#paper--canvas-texture) effect reading the same paper |
+| Paper layer with Color, Texture and Scale | Lighting the thickness of paint with the paper |
+| Relief, Light and Shows through paint, lighting the canvas and exports | Paper lighting in New drawing |
 | One resolution per drawing, 300 ppi by default | Texture parameters in Properties and saved variations |
 | Thirteen built-in papers from eight programs | Portable user texture programs, shared with a portable custom-filter contract |
 | Every grain brush follows the paper | Per-brush textures |
@@ -36,13 +37,19 @@ the library, rendering, saved data and what each host has.
    canvas, following the slider at once, so its scale can be judged against
    the drawing. The same shading shows for a moment after a paper is chosen.
    It never appears in the artwork or export.
-4. **Draw.** Pencils, charcoal, pastels and textured paint brushes catch the
+4. **Light the paper.** Relief raises the texture on the canvas and in
+   exports, lit from the upper left. Light turns where the light comes from,
+   and Shows through paint sets how much texture shows through the paint: at
+   100% the whole picture is lit like paint on rough paper, at 0% paint hides
+   the texture it covers. Light and Shows through paint are dimmed while Relief
+   is 0.
+5. **Draw.** Pencils, charcoal, pastels and textured paint brushes catch the
    tooth. Texture strength in Tool Settings still sets how much a brush reacts.
    Bristol and hot press break a pencil line only lightly; rough breaks it
    everywhere.
-5. **Import a paper.** Import… in Choose Texture accepts an image file, adds it
+6. **Import a paper.** Import… in Choose Texture accepts an image file, adds it
    to the library and applies it.
-6. **Resize, crop, rotate or flip the image.** The tooth stays attached to the
+7. **Resize, crop, rotate or flip the image.** The tooth stays attached to the
    marks already drawn, and Scale reports its new value.
 
 ## Controls
@@ -53,12 +60,13 @@ the library, rendering, saved data and what each host has.
 | Image Size | Unchanged. It shows 300 ppi for a drawing without a resolution. |
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
 | Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name and opens Choose Texture unless the layer is locked. Add mask in the footer and the row menu's Add mask, mask-from-selection and Paste mask items are disabled while Paper is selected. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
-| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%. Double-clicking the Scale label returns to 100%. |
+| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%; Relief, a slider from 0 to 300%; Light, a [dial](../ui/numeric-controls.md) with its angle; Shows through paint, a slider from 0 to 100%. Double-clicking a label returns it to its default: Scale 100%, Relief 0%, Light 225° (upper left) and Shows through paint 100%. Light and Shows through paint are disabled while Relief is 0. |
 | Choose Texture | A dialog with Edit Color's size, title and footer. One grid of squircle tiles, each preview at its own size with the paper's name below: the thirteen built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
-| Canvas | Relief shading while Scale changes and for a moment after a paper is chosen. |
+| Canvas | The lit relief while Relief is above 0. On a flat paper, relief shading while Scale changes and for a moment after a paper is chosen. |
 | Tool Settings | Texture strength, unchanged. Brushes have no texture picker or texture scale. |
 
-Choosing a paper is one undo step, and so is each Scale drag. The paper
+Choosing a paper is one undo step, and so is each Scale, Relief, Light or
+Shows through paint drag. The paper
 feature adds no preference. A Properties title shows only the layer name when
 it matches the layer type, so Paper is not titled "Paper (Paper)" and a Solid
 Color named Solid Color is not repeated either.
@@ -119,6 +127,9 @@ when none exists inserts it at the bottom, regardless of the selected group.
 | --- | --- | --- |
 | `color` | Color | Opaque. Declared as the program's constant color, so Paper keeps the startup background, clear folding and color thumbnails of Solid Color. |
 | `texture` | Texture (new) | A built-in program with its values, or an imported image. Defaults to the paper last chosen in Choose Texture, or Drawing paper. |
+| `relief` | Number, 0–300% | How far the texture stands out on the canvas and in exports. 100% lights the paper's own relief as the brushes feel it. 0 leaves the paper flat. |
+| `light` | Angle, 0–360° | Where the light comes from, in degrees clockwise from the drawing's +x axis; 225° is the upper left. It turns with the artwork. |
+| `through_paint` | Number, 0–100% | How much texture shows through paint above the paper. |
 
 Paper's spatial reference maps paper millimeters to drawing pixels, and it is
 the only stored scale. Scale is a Paper property read from it: the mapping's
@@ -153,7 +164,7 @@ hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 
 | Restriction | Status | Reason |
 | --- | --- | --- |
-| Paper draws a flat color | Adopted | Fill shaders never bind a texture and Paper keeps every constant-color shortcut. Opaque paint hides relief on the paper itself; visible relief belongs to the later appearance effect over the painting. |
+| Paper draws a flat color | Adopted | Fill shaders never bind a texture and Paper keeps every constant-color shortcut. Relief is light applied to the finished picture, not paper pixels. |
 | Paper color is opaque | Adopted | Transparency comes from visibility or layer opacity; the startup background stays exact. |
 | Tooth ignores appearance | Adopted | Brushes read one texture per stroke and never a mask. |
 | No offset or angle on Paper | Adopted | Position and orientation come from the spatial reference that image commands already update. |
@@ -272,8 +283,9 @@ with Add to Library; adding it reuses an equal stored image.
 
 ## Rendering and performance
 
-- **The canvas is unaffected.** Paper composites as a constant color, so
-  startup, composition and its cost are those of Solid Color.
+- **Composition is unaffected.** Paper composites as a constant color, so
+  startup, composition and its cost are those of Solid Color. Lighting is
+  applied after composition ([lighting](#lighting)).
 - **Bakes run off the frame path.** The [bake](texture-programs.md#the-bake)
   is GPU work in 256 × 256 pages, scheduled at brush priority by the compiler
   path, never on the CPU or in a browser task. One bake advances at a time,
@@ -295,21 +307,21 @@ with Add to Library; adding it reuses an equal stored image.
   variant. Dry media on Drawing paper run as fast as before Paper; rougher
   papers cost them a few percent more per update
   ([top tier](../performance/top-tier.md#paper)).
-- **The paper preview** is a separate draw in the presentation pass with its
-  own bind group, so the canvas shader and camera are unchanged. It shades the
-  Paper's baked tile by its slope, white facing the light and black away from
-  it, while Scale changes and for 1.2 s after a paper is chosen, then fades out
-  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)). While Scale moves,
-  it stretches the finished bake of the same paper and orientation nearest in
-  size, so every slider step shows at once, and holds bakes of that paper so
-  the drag spends no GPU time on them; only a paper without any bake is baked
-  during the drag. On release the paper's own bake replaces the stretched one.
-  The presenter prepares its pipeline after startup and promotes it when
-  relief is wanted. The visible interval starts after the
-  viewport has encoded the paper's own relief; waiting for the paper bake or
-  its presentation pipeline does not consume that interval, and GTK's render
-  thread reports that moment to the session. Replacing the renderer resends
-  the relief and preserves its remaining visible interval.
+- **The paper preview** shades the displayed canvas with the paper's slope
+  tile in the presenter's own pass, as the [lighting](#lighting) does, from the
+  upper left at a fixed strength and also over a transparent canvas, while
+  Scale changes and for 1.2 s after a paper is chosen, then fades out
+  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)). A lit paper shows
+  its own relief instead. While Scale moves, it stretches the slope tile of the
+  finished bake of the same paper and orientation nearest in size, scaling its
+  slopes to the new size, so every slider step shows at once, and holds bakes
+  of that paper so the drag spends no GPU time on them; only a paper without
+  any bake is baked during the drag. On release the paper's own bake and slope
+  replace the stretched one. The visible interval starts after the viewport
+  has encoded the paper's own slope; waiting for the bake or its slope does
+  not consume that interval, and GTK's render thread reports that moment to
+  the session. Replacing the renderer resends the relief and preserves its
+  remaining visible interval.
 - **Memory** is one byte per texel: 2.3 MB for a 128 mm watercolor tile at
   300 ppi, 4.3 MB for a 175 mm laid or washi tile, and at most 16 MB.
 
@@ -318,11 +330,46 @@ control by the [measuring rules](../performance/measuring.md). Bake time counts
 toward canvas readiness in [responsiveness](../performance/responsiveness.md);
 it is measured on desktop only.
 
+## Lighting
+
+Paper lights the finished picture, as a painting on textured paper is lit; the
+height texture is the tooth the brushes feel, so what a pencil catches and what
+the light shows agree.
+
+- **Shade.** Each pixel is multiplied in linear light by
+  `S = 1 − Relief · (slope · light direction)`, from the paper's slope at that
+  point. Slopes average to zero over a sheet, so the paper keeps its tone and
+  only turns lighter towards the light and darker away from it. Brightening
+  stops at the brightest channel's limit, so highlights never shift hue
+  ([`paper_shade.wgsl`](../../crates/layer-render-wgpu/src/paper_shade.wgsl)).
+  The blend is fixed: a multiply in linear light is how a raised sheet under
+  one light changes the color reflected from it.
+- **Slope.** The baked height tile becomes a slope tile with a Sobel kernel in
+  physical units, `relief × 100 µm` of height over the texel's width, and a
+  wrapping RG16F mip chain ([`paper_slope.wgsl`](../../crates/layer-render-wgpu/src/paper_slope.wgsl)).
+  It is built once per bake on first use. The canvas samples it with the
+  screen footprint, so the relief averages out as the view zooms out instead
+  of shimmering.
+- **Shows through paint.** At 100%, or when a layer above the paper reads its
+  color (any blend mode but Normal or Pass Through, an adjustment, or clipping
+  to the paper), the whole picture is shaded. Below 100%, with only Normal
+  layers above, the paper leaves the composite. The canvas adds it back under
+  the paint where the composite blends, then shades with weight
+  `(1 − α) + α · Shows through paint`, where α is the paint's coverage.
+  Exports capture the paint above the paper a second time for α, and match the
+  canvas.
+- **Edits are cheap.** Relief, Light and Shows through paint change no
+  composited pixel, so dragging them only presents the canvas again. The one
+  edit that moves the paper into or out of the composite, Shows through paint
+  crossing 100% or Relief crossing 0, recomposites once.
+- **The scale preview gives way.** A lit paper already shows its relief, so
+  changing Scale or the texture does not flash the preview over it.
+
 ## Saved data
 
 | Record | Change |
 | --- | --- |
-| `paper` built-in effect, version 1 | Values `color` and `texture`. The spatial reference maps paper millimeters to drawing pixels and holds the scale shown as Scale. |
+| `paper` built-in effect, version 1 | Values `color`, `texture`, `relief`, `light` and `through_paint`. The spatial reference maps paper millimeters to drawing pixels and holds the scale shown as Scale. |
 | Effect value kind `texture` | `{"kind": "texture", "value": {"builtin": "watercolor", "version": 1, "values": {...}}}` or `{"kind": "texture", "value": {"image": {"ref": "..."}}}`. |
 | `capy.image/1` | An imported paper is a `gray` image with a required resolution, read as data without profile conversion, as the [package contract](../reference/capy-package.md) plans for image inputs. |
 | `capy.composition/2` | New drawings write their resolution. |
@@ -336,12 +383,12 @@ keep their Solid Color.
 
 | Area | State |
 | --- | --- |
-| Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
-| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. `native_paper_scale_drag` drags Scale with real input on a 12 MP drawing in both themes and records how soon each step reaches the canvas. |
-| Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows, Choose Texture and the Scale relief in both themes. |
-| Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Native workers run image decoding and library files through the shared `layer_host::papers::PaperTask`. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
-| Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the texture dialog, missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it; `paperScaleShadesTheCanvasWhileDragging` checks the relief while Scale is held and after release. |
-| Web | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lives in the raster worker's IndexedDB store, which decodes, converts and encodes papers off the page thread; the page lists it after the canvas starts and runs every Paper request through the shared session capture and adoption. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `--paper-library`, `--paper-rows` and `--blending` cover the library, Choose Texture, the Scale relief, layer controls and Resolution. |
+| Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, lighting with Relief, Light and Shows through paint on the canvas and in exports, library policy, import |
+| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview, Relief, the Light dial, Shows through paint and the Add paper row. `native_paper_lighting`, `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the lighting controls, the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. `native_paper_scale_drag` drags Scale with real input on a 12 MP drawing in both themes and records how soon each step reaches the canvas. |
+| Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and lighting, and the Add paper row. Light shows only its value field. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows, Choose Texture and the Scale relief in both themes. |
+| Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and lighting, and the Add paper row. Light shows only its value field. Native workers run image decoding and library files through the shared `layer_host::papers::PaperTask`. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
+| Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. Properties has Relief, the Light dial and Shows through paint. `paperLightingFollowsReliefTheLightDialAndPaintCoverage`, `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the texture dialog, missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it; `paperScaleShadesTheCanvasWhileDragging` checks the relief while Scale is held and after release. |
+| Web | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lives in the raster worker's IndexedDB store, which decodes, converts and encodes papers off the page thread; the page lists it after the canvas starts and runs every Paper request through the shared session capture and adoption. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. The shared renderer lights the canvas; Light shows only its value field. `--paper-library`, `--paper-rows` and `--blending` cover the library, Choose Texture, the Scale relief, layer controls and Resolution. |
 
 ## Measurements
 
@@ -371,6 +418,11 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | --- | --- | --- |
 | Layer type | A fill program | A dedicated Paper occurrence. It was removed once already; a fill reuses every layer rule. |
 | Visible relief on the Paper layer | No | It would make Paper a textured generator, losing the constant-color shortcuts, and paint covers it anyway. The simpler option wins. |
+| Where relief shows | Lighting of the finished picture, with Shows through paint | Shading only the Paper's own pixels: paint, even thin washes, would hide the paper's texture entirely, unlike paint on real paper. |
+| Light control | A dial beside its value | A slider hides that 0° and 360° meet. One circle setting Relief by radius and Light by angle hides the relief amount and is hard to set precisely. |
+| Shadow strength | Relief alone | A separate strength: in the slope model the shading is the relief, so two controls would change the same thing. |
+| Lighting blend | Multiply in linear light, fixed | A blend-mode choice. Overlay and soft light change the sheet's tone and hue; a lit surface reflects in proportion to its light. |
+| Name | Shows through paint | Texture on paint or Paint coverage: neither says what 0% and 100% do. |
 | Which paper a stroke uses | Nearest Paper at or below the target | One Paper per drawing needs pinning and refusals across every structural command. |
 | Texture parameters in Properties | Presets only | The simpler option wins for now. Presets with Scale cover the papers artists choose between; exposing parameters adds controls, text and frozen ranges for every program. |
 | Paper preview on the canvas | Brief relief shading when the paper or its Scale changes | Thumbnails alone: a thumbnail cannot show scale relative to the drawing, which is the judgement Scale exists for. Shading while Choose Texture is open: it needs hover to preview a tile, which touch screens lack, and keeps another state. |

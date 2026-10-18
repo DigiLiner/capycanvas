@@ -1774,6 +1774,7 @@ impl Edit {
             Self::Guides(_)|Self::Output(_)|Self::SavedSelection(_)|Self::Working(_)=>false,
             Self::Composition(c)=>c.value.as_ref().zip(document.artwork.compositions.get(c.handle)).is_none_or(|(a,b)|a.size!=b.size||a.color!=b.color||a.blend!=b.blend||a.result!=b.result),
             Self::Occurrence(c)=>c.value.as_ref().zip(document.artwork.occurrences.get(c.handle)).is_none_or(|(a,b)|a.content!=b.content||a.visible!=b.visible||a.opacity!=b.opacity||a.blend!=b.blend||a.attachment!=b.attachment||a.offset!=b.offset||a.mask!=b.mask),
+            Self::Effect(c)=>c.value.as_ref().zip(document.artwork.effects.get(c.handle)).is_none_or(|(a,b)|!paper::same_composite(b,a)),
             Self::Batch(es)=>{
                 let mut current=document.clone();
                 for edit in es {

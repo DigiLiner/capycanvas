@@ -533,11 +533,15 @@ impl WgpuRasterizer {
                 self.upload_mask(&id, width, height, width, &pixels)?;
             }
             let held = self.paper_overlay.as_ref().filter(|overlay| overlay.moving && paper::PaperTile::new(&overlay.paper.surface)
-                .is_ok_and(|tile| self.papers.nearest(&overlay.paper.surface, &tile).is_some())).map(|overlay| &overlay.paper.surface.texture);
+                .is_ok_and(|tile| self.papers.nearest_slope(&overlay.paper.surface, &tile).is_some())).map(|overlay| &overlay.paper.surface.texture);
             self.papers.advance(&self.device, &self.queue, false, held)?;
         }
-        if let (Some(startup), Some(overlay)) = (&self.startup, &self.paper_overlay) {
-            self.papers.require(&self.device, Some(&startup.compiler), &overlay.paper, VALIDATION)?;
+        if self.startup.is_some() {
+            let shaded: Vec<_> = self.paper_overlay.iter().map(|o| (o.paper.clone(), VALIDATION))
+                .chain(self.paper_lighting.iter().map(|lit| (lit.binding.clone(), OTHER))).collect();
+            for (binding, priority) in shaded {
+                self.require_paper_slope(&binding, priority)?;
+            }
         }
         let Some(startup) = &mut self.startup else {
             return Ok(StartupProgress::COMPLETE);

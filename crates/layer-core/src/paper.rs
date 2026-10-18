@@ -1,8 +1,12 @@
 use crate::authored::{Affine64, Composition, EffectApplication, EffectSpatialReference, OccurrenceHandle, SceneView, SourceTarget};
-use crate::{EffectProgram, EffectValue, ImageResolution, ResourceLabel, TextureSource};
+use crate::{EffectProgram, EffectValue, EffectView, ImageResolution, ResourceLabel, TextureSource};
 use std::sync::Arc;
 
 pub const PAPER_PROGRAM: &str = "paper";
+pub const RELIEF: &str = "relief";
+pub const LIGHT: &str = "light";
+pub const THROUGH_PAINT: &str = "through_paint";
+const LIGHTING: [&str; 3] = [RELIEF, LIGHT, THROUGH_PAINT];
 pub const DEFAULT_PAPER: &str = "drawing_paper";
 pub const DEFAULT_PAPER_PPI: f64 = 300.;
 const MINIMUM_PRINT_PPI: f64 = 150.;
@@ -120,6 +124,66 @@ pub struct PaperBinding {
     pub target_offset: [i64; 2],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PaperLight {
+    pub relief: f32,
+    pub angle: f32,
+    pub through_paint: f32,
+}
+impl PaperLight {
+    pub fn direction(self) -> [f32; 2] {
+        let radians = self.angle.to_radians();
+        [radians.cos(), radians.sin()]
+    }
+}
+
+pub fn light(effect: EffectView<'_>) -> Option<PaperLight> {
+    if !is_paper(effect.program) { return None; }
+    let number = |key| match effect.value(key)? { EffectValue::Number(v) => Some(*v), _ => None };
+    Some(PaperLight { relief: number(RELIEF)? / 100., angle: number(LIGHT)?, through_paint: number(THROUGH_PAINT)? / 100. })
+}
+
+pub fn lit_paper(scene: SceneView<'_>) -> Option<(OccurrenceHandle, PaperLight)> {
+    let paper = *scene.children(None).last()?;
+    let light = light(scene.effect(paper)?)?;
+    (light.relief > 0. && scene.includes(paper) && scene.visible(paper)).then_some((paper, light))
+}
+
+pub fn separates(scene: SceneView<'_>, paper: OccurrenceHandle) -> bool {
+    fn over(scene: SceneView<'_>, parent: Option<OccurrenceHandle>, paper: OccurrenceHandle) -> bool {
+        scene.members(parent).filter(|h| *h != paper && scene.includes(*h) && scene.visible(*h)).all(|h| {
+            let occurrence = scene.occurrence(h).unwrap();
+            !scene.effect(h).is_some_and(|effect| effect.program.kind == crate::EffectKind::Adjustment)
+                && scene.clipping_base(h) != Some(paper)
+                && match occurrence.blend {
+                    crate::LayerBlend::Normal => true,
+                    crate::LayerBlend::PassThrough => over(scene, Some(h), paper),
+                    _ => false,
+                }
+        })
+    }
+    scene.occurrence(paper).is_some_and(|o| o.blend == crate::LayerBlend::Normal && !o.mask.as_ref().is_some_and(|m| m.enabled))
+        && scene.effect(paper).is_some_and(|effect| effect.constant_color().is_some()) && over(scene, None, paper)
+}
+
+fn splits(light: PaperLight) -> bool { light.relief > 0. && light.through_paint < 1. }
+
+pub fn separate_paper(scene: SceneView<'_>) -> Option<(OccurrenceHandle, PaperLight)> {
+    lit_paper(scene).filter(|(paper, light)| splits(*light) && separates(scene, *paper))
+}
+
+pub fn same_composite(a: &EffectApplication, b: &EffectApplication) -> bool {
+    is_paper(&a.program) && a.program == b.program && a.spatial == b.spatial && a.values.len() == b.values.len()
+        && a.program.parameters.iter().zip(a.values.iter().zip(&b.values))
+            .all(|(parameter, (x, y))| x == y || LIGHTING.contains(&parameter.key.as_ref()))
+        && light(EffectView::new(&a.program, &a.values)).map(splits) == light(EffectView::new(&b.program, &b.values)).map(splits)
+}
+
+pub fn surface(scene: SceneView<'_>, occurrence: OccurrenceHandle) -> Option<PaperSurface> {
+    let application = scene.effect_application(occurrence)?;
+    Some(PaperSurface { texture: texture(application)?.clone(), mapping: application.spatial?.mapping })
+}
+
 fn texture(application: &EffectApplication) -> Option<&TextureSource> {
     if !is_paper(&application.program) { return None; }
     application.values.iter().find_map(|value| match value { EffectValue::Texture(texture) => Some(texture), _ => None })
@@ -165,8 +229,7 @@ impl crate::Document {
         })
     }
     pub fn paper_surface(&self, occurrence: OccurrenceHandle) -> Option<PaperSurface> {
-        let application = self.scene().effect_application(occurrence)?;
-        Some(PaperSurface { texture: texture(application)?.clone(), mapping: application.spatial?.mapping })
+        surface(self.scene(), occurrence)
     }
     pub fn paper_binding(&self, target: SourceTarget) -> PaperBinding {
         PaperBinding { surface: Arc::new(self.paper(Some(target))), target_offset: self.target_offset(target) }
@@ -245,6 +308,71 @@ mod tests {
         doc.artwork.compositions.get_mut(doc.artwork.root).unwrap().resolution = Some(ImageResolution::ppi(600));
         doc.fit_papers_to_resolution();
         assert!((doc.paper(doc.working.target).mapping.0[0] - 600. / 25.4).abs() < 1e-12);
+    }
+    #[test]
+    fn lighting_edits_keep_the_composite_and_only_a_visible_raised_paper_is_lit() {
+        use crate::{Edit, authored::RecordChange};
+        let mut doc = document();
+        let paper = doc.bottom_paper().unwrap();
+        assert_eq!(light(doc.scene().effect(paper).unwrap()), Some(PaperLight { relief: 0., angle: 225., through_paint: 1. }));
+        assert_eq!(lit_paper(doc.scene()), None);
+        let handle = doc.scene().effect_handle(paper).unwrap();
+        let edit = |doc: &Document, values: &[(&str, EffectValue)]| {
+            let mut application = doc.artwork.effects.get(handle).unwrap().clone();
+            let mut draft = crate::EffectInstance { program: application.program.clone(), values: application.values };
+            for (key, value) in values { draft.set(key, value.clone()).unwrap(); }
+            application.values = draft.values;
+            Edit::Effect(RecordChange::replace(&doc.artwork.effects, handle, Some(application)).unwrap())
+        };
+        let lighting = edit(&doc, &[(RELIEF, EffectValue::Number(150.)), (LIGHT, EffectValue::Number(90.))]);
+        assert!(!lighting.changes_image(&doc));
+        doc.apply(lighting).unwrap();
+        let through = edit(&doc, &[(THROUGH_PAINT, EffectValue::Number(40.))]);
+        assert!(through.changes_image(&doc), "paint starts covering the texture, so the paper leaves the composite");
+        doc.apply(through).unwrap();
+        assert!(!edit(&doc, &[(THROUGH_PAINT, EffectValue::Number(60.)), (RELIEF, EffectValue::Number(80.))]).changes_image(&doc));
+        assert!(edit(&doc, &[(RELIEF, EffectValue::Number(0.))]).changes_image(&doc), "a flat paper returns to the composite");
+        assert!(edit(&doc, &[(THROUGH_PAINT, EffectValue::Number(100.))]).changes_image(&doc));
+        let (lit, light) = lit_paper(doc.scene()).unwrap();
+        assert_eq!((lit, light), (paper, PaperLight { relief: 1.5, angle: 90., through_paint: 0.4 }));
+        let [x, y] = light.direction();
+        assert!(x.abs() < 1e-6 && (y - 1.).abs() < 1e-6, "90° points down the y-down document");
+        let recolor = edit(&doc, &[("color", EffectValue::Color(crate::color::RgbColor::BLACK))]);
+        assert!(recolor.changes_image(&doc));
+        let mut hidden = doc.scene().occurrence(paper).unwrap().clone();
+        hidden.visible = false;
+        doc.apply(Edit::Occurrence(RecordChange::replace(&doc.artwork.occurrences, paper, Some(hidden)).unwrap())).unwrap();
+        assert_eq!(lit_paper(doc.scene()), None);
+    }
+    #[test]
+    fn paper_separates_from_paint_only_under_normal_unclipped_layers() {
+        use crate::{Edit, LayerBlend, authored::RecordChange};
+        let mut doc = document();
+        let paper = doc.bottom_paper().unwrap();
+        let ink = doc.scene().order()[0];
+        assert!(separates(doc.scene(), paper));
+        let mut multiply = doc.scene().occurrence(ink).unwrap().clone();
+        multiply.blend = LayerBlend::Multiply;
+        let edit = Edit::Occurrence(RecordChange::replace(&doc.artwork.occurrences, ink, Some(multiply.clone())).unwrap());
+        let mut multiplied = doc.clone();
+        multiplied.apply(edit).unwrap();
+        assert!(!separates(multiplied.scene(), paper), "Multiply reads the paper's color");
+        multiply.visible = false;
+        let hidden = Edit::Occurrence(RecordChange::replace(&multiplied.artwork.occurrences, ink, Some(multiply)).unwrap());
+        multiplied.apply(hidden).unwrap();
+        assert!(separates(multiplied.scene(), paper), "a hidden layer reads nothing");
+        assert_eq!(separate_paper(doc.scene()), None, "a flat paper has no light to separate");
+        let handle = doc.scene().effect_handle(paper).unwrap();
+        let mut application = doc.artwork.effects.get(handle).unwrap().clone();
+        let mut draft = crate::EffectInstance { program: application.program.clone(), values: application.values };
+        draft.set(RELIEF, EffectValue::Number(100.)).unwrap();
+        application.values = draft.values.clone();
+        doc.apply(Edit::Effect(RecordChange::replace(&doc.artwork.effects, handle, Some(application.clone())).unwrap())).unwrap();
+        assert_eq!(separate_paper(doc.scene()), None, "relief that fully shows through paint needs no separation");
+        draft.set(THROUGH_PAINT, EffectValue::Number(30.)).unwrap();
+        application.values = draft.values;
+        doc.apply(Edit::Effect(RecordChange::replace(&doc.artwork.effects, handle, Some(application)).unwrap())).unwrap();
+        assert_eq!(separate_paper(doc.scene()).map(|(h, light)| (h, light.through_paint)), Some((paper, 0.3)));
     }
     #[test]
     fn paper_order_is_protected_across_layer_edits_and_history() {

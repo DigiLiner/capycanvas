@@ -604,6 +604,9 @@ resources-parameter-channel-mixer-constant = 定数
 resources-parameter-channel-mixer-monochrome = モノクロ
 resources-parameter-paper-color = 色
 resources-parameter-paper-texture = テクスチャ
+resources-parameter-paper-relief = 凹凸
+resources-parameter-paper-light = 光
+resources-parameter-paper-through-paint = 絵の具越しに見える
 
 resources-filter-color-lookup = カラールックアップ（LUT）
 resources-lookup-table = ルック

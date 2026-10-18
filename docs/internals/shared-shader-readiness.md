@@ -137,9 +137,10 @@ A loaded Paper waits until earlier drawing work finishes. Its decoded pending
 image keeps shared frame demand active until the choice is applied or rejected.
 Waiting for disk I/O and suspended painting do not request polling. Once Paper
 applies, its relief preview finishes before frame demand returns to idle.
-Every presenter requests the relief pipeline as optional work, so it compiles
-after startup once input is quiet, and promotes it with the relief's own bake
-to preview priority while relief is shown. Paper bakes advance one at a time,
+Paper shading is part of the presenter's own pipeline. The slope pipelines
+that turn a bake into its slope tile compile as optional work for a lit paper
+and at preview priority, with the relief's own bake, while the Scale preview is
+shown. Paper bakes advance one at a time,
 most urgent first, one step per completed GPU submission, and a newer request
 drops unstarted bakes of the same paper at its priority. While Scale moves, bakes of a paper that already has one wait
 until release.

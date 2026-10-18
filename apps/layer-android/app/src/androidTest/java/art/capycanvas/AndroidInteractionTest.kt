@@ -289,6 +289,60 @@ class AndroidInteractionTest {
         } finally { action(obj("type" to "set_theme", "theme" to originalTheme)) }
     }
 
+    @Test fun paperLightingFollowsReliefTheLightDialAndPaintCoverage() {
+        val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
+        customize(obj("type" to "close_expanded"))
+        val paper = layerStates().last().getLong("id")
+        fun control(key: String) = state().getJSONObject("layer_properties").array("controls").objects().first { it.getString("key") == key }
+        fun value(key: String) = control(key).getJSONObject("value").getDouble("value")
+        fun disabled(key: String) = control(key).optBoolean("disabled")
+        fun reveal(tag: String) {
+            onMain {
+                val item = find(tag)!!
+                generateSequence(item.parent) { it.parent }.firstOrNull { it.config.getOrNull(SemanticsActions.ScrollBy) != null }?.let { list ->
+                    val by = item.boundsInRoot.bottom - list.boundsInRoot.bottom
+                    if (by > 0) list.config[SemanticsActions.ScrollBy].action!!.invoke(0f, by + 8 * density)
+                }
+            }
+            settle()
+        }
+        try {
+            for (theme in listOf("light", "dark")) {
+                action(obj("type" to "set_theme", "theme" to theme))
+                layerAction(obj("op" to "select", "id" to paper, "mask" to false))
+                group("properties").let { if (it.optString("active") != "properties") action(obj("type" to "select_panel_tab", "group" to it.getInt("id"), "panel" to "properties")) }
+                customize(obj("type" to "close_expanded"))
+                waitFor("Properties shows the paper's relief") { shown("number-slider-Relief") && state().getJSONObject("customization").isNull("expanded") }
+                assertTrue("A flat paper has no light to turn or hide", disabled("light") && disabled("through_paint"))
+                screenshot("validation/paper/lighting-flat-$theme.png")
+                val relief = bounds("number-slider-Relief")
+                tap(Offset(relief.left + relief.width * .5f, relief.center.y))
+                waitFor("Relief raises the paper") { value("relief") > 0 && !disabled("light") && !disabled("through_paint") }
+                val dial = bounds("number-dial-light")
+                assertEquals("The Light dial is drawn at its proposed size", 40f, dial.width / density, .5f)
+                tap(Offset(dial.left + dial.width * .08f, dial.center.y))
+                waitFor("A press on the dial's left edge lights from the left") { value("light") == 180.0 }
+                reveal("number-slider-Shows through paint")
+                screenshot("validation/paper/lighting-lit-$theme.png")
+                val through = bounds("number-slider-Shows through paint")
+                event(MotionEvent.ACTION_DOWN, Offset(through.center.x, through.center.y))
+                for (x in listOf(through.center.x - 12 * density, through.left + through.width * .2f, through.left - 24 * density)) {
+                    SystemClock.sleep(30); event(MotionEvent.ACTION_MOVE, Offset(x, through.center.y))
+                }
+                event(MotionEvent.ACTION_UP)
+                waitFor("Dragging past the start hides the texture under paint") { value("through_paint") == 0.0 }
+                settle()
+                screenshot("validation/paper/lighting-covered-$theme.png")
+                command("undo")
+                waitFor("Shows through paint is one step") { value("through_paint") == 100.0 && value("light") == 180.0 }
+                command("undo")
+                waitFor("Turning the light is one step") { value("light") == 225.0 && value("relief") > 0 }
+                command("undo")
+                waitFor("Raising the relief is one step") { value("relief") == 0.0 && disabled("light") }
+            }
+        } finally { action(obj("type" to "set_theme", "theme" to originalTheme)) }
+    }
+
     private fun chooseTexture(theme: String) {
         val paper = layerStates().last().getLong("id")
         fun texture() = layerStates().first { it.getLong("id") == paper }.getJSONObject("paper")

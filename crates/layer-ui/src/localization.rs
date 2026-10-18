@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::{Arc, OnceLock}};
+use std::{collections::HashMap, sync::{Arc, OnceLock}};
 use fluent_bundle::{concurrent::FluentBundle, FluentResource};
 pub use fluent_bundle::FluentArgs;
 use serde::{Deserialize, Serialize};
@@ -159,7 +159,7 @@ pub struct Localizer {
     language: UiLanguage,
     active: FluentBundle<FluentResource>,
     english: FluentBundle<FluentResource>,
-    labels: BTreeMap<MessageId, Arc<str>>,
+    labels: HashMap<MessageId, Arc<str>>,
 }
 
 #[cfg(test)]
@@ -206,7 +206,7 @@ impl Localizer {
     }
     #[cfg(test)]
     fn from_bundles(language: UiLanguage, active: FluentBundle<FluentResource>, english: FluentBundle<FluentResource>) -> Self {
-        let mut localizer = Self { language, active, english, labels: BTreeMap::new() };
+        let mut localizer = Self { language, active, english, labels: HashMap::new() };
         for &id in MessageId::STATIC {
             match render(&localizer.active, id, None) {
                 Ok(text) => { localizer.labels.insert(id, Arc::from(text)); }
@@ -273,7 +273,7 @@ impl LocalizerPreparation {
         let mut english = FluentBundle::new_concurrent(vec!["en".parse().unwrap()]);
         active.set_use_isolating(false);
         english.set_use_isolating(false);
-        let localizer = Some(Localizer { language, active, english, labels: BTreeMap::new() });
+        let localizer = Some(Localizer { language, active, english, labels: HashMap::new() });
         Self { canonical: None, localizer, prepared: None, catalog: 0, label: 0 }
     }
     pub fn step(&mut self, budget: usize) -> bool {

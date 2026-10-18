@@ -940,6 +940,8 @@ pub struct WgpuRasterizer {
     crop_overlay: Option<layer_render::CropOverlay>,
     paper_overlay: Option<layer_render::PaperOverlay>,
     paper_overlay_drawn: std::cell::Cell<bool>,
+    paper_lighting: Option<paper::PaperLighting>,
+    paper_export: Option<paper::ExportShade>,
     clipping_preview: [bool; 2],
     selection_previews: selection_previews::SelectionPreviews,
     selection_paint_revision: u64,
@@ -1329,6 +1331,8 @@ impl WgpuRasterizer {
             crop_overlay: None,
             paper_overlay: None,
             paper_overlay_drawn: std::cell::Cell::new(false),
+            paper_lighting: None,
+            paper_export: None,
             clipping_preview: [false; 2],
             selection_previews: Default::default(),
             selection_paint_revision: 0,
@@ -1687,12 +1691,67 @@ impl WgpuRasterizer {
         }).unwrap_or(([1., 1., 0., 0.], 1.))
     }
 
-    fn paper_overlay_tile(&self) -> Option<(&wgpu::TextureView, [f32; 4], f32, bool)> {
-        let overlay = self.paper_overlay.as_ref()?;
-        let tile = paper::PaperTile::new(&overlay.paper.surface).ok()?;
-        let exact = self.papers.view(&tile.id(&overlay.paper.surface));
-        let view = exact.or_else(|| self.papers.nearest(&overlay.paper.surface, &tile))?;
-        Some((view, tile.grain(&overlay.paper), overlay.opacity, exact.is_some()))
+    fn paper_shade(&self) -> Option<(&wgpu::TextureView, [f32; 16], bool)> {
+        let (binding, light, separated, flash) = match (&self.paper_lighting, &self.paper_overlay) {
+            (Some(lit), _) => (&lit.binding, lit.light, lit.separated, false),
+            (None, Some(overlay)) => (&overlay.paper, paper::flash_light(overlay.opacity), None, true),
+            _ => return None,
+        };
+        let tile = paper::PaperTile::new(&binding.surface).ok()?;
+        let exact = self.papers.slope(&tile.id(&binding.surface));
+        let (view, stretch) = exact.map(|view| (view, 1.)).or_else(|| self.papers.nearest_slope(&binding.surface, &tile))?;
+        let [pixels_x, pixels_y, offset_x, offset_y] = tile.grain(binding);
+        let [x, y] = light.direction();
+        let [r, g, b, a] = separated.unwrap_or_default();
+        Some((view, [pixels_x, pixels_y, offset_x, offset_y, x, y, light.relief * stretch, light.through_paint, r, g, b, a,
+            1., f32::from(u8::from(separated.is_some())), f32::from(u8::from(flash)), 0.], flash && exact.is_some()))
+    }
+
+    fn require_paper_slope(&mut self, binding: &layer_core::paper::PaperBinding, priority: u8) -> Result<(), GpuRasterError> {
+        let compiler = self.startup.as_ref().map(|startup| &startup.compiler);
+        let id = self.papers.require(&self.device, compiler, binding, priority)?;
+        self.papers.require_slope(&self.device, compiler, &id, priority);
+        if self.startup.is_none() {
+            self.papers.advance(&self.device, &self.queue, true, None)?;
+        }
+        Ok(())
+    }
+
+    fn update_paper_lighting(&mut self, scene: layer_core::authored::SceneView<'_>) -> Result<(), GpuRasterError> {
+        if scene.scope().is_some_and(|scope| !matches!(scope, layer_core::SceneScope::All)) { return Ok(()); }
+        let separated = paper::separated_color(scene, self.device.working_space())?;
+        let lighting = layer_core::paper::lit_paper(scene).and_then(|(paper, light)| Some(paper::PaperLighting {
+            binding: layer_core::paper::PaperBinding { surface: Arc::new(layer_core::paper::surface(scene, paper)?), target_offset: [0; 2] },
+            light,
+            separated,
+        }));
+        if let Some(lighting) = &lighting {
+            self.require_paper_slope(&lighting.binding, startup::OTHER)?;
+        }
+        self.paper_lighting = lighting;
+        Ok(())
+    }
+
+    fn shade_paper_export(&mut self, scene: layer_core::authored::SceneView<'_>, source: &wgpu::Texture, coverage: Option<&wgpu::Texture>,
+        origin: [u32; 2], encoder: &mut wgpu::CommandEncoder) -> Result<Option<wgpu::Texture>, GpuRasterError> {
+        if scene.scope().is_some_and(|scope| !matches!(scope, layer_core::SceneScope::All)) { return Ok(None); }
+        let Some((sheet, light)) = layer_core::paper::lit_paper(scene) else { return Ok(None) };
+        let Some(surface) = layer_core::paper::surface(scene, sheet) else { return Ok(None) };
+        let binding = layer_core::paper::PaperBinding { surface: Arc::new(surface), target_offset: [0; 2] };
+        if !cfg!(target_arch = "wasm32") {
+            self.require_paper_slope(&binding, startup::OTHER)?;
+        }
+        let tile = paper::PaperTile::new(&binding.surface)?;
+        let export = self.paper_export.get_or_insert_with(|| paper::ExportShade::new(&self.device));
+        let Some(slope) = self.papers.slope(&tile.id(&binding.surface)) else { return Ok(None) };
+        let offset = scene.evaluation_offset64();
+        let origin = [f64::from(origin[0]) + offset[0], f64::from(origin[1]) + offset[1]];
+        export.encode(&self.device, encoder, source, coverage, slope, tile.grain(&binding), light, origin).map(Some)
+    }
+
+    fn paper_shade_pending(&self) -> bool {
+        self.paper_lighting.as_ref().map(|lit| &lit.binding).or(self.paper_overlay.as_ref().map(|o| &o.paper))
+            .and_then(|binding| paper::PaperTile::id_for(binding)).is_some_and(|id| self.papers.slope(&id).is_none())
     }
 
     fn texture_view(&self, id: &AssetId) -> Result<&wgpu::TextureView, GpuRasterError> {
@@ -3673,6 +3732,7 @@ impl CanvasRenderer for WgpuRasterizer {
             || (self.object_deferred || self.moving_layer.is_none() && self.scene.as_ref().is_some_and(|scene| scene.objects_pending()))
                 && (!cfg!(target_arch="wasm32") || !self.image_decode_waiting())
             || self.scale_display.as_ref().is_some_and(|cache| cache.has_pending_work(self))
+            || self.paper_shade_pending()
     }
     fn prepare_retouch(&mut self, retouch: Option<&layer_render::RetouchPreparation>) {
         self.prepare_retouch_sources(retouch);
@@ -3738,9 +3798,7 @@ impl CanvasRenderer for WgpuRasterizer {
     fn set_selection_overlay(&mut self, overlay: Option<layer_render::SelectionOverlay>) { self.selection_overlay = overlay; }
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
-        if self.startup.is_none() && let Some(overlay) = &overlay
-            && self.papers.require(&self.device, None, &overlay.paper, startup::VALIDATION)
-                .and_then(|_| self.papers.advance(&self.device, &self.queue, true, None)).is_err() {
+        if let Some(overlay) = &overlay && self.require_paper_slope(&overlay.paper, startup::VALIDATION).is_err() {
             return;
         }
         if self.paper_overlay.as_ref().map(|o| &o.paper) != overlay.as_ref().map(|o| &o.paper) {
@@ -3994,6 +4052,7 @@ impl WgpuRasterizer {
             && self.artwork_frame.as_ref().is_some_and(|frame|
                 frame.view == packet.view && frame.same_artwork(packet))
         { return Ok(()); }
+        self.update_paper_lighting(packet.scene)?;
         let display_request = scene::scale::request(self, packet)?;
         let mut trace_phase = performance_trace::Span::new(c"capy.prepare");
         if let Some(native) = &self.native_edit {

@@ -128,6 +128,7 @@ impl From<&str> for WorkspaceValidationError {
 pub enum NumericKind {
     Number,
     Slider,
+    Dial,
 }
 
 pub use layer_core::NumericMapping;
@@ -143,6 +144,9 @@ pub enum NumericSliderSnap {
 }
 
 const FRACTIONAL_PIXEL_LIMIT: f64 = 32.;
+const DIAL_SNAP_DEGREES: f64 = 15.;
+const DIAL_SNAP_RADII: f64 = 2.;
+const DIAL_CENTER_RADII: f64 = 0.15;
 const FRACTIONAL_PIXEL_SCRUB_LIMIT: f64 = 1000.;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -360,7 +364,17 @@ impl NumericControl {
         } else { self.fine_resolution() }
     }
     fn quantized(&self, value: f64, resolution: f64) -> f64 {
-        ((value / resolution).round() * resolution).clamp(self.min, self.max)
+        let value = (value / resolution).round() * resolution;
+        if self.kind == NumericKind::Dial { self.min + (value - self.min).rem_euclid(self.max - self.min) }
+        else { value.clamp(self.min, self.max) }
+    }
+    fn dial_value(&self, value: f64, x: f64, y: f64, radius: f64) -> Result<f64, NumericError> {
+        if ![x, y, radius].into_iter().all(f64::is_finite) || radius <= 0. { return Err(NumericError::FiniteNumber); }
+        let distance = x.hypot(y);
+        if distance < DIAL_CENTER_RADII * radius { return Ok(value); }
+        let degrees = y.atan2(x).to_degrees();
+        let degrees = if distance <= DIAL_SNAP_RADII * radius { (degrees / DIAL_SNAP_DEGREES).round() * DIAL_SNAP_DEGREES } else { degrees };
+        Ok(degrees / self.scale)
     }
     fn value_at_position(&self, position: f64) -> f64 {
         self.unmapped(self.mapped(self.soft_min)
@@ -409,6 +423,7 @@ impl NumericControl {
                 if text.trim().is_empty() { self.default_value.ok_or(NumericError::ExpressionRequired)? }
                 else { self.expression(text)? / self.scale }
             }
+            NumericOperation::Dial { x, y, radius } => self.dial_value(value, x, y, radius)?,
         };
         if !resolved.is_finite() {
             return Err(NumericError::FiniteNumber);
@@ -546,6 +561,11 @@ pub enum NumericOperation {
     Expression {
         text: String,
     },
+    Dial {
+        x: f64,
+        y: f64,
+        radius: f64,
+    },
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct NumericValue {
@@ -622,6 +642,22 @@ mod tests {
         }
         let degrees = NumericControl::number(-2000., 2000., 1., 1).unit("°");
         assert_eq!(degrees.resolve(1200., NumericOperation::Scrub { origin: 1200., pixels: 2. }).unwrap().value, 1200.5);
+    }
+    #[test]
+    fn dials_point_where_pressed_snap_near_the_dial_and_wrap() {
+        let dial = NumericControl { kind: NumericKind::Dial, ..NumericControl::number(0., 360., 1., 0).unit("°") };
+        let at = |value, x, y| dial.resolve(value, NumericOperation::Dial { x, y, radius: 20. }).unwrap().value;
+        assert_eq!(at(0., -10., -10.), 225., "upper left, y down");
+        assert_eq!(at(0., 30., 9.), 15., "within twice the radius the direction snaps to 15°");
+        assert_eq!(at(0., 100., 30.), 17., "farther out it moves freely in whole degrees");
+        assert_eq!(at(225., 1., 1.), 225., "a press on the center keeps the direction");
+        assert_eq!(at(0., 10., -0.1), 0.);
+        let step = |value, steps| dial.resolve(value, NumericOperation::Step { steps }).unwrap().value;
+        assert_eq!(step(359., 1.), 0.);
+        assert_eq!(step(0., -15.), 345.);
+        assert_eq!(dial.resolve(0., NumericOperation::Value { value: 360. }).unwrap().value, 0.);
+        assert_eq!(dial.resolve(0., NumericOperation::Expression { text: "-90".into() }).unwrap().value, 270.);
+        assert!(dial.resolve(0., NumericOperation::Dial { x: 1., y: 1., radius: 0. }).is_err());
     }
     #[test]
     fn endpoint_words_preserve_numeric_editing_and_slider_policy() {

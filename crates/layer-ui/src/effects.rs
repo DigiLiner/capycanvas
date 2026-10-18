@@ -532,6 +532,7 @@ pub struct PropertyControl {
     pub modified: bool,
     /// Optional shortcut alongside a color editor, supplied by shared policy.
     pub color_action: Option<UiAction>,
+    pub disabled: bool,
 }
 impl PropertyControl {
     pub(super) fn new(key: &str, label: &str, kind: PropertyKind, value: EffectValue, default: EffectValue) -> Self {
@@ -548,6 +549,7 @@ impl PropertyControl {
             value,
             default,
             color_action: None,
+            disabled: false,
         }
     }
 }
@@ -559,6 +561,7 @@ pub(super) fn property_value(
     l: &Localizer,
 ) -> Result<EffectValue, String> {
     let control = view.controls.iter().find(|c| c.key == key).ok_or_else(|| l.text(MessageId::RESOURCES_ERROR_UNKNOWN_PROPERTY).to_string())?;
+    if control.disabled { return Err(l.text(MessageId::RESOURCES_ERROR_INVALID_LAYER_PROPERTY).to_string()); }
     Ok(match action {
         EffectAction::Set { value, .. } => value.clone(),
         EffectAction::Reset { .. } => control.default.clone(),
@@ -719,6 +722,7 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
         );
         if layer_core::paper::is_paper(program) {
             controls.extend(paper::controls(token, application, doc, papers, l));
+            paper::arrange(&mut controls);
         }
         if effect.program.id.as_ref() == "curves" {
             if let (Some(space), Some(EffectValue::Number(stops))) = (effect.choice("domain"), effect.value("hdr_stops")) {

@@ -45,7 +45,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-private fun CanvasHost.effect(action: JSONObject) = dispatch(obj("type" to "effect", "action" to action))
+private fun CanvasHost.effect(action: JSONObject, moving: Boolean = false) = dispatch(obj("type" to "effect", "action" to action), moving)
 
 /** Category/search decisions and preview sampling are shared Rust policy. Only
  * visible row geometry and native bitmap presentation belong to this view. */
@@ -258,7 +258,7 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
                 "value" to obj("kind" to kind.getString("kind"), "value" to value)))
             when(kind.getString("kind")) {
                 "number" -> key(layer, key, kind.toString()) {
-                    EffectNumber(host, label, (value as Number).toDouble(), kind.getJSONObject("numeric"), enabled, key) { obj("op" to "number", "layer" to layer, "key" to key) }
+                    EffectNumber(host, label, (value as Number).toDouble(), kind.getJSONObject("numeric"), enabled && !control.optBoolean("disabled"), key) { obj("op" to "number", "layer" to layer, "key" to key) }
                 }
                 "curve" -> key(layer, key, control.getJSONObject("curve").getJSONObject("domain").toString()) { CurveControl(host, state, layer, control, enabled) }
                 "toggle" -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -296,7 +296,7 @@ internal fun propertySectionId(control: JSONObject): String = JSONArray().put(co
     }) { next ->
         latest = next
         val action = action(next)
-        host.effect(if (owner == null) action else obj("op" to "gesture", "phase" to "move", "action" to action))
+        host.effect(if (owner == null) action else obj("op" to "gesture", "phase" to "move", "action" to action), moving = owner != null)
     }
 }
 

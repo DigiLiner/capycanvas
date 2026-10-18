@@ -488,6 +488,9 @@ resources-parameter-channel-mixer-constant = Constant
 resources-parameter-channel-mixer-monochrome = Monochrome
 resources-parameter-paper-color = Color
 resources-parameter-paper-texture = Texture
+resources-parameter-paper-relief = Relief
+resources-parameter-paper-light = Light
+resources-parameter-paper-through-paint = Shows through paint
 
 resources-filter-color-lookup = Color Lookup (LUT)
 resources-lookup-table = Look

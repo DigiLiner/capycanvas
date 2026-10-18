@@ -23,6 +23,13 @@ entry without changing the effect application.
   field step. Escape or native cancellation restores the starting value.
   Edit Color numbers adjust by vertical drag without a slider
   ([color picking](color-picker.md#edit-color)).
+- Directions that wrap use a dial: label left, a 40-unit round dial, then the
+  plain, tappable value. Pressing or dragging points the dial where the pointer
+  is. Within twice the dial's radius it snaps to 15° steps; farther out it
+  turns freely, and a press at its center keeps the value. Values wrap at 360°.
+  Double-clicking the label or the dial restores the default; on GTK, arrow keys
+  and the scroll wheel also step it. GTK and Android draw the dial; Web, Apple
+  and Windows show only the value field. Paper's Light is a dial.
 - In Preferences the complete name/description/value header is above the
   slider. Rows expand for descriptions; the numeric content is capped at
   600 logical pixels. Surrounding groups share the same width so labels align.
@@ -82,7 +89,9 @@ the pressure slider uses a linear range.
 Control schema comparisons include the logarithmic offset as part of the slider curve.
 
 `NumericOperation` handles formatting, stepping, fine value scrubbing, native
-values, normalized slider positions and typed expressions. Sliders send positions in 0–1.
+values, normalized slider positions, dial points and typed expressions. Sliders
+send positions in 0–1; dials send the pointer's offset from their center and
+their radius, and `NumericKind::Dial` wraps every result into its range.
 Mapping, quantization, validation and
 formatting happen in Rust; hosts never reproduce those formulas. Buttons and
 value scrubs operate in the field's units, independently of its slider curve.

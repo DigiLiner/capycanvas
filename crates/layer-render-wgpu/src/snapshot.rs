@@ -547,9 +547,19 @@ impl SnapshotRenderer {
         self.with_region_gpu([x, y, width, height], reserved_bytes, |r, packet, region, encoder| {
             let (target, _) = create_color_target(&r.device, [width, height], "snapshot region");
             let mut scene = r.scene.take().map(Ok).unwrap_or_else(|| scene::Scene::new(r))?;
-            let captured = scene.capture_region(r, packet, &target, region, output, encoder);
+            let captured = scene.capture_region(r, packet, &target, region, output, encoder).and_then(|()| {
+                let separated = layer_core::paper::separate_paper(packet.scene).filter(|_| matches!(output, scene::Output::Artwork(None)));
+                separated.map(|(paper, _)| {
+                    let (coverage, _) = create_color_target(&r.device, [width, height], "paper coverage");
+                    scene.capture_above(r, packet, &coverage, region, paper, encoder).map(|()| coverage)
+                }).transpose()
+            });
             r.scene = Some(scene);
-            captured?;
+            let coverage = captured?;
+            let target = match output {
+                scene::Output::Artwork(None) => r.shade_paper_export(packet.scene, &target, coverage.as_ref(), [x, y], encoder)?.unwrap_or(target),
+                _ => target,
+            };
             Ok(consume.take().unwrap()(&r.device, &target, encoder))
         }).await
     }

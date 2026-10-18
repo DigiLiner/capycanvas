@@ -828,6 +828,89 @@ class AndroidCanvasBarBenchmarkTest {
                     hide()
                 }
             }
+            if (wanted("paper")) {
+                photoDocument()
+                val paper = state().array("layers").objects().last().getLong("id")
+                action(obj("type" to "set_layer_visibility", "id" to paper, "visible" to true))
+                action(obj("type" to "select_layer", "id" to paper))
+                fun effect(op: JSONObject) = action(obj("type" to "effect", "action" to op))
+                effect(obj("op" to "set", "layer" to paper, "key" to "texture", "value" to obj("kind" to "choice", "value" to 1)))
+                effect(obj("op" to "set", "layer" to paper, "key" to "relief", "value" to obj("kind" to "number", "value" to 100)))
+                action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "properties", "visible" to true)))
+                val group = host.panelGroup("properties")
+                action(obj("type" to "customize", "action" to obj("type" to "set_column_collapsed", "group" to group.getInt("id"), "collapsed" to false)))
+                if (group.optString("active") != "properties") action(obj("type" to "select_panel_tab", "group" to group.getInt("id"), "panel" to "properties"))
+                action(obj("type" to "customize", "action" to obj("type" to "close_expanded")))
+                waitFor("panel configuration closed") { state().getJSONObject("customization").isNull("expanded") }
+                invoke("fit_canvas")
+                waitFor("paper shaders ready") { host.snapshot?.optBoolean("shaders_ready") == true }
+                SystemClock.sleep(2000)
+                fun value(key: String) = state().getJSONObject("layer_properties").array("controls").objects()
+                    .first { it.getString("key") == key }.getJSONObject("value").getDouble("value")
+                fun slider() = findTag("number-value-relief")?.let { (root, value) ->
+                    generateSequence(value.parent) { it.parent }.firstNotNullOfOrNull { row -> row.find(hasTag("number-slider-Relief"))?.let { root to it } }
+                }
+                val track = settledControl("Relief slider", ::slider)
+                val start = track.left + track.width() * .2 - host.surfaceOrigin.x to track.centerY() - host.surfaceOrigin.y.toDouble()
+                interactionSnapshot("paper-relief-before", "number-slider-Relief", ::slider)
+                drag(start, 250) { t -> track.width() * .1 * t / .25 to 0.0 }
+                host.awaitMain("Relief gesture changes its value", 10_000, condition = { value("relief") != 100.0 })
+                invoke("undo")
+                val reliefValues = java.util.Collections.synchronizedSet(mutableSetOf<Double>())
+                measure("paper-relief-drag") {
+                    val sampler = Thread {
+                        val until = SystemClock.uptimeMillis() + duration
+                        while (SystemClock.uptimeMillis() < until) { reliefValues += value("relief"); SystemClock.sleep(8) }
+                    }.apply { start() }
+                    drag(start, duration) { t -> track.width() * .4 * (1 - kotlin.math.abs(1 - (t % .5) * 4)) to 0.0 }
+                    sampler.join()
+                }
+                check(reliefValues.size > 1) { "Relief did not change during motion" }
+                interactionSnapshot("paper-relief-after", "number-slider-Relief", ::slider)
+                val dial = settledControl("Light dial", { findTag("number-dial-light") })
+                val center = dial.centerX() - host.surfaceOrigin.x to dial.centerY() - host.surfaceOrigin.y.toDouble()
+                val inside = dial.width() * .4
+                val reach = dial.width() * 2.5
+                val press = center.first + inside to center.second
+                fun around(t: Double): Pair<Double, Double> {
+                    val radius = inside + (reach - inside) * minOf(1.0, t / .2)
+                    val angle = 2 * PI * t
+                    return center.first + radius * cos(angle) - press.first to center.second + radius * kotlin.math.sin(angle) - press.second
+                }
+                val lightValues = java.util.Collections.synchronizedSet(mutableSetOf<Double>())
+                measure("paper-light-dial-drag") {
+                    val sampler = Thread {
+                        val until = SystemClock.uptimeMillis() + duration
+                        while (SystemClock.uptimeMillis() < until) { lightValues += value("light"); SystemClock.sleep(8) }
+                    }.apply { start() }
+                    drag(press, duration, ::around)
+                    sampler.join()
+                }
+                check(lightValues.size > 8) { "Light did not turn during motion" }
+                interactionSnapshot("paper-light-after", "number-dial-light")
+                effect(obj("op" to "set", "layer" to paper, "key" to "through_paint", "value" to obj("kind" to "number", "value" to 50)))
+                host.awaitMain("Paint hides half the texture", 10_000, condition = { value("through_paint") == 50.0 })
+                SystemClock.sleep(2000)
+                fun coverage() = findTag("number-value-through_paint")?.let { (root, value) ->
+                    generateSequence(value.parent) { it.parent }.firstNotNullOfOrNull { row -> row.find(hasTag("number-slider-Shows through paint"))?.let { root to it } }
+                }
+                val through = settledControl("Shows through paint slider", ::coverage)
+                val from = through.left + through.width() * .2 - host.surfaceOrigin.x to through.centerY() - host.surfaceOrigin.y.toDouble()
+                val throughValues = java.util.Collections.synchronizedSet(mutableSetOf<Double>())
+                measure("paper-through-drag") {
+                    val sampler = Thread {
+                        val until = SystemClock.uptimeMillis() + duration
+                        while (SystemClock.uptimeMillis() < until) { throughValues += value("through_paint"); SystemClock.sleep(8) }
+                    }.apply { start() }
+                    drag(from, duration) { t -> through.width() * .6 * (1 - kotlin.math.abs(1 - (t % .5) * 4)) to 0.0 }
+                    sampler.join()
+                }
+                check(throughValues.size > 1 && throughValues.all { it < 100.0 }) { "Shows through paint did not change below 100% during motion" }
+                interactionSnapshot("paper-through-after", "number-slider-Shows through paint", ::coverage)
+                File(output, "paper-values.json").writeText(obj("relief" to JSONArray(reliefValues.toList().sorted()),
+                    "light" to JSONArray(lightValues.toList().sorted()), "through_paint" to JSONArray(throughValues.toList().sorted()),
+                    "theme" to state().getString("theme")).toString(2))
+            }
             if (wanted("effects") || wanted("spatial-effects")) {
                 data class Scrub(val id: String, val key: String, val title: String, val label: String, val start: Double, val chain: Boolean = false, val page: String? = null, val colorize: Boolean = false, val span: Double = .1, val radius: Double? = null, val primeSpan: Double = .1)
                 val scrubs = if (wanted("spatial-effects")) listOf(

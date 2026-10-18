@@ -231,7 +231,8 @@ fn compose(
     packet: FramePacket<'_>, sources: Option<&Sources>, effects: Option<&HashMap<OccurrenceHandle, (metadata::Metadata, u64)>>,
     level: u32, space: layer_core::color::RgbSpace, objects:Option<&mut object_spatial::SpatialIndex>,
 ) -> Result<Node, GpuRasterError> {
-    let mut builder = Builder { packet, sources, effects, level, space, objects };
+    let presented = layer_core::paper::separate_paper(packet.scene).map(|(paper, _)| paper);
+    let mut builder = Builder { packet, sources, effects, level, space, objects, presented };
     let output = stack::compose(&mut builder, packet.scene, None, packet.scene.effect_input())?;
     let mut root = Expression::over(&output);
     if let Some(handle) = packet.inspect_mask
@@ -248,6 +249,7 @@ struct Builder<'a> {
     level: u32,
     space: layer_core::color::RgbSpace,
     objects:Option<&'a mut object_spatial::SpatialIndex>,
+    presented: Option<OccurrenceHandle>,
 }
 impl Builder<'_> {
     fn source(&self, handle: OccurrenceHandle, mask: bool) -> Node {
@@ -321,6 +323,7 @@ impl stack::Compositor for Builder<'_> {
         let layer = self.packet.scene.occurrence(index).unwrap();
         matches!(layer.kind(), LayerKind::Group | LayerKind::Paint | LayerKind::Effect) || self.packet.scene.object_layer(index).is_some()
     }
+    fn presented_backdrop(&self) -> Option<OccurrenceHandle> { self.presented }
 }
 
 impl Cache {
