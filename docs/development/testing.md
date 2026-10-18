@@ -556,10 +556,6 @@ are your task, and remove an entry when you fix it.
   `native_workspace_motion_input`, and `native_workspace_switcher_input`
   (intermittent). `native_workspace_resize_input` presents below its rate
   threshold under the runner's `color-mgmt`.
-- GTK `native_image_object_clipboard_and_paste_into` looks for Paste Into in
-  the Edit menu itself, where Edit › Paste Special holds it.
-  `native_image_object_rows_picking_and_transforms` expects a held touch on a
-  row body to reorder the rows, which touch leaves to scrolling.
 - GTK `native_document_tabs_history_storage_and_close`: the reactivated camera's
   translation differs from the original by about 3e-5.
   `native_embedded_proof_replacement_preserves_local_copy_and_saves_one_profile`

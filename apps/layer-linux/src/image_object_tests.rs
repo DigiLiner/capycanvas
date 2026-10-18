@@ -153,7 +153,15 @@ fn native_image_object_rows_picking_and_transforms() {
     assert_eq!(image_order(&w), vec![blue, red], "an unheld touch on a row does not reorder");
     native.perform(json!([{"touch":"down","point":start},{"wait_ms":900},{"touch":"move","point":[start[0],start[1]-6.]},
         {"touch":"move","point":[start[0],start[1]-14.]},{"wait_ms":60},{"touch":"move","point":end},{"wait_ms":120},{"touch":"move","point":end},{"touch":"up"}]));
-    until(|| image_order(&w) == vec![red, blue], "a held touch drag reorders the rows");
+    pump(200);
+    assert_eq!(image_order(&w), vec![blue, red], "a held touch on a row body opens its menu instead of reordering");
+    for menu in w.popovers.borrow().iter().filter_map(|p| p.upgrade()) { menu.popdown(); }
+    pump(120);
+    let start = center(&w, &object_row(&w, red).last_child().unwrap());
+    let end = [start[0], end[1]];
+    native.perform(json!([{"touch":"down","point":start},{"touch":"move","point":[start[0],start[1]-6.]},
+        {"touch":"move","point":[start[0],start[1]-14.]},{"wait_ms":60},{"touch":"move","point":end},{"wait_ms":120},{"touch":"move","point":end},{"touch":"up"}]));
+    until(|| image_order(&w) == vec![red, blue], "a touch drag from the row's grab handle reorders the rows");
     invoke(&w, CommandId::Undo); settle(&w);
     assert_eq!(image_order(&w), vec![blue, red]);
     w.dispatch(UiAction::SelectLayer { id: layer_ui::occurrence_token(document(&w).scene().object_owner(red).unwrap()) });
@@ -379,7 +387,7 @@ fn native_image_object_clipboard_and_paste_into() {
     let frame = [[400., 60.], [600., 60.], [600., 220.], [400., 220.], [400., 60.]].map(|p| doc_point(&w, p));
     mouse_path(&mut native, &frame);
     until(|| document(&w).working.selection.is_some(), "a lasso selection");
-    super::photo_edit::choose(&w, &mut native, "Edit", &["Paste Into"]);
+    super::photo_edit::choose(&w, &mut native, "Edit", &["Paste Special", "Paste Into"]);
     until(|| document(&w).scene().order().len() == order + 1 && state(&w).requests.is_empty(), "Paste Into adds a masked image layer");
     let doc = document(&w);
     let frame_layer = doc.working.occurrence.unwrap();
