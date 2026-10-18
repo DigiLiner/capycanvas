@@ -2,6 +2,9 @@ use super::{Affine64, PortableId, Resource};
 use crate::color::RgbColor;
 use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, OnceLock}};
 
+mod index;
+pub use index::VectorIndex;
+
 pub const ANCHOR_RUN: usize = 256;
 pub const CHUNK_RECORDS: usize = 64;
 
@@ -612,18 +615,6 @@ impl VectorObject {
         let chunk = self.chunks().iter().position(|chunk| chunk.contains(id))?;
         let index = self.chunks()[chunk].records().iter().position(|record| record.id() == Some(id))?;
         Some(Position { chunk: chunk as u32, index: index as u32 })
-    }
-    pub fn hit(&self, point: [f64; 2], slop: f64) -> Option<ItemId> {
-        self.chunks().iter().filter(|chunk| chunk.summary().bounds.is_some_and(|[x0, y0, x1, y1]|
-            point[0] >= x0 - slop && point[1] >= y0 - slop && point[0] <= x1 + slop && point[1] <= y1 + slop))
-            .flat_map(|chunk| chunk.records().iter().filter_map(Record::path))
-            .find(|path| !path.locked && path.hit(point, slop)).map(|path| path.id)
-    }
-    pub fn paths_within(&self, area: [f64; 4]) -> BTreeSet<ItemId> {
-        let inside = |b: [f64; 4]| b[0] >= area[0] && b[1] >= area[1] && b[2] <= area[2] && b[3] <= area[3];
-        self.chunks().iter().filter(|chunk| chunk.summary().bounds.is_some_and(|b| b[2] >= area[0] && b[0] <= area[2] && b[3] >= area[1] && b[1] <= area[3]))
-            .flat_map(|chunk| chunk.records().iter().filter_map(Record::path))
-            .filter(|path| !path.hidden && !path.locked && inside(path.bounds())).map(|path| path.id).collect()
     }
     pub fn positions(&self, ids: &BTreeSet<ItemId>) -> BTreeMap<usize, Vec<usize>> {
         let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();

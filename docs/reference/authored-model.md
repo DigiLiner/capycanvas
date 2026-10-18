@@ -221,7 +221,9 @@ copies only the chunk, path and run it changes. Item IDs are random nonzero
 chunk keeps its sorted item IDs and container nesting, and an object remembers
 that it validated, so a vector edit that replaces an existing object checks only
 its new chunks and the identities they introduce, and skips resource-closure
-admission. The working state's `vector_items` names selected paths of one
+admission. Picking and marquee selection go through a `VectorIndex`, a grid of
+256-pixel cells over visible, unlocked paths that follows a new object version by
+reindexing only the chunks it replaced. The working state's `vector_items` names selected paths of one
 vector layer; edits drop paths that no longer exist, and sessions do not save
 it. The wire form is in [vector records](capy-package.md#vector-records).
 

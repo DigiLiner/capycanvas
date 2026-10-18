@@ -338,10 +338,14 @@ fn crowded_vector_layer_edit_frames() {
     let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
     submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
     let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    let mut index = layer_core::authored::vector::VectorIndex::default();
     let start = std::time::Instant::now();
-    let probes: Vec<_> = (0..100).map(|i| object.hit([1200. + i as f64 * 13., 1400. + (i % 7) as f64 * 31.], 4.)).collect();
+    index.hit(&object, [0.; 2], 4.);
+    let build = start.elapsed().as_secs_f64() * 1e3;
+    let start = std::time::Instant::now();
+    let probes: Vec<_> = (0..100).map(|i| index.hit(&object, [1200. + i as f64 * 13., 1400. + (i % 7) as f64 * 31.], 4.)).collect();
     let hit = start.elapsed().as_secs_f64() * 1e3 / 100.;
-    eprintln!("hit test {hit:.3} ms per probe, {} hits of 100", probes.iter().flatten().count());
+    eprintln!("hit index build {build:.2} ms, then {hit:.4} ms per probe, {} hits of 100", probes.iter().flatten().count());
     let ids: Vec<ItemId> = object.paths().filter(|(_, p)| { let b = p.bounds(); b[0] > 1200. && b[1] > 1300. }).map(|(_, p)| p.id).collect();
     let (_texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();

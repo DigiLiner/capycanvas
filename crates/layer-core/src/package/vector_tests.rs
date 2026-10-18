@@ -358,14 +358,15 @@ fn hits_find_the_frontmost_visible_unlocked_path_under_the_point() {
     let mut locked = plain_line(4, [0., 50.], [100., 50.], 6.);
     locked.locked = true;
     let object = VectorObject::from_records(vec![Record::Path(plain_line(1, [0., 0.], [100., 0.], 4.)), Record::Path(plain_line(2, [50., -20.], [50., 20.], 2.)), Record::Path(badge), Record::Path(locked)]);
-    assert_eq!(object.hit([50., 0.], 0.), Some(ItemId(1)), "the front path wins where paths overlap");
-    assert_eq!(object.hit([50., 10.], 0.), Some(ItemId(2)));
-    assert_eq!(object.hit([20., 1.9], 0.), Some(ItemId(1)));
-    assert_eq!(object.hit([20., 2.5], 0.), None);
-    assert_eq!(object.hit([20., 2.5], 1.), Some(ItemId(1)));
-    assert_eq!(object.hit([1.5, 5.], 0.), Some(ItemId(3)), "filled area");
-    assert_eq!(object.hit([5., 5.], 0.), None, "even-odd hole");
-    assert_eq!(object.hit([20., 50.], 0.), None, "locked paths are not picked");
+    let mut index = VectorIndex::default();
+    assert_eq!(index.hit(&object, [50., 0.], 0.), Some(ItemId(1)), "the front path wins where paths overlap");
+    assert_eq!(index.hit(&object, [50., 10.], 0.), Some(ItemId(2)));
+    assert_eq!(index.hit(&object, [20., 1.9], 0.), Some(ItemId(1)));
+    assert_eq!(index.hit(&object, [20., 2.5], 0.), None);
+    assert_eq!(index.hit(&object, [20., 2.5], 1.), Some(ItemId(1)));
+    assert_eq!(index.hit(&object, [1.5, 5.], 0.), Some(ItemId(3)), "filled area");
+    assert_eq!(index.hit(&object, [5., 5.], 0.), None, "even-odd hole");
+    assert_eq!(index.hit(&object, [20., 50.], 0.), None, "locked paths are not picked");
 }
 
 #[test]

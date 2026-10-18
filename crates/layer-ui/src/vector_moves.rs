@@ -1,5 +1,5 @@
 use super::*;
-use layer_core::{Edit, Point, authored::{Affine64, VectorItemSelection, vector::{ItemId, VectorObject}}};
+use layer_core::{Edit, Point, authored::{Affine64, VectorItemSelection, vector::{ItemId, VectorIndex, VectorObject}}};
 use layer_render::CursorSegment;
 use std::{cell::RefCell, collections::BTreeSet, sync::Arc};
 
@@ -17,6 +17,7 @@ type SelectionBounds = (VectorObject, Arc<BTreeSet<ItemId>>, Option<[f64; 4]>);
 pub(super) struct VectorMoves {
     gesture: Option<Gesture>,
     bounds: RefCell<Option<SelectionBounds>>,
+    index: VectorIndex,
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
@@ -55,7 +56,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
                 let offset = doc.scene().occurrence_offset64(layer);
                 let local = [point[0] - offset[0], point[1] - offset[1]];
-                let hit = object.hit(local, HIT_SLOP * self.document_per_surface_pixel());
+                let hit = self.vector_moves.index.hit(object, local, HIT_SLOP * self.document_per_surface_pixel());
                 let adding = self.interaction.modifiers.shift;
                 let selected: BTreeSet<ItemId> = self.selected_vector_items().map(|s| (*s.items).clone()).unwrap_or_default();
                 let Some(id) = hit else {
@@ -117,7 +118,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let offset = doc.scene().occurrence_offset64(layer);
                 let area = [start[0].min(end[0]) - offset[0], start[1].min(end[1]) - offset[1], start[0].max(end[0]) - offset[0], start[1].max(end[1]) - offset[1]];
                 let swept = area[2] - area[0] > reach || area[3] - area[1] > reach;
-                let found = if swept { doc.scene().vector_layer(layer).map(|object| object.paths_within(area)).unwrap_or_default() } else { BTreeSet::new() };
+                let found = match doc.scene().vector_layer(layer) { Some(object) if swept => self.vector_moves.index.within(object, area), _ => BTreeSet::new() };
                 let kept = if adding { self.selected_vector_items().map(|s| (*s.items).clone()).unwrap_or_default() } else { BTreeSet::new() };
                 self.select_vector_items(layer, kept.into_iter().chain(found).collect()).map(|_| ())
             }
