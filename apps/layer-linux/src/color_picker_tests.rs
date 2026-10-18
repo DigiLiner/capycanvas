@@ -665,3 +665,43 @@ fn native_color_picker_preview_pacing() {
     assert!(!d.w.status.is_visible(), "{}", d.w.status.text());
     d.finish();
 }
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+fn native_color_picker_settings_follow_shared_copy_and_sizes() {
+    let app = native_test_app("art.capycanvas.ColorPickerSettingsCopy");
+    let choices = |dropdown: &gtk::DropDown| {
+        let model = dropdown.model().unwrap();
+        (0..model.n_items()).map(|i| model.item(i).and_downcast::<gtk::StringObject>().unwrap().string().to_string()).collect::<Vec<_>>()
+    };
+    let caption = |dropdown: &gtk::DropDown| dropdown.parent().and_then(|row| row.first_child()).and_downcast::<gtk::Label>().unwrap().text().to_string();
+    for language in [UiLanguage::English, UiLanguage::Japanese] {
+        let w = Workspace::new_localized(&app, Localizer::shared(language));
+        w.dispatch(UiAction::RestoreSettings { settings: layer_ui::Settings {
+            language: layer_ui::LanguagePreference::Explicit(language), ..Default::default()
+        }});
+        w.window.present();
+        crate::workspace::tests::new_photo::ready(&w);
+        until(|| w.localization().language() == language, "explicit language");
+        let copy = layer_ui::NativeCopy::new(&w.localization()).sampler;
+        w.dispatch(UiAction::Invoke { command: CommandId::Eyedropper });
+        pump(100);
+        let source = find_named(w.window.upcast_ref(), "color-picker-source").and_downcast::<gtk::DropDown>().unwrap();
+        let size = find_named(w.window.upcast_ref(), "color-picker-size").and_downcast::<gtk::DropDown>().unwrap();
+        let picker = state(&w).color_picker;
+        assert_eq!(picker.sample_sizes, &layer_ui::COLOR_SAMPLE_WIDTHS);
+        assert_eq!(caption(&source), copy.source.as_ref(), "{language:?}");
+        assert_eq!(caption(&size), copy.sample_size.as_ref(), "{language:?}");
+        let mut sources = vec![copy.visible_color.to_string()];
+        if picker.can_sample_layer { sources.push(copy.selected_layer.to_string()); }
+        assert_eq!(choices(&source), sources, "{language:?}");
+        assert_eq!(choices(&size), copy.sizes.iter().map(|(_, label)| label.to_string()).collect::<Vec<_>>(), "{language:?}");
+        size.set_selected(3);
+        assert_eq!(state(&w).color_picker.sample_width, layer_ui::COLOR_SAMPLE_WIDTHS[3]);
+        w.dispatch(UiAction::SetColorSampleSize { width: layer_ui::COLOR_SAMPLE_WIDTHS[1] });
+        pump(50);
+        assert_eq!(size.selected(), 1);
+        w.window.destroy();
+        pump(100);
+    }
+}

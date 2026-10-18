@@ -252,7 +252,7 @@ impl ToolSettings {
         root.add_css_class("tool-settings");
         let settings = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         let form = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
-        let picker = crate::color_picker::Settings::new();
+        let picker = crate::color_picker::Settings::new(localization);
         let mode_container=gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         let modes=gtk::Box::new(gtk::Orientation::Horizontal,0);
         modes.set_homogeneous(true);
@@ -290,6 +290,7 @@ impl ToolSettings {
         self.modes.update_property(&[gtk::accessible::Property::Label(&ToolActionGroup::SelectionMode.localized_label(&localization))]);
         self.selection_actions.set_label(&localization.text(layer_ui::MessageId::MENU_SELECT));
         for (control, input) in self.fields.borrow().iter() { input.set_caption(&control.label, "", localization.clone()); }
+        self.picker.set_localization(&localization);
     }
     pub fn refresh(&self, workspace: &Rc<Workspace>, state: &UiState) {
         let picking = state.layer_tools.tool.picks_color();

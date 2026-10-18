@@ -15,27 +15,32 @@ pub struct Settings {
     pub root: gtk::Box,
     source: gtk::DropDown,
     size: gtk::DropDown,
+    source_row: gtk::Box,
+    labels: [gtk::Label; 2],
+    copy: RefCell<layer_ui::native_copy::SamplerCopy>,
+    choices: RefCell<(Vec<std::sync::Arc<str>>, Vec<std::sync::Arc<str>>)>,
+    widths: Rc<RefCell<Vec<u32>>>,
     owner: Rc<RefCell<Weak<Workspace>>>,
     updating: Rc<Cell<bool>>,
 }
 impl Settings {
-    pub fn new() -> Self {
+    pub fn new(localization: &layer_ui::Localizer) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, crate::panel_controls::CONTROL_SPACING);
         root.set_widget_name("color-picker-settings");
-        let source = crate::panel_controls::dropdown(&["Visible color", "Selected layer"]);
+        let source = crate::panel_controls::dropdown(&[]);
         source.set_widget_name("color-picker-source");
-        let sizes = layer_ui::COLOR_SAMPLE_WIDTHS.map(|width| {
-            if width == 1 { "Single pixel".to_string() } else { format!("{width} px circle") }
-        });
-        let size = crate::panel_controls::dropdown(&sizes.each_ref().map(String::as_str));
+        let size = crate::panel_controls::dropdown(&[]);
         size.set_widget_name("color-picker-size");
-        let labels = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
-        for (name, widget) in [("Source", &source), ("Sample size", &size)] {
-            widget.update_property(&[gtk::accessible::Property::Label(name)]);
-            root.append(&crate::panel_controls::row(name,widget,crate::panel_controls::CONTROL_SPACING,Some(&labels)));
-        }
+        let group = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
+        let [source_row, size_row] = [&source, &size].map(|widget| {
+            let row = crate::panel_controls::row("", widget, crate::panel_controls::CONTROL_SPACING, Some(&group));
+            root.append(&row);
+            row
+        });
+        let labels = [&source_row, &size_row].map(|row| row.first_child().and_downcast::<gtk::Label>().unwrap());
         let owner: Rc<RefCell<Weak<Workspace>>> = Rc::default();
         let updating = Rc::new(Cell::new(false));
+        let widths: Rc<RefCell<Vec<u32>>> = Rc::default();
         source.connect_selected_notify(glib::clone!(
             #[strong]
             owner,
@@ -59,56 +64,66 @@ impl Settings {
             owner,
             #[strong]
             updating,
+            #[strong]
+            widths,
             move |d| {
                 let workspace = owner.borrow().upgrade();
+                let width = widths.borrow().get(d.selected() as usize).copied();
                 if !updating.get()
                     && let Some(w) = workspace
-                    && let Some(&width) = layer_ui::COLOR_SAMPLE_WIDTHS.get(d.selected() as usize)
+                    && let Some(width) = width
                 {
                     w.dispatch(UiAction::SetColorSampleSize { width });
                 }
             }
         ));
-        Self {
+        let settings = Self {
             root,
             source,
             size,
+            source_row,
+            labels,
+            copy: RefCell::new(layer_ui::NativeCopy::new(localization).sampler),
+            choices: RefCell::default(),
+            widths,
             owner,
             updating,
+        };
+        settings.set_localization(localization);
+        settings
+    }
+    pub fn set_localization(&self, localization: &layer_ui::Localizer) {
+        let copy = layer_ui::NativeCopy::new(localization).sampler;
+        for ((label, widget), text) in self.labels.iter().zip([&self.source, &self.size]).zip([&copy.source, &copy.sample_size]) {
+            label.set_text(text);
+            widget.update_property(&[gtk::accessible::Property::Label(text)]);
         }
+        *self.copy.borrow_mut() = copy;
     }
     pub fn refresh(&self, w: &Rc<Workspace>, state: &UiState) {
         *self.owner.borrow_mut() = Rc::downgrade(w);
         self.updating.set(true);
-        let model = if state.color_picker.can_sample_layer {
-            &["Visible color", "Selected layer"][..]
-        } else {
-            &["Visible color"][..]
-        };
-        if self
-            .source
-            .model()
-            .is_none_or(|m| m.n_items() != model.len() as u32)
-        {
-            self.source.set_model(Some(&gtk::StringList::new(model)));
+        let picker = &state.color_picker;
+        let copy = self.copy.borrow();
+        let sources: Vec<_> = std::iter::once(copy.visible_color.clone())
+            .chain(picker.can_sample_layer.then(|| copy.selected_layer.clone()))
+            .collect();
+        let sizes: Vec<_> = picker.sample_sizes.iter()
+            .filter_map(|width| copy.sizes.iter().find(|(value, _)| value == width).map(|(_, label)| label.clone()))
+            .collect();
+        let (source_choices, size_choices) = &mut *self.choices.borrow_mut();
+        for (dropdown, current, next) in [(&self.source, source_choices, sources), (&self.size, size_choices, sizes)] {
+            if *current != next {
+                dropdown.set_model(Some(&gtk::StringList::new(&next.iter().map(AsRef::as_ref).collect::<Vec<_>>())));
+                *current = next;
+            }
         }
-        self.source.set_selected(u32::from(
-            state.color_picker.layer && state.color_picker.can_sample_layer,
-        ));
-        self.source
-            .set_tooltip_text(Some(if state.color_picker.can_sample_layer {
-                "Visible artwork, or raw paint from the selected layer"
-            } else {
-                "Select an editable paint layer to enable layer sampling"
-            }));
+        *self.widths.borrow_mut() = picker.sample_sizes.to_vec();
+        self.source_row.set_visible(!picker.calibrating);
+        self.source.set_selected(u32::from(picker.layer && picker.can_sample_layer));
         self.size.set_selected(
-            layer_ui::COLOR_SAMPLE_WIDTHS
-                .iter()
-                .position(|&n| n == state.color_picker.sample_width)
-                .unwrap_or(0) as u32,
+            picker.sample_sizes.iter().position(|&n| n == picker.sample_width).map_or(gtk::INVALID_LIST_POSITION, |i| i as u32),
         );
-        self.size
-            .set_tooltip_text(Some("Document pixels · perceptual Oklab average"));
         self.updating.set(false);
     }
 }
