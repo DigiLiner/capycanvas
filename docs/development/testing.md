@@ -27,6 +27,9 @@ passes needed for the first contact across four tiles.
 `page_zero_copies_reclear_both_formats_and_reduced_extents` checks exact zero
 pixels, preview invalidation and zero render/compute passes when reusing full
 and reduced paint and scalar pages.
+`watercolor_transport_batches_restored_empty_backing` repeats the multitile
+prediction, cancel, commit and restore fixture after restoring empty native
+backing, retaining its three-pass transport bound.
 
 The renderer's `direct_contact_paint_and_erase_match_destination_deposition`
 requires hardware float32 blending and runs with `--ignored`. It compares actual

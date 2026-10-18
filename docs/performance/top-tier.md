@@ -3212,6 +3212,31 @@ observations do not qualify GPU-completed brush updates or physical latency.
 Current traces and reviewed captures are in
 `batched-page-clear-Release-refresh/runtime-Light/` beside those controls.
 
+A further transport correction checks whether a missing neighbor actually has
+native color backing or intersects an original image before splitting the batch
+for borrowed cache views. A restored-empty four-tile regression falls from 12 to
+3 transport passes. Six matched cases preserve all 508 raw color, wetness,
+coverage and active-side files exactly. Both normal Apple Release apps build
+and pass signing and ABI checks.
+
+One light-theme pair on `c43539591` plus this correction uses the same photo,
+brush, priming Undo and contacts:
+
+| Device | Contact presentations/s, control → candidate | Maximum prepare, control → candidate | First-contact maximum displayed gap, control → candidate |
+| --- | --- | --- | --- |
+| M2 Pro Mac mini, 90 Hz | 87.453 / 89.280 / 89.265 → 87.332 / 89.497 / 89.336 | 113.218 → 100.849 ms | 177.779 → 166.668 ms |
+| M4 iPad Pro, 120 Hz | 111.167 / 113.336 / 113.168 → 116.828 / 113.994 / 113.157 | 75.776 → 78.533 ms | 141.670 → 141.670 ms |
+
+Both complete all input, priming Undo and callback-accounting guards with zero
+missing or zero-time callbacks and nominal thermal state. Mac interval p99 is
+11.111 ms; iPad contact p99 values are 8.334/16.667/16.667 ms. The iPad's
+second and third contacts still miss 114 presentations/s. The Mac prepare
+reduction does not close its first-contact response gap, and one zero-free run
+does not establish that the earlier resumed-contact skip is fixed. GPU-completed
+updates and physical latency remain unqualified. Traces and reviewed light
+captures are in `empty-backed-neighbor-Release-refresh/runtime-Light/` beside
+the preceding controls. These builds precede the Paper texture-dialog changes.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

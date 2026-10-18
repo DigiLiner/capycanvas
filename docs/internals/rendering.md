@@ -555,6 +555,12 @@ These stay the same in both spaces: erasing, which scales color and alpha
 together; paint color mixing, which follows the brush's Color mixing choice;
 Watercolor's pigment transport; Liquify; and wet or burnt stroke edges.
 
+Watercolor batches updated tiles in three ordered transport steps. Missing pages
+stay in the batch when neither native color backing nor the original image
+covers them. Reading an original through the mutable decoded-source cache closes
+the preceding batch, then consumes its borrowed views before another
+neighborhood can evict them.
+
 Healing ([`heal.wgsl`](../../crates/layer-render-wgpu/src/heal.wgsl)) computes
 its tone correction in the document's Blending: the membrane matches `B − S` on
 encoded values in a Perceptual document and is added to the copy there.

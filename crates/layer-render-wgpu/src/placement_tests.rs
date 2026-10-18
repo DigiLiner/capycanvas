@@ -507,6 +507,15 @@ fn layer_tiles_beside_the_largest_offset_keep_their_exact_pixels() {
 
 #[test]
 fn watercolor_transport_preserves_multitile_prediction_commit_and_restore() {
+    watercolor_multitile_prediction_commit_and_restore(false);
+}
+
+#[test]
+fn watercolor_transport_batches_restored_empty_backing() {
+    watercolor_multitile_prediction_commit_and_restore(true);
+}
+
+fn watercolor_multitile_prediction_commit_and_restore(restored_empty: bool) {
     let mut layer = paint_document([512; 2], "multitile transport");
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let send = |r: &mut WgpuRasterizer, layer: &Document, dabs: &[Dab], batches: &[DabBatch], reset| {
@@ -515,6 +524,11 @@ fn watercolor_transport_preserves_multitile_prediction_commit_and_restore() {
         r.readback_srgb_rgba8().unwrap()
     };
     let original = send(&mut r, &layer, &[], &[], true);
+    if restored_empty {
+        let empty = layer_core::raster::RasterData::default();
+        r.restore_raster(target(&layer), &empty, &empty).unwrap();
+        assert!(r.native_backing(target(&layer)).is_some_and(|data| data.tiles.is_empty()));
+    }
     let mut ink = dab([0.1, 0.3, 0.8, 1.]);
     ink.center = Point { x: 256., y: 256. };
     ink.radii = [160.; 2];
@@ -535,13 +549,15 @@ fn watercolor_transport_preserves_multitile_prediction_commit_and_restore() {
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     r.encode_watercolor_transport(&mut encoder, 0, &preview,
         &[pixel_rect(preview.damage, [512; 2])], true).unwrap();
-    assert_eq!(encoder.pass_count(), u64::from(WATERCOLOR_TRANSPORT_STEPS));
+    let passes = encoder.pass_count();
     r.uploads.finish(&encoder);
     encoder.submit(&r.queue);
     assert_eq!(send(&mut r, &layer, &[], &[], false), original);
     paint_mut(&mut layer).raster = layer_core::raster::RasterRevision::pending();
     let accepted = send(&mut r, &layer, &[ink], &[stroke], false);
     assert_eq!(send(&mut r, &layer, &[], &[], true), accepted);
+    println!("watercolor transport: restored_empty={restored_empty}, passes={passes}");
+    assert_eq!(passes, u64::from(WATERCOLOR_TRANSPORT_STEPS));
 }
 
 #[test]

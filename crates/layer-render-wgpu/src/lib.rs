@@ -2935,20 +2935,25 @@ impl WgpuRasterizer {
             for (index, job) in jobs.iter().enumerate() {
                 let local = regions[index];
                 if local.is_empty() { continue; }
-                let borrowed = (self.tiled_sources.contains_key(&batch.target) || self.native_backing(batch.target).is_some())
+                let base = self.tiled_sources.get(&batch.target);
+                let backing = self.native_backing(batch.target);
+                let borrowed = (base.is_some() || backing.is_some())
                     && [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].into_iter().any(|[dx, dy]| {
                         let [x, y] = [job.coordinate[0] as i32 + dx, job.coordinate[1] as i32 + dy];
                         if x < 0 || y < 0 { return false; }
                         let at = [x as u32, y as u32];
                         !(preview && self.preview_page(at).is_some())
                             && !self.paint_layers.iter().find(|layer| layer.id == batch.target).unwrap().pages.iter().any(|page| page.coordinate == at)
+                            && (backing.is_some_and(|data| data.tiles.contains_key(&layer_core::raster::TileKey {
+                                plane: layer_core::raster::RasterPlane::Color, coordinate: at,
+                            })) || base.is_some_and(|base| source_access::paint_base_contains(base, at)))
                     });
                 if borrowed {
                     self.encode_watercolor_transport_jobs(encoder, batch_index, batch, step, &transport_texture_bind_group, &pending);
                     pending.clear();
+                    self.prepare_raw_neighborhood(batch.target, job.coordinate,
+                        [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].map(Some), preview, encoder)?;
                 }
-                self.prepare_raw_neighborhood(batch.target, job.coordinate,
-                    [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]].map(Some), preview, encoder)?;
                 let (color_destination, wetness_destination) =
                     if preview {
                         let color = self
