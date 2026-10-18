@@ -130,7 +130,8 @@ capture APIs.
 
 Each fixture has a 20-minute deadline. For longer language matrices, pass
 `fixtures localization --timeout-minutes 90`; the accepted range is 1–1440
-minutes. `plan.json` records that deadline and the monitor uses it for each
+minutes. `layers:Paper` walks both themes and needs `--timeout-minutes 40` on
+the software renderer. `plan.json` records that deadline and the monitor uses it for each
 expected result. Input waits and assertions keep their existing limits.
 
 To use several VMs, give each a share of the names:

@@ -98,6 +98,13 @@ function Test-PaperTexture{
     Relationship-Layers
     $theme=(Model).state.theme;$paper=(Texture-Paper).id;$row=Relationship-Layer $paper
     if(!$row.paper -or !$row.paper.editable){throw 'The Paper row did not publish an editable texture'}
+    if($row.paper.id -eq $TextureLibraryId){
+        Relationship-Reveal "layer-$paper-name";Texture-Open "layer-texture-$paper"
+        Invoke 'texture-tile-0';Wait-Until {(Texture-Pending) -eq 0} 'Clicking a tile did not move the pending texture'
+        Invoke 'texture-apply';Texture-Closed 'Use Texture did not close Choose Texture'
+        Wait-Until {$shown=(Relationship-Layer $paper).paper.id;$shown -and $shown -ne $TextureLibraryId} 'Use Texture did not restore a built-in paper'
+        $row=Relationship-Layer $paper
+    }
     $original=$row.paper.id
     Relationship-Reveal "layer-$paper-name"
     $texture=Control "layer-texture-$paper" -Arranged
