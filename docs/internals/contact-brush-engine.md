@@ -155,7 +155,8 @@ Pointwise deposition and transported materials share their compositing helpers
 but compile separate dependency sets. Dry contact modules omit bristle and
 neighborhood transport code; legacy brushes retain those evaluators. Contact
 features and material operation are module constants, so unrelated branches do
-not enter the device compiler. Aggregate and ordered deposition share one
+not enter the device compiler. Dry kernels only serve normal blending, so the
+blend-mode switch is a module constant too. Aggregate and ordered deposition share one
 contact loop, selected by the existing batch marker. They compile separate
 variants so ordered compositing does not increase the fast path's register
 requirements. The small-contact antialiasing variant also remains separate. Normal pointwise brushes

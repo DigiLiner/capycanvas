@@ -1,4 +1,5 @@
 override MATERIAL_OPERATION: u32;
+override MATERIAL_NORMAL_BLEND: bool = false;
 
 const OP_DEPOSIT: u32 = 0u;
 const OP_COVERAGE: u32 = 1u;
@@ -60,7 +61,7 @@ fn brush_blend() -> u32 {
 }
 
 fn brush_normal() -> bool {
-    return blend_mode(brush_blend()) == 0u;
+    return MATERIAL_NORMAL_BLEND || blend_mode(brush_blend()) == 0u;
 }
 
 fn deposit_encoded() -> bool {

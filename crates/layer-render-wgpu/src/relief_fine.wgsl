@@ -79,16 +79,20 @@ fn relief_tap_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32)->f32 {
 fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {
     let axes=0.5*(dab.radii+dab.previous.xy);
     let radius=min(axes.x,axes.y);
-    if !contact_feature(16384u,radius<8.0) || radius>=8.0 || contact_feature(4096u,style.material_a.x>0.0) {
-        return relief_evaluate(dab,world,paper,false).x;
+    var filtered=0.0;
+    var blend=1.0;
+    if contact_feature(16384u,radius<8.0) && radius<8.0 && !contact_feature(4096u,style.material_a.x>0.0) {
+        let dose=6.0*dab.flow*dab.color.a;
+        if dose<=0.0 {return 0.0;}
+        if dot(dab.motion,dab.motion)<0.000001 {filtered=relief_tap_pixel(dab,world,paper,dose);}
+        else {filtered=relief_swept_pixel(dab,world,paper,dose,radius);}
+        blend=relief_transfer((radius-4.0)*0.25);
     }
-    let dose=6.0*dab.flow*dab.color.a;
-    if dose<=0.0 {return 0.0;}
-    if dot(dab.motion,dab.motion)<0.000001 {
-        let filtered=relief_tap_pixel(dab,world,paper,dose);
-        let blend=relief_transfer((radius-4.0)*0.25);
-        return mix(filtered,relief_evaluate(dab,world,paper,false).x,blend);
-    }
+    if blend>0.0 {filtered=mix(filtered,relief_evaluate(dab,world,paper,false).x,blend);}
+    return filtered;
+}
+
+fn relief_swept_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32,radius:f32)->f32 {
     let relative=world-dab.center+dab.motion;
     let transverse=dot(relative,dab.metric.zw);
     let pressure=max(dab.previous_contact.x,dab.contact.x);
@@ -130,12 +134,7 @@ fn relief_contact(dab:Dab,world:vec2<f32>,paper:f32)->f32 {
             alpha+=weight*(1.0-exp(-dose*contact.y));
         }
     }
-    var filtered=0.0;
-    if contact_uniform() {filtered=exposure.x;}
-    else if exposure.y>0.0 {
-        filtered=exposure.x*(-log(max(1.0-alpha,0.000001)))/(dose*exposure.y);
-    }
-    let blend=relief_transfer((radius-4.0)*0.25);
-    if blend>0.0 {filtered=mix(filtered,relief_evaluate(dab,world,paper,false).x,blend);}
-    return filtered;
+    if contact_uniform() {return exposure.x;}
+    if exposure.y<=0.0 {return 0.0;}
+    return exposure.x*(-log(max(1.0-alpha,0.000001)))/(dose*exposure.y);
 }

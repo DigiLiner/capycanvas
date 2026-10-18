@@ -96,7 +96,8 @@ pub(super) fn kernel_source(space:layer_core::color::RgbSpace,float_sampling:&st
         "fn material_result(p:vec4<f32>)->MaterialOutput {return pointwise_material_result(p);}",
         include_str!("material_compute.wgsl"),&coverage_source(flags),include_str!("selection_clip.wgsl")]);
     specialize_contact(source,flags)
-        .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32)).into()
+        .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32))
+        .replace("override MATERIAL_NORMAL_BLEND: bool = false;","const MATERIAL_NORMAL_BLEND: bool = true;").into()
 }
 
 /// One reduced-resolution page of averaged original paint, stroke coverage
