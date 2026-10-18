@@ -1623,10 +1623,15 @@ impl ImageTransformState {
     fn fill_fine_pages(&mut self,r:&mut WgpuRasterizer,encoder:&mut crate::submission::CommandEncoder,
         coordinates:&[[u32;2]],extent:[u32;2])->Result<(),GpuRasterError> {
         r.drain_image_decodes(encoder)?;
+        let mut pending=false;
         for coordinate in coordinates.iter().copied() {
             if self.reduced.as_ref().unwrap().fine.as_ref().unwrap().resident(coordinate) {continue;}
             let snapshot=self.sources[0].as_ref().unwrap();
-            let _leases=snapshot.prepare_pages(r,std::slice::from_ref(&coordinate),encoder)?;
+            let _leases=match snapshot.prepare_pages(r,std::slice::from_ref(&coordinate),encoder) {
+                Ok(leases)=>leases,
+                Err(GpuRasterError::DeferredObjectWork)=>{pending=true;continue;},
+                Err(error)=>return Err(error),
+            };
             let input=self.reduced.as_mut().unwrap();
             let fine=input.fine.as_mut().unwrap();
             let index=fine.assign(coordinate)?;
@@ -1649,7 +1654,7 @@ impl ImageTransformState {
             fine.written(index,encoder);
             encoder.on_submitted_work_done(move||drop(_leases));
         }
-        Ok(())
+        if pending {Err(GpuRasterError::DeferredObjectWork)} else {Ok(())}
     }
     fn prepare_fine_input(&mut self,r:&WgpuRasterizer,extent:[u32;2],phase:[u32;2],selection:Option<&layer_core::Selection>,capacity:usize)->Result<(),GpuRasterError> {
         let kept=keeps_pixels(selection,self.sources[0].as_ref().unwrap().bounds);

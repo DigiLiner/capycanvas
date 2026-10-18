@@ -636,6 +636,10 @@ its exact sampling geometry and classifies at most 48 regions per frame;
 unfinished subdivisions resume without changing the accepted display. Partial
 output stays private until its region is complete. A matching existing fine
 source keeps its admitted capacity; new allocations still pass budget admission.
+Fine-source preparation requests every missing coordinate in the admitted region
+and copies ready pages into the atlas before yielding for pending decodes. Copied
+pages remain resident without requiring the decoded-source cache to hold the
+whole region at once.
 Native spare pages and superseded outputs remain charged until their submitted
 GPU work completes. The 608 MiB composition budget includes live and retiring
 fine resources; the optional complete display pyramid keeps its separate
