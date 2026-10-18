@@ -589,8 +589,7 @@ are your task, and remove an entry when you fix it.
 - Windows `exercise-multiwindow.ps1`: "Pin preferences did not refresh in the
   inactive window".
 - Windows `exercise-persistence.ps1`: "Missing control: Brush size slider"
-  (the slider is named "Brush size"). `documents:RecoverGpu` on a VM: "GPU
-  reconstruction did not start".
+  (the slider is named "Brush size").
 - Windows fixtures that also fail on the unported upstream build: `exercise-pen-buttons.ps1` (Transform is
   enabled on the empty starting layer), `exercise-persistence.ps1` (the unreadable database writes a
   storage diagnostic to stderr) and `exercise-proof.ps1` (UI Automation times out

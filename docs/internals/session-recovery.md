@@ -253,7 +253,9 @@ opened or edited a drawing, restored drawings append without replacing that work
 Inactive drawings are parked and admission checks apply before publication.
 
 Explicit close prepares fallible owner changes before durable membership removal.
-After removal, completion must not fail while leaving a live drawing without its
+While a close is prepared, the closing drawing refuses edits and ignores late
+canvas input, but accepts host reports such as layout measurements and theme
+changes, so a window that relays out meanwhile reports no error. After removal, completion must not fail while leaving a live drawing without its
 session membership. Resource retirement follows the accepted close; any retained
 reader keeps its immutable resources alive until released. Native publication
 errors distinguish failure before replacement from failure to synchronize a

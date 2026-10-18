@@ -1693,7 +1693,7 @@ pub enum UiAction {
     CloseSettings,
 }
 impl UiAction {
-    pub(crate) fn is_host_report(&self) -> bool {
+    pub fn is_host_report(&self) -> bool {
         matches!(
             self,
             Self::PrepareExport { .. }

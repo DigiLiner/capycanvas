@@ -1282,6 +1282,39 @@ mod tests {
     }
 
     #[test]
+    fn host_reports_reach_a_drawing_whose_close_is_prepared() {
+        let mut host = host();
+        let mut window = Window::default();
+        open(&mut window, &mut host);
+        for commit in [false, true] {
+            invoke(&mut host, CommandId::CloseDocument);
+            let prepared = window.prepare_close(&mut host, Default::default()).unwrap();
+            let stamp = host.session.session_stamp();
+            for report in [
+                UiAction::MeasurePanels { measurements: vec![] },
+                UiAction::MeasureDrawerTiles { measurements: vec![] },
+                UiAction::SystemThemeChanged { theme: layer_ui::Theme::Light, accent: None },
+            ] {
+                host.dispatch(report).unwrap();
+            }
+            assert_eq!(host.session.session_stamp(), stamp);
+            assert!(host.dispatch(UiAction::Invoke {command:CommandId::AddLayer}).is_err());
+            window.validate_close(&host, &prepared).unwrap();
+            if !commit {
+                window.cancel_close(&mut host, prepared).unwrap();
+                continue;
+            }
+            let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {}).unwrap();
+            assert!(closed.is_some());
+            drop(closed);
+            activation.work().unwrap();
+            resume(&mut window, &mut host, &mut activation);
+        }
+        assert_eq!(window.documents.order(), [1]);
+        finish(host, window);
+    }
+
+    #[test]
     fn language_adoption_keeps_open_candidates_save_completions_and_parked_documents() {
         use layer_ui::{Localizer, UiLanguage};
         let mut host = host();

@@ -315,7 +315,7 @@ impl NativeHost {
         Ok(())
     }
     pub fn dispatch(&mut self, action: UiAction) -> Result<(), String> {
-        self.require_document_owner()?;
+        if !action.is_host_report() { self.require_document_owner()?; }
         if matches!(action, UiAction::RestoreWorkspace { .. }) {
             self.header_drag = None;
         }
