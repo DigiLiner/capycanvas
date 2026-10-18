@@ -564,6 +564,7 @@ pub(crate) struct Drawer {
     closing: Cell<bool>,
     animation: RefCell<Option<adw::TimedAnimation>>,
     source_corners: RefCell<Vec<(gtk::Widget, [bool; 4])>>,
+    generation: Cell<u64>,
 }
 impl Drawer {
     pub fn new(id: u32) -> Rc<Self> {
@@ -577,6 +578,7 @@ impl Drawer {
             closing: Cell::new(false),
             animation: RefCell::default(),
             source_corners: RefCell::default(),
+            generation: Cell::new(0),
         })
     }
     pub fn layers(&self) -> Option<Rc<LayerPanel>> {
@@ -972,18 +974,22 @@ impl Drawer {
             move |_| {
                 drawer.from.borrow_mut().take();
                 if drawer.closing.get() {
-                    w.surface
-                        .remove_slots(|slot| matches!(slot, Slot::Drawer(id) | Slot::DrawerConnection(id) | Slot::DrawerShadow(id) if id == drawer.id));
-                    drawer.mark_origin(&w, None);
-                    drawer.view.borrow_mut().take();
-                    drawer.state.borrow_mut().take();
-                    drawer.presented.borrow_mut().take();
+                    drawer.retire(&w);
                 }
                 w.surface.queue_allocate();
             }
         ));
         *self.animation.borrow_mut() = Some(animation.clone());
         animation.play();
+    }
+    fn retire(&self, w: &Rc<Workspace>) {
+        if let Some(animation) = self.animation.take() { animation.pause(); }
+        w.surface
+            .remove_slots(|slot| matches!(slot, Slot::Drawer(id) | Slot::DrawerConnection(id) | Slot::DrawerShadow(id) if id == self.id));
+        self.mark_origin(w, None);
+        self.view.borrow_mut().take();
+        self.state.borrow_mut().take();
+        self.presented.borrow_mut().take();
     }
     fn finish_animation(&self) {
         if let Some(animation) = self.animation.take() { animation.pause(); }
@@ -1008,8 +1014,12 @@ impl Drawer {
         regions: u32,
         next: Option<&ContentDrawer>,
     ) {
+        let replaced = self.generation.replace(state.toolbar_context_generation) != state.toolbar_context_generation;
         let Some(next) = next else {
-            if self.state.borrow().is_some() && !self.closing.get() {
+            if replaced && self.state.borrow().is_some() {
+                self.retire(w);
+                w.surface.queue_allocate();
+            } else if self.state.borrow().is_some() && !self.closing.get() {
                 self.animate(w, true);
             }
             return;

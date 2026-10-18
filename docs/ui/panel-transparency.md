@@ -53,7 +53,12 @@ radii. The shared `ViewportPresenter` blurs its own artwork beneath them:
   on its own surface, outside that scan. The workspace adds its body, with
   circular corners, from the popup's position relative to the window. The
   region is refreshed when the popup's layout changes and dropped when it
-  unmaps.
+  unmaps. The glass regions and Navigator placements from one snapshot form a
+  revision. The canvas commits a new revision in synchronized subsurface mode
+  and reports it; GTK keeps presenting the composition for the last committed
+  revision, so panels, blur and the Navigator image change in the same
+  compositor frame. After 100 ms without a report GTK presents its newest
+  composition.
 - Web: `glass.js` measures the translucent DOM surfaces and their CSS radii in
   the canvas frame, and `set_glass` scales them to device pixels. Each region
   carries its corner shape: workspace surfaces are squircles where the browser
@@ -170,9 +175,9 @@ tables, such as [low tier](../performance/low-tier.md).
 
 ## Known limitations
 
-- The GTK canvas subsurface is desynchronized from GTK, so while a panel moves
-  its blur follows about one frame behind. Web and Android place glass in the
-  canvas frame that follows the layout.
+- GTK waits for the canvas frame that carries new glass geometry, so a layout
+  change appears up to one canvas frame later. Web and Android place glass in
+  the canvas frame that follows the layout.
 - Popovers, menus and tooltips are separate surfaces and stay opaque. The
   command bar is the exception. On GTK its popup and the canvas are separate
   surfaces, so when the result count changes its size, the blur can trail the

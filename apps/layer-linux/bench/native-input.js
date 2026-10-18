@@ -34,6 +34,47 @@ const captureFrame = name => {
         info.width, info.height, info.stride[0]).savev(`${captureDir}/${name}.png`, 'png', [], []);
     return true;
 };
+const recording = {name: null, samples: [], timer: 0, events: []};
+const pullRecorded = () => {
+    for (let sample; (sample = captureSink.try_pull_sample(0));)
+        recording.samples.push({sample, ns: GLib.get_monotonic_time() * 1000});
+};
+const startRecording = name => {
+    if (!captureDir || !/^[a-z0-9-]+$/.test(name) || recording.name || !captureSink)
+        throw Error('Invalid native recording request');
+    recording.name = name;
+    captureSink.try_pull_sample(0);
+    recording.samples = [];
+    recording.events = [];
+    captureSink.set_property('max-buffers', 600);
+    recording.timer = GLib.timeout_add(GLib.PRIORITY_HIGH, 2, () => {
+        pullRecorded();
+        return GLib.SOURCE_CONTINUE;
+    });
+};
+const stopRecording = () => {
+    if (!recording.name) throw Error('No native recording is active');
+    GLib.source_remove(recording.timer);
+    pullRecorded();
+    captureSink.set_property('max-buffers', 1);
+    const {Gst, GstVideo} = imports.gi;
+    const directory = `${captureDir}/${recording.name}`;
+    GLib.mkdir_with_parents(directory, 0o755);
+    const frames = recording.samples.map(({sample, ns}, index) => {
+        const info = GstVideo.VideoInfo.new_from_caps(sample.get_caps());
+        const buffer = sample.get_buffer();
+        const [ok, map] = buffer.map(Gst.MapFlags.READ);
+        if (!ok) throw Error('Cannot map recorded frame');
+        GLib.file_set_contents(`${directory}/${String(index).padStart(4, '0')}.rgb`, map.data);
+        buffer.unmap(map);
+        return {pts_ns: buffer.pts, pulled_ns: ns, width: info.width, height: info.height, stride: info.stride[0]};
+    });
+    GLib.file_set_contents(`${directory}/frames.json`, JSON.stringify(frames));
+    GLib.file_set_contents(`${directory}/events.json`, JSON.stringify(recording.events));
+    print(`Recorded ${frames.length} compositor frames: ${recording.name}`);
+    recording.name = null;
+    recording.samples = [];
+};
 const ready = Gio.File.new_for_path(`${output}/ready`);
 if (ready.query_exists(null)) throw new Error('Use a fresh output directory');
 const loop = new GLib.MainLoop(null, false);
@@ -215,6 +256,14 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                     if (!captureFrame(event.capture)) index--;
                     return GLib.SOURCE_CONTINUE;
                 }
+                if (event.record_start) {
+                    startRecording(event.record_start);
+                    return GLib.SOURCE_CONTINUE;
+                }
+                if (event.record_stop) {
+                    stopRecording();
+                    return GLib.SOURCE_CONTINUE;
+                }
                 if ('wait_ms' in event) {
                     if (!Number.isFinite(event.wait_ms) || event.wait_ms < 0 || event.wait_ms > 10000)
                         throw Error('Native event wait must be 0..10000 ms');
@@ -248,6 +297,7 @@ GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                 }
                 if (event.wheel) send('NotifyPointerAxisDiscrete', '(ui)', event.wheel);
                 if ('down' in event) send('NotifyPointerButton', '(ib)', [event.button ?? 272, event.down]);
+                if (recording.name) recording.events.push({ns: GLib.get_monotonic_time() * 1000, event});
             }
             return GLib.SOURCE_CONTINUE;
         });

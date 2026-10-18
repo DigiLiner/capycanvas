@@ -378,6 +378,21 @@ fn native_column_stack_input() {
                 .to_str()
                 .unwrap(),
         );
+        let retained = |w: &Workspace| {
+            let column = w.resolved().collapsed[0].id;
+            let roots: Vec<_> = w.groups.borrow().iter()
+                .filter(|g| [Panel::Brushes, Panel::ToolSettings, Panel::Color].iter().any(|p| g.panels.contains(p)))
+                .map(|g| (g.root.clone(), g.tabs.iter().map(|(_, tab)| tab.clone()).collect::<Vec<_>>()))
+                .collect();
+            (roots, w.columns.button(column, Panel::Layers).unwrap())
+        };
+        let before = retained(&w);
+        for _ in 0..2 {
+            let icon = before.1.clone().upcast::<gtk::Widget>();
+            input.perform(serde_json::json!([contact("mouse", "down", screen_point(&icon, &w.window, [0.5, 0.5])), contact("mouse", "up", [0.; 2])]));
+            assert_eq!(retained(&w), before, "toggling a column keeps unchanged groups, tabs and strip tiles");
+        }
+        assert!(w.resolved().collapsed.iter().all(|c| c.open.is_some()));
     }
     for (theme, edge) in [(Theme::Dark, Edge::Left), (Theme::Light, Edge::Right)] {
         for touch in [false, true] {

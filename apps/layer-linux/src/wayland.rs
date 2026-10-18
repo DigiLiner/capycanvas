@@ -418,6 +418,15 @@ impl Child {
         false
     }
 
+    pub fn synchronize(&mut self, synchronized: bool) -> Result<(), String> {
+        if synchronized {
+            self.subsurface.set_sync();
+        } else {
+            self.subsurface.set_desync();
+        }
+        self.connection.flush().map_err(error)
+    }
+
     pub fn dispatch(&mut self) -> Result<(), String> {
         // GTK/Vulkan read the shared socket. Dispatch only our pending events.
         self.events

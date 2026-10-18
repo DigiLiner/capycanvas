@@ -80,6 +80,8 @@ mod column_drop;
 mod column_stack_tests;
 #[path = "paint_column_fit_tests.rs"]
 mod paint_column_fit;
+#[path = "ui_motion_tests.rs"]
+mod ui_motion;
 #[path = "contact_brush_tests.rs"]
 mod contact_brush;
 #[path = "squircle_tests.rs"]
@@ -3089,10 +3091,9 @@ fn native_navigator_column_resize() {
             {
                 let s = stats.lock().unwrap();
                 assert!(
-                    s.cpu.len() > frames,
+                    s.cpu.len() > frames && !s.overview_presented,
                     "collapse must present a frame without the overview"
                 );
-                assert_eq!(s.overview_frames, previews);
             }
             drag.update(delta(minimum - 108. + 1.));
             pump(200);

@@ -594,6 +594,10 @@ impl Customization {
         self.controls.borrow_mut().retain(|c| !c.configuration);
     }
 
+    pub fn expands(&self, root: &PanelColumns) -> bool {
+        self.expanded_root.borrow().as_ref() == Some(root)
+    }
+
     pub fn geometry(&self, w: &Workspace) -> Option<PanelExpansion> {
         let target = self.target_geometry(w, !self.closing.get())?;
         Some(self.transition_from.get().map_or(target, |from| {
@@ -1441,6 +1445,10 @@ impl Workspace {
     }
 
     pub(super) fn panel_widget(&self, panel: Panel) -> gtk::Widget {
+        self.panel_view(panel).expect("validated panel has a native view")
+    }
+
+    pub(super) fn panel_view(&self, panel: Panel) -> Option<gtk::Widget> {
         self.panels
             .iter()
             .find(|(p, _)| *p == panel)
@@ -1453,7 +1461,6 @@ impl Workspace {
                     .find(|t| t.id == panel)
                     .map(|t| t.strip.clone().upcast())
             })
-            .expect("validated panel has a native view")
     }
 
     pub(super) fn install_context(

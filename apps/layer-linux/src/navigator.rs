@@ -9,35 +9,18 @@ use std::{cell::RefCell, rc::Rc};
 #[derive(Default)]
 pub struct Overviews {
     views: RefCell<Vec<glib::WeakRef<Overview>>>,
-    owner: RefCell<std::rc::Weak<Workspace>>,
-    wake_pending: std::cell::Cell<bool>,
+    projections: RefCell<Vec<Projection>>,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Projection {
+pub(crate) struct Projection {
     image: gtk::graphene::Rect,
     clip: gtk::graphene::Rect,
     origin: [f32; 2],
+    size: [f32; 2],
     opacity: f32,
     order: usize,
 }
 impl Overviews {
-    pub fn bind(self: &Rc<Self>, w: &Rc<Workspace>) {
-        *self.owner.borrow_mut() = Rc::downgrade(w);
-    }
-    fn wake(self: &Rc<Self>) {
-        if self.wake_pending.replace(true) {
-            return;
-        }
-        let this = self.clone();
-        // Snapshot can run during a native allocation or explicit capture.
-        // Defer session access rather than reentering its RefCell borrow.
-        glib::idle_add_local_once(move || {
-            this.wake_pending.set(false);
-            if let Some(w) = this.owner.borrow().upgrade() {
-                w.wake();
-            }
-        });
-    }
     pub fn placements(
         &self,
         state: &UiState,
@@ -48,20 +31,11 @@ impl Overviews {
         };
         let fg = state.palette.text.linear();
         let mut views: Vec<_> = self
-            .views
+            .projections
             .borrow()
             .iter()
-            .filter_map(|v| v.upgrade())
-            .filter_map(|v| {
-                if !v.is_mapped() {
-                    return None;
-                }
-                let p = v.imp().projection.get()?;
-                let g = NavigatorGeometry::new(
-                    &state.camera,
-                    [tab.width, tab.height],
-                    [v.width() as f32, v.height() as f32],
-                )?;
+            .filter_map(|p| {
+                let g = NavigatorGeometry::new(&state.camera, [tab.width, tab.height], p.size)?;
                 let rect = |r: gtk::graphene::Rect| {
                     [
                         r.x() * scale,
@@ -89,31 +63,30 @@ impl Overviews {
         views.into_iter().map(|(_, view)| view).collect()
     }
     pub fn project_child(
-        self: &Rc<Self>,
+        &self,
         parent: &gtk::Widget,
         child: &gtk::Widget,
         order: usize,
         node: Option<&gtk::gsk::RenderNode>,
+        projections: &mut Vec<Projection>,
     ) -> Vec<gtk::graphene::Rect> {
         self.views.borrow_mut().retain(|v| v.upgrade().is_some());
-        let views: Vec<_> = self
-            .views
-            .borrow()
-            .iter()
-            .filter_map(|v| v.upgrade())
-            .filter(|v| v.is_ancestor(child))
-            .collect();
-        let mut holes = Vec::new();
-        for view in views {
-            let projection = node.and_then(|node| view.projection(parent, child, node, order));
-            if view.imp().projection.replace(projection) != projection {
-                self.wake();
-            }
-            if let Some(p) = projection {
-                holes.push(p.clip);
-            }
+        let first = projections.len();
+        projections.extend(
+            self.views
+                .borrow()
+                .iter()
+                .filter_map(|v| v.upgrade())
+                .filter(|v| v.is_ancestor(child))
+                .filter_map(|view| node.and_then(|node| view.projection(parent, child, node, order))),
+        );
+        projections[first..].iter().map(|p| p.clip).collect()
+    }
+    pub fn commit(&self, projections: Vec<Projection>) -> bool {
+        *self.projections.borrow() != projections && {
+            *self.projections.borrow_mut() = projections;
+            true
         }
-        holes
     }
     pub fn append_clipped(
         target: &gtk::Snapshot,
@@ -217,7 +190,6 @@ mod imp {
     #[derive(Default)]
     pub struct Overview {
         pub view: RefCell<Option<(Camera, [u32; 2])>>,
-        pub(super) projection: std::cell::Cell<Option<Projection>>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for Overview {
@@ -304,6 +276,7 @@ impl Overview {
             image,
             clip,
             origin: [origin.x(), origin.y()],
+            size: [self.width() as f32, self.height() as f32],
             opacity,
             order,
         })
@@ -329,18 +302,6 @@ impl Navigator {
         overview.set_vexpand(true);
         overview.set_cursor_from_name(Some("grab"));
         images.views.borrow_mut().push(overview.downgrade());
-        overview.connect_unmap(glib::clone!(
-            #[weak]
-            images,
-            move |view| {
-                // A detached/hidden view is no longer visited by project_child.
-                // Remove its GPU image now, and invalidate the cached projection
-                // so reopening at the same size also schedules a fresh frame.
-                if view.imp().projection.take().is_some() {
-                    images.wake();
-                }
-            }
-        ));
         root.append(&overview);
         let controls = NavigationControls::new("navigator");
         root.append(&controls.root);

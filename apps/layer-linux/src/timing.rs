@@ -47,6 +47,7 @@ pub struct Stats {
     pub overview_revisions: Vec<u64>,
     pub backdrop_frames: [u64; 2],
     pub overview_frames: usize,
+    pub overview_presented: bool,
 }
 struct Slot {
     query: wgpu::QuerySet,
@@ -112,8 +113,9 @@ impl Timing {
         self.stats.lock().unwrap().raster_commits.push([self.id, self.queued_ns]);
     }
     pub fn overview(&self, revision: Option<u64>) {
+        let mut stats = self.stats.lock().unwrap();
+        stats.overview_presented = revision.is_some();
         if let Some(revision) = revision {
-            let mut stats = self.stats.lock().unwrap();
             stats.overview_frames += 1;
             if stats.overview_revisions.last() != Some(&revision) {
                 stats.overview_revisions.push(revision);

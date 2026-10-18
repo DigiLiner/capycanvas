@@ -12,7 +12,7 @@ use std::{
     collections::{HashMap, VecDeque},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc,
     },
     thread::JoinHandle,
@@ -26,13 +26,17 @@ fn error(e: impl std::fmt::Display) -> String {
 }
 /// Wake the canvas once GTK is next idle, from any thread.
 fn wake_canvas(area: &gtk::glib::SendWeakRef<gtk::Picture>) {
+    canvas_action(area, "canvas.wake");
+}
+fn canvas_action(area: &gtk::glib::SendWeakRef<gtk::Picture>, action: &'static str) {
     let area = area.clone();
     gtk::glib::idle_add_once(move || {
         if let Some(area) = area.upgrade() {
-            let _ = area.activate_action("canvas.wake", None);
+            let _ = area.activate_action(action, None);
         }
     });
 }
+const CHROME_SYNC_LIMIT: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub(crate) struct ContextCapture(Arc<std::sync::OnceLock<Result<EvaluationContext, String>>>);
@@ -93,6 +97,8 @@ struct Frame {
     backdrops: Vec<layer_render_wgpu::BackdropRegion>,
     backdrop_style: layer_render_wgpu::BackdropBlurStyle,
     backdrop_hold: bool,
+    chrome: u64,
+    chrome_hold: bool,
     stroke_target: Option<crate::wayland::StrokeTarget>,
     // Every queued producer must resolve its immutable roots, even on failure.
     pending_rasters: Vec<layer_core::raster::RasterRevision>,
@@ -173,6 +179,7 @@ enum Command {
     CancelFilterPreviews(u64),
     Frame(Box<Frame>),
     Present(ViewState, Geometry, [f32; 4], Vec<CursorSegment>),
+    ReleaseChrome(u64),
     Asset(AssetId, layer_core::ProjectAsset),
     Release(AssetId),
     #[cfg(test)]
@@ -316,11 +323,20 @@ pub struct RenderWorker {
     pub(super) backdrops: Vec<layer_render_wgpu::BackdropRegion>,
     pub(super) backdrop_style: layer_render_wgpu::BackdropBlurStyle,
     pub(super) backdrop_hold: bool,
+    pub(super) chrome: u64,
+    pub(super) chrome_hold: bool,
+    presented_chrome: Arc<AtomicU64>,
     pub(super) stroke_target: Option<crate::wayland::StrokeTarget>,
     #[cfg(test)]
     pub stats: Arc<std::sync::Mutex<crate::timing::Stats>>,
 }
 impl RenderWorker {
+    pub(crate) fn presented_chrome(&self) -> u64 {
+        self.presented_chrome.load(Ordering::Acquire)
+    }
+    pub(crate) fn release_chrome(&self, revision: u64) {
+        let _ = self.send(Command::ReleaseChrome(revision));
+    }
     pub(crate) fn set_local_tone(
         &self,
         guide: Option<Arc<layer_render_wgpu::local_tone::GpuToneGuide>>,
@@ -399,6 +415,8 @@ impl RenderWorker {
         ));
         let worker_telemetry = telemetry.clone();
         let failure_area = area.clone();
+        let presented_chrome = Arc::new(AtomicU64::new(0));
+        let worker_chrome = presented_chrome.clone();
         #[cfg(test)]
         let stats = Arc::new(std::sync::Mutex::new(crate::timing::Stats::default()));
         #[cfg(test)]
@@ -415,7 +433,7 @@ impl RenderWorker {
                             std::thread::sleep(Duration::from_millis(1));
                         }
                     }
-                    Worker::new(parent, area, worker_clock, color, &localization)?.run(
+                    Worker::new(parent, area, worker_clock, worker_chrome, color, &localization)?.run(
                         &receiver,
                         &reply,
                         &worker_telemetry,
@@ -524,6 +542,9 @@ impl RenderWorker {
             backdrops: Vec::new(),
             backdrop_style: Default::default(),
             backdrop_hold: false,
+            chrome: 0,
+            chrome_hold: false,
+            presented_chrome,
             #[cfg(test)]
             stats,
         })
@@ -1071,6 +1092,8 @@ impl CanvasRenderer for RenderWorker {
             backdrops: self.backdrops.clone(),
             backdrop_style: self.backdrop_style,
             backdrop_hold: self.backdrop_hold,
+            chrome: self.chrome,
+            chrome_hold: self.chrome_hold,
             stroke_target: self.stroke_target,
             #[cfg(test)]
             queued_ns: gtk::glib::monotonic_time().max(0) as u64 * 1000,
@@ -1119,6 +1142,9 @@ struct Worker {
     checked_generation: u64,
     screen_reported: Option<u64>,
     last_publish: std::time::Instant,
+    chrome: u64,
+    presented_chrome: Arc<AtomicU64>,
+    synchronized: Option<std::time::Instant>,
 }
 impl Worker {
     #[cfg(test)]
@@ -1576,7 +1602,13 @@ impl Worker {
                             .map_err(error)?;
                     }
                 }
+                Command::ReleaseChrome(revision) => {
+                    if revision >= self.chrome {
+                        self.synchronize(false)?;
+                    }
+                }
                 Command::Present(view, geometry, surround, cursor) => {
+                    self.expire_synchronization()?;
                     self.set_view(view, geometry, surround);
                     self.cursor = cursor;
                     self.presenter.set_cursor(self.renderer.device(), &self.cursor, geometry.scale as f32);
@@ -1651,6 +1683,7 @@ impl Worker {
         parent: Parent,
         area: gtk::glib::SendWeakRef<gtk::Picture>,
         clock: Arc<crate::wayland::FrameClock>,
+        presented_chrome: Arc<AtomicU64>,
         color: layer_core::color::DocumentColor,
         localization: &layer_ui::Localizer,
     ) -> Result<Self, String> {
@@ -1762,6 +1795,9 @@ impl Worker {
             checked_generation: 0,
             screen_reported: None,
             last_publish: std::time::Instant::now(),
+            chrome: 0,
+            presented_chrome,
+            synchronized: None,
         })
     }
     /// Publish whether the renderer has work for later frames, and wake an
@@ -1840,6 +1876,7 @@ impl Worker {
             return Err(failure);
         }
         let draw_start = std::time::Instant::now();
+        self.expire_synchronization()?;
         while frame.scene.view().targets().any(|t| frame.scene.view().raster(t).is_some_and(|r| r.try_data().is_none())) && !self.renderer.raster_ready()
         {
             std::thread::sleep(std::time::Duration::from_millis(1));
@@ -1882,6 +1919,10 @@ impl Worker {
         #[cfg(test)]
         timing.mark(0);
         if !frame.present {return Ok(());}
+        let chrome = frame.chrome != self.chrome;
+        if chrome && frame.chrome_hold {
+            self.synchronize(true)?;
+        }
         self.picker = frame.picker;
         self.presenter.set_color_picker(&self.renderer, self.picker);
         self.cursor.clone_from(&frame.cursor);
@@ -1914,6 +1955,27 @@ impl Worker {
             )?;
         }
         self.child.observe_draw_work(draw_start.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+        if chrome {
+            self.chrome = frame.chrome;
+            self.presented_chrome.store(frame.chrome, Ordering::Release);
+            canvas_action(&self.area, "canvas.chrome");
+        }
+        Ok(())
+    }
+    fn synchronize(&mut self, synchronized: bool) -> Result<(), String> {
+        if synchronized {
+            if self.synchronized.replace(std::time::Instant::now()).is_none() {
+                self.child.synchronize(true)?;
+            }
+        } else if self.synchronized.take().is_some() {
+            self.child.synchronize(false)?;
+        }
+        Ok(())
+    }
+    fn expire_synchronization(&mut self) -> Result<(), String> {
+        if self.synchronized.is_some_and(|since| since.elapsed() > CHROME_SYNC_LIMIT) {
+            self.synchronize(false)?;
+        }
         Ok(())
     }
 

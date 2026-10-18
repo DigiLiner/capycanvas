@@ -166,3 +166,57 @@ fn visit(
 pub fn connector(c: &layer_ui::DrawerConnection, out: &mut Vec<BackdropRegion>) {
     out.extend(c.glass().into_iter().map(|(bounds, radii)| BackdropRegion { bounds, radii, shape: BackdropRegion::SQUIRCLE }));
 }
+
+#[derive(Default)]
+pub(crate) struct Chrome {
+    revision: std::cell::Cell<u64>,
+    frames: std::cell::RefCell<std::collections::VecDeque<(u64, i64, gsk::RenderNode)>>,
+}
+pub(crate) const CHROME_HOLD_US: i64 = 100_000;
+impl Chrome {
+    pub fn revision(&self) -> u64 {
+        self.revision.get()
+    }
+    pub fn compose(&self, node: gsk::RenderNode, changed: bool, presented: Option<u64>, now: i64) -> (gsk::RenderNode, u64, bool) {
+        let mut frames = self.frames.borrow_mut();
+        if changed || frames.is_empty() {
+            if changed {
+                self.revision.set(self.revision.get() + 1);
+            }
+            frames.push_back((self.revision.get(), now, node));
+        } else {
+            frames.back_mut().unwrap().2 = node;
+        }
+        let latest = frames.len() - 1;
+        let shown = presented
+            .and_then(|presented| frames.iter().rposition(|(revision, ..)| *revision <= presented))
+            .filter(|&index| index < latest && now - frames[index + 1].1 < CHROME_HOLD_US)
+            .unwrap_or(latest);
+        frames.drain(..shown);
+        let (revision, _, node) = frames.front().unwrap().clone();
+        (node, revision, frames.len() > 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gtk::prelude::*;
+
+    #[test]
+    fn chrome_shows_the_committed_revision_until_the_canvas_reports_or_the_hold_expires() {
+        let node = |shade: f32| -> gsk::RenderNode {
+            gsk::ColorNode::new(&gtk::gdk::RGBA::new(shade, 0., 0., 1.), &gtk::graphene::Rect::new(0., 0., 1., 1.)).upcast()
+        };
+        let shade = |node: &gsk::RenderNode| node.downcast_ref::<gsk::ColorNode>().unwrap().color().red();
+        let chrome = Chrome::default();
+        let shown = |(node, revision, waiting): (gsk::RenderNode, u64, bool)| (shade(&node), revision, waiting);
+        assert_eq!(shown(chrome.compose(node(0.), false, Some(0), 0)), (0., 0, false));
+        assert_eq!(shown(chrome.compose(node(0.25), true, Some(0), 10)), (0., 0, true));
+        assert_eq!(shown(chrome.compose(node(0.5), false, Some(0), 20)), (0., 0, true));
+        assert_eq!(shown(chrome.compose(node(0.5), false, Some(1), 30)), (0.5, 1, false));
+        assert_eq!(shown(chrome.compose(node(0.75), true, Some(1), 40)), (0.5, 1, true));
+        assert_eq!(shown(chrome.compose(node(0.75), false, Some(1), 40 + CHROME_HOLD_US)), (0.75, 2, false));
+        assert_eq!(shown(chrome.compose(node(1.), true, None, 50 + CHROME_HOLD_US)), (1., 3, false));
+    }
+}

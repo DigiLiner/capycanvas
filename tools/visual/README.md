@@ -11,6 +11,7 @@ reference at the same viewport, scale, theme, document and workspace.
 | `check_icon_paints.py`, `check_control_colors.py` | Flat-fill checks for icon and control-color fixtures. |
 | `tool_action_fixture.py` | Builds the tool-action fixture from an inventory. |
 | `mac-capture.swift` | Captures the frontmost Mac editor window. |
+| `ui_motion.py` | Summarizes GTK compositor recordings: where pixels change more than once. |
 
 Set up the Python environment once, and check the comparator after changing it:
 
@@ -60,6 +61,24 @@ must use the same theme, document, workspace and camera. On Apple debug builds,
 `CAPY_INITIAL_ACTIONS` sets up the matching state, for example
 `[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"zen_mode"}]`
 for `partial-zen`.
+
+## GTK motion recordings
+
+`native_ui_motion_recording` paints stripes behind the panels, then records
+every composited frame while it switches Sketch, Paint and Photo, opens and
+closes Paint's right column and selects a tab. `record_start` and
+`record_stop` events in `native-input.js` drive the recording.
+
+```sh
+LAYER_NATIVE_CAPTURE_DIR=$PWD/artifacts/ui-motion/run CAPY_NATIVE_TEST_THEME=light \
+  bash tools/performance/workspace-motion.sh gtk --native-test=native_ui_motion_recording --native-storage
+python3 tools/visual/ui_motion.py artifacts/ui-motion/run artifacts/ui-motion/report
+```
+
+Each recording gets a contact sheet, a heatmap of pixels that changed once
+(green), twice (yellow) or more (red), and `report.json` with frame times from
+the pointer release. A layout change should appear in one frame; repeated
+changes are expected only for the pressed control, tooltips and live data.
 
 ## Comparing images
 

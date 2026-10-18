@@ -57,16 +57,18 @@ pub struct LayerPanel {
     owner: Rc<RefCell<Weak<Workspace>>>,
     rows: Rc<RefCell<HashMap<usize, Row>>>,
     connections: connections::Connections,
-    previews: RefCell<HashMap<(u64, bool), (u64, gdk::Texture)>>,
+    previews: Previews,
     requested: RefCell<HashMap<(u64, bool), u64>>,
     pending: RefCell<HashMap<u64, (u64, bool, u64)>>,
     next_preview: Cell<u64>,
     renderer: Cell<u64>,
 }
+type Previews = Rc<RefCell<HashMap<(u64, bool), (u64, gdk::Texture)>>>;
 #[derive(Clone)]
 struct Row {
     copy: Rc<RefCell<LayerCopy>>,
     owner: Rc<RefCell<Weak<Workspace>>>,
+    previews: Previews,
     id: Cell<u64>,
     bound: Cell<bool>,
     swipe: crate::swipe_row::SwipeRow,
@@ -475,10 +477,13 @@ impl LayerPanel {
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         let rows: Rc<RefCell<HashMap<usize, Row>>> = Rc::default();
+        let previews = Previews::default();
         let connections = connections::Connections::new(rows.clone());
         factory.connect_setup(glib::clone!(
             #[weak]
             connections,
+            #[strong]
+            previews,
             #[strong]
             copy,
             #[strong]
@@ -915,6 +920,7 @@ impl LayerPanel {
                     Row {
                         copy: copy.clone(),
                         owner: owner.clone(),
+                        previews: previews.clone(),
                         id: Cell::new(0),
                         bound: Cell::new(false),
                         swipe,
@@ -1052,7 +1058,7 @@ impl LayerPanel {
             context,
             owner,
             rows,
-            previews: Default::default(),
+            previews,
             requested: Default::default(),
             pending: Default::default(),
             next_preview: Cell::new(1),
@@ -1587,8 +1593,9 @@ impl Row {
             self.swipe.reset();
             self.name_stack.set_visible_child_name("name");
             self.name_entry.set_text("");
-            self.content_image.set_paintable(None::<&gdk::Paintable>);
-            self.mask_image.set_paintable(None::<&gdk::Paintable>);
+            let previews = self.previews.borrow();
+            self.content_image.set_paintable(previews.get(&(s.id, false)).map(|(_, texture)| texture));
+            self.mask_image.set_paintable(previews.get(&(s.id, true)).map(|(_, texture)| texture));
         }
         self.root.set_widget_name(&format!("art-layer-{}", s.id));
         self.swipe.set_actions(s);

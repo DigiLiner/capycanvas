@@ -187,6 +187,11 @@ mod allocation {
             }
         }
         fn size_allocate(&self, width: i32, height: i32, _: i32) {
+            if let Some(owner) = self.owner.borrow().upgrade()
+                && owner.measure_on_allocate.replace(false)
+            {
+                owner.settle_measurements([width as f32, height as f32]);
+            }
             let mut resolved = self.layout.borrow().workspace(
                 width as f32,
                 height as f32,
@@ -341,10 +346,13 @@ mod allocation {
                 }
             }
         }
-        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+        fn snapshot(&self, target: &gtk::Snapshot) {
+            let composed = gtk::Snapshot::new();
+            let snapshot = &composed;
             let owner = self.owner.borrow().upgrade();
             let mut nodes = Vec::new();
             let mut holes = Vec::new();
+            let mut projections = Vec::new();
             for (order, (slot, child)) in self.children.borrow().iter().enumerate() {
                 let native = gtk::Snapshot::new();
                 if child.has_css_class("expanded-panel") {
@@ -364,7 +372,7 @@ mod allocation {
                     holes.extend(
                         owner
                             .navigator_overviews
-                            .project_child(self.obj().upcast_ref(), child, order, node.as_ref())
+                            .project_child(self.obj().upcast_ref(), child, order, node.as_ref(), &mut projections)
                             .into_iter()
                             .map(|hole| (order, hole)),
                     );
@@ -372,6 +380,7 @@ mod allocation {
                 nodes.push((*slot, node));
             }
             let mut connectors = Vec::new();
+            let mut chrome_changed = false;
             if let Some(owner) = &owner {
                 let mut regions = Vec::new();
                 if let Some(glass) = owner.palette.get().map(|p| p.glass).filter(|g| g.transparency.enabled()) {
@@ -386,16 +395,9 @@ mod allocation {
                 }
                 if *owner.glass.borrow() != regions {
                     *owner.glass.borrow_mut() = regions;
-                    if !owner.glass_wake_pending.replace(true) {
-                        let owner = Rc::downgrade(owner);
-                        glib::idle_add_local_once(move || {
-                            if let Some(owner) = owner.upgrade() {
-                                owner.glass_wake_pending.set(false);
-                                owner.wake();
-                            }
-                        });
-                    }
+                    chrome_changed = true;
                 }
+                chrome_changed |= owner.navigator_overviews.commit(projections);
             }
             for (order, (slot, node)) in nodes.iter().enumerate() {
                 let Some(node) = node else {
@@ -439,6 +441,12 @@ mod allocation {
                         &[gdk::RGBA::new(0.38, 0.68, 1.0, 0.95); 4],
                     );
                 }
+            }
+            let composed = composed.to_node();
+            let snapshot = target;
+            match &owner {
+                Some(owner) => owner.present_chrome(snapshot, composed, chrome_changed),
+                None => if let Some(node) = composed { snapshot.append_node(&node); },
             }
             if let Some(owner) = &owner
                 && let Some(drag) = owner.workspace_drag.borrow().as_ref()
@@ -660,23 +668,6 @@ impl DockSurface {
                 None => { overlay.1.insert_after(self, children.last().map(|(_, w)| w)); children.push(overlay); }
             }
         }
-    }
-    fn clear_docks(&self) {
-        self.remove_slots(|slot| {
-            !matches!(
-                slot,
-                Slot::Canvas
-                    | Slot::Header
-                    | Slot::ZenCapy
-                    | Slot::Status
-                    | Slot::CanvasBar
-                    | Slot::PressureCalibration
-                    | Slot::Drawer(_)
-                    | Slot::DrawerShadow(_)
-                    | Slot::DrawerConnection(_)
-                    | Slot::Divider(_)
-            )
-        });
     }
     fn remove_slots(&self, remove: impl Fn(Slot) -> bool) {
         if !self
@@ -958,7 +949,12 @@ pub struct Workspace {
     navigator: crate::navigator::Navigator,
     navigator_overviews: Rc<crate::navigator::Overviews>,
     glass: RefCell<Vec<layer_render_wgpu::BackdropRegion>>,
-    glass_wake_pending: Cell<bool>,
+    chrome: crate::glass::Chrome,
+    chrome_released: Cell<u64>,
+    chrome_presented: Cell<bool>,
+    chrome_hold: Cell<bool>,
+    chrome_moving: Cell<bool>,
+    measure_on_allocate: Cell<bool>,
     pub(crate) layer_panel: crate::layers::LayerPanel,
     pub(crate) effects: Rc<crate::effects::EffectPanels>,
     pub(crate) view_info: Rc<crate::zoom_readout::ZoomReadout>,
@@ -1321,7 +1317,12 @@ impl Workspace {
             navigator,
             navigator_overviews,
             glass: RefCell::new(Vec::new()),
-            glass_wake_pending: Cell::new(false),
+            chrome: Default::default(),
+            chrome_released: Cell::new(0),
+            chrome_presented: Cell::new(false),
+            chrome_hold: Cell::new(false),
+            chrome_moving: Cell::new(false),
+            measure_on_allocate: Cell::new(false),
             layer_panel,
             effects,
             view_info,
@@ -1366,7 +1367,6 @@ impl Workspace {
         this.palette_panel.bind(&this);
         this.color_strip.bind(&this);
         this.navigator.bind(&this);
-        this.navigator_overviews.bind(&this);
         this.customization.bind(&this);
         this.preferences.bind(&this);
         this.command_bar.bind(&this);
@@ -2280,15 +2280,17 @@ impl Workspace {
                 if change.regions != 0 {
                     let pending_layout = self.reset_workspace_publication();
                     let moving = publication.as_ref().is_some_and(|u| u.drag.is_some());
-                    self.refresh(
-                        change.regions
-                            | if moving || pending_layout {
-                                regions::LAYOUT
-                            } else {
-                                0
-                            },
-                    );
+                    let refreshed = change.regions
+                        | if moving || pending_layout {
+                            regions::LAYOUT
+                        } else {
+                            0
+                        };
+                    self.refresh(refreshed);
                     self.workspaces.observe(self, change.regions);
+                    if refreshed & regions::LAYOUT != 0 && !moving {
+                        self.measure_on_allocate.set(true);
+                    }
                 }
                 if let Some(update) = publication.filter(|update| {
                     change.regions != 0
@@ -2460,6 +2462,8 @@ impl Workspace {
                             .navigator_overviews
                             .placements(g.session.state(), area.scale_factor() as f32);
                         g.session.renderer_mut().overviews = overviews;
+                        g.session.renderer_mut().chrome = this.chrome.revision();
+                        g.session.renderer_mut().chrome_hold = this.chrome_hold.get();
                         let scale = area.scale_factor() as f32;
                         let blur = g.session.state().palette.glass.blur;
                         g.session.renderer_mut().backdrop_style = layer_render_wgpu::BackdropBlurStyle {
@@ -2551,6 +2555,12 @@ impl Workspace {
         let wake = gtk::gio::SimpleAction::new("wake", None);
         wake.connect_activate(glib::clone!(#[weak(rename_to = this)] self, move |_, _| this.wake()));
         actions.add_action(&wake);
+        let chrome = gtk::gio::SimpleAction::new("chrome", None);
+        chrome.connect_activate(glib::clone!(#[weak(rename_to = this)] self, move |_, _| {
+            this.chrome_presented.set(true);
+            this.surface.queue_draw();
+        }));
+        actions.add_action(&chrome);
         self.area.insert_action_group("canvas", Some(&actions));
         self.area.connect_realize(glib::clone!(
             #[weak(rename_to = this)]
@@ -2932,6 +2942,42 @@ impl Workspace {
         self.update_backdrop();
     }
 
+    fn present_chrome(self: &Rc<Self>, snapshot: &gtk::Snapshot, node: Option<gtk::gsk::RenderNode>, changed: bool) {
+        let Some(node) = node else { return };
+        let previous = self.chrome_moving.replace(changed);
+        let moving = changed && (previous || self.workspace_drag.borrow().is_some());
+        if changed {
+            self.chrome_hold.set(!moving);
+        }
+        let presented = self.gpu.try_borrow().ok().and_then(|g| {
+            g.as_ref().filter(|g| g.session.engine().backend().startup.complete)
+                .map(|g| g.session.engine().backend().presented_chrome())
+        }).filter(|_| !moving);
+        let (node, revision, waiting) = self.chrome.compose(node, changed, presented, glib::monotonic_time());
+        snapshot.append_node(&node);
+        let weak = Rc::downgrade(self);
+        if changed {
+            glib::idle_add_local_once(glib::clone!(#[strong] weak, move || {
+                if let Some(w) = weak.upgrade() { w.wake_frame(!moving, false); }
+            }));
+        }
+        if waiting && changed {
+            glib::timeout_add_local_once(
+                std::time::Duration::from_micros(crate::glass::CHROME_HOLD_US as u64),
+                glib::clone!(#[strong] weak, move || {
+                    if let Some(w) = weak.upgrade() { w.surface.queue_draw(); }
+                }),
+            );
+        }
+        let shown = self.chrome_released.replace(revision) != revision;
+        if self.chrome_presented.replace(false) || shown {
+            glib::idle_add_local_once(move || {
+                if let Some(w) = weak.upgrade() && let Some(g) = w.gpu.borrow().as_ref() {
+                    g.session.engine().backend().release_chrome(revision);
+                }
+            });
+        }
+    }
     fn update_backdrop(&self) {
         if let Some(background) = self.backdrop.borrow_mut().as_mut()
             && let Some(palette) = self.palette.get()
@@ -2974,20 +3020,52 @@ impl Workspace {
     // Also run synchronously at release: an idle measurement from before a
     // tear-off may describe a different width or an older layer count.
     fn measure_panels(self: &Rc<Self>) {
-        let Some(layout) = self
-            .gpu
-            .borrow()
-            .as_ref()
-            .map(|g| g.session.state().workspace.layout.clone())
-        else {
-            return;
-        };
+        for _ in 0..3 {
+            let Some(layout) = self
+                .gpu
+                .borrow()
+                .as_ref()
+                .map(|g| g.session.state().workspace.layout.clone())
+            else {
+                return;
+            };
+            let measurements = self.panel_measurements(&layout, [self.surface.width().max(1) as f32, self.surface.height().max(1) as f32]);
+            if measurements == layout.measurements {
+                return;
+            }
+            self.dispatch(UiAction::MeasurePanels { measurements });
+        }
+    }
+    fn settle_measurements(self: &Rc<Self>, viewport: [f32; 2]) {
+        let mut settled = None;
+        for _ in 0..3 {
+            let layout = self.surface.imp().layout.borrow().clone();
+            let measurements = self.panel_measurements(&layout, viewport);
+            if measurements == layout.measurements {
+                break;
+            }
+            self.surface.imp().layout.borrow_mut().measurements.clone_from(&measurements);
+            settled = Some(measurements);
+        }
+        if let Some(measurements) = settled {
+            let weak = Rc::downgrade(self);
+            glib::idle_add_local_once(move || {
+                if let Some(w) = weak.upgrade() { w.dispatch(UiAction::MeasurePanels { measurements }); }
+            });
+        }
+    }
+    fn panel_measurements(&self, layout: &DockLayout, viewport: [f32; 2]) -> Vec<PanelMeasurement> {
+        let resolved = layout.workspace(viewport[0], viewport[1], HEADER_HEIGHT, STATUS_HEIGHT);
         let groups = self.groups.borrow();
-        let resolved = self.resolved();
-        let measurements = layout
+        layout
             .panels
             .iter()
-            .map(|config| {
+            .filter_map(|config| {
+                let placed = resolved.groups.iter().find(|g| g.panels.contains(&config.id));
+                let previous = layout.measurements.iter().find(|m| m.panel == config.id).copied();
+                let Some(widget) = self.panel_view(config.id).filter(|_| placed.is_some() || previous.is_none()) else {
+                    return previous;
+                };
                 let tab_width = groups
                     .iter()
                     .flat_map(|g| &g.tabs)
@@ -2995,12 +3073,7 @@ impl Workspace {
                     .map_or(0.0, |(_, tab)| {
                         tab.measure(gtk::Orientation::Horizontal, -1).1 as f32
                     });
-                let width = resolved
-                    .groups
-                    .iter()
-                    .find(|g| g.panels.contains(&config.id))
-                    .map_or(232.0, |g| g.bounds.width);
-                let widget = self.panel_widget(config.id);
+                let width = placed.map_or_else(|| config.id.default_width(viewport[0]), |g| g.bounds.width);
                 let content = widget
                     .downcast_ref::<gtk::ScrolledWindow>()
                     .and_then(|s| s.child())
@@ -3028,18 +3101,14 @@ impl Workspace {
                         }),
                     ),
                 };
-                PanelMeasurement {
+                Some(PanelMeasurement {
                     panel: config.id,
                     tab_width,
                     content_height,
                     scroll,
-                }
+                })
             })
-            .collect::<Vec<_>>();
-        drop(groups);
-        if measurements != layout.measurements {
-            self.dispatch(UiAction::MeasurePanels { measurements });
-        }
+            .collect()
     }
     fn queue_toolbar_presentation(self: &Rc<Self>, resolved: &ResolvedLayout) {
         if !self.customization.presentation_stale(resolved)
@@ -3082,14 +3151,19 @@ impl Workspace {
         *self.surface.imp().layout.borrow_mut() = layout.clone();
         let resolved = self.resolved();
         if !self.customization.reconcile_toolbars(self, layout, &resolved) { return; }
-        let same_groups = self.groups.borrow().len() == resolved.groups.len()
-            && self.groups.borrow().iter().all(|view| {
+        let stale: Vec<GroupView> = {
+            let mut groups = self.groups.borrow_mut();
+            let (current, stale) = std::mem::take(&mut *groups).into_iter().partition(|view: &GroupView| {
                 resolved.groups.iter().any(|g| {
                     view.id == g.id
                         && view.panels == g.panels
                         && view.tabs_visible == g.tabs_visible
                 })
             });
+            *groups = current;
+            stale
+        };
+        let rebuilt = !stale.is_empty() || self.groups.borrow().len() != resolved.groups.len();
         let same_dividers = self
             .surface
             .imp()
@@ -3104,16 +3178,22 @@ impl Workspace {
                 }
             })
             .eq(resolved.dividers.iter().map(|d| d.id));
-        if !same_groups {
+        if stale.iter().any(|view| self.customization.expands(&view.root)) {
             self.customization.collapse_panel();
-            for panel in layout.panels.iter().map(|p| self.panel_widget(p.id)) {
-                if let Some(stack) = panel.parent().and_downcast::<gtk::Stack>() {
-                    stack.remove(&panel);
+        }
+        for view in &stale {
+            for widget in view.panels.iter().filter_map(|panel| self.panel_view(*panel)) {
+                if widget.parent().as_ref() == Some(view.stack.upcast_ref()) {
+                    view.stack.remove(&widget);
                 }
             }
-            self.surface.clear_docks();
-            self.groups.borrow_mut().clear();
-            for group in &resolved.groups {
+        }
+        self.surface.remove_slots(|slot| {
+            matches!(slot, Slot::Group(id) if stale.iter().any(|view| view.id == id))
+        });
+        if rebuilt {
+            let built: Vec<u32> = self.groups.borrow().iter().map(|view| view.id).collect();
+            for group in resolved.groups.iter().filter(|g| !built.contains(&g.id)) {
                 let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 let root = PanelColumns::new(&column);
                 if group.floating {
@@ -3185,6 +3265,9 @@ impl Workspace {
                 stack.set_vhomogeneous(false);
                 for &panel in &group.panels {
                     let widget = self.panel_widget(panel);
+                    if let Some(previous) = widget.parent().and_downcast::<gtk::Stack>() {
+                        previous.remove(&widget);
+                    }
                     stack.add_named(&widget, Some(&format!("{panel:?}")));
                 }
                 column.append(&stack);
@@ -3216,7 +3299,7 @@ impl Workspace {
                 });
             }
         }
-        if !same_groups || !same_dividers {
+        if rebuilt || !same_dividers {
             // The pressed divider owns GTK's implicit pointer grab and resize
             // cursor. Keep it parented when collapse/expansion rebuilds panels.
             self.surface.remove_slots(|slot| {
