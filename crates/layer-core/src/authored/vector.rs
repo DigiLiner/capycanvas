@@ -27,16 +27,32 @@ impl AnchorKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Anchor { pub point: [f64; 2], pub in_handle: [f64; 2], pub out_handle: [f64; 2], pub kind: AnchorKind }
+pub struct Anchor { point: [f32; 2], in_handle: [f32; 2], out_handle: [f32; 2], pub kind: AnchorKind }
+fn narrow(v: [f64; 2]) -> [f32; 2] { [v[0] as f32, v[1] as f32] }
+fn widen(v: [f32; 2]) -> [f64; 2] { [f64::from(v[0]), f64::from(v[1])] }
 impl Anchor {
-    pub fn corner(point: [f64; 2]) -> Self { Self { point, in_handle: [0.; 2], out_handle: [0.; 2], kind: AnchorKind::CORNER } }
-    pub fn incoming(&self) -> [f64; 2] { [self.point[0] + self.in_handle[0], self.point[1] + self.in_handle[1]] }
-    pub fn outgoing(&self) -> [f64; 2] { [self.point[0] + self.out_handle[0], self.point[1] + self.out_handle[1]] }
-    fn finite(&self) -> bool { self.point.iter().chain(&self.in_handle).chain(&self.out_handle).all(|v| v.is_finite()) }
+    pub fn new(point: [f64; 2], in_handle: [f64; 2], out_handle: [f64; 2], kind: AnchorKind) -> Self {
+        Self { point: narrow(point), in_handle: narrow(in_handle), out_handle: narrow(out_handle), kind }
+    }
+    pub fn corner(point: [f64; 2]) -> Self { Self::new(point, [0.; 2], [0.; 2], AnchorKind::CORNER) }
+    pub fn from_bits(values: [f32; 6], kind: AnchorKind) -> Self {
+        let [px, py, ix, iy, ox, oy] = values;
+        Self { point: [px, py], in_handle: [ix, iy], out_handle: [ox, oy], kind }
+    }
+    pub fn bits(&self) -> [f32; 6] {
+        [self.point[0], self.point[1], self.in_handle[0], self.in_handle[1], self.out_handle[0], self.out_handle[1]]
+    }
+    pub fn point(&self) -> [f64; 2] { widen(self.point) }
+    pub fn in_handle(&self) -> [f64; 2] { widen(self.in_handle) }
+    pub fn out_handle(&self) -> [f64; 2] { widen(self.out_handle) }
+    pub fn with_out_handle(self, handle: [f64; 2]) -> Self { Self { out_handle: narrow(handle), ..self } }
+    pub fn incoming(&self) -> [f64; 2] { let [p, h] = [self.point(), self.in_handle()]; [p[0] + h[0], p[1] + h[1]] }
+    pub fn outgoing(&self) -> [f64; 2] { let [p, h] = [self.point(), self.out_handle()]; [p[0] + h[0], p[1] + h[1]] }
+    fn finite(&self) -> bool { self.bits().iter().all(|v| v.is_finite()) }
     pub fn transformed(&self, map: impl Fn([f64; 2]) -> [f64; 2]) -> Self {
-        let point = map(self.point);
+        let point = map(self.point());
         let relative = |handle: [f64; 2]| { let [x, y] = map(handle); [x - point[0], y - point[1]] };
-        Self { point, in_handle: relative(self.incoming()), out_handle: relative(self.outgoing()), kind: self.kind }
+        Self::new(point, relative(self.incoming()), relative(self.outgoing()), self.kind)
     }
 }
 
@@ -76,7 +92,7 @@ impl Subpath {
     pub fn segment_count(&self) -> usize { if self.closed { self.len } else { self.len.saturating_sub(1) } }
     pub fn segment(&self, index: usize) -> Segment {
         let (a, b) = (self.anchor(index), self.anchor((index + 1) % self.len));
-        Segment { from: a.point, control: [a.outgoing(), b.incoming()], to: b.point }
+        Segment { from: a.point(), control: [a.outgoing(), b.incoming()], to: b.point() }
     }
     pub fn segments(&self) -> impl Iterator<Item = Segment> + '_ { (0..self.segment_count()).map(|i| self.segment(i)) }
     pub fn with_anchor(&self, index: usize, anchor: Anchor) -> Self {
@@ -120,7 +136,7 @@ impl PathGeometry {
             segments += subpath.segment_count();
             for anchor in subpath.anchors() {
                 if !anchor.finite() { return Err("Path coordinates must be finite"); }
-                for point in [anchor.point, anchor.incoming(), anchor.outgoing()] {
+                for point in [anchor.point(), anchor.incoming(), anchor.outgoing()] {
                     if !point.iter().all(|v| v.is_finite()) { return Err("Path coordinates must be finite"); }
                     hull = [hull[0].min(point[0]), hull[1].min(point[1]), hull[2].max(point[0]), hull[3].max(point[1])];
                 }
@@ -151,7 +167,17 @@ pub enum Cap { #[default] Butt, Round, Square }
 pub enum Join { #[default] Miter, Round, Bevel }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WidthKnot { pub segment: u32, pub t: f64, pub left: f64, pub right: f64 }
+pub struct WidthKnot { segment: u32, t: f32, left: f32, right: f32 }
+impl WidthKnot {
+    pub fn new(segment: u32, t: f64, left: f64, right: f64) -> Self { Self { segment, t: t as f32, left: left as f32, right: right as f32 } }
+    pub fn from_bits(segment: u32, values: [f32; 3]) -> Self { let [t, left, right] = values; Self { segment, t, left, right } }
+    pub fn bits(&self) -> [f32; 3] { [self.t, self.left, self.right] }
+    pub fn segment(&self) -> u32 { self.segment }
+    pub fn t(&self) -> f64 { f64::from(self.t) }
+    pub fn left(&self) -> f64 { f64::from(self.left) }
+    pub fn right(&self) -> f64 { f64::from(self.right) }
+    fn place(&self) -> f64 { f64::from(self.segment) + self.t() }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct WidthProfile { knots: Box<[WidthKnot]> }
 impl WidthProfile {
@@ -165,17 +191,16 @@ impl WidthProfile {
         Ok(Self { knots: knots.into() })
     }
     pub fn knots(&self) -> &[WidthKnot] { &self.knots }
-    pub fn max_factor(&self) -> f64 { self.knots.iter().map(|k| k.left.max(k.right)).fold(0., f64::max) }
+    pub fn max_factor(&self) -> f64 { self.knots.iter().map(|k| k.left().max(k.right())).fold(0., f64::max) }
     pub fn at(&self, segment: u32, t: f64) -> [f64; 2] {
         let position = f64::from(segment) + t;
-        let place = |k: &WidthKnot| f64::from(k.segment) + k.t;
-        let after = self.knots.partition_point(|k| place(k) <= position);
-        if after == 0 { let k = &self.knots[0]; return [k.left, k.right]; }
-        if after == self.knots.len() { let k = &self.knots[after - 1]; return [k.left, k.right]; }
+        let after = self.knots.partition_point(|k| k.place() <= position);
+        if after == 0 { let k = &self.knots[0]; return [k.left(), k.right()]; }
+        if after == self.knots.len() { let k = &self.knots[after - 1]; return [k.left(), k.right()]; }
         let (a, b) = (&self.knots[after - 1], &self.knots[after]);
-        let span = place(b) - place(a);
-        let f = if span > 0. { (position - place(a)) / span } else { 0. };
-        [a.left + (b.left - a.left) * f, a.right + (b.right - a.right) * f]
+        let span = b.place() - a.place();
+        let f = if span > 0. { (position - a.place()) / span } else { 0. };
+        [a.left() + (b.left() - a.left()) * f, a.right() + (b.right() - a.right()) * f]
     }
     pub fn validate_for(&self, segments: usize) -> Result<(), &'static str> {
         if self.knots.iter().any(|k| k.segment as usize >= segments.max(1)) { return Err("Width knot names a missing segment"); }

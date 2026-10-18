@@ -13,7 +13,7 @@ fn smooth(points: &[[f64; 2]], closed: bool) -> Subpath {
         let previous = points[if i == 0 { if closed { n - 1 } else { 0 } } else { i - 1 }];
         let next = points[if i + 1 == n { if closed { 0 } else { n - 1 } } else { i + 1 }];
         let tangent = [(next[0] - previous[0]) / 6., (next[1] - previous[1]) / 6.];
-        Anchor { point: points[i], in_handle: [-tangent[0], -tangent[1]], out_handle: tangent, kind: AnchorKind::SMOOTH }
+        Anchor::new(points[i], [-tangent[0], -tangent[1]], tangent, AnchorKind::SMOOTH)
     }).collect();
     Subpath::new(&anchors, closed)
 }
@@ -42,7 +42,7 @@ fn scenes() -> Vec<(&'static str, PathItem)> {
         ("hairline and wide strokes", path(vec![smooth(&[[10., 20.], [120., 60.], [240., 30.]], false), smooth(&[[20., 200.], [128., 140.], [236., 210.]], false)],
             vec![round_stroke(0.4, None)], FillRule::NonZero)),
         ("tapered ink", path(vec![smooth(&[[30., 40.], [90., 200.], [170., 60.], [230., 220.]], false)],
-            vec![round_stroke(14., Some(WidthProfile::new(vec![WidthKnot { segment: 0, t: 0., left: 0., right: 0. }, WidthKnot { segment: 1, t: 0.5, left: 1., right: 1. }, WidthKnot { segment: 2, t: 1., left: 0.05, right: 0.05 }]).unwrap()))], FillRule::NonZero)),
+            vec![round_stroke(14., Some(WidthProfile::new(vec![WidthKnot::new(0, 0., 0., 0.), WidthKnot::new(1, 0.5, 1., 1.), WidthKnot::new(2, 1., 0.05, 0.05)]).unwrap()))], FillRule::NonZero)),
         ("thick round stroke over fill", path(vec![blob], vec![fill([0.9, 0.9, 0.2, 1.]), round_stroke(40., None)], FillRule::NonZero)),
         ("miter outline", path(vec![corners(&[[30., 200.], [128., 40.], [226., 200.]], false)], vec![PaintEntry::Stroke(Stroke::new(paint([0., 0., 0., 1.]), 12.))], FillRule::NonZero)),
     ]
@@ -117,8 +117,8 @@ fn fine(item: &PathItem, level: u32) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<([f64; 2], 
     let mut lines = Vec::new();
     let mut base = 0u32;
     for subpath in item.geometry.subpaths() {
-        let mut ring = vec![map(subpath.anchor(0).point)];
-        let mut line = vec![(map(subpath.anchor(0).point), 0u32, 0.)];
+        let mut ring = vec![map(subpath.anchor(0).point())];
+        let mut line = vec![(map(subpath.anchor(0).point()), 0u32, 0.)];
         for (i, segment) in subpath.segments().enumerate() {
             tiles::flatten(&segment, map, 0.002, |p, t| { ring.push(p); line.push((p, base + i as u32, t)); });
         }

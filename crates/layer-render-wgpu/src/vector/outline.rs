@@ -87,7 +87,7 @@ pub(crate) fn outline(path: &PathItem, stroke: &Stroke, frame: &Frame) -> Vec<Ve
     let mut base = 0u32;
     for subpath in path.geometry.subpaths() {
         let [l, r] = width(base, 0.);
-        let mut points = vec![Point { p: map(subpath.anchor(0).point), left: l, right: r }];
+        let mut points = vec![Point { p: map(subpath.anchor(0).point()), left: l, right: r }];
         for (index, segment) in subpath.segments().enumerate() {
             let global = base + index as u32;
             flatten(&segment, map, TOLERANCE, |p, t| { let [left, right] = width(global, t); points.push(Point { p, left, right }); });

@@ -56,7 +56,7 @@ pub(crate) fn flatten(segment: &Segment, map: impl Fn([f64; 2]) -> [f64; 2], tol
 
 fn polylines(path: &PathItem, frame: &Frame) -> Vec<Vec<[f64; 2]>> {
     path.geometry.subpaths().iter().map(|subpath| {
-        let mut points = vec![frame.map(subpath.anchor(0).point)];
+        let mut points = vec![frame.map(subpath.anchor(0).point())];
         for segment in subpath.segments() { flatten(&segment, |p| frame.map(p), TOLERANCE, |p, _| points.push(p)); }
         points
     }).collect()
@@ -221,7 +221,7 @@ fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke,
 
 fn centerline(subpath: &Subpath, segment_base: u32, stroke: &Stroke, half: f64, frame: &Frame) -> Vec<([f64; 2], [f64; 2])> {
     let width = |segment: u32, t: f64| stroke.profile.as_ref().map_or([half; 2], |p| p.at(segment, t).map(|f| f * half));
-    let mut points = vec![(frame.map(subpath.anchor(0).point), width(segment_base, 0.))];
+    let mut points = vec![(frame.map(subpath.anchor(0).point()), width(segment_base, 0.))];
     for (index, segment) in subpath.segments().enumerate() {
         let global = segment_base + index as u32;
         flatten(&segment, |p| frame.map(p), TOLERANCE, |p, t| points.push((p, width(global, t))));

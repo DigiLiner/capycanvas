@@ -66,8 +66,8 @@ pub const MAX_PATH_ANCHORS: usize = 1 << 20;
 pub const MAX_PROPERTY_BYTES: usize = 16 << 20;
 pub const MAX_CHUNK_BYTES: usize = 64 << 20;
 pub const MAX_DEPTH: u32 = 64;
-const ANCHOR_BYTES: usize = 49;
-const KNOT_BYTES: usize = 28;
+const ANCHOR_BYTES: usize = 25;
+const KNOT_BYTES: usize = 16;
 
 fn invalid(message: &str) -> DecodeError { DecodeError::Invalid(format!("Invalid vector data: {message}")) }
 fn unsupported(message: &str) -> DecodeError { DecodeError::Unsupported(format!("Unsupported vector data: {message}")) }
@@ -90,6 +90,10 @@ impl<'a> Bytes<'a> {
     fn u32(&mut self) -> DecodeResult<u32> { Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap())) }
     fn u64(&mut self) -> DecodeResult<u64> { Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap())) }
     fn f32(&mut self) -> DecodeResult<f32> { Ok(f32::from_le_bytes(self.take(4)?.try_into().unwrap())) }
+    fn finite_f32(&mut self) -> DecodeResult<f32> {
+        let value = self.f32()?;
+        if value.is_finite() { Ok(value) } else { Err(invalid("nonfinite number")) }
+    }
     fn f64(&mut self) -> DecodeResult<f64> {
         let value = f64::from_le_bytes(self.take(8)?.try_into().unwrap());
         if value.is_finite() { Ok(value) } else { Err(invalid("nonfinite number")) }
@@ -208,8 +212,9 @@ fn decode_geometry(value: &[u8]) -> DecodeResult<PathGeometry> {
         let mut list = Vec::with_capacity(anchors as usize);
         for _ in 0..anchors {
             let kind = AnchorKind(bytes.u8()?);
-            let [px, py, ix, iy, ox, oy] = [bytes.f64()?, bytes.f64()?, bytes.f64()?, bytes.f64()?, bytes.f64()?, bytes.f64()?];
-            list.push(Anchor { point: [px, py], in_handle: [ix, iy], out_handle: [ox, oy], kind });
+            let mut values = [0f32; 6];
+            for value in &mut values { *value = bytes.finite_f32()?; }
+            list.push(Anchor::from_bits(values, kind));
         }
         subpaths.push(Subpath::new(&list, flags == 1));
     }
@@ -220,7 +225,7 @@ fn decode_profile(value: &[u8]) -> DecodeResult<WidthProfile> {
     let mut bytes = Bytes::new(value);
     let count = bytes.varuint()?;
     if count == 0 || count > (value.len() / KNOT_BYTES) as u64 { return Err(invalid("width knot count")); }
-    let knots = (0..count).map(|_| Ok(WidthKnot { segment: bytes.u32()?, t: bytes.f64()?, left: bytes.f64()?, right: bytes.f64()? }))
+    let knots = (0..count).map(|_| Ok(WidthKnot::from_bits(bytes.u32()?, [bytes.finite_f32()?, bytes.finite_f32()?, bytes.finite_f32()?])))
         .collect::<DecodeResult<Vec<_>>>()?;
     exact(bytes, ())?;
     WidthProfile::new(knots).map_err(|e| invalid(e))
@@ -401,7 +406,7 @@ pub fn encode_geometry(geometry: &PathGeometry) -> Vec<u8> {
         out.push(u8::from(subpath.closed));
         for a in subpath.anchors() {
             out.push(a.kind.0);
-            for v in [a.point[0], a.point[1], a.in_handle[0], a.in_handle[1], a.out_handle[0], a.out_handle[1]] { out.extend_from_slice(&v.to_le_bytes()); }
+            for v in a.bits() { out.extend_from_slice(&v.to_le_bytes()); }
         }
     }
     out
@@ -410,8 +415,8 @@ fn encode_profile(profile: &WidthProfile) -> Vec<u8> {
     let mut out = Vec::with_capacity(2 + profile.knots().len() * KNOT_BYTES);
     put_varuint(&mut out, profile.knots().len() as u64);
     for k in profile.knots() {
-        out.extend_from_slice(&k.segment.to_le_bytes());
-        for v in [k.t, k.left, k.right] { out.extend_from_slice(&v.to_le_bytes()); }
+        out.extend_from_slice(&k.segment().to_le_bytes());
+        for v in k.bits() { out.extend_from_slice(&v.to_le_bytes()); }
     }
     out
 }

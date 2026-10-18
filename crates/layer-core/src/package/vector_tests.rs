@@ -6,15 +6,15 @@ use std::sync::Arc;
 
 fn color(r: f32) -> Paint { Paint::color(RgbColor::new(Default::default(), [r, 0.25, 0.5, 1.]).unwrap()) }
 fn line(id: u64, points: &[[f64; 2]], width: f64) -> Record {
-    let anchors: Vec<_> = points.iter().map(|p| Anchor { point: *p, in_handle: [-1., 0.5], out_handle: [1., -0.5], kind: AnchorKind::SMOOTH }).collect();
+    let anchors: Vec<_> = points.iter().map(|p| Anchor::new(*p, [-1., 0.5], [1., -0.5], AnchorKind::SMOOTH)).collect();
     let geometry = PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap();
     let mut stroke = Stroke::new(color(0.1), width);
     stroke.cap = Cap::Round;
     stroke.join = Join::Round;
     stroke.profile = Some(Arc::new(WidthProfile::new(vec![
-        WidthKnot { segment: 0, t: 0., left: 0., right: 0. },
-        WidthKnot { segment: 0, t: 0.5, left: 1., right: 0.5 },
-        WidthKnot { segment: points.len().saturating_sub(2) as u32, t: 1., left: 0.2, right: 0.2 },
+        WidthKnot::new(0, 0., 0., 0.),
+        WidthKnot::new(0, 0.5, 1., 0.5),
+        WidthKnot::new(points.len().saturating_sub(2) as u32, 1., 0.2, 0.2),
     ]).unwrap()));
     Record::Path(PathItem::new(ItemId(id), Arc::new(geometry), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))
 }
@@ -67,7 +67,7 @@ fn every_v0_property_round_trips_canonically() {
 #[test]
 fn defaults_are_omitted_and_framing_is_minimal() {
     let (bytes, _) = round_trip(vec![Record::Path(PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.])], false)]).unwrap()), Arc::default()))]);
-    assert_eq!(bytes.len(), 1 + 8 + 1 + 2 + 3 + 49);
+    assert_eq!(bytes.len(), 1 + 8 + 1 + 2 + 3 + 25);
 }
 
 #[test]
@@ -77,8 +77,8 @@ fn long_paths_keep_runs_of_256_and_edit_one_run() {
     assert_eq!(subpath.runs().iter().map(|r| r.len()).collect::<Vec<_>>(), vec![256, 256, 256, 232]);
     let edited = subpath.with_anchor(600, Anchor::corner([-1., -1.]));
     for (index, (a, b)) in subpath.runs().iter().zip(edited.runs()).enumerate() { assert_eq!(Arc::ptr_eq(a, b), index != 2); }
-    assert_eq!(edited.anchor(600).point, [-1., -1.]);
-    assert_eq!(edited.anchors().rev().nth(999).unwrap().point, [0., 0.]);
+    assert_eq!(edited.anchor(600).point(), [-1., -1.]);
+    assert_eq!(edited.anchors().rev().nth(999).unwrap().point(), [0., 0.]);
     round_trip(vec![Record::Path(PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![edited]).unwrap()), Arc::default()))]);
 }
 
@@ -143,8 +143,8 @@ fn malformed_framing_is_invalid() {
     assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[]), 1, &mut 0)));
     assert!(is_invalid(decode_chunk(&record_bytes(PATH | IGNORABLE, 8, &[(GEOMETRY, geometry.clone())]), 1, &mut 0)));
     let mut nan = geometry.clone();
-    let at = nan.len() - 8;
-    nan[at..].copy_from_slice(&f64::NAN.to_le_bytes());
+    let at = nan.len() - 4;
+    nan[at..].copy_from_slice(&f32::NAN.to_le_bytes());
     assert!(is_invalid(decode_chunk(&record_bytes(PATH, 8, &[(GEOMETRY, nan)]), 1, &mut 0)));
     let two = [encode_chunk(&chunk(vec![line(1, &[[0., 0.], [1., 1.]], 1.)])), encode_chunk(&chunk(vec![line(1, &[[0., 0.], [1., 1.]], 1.)]))];
     assert!(matches!(decode_object(&[(&two[0], 1), (&two[1], 1)]), Err(DecodeError::Invalid(_))));

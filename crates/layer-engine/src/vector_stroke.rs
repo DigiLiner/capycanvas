@@ -79,7 +79,7 @@ pub fn polyline(samples: &[Sample]) -> Option<(PathGeometry, Option<WidthProfile
     let segments = samples.len().saturating_sub(1).max(1);
     let knots = samples.iter().enumerate().map(|(i, s)| {
         let (segment, t) = if i < segments { (i as u32, 0.) } else { ((segments - 1) as u32, 1.) };
-        WidthKnot { segment, t, left: s.1 / half, right: s.1 / half }
+        WidthKnot::new(segment, t, s.1 / half, s.1 / half)
     }).collect();
     Some((geometry, WidthProfile::new(knots).ok(), half * 2.))
 }
@@ -242,9 +242,9 @@ pub fn fit_line(samples: &[Sample], tolerance: f64) -> Option<(PathGeometry, Opt
     kinds.push(AnchorKind::CORNER);
     let mut anchors: Vec<Anchor> = Vec::with_capacity(fitted.cubics.len() + 1);
     for (i, cubic) in fitted.cubics.iter().enumerate() {
-        if i == 0 { anchors.push(Anchor { point: cubic[0], in_handle: [0.; 2], out_handle: sub(cubic[1], cubic[0]), kind: kinds[0] }); }
-        else { anchors.last_mut().unwrap().out_handle = sub(cubic[1], cubic[0]); }
-        anchors.push(Anchor { point: cubic[3], in_handle: sub(cubic[2], cubic[3]), out_handle: [0.; 2], kind: kinds[i + 1] });
+        if i == 0 { anchors.push(Anchor::new(cubic[0], [0.; 2], sub(cubic[1], cubic[0]), kinds[0])); }
+        else { let last = anchors.last_mut().unwrap(); *last = last.with_out_handle(sub(cubic[1], cubic[0])); }
+        anchors.push(Anchor::new(cubic[3], sub(cubic[2], cubic[3]), [0.; 2], kinds[i + 1]));
     }
     let geometry = PathGeometry::new(vec![Subpath::new(&anchors, false)]).ok()?;
     let widths: Vec<f64> = kept.iter().map(|s| s.1).collect();
@@ -260,9 +260,9 @@ pub fn fit_line(samples: &[Sample], tolerance: f64) -> Option<(PathGeometry, Opt
     let mut knots: Vec<WidthKnot> = Vec::new();
     for (i, w) in widths.iter().enumerate().filter(|(i, _)| keep[*i]) {
         let (segment, t) = fitted.params[i];
-        let factor = w / high;
-        if let Some(last) = knots.last() && (last.segment, last.t) >= (segment as u32, t) { continue; }
-        knots.push(WidthKnot { segment: segment as u32, t: t.clamp(0., 1.), left: factor, right: factor });
+        let knot = WidthKnot::new(segment as u32, t.clamp(0., 1.), w / high, w / high);
+        if let Some(last) = knots.last() && (last.segment(), last.t()) >= (knot.segment(), knot.t()) { continue; }
+        knots.push(knot);
     }
     Some((geometry, WidthProfile::new(knots).ok(), high * 2.))
 }
@@ -301,7 +301,7 @@ mod tests {
         samples.extend((1..100).map(|i| ([99., i as f64], 3.)));
         let (geometry, profile, _) = fit_line(&samples, 0.25).unwrap();
         assert!(profile.is_none());
-        let corner = geometry.subpaths()[0].anchors().any(|a| a.kind == AnchorKind::CORNER && distance(a.point, [99., 0.]) < 1.5);
+        let corner = geometry.subpaths()[0].anchors().any(|a| a.kind == AnchorKind::CORNER && distance(a.point(), [99., 0.]) < 1.5);
         assert!(corner, "{:?}", geometry.subpaths()[0].to_vec());
         assert!(deviation(&geometry, &samples) < 0.5);
         let (dot, _, width) = fit_line(&[([5., 5.], 2.)], 0.25).unwrap();

@@ -51,7 +51,7 @@ fn crowded_vector_layer_session_costs() {
         let records: Vec<Record> = (0..count).map(|i| {
             let x = (i % 400) as f64 * 10.;
             let y = (i / 400) as f64 * 6.;
-            let anchors: Vec<_> = (0..4).map(|k| Anchor { point: [x + k as f64 * 12., y + (k % 2) as f64 * 5.], in_handle: [-4., 0.], out_handle: [4., 0.], kind: AnchorKind::SMOOTH }).collect();
+            let anchors: Vec<_> = (0..4).map(|k| Anchor::new([x + k as f64 * 12., y + (k % 2) as f64 * 5.], [-4., 0.], [4., 0.], AnchorKind::SMOOTH)).collect();
             let mut stroke = Stroke::new(Paint::color(layer_core::color::RgbColor::BLACK), 3.);
             stroke.cap = Cap::Round; stroke.join = Join::Round;
             Record::Path(PathItem::new(ItemId(i + 1), Arc::new(PathGeometry::new(vec![Subpath::new(&anchors, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))))

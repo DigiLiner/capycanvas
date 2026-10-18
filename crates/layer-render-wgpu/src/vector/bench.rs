@@ -18,14 +18,14 @@ fn smooth(points: &[[f64; 2]], closed: bool) -> Subpath {
         let previous = points[if i == 0 { if closed { n - 1 } else { 0 } } else { i - 1 }];
         let next = points[if i + 1 == n { if closed { 0 } else { n - 1 } } else { i + 1 }];
         let t = [(next[0] - previous[0]) / 6., (next[1] - previous[1]) / 6.];
-        Anchor { point: points[i], in_handle: [-t[0], -t[1]], out_handle: t, kind: AnchorKind::SMOOTH }
+        Anchor::new(points[i], [-t[0], -t[1]], t, AnchorKind::SMOOTH)
     }).collect();
     Subpath::new(&anchors, closed)
 }
 fn round(width: f64, paint: Paint, profile: bool) -> PaintEntry {
     let mut stroke = Stroke::new(paint, width);
     stroke.cap = Cap::Round; stroke.join = Join::Round;
-    if profile { stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot { segment: 0, t: 0., left: 0.1, right: 0.1 }, WidthKnot { segment: 0, t: 0.6, left: 1., right: 1. }, WidthKnot { segment: 1, t: 1., left: 0.05, right: 0.05 }]).unwrap())); }
+    if profile { stroke.profile = Some(Arc::new(WidthProfile::new(vec![WidthKnot::new(0, 0., 0.1, 0.1), WidthKnot::new(0, 0.6, 1., 1.), WidthKnot::new(1, 1., 0.05, 0.05)]).unwrap())); }
     PaintEntry::Stroke(stroke)
 }
 pub(crate) fn scene_a(extent: [f64; 2]) -> Vec<PathItem> {

@@ -158,7 +158,7 @@ pub(crate) fn preview_damage(scene: SceneView<'_>, old: Option<&layer_render::Ve
     let mut bounds: Option<[f64; 4]> = None;
     for (line, half, profile) in [(old_line, old_half, old_profile), (new_line, new_half, new_profile)] {
         for i in first..line.len() {
-            let p = line.anchor(i).point;
+            let p = line.anchor(i).point();
             let r = width(half, profile, i).into_iter().fold(0., f64::max) + 2.;
             bounds = Some(layer_core::authored::vector::union(bounds, [p[0] - r, p[1] - r, p[0] + r, p[1] + r]));
         }

@@ -553,8 +553,8 @@ default butt), `join` (`u8` miter, round, bevel; default miter), `miter_limit`
 
 | Value | Encoding |
 | --- | --- |
-| Geometry | Varuint subpath count, at least one. Per subpath: varuint anchor count (at least one), `u8` flags (bit 0 closed), then per anchor a `u8` kind (0 corner, 1 smooth, 2 symmetric) and six F64 values: point, incoming handle offset, outgoing handle offset. Segment *i* is the cubic from anchor *i* through its outgoing handle and the next anchor's incoming handle; a closed subpath adds the closing segment. A single-anchor subpath is a dot. |
-| Width profile | Varuint knot count, at least one. Per knot: `u32` segment index counted across subpaths, F64 `t` in `[0,1]`, F64 left and right factors. Knots strictly ascend by (segment, `t`). Each side's offset is half the stroke width times its factor, interpolated linearly in segment plus `t` and held beyond the ends. |
+| Geometry | Varuint subpath count, at least one. Per subpath: varuint anchor count (at least one), `u8` flags (bit 0 closed), then per anchor a `u8` kind (0 corner, 1 smooth, 2 symmetric) and six F32 values: point, incoming handle offset, outgoing handle offset. F32 resolves 1/256 pixel across the largest canvas. Segment *i* is the cubic from anchor *i* through its outgoing handle and the next anchor's incoming handle; a closed subpath adds the closing segment. A single-anchor subpath is a dot. |
+| Width profile | Varuint knot count, at least one. Per knot: `u32` segment index counted across subpaths, F32 `t` in `[0,1]`, F32 left and right factors. Knots strictly ascend by (segment, `t`). Each side's offset is half the stroke width times its factor, interpolated linearly in segment plus `t` and held beyond the ends. |
 
 A reader treats an anchor kind it does not know as a corner when editing and
 keeps it otherwise.
@@ -570,7 +570,7 @@ path, 16 MiB per property, depth 64) are unsupported.
 
 **Invalid** framing: truncated or trailing bytes, non-minimal varuints,
 unordered or repeated tags, unbalanced End markers across the object, a record
-count that disagrees with the stream, nonfinite F64 values, duplicate item IDs,
+count that disagrees with the stream, nonfinite F32 or F64 values, duplicate item IDs,
 a path without geometry or ID, a paint entry without a paint, negative widths
 or factors and width knots outside their path.
 
