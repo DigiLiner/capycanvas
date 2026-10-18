@@ -135,6 +135,24 @@ pub fn paper_occurrence(scene: SceneView<'_>, from: Option<OccurrenceHandle>) ->
 }
 
 impl crate::Document {
+    pub fn bottom_paper(&self) -> Option<OccurrenceHandle> {
+        self.scene().children(None).last().copied().filter(|h| self.scene().effect(*h).is_some_and(|e| is_paper(e.program)))
+    }
+    pub(crate) fn validate_paper_order(&self, previous: &Self) -> Result<(), crate::DocumentError> {
+        let scene = self.scene();
+        let bottom = self.bottom_paper();
+        if let Some(paper) = previous.bottom_paper()
+            && scene.includes(paper) && scene.effect(paper).is_some_and(|e| is_paper(e.program)) && bottom != Some(paper) {
+            return Err(crate::DocumentError::ProtectedOccurrence(paper));
+        }
+        for &h in scene.order() {
+            if scene.effect(h).is_some_and(|e| is_paper(e.program))
+                && (previous.scene().position(h).is_none() || !previous.scene().effect(h).is_some_and(|e| is_paper(e.program))) && bottom != Some(h) {
+                return Err(crate::DocumentError::ProtectedOccurrence(h));
+            }
+        }
+        Ok(())
+    }
     pub fn paper(&self, target: Option<SourceTarget>) -> PaperSurface {
         let scene = self.scene();
         paper_occurrence(scene, target.and_then(|t| scene.source_owner(t))).and_then(|h| self.paper_surface(h)).unwrap_or_else(|| PaperSurface {
@@ -223,6 +241,54 @@ mod tests {
         doc.artwork.compositions.get_mut(doc.artwork.root).unwrap().resolution = Some(ImageResolution::ppi(600));
         doc.fit_papers_to_resolution();
         assert!((doc.paper(doc.working.target).mapping.0[0] - 600. / 25.4).abs() < 1e-12);
+    }
+    #[test]
+    fn paper_order_is_protected_across_layer_edits_and_history() {
+        use crate::{Edit, LayerBlend, authored::{RecordChange, Stack}};
+        let mut doc = document();
+        let paper = doc.bottom_paper().unwrap();
+        let ink = doc.scene().order()[0];
+        let original = doc.clone();
+        assert!(doc.move_occurrence_edit(paper, 0).is_err());
+        assert!(doc.group_layers_edit(&[ink, paper], LayerBlend::Normal, "Group").is_err());
+        assert!(doc.validate_duplicate_layers(&[paper]).is_err());
+        assert!(doc.duplicate_layers_edit(&[ink, paper]).is_err());
+        let root = doc.composition().result;
+        let reorder = Edit::Stack(RecordChange::replace(&doc.artwork.stacks, root, Some(Stack { entries: vec![paper, ink] })).unwrap());
+        assert!(doc.apply(reorder).is_err());
+        assert_eq!(doc.artwork, original.artwork);
+        let undo = doc.apply(doc.delete_layers_edit(&[paper]).unwrap()).unwrap();
+        assert_eq!(doc.bottom_paper(), None);
+        let redo = doc.apply(undo).unwrap();
+        assert_eq!(doc.artwork, original.artwork);
+        doc.apply(redo).unwrap();
+        assert_eq!(doc.bottom_paper(), None);
+    }
+    #[test]
+    fn unmasked_fills_draw_above_without_entering_groups_and_own_masks_take_priority() {
+        use crate::{DrawingRefusal, LayerBlend, operation_test_support as f};
+        for program in ["paper", "solid_color", "gradient_fill"] {
+            let mut doc = f::document([32; 2], &["Top", "Nearest"]);
+            let fill = doc.bottom_paper().unwrap();
+            if program != "paper" { f::effect(&mut doc, "Paper", program); }
+            let nearest = f::id(&doc, "Nearest");
+            doc.apply(doc.select_occurrence_edit(fill).unwrap()).unwrap();
+            assert_eq!(doc.drawing_target(), doc.scene().source_target(nearest), "{program}");
+            assert_eq!(doc.working.occurrence, Some(fill));
+            doc.artwork.occurrences.get_mut(nearest).unwrap().locked = true;
+            assert_eq!(doc.try_drawing_target(), Err(DrawingRefusal::BaseLocked));
+            doc.artwork.occurrences.get_mut(nearest).unwrap().locked = false;
+            let undo = doc.apply(doc.group_layers_edit(&[nearest], LayerBlend::Normal, "Group").unwrap()).unwrap();
+            assert_eq!(doc.try_drawing_target(), Err(DrawingRefusal::Group));
+            doc.apply(undo).unwrap();
+            assert_eq!(doc.drawing_target(), doc.scene().source_target(nearest));
+            let undo = doc.apply(doc.delete_layers_edit(&[f::id(&doc, "Top"), nearest]).unwrap()).unwrap();
+            assert_eq!(doc.try_drawing_target(), Err(DrawingRefusal::NoLayer));
+            let coverage = f::add_mask(&mut doc, fill, [32; 2], [0; 2]);
+            assert_eq!(doc.drawing_target(), Some(SourceTarget::Coverage(coverage)));
+            doc.apply(undo).unwrap();
+            assert_eq!(doc.drawing_target(), Some(SourceTarget::Coverage(coverage)));
+        }
     }
     #[test]
     fn strokes_use_the_nearest_paper_at_or_below_their_layer() {

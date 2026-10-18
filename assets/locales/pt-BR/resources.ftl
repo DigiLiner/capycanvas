@@ -577,3 +577,4 @@ resources-paper-scale = Escala
 resources-paper-unryu = Unryu
 resources-paper-unsupported = Use uma imagem RGB ou em tons de cinza como papel
 resources-paper-washi = Washi
+resources-layer-add-paper = Adicionar papel

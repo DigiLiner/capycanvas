@@ -142,7 +142,7 @@ pub use renderer_lifecycle::ThumbnailRequests;
 pub use document_files::*;
 pub use effects::{
     GradientDestination, GradientEdit, GradientControls, AdjustmentChoice, EffectAction, FilterCategoryChoice, FilterPickerAction, FilterPickerState,
-    LayerPropertiesView, PaperPickerView, PaperTileView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
+    LayerPropertiesView, PaperPickerView, PaperTileView, PropertyDisclosure, LayerDrawerSizing, PropertyControl, PropertyKind, PropertyPageView, PropertyActionView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain,
 };
 pub use filter_loading::FilterLoadState;
 
@@ -5874,6 +5874,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let l = scene.occurrence(id).expect("placed occurrence");
             let source = scene.source_target(id);
             let locked = doc.is_locked(id);
+            let can_reorder = !scene.effect(id).is_some_and(|e| layer_core::paper::is_paper(e.program));
             let drawing = drawing_owner == Some(id) || self.selection_masks.target() == Some(layer_core::SelectionTarget::Saved(id));
             let can_delete = doc.can_delete_layers(&if collapsed.contains(&id) {
                 scene.order().iter().copied().filter(|h| *h == id || layer_core::descends_from(scene, *h, Some(id))).collect()
@@ -5941,8 +5942,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             reference: l.reference,
             group: l.kind() == LayerKind::Group,
             object: l.kind() == LayerKind::Object,
-            can_drop_below: true,
-            drag_from_body: if locked { &[] } else { &[PointerKind::Mouse] },
+            can_drop_below: can_reorder,
+            drag_from_body: if locked || !can_reorder { &[] } else { &[PointerKind::Mouse] },
             depth: self.layer_interaction.depth(doc, id),
             collapsed: self.layer_interaction.collapsed.contains(&id),
             blend: l.blend.code(),
@@ -5998,6 +5999,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.state.layer_properties = selection_properties::properties(0, &self.localization().text(MessageId::COMMAND_QUICK_MASK), &self.selection_masks.quick_properties, self.state.settings.selection_painting, true, self.localization());
         }
         self.state.layer_tools.connections = crate::layer_relationships::connections(doc, &self.state.layers);
+        self.state.layer_tools.add_paper = (self.selection_masks.target().is_none() && layer_core::paper::paper_occurrence(doc.scene(), None).is_none()).then(|| PropertyActionView {
+            label: self.state.localization.text(MessageId::RESOURCES_LAYER_ADD_PAPER).to_string(),
+            icon: Some("layer-plus-symbolic".into()), group: None,
+            action: EffectAction::Insert { effect: layer_core::paper::PAPER_PROGRAM.into() },
+        });
         effects::publish_properties(&mut self.state.layer_properties,doc,&mut self.property_editor,self.effect_gesture.as_ref(),&self.state.localization);
         self.state.layer_properties.disclosure = effects::property_disclosure(doc, &self.state.layer_properties, &self.state.localization);
         if let Some(id) = self.state.layer_properties.layer.and_then(|id| occurrence_handle(id).ok()).and_then(|id| self.effect_analyses.status(id)) {
@@ -8102,6 +8108,10 @@ mod tests {
             s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
             let document = s.engine.document();
             let mut occurrence = document.scene().occurrence(handle).unwrap().clone();
+            let program = layer_core::bundled_effect_catalog().get("solid_color").unwrap().program();
+            let instance = layer_core::EffectInstance::new(program.clone());
+            let application = RecordChange::insert(&document.artwork.effects, layer_core::EffectApplication::new(program, instance.values, document.composition().size));
+            occurrence.content = layer_core::authored::OccurrenceContent::Effect(application.handle);
             occurrence.visible = false;
             occurrence.opacity = 0.25;
             occurrence.blend = layer_core::LayerBlend::Multiply;
@@ -8110,7 +8120,7 @@ mod tests {
             let root = document.composition().result;
             let mut stack = document.artwork.stacks.get(root).unwrap().clone();
             stack.entries.swap(0, 1);
-            let mut edits = vec![Edit::Stack(RecordChange::replace(&document.artwork.stacks, root, Some(stack)).unwrap())];
+            let mut edits = vec![Edit::Effect(application), Edit::Stack(RecordChange::replace(&document.artwork.stacks, root, Some(stack)).unwrap())];
             if masked {
                 let coverage = RecordChange::insert(&document.artwork.coverage, CoverageSource {
                     domain: document.composition().size, default_coverage: 0.,
@@ -10418,7 +10428,7 @@ mod tests {
     }
 
     #[test]
-    fn paper_is_a_maskless_fill_that_can_be_reordered_and_accept_a_mask() {
+    fn paper_stays_at_the_bottom_and_accepts_a_mask() {
         let mut s = session(Platform::Gtk);
         s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
         let paper_handle = occurrence_handle(2).unwrap();
@@ -10431,12 +10441,16 @@ mod tests {
         let row = s.state.layers.iter().find(|l| l.id == 2).unwrap();
         assert!(row.has_thumbnail);
         assert_eq!(row.content_icon.as_deref(), Some("layer-paper-symbolic"));
-        assert_eq!(s.engine.document().try_drawing_target(), Err(layer_core::DrawingRefusal::Fill));
-        layer(&mut s, LayerAction::Drop { id: 2, target: 1, fraction: 0., surface: LayerDropSurface::Row, });
-        assert_eq!(s.state.layers[0].id, 2);
-        assert_eq!(s.engine.document().try_drawing_target(), Err(layer_core::DrawingRefusal::Fill));
+        assert_eq!(s.engine.document().drawing_target(), s.engine.document().scene().source_target(occurrence_handle(1).unwrap()));
+        assert!(!row.can_drop_below);
+        for kind in [PointerKind::Mouse, PointerKind::Touch, PointerKind::Pen] {
+            assert!(!row.can_drag(kind, false, true));
+            assert!(!row.can_drag(kind, true, true));
+        }
+        assert_eq!(s.layer_drop_preview(2, 1, 0., LayerDropSurface::Row), None);
+        assert!(s.dispatch(UiAction::Layer { action: LayerAction::Drop { id: 2, target: 1, fraction: 0., surface: LayerDropSurface::Row } }).is_err());
         layer(&mut s, LayerAction::Drop { id: 1, target: 2, fraction: 1., surface: LayerDropSurface::Row, });
-        assert_eq!(s.state.layers.last().unwrap().id, 1);
+        assert_eq!(s.state.layers.last().unwrap().id, 2);
         s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
         layer(&mut s, LayerAction::AddMask { id: 2, replace: false });
         let mask = layer_core::authored::SourceTarget::Coverage(s.engine.document().scene().occurrence(paper_handle).unwrap().mask.as_ref().unwrap().source);
@@ -10452,8 +10466,9 @@ mod tests {
         let mut stack = document.artwork.stacks.get(root).unwrap().clone();
         stack.entries.push(bottom);
         let stack = layer_core::authored::RecordChange::replace(&document.artwork.stacks, root, Some(stack)).unwrap();
-        s.engine.apply_edit(layer_core::Edit::Batch(vec![layer_core::Edit::Paint(paint), layer_core::Edit::Occurrence(occurrence), layer_core::Edit::Stack(stack)])).unwrap();
-        assert_eq!(s.engine.document().scene().order().last(), Some(&bottom));
+        let before = s.engine.document().clone();
+        assert!(s.engine.apply_edit(layer_core::Edit::Batch(vec![layer_core::Edit::Paint(paint), layer_core::Edit::Occurrence(occurrence), layer_core::Edit::Stack(stack)])).is_err());
+        test_support::assert_live_artwork_eq(s.engine.document(), &before);
     }
 
     #[test]
@@ -17678,7 +17693,8 @@ mod tests {
         app.dispatch(UiAction::SelectLayer { id }).unwrap();
         invoke(&mut app, CommandId::LowerLayer);
         assert_eq!(app.state.layers[1].id, id);
-        assert!(app.command(CommandId::LowerLayer).enabled);
+        assert!(!app.command(CommandId::LowerLayer).enabled);
+        assert_eq!(app.state.layers.last().unwrap().id, 2);
         app.dispatch(UiAction::SetLayerOpacity {
             id: Some(id),
             opacity: 0.35,

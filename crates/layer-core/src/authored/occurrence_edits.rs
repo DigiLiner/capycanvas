@@ -43,9 +43,13 @@ fn copy_occurrence(source: &Artwork, target: &mut Artwork, id: OccurrenceHandle,
 }
 
 fn content_position(scene:SceneView<'_>,entries:&[OccurrenceHandle],index:usize)->usize {
+    let index=paper_position(scene,entries,index);
     let Some(next)=entries.get(index..).unwrap_or(&[]).iter().copied().find(|h|scene.occurrence(*h).is_some_and(|o|o.is_artwork())) else{return index;};
     let owner=scene.effect_owner(next).unwrap_or(next);
     entries.iter().position(|h|scene.effect_owner(*h)==Some(owner)).map_or(index,|top|top.min(index))
+}
+fn paper_position(scene:SceneView<'_>,entries:&[OccurrenceHandle],index:usize)->usize {
+    entries.iter().position(|h|scene.effect(*h).is_some_and(|e|crate::paper::is_paper(e.program))).map_or(index,|paper|index.min(paper))
 }
 fn clipping_gap(scene:SceneView<'_>,entries:&[OccurrenceHandle],index:usize)->bool {
     let content=|h:&OccurrenceHandle|scene.occurrence(*h).is_some_and(|o|o.is_artwork()&&o.attachment!=Attachment::Effect);
@@ -176,7 +180,7 @@ impl Document {
         let mut destination=self.artwork.stacks.get(new_stack).unwrap().clone();destination.entries.retain(|h|!moving.contains(h));
         if index>destination.entries.len(){return Err(invalid("Invalid layer position"));}
         let original=scene.occurrence(id).unwrap();let adjustment=scene.effect(id).is_some_and(|e|e.program.kind==crate::EffectKind::Adjustment);
-        let at=if adjustment{index}else{content_position(scene,&destination.entries,index)};
+        let at=if adjustment{paper_position(scene,&destination.entries,index)}else{content_position(scene,&destination.entries,index)};
         if old_stack==new_stack&&scene.children(parent).get(at..at+moving.len())==Some(moving.as_slice()) {return Ok(Edit::Batch(Vec::new()));}
         let attachment=if !original.is_artwork(){Attachment::None}else if adjustment {
             if let Some(owner)=effect_gap_owner(scene,&destination.entries,at){
@@ -219,6 +223,7 @@ impl Document {
     }
 
     pub fn drop_layers_edit(&self, roots: &[OccurrenceHandle], target: OccurrenceHandle, position: OccurrenceDropPosition) -> Result<OccurrenceDropPlan, DocumentError> {
+        let position = if position == OccurrenceDropPosition::Below && self.bottom_paper() == Some(target) { OccurrenceDropPosition::Above } else { position };
         let roots = self.layer_roots(&roots.iter().copied().collect());
         if roots.is_empty() { return Err(invalid("Select layers first")); }
         let moving = self.relationship_roots(&roots);
@@ -256,6 +261,7 @@ impl Document {
         let stack = match parent { Some(h) => match self.scene().occurrence(h).map(|o| &o.content) { Some(OccurrenceContent::Stack(stack)) => *stack, _ => return Err(invalid("Choose a destination group")) }, None => self.composition().result };
         let mut entries = self.artwork.stacks.get(stack).ok_or(invalid("Missing destination stack"))?.clone();
         if index > entries.entries.len() { return Err(invalid("Invalid layer position")); }
+        let index = paper_position(self.scene(), &entries.entries, index);
         let mut artwork = self.artwork.clone();
         let mut edits = Vec::new();
         let mut copies = BTreeMap::new();
@@ -315,6 +321,9 @@ impl Document {
     pub fn validate_duplicate_layers(&self, roots: &[OccurrenceHandle]) -> Result<(), DocumentError> {
         if roots.is_empty() { return Err(invalid("Select layers first")); }
         let scene = self.scene();
+        for h in self.layer_subtrees(roots) {
+            if scene.effect(h).is_some_and(|e|crate::paper::is_paper(e.program)) { return Err(DocumentError::ProtectedOccurrence(h)); }
+        }
         for h in roots {
             scene.occurrence(*h).ok_or(DocumentError::MissingOccurrence(*h))?;
             if scene.stack(*h).is_none() { return Err(DocumentError::MissingOccurrence(*h)); }
@@ -817,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_and_move_preserve_existing_clipping_bases_with_ordinary_fills() {
+    fn duplicate_and_move_preserve_clipping_bases_and_keep_paper_at_the_bottom() {
         let mut doc = document();
         let base = doc.scene().order()[0]; let paper = doc.scene().order()[1];
         let (edit, copies) = doc.duplicate_layers_edit(&[base]).unwrap(); doc.apply(edit).unwrap(); let clipped = copies[0];
@@ -829,11 +838,7 @@ mod tests {
         let inverse=doc.apply(doc.reparent_occurrence_edit(clipped,Some(destination),0).unwrap()).unwrap();
         assert_eq!(doc.scene().occurrence(clipped).unwrap().attachment,Attachment::None);doc.apply(inverse).unwrap();
         let before = doc.artwork.clone();
-        let undo = doc.apply(doc.reparent_occurrence_edit(paper, None, 0).unwrap()).unwrap();
-        assert_eq!(doc.scene().children(None)[0], paper);
-        assert_eq!(doc.scene().occurrence(paper).unwrap().attachment,Attachment::None);
-        assert_eq!(doc.clipping_base(clipped), Some(base));
-        doc.apply(undo).unwrap();
+        assert!(doc.reparent_occurrence_edit(paper, None, 0).is_err());
         assert_eq!(doc.artwork, before);
         let (edit, copies) = doc.duplicate_layers_edit(&[clipped, base]).unwrap(); doc.apply(edit).unwrap();
         assert_eq!(doc.clipping_base(clipped), Some(base));
@@ -842,7 +847,8 @@ mod tests {
         assert_eq!(doc.clipping_base(clipped), Some(base));
         let before = doc.artwork.clone();
         let undo = doc.apply(doc.reparent_occurrence_edit(copied_base[0], None, doc.scene().children(None).len() - doc.relationship_roots(&[copied_base[0]]).len()).unwrap()).unwrap();
-        assert_eq!(doc.scene().children(None).last(), Some(&copied_base[0]));
+        let root = doc.scene().children(None);
+        assert_eq!(&root[root.len() - 2..], &[copied_base[0], paper]);
         assert_eq!(doc.clipping_base(clipped), Some(base));
         doc.apply(undo).unwrap();
         assert_eq!(doc.artwork, before);

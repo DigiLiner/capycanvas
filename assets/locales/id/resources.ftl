@@ -1005,3 +1005,4 @@ resources-paper-scale = Skala
 resources-paper-unryu = Unryu
 resources-paper-unsupported = Gunakan gambar RGB atau skala abu-abu sebagai kertas
 resources-paper-washi = Washi
+resources-layer-add-paper = Tambah kertas

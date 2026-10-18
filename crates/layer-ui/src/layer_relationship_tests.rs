@@ -102,7 +102,7 @@ fn new_group_wraps_checked_rows_and_reordering_moves_them_together() {
     assert_eq!(s.engine.document().scene().children(None)[..3], [third, second, first]);
     let paper = s.state.layers.iter().find(|row| row.label == "Paper").unwrap().id;
     layer(&mut s, LayerAction::Drop { id: occurrence_token(third), target: paper, fraction: 1., surface: LayerDropSurface::Row });
-    assert_eq!(s.engine.document().scene().children(None), [second, occurrence_handle(paper).unwrap(), third, first]);
+    assert_eq!(s.engine.document().scene().children(None), [second, third, first, occurrence_handle(paper).unwrap()]);
     assert_eq!(s.selected_layers(), &checked);
     invoke(&mut s, CommandId::Undo);
     invoke(&mut s, CommandId::DeleteLayer);

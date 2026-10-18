@@ -51,8 +51,8 @@ the library, rendering, saved data and what each host has.
 | New drawing | Resolution (ppi) beside Width and Height, 300 by default and kept in saved presets. There is no paper choice: a new drawing uses the paper last chosen in the picker. |
 | Image Size | Unchanged. It shows 300 ppi for a drawing without a resolution. |
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
-| Layers panel | Paper is an ordinary fill row. Its color thumbnail opens Edit Color. |
-| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper; Scale, a logarithmic slider from 25% to 400%. Double-clicking the Scale label returns to 100%. |
+| Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. When Paper is missing, GTK shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text and the list's square hover, pressed and focus surfaces. Enter activates the focused row; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
+| Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name; Scale, a logarithmic slider from 25% to 400%. Double-clicking the Scale label returns to 100%. |
 | Paper picker | One grid: the thirteen built-in papers, imported papers, then Import…. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete. |
 | Canvas | Relief shading while Scale changes and for a moment after a paper is chosen. |
 | Tool Settings | Texture strength, unchanged. Brushes have no texture picker or texture scale. |
@@ -109,8 +109,10 @@ the same thing in every drawing.
 
 Paper is a built-in fill program, `paper`, in the Fill category beside Solid
 Color and Gradient Fill. It keeps the decision that made the default paper an
-ordinary fill: masks, opacity, blending, clipping, merging, history,
-thumbnails and color editing come from the general layer rules.
+ordinary fill: masks, opacity, blending, history, thumbnails and color editing
+come from the general layer rules. Paper stays at the bottom of the root stack;
+other layers drop above it. It cannot be grouped or duplicated. Adding a sheet
+when none exists inserts it at the bottom, regardless of the selected group.
 
 | Value | Kind | Rule |
 | --- | --- | --- |
@@ -154,9 +156,9 @@ hidden, and the [GTK opener](../../apps/layer-linux/src/files/open.rs).
 | Paper color is opaque | Adopted | Transparency comes from visibility or layer opacity; the startup background stays exact. |
 | Tooth ignores appearance | Adopted | Brushes read one texture per stroke and never a mask. |
 | No offset or angle on Paper | Adopted | Position and orientation come from the spatial reference that image commands already update. |
-| Painting on Paper requires a mask | Kept | The existing rule for fills. |
-| No masks on Paper | Rejected | Masks already work on fills with no Paper-specific code. Forbidding them adds refusals to Add Mask, fill insertion with a selection, mask paste and drag, Merge and Group on five hosts. |
-| One Paper per drawing, pinned to the bottom | Rejected | This is the protect-at-bottom logic removed when Paper became a fill. It needs refusals in duplicate, reorder, group, paste and merge, while the nearest-Paper query is a short stack walk. |
+| A selected Paper with a mask paints its mask | Adopted | Without a mask, Paper and other fills use the nearest artwork layer above them. If that layer is inside a group, there is no drawable target. |
+| No masks on Paper | Rejected | Paper shares fill-mask editing, selection masks, mask paste and history. |
+| One Paper per drawing, pinned to the bottom | Adopted | The sheet stays below the artwork. Shared edit validation protects its position through reorder, group, duplicate and paste. |
 | Normal blend only | Rejected | Blend modes cost nothing; forbidding them adds code. |
 
 Flatten and Merge Visible keep the bottom root Paper as a separate layer, as
@@ -316,7 +318,7 @@ keep their Solid Color.
 | Area | State |
 | --- | --- |
 | Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
-| GTK | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview. `native_paper_picker_relief_and_scale` walks it in both themes. |
+| GTK | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the compact Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the picker, drawing targets, masks and sheet creation in both themes. |
 | Windows | Properties with the paper picker, Import, Rename, Delete and Add to Library, Resolution in New drawing, and shared relief preview. Image decoding and library files use native workers. |
 | Web, Android, Apple | Build and paint on Paper. Until ported after GTK review, Texture is a list of built-in papers, Scale is a slider and there is no library or Import. |
 

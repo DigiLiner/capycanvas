@@ -249,12 +249,13 @@ fn serialized_layer_body_drag_devices_match_shared_pickup_policy() {
             }
         }};
         verify(&s);
-        let target=s.state.layers.iter().find(|row|row.id!=1).unwrap().id;
+        layer(&mut s,LayerAction::New {group:false,clipped:false});
+        let target=s.state.layer_properties.layer.unwrap();
         layer(&mut s,LayerAction::Lock {id:1,value:true});verify(&s);
         assert!(s.state.layers.iter().find(|row|row.id==1).unwrap().can_drop_below);
-        assert!(s.layer_drop_preview(1,target,1.,LayerDropSurface::Row).is_none());
+        assert!(s.layer_drop_preview(1,target,0.,LayerDropSurface::Row).is_none());
         layer(&mut s,LayerAction::Lock {id:1,value:false});verify(&s);
-        assert!(s.layer_drop_preview(1,target,1.,LayerDropSurface::Row).is_some());
+        assert!(s.layer_drop_preview(1,target,0.,LayerDropSurface::Row).is_some());
         layer(&mut s,LayerAction::New {group:true,clipped:false});let group=s.state.layer_properties.layer.unwrap();
         layer(&mut s,LayerAction::New {group:false,clipped:false});let child=s.state.layer_properties.layer.unwrap();
         layer(&mut s,LayerAction::Lock {id:group,value:true});verify(&s);

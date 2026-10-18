@@ -192,7 +192,8 @@ fn insert_effect(doc: &mut Document, index: usize) -> OccurrenceHandle {
 }
 #[test]
 fn effect_input_key_ignores_upper_changes_and_own_consuming_values() {
-    let doc = input_key_document();
+    let mut doc = input_key_document();
+    fixture::effect(&mut doc, "Paper", "solid_color");
     let target = fixture::id(&doc, "Target");
     let upper = fixture::id(&doc, "Upper");
     let ink = fixture::id(&doc, "Ink");

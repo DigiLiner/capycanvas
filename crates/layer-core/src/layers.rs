@@ -560,6 +560,7 @@ impl Document {
         let scene = self.scene();
         let mut id = self.working.occurrence.ok_or(DrawingRefusal::NoLayer)?;
         let mut occurrence = scene.occurrence(id).ok_or(DrawingRefusal::NoLayer)?;
+        let fill = scene.effect(id).is_some_and(|e| e.program.kind == EffectKind::Generator);
         if self.is_locked(id) {
             return Err(DrawingRefusal::Locked);
         }
@@ -569,6 +570,13 @@ impl Document {
             let target = SourceTarget::Coverage(mask.source);
             self.validate_content_write(target)?;
             return Ok(target);
+        }
+        if fill {
+            let index = scene.position(id).ok_or(DrawingRefusal::NoLayer)?;
+            id = scene.order()[..index].iter().rev().copied()
+                .find(|h| scene.occurrence(*h).is_some_and(|o| o.is_artwork())).ok_or(DrawingRefusal::NoLayer)?;
+            occurrence = scene.occurrence(id).ok_or(DrawingRefusal::NoLayer)?;
+            if scene.parent(id).is_some() { return Err(DrawingRefusal::Group); }
         }
         while occurrence.kind() == LayerKind::Effect {
             if scene.effect(id).is_some_and(|e| e.program.kind == EffectKind::Generator) {

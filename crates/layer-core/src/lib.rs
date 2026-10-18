@@ -1482,6 +1482,7 @@ impl Document {
             candidate.scene_index = Arc::new(
                 SceneIndex::build(&candidate.artwork).map_err(DocumentError::InvalidArtwork)?,
             );
+            candidate.validate_paper_order(self)?;
         }
         candidate.validate_payloads()?;
         if resources {let mut roots=RootInventory::default();roots.document(&candidate);roots.validate_resources().map_err(DocumentError::InvalidArtwork)?;}
@@ -1824,7 +1825,7 @@ impl Edit {
                 .value
                 .as_ref()
                 .zip(document.artwork.effects.get(c.handle))
-                .is_none_or(|(a, b)| a.program.kind != b.program.kind),
+                .is_none_or(|(a, b)| a.program.kind != b.program.kind || paper::is_paper(&a.program) != paper::is_paper(&b.program)),
             Self::SavedSelection(c) => {
                 c.value.is_none() || document.artwork.selections.get(c.handle).is_none()
             }

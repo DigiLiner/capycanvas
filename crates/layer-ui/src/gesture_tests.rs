@@ -366,9 +366,6 @@ fn refused_brush_strokes_raise_a_notice_and_paint_nothing() {
     stroke(&mut s, 10);
     assert!(s.state.notice.as_ref().unwrap().id > first, "a repeated refusal is shown again");
     layer(&mut s, LayerAction::Lock { id: 1, value: false });
-    s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
-    stroke(&mut s, 20);
-    assert_eq!(notice_text(&s), Some("Add a mask to paint on this fill layer."));
     layer(&mut s, LayerAction::New { group: true, clipped: false });
     stroke(&mut s, 30);
     assert_eq!(notice_text(&s), Some("A group has no pixels of its own. Select a layer inside it."));

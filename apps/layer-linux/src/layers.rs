@@ -46,6 +46,7 @@ pub struct LayerPanel {
     lock: gtk::ToggleButton,
     mask_action: gtk::Button,
     add_filter: gtk::MenuButton,
+    add_paper: Rc<glib::WeakRef<gtk::Box>>,
     delete: gtk::Button,
     reference: gtk::ToggleButton,
     attachment: gtk::ToggleButton,
@@ -100,11 +101,33 @@ fn row_state(item: &gtk::ListItem) -> Option<LayerState> {
 fn item_id(object: &glib::BoxedAnyObject) -> Option<u64> {
     object.try_borrow::<LayerState>().map(|l| l.id).ok()
 }
-fn panel_items(layers: &[LayerState]) -> Vec<glib::BoxedAnyObject> {
-    layers.iter().map(|layer| glib::BoxedAnyObject::new(layer.clone())).collect()
+fn panel_items(layers: &[LayerState], add_paper: Option<&layer_ui::PropertyActionView>) -> Vec<glib::BoxedAnyObject> {
+    layers.iter().map(|layer| glib::BoxedAnyObject::new(layer.clone()))
+        .chain(add_paper.map(|action| glib::BoxedAnyObject::new(action.clone()))).collect()
 }
-fn panel_ids(layers: &[LayerState]) -> Vec<u64> {
-    layers.iter().map(|layer| layer.id).collect()
+fn activate_paper(owner: &RefCell<Weak<Workspace>>) {
+    let Some(w) = owner.borrow().upgrade() else { return };
+    let action = w.gpu.borrow().as_ref().and_then(|g| g.session.state().layer_tools.add_paper.as_ref().map(|a| a.action.clone()));
+    if let Some(action) = action { w.dispatch(UiAction::Effect { action }); }
+}
+fn paper_row(action: &layer_ui::PropertyActionView, owner: Rc<RefCell<Weak<Workspace>>>) -> gtk::Box {
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::SPACING);
+    content.set_halign(gtk::Align::Center);
+    content.set_hexpand(true);
+    content.append(&crate::icons::image(action.icon.as_deref().unwrap_or("layer-plus-symbolic")));
+    content.append(&gtk::Label::new(Some(&action.label)));
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    row.add_css_class("layer-row");
+    row.set_widget_name("layer-add-paper");
+    row.append(&content);
+    let click = gtk::GestureClick::new();
+    click.set_button(1);
+    click.connect_released(glib::clone!(#[weak] row, #[strong] owner, move |gesture, _, x, y| {
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        if row.contains(x, y) { activate_paper(&owner); }
+    }));
+    row.add_controller(click);
+    row
 }
 fn thumbnail(tooltip: &str) -> (gtk::Button, gtk::Picture, gtk::Overlay) {
     let button = button("layer-image-symbolic", tooltip);
@@ -422,6 +445,7 @@ impl LayerPanel {
             actions.append(b);
         }
         header.append(&actions);
+        let add_paper = Rc::new(glib::WeakRef::new());
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         let rows: Rc<RefCell<HashMap<usize, Row>>> = Rc::default();
@@ -883,16 +907,30 @@ impl LayerPanel {
             #[weak]
             connections,
             #[strong]
+            add_paper,
+            #[strong]
+            owner,
+            #[strong]
             rows,
             move |_, item| {
                 let item = item.downcast_ref::<gtk::ListItem>().unwrap();
                 let rows = rows.borrow();
                 let row = &rows[&(item.as_ptr() as usize)];
                 if let Some(state) = row_state(item) {
+                    if item.child().as_ref() != Some(row.swipe.upcast_ref()) { item.set_child(Some(&row.swipe)); }
                     item.set_accessible_label("");
                     item.set_accessible_description("");
                     row.bound.set(true);
                     row.refresh(&state);
+                } else {
+                    row.bound.set(false);
+                    let object = item.item().unwrap().downcast::<glib::BoxedAnyObject>().unwrap();
+                    let action = object.borrow::<layer_ui::PropertyActionView>();
+                    let controls = paper_row(&action, owner.clone());
+                    item.set_accessible_label(&action.label);
+                    item.set_accessible_description("");
+                    add_paper.set(Some(&controls));
+                    item.set_child(Some(&controls));
                 }
                 connections.queue_draw();
             }
@@ -920,6 +958,11 @@ impl LayerPanel {
         let selection = gtk::NoSelection::new(Some(model.clone()));
         let view = gtk::ListView::new(Some(selection), Some(factory));
         view.set_single_click_activate(false);
+        view.connect_activate(glib::clone!(#[strong] model, #[strong] owner, move |_, position| {
+            let Some(object) = model.item(position).and_downcast::<glib::BoxedAnyObject>() else { return };
+            if object.try_borrow::<layer_ui::PropertyActionView>().is_err() { return; }
+            activate_paper(&owner);
+        }));
         view.add_css_class("layer-list");
         let list = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -944,6 +987,7 @@ impl LayerPanel {
             header,
             footer,
             list,
+            add_paper,
             connections,
             opacity,
             model,
@@ -993,6 +1037,7 @@ impl LayerPanel {
             .values()
             .filter(|row| row.bound.get())
             .map(|row| row.root.measure(gtk::Orientation::Vertical, width).1)
+            .chain(self.add_paper.upgrade().map(|row| row.measure(gtk::Orientation::Vertical, width).1))
             .max()
             .unwrap_or(0) as f32;
         layer_ui::PanelScrollMeasurement { fixed_height, unit_height }
@@ -1308,13 +1353,18 @@ impl LayerPanel {
         }
     }
     pub fn refresh(&self, state: &UiState) {
-        let ids = panel_ids(&state.layers);
+        let add_paper = state.layer_tools.add_paper.is_some();
+        let ids: Vec<_> = state.layers.iter().map(|layer| Some(layer.id)).chain(add_paper.then_some(None)).collect();
         let same = self.model.n_items() as usize == ids.len()
             && ids.iter().enumerate().all(|(i, id)| {
-                self.model.item(i as u32).and_downcast::<glib::BoxedAnyObject>().and_then(|o| item_id(&o)) == Some(*id)
+                self.model.item(i as u32).and_downcast::<glib::BoxedAnyObject>().and_then(|o| item_id(&o)) == *id
+            })
+            && state.layer_tools.add_paper.as_ref().is_none_or(|action| {
+                self.model.item(state.layers.len() as u32).and_downcast::<glib::BoxedAnyObject>()
+                    .is_some_and(|object| object.try_borrow::<layer_ui::PropertyActionView>().is_ok_and(|previous| *previous == *action))
             });
         if !same {
-            self.model.splice(0, self.model.n_items(), &panel_items(&state.layers));
+            self.model.splice(0, self.model.n_items(), &panel_items(&state.layers, state.layer_tools.add_paper.as_ref()));
         } else {
             let mut position = 0;
             for l in &state.layers {

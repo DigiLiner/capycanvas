@@ -103,7 +103,7 @@ mod selection_pixel_checks {
         assert_eq!(reason(&s).as_deref(), Some("The active layer is locked"));
         s.dispatch(UiAction::Layer { action: LayerAction::Lock { id, value: false } }).unwrap();
         s.dispatch(UiAction::SelectLayer { id: 2 }).unwrap();
-        assert_eq!(reason(&s).as_deref(), Some(super::notices::drawing_refusal_text(layer_core::DrawingRefusal::Fill, s.localization()).as_ref()));
+        assert_eq!(reason(&s), None);
         s.dispatch(UiAction::SelectLayer { id }).unwrap();
         let selection = s.engine.document().working.selection.clone();
         s.dispatch(UiAction::Layer { action: LayerAction::AddMask { id, replace: false } }).unwrap();

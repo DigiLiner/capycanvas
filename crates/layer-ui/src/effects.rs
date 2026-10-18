@@ -1087,9 +1087,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         let choosing = destination.is_none() && self.filter_drawer_open();
         let catalog = self.effect_catalog.get(&effect).ok_or_else(|| self.state.localization.text(MessageId::RESOURCES_ERROR_UNKNOWN_FILTER).to_string())?;
         let generator = catalog.program.kind == layer_core::EffectKind::Generator;
+        let paper = layer_core::paper::is_paper(&catalog.program);
         let doc = self.engine.document();
         let scene = doc.scene();
-        let current = destination.map(|(owner, _)| owner).or(doc.working.occurrence);
+        if paper && let Some(handle) = doc.bottom_paper() {
+            return self.layer_action(crate::LayerAction::Select { id: occurrence_token(handle), mask: false });
+        }
+        let current = if paper { None } else { destination.map(|(owner, _)| owner).or(doc.working.occurrence) };
         let occurrence = current.and_then(|id| scene.occurrence(id));
         let replacing = choosing && current.and_then(|id| scene.effect(id)).is_some_and(|effect| effect.program.kind == catalog.program.kind);
         let masked = !replacing && doc.working.selection.is_some();
@@ -1101,8 +1105,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         if !replacing && parent.is_some_and(|id| doc.is_locked(id)) { return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string()); }
         let stack_handle = top.and_then(|id| scene.stack(id)).unwrap_or(doc.composition().result);
         let mut stack = doc.artwork.stacks.get(stack_handle).ok_or("Missing containing stack")?.clone();
-        let index = top.and_then(|id| stack.entries.iter().position(|handle| *handle == id)).unwrap_or(0);
-        let (index,insertion_attachment)=if generator&&!replacing {doc.content_insertion(parent,index)}else{(index,layer_core::Attachment::None)};
+        let index = if paper { stack.entries.len() } else { top.and_then(|id| stack.entries.iter().position(|handle| *handle == id)).unwrap_or(0) };
+        let (index,insertion_attachment)=if generator&&!replacing&&!paper {doc.content_insertion(parent,index)}else{(index,layer_core::Attachment::None)};
         let depth = doc.composition().color.depth;
         let mut instance = EffectInstance::new(catalog.program());
         if depth.is_float() && instance.program.id.as_ref() == "curves" { instance.set_choice("domain", "log_hdr").map_err(str::to_string)?; }

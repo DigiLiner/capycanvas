@@ -693,3 +693,4 @@ resources-paper-scale = 크기 조절
 resources-paper-unryu = 운룡지
 resources-paper-unsupported = RGB 또는 회색조 이미지를 종이로 사용하세요
 resources-paper-washi = 와시
+resources-layer-add-paper = 종이 추가

@@ -147,6 +147,7 @@ pub struct LayersView {
     pub controls: LayerControls,
     pub attachment: LayerAttachmentControl,
     pub add_filter: Option<ContextMenu>,
+    pub add_paper: Option<PropertyActionView>,
     pub connections: Vec<LayerConnection>,
 }
 impl LayersView {
@@ -510,7 +511,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         let siblings = doc.scene().children(parent);
         let at = siblings.iter().position(|id| moving.contains(id)).unwrap();
         let end = siblings.iter().rposition(|id| moving.contains(id)).unwrap();
-        let target = if raise { at.checked_sub(1).and_then(|at| siblings.get(at)) } else { siblings.get(end + 1) }.ok_or(InvalidLayerOperation("Invalid layer position"))?;
+        let target = if raise { at.checked_sub(1).and_then(|at| siblings.get(at)) } else { siblings.get(end + 1) }
+            .filter(|&&id| Some(id) != doc.bottom_paper()).ok_or(InvalidLayerOperation("Invalid layer position"))?;
         doc.drop_layers_edit(&roots, *target, if raise { LayerDropPosition::Above } else { LayerDropPosition::Below })
             .map(|plan| plan.edit)
     }
@@ -573,7 +575,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let handle = occurrence_handle(target).ok()?;
         let row = self.engine.document().scene().occurrence(handle)?;
         let position = if row.kind() == LayerKind::Group && (0.25..0.75).contains(&fraction) { LayerDropPosition::Into }
-            else if fraction < 0.5 { LayerDropPosition::Above } else { LayerDropPosition::Below };
+            else if fraction < 0.5 || self.engine.document().bottom_paper() == Some(handle) { LayerDropPosition::Above } else { LayerDropPosition::Below };
         self.image_layer_destination(Some(ImageLayerDestination { target: handle, position })).ok()?;
         Some(position)
     }

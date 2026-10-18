@@ -160,3 +160,166 @@ fn native_paper_picker_relief_and_scale() {
     assert_eq!(ui_session(&w).engine().checkpoint(), before, "the import, Scale and the choice are one step each");
     assert_eq!(texture(&w), layer_core::paper::default_texture());
 }
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+#[allow(deprecated)]
+fn native_fill_drawing_targets_and_paper_order() {
+    let app = native_test_app("art.capycanvas.FillTargets");
+    let w = fixture_workspace(&app);
+    apply_fixture_theme(&w);
+    w.window.maximize();
+    w.window.present();
+    ready(&w);
+    let mut input = RemoteInput::new().settle_ms(120);
+    input.ready();
+    let directory = std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap_or_else(|_| "../../artifacts/paper-bottom".into()));
+    std::fs::create_dir_all(&directory).unwrap();
+    for program in ["paper", "solid_color", "gradient_fill"] {
+        w.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Insert { effect: program.into() } });
+        ready(&w);
+        let fill = layer_ui::occurrence_token(ui_session(&w).engine().document().working.occurrence.unwrap());
+        w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::New { group: false, clipped: false } });
+        ready(&w);
+        let ink = layer_ui::occurrence_token(ui_session(&w).engine().document().working.occurrence.unwrap());
+        let change = ui_session_mut(&w).reveal_panel(Panel::Layers);
+        w.changed(change);
+        ready(&w);
+        let row: gtk::Widget = named(w.window.upcast_ref(), &format!("art-layer-{fill}"));
+        assert!(row.is_mapped());
+        let bounds = find_css(&row, "layer-name").unwrap().compute_bounds(&w.surface).unwrap();
+        let point = [bounds.x() + bounds.width() * 0.5, bounds.y() + bounds.height() * 0.5];
+        input.perform(serde_json::json!([{"point":point}, {"down":true}, {"down":false}]));
+        ready(&w);
+        let fill_row = || state(&w).layers.into_iter().find(|row| row.id == fill).unwrap();
+        let ink_row = || state(&w).layers.into_iter().find(|row| row.id == ink).unwrap();
+        save_snapshot(&w, 100, || directory.join(format!("{program}-selected.png")));
+        assert!(fill_row().editing && ink_row().drawing, "{program}: selecting a fill paints above it: fill={:?}, ink={:?}", fill_row(), ink_row());
+        if program == "paper" {
+            assert_eq!(state(&w).layers.last().unwrap().id, fill);
+            assert!(!row.last_child().unwrap().is_visible());
+        }
+        let before = ink_row().paint_revision;
+        shade(&w, [180., 200.], 0.45);
+        ready(&w);
+        assert_ne!(ink_row().paint_revision, before, "{program}: the layer above receives the stroke");
+        w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+        ready(&w);
+        w.dispatch(UiAction::SelectLayer { id: ink });
+        w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::GroupSelected });
+        w.dispatch(UiAction::SelectLayer { id: fill });
+        ready(&w);
+        assert!(state(&w).layers.iter().all(|row| !row.drawing), "{program}: a grouped layer is not a fallback");
+        w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+        w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: fill, replace: false } });
+        w.dispatch(UiAction::SelectLayer { id: fill });
+        ready(&w);
+        assert!(fill_row().mask_selected && !ink_row().drawing, "{program}: selecting a masked fill targets its mask");
+        let before = fill_row().mask_revision;
+        shade(&w, [180., 200.], 0.45);
+        ready(&w);
+        assert_ne!(fill_row().mask_revision, before, "{program}: the mask receives the stroke");
+        w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+        w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::DeleteMask { id: fill } });
+        w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: ink } });
+        if program != "paper" { w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: fill } }); }
+        ready(&w);
+    }
+    let paper = layer_ui::occurrence_token(ui_session(&w).engine().document().bottom_paper().unwrap());
+    w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Delete { id: paper } });
+    ready(&w);
+    let add = || widgets(w.window.upcast_ref()).filter_map(|node| node.downcast::<gtk::Box>().ok())
+        .find(|row| row.widget_name() == "layer-add-paper" && row.is_mapped());
+    let row = add().unwrap();
+    let surface = row.parent().unwrap();
+    assert!(descendant::<gtk::Button>(&row).is_none(), "the list row owns all action feedback");
+    let label: gtk::Label = descendant(&row).unwrap();
+    assert_eq!(label.layout().iter().run_readonly().unwrap().item().analysis().font().describe().weight(), gtk::pango::Weight::Normal, "Add paper uses regular text like the layer names");
+    let bounds = row.compute_bounds(&w.surface).unwrap();
+    let label_bounds = label.compute_bounds(&w.surface).unwrap();
+    let (_, text_y) = label.layout_offsets();
+    let (_, text_bounds) = label.layout().pixel_extents();
+    let text_center = label_bounds.y() + text_y as f32 + text_bounds.y() as f32 + text_bounds.height() as f32 * 0.5;
+    assert!((text_center - bounds.y() - bounds.height() * 0.5).abs() <= 1., "the text is vertically centered");
+    assert!(bounds.height() - text_bounds.height() as f32 >= (crate::panel_controls::CONTROL_SPACING * 2) as f32, "the text has room above and below");
+    let check_position = || {
+        let row = add().unwrap();
+        let last = state(&w).layers.last().unwrap().id;
+        let last: gtk::Widget = named(w.window.upcast_ref(), &format!("art-layer-{last}"));
+        let layer_bounds = last.compute_bounds(&w.surface).unwrap();
+        let bounds = row.compute_bounds(&w.surface).unwrap();
+        assert_eq!(bounds.height(), layer_bounds.height(), "Add paper has the standard layer row height");
+        assert!((bounds.y() - layer_bounds.y() - layer_bounds.height()).abs() <= 2., "Add paper follows the last layer: {layer_bounds:?} {bounds:?}");
+        let content = row.first_child().unwrap().compute_bounds(&w.surface).unwrap();
+        assert!((content.x() + content.width() * 0.5 - bounds.x() - bounds.width() * 0.5).abs() <= 1., "the icon and label are centered together");
+    };
+    check_position();
+    input.perform(serde_json::json!([{"point":[800., 500.]}]));
+    save_snapshot(&w, 100, || directory.join("add-paper.png"));
+    let bounds = row.compute_bounds(&w.surface).unwrap();
+    let point = [bounds.x() + bounds.width() * 0.5, bounds.y() + bounds.height() * 0.5];
+    input.perform(serde_json::json!([{"point":point}]));
+    assert!(surface.state_flags().contains(gtk::StateFlags::PRELIGHT));
+    let check_feedback = || {
+        let snapshot = gtk::Snapshot::new();
+        snapshot.render_background(&surface.style_context(), 0., 0., surface.width() as f64, surface.height() as f64);
+        assert!(snapshot.to_node().unwrap().is::<gtk::gsk::ColorNode>(), "the feedback is a single square surface");
+    };
+    check_feedback();
+    save_snapshot(&w, 100, || directory.join("add-paper-hover.png"));
+    input.perform(serde_json::json!([{"down":true}]));
+    assert!(surface.state_flags().contains(gtk::StateFlags::ACTIVE));
+    check_feedback();
+    save_snapshot(&w, 100, || directory.join("add-paper-active.png"));
+    input.perform(serde_json::json!([{"point":[800., 500.]}, {"down":false}]));
+    ready(&w);
+    assert!(ui_session(&w).engine().document().bottom_paper().is_none(), "releasing outside cancels the action");
+    assert!(!surface.state_flags().intersects(gtk::StateFlags::PRELIGHT | gtk::StateFlags::ACTIVE), "cancel clears hover and pressed feedback");
+    input.perform(serde_json::json!([{"point":point}, {"down":true}, {"down":false}]));
+    ready(&w);
+    assert!(ui_session(&w).engine().document().bottom_paper().is_some());
+    assert!(add().is_none());
+    save_snapshot(&w, 100, || directory.join("paper-properties.png"));
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    let change = ui_session_mut(&w).reveal_panel(Panel::Layers);
+    w.changed(change);
+    ready(&w);
+    assert!(add().is_some());
+    check_position();
+    let before = ui_session(&w).engine().checkpoint();
+    let surface = add().unwrap().parent().unwrap();
+    assert!(surface.grab_focus());
+    input.key(0xff52);
+    input.key(0xff54);
+    assert!(surface.has_focus() && surface.state_flags().contains(gtk::StateFlags::FOCUS_VISIBLE));
+    save_snapshot(&w, 100, || directory.join("add-paper-focus.png"));
+    input.key(0xff0d);
+    ready(&w);
+    assert!(ui_session(&w).engine().document().bottom_paper().is_some(), "Enter activates the focused row");
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    let change = ui_session_mut(&w).reveal_panel(Panel::Layers);
+    w.changed(change);
+    ready(&w);
+    assert_eq!(ui_session(&w).engine().checkpoint(), before, "keyboard activation is one undo step");
+    w.dispatch(UiAction::Invoke { command: CommandId::Redo });
+    ready(&w);
+    assert!(add().is_none());
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    for _ in 0..30 { w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::New { group: false, clipped: false } }); }
+    ready(&w);
+    let scroll = w.layer_panel.list.vadjustment();
+    assert!(scroll.upper() > scroll.page_size());
+    scroll.set_value(0.);
+    pump(120);
+    assert!(add().is_none_or(|row| row.compute_bounds(&w.layer_panel.list).is_none_or(|bounds| bounds.y() >= w.layer_panel.list.height() as f32)), "Add paper scrolls out of the viewport with the layers");
+    scroll.set_value(scroll.upper() - scroll.page_size());
+    until(|| add().is_some(), "the final list item is visible");
+    pump(120);
+    check_position();
+    w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::SelectAllLayers { selected: true } });
+    w.dispatch(UiAction::Layer { action: layer_ui::LayerAction::DeleteSelected });
+    ready(&w);
+    assert!(state(&w).layers.is_empty());
+    let bounds = add().unwrap().compute_bounds(&w.layer_panel.list).unwrap();
+    assert!(bounds.y().abs() <= 2., "Add paper starts the empty layer list");
+}

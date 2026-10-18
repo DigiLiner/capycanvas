@@ -42,14 +42,85 @@ fn choosing_and_scaling_paper_are_single_undo_steps_and_new_paper_starts_on_the_
     let menu = s.application_menu(ApplicationMenu::Layer);
     let new = menu.sections.iter().flatten().find(|item| item.label == "New").unwrap();
     let paper = new.sections.iter().flatten().find(|item| item.label == "Paper").expect("Layer › New › Paper").clone();
+    s.dispatch(UiAction::Layer { action: LayerAction::Delete { id: layer } }).unwrap();
+    s.dispatch(UiAction::Layer { action: LayerAction::New { group: true, clipped: false } }).unwrap();
     s.dispatch(paper.action.unwrap()).unwrap();
     let inserted = s.engine.document().working.occurrence.unwrap();
+    assert_eq!(s.engine.document().scene().children(None).last(), Some(&inserted));
+    assert_eq!(s.engine.document().scene().parent(inserted), None);
     let application = s.engine.document().scene().effect_application(inserted).unwrap();
     assert!(layer_core::paper::is_paper(&application.program));
     assert_eq!(s.engine.document().scene().effect(inserted).unwrap().constant_color(), Some(layer_core::color::RgbColor::WHITE));
     assert_eq!(s.engine.document().paper(s.engine.document().working.target).texture, layer_core::paper::built_in_paper("rough").unwrap().texture);
     assert!((paper_scale(&s) - 1.).abs() < 1e-4);
     assert_eq!(s.state.layer_properties.title, "Paper");
+}
+
+#[test]
+fn adding_paper_again_selects_the_existing_sheet_without_an_edit() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        let paper = paper_layer(&s);
+        let before = s.engine.checkpoint();
+        s.dispatch(UiAction::Effect { action: EffectAction::Insert { effect: "paper".into() } }).unwrap();
+        assert_eq!(s.state.layers.len(), 2);
+        assert_eq!(s.engine.document().working.occurrence, Some(occurrence_handle(paper).unwrap()));
+        assert_eq!(s.engine.checkpoint(), before);
+        assert_eq!(s.state.layers.last().unwrap().id, paper);
+    }
+}
+
+#[test]
+fn add_paper_row_tracks_the_missing_sheet_through_undo_and_redo() {
+    for platform in Platform::ALL {
+        let mut s = session(platform);
+        assert!(s.state.layer_tools.add_paper.is_none());
+        assert!(!s.command(CommandId::LowerLayer).enabled);
+        let paper = paper_layer(&s);
+        s.dispatch(UiAction::Layer { action: LayerAction::Delete { id: paper } }).unwrap();
+        s.dispatch(UiAction::Layer { action: LayerAction::New { group: true, clipped: false } }).unwrap();
+        let row = s.state.layer_tools.add_paper.clone().unwrap();
+        assert_eq!(row.label, "Add paper");
+        let before = s.engine.checkpoint();
+        s.dispatch(UiAction::Effect { action: row.action }).unwrap();
+        let paper = s.engine.document().bottom_paper().unwrap();
+        assert_eq!(s.engine.document().working.occurrence, Some(paper));
+        assert!(s.state.layer_tools.add_paper.is_none());
+        invoke(&mut s, CommandId::Undo);
+        assert_eq!(s.engine.checkpoint(), before);
+        assert!(s.state.layer_tools.add_paper.is_some());
+        assert!(s.engine.document().bottom_paper().is_none());
+        invoke(&mut s, CommandId::Redo);
+        assert_eq!(s.engine.document().bottom_paper(), Some(paper));
+        assert!(s.state.layer_tools.add_paper.is_none());
+    }
+}
+
+#[test]
+fn selected_fills_keep_properties_and_mark_only_an_ungrouped_layer_drawable() {
+    for platform in Platform::ALL {
+        for (program, title) in [("paper", "Paper"), ("solid_color", "Solid Color"), ("gradient_fill", "Gradient Fill")] {
+            let mut s = session(platform);
+            s.dispatch(UiAction::Effect { action: EffectAction::Insert { effect: program.into() } }).unwrap();
+            let fill = occurrence_token(s.engine.document().working.occurrence.unwrap());
+            s.dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }).unwrap();
+            let ink = occurrence_token(s.engine.document().working.occurrence.unwrap());
+            s.dispatch(UiAction::SelectLayer { id: fill }).unwrap();
+            assert_eq!(s.state.layer_properties.title, title);
+            assert_eq!(s.state.layers.iter().filter(|row| row.drawing).map(|row| row.id).collect::<Vec<_>>(), [ink]);
+            s.dispatch(UiAction::SelectLayer { id: ink }).unwrap();
+            s.dispatch(UiAction::Layer { action: LayerAction::GroupSelected }).unwrap();
+            s.dispatch(UiAction::SelectLayer { id: fill }).unwrap();
+            assert!(s.state.layers.iter().all(|row| !row.drawing));
+            assert_eq!(s.engine.document().drawing_target(), None);
+            invoke(&mut s, CommandId::Undo);
+            assert_eq!(s.state.layers.iter().filter(|row| row.drawing).map(|row| row.id).collect::<Vec<_>>(), [ink]);
+            s.dispatch(UiAction::Layer { action: LayerAction::AddMask { id: fill, replace: false } }).unwrap();
+            s.dispatch(UiAction::SelectLayer { id: fill }).unwrap();
+            assert!(s.state.layers.iter().all(|row| row.id == fill || !row.drawing));
+            assert!(s.state.layers.iter().find(|row| row.id == fill).unwrap().mask_selected);
+        }
+    }
 }
 
 #[test]

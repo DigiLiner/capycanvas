@@ -148,7 +148,7 @@ fn photo_drop_destination_respects_groups_locks_clipping_and_parent_offsets() {
     let mut session = UiSession::new(Recorder { tiled_sources: true, ..Default::default() }, doc, [800, 600], Platform::Gtk).unwrap();
     let source = Arc::unwrap_or_clone(rgba8_source([2, 1], |_, _| [255; 4]));
     assert_eq!(session.image_layer_drop_hint(occurrence_token(group_id), 0.5), Some(LayerDropPosition::Into));
-    assert_eq!(session.image_layer_drop_hint(occurrence_token(paper), 0.9), Some(LayerDropPosition::Below));
+    assert_eq!(session.image_layer_drop_hint(occurrence_token(paper), 0.9), Some(LayerDropPosition::Above));
     assert_eq!(session.image_layer_drop_hint(occurrence_token(ink), 0.1), Some(LayerDropPosition::Above));
     assert_eq!(session.image_layer_drop_hint(occurrence_token(clipped_id), 0.9), Some(LayerDropPosition::Below));
     assert_eq!(session.image_layer_drop_hint(occurrence_token(clipped_id), 0.1), Some(LayerDropPosition::Above));

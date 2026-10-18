@@ -334,6 +334,10 @@ mod tests {
     fn constant_backdrop_is_a_borrowed_contiguous_root_suffix() {
         let mut doc=crate::Document::new(PortableId::random(),16,16,crate::DocumentNames{paint:"Ink".into(),paper:"White fill".into()});
         let root=doc.composition().result;let fill=doc.scene().children(None)[1];
+        let effect=doc.scene().effect_handle(fill).unwrap();
+        let application=doc.artwork.effects.get_mut(effect).unwrap();
+        application.program=crate::bundled_effect_catalog().get("solid_color").unwrap().program();
+        application.values.truncate(1);application.spatial=None;
         assert_eq!(doc.scene().effect(fill).unwrap().constant_color(),Some(crate::color::RgbColor::WHITE));
         assert_eq!(doc.scene().constant_backdrop(),&[fill]);
         assert_eq!(doc.scene().constant_backdrop().as_ptr(),doc.scene().children(None)[1..].as_ptr());
@@ -375,10 +379,10 @@ mod tests {
         assert!(doc.apply(crate::Edit::Occurrence(RecordChange::replace(&doc.artwork.occurrences,base,Some(invalid)).unwrap())).is_err());
     }
     #[test]
-    fn fill_routes_drawing_only_to_its_own_mask() {
+    fn fill_routes_drawing_above_and_prefers_its_own_mask() {
         let mut doc=crate::Document::new(PortableId::random(),16,16,crate::DocumentNames{paint:"Ink".into(),paper:"White fill".into()});
         let fill=doc.scene().children(None)[1];doc.working.occurrence=Some(fill);doc.working.target=None;
-        assert_eq!(doc.try_drawing_target(),Err(crate::DrawingRefusal::Fill));
+        assert_eq!(doc.drawing_target(),doc.scene().source_target(doc.scene().children(None)[0]));
         let coverage=doc.allocate_coverage_handle();let mask=crate::CoverageSnapshot::reveal_all(coverage,[16,16],[0;2]);
         doc.artwork.coverage.install(coverage,mask.source).unwrap();doc.artwork.occurrences.get_mut(fill).unwrap().mask=Some(mask.use_);
         doc.scene_index=Arc::new(SceneIndex::build(&doc.artwork).unwrap());

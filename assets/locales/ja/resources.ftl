@@ -693,3 +693,4 @@ resources-paper-scale = 拡大縮小
 resources-paper-unryu = 雲竜紙
 resources-paper-unsupported = 用紙にはRGBまたはグレースケールの画像を使用してください
 resources-paper-washi = 和紙
+resources-layer-add-paper = 用紙を追加

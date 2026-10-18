@@ -1522,6 +1522,7 @@ impl Workspace {
                     && !modifiers.intersects(gdk::ModifierType::CONTROL_MASK|gdk::ModifierType::ALT_MASK|gdk::ModifierType::SUPER_MASK|gdk::ModifierType::META_MASK)
                     && gtk::prelude::GtkWindowExt::focus(&this.window).is_some_and(|w| {
                         w.is::<gtk::Button>() || w.is::<gtk::Switch>() || w.is::<gtk::CheckButton>()
+                            || w.is::<gtk::ListView>() || w.parent().is_some_and(|parent| parent.is::<gtk::ListView>())
                     })
                 {
                     return glib::Propagation::Proceed;

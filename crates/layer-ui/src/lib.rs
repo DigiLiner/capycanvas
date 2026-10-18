@@ -139,7 +139,7 @@ pub use session::{
     DEFAULT_DOCUMENT_EXTENT,
     DocumentColorOperation, DocumentIdleReason, ExportRepeat, DocumentHostError, DocumentHostErrorCopy, HostRequestFailure, DocumentExport, DocumentFileState, DocumentLocation, DocumentRequest, EffectAction, FilterCategoryChoice,
     FilterLoadState, FilterPickerAction, FilterPickerState, LayerPropertiesView, PropertyDisclosure, LayerDrawerSizing,
-    MAX_NEW_DOCUMENT_DIMENSION, PaperPickerView, PaperTileView, PropertyControl, PropertyKind, PropertyPageView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
+    MAX_NEW_DOCUMENT_DIMENSION, PaperPickerView, PaperTileView, PropertyControl, PropertyKind, PropertyPageView, PropertyActionView, CurveAxis, CurveAxisView, CurveControls, CurveCoordinateControl, CurveDomain, new_drawing, new_document_spec,
 };
 pub use stats::{StatRow, StatsView};
 

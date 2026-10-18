@@ -17,8 +17,8 @@ is attached.
 [`Document`](../../crates/layer-core/src/lib.rs) owns typed authored stores and
 working state. A stack owns ordered occurrence handles. An occurrence owns its
 name, integer offset and composition properties, and refers to a paint source,
-object layer, child stack, effect application or saved selection. Paper is an ordinary Solid Color
-effect occurrence. Paint and coverage sources
+object layer, child stack, effect application or saved selection. Paper is a fill
+effect occurrence pinned to the bottom of the root stack. Paint and coverage sources
 own immutable raster roots; masks bind a coverage source to an occurrence.
 Working selection, image selection, the canvas view origin and explicit
 `SourceTarget` belong to working state.
@@ -30,15 +30,18 @@ evaluation context for previews, bakes, export and source-aware analysis.
 A raw source scope reads source pixels independently of occurrence opacity,
 visibility or blending, while preserving the source's position.
 
-With a filter selected, a stroke paints the first artwork layer below it in the
-same group, or its attached effect owner. Groups, maskless generators, locked bases and
-selection layers refuse with a reason (`Document::try_drawing_target`). An empty
-stack stays valid.
+With an unmasked filter selected, a stroke paints the first artwork layer below
+it in the same group, or its attached effect owner. An unmasked fill instead uses
+the nearest artwork layer above it; a layer inside a group is not a fallback.
+A selected filter or fill with a mask paints its own mask. Groups, locked bases
+and selection layers refuse with a reason (`Document::try_drawing_target`).
+An empty stack stays valid.
 
 New documents contain an empty paint layer above a white [Paper](../development/paper.md)
-fill. The fill starts without a mask and follows ordinary layer rules: it can
-be renamed, moved, grouped, duplicated, hidden, deleted or merged. Add a mask to
-paint on it. Its thumbnail shows its color over the checkerboard. Flatten and
+fill. Paper can be renamed, hidden, deleted or masked; it cannot be reordered,
+grouped or duplicated. Adding Paper places it below all root layers, regardless
+of the selection; adding it again selects the existing sheet. Its thumbnail
+shows its color over the checkerboard. Flatten and
 Merge Visible keep the bottom Paper as a separate layer.
 
 Paint layers, object layers and groups are positioned only by signed integer

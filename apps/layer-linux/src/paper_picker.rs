@@ -42,7 +42,7 @@ impl PaperPicker {
     pub fn new(select: impl Fn(u32) + 'static, act: impl Fn(EffectAction) + 'static) -> Rc<Self> {
         let thumbnail = picture(None, THUMBNAIL);
         let name = gtk::Label::builder().xalign(0.).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::End).build();
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::CONTROL_SPACING);
+        let content = gtk::Box::new(gtk::Orientation::Horizontal, crate::panel_controls::SPACING);
         content.append(&thumbnail);
         content.append(&name);
         let grid = gtk::FlowBox::builder()

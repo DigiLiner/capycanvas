@@ -137,8 +137,9 @@ fn filters_resolve_drawing_without_borrowing_other_masks_or_entering_groups() {
     doc.apply(effect_test_mask_edit(&doc,base,1.)).unwrap();
     assert_eq!(doc.drawing_target(),None,"a group and its mask are not drawing fallbacks");
     doc.apply(doc.attachment_edit(first,false,false).unwrap()).unwrap();
-    let fill = doc.scene().effect_handle(occurrence_handle(2).unwrap()).unwrap();
-    let fill = layer_core::authored::RecordChange::insert(&doc.artwork.effects, doc.artwork.effects.get(fill).unwrap().clone());
+    let program = layer_core::bundled_effect_catalog().get("solid_color").unwrap().program();
+    let instance = layer_core::EffectInstance::new(program.clone());
+    let fill = layer_core::authored::RecordChange::insert(&doc.artwork.effects, layer_core::EffectApplication::new(program, instance.values, doc.composition().size));
     let content = layer_core::authored::OccurrenceContent::Effect(fill.handle);
     let occurrence = effect_test_occurrence_edit(&doc,base,|o|{ o.content = content; o.mask = None; });
     doc.apply(layer_core::Edit::Batch(vec![layer_core::Edit::Effect(fill), occurrence])).unwrap();
