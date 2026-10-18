@@ -138,6 +138,7 @@ impl PaintTransforms {
         next: &layer_render::TransformPreview, scene: SceneView<'_>, level: Option<u32>,
     ) -> Result<Vec<(SourceTarget, PixelRect)>, GpuRasterError> {
         let mut damage = Vec::new();
+        let capacity=r.scale_display.as_ref().and_then(|cache|cache.evaluation.fine_capacity());
         for (state, next) in self.0.iter_mut().zip([Some(next.clone()), next.companion(scene)]) {
             state.fine_steps=BATCH_ORIGINAL_TILES;
             state.fine_progress.retain(|progress|progress.valid.load(std::sync::atomic::Ordering::Acquire));
@@ -145,9 +146,9 @@ impl PaintTransforms {
                 let extent = r.target_extent(next.target);
                 let native = level.is_none() || r.layer_masks.definitions.contains_key(&next.target);
                 damage.extend(state.update_preview(r, encoder, &next, Some((scene, next.target)), extent, native)?);
-                if !native && state.native_retirement_pending() {continue;}
+                if !native && capacity.is_some() && state.native_retirement_pending() {continue;}
                 if let Some(level) = level.filter(|_| !native) {
-                    if let Some(capacity)=r.scale_display.as_ref().and_then(|cache|cache.evaluation.fine_capacity()) {
+                    if let Some(capacity)=capacity {
                         state.prepare_fine_input(r,extent,crate::scene::page_phase(scene.target_offset(next.target)),next.selection.as_ref(),capacity)?;
                     } else {
                         let local = input_level(level, &next, extent);
@@ -210,8 +211,8 @@ impl PaintTransforms {
     }
     pub fn waiting_for_display_input(&self,capacity:Option<usize>)->bool {
         self.0.iter().any(|state|state.preview.is_some() && !state.native_preview
-            && (state.native_retirement_pending() || state.reduced.is_none()
-                || capacity.is_some_and(|capacity|state.reduced.as_ref().and_then(|input|input.fine.as_ref()).is_none_or(|fine|fine.capacity!=capacity))))
+            && (state.reduced.is_none() || capacity.is_some_and(|capacity|state.native_retirement_pending()
+                || state.reduced.as_ref().and_then(|input|input.fine.as_ref()).is_none_or(|fine|fine.capacity!=capacity))))
     }
     pub fn retiring_native_bytes(&self,preview:&layer_render::TransformPreview)->u64 {
         self.0.iter().filter(|state|state.displayable(preview)).flat_map(|state|&state.retired_native)
@@ -1414,8 +1415,8 @@ impl ImageTransformState {
         level: &wgpu::TextureView, display: pixel_transform::DisplayLevel, target: display_mips::Plan, region: DocRect,
         resample: &resample::Resample, fine_budget:u64,
     ) -> Result<(), GpuRasterError> {
-        if self.native_retirement_pending() {return Err(GpuRasterError::DeferredObjectWork);}
         if self.reduced.as_ref().is_some_and(|input|input.fine.is_some()) {
+            if self.native_retirement_pending() {return Err(GpuRasterError::DeferredObjectWork);}
             self.prepare_fine_reduced(r,encoder,next.selection.as_ref(),extent)?;
             let side=display.side;
             let texels=texel_rect(target.doc_bounds.local(region),side);

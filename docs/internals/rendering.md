@@ -643,7 +643,9 @@ and copies ready pages into the atlas before yielding for pending decodes. Copie
 pages remain resident without requiring the decoded-source cache to hold the
 whole region at once.
 Native spare pages and superseded outputs remain charged until their submitted
-GPU work completes. The 608 MiB composition budget includes live and retiring
+GPU work completes. Bounded fine inputs wait for retiring spare pages before they
+are allocated; a preview that leaves native pages for an ordinary display level
+draws in the same frame. The 608 MiB composition budget includes live and retiring
 fine resources; the optional complete display pyramid keeps its separate
 admission budget.
 
