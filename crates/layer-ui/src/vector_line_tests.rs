@@ -208,7 +208,8 @@ fn move_tool_nudges_duplicates_and_copies_paths() {
     s.frame(2_000_000_000, 2_000_000_000).unwrap();
     assert_eq!(start(&s, id), [origin[0] + 1., origin[1]], "each nudge is one undo step");
 
-    let at = surface_at(&s, start(&s, id));
+    let middle = |s: &UiSession<Recorder>, id| { let o = object(s); let subpath = &o.record(o.find(id).unwrap()).unwrap().path().unwrap().geometry.subpaths()[0]; subpath.segment(subpath.segment_count() / 2).point(0.5) };
+    let at = surface_at(&s, middle(&s, id));
     s.interaction.modifiers = Modifiers { alt: true, ..Modifiers::default() };
     press(&mut s, 200, &[at, Point { x: at.x + 10., y: at.y }, Point { x: at.x + 30., y: at.y + 20. }]);
     s.interaction.modifiers = Modifiers::default();
@@ -222,7 +223,7 @@ fn move_tool_nudges_duplicates_and_copies_paths() {
     s.frame(3_000_000_000, 3_000_000_000).unwrap();
     assert_eq!(object(&s).path_count(), 1, "one undo removes the dragged copy");
 
-    let at = surface_at(&s, start(&s, id));
+    let at = surface_at(&s, middle(&s, id));
     press(&mut s, 300, &[at, at]);
     let request = |s: &UiSession<Recorder>| s.state.requests.iter().find_map(|r| match &r.kind { HostRequestKind::Document { request } => Some((r.id, request.clone())), _ => None }).unwrap().0;
     let copy_clip = |s: &mut UiSession<Recorder>, command| {
@@ -313,6 +314,45 @@ fn monoline_draws_constant_width_vector_lines() {
     let stroke = path.style.strokes().next().unwrap();
     assert!(stroke.profile.is_none(), "pressure does not change Monoline's width");
     assert_eq!(stroke.width, f64::from(s.engine.configured_brush().diameter));
+}
+
+#[test]
+fn move_frame_scales_and_rotates_selected_paths_in_one_undo_step() {
+    let (mut s, layer) = vector_session();
+    draw_line(&mut s, 1, 30);
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let drawn = object(&s);
+    let id = drawn.paths().next().unwrap().1.id;
+    let bounds = |s: &UiSession<Recorder>| object(s).items_bounds(&[id].into()).unwrap();
+    invoke(&mut s, CommandId::Move);
+    let at = surface_at(&s, drawn.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point());
+    press(&mut s, 50, &[at, at]);
+    let mut overlay = Vec::new();
+    s.append_layer_overlay(&mut overlay);
+    assert_eq!(overlay.iter().filter(|segment| segment.marker == 2.).count(), 9, "the selection shows eight scale handles and a rotate handle");
+    let [x0, y0, x1, y1] = bounds(&s);
+    let corner = surface_at(&s, [x1, y1]);
+    let far = surface_at(&s, [x1 + (x1 - x0), y1 + (y1 - y0)]);
+    press(&mut s, 100, &[corner, Point { x: (corner.x + far.x) * 0.5, y: (corner.y + far.y) * 0.5 }, far]);
+    let [a0, b0, a1, b1] = bounds(&s);
+    assert!((a0 - x0).abs() < 0.5 && (b0 - y0).abs() < 0.5, "the opposite corner stays put");
+    assert!(((a1 - a0) / (x1 - x0) - 2.).abs() < 0.05 && ((b1 - b0) / (y1 - y0) - 2.).abs() < 0.05, "dragging a corner scales: {:?} -> {:?}", [x0, y0, x1, y1], [a0, b0, a1, b1]);
+    let stroke = |s: &UiSession<Recorder>| object(s).paths().next().unwrap().1.style.strokes().next().unwrap().width;
+    assert!(stroke(&s) > drawn.paths().next().unwrap().1.style.strokes().next().unwrap().width * 1.9, "strokes scale with the paths");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert_eq!(object(&s), drawn, "a frame drag is one undo step");
+    let [x0, y0, x1, _] = bounds(&s);
+    let reach = f64::from(s.ruler_reach());
+    let rotate = [(x0 + x1) * 0.5, y0 - reach * 2.5];
+    let centre = { let [x0, y0, x1, y1] = bounds(&s); [(x0 + x1) * 0.5, (y0 + y1) * 0.5] };
+    let quarter = [centre[0] + (centre[1] - rotate[1]), centre[1]];
+    let turn = [surface_at(&s, rotate), surface_at(&s, [rotate[0] + 10., rotate[1]]), surface_at(&s, quarter)];
+    press(&mut s, 200, &turn);
+    let first = |o: &layer_core::authored::vector::VectorObject| o.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point();
+    let (before, after) = (first(&drawn), first(&object(&s)));
+    let expected = [centre[0] - (before[1] - centre[1]), centre[1] + (before[0] - centre[0])];
+    assert!((after[0] - expected[0]).abs() < 0.5 && (after[1] - expected[1]).abs() < 0.5, "the rotate handle turns the paths about their centre: {after:?} vs {expected:?}");
 }
 
 #[test]

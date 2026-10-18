@@ -2,6 +2,7 @@ use super::*;
 use layer_core::{Edit, Point, authored::{Affine64, VectorItemSelection, vector::{ItemId, VectorIndex, VectorObject}}};
 use layer_render::CursorSegment;
 use std::{cell::RefCell, collections::BTreeSet, sync::Arc};
+use super::transform_frame::{Frame, FrameHandle, translation};
 
 const HIT_SLOP: f64 = 6.;
 const CLICK: f64 = 3.;
@@ -9,6 +10,7 @@ const CLICK: f64 = 3.;
 enum Gesture {
     Drag { layer: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, start: [f64; 2], offset: [f64; 2], nudge: Option<String>, original: Option<VectorObject> },
     Marquee { layer: OccurrenceHandle, start: [f64; 2], end: [f64; 2], adding: bool },
+    Transform { layer: OccurrenceHandle, items: Arc<BTreeSet<ItemId>>, frame: Frame, handle: FrameHandle, press: [f64; 2], original: VectorObject, transformed: Option<VectorObject> },
 }
 
 type SelectionBounds = (VectorObject, Arc<BTreeSet<ItemId>>, Option<[f64; 4]>);
@@ -42,6 +44,37 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.layer_interaction.changed = true;
         Ok(items)
     }
+    fn vector_frame(&self) -> Option<Frame> {
+        let selection = self.selected_vector_items()?;
+        let doc = self.engine.document();
+        let object = doc.scene().vector_layer(selection.layer)?;
+        let mut cached = self.vector_moves.bounds.borrow_mut();
+        if !cached.as_ref().is_some_and(|(root, items, _)| root.same_root(object) && Arc::ptr_eq(items, &selection.items)) {
+            *cached = Some((object.clone(), selection.items.clone(), object.items_bounds(&selection.items)));
+        }
+        let [x0, y0, x1, y1] = cached.as_ref().and_then(|(_, _, bounds)| *bounds)?;
+        let [ox, oy] = doc.scene().occurrence_offset64(selection.layer);
+        let (min, size) = ([x0 + ox, y0 + oy], [(x1 - x0).max(1e-3), (y1 - y0).max(1e-3)]);
+        Some(Frame { unit: Affine64([size[0], 0., 0., size[1], min[0], min[1]]), pivot: [min[0] + size[0] * 0.5, min[1] + size[1] * 0.5] })
+    }
+    fn begin_vector_transform(&mut self, layer: OccurrenceHandle, point: [f64; 2]) -> Option<Gesture> {
+        let frame = self.vector_frame()?;
+        let handle = frame.hit(point, f64::from(self.ruler_reach())).filter(|handle| matches!(handle, FrameHandle::Scale(_) | FrameHandle::Rotate))?;
+        let items = self.selected_vector_items()?.items.clone();
+        let original = self.engine.document().scene().vector_layer(layer)?.clone();
+        Some(Gesture::Transform { layer, items, frame, handle, press: point, original, transformed: None })
+    }
+    fn transform_vector_items(&mut self, point: [f64; 2]) -> Result<(), String> {
+        let modifiers = self.interaction.modifiers;
+        let Some(Gesture::Transform { layer, items, frame, handle, press, original, transformed }) = &mut self.vector_moves.gesture else { return Ok(()) };
+        let Some(delta) = frame.delta(*handle, *press, point, modifiers.shift, false, modifiers.alt) else { return Ok(()) };
+        let [ox, oy] = self.engine.document().scene().occurrence_offset64(*layer);
+        let local = translation([-ox, -oy]).compose(delta).compose(translation([ox, oy]));
+        let result = original.transform_items(items, local).map_err(str::to_string)?;
+        *transformed = Some(result.clone());
+        let edit = self.engine.document().vector_object_edit(*layer, result).map_err(|e| e.to_string())?;
+        self.engine.preview_edit(edit).map_err(|e| e.to_string())
+    }
     fn document_per_surface_pixel(&self) -> f64 {
         let [m0, m1, m2, m3, _, _] = self.state.camera.input_transform().surface_to_document;
         f64::from((m0 * m3 - m1 * m2).abs().sqrt()).max(1e-6)
@@ -53,6 +86,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.cancel_vector_move();
                 let Some(layer) = self.vector_move_layer() else { return Ok(false) };
                 if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
+                if let Some(gesture) = self.begin_vector_transform(layer, point) {
+                    self.vector_moves.gesture = Some(gesture);
+                    return Ok(true);
+                }
                 let doc = self.engine.document();
                 let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
                 let offset = doc.scene().occurrence_offset64(layer);
@@ -87,6 +124,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                         motion = Some(layer_render::VectorMotion { owner: *layer, items: items.clone(), offset: *offset });
                     }
                     Gesture::Marquee { end, .. } => *end = point,
+                    Gesture::Transform { .. } => self.transform_vector_items(point)?,
                 }
                 self.layer_interaction.changed = true;
                 if event.phase == PenPhase::Up { return self.finish_vector_move().map(|()| true); }
@@ -130,9 +168,13 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn cancel_vector_move(&mut self) -> bool {
         let Some(gesture) = self.vector_moves.gesture.take() else { return false };
-        if let Gesture::Drag { layer, original, .. } = gesture {
-            self.engine.backend_mut().set_vector_motion(None);
-            let _ = self.restore_vector_original(layer, original);
+        match gesture {
+            Gesture::Drag { layer, original, .. } => {
+                self.engine.backend_mut().set_vector_motion(None);
+                let _ = self.restore_vector_original(layer, original);
+            }
+            Gesture::Transform { layer, original, transformed: Some(_), .. } => { let _ = self.restore_vector_original(layer, Some(original)); }
+            _ => {}
         }
         self.layer_interaction.changed = true;
         true
@@ -151,6 +193,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 Ok(())
             })(),
             Gesture::Drag { layer, original, .. } => self.restore_vector_original(layer, original),
+            Gesture::Transform { layer, original, transformed: Some(transformed), .. } => (|| {
+                self.restore_vector_original(layer, Some(original))?;
+                let edit = self.engine.document().vector_object_edit(layer, transformed).map_err(|e| e.to_string())?;
+                self.layer_edit(edit)
+            })(),
+            Gesture::Transform { .. } => Ok(()),
             Gesture::Marquee { layer, start, end, adding } => {
                 let reach = CLICK * self.document_per_surface_pixel();
                 let doc = self.engine.document();
@@ -204,17 +252,13 @@ impl<R: CanvasRenderer> UiSession<R> {
             rect([start[0].min(end[0]), start[1].min(end[1]), start[0].max(end[0]), start[1].max(end[1])]);
             return;
         }
-        let Some(selection) = self.selected_vector_items() else { return };
-        let doc = self.engine.document();
-        let Some(object) = doc.scene().vector_layer(selection.layer) else { return };
-        let mut cached = self.vector_moves.bounds.borrow_mut();
-        if !cached.as_ref().is_some_and(|(root, items, _)| root.same_root(object) && Arc::ptr_eq(items, &selection.items)) {
-            *cached = Some((object.clone(), selection.items.clone(), object.items_bounds(&selection.items)));
-        }
-        let Some(bounds) = cached.as_ref().and_then(|(_, _, bounds)| *bounds) else { return };
-        let layer = doc.scene().occurrence_offset64(selection.layer);
-        let drag = match &self.vector_moves.gesture { Some(Gesture::Drag { offset, .. }) => *offset, _ => [0.; 2] };
-        let shift = [layer[0] + drag[0], layer[1] + drag[1]];
-        rect([bounds[0] + shift[0], bounds[1] + shift[1], bounds[2] + shift[0], bounds[3] + shift[1]]);
+        let (frame, idle) = match &self.vector_moves.gesture {
+            Some(Gesture::Transform { frame, .. }) => (self.vector_frame().unwrap_or(*frame), false),
+            Some(Gesture::Drag { offset, .. }) => match self.vector_frame() { Some(frame) => (frame.moved(translation(*offset)), false), None => return },
+            _ => match self.vector_frame() { Some(frame) => (frame, true), None => return },
+        };
+        let corners = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]].map(|p| { let [x, y] = frame.unit.map(p); point(x, y) });
+        for i in 0..4 { segments.push(CursorSegment { from: corners[i], to: corners[(i + 1) % 4], distance: 0., marker: 0., scale: 1. }); }
+        if idle && self.vector_paths_editable() { frame.append_handles(f64::from(self.ruler_reach()), |[x, y]| point(x, y), false, segments); }
     }
 }

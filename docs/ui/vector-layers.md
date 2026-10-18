@@ -55,7 +55,13 @@ With **Move** on a vector layer and no pixel selection:
   selection. Shift adds a path to the selection or removes it.
 - Pressing empty canvas and dragging draws a marquee that selects the paths it
   fully encloses; Shift adds them. A click on empty canvas clears the selection.
-- A dashed box marks the selection's bounds.
+- A dashed box marks the selection's bounds, with the eight scale handles and
+  the rotate handle image layers use. Dragging a side or corner scales the
+  selected paths and their outline widths from the opposite edge (Shift keeps
+  the proportions, Alt scales about the centre); the rotate handle turns them
+  about their centre (Shift snaps to 15°). Each drag previews live and commits
+  one undo step. Rectangles and ellipses stay live shapes while the transform
+  keeps them rectangles and ellipses.
 - Arrow keys nudge the selected paths by one pixel, ten with Shift; a held key
   previews the move and commits it as one undo step on release.
 - Alt-dragging a path drags copies of the selected paths, placed in front, and
@@ -91,7 +97,8 @@ layers ([Object layers](image-objects.md)).
 `move_tool_nudges_duplicates_and_copies_paths`,
 `properties_restyle_every_selected_path_in_one_undo_step`,
 `rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step`,
-`monoline_draws_constant_width_vector_lines` and
+`monoline_draws_constant_width_vector_lines`,
+`move_frame_scales_and_rotates_selected_paths_in_one_undo_step` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

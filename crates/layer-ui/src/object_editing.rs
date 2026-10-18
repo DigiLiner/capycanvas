@@ -8,30 +8,13 @@ use std::collections::BTreeSet;
 
 type InsertedObjects = (Edit, Vec<ImageObjectHandle>, Vec<(SourceTarget, layer_core::RasterOperation)>);
 
-const UNIT_HANDLES: [[f64; 2]; 8] = [[0., 0.], [0.5, 0.], [1., 0.], [1., 0.5], [1., 1.], [0.5, 1.], [0., 1.], [0., 0.5]];
 
 pub fn object_token(handle: ImageObjectHandle) -> u64 { handle.wire_id() }
 pub fn object_handle(token: u64) -> Result<ImageObjectHandle, String> {
     ImageObjectHandle::from_wire_id(token).ok_or_else(|| "Invalid image identity".into())
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum ObjectHandle { Move, Scale([f64; 2]), Rotate, Pivot }
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Frame { unit: Affine64, pivot: [f64; 2] }
-impl Frame {
-    fn moved(self, delta: Affine64) -> Self { Self { unit: delta.compose(self.unit), pivot: delta.map(self.pivot) } }
-    fn handles(self, reach: f64) -> Vec<(ObjectHandle, [f64; 2])> {
-        let top = self.unit.map([0.5, 0.]);
-        let centre = self.unit.map([0.5, 0.5]);
-        let outward = [top[0] - centre[0], top[1] - centre[1]];
-        let length = outward[0].hypot(outward[1]).max(f64::MIN_POSITIVE);
-        let rotate = [top[0] + outward[0] / length * reach * 2.5, top[1] + outward[1] / length * reach * 2.5];
-        UNIT_HANDLES.into_iter().map(|unit| (ObjectHandle::Scale(unit), self.unit.map(unit)))
-            .chain([(ObjectHandle::Rotate, rotate), (ObjectHandle::Pivot, self.pivot)]).collect()
-    }
-}
+use super::transform_frame::{Frame, FrameHandle as ObjectHandle, about, translation};
 
 struct Gesture {
     handle: ObjectHandle,
@@ -65,10 +48,6 @@ impl ObjectEditing {
     pub fn snapping(&self) -> Option<&(Snapping, [f64; 2])> { self.gesture.as_ref().and_then(|gesture| gesture.snapping.as_ref()) }
 }
 
-fn translation(delta: [f64; 2]) -> Affine64 { Affine64([1., 0., 0., 1., delta[0], delta[1]]) }
-fn about(pivot: [f64; 2], linear: [f64; 4]) -> Affine64 {
-    translation(pivot).compose(Affine64([linear[0], linear[1], linear[2], linear[3], 0., 0.])).compose(translation([-pivot[0], -pivot[1]]))
-}
 fn rect(bounds: [[f64; 2]; 2], origin: [f64; 2]) -> Rect {
     let point = |p: [f64; 2]| Point { x: (p[0] - origin[0]) as f32, y: (p[1] - origin[1]) as f32 };
     Rect { min: point(bounds[0]), max: point(bounds[1]) }
@@ -161,9 +140,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     fn object_hit(&self, point: [f64; 2]) -> Option<ObjectHandle> {
         let frame = self.session_frame()?;
-        let reach = f64::from(self.ruler_reach());
-        frame.handles(reach).into_iter().map(|(handle, at)| ((at[0] - point[0]).hypot(at[1] - point[1]), handle))
-            .filter(|(distance, _)| *distance <= reach).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, handle)| handle)
+        frame.hit(point, f64::from(self.ruler_reach()))
             .or_else(|| self.selected_objects().iter().any(|h| self.engine.document().object_contains(*h, point)).then_some(ObjectHandle::Move))
     }
     pub(super) fn pointer64(&self, surface: [f32; 2]) -> [f64; 2] {
@@ -258,35 +235,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 }
                 translation(delta)
             }
-            ObjectHandle::Rotate => {
-                let pivot = frame.pivot;
-                let mut angle = (point[1] - pivot[1]).atan2(point[0] - pivot[0]) - (gesture.press[1] - pivot[1]).atan2(gesture.press[0] - pivot[0]);
-                if modifiers.shift { let step = std::f64::consts::PI / 12.; angle = (angle / step).round() * step; }
-                let (sin, cos) = angle.sin_cos();
-                about(pivot, [cos, sin, -sin, cos])
-            }
-            ObjectHandle::Scale(handle) => {
-                let inverse = frame.unit.inverse()?;
-                let anchor = if modifiers.alt { inverse.map(frame.pivot) } else { handle.map(|v| 1. - v) };
-                let q = inverse.map(point);
-                let mut scale = [0, 1].map(|axis| {
-                    let span = handle[axis] - anchor[axis];
-                    if handle[axis] == 0.5 || span == 0. { 1. } else { (q[axis] - anchor[axis]) / span }
-                });
-                if (aspect || modifiers.shift) && handle[0] != 0.5 && handle[1] != 0.5 {
-                    let factor = if (scale[0] - 1.).abs() >= (scale[1] - 1.).abs() { scale[0] } else { scale[1] };
-                    scale = [factor; 2];
-                }
-                if scale.iter().any(|v| !v.is_finite()) { return None; }
-                let [a, b, c, d, _, _] = frame.unit.0;
-                let sides = [a.hypot(b), c.hypot(d)];
-                let scale = [0, 1].map(|axis| {
-                    let least = (1. / sides[axis]).min(1.);
-                    if scale[axis].abs() >= least { scale[axis] } else if scale[axis] < 0. { -least } else { least }
-                });
-                frame.unit.compose(about(anchor, [scale[0], 0., 0., scale[1]])).compose(inverse)
-            }
-            ObjectHandle::Pivot => return None,
+            handle => return frame.delta(handle, gesture.press, point, modifiers.shift, aspect, modifiers.alt),
         })
     }
     fn move_objects(&mut self, delta: Affine64) -> Result<(), String> {
@@ -550,13 +499,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let corners = [[0., 0.], [1., 0.], [1., 1.], [0., 1.]].map(|p| point(frame.unit.map(p)));
             for i in 0..4 { line(corners[i], corners[(i + 1) % 4], true); }
         }
-        let handles = frame.handles(f64::from(self.ruler_reach()));
-        if let Some((_, rotate)) = handles.iter().find(|(handle, _)| *handle == ObjectHandle::Rotate) { line(point(frame.unit.map([0.5, 0.])), point(*rotate), true); }
-        for (handle, at) in handles {
-            let [x, y] = point(at);
-            let half = operation::HANDLE_HALF_SIZE;
-            segments.push(CursorSegment { from: [x - half, y - half], to: [x + half, y + half], distance: 0., marker: if handle == ObjectHandle::Pivot { 5. } else { 2. }, scale: 1. });
-        }
+        frame.append_handles(f64::from(self.ruler_reach()), point, true, segments);
     }
     pub(super) fn require_document_idle_except_placement(&self) -> Result<(), String> {
         if self.objects.placing() { self.require_idle() } else { self.require_document_idle() }
