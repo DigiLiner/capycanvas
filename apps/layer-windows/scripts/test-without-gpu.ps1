@@ -1,9 +1,10 @@
-param([ValidateSet('Debug','Release')][string]$Configuration = 'Debug')
+param([ValidateSet('Debug','Release')][string]$Configuration = 'Release')
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $packages = 'layer-core','layer-engine','layer-ui','layer-workspace','layer-host','layer-windows' | ForEach-Object { '-p', $_ }
+$cargoProfileArgs = @(if ($Configuration -eq 'Release') { '--release' })
 & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration
-& (Join-Path $PSScriptRoot 'test-input.ps1')
+& (Join-Path $PSScriptRoot 'test-input.ps1') -Configuration $Configuration
 Push-Location $repo
 $previousSoftwareGpu = $env:LAYER_TEST_SOFTWARE_GPU
 $previousAdapter = $env:WGPU_ADAPTER_NAME
@@ -16,10 +17,10 @@ try {
     $env:WGPU_ADAPTER_NAME = 'Microsoft Basic Render Driver'
     $env:LAYER_GPU_INDEX = $null
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
-    & cargo test --locked @packages --lib --features layer-render-wgpu/software-adapter-tests
+    & cargo test --locked @cargoProfileArgs @packages --lib --features layer-render-wgpu/software-adapter-tests
     if ($LASTEXITCODE -ne 0) { throw 'Rust tests failed.' }
     $env:CAPY_STORAGE_DIR = Join-Path $repo ('artifacts/windows/test-storage/'+[Guid]::NewGuid().ToString('N'))
-    & cargo test --locked -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests d3d12_ -- --ignored --test-threads=1 --skip hdr --skip native_color
+    & cargo test --locked @cargoProfileArgs -p layer-windows --lib --features layer-render-wgpu/software-adapter-tests d3d12_ -- --ignored --test-threads=1 --skip hdr --skip native_color
     if ($LASTEXITCODE -ne 0) { throw 'D3D12 document tests failed.' }
 } finally {
     $env:LAYER_TEST_SOFTWARE_GPU = $previousSoftwareGpu

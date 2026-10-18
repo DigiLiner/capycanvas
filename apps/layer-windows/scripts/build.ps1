@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Debug','Release')][string]$Configuration = 'Debug',
+    [ValidateSet('Debug','Release')][string]$Configuration = 'Release',
     [string]$PackagesDirectory,
     [string]$OutputDirectory,
     [switch]$SkipRust,
@@ -10,7 +10,6 @@ param(
     [switch]$Run
 )
 $ErrorActionPreference = 'Stop'
-if ($Run -and !$PSBoundParameters.ContainsKey('Configuration')) { $Configuration = 'Release' }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 if (!$PackagesDirectory) { $PackagesDirectory = Join-Path $repo 'artifacts/windows/packages' }
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $repo "artifacts/windows/$Configuration" }

@@ -500,7 +500,7 @@ def check(args):
     boot(machine, gui=False)
     lock = claim(machine)
     sync_machine(machine)
-    configuration = "Release" if args.release else "Debug"
+    configuration = "Debug" if args.debug else "Release"
     guest(machine, f"& '{GUEST_REPO}\\apps\\layer-windows\\scripts\\test-without-gpu.ps1' "
                    f"-Configuration {configuration}")
 
@@ -703,7 +703,7 @@ def main():
         "command", nargs=argparse.REMAINDER)
     command("sync", sync, f"copy the working tree to {GUEST_REPO}, keeping build outputs")
     command("check", check, "sync, build and run the tests that need no GPU").add_argument(
-        "--release", action="store_true", help="build the Release configuration")
+        "--debug", action="store_true", help="use unoptimized Debug builds and tests (default: Release)")
     fixture = command("fixtures", fixtures, "sync, build and run the UI fixtures on the software adapter")
     fixture.add_argument("names", nargs="*", help="fixtures to run, e.g. layers or header:pen (default: all)")
     fixture.add_argument("--no-build", action="store_true", help="reuse the last software-adapter build")

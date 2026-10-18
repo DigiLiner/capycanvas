@@ -76,6 +76,18 @@ class CredentialTests(unittest.TestCase):
             self.assertEqual(target.read_text(), "preserved")
 
 
+class CheckTests(unittest.TestCase):
+    def test_cli_defaults_to_release_and_debug_is_explicit(self):
+        for options, configuration in (([], "Release"), (["--debug"], "Debug")):
+            with self.subTest(configuration=configuration), \
+                    patch.object(sys, "argv", ["windows-vm.py", "check", *options]), \
+                    patch.object(vm, "selected", return_value=None), patch.object(vm, "boot"), \
+                    patch.object(vm, "claim"), patch.object(vm, "sync_machine"), \
+                    patch.object(vm, "guest") as guest:
+                vm.main()
+            self.assertTrue(guest.call_args.args[1].endswith(f"-Configuration {configuration}"))
+
+
 class FixtureRunnerTests(unittest.TestCase):
     def test_cli_timeout_defaults_and_bounded_override(self):
         for arguments, minutes in (([], 20), (["--timeout-minutes", "90"], 90)):

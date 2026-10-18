@@ -47,23 +47,24 @@ root, build and run:
 ```
 
 The launcher builds optimized Release and opens the app after a successful build.
-Use `.\apps\layer-windows\run.cmd -Configuration Debug` for an unoptimized build.
 It sets the script execution policy for its child PowerShell process, leaving
-your settings intact.
+your settings intact. Use Release for everyday development, drawing and performance
+checks. Reserve `-Configuration Debug` for stepping through code, inspecting
+variables or running debug assertions; unoptimized painting can lag.
 
 To build without launching, allow local scripts in this terminal and call the
 build script directly:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process RemoteSigned -Force
-./apps/layer-windows/scripts/build.ps1 -Configuration Release
+./apps/layer-windows/scripts/build.ps1
 ```
 
 The build script restores the NuGet packages pinned in
 [`packages.config`](../../apps/layer-windows/packages.config) into ignored
 `artifacts/windows/packages`, builds the Rust DLL and then the WinUI app into
 `artifacts/windows/Release`, and prints the path of `CapyCanvas.exe`.
-For a Debug build, omit `-Configuration Release`; the output is `artifacts/windows/Debug`.
+For a Debug build, pass `-Configuration Debug`; the output is `artifacts/windows/Debug`.
 `-OutputDirectory` builds elsewhere, `-PackagesDirectory` reuses another restore
 and `-SkipRestore` skips it. `-ControlFixture` and `-SoftwareAdapterTests` build
 the [control reviews](#control-reviews) and the [VM fixture build](windows-vm.md#ui-fixtures-on-the-software-adapter).
@@ -72,7 +73,8 @@ only packaging uses it.
 
 Always rebuild with `build.ps1` after Rust or shared changes. MSBuild alone copies
 whatever Rust DLL already exists, so you would test stale code. Close the test
-apps you started before rebuilding.
+apps you started before rebuilding. Close every window of the current app before
+switching configurations; a new launch otherwise activates the running build.
 
 The build copies `dxcompiler.dll` from the pinned `Microsoft.Direct3D.DXC` package
 beside the executable. The host compiles D3D12 shaders with it; it uses its
@@ -298,7 +300,7 @@ From the repository root, for a built app:
 ```powershell
 $env:CAPY_FILTERS_DIR = (Resolve-Path examples/filters/tent-blur).Path
 $env:CAPY_FILTERS_MODE = 'add'
-& ./artifacts/windows/Debug/CapyCanvas.exe
+& ./artifacts/windows/Release/CapyCanvas.exe
 ```
 
 [Runtime filters](../reference/runtime-filters.md#windows-file-transport)
@@ -444,7 +446,7 @@ registration and menu actions in both themes.
 | Where | Checks |
 | --- | --- |
 | Linux or Windows | `cargo test --locked -p layer-host -p layer-ui -p layer-workspace -p layer-windows --lib` and `cargo clippy --locked -p layer-windows --all-targets -- -D warnings` |
-| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: build, native input queue tests, Rust unit tests and the `d3d12_` document tests on the Microsoft software adapter. On Linux: `tools/windows-vm/windows-vm.py check`. |
+| Windows, no GPU needed | `./apps/layer-windows/scripts/test-without-gpu.ps1`: Release build, native input queue tests, Rust unit tests and the `d3d12_` document tests on the Microsoft software adapter. Pass `-Configuration Debug` for unoptimized builds and tests. On Linux: `tools/windows-vm/windows-vm.py check`. |
 | Windows desktop | The `exercise-*.ps1` fixtures for the changed area. On Linux: `tools/windows-vm/windows-vm.py fixtures <name>`. |
 | Hardware D3D12 | `cargo test --locked -p layer-windows --lib d3d12_ -- --ignored --test-threads=1`, which adds the HDR and color round-trip tests; [GPU reconstruction](#gpu-reconstruction); renderer tests with `LAYER_GPU_INDEX`; performance. |
 
