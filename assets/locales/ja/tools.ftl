@@ -12,6 +12,7 @@ brush-preset-dry-scumble = かすれ塗り
 brush-preset-dual-texture = 二重テクスチャ
 brush-preset-eraser = 消しゴム
 brush-preset-gpen = Gペン
+brush-preset-monoline = モノライン
 brush-preset-healing-brush = 修復ブラシ
 brush-preset-liquify-crystals = ゆがみ・結晶
 brush-preset-liquify-expand = ゆがみ・膨張

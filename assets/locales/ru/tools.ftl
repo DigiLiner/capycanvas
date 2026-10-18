@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Сухая протирка
 brush-preset-dual-texture = Двойная текстура
 brush-preset-eraser = Ластик
 brush-preset-gpen = G-перо
+brush-preset-monoline = Монолайн
 brush-preset-healing-brush = Восстанавливающая кисть
 brush-preset-liquify-crystals = Пластика: кристаллы
 brush-preset-liquify-expand = Пластика: расширение

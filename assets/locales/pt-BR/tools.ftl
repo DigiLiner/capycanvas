@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Esfregaço seco
 brush-preset-dual-texture = Textura dupla
 brush-preset-eraser = Borracha
 brush-preset-gpen = Caneta G
+brush-preset-monoline = Monolinha
 brush-preset-healing-brush = Pincel de correção
 brush-preset-liquify-crystals = Cristais de liquefação
 brush-preset-liquify-expand = Expandir com liquefação

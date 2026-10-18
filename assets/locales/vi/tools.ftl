@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Cọ khô phủ mỏng
 brush-preset-dual-texture = Hai kết cấu
 brush-preset-eraser = Tẩy
 brush-preset-gpen = Bút G
+brush-preset-monoline = Nét đều
 brush-preset-healing-brush = Cọ phục hồi
 brush-preset-liquify-crystals = Biến dạng tinh thể
 brush-preset-liquify-expand = Biến dạng phồng

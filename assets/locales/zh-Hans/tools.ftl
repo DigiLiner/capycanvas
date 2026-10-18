@@ -12,6 +12,7 @@ brush-preset-dry-scumble = 干擦叠色
 brush-preset-dual-texture = 双重纹理
 brush-preset-eraser = 橡皮擦
 brush-preset-gpen = G 笔
+brush-preset-monoline = 等宽笔
 brush-preset-healing-brush = 修复画笔
 brush-preset-liquify-crystals = 液化结晶
 brush-preset-liquify-expand = 液化膨胀

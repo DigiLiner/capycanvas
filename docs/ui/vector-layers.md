@@ -7,7 +7,8 @@
 
 ## Drawing
 
-Plain round dry brushes, such as G-Pen, draw on a vector layer. While the
+Plain round dry brushes draw on a vector layer: G-Pen, whose pressure sets the
+width, and Monoline, which keeps one width. While the
 pen is down the line shows as a provisional path; at pen-up it is fitted to
 cubic segments with a pressure width profile and added as one path in one undo
 step. Other brushes refuse the stroke with a notice, and the canvas cursor shows
@@ -89,7 +90,8 @@ layers ([Object layers](image-objects.md)).
 `figure_shapes_on_vector_layers_become_selected_editable_paths`,
 `move_tool_nudges_duplicates_and_copies_paths`,
 `properties_restyle_every_selected_path_in_one_undo_step`,
-`rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step` and
+`rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step`,
+`monoline_draws_constant_width_vector_lines` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

@@ -303,6 +303,19 @@ fn rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step() {
 }
 
 #[test]
+fn monoline_draws_constant_width_vector_lines() {
+    let (mut s, layer) = vector_session();
+    s.select_brush(DefaultBrushPreset::Monoline as u32).unwrap();
+    draw_line(&mut s, 1, 40);
+    let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    assert_eq!(object.path_count(), 1);
+    let (_, path) = object.paths().next().unwrap();
+    let stroke = path.style.strokes().next().unwrap();
+    assert!(stroke.profile.is_none(), "pressure does not change Monoline's width");
+    assert_eq!(stroke.width, f64::from(s.engine.configured_brush().diameter));
+}
+
+#[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {
     use layer_core::authored::vector::*;

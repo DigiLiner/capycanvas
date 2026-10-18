@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Sfregazzo asciutto
 brush-preset-dual-texture = Doppia trama
 brush-preset-eraser = Gomma
 brush-preset-gpen = G-Pen
+brush-preset-monoline = Monolinea
 brush-preset-healing-brush = Pennello correttivo
 brush-preset-liquify-crystals = Fluidifica: cristalli
 brush-preset-liquify-expand = Fluidifica: espandi

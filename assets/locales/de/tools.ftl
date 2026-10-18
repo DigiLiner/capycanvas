@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Trockenes Schummern
 brush-preset-dual-texture = Doppelte Textur
 brush-preset-eraser = Radierer
 brush-preset-gpen = G-Feder
+brush-preset-monoline = Monoline-Stift
 brush-preset-healing-brush = Reparaturpinsel
 brush-preset-liquify-crystals = Verflüssigen: Kristalle
 brush-preset-liquify-expand = Verflüssigen: Aufblasen

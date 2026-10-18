@@ -143,6 +143,7 @@ impl ToolGroup {
 // also the keys of the GPU preview cache and saved brush assets.
 const PRESETS: &[(DefaultBrushPreset, MessageId, ToolGroup)] = &[
     (DefaultBrushPreset::GPen, MessageId::BRUSH_PRESET_GPEN, ToolGroup::Pen),
+    (DefaultBrushPreset::Monoline, MessageId::BRUSH_PRESET_MONOLINE, ToolGroup::Pen),
     (DefaultBrushPreset::RoughGPen, MessageId::BRUSH_PRESET_ROUGH_GPEN, ToolGroup::Pen),
     (DefaultBrushPreset::BlottyInk, MessageId::BRUSH_PRESET_BLOTTY_INK, ToolGroup::Pen),
     (
@@ -657,7 +658,7 @@ mod tests {
 
     #[test]
     fn every_brush_has_one_tool_and_group_and_every_group_is_populated() {
-        assert_eq!(PRESETS.len(), 43);
+        assert_eq!(PRESETS.len(), 44);
         let mut ids = std::collections::BTreeSet::new();
         for &(preset, _, group) in PRESETS {
             assert!(ids.insert(preset as u32));

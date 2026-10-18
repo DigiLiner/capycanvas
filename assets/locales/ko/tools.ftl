@@ -12,6 +12,7 @@ brush-preset-dry-scumble = 마른 덧칠
 brush-preset-dual-texture = 이중 질감
 brush-preset-eraser = 지우개
 brush-preset-gpen = G펜
+brush-preset-monoline = 모노라인
 brush-preset-healing-brush = 복구 브러시
 brush-preset-liquify-crystals = 왜곡 · 결정
 brush-preset-liquify-expand = 왜곡 · 팽창

@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Kuru sürtme
 brush-preset-dual-texture = Çift doku
 brush-preset-eraser = Silgi
 brush-preset-gpen = G kalem
+brush-preset-monoline = Tek çizgi
 brush-preset-healing-brush = Düzeltme fırçası
 brush-preset-liquify-crystals = Sıvılaştırma kristalleri
 brush-preset-liquify-expand = Sıvılaştırma genişletme

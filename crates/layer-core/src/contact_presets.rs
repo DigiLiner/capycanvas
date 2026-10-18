@@ -2,13 +2,14 @@
 use crate::*;
 use std::sync::Arc;
 
-pub const CONTACT_BRUSH_PRESETS: [DefaultBrushPreset; 24] = [
+pub const CONTACT_BRUSH_PRESETS: [DefaultBrushPreset; 25] = [
     DefaultBrushPreset::Pencil,
     DefaultBrushPreset::PointyPencil,
     DefaultBrushPreset::ShadingPencil,
     DefaultBrushPreset::Charcoal,
     DefaultBrushPreset::Crayon,
     DefaultBrushPreset::GPen,
+    DefaultBrushPreset::Monoline,
     DefaultBrushPreset::RoughGPen,
     DefaultBrushPreset::CalligraphyPen,
     DefaultBrushPreset::AntiquePen,
@@ -130,6 +131,9 @@ pub(crate) fn contact_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         GPen => {
             brush.stabilization.pressure_fall_micros = 34_133;
         }
+        Monoline => {
+            brush.mappings = Arc::from([]);
+        }
         RoughGPen => {
             model.edge_roughness = 0.3;
             model.edge_scale = 1.7;
@@ -226,6 +230,8 @@ mod vector_line_tests {
     #[test]
     fn only_solid_round_contact_pens_draw_vector_lines() {
         assert!(contact_brush(DefaultBrushPreset::GPen).draws_vector_lines());
+        assert!(contact_brush(DefaultBrushPreset::Monoline).draws_vector_lines());
+        assert!(contact_brush(DefaultBrushPreset::Monoline).mappings.is_empty(), "Monoline keeps one width");
         for preset in [DefaultBrushPreset::RoughGPen, DefaultBrushPreset::CalligraphyPen, DefaultBrushPreset::BrushedInk, DefaultBrushPreset::WetInk] {
             assert!(!contact_brush(preset).draws_vector_lines(), "{preset:?}");
         }

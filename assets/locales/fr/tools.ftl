@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Brossage à sec
 brush-preset-dual-texture = Double texture
 brush-preset-eraser = Gomme
 brush-preset-gpen = Plume G
+brush-preset-monoline = Monoligne
 brush-preset-healing-brush = Pinceau correcteur
 brush-preset-liquify-crystals = Fluidité cristalline
 brush-preset-liquify-expand = Fluidité : dilatation

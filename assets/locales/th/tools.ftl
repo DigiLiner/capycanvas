@@ -12,6 +12,7 @@ brush-preset-dry-scumble = ป้ายสีแห้ง
 brush-preset-dual-texture = พื้นผิวคู่
 brush-preset-eraser = ยางลบ
 brush-preset-gpen = ปากกา G
+brush-preset-monoline = โมโนไลน์
 brush-preset-healing-brush = พู่กันซ่อมแซม
 brush-preset-liquify-crystals = บิดรูปเป็นผลึก
 brush-preset-liquify-expand = บิดรูปขยาย

@@ -12,6 +12,7 @@ brush-preset-dry-scumble = Dry Scumble
 brush-preset-dual-texture = Dual Texture
 brush-preset-eraser = Eraser
 brush-preset-gpen = G-Pen
+brush-preset-monoline = Monoline
 brush-preset-healing-brush = Healing Brush
 brush-preset-liquify-crystals = Liquify Crystals
 brush-preset-liquify-expand = Liquify Expand

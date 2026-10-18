@@ -24,6 +24,7 @@ brush-preset-dual-texture = Tekstur Ganda
 brush-preset-eraser = Penghapus
 
 brush-preset-gpen = Pena G
+brush-preset-monoline = Monoline
 
 brush-preset-healing-brush = Kuas Pemulih
 

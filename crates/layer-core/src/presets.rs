@@ -59,6 +59,7 @@ pub enum DefaultBrushPreset {
     HealingBrush = 41,
     SpotHealingBrush = 42,
     Crayon = 43,
+    Monoline = 44,
 }
 
 /// Returns a complete immutable preset snapshot. Callers may override color,
@@ -70,6 +71,7 @@ pub fn default_brush(preset: DefaultBrushPreset) -> BrushSnapshot {
         | DefaultBrushPreset::Crayon => crate::contact_presets::dry_brush(preset),
         DefaultBrushPreset::BristlePaintbrush => crate::contact_presets::bristle_paintbrush(),
         DefaultBrushPreset::GPen
+        | DefaultBrushPreset::Monoline
         | DefaultBrushPreset::RoughGPen
         | DefaultBrushPreset::CalligraphyPen
         | DefaultBrushPreset::AntiquePen
