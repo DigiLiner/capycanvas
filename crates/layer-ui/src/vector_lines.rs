@@ -25,7 +25,8 @@ impl<R: CanvasRenderer> UiSession<R> {
         let document = self.engine.document();
         let layer = document.working.occurrence?;
         document.scene().vector_layer(layer)?;
-        self.engine.configured_brush().draws_vector_lines().then_some(layer)
+        let erasing = self.state.brush.tool == Tool::Eraser || self.state.colors.transparent();
+        (!erasing && self.engine.configured_brush().draws_vector_lines()).then_some(layer)
     }
     pub(super) fn vector_line_pen(&mut self, event: PenEvent) -> Result<(), String> {
         if event.flags.contains(SampleFlags::PREDICTED) || event.flags.contains(SampleFlags::CORRECTION) { return Ok(()); }
@@ -77,7 +78,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             let id = object.allocate_id();
             let drawn = object.insert_front(vec![Record::Path(path(id, &line.paint, fitted))]);
             let edit = document.vector_object_edit(line.layer, drawn).map_err(|e| e.to_string())?;
-            self.layer_edit(edit)
+            self.layer_edit(edit)?;
+            self.layer_interaction.changed = true;
+            Ok(())
         })();
         self.engine.backend_mut().set_vector_preview(None);
         result

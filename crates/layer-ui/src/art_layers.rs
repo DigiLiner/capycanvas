@@ -15,7 +15,7 @@ pub(super) fn color_mode_label(mode: layer_core::color::LayerColorMode, localiza
 type PreviewGeometry = ([i64; 2], [u32; 2], Option<(layer_core::authored::CoverageHandle, [i64; 2], [u32; 2], bool)>);
 type GeneratorPreview = (layer_core::authored::EffectApplication, Arc<layer_core::EffectProgram>,
     ([u32; 2], layer_core::BlendSpace, layer_core::color::DocumentColor));
-type PreviewRevision = (Option<std::sync::Weak<layer_core::color::source::SourceImage>>, Option<GeneratorPreview>, PreviewGeometry, u64);
+type PreviewRevision = (Option<std::sync::Weak<layer_core::color::source::SourceImage>>, Option<GeneratorPreview>, PreviewGeometry, Option<layer_core::authored::vector::VectorObject>, u64);
 
 #[derive(Default)]
 pub(super) struct PreviewRevisions {
@@ -38,20 +38,22 @@ impl PreviewRevisions {
             let environment = (composition.size, composition.blend, composition.color);
             let geometry = (occurrence.offset, scene.local_extent(handle),
                 occurrence.mask.as_ref().map(|mask| (mask.source, mask.offset, document.artwork.coverage.get(mask.source).unwrap().domain, mask.linked)));
-            let same = self.occurrences.get(&handle).is_some_and(|(a, c, previous, _)| {
+            let vector = scene.vector_layer(handle);
+            let same = self.occurrences.get(&handle).is_some_and(|(a, c, previous, drawn, _)| {
                 let source = match (a, &source) { (Some(a), Some(b)) => a.ptr_eq(b), (None, None) => true, _ => false };
+                let vector = match (drawn, vector) { (Some(a), Some(b)) => a.same_root(b), (None, None) => true, _ => false };
                 let generator = match (c, generator) { (Some(a), Some((application, program))) => a.0 == *application && (Arc::ptr_eq(&a.1, program) || a.1 == *program) && a.2 == environment, (None, None) => true, _ => false };
-                source && generator && *previous == geometry
+                source && generator && vector && *previous == geometry
             });
             if !same {
                 self.next = self.next.wrapping_add(1);
                 let generator = generator.map(|(application, program)| (application.clone(), program.clone(), environment));
-                self.occurrences.insert(handle, (source, generator, geometry, self.next));
+                self.occurrences.insert(handle, (source, generator, geometry, vector.cloned(), self.next));
             }
         }
         self.occurrences.retain(|handle, _| scene.position(*handle).is_some());
     }
-    pub(super) fn id(&self, handle: OccurrenceHandle) -> u64 { self.occurrences.get(&handle).map_or(0, |value| value.3) }
+    pub(super) fn id(&self, handle: OccurrenceHandle) -> u64 { self.occurrences.get(&handle).map_or(0, |value| value.4) }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1650,7 +1652,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if matches!(self.layer_interaction.tool, LayerCanvasTool::Ruler { .. }) {
             return self.ruler_pen(event, p);
         }
-        if self.object_pen(event)? {
+        if self.object_pen(event)? || self.vector_move_pen(event, p)? {
             return Ok(());
         }
         if self.layer_interaction.tool == LayerCanvasTool::Transform || self.operation.moving_pixels() || self.operation.moving_layer() {
@@ -1807,7 +1809,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let tonal=self.cancel_tonal();
         let effect = self.cancel_effect_gesture()?;
         let sdr = self.cancel_sdr_gesture()?;
-        let transform = self.cancel_object_interaction()? || self.cancel_transform()?;
+        let transform = self.cancel_object_interaction()? || self.cancel_transform()? || self.cancel_vector_move();
         self.cancel_ruler_gesture();
         let selection = self.selection_tools.cancel();
         let region = self.region_tools.cancellable();
@@ -1920,6 +1922,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.append_ruler_overlay(segments);
         self.append_transform_overlay(segments);
         self.append_object_overlay(segments);
+        self.append_vector_move_overlay(segments);
         self.append_crop_overlay(segments);
         self.append_clone_overlay(segments);
         let transform = self.document_to_logical();

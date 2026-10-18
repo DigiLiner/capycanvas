@@ -102,7 +102,7 @@ impl ObjectVersion {
                 let entries=value.as_array().ok_or("Invalid captured session index")?;
                 let mut groups=Vec::new();let mut group=Vec::new();
                 for entry in entries {
-                    let boundary=crc32fast::hash(&serde_json::to_vec(entry).map_err(|e|e.to_string())?)%INDEX_BOUNDARY==0;
+                    let boundary=crc32fast::hash(&serde_json::to_vec(entry).map_err(|e|e.to_string())?).is_multiple_of(INDEX_BOUNDARY);
                     group.push(entry.clone());
                     if boundary||group.len()==INDEX_CHUNK {groups.push(std::mem::take(&mut group));}
                 }

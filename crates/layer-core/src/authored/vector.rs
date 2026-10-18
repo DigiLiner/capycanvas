@@ -564,6 +564,12 @@ impl VectorObject {
             .flat_map(|chunk| chunk.records().iter().filter_map(Record::path))
             .find(|path| !path.locked && path.hit(point, slop)).map(|path| path.id)
     }
+    pub fn paths_within(&self, area: [f64; 4]) -> BTreeSet<ItemId> {
+        let inside = |b: [f64; 4]| b[0] >= area[0] && b[1] >= area[1] && b[2] <= area[2] && b[3] <= area[3];
+        self.chunks().iter().filter(|chunk| chunk.summary().bounds.is_some_and(|b| b[2] >= area[0] && b[0] <= area[2] && b[3] >= area[1] && b[1] <= area[3]))
+            .flat_map(|chunk| chunk.records().iter().filter_map(Record::path))
+            .filter(|path| !path.hidden && !path.locked && inside(path.bounds())).map(|path| path.id).collect()
+    }
     pub fn positions(&self, ids: &BTreeSet<ItemId>) -> BTreeMap<usize, Vec<usize>> {
         let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         let mut note = |chunk: usize, id: ItemId| if let Some(index) = self.chunks()[chunk].records().iter().position(|r| r.id() == Some(id)) { found.entry(chunk).or_default().push(index); };

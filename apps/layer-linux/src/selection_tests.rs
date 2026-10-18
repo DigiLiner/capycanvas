@@ -25,7 +25,7 @@ fn selection(d: &Driver) -> Option<layer_core::Selection> {
         .document().working.selection
         .clone()
 }
-fn canvas_point(d: &Driver, p: [f32; 2]) -> [f32; 2] {
+pub(super) fn canvas_point(d: &Driver, p: [f32; 2]) -> [f32; 2] {
     let m = state(&d.w).camera.document_to_surface();
     let scale = d.w.area.scale_factor() as f32;
     let p = gtk::graphene::Point::new(
@@ -40,7 +40,7 @@ fn canvas_click(d: &mut Driver, p: [f32; 2]) {
     d.input
         .perform(serde_json::json!([{"point":p,"down":true},{"down":false}]));
 }
-fn canvas_drag(d: &mut Driver, a: [f32; 2], b: [f32; 2], pen: bool) {
+pub(super) fn canvas_drag(d: &mut Driver, a: [f32; 2], b: [f32; 2], pen: bool) {
     let a = canvas_point(d, a);
     let b = canvas_point(d, b);
     d.input.perform(if pen {serde_json::json!([{"pen":"move","point":a},{"pen":"down","point":a},{"pen":"move","point":b},{"pen":"up"},{"pen":"leave"}])}

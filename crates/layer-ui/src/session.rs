@@ -67,6 +67,8 @@ pub use selection_tools::{SelectionTool, SelectionConstraint, SelectionOptions, 
 mod painted_selections;
 #[path = "vector_lines.rs"]
 mod vector_lines;
+#[path = "vector_moves.rs"]
+mod vector_moves;
 #[path = "deferred_edits.rs"]
 mod deferred_edits;
 pub use painted_selections::SelectionBrushOptions;
@@ -266,6 +268,7 @@ pub struct UiSession<R: CanvasRenderer> {
     tonal_tools: tonal_selection::TonalTools,
     painted_selections: painted_selections::PaintedSelections,
     vector_lines: vector_lines::VectorLines,
+    vector_moves: vector_moves::VectorMoves,
     deferred_edits: std::collections::VecDeque<deferred_edits::DeferredEdit>,
     selection_masks: selection_masks::SelectionMasks,
     canvas_size: Option<canvas_size::CanvasSizeDraft>,
@@ -473,6 +476,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             tonal_tools: Default::default(),
             painted_selections: Default::default(),
             vector_lines: Default::default(),
+            vector_moves: Default::default(),
             deferred_edits: Default::default(),
             selection_masks: Default::default(),
             canvas_size: None,
@@ -969,7 +973,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let painting = self.layer_interaction.tool == LayerCanvasTool::Paint || self.selection_brush_active();
         let blocked = if self.selection_masks.target().is_some() { self.mask_brush_reason().is_some() }
             else { self.layer_interaction.tool.draws()
-            && if painting { self.engine.document().drawing_target().is_none() }
+            && if painting { self.engine.document().drawing_target().is_none() && self.vector_drawing_layer().is_none() }
                 else { self.engine.document().drawing_content().is_none() } };
         let contact = self.interaction.pointer.is_some_and(|p| p.paint);
         let mode = if !painting && self.state.settings.cursor.has_tool() {
@@ -2529,6 +2533,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             CommandId::Deselect | CommandId::InvertSelection => {
                 self.require_document_idle().is_ok() && self.has_selection()
             }
+            CommandId::ClearSelected if self.selected_vector_items().is_some() => self.require_document_idle().is_ok(),
             CommandId::ClearSelected | CommandId::ClearOutside => {
                 self.require_document_idle().is_ok() && self.clear_refusal().is_none()
             }
@@ -4950,6 +4955,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.use_reference_below()?;
                 Ok((DOCUMENT | COMMANDS, true))
             }
+            CommandId::ClearSelected if self.delete_selected_vector_items()? => Ok((DOCUMENT, true)),
             CommandId::ClearSelected | CommandId::ClearOutside => {
                 self.clear_selection(command == CommandId::ClearOutside)?;
                 Ok((DOCUMENT, true))

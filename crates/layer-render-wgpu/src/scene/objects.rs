@@ -70,7 +70,7 @@ pub(super) fn edited_damage(before: SceneView<'_>, after: SceneView<'_>, extent:
             damage.regions.extend(super::vectors::coalesce(rects).into_iter().map(|rect| rect.intersect(PixelRect::full(extent))));
             continue;
         }
-        if after.object_layer(owner).is_none() { return None; }
+        after.object_layer(owner)?;
         changed = true;
         for scene in [before, after] {
             if !scene.visible(owner) { continue; }

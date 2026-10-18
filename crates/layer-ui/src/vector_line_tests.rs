@@ -42,6 +42,75 @@ fn vector_layers_draw_fitted_lines_with_one_undo_step() {
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 2);
 }
 
+fn surface_at(s: &UiSession<Recorder>, doc: [f64; 2]) -> Point {
+    let [a, b, c, d, x, y] = s.state.camera.view().document_to_surface;
+    let [px, py] = doc.map(|v| v as f32);
+    Point { x: a * px + c * py + x, y: b * px + d * py + y }
+}
+fn press(s: &mut UiSession<Recorder>, first: u64, points: &[Point]) {
+    for (i, point) in points.iter().enumerate() {
+        let phase = if i == 0 { PenPhase::Down } else if i + 1 == points.len() { PenPhase::Up } else { PenPhase::Move };
+        let mut e = event(s, first + i as u64, phase, 0.5);
+        e.surface_position = *point;
+        s.pen(e).unwrap();
+        s.frame((first + i as u64) * 10_000_000, (first + i as u64) * 10_000_000).unwrap();
+    }
+}
+
+#[test]
+fn vector_layers_take_vector_brushes_refuse_erasing_and_refresh_their_thumbnail() {
+    let (mut s, layer) = vector_session();
+    let prohibited = |s: &mut UiSession<Recorder>| { s.cursor_input(Some(event(s, 1, PenPhase::Hover, 0.))); s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)) };
+    assert!(!prohibited(&mut s), "G-Pen draws on a vector layer");
+    let revision = |s: &UiSession<Recorder>| s.state.layers.iter().find(|row| row.id == occurrence_token(layer)).unwrap().paint_revision;
+    let before = revision(&s);
+    draw_line(&mut s, 1, 30);
+    assert_ne!(revision(&s), before, "a new path refreshes the layer thumbnail");
+    invoke(&mut s, CommandId::Eraser);
+    assert!(prohibited(&mut s), "erasing paths is not available");
+    draw_line(&mut s, 100, 30);
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 1, "the eraser draws no path");
+    assert!(s.state.notice.is_some());
+}
+
+#[test]
+fn move_tool_selects_drags_and_deletes_vector_paths() {
+    let (mut s, layer) = vector_session();
+    draw_line(&mut s, 1, 40);
+    draw_line(&mut s, 200, 40);
+    let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let (front, back) = { let mut paths = object.paths().map(|(_, p)| p.clone()); (paths.next().unwrap(), paths.next().unwrap()) };
+    invoke(&mut s, CommandId::Move);
+    let on_front = front.geometry.subpaths()[0].anchor(0).point();
+    let start = surface_at(&s, on_front);
+    let revision = s.engine.document().revision;
+    press(&mut s, 400, &[start, Point { x: start.x + 20., y: start.y }, Point { x: start.x + 40., y: start.y + 10. }]);
+    let selected = s.engine.document().working.vector_items.clone().expect("pressing a path selects it");
+    assert_eq!(*selected.items, [front.id].into());
+    let moved = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let delta = |id: layer_core::authored::vector::ItemId| { let p = moved.record(moved.find(id).unwrap()).unwrap().path().unwrap().geometry.subpaths()[0].anchor(0).point(); let q = if id == front.id { on_front } else { back.geometry.subpaths()[0].anchor(0).point() }; [p[0] - q[0], p[1] - q[1]] };
+    let scale = f64::from(s.state.camera.input_transform().surface_to_document[0]);
+    assert!((delta(front.id)[0] - 40. * scale).abs() < 1e-3 && (delta(front.id)[1] - 10. * scale).abs() < 1e-3, "{:?}", delta(front.id));
+    assert_eq!(delta(back.id), [0., 0.], "other paths stay");
+    assert_eq!(moved.path_count(), 2);
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(6_000_000_000, 6_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap(), &object, "one undo step restores the move");
+    assert!(s.engine.document().revision > revision);
+    let empty = surface_at(&s, [3000., 2000.]);
+    press(&mut s, 500, &[empty, empty]);
+    assert!(s.engine.document().working.vector_items.is_none(), "a click on empty canvas clears the selection");
+    let [x0, y0, x1, y1] = back.bounds();
+    let corners = [surface_at(&s, [x0 - 5., y0 - 5.]), surface_at(&s, [x1 + 5., y1 + 5.])];
+    press(&mut s, 600, &corners);
+    let marquee = s.engine.document().working.vector_items.clone().expect("a marquee selects enclosed paths");
+    assert!(marquee.items.contains(&back.id));
+    invoke(&mut s, CommandId::ClearSelected);
+    let left = s.engine.document().scene().vector_layer(layer).unwrap();
+    assert!(left.find(back.id).is_none() && left.path_count() == 2 - marquee.items.len());
+    assert!(s.engine.document().working.vector_items.is_none());
+}
+
 #[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {

@@ -127,7 +127,7 @@ fn framed<'a>(bytes: &mut Bytes<'a>) -> DecodeResult<Option<Framed<'a>>> {
     let length = bytes.length(MAX_PROPERTY_BYTES * 4)?;
     Ok(Some(Framed { kind, id, properties: bytes.take(length)? }))
 }
-fn properties<'a>(data: &'a [u8]) -> DecodeResult<Vec<(u64, &'a [u8])>> {
+fn properties(data: &[u8]) -> DecodeResult<Vec<(u64, &[u8])>> {
     let mut bytes = Bytes::new(data);
     let mut list: Vec<(u64, &[u8])> = Vec::new();
     while !bytes.done() {
@@ -186,7 +186,7 @@ fn unknown_property(tag: u64, value: &[u8], owner: u64, depth: u32, unknown: &mu
     }
     if tag & TAG_RESERVED != 0 || tag & IGNORABLE == 0 { return Err(unsupported("required property")); }
     if ValueClass::of(tag) == ValueClass::Nested { validate_stream(value, depth + 1)?; }
-    if ValueClass::of(tag) == ValueClass::Items && value.len() % 8 != 0 { return Err(invalid("item list length")); }
+    if ValueClass::of(tag) == ValueClass::Items && !value.len().is_multiple_of(8) { return Err(invalid("item list length")); }
     if ValueClass::of(tag) == ValueClass::Slots && !value.is_empty() { return Err(invalid("slot index out of range")); }
     unknown.push(UnknownProperty { tag, value: value.into() });
     Ok(())
@@ -219,7 +219,7 @@ fn decode_geometry(value: &[u8]) -> DecodeResult<PathGeometry> {
         subpaths.push(Subpath::new(&list, flags == 1));
     }
     exact(bytes, ())?;
-    PathGeometry::new(subpaths).map_err(|e| invalid(e))
+    PathGeometry::new(subpaths).map_err(invalid)
 }
 fn decode_profile(value: &[u8]) -> DecodeResult<WidthProfile> {
     let mut bytes = Bytes::new(value);
@@ -228,7 +228,7 @@ fn decode_profile(value: &[u8]) -> DecodeResult<WidthProfile> {
     let knots = (0..count).map(|_| Ok(WidthKnot::from_bits(bytes.u32()?, [bytes.finite_f32()?, bytes.finite_f32()?, bytes.finite_f32()?])))
         .collect::<DecodeResult<Vec<_>>>()?;
     exact(bytes, ())?;
-    WidthProfile::new(knots).map_err(|e| invalid(e))
+    WidthProfile::new(knots).map_err(invalid)
 }
 fn decode_color(value: &[u8]) -> DecodeResult<RgbColor> {
     let mut bytes = Bytes::new(value);

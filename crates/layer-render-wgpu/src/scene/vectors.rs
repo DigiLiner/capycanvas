@@ -7,9 +7,11 @@ const CELL: f64 = 256.;
 const POOL_BYTES: u64 = 128 << 20;
 const DERIVED_BYTES: usize = 256 << 20;
 const MOTION_PIXELS: u64 = 4 << 20;
+type Colors = Arc<[[f32; 4]]>;
+type PreviewGeometry = ((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Colors);
 
 struct Derived { level: u32, offset: [i64; 2], geometry: Arc<LevelGeometry>, base: Option<u32>, used: u64 }
-struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Arc<[[f32; 4]]>, derived: Vec<Derived>, seen: u64, hidden: bool }
+struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Colors, derived: Vec<Derived>, seen: u64, hidden: bool }
 impl Item {
     fn derived_at(&mut self, level: u32, offset: [i64; 2], frame: &Frame, bytes: &mut usize) -> usize {
         if let Some(at) = self.derived.iter().position(|d| d.level == level && d.offset == offset) { return at; }
@@ -48,7 +50,7 @@ fn cells(bounds: [f64; 4]) -> [i32; 4] {
 fn same(a: &PathItem, b: &PathItem) -> bool {
     Arc::ptr_eq(&a.geometry, &b.geometry) && Arc::ptr_eq(&a.style, &b.style) && a.fill_rule == b.fill_rule && a.hidden == b.hidden
 }
-fn colors(path: &PathItem, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Arc<[[f32; 4]]> {
+fn colors(path: &PathItem, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Colors {
     path.style.entries.iter().map(|entry| {
         let paint = match entry { PaintEntry::Fill(f) => f.paint.rgb(), PaintEntry::Stroke(s) => s.paint.rgb(), PaintEntry::Opaque(_) => None };
         paint.and_then(|c| c.linear_in(palette.0).ok()).map_or([0.; 4], |[r, g, b, a]| palette.1.composite(palette.0, [r * a, g * a, b * a, a]))
@@ -71,7 +73,10 @@ impl LayerCache {
         let item = self.items[slot as usize].take().unwrap();
         let [x0, y0, x1, y1] = item.cells;
         for y in y0..y1 { for x in x0..x1 {
-            if let Some(list) = self.grid.get_mut(&[x, y]) { if let Some(i) = list.iter().position(|s| *s == slot) { list.swap_remove(i); } if list.is_empty() { self.grid.remove(&[x, y]); } }
+            if let Some(list) = self.grid.get_mut(&[x, y]) {
+                if let Some(i) = list.iter().position(|s| *s == slot) { list.swap_remove(i); }
+                if list.is_empty() { self.grid.remove(&[x, y]); }
+            }
         }}
         for derived in &item.derived {
             if let Some(base) = derived.base { pool.release(base, &derived.geometry); }
@@ -247,7 +252,7 @@ pub(super) struct Vectors {
     pool: Option<Pool>,
     frame: u64,
     stamp: u64,
-    preview: Option<((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Arc<[[f32; 4]]>)>,
+    preview: Option<PreviewGeometry>,
     pub(super) motion: Option<MotionImage>,
     buffers: [Option<wgpu::Buffer>; 4],
 }
@@ -262,7 +267,7 @@ impl Scene {
     pub(super) fn vector_tile(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, owner: OccurrenceHandle, coordinate: [u32; 2]) -> usize {
         let origin = coordinate.map(|v| i64::from(v * PAGE_SIZE));
         let preview = r.vector_preview.as_ref().filter(|p| self.object_display && p.owner == owner).map(|p| p.path.clone());
-        let batch = self.vectors.batch_with(packet.scene, owner, origin, 0, [PAGE_SIZE; 2], packet.document_extent, Self::vector_palette(r, packet), preview.as_ref());
+        let batch = self.vectors.batch_with(packet.scene, owner, origin, 0, [PAGE_SIZE; 2], packet.document_extent, Self::vector_palette(r, packet), preview.as_ref(), false);
         let output = self.alloc(r, wgpu::Color::TRANSPARENT);
         if batch.tile_count() > 0 { self.jobs.push(Job::Vector(Box::new(VectorJob { batch, output: self.pool[output].view.clone(), base: None }))); }
         output
@@ -271,7 +276,7 @@ impl Scene {
         encoder: &mut crate::submission::CommandEncoder) -> Result<(wgpu::Texture, wgpu::TextureView), GpuRasterError> {
         let target = create_color_target(&r.device, [PAGE_SIZE; 2], "vector layer thumbnail");
         r.encode_clear(encoder, &target.1, "vector layer thumbnail");
-        let batch = self.vectors.batch(packet.scene, owner, [0, 0], grid.level, grid.size, packet.document_extent, (r.device.working_space(), layer_core::BlendSpace::Linear));
+        let batch = self.vectors.batch_with(packet.scene, owner, [0, 0], grid.level, grid.size, packet.document_extent, (r.device.working_space(), layer_core::BlendSpace::Linear), None, false);
         if batch.tile_count() > 0 { self.vectors.encode(r, encoder, &VectorJob { batch, output: target.1.clone(), base: None })?; }
         Ok(target)
     }
@@ -351,7 +356,7 @@ impl Vectors {
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
     pub fn batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Batch {
-        self.batch_with(scene, owner, origin, level, size, extent, palette, None)
+        self.batch_with(scene, owner, origin, level, size, extent, palette, None, true)
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
     pub fn append_batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Option<Batch> {
@@ -441,14 +446,14 @@ impl Vectors {
         batch.build(&layers, origin.map(|v| v.div_euclid(side)), size);
         batch
     }
-    fn entries(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2]) -> Vec<(Arc<LevelGeometry>, u32, Arc<[[f32; 4]]>)> {
+    fn entries(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2]) -> Vec<(Arc<LevelGeometry>, u32, Colors)> {
         let frame = level_frame(offset, level, extent);
         let integer_offset = offset.map(|v| v as i64);
         let frame_number = self.frame;
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let Some(layer) = self.layers.get_mut(&handle) else { return Vec::new() };
         let mut keyed: Vec<(u64, u32)> = slots.into_iter().map(|s| (layer.order(layer.items[s as usize].as_ref().unwrap()), s)).collect();
-        keyed.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        keyed.sort_unstable_by_key(|(order, _)| std::cmp::Reverse(*order));
         let mut entries = Vec::with_capacity(keyed.len());
         for (_, slot) in keyed {
             let item = layer.items[slot as usize].as_mut().unwrap();
@@ -472,7 +477,7 @@ impl Vectors {
         entries
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent, color domain and provisional path")]
-    fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>) -> Batch {
+    fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>, display: bool) -> Batch {
         let mut batch = Batch::default();
         let Some(handle) = scene.vector_handle(owner) else { return batch };
         let Some(object) = scene.vector(handle) else { return batch };
@@ -494,7 +499,7 @@ impl Vectors {
                 if item.seen == stamp { continue; }
                 item.seen = stamp;
                 let b = item.bounds;
-                if item.hidden || b[2] < window[0] - 16. || b[0] > window[0] + span[0] + 16. || b[3] < window[1] - 16. || b[1] > window[1] + span[1] + 16. { continue; }
+                if (display && item.hidden) || b[2] < window[0] - 16. || b[0] > window[0] + span[0] + 16. || b[3] < window[1] - 16. || b[1] > window[1] + span[1] + 16. { continue; }
                 slots.push(*slot);
             }
         }}

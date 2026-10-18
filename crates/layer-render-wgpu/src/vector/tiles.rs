@@ -181,7 +181,7 @@ fn stroke(out: &mut LevelGeometry, entry: u16, path: &PathItem, stroke: &Stroke,
             point += 1;
         }
         if centerline.len() == 1 {
-            out.words.extend_from_slice(&out.words[out.words.len() - 3..].to_vec());
+            out.words.extend_from_within(out.words.len() - 3..);
             point += 1;
         }
         for capsule in first..point - 1 { capsule_tiles(&out.words[(base + capsule * 3) as usize..], capsule, frame.clip, &mut touches, &mut solids); }

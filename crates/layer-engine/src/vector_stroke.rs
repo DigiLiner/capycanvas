@@ -200,9 +200,9 @@ fn simplify(values: &[[f64; 2]], tolerance: f64, keep: &mut [bool], range: std::
     if range.len() < 3 { return; }
     let (a, b) = (values[range.start], values[range.end - 1]);
     let mut worst = (0., range.start);
-    for i in range.start + 1..range.end - 1 {
-        let t = if b[0] > a[0] { (values[i][0] - a[0]) / (b[0] - a[0]) } else { 0. };
-        let error = (values[i][1] - (a[1] + (b[1] - a[1]) * t)).abs();
+    for (i, value) in values.iter().enumerate().take(range.end - 1).skip(range.start + 1) {
+        let t = if b[0] > a[0] { (value[0] - a[0]) / (b[0] - a[0]) } else { 0. };
+        let error = (value[1] - (a[1] + (b[1] - a[1]) * t)).abs();
         if error > worst.0 { worst = (error, i); }
     }
     if worst.0 > tolerance {

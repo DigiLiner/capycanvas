@@ -139,16 +139,16 @@ impl Accounting {
         bytes
     }
     pub(super) fn charge_vector(&mut self, object: &authored::vector::VectorObject) -> usize {
-        use authored::vector::{PaintEntry, Record, Anchor, Subpath};
+        use authored::vector::{PaintEntry, Record, Anchor};
         let mut bytes = 0usize;
         for chunk in object.chunks() {
             if !self.vector_chunks.insert(chunk.owner_identity()) { continue; }
-            bytes = bytes.saturating_add(128 + chunk.records().len() * std::mem::size_of::<Record>());
+            bytes = bytes.saturating_add(128 + std::mem::size_of_val(chunk.records()));
             for record in chunk.records() {
                 match record {
                     Record::Path(path) => {
                         if self.vector_parts.insert(Arc::as_ptr(&path.geometry) as usize) {
-                            bytes = bytes.saturating_add(64 + path.geometry.subpaths().len() * std::mem::size_of::<Subpath>());
+                            bytes = bytes.saturating_add(64 + std::mem::size_of_val(path.geometry.subpaths()));
                             for run in path.geometry.subpaths().iter().flat_map(|s| s.runs()) {
                                 if self.vector_parts.insert(run.as_ptr() as usize) { bytes = bytes.saturating_add(run.len() * std::mem::size_of::<Anchor>()); }
                             }

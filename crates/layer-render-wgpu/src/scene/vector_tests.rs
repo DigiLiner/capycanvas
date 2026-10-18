@@ -240,6 +240,30 @@ fn removing_or_dragging_a_lone_path_clears_tiles_no_other_path_covers() {
     assert!(max_error(&display(&r), &fresh(&editor)) < 1e-5, "removing the lone path clears its tiles");
 }
 
+#[test]
+fn vector_layer_thumbnails_show_their_paths() {
+    let (editor, layer) = document([2048, 1536], vec![stroke(1, &[[200., 700.], [1800., 760.]], 24., [0.2, 0.6, 0.2, 1.])]);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, packet(editor.document().scene(), [2048, 1536]));
+    let mut inked = |r: &mut WgpuRasterizer| {
+        for _ in 0..50 { if r.prepare_thumbnail_batch(layer_render::ThumbnailTarget::Occurrence(layer)).unwrap() { break; } crate::test_support::complete(r); }
+        r.request_thumbnail(1, layer_render::ThumbnailTarget::Occurrence(layer)).unwrap();
+        crate::test_support::complete(r);
+        r.take_thumbnail().unwrap().unwrap().bytes.chunks_exact(4).filter(|p| p[3] > 128).count()
+    };
+    let shown = inked(&mut r);
+    assert!(shown > 20, "the thumbnail shows the line: {shown} pixels");
+    r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: Arc::new([ItemId(1)].into()), offset: [40., 30.] }));
+    submit_ready(&mut r, FramePacket { composite_all: false, ..packet(editor.document().scene(), [2048, 1536]) });
+    assert_eq!(inked(&mut r), shown, "a drag in progress keeps its paths in the thumbnail");
+    let mut editor = editor;
+    let moved = editor.document().scene().vector_layer(layer).unwrap().transform_items(&[ItemId(1)].into(), layer_core::authored::Affine64([1., 0., 0., 1., 40., 30.])).unwrap();
+    editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
+    r.set_vector_motion(None);
+    r.submit(FramePacket { composite_all: true, ..packet(editor.document().scene(), [2048, 1536]) }).unwrap();
+    assert!(inked(&mut r) > 20, "the thumbnail after the move shows the line");
+}
+
 fn presented(r: &WgpuRasterizer, view: layer_render::ViewState) -> Vec<u8> {
     let (texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
