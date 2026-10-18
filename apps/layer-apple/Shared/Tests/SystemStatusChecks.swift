@@ -390,7 +390,10 @@ extension XCTestCase {
                 workspaceActivate(app.checkBoxes["new-document-defaults"])
                 #else
                 dismissEditorKeyboard(in:app)
-                workspaceActivate(app.switches["new-document-defaults"])
+                let defaults = app.switches["new-document-defaults"]
+                revealEditorControl(defaults, in: app.scrollViews.containing(.switch, identifier: defaults.identifier).firstMatch)
+                workspaceActivate(defaults)
+                XCTAssertEqual(defaults.value as? String, "1", "The new drawing options become the defaults")
                 #endif
             }
             XCTAssertEqual(app.textFields["new-document-width"].value as? String,"128")
@@ -464,6 +467,7 @@ extension XCTestCase {
         app.typeKey("a",modifierFlags:.command);app.typeText(folder+"\n")
         XCTAssertTrue(app.otherElements["DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: "+folder].waitForExistence(timeout:15))
         replaceEditorText(filename,with:fileName,in:app)
+        dismissEditorKeyboard(in:app)
         workspaceActivate(save);XCTAssertTrue(save.waitForNonExistence(timeout:30))
         let provider = XCTAttachment(string:"Owned provider folder: "+folder+"; one normal exported PaperScan.png; retain for exact scoped cleanup")
         provider.name="paper-provider-owned-folder-"+theme;provider.lifetime = .keepAlways;add(provider)
@@ -570,7 +574,7 @@ extension XCTestCase {
         workspaceActivate(app.cells["DOC.sidebar.item.On My iPad"])
         workspaceActivate(app.cells[folder+", Folder"])
         XCTAssertTrue(app.otherElements["DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: "+folder].waitForExistence(timeout:15))
-        let file=app.cells.matching(NSPredicate(format:"identifier BEGINSWITH %@",fileName+".png,")).firstMatch.images.firstMatch
+        let file=fileProviderFile(fileName+".png",in:app).images.firstMatch
         XCTAssertTrue(file.waitForExistence(timeout:15));captureState("import-file-selected");workspaceActivate(file)
         XCTAssertTrue(file.waitForNonExistence(timeout:20))
         #endif

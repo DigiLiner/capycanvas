@@ -101,8 +101,7 @@ extension XCTestCase {
         field.typeText(value)
         #else
         if !field.isHittable { dismissEditorKeyboard(in: app) }
-        let focused = app.textFields.matching(identifier: field.identifier)
-            .matching(NSPredicate(format: "hasKeyboardFocus == true")).firstMatch
+        let focused = app.textFields.matching(NSPredicate(format: "identifier == %@ AND hasKeyboardFocus == true", field.identifier)).firstMatch
         let scroll = app.scrollViews.containing(.textField, identifier: field.identifier).firstMatch
         for _ in 0..<2 {
             if focused.exists { break }
@@ -143,7 +142,11 @@ extension XCTestCase {
         #if os(macOS)
         workspaceActivate(app.checkBoxes["new-document-defaults"])
         #else
-        workspaceActivate(app.switches["new-document-defaults"])
+        dismissEditorKeyboard(in: app)
+        let defaults = app.switches["new-document-defaults"]
+        revealEditorControl(defaults, in: app.scrollViews.containing(.switch, identifier: defaults.identifier).firstMatch)
+        workspaceActivate(defaults)
+        XCTAssertEqual(defaults.value as? String, "1", "The new drawing options become the defaults")
         #endif
         attachEditor(in: app, name: "sdr-new-options")
         workspaceActivate(create)
