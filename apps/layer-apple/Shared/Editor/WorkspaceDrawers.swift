@@ -127,7 +127,7 @@ private struct WorkspaceContentDrawer: View {
                                 if !drawer.model["layer_properties"].isNull {
                                     LayerInspector(store: store, drawer: drawer, width: bounds.rect.width, height: bounds.rect.height)
                                 } else { EditorScrollView(.vertical, showsIndicators: false) {
-                                    VStack(spacing: 6) {
+                                    VStack(spacing: 0) {
                                         ForEach(drawer.model["columns"][index].array.indices, id: \.self) { row in
                                             let panel = drawer.panel(drawer.model["columns"][index][row])
                                             DrawerPanelBody(store: store, panel: panel, width: bounds.rect.width,
@@ -203,19 +203,21 @@ private struct LayerInspector: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { propertiesHeight = $0 }
                 }.frame(width: width, height: pageHeight).offset(y: (1 - drawer.pagePosition) * pageHeight)
                     .allowsHitTesting(open).accessibilityHidden(!open)
-            }.frame(height: pageHeight, alignment: .topLeading).contentShape(Rectangle()).clipped().accessibilityIdentifier("layer-properties-pages")
+            }.frame(height: pageHeight, alignment: .topLeading).contentShape(Rectangle()).clipped()
+                .accessibilityElement(children: .contain).accessibilityIdentifier("layer-properties-pages")
             Rectangle().fill(palette["text"].opacity(0.16)).frame(height: 1).accessibilityHidden(true)
             Button { store.customize(["type": "toggle_layer_drawer_properties"]) } label: {
                 HStack(spacing: 6) {
                     SharedIcon(name: "properties").frame(width: 16, height: 16).frame(width: 24, height: 24)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(label).lineLimit(1).accessibilityIdentifier("layer-properties-disclosure-label")
-                        if !summary.isEmpty { Text(summary).font(.system(size: store.catalog["text_size_pt"].number * 0.9)).foregroundStyle(palette["text"].opacity(0.55)).lineLimit(1) }
+                        if !summary.isEmpty { Text(summary).font(.system(size: store.catalog["text_size_pt"].number * 4 / 3 * 0.9)).foregroundStyle(palette["text"].opacity(0.55)).lineLimit(1) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     SharedIcon(name: "chevron-down").frame(width: 16, height: 16).rotationEffect(.degrees(open ? 0 : 180)).frame(width: 24, height: 24)
                 }.padding(.horizontal, 8).frame(height: footerHeight - 1).contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(active: footerHover, joinedEdge: "top"))
                 .onHover { footerHover = $0 }.disabled(!open && view["layer"].isNull).help([label, summary].filter { !$0.isEmpty }.joined(separator: "\n"))
+                .accessibilityLabel(label)
                 .accessibilityIdentifier("layer-properties-disclosure")
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onChange(of: reduceMotion, initial: true) { _, value in drawer.reduceMotion = value }

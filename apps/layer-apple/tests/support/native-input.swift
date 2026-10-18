@@ -22,12 +22,13 @@ class NativeWorkspaceInputFixture {
         }
         throw HostFailure(message: "The fixture has no native hold recognizer")
     }
-    @MainActor static func key(_ characters: String, code: UInt16, window: NSWindow) throws {
-        for type: NSEvent.EventType in [.keyDown, .keyUp] {
+    @MainActor static func key(_ characters: String, code: UInt16, window: NSWindow, pressed: Bool? = nil, repeatKey: Bool = false) throws {
+        let types: [NSEvent.EventType] = pressed.map { [$0 ? .keyDown : .keyUp] } ?? [.keyDown, .keyUp]
+        for type in types {
             guard let event = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [],
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                 context: nil, characters: characters, charactersIgnoringModifiers: characters,
-                isARepeat: false, keyCode: code) else { throw HostFailure(message: "No native fixture key") }
+                isARepeat: repeatKey, keyCode: code) else { throw HostFailure(message: "No native fixture key") }
             NSApp.postEvent(event, atStart: false)
         }
     }

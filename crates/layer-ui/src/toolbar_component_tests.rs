@@ -406,6 +406,30 @@ fn toolbar_dry_settings_preserve_writing_size_and_default_pose_footprints() {
             assert!((f64::from(brush.diameter*pose.radii[axis])-diameter*expected[axis]/extent).abs()<2e-5,
                 "{preset:?}: full-pressure footprint axis{axis}");
         }}
+        let mut support_brush=brush.clone();support_brush.diameter=24.;
+        assert_eq!(support_brush.angle_radians,0.);
+        assert_eq!(support_brush.shape,layer_core::BrushShape::default());
+        assert_eq!(support_brush.path,layer_core::BrushPath::default());
+        for tilt in [0.,0.5,0.85] {for pressures in [[0.;4],[0.15;4],[0.45;4],[1.;4],[0.,0.15,0.45,1.]] {
+            let points:Vec<_>=(0..5).map(|i|layer_core::StrokePoint {
+                position:layer_core::Point{x:24.+i.min(3) as f32*80./3.,y:64.},pressure:pressures[i.min(3)],
+                tilt:[tilt*std::f32::consts::FRAC_PI_2,0.],twist:0.,elapsed_micros:i as u32*4000,
+            }).collect();
+            let stroke=layer_core::Stroke::new(layer_core::StrokeId(1),s.engine.document().working.target.unwrap(),
+                layer_core::StrokeTool::Brush,support_brush.clone(),points).unwrap();
+            let mut dabs=Vec::new();layer_engine::DabGenerator::generate(&stroke,s.engine.document().composition().color.space,&mut dabs);
+            assert!(!dabs.is_empty());
+            for dab in dabs {
+                assert_eq!(dab.rotation,[1.,0.]);assert_eq!(&dab.previous[2..],&[1.,0.]);assert_eq!(dab.motion[1],0.);
+                for previous in [false,true] {
+                    let mut endpoint=dab;
+                    if previous {endpoint.center.x-=dab.motion[0];endpoint.center.y-=dab.motion[1];endpoint.radii=[dab.previous[0],dab.previous[1]];}
+                    endpoint.previous=[0.;4];
+                    let bounds=endpoint.bounds();
+                    assert!(bounds.min.y>=40. && bounds.max.y<=88.,"{preset:?} tilt={tilt} pressures={pressures:?}: {bounds:?}");
+                }
+            }
+        }}
         for (id,value) in [("material_hardness",0.65),("grain_depth",2.)] {
             s.dispatch(UiAction::SetToolSetting {id:id.into(),value}).unwrap();
         }

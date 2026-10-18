@@ -2,6 +2,90 @@ import XCTest
 import CoreGraphics
 
 extension XCTestCase {
+    @MainActor func checkZoomTool(in app: XCUIApplication, theme: String) throws {
+        var actions: [[String: Any]] = [
+            ["type": "set_theme", "theme": theme],
+            ["type": "workspace_manager", "command": ["type": "switch", "id": "builtin:workspace:illustrator"]],
+            ["type": "customize", "action": ["type": "set_panel_visible", "panel": "tool_settings", "visible": true]],
+            ["type": "move_panel", "panel": "tool_settings", "target": ["kind": "float", "position": [20, 140]], "viewport": [1376, 1032]],
+            ["type": "customize", "action": ["type": "insert_tools", "panel": "commands", "before": NSNull()]]
+        ]
+        for command in ["zoom", "fit_canvas"] {
+            actions.append(["type": "customize", "action": ["type": "picker_select",
+                "control": ["kind": "command", "command": command], "selected": true]])
+        }
+        actions.append(["type": "customize", "action": ["type": "confirm_tools"]])
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = String(data: try JSONSerialization.data(withJSONObject: actions), encoding: .utf8)
+        app.launch()
+        let canvas = app.descendants(matching: .any)["canvas"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 30))
+        expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
+        waitForExpectations(timeout: 30)
+        func command(_ label: String) {
+            let button = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+                "toolbar-tile-commands-", label)).firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 10))
+            let scroll = app.scrollViews.containing(.button, identifier: button.identifier).firstMatch
+            if scroll.exists { revealEditorControl(button, in: scroll) }
+            workspaceActivate(button)
+        }
+        command("Zoom")
+        let status = app.buttons["camera-status"]
+        func zoom() -> Int {
+            let text = (status.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? status.label
+            return Int(text.components(separatedBy: "%")[0]) ?? 0
+        }
+        func changed(from before: Int, increasing: Bool) {
+            expectation(for: NSPredicate { _, _ in increasing ? zoom() > before : zoom() < before }, evaluatedWith: status)
+            waitForExpectations(timeout: 10)
+        }
+        func choose(_ group: String, _ index: Int) {
+            let button = app.buttons["tool-segment-zoom-\(group)-\(index)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 10)); workspaceActivate(button)
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: button)
+            waitForExpectations(timeout: 5)
+        }
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.6))
+        func drag(_ dx: CGFloat, _ dy: CGFloat) {
+            let end = start.withOffset(CGVector(dx: dx, dy: dy))
+            #if os(macOS)
+            start.click(forDuration: 0.05, thenDragTo: end)
+            #else
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.05)
+            #endif
+        }
+        command("Fit canvas")
+        XCTAssertGreaterThan(zoom(), 0)
+        for index in [0, 1] {
+            choose("click", index)
+            let before = zoom()
+            #if os(macOS)
+            start.click()
+            #else
+            start.tap()
+            #endif
+            changed(from: before, increasing: index == 0)
+        }
+        choose("click", 0)
+        for (index, dx, dy) in [(0, CGFloat(80), CGFloat(0)), (1, CGFloat(0), CGFloat(-80))] {
+            choose("drag", index)
+            let before = zoom(); drag(dx, dy); changed(from: before, increasing: true)
+        }
+        choose("drag", 3)
+        let before = zoom(); drag(80, 0)
+        XCTAssertEqual(zoom(), before, "Click-only Zoom ignores a dragged contact")
+        choose("drag", 2)
+        command("Fit canvas")
+        let fitted = zoom(); drag(80, 60); changed(from: fitted, increasing: true)
+        command("Fit canvas")
+        let undo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@",
+            "toolbar-tile-commands-", "Undo")).firstMatch
+        XCTAssertTrue(undo.exists); XCTAssertFalse(undo.isEnabled, "Zoom modes and preferences create no artwork history")
+        XCTAssertTrue(editorPixels(in: app).allSatisfy { $0 == 255 }, "Navigation preserves the empty white drawing")
+        attachEditor(in: app, name: "zoom-tool-\(theme)")
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
+
     @MainActor func checkLassoControls(in app: XCUIApplication) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
         app.launch(); capturePaintEditor(in: app)
@@ -153,7 +237,7 @@ extension XCTestCase {
                 "control": ["kind": "command", "command": command], "selected": true]])
         }
         actions.append(["type": "customize", "action": ["type": "confirm_tools"]])
-        for command in ["hand", "reset_view"] {
+        for command in ["hand", "zoom", "reset_view"] {
             actions.append(["type": "customize", "action": ["type": "header", "action": ["type": "add",
                 "zone": "right", "before": NSNull(), "item": ["kind": "tool", "control": ["kind": "command", "command": command]]]]])
         }
@@ -206,30 +290,34 @@ extension XCTestCase {
             expectCamera("250% · 30°")
         }
         func navigation(_ label: String, header: Bool) -> XCUIElement {
-            header ? app.buttons["header-tool-hand"] : tile(label)
+            header ? app.buttons[label == "Zoom" ? "header-tool-zoom" : "header-tool-hand"] : tile(label)
         }
         func chooseNavigation(_ label: String, current: String, header: Bool) {
-            let button = navigation(current, header: header)
-            XCTAssertTrue(button.waitForExistence(timeout: 10))
-            if !header {
-                let scroll = app.scrollViews.containing(.button, identifier: button.identifier).firstMatch
-                if scroll.exists { revealEditorControl(button, in: scroll) }
-            }
-            #if os(macOS)
-            button.rightClick()
-            if header {
-                let items = app.menuItems.matching(identifier: label)
-                expectation(for: NSPredicate { _, _ in items.allElementsBoundByIndex.contains { $0.isHittable } }, evaluatedWith: app)
-                waitForExpectations(timeout: 10)
-                guard let item = items.allElementsBoundByIndex.first(where: { $0.isHittable }) else {
-                    XCTFail("The presented native menu must offer \(label)"); return
+            if label == "Zoom" {
+                workspaceActivate(navigation(label, header: header))
+            } else {
+                let button = navigation(current, header: header)
+                XCTAssertTrue(button.waitForExistence(timeout: 10))
+                if !header {
+                    let scroll = app.scrollViews.containing(.button, identifier: button.identifier).firstMatch
+                    if scroll.exists { revealEditorControl(button, in: scroll) }
                 }
-                item.click()
-            } else { workspaceActivate(app.buttons["menu-action-" + label]) }
-            #else
-            button.press(forDuration: 0.8)
-            workspaceActivate(app.buttons["menu-action-" + label])
-            #endif
+                #if os(macOS)
+                button.rightClick()
+                if header {
+                    let items = app.menuItems.matching(identifier: label)
+                    expectation(for: NSPredicate { _, _ in items.allElementsBoundByIndex.contains { $0.isHittable } }, evaluatedWith: app)
+                    waitForExpectations(timeout: 10)
+                    guard let item = items.allElementsBoundByIndex.first(where: { $0.isHittable }) else {
+                        XCTFail("The presented native menu must offer \(label)"); return
+                    }
+                    item.click()
+                } else { workspaceActivate(app.buttons["menu-action-" + label]) }
+                #else
+                button.press(forDuration: 0.8)
+                workspaceActivate(app.buttons["menu-action-" + label])
+                #endif
+            }
             expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: navigation(label, header: header))
             waitForExpectations(timeout: 10)
         }
@@ -240,7 +328,8 @@ extension XCTestCase {
         var current = "Hand"
         for header in [false, true] {
             for label in ["Hand", "Zoom", "Rotate view"] {
-                chooseNavigation(label, current: current, header: header); current = label
+                chooseNavigation(label, current: current, header: header)
+                if label != "Zoom" { current = label }
                 workspaceActivate(flip)
                 expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: flip)
                 waitForExpectations(timeout: 5)

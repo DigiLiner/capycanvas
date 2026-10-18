@@ -48,10 +48,32 @@ export async function captureHeaderControls({manifest, output, evaluate, call}) 
     const metrics=await evaluate(`(()=>{
       const elements={},rect=node=>{const b=node.getBoundingClientRect();return{x:b.x,y:b.y,width:b.width,height:b.height};};
       for(const node of document.querySelectorAll('#header [data-header-item]'))if(!node.hidden)elements[node.id]=rect(node);
-      return{elements,active_workspace:JSON.parse(layerApp.app.workspace_view()).id,scale:devicePixelRatio,
+      const indicator=document.getElementById('system-battery'),properties=['display','position','box-sizing','width','height','min-width','max-width','flex','flex-basis','flex-grow','flex-shrink','align-items','justify-content','padding-left','padding-right','padding-top','padding-bottom','border-left-width','border-right-width','margin-left','margin-right','transform','transform-origin','left','top','right','bottom','content'];
+      const style=(node,pseudo)=>{const css=getComputedStyle(node,pseudo);return Object.fromEntries(properties.map(key=>[key,css.getPropertyValue(key)]));};
+      const measure=node=>({bounds:rect(node),client:{left:node.clientLeft,top:node.clientTop,width:node.clientWidth,height:node.clientHeight},offset:{left:node.offsetLeft,top:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight},scroll:{width:node.scrollWidth,height:node.scrollHeight},computed:style(node)});
+      const battery=indicator?.getClientRects().length?{tile:measure(indicator.parentElement),indicator:measure(indicator),shell:measure(indicator.querySelector('.battery-shell')),fill:measure(indicator.querySelector('.battery-fill')),terminal_computed:style(indicator,'::after')}:null;
+      return{elements,battery,active_workspace:JSON.parse(layerApp.app.workspace_view()).id,scale:devicePixelRatio,
         fonts:[...document.querySelectorAll('.workspace-switcher button')].map(node=>({text:node.textContent,font:getComputedStyle(node).font}))};
     })()`);
     assert.equal(metrics.active_workspace,fixture.active_workspace);
+    if(fixture.elements['system-battery'])assert(metrics.battery,'Native fixture expects a visible battery');
+    if(metrics.battery) {
+      const {root}=await call('DOM.getDocument',{depth:0});
+      const boxes={};
+      for(const [role,selector] of Object.entries({tile:'#system-battery-tile',indicator:'#system-battery',shell:'#system-battery .battery-shell',fill:'#system-battery .battery-fill'})) {
+        const {nodeId}=await call('DOM.querySelector',{nodeId:root.nodeId,selector});
+        assert(nodeId,selector);
+        boxes[role]=(await call('DOM.getBoxModel',{nodeId})).model;
+        if(role==='indicator') {
+          const {node}=await call('DOM.describeNode',{nodeId,depth:1,pierce:true});
+          const terminal=node.pseudoElements?.find(child=>child.pseudoType==='after');
+          assert(terminal,'Battery terminal pseudo-element unavailable');
+          boxes.terminal=(await call('DOM.getBoxModel',{backendNodeId:terminal.backendNodeId})).model;
+        }
+      }
+      metrics.battery.boxes=boxes;
+      metrics.battery.native_indicator=fixture.elements['system-battery'];
+    }
     const shot=await call('Page.captureScreenshot',{format:'png',fromSurface:true,clip:{...fixture.clip,scale:1}});
     const png=Buffer.from(shot.data,'base64');
     assert.equal(png.readUInt32BE(16),width*fixture.scale);

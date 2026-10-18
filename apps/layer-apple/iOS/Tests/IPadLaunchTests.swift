@@ -99,11 +99,19 @@ extension EditorLaunchTests {
         XCTAssertTrue(stride(from: 0, to: painted.count, by: 4).contains {
             Int(painted[$0 + 2]) > Int(painted[$0]) + 20 && painted[$0 + 3] > 0
         }, "The paper crop must contain authored blue pigment")
+        attachEditor(in: app, name: "owner-workload-before-clear-\(theme)")
+        editorMenu(in: app, menu: "Layer", id: "clear_layer", label: "Clear Entire Layer")
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() != painted }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 15), .completed)
+        let cleared = pixels()
+        attachEditor(in: app, name: "owner-workload-before-undo-\(theme)")
         editorHistory("Undo", in: app)
-        let undone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() != painted }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [undone], timeout: 15), .completed)
+        let undone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() == painted }, object: app)
+        let undoResult = XCTWaiter.wait(for: [undone], timeout: 15)
+        attachEditor(in: app, name: "owner-workload-after-undo-\(theme)")
+        XCTAssertEqual(undoResult, .completed)
         editorHistory("Redo", in: app)
-        let redone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() == painted }, object: app)
+        let redone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in pixels() == cleared }, object: app)
         XCTAssertEqual(XCTWaiter.wait(for: [redone], timeout: 15), .completed)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
         attachEditor(in: app, name: "owner-workload-first-use-history-\(theme)")
@@ -122,6 +130,16 @@ extension EditorLaunchTests {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 
+    @MainActor private func navigateCanvas(in app: XCUIApplication, _ action: () -> Void) {
+        let capy = app.descendants(matching: .any)["zen-button"].firstMatch
+        let status = app.buttons["camera-status"]
+        workspaceActivate(capy)
+        XCTAssertTrue(status.waitForNonExistence(timeout: 5))
+        action()
+        workspaceActivate(capy)
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+    }
+
     @MainActor private func checkNativeDrawingLifecycleStress(theme: String) throws {
         guard let storage = ProcessInfo.processInfo.environment["CAPY_UI_DRAWING_STORAGE_" + theme.uppercased()] else {
             throw XCTSkip("Seed an owned Release G-Pen session into private app storage before this test")
@@ -129,22 +147,13 @@ extension EditorLaunchTests {
         XCTAssertTrue(storage.hasPrefix("capy-test-drawing-"))
         let app = editorTestApplication()
         app.launchEnvironment["CAPY_STORAGE_DIR"] = storage
-        app.launchEnvironment["CAPY_PERSISTENCE_PROBE"] = "1"
-        let panels = ["toolbar", "commands", "brushes", "tool_settings", "sizes", "color", "stats", "navigator", "properties", "adjustments", "layers"]
-        let actions: [[String: Any]] = [["type": "set_theme", "theme": theme]] + panels.map {
-            ["type": "customize", "action": ["type": "set_panel_visible", "panel": $0, "visible": false]]
-        }
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = String(data: try JSONSerialization.data(withJSONObject: actions), encoding: .utf8)
         app.launch(); waitForStartupCanvas(app)
-        let ready = app.staticTexts["recovery-status"]
-        expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Recovery ready", "Recovery ready"), evaluatedWith: ready)
-        waitForExpectations(timeout: 60)
         attachEditor(in: app, name: "startup-release-ink-before-controls-\(theme)")
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch
         let camera = app.buttons["camera-status"]
         XCTAssertTrue(camera.waitForExistence(timeout: 10))
         let originalCamera = camera.label
-        canvas.pinch(withScale: 1.4, velocity: 1)
+        navigateCanvas(in: app) { canvas.pinch(withScale: 1.4, velocity: 1) }
         expectation(for: NSPredicate { _, _ in camera.label != originalCamera }, evaluatedWith: camera)
         waitForExpectations(timeout: 15)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
@@ -172,15 +181,22 @@ extension EditorLaunchTests {
             XCTAssertEqual(scene.identifier, sceneID)
             XCTAssertEqual(editorPixels(in: app, at: sample, size: 768), painted, "Lifecycle cycle \(cycle) must preserve the real stroke")
         }
-        editorMenu(in: app, menu: "Edit", id: "undo", label: "Undo")
-        let undoneAfterCycles = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.editorPixels(in: app, at: sample, size: 768) == previous }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [undoneAfterCycles], timeout: 15), .completed)
-        editorMenu(in: app, menu: "Edit", id: "redo", label: "Redo")
-        expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Recovery ready", "Recovery ready"), evaluatedWith: ready)
-        waitForExpectations(timeout: 60)
-        let preserved = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.editorPixels(in: app, at: sample, size: 768) == painted }, object: app)
-        XCTAssertEqual(XCTWaiter.wait(for: [preserved], timeout: 15), .completed)
+        func history() {
+            editorMenu(in: app, menu: "Edit", id: "undo", label: "Undo")
+            let undone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.editorPixels(in: app, at: sample, size: 768) == previous }, object: app)
+            XCTAssertEqual(XCTWaiter.wait(for: [undone], timeout: 15), .completed)
+            editorMenu(in: app, menu: "Edit", id: "redo", label: "Redo")
+            let redone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.editorPixels(in: app, at: sample, size: 768) == painted }, object: app)
+            XCTAssertEqual(XCTWaiter.wait(for: [redone], timeout: 15), .completed)
+        }
+        history()
         attachEditor(in: app, name: "startup-native-ten-lifecycle-cycles-\(theme)")
+        app.terminate(); app.launch(); waitForStartupCanvas(app)
+        editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
+        let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in self.editorPixels(in: app, at: sample, size: 768) == painted }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 30), .completed)
+        history()
+        attachEditor(in: app, name: "startup-release-ink-reopened-\(theme)")
     }
 
     @MainActor func testMalformedRecoveryStillAllowsNewDrawing() throws { try checkMalformedRecoveryStillAllowsNewDrawing(theme: "light") }
@@ -229,13 +245,19 @@ extension EditorLaunchTests {
     }
 
     @MainActor func testTwoFingerCanvasNavigation() throws {
+        try checkTwoFingerCanvasNavigation(theme: "light")
+    }
+
+    @MainActor func testTwoFingerCanvasNavigationDark() throws {
+        try checkTwoFingerCanvasNavigation(theme: "dark")
+    }
+
+    @MainActor private func checkTwoFingerCanvasNavigation(theme: String) throws {
         let app = editorCaptureApplication()
-        // XCTest's pinch-out begins near opposite corners of the element's
-        // full bounds. Hide panels through ordinary workspace customization so
-        // both starting contacts reach the canvas beneath the editor chrome.
-        let panels = ["toolbar", "commands", "brushes", "tool_settings", "sizes", "color",
-            "stats", "navigator", "properties", "adjustments", "layers"]
-        let actions: [[String: Any]] = [["type": "set_theme", "theme": "light"]] + panels.map {
+        let panels = ["toolbar", "commands", "brushes", "tool_settings", "sizes", "color", "palettes",
+            "stats", "navigator", "proof", "properties", "adjustments", "layers", "histogram", "waveform",
+            "brush_sets", "sculpt_sets", "tools", "filter_types"]
+        let actions: [[String: Any]] = [["type": "set_theme", "theme": theme]] + panels.map {
             ["type": "customize", "action": ["type": "set_panel_visible", "panel": $0, "visible": false]]
         }
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = String(data: try JSONSerialization.data(withJSONObject: actions), encoding: .utf8)
@@ -264,11 +286,11 @@ extension EditorLaunchTests {
 
         // XCTest injects two actual UIKit contacts into the editor canvas.
         // These are native delivery checks, not physical finger/sensor evidence.
-        canvas.pinch(withScale: 1.6, velocity: 1)
+        navigateCanvas(in: app) { canvas.pinch(withScale: 1.6, velocity: 1) }
         expectation(for: NSPredicate { _, _ in camera().zoom > original.zoom * 5 / 4 }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         let enlarged = camera()
-        canvas.rotate(.pi / 6, withVelocity: .pi / 2)
+        navigateCanvas(in: app) { canvas.rotate(.pi / 6, withVelocity: .pi / 2) }
         expectation(for: NSPredicate { _, _ in abs(camera().rotation - enlarged.rotation) >= 20 }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         XCTAssertLessThanOrEqual(abs(camera().rotation - enlarged.rotation), 40)
@@ -276,7 +298,7 @@ extension EditorLaunchTests {
 
         // A fresh pair must work after the preceding contacts have ended.
         let rotated = camera()
-        canvas.pinch(withScale: 0.7, velocity: -1)
+        navigateCanvas(in: app) { canvas.pinch(withScale: 0.7, velocity: -1) }
         expectation(for: NSPredicate { _, _ in camera().zoom < rotated.zoom * 4 / 5 }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         XCTAssertEqual(viewport.frame, originalFrame, "Navigation must leave the OS window fixed")
@@ -287,7 +309,7 @@ extension EditorLaunchTests {
             XCTAssertFalse(button.isEnabled, "Two-finger navigation must not paint or create artwork history")
         }
         canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55)).tap()
-        editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
+        editorMenu(in: app, menu: "View", id: "reset_view", label: "Reset view")
         expectation(for: NSPredicate { _, _ in
             let current = camera()
             return current.zoom == original.zoom && current.rotation == original.rotation
@@ -295,7 +317,7 @@ extension EditorLaunchTests {
         waitForExpectations(timeout: 10)
         XCTAssertEqual(editorPixels(in: app, at: sample), paper)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
-        attachEditor(in: app, name: "two-finger-fit-restored")
+        attachEditor(in: app, name: "two-finger-view-restored")
     }
 
     @MainActor func testNativeWorkspaceContextAction() { checkNativeWorkspaceContextAction() }

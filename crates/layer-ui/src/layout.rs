@@ -2439,10 +2439,16 @@ impl DockLayout {
             Some(height) => (height, second, true),
             None => (self.fitted_height(second)?, first, false),
         };
-        let size = height
-            .min(usable - stacked_min_height(sibling, self))
-            .max(height.min(TAB_BAR_HEIGHT))
-            .min(usable);
+        let own = if leading { first } else { second };
+        let [hard, minimum, _, _, _, _] = stacked_heights(own, self);
+        let [_, sibling_minimum, _, _, sibling_ideal, sibling_rows] = stacked_heights(sibling, self);
+        let size = if hard + sibling_minimum <= usable {
+            let reserved = if hard + sibling_rows <= usable { sibling_rows } else { sibling_minimum };
+            let minimum = minimum.min(hard.max(usable - reserved));
+            height.min(usable - sibling_ideal).clamp(minimum, usable - sibling_minimum)
+        } else {
+            (usable - sibling_minimum).max(height.min(TAB_BAR_HEIGHT)).min(usable)
+        };
         Some(if leading { size } else { usable - size })
     }
     fn tab_width(&self, group: u32) -> f32 {
@@ -4319,31 +4325,31 @@ fn expanded_ribbon_cross_width(node: &DockNode, ribbon_axis: Axis, length: f32, 
         minimum
     }
 }
-fn stacked_min_height(node: &DockNode, layout: &DockLayout) -> f32 {
+fn stacked_heights(node: &DockNode, layout: &DockLayout) -> [f32; 6] {
     match node {
         DockNode::Tabs { panels, active, .. } => {
+            let heights = layout.measurements.iter()
+                .filter(|m| panels.contains(&m.panel) && m.content_height > 0.)
+                .map(|m| match m.scroll {
+                    Some(scroll) => [scroll.fixed_height, scroll.fixed_height,
+                        if m.panel == *active { m.content_height_for_rows(1.) } else { scroll.fixed_height },
+                        m.content_height_for_rows(1.), m.content_height_for_rows(4.),
+                        if scroll.unit_height > 0. { m.content_height_for_rows(1.) } else { scroll.fixed_height }],
+                    None => [0., m.content_height, m.content_height, m.content_height, m.content_height, m.content_height],
+                })
+                .reduce(|a, b| std::array::from_fn(|i| a[i].max(b[i])))
+                .unwrap_or([0., TILE_SIZE, TILE_SIZE, TILE_SIZE, TILE_SIZE, TILE_SIZE]);
             let chrome = if panels.len() == 1 && layout.panel(*active).is_ok_and(|p| p.hide_tab) {
                 PANEL_GRIP_HEIGHT
-            } else {
-                TAB_BAR_HEIGHT
-            };
-            layout.measurements.iter()
-                .filter(|m| panels.contains(&m.panel) && m.scroll.is_some() && m.content_height > 0.)
-                .map(|m| chrome + m.content_height_for_rows(1.))
-                .fold(TAB_BAR_HEIGHT + TILE_SIZE, f32::max)
-        },
-        DockNode::Split {
-            axis,
-            first,
-            second,
-            ..
-        } => {
-            let (a, b) = (stacked_min_height(first, layout), stacked_min_height(second, layout));
-            if *axis == Axis::Vertical {
-                a + b + WORKSPACE_SPACING
-            } else {
-                a.max(b)
-            }
+            } else { TAB_BAR_HEIGHT };
+            heights.map(|height| chrome + height)
+        }
+        DockNode::Split { axis, first, second, .. } => {
+            let a = stacked_heights(first, layout);
+            let b = stacked_heights(second, layout);
+            std::array::from_fn(|i| if *axis == Axis::Vertical {
+                a[i] + b[i] + WORKSPACE_SPACING
+            } else { a[i].max(b[i]) })
         }
     }
 }
@@ -4525,8 +4531,7 @@ fn resolve_node(
                 Edge::Top
             };
             let usable = length - gap;
-            let mut first_size;
-            if *axis == Axis::Horizontal || *axis != orientation {
+            let mut first_size = if *axis == Axis::Horizontal || *axis != orientation {
                 let minimum = |node: &DockNode, preferred: bool| {
                     let group_width: fn(&DockLayout, u32) -> f32 = if preferred { DockLayout::group_preferred_width } else { DockLayout::group_min_width };
                     let tabs = if *axis == Axis::Horizontal {
@@ -4562,12 +4567,20 @@ fn resolve_node(
                         b = preferred_b;
                     }
                 }
-                first_size = split_size(usable, *fraction, a, b);
+                split_size(usable, *fraction, a, b)
             } else if let Some(size) = layout.fitted_split(first, second, usable) {
-                first_size = size;
+                size
             } else {
-                first_size = split_size(usable, *fraction, stacked_min_height(first, layout), stacked_min_height(second, layout));
-            }
+                let a = stacked_heights(first, layout);
+                let b = stacked_heights(second, layout);
+                if a[4] + b[4] > usable && a[1] + b[1] <= usable {
+                    let tier = (1..4).rev().find(|&tier| a[tier] + b[tier] <= usable).unwrap();
+                    a[tier] + (usable - a[tier] - b[tier]) * (a[tier + 1] - a[tier])
+                        / (a[tier + 1] + b[tier + 1] - a[tier] - b[tier])
+                } else {
+                    split_size(usable, *fraction, a[1], b[1])
+                }
+            };
             if *axis == Axis::Horizontal {
                 if layout.is_collapsed(first.id()) && !(open_columns && layout.open_stack_column(first.id()).is_some()) {
                     first_size = TILE_SIZE.min(usable);

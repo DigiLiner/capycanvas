@@ -10,7 +10,10 @@ extern "C" {
 typedef struct CapyApple CapyApple;
 /* All session calls run on one serial engine/render owner. UIKit/AppKit owns
    the retained CAMetalLayer and must keep it alive until detach completes. */
-CapyApple *capy_apple_launch(uint32_t platform, const char *json, char **bootstrap, char **error);
+typedef struct CapyAppleLaunch CapyAppleLaunch;
+CapyAppleLaunch *capy_apple_prepare_launch(const char *json, char **error);
+CapyApple *capy_apple_launch(uint32_t platform, const CapyAppleLaunch *prepared, char **bootstrap, char **error);
+void capy_apple_launch_free(CapyAppleLaunch *prepared);
 typedef struct CapyLanguageTask CapyLanguageTask;
 CapyLanguageTask *capy_apple_language_request(CapyApple *app, const char *preferred_languages);
 void capy_language_prepare(CapyLanguageTask *task);
@@ -46,6 +49,21 @@ int32_t capy_apple_document_close_commit(CapyApple *app, CapyDocumentTask *task,
 int32_t capy_apple_document_close_validate(CapyApple *app, const CapyDocumentTask *task);
 int32_t capy_apple_document_resume(CapyApple *app, CapyDocumentTask *task);
 void capy_document_free(CapyDocumentTask *task);
+typedef struct CapyPaperTask CapyPaperTask;
+/* Capture/apply on serial owner; work/free on file worker; error after work. Request0 lists the library. */
+CapyPaperTask *capy_apple_paper_task(CapyApple *app, uint32_t request, uint64_t epoch, const char *directory);
+void capy_paper_work(const CapyPaperTask *task, int32_t fd, const char *name);
+void capy_paper_failed(const CapyPaperTask *task, const char *message);
+char *capy_paper_error(const CapyPaperTask *task);
+int32_t capy_apple_paper_apply(CapyApple *app, const CapyPaperTask *task);
+void capy_paper_cancel(const CapyPaperTask *task);
+void capy_paper_free(CapyPaperTask *task);
+typedef struct CapyPaperPreviews CapyPaperPreviews;
+/* Owner captures immutable grayscale leases; read/decode/free away from UI/input. */
+CapyPaperPreviews *capy_apple_paper_previews(CapyApple *app, uint64_t layer, uint64_t epoch);
+size_t capy_paper_previews_count(const CapyPaperPreviews *previews);
+uint32_t capy_paper_previews_read(const CapyPaperPreviews *previews, size_t index, const uint8_t **bytes, size_t *count);
+void capy_paper_previews_free(CapyPaperPreviews *previews);
 typedef struct CapyProjectTask CapyProjectTask;
 int32_t capy_apple_project_prepare_adopt(CapyApple *app, const CapyProjectTask *task, uint64_t now);
 /* Capture/context and adopt/saved run on the editor owner. read/write/free run

@@ -8,17 +8,19 @@ extension View {
             for index in requests.indices { requests[index].passThrough = anchor }
         }
     }
-    func editorPopover<Popup: View>(isPresented: Binding<Bool>, placement: EditorPopoverPlacement = .below,
+    func editorPopover<Popup: View>(isPresented: Binding<Bool>, placement: EditorPopoverPlacement = .below, owner: UUID? = nil,
         @ViewBuilder content: () -> Popup) -> some View {
-        modifier(EditorPopoverSource(isPresented: isPresented, placement: placement, popup: content()))
+        modifier(EditorPopoverSource(isPresented: isPresented, placement: placement, owner: owner, popup: content()))
     }
 }
 
 private struct EditorPopoverSource<Popup: View>: ViewModifier {
     @Binding var isPresented: Bool
     let placement: EditorPopoverPlacement
+    let owner: UUID?
     let popup: Popup
     @State private var id = UUID()
+    @Environment(\.editorPopupStore) private var store
     func body(content: Content) -> some View {
         let presented = isPresented
         return content.transformAnchorPreference(key: EditorPopovers.self, value: .bounds) { requests, anchor in
@@ -27,6 +29,9 @@ private struct EditorPopoverSource<Popup: View>: ViewModifier {
                     content: AnyView(popup), dismiss: { isPresented = false }))
             }
         }
+        .onAppear { if isPresented { store?.workspace.popover(id, open: true, owner: owner) } }
+        .onChange(of: isPresented) { _, open in store?.workspace.popover(id, open: open, owner: owner) }
+        .onDisappear { store?.workspace.popover(id, open: false) }
     }
 }
 

@@ -160,13 +160,13 @@ extension XCTestCase {
     @MainActor func checkSettingsNumericReset(in app: XCUIApplication) {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"settings"},{"type":"preferences","action":{"type":"reveal","id":"pan_speed"}}]"#
         app.launch()
-        let value = app.buttons["number-value-Pan speed"]
-        let entry = app.textFields["number-entry-Pan speed"]
+        let value = app.buttons["number-value-Scroll pan speed"]
+        let entry = app.textFields["number-entry-Scroll pan speed"]
         XCTAssertTrue(value.waitForExistence(timeout: 20))
         let defaultDisplay = value.value as? String ?? ""
         XCTAssertFalse(defaultDisplay.isEmpty)
         for draft in ["", "2 + 0.25", "2 + ("] {
-            workspaceActivate(app.buttons["number-increase-Pan speed"])
+            workspaceActivate(app.buttons["number-increase-Scroll pan speed"])
             expectation(for: NSPredicate(format: "value != %@", defaultDisplay), evaluatedWith: value)
             waitForExpectations(timeout: 5)
             if !draft.isEmpty {
@@ -175,7 +175,7 @@ extension XCTestCase {
                 entry.typeText(draft)
                 XCTAssertEqual(entry.value as? String, draft)
             }
-            let label = app.staticTexts["Pan speed"].firstMatch
+            let label = app.staticTexts["Scroll pan speed"].firstMatch
             #if os(macOS)
             label.rightClick()
             let reset = app.menuItems["Reset to Default"]
@@ -185,7 +185,7 @@ extension XCTestCase {
             #endif
             XCTAssertTrue(reset.waitForExistence(timeout: 5)); XCTAssertTrue(reset.isEnabled)
             workspaceActivate(reset)
-            XCTAssertFalse(app.staticTexts["number-error-Pan speed"].exists,
+            XCTAssertFalse(app.staticTexts["number-error-Scroll pan speed"].exists,
                 "Reset must discard an invalid draft's error")
             if !draft.isEmpty {
                 XCTAssertNotEqual(entry.exists ? entry.value as? String : nil, draft,
@@ -448,6 +448,35 @@ extension XCTestCase {
         workspaceActivate(app.menuItems["About Capy Canvas"])
         #else
         XCTAssertFalse(app.buttons["menu-Help"].exists)
+        let file = app.buttons["menu-File"]
+        XCTAssertTrue(file.waitForExistence(timeout: 10))
+        let window = workspaceViewport(in: app), origin = window.frame.origin
+        let fileFrame = file.frame, editFrame = app.buttons["menu-Edit"].frame
+        XCTAssertGreaterThan(editFrame.minX, fileFrame.maxX)
+        let gap = window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: (fileFrame.maxX + editFrame.minX) / 2 - origin.x,
+            dy: fileFrame.minY + fileFrame.height * 0.85 - origin.y))
+        let headings = Dictionary(uniqueKeysWithValues: ["Edit", "Image", "Select"].map { heading in
+            let frame = app.buttons["menu-" + heading].frame
+            return (heading, window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: frame.midX - origin.x, dy: frame.minY + frame.height * 0.85 - origin.y)))
+        })
+        file.click()
+        XCTAssertTrue(app.buttons["command-new_document"].waitForExistence(timeout: 5))
+        for heading in ["Edit", "Image", "Select"] {
+            gap.click(forDuration: 0.05, thenDragTo: headings[heading]!, withVelocity: .slow, thenHoldForDuration: 0.5)
+            let command = ["Edit": "scale_rotate", "Image": "image_size", "Select": "select_all"][heading]!
+            XCTAssertTrue(app.buttons["command-" + command].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["command-new_document"].exists)
+            if heading == "Image" {
+                XCTAssertTrue(app.buttons["command-image_size"].exists)
+                XCTAssertTrue(app.buttons["command-canvas_size"].exists)
+            } else if heading == "Select" {
+                XCTAssertTrue(app.buttons["command-select_all"].exists)
+                XCTAssertFalse(app.buttons["command-fill_selection"].exists)
+            }
+        }
+        workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65)).tap()
         workspaceActivate(app.buttons["settings-button"])
         XCTAssertTrue(app.staticTexts["settings-page-about"].waitForExistence(timeout: 10))
         workspaceActivate(app.staticTexts["settings-page-about"])
@@ -490,6 +519,9 @@ extension XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["preference-source_code"].firstMatch.waitForExistence(timeout: 5))
         workspaceActivate(done)
         XCTAssertTrue(done.waitForNonExistence(timeout: 5))
+        #if os(macOS)
+        XCTAssertFalse(app.menuBars.menuBarItems["Help"].exists)
+        #endif
         #if os(macOS)
         for id in ["illustrator", "painter", "illustrator"] {
             let workspace = app.buttons["workspace-switch-builtin:workspace:" + id]

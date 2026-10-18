@@ -6,9 +6,7 @@ struct EditorMenuButton<Label: View>: View {
     var rootFocusesSelection = true
     var isPresented: Binding<Bool>? = nil
     @ViewBuilder let label: () -> Label
-    @Environment(\.editorPopupStore) private var store
     @State private var localActive = false
-    @State private var popupID = UUID()
     private var active: Binding<Bool> { isPresented ?? $localActive }
     var body: some View {
         Button { active.wrappedValue.toggle() } label: { label().contentShape(Rectangle()) }
@@ -19,8 +17,6 @@ struct EditorMenuButton<Label: View>: View {
                         rootFocusesSelection: rootFocusesSelection) { active.wrappedValue = false }
                 }
             }
-            .onChange(of: active.wrappedValue) { _, open in store?.workspace.popover(popupID, open: open) }
-            .onDisappear { store?.workspace.popover(popupID, open: false) }
     }
 }
 

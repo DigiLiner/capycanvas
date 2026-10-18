@@ -642,18 +642,48 @@ extension XCTestCase {
         app.typeKey("e", modifierFlags: [.command, .shift])
         #else
         editorMenu(in: app, menu: "File", id: "export_document", label: "Export…")
+        let preview = app.buttons["export-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 15))
+        XCTAssertEqual(preview.label, "Preview Output")
+        let exportScroll = app.scrollViews.containing(.button, identifier: "export-preview").firstMatch
+        let fit = app.switches["export-fit"]
+        revealEditorControl(fit, in: exportScroll)
+        if fit.value as? String != "1" { workspaceActivate(fit) }
+        let exportWidth = app.textFields["export-width"], exportHeight = app.textFields["export-height"]
+        replaceEditorText(exportWidth, with: "7.5", in: app)
+        dismissEditorKeyboard(in: app)
+        revealEditorControl(preview, in: exportScroll); workspaceActivate(preview)
+        let integerError = app.staticTexts["export-error"]
+        expectation(for: NSPredicate { _, _ in
+            integerError.exists && (integerError.label == "Maximum width (px) needs a whole number." || integerError.value as? String == "Maximum width (px) needs a whole number.")
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        XCTAssertEqual(exportWidth.value as? String, "7.5")
+        replaceEditorText(exportWidth, with: "32", in: app)
+        replaceEditorText(exportHeight, with: "32", in: app)
+        dismissEditorKeyboard(in: app)
+        revealEditorControl(preview, in: exportScroll); workspaceActivate(preview)
+        let outputSize = app.staticTexts["export-output-size"]
+        expectation(for: NSPredicate { _, _ in
+            outputSize.exists && (outputSize.label == "Output: 32 × 24 px" || outputSize.value as? String == "Output: 32 × 24 px")
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 60)
         #endif
         chooseExportDestination(in: app)
         // Files also exposes a non-button Cancel element with stale bounds.
         // Target the native close button shown by the unlocked picker.
-        let cancel = app.buttons["Cancel"].firstMatch
         #if os(macOS)
-        XCTAssertTrue(cancel.waitForExistence(timeout: 15))
+        let cancel = app.windows.buttons["CancelButton"].firstMatch
+        let commit = app.windows.buttons["OKButton"].firstMatch
+        expectation(for: NSPredicate { _, _ in cancel.exists && commit.exists }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
+        expectation(for: NSPredicate { _, _ in !cancel.exists && !commit.exists }, evaluatedWith: app)
         #else
+        let cancel = app.buttons["Cancel"].firstMatch
         activate(cancel)
-        #endif
         expectation(for: NSPredicate(format: "exists == NO"), evaluatedWith: cancel)
+        #endif
         waitForExpectations(timeout: 10)
         XCTAssertTrue(title.label == "Untitled · 63 × 47" || title.value as? String == "Untitled · 63 × 47",
             "Export cancellation must retain the drawing")
@@ -727,7 +757,7 @@ extension XCTestCase {
             let local = app.cells["DOC.sidebar.item.On My iPad"]
             XCTAssertTrue(local.waitForExistence(timeout: 15)); workspaceActivate(local)
             XCTAssertTrue(folderTitle("On My iPad").waitForExistence(timeout: 10))
-            workspaceActivate(app.cells[provider + ", Folder"])
+            workspaceActivate(fileProviderRoot(provider, in: app))
             XCTAssertTrue(folderTitle(provider).waitForExistence(timeout: 10))
             workspaceActivate(app.cells[folder + ", Folder"])
             XCTAssertTrue(folderTitle(folder).waitForExistence(timeout: 10))
@@ -740,8 +770,9 @@ extension XCTestCase {
         XCTAssertTrue(open.waitForNonExistence(timeout: 20))
         #else
         enterRunnerFolder()
-        let input = app.cells.matching(NSPredicate(format: "identifier BEGINSWITH %@", "Unsupported.capy,")).firstMatch.images.firstMatch
+        let input = fileProviderFile("Unsupported.capy", in: app).images.firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 10)); workspaceActivate(input)
+        submitFileProviderSelection(in: app)
         #endif
         let preview = app.descendants(matching: .any)["preserved-package-preview"].firstMatch
         let copy = app.buttons["copy-original-package"]
@@ -764,11 +795,12 @@ extension XCTestCase {
         workspaceActivate(name); name.typeKey("a", modifierFlags: .command); name.typeText(destination.lastPathComponent)
         workspaceActivate(save); XCTAssertTrue(save.waitForNonExistence(timeout: 20))
         #else
-        let name = app.textFields["DOCPicker.filenameTextField"]
-        XCTAssertTrue(name.waitForExistence(timeout: 20)); enterRunnerFolder()
-        workspaceActivate(name); name.typeKey("a", modifierFlags: .command); name.typeText("Copy")
-        let save = app.navigationBars.buttons["Save"].firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 10)); workspaceActivate(save)
+        let controls = documentExportControls(in: app)
+        let name = controls.filename
+        enterRunnerFolder()
+        XCTAssertTrue(["Copy", destination.lastPathComponent].contains(name.value as? String ?? ""))
+        let save = controls.commit
+        workspaceActivate(save)
         XCTAssertTrue(save.waitForNonExistence(timeout: 20))
         #endif
         XCTAssertTrue(copy.waitForNonExistence(timeout: 20))

@@ -121,7 +121,7 @@ fn stroke_increment(previous: f32, next: f32) -> f32 {
 }
 
 fn grouped_opacity() -> bool {
-    return contact_feature(65536u,style.canvas_opacity.z < 1.0)
+    return style.canvas_opacity.z < 1.0
         && (MATERIAL_OPERATION == OP_DEPOSIT || MATERIAL_OPERATION == OP_COVERAGE || MATERIAL_OPERATION == OP_CLONE);
 }
 

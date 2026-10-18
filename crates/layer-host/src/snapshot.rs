@@ -422,6 +422,57 @@ mod tests {
         host
     }
     #[test]
+    fn workspace_replacement_serializes_metadata_for_every_presented_panel() {
+        use layer_ui::{HostRequestKind, ManagedWorkspace, PreparedWorkspace, WorkspaceCapture, WorkspaceCommand, WorkspacePreset};
+        fn complete(host: &NativeHost, stage: &str) {
+            let snapshot = host.snapshot();
+            let available = snapshot["panels"].as_array().unwrap();
+            let layout = host.session.layout(host.logical);
+            let mut referenced: Vec<_> = layout.groups.iter().flat_map(|group| &group.panels).copied().collect();
+            referenced.extend(layout.collapsed.iter().flat_map(|column| &column.groups)
+                .flat_map(|group| &group.icons).map(|icon| icon.panel));
+            referenced.extend(host.session.state().customization.drawer.iter()
+                .chain(&host.session.state().customization.column_drawers).flat_map(|drawer| drawer.panels()));
+            assert!(!referenced.is_empty(), "{stage}");
+            for panel in referenced {
+                let id = serde_json::to_value(panel).unwrap();
+                let metadata = available.iter().find(|value| value["id"] == id)
+                    .unwrap_or_else(|| panic!("{stage}: missing presented panel {id}; available: {}", snapshot["panels"]));
+                assert!(!metadata["icon"].as_str().unwrap().is_empty(), "{stage}: {id}");
+                assert!(!metadata["title"].as_str().unwrap().is_empty(), "{stage}: {id}");
+            }
+        }
+        for platform in [Platform::Mac, Platform::Ios] {
+            for theme in ["light", "dark"] {
+                let mut host = host(platform);
+                host.resize(2400, 1740, 2.).unwrap();
+                let previous = host.session.state().revision;
+                let change = host.session.configure_workspace_manager(ManagedWorkspace {
+                    id: "initial".into(), name: "Initial".into(),
+                    baseline: host.session.state().workspace.layout.clone(), choices: Vec::new(),
+                }).unwrap();
+                host.apply_change(previous, change);
+                complete(&host, "initial");
+                host.dispatch(serde_json::from_value(json!({"type":"set_theme", "theme":theme})).unwrap()).unwrap();
+                complete(&host, "theme");
+                host.dispatch(UiAction::WorkspaceManager {command:WorkspaceCommand::Switch {
+                    id:"builtin:workspace:painter".into(),
+                }}).unwrap();
+                assert!(host.session.state().requests.iter().any(|request| matches!(&request.kind,
+                    HostRequestKind::Workspace {command:WorkspaceCommand::Switch {id}} if id == "builtin:workspace:painter")));
+                complete(&host, "switch request");
+                let prepared = PreparedWorkspace::new(WorkspaceCapture::from_template(&WorkspacePreset::Painter.layout(platform)).unwrap()).unwrap();
+                host.session.begin_workspace_transition().unwrap();
+                let previous = host.session.state().revision;
+                let change = host.session.adopt_workspace(prepared).unwrap();
+                host.session.end_workspace_transition();
+                host.apply_change(previous, change);
+                complete(&host, "adopted Painter");
+                assert!(host.session.layout(host.logical).collapsed.is_empty());
+            }
+        }
+    }
+    #[test]
     fn combined_layer_drawer_publishes_both_retained_panels() {
         use layer_ui::{Bounds, CustomizationAction, HeaderItem, HeaderItemBounds, Panel, ToolbarControl, WorkspacePreset};
         let mut host = host(Platform::Windows);

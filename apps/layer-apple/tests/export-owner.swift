@@ -170,7 +170,56 @@ import UniformTypeIdentifiers
             try await invoke("add_layer") // Export must preserve unsaved state too.
             let state = store.state["document_file"].stableKey
             let original = try Data(contentsOf: master)
+            func localized(_ editor: ExportController) async throws {
+                let localizedRecipe = editor.recipe.stableKey
+                let localizedDraft = editor.draft.stableKey
+                let literalNames = Array(editor.names.dropFirst(4))
+                let localizedProfiles = editor.profiles.map(\.stableKey)
+                let localizedSelection = (editor.destination, editor.profileIndex)
+                editor.invalidNumber("color-features-export-quality")
+                for (language, index, title) in [("ja", 2, "画像を書き出す"), ("en", 1, "Export image")] {
+                    try await store.apply(["type": "preferences", "action": ["type": "edit", "id": "language", "value": index]])
+                    try await wait("Export language", store: store) { store.interfaceLanguage == language }
+                    editor.refreshCopy()
+                    try await wait("Export copy projections", store: store) {
+                        editor.names.first == store.catalog["export_copy"]["web_share"].string
+                            && editor.metadataCopy["label"].string == store.catalog["export_copy"]["metadata"].string
+                        && editor.outputSize.contains(language == "ja" ? "出力" : "Output")
+                    }
+                    try require(editor.copy["title"].string == title
+                        && editor.copy.stableKey == store.catalog["export_copy"].stableKey,
+                        "Open export controller consumes the current shared catalog")
+                    try require(!editor.copy["outside_range"].string.isEmpty
+                        && !editor.copy["preview_gainmap"].string.isEmpty
+                        && !editor.copy["jpeg_gainmap"].string.isEmpty
+                        && !editor.copy["avif_gainmap"].string.isEmpty,
+                        "Shared preview, HDR option and warning copy is available")
+                    try require(editor.profiles.map(\.stableKey) == localizedProfiles
+                        && editor.destination == localizedSelection.0 && editor.profileIndex == localizedSelection.1,
+                        "Locale projection preserves exact profile backing and selection")
+                    try require(editor.draft.stableKey == localizedDraft && Array(editor.names.dropFirst(4)) == literalNames,
+                        "Locale projection preserves the exact draft and literal preset names")
+                    let size = NativeTextContext.caption(["type": "export_size", "width": 64, "height": 48], language: language)
+                    try require(size.contains("64") && size.contains("48") && size.contains(language == "ja" ? "出力" : "Output"),
+                        "Output size caption follows the active language")
+                    let number = NativeTextContext.caption(["type": "numeric_error", "reason": ["reason": "whole_number",
+                        "label": ["message": "color-features-export-quality"]]], language: language)
+                    try await wait("Export number error", store: store) { editor.error == number }
+                    try require(number.contains(editor.copy["quality"].string), "Whole-number error resolves its shared field label")
+                    try require(editor.recipe.stableKey == localizedRecipe,
+                        "Changing export language preserves every recipe value")
+                }
+                editor.invalidNumber("color-features-export-quality")
+                editor.invalidate()
+                await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                    native.submit(2, JSON(["type": "catalog"])) { _ in
+                        DispatchQueue.main.async { done.resume() }
+                    }
+                }
+                try require(editor.error == nil, "Cleared numeric errors cannot return from an older copy reply")
+            }
             var editor = try await dialog()
+            try await localized(editor)
             editor.cancel(); try await idle()
             try require(store.state["document_file"].stableKey == state, "Cancel leaves unsaved master unchanged")
             editor = try await dialog()
@@ -241,6 +290,7 @@ import UniformTypeIdentifiers
             editor = try await dialog()
             editor.preference(JSON(["type":"get", "index":4])); try await finished(editor)
             try require(editor.recipe.stableKey == recipe.stableKey, "Reuse named output after cancel")
+            try await localized(editor)
             let tiff = root.appendingPathComponent("Output-\(platform).tiff")
             destination = tiff; editor.choose(editor.recipe); try await idle()
             try image(tiff, type: .tiff, depth: 16, extent: [32,24])

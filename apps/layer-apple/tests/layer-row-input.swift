@@ -169,23 +169,54 @@ import SwiftUI
         scroll.frame = scrollFrame
         try require(admitted, "An offset native scroll view must accept a pen contact over its layer row")
         start = body(original); end = CGPoint(x: start.x, y: model.frames[added]!.row.minY + 2)
-        let swipeEnd = CGPoint(x: start.x - 90, y: start.y)
-        try event(.leftMouseDown, at: start, marker: marker, number: 1010, tablet: true); try await drain(0.02)
-        try event(.leftMouseDragged, at: swipeEnd, marker: marker, number: 1011, tablet: true); try await drain(0.04)
-        try event(.leftMouseUp, at: swipeEnd, marker: marker, number: 1012, tablet: true); try await drain()
         let actions = store.state["layers"].array.first { $0["id"].uint == original }!["swipe_actions"].array
-        let swipeExtent = min(model.frames[original]!.row.width, CGFloat(actions.count) * 72)
-        try require(store.layerSwipe.offset == swipeExtent && store.layerSwipe.layer == original && model.drag == nil && model.menu.isNull,
-            "A pen row swipe reveals the shared actions without reordering or opening a menu")
-        try require(order(store) == initial, "Revealing Delete does not edit the document")
-        try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "A displaced row hides its grip")
-        let displacedGrip = model.frames[original]!.grip
-        if displacedGrip != .zero, let target = model.source(at: CGPoint(x: displacedGrip.midX, y: displacedGrip.midY)) {
-            try require(target.surface != .handle && !target.canDrag, "A displaced grip cannot admit reorder")
+        try require(actions.map { $0["id"].string } == ["lock", "duplicate", "delete"],
+            "Paint rows must expose Lock, Duplicate and Delete")
+        for (index, action) in actions.enumerated() {
+            start = body(original)
+            let row = model.frames[original]!.row, extent = min(row.width, CGFloat(actions.count) * 72)
+            let swipeEnd = CGPoint(x: start.x - 90, y: start.y)
+            try event(.leftMouseDown, at: start, marker: marker, number: 1010, tablet: true); try await drain(0.02)
+            try event(.leftMouseDragged, at: swipeEnd, marker: marker, number: 1011, tablet: true); try await drain(0.04)
+            try event(.leftMouseUp, at: swipeEnd, marker: marker, number: 1012, tablet: true); try await drain()
+            try require(store.layerSwipe.offset == extent && store.layerSwipe.layer == original && model.drag == nil && model.menu.isNull,
+                "A pen row swipe reveals every shared action without reordering or opening a menu")
+            try require(order(store) == initial, "Revealing swipe actions does not edit the document")
+            try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "A displaced row hides its grip")
+            let grip = model.frames[original]!.grip
+            if grip != .zero, let target = model.source(at: CGPoint(x: grip.midX, y: grip.midY)) {
+                try require(target.surface != .handle && !target.canDrag, "A displaced grip cannot admit reorder")
+            }
+            let target = CGPoint(x: row.maxX - extent + (CGFloat(index) + 0.5) * extent / CGFloat(actions.count), y: row.midY)
+            try event(.leftMouseDown, at: target, marker: marker, number: 1013)
+            try event(.leftMouseUp, at: target, marker: marker, number: 1014)
+            try await wait("Revealed \(action["label"].string) must invoke its shared action") {
+                switch action["id"].string {
+                case "lock": return store.state["layers"].array.first { $0["id"].uint == original }!["locked"].bool
+                case "duplicate": return order(store).count == initial.count + 1
+                default: return !order(store).contains(original)
+                }
+            }
+            try await store.apply(["type": "invoke", "command": "undo"])
+            try require(order(store) == initial && !store.state["layers"].array.first { $0["id"].uint == original }!["locked"].bool,
+                "One Undo restores the row order and lock after \(action["label"].string)")
+            try await drain()
         }
+        start = body(original)
+        let returnEnd = CGPoint(x: start.x - 90, y: start.y)
+        try event(.leftMouseDown, at: start, marker: marker, number: 1019, tablet: true); try await drain(0.02)
+        try event(.leftMouseDragged, at: returnEnd, marker: marker, number: 1020, tablet: true); try await drain(0.04)
+        try event(.leftMouseUp, at: returnEnd, marker: marker, number: 1021, tablet: true); try await drain()
+        let visibleRow = model.frames[original]!.row.intersection(model.viewport)
+        let returnPoint = CGPoint(x: visibleRow.midX, y: visibleRow.midY)
+        guard !visibleRow.isEmpty, let displaced = model.source(at: returnPoint) else { throw HostFailure(message: "Displaced row contact missing") }
+        model.contact.prepare(displaced, device: .mouse, origin: returnPoint)
         store.layerSwipe.close()
         try require(!store.layerSwipe.atRest(owner: model.swipeOwner, layer: original), "The grip stays hidden through swipe return")
         try await wait("The returned row did not restore its grip") { store.layerSwipe.atRest(owner: model.swipeOwner, layer: original) }
+        try require(!model.contact.move(to: body(added)) && model.drag == nil,
+            "A contact admitted on a displaced row cannot gain pickup when its swipe returns")
+        model.cancel()
         for device: ReorderDevice in [.touch, .pen] {
             guard let target = model.source(at: body(original)) else { throw HostFailure(message: "A resting body must admit context input") }
             model.contact.prepare(target, device: device, origin: body(original))
@@ -195,17 +226,8 @@ import SwiftUI
                 "Touch and pen body holds cannot reorder")
             model.cancel(); model.closeMenu()
         }
-        start = body(original)
-        try event(.leftMouseDown, at: start, marker: marker, number: 1015, tablet: true); try await drain(0.02)
-        try event(.leftMouseDragged, at: CGPoint(x: start.x - 90, y: start.y), marker: marker, number: 1016, tablet: true); try await drain(0.04)
-        try event(.leftMouseUp, at: CGPoint(x: start.x - 90, y: start.y), marker: marker, number: 1017, tablet: true); try await drain()
-        let delete = CGPoint(x: model.frames[original]!.row.maxX - 24, y: model.frames[original]!.row.midY)
-        try event(.leftMouseDown, at: delete, marker: marker, number: 1013)
-        try event(.leftMouseUp, at: delete, marker: marker, number: 1014)
-        try await wait("Revealed Delete must invoke the shared deletion action") { !order(store).contains(original) }
-        try await store.apply(["type": "invoke", "command": "undo"])
-        try require(order(store) == initial, "One Undo restores swipe deletion")
         try await drain()
+        start = body(original); end = CGPoint(x: start.x, y: model.frames[added]!.row.minY + 2)
         try event(.leftMouseDown, at: start, marker: marker, number: 1, tablet: true); try await drain(0.02)
         try event(.leftMouseDragged, at: end, marker: marker, number: 2, tablet: true); try await drain(0.04)
         try event(.leftMouseUp, at: end, marker: marker, number: 3, tablet: true); try await drain()
@@ -252,11 +274,39 @@ import SwiftUI
         guard let paperTarget = model.source(at: paperPoint) else {
             throw HostFailure(message: "Paper must retain its context source")
         }
-        model.contact.prepare(paperTarget, device: .pen, origin: paperPoint)
+        model.contact.prepare(paperTarget, device: .mouse, origin: paperPoint)
+        model.contact.recognizeHold(openContext: false)
+        try require(!row(paper)["drag_from_handle"].bool && row(paper)["drag_from_body"].array.isEmpty
+            && !paperTarget.canDrag && !model.contact.move(to: body(added)) && model.drag == nil,
+            "Paper retains context without pickup under the shared row contract")
+        model.cancel()
+        try require(order(store) == initial, "Cancelling the Paper drag preserves its authored order")
+        try await store.apply(["type": "invoke", "command": "quick_mask"])
+        try await wait("Quick Mask row geometry") { model.frames[0] != nil }
+        try await drain(); host.layoutSubtreeIfNeeded(); try await drain()
+        func hasEditableName(_ view: NSView) -> Bool {
+            if let field = view as? NSTextField, field.isEditable,
+                marker.convert(field.bounds, from: field).intersects(model.frames[0]!.name) { return true }
+            return view.subviews.contains(where: hasEditableName)
+        }
+        try require(!hasEditableName(host) && (window.firstResponder as? NSTextView)?.isFieldEditor != true,
+            "Quick Mask must not mount or focus a name editor without a rename owner")
+        window.makeFirstResponder(nil)
+        model.openMenu(id: original, mask: false)
+        try await wait("Quick Mask keeps the native layer menu available") { !model.menu.isNull }
+        try await drain()
+        try require(store.failure == nil && store.state["layer_tools"]["rename_layer"].isNull,
+            "Leaving Quick Mask focus and opening a menu cannot rename layer zero")
+        model.closeMenu()
+        let maskPoint = body(0)
+        guard let maskTarget = model.source(at: maskPoint) else { throw HostFailure(message: "Quick Mask row missing") }
+        model.contact.prepare(maskTarget, device: .pen, origin: maskPoint)
         model.contact.recognizeHold(openContext: false)
         try require(!model.contact.move(to: body(added)) && model.drag == nil,
-            "Holding Paper must never make the background anchor draggable")
+            "Holding Quick Mask must preserve its nondraggable shared row")
         model.cancel()
+        try await store.apply(["type": "invoke", "command": "quick_mask"])
+        try await drain()
         try await store.apply(["type": "layer", "action": ["op": "begin_rename", "id": added]])
         try require(model.source(at: body(added)) == nil, "Native name editing owns its contact")
         try await store.apply(["type": "layer", "action": ["op": "cancel_rename"]])

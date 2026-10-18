@@ -48,6 +48,8 @@ color-features-proof-contrast-scale = Kontras dan skala
 
 color-features-proof-tone-help = Ke atas meningkatkan kontras. Ke kiri mengutamakan struktur luas; ke kanan mengutamakan tekstur halus. Tengah memulihkan acuan otomatis. Tombol panah menyesuaikan; Escape membatalkan; klik dua kali mengatur ulang.
 
+color-features-proof-sdr-appearance = Tampilan SDR
+color-features-proof-edit-sdr-appearance = Edit tampilan SDR…
 color-features-proof-reset-sdr = Atur ulang tampilan SDR
 
 color-features-proof-normal = Normal
@@ -118,6 +120,7 @@ color-features-profile-interpret-title = Pilih interpretasi gambar
 
 color-features-profile-interpret-help = Gambar ini tidak menyatakan profil warna. Pilih cara menafsirkan nilai tersimpannya. Angka asli akan dipertahankan.
 
+color-features-profile-source = Sumber: { $channels } · { $depth }
 color-features-profile-interpret-as = Tafsirkan sebagai
 
 color-features-export-title = Ekspor gambar
@@ -127,6 +130,7 @@ color-features-export-help = Ekspor salinan berprofil. Gambar yang dapat diedit 
 color-features-export-export = Ekspor
 
 color-features-export-choose-file = Pilih Berkas…
+color-features-export-retry = Coba Lagi
 
 color-features-export-destination = Tujuan
 

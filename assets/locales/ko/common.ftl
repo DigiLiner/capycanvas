@@ -82,6 +82,7 @@ numeric-invalid-expression = 올바른 수식을 입력하세요.
 numeric-range = { $label } 값은 { $min }에서 { $max } 사이여야 합니다.
 
 numeric-whole-pixels = { $label } 값은 정수 픽셀 수여야 합니다.
+numeric-whole-number = { $label }에는 정수를 입력하세요.
 
 common-close = 닫기
 common-remove = 제거

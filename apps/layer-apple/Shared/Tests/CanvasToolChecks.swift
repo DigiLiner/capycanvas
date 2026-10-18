@@ -3,17 +3,39 @@ import CoreGraphics
 import ImageIO
 
 extension XCTestCase {
+    @MainActor func editorText(_ element: XCUIElement) -> String {
+        element.label.isEmpty ? element.value as? String ?? "" : element.label
+    }
+
     @MainActor func revealEditorControl(_ element: XCUIElement, in scroll: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
         for _ in 0..<30 {
-            let viewport = scroll.frame.insetBy(dx: 0, dy: 2), frame = element.frame
-            if frame.minY >= viewport.minY && frame.maxY <= viewport.maxY { return }
-            let upward = frame.maxY > viewport.maxY
+            let viewport = scroll.frame, frame = element.frame
+            if frame.width > 0 && frame.height > 0 && viewport.contains(frame) { return }
+            let upward: Bool
+            if frame.width > 0 && frame.height > 0 { upward = frame.maxY > viewport.maxY }
+            else {
+                let identifier = element.identifier, text = identifier.isEmpty ? editorText(element) : ""
+                let siblings = scroll.descendants(matching: element.elementType).allElementsBoundByIndex
+                guard let index = siblings.firstIndex(where: {
+                    identifier.isEmpty ? editorText($0) == text : $0.identifier == identifier
+                }) else { return XCTFail("The scroll must retain its requested control: \(identifier)") }
+                let visible = siblings.map {
+                    let bounds = $0.frame
+                    return bounds.width > 0 && bounds.height > 0 && viewport.contains(bounds)
+                }
+                let before = visible[..<index].contains(true)
+                let after = visible[(index + 1)...].contains(true)
+                guard before != after else {
+                    return XCTFail("The hidden control must lie outside its visible siblings: \(identifier)")
+                }
+                upward = before
+            }
             #if os(macOS)
             scroll.scroll(byDeltaX: 0, deltaY: upward ? -80 : 80)
             #else
-            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: upward ? 0.8 : 0.2))
-            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: upward ? 0.2 : 0.8))
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: upward ? 0.8 : 0.2))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: upward ? 0.2 : 0.8))
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
             #endif
         }
@@ -95,6 +117,18 @@ extension XCTestCase {
         editorPixelSamples(in: app, at: [point], size: size)[0]
     }
 
+    @MainActor private func settledEditorPixels(in app: XCUIApplication, at point: CGPoint, size: Int) -> Data {
+        var previous = editorPixels(in: app, at: point, size: size), unchanged = 0
+        for _ in 0..<40 {
+            Thread.sleep(forTimeInterval: 0.25)
+            let next = editorPixels(in: app, at: point, size: size)
+            unchanged = next == previous ? unchanged + 1 : 0
+            if unchanged == 4 { return next }
+            previous = next
+        }
+        XCTFail("The finished stroke must stop changing"); return previous
+    }
+
     @MainActor func expectPixels(_ expected: Data, in app: XCUIApplication, at point: CGPoint = CGPoint(x: 0.5, y: 0.6)) {
         expectation(for: NSPredicate { _, _ in self.editorPixels(in: app, at: point) == expected }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
@@ -144,15 +178,55 @@ extension XCTestCase {
         }
     }
 
-    @MainActor func editPaintSize(_ size: String, in app: XCUIApplication) {
-        let value = app.buttons["number-value-tool-size"]
+    @MainActor private func editPaintSetting(_ id: String, text: String, in app: XCUIApplication) -> XCUIElement {
+        let value = app.buttons["number-value-tool-" + id]
         XCTAssertTrue(value.waitForExistence(timeout: 5))
         revealEditorControl(value, in: app.scrollViews.containing(.button, identifier: value.identifier).firstMatch)
         workspaceActivate(value)
-        let entry = app.textFields["number-entry-tool-size"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.typeText(size + "\n")
+        let entry = app.textFields["number-entry-tool-" + id]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.typeText(text + "\n")
+        return value
+    }
+
+    @MainActor func editPaintSize(_ size: String, in app: XCUIApplication) {
+        let value = editPaintSetting("size", text: size, in: app)
         expectation(for: NSPredicate(format: "value BEGINSWITH %@", size), evaluatedWith: value)
         waitForExpectations(timeout: 5)
+    }
+
+    @MainActor private func resetPaintSetting(_ id: String, in app: XCUIApplication) {
+        let value = app.buttons["number-value-tool-" + id]
+        let scroll = app.scrollViews.containing(.button, identifier: value.identifier).firstMatch
+        revealEditorControl(value, in: scroll)
+        let labels = scroll.staticTexts.allElementsBoundByIndex.filter { editorText($0) == value.label }
+        guard let label = labels.min(by: { abs($0.frame.midY - value.frame.midY) < abs($1.frame.midY - value.frame.midY) }) else {
+            return XCTFail("The numeric control must expose its own label")
+        }
+        XCTAssertLessThan(abs(label.frame.midY - value.frame.midY), 36)
+        #if os(macOS)
+        label.doubleClick()
+        #else
+        label.doubleTap()
+        #endif
+    }
+
+    @MainActor private func expectPaintGroup(_ title: String, setting id: String, in app: XCUIApplication) {
+        let value = app.buttons["number-value-tool-" + id]
+        let scroll = app.scrollViews.containing(.button, identifier: value.identifier).firstMatch
+        revealEditorControl(value, in: scroll)
+        guard let heading = scroll.staticTexts.allElementsBoundByIndex.first(where: { editorText($0) == title }) else {
+            return XCTFail("The setting must expose its section heading: \(title)")
+        }
+        XCTAssertTrue(heading.exists); XCTAssertGreaterThan(heading.frame.height, 0)
+        revealEditorControl(heading, in: scroll)
+        revealEditorControl(value, in: scroll)
+        XCTAssertTrue(heading.isHittable && value.isHittable)
+        XCTAssertTrue(scroll.frame.contains(heading.frame.union(value.frame)))
+        XCTAssertLessThan(heading.frame.maxY, value.frame.minY)
+        let sections = scroll.staticTexts.allElementsBoundByIndex.filter {
+            ["Tip", "Material", "Texture", "Blending", "Smoothing"].contains(editorText($0))
+        }
+        XCTAssertFalse(sections.contains { $0.frame.minY > heading.frame.maxY && $0.frame.maxY < value.frame.minY }, "A setting must remain under its own heading")
     }
 
     @MainActor func checkPenBrushOrder(in app: XCUIApplication, theme: String) {
@@ -216,9 +290,9 @@ extension XCTestCase {
     }
     #endif
 
-    @MainActor func checkPaintingBrushes(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
-        app.launch(); capturePaintEditor(in: app)
+    @MainActor func checkPaintingBrushes(in app: XCUIApplication, theme: String = "light", dryOnly: Bool = false) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
+        app.launch(); capturePaintEditor(in: app, theme: theme)
         let viewport = workspaceViewport(in: app), originalFrame = viewport.frame
         let families: [(String, String, [String])] = [
             ("Pen", "Pen", ["G-Pen", "Rough G-Pen", "Blotty Ink", "Calligraphy Pen", "Antique Pen", "Realistic Pen", "Wet Ink", "Realistic Brushed Ink"]),
@@ -242,23 +316,46 @@ extension XCTestCase {
             }
         }
         func settledPixels() -> Data {
-            var previous = pixels(), unchanged = 0
-            for _ in 0..<40 {
-                Thread.sleep(forTimeInterval: 0.25)
-                let next = pixels()
-                unchanged = next == previous ? unchanged + 1 : 0
-                if unchanged == 4 { return next }
-                previous = next
-            }
-            XCTFail("The finished stroke must stop changing"); return previous
+            settledEditorPixels(in: app, at: CGPoint(x: 0.5, y: 0.52), size: 96)
         }
         #endif
-        for (tool, group, presets) in families {
+        for (tool, group, presets) in families where !dryOnly || tool == "Pencil" {
             for preset in presets {
                 selectPaintPreset(tool, group: group, preset: preset, in: app)
                 XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "brush-")).count, presets.count)
                 editPaintSize("120", in: app)
                 XCTAssertTrue(app.buttons["number-value-tool-opacity"].exists)
+                if tool == "Pencil" {
+                    let history = ["Undo", "Redo"].map { app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-commands-", $0)).firstMatch }
+                    let historyBefore = history.map(\.isEnabled), paperBefore = editorPixels(in: app)
+                    let primary = ["size", "flow", "grain_depth", "material_hardness"].map { app.buttons["number-value-tool-" + $0] }
+                    XCTAssertTrue(primary.allSatisfy { $0.exists && $0.frame.height > 0 })
+                    let y = primary.map { $0.frame.midY }
+                    XCTAssertTrue(zip(y, y.dropFirst()).allSatisfy { $0.0 < $0.1 }, "Size, Strength, Texture strength and Material hardness stay primary")
+                    let scroll = app.scrollViews.containing(.button, identifier: primary[0].identifier).firstMatch
+                    let captions = scroll.staticTexts.allElementsBoundByIndex.map { editorText($0) }
+                    for heading in ["Material", "Texture"] { XCTAssertFalse(captions.contains(heading), "Promoted dry controls have no duplicate section heading") }
+                    expectPaintGroup("Blending", setting: "opacity", in: app)
+                    let opacity = app.buttons["number-value-tool-opacity"].value as? String
+                    for id in ["material_hardness", "grain_depth"] {
+                        let value = app.buttons["number-value-tool-" + id], other = app.buttons["number-value-tool-" + (id == "grain_depth" ? "material_hardness" : "grain_depth")]
+                        guard let original = value.value as? String, let unchanged = other.value as? String else {
+                            return XCTFail("Dry controls must expose their accepted values")
+                        }
+                        for text in id == "grain_depth" ? ["37", "200"] : ["37"] {
+                            _ = editPaintSetting(id, text: text, in: app)
+                            expectation(for: NSPredicate(format: "value == %@", text + " %"), evaluatedWith: value)
+                            waitForExpectations(timeout: 10)
+                            XCTAssertEqual(other.value as? String, unchanged); XCTAssertEqual(app.buttons["number-value-tool-opacity"].value as? String, opacity)
+                        }
+                        resetPaintSetting(id, in: app)
+                        expectation(for: NSPredicate(format: "value == %@", original), evaluatedWith: value)
+                        waitForExpectations(timeout: 10)
+                    }
+                    XCTAssertEqual(history.map(\.isEnabled), historyBefore)
+                    XCTAssertEqual(editorPixels(in: app), paperBefore, "Material controls preserve artwork")
+                    attachEditor(in: app, name: "dry-material-controls-\(preset)-\(theme)")
+                }
                 #if os(macOS)
                 if tool == "Eraser" {
                     editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")
@@ -284,7 +381,7 @@ extension XCTestCase {
                 }, evaluatedWith: app)
                 waitForExpectations(timeout: 10)
                 let painted = settledPixels()
-                attachEditor(in: app, name: "paint-" + preset)
+                attachEditor(in: app, name: "paint-\(preset)-\(theme)")
                 for (command, expected) in [("Undo", before), ("Redo", painted), ("Undo", before)] {
                     editorHistory(command, in: app); expectPixels(expected, "\(preset) \(command) restores the displayed stroke")
                 }
@@ -294,7 +391,7 @@ extension XCTestCase {
                 XCTAssertFalse(app.staticTexts["Canvas error"].exists)
             }
             #if os(iOS)
-            attachEditor(in: app, name: "paint-controls-" + group)
+            attachEditor(in: app, name: "paint-controls-\(group)-\(theme)")
             #endif
         }
     }
@@ -510,6 +607,108 @@ extension XCTestCase {
             #endif
         }
         attachEditor(in: app, name: "ruler-controls")
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
+
+    @MainActor func checkStrengthAndSmoothing(in app: XCUIApplication, theme: String) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
+        app.launch(); capturePaintEditor(in: app, theme: theme)
+        let viewport = workspaceViewport(in: app), frame = viewport.frame
+        let undo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-commands-", "Undo")).firstMatch
+        let redo = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-commands-", "Redo")).firstMatch
+        func value(_ id: String) -> XCUIElement { app.buttons["number-value-tool-" + id] }
+        func expect(_ id: String, _ text: String) {
+            expectation(for: NSPredicate(format: "value == %@", text), evaluatedWith: value(id))
+            waitForExpectations(timeout: 10)
+        }
+        func edit(_ id: String, _ text: String) {
+            _ = editPaintSetting(id, text: text, in: app)
+            expect(id, text + (id == "smoothing_strength" ? "" : " %"))
+        }
+        let paper = editorPixels(in: app)
+        XCTAssertTrue(undo.exists && redo.exists)
+        XCTAssertFalse(undo.isEnabled); XCTAssertFalse(redo.isEnabled)
+        for (tool, group, preset, id) in [("Pencil", "Pencil", "Pencil", "flow"),
+            ("Paint Brush", "Paint", "Paintbrush", "flow"), ("Liquify", "Liquify", "Liquify Push", "strength"),
+            ("Decoration", "Texture", "Dual Texture", "flow")] {
+            selectPaintPreset(tool, group: group, preset: preset, in: app)
+            XCTAssertEqual(value(id).label, "Strength")
+            XCTAssertEqual(value("opacity").exists, id == "flow")
+            if id == "flow" { edit("opacity", "42") }
+            for strength in ["0", "37", "100"] {
+                edit(id, strength)
+                if id == "flow" { expect("opacity", "42 %") }
+            }
+            if preset == "Dual Texture" { expectPaintGroup("Texture", setting: "grain_depth", in: app) }
+            attachEditor(in: app, name: "strength-controls-\(tool)-\(theme)")
+        }
+        selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
+        edit("flow", "37"); edit("opacity", "42")
+        let speed = app.descendants(matching: .any)["tool-action-smoothing_adjust_speed"].firstMatch
+        expect("smoothing_strength", "6")
+        let toolScroll = app.scrollViews.containing(.button, identifier: value("smoothing_strength").identifier).firstMatch
+        revealEditorControl(value("smoothing_strength"), in: toolScroll)
+        XCTAssertTrue(speed.exists, "Adjust by speed must be accessible after revealing Smoothing: \(app.debugDescription)")
+        revealEditorControl(speed, in: toolScroll)
+        XCTAssertFalse(speed.isSelected)
+        let smoothingTrack = app.descendants(matching: .any)["number-track-tool-smoothing_strength"].firstMatch
+        XCTAssertTrue(smoothingTrack.isHittable)
+        smoothingTrack.coordinate(withNormalizedOffset: CGVector(dx: 0.75, dy: 0.5)).clickOrTap()
+        expect("smoothing_strength", "30")
+        revealEditorControl(speed, in: toolScroll)
+        workspaceActivate(speed)
+        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: speed); waitForExpectations(timeout: 10)
+        selectPaintPreset("Pencil", group: "Pencil", preset: "Pencil", in: app)
+        expect("smoothing_strength", "6"); XCTAssertFalse(speed.isSelected)
+        selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
+        expect("smoothing_strength", "30"); XCTAssertTrue(speed.isSelected)
+        resetPaintSetting("smoothing_strength", in: app)
+        expect("smoothing_strength", "6"); XCTAssertTrue(speed.isSelected, "Resetting numeric Strength preserves Adjust by speed")
+        edit("smoothing_strength", "30")
+        XCTAssertEqual(editorPixels(in: app), paper, "Tool settings preserve artwork")
+        XCTAssertFalse(undo.isEnabled); XCTAssertFalse(redo.isEnabled)
+        for (strength, adjusted) in [("0", false), ("30", true)] {
+            edit("smoothing_strength", strength)
+            if speed.isSelected != adjusted {
+                revealEditorControl(speed, in: toolScroll)
+                workspaceActivate(speed)
+                expectation(for: NSPredicate(format: "selected == %@", NSNumber(value: adjusted)), evaluatedWith: speed)
+                waitForExpectations(timeout: 10)
+            }
+            attachEditor(in: app, name: "smoothing-controls-\(strength)-\(theme)")
+            #if os(macOS)
+            editPaintSize("120", in: app)
+            let point = CGPoint(x: 0.5, y: 0.52), outside = CGPoint(x: 0.5, y: 0.35)
+            let before = editorPixels(in: app, at: point, size: 96), untouched = editorPixels(in: app, at: outside, size: 16)
+            viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.44, dy: 0.55)).click(forDuration: 0.05,
+                thenDragTo: viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.55)))
+            editorDocumentTitle(in: app).hover()
+            expectation(for: NSPredicate { _, _ in self.editorPixels(in: app, at: point, size: 96) != before }, evaluatedWith: app)
+            waitForExpectations(timeout: 15)
+            let painted = settledEditorPixels(in: app, at: point, size: 96)
+            XCTAssertEqual(editorPixels(in: app, at: outside, size: 16), untouched)
+            for (command, pixels) in [("Undo", before), ("Redo", painted), ("Undo", before)] {
+                editorHistory(command, in: app)
+                expectation(for: NSPredicate { _, _ in self.editorPixels(in: app, at: point, size: 96) == pixels }, evaluatedWith: app)
+                waitForExpectations(timeout: 15)
+            }
+            #endif
+        }
+        editorTool("Lasso selection", in: app)
+        editorChoice("Rectangle select", in: app)
+        XCTAssertTrue(value("smoothing_strength").waitForNonExistence(timeout: 10))
+        XCTAssertFalse(speed.exists)
+        selectPaintPreset("Pen", group: "Pen", preset: "G-Pen", in: app)
+        expect("smoothing_strength", "30"); XCTAssertTrue(speed.isSelected)
+        editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
+        let quick = app.descendants(matching: .any)["layer-row-0"].firstMatch
+        XCTAssertTrue(quick.waitForExistence(timeout: 10))
+        XCTAssertTrue(value("smoothing_strength").waitForNonExistence(timeout: 10)); XCTAssertFalse(speed.exists)
+        attachEditor(in: app, name: "quick-mask-smoothing-hidden-\(theme)")
+        editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
+        XCTAssertTrue(quick.waitForNonExistence(timeout: 10))
+        expect("smoothing_strength", "30"); XCTAssertTrue(speed.isSelected)
+        XCTAssertEqual(viewport.frame, frame)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 

@@ -1,8 +1,8 @@
 import XCTest
 
 extension XCTestCase {
-    @MainActor func checkInlineLayerOpacity(in app: XCUIApplication) {
-        capturePaintEditor(in: app)
+    @MainActor func checkInlineLayerOpacity(in app: XCUIApplication, theme: String = "light") {
+        capturePaintEditor(in: app, theme: theme)
         let value = app.buttons["number-value-layer-opacity"]
         let entry = app.textFields["number-entry-layer-opacity"]
         let property = app.buttons["number-value-property-opacity"]
@@ -45,6 +45,8 @@ extension XCTestCase {
         #if os(iOS)
         let keyboard = app.keyboards.firstMatch
         XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        revealEditorControl(original, in: app.scrollViews["layer-rows"])
+        XCTAssertTrue(keyboard.exists, "Revealing a layer preserves the editing keyboard")
         XCTAssertFalse(keyboard.frame.intersects(entry.frame), "Layer opacity must stay above the keyboard")
         attachEditor(in: app, name: "layer-opacity-draft-switch")
         XCTAssertFalse(keyboard.frame.intersects(original.frame), "Layer switching must stay available while editing")
@@ -52,6 +54,9 @@ extension XCTestCase {
         #endif
         workspaceActivate(original); expect("42")
         XCTAssertFalse(entry.exists, "An unfinished draft must not move to another layer")
+        #if os(iOS)
+        revealEditorControl(added, in: app.scrollViews["layer-rows"])
+        #endif
         workspaceActivate(added); expect("100")
         let track = app.descendants(matching: .any)["number-track-layer-opacity"].firstMatch
         workspaceActivate(track)
@@ -66,6 +71,9 @@ extension XCTestCase {
         XCTAssertNotNil(Double(dragged), "The completed slider drag must publish a numeric value")
         command("Undo"); expect("100")
         command("Redo"); expect(dragged)
+        #if os(iOS)
+        revealEditorControl(original, in: app.scrollViews["layer-rows"])
+        #endif
         workspaceActivate(original); expect("42")
         let propertyEntry = app.textFields["number-entry-property-opacity"]
         let properties = app.descendants(matching: .any)["layer-properties"].firstMatch
@@ -81,7 +89,11 @@ extension XCTestCase {
             label.rightClick()
             let reset = app.menuItems["Reset"]
             #else
-            label.press(forDuration: 0.7)
+            let scroll = app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch
+            XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+            revealEditorControl(label, in: scroll)
+            XCTAssertTrue(scroll.frame.intersection(workspaceViewport(in: app).frame).contains(label.frame))
+            label.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.7)
             let reset = app.buttons["Reset"]
             #endif
             XCTAssertTrue(reset.waitForExistence(timeout: 5)); XCTAssertTrue(reset.isEnabled)
@@ -134,7 +146,13 @@ extension XCTestCase {
 
     @MainActor func waitForLayerPreviews(in app: XCUIApplication) {
         let thumbnails = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-thumbnail-"))
-        let visible = thumbnails.allElementsBoundByIndex.filter(\.isHittable)
+        let viewport = workspaceViewport(in: app).frame
+        let lists = app.scrollViews.matching(identifier: "layer-rows").allElementsBoundByIndex
+            .map { $0.frame.intersection(viewport) }
+        let visible = thumbnails.allElementsBoundByIndex.filter {
+            let frame = $0.frame
+            return frame.width > 0 && frame.height > 0 && lists.contains { $0.contains(frame) }
+        }
         XCTAssertFalse(visible.isEmpty)
         for thumbnail in visible {
             expectation(for: NSPredicate(format: "value == %@", "Preview ready"), evaluatedWith: thumbnail)

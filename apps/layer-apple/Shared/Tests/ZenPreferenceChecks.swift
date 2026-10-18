@@ -25,12 +25,21 @@ extension XCTestCase {
             XCTAssertEqual(tab.exists, visible, message)
         }
         func configure(show: Bool, theme: String) {
+            #if os(macOS)
             workspaceActivate(workspaceViewport(in: app))
-            app.typeKey("k", modifierFlags: .command)
+            app.typeKey(",", modifierFlags: .command)
+            #else
+            if app.buttons["settings-button"].exists { workspaceActivate(app.buttons["settings-button"]) }
+            else { editorMenu(in: app, menu: "Edit", id: "settings", label: "Settings…") }
+            #endif
             XCTAssertTrue(app.buttons["settings-done"].waitForExistence(timeout: 10))
             let search = app.textFields["settings-search"]
             workspaceActivate(search)
+            #if os(macOS)
             search.typeKey("a", modifierFlags: .command)
+            #else
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: (search.value as? String ?? "").count))
+            #endif
             search.typeText("Show Capy in Zen mode")
             workspaceActivate(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show Capy in Zen mode")).firstMatch)
             let control = app.switches["preference-zen_show_capy"]
@@ -53,7 +62,7 @@ extension XCTestCase {
             let compact = app.descendants(matching: .any)["workspace-switcher-menu"].firstMatch
             let title = ["painter": "Sketch", "illustrator": "Paint", "photographer": "Photo"][workspace]!
             expectation(for: NSPredicate { _, _ in
-                choice.exists && choice.isSelected || compact.exists && compact.label.contains(title)
+                choice.exists && choice.isSelected || compact.exists && compact.value as? String == title
             }, evaluatedWith: app)
             waitForExpectations(timeout: 30)
             app.terminate()
@@ -61,6 +70,9 @@ extension XCTestCase {
                 for headerSize in ["small", "medium", "large"] {
                     app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"restore_settings","settings":{}},{"type":"set_theme","theme":"\#(theme)"},{"type":"invoke","command":"hand"},{"type":"customize","action":{"type":"header","action":{"type":"set_size","size":"\#(headerSize)"}}}]"#
                     app.launch()
+                    let canvas = app.descendants(matching: .any)["canvas"].firstMatch
+                    expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
+                    waitForExpectations(timeout: 30)
                     current = true
                     func headerAnchor() -> XCUIElement? {
                         let candidates = [app.descendants(matching: .any)["settings-button"].firstMatch,
@@ -69,9 +81,10 @@ extension XCTestCase {
                                 "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@", "header-tool-", "header-overflow-")).allElementsBoundByIndex
                         return candidates.first { $0.exists && $0.frame.width > 0 && workspaceViewport(in: app).frame.contains($0.frame) }
                     }
-                    expectation(for: NSPredicate { _, _ in headerAnchor() != nil }, evaluatedWith: app)
+                    var anchor: XCUIElement?
+                    expectation(for: NSPredicate { _, _ in anchor = headerAnchor(); return anchor != nil }, evaluatedWith: app)
                     waitForExpectations(timeout: 30)
-                    tab = headerAnchor()!
+                    tab = anchor!
                     for show in [true, false] {
                         configure(show: show, theme: theme)
                         let baseline = tab.frame, normalCapyBounds = capy.frame

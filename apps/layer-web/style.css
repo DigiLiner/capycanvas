@@ -358,6 +358,12 @@ svg { width: 16px; height: 16px; flex: none; display: block; }
 .number-value-box.number-spin { background: var(--input); border-radius: var(--control-radius); overflow: hidden; }
 .number-spin .number-entry { width: 60px; height: 32px; }
 .panel .number-spin .number-entry { width: auto; height: var(--panel-control-height); }
+.number-spin-field { display:contents; }
+.number-spin-field > .number-measure { display:none; }
+.panel .number-spin-field { display:grid; }
+.panel .number-spin-field > * { grid-area:1/1; min-width:0; font-variant-numeric:tabular-nums; }
+.panel .number-spin-field > .number-entry { width:0; min-width:100%; }
+.panel .number-spin-field > .number-measure { display:block; visibility:hidden; min-width:calc(24px + 2 * var(--panel-field-padding)); padding:2px var(--panel-field-padding); }
 .number-panel { position:relative; height:36px; --number-fill:color-mix(in srgb, var(--panel), var(--text)); }
 .number-panel .number-header { position:absolute; inset:0; align-items:flex-start; }
 .number-panel .number-labels { padding:0 76px 0 0; line-height:20px; align-self:flex-start; }
@@ -918,7 +924,7 @@ body[data-theme="dark"] .toolbar-manager .destructive-action { color: #ff7b63; }
 #system-clock { display:flex; align-items:center; height:36px; padding:0 var(--header-text-padding); }
 .system-status-tile { display:grid; place-items:center; width:36px; height:36px; flex:none; }
 .system-status[hidden], #system-clock[hidden], .system-status-tile[hidden], .system-battery[hidden], .battery-charging[hidden] { display:none; }
-.system-battery { --battery-fill:#e5e7eb; --battery-track:#a3a8b0; --battery-ink:#202226; display:inline-block; position:relative; width:26px; height:14px; }
+.system-battery { --battery-fill:#e5e7eb; --battery-track:#a3a8b0; --battery-ink:#202226; display:inline-block; position:relative; width:26px; height:14px; flex:none; }
 body[data-theme="light"] .system-battery { --battery-fill:#3f4246; --battery-track:#707479; --battery-ink:#fff; }
 .system-battery.low { --battery-fill:#bc9996; --battery-track:#a3a8b0; --battery-ink:#202226; }
 body[data-theme="light"] .system-battery.low { --battery-fill:#a15d59; --battery-track:#707479; --battery-ink:#fff; }

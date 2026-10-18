@@ -204,6 +204,20 @@ pending texture reads. Run `a_late_library_read_cannot_replace_a_newer_paper_cho
 and `scaling_paper_preserves_the_pending_library_choice` in `layer-ui`; late
 completion must preserve authored data, dirty state and history while its host
 request retires.
+Apple Paper bridge regressions use the existing headless app and project
+fixtures to import, reload, rename, delete and add library entries. Compare exact
+authored documents and source samples, checkpoint/dirty state, request retirement,
+worker failure, cancelled/replaced jobs and preview ownership after editor close.
+Async adoption must publish one settings-save request with the new paper identity;
+cache-only reads must not save it again. Native file delivery, tile presentation
+and interactions still require Mac and iPad journeys in both themes.
+Paper creation tests compare initial remembered image samples and creation
+settings before publication with clean history, explicit New from an uncached
+identity, restored authored paper and exact earlier-stroke state. Missing,
+corrupt or unavailable library material preserves the fallback and remembered
+ID, reports one failure, avoids a repeated automatic Load and permits an
+explicit user retry. Keep constructor/capture tests-only negatives separate
+from prepared-material API adaptations.
 Paper preparation also runs
 `changing_paper_texture_holds_early_strokes_until_the_new_binding_is_ready` in
 `layer-host` on a hardware GPU. A whole stroke sent before the changed paper is
@@ -466,16 +480,6 @@ and popup. Windows' native `toolbar_stamp_returns_alpha_bytes_and_rejects_stale_
 checks the asynchronous packet boundary.
 
 ## Known failures on main
-
-- Shared host failures reproduced on the preserved unmodified `beac20d007`
-  baseline: `a_layer_thumbnail_returns_the_same_bytes_after_a_stroke_is_undone`
-  reads identical checker pixels before and after the stroke;
-  `input_held_for_shaders_keeps_saving_waiting_until_it_is_delivered_or_cancelled`
-  reports a held-drag coordinate of `169.9999791283384, 99.99999999999999`.
-  Apple `apple_header_joins_adjacent_icon_controls_into_painter_bars` expects
-  `["capy"]` where the projection returns `["menu","tool","tool","tool"]`.
-  Fixture bodies and complete failure output match that baseline; keep their
-  assertions when checking brush changes.
 
 These fail on `main` independently of your change. Don't chase them unless they
 are your task, and remove an entry when you fix it.

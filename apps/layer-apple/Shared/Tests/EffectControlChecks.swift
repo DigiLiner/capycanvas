@@ -33,7 +33,7 @@ extension XCTestCase {
             let title = app.staticTexts["properties-layer-name"]
             expectation(for: NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", name, name), evaluatedWith: title)
             waitForExpectations(timeout: 10)
-            XCTAssertTrue(app.staticTexts["properties-layer-type"].exists)
+            XCTAssertFalse(app.staticTexts["properties-layer-type"].exists)
         }
         func choose(_ key: String, _ index: Int, _ label: String) {
             let button = app.buttons["property-" + key]
@@ -66,6 +66,20 @@ extension XCTestCase {
         _ = pixels("The default alpha threshold removes faint ink") { r, g, b in min(r, g, b) >= 253 }
         edit("alpha_threshold", "37")
         let black = pixels("A lower alpha threshold makes the ink opaque") { r, g, b in max(r, g, b) <= 2 }
+        workspaceActivate(app.buttons["panel-tab-layers"])
+        let opacity = app.buttons["number-value-layer-opacity"]
+        XCTAssertTrue(opacity.waitForExistence(timeout: 5))
+        workspaceActivate(opacity)
+        let opacityEntry = app.textFields["number-entry-layer-opacity"]
+        XCTAssertTrue(opacityEntry.waitForExistence(timeout: 5)); opacityEntry.typeText("50\n")
+        expectValue(opacity, "50")
+        expectation(for: NSPredicate { _, _ in self.editorPixels(in: app) != black }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        let translucent = editorPixels(in: app)
+        editorHistory("Undo", in: app); expectValue(opacity, "100"); expectPixels(black, in: app)
+        editorHistory("Redo", in: app); expectValue(opacity, "50"); expectPixels(translucent, in: app)
+        editorHistory("Undo", in: app); expectValue(opacity, "100"); expectPixels(black, in: app)
+        workspaceActivate(app.buttons["panel-tab-properties"])
         choose("colors", 2, "White")
         _ = pixels("White output removes the dark pixels") { r, g, b in min(r, g, b) >= 253 }
         editorHistory("Undo", in: app); expectPixels(black, in: app)
@@ -97,11 +111,11 @@ extension XCTestCase {
         attachEditor(in: app, name: "brightness-to-opacity-\(theme)")
     }
 
-    @MainActor func checkFilterArtworkAndHistory(in app: XCUIApplication) {
+    @MainActor func checkFilterArtworkAndHistory(in app: XCUIApplication, theme: String = "light") {
         // Only the starting color/theme are seeded. Create artwork and effects
         // through native controls, then sample the actual displayed canvas.
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]},{"type":"customize","action":{"type":"set_panel_visible","panel":"adjustments","visible":true}}]"#
-        app.launch(); capturePaintEditor(in: app)
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]},{"type":"customize","action":{"type":"set_panel_visible","panel":"adjustments","visible":true}}]"#
+        app.launch(); capturePaintEditor(in: app, theme: theme)
         let viewport = workspaceViewport(in: app), originalFrame = viewport.frame
         let layers = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
         func pixels() -> Data { editorPixels(in: app) }
@@ -298,7 +312,9 @@ extension XCTestCase {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 
-    @MainActor func checkFilterSearchPreviewAndProperties(in app: XCUIApplication) {
+    @MainActor func checkFilterSearchPreviewAndProperties(in app: XCUIApplication, theme: String = "light") {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"customize","action":{"type":"set_panel_visible","panel":"adjustments","visible":true}}]"#
+        app.launch()
         var viewport: CGRect {
             #if os(macOS)
             app.windows.firstMatch.frame

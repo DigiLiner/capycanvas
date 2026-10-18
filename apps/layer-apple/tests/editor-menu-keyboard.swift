@@ -58,15 +58,17 @@ import SwiftUI
 private struct MenuFixtureView: View {
     @ObservedObject var fixture: MenuFixture
     var size = CGSize(width: 500, height: 400)
+    var store: EditorStore? = nil
+    var owner: UUID? = nil
     var body: some View {
         VStack(alignment: .leading) {
             Text("Menu source").frame(width: 120, height: 36)
-                .editorPopover(isPresented: $fixture.presented) {
+                .editorPopover(isPresented: $fixture.presented, owner: owner) {
                     EditorActionMenu(model: fixture.menu, width: fixture.menuWidth) { fixture.presented = false }
                 }
             Spacer()
         }.frame(width: size.width, height: size.height, alignment: .topLeading)
-            .modifier(EditorPopoverHost())
+            .modifier(EditorPopoverHost()).environment(\.editorPopupStore, store)
     }
 }
 
@@ -200,6 +202,7 @@ private struct MenuFixtureView: View {
             print("PASS: \(appearance.rawValue) popup Tab focus, projected drawing shortcuts and Command-Z")
         }
         try await checkWindowFit()
+        try await checkPopupOwnership()
         try await checkClipboardKeys()
     }
     @MainActor static func checkClipboardKeys() async throws {
@@ -258,6 +261,48 @@ private struct MenuFixtureView: View {
                 "Native text focus retains \(command) instead of dispatching it to the canvas")
         }
         print("PASS: native Insert/Help normalization, Insert menu equivalence, clipboard chords, disabled Copy and text-focus guards")
+    }
+    @MainActor static func checkPopupOwnership() async throws {
+        for platform: UInt32 in [0, 1] {
+            let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
+            try await wait("Popup store") { !store.state.isNull }
+            let owner = UUID(), other = UUID()
+            let window = NSWindow(contentRect: CGRect(x: 100, y: 100, width: 500, height: 400),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            defer { window.contentView = nil; window.close() }
+            let container = NSView(frame: CGRect(x: 0, y: 0, width: 500, height: 400))
+            window.contentView = container; window.makeKeyAndOrderFront(nil)
+            func mount(_ fixture: MenuFixture, _ owner: UUID) -> NSHostingView<MenuFixtureView> {
+                let host = NSHostingView(rootView: MenuFixtureView(fixture: fixture, store: store, owner: owner))
+                host.frame = container.bounds; container.addSubview(host); return host
+            }
+            let first = MenuFixture(), firstHost = mount(first, owner)
+            try await drain(0.3)
+            try require(store.workspace.hasPopover(excluding: other) && !store.workspace.hasPopover(excluding: owner),
+                "A popup already open on mount must publish its own owner without blocking that owner")
+            let nested = MenuFixture(), nestedHost = mount(nested, other)
+            try await drain()
+            try require(store.workspace.hasPopover(excluding: owner), "A nested foreign popup blocks the parent owner")
+            nested.presented = false; try await drain()
+            try require(!store.workspace.hasPopover(excluding: owner), "Nested dismissal preserves the parent popup")
+            nestedHost.removeFromSuperview(); try await drain()
+            let sibling = MenuFixture(), siblingHost = mount(sibling, owner)
+            try await drain()
+            firstHost.removeFromSuperview(); try await drain()
+            try require(store.workspace.hasPopover(excluding: other) && !store.workspace.hasPopover(excluding: owner),
+                "Late disappearance of an older source must not clear its same-owner sibling")
+            sibling.presented = false; try await drain()
+            try require(!store.workspace.hasPopover(excluding: other), "Closing the last popup clears admission facts")
+            sibling.presented = true; try await drain()
+            siblingHost.removeFromSuperview(); try await drain()
+            try require(!store.workspace.hasPopover(excluding: other), "Removing an open source clears admission facts")
+            store.workspace.popover(owner, open: true)
+            try require(!store.workspace.hasPopover(excluding: owner) && store.workspace.hasPopover(excluding: other),
+                "Native menu callbacks retain their existing owner identity")
+            store.workspace.popover(owner, open: false)
+            print("PASS popup admission platform\(platform): initial presentation, owner exclusion, nested/sibling replacement and retirement")
+        }
     }
     @MainActor static func checkWindowFit() async throws {
         for size in [CGSize(width: 700, height: 500), CGSize(width: 360, height: 500), CGSize(width: 700, height: 760)] {

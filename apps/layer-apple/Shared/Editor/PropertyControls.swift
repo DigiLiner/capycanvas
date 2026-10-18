@@ -147,6 +147,11 @@ private struct PropertyField: View {
         case "toggle":
             Toggle(label, isOn: Binding(get: { value.bool }, set: { change($0, revision: revision) }))
                 .toggleStyle(PanelCheckStyle()).accessibilityIdentifier("property-" + key)
+        case "choice" where !control["paper"].isNull:
+            PropertyChoiceRow(labelWidth: labelWidth) {
+                Text(label).lineLimit(1)
+                PaperPicker(store: store, controller: store.papers, layer: layer, epoch: epoch, control: control) { change($0, revision: revision) }
+            }
         case "choice":
             PropertyChoiceRow(labelWidth: labelWidth) {
                 Text(label).lineLimit(1)

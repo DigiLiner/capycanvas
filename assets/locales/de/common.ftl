@@ -45,6 +45,7 @@ numeric-expression-too-long = Dieser Ausdruck ist zu lang.
 numeric-invalid-expression = Einen gültigen mathematischen Ausdruck eingeben.
 numeric-range = { $label } muss zwischen { $min } und { $max } liegen.
 numeric-whole-pixels = { $label } benötigt eine ganze Pixelzahl.
+numeric-whole-number = { $label } muss eine ganze Zahl sein.
 common-close = Schließen
 common-remove = Entfernen
 common-delete = Löschen

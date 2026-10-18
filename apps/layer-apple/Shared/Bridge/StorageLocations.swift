@@ -4,6 +4,7 @@ import Foundation
 struct StorageLocations: Sendable {
     let settings: URL
     let exportPresets: URL
+    let papers: URL
     let colorProfiles: URL
     let workspaces: URL
     let sessions: URL
@@ -44,9 +45,11 @@ struct StorageLocations: Sendable {
         defer { capy_apple_string_free(pointer) }
         let value = try JSON.decode(String(cString: pointer))
         if !value["error"].isNull { throw HostFailure(message: value["error"].string) }
-        func location(_ key: String) -> URL { URL(fileURLWithPath: value[key].string) }
-        return StorageLocations(settings: location("settings"), exportPresets: location("export_presets"),
-            colorProfiles: location("color_profiles"), workspaces: location("workspaces"),
+        func location(_ key: String, _ hint: URL.DirectoryHint = .isDirectory) -> URL {
+            URL(filePath: value[key].string, directoryHint: hint)
+        }
+        return StorageLocations(settings: location("settings", .notDirectory), exportPresets: location("export_presets", .notDirectory),
+            papers: location("papers"), colorProfiles: location("color_profiles"), workspaces: location("workspaces"),
             sessions: location("sessions"), shaders: location("shaders"), state: location("state"))
     }
 }

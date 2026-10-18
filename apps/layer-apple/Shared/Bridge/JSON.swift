@@ -23,7 +23,8 @@ struct JSON: @unchecked Sendable {
     var object: [String: Any] { raw as? [String: Any] ?? [:] }
     var string: String { raw as? String ?? "" }
     var number: Double { (raw as? NSNumber)?.doubleValue ?? 0 }
-    var uint: UInt64 { (raw as? NSNumber)?.uint64Value ?? 0 }
+    var optionalUInt: UInt64? { (raw as? NSNumber)?.uint64Value }
+    var uint: UInt64 { optionalUInt ?? 0 }
     var bool: Bool { (raw as? NSNumber)?.boolValue ?? false }
     var isNull: Bool { raw is NSNull }
     func replacing(_ key: String, with value: JSON) -> JSON {

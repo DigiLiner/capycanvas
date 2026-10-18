@@ -77,7 +77,7 @@ private struct BrushSliderComponent: View {
                 .accessibilityIdentifier("slider-cap-\(tile["id"].uint)")
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: item, surface: .tile, context: item))
                 .placed(layout[0])
-            ToolbarSliderTrack(fill: shown["fill"].number, marks: marks,
+            ToolbarSliderTrack(identity: model["context"].stableKey, fill: shown["fill"].number, marks: marks,
                 opacity: tile["control"]["kind"].string != "brush_size_slider", vertical: vertical,
                 enabled: !field.isNull, label: label, valueText: shown["text"].string,
                 palette: EditorPalette(source: store.state["palette"]),
@@ -93,6 +93,7 @@ private struct BrushSliderComponent: View {
             frame = next; refreshPreview()
         }
         .onChange(of: JSON([value, marks.map(\.raw)]).stableKey) { _, _ in refreshPreview() }
+        .onChange(of: session.knownRequest) { _, _ in refreshPreview() }
         .onDisappear { session.close(store.workspace.sliderPreview) }
     }
     private func pick(_ fill: Double, _ snap: Bool, _ travel: Double) {
@@ -116,7 +117,6 @@ private struct BrushSliderComponent: View {
         guard !field.isNull else { return }
         let context = model["context"]
         session.close(store.workspace.sliderPreview)
-        session.context = context.stableKey
         session.stamp = nil; session.knownRequest = nil; session.open = true
         let request = UUID(); session.request = request
         session.task = Task { @MainActor in
@@ -133,7 +133,6 @@ private struct BrushSliderComponent: View {
                     if let image {
                         session.stamp = (image, reply["extent"].number)
                         session.knownRequest = reply["request_id"].uint
-                        refreshPreview()
                     }
                 }
                 try? await Task.sleep(for: .milliseconds(16))
@@ -160,9 +159,8 @@ private struct SliderStampImage: @unchecked Sendable { let image: CGImage? }
     let id = UUID()
     var open = false
     var request: UUID?
-    var knownRequest: UInt64?
+    @Published var knownRequest: UInt64?
     var task: Task<Void, Never>?
-    var context = ""
     var stamp: (image: CGImage, extent: Double)?
     func close(_ preview: ToolbarSliderPreview) {
         request = nil; task?.cancel(); task = nil
@@ -180,6 +178,7 @@ private struct SliderStampImage: @unchecked Sendable { let image: CGImage? }
 }
 
 private struct ToolbarSliderTrack: View {
+    let identity: String
     let fill: Double
     let marks: [JSON]
     let opacity: Bool
@@ -193,7 +192,6 @@ private struct ToolbarSliderTrack: View {
     let step: (Int) -> Void
     @State private var origin: CGPoint?
     @State private var moved = false
-    @GestureState private var tracking = false
     private var insets: EdgeInsets {
         vertical ? EdgeInsets(top: 2, leading: 5, bottom: 2, trailing: 5) : EdgeInsets(top: 5, leading: 2, bottom: 5, trailing: 2)
     }
@@ -201,31 +199,33 @@ private struct ToolbarSliderTrack: View {
         GeometryReader { geometry in
             let area = CGSize(width: max(0, geometry.size.width - insets.leading - insets.trailing),
                 height: max(0, geometry.size.height - insets.top - insets.bottom))
-            Canvas { context, _ in
-                var inset = context
-                inset.translateBy(x: insets.leading, y: insets.top)
-                draw(inset, area)
-            }
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).updating($tracking) { _, state, _ in state = true }
-                    .onChanged { event in
-                        guard enabled else { return }
-                        let local = CGPoint(x: event.location.x - insets.leading, y: event.location.y - insets.top)
-                        if origin == nil {
-                            origin = event.location; moved = false
-                            contact(true, false); pick(local, area, snap: true)
-                        } else if let origin, moved || hypot(event.location.x - origin.x, event.location.y - origin.y) >= 3 {
-                            moved = true; pick(local, area, snap: false)
-                        }
-                    }.onEnded { _ in
+            ZStack {
+                Canvas { context, _ in
+                    var inset = context
+                    inset.translateBy(x: insets.leading, y: insets.top)
+                    draw(inset, area)
+                }.allowsHitTesting(false)
+                ParameterInput(region: .rectangle, identity: identity, nudge: { phase, _, delta in
+                    if phase == "down" || phase == "move" { step(Int(delta[0] + delta[1])) }
+                }) { phase, _, point, _ in
+                    switch phase {
+                    case "down":
+                        origin = point; moved = false
+                        contact(true, false)
+                        pick(CGPoint(x: point.x - insets.leading, y: point.y - insets.top), area, snap: true)
+                    case "move":
+                        guard let origin, moved || hypot(point.x - origin.x, point.y - origin.y) >= 3 else { return }
+                        moved = true
+                        pick(CGPoint(x: point.x - insets.leading, y: point.y - insets.top), area, snap: false)
+                    case "up", "cancel":
                         guard origin != nil else { return }
-                        origin = nil; contact(false, moved)
-                    }, isEnabled: enabled)
+                        origin = nil; contact(false, phase == "cancel" || moved)
+                    default: break
+                    }
+                }.disabled(!enabled).accessibilityHidden(true)
+            }
         }
         .opacity(enabled ? 1 : 0.4)
-        .onChange(of: tracking) { _, active in
-            if !active && origin != nil { origin = nil; contact(false, true) }
-        }
         .accessibilityElement().accessibilityLabel(label).accessibilityValue(valueText)
         .accessibilityAdjustableAction { direction in
             switch direction {
@@ -318,6 +318,7 @@ private struct ToolbarSliderTrack: View {
 }
 
 struct ToolbarSliderPreviewOverlay: View {
+    @Environment(\.capyNativeCopy) private var nativeCopy
     @ObservedObject var preview: ToolbarSliderPreview
     let palette: EditorPalette
     var body: some View {
@@ -338,8 +339,8 @@ struct ToolbarSliderPreviewOverlay: View {
                         SharedIcon(name: content.selected ? "minus" : "plus", size: geometry["icon"].number)
                             .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
                     }.buttonStyle(EditorControlButtonStyle(corner: .half))
-                        .accessibilityLabel(content.selected ? "Remove bookmark" : "Bookmark this value")
-                        .help(content.selected ? "Remove bookmark" : "Bookmark this value")
+                        .accessibilityLabel(nativeCopy["tool_controls"][content.selected ? "remove_bookmark" : "bookmark_value"].string)
+                        .help(nativeCopy["tool_controls"][content.selected ? "remove_bookmark" : "bookmark_value"].string)
                         .accessibilityIdentifier("slider-bookmark")
                         .placed(geometry["bookmark"])
                 }
@@ -522,7 +523,6 @@ private struct GradientOptionButton: View {
     let prefix: String
     let edit: ToolOptionEdit
     @State private var open = false
-    @State private var popupID = UUID()
     var body: some View {
         Button { open.toggle() } label: {
             GradientPreview(store: store, gradient: control["value"]["value"])
@@ -535,8 +535,6 @@ private struct GradientOptionButton: View {
                         .padding(10).frame(width: 260)
                 }
             }
-            .onChange(of: open) { _, open in store.workspace.popover(popupID, open: open) }
-            .onDisappear { store.workspace.popover(popupID, open: false) }
     }
 }
 

@@ -45,11 +45,27 @@ private final class SessionJob: @unchecked Sendable {
     }
 }
 
+private final class NativeLaunch: @unchecked Sendable {
+    let handle: OpaquePointer?
+    let failure: String?
+    init(configuration: String) {
+        var error: UnsafeMutablePointer<CChar>?
+        handle = configuration.withCString { capy_apple_prepare_launch($0, &error) }
+        failure = error.map { String(cString:$0) }
+        if let error { capy_apple_string_free(error) }
+    }
+    deinit { let handle = handle; NativeProjectTask.io.async { if let handle { capy_apple_launch_free(handle) } } }
+}
 private final class PersistenceLoad: @unchecked Sendable {
+    struct Value: Sendable {
+        var storage = EditorPersistence.Loaded()
+        var launch: NativeLaunch?
+        var failure: String?
+    }
     private let lock = NSLock()
-    private var loaded = EditorPersistence.Loaded()
-    func set(_ value: EditorPersistence.Loaded) { lock.lock(); loaded = value; lock.unlock() }
-    func value() -> EditorPersistence.Loaded { lock.lock(); defer { lock.unlock() }; return loaded }
+    private var loaded = Value()
+    func set(_ value: Value) { lock.lock(); loaded = value; lock.unlock() }
+    func value() -> Value { lock.lock(); defer { lock.unlock() }; return loaded }
 }
 
 /// The only owner of Rust and GPU state. UI callbacks submit owned input batches.
@@ -68,7 +84,7 @@ final class NativeOwner: @unchecked Sendable {
     var scopesReceived: (@Sendable (ScopeUpdate) -> Void)?
     private var handle: OpaquePointer?
     private let platform: UInt32
-    private var launchConfiguration = ""
+    private var launchConfiguration: NativeLaunch?
     private var launchFailure: String?
     private var workspaceStart: JSON?
     private var layer: CAMetalLayer?
@@ -102,6 +118,7 @@ final class NativeOwner: @unchecked Sendable {
     private var lastSnapshotTime: UInt64 = 0
     private var canvasReady = false
     private var shadersReady = false
+    private var catalogLoaded = false
     private let trace: FrameTrace?
     private var latestTracedInput: UInt64 = 0
     private var gpuTimingEnabled = false
@@ -158,11 +175,12 @@ final class NativeOwner: @unchecked Sendable {
         queue.suspend()
         queue.async { [self] in
             do {
-                let saved = loaded.value().settings.map { String(decoding: $0, as: UTF8.self) } ?? ""
-                launchConfiguration = try JSON(["saved": saved, "preferred_languages": preferredLanguages]).encoded()
-                try launch()
+                let value = loaded.value()
+                guard let launch = value.launch else { throw HostFailure(message:value.failure ?? "Native session initialization failed") }
+                launchConfiguration = launch
+                try self.launch()
                 try publish()
-                storageError = loaded.value().error
+                storageError = value.storage.error
                 reportStorage()
             } catch {
                 if handle == nil { launchFailure = error.localizedDescription }
@@ -175,17 +193,30 @@ final class NativeOwner: @unchecked Sendable {
                 if change.revision > appliedSettingsRevision { latestSettings = change }
                 try applySharedSettings(); try publish()
             }
-        }) { value in loaded.set(value); queue.resume() }
+        }) { value in
+            var prepared = PersistenceLoad.Value(storage:value)
+            do {
+                let saved = value.settings.map { String(decoding:$0,as:UTF8.self) } ?? ""
+                let configuration = try JSON(["saved":saved,"preferred_languages":preferredLanguages,
+                    "paper_directory":persistence.locations.map { $0.papers.path as Any } ?? NSNull()]).encoded()
+                prepared.launch = NativeLaunch(configuration:configuration)
+            } catch { prepared.failure = error.localizedDescription }
+            loaded.set(prepared); queue.resume()
+        }
     }
     private func launch() throws {
         var bootstrap: UnsafeMutablePointer<CChar>?
         var error: UnsafeMutablePointer<CChar>?
-        handle = launchConfiguration.withCString { capy_apple_launch(platform, $0, &bootstrap, &error) }
+        guard let prepared = launchConfiguration?.handle else {
+            throw HostFailure(message:launchConfiguration?.failure ?? "Native session initialization failed")
+        }
+        handle = capy_apple_launch(platform, prepared, &bootstrap, &error)
         defer { if let error { capy_apple_string_free(error) } }
         if let bootstrap {
             defer { capy_apple_string_free(bootstrap) }
             let view = try JSON.decode(String(cString: bootstrap))
             let catalog = handle == nil ? nil : try request(2, JSON(["type": "catalog"]))
+            catalogLoaded = catalog?.isNull == false
             receive(JSON(["bootstrap": view.raw, "catalog": catalog?.raw ?? NSNull()]), nil)
         }
         guard handle != nil else {
@@ -193,6 +224,7 @@ final class NativeOwner: @unchecked Sendable {
             throw HostFailure(message: launchFailure!)
         }
         launchFailure = nil
+        launchConfiguration = nil
         if let workspaceStart { _ = try request(6, workspaceStart) }
     }
     deinit {
@@ -225,7 +257,10 @@ final class NativeOwner: @unchecked Sendable {
     }
     private func publish() throws {
         if let snapshot = try request(7) {
-            if !snapshot["catalog"].isNull { documentDeliveryCopy = snapshot["catalog"]["document_delivery_copy"] }
+            if !snapshot["catalog"].isNull {
+                catalogLoaded = true
+                documentDeliveryCopy = snapshot["catalog"]["document_delivery_copy"]
+            }
             if !snapshot["document_tabs"].isNull { selectedDocument = snapshot["document_tabs"]["selected"].uint }
             if !snapshot["proof_panel"].isNull {
                 let hdr = snapshot["proof_panel"]["hdr"].bool
@@ -370,6 +405,33 @@ final class NativeOwner: @unchecked Sendable {
             defer { if let current { capy_apple_string_free(current) } }
             completion(current.map { String(cString: $0) == nonce } ?? false)
         }
+    }
+    func paperTask(id: UInt32, epoch: UInt64, directory: URL,
+        completion: @escaping @Sendable (NativePaperTask?, String?) -> Void) {
+        queue.async { [self] in
+            guard let pointer = directory.path.withCString({ capy_apple_paper_task(handle,id,epoch,$0) }) else {
+                let error = capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["change_in_progress"].string
+                if id != 0 { _ = try? request(0,JSON(["type":"complete_request","id":id,"error":error])) }
+                try? publish(); completion(nil,error); return
+            }
+            completion(NativePaperTask(pointer),nil)
+        }
+    }
+    func runPaperTask(_ job: NativePaperTask, url: URL?, completion: @escaping @Sendable (String?) -> Void) {
+        NativeProjectTask.io.async { [self] in
+            job.work(url)
+            queue.async { [self] in
+                let error = capy_paper_error(job.handle)
+                defer { if let error { capy_apple_string_free(error) } }
+                do {
+                    try check(capy_apple_paper_apply(handle,job.handle)); try publish()
+                    completion(error.map { String(cString: $0) })
+                } catch { completion(error.localizedDescription) }
+            }
+        }
+    }
+    func paperPreviews(layer: UInt64, epoch: UInt64, completion: @escaping @Sendable (NativePaperPreviews?) -> Void) {
+        queue.async { [self] in completion(capy_apple_paper_previews(handle,layer,epoch).map(NativePaperPreviews.init)) }
     }
     func projectTask(kind: NativeProjectTask.Kind, expected: (UInt64, UInt64)? = nil,
         placement: JSON? = nil,
@@ -940,7 +1002,7 @@ final class NativeOwner: @unchecked Sendable {
                 #endif
                 if canvasReady && !shadersReady { try check(capy_apple_finish_startup_cache(handle)) }
                 if let observation {
-                    let state: UInt64 = (canvasReady ? 1 : 0) | (result == 1 ? 4 : 0) | (shadersReady ? 8 : 0)
+                    let state: UInt64 = (canvasReady ? 1 : 0) | (catalogLoaded ? 2 : 0) | (result == 1 ? 4 : 0) | (shadersReady ? 8 : 0)
                     if state != lastTraceState {
                         observation.record(FrameTraceEvent(kind: .state, a: FrameTrace.now(), b: now, c: state))
                         lastTraceState = state

@@ -13,6 +13,7 @@ fn locations(roots: StorageRoots) -> Result<Value, String> {
         "settings": text(roots.settings())?,
         "export_presets": text(roots.export_presets())?,
         "color_profiles": text(roots.color_profiles())?,
+        "papers": text(roots.papers())?,
         "workspaces": text(roots.workspaces())?,
         "sessions": text(roots.sessions())?,
         "shaders": text(roots.shaders())?,

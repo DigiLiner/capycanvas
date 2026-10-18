@@ -29,8 +29,8 @@ import SwiftUI
     }
     private var chromeKey = ""
     var headerHeld = false
-    private var popovers = Set<UUID>()
-    var languageInputBusy: Bool { !popovers.isEmpty }
+    private var popovers = [UUID: (owner: UUID, defersLanguage: Bool)]()
+    var languageInputBusy: Bool { popovers.values.contains { $0.defersLanguage } }
     private struct Drag {
         let token = UUID()
         let item: JSON
@@ -124,11 +124,11 @@ import SwiftUI
             }
             .map { ($0.key, $0.value) }
     }
-    func popover(_ id: UUID, open: Bool) {
-        if open { popovers.insert(id) } else { popovers.remove(id) }
+    func popover(_ id: UUID, open: Bool, owner: UUID? = nil, defersLanguage: Bool = true) {
+        if open { popovers[id] = (owner ?? id, defersLanguage) } else { popovers.removeValue(forKey: id) }
         refreshChrome()
     }
-    func hasPopover(excluding id: UUID) -> Bool { popovers.contains { $0 != id } }
+    func hasPopover(excluding id: UUID) -> Bool { popovers.values.contains { $0.owner != id } }
     private var facts: JSON {
         guard let store else { return JSON() }
         let tool = store.contentDrawers.items["tool"]?.geometry ?? JSON()

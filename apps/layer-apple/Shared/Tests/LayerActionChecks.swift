@@ -11,17 +11,23 @@ extension XCTestCase {
         let footer = app.buttons["layer-properties-disclosure"], label = app.staticTexts["layer-properties-disclosure-label"]
         XCTAssertTrue(footer.waitForExistence(timeout: 10))
         let drawer = app.descendants(matching: .any)["tool-drawer"].firstMatch
-        var measuredHeight: CGFloat = 0, stableSince = Date()
-        expectation(for: NSPredicate { _, _ in
-            let height = drawer.frame.height
-            if abs(height - measuredHeight) > 0.5 { measuredHeight = height; stableSince = Date() }
-            return height > 200 && Date().timeIntervalSince(stableSince) > 0.3
-        }, evaluatedWith: drawer)
-        waitForExpectations(timeout: 10)
-        XCTAssertEqual(label.label, "Layer properties")
+        func settle() {
+            var measuredHeight: CGFloat = 0, stableSince = Date()
+            expectation(for: NSPredicate { _, _ in
+                let height = drawer.frame.height
+                if abs(height - measuredHeight) > 0.5 { measuredHeight = height; stableSince = Date() }
+                return height > 200 && Date().timeIntervalSince(stableSince) > 0.3
+            }, evaluatedWith: drawer)
+            waitForExpectations(timeout: 10)
+        }
+        settle()
+        XCTAssertEqual(footer.label, "Layer properties")
         let floor = drawer.frame.height
-        for _ in 0..<6 {
-            let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
+        let rowHeight = rows.firstMatch.frame.height
+        guard rowHeight > 0 else { XCTFail("The native layer drawer must expose its row height"); return }
+        let additions = max(16, Int(ceil(workspaceViewport(in: app).frame.height / rowHeight)) + 2)
+        for _ in 0..<additions {
             let before = rows.firstMatch.identifier
             workspaceActivate(drawer.buttons.matching(NSPredicate(format: "label == %@", "New layer")).firstMatch)
             expectation(for: NSPredicate { _, _ in rows.firstMatch.identifier != before }, evaluatedWith: rows.firstMatch)
@@ -29,14 +35,33 @@ extension XCTestCase {
         }
         expectation(for: NSPredicate { _, _ in drawer.frame.height > floor + 20 }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
+        settle()
         let grown = drawer.frame.height
+        let list = app.scrollViews["layer-rows"]
+        let first = app.descendants(matching: .any)[rows.firstMatch.identifier].firstMatch
+        let firstY = first.frame.minY
+        #if os(macOS)
+        list.scroll(byDeltaX: 0, deltaY: -160)
+        #else
+        list.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.8)).press(forDuration: 0.05,
+            thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.05, dy: 0.2)),
+            withVelocity: .slow, thenHoldForDuration: 0.2)
+        #endif
+        expectation(for: NSPredicate { _, _ in !first.exists || first.frame.minY < firstY - 20 }, evaluatedWith: first)
+        waitForExpectations(timeout: 5)
+        let visible = rows.allElementsBoundByIndex.first { list.frame.contains($0.frame) }
+        XCTAssertNotNil(visible, "The scrolled layer list must expose a visible row")
+        let anchor = app.descendants(matching: .any)[visible!.identifier].firstMatch
+        let scrolledY = anchor.frame.minY
         workspaceActivate(footer)
-        expectation(for: NSPredicate { _, _ in label.label == "All layers" && abs(drawer.frame.height - floor) <= 2 }, evaluatedWith: drawer)
+        expectation(for: NSPredicate { _, _ in footer.label == "All layers" && abs(drawer.frame.height - floor) <= 2 }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
         attachEditor(in: app, name: "layer-properties-\(theme)")
         workspaceActivate(footer)
-        expectation(for: NSPredicate { _, _ in label.label == "Layer properties" && abs(drawer.frame.height - grown) <= 2 }, evaluatedWith: drawer)
+        expectation(for: NSPredicate { _, _ in footer.label == "Layer properties" && abs(drawer.frame.height - grown) <= 2 }, evaluatedWith: drawer)
         waitForExpectations(timeout: 10)
+        XCTAssertTrue(anchor.waitForExistence(timeout: 5))
+        XCTAssertEqual(anchor.frame.minY, scrolledY, accuracy: 2, "Switching drawer pages retains the layer list scroll position")
         workspaceActivate(drawer.buttons.matching(NSPredicate(format: "label == %@", "New group")).firstMatch)
         expectation(for: NSPredicate(format: "label == %@", "Group properties"), evaluatedWith: label)
         waitForExpectations(timeout: 5)

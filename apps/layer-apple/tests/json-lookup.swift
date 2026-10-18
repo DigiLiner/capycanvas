@@ -38,6 +38,10 @@ import Foundation
         for value in [native, decoded, foundation] {
             count += try verify(value, against: raw)
             precondition(value["state"]["revision"].uint == UInt64.max)
+            precondition(value["state"]["revision"].optionalUInt == UInt64.max)
+            precondition(value["state"]["nil"].optionalUInt == nil)
+            precondition(value["state"]["missing"].optionalUInt == nil)
+            precondition(JSON(UInt64(0)).optionalUInt == 0)
             precondition(value["state"]["enabled"].bool && !value["state"]["disabled"].bool)
             precondition(value["state"]["zoom"].number == 0.1)
             precondition(value["rows"][1]["id"].string == "redo")

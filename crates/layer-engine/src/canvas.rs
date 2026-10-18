@@ -312,6 +312,10 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         self.document().snapshot_with_context(context)
     }
 
+    pub fn retained_images(&self) -> Vec<layer_core::Image> {
+        self.editor.retained_images()
+    }
+
     pub fn checkpoint(&self) -> u64 {
         self.editor.checkpoint()
     }

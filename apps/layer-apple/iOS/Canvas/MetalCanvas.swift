@@ -11,7 +11,7 @@ struct MetalCanvas: UIViewRepresentable {
 }
 
 final class CanvasView: UIView {
-    override class var layerClass: AnyClass { ObservedMetalLayer.self }
+    private let metal = ObservedMetalLayer()
     let store: EditorStore
     private var displayLink: CADisplayLink?
     private var screenReport: ScreenReport?
@@ -46,11 +46,9 @@ final class CanvasView: UIView {
         isAccessibilityElement = true
         accessibilityLabel = store.bootstrap["drawing_canvas"].string
         accessibilityValue = store.bootstrap["starting_canvas"].string
-        let metal = layer as! CAMetalLayer
         metal.isOpaque = true
-        metal.framebufferOnly = true
         metal.presentsWithTransaction = false
-        metal.colorspace = CGColorSpace(name: CGColorSpace.displayP3)
+        layer.addSublayer(metal)
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
         hover.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
         addGestureRecognizer(hover)
@@ -148,11 +146,13 @@ final class CanvasView: UIView {
             if store?.displayDetails != details { store?.displayDetails = details }
         }
         let extent = CGSize(width: (bounds.width * contentScaleFactor).rounded(), height: (bounds.height * contentScaleFactor).rounded())
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        metal.frame = bounds
+        metal.contentsScale = contentScaleFactor
+        CATransaction.commit()
         guard extent != drawableExtent || !attached else { return }
         drawableExtent = extent
-        let metal = layer as! CAMetalLayer
-        metal.contentsScale = contentScaleFactor
-        metal.drawableSize = extent
         let width = UInt32(extent.width), height = UInt32(extent.height)
         store.native?.observeDisplay(width: width, height: height, scale: Float(contentScaleFactor),
             maximumRefreshRate: window.screen.maximumFramesPerSecond)

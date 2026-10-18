@@ -329,3 +329,209 @@ fn scaling_paper_preserves_the_pending_library_choice() {
         assert!((paper_scale(&s)-1.5).abs()<1e-4);
     }
 }
+
+#[test]
+fn imported_and_loaded_papers_save_the_remembered_paper_through_host_requests() {
+    use crate::paper_library::{PaperEntry,paper_identity};
+    for imported in [false,true] {
+        let mut s=session(Platform::Mac);let layer=paper_layer(&s);
+        s.dispatch(UiAction::SelectLayer {id:layer}).unwrap();
+        let image=gray_paper(90);let id=paper_identity(&image).unwrap();
+        let entry=PaperEntry {id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into()};
+        if imported { s.paper_imported(layer,vec![entry],&id,image).unwrap(); }
+        else {
+            s.set_paper_library(vec![entry]).unwrap();
+            s.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}}).unwrap();
+            s.paper_loaded(&id,image).unwrap();
+        }
+        assert_eq!(s.state.requests.iter().filter(|request|matches!(&request.kind,
+            HostRequestKind::SaveSettings {settings} if settings.new_document.paper.as_deref()==Some(id.as_str()))).count(),1,
+            "async adoption must enqueue exactly one save containing the adopted paper identity");
+        let mark=s.engine.checkpoint();
+        let saves=s.state.requests.iter().filter(|request|matches!(request.kind,HostRequestKind::SaveSettings {..})).count();
+        s.paper_loaded(&id,gray_paper(90)).unwrap();
+        assert_eq!(s.engine.checkpoint(),mark);
+        assert_eq!(s.state.requests.iter().filter(|request|matches!(request.kind,HostRequestKind::SaveSettings {..})).count(),saves,
+            "cache-only reads must not request redundant preference writes");
+    }
+}
+
+#[test]
+fn late_remembered_library_loading_preserves_the_existing_startup_stroke() {
+    use crate::paper_library::{PaperEntry,paper_identity};
+    for platform in [Platform::Gtk,Platform::Mac,Platform::Ios] {
+        let mut s=UiSession::blank(Recorder::default(),[1000,1000],platform).unwrap();
+        let image=gray_paper(90);let id=paper_identity(&image).unwrap();
+        let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
+        s.dispatch(UiAction::RestoreSavedSettings {saved:serde_json::to_string(&settings).unwrap()}).unwrap();
+        s.set_paper_library(vec![PaperEntry {id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into()}]).unwrap();
+        let request=s.state.requests.iter().find(|request|matches!(&request.kind,HostRequestKind::Paper {..})).unwrap().id;
+        stroke(&mut s,10);assert!(s.engine.can_undo());
+        let before=s.engine.document().clone();let mark=s.engine.checkpoint();let modified=s.state.document_file.modified;
+        s.paper_loaded(&id,image.clone()).unwrap();s.dispatch(UiAction::CompleteRequest {id:request,error:None}).unwrap();
+        assert_live_artwork_eq(s.engine.document(),&before);assert_eq!(s.engine.checkpoint(),mark);
+        assert_eq!(s.state.document_file.modified,modified);assert!(!s.state.requests.iter().any(|item|item.id==request));
+        let layer_core::TextureSource::Image(warmed)=s.new_drawing_paper() else {panic!("remembered image is available only to subsequent new drawings")};
+        assert_eq!(*warmed.storage().as_ref(),image);
+    }
+}
+
+#[test]
+fn recovery_keeps_its_authored_paper_when_the_initial_default_was_prepared_from_another_image() {
+    use crate::paper_library::{PaperEntry,paper_identity,paper_image_id};
+    use layer_core::package::ImmutableBacking;
+    use std::sync::{Arc,atomic::AtomicBool};
+    let mut source=session(Platform::Mac);let source_layer=paper_layer(&source);
+    let authored=gray_paper(90);let authored_id=paper_identity(&authored).unwrap();
+    source.paper_imported(source_layer,vec![],&authored_id,authored.clone()).unwrap();
+    source.frame(1,1).unwrap();
+    let expected=source.engine.document().clone();let mark=source.engine.checkpoint();
+    let cancelled=AtomicBool::new(false);let mut bytes=Vec::new();
+    source.capture_session().unwrap().prepare(&cancelled).unwrap().write(&mut bytes,&cancelled).unwrap();
+    let remembered=gray_paper(10);let id=paper_identity(&remembered).unwrap();
+    let texture=layer_core::TextureSource::Image(layer_core::authored::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(remembered.clone())));
+    let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
+    let mut initial=UiSession::blank_with_settings(Recorder::default(),[1000,1000],Platform::Mac,source.localization().clone(),settings,texture.clone()).unwrap();
+    initial.initialize_paper(Some(id.clone()),texture.clone(),None);initial.frame(0,0).unwrap();
+    assert_eq!(initial.engine.document().paper(None).texture,texture);
+    assert!(!initial.engine.can_undo());assert!(!initial.engine.can_redo());assert!(!initial.state.document_file.modified);
+    let backing=ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap();
+    let recovery=crate::session_recovery::SessionRestore::open(backing,layer_core::ProjectLimits::default(),&cancelled).unwrap();
+    let mut restored=UiSession::from_project_localized(Recorder::default(),recovery.document().clone(),None,[1000,1000],Platform::Mac,source.localization().clone()).unwrap();
+    restored.frame(0,0).unwrap();restored.restore_session(recovery,false,None).unwrap();
+    restored.inherit_window_state(&initial).unwrap();
+    restored.set_paper_library(vec![PaperEntry {id:id.clone(),name:"Cotton".into(),bytes:64,preview:vec![10;96 * 96].into()}]).unwrap();
+    restored.paper_loaded(&id,remembered).unwrap();
+    assert_live_artwork_eq(restored.engine.document(),&expected);assert_eq!(restored.engine.checkpoint(),mark);
+    let layer_core::TextureSource::Image(actual)=restored.engine.document().paper(None).texture else {panic!("recovered authored image")};
+    assert_eq!(*actual.storage().as_ref(),authored);
+    assert_eq!(restored.state.settings.new_document.paper.as_deref(),Some(id.as_str()));
+}
+
+#[test]
+fn deleted_and_readded_paper_reuses_retained_history_source_after_reload() {
+    use crate::paper_library::{PaperEntry, paper_identity};
+    for platform in [Platform::Gtk,Platform::Mac,Platform::Ios] {
+        let mut s = session(platform); let layer = paper_layer(&s);
+        s.dispatch(UiAction::SelectLayer { id:layer }).unwrap();
+        let initial = s.engine.document().clone(); let initial_checkpoint = s.engine.checkpoint();
+        let source = gray_paper(37); let id = paper_identity(&source).unwrap();
+        let entry = PaperEntry { id:id.clone(),name:"Cotton".into(),bytes:64,preview:vec![128;96 * 96].into() };
+        s.paper_imported(layer,vec![entry.clone()],&id,source.clone()).unwrap();
+        let imported = s.engine.document().clone(); let imported_checkpoint = s.engine.checkpoint();
+        s.set_paper_library(Vec::new()).unwrap();
+        s.dispatch(UiAction::Effect { action:EffectAction::AddPaper { layer } }).unwrap();
+        let add = s.state.requests.iter().find(|r|matches!(&r.kind,HostRequestKind::Paper { request:crate::paper_library::PaperRequest::Add { .. } })).unwrap().id;
+        s.set_paper_library(vec![entry]).unwrap();
+        s.dispatch(UiAction::CompleteRequest { id:add,error:None }).unwrap();
+        let load = s.state.requests.iter().find(|r|matches!(&r.kind,HostRequestKind::Paper { request:crate::paper_library::PaperRequest::Load { .. } })).unwrap().id;
+        let decoded = layer_core::paper::decode_png(&layer_core::paper::encode_png(&source).unwrap()).unwrap();
+        assert_eq!(paper_identity(&decoded).unwrap(),id);
+        s.paper_loaded(&id,decoded).unwrap();
+        s.dispatch(UiAction::CompleteRequest { id:load,error:None }).unwrap();
+        assert_eq!(s.engine.checkpoint(),imported_checkpoint); assert_live_artwork_eq(s.engine.document(),&imported);
+        s.dispatch(UiAction::Effect { action:EffectAction::Reset { layer,key:"texture".into() } }).unwrap();
+        let reset = s.engine.checkpoint();
+        s.dispatch(UiAction::Effect { action:EffectAction::Set { layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13) } })
+            .expect("reselecting a reloaded library paper must retain its authored source identity");
+        assert_live_artwork_eq(s.engine.document(),&imported);
+        invoke(&mut s,CommandId::Undo); assert_eq!(s.engine.checkpoint(),reset);
+        invoke(&mut s,CommandId::Undo); assert_eq!(s.engine.checkpoint(),imported_checkpoint); assert_live_artwork_eq(s.engine.document(),&imported);
+        invoke(&mut s,CommandId::Undo); assert_eq!(s.engine.checkpoint(),initial_checkpoint); assert_live_artwork_eq(s.engine.document(),&initial);
+        for _ in 0..3 { invoke(&mut s,CommandId::Redo); }
+        assert_live_artwork_eq(s.engine.document(),&imported);
+        let document = s.engine.document();
+        let occurrence = layer_core::paper::paper_occurrence(document.scene(),None).unwrap();
+        let effect = document.scene().effect_handle(occurrence).unwrap();
+        let bad = layer_core::authored::Image::with_id(crate::paper_library::paper_image_id(&id).unwrap(),std::sync::Arc::new(gray_paper(99)));
+        let mut edited = document.scene().effect_application(occurrence).unwrap().clone();
+        let mut draft=layer_core::EffectInstance {program:edited.program.clone(),values:edited.values};
+        draft.set("texture",layer_core::EffectValue::Texture(layer_core::TextureSource::Image(bad))).unwrap();edited.values=draft.values;
+        let edit = layer_core::Edit::Effect(layer_core::authored::RecordChange::replace(&document.artwork.effects,effect,Some(edited)).unwrap());
+        let checkpoint = s.engine.checkpoint();
+        assert!(s.engine.apply_edit(edit).unwrap_err().to_string().contains("Immutable image identity conflicts with retained history"));
+        assert_eq!(s.engine.checkpoint(),checkpoint); assert_live_artwork_eq(s.engine.document(),&imported);
+    }
+}
+
+#[test]
+fn evicted_library_paper_reuses_retained_history_source_after_reload() {
+    use crate::paper_library::{PaperEntry,paper_identity};
+    for platform in [Platform::Gtk,Platform::Mac,Platform::Ios] {
+        let mut s = session(platform); let layer = paper_layer(&s);
+        s.dispatch(UiAction::SelectLayer { id:layer }).unwrap();
+        let images = (0..4).map(|n|gray_paper(20 + n * 30)).collect::<Vec<_>>();
+        let ids = images.iter().map(|image|paper_identity(image).unwrap()).collect::<Vec<_>>();
+        let entries = ids.iter().enumerate().map(|(n,id)|PaperEntry { id:id.clone(),name:format!("Paper {n}"),bytes:64,preview:vec![128;96 * 96].into() }).collect::<Vec<_>>();
+        s.paper_imported(layer,entries,&ids[0],images[0].clone()).unwrap();
+        let original = s.engine.document().clone(); let checkpoint = s.engine.checkpoint();
+        for (id,image) in ids.iter().zip(&images).skip(1) { s.paper_loaded(id,image.clone()).unwrap(); }
+        assert!(s.papers.image(&ids[0]).is_none(),"the original three-entry strong cache still evicts");
+        s.dispatch(UiAction::Effect { action:EffectAction::Reset { layer,key:"texture".into() } }).unwrap();
+        let reset = s.engine.checkpoint();
+        s.dispatch(UiAction::Effect { action:EffectAction::Set { layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13) } }).unwrap();
+        let decoded = layer_core::paper::decode_png(&layer_core::paper::encode_png(&images[0]).unwrap()).unwrap();
+        assert_eq!(paper_identity(&decoded).unwrap(),ids[0]);
+        s.paper_loaded(&ids[0],decoded).expect("an evicted paper must reuse the source retained by authored history");
+        assert_live_artwork_eq(s.engine.document(),&original);
+        invoke(&mut s,CommandId::Undo); assert_eq!(s.engine.checkpoint(),reset);
+        invoke(&mut s,CommandId::Undo); assert_eq!(s.engine.checkpoint(),checkpoint); assert_live_artwork_eq(s.engine.document(),&original);
+        for _ in 0..2 { invoke(&mut s,CommandId::Redo); }
+        assert_live_artwork_eq(s.engine.document(),&original);
+    }
+}
+
+#[test]
+fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
+    use crate::paper_library::{PaperEntry,paper_identity,paper_image_id};
+    use layer_core::package::ImmutableBacking;
+    use std::sync::{Arc,atomic::AtomicBool};
+    let portable=|document:&layer_core::Document| {
+        package_bytes(&layer_core::Editor::new(document.clone()).capture(0,document.output().context.clone()).unwrap())
+    };
+    for platform in [Platform::Mac,Platform::Ios] {
+        for mode in 0..3 {
+            let source=gray_paper(63);let id=paper_identity(&source).unwrap();
+            let entry=PaperEntry {id:id.clone(),name:"Cotton".into(),bytes:64,preview:vec![128;96 * 96].into()};
+            let mut authored=session(platform);let layer=paper_layer(&authored);
+            authored.dispatch(UiAction::SelectLayer {id:layer}).unwrap();
+            authored.paper_imported(layer,vec![entry.clone()],&id,source.clone()).unwrap();
+            let imported=authored.engine.document().clone();
+            if mode==2 {authored.dispatch(UiAction::Effect {action:EffectAction::Reset {layer,key:"texture".into()}}).unwrap();}
+            authored.frame(1,1).unwrap();
+            let expected=authored.engine.document().clone();
+            let mut opened=if mode==0 {
+                UiSession::from_project(Recorder::default(),package_roundtrip(&expected),None,[1000,1000],platform).unwrap()
+            } else {
+                let cancel=AtomicBool::new(false);let mut bytes=Vec::new();
+                authored.capture_session().unwrap().prepare(&cancel).unwrap().write(&mut bytes,&cancel).unwrap();
+                let backing=ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap();
+                let recovery=crate::session_recovery::SessionRestore::open(backing,layer_core::ProjectLimits::default(),&cancel).unwrap();
+                let mut recovered=UiSession::from_project_localized(Recorder::default(),recovery.document().clone(),None,[1000,1000],platform,authored.localization().clone()).unwrap();
+                recovered.frame(0,0).unwrap();recovered.restore_session(recovery,false,None).unwrap();recovered
+            };
+            let decoded=layer_core::paper::decode_png(&layer_core::paper::encode_png(&source).unwrap()).unwrap();
+            let texture=layer_core::TextureSource::Image(layer_core::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(decoded)));
+            let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
+            let mut previous=UiSession::blank_with_settings(Recorder::default(),[1000,1000],platform,authored.localization().clone(),settings,texture.clone()).unwrap();
+            previous.initialize_paper(Some(id.clone()),texture,None);previous.frame(0,0).unwrap();
+            if mode==0 {opened.frame(0,0).unwrap();}opened.inherit_window_state(&previous).unwrap();
+            opened.set_paper_library(vec![entry]).unwrap();
+            let layer=paper_layer(&opened);opened.dispatch(UiAction::SelectLayer {id:layer}).unwrap();
+            let baseline=opened.engine.document().clone();
+            assert_eq!(portable(&baseline),portable(&expected));
+            let checkpoint=opened.engine.checkpoint();
+            opened.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}})
+                .expect("an inherited cached owner must defer to the destination editor's verified Paper worker");
+            assert_eq!(paper_requests(&opened).last(),Some(&crate::paper_library::PaperRequest::Load {id:id.clone()}));
+            assert_eq!(opened.engine.checkpoint(),checkpoint);assert_live_artwork_eq(opened.engine.document(),&baseline);
+            opened.paper_loaded(&id,source.clone()).unwrap();
+            assert_eq!(portable(opened.engine.document()),portable(&imported));
+            let applied=opened.engine.document().clone();
+            if mode==2 {
+                invoke(&mut opened,CommandId::Undo);assert_eq!(opened.engine.checkpoint(),checkpoint);assert_live_artwork_eq(opened.engine.document(),&baseline);
+                invoke(&mut opened,CommandId::Redo);assert_live_artwork_eq(opened.engine.document(),&applied);
+            } else {assert_eq!(opened.engine.checkpoint(),checkpoint,"same authored Paper adds no history");assert_live_artwork_eq(opened.engine.document(),&baseline);}
+        }
+    }
+}

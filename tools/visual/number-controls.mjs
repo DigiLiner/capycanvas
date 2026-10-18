@@ -14,6 +14,8 @@ export async function captureNumberControls({fixture, width, height, scale, outp
     await new Promise((resolve,reject)=>{const link=document.head.querySelector('link');link.onload=resolve;link.onerror=reject;});
     document.body.replaceChildren();document.body.dataset.theme=fixture.theme;
     document.documentElement.style.setProperty('--ui-text-size',fixture.text_size+'px');
+    for(const [name,value] of Object.entries(fixture.panel_metrics))
+      document.documentElement.style.setProperty('--panel-'+name.replaceAll('_','-'),value+'px');
     for(const [name,color] of Object.entries(fixture.palette))if(typeof color==='string')
       document.body.style.setProperty('--'+name.replaceAll('_','-'),name==='button'?color+'0d':color);
     document.body.style.background=fixture.palette.panel;
@@ -28,9 +30,10 @@ export async function captureNumberControls({fixture, width, height, scale, outp
       for(let row=0;row<fixture.rows.length;row++) {
         const item=fixture.rows[row], panel=document.createElement('div'); panel.className='panel';
         panel.style.cssText='position:absolute;left:'+x+'px;top:'+(6+row*64)+'px;width:'+fixture.column_widths[column]+'px;height:auto;padding:0;border:0';
-        const root=createNumberField({control:item.control,label:item.label,
+        const root=createNumberField({control:item.control,label:item.label,labels:item.labels,
           resolve:({operation,value})=>{if(operation.type!=='format')throw Error('Unexpected operation in capture');
             if(value===item.value)return item.formatted;if(value===item.control.min)return item.minimum;
+            if(value===item.control.max)return item.maximum;
             throw Error('Missing Rust format result');},
           onChange(){throw Error('Unexpected edit in capture');},
           icon:name=>{const template=document.createElement('template');template.innerHTML=icons[name];return template.content.firstElementChild;}});
@@ -44,7 +47,8 @@ export async function captureNumberControls({fixture, width, height, scale, outp
     const frames={};
     for(const {key,root} of controls) {
       const item=fixture.rows[Number(key.split('-')[1])], steps=root.querySelectorAll('.number-step');
-      if(steps[0].disabled!==(!item.enabled||item.value<=item.control.min)||
+      if(item.control.kind==='slider'){if(steps.length)throw Error('Compact panel sliders must not retain step buttons');}
+      else if(steps.length!==2||steps[0].disabled!==(!item.enabled||item.value<=item.control.min)||
          steps[1].disabled!==(!item.enabled||item.value>=item.control.max))throw Error('Incorrect step availability');
       const display=root.querySelector(item.control.kind==='slider'?'.number-value':'.number-entry');
       if((item.control.kind==='slider'?display.textContent:display.value)!==item.formatted.text)throw Error('Incorrect formatted display');

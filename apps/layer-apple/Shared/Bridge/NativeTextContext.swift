@@ -7,6 +7,7 @@ import UIKit
 
 private struct NativeCopyKey: EnvironmentKey { static let defaultValue = JSON() }
 private struct CommonCopyKey: EnvironmentKey { static let defaultValue = JSON() }
+private struct ProfileCopyKey: EnvironmentKey { static let defaultValue = JSON() }
 private struct InterfaceLanguageKey: EnvironmentKey {
     static let defaultValue = "en"
 }
@@ -14,6 +15,10 @@ extension EnvironmentValues {
     var capyNativeCopy: JSON {
         get { self[NativeCopyKey.self] }
         set { self[NativeCopyKey.self] = newValue }
+    }
+    var capyProfileCopy: JSON {
+        get { self[ProfileCopyKey.self] }
+        set { self[ProfileCopyKey.self] = newValue }
     }
     var capyCommonCopy: JSON {
         get { self[CommonCopyKey.self] }

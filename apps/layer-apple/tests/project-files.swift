@@ -22,6 +22,9 @@ import ImageIO
         try await Task.sleep(for: .milliseconds(10))
     }
     @MainActor static func main() async throws {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        precondition(StorageLocations.installation != nil, "Private installation storage must initialize")
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("capy-files-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: root) }
@@ -58,7 +61,12 @@ import ImageIO
             var beforeOpen: (() -> Void)?
             store.projectFiles = ProjectFiles(store: store, dialogs: .init(
                 open: { _, done in choices += 1; beforeOpen?(); done(openLocation.map { [$0] } ?? []) },
-                save: { _, _, callback in choices += 1; callback(saveLocation) },
+                save: { [weak store] name, _, callback in
+                    if let request = store?.state["requests"].array.first(where: { $0["kind"]["request"]["type"].string == "save" }) {
+                        precondition(name == request["kind"]["request"]["name"].string, "Save picker must preserve the shared suggested filename")
+                    }
+                    choices += 1; callback(saveLocation)
+                },
                 create: { spec, callback in
                     precondition(spec["extent"][0].uint == 2048 && spec["maximum"].uint == 8192)
                     callback(creationOptions)
@@ -89,7 +97,17 @@ import ImageIO
                 }
                 try await wait("Document operation did not settle: \(command)") { !store.projectFiles.busy && store.state["requests"].array.isEmpty }
             }
+            func language(_ tag: String) async throws {
+                let index = store.bootstrap["shipped_tags"].array.firstIndex(where: { $0.string == tag })!
+                try await store.apply(["type": "preferences", "action": ["type": "edit", "id": "language", "value": index + 1]])
+                try await wait("Document language did not refresh") { store.interfaceLanguage == tag }
+            }
+            try await language("ja")
+            try await wait("Untitled drawing title did not refresh") {
+                store.projectFiles.title == "無題" && store.projectFiles.title == store.state["tabs"][0]["title"].string
+            }
             try await invoke("save_document_as")
+            try await language("en")
             precondition(store.projectFiles.error == nil, store.projectFiles.error ?? "")
             precondition(FileManager.default.fileExists(atPath: target.path))
             precondition(store.state["document_file"]["location"]["name"].string == target.lastPathComponent)
@@ -232,7 +250,22 @@ import ImageIO
             store.projectFiles.error = nil
             store.invoke("add_layer")
             try await wait("Unsaved failed-open fixture") { store.state["layers"].array.count == 3 }
-            let unsavedLayers = store.state["layers"].stableKey
+            func layerStateWithoutPreviewRevisions(_ rows: JSON) -> String {
+                JSON(rows.array.map { row in
+                    var fields = row.object
+                    fields.removeValue(forKey: "paint_revision")
+                    fields.removeValue(forKey: "mask_revision")
+                    return fields
+                }).stableKey
+            }
+            func reportLayerMismatch(_ expected: JSON) {
+                let state = JSON(["expected_layers": expected.raw, "actual_layers": store.state["layers"].raw,
+                    "commands": store.state["commands"].raw, "document_file": store.state["document_file"].raw])
+                FileHandle.standardError.write(Data(("Failed Open history state: " + state.stableKey + "\n").utf8))
+            }
+            let unsavedRows = store.state["layers"]
+            let unsavedLayers = unsavedRows.stableKey
+            let unsavedContent = layerStateWithoutPreviewRevisions(unsavedRows)
             let unsavedFile = store.state["document_file"].stableKey
             store.invoke("open_document")
             try await wait("Invalid replacement must finish with an error") {
@@ -245,11 +278,17 @@ import ImageIO
             store.invoke("undo")
             try await wait("Failed Open must retain Undo") { store.state["layers"].array.count == 2 }
             store.invoke("redo")
-            try await wait("Failed Open must retain Redo") { store.state["layers"].stableKey == unsavedLayers }
+            do {
+                try await wait("Failed Open must retain Redo") { layerStateWithoutPreviewRevisions(store.state["layers"]) == unsavedContent }
+            } catch {
+                reportLayerMismatch(unsavedRows)
+                throw error
+            }
             openLocation = nil
             try await invoke("open_document")
-            precondition(store.state["document_file"]["modified"].bool
-                && store.state["layers"].stableKey == unsavedLayers)
+            let cancelledLayersMatch = layerStateWithoutPreviewRevisions(store.state["layers"]) == unsavedContent
+            if !cancelledLayersMatch { reportLayerMismatch(unsavedRows) }
+            precondition(store.state["document_file"]["modified"].bool && cancelledLayersMatch)
             store.invoke("undo")
             try await wait("Restore the clean fixture before the queued-edit check") {
                 store.state["layers"].array.count == 2 && !store.state["document_file"]["modified"].bool
@@ -265,10 +304,29 @@ import ImageIO
             precondition(store.projectFiles.error == nil, store.projectFiles.error ?? "")
             precondition(store.state["layers"].array.contains { $0["label"].string == savedLayerName })
             precondition(!store.state["document_file"]["modified"].bool)
+            openLocation = png
+            try await invoke("open_document")
+            precondition(store.state["document_file"]["location"].isNull)
+            precondition(!store.state["document_file"]["unsaved_name"].string.isEmpty)
+            precondition(store.projectFiles.title == store.state["document_file"]["unsaved_name"].string)
+            saveLocation = nil
+            try await invoke("save_document_as")
+            precondition(store.state["document_file"]["location"].isNull, "Cancelled Save must retain the imported photo name")
+            openLocation = target; saveLocation = target
+            try await invoke("open_document")
+            precondition(store.state["layers"].array.contains { $0["label"].string == savedLayerName })
             store.invoke("add_layer")
             var closed: Bool?
             store.projectFiles.confirmCurrentClose { closed = $0 }
             try await wait("Close prompt missing") { store.projectFiles.confirming }
+            let closeRequest = store.state["requests"].array.first(where: { $0["kind"]["request"]["type"].string == "confirm_close" })!
+            precondition(store.projectFiles.alertTitle == closeRequest["kind"]["request"]["title"].string)
+            let englishClose = store.projectFiles.alertTitle
+            try await language("ja")
+            try await wait("Pending close title did not refresh") { store.projectFiles.alertTitle != englishClose }
+            let translatedClose = store.state["requests"].array.first(where: { $0["id"].uint == closeRequest["id"].uint })!
+            precondition(store.projectFiles.alertTitle == translatedClose["kind"]["request"]["title"].string)
+            try await language("en")
             store.projectFiles.choose("cancel")
             try await wait("Close cancellation did not settle") { closed != nil }
             precondition(closed == false)

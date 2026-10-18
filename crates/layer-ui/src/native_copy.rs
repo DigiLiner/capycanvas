@@ -338,24 +338,26 @@ impl SamplerCopy {
 pub struct PaperCopy {
     pub import_accept: String,
     pub rename_title: String,
+    pub rename: Arc<str>,
     pub extensions: Vec<String>,
 }
 impl PaperCopy {
     pub fn new(l: &Localizer) -> Self {
         Self { import_accept:l.text(MessageId::DOCUMENTS_IMPORT_ACCEPT).to_string(),
             rename_title:l.text(MessageId::RESOURCES_PAPER_RENAME_TITLE).to_string(),
+            rename:l.text(MessageId::WORKSPACE_RENAME),
             extensions:layer_color::photo::extensions().map(|suffix| format!(".{suffix}")).collect() }
     }
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct NativeCopy {
+    pub paper: PaperCopy,
     pub tool_controls: ToolControlCopy,
     pub sampler: SamplerCopy,
     pub search: SearchCopy,
     pub layers: LayerCopy,
     pub palettes: PaletteCopy,
-    pub paper: PaperCopy,
     pub header: HeaderCopy,
     pub color: ColorCopy,
     pub shortcuts: ShortcutCopy,
@@ -363,12 +365,12 @@ pub struct NativeCopy {
 impl NativeCopy {
     pub fn new(l: &Localizer) -> Self {
         Self {
+            paper: PaperCopy::new(l),
             tool_controls: ToolControlCopy::new(l),
             sampler: SamplerCopy::new(l),
             search: SearchCopy::new(l),
             layers: LayerCopy::new(l),
             palettes: PaletteCopy::new(l),
-            paper: PaperCopy::new(l),
             header: HeaderCopy::new(l),
             color: ColorCopy::new(l),
             shortcuts: ShortcutCopy::new(l),
@@ -404,6 +406,8 @@ pub enum NativeCaption {
     ChoosePalette { name: String },
     RemovePalette { name: String },
     ColorIntensity { value: f64 },
+    ExportSize { width: u32, height: u32 },
+    PhotoSource { channels: layer_core::color::source::SourceChannels, depth: layer_core::color::SampleDepth },
 }
 impl NativeCaption {
     pub fn message(&self, l: &Localizer) -> String {
@@ -441,6 +445,15 @@ impl NativeCaption {
             Self::ChoosePalette { name } => { args.set("name", name.as_str()); MessageId::NATIVE_CHOOSE_PALETTE },
             Self::RemovePalette { name } => { args.set("name", name.as_str()); MessageId::NATIVE_REMOVE_PALETTE },
             Self::ColorIntensity { value } => { args.set("value", format!("{value:+.2}")); MessageId::NATIVE_COLOR_INTENSITY_VALUE },
+            Self::PhotoSource { channels, depth } => {
+                args.set("channels", crate::document_properties::source_channels_label(*channels, l).to_string());
+                args.set("depth", crate::document_creation::depth_label(*depth, l).to_string());
+                MessageId::COLOR_FEATURES_PROFILE_SOURCE
+            },
+            Self::ExportSize { width, height } => {
+                args.set("width", width.to_string()); args.set("height", height.to_string()); args.set("resolution", "");
+                return l.format(MessageId::COLOR_FEATURES_EXPORT_SIZE_SUMMARY, &args).trim_end().to_string();
+            },
         };
         l.format(id, &args)
     }
@@ -556,6 +569,47 @@ mod numeric_caption_tests {
     }
 
     #[test]
+    fn photo_source_captions_preserve_integer_and_float_depths_in_every_language() {
+        let english = Localizer::shared(UiLanguage::English);
+        for (depth, description, id) in [
+            ("U8", "8-bit SDR", MessageId::DOCUMENTS_DEPTH_U8),
+            ("U16", "16-bit SDR", MessageId::DOCUMENTS_DEPTH_U16),
+            ("F16", "16-bit float HDR", MessageId::DOCUMENTS_DEPTH_F16),
+            ("F32", "32-bit float HDR", MessageId::DOCUMENTS_DEPTH_F32),
+        ] {
+            for (channels, family) in [("Rgb", "RGB"), ("Rgba", "RGB"), ("Cmyk", "CMYK"), ("Gray", "Grayscale"), ("GrayAlpha", "Grayscale")] {
+                let request = serde_json::json!({"type":"photo_source", "channels":channels, "depth":depth});
+                let caption: NativeCaption = serde_json::from_value(request.clone()).unwrap();
+                assert_eq!(caption.message(&english), format!("Source: {family} · {description}"));
+                assert_eq!(serde_json::to_value(&caption).unwrap(), request);
+                for language in UiLanguage::ALL {
+                    let l = Localizer::shared(language);
+                    let text = caption.message(&l);
+                    assert!(text.contains(l.text(id).as_ref()), "{}: {text}", language.tag());
+                    let localized_family = if family == "Grayscale" { l.text(MessageId::COLOR_FEATURES_PROFILE_GRAYSCALE) } else { family.into() };
+                    assert!(text.contains(localized_family.as_ref()), "{}: {text}", language.tag());
+                    if language != UiLanguage::English { assert_ne!(text, caption.message(&english)); }
+                }
+            }
+        }
+        for (channels, depth) in [("RGB", "F16"), ("Rgb", "F64"), ("Rgb", "16")] {
+            assert!(serde_json::from_value::<NativeCaption>(serde_json::json!({"type":"photo_source", "channels":channels, "depth":depth})).is_err());
+        }
+    }
+
+    #[test]
+    fn native_export_size_projects_existing_shared_copy_without_changing_dimensions() {
+        let caption: NativeCaption = serde_json::from_value(serde_json::json!({"type":"export_size","width":12345,"height":6789})).unwrap();
+        assert_eq!(caption.message(&Localizer::shared(UiLanguage::English)), "Output: 12345 × 6789 px");
+        for language in UiLanguage::ALL {
+            let l = Localizer::shared(language); let copy = crate::color_feature_copy::ExportCopy::new(&l);
+            assert_eq!(copy.retry, l.text(MessageId::COLOR_FEATURES_EXPORT_RETRY));
+            let text = caption.message(&l);
+            assert!(text.contains("12345") && text.contains("6789"), "{}: {text}", language.tag());
+        }
+    }
+
+    #[test]
     fn retained_native_numeric_errors_format_current_copy_and_preserve_literal_arguments() {
         let literal = "İı ไทย Tie\u{302}\u{301}ng Vie\u{323}\u{302}t { $label }\n{\"type\":\"numeric_error\"} 🎨";
         let label: ResourceLabel = ResourceLabel::Literal(literal.into());
@@ -575,6 +629,8 @@ mod numeric_caption_tests {
         let reasons = leaves.iter().map(|(reason, _)| reason.clone()).chain([
             NumericError::Range { label:label.clone(), min:-1.25, max:32768. },
             NumericError::WholePixels { label:label.clone() },
+            NumericError::WholeNumber { label:label.clone() },
+            NumericError::WholeNumber { label:MessageId::COLOR_FEATURES_EXPORT_QUALITY.into() },
             NumericError::Range { label:MessageId::COLOR_FEATURES_EXPORT_MAXIMUM_WIDTH.into(), min:1., max:32768. },
         ]).collect::<Vec<_>>();
         for reason in reasons {
@@ -589,7 +645,8 @@ mod numeric_caption_tests {
                 assert_eq!(message, reason.message(&localizer));
                 if let Some((_, id)) = leaves.iter().find(|(leaf, _)| leaf == &reason) { assert_eq!(message, localizer.text(*id).as_ref()); }
                 match &reason {
-                    NumericError::Range { label:ResourceLabel::Literal(_), .. } | NumericError::WholePixels { label:ResourceLabel::Literal(_) } => assert!(message.contains(literal)),
+                    NumericError::Range { label:ResourceLabel::Literal(_), .. } | NumericError::WholePixels { label:ResourceLabel::Literal(_) } | NumericError::WholeNumber { label:ResourceLabel::Literal(_) } => assert!(message.contains(literal)),
+                    NumericError::WholeNumber { label:ResourceLabel::Message { .. } } => assert!(message.contains(localizer.text(MessageId::COLOR_FEATURES_EXPORT_QUALITY).as_ref())),
                     NumericError::Range { label:ResourceLabel::Message { .. }, .. } => assert!(message.contains(localizer.text(MessageId::COLOR_FEATURES_EXPORT_MAXIMUM_WIDTH).as_ref())),
                     _ => {},
                 }
@@ -601,6 +658,7 @@ mod numeric_caption_tests {
             NumericError::Range { label:label.clone(), min:f64::NAN, max:1. },
             NumericError::Range { label:label.clone(), min:0., max:f64::INFINITY },
             NumericError::WholePixels { label:ResourceLabel::Message { message:"unknown-host-message".into() } },
+            NumericError::WholeNumber { label:ResourceLabel::Message { message:"unknown-host-message".into() } },
         ];
         for reason in invalid {
             assert!(!reason.valid());

@@ -10,7 +10,10 @@ extension XCTestCase {
             let parent = bar.descendants(matching: .menuItem)[submenu]
             XCTAssertTrue(parent.waitForExistence(timeout: 5)); parent.hover()
         }
-        workspaceActivate(bar.descendants(matching: .menuItem)[label].firstMatch)
+        let item = bar.descendants(matching: .menuItem)[label].firstMatch
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == YES"), object: item)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 15), .completed)
+        workspaceActivate(item)
         #else
         let button = app.buttons["menu-" + menu], compact = app.buttons["application-menus"]
         let available = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in button.exists || compact.exists }, object: app)
@@ -38,14 +41,21 @@ extension XCTestCase {
             workspaceActivate(app.buttons["menu-action-" + menu].firstMatch)
         }
         if let submenu { workspaceActivate(app.buttons[submenu].firstMatch) }
-        let item = app.buttons["command-" + id]
+        let item = app.buttons.matching(NSPredicate(format: "identifier IN %@",
+            ["command-" + id, "menu-action-" + label])).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        let scroll = app.scrollViews.containing(.button, identifier: item.identifier).firstMatch
+        if scroll.exists { revealEditorControl(item, in: scroll) }
         workspaceActivate(item)
         XCTAssertTrue(item.waitForNonExistence(timeout: 5))
         #endif
     }
 
     @MainActor private func revealTransform(_ element: XCUIElement, in app: XCUIApplication) {
-        revealEditorControl(element, in: app.scrollViews.containing(.button, identifier: "number-value-tool-transform_x").firstMatch)
+        XCTAssertTrue(element.waitForExistence(timeout: 10))
+        let scroll = app.scrollViews.containing(.button, identifier: element.identifier).firstMatch
+        if scroll.exists { revealEditorControl(element, in: scroll) }
+        else { XCTAssertTrue(element.isHittable && workspaceViewport(in: app).frame.contains(element.frame)) }
     }
     @MainActor private func transformMode(_ mode: String, in app: XCUIApplication) {
         let button = app.buttons["tool-action-transform_" + mode]
@@ -381,7 +391,7 @@ extension XCTestCase {
         revealTransform(cancel, in: app); workspaceActivate(cancel)
     }
 
-    @MainActor private func artworkRows(in app: XCUIApplication) -> XCUIElementQuery {
+    @MainActor func artworkRows(in app: XCUIApplication) -> XCUIElementQuery {
         #if os(macOS)
         app.groups.matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
         #else
@@ -425,11 +435,22 @@ extension XCTestCase {
     }
 
     @MainActor func checkAddPaper(in app: XCUIApplication, theme: String) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
         app.launch(); capturePaintEditor(in: app, theme: theme)
         let rows = artworkRows(in: app)
         let add = app.buttons["layer-add-paper"]
+        let list = app.scrollViews["layer-rows"]
+        func addVisible() -> Bool {
+            guard add.exists else { return false }
+            let frame = add.frame, clip = list.frame.intersection(app.windows.firstMatch.frame)
+            return frame.width > 0 && frame.height > 0 && clip.contains(frame)
+        }
         let paper = rows.matching(NSPredicate(format: "label CONTAINS %@", "Paper")).firstMatch
+        func expectPaperSelected() {
+            XCTAssertEqual(paper.value as? String, "Selected")
+            XCTAssertTrue(paper.buttons["layer-Select layer without changing drawing target"].isSelected)
+            XCTAssertEqual(editorText(app.staticTexts["properties-layer-name"]), "Paper")
+        }
         XCTAssertTrue(paper.waitForExistence(timeout: 10))
         XCTAssertFalse(add.exists)
         let paintID = rows.matching(NSPredicate(format: "value == %@", "Drawing target")).firstMatch.identifier
@@ -440,7 +461,11 @@ extension XCTestCase {
         XCTAssertTrue(add.waitForExistence(timeout: 10))
         XCTAssertEqual(add.label, "Add paper")
         XCTAssertEqual(rows.count, 1)
-        expectation(for: NSPredicate { _, _ in add.isHittable && paint.frame.height > 0 }, evaluatedWith: add)
+        revealEditorControl(add, in: list)
+        expectation(for: NSPredicate { _, _ in
+            let frame = paint.frame, clip = list.frame.intersection(app.windows.firstMatch.frame)
+            return addVisible() && frame.width > 0 && frame.height > 0 && clip.contains(frame)
+        }, evaluatedWith: add)
         waitForExpectations(timeout: 10)
         XCTAssertGreaterThanOrEqual(add.frame.minY, paint.frame.maxY - 1)
         XCTAssertEqual(add.frame.height, paint.frame.height, accuracy: 1)
@@ -452,8 +477,9 @@ extension XCTestCase {
         XCTAssertEqual(rows.count, 2)
         XCTAssertTrue(paper.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(paper.frame.minY, paint.frame.maxY - 1)
-        XCTAssertTrue(paper.buttons["Edit layer content"].isSelected)
+        expectPaperSelected()
         XCTAssertEqual(paint.value as? String, "Drawing target")
+        XCTAssertTrue(paint.buttons["Edit layer content"].isSelected)
         expectPixels(original, in: app)
         editorHistory("Undo", in: app)
         XCTAssertTrue(add.waitForExistence(timeout: 10)); expectPixels(before, in: app)
@@ -461,20 +487,61 @@ extension XCTestCase {
         XCTAssertTrue(add.waitForNonExistence(timeout: 10)); expectPixels(original, in: app)
         editorHistory("Undo", in: app)
         XCTAssertTrue(add.waitForExistence(timeout: 10))
+        editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")
+        editorMenu(in: app, menu: "Edit", id: "fill_selection", label: "Fill selection")
+        expectation(for: NSPredicate { _, _ in
+            let pixel = self.editorPixels(in: app)
+            return Int(pixel[2]) > Int(pixel[0]) + 50
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        editorMenu(in: app, menu: "Select", id: "deselect", label: "Deselect pixels")
+        let bounds = bluePaperBounds(in: app)
+        let points = [0.1, 0.35, 0.65, 0.9].map { CGPoint(x: bounds.minX + bounds.width * $0, y: bounds.midY) }
+        expectBluePaper([true, true, true, true], at: points, in: app)
+        let artwork = editorPixelSamples(in: app, at: points, size: 8)
+        let paintOrder = rows.allElementsBoundByIndex.map(\.identifier)
+        func expectPaintOrder(_ order: [String]) {
+            expectation(for: NSPredicate { _, _ in
+                rows.allElementsBoundByIndex.map(\.identifier) == order
+            }, evaluatedWith: rows)
+            waitForExpectations(timeout: 10)
+            expectation(for: NSPredicate { _, _ in
+                self.editorPixelSamples(in: app, at: points, size: 8) == artwork
+            }, evaluatedWith: app)
+            waitForExpectations(timeout: 15)
+        }
+        revealEditorControl(add, in: list)
+        XCTAssertTrue(list.frame.contains(add.frame))
+        XCTAssertGreaterThanOrEqual(add.frame.minY, rows.allElementsBoundByIndex.map { $0.frame.maxY }.max()!)
+        workspaceActivate(add)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(paper.waitForExistence(timeout: 5))
+        let insertedOrder = paintOrder + [paper.identifier]
+        expectPaintOrder(insertedOrder)
+        attachEditor(in: app, name: "add-paper-inserted-" + theme)
+        editorHistory("Undo", in: app); expectPaintOrder(paintOrder)
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
+        editorHistory("Redo", in: app); expectPaintOrder(insertedOrder)
+        XCTAssertTrue(add.waitForNonExistence(timeout: 5))
+        editorHistory("Undo", in: app); expectPaintOrder(paintOrder)
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
         editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
         XCTAssertTrue(rows["layer-row-0"].waitForExistence(timeout: 10))
+        XCTAssertEqual(rows["layer-row-0"].textFields.count, 0)
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
         XCTAssertFalse(add.exists, "Selection-mask editing must not offer paper")
         editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
         XCTAssertTrue(add.waitForExistence(timeout: 10))
         layerContext("Delete layer", on: paint.buttons["Edit layer content"], in: app)
         expectation(for: NSPredicate(format: "count == 0"), evaluatedWith: rows)
         waitForExpectations(timeout: 10)
-        XCTAssertTrue(add.exists && add.isHittable)
+        revealEditorControl(add, in: list)
+        XCTAssertTrue(add.exists && addVisible())
         workspaceActivate(add)
         XCTAssertTrue(add.waitForNonExistence(timeout: 10))
         XCTAssertEqual(rows.count, 1)
         XCTAssertTrue(paper.waitForExistence(timeout: 5))
-        XCTAssertTrue(paper.buttons["Edit layer content"].isSelected)
+        expectPaperSelected()
         XCTAssertEqual(rows.matching(NSPredicate(format: "value == %@", "Drawing target")).count, 0)
         editorHistory("Undo", in: app)
         XCTAssertTrue(add.waitForExistence(timeout: 10))

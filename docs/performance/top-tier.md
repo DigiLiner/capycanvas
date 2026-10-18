@@ -128,7 +128,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps | `dc27e04d`, 2026-09-23 |
 | Panel or column resize | 120 | **Unqualified.** Current GTK desktop 1× SDR Color column 59.62–65.40, floating panel 118.29–118.96 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
-| Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10 |
+| Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
 | Grouped tool menus, drawer switching and tile drag | 120 | Not measured on reference hardware | [Tool variations](../ui/panel-customization.md#tool-variations); desktop functional checks do not qualify this tier |
 | Colour wheel or picker drag | 120 | **Unqualified.** Current GTK 2× workstation picker diagnostic: docked SDR 75.00, HDR 62.96 canvas presents/s; reference tablet unmeasured | [GTK Color diagnostic](#gtk-color-panel-resize), 2026-10-04; earlier [swatch diagnostic](#gtk-selected-swatch-diagnostic) |
 | Slider and value scrub: size, opacity, flow | 120 | **Unqualified.** GTK presentations and Web callbacks measured on the workstation; reference tablet unmeasured | [GTK](#gtk-panel-slider-diagnostic) and [Web](#web-numeric-panel-diagnostic), 2026-10-10 |
@@ -3036,9 +3036,25 @@ Run `native_pressure_calibration --tablet` with `LAYER_PRESSURE_MOTION=1` and
 
 ## Apple native measurements
 
+Current integrated Apple sources are unqualified. Functional Palette resize and
+allocation checks do not establish presentation rates. Current optimized motion
+measurements remain required.
+
 | Hardware / workload | Current rate and metric | Motion interval p99 | Qualification |
 | --- | --- | --- | --- |
+| M2 Pro Mac mini, 90 Hz: drawing profiles | Not measured | Not measured | Unqualified; current optimized comparison required |
+| M4 iPad Pro, 120 Hz: drawing profiles | Not measured | Not measured | Unqualified; current optimized comparison required |
+| Mac: Palette resize, light and dark | Not measured | Not measured | Unqualified; current optimized measurement required |
+| Mac and iPad: layer scrolling and drawer transitions, light and dark | Not measured | Not measured | Unqualified; current motion measurements required |
 | M2 Pro Mac: brush-size stamp preview, light | Longest unchanged or unsampled interval: 92.44 ms; prior 1,244.49 ms | Not measured | Four original six-second continuity checks pass; presentation rate unqualified |
+
+Record source and binary identity, date, canvas/display extent, workload, thermal
+coverage and collector limitations with each result. Use the
+[Apple measurement procedure](../../apps/layer-apple/PERFORMANCE.md) and
+[motion rules](measuring.md). Distinguish completed canvas updates, presented
+frames and renderer submissions; a shared geometry poll is not a native frame.
+Synthetic documents and renderer-only rates do not qualify the reference tier
+or physical input latency.
 
 The stamp-preview check on 2026-10-17 used an optimized build, a 9504 × 6336
 sRGB 8-bit photo and a 1200 × 870 logical viewport at 2× scale. Recognizing wrapped

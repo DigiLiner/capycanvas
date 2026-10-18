@@ -45,6 +45,7 @@ numeric-expression-too-long = Cette expression est trop longue.
 numeric-invalid-expression = Saisir une expression mathématique valide.
 numeric-range = La valeur du champ « { $label } » doit être comprise entre { $min } et { $max }.
 numeric-whole-pixels = { $label } nécessite un nombre entier de pixels.
+numeric-whole-number = { $label } doit être un nombre entier.
 common-close = Fermer
 common-remove = Retirer
 common-delete = Supprimer

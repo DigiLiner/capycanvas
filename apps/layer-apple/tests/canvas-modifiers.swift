@@ -7,14 +7,16 @@ private final class Contact: UITouch {
     var point = CGPoint(x: 500, y: 400)
     var time = ProcessInfo.processInfo.systemUptime
     var device: UITouch.TouchType = .indirectPointer
+    var pressure: CGFloat = 1
+    var altitude: CGFloat = .pi / 2
     override var type: UITouch.TouchType { device }
     override var timestamp: TimeInterval { time }
     override func preciseLocation(in view: UIView?) -> CGPoint { point }
     override var estimationUpdateIndex: NSNumber? { nil }
     override var estimatedPropertiesExpectingUpdates: UITouch.Properties { [] }
-    override var force: CGFloat { 1 }
+    override var force: CGFloat { pressure }
     override var maximumPossibleForce: CGFloat { 1 }
-    override var altitudeAngle: CGFloat { .pi / 2 }
+    override var altitudeAngle: CGFloat { altitude }
     override func azimuthAngle(in view: UIView?) -> CGFloat { 0 }
     override var rollAngle: CGFloat { 0 }
 }
@@ -51,7 +53,6 @@ private final class NativeRotation: UIRotationGestureRecognizer {
 }
 
 @MainActor private final class ModifierChecks: NSObject, UIApplicationDelegate, UIWindowSceneDelegate {
-    var window: UIWindow?
     private var completedGroups = 0
     private let runID = ProcessInfo.processInfo.environment["CAPY_INPUT_RUN"] ?? UUID().uuidString
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
@@ -60,11 +61,8 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         configuration.delegateClass = ModifierChecks.self
         return configuration
     }
-    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
-        guard let scene = scene as? UIWindowScene else { return }
-        let window = UIWindow(windowScene: scene)
-        window.rootViewController = UIViewController()
-        window.makeKeyAndVisible(); self.window = window
+    func application(_ application: UIApplication,
+        didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         Task { @MainActor in
             do {
                 try await run(); try report(nil)
@@ -74,6 +72,7 @@ private final class NativeRotation: UIRotationGestureRecognizer {
                 print("FAIL: \(error.localizedDescription)"); exit(1)
             }
         }
+        return true
     }
     private func passed(_ message: String) { completedGroups += 1; print(message) }
     private func report(_ failure: String?) throws {
@@ -102,6 +101,9 @@ private final class NativeRotation: UIRotationGestureRecognizer {
                 catch { store.failure = error.localizedDescription; done(nil) }
             }, exportOptions: { $0.choose($0.recipe) }))
         let canvas = CanvasView(store: store)
+        let renderLayer = canvas.layer.sublayers?.compactMap { $0 as? ObservedMetalLayer }.first
+        try require(!(canvas.layer is CAMetalLayer) && renderLayer != nil && renderLayer?.delegate == nil,
+            "The render owner must configure a standalone Metal layer without a UIView delegate")
         canvas.contentScaleFactor = 1
         defer { canvas.stop() }
         let native = store.native!
@@ -274,8 +276,11 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             try await invoke("fit_canvas")
             try await wait("Prepare replacement drawing") { store.snapshot["brush_ready"].bool }
         }
-        func path(_ points: [CGPoint], device: UITouch.TouchType, modifiers: UIKeyModifierFlags = [], cancel: Bool = false) async throws {
+        func path(_ points: [CGPoint], device: UITouch.TouchType, modifiers: UIKeyModifierFlags = [], cancel: Bool = false,
+            pressures: [CGFloat] = [], altitude: CGFloat = .pi / 2) async throws {
+            try require(pressures.isEmpty || pressures.count == points.count, "Match supplied pressure samples to contact positions")
             let touch = Contact(), event = ContactEvent(); touch.device = device
+            touch.pressure = pressures.first ?? 1; touch.altitude = altitude
             event.flags = modifiers
             let camera = store.state["camera"]
             func position(_ p: CGPoint) throws -> CGPoint {
@@ -290,7 +295,8 @@ private final class NativeRotation: UIRotationGestureRecognizer {
                 return CGPoint(x: surface.x / canvas.contentScaleFactor, y: surface.y / canvas.contentScaleFactor)
             }
             touch.point = try position(points[0]); canvas.touchesBegan([touch], with: event)
-            for point in points.dropFirst() {
+            for (index, point) in points.enumerated().dropFirst() {
+                touch.pressure = pressures.isEmpty ? 1 : pressures[index]
                 touch.point = try position(point); touch.time = max(touch.time.nextUp, ProcessInfo.processInfo.systemUptime)
                 canvas.touchesMoved([touch], with: event)
             }
@@ -414,6 +420,53 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         try require(gesturePainted != paper, "The UIKit gesture checks must retain authored artwork")
         for theme in ["light", "dark"] {
             try await action(["type": "set_theme", "theme": theme])
+            try await action(["type": "preferences", "action": ["type": "edit", "id": "wheel_behavior", "value": 1]])
+            var before = store.state["camera"]
+            scroll.flags = []; scroll.delta = CGPoint(x: 0, y: 40)
+            canvas.scrolled(scroll); try await flush()
+            try require(store.state["camera"]["zoom"].number > before["zoom"].number
+                && near(store.state["camera"]["rotation"].number, before["rotation"].number),
+                "UIKit Wheel Zoom must change zoom without rotating in \(theme)")
+            before = store.state["camera"]
+            scroll.flags = .control; scroll.delta = CGPoint(x: 0, y: 40)
+            canvas.scrolled(scroll); try await flush()
+            try require(store.state["camera"]["zoom"].number > before["zoom"].number,
+                "Control retains UIKit Wheel Zoom in \(theme)")
+            before = store.state["camera"]
+            scroll.flags = .shift; scroll.delta = CGPoint(x: 3, y: 4)
+            canvas.scrolled(scroll); try await flush()
+            try require(near(store.state["camera"]["zoom"].number, before["zoom"].number)
+                && near(store.state["camera"]["translation"][0].number - before["translation"][0].number, 7 * density)
+                && near(store.state["camera"]["translation"][1].number, before["translation"][1].number),
+                "Shift pans horizontally with UIKit Wheel Zoom in \(theme)")
+            try await action(["type": "preferences", "action": ["type": "edit", "id": "wheel_behavior", "value": 0]])
+            try await action(["type": "preferences", "action": ["type": "edit", "id": "rotate_with_two_fingers", "value": false]])
+            before = store.state["camera"]
+            try await rotated(.began); try await rotated(.changed, angle: .pi / 9); try await rotated(.ended)
+            try require(sameCamera(before), "Disabled UIKit two-finger rotation must preserve the entire camera in \(theme)")
+            try await pinched(.began); try await pinched(.changed, scale: 1.1); try await pinched(.ended)
+            try require(store.state["camera"]["zoom"].number > before["zoom"].number
+                && near(store.state["camera"]["rotation"].number, before["rotation"].number),
+                "Disabling rotation must preserve UIKit pinch zoom in \(theme)")
+            try await action(["type": "preferences", "action": ["type": "edit", "id": "rotate_with_two_fingers", "value": true]])
+            let left = Contact(), right = Contact(), touchEvent = ContactEvent()
+            left.device = .direct; right.device = .direct
+            for ratio in [1.6, 0.7, 1.2, 0.8] {
+                let before = store.state["camera"]
+                left.point = CGPoint(x: 440, y: 400); right.point = CGPoint(x: 760, y: 400)
+                left.time += 0.1; right.time = left.time
+                canvas.touchesBegan([left, right], with: touchEvent); try await flush()
+                left.point.x = 600 - 160 * ratio; right.point.x = 600 + 160 * ratio
+                left.time += 0.1; right.time = left.time
+                canvas.touchesMoved([left, right], with: touchEvent); try await flush()
+                left.time += 0.1; right.time = left.time
+                canvas.touchesEnded([left, right], with: touchEvent); try await flush()
+                try require(near(store.state["camera"]["zoom"].number, before["zoom"].number * ratio)
+                    && canvas.contacts.isEmpty && canvas.ignoredContacts.isEmpty,
+                    "Each fresh direct-touch pair must pinch and release both reused identities in \(theme): ratio=\(ratio), zoom=\(before["zoom"].number)->\(store.state["camera"]["zoom"].number), viewport=\(store.state["camera"]["viewport"]), work_area=\(store.state["camera"]["work_area"]), contacts=\(canvas.contacts.count), ignored=\(canvas.ignoredContacts.count)")
+            }
+            try await invoke("fit_canvas")
+            try require(try await pixels() == gesturePainted, "Consecutive direct-touch pinches preserve every authored pixel")
             for mode in ["pinch", "rotation", "combined"] {
                 let beginning = store.state["camera"]
                 if mode != "rotation" {
@@ -664,6 +717,59 @@ private final class NativeRotation: UIRotationGestureRecognizer {
                 passed("PASS: \(device) transform \(test.name), native handle pose, contact/command cancellation, Apply and exact PNG history")
             }
             try await newDocument()
+        }
+        let pressurePoints: [[Double]] = [[0, 0], [1, 1]]
+        try await action(["type":"restore_settings", "settings":store.state["settings"]
+            .replacing("pressure_curve", with: JSON(pressurePoints)).raw])
+        try await wait("Apply linear calibration for supplied dry-media pressures") {
+            store.state["settings"]["pressure_curve"].array.map { $0.array.map(\.number) } == pressurePoints
+        }
+        let dryPresets = [(2, "Pencil"), (25, "Pointy Pencil"), (26, "Shading Pencil"),
+            (6, "Chalk"), (17, "Pastel Block"), (27, "Charcoal"), (43, "Crayon")]
+        let dryPoses: [(String, CGFloat)] = [("upright", 0), ("writing", 0.5), ("side", 0.85)]
+        let dryPressures: [CGFloat] = [0, 0.15, 0.45, 1]
+        let dryPoints = dryPressures.indices.map { CGPoint(x: 24 + CGFloat($0) * 80 / 3, y: 64) }
+        let contactRows = 40..<88
+        let outsidePixelCount = (0..<128).filter { !contactRows.contains($0) }.count * 128
+        try require(outsidePixelCount > 0, "The dry contact oracle must retain outside pixels")
+        for theme in ["light", "dark"] {
+            try await action(["type":"set_theme", "theme":theme])
+            try require(store.state["theme"].string == theme, "Apply the supplied dry-media theme")
+            for (preset, name) in dryPresets {
+                try await newDocument()
+                try await action(["type":"select_brush", "id":preset])
+                try await action(["type":"set_color", "rgba":[0,0,1,1]])
+                try await action(["type":"set_brush_size", "value":24])
+                try await wait("Prepare dry-media preset \(name)") {
+                    store.state["brush"]["preset"].uint == UInt64(preset)
+                        && store.state["brush"]["diameter"].number == 24 && store.snapshot["brush_ready"].bool
+                }
+                try require(store.state["camera"]["rotation"].number == 0
+                    && store.state["camera"]["flipped"].array.allSatisfy { !$0.bool }, "Dry contact bounds require the default document orientation")
+                let dryPaper = try await pixels()
+                for (pose, tilt) in dryPoses {
+                    let altitude = CGFloat.pi / 2 * (1 - tilt)
+                    let label = "\(name) \(theme) \(pose)"
+                    try require(try await pixels() == dryPaper, "\(label): start on exact blank paper")
+                    try await path(dryPoints, device:.pencil, pressures:Array(repeating:0, count:dryPoints.count), altitude:altitude)
+                    try require(try await pixels() == dryPaper, "\(label): zero supplied pressure must preserve every pixel")
+                    try await path(dryPoints, device:.pencil, pressures:dryPressures, altitude:altitude)
+                    try require(canvas.contacts.isEmpty && canvas.estimates.pending.isEmpty,
+                        "\(label): completed supplied Pencil contact must retire its observations")
+                    let painted = try await pixels()
+                    try require((40..<88).contains { y in (8..<120).contains { x in
+                        let pixel = sample(painted,x,y)
+                        return Int(pixel[2]) > Int(pixel[0]) + 10 && pixel != sample(dryPaper,x,y)
+                    } }, "\(label): pressure sweep must deposit blue pigment in its authored path region")
+                    try require((0..<128*128).allSatisfy { pixel in
+                        let x = pixel % 128, y = pixel / 128
+                        return contactRows.contains(y) || sample(painted,x,y) == sample(dryPaper,x,y)
+                    }, "\(label): preserve every pixel outside the bounded contact region")
+                    try await history(dryPaper, painted)
+                    try require(try await pixels() == dryPaper, "\(label): final Undo restores every original pixel")
+                    passed("PASS: supplied UIKit Pencil \(label), zero force, pressure sweep, bounded pigment and exact PNG history")
+                }
+            }
         }
     }
 }

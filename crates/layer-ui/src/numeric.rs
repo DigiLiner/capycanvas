@@ -21,6 +21,7 @@ pub enum NumericError {
     InvalidNumber,
     Range { label: ResourceLabel, min: f64, max: f64 },
     WholePixels { label: ResourceLabel },
+    WholeNumber { label: ResourceLabel },
 }
 impl NumericError {
     pub fn valid(&self) -> bool {
@@ -29,7 +30,7 @@ impl NumericError {
                 if !min.is_finite() || !max.is_finite() || min >= max { return false; }
                 label
             }
-            Self::WholePixels { label } => label,
+            Self::WholePixels { label } | Self::WholeNumber { label } => label,
             _ => return true,
         };
         match label {
@@ -52,6 +53,7 @@ impl NumericError {
             Self::InvalidNumber => MessageId::SETTINGS_EXPECTED_A_NUMBER,
             Self::Range { .. } => MessageId::NUMERIC_RANGE,
             Self::WholePixels { .. } => MessageId::NUMERIC_WHOLE_PIXELS,
+            Self::WholeNumber { .. } => MessageId::NUMERIC_WHOLE_NUMBER,
         }
     }
     pub fn code(&self) -> &'static str { self.message_id().key() }
@@ -64,7 +66,7 @@ impl NumericError {
                 args.set("label", label.as_ref()); args.set("min", *min); args.set("max", *max);
                 localization.format(self.message_id(), &args)
             }
-            Self::WholePixels { label } => {
+            Self::WholePixels { label } | Self::WholeNumber { label } => {
                 let label = numeric_label(label, localization);
                 let mut args = crate::FluentArgs::new(); args.set("label", label.as_ref());
                 localization.format(self.message_id(), &args)

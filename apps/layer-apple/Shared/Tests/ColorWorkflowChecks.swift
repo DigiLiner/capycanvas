@@ -2,6 +2,23 @@ import XCTest
 
 extension XCTestCase {
     #if os(iOS)
+    @MainActor func fileProviderRoot(_ provider: String, in app: XCUIApplication) -> XCUIElement {
+        app.cells.matching(NSPredicate(format: "identifier == %@ OR identifier == %@",
+            provider + ", Container", provider + ", Folder")).firstMatch
+    }
+    @MainActor func fileProviderFile(_ name: String, in app: XCUIApplication) -> XCUIElement {
+        let file = URL(fileURLWithPath: name)
+        return app.cells.matching(NSPredicate(format: "identifier == %@ OR identifier BEGINSWITH %@",
+            file.deletingPathExtension().lastPathComponent + ", " + file.pathExtension, name + ",")).firstMatch
+    }
+    @MainActor func submitFileProviderSelection(in app: XCUIApplication) {
+        let picker = app.navigationBars["FullDocumentManagerViewControllerNavigationBar"]
+        let open = picker.buttons.matching(NSPredicate(format: "label == %@ AND enabled == true", "Open"))
+        XCTAssertTrue(open.firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(open.count, 1)
+        workspaceActivate(open.firstMatch)
+        XCTAssertTrue(picker.waitForNonExistence(timeout: 10))
+    }
     @MainActor func dismissEditorKeyboard(in app: XCUIApplication) {
         func zeroKey(_ node: any XCUIElementSnapshot) -> Bool {
             node.elementType == .key && node.label == "0" || node.children.contains(where: zeroKey)
@@ -16,9 +33,6 @@ extension XCTestCase {
                 return [(child.frame, regions.count == 1 ? regions[0].frame : nil)]
             }
         }
-        func hasField(_ node: any XCUIElementSnapshot) -> Bool {
-            node.elementType == .textField || node.children.contains(where: hasField)
-        }
         func usable(_ frame: CGRect) -> Bool {
             [frame.minX, frame.minY, frame.maxX, frame.maxY].allSatisfy(\.isFinite) && frame.width > 0 && frame.height > 0
         }
@@ -30,18 +44,14 @@ extension XCTestCase {
         }
         let keyboard = app.keyboards.firstMatch
         let hide = keyboard.buttons["Hide keyboard"]
-        var snapshotFailure: Error?
+        let numberPad = app.popovers.containing(.key, identifier: "0").firstMatch
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard snapshotFailure == nil else { return false }
-            if keyboard.exists { return true }
-            do { return !numberPads(try app.snapshot()).isEmpty }
-            catch { snapshotFailure = error; return false }
+            keyboard.exists || numberPad.exists
         }, object: app)
         let ready = XCTWaiter.wait(for: [visible], timeout: 5)
-        if let snapshotFailure { XCTFail("Cannot inspect the editor keyboard: \(snapshotFailure)"); return }
         guard ready == .completed else { return }
         let pads: [Pad]
-        do { pads = numberPads(try app.snapshot()) }
+        do { pads = numberPad.exists ? numberPads(try app.snapshot()) : [] }
         catch { XCTFail("Cannot inspect the editor keyboard: \(error)"); return }
         guard pads.count <= 1 else { fail("The editor exposes multiple number pads: \(pads)"); return }
         if let pad = pads.first {
@@ -72,15 +82,9 @@ extension XCTestCase {
             window.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
                 dx: point.x - bounds.minX, dy: point.y - bounds.minY)).clickOrTap()
             let absent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                guard snapshotFailure == nil else { return false }
-                do {
-                    let snapshot = try app.snapshot()
-                    return hasField(snapshot) && numberPads(snapshot).isEmpty
-                }
-                catch { snapshotFailure = error; return false }
+                app.textFields.firstMatch.exists && !numberPad.exists
             }, object: app)
             let result = XCTWaiter.wait(for: [absent], timeout: 5)
-            if let snapshotFailure { XCTFail("Cannot inspect the editor keyboard: \(snapshotFailure)"); return }
             guard result == .completed else { fail("The number pad must close while its editor fields remain visible"); return }
         }
         if keyboard.waitForExistence(timeout: 5) {

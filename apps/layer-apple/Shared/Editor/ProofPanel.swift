@@ -5,6 +5,7 @@ struct ProofPanel: View {
     @ObservedObject var store: EditorStore
     @ObservedObject var controller: ProofController
     private var model: JSON { store.snapshot["proof_panel"] }
+    private var copy: JSON { store.catalog["proof_copy"] }
     var body: some View {
         VStack(spacing: store.panelMetrics.spacing) {
             HStack(spacing: store.panelMetrics.spacing) {
@@ -12,7 +13,7 @@ struct ProofPanel: View {
                     Button {
                         controller.close(); controller.action(["type": "mode", "mode": mode])
                     } label: {
-                        Text(mode == "sdr" ? "SDR" : mode.capitalized).frame(maxWidth: .infinity, minHeight: store.panelMetrics.height)
+                        Text(mode == "sdr" ? "SDR" : copy["mode_" + mode].string).frame(maxWidth: .infinity, minHeight: store.panelMetrics.height)
                             .background(model["mode"].string == mode ? Color.primary.opacity(0.12) : .clear,
                                 in: SquircleShape.control)
                     }.buttonStyle(.plain).disabled(mode == "sdr" && !model["hdr"].bool)
@@ -54,6 +55,7 @@ struct ProofDial: View {
     @State private var numeric = false
     @State private var origin = CGPoint.zero
     private var model: JSON { store.snapshot["proof_panel"] }
+    private var copy: JSON { store.catalog["proof_copy"] }
     var body: some View {
         GeometryReader { bounds in
             let glassImage = glass.image
@@ -99,7 +101,7 @@ struct ProofDial: View {
                         .frame(width: icon[2].number, height: icon[3].number).offset(x: icon[0].number, y: icon[1].number)
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
-                ParameterInput(hdr: false, identity: String(store.state["document_file"]["epoch"].uint), nudge: { phase, part, delta in
+                ParameterInput(region: .parameter(hdr: false), identity: String(store.state["document_file"]["epoch"].uint), nudge: { phase, part, delta in
                     controller.action(["type": "control", "phase": phase, "part": Int(part) - 1,
                         "edit": ["type": "step", "axis": delta[0] != 0 ? 0 : 1, "steps": delta[0] + delta[1]]])
                 }) { phase, part, point, size in
@@ -110,17 +112,17 @@ struct ProofDial: View {
                 Button { resetAll() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.plain).frame(width: g["reset"][2].number, height: g["reset"][3].number)
                     .offset(x: g["reset"][0].number, y: g["reset"][1].number)
-                    .accessibilityLabel("Reset SDR appearance").accessibilityIdentifier("proof-reset")
+                    .accessibilityLabel(copy["reset_sdr"].string).accessibilityIdentifier("proof-reset")
             }.frame(width: size, height: size)
-                .contextMenu { Button("Edit SDR Appearance…") { numeric = true }; Button("Reset") { resetAll() } }
+                .contextMenu { Button(copy["edit_sdr_appearance"].string) { numeric = true }; Button(copy["common"]["reset"].string) { resetAll() } }
                 .accessibilityElement(children: .contain)
                 .accessibilityChildren {
                     ForEach(Array(["balance", "contrast", "exposure", "highlight_color"].enumerated()), id: \.offset) { i, key in
-                        Text(["Fine texture balance", "Contrast", "Brightness", "Color intensity"][i])
+                        Text(copy[["balance", "contrast", "brightness", "highlight_color"][i]].string)
                             .accessibilityValue(model["readouts"][[1, 0, 2, 3][i]].string)
                             .accessibilityAdjustableAction { direction in adjust(key, direction == .increment ? 1 : -1) }
                     }
-                    Button("Reset SDR appearance") { resetAll() }
+                    Button(copy["reset_sdr"].string) { resetAll() }
                         .accessibilityIdentifier("proof-reset")
                 }
                 .accessibilityIdentifier("proof-dial")
@@ -155,9 +157,10 @@ private struct ProofNumbers: View {
     @ObservedObject var store: EditorStore
     let controller: ProofController
     @Environment(\.dismiss) private var dismiss
+    private var copy: JSON { store.catalog["proof_copy"] }
     var body: some View {
         VStack(spacing: 12) {
-            Text("SDR Appearance").font(.headline)
+            Text(copy["sdr_appearance"].string).font(.headline)
             ForEach(store.snapshot["proof_panel"]["numbers"].array, id: \.stableKey) { spec in
                 let key = spec["key"].string
                 NumberControl(store: store, label: spec["label"].string, value: spec["value"].number, control: spec["numeric"], gestureChange: { phase, value, completion in
@@ -166,7 +169,7 @@ private struct ProofNumbers: View {
                     controller.action(["type": "number", "key": key, "value": value]); completion(nil)
                 }
             }
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            Button(copy["common"]["done"].string) { dismiss() }.keyboardShortcut(.defaultAction)
         }.padding(20).frame(minWidth: 300)
     }
 }
@@ -177,7 +180,7 @@ private struct PrintProofControls: View {
     @ObservedObject var store: EditorStore
     @State private var recipe = JSON()
     @State private var importing = false
-    private var profiles: [JSON] { controller.form["profiles"].array }
+    private var copy: JSON { store.catalog["proof_copy"] }
     private func change(_ value: JSON) {
         let profile = JSON(["name": value["name"].raw, "profile": value["profile"].raw, "channels": "Rgb"])
         let normalized = ColorUI.resolve(["type": "print_proof", "settings": ["profile": profile.raw,
@@ -212,12 +215,12 @@ private struct PrintProofControls: View {
                     change(recipe.replacing("conversion", with: recipe["conversion"].replacing("intent", with: intents[index]["value"])))
                 }
             }
-            Toggle("Black point compensation", isOn: Binding(get: { recipe["conversion"]["black_point_compensation"].bool }, set: { v in
+            Toggle(copy["black_point_compensation"].string, isOn: Binding(get: { recipe["conversion"]["black_point_compensation"].bool }, set: { v in
                 change(recipe.replacing("conversion", with: recipe["conversion"].replacing("black_point_compensation", with: JSON(v))))
             })).disabled(recipe["conversion"]["intent"].string == "AbsoluteColorimetric")
-            Toggle("Gamut warning", isOn: Binding(get: { model["gamut_warning"].bool }, set: { _ in store.invoke("gamut_warning") }))
+            Toggle(copy["gamut_warning"].string, isOn: Binding(get: { model["gamut_warning"].bool }, set: { _ in store.invoke("gamut_warning") }))
                 .disabled(model["print"].isNull).accessibilityIdentifier("proof-gamut-warning")
-            if controller.busy { ProgressView("Preparing proof…") }
+            if controller.busy { ProgressView(copy["preparing"].string) }
             if let error = controller.error { Text(error).foregroundStyle(.red).font(.caption) }
         }.toggleStyle(PanelCheckStyle()).disabled(controller.busy || importing)
             .task(id:store.interfaceLanguage) { controller.loadForm() }
@@ -230,6 +233,7 @@ private struct PrintProofControls: View {
 /// The same section order as the shared profile menus; ICC loading stays off UI.
 private struct PrintProfileMenu: View {
     @Environment(\.capyInterfaceLanguage) private var language
+    @Environment(\.capyProfileCopy) private var copy
     @Environment(\.editorPalette) private var palette
     @ObservedObject var controller: ProofController
     let recipe: JSON
@@ -244,23 +248,23 @@ private struct PrintProfileMenu: View {
     var body: some View {
         let saved = entryCopy.rows(metadata, language: language)
         PropertyChoiceRow(labelWidth:labelWidth) {
-            Text("Profile").lineLimit(1)
+            Text(controller.form["copy"]["profile"].string).lineLimit(1)
             Menu {
                 if !controller.form["document_profile"].isNull {
-                    Section("Document Profile") { Button(controller.form["document_profile"]["name"].string) { choose(controller.form["document_profile"]) } }
+                    Section(copy["document"].string) { Button(controller.form["document_profile"]["name"].string) { choose(controller.form["document_profile"]) } }
                 }
                 if !saved.isEmpty {
-                    Section("Saved Profiles") { ForEach(saved, id: \.stableKey) { p in Button(p["name"].string) { read(id: p["id"].string) } } }
+                    Section(copy["saved"].string) { ForEach(saved, id: \.stableKey) { p in Button(p["name"].string) { read(id: p["id"].string) } } }
                 }
-                Section("Standard Color Spaces") {
+                Section(copy["standard"].string) {
                     ForEach(controller.form["profiles"].array, id: \.stableKey) { p in Button(p["name"].string) { choose(p) } }
                 }
                 Divider()
-                Button("Add ICC Profile…") { importing = true }
-                Button("Manage Profiles…") { library = true }
+                Button(copy["add_profile_dialog"].string) { importing = true }
+                Button(copy["manage"].string) { library = true }
             } label: {
                 HStack(spacing:4) {
-                    Text(recipe["name"].string.isEmpty ? "Choose a profile" : recipe["name"].string).lineLimit(1).truncationMode(.tail)
+                    Text(recipe["name"].string.isEmpty ? copy["choose"].string : recipe["name"].string).lineLimit(1).truncationMode(.tail)
                     Spacer(minLength:0)
                     SharedIcon(name:"chevron-down",size:12)
                 }.padding(.horizontal,6).frame(minHeight:24)

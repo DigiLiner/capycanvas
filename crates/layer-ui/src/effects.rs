@@ -287,6 +287,7 @@ pub enum EffectAction {
         owner: u64,
         epoch: u64,
     },
+    LayerOpacity { layer: u64, opacity: f32 },
     Set {
         layer: u64,
         key: String,
@@ -849,7 +850,10 @@ enum PropertyBaseline {
     SelectionDisplay {occurrence: OccurrenceHandle, handle: SelectionHandle, value: Option<layer_core::SelectionMaskProperties>},
 }
 impl PropertyBaseline {
-    fn capture(document: &Document, handle: OccurrenceHandle) -> Result<Self, String> {
+    fn capture(document: &Document, handle: OccurrenceHandle, layer_opacity: bool) -> Result<Self, String> {
+        if layer_opacity {
+            return Ok(Self::Occurrence {handle, value: document.scene().occurrence(handle).ok_or("Unknown occurrence")?.clone()});
+        }
         if let Some(SourceTarget::Selection(selection)) = document.scene().source_target(handle) {
             let value = document.working.selection_overlays.properties.get(&selection).cloned();
             Ok(Self::SelectionDisplay {occurrence: handle, handle: selection, value})
@@ -878,6 +882,7 @@ impl PropertyBaseline {
 pub(super) use paper::PaperPreview;
 pub(super) struct EffectGesture {
     original: PropertyBaseline,
+    layer_opacity: bool,
     key: String,
     detached_curve_point: bool,
 }
@@ -928,7 +933,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if let EffectAction::CurveNumber{layer,key,epoch,..}=&action
             && !self.curve_action_target(*layer,key,*epoch) {return Ok(());}
+        let layer_opacity = matches!(&action, EffectAction::LayerOpacity {..});
         let (layer, key) = match &action {
+            EffectAction::LayerOpacity {layer,..} => (*layer, "opacity".into()),
             EffectAction::CurvePoint { layer, key, .. }
             | EffectAction::CurveNumber { layer, key, .. }
             | EffectAction::Number { layer, key, .. }
@@ -961,19 +968,20 @@ impl<R: CanvasRenderer> UiSession<R> {
         if phase == ContactPhase::Down {
             self.require_idle()?;
             let handle = occurrence_handle(layer)?;
-            let original = PropertyBaseline::capture(self.engine.document(), handle)?;
+            let original = PropertyBaseline::capture(self.engine.document(), handle, layer_opacity)?;
             if self.engine.document().is_locked(handle) {
                 return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string());
             }
             self.effect_gesture = Some(EffectGesture {
                 original,
+                layer_opacity,
                 key: key.clone(),
                 detached_curve_point: false,
             });
         } else if !self
             .effect_gesture
             .as_ref()
-            .is_some_and(|g| occurrence_token(g.original.occurrence()) == layer && g.key == key)
+            .is_some_and(|g| occurrence_token(g.original.occurrence()) == layer && g.key == key && g.layer_opacity == layer_opacity)
         {
             // A cancelled native contact may still deliver its terminal event.
             return Ok(());
@@ -993,7 +1001,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if phase == ContactPhase::Up {
             let gesture = self.effect_gesture.take().unwrap();
             if gesture.detached_curve_point {self.property_editor.clear_selection(&gesture.key);}
-            let edited = PropertyBaseline::capture(self.engine.document(), gesture.original.occurrence())?;
+            let edited = PropertyBaseline::capture(self.engine.document(), gesture.original.occurrence(), gesture.layer_opacity)?;
             let changed = edited != gesture.original;
             let original_edit = gesture.original.edit(self.engine.document())?;
             self.engine.preview_edit(original_edit).map_err(error)?;
@@ -1019,9 +1027,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.property_editor.accepts(layer,epoch) && self.state.layer_properties.layer==Some(layer)
             && self.state.layer_properties.controls.iter().any(|control|control.key==key && matches!(control.kind,PropertyKind::Curve))
     }
-    pub fn new_drawing_paper(&self) -> layer_core::TextureSource {
-        self.state.settings.new_document.paper.as_deref().and_then(|id| self.papers.image(id))
-            .map_or_else(|| self.state.settings.new_document.paper(), |image| layer_core::TextureSource::Image(image.clone()))
+    pub fn new_drawing_paper_material(&self) -> crate::paper_library::PaperMaterial {
+        crate::paper_library::PaperMaterial::capture(&self.state.settings.new_document,
+            self.state.settings.new_document.paper.as_deref().and_then(|id| self.papers.image(id)).cloned())
+    }
+    pub fn new_drawing_paper(&self) -> layer_core::TextureSource { self.new_drawing_paper_material().fallback() }
+    pub fn initialize_paper(&mut self, id: Option<String>, texture: layer_core::TextureSource, warning: Option<String>) -> UiChange {
+        if let Some(id) = id {
+            if let layer_core::TextureSource::Image(image) = texture { self.papers.keep_image(&id, image); }
+            self.papers.prepared_default = Some(id);
+        }
+        if let Some(warning) = warning { self.notify(warning); }
+        self.refresh_document();
+        self.changed(regions::DOCUMENT | regions::HOST, true)
     }
     fn paper_layer(&self, layer: u64) -> Result<(OccurrenceHandle, EffectApplication), String> {
         let handle = occurrence_handle(layer)?;
@@ -1035,11 +1053,24 @@ impl<R: CanvasRenderer> UiSession<R> {
         let (handle, application) = self.paper_layer(layer)?;
         let edited = paper::with_texture(&application, texture)?;
         if edited == application { return Ok(()); }
-        self.state.settings.new_document.paper = paper::choice(&edited, &self.papers);
+        let remembered = paper::choice(&edited, &self.papers);
         let document = self.engine.document();
         let effect = document.scene().effect_handle(handle).ok_or("Missing adjustment")?;
         self.paper_preview.show(handle);
-        self.layer_edit(Edit::Effect(RecordChange::replace(&document.artwork.effects, effect, Some(edited)).map_err(str::to_string)?))
+        self.layer_edit(Edit::Effect(RecordChange::replace(&document.artwork.effects, effect, Some(edited)).map_err(str::to_string)?))?;
+        if self.state.settings.new_document.paper != remembered {
+            self.state.settings.new_document.paper = remembered;
+            self.request(HostRequestKind::SaveSettings { settings: Box::new(self.state.settings.clone()) })?;
+        }
+        Ok(())
+    }
+    pub fn paper_sources(&self) -> Vec<layer_core::Image> {self.engine.retained_images()}
+    fn cache_paper(&mut self, id: &str, source: layer_core::color::source::SourceImage) -> Option<layer_core::Image> {
+        let parent=crate::paper_library::paper_image_id(id)?;
+        if let Some(image)=self.engine.retained_images().into_iter().find(|image|image.id()==parent && image.storage().as_ref()==&source) {
+            self.papers.retain_source(id,&image);
+        }
+        self.papers.keep(id,source)
     }
     pub fn paper_image(&self, layer: u64) -> Option<Arc<layer_core::color::source::SourceImage>> {
         let (_, application) = self.paper_layer(layer).ok()?;
@@ -1050,7 +1081,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub fn set_paper_library(&mut self, entries: Vec<crate::paper_library::PaperEntry>) -> Result<UiChange, String> {
         let remembered = self.state.settings.new_document.paper.clone()
-            .filter(|id| entries.iter().any(|entry| entry.id == *id) && self.papers.image(id).is_none());
+            .filter(|id| entries.iter().any(|entry| entry.id == *id) && self.papers.image(id).is_none()
+                && self.papers.prepared_default.as_deref() != Some(id.as_str()));
         self.papers.set_entries(entries);
         if let Some(id) = remembered {
             self.request(HostRequestKind::Paper { request: PaperRequest::Load { id } })?;
@@ -1059,7 +1091,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(self.changed(regions::DOCUMENT | regions::HOST, false))
     }
     pub fn paper_loaded(&mut self, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
-        let image = self.papers.keep(id, image).ok_or("Invalid paper")?;
+        let image = self.cache_paper(id, image).ok_or("Invalid paper")?;
         if let Some(pending) = self.papers.pending.take_if(|pending| pending.id == id) && pending.epoch == self.state.document_file.epoch {
             self.require_idle()?;
             self.apply_paper_texture(pending.layer, layer_core::TextureSource::Image(image))?;
@@ -1069,7 +1101,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub fn paper_imported(&mut self, layer: u64, entries: Vec<crate::paper_library::PaperEntry>, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
         self.papers.set_entries(entries);
-        let image = self.papers.keep(id, image).ok_or("Invalid paper")?;
+        let image = self.cache_paper(id, image).ok_or("Invalid paper")?;
         self.require_idle()?;
         self.apply_paper_texture(layer, layer_core::TextureSource::Image(image))?;
         self.refresh_document();
@@ -1167,6 +1199,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
         if self.selection_masks.target().is_some() && !matches!(action, EffectAction::Gesture { .. } | EffectAction::Gradient {target:GradientDestination::Tool {..},..}) {return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_ARTWORK_REQUIRED).to_string());}
         match action {
+            EffectAction::LayerOpacity {layer,opacity} => self.set_layer_opacity(Some(layer), opacity)?,
             EffectAction::LookupPreset {layer,epoch,preset} => {
                 if !self.property_editor.accepts(layer,epoch) {return Ok(());}
                 self.cancel_effect_gesture()?;
@@ -1398,8 +1431,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 if document.is_locked(handle) {
                     return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string());
                 }
+                let retained = if key == paper::TEXTURE { self.engine.retained_images() } else { Vec::new() };
                 if let Some((effect, application)) = effect_application(document, handle)
-                    && let Some(edited) = paper::edited(application, document, &self.papers, &key, &value, &self.state.localization) {
+                    && let Some(edited) = paper::edited(application, document, &retained, &self.papers, &key, &value, &self.state.localization) {
                     let edited = match edited? {
                         paper::PaperEdit::Applied(edited) => edited,
                         paper::PaperEdit::Load(paper) => {

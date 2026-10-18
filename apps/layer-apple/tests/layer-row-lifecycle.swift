@@ -9,9 +9,15 @@ import QuartzCore
         try await drain()
     }
     @MainActor static func order(_ store: EditorStore) -> [UInt64] { store.state["layers"].array.map { $0["id"].uint } }
+    @MainActor static func barrier(_ store: EditorStore) async {
+        await withCheckedContinuation { done in
+            store.query(["type": "catalog"]) { _ in done.resume() }
+        }
+    }
     @MainActor static func run(_ platform: UInt32, theme: ColorScheme) async throws {
         let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
         try await wait("Initial layers did not load") { order(store).count == 2 }
+        try await store.apply(["type": "set_theme", "theme": theme == .dark ? "dark" : "light"])
         for _ in 0..<22 {
             try await edit(store, ["type": "layer", "action": ["op": "new", "group": false, "clipped": false]])
         }
@@ -19,6 +25,7 @@ import QuartzCore
         let window = NSWindow(contentRect: CGRect(x: 160, y: 160, width: 380, height: 260),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Layer list lifecycle check"; window.isReleasedWhenClosed = false; window.animationBehavior = .none
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
         let panel = JSON(["controls": [["control": "layers", "visible_in_panel": true]]])
         let host = NSHostingView(rootView: LayerPanel(store: store, panel: panel).environment(\.colorScheme, theme))
         window.contentView = host; window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -45,9 +52,16 @@ import QuartzCore
         try require(model.contact.dragging && model.menu.isNull, "A pen grip scrolls immediately without a menu")
         let drop = CGPoint(x: start.x, y: viewport().midY)
         try await send(.leftMouseDragged, drop, pen: true)
-        guard let hint = model.drag, let target = hint.target else { throw HostFailure(message: "No measured layer drop hint after scrolling") }
+        try await wait("The centered drag did not reach a measured row") {
+            model.drag?.point == drop && model.drag?.hit != nil
+        }
+        await barrier(store)
+        guard let hint = model.drag, let target = hint.target, let position = hint.position else {
+            throw HostFailure(message: "No measured layer drop hint after scrolling")
+        }
+        try require(position == "above" || position == "below", "Paint layer feedback must indicate a row boundary")
         var expected = initial.filter { $0 != first }
-        expected.insert(first, at: expected.firstIndex(of: target)! + (hint.fraction >= 0.5 ? 1 : 0))
+        expected.insert(first, at: expected.firstIndex(of: target)! + (position == "below" ? 1 : 0))
         try await send(.leftMouseUp, drop, pen: true)
         try await wait("Scrolled layer drop did not match its indicated position") { order(store) == expected }
         try await edit(store, ["type": "invoke", "command": "undo"])
@@ -132,7 +146,7 @@ import QuartzCore
     @MainActor static func hierarchy(_ platform: UInt32) async throws {
         let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
         try await wait("Initial hierarchy did not load") { order(store).count == 2 }
-        let paint = order(store)[0]
+        let paint = order(store)[0], paper = order(store)[1]
         try await edit(store, ["type": "layer", "action": ["op": "new", "group": true, "clipped": false]])
         let group = order(store)[0]
         let window = NSWindow(contentRect: CGRect(x: 160, y: 160, width: 380, height: 260),
@@ -149,43 +163,55 @@ import QuartzCore
         try await wait("Hierarchy rows were not measured") { model.frames[paint]?.row.height == 40 }
         func row(_ id: UInt64) -> JSON { store.state["layers"].array.first { $0["id"].uint == id }! }
         var number = 400
-        func drop(_ id: UInt64, on target: UInt64, fraction: CGFloat = 0.5) async throws {
+        func drop(_ id: UInt64, on target: UInt64, fraction: CGFloat = 0.5, accepted: Bool = true,
+                  feedbackTarget: UInt64? = nil, position: String = "into") async throws {
             let source = model.frames[id]!.name, destination = model.frames[target]!.row
             let start = CGPoint(x: source.midX, y: source.midY)
             let end = CGPoint(x: source.midX, y: destination.minY + destination.height * fraction)
             number += 1; try event(.leftMouseDown, at: start, marker: marker, number: number); try await drain(0.02)
             number += 1; try event(.leftMouseDragged, at: end, marker: marker, number: number); try await drain()
-            try require(model.contact.dragging && model.drag?.target == target, "Native hierarchy drag must reach its measured target")
+            try await wait("Native hierarchy drag must reach its measured target") {
+                model.contact.dragging && model.drag?.hit?.target == target
+            }
+            await barrier(store)
+            try require(accepted ? model.drag?.target == (feedbackTarget ?? target) && model.drag?.position == position
+                : model.drag?.target == nil && model.drag?.position == nil,
+                "Shared drop feedback must accept valid targets and reject invalid targets")
             number += 1; try event(.leftMouseUp, at: end, marker: marker, number: number); try await drain()
+            await barrier(store); await barrier(store)
+            try require(model.contact.target == nil && model.drag == nil, "Releasing a hierarchy drop must retire native capture")
         }
         try await drop(paint, on: group)
         try await wait("Dropping on a group center must reparent the layer") { row(paint)["depth"].uint == 1 }
         try require(!row(group)["collapsed"].bool, "A successful group drop must expose its child")
         let nestedOrder = order(store), nestedRevision = store.state["revision"].uint
-        try await drop(group, on: paint)
-        try await wait("Shared Rust must reject placing a group inside itself") { store.failure != nil }
-        try require(order(store) == nestedOrder && store.state["revision"].uint == nestedRevision,
+        try await drop(group, on: paint, accepted: false)
+        try require(order(store) == nestedOrder && store.state["revision"].uint == nestedRevision && store.failure == nil,
             "An invalid descendant drop cannot modify the document or history")
-        store.failure = nil
         try await edit(store, ["type": "invoke", "command": "undo"])
         try require(row(paint)["depth"].uint == 0, "Undo after a rejected drop must restore the last successful reparent")
 
         for locked in [group, paint] {
             try await edit(store, ["type": "layer", "action": ["op": "lock", "id": locked, "value": true]])
-            let before = store.state["revision"].uint
-            try await drop(paint, on: group)
-            try await wait("Shared Rust must reject a locked source or destination") { store.failure != nil }
-            try require(store.failure!.localizedCaseInsensitiveContains("locked") && row(paint)["depth"].uint == 0
+            let before = store.state["revision"].uint, beforeOrder = order(store)
+            try await drop(paint, on: group, accepted: false)
+            try require(store.failure == nil && row(paint)["depth"].uint == 0 && order(store) == beforeOrder
                 && store.state["revision"].uint == before, "A locked drop must preserve document and hierarchy")
-            store.failure = nil
             try await edit(store, ["type": "invoke", "command": "undo"])
             try require(!row(locked)["locked"].bool, "An invalid drop must not add a history entry after locking")
         }
         // The shared group interval includes 0.25 and excludes 0.75.
         try await drop(paint, on: group, fraction: 0.25)
         try await wait("The upper group boundary must reparent") { row(paint)["depth"].uint == 1 }
-        try await drop(paint, on: group, fraction: 0.75)
+        try await drop(paint, on: group, fraction: 0.75, feedbackTarget: paper, position: "above")
         try await wait("The lower group boundary must insert outside the group") { row(paint)["depth"].uint == 0 }
+        try require(order(store) == [group, paint, paper], "The lower group boundary must retain the indicated order above Paper")
+        try await edit(store, ["type": "invoke", "command": "undo"])
+        try require(row(paint)["depth"].uint == 1 && order(store) == [group, paint, paper],
+            "One Undo must restore the boundary drop's group membership")
+        try await edit(store, ["type": "invoke", "command": "redo"])
+        try require(row(paint)["depth"].uint == 0 && order(store) == [group, paint, paper],
+            "Redo must restore the indicated drop outside the group")
         try require(store.failure == nil, store.failure ?? "")
         note("PASS platform \(platform): native group reparent/boundaries, locked source/destination and descendant rejection with history retained")
     }

@@ -18,6 +18,7 @@ import SwiftUI
                 try await Task.sleep(for: .milliseconds(5))
             }
             let control = store.catalog["layer_opacity"]
+            let label = store.catalog["native_copy"]["layers"]["opacity"].string
             for theme in ["light", "dark"] {
                 try await store.apply(["type": "set_theme", "theme": theme])
                 for panelWidth: CGFloat in [160, 226, 320] {
@@ -49,6 +50,7 @@ import SwiftUI
                             fixtures.append(JSON(["name": name, "platform": platform, "width": width + 12, "height": height,
                                 "scale": Double(bitmap.pixelsWide) / (width + 12), "theme": theme, "text_size": textSize,
                                 "palette": store.state["palette"].raw, "control": control.raw, "value": value, "enabled": enabled,
+                                "label": label, "labels": NativeTextContext.numericLabels(label, language: store.interfaceLanguage).raw,
                                 "formatted": try store.resolveNumber(control, value: value, operation: ["type": "format"]).raw,
                                 "minimum": try store.resolveNumber(control, value: control["min"].number, operation: ["type": "format"]).raw,
                                 "maximum": try store.resolveNumber(control, value: control["max"].number, operation: ["type": "format"]).raw,

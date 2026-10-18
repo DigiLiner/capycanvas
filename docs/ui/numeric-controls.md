@@ -4,10 +4,18 @@
 
 Every host shares the same numeric policy and editable values.
 
+Common layer opacity targets the occurrence, including filter layers; effect
+parameters use their own keys. Apple sends `EffectAction::LayerOpacity` through
+the shared property gesture protocol. Contacts match both the occurrence and
+action kind: cancellation restores the occurrence, and release adds one history
+entry without changing the effect application.
+
 - Small-range integers: label left, a conventional spin control right. GTK
   uses `GtkSpinButton` in panels and `AdwSpinRow` in Preferences.
   Compact workspace spin controls have a 24-unit base height, with compact step buttons
   and a value field sized from the shared formatted range and units.
+  Web and Apple measure that range's shaped text with tabular digits; browser
+  input character counts must not choose compact field widths.
 - Wider integers and continuous values: label left and a plain, tappable value
   right; a native slider underneath. Tapping the value enters text editing.
   Panel values also accept vertical mouse, touch and pen drags for fine

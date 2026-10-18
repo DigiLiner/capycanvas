@@ -42,6 +42,19 @@ import Foundation
                 precondition(events.isEmpty && contact.target == nil, "Removed sources cannot arm or commit")
             }
         }
-        print("PASS: eighteen surface/device combinations preserve clicks, negative hold gates, menu continuation, cancellation and one transaction")
+        for device: ReorderDevice in [.mouse, .touch, .pen] {
+            var menus = 0, starts = 0, finishes = 0
+            let contact = ReorderContact()
+            let target = ReorderTarget(id: "layer", surface: .row, dragDevices: [.mouse], valid: { _ in true },
+                openContext: { menus += 1 }, begin: { _ in starts += 1 }, move: { _ in },
+                finish: { _ in finishes += 1 }, cancel: {})
+            contact.prepare(target, device: device, origin: origin)
+            contact.recognizeHold()
+            precondition(contact.move(to: destination) == (device == .mouse), "Layer body pickup retains the admitted device after a hold")
+            contact.release(at: destination)
+            precondition(menus == (device == .mouse ? 0 : 1) && starts == (device == .mouse ? 1 : 0) && finishes == starts,
+                "Direct-contact layer bodies retain context without an artwork transaction")
+        }
+        print("PASS: eighteen generic surface/device combinations and layer body device gates preserve context, cancellation and one transaction")
     }
 }

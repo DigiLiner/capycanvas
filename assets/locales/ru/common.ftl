@@ -45,6 +45,7 @@ numeric-expression-too-long = Это выражение слишком длин�
 numeric-invalid-expression = Введите допустимое математическое выражение.
 numeric-range = Значение поля «{ $label }» должно быть от { $min } до { $max }.
 numeric-whole-pixels = Для поля «{ $label }» нужно целое число пикселей.
+numeric-whole-number = { $label } должно быть целым числом.
 common-close = Закрыть
 common-remove = Убрать
 common-delete = Удалить

@@ -13,6 +13,7 @@ import UIKit
     @Published var busy = false
     @Published var blocksEditor = false
     @Published var confirming = false
+    @Published private(set) var confirmationTitle = ""
     @Published var error: String?
     @Published var picker: Picker?
     @Published var cancelling = false
@@ -78,8 +79,10 @@ import UIKit
     }
     init(store: EditorStore, dialogs: Dialogs? = nil) { self.store = store; self.dialogs = dialogs; self.preferences = store.colorPreferences }
     var title: String {
-        let name = store?.state["document_file"]["location"]["name"].string ?? ""
-        return name.isEmpty ? "Untitled" : name
+        store?.state["tabs"][0]["title"].string ?? ""
+    }
+    var alertTitle: String {
+        error == nil ? confirmationTitle : store?.bootstrap["recovery"]["attention"].string ?? ""
     }
     func forgetDocument(_ id: UInt64) { destinations.removeValue(forKey: id) }
     func receive(_ state: JSON) {
@@ -91,8 +94,10 @@ import UIKit
             handledClose = true
             if closeCompletion != nil { finishClose(true) } else if store?.drawingTabs.confirmingWindow != true { store?.drawingTabs.closeApproved() }
         }
-        guard requestID == nil, !finishing,
-            let request = state["requests"].array.first(where: { $0["kind"]["type"].string == "document" }) else { return }
+        let pending = state["requests"].array.first(where: { $0["kind"]["type"].string == "document" })
+        if let document = pending?["kind"]["request"], document["type"].string == "confirm_close",
+            confirmationTitle != document["title"].string { confirmationTitle = document["title"].string }
+        guard requestID == nil, !finishing, let request = pending else { return }
         requestID = request["id"].uint; busy = true
         if droppedPhotos == nil { cancelling = false; cancelled = false }
         approved = (file["epoch"].uint, file["revision"].uint)
@@ -101,7 +106,7 @@ import UIKit
         blocksEditor = !["save", "copy"].contains(action) || closeCompletion != nil
         switch action {
         case "save":
-            save(to: document["location"]["uri"].string) { [weak self] saved in self?.finish(saved) }
+            save(to: document["location"]["uri"].string, name: document["name"].string) { [weak self] saved in self?.finish(saved) }
         case "new":
             let completed: (JSON?) -> Void = { [weak self] options in
                 guard let self else { return }
@@ -162,7 +167,7 @@ import UIKit
                 if cancelled { finish(); return }
                 switch result {
                 case .success(let images):
-                    if images.isEmpty { fail("The clipboard contains no supported images") }
+                    if images.isEmpty { fail(store?.catalog["document_delivery_copy"]["clipboard_empty"].string ?? "") }
                     else { place(task, inputs: images) }
                 case .failure(let error): fail(error.localizedDescription)
                 }
@@ -302,11 +307,11 @@ import UIKit
             if error == nil { complete(choice.options) }
         }
     }
-    private func save(to uri: String, completion: @escaping (Bool) -> Void) {
+    private func save(to uri: String, name: String, completion: @escaping (Bool) -> Void) {
         if let destination, destination.absoluteString == uri { write(destination, completion: completion); return }
         task(.save) { [weak self] task in
             guard let self else { return }
-            deliver(task, name: title, type: .capyProject) { [weak self] url in
+            deliver(task, name: name, type: .capyProject) { [weak self] url in
                 guard let self, let url else { completion(false); return }
                 saved(task, at: url, completion: completion)
             }
@@ -326,6 +331,7 @@ import UIKit
     private func exportAgain(name: String, owner: JSON, repeating: JSON) {
         guard let id = requestID, let native = store?.native else { fail("The canvas is unavailable"); return }
         let recipe = repeating["recipe"]
+        let outsideRange = store?.catalog["export_copy"]["outside_range"].string ?? ""
         native.exportTask(id: id) { [weak self] task, error in
             DispatchQueue.main.async {
                 guard let self, self.requestID == id else { task?.cancel(); return }
@@ -337,7 +343,7 @@ import UIKit
                         if recipe["format"].string.contains("Hdr") {
                             try task.compare()
                             if try task.details()["range_blocked"].bool {
-                                throw HostFailure(message: "Some colors exceed the selected HDR output range. Enable Clip to output HDR range, or choose SDR output.")
+                                throw HostFailure(message: outsideRange)
                             }
                         }
                         DispatchQueue.main.async { self?.deliverAgain(task, name: name, owner: owner, recipe: recipe,
@@ -372,7 +378,8 @@ import UIKit
     }
     private func beginExport(name: String, owner: JSON) {
         guard let id = requestID, let native = store?.native else { fail("The canvas is unavailable"); return }
-        let editor = ExportController(native: native, request: id, preferences: preferences) { [weak self] task, recipe, destination, color in
+        let editor = ExportController(native: native, request: id, preferences: preferences,
+            copy: { [weak store = self.store] in store?.catalog["export_copy"] ?? JSON() }) { [weak self] task, recipe, destination, color in
             guard let self, self.requestID == id else { task?.cancel(); return }
             guard let task else { self.finish(); return }
             self.activeTask = task
@@ -394,7 +401,18 @@ import UIKit
                             JSON(["type": "remember", "index": destination < 4 ? destination : 3, "recipe": recipe.raw])) }
                         DispatchQueue.main.async {
                             if case .failure(let error) = result {
-                                self?.report("Image exported, but its preferences could not be saved: \(error.localizedDescription)")
+                                let detail = error.localizedDescription
+                                if let native = self?.store?.native {
+                                    native.submit(2, JSON(["type": "document_delivery_message", "message":
+                                        ["type": "export_preferences", "detail": detail]])) { [weak self] copy in
+                                        DispatchQueue.main.async {
+                                            guard let self, self.requestID == id else { return }
+                                            self.report(copy?.string ?? detail); self.finish(true)
+                                        }
+                                    }
+                                    return
+                                }
+                                self?.report(detail)
                             }
                             self?.finish(true)
                         }
@@ -715,15 +733,18 @@ import UIKit
         pickerCompletion = chosen; picker = Picker(export: nil, types: types)
         #endif
     }
-    private func chooseOpen(photosOnly: Bool = false, _ completion: @escaping ([URL]) -> Void) {
+    func choosePaper(_ completion: @escaping (URL?) -> Void) {
+        chooseOpen(photosOnly: true, multiple: false) { completion($0.first) }
+    }
+    private func chooseOpen(photosOnly: Bool = false, multiple: Bool = true, _ completion: @escaping ([URL]) -> Void) {
         if let dialogs { dialogs.open(photosOnly, completion); return }
         #if os(macOS)
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = (photosOnly ? [] : [.capyProject]) + UTType.capyPhotoTypes; panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = (photosOnly ? [] : [.capyProject]) + UTType.capyPhotoTypes; panel.allowsMultipleSelection = multiple
         panel.canChooseDirectories = false
         present(panel) { response in completion(response == .OK ? panel.urls : []) }
         #else
-        pickerCompletion = completion; picker = Picker(export: nil, types: (photosOnly ? [] : [.capyProject]) + UTType.capyPhotoTypes, multiple: true)
+        pickerCompletion = completion; picker = Picker(export: nil, types: (photosOnly ? [] : [.capyProject]) + UTType.capyPhotoTypes, multiple: multiple)
         #endif
     }
     static func exportType(_ format: String) -> UTType {
@@ -778,12 +799,12 @@ struct ProjectFilesModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.allowsHitTesting(!files.blocksEditor)
             .accessibilityHidden(files.blocksEditor)
-            .alert(files.error == nil ? "Save changes to “\(files.title)” before continuing?" : "Document",
+            .alert(files.alertTitle,
                 isPresented: Binding(get: { files.confirming || files.error != nil }, set: { if !$0 { files.dismissAlert() } })) {
-                if files.error != nil { Button("OK", role: .cancel) { files.error = nil } }
+                if files.error != nil { Button(common["ok"].string, role: .cancel) { files.error = nil } }
                 else {
                     Button(common["save"].string) { files.choose("save") }
-                    Button("Discard Changes", role: .destructive) { files.choose("discard") }
+                    Button(files.newDocumentSpec["discard"].string, role: .destructive) { files.choose("discard") }
                     Button(common["cancel"].string, role: .cancel) { files.choose("cancel") }
                 }
             } message: { if let error = files.error { Text(error) } }
@@ -807,7 +828,7 @@ struct ProjectFilesModifier: ViewModifier {
                         }
                     }.padding(24).frame(minWidth: 320, idealWidth: 560)
                         .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("preserved-package-preview")
+                        .accessibilityIdentifier("preserved-package-preview")
                         .interactiveDismissDisabled(files.packageCopying).modifier(EditorPopupPresentation())
                 }
             }
@@ -833,10 +854,9 @@ struct ProjectFilesModifier: ViewModifier {
                 if let editor = files.exportEditor { ExportForm(editor: editor).modifier(EditorPopupPresentation()) }
             }
             #if os(iOS)
-            // Files may deliver its URL after SwiftUI dismisses this sheet.
-            // Only the document-picker delegate completes selection or cancellation.
-            .sheet(item: $files.picker) { picker in
-                NativeDocumentPicker(export: picker.export, contentTypes: picker.types, multiple: picker.multiple) { files.picked($0) }.ignoresSafeArea()
+            .background {
+                NativeDocumentPicker(picker: files.picker) { files.picked($0) }
+                    .frame(width: 0, height: 0).allowsHitTesting(false).accessibilityHidden(true)
             }
             #endif
     }
@@ -860,23 +880,99 @@ extension ProjectFiles {
 
 #if os(iOS)
 struct NativeDocumentPicker: UIViewControllerRepresentable {
-    let export: URL?
-    let contentTypes: [UTType]
-    let multiple: Bool
+    let picker: ProjectFiles.Picker?
     let completion: ([URL]) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(completion) }
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let controller = export.map { UIDocumentPickerViewController(forExporting: [$0], asCopy: false) }
-            ?? UIDocumentPickerViewController(forOpeningContentTypes: contentTypes, asCopy: false)
-        controller.allowsMultipleSelection = multiple; controller.delegate = context.coordinator
-        return controller
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIViewController(context: Context) -> Anchor {
+        let anchor = Anchor()
+        anchor.ready = { [weak coordinator = context.coordinator] in coordinator?.present() }
+        context.coordinator.anchor = anchor
+        return anchor
     }
-    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    func updateUIViewController(_ controller: Anchor, context: Context) {
+        context.coordinator.picker = picker
+        context.coordinator.completion = completion
+        context.coordinator.present()
+    }
+    static func dismantleUIViewController(_ controller: Anchor, coordinator: Coordinator) {
+        controller.ready = nil
+        coordinator.stopped = true
+        coordinator.picker = nil
+        coordinator.completion = nil
+        coordinator.dismiss()
+    }
+    final class Anchor: UIViewController {
+        var ready: (() -> Void)?
+        override func loadView() {
+            view = UIView()
+            view.backgroundColor = .clear
+            view.isUserInteractionEnabled = false
+        }
+        override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); ready?() }
+        override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); ready?() }
+    }
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let completion: ([URL]) -> Void
-        init(_ completion: @escaping ([URL]) -> Void) { self.completion = completion }
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { completion(urls) }
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { completion([]) }
+        weak var anchor: Anchor?
+        var picker: ProjectFiles.Picker?
+        var completion: (([URL]) -> Void)?
+        var stopped = false
+        private var controller: UIDocumentPickerViewController?
+        private var identity: UUID?
+        private var transitioning = false
+        func present() {
+            guard !transitioning else { return }
+            if stopped { dismiss(); return }
+            if controller != nil {
+                if picker == nil || identity != picker?.id { dismiss() }
+                return
+            }
+            guard let picker, let anchor, let window = anchor.viewIfLoaded?.window else { return }
+            var presenter: UIViewController = anchor
+            while let parent = presenter.parent { presenter = parent }
+            while let presented = presenter.presentedViewController { presenter = presented }
+            if let transition = presenter.transitionCoordinator ?? presenter.presentingViewController?.transitionCoordinator {
+                transitioning = true
+                if transition.animate(alongsideTransition: nil, completion: { [weak self] _ in
+                    self?.transitioning = false
+                    self?.present()
+                }) { return }
+                transitioning = false
+            }
+            guard !presenter.isBeingPresented, !presenter.isBeingDismissed,
+                presenter.viewIfLoaded?.window === window else { return }
+            let controller = picker.export.map { UIDocumentPickerViewController(forExporting: [$0], asCopy: false) }
+                ?? UIDocumentPickerViewController(forOpeningContentTypes: picker.types, asCopy: false)
+            controller.allowsMultipleSelection = picker.multiple
+            controller.delegate = self
+            self.controller = controller
+            identity = picker.id
+            transitioning = true
+            presenter.present(controller, animated: true) {
+                self.transitioning = false
+                self.present()
+            }
+        }
+        func dismiss() {
+            guard !transitioning, let controller else { return }
+            transitioning = true
+            controller.dismiss(animated: true) {
+                self.controller = nil
+                self.identity = nil
+                self.transitioning = false
+                self.present()
+            }
+        }
+        private func complete(_ controller: UIDocumentPickerViewController, _ urls: [URL]) {
+            guard self.controller === controller, identity != nil else { return }
+            identity = nil
+            picker = nil
+            completion?(urls)
+            dismiss()
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            complete(controller, urls)
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { complete(controller, []) }
     }
 }
 #endif

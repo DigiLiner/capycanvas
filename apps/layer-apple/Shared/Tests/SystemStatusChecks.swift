@@ -1,8 +1,10 @@
 import XCTest
+import CoreGraphics
+import ImageIO
 
 extension XCTestCase {
-    @MainActor func checkTitleBarToolDrawers(in app: XCUIApplication) {
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:painter"}}]"#
+    @MainActor func checkTitleBarToolDrawers(in app: XCUIApplication, theme: String = "light") {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]},{"type":"workspace_manager","command":{"type":"switch","id":"builtin:workspace:painter"}}]"#
         app.launch()
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch
         expectation(for: NSPredicate(format: "value == %@", "Canvas ready"), evaluatedWith: canvas)
@@ -21,8 +23,13 @@ extension XCTestCase {
         #endif
         workspaceActivate(app.buttons["Brush color"])
         XCTAssertTrue(wheel.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate { _, _ in
+            drawer.exists && self.workspaceViewport(in: app).frame.contains(drawer.frame)
+        }, evaluatedWith: drawer)
+        waitForExpectations(timeout: 5)
         XCTAssertTrue(workspaceViewport(in: app).frame.contains(drawer.frame),
             "Drawer \(drawer.frame) must fit the editor \(workspaceViewport(in: app).frame)")
+        attachEditor(in: app, name: "color-palette-tool-drawer-" + theme)
         workspaceActivate(app.buttons["header-tool-drawing_brush"])
         XCTAssertTrue(wheel.waitForNonExistence(timeout: 10), "Another header tool switches the drawer in one click")
         XCTAssertTrue(drawer.exists)
@@ -64,6 +71,10 @@ extension XCTestCase {
         XCTAssertTrue(app.buttons["layer-New layer"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-")).count, 2)
         workspaceActivate(app.buttons["layer-thumbnail-2-content"])
+        let colorCancel = app.buttons["color-cancel"]
+        XCTAssertTrue(colorCancel.waitForExistence(timeout: 10))
+        workspaceActivate(colorCancel)
+        XCTAssertTrue(colorCancel.waitForNonExistence(timeout: 5))
         workspaceActivate(app.buttons["Filters panel"])
         let bucket = app.buttons["property-color-bucket"]
         XCTAssertTrue(bucket.waitForExistence(timeout: 10))
@@ -73,6 +84,67 @@ extension XCTestCase {
         expectation(for: NSPredicate { _, _ in self.editorPixels(in: app, at: paperPoint) != beforePaper }, evaluatedWith: app)
         waitForExpectations(timeout: 15)
         attachEditor(in: app, name: "paper-color-property")
+        let texture = app.buttons["property-texture"], scale = app.buttons["number-value-property-scale"]
+        let propertyScroll = app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch
+        func expectPaperValue(_ element: XCUIElement, _ text: String) {
+            expectation(for: NSPredicate(format: "value == %@", text), evaluatedWith: element)
+            waitForExpectations(timeout: 10)
+        }
+        func reopenToolDrawer(_ label: String) {
+            #if os(iOS)
+            XCTAssertTrue(drawer.waitForNonExistence(timeout: 10))
+            workspaceActivate(app.buttons[label])
+            XCTAssertTrue(drawer.waitForExistence(timeout: 10))
+            #endif
+        }
+        let papers = ["Hot press", "Cold press", "Rough", "Drawing paper", "Bristol", "Ingres", "Pastel paper",
+            "Sanded pastel", "Washi", "Unryu", "Handmade paper", "Canvas", "Linen"]
+        XCTAssertTrue(texture.waitForExistence(timeout: 10)); expectPaperValue(texture, "Drawing paper")
+        var previousPaper = "Drawing paper"
+        for (index, name) in papers.enumerated() {
+            revealEditorControl(texture, in: propertyScroll); workspaceActivate(texture)
+            if index == 0 {
+                let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "paper-tile-"))
+                XCTAssertEqual(options.count, papers.count)
+                for (option, label) in papers.enumerated() { XCTAssertEqual(app.buttons["paper-tile-\(option)"].label, label) }
+            }
+            let option = app.buttons["paper-tile-\(index)"]
+            let menuScroll = app.scrollViews.containing(.button, identifier: option.identifier).firstMatch
+            revealEditorControl(option, in: menuScroll); workspaceActivate(option)
+            XCTAssertTrue(drawer.exists, "A child menu choice outside its parent must preserve the tool drawer")
+            expectPaperValue(texture, name)
+            editorMenu(in: app, menu: "Edit", id: "undo", label: "Undo"); reopenToolDrawer("Filters panel"); expectPaperValue(texture, previousPaper)
+            editorMenu(in: app, menu: "Edit", id: "redo", label: "Redo"); reopenToolDrawer("Filters panel"); expectPaperValue(texture, name)
+            previousPaper = name
+        }
+        revealEditorControl(scale, in: propertyScroll); expectPaperValue(scale, "100 %")
+        workspaceActivate(scale); app.textFields["number-entry-property-scale"].typeText("200\n")
+        expectPaperValue(scale, "200 %")
+        editorMenu(in: app, menu: "Edit", id: "undo", label: "Undo"); reopenToolDrawer("Filters panel"); expectPaperValue(scale, "100 %")
+        editorMenu(in: app, menu: "Edit", id: "redo", label: "Redo"); reopenToolDrawer("Filters panel"); expectPaperValue(scale, "200 %")
+        let scaleTrack = app.descendants(matching: .any)["number-track-property-scale"].firstMatch
+        revealEditorControl(scaleTrack, in: propertyScroll)
+        scaleTrack.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)).press(forDuration: 0.05,
+            thenDragTo: scaleTrack.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)),
+            withVelocity: .slow, thenHoldForDuration: 0.1)
+        expectation(for: NSPredicate { _, _ in
+            let value = scale.value as? String ?? ""
+            return !value.isEmpty && value != "200 %"
+        }, evaluatedWith: scale)
+        waitForExpectations(timeout: 10)
+        let draggedScale = scale.value as? String ?? ""
+        XCTAssertFalse(draggedScale.isEmpty); XCTAssertNotEqual(draggedScale, "200 %")
+        editorMenu(in: app, menu: "Edit", id: "undo", label: "Undo"); reopenToolDrawer("Filters panel"); expectPaperValue(scale, "200 %")
+        editorMenu(in: app, menu: "Edit", id: "redo", label: "Redo"); reopenToolDrawer("Filters panel"); expectPaperValue(scale, draggedScale)
+        let scaleLabel = app.staticTexts["Scale"].firstMatch
+        XCTAssertTrue(scaleLabel.waitForExistence(timeout: 5))
+        #if os(macOS)
+        scaleLabel.doubleClick()
+        #else
+        scaleLabel.doubleTap()
+        #endif
+        expectPaperValue(scale, "100 %")
+        attachEditor(in: app, name: "paper-texture-scale-" + theme)
         workspaceActivate(app.buttons["Layers panel"])
         #if os(iOS)
         let paper = app.descendants(matching: .any)["layer-row-2"].firstMatch
@@ -81,6 +153,7 @@ extension XCTestCase {
         workspaceActivate(app.buttons["layer-delete-2"])
         XCTAssertTrue(paper.waitForNonExistence(timeout: 10))
         workspaceActivate(app.buttons["Undo"])
+        reopenToolDrawer("Layers panel")
         XCTAssertTrue(paper.waitForExistence(timeout: 10))
         let ink = app.descendants(matching: .any)["layer-row-1"].firstMatch, alphaLock = app.buttons["layer-Alpha lock"]
         workspaceActivate(app.buttons["layer-thumbnail-1-content"])
@@ -90,8 +163,34 @@ extension XCTestCase {
         expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: alphaLock); waitForExpectations(timeout: 10)
         XCTAssertTrue(paper.exists, "A right swipe never deletes")
         workspaceActivate(app.buttons["Undo"])
+        reopenToolDrawer("Layers panel")
         expectation(for: NSPredicate(format: "selected == NO"), evaluatedWith: alphaLock); waitForExpectations(timeout: 10)
         #endif
+        let layersPage = drawer.descendants(matching: .any)["layer-properties-pages"].firstMatch
+        let layerList = layersPage.scrollViews["layer-rows"]
+        let layerRows = layerList.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))
+        let opacity = drawer.buttons["number-value-layer-opacity"]
+        let layerActions = drawer.buttons["layer-Layer actions"]
+        let disclosure = drawer.buttons["layer-properties-disclosure"]
+        let controls = [layersPage, layerList, opacity, layerActions, disclosure]
+        var lastLayerBounds = [CGRect](), stableSince = Date()
+        expectation(for: NSPredicate { _, _ in
+            guard drawer.exists, controls.allSatisfy({ $0.exists }),
+                let row = layerRows.allElementsBoundByIndex.first(where: {
+                    !$0.frame.isEmpty && layerList.frame.contains($0.frame)
+                }) else { lastLayerBounds = []; return false }
+            let name = row.staticTexts.firstMatch
+            let thumbnail = row.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-thumbnail-")).firstMatch
+            guard name.exists, thumbnail.exists, !(name.value as? String ?? name.label).isEmpty else { lastLayerBounds = []; return false }
+            let bounds = drawer.frame, frames = (controls + [row, name, thumbnail]).map(\.frame)
+            guard !bounds.isEmpty, self.workspaceViewport(in: app).frame.contains(bounds),
+                frames.allSatisfy({ !$0.isEmpty && bounds.contains($0) }),
+                row.frame.contains(name.frame), row.frame.contains(thumbnail.frame),
+                thumbnail.frame.maxX <= name.frame.minX else { lastLayerBounds = []; return false }
+            if frames != lastLayerBounds { lastLayerBounds = frames; stableSince = Date() }
+            return Date().timeIntervalSince(stableSince) > 0.3
+        }, evaluatedWith: drawer)
+        waitForExpectations(timeout: 10)
         #if os(macOS)
         let capture = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
         #else
@@ -102,10 +201,13 @@ extension XCTestCase {
         XCTAssertTrue(wheel.waitForExistence(timeout: 10))
         workspaceActivate(app.buttons["Brush color"])
         XCTAssertTrue(drawer.waitForNonExistence(timeout: 10))
-        workspaceActivate(app.buttons["zen-button"])
+        workspaceActivate(app.descendants(matching: .any)["zen-button"].firstMatch)
         XCTAssertTrue(sketch.waitForNonExistence(timeout: 10))
         workspaceActivate(app.descendants(matching: .any)["zen-button"].firstMatch)
         XCTAssertTrue(sketch.waitForExistence(timeout: 10))
+        #if os(macOS)
+        XCTAssertFalse(app.menuBars.menuBarItems["Help"].exists)
+        #endif
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 
@@ -232,5 +334,380 @@ extension XCTestCase {
         workspaceActivate(app.buttons["header-cancel"])
         #endif
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
+}
+
+private func paperUIFileWork<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+    try await withCheckedThrowingContinuation { done in
+        DispatchQueue.global(qos:.utility).async { done.resume(with:Result(catching:work)) }
+    }
+}
+
+extension XCTestCase {
+    @MainActor func checkOrdinaryPaperLibrary(in app: XCUIApplication, theme: String) async throws {
+        let token = UUID().uuidString
+        let fileName = "PaperScan"
+        #if os(macOS)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("Capy Paper " + token)
+        try await paperUIFileWork { try FileManager.default.createDirectory(at:root,withIntermediateDirectories:false) }
+        let photo = root.appendingPathComponent(fileName + ".png")
+        #else
+        let folder = "Capy Files " + token
+        #endif
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.1,0.3,0.9,1]}]"#
+        app.launch(); capturePaintEditor(in:app,theme:theme)
+        let canvas = app.descendants(matching:.any)["canvas"].firstMatch
+        func expect(_ element: XCUIElement, value: String) {
+            expectation(for:NSPredicate(format:"value == %@",value),evaluatedWith:element)
+            waitForExpectations(timeout:20)
+        }
+        func createDrawing(defaults: Bool = false) {
+            editorMenu(in:app,menu:"File",id:"new_document",label:"New…")
+            let create = app.buttons["new-document-create"]
+            XCTAssertTrue(create.waitForExistence(timeout:20))
+            if defaults {
+                replaceEditorText(app.textFields["new-document-width"],with:"128",in:app)
+                replaceEditorText(app.textFields["new-document-height"],with:"128",in:app)
+                #if os(macOS)
+                workspaceActivate(app.checkBoxes["new-document-defaults"])
+                #else
+                dismissEditorKeyboard(in:app)
+                workspaceActivate(app.switches["new-document-defaults"])
+                #endif
+            }
+            XCTAssertEqual(app.textFields["new-document-width"].value as? String,"128")
+            XCTAssertEqual(app.textFields["new-document-height"].value as? String,"128")
+            #if os(iOS)
+            dismissEditorKeyboard(in:app)
+            #endif
+            workspaceActivate(create)
+            XCTAssertTrue(create.waitForNonExistence(timeout:60))
+            expect(canvas,value:"Canvas ready")
+            capturePaintEditor(in:app,theme:theme)
+            let title=editorDocumentTitle(in:app)
+            expectation(for:NSPredicate(format:"label CONTAINS %@ OR value CONTAINS %@","128 × 128","128 × 128"),evaluatedWith:title)
+            waitForExpectations(timeout:20)
+            editorMenu(in:app,menu:"View",id:"fit_canvas",label:"Fit canvas")
+        }
+        createDrawing(defaults:true)
+        editorMenu(in:app,menu:"Select",id:"select_all",label:"Select all pixels")
+        editorMenu(in:app,menu:"Edit",id:"fill_selection",label:"Fill selection")
+        expectation(for:NSPredicate { _,_ in let p=self.editorPixels(in:app);return Int(p[2])>Int(p[0])+50 },evaluatedWith:app)
+        waitForExpectations(timeout:20)
+        let bounds = bluePaperBounds(in:app)
+        let imagePoints = [CGPoint(x:bounds.midX,y:bounds.midY),CGPoint(x:bounds.minX+bounds.width*0.1,y:bounds.midY)]
+        expectBluePaper([true,true],at:imagePoints,in:app)
+        editorMenu(in:app,menu:"Edit",id:"scale_rotate",label:"Transform")
+        let uniform = app.buttons["tool-action-transform_uniform"]
+        XCTAssertTrue(uniform.waitForExistence(timeout:10))
+        if !uniform.isSelected { workspaceActivate(uniform) }
+        let width = app.buttons["number-value-tool-transform_width"]
+        revealEditorControl(width,in:app.scrollViews.containing(.button,identifier:width.identifier).firstMatch)
+        workspaceActivate(width)
+        app.textFields["number-entry-tool-transform_width"].typeText("50\n")
+        expect(width,value:"50 %")
+        expect(app.buttons["number-value-tool-transform_height"],value:"50 %")
+        #if os(iOS)
+        dismissEditorKeyboard(in:app)
+        #endif
+        let apply = app.buttons["tool-action-apply_transform"]
+        revealEditorControl(apply,in:app.scrollViews.containing(.button,identifier:apply.identifier).firstMatch)
+        workspaceActivate(apply)
+        XCTAssertTrue(width.waitForNonExistence(timeout:20))
+        editorMenu(in:app,menu:"Select",id:"deselect",label:"Deselect pixels")
+        expectBluePaper([true,false],at:imagePoints,in:app)
+        attachEditor(in:app,name:"paper-source-nonuniform-"+theme)
+        editorMenu(in:app,menu:"File",id:"export_document",label:"Export…")
+        chooseExportDestination(in:app)
+        #if os(macOS)
+        let save = app.windows.buttons["OKButton"].firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout:20)); goToFolder(root,in:app)
+        replaceEditorText(app.textFields["saveAsNameTextField"],with:photo.lastPathComponent,in:app)
+        workspaceActivate(save);XCTAssertTrue(save.waitForNonExistence(timeout:20))
+        let raw = try await paperUIFileWork {
+            let size=(try FileManager.default.attributesOfItem(atPath:photo.path)[.size] as? NSNumber)?.intValue ?? Int.max
+            guard size<=1024*1024 else { throw NSError(domain:"PaperUIFixture",code:1,userInfo:[NSLocalizedDescriptionKey:"Unbounded exported private PNG"]) }
+            let data = try Data(contentsOf:photo)
+            guard data.count<=1024*1024,let source=CGImageSourceCreateWithData(data as CFData,nil),
+                let image=CGImageSourceCreateImageAtIndex(source,0,nil),image.width==128,image.height==128 else {
+                throw NSError(domain:"PaperUIFixture",code:1,userInfo:[NSLocalizedDescriptionKey:"Missing bounded exported private128 PNG"])
+            }
+            return data
+        }
+        let sourceAttachment = XCTAttachment(data:raw,uniformTypeIdentifier:"public.png")
+        sourceAttachment.name="paper-authored-import-source-"+theme;sourceAttachment.lifetime = .keepAlways;add(sourceAttachment)
+        #else
+        let controls = documentExportControls(in: app)
+        let filename = controls.filename, save = controls.commit
+        workspaceActivate(app.cells["DOC.sidebar.item.On My iPad"])
+        XCTAssertFalse(app.cells[folder+", Folder"].exists,"Only a fresh owned provider folder")
+        workspaceActivate(app.buttons["New Folder"])
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout:10))
+        app.typeKey("a",modifierFlags:.command);app.typeText(folder+"\n")
+        XCTAssertTrue(app.otherElements["DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: "+folder].waitForExistence(timeout:15))
+        replaceEditorText(filename,with:fileName,in:app)
+        workspaceActivate(save);XCTAssertTrue(save.waitForNonExistence(timeout:30))
+        let provider = XCTAttachment(string:"Owned provider folder: "+folder+"; one normal exported PaperScan.png; retain for exact scoped cleanup")
+        provider.name="paper-provider-owned-folder-"+theme;provider.lifetime = .keepAlways;add(provider)
+        #endif
+        XCTAssertEqual(app.state,.runningForeground)
+        createDrawing()
+        let painter = app.buttons["workspace-switch-builtin:workspace:painter"]
+        workspaceActivate(painter)
+        expectation(for:NSPredicate(format:"selected == YES"),evaluatedWith:painter);waitForExpectations(timeout:15)
+        let texture = app.buttons["property-texture"]
+        let picker = app.descendants(matching:.any)["paper-picker"].firstMatch
+        let footer = app.buttons["layer-properties-disclosure"]
+        func properties() {
+            if !footer.exists { workspaceActivate(app.buttons["Layers panel"]) }
+            XCTAssertTrue(footer.waitForExistence(timeout:10))
+            if !texture.exists {
+                let thumbnail=app.buttons["layer-thumbnail-2-content"]
+                if !thumbnail.exists { workspaceActivate(footer) }
+                XCTAssertTrue(thumbnail.waitForExistence(timeout:10));workspaceActivate(thumbnail)
+                let cancel=app.buttons["color-cancel"]
+                XCTAssertTrue(cancel.waitForExistence(timeout:10));workspaceActivate(cancel)
+                XCTAssertTrue(cancel.waitForNonExistence(timeout:10));workspaceActivate(footer)
+            }
+            XCTAssertTrue(texture.waitForExistence(timeout:10))
+        }
+        func openPicker() {
+            properties()
+            revealEditorControl(texture,in:app.scrollViews.containing(.any,identifier:"layer-properties").firstMatch)
+            workspaceActivate(texture);XCTAssertTrue(picker.waitForExistence(timeout:10))
+        }
+        func tile(_ label: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","paper-tile-",label)).firstMatch
+        }
+        func revealTile(_ tile: XCUIElement) {
+            revealEditorControl(tile,in:app.scrollViews.containing(.button,identifier:tile.identifier).firstMatch)
+        }
+        func chooseTile(_ label: String) {
+            openPicker();let item=tile(label);XCTAssertTrue(item.waitForExistence(timeout:10));revealTile(item)
+            workspaceActivate(item);XCTAssertTrue(picker.waitForNonExistence(timeout:10));expect(texture,value:label)
+        }
+        func context(_ label: String, action: String) {
+            openPicker();let item=tile(label);XCTAssertTrue(item.waitForExistence(timeout:10));revealTile(item)
+            #if os(macOS)
+            item.rightClick();let command=app.menuItems[action].firstMatch
+            #else
+            item.press(forDuration:0.8);let command=app.buttons[action].firstMatch
+            #endif
+            XCTAssertTrue(command.waitForExistence(timeout:10));workspaceActivate(command)
+            XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        }
+        func sample() -> Data { editorPixels(in:app,at:CGPoint(x:0.5,y:0.65)) }
+        func settledSample() -> Data {
+            let began=Date()
+            var previous=sample(),stableSince=Date()
+            expectation(for:NSPredicate { _,_ in
+                let next=sample()
+                if next != previous { previous=next;stableSince=Date() }
+                return Date().timeIntervalSince(began)>2 && Date().timeIntervalSince(stableSince)>0.4
+            },evaluatedWith:app)
+            waitForExpectations(timeout:20)
+            return previous
+        }
+        func samePixels(_ expected: Data) {
+            expectation(for:NSPredicate { _,_ in sample()==expected },evaluatedWith:app);waitForExpectations(timeout:20)
+        }
+        func noError() {
+            XCTAssertFalse(app.staticTexts["Canvas error"].exists);XCTAssertFalse(app.alerts.firstMatch.exists)
+        }
+        func captureState(_ phase: String) {
+            let hierarchy=XCTAttachment(string:app.debugDescription)
+            hierarchy.name="paper-"+phase+"-hierarchy-"+theme;hierarchy.lifetime = .keepAlways;add(hierarchy)
+            let shot=XCTAttachment(screenshot:app.screenshot())
+            shot.name="paper-"+phase+"-"+theme;shot.lifetime = .keepAlways;add(shot)
+        }
+        properties();expect(texture,value:"Drawing paper")
+        let original=settledSample()
+        openPicker();workspaceActivate(app.buttons["paper-import"])
+        #if os(macOS)
+        let open=app.windows.buttons["OKButton"].firstMatch
+        XCTAssertTrue(open.waitForExistence(timeout:20));captureState("import-cancel-chooser")
+        app.typeKey(XCUIKeyboardKey.escape.rawValue,modifierFlags:[])
+        XCTAssertTrue(open.waitForNonExistence(timeout:15))
+        #else
+        let cancel=app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout:20));captureState("import-cancel-chooser");workspaceActivate(cancel)
+        XCTAssertTrue(cancel.waitForNonExistence(timeout:15))
+        #endif
+        properties();expect(texture,value:"Drawing paper");samePixels(original);noError()
+        openPicker();workspaceActivate(app.buttons["paper-import"])
+        #if os(macOS)
+        XCTAssertTrue(open.waitForExistence(timeout:20));goToFolder(photo,in:app)
+        expectation(for:NSPredicate(format:"enabled == YES"),evaluatedWith:open);waitForExpectations(timeout:15)
+        captureState("import-file-selected")
+        workspaceActivate(open);XCTAssertTrue(open.waitForNonExistence(timeout:20))
+        #else
+        workspaceActivate(app.cells["DOC.sidebar.item.On My iPad"])
+        workspaceActivate(app.cells[folder+", Folder"])
+        XCTAssertTrue(app.otherElements["DOC.browsingRoot Source: com.apple.FileProvider.LocalStorage, Title: "+folder].waitForExistence(timeout:15))
+        let file=app.cells.matching(NSPredicate(format:"identifier BEGINSWITH %@",fileName+".png,")).firstMatch.images.firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout:15));captureState("import-file-selected");workspaceActivate(file)
+        XCTAssertTrue(file.waitForNonExistence(timeout:20))
+        #endif
+        properties();expect(texture,value:fileName);noError()
+        openPicker()
+        let importedTile=tile(fileName)
+        XCTAssertTrue(importedTile.waitForExistence(timeout:20));revealTile(importedTile)
+        XCTAssertTrue(importedTile.isSelected)
+        let thumbnailBefore=try await ordinaryPaperThumbnail(importedTile,name:"paper-native-import-preview-"+theme)
+        workspaceActivate(importedTile);XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        let imported=settledSample()
+        editorMenu(in:app,menu:"Edit",id:"undo",label:"Undo");properties();expect(texture,value:"Drawing paper")
+        editorMenu(in:app,menu:"Edit",id:"redo",label:"Redo");properties();expect(texture,value:fileName)
+        samePixels(imported)
+        context(fileName,action:"Rename…")
+        let dialog=app.descendants(matching:.any)["paper-name-dialog"].firstMatch
+        let name=app.textFields["paper-library-name"]
+        XCTAssertTrue(dialog.waitForExistence(timeout:10))
+        replaceEditorText(name,with:"Cancelled",in:app)
+        #if os(iOS)
+        dismissEditorKeyboard(in:app)
+        #endif
+        workspaceActivate(dialog.buttons["Cancel"]);XCTAssertTrue(dialog.waitForNonExistence(timeout:10))
+        expect(texture,value:fileName);samePixels(imported)
+        context(fileName,action:"Rename…")
+        XCTAssertTrue(dialog.waitForExistence(timeout:10));replaceEditorText(name,with:" ",in:app)
+        #if os(iOS)
+        dismissEditorKeyboard(in:app)
+        #endif
+        workspaceActivate(app.buttons["paper-name-save"])
+        let renameError=app.staticTexts["paper-name-error"]
+        XCTAssertTrue(renameError.waitForExistence(timeout:10));XCTAssertEqual(editorText(renameError),"Enter a name for the paper")
+        XCTAssertTrue(dialog.exists)
+        captureState("rename-invalid")
+        replaceEditorText(name,with:"Rag",in:app)
+        #if os(iOS)
+        dismissEditorKeyboard(in:app)
+        #endif
+        workspaceActivate(app.buttons["paper-name-save"]);XCTAssertTrue(dialog.waitForNonExistence(timeout:20))
+        expect(texture,value:"Rag");samePixels(imported);noError()
+        context("Rag",action:"Delete")
+        expect(texture,value:"This drawing’s paper");samePixels(imported)
+        openPicker();XCTAssertFalse(tile("Rag").exists)
+        let retained=tile("This drawing’s paper")
+        XCTAssertTrue(retained.exists);XCTAssertTrue(retained.isSelected);captureState("deleted-material-retained")
+        workspaceActivate(retained)
+        context("This drawing’s paper",action:"Add to Library")
+        expectation(for:NSPredicate { _,_ in
+            let value=texture.value as? String ?? "";return !value.isEmpty && value != "This drawing’s paper"
+        },evaluatedWith:texture);waitForExpectations(timeout:20)
+        let addedName=try XCTUnwrap(texture.value as? String)
+        samePixels(imported);noError()
+        openPicker();let added=tile(addedName);XCTAssertTrue(added.waitForExistence(timeout:15));revealTile(added)
+        XCTAssertTrue(added.isSelected)
+        let thumbnailAfter=try await ordinaryPaperThumbnail(added,name:"paper-native-added-preview-"+theme)
+        XCTAssertEqual(thumbnailAfter,thumbnailBefore,"Add retains the same visible imported material thumbnail pixels")
+        workspaceActivate(added);XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        chooseTile("Rough");editorMenu(in:app,menu:"Edit",id:"undo",label:"Undo")
+        properties();expect(texture,value:addedName)
+        editorMenu(in:app,menu:"Edit",id:"redo",label:"Redo");properties();expect(texture,value:"Rough")
+        chooseTile(addedName)
+        attachEditor(in:app,name:"paper-native-library-actions-"+theme)
+        createDrawing()
+        for command in ["Undo","Redo"] {
+            let history=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","toolbar-tile-commands-",command)).firstMatch
+            XCTAssertTrue(history.exists);XCTAssertFalse(history.isEnabled,"New drawing starts with empty authored history")
+        }
+        workspaceActivate(painter);properties();expect(texture,value:addedName)
+        openPicker();XCTAssertTrue(tile(addedName).isSelected)
+        _=try await ordinaryPaperThumbnail(tile(addedName),name:"paper-native-warm-new-preview-"+theme)
+        workspaceActivate(tile(addedName));XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        noError();attachEditor(in:app,name:"paper-native-remembered-warm-new-"+theme)
+        let scope=XCTAttachment(string:"Ordinary full app, real native menus/context actions/system chooser/provider; exact displayed crops/thumbnail samples and native values only. Add stores current Paper Image material. New is warm; cold Load/startup, SourceImage/package byte equality, physical Pencil/present/performance remain separate gates. Own input token: "+token)
+        scope.name="paper-native-scope-"+theme;scope.lifetime = .keepAlways;add(scope)
+    }
+
+    @MainActor private func ordinaryPaperThumbnail(_ tile: XCUIElement, name: String) async throws -> Data {
+        let shot=tile.screenshot()
+        let attachment=XCTAttachment(screenshot:shot);attachment.name=name;attachment.lifetime = .keepAlways;add(attachment)
+        let encoded=shot.pngRepresentation
+        return try await paperUIFileWork {
+            guard encoded.count<=4*1024*1024,let source=CGImageSourceCreateWithData(encoded as CFData,nil),
+                let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
+                let width=properties[kCGImagePropertyPixelWidth] as? Int,let height=properties[kCGImagePropertyPixelHeight] as? Int,
+                width<=1024,height<=1024,
+                let image=CGImageSourceCreateThumbnailAtIndex(source,0,[kCGImageSourceCreateThumbnailFromImageAlways:true,
+                    kCGImageSourceCreateThumbnailWithTransform:true,kCGImageSourceThumbnailMaxPixelSize:max(width,height)] as CFDictionary),
+                let crop=image.cropping(to:CGRect(x:Double(image.width)*0.2,y:Double(image.height)*0.1,
+                    width:Double(image.width)*0.6,height:Double(image.height)*0.5)) else {
+                throw NSError(domain:"PaperUIFixture",code:2,userInfo:[NSLocalizedDescriptionKey:"Missing bounded native Paper thumbnail capture"])
+            }
+            var bytes=Data(count:crop.width*crop.height*4)
+            try bytes.withUnsafeMutableBytes { buffer in
+                guard let context=CGContext(data:buffer.baseAddress,width:crop.width,height:crop.height,bitsPerComponent:8,
+                    bytesPerRow:crop.width*4,space:CGColorSpace(name:CGColorSpace.sRGB)!,
+                    bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                    throw NSError(domain:"PaperUIFixture",code:3,userInfo:[NSLocalizedDescriptionKey:"Native Paper preview decode"])
+                }
+                context.draw(crop,in:CGRect(x:0,y:0,width:crop.width,height:crop.height))
+            }
+            return bytes
+        }
+    }
+}
+
+extension XCTestCase {
+    @MainActor func checkRememberedPaperColdStart(in app: XCUIApplication, theme: String) async throws {
+        let storage = try XCTUnwrap(ProcessInfo.processInfo.environment["CAPY_UI_DRAWING_STORAGE_" + theme.uppercased()],
+            "Stage a fresh settings+papers-only owned seed; missing seed is an unmet gate")
+        let name = URL(fileURLWithPath:storage).lastPathComponent
+        XCTAssertTrue(name.hasPrefix("capy-test-drawing-paper-" + theme + "-"))
+        guard name.hasPrefix("capy-test-drawing-paper-" + theme + "-") else { return }
+        app.launchEnvironment["CAPY_STORAGE_DIR"] = storage
+        app.launchEnvironment.removeValue(forKey:"CAPY_INITIAL_ACTIONS")
+        app.launch()
+        let canvas = app.descendants(matching:.any)["canvas"].firstMatch
+        expectation(for:NSPredicate(format:"value == %@","Canvas ready"),evaluatedWith:canvas)
+        waitForExpectations(timeout:60)
+        let first = XCTAttachment(screenshot:app.screenshot())
+        first.name="paper-cold-first-ready-before-controls-" + theme; first.lifetime = .keepAlways; add(first)
+        let hierarchy = XCTAttachment(string:app.debugDescription)
+        hierarchy.name="paper-cold-first-ready-hierarchy-" + theme; hierarchy.lifetime = .keepAlways; add(hierarchy)
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+        XCTAssertFalse(app.alerts.firstMatch.exists)
+        XCTAssertFalse(app.buttons["recovery-retry"].exists)
+        XCTAssertFalse(app.buttons["recovery-later"].exists)
+        for command in ["Undo","Redo"] {
+            let history=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","toolbar-tile-commands-",command)).firstMatch
+            XCTAssertTrue(history.exists);XCTAssertFalse(history.isEnabled,"Settings+papers-only startup has no authored history")
+        }
+        let painter=app.buttons["workspace-switch-builtin:workspace:illustrator"]
+        XCTAssertTrue(painter.waitForExistence(timeout:10));workspaceActivate(painter)
+        expectation(for:NSPredicate(format:"selected == YES"),evaluatedWith:painter);waitForExpectations(timeout:15)
+        let rows = artworkRows(in: app)
+        XCTAssertEqual(rows.count, 2)
+        let papers = rows.matching(NSPredicate(format: "label == %@", "Paper layer row"))
+        XCTAssertEqual(papers.count, 1)
+        let paper = papers.firstMatch
+        XCTAssertTrue(paper.waitForExistence(timeout: 10))
+        let paperName = paper.staticTexts["Paper"].firstMatch
+        let list = app.scrollViews["layer-rows"]
+        revealEditorControl(paperName, in: list); workspaceActivate(paperName)
+        let selected = paper.buttons["layer-Select layer without changing drawing target"]
+        let checked = list.buttons.matching(NSPredicate(format: "identifier == %@ AND selected == YES", "layer-Select layer without changing drawing target"))
+        expectation(for: NSPredicate { _, _ in selected.isSelected && checked.count == 1 }, evaluatedWith: paper)
+        waitForExpectations(timeout: 10)
+        expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Paper", "Paper"), evaluatedWith: app.staticTexts["properties-layer-name"])
+        waitForExpectations(timeout: 10)
+        let texture = app.buttons["property-texture"]
+        XCTAssertTrue(texture.waitForExistence(timeout:10), app.debugDescription)
+        expectation(for:NSPredicate(format:"value == %@","Cold paper"),evaluatedWith:texture);waitForExpectations(timeout:20)
+        revealEditorControl(texture,in:app.scrollViews.containing(.any,identifier:"layer-properties").firstMatch)
+        workspaceActivate(texture)
+        let picker=app.descendants(matching:.any)["paper-picker"].firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout:10))
+        let tile=app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ AND label == %@","paper-tile-","Cold paper")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout:15))
+        revealEditorControl(tile,in:app.scrollViews.containing(.button,identifier:tile.identifier).firstMatch)
+        XCTAssertTrue(tile.isSelected)
+        _=try await ordinaryPaperThumbnail(tile,name:"paper-cold-library-preview-" + theme)
+        workspaceActivate(tile);XCTAssertTrue(picker.waitForNonExistence(timeout:10))
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists);XCTAssertFalse(app.alerts.firstMatch.exists)
+        let scope=XCTAttachment(string:"Fresh process and fresh prelaunch settings+papers-only profile; initial raw screen precedes controls. Native value/selection/history coverage only; visually compare initial canvas and tile against retained shared seed PNG/96x96 preview. Canvas ready is not a first hardware-present acknowledgment. Explicit New after this initial load is warm and covered separately. Storage input: " + storage)
+        scope.name="paper-cold-scope-" + theme;scope.lifetime = .keepAlways;add(scope)
     }
 }

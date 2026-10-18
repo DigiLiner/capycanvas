@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Source interpretation and repair share the managed ICC picker with export.
 struct SourceProfilePicker: View {
+    @Environment(\.capyProfileCopy) private var copy
     let preferences: ColorPreferencesStore
     let spaces: [JSON]
     @Binding var selection: String
@@ -10,7 +11,7 @@ struct SourceProfilePicker: View {
     var onImport: () -> Void = {}
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            FormPicker("Interpret as", selection: $selection) {
+            FormPicker(copy["interpret_as"].string, selection: $selection) {
                 ForEach(spaces, id: \.stableKey) { Text($0[1].string).tag($0[0].string) }
                 if !imported["profile"].isNull { Text(imported["name"].string).tag("imported") }
             }.accessibilityIdentifier("photo-profile-space")

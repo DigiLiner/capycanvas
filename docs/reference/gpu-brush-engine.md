@@ -48,6 +48,9 @@ calibrated pressure by it on the CPU and store unit `Dab.flow`; other media reta
 transfer. Dry swept contacts derive `request` from exponential optical transfer.
 Opacity is retained separately in `DabStyle`;
 partial-opacity pointwise strokes retain the starting RGBA of touched pages.
+Contact-family specialization preserves the per-batch Opacity test. Family flags
+describe the contact and cannot disable its starting-paint composite. Committed
+and predicted pages use the same composite at every display resolution.
 This composite permits pigment changes after a pixel reaches its alpha ceiling.
 Normal paint and Erase use the direct recurrence above. Other blend modes
 recover the full stroke result, apply their blend, and reapply stroke Opacity.
@@ -69,6 +72,8 @@ One semantic model does not mean one pipeline. A renderer-private
 `BrushPassPlan` compiles each frozen batch style once into its raster family,
 typed material operation, sparse state attachments, reservoir use, and edge
 work. Allocation, committed rendering, and prediction consume that same plan.
+Readiness keys distinguish compute-material and fragment-material routes. Blend
+values that use the same route reuse its prepared pipelines.
 The selected pipeline is prepared before pen-down:
 
 - dry analytic paint or erase uses an instanced graphics pass and fixed-function

@@ -19,9 +19,15 @@ private final class Contact: UITouch {
     override func azimuthAngle(in view: UIView?) -> CGFloat { 0 }
     override var rollAngle: CGFloat { roll }
 }
-@MainActor private final class PencilEstimateChecks: NSObject, UIApplicationDelegate {
+@MainActor private final class PencilEstimateChecks: NSObject, UIApplicationDelegate, UIWindowSceneDelegate {
     private var completedGroups = 0
     private let runID = ProcessInfo.processInfo.environment["CAPY_INPUT_RUN"] ?? UUID().uuidString
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
+        options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let configuration = UISceneConfiguration(name: "Pencil estimates", sessionRole: session.role)
+        configuration.delegateClass = PencilEstimateChecks.self
+        return configuration
+    }
     func application(_ application: UIApplication,
         didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // The fixture supplies its own canvas and Metal surface. Run from app

@@ -45,6 +45,7 @@ numeric-expression-too-long = Bu ifade çok uzun.
 numeric-invalid-expression = Geçerli bir matematiksel ifade girin.
 numeric-range = { $label }, { $min } ile { $max } arasında olmalıdır.
 numeric-whole-pixels = { $label } için tam sayı piksel değeri gerekir.
+numeric-whole-number = { $label } bir tam sayı olmalıdır.
 common-close = Kapat
 common-remove = Kaldır
 common-delete = Sil

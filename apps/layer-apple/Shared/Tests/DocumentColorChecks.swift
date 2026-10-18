@@ -51,7 +51,11 @@ extension XCTestCase {
         let before=editorPixels(in:app)
         command("Assign Profile…");choose("document-color-space","ProPhoto RGB");compare()
         attachEditor(in:app,name:"document-assign-comparison")
+        #if os(macOS)
+        workspaceActivate(app.windows.buttons["Cancel"].firstMatch)
+        #else
         workspaceActivate(app.buttons["Cancel"].firstMatch)
+        #endif
         XCTAssertTrue(preview.waitForNonExistence(timeout:10));XCTAssertEqual(editorPixels(in:app),before)
         command("Assign Profile…");choose("document-color-space","ProPhoto RGB");compare();workspaceActivate(apply)
         XCTAssertTrue(preview.waitForNonExistence(timeout:30))

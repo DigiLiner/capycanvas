@@ -92,11 +92,46 @@ pub fn import(directory: &Path, source: &SourceImage, name: &str, cancelled: &dy
     Ok((id, paper, entries))
 }
 
+#[derive(Clone)]
+pub struct PreparedPaper {
+    pub texture: layer_core::TextureSource,
+    pub identity: Option<String>,
+    pub warning: Option<String>,
+}
+impl PreparedPaper {
+    pub fn apply<R: layer_render::CanvasRenderer>(self, session: &mut layer_ui::UiSession<R>) -> layer_ui::UiChange {
+        session.initialize_paper(self.identity, self.texture, self.warning)
+    }
+}
+pub fn resolve(material: &layer_ui::paper_library::PaperMaterial, directory: Option<&Path>, localization: &layer_ui::Localizer) -> PreparedPaper {
+    use layer_ui::paper_library::PaperMaterial;
+    match material {
+        PaperMaterial::Ready(texture) => PreparedPaper { texture: texture.clone(), identity: None, warning: None },
+        PaperMaterial::Stored { id, fallback } => {
+            let loaded = directory.and_then(|directory| load(directory, id).ok());
+            let texture = loaded.map(|image| layer_core::TextureSource::Image(layer_core::authored::Image::with_id(
+                layer_ui::paper_library::paper_image_id(id).unwrap(), std::sync::Arc::new(image))));
+            let warning = texture.is_none().then(|| layer_ui::file_open_failure(localization, &format!("{id}.png")));
+            PreparedPaper { texture: texture.unwrap_or_else(|| fallback.clone()), identity: Some(id.clone()), warning }
+        }
+    }
+}
+
 pub fn load(directory: &Path, id: &str) -> Result<SourceImage, String> {
     if !valid_paper_id(id) { return Err("Unknown paper".into()); }
     let paper = layer_core::paper::decode_png(&read_bounded(&image(directory, id), MAX_PAPER_BYTES)?)?;
     if paper_identity(&paper)? != id { return Err("The stored paper changed".into()); }
     Ok(paper)
+}
+
+pub fn canonical_source(id: &str, source: SourceImage, retained: &[layer_core::Image]) -> Result<SourceImage, String> {
+    let parent=layer_ui::paper_library::paper_image_id(id).ok_or("Unknown paper")?;
+    if let Some(image)=retained.iter().find(|image|image.id()==parent) {
+        if image.extent != source.extent || layer_core::paper::paper_ppi(image.resolution) != layer_core::paper::paper_ppi(source.resolution)
+            || image.interpretation != source.interpretation || paper_identity(image.storage())? != id {return Err("The stored paper changed".into());}
+        return Ok(image.storage().as_ref().clone());
+    }
+    Ok(source)
 }
 
 pub fn rename(directory: &Path, id: &str, name: &str) -> Result<Vec<PaperEntry>, String> {
@@ -170,5 +205,100 @@ mod tests {
         drop(locked);
         assert_eq!(rename(&directory, &id, "Cotton rag").unwrap()[0].name, "Cotton rag");
         std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn remembered_material_prepares_initial_source_defaults_and_clean_history_before_construction() {
+        let directory=std::env::temp_dir().join(format!("capy-paper-launch-{}",layer_core::PortableId::random()));
+        let (id,image,_)=import(&directory,&photo(37),"Cotton",&||false).unwrap();
+        let mut settings=layer_ui::Settings::default();settings.new_document.paper=Some(id.clone());
+        settings.new_document.defaults.extent=[513,257];settings.new_document.defaults.resolution=150;
+        let material=layer_ui::paper_library::PaperMaterial::capture(&settings.new_document,None);
+        assert!(matches!(material,layer_ui::paper_library::PaperMaterial::Stored {..}));
+        let localization=layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
+        let prepared=std::thread::spawn({let directory=directory.clone();let localization=localization.clone();
+            move || resolve(&material,Some(&directory),&localization)}).join().unwrap();
+        assert!(prepared.warning.is_none());assert_eq!(prepared.identity.as_deref(),Some(id.as_str()));
+        std::fs::write(super::image(&directory,&id),b"changed after worker preparation").unwrap();
+        for platform in [layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
+            let host=crate::NativeHost::launch_prepared(platform,settings.clone(),localization.clone(),prepared.clone()).unwrap();
+            let document=host.session.engine().document();
+            let layer_core::TextureSource::Image(source)=document.paper(None).texture else {panic!("prepared image paper")};
+            assert_eq!(document.paper(None).texture,prepared.texture);
+            let actual=source.storage();
+            assert_eq!((actual.extent,actual.resolution,actual.interpretation.channels,actual.interpretation.depth,actual.interpretation.profile_assumed),
+                (image.extent,image.resolution,image.interpretation.channels,image.interpretation.depth,image.interpretation.profile_assumed));
+            assert_eq!(layer_color::profile_bytes(&actual.interpretation.profile).unwrap(),layer_color::profile_bytes(&image.interpretation.profile).unwrap());
+            assert!(actual.tiles.keys().eq(image.tiles.keys()));
+            for (coordinate,tile) in &image.tiles {
+                let found=&actual.tiles[coordinate];
+                assert_eq!(found.descriptor,tile.descriptor);
+                assert_eq!(found.decode().unwrap(),tile.decode().unwrap());
+            }
+            assert_eq!(document.composition().size,[513,257]);
+            assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(150)));
+            assert!(!host.session.state().document_file.modified);
+            assert!(!host.session.engine().can_undo());assert!(!host.session.engine().can_redo());
+            assert_eq!(host.session.state().settings.new_document.paper.as_deref(),Some(id.as_str()));
+            assert!(!host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::SaveSettings {..})));
+            assert_eq!(host.session.new_drawing_paper(),layer_core::TextureSource::Image(source));
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn missing_corrupt_and_unavailable_remembered_material_falls_back_once_without_forgetting_or_retry_loop() {
+        for failure in 0..3 {
+            let directory=std::env::temp_dir().join(format!("capy-paper-failure-{}",layer_core::PortableId::random()));
+            let (id,_,entries)=import(&directory,&photo(77),"Cotton",&||false).unwrap();
+            if failure==0 {std::fs::remove_file(image(&directory,&id)).unwrap();}
+            if failure==1 {std::fs::write(image(&directory,&id),b"invalid PNG").unwrap();}
+            let mut settings=layer_ui::Settings::default();settings.new_document.paper=Some(id.clone());
+            let localization=layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
+            let material=layer_ui::paper_library::PaperMaterial::capture(&settings.new_document,None);
+            let prepared=resolve(&material,(failure!=2).then_some(directory.as_path()),&localization);
+            let expected=layer_ui::file_open_failure(&localization,&format!("{id}.png"));
+            assert_eq!(prepared.warning.as_deref(),Some(expected.as_str()));assert_eq!(prepared.texture,settings.new_document.paper());
+            let mut host=crate::NativeHost::launch_prepared(layer_ui::Platform::Mac,settings.clone(),localization,prepared).unwrap();
+            let document=host.session.engine().document().clone();let mark=host.session.engine().checkpoint();
+            let notice=host.session.state().notice.as_ref().unwrap().id;
+            for _ in 0..2 {host.session.set_paper_library(entries.clone()).unwrap();}
+            assert_eq!(host.session.engine().document(),&document);assert_eq!(host.session.engine().checkpoint(),mark);
+            assert_eq!(host.session.state().notice.as_ref().unwrap().id,notice);
+            assert_eq!(host.session.state().notice.as_ref().unwrap().text,expected);
+            assert_eq!(host.session.state().settings.new_document.paper,settings.new_document.paper);
+            assert!(!host.session.state().requests.iter().any(|request|matches!(request.kind,
+                layer_ui::HostRequestKind::Paper {..}|layer_ui::HostRequestKind::SaveSettings {..})));
+            assert!(!host.session.state().document_file.modified);assert!(!host.session.engine().can_undo());
+            let layer=layer_ui::occurrence_token(layer_core::paper::paper_occurrence(host.session.engine().document().scene(),None).unwrap());
+            host.dispatch(layer_ui::UiAction::SelectLayer {id:layer}).unwrap();
+            host.dispatch(layer_ui::UiAction::Effect {action:layer_ui::EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}}).unwrap();
+            assert_eq!(host.session.state().requests.iter().filter(|request|matches!(&request.kind,
+                layer_ui::HostRequestKind::Paper {request:layer_ui::paper_library::PaperRequest::Load {id:requested}} if requested==&id)).count(),1,
+                "an explicit user retry must remain available");
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+
+    #[test]
+    fn verified_paper_worker_reuses_retained_tiles_and_rejects_forged_full_keys_and_profiles() {
+        use layer_core::Image;
+        use std::sync::Arc;
+        let source=|seed|layer_core::paper::paper_image(&photo(seed),&||false).unwrap();
+        let original=source(42);let id=paper_identity(&original).unwrap();
+        let parent=layer_ui::paper_library::paper_image_id(&id).unwrap();
+        let retained=Image::with_id(parent,Arc::new(original));
+        let decoded=layer_core::paper::decode_png(&layer_core::paper::encode_png(retained.storage()).unwrap()).unwrap();
+        let actual=canonical_source(&id,decoded,&[retained.clone()]).unwrap();
+        for (coordinate,tile) in &actual.tiles {assert!(Arc::ptr_eq(tile,&retained.tiles[coordinate]));}
+        let wrong=Image::with_id(parent,Arc::new(source(91)));
+        assert!(canonical_source(&id,source(42),&[wrong]).is_err());
+        let mut changed=retained.storage().as_ref().clone();changed.interpretation.profile_assumed=true;
+        assert_eq!(paper_identity(&changed).unwrap(),id,"sample hash does not establish interpretation");
+        assert!(canonical_source(&id,source(42),&[Image::with_id(parent,Arc::new(changed))]).is_err());
+        let mut forged=id.clone();let byte=if &id[63..]=="0" {"1"}else{"0"};forged.replace_range(63..64,byte);
+        assert_eq!(layer_ui::paper_library::paper_image_id(&forged),Some(parent));
+        assert!(canonical_source(&forged,source(42),&[retained]).is_err(),"the whole256-bit Paper key is verified on the worker");
     }
 }

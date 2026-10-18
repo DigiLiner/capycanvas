@@ -82,6 +82,7 @@ numeric-invalid-expression = 請輸入有效的數學運算式。
 numeric-range = { $label }必須介於{ $min }與{ $max }之間。
 
 numeric-whole-pixels = { $label }的像素數必須為整數。
+numeric-whole-number = { $label } 必須是整數。
 
 common-close = 關閉
 common-remove = 移除

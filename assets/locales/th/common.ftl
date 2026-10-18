@@ -44,6 +44,7 @@ numeric-expression-too-long = นิพจน์นี้ยาวเกิน�
 numeric-invalid-expression = ป้อนนิพจน์คณิตศาสตร์ที่ถูกต้อง
 numeric-range = { $label } ต้องอยู่ระหว่าง { $min } ถึง { $max }
 numeric-whole-pixels = { $label } ต้องเป็นจำนวนพิกเซลเต็ม
+numeric-whole-number = { $label } ต้องเป็นจำนวนเต็ม
 common-close = ปิด
 common-remove = เอาออก
 common-delete = ลบ

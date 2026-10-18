@@ -337,6 +337,15 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(session)
     }
 
+    pub fn blank_with_settings(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>,
+        settings: Settings, paper: layer_core::TextureSource) -> Result<Self, String> {
+        let document = settings.new_document.defaults.project_on(paper, &localization)?;
+        let mut session = Self::new_localized(renderer, document, viewport, platform, localization)?;
+        session.dispatch(UiAction::RestoreSettings { settings })?;
+        session.mark_startup_drawing();
+        Ok(session)
+    }
+
     pub fn new(renderer: R, document: Document, viewport: [u32; 2], platform: Platform) -> Result<Self, String> {
         Self::new_localized(renderer, document, viewport, platform, Localizer::shared(UiLanguage::English))
     }
@@ -10276,6 +10285,74 @@ mod tests {
         layer(&mut s, LayerAction::ShowAll);
         assert!(s.engine.document().working.solo_visibility.is_none());
         assert!(visibility(&s).values().all(|value| *value));
+    }
+
+    #[test]
+    fn common_opacity_gestures_preserve_effect_parameters_and_history() {
+        for platform in [Platform::Mac, Platform::Ios] {
+        for (effect, attached) in [(None, false), (Some("threshold"), false), (Some("threshold"), true),
+            (Some("gaussian_blur"), false), (Some("gaussian_blur"), true)] {
+            let mut s = session(platform);
+            let owner = s.engine.document().working.occurrence.unwrap();
+            if let Some(effect) = effect {
+                let action = if attached { EffectAction::InsertAttached {effect: effect.into(),
+                    owner: occurrence_token(owner), epoch: s.state.document_file.epoch} }
+                    else { EffectAction::Insert {effect: effect.into()} };
+                s.dispatch(UiAction::Effect {action}).unwrap();
+            }
+            let handle = s.engine.document().working.occurrence.unwrap();
+            let id = occurrence_token(handle);
+            let original = s.engine.document().scene().occurrence(handle).unwrap().clone();
+            let application = s.engine.document().scene().effect_application(handle).cloned();
+            assert_eq!(s.engine.document().scene().effect_owner(handle), attached.then_some(owner));
+            assert!(s.state.layer_tools.controls.opacity);
+            let gesture = |phase, opacity| serde_json::from_value::<UiAction>(serde_json::json!({
+                "type":"effect", "action":{"op":"gesture", "phase":phase,
+                    "action":{"op":"layer_opacity", "layer":id, "opacity":opacity}}
+            })).unwrap();
+            let checkpoint = s.engine.checkpoint();
+            s.dispatch(gesture(ContactPhase::Down, original.opacity)).unwrap();
+            s.dispatch(gesture(ContactPhase::Move, 0.35)).unwrap();
+            assert_eq!(s.engine.document().scene().occurrence(handle).unwrap().opacity, 0.35);
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+            for phase in [ContactPhase::Move, ContactPhase::Up] {
+                s.dispatch(UiAction::Effect {action: EffectAction::Gesture {phase,
+                    action: Box::new(EffectAction::Set {layer: id, key: "opacity".into(), value: layer_core::EffectValue::Number(0.8)}),
+                }}).unwrap();
+                assert_eq!(s.engine.document().scene().occurrence(handle).unwrap().opacity, 0.35);
+                assert_eq!(s.engine.checkpoint(), checkpoint);
+            }
+            s.dispatch(gesture(ContactPhase::Cancel, 0.35)).unwrap();
+            assert_eq!(s.engine.document().scene().occurrence(handle).unwrap(), &original);
+            assert_eq!(s.engine.checkpoint(), checkpoint);
+            s.dispatch(gesture(ContactPhase::Down, original.opacity)).unwrap();
+            s.dispatch(gesture(ContactPhase::Move, 0.55)).unwrap();
+            s.dispatch(gesture(ContactPhase::Up, 0.55)).unwrap();
+            assert_eq!(s.engine.document().scene().occurrence(handle).unwrap().opacity, 0.55);
+            assert_eq!(s.engine.document().scene().effect_application(handle).cloned(), application);
+            invoke(&mut s, CommandId::Undo);
+            assert_eq!(s.engine.document().scene().occurrence(handle).unwrap(), &original);
+            invoke(&mut s, CommandId::Redo);
+            assert_eq!(s.engine.document().scene().occurrence(handle).unwrap().opacity, 0.55);
+            if effect.is_some() {
+            let parameter = s.state.layer_properties.controls.iter().find(|control|
+                matches!(&control.value, layer_core::EffectValue::Number(_))).unwrap();
+            let key = parameter.key.clone();
+            let value = parameter.value.clone();
+            let parameter_gesture = |phase| UiAction::Effect {action: EffectAction::Gesture {phase,
+                action: Box::new(EffectAction::Set {layer: id, key: key.clone(), value: value.clone()}),
+            }};
+            s.dispatch(parameter_gesture(ContactPhase::Down)).unwrap();
+            s.dispatch(gesture(ContactPhase::Move, 0.8)).unwrap();
+            s.dispatch(gesture(ContactPhase::Up, 0.8)).unwrap();
+            assert_eq!(s.engine.document().scene().occurrence(handle).unwrap().opacity, 0.55);
+            s.dispatch(parameter_gesture(ContactPhase::Cancel)).unwrap();
+            assert_eq!(s.engine.document().scene().effect_application(handle).cloned(), application);
+            }
+            layer(&mut s, LayerAction::Lock {id, value: true});
+            assert!(s.dispatch(gesture(ContactPhase::Down, 0.55)).is_err());
+        }
+        }
     }
 
     #[test]

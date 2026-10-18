@@ -18,6 +18,7 @@ import SwiftUI
 
     func receive(_ facts: [PanelSizeKey: CGFloat]) {
         let mounted = Set(facts.keys.filter { $0.kind != .tab }.map(\.panel))
+        let units = bodies.mapValues(\.unitHeight)
         for panel in mounted { bodies[panel] = Body() }
         for (key, value) in facts where value.isFinite && value >= 0 {
             switch key.kind {
@@ -28,6 +29,9 @@ import SwiftUI
                 bodies[key.panel, default: Body()].scrollHeight = (bodies[key.panel]?.scrollHeight ?? 0) + value
             case .unit: bodies[key.panel, default: Body()].unitHeight = max(bodies[key.panel]?.unitHeight ?? 0, value)
             }
+        }
+        for panel in mounted where bodies[panel]?.unitHeight == 0 {
+            bodies[panel]?.unitHeight = units[panel] ?? 0
         }
         reconcile()
     }
@@ -47,7 +51,7 @@ import SwiftUI
     private func publish() {
         guard let store else { return }
         let ids = store.snapshot["panels"].array.map { $0["id"].string }
-        let live = Set(ids)
+        let live = Set(store.state["workspace"]["layout"]["panels"].array.map { $0["id"].string })
         widths = widths.filter { live.contains($0.key) }
         bodies = bodies.filter { live.contains($0.key) }
         let values = ids.compactMap { id -> [String: Any]? in

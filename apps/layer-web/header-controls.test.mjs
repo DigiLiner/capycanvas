@@ -46,7 +46,10 @@ export async function checkHeaderControls({call,evaluate,settle}) {
       assert.ok(await evaluate('layerApp.state().camera.zoom')>zoom);assert.equal(await evaluate(`document.querySelector('${selector}').open`),false);
       await click(`${selector} > summary`);await resize(1440);
       assert.equal(await evaluate("document.querySelectorAll('.header-overflow[open],.header-menu-labels-compact[open]').length"),0);
+      const restored=await evaluate(`(()=>{const node=document.activeElement,r=node.getBoundingClientRect();return{tag:node.tagName,id:node.id,className:node.className,item:node.closest('.header-item')?.dataset.kind??null,hidden:!!node.closest('[hidden],[inert]'),disabled:!!node.disabled,bounds:{x:r.x,y:r.y,width:r.width,height:r.height}}})()`);
+      await writeFile(`${dir}/header-focus-${theme}-${width}.local.json`,JSON.stringify({theme,width,restored},null,2));
       assert.ok(await evaluate(`document.activeElement.closest('${width===600?'.header-menu-labels':'.header-item:not([hidden])'}')!==null`),'Expansion restores a visible control');
+      assert.ok(!restored.hidden&&!restored.disabled&&restored.bounds.width>0&&restored.bounds.height>0,`${theme}/${width}: restored focus is an enabled visible control: ${JSON.stringify(restored)}`);
     }
   }
   const tags=await evaluate('layerApp.app.bootstrap_view().shipped_tags'),expected={};

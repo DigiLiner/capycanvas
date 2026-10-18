@@ -56,7 +56,7 @@ struct EditorPopupPresentation: ViewModifier {
                 content.modifier(EditorPopoverHost()).foregroundStyle(.primary).presentationBackground(.background)
             }
         }
-        .onAppear { store?.workspace.popover(popup, open: true) }
+        .onAppear { store?.workspace.popover(popup, open: true, defersLanguage: false) }
         .onDisappear { store?.workspace.popover(popup, open: false) }
     }
 }

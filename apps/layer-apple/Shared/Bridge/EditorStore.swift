@@ -46,6 +46,10 @@ import Darwin
     @Published var storagePending = true
     @Published var canRetryStorage = false
     private static let instances = NSHashTable<EditorStore>.weakObjects()
+    func paperLibraryChanged() {
+        guard let paperDirectory else { return }
+        for store in Self.instances.allObjects where store.paperDirectory == paperDirectory { store.papers.reload() }
+    }
     var acceptsGamepad: (() -> Bool)?
     static var gamepadTarget: EditorStore? { instances.allObjects.first { $0.acceptsGamepad?() == true } }
     /// Measured native window controls; editor geometry otherwise comes from Rust.
@@ -77,6 +81,8 @@ import Darwin
     lazy var recovery = ArtworkRecovery(store: self)
     let scopes = ScopePlots()
     lazy var proof = ProofController(store: self)
+    private var paperDirectory: URL?
+    lazy var papers = PaperController(store: self, directory: paperDirectory)
     lazy var palettes = PaletteController(store: self)
     lazy var colorEditing = ColorEditingController(store: self)
     lazy var strokeRecording = StrokeRecording(store: self)
@@ -109,6 +115,7 @@ import Darwin
             let storage = workload == nil ? persistence : EditorPersistence(root:
                 FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                     .appendingPathComponent("CapyPerformanceSessions/\(UUID().uuidString)", isDirectory: true))
+            paperDirectory = storage.locations?.papers
             colorPreferences = ColorPreferencesStore(locations: storage.locations)
             let usesWorkspaceLibrary = managedWorkspaces && storage.locations != nil
             native = try NativeOwner(platform: platform, persistence: storage,
@@ -183,6 +190,7 @@ import Darwin
                 drawingTabs.receive()
                 colorEditing.receive(state["color_picker"])
                 projectFiles.receive(state.json)
+                papers.receive()
                 windowPresentation.receive(state.json)
                 contentDrawers.refresh()
                 workspace.refresh()

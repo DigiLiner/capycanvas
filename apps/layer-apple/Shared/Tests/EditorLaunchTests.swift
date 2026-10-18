@@ -20,6 +20,17 @@ final class EditorLaunchTests: XCTestCase {
         try checkNativeHDRColor(in: editorCaptureApplication())
     }
 
+    @MainActor func testNativeHDRColorLight() throws {
+        try checkNativeHDRColor(in: editorCaptureApplication(), theme: "light")
+    }
+
+    @MainActor func testNativeFloatSourceCaption() async throws {
+        try await checkNativeFloatSourceCaption(in: editorCaptureApplication(), theme: "light")
+    }
+    @MainActor func testNativeFloatSourceCaptionDark() async throws {
+        try await checkNativeFloatSourceCaption(in: editorCaptureApplication(), theme: "dark")
+    }
+
     @MainActor func testNativeDocumentColor() throws {
         try checkNativeDocumentColor(in: editorCaptureApplication())
     }
@@ -47,6 +58,8 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testBlendAndLiquify() { checkBlendAndLiquify(in: editorCaptureApplication()) }
 
     @MainActor func testPaintingBrushes() { checkPaintingBrushes(in: editorCaptureApplication()) }
+    @MainActor func testDryMediaBrushes() { checkPaintingBrushes(in: editorCaptureApplication(), dryOnly: true) }
+    @MainActor func testDryMediaBrushesDark() { checkPaintingBrushes(in: editorCaptureApplication(), theme: "dark", dryOnly: true) }
     @MainActor func testPenBrushOrder() { checkPenBrushOrder(in: editorCaptureApplication(), theme: "light") }
     @MainActor func testPenBrushOrderDark() { checkPenBrushOrder(in: editorCaptureApplication(), theme: "dark") }
 
@@ -84,6 +97,9 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testRegionSelectionAndFill() { checkRegionSelectionAndFill(in: editorCaptureApplication()) }
 
     @MainActor func testToolbarComponents() { checkToolbarComponents(in: editorCaptureApplication()) }
+    @MainActor func testToolbarComponentsDark() { checkToolbarComponents(in: editorCaptureApplication(), theme: "dark") }
+    @MainActor func testStrengthAndSmoothing() { checkStrengthAndSmoothing(in: editorCaptureApplication(), theme: "light") }
+    @MainActor func testStrengthAndSmoothingDark() { checkStrengthAndSmoothing(in: editorCaptureApplication(), theme: "dark") }
     @MainActor func testColorPicker() { checkColorPicker(in: editorCaptureApplication()) }
     @MainActor func testColorPickerDark() { checkColorPicker(in: editorCaptureApplication(), theme: "dark") }
     @MainActor func testLiveColorTab() { checkLiveColorTab(in: editorCaptureApplication(), theme: "light") }
@@ -136,6 +152,8 @@ final class EditorLaunchTests: XCTestCase {
         #endif
     }
     @MainActor func testZoomReadout() { checkZoomReadout(in: ignoringSavedWindows(editorCaptureApplication())) }
+    @MainActor func testZoomTool() throws { try checkZoomTool(in: ignoringSavedWindows(editorCaptureApplication()), theme: "light") }
+    @MainActor func testZoomToolDark() throws { try checkZoomTool(in: ignoringSavedWindows(editorCaptureApplication()), theme: "dark") }
     @MainActor func testCanvasNavigationControls() throws { try checkCanvasNavigationControls(in: ignoringSavedWindows(editorCaptureApplication()), theme: "light") }
     @MainActor func testCanvasNavigationControlsDark() throws { try checkCanvasNavigationControls(in: ignoringSavedWindows(editorCaptureApplication()), theme: "dark") }
     @MainActor func testNavigationDrawingCycle() throws { try checkNavigationDrawingCycle(in: ignoringSavedWindows(editorCaptureApplication()), theme: "light") }
@@ -176,6 +194,14 @@ final class EditorLaunchTests: XCTestCase {
     @MainActor func testTitleBarCustomization() { checkTitleBarCustomization(in: editorTestApplication()) }
 
     @MainActor func testTitleBarToolDrawers() { checkTitleBarToolDrawers(in: editorCaptureApplication()) }
+    @MainActor func testTitleBarToolDrawersDark() { checkTitleBarToolDrawers(in: editorCaptureApplication(), theme: "dark") }
+
+    @MainActor func testOrdinaryPaperLibrary() async throws {
+        try await checkOrdinaryPaperLibrary(in:editorCaptureApplication(),theme:"light")
+    }
+    @MainActor func testOrdinaryPaperLibraryDark() async throws {
+        try await checkOrdinaryPaperLibrary(in:editorCaptureApplication(),theme:"dark")
+    }
 
     @MainActor func testColumnStacks() { checkColumnStacks(in: editorTestApplication()) }
 
@@ -247,13 +273,10 @@ final class EditorLaunchTests: XCTestCase {
     }
 
     @MainActor func testFilterArtworkAndHistory() throws { checkFilterArtworkAndHistory(in: ignoringSavedWindows(editorCaptureApplication())) }
+    @MainActor func testFilterArtworkAndHistoryDark() throws { checkFilterArtworkAndHistory(in: ignoringSavedWindows(editorCaptureApplication()), theme: "dark") }
 
-    @MainActor func testFilterSearchPreviewAndProperties() throws {
-        let app = ignoringSavedWindows(editorTestApplication())
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"customize","action":{"type":"set_panel_visible","panel":"adjustments","visible":true}}]"#
-        app.launch()
-        checkFilterSearchPreviewAndProperties(in: app)
-    }
+    @MainActor func testFilterSearchPreviewAndProperties() throws { checkFilterSearchPreviewAndProperties(in: ignoringSavedWindows(editorTestApplication())) }
+    @MainActor func testFilterSearchPreviewAndPropertiesDark() throws { checkFilterSearchPreviewAndProperties(in: ignoringSavedWindows(editorTestApplication()), theme: "dark") }
 
     @MainActor func testShortcutConflictAndEditorEffect() throws {
         let app = ignoringSavedWindows(editorTestApplication())
@@ -325,11 +348,18 @@ final class EditorLaunchTests: XCTestCase {
         checkBlendChoices(in: app)
     }
 
-    @MainActor func testInlineLayerOpacity() {
+    @MainActor func testInlineLayerOpacity() { runInlineLayerOpacity(theme: "light") }
+
+    @MainActor func testInlineLayerOpacityDark() { runInlineLayerOpacity(theme: "dark") }
+
+    @MainActor private func runInlineLayerOpacity(theme: String) {
         let app = ignoringSavedWindows(editorCaptureApplication())
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"}]"#
+        #if os(macOS)
+        app.launchArguments += ["-AppleInterfaceStyle", theme == "dark" ? "Dark" : "Light"]
+        #endif
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = "[{\"type\":\"set_theme\",\"theme\":\"\(theme)\"}]"
         app.launch()
-        checkInlineLayerOpacity(in: app)
+        checkInlineLayerOpacity(in: app, theme: theme)
     }
 
     @MainActor func testEditorControlLayout() {
@@ -366,6 +396,15 @@ final class EditorLaunchTests: XCTestCase {
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
         #endif
         return app
+    }
+}
+
+extension EditorLaunchTests {
+    @MainActor func testRememberedPaperColdStart() async throws {
+        try await checkRememberedPaperColdStart(in:ignoringSavedWindows(editorCaptureApplication()),theme:"light")
+    }
+    @MainActor func testRememberedPaperColdStartDark() async throws {
+        try await checkRememberedPaperColdStart(in:ignoringSavedWindows(editorCaptureApplication()),theme:"dark")
     }
 }
 

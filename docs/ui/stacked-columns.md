@@ -50,6 +50,23 @@ Its normal tab groups and split dividers are rendered by the ordinary dock views
 tab group in the open column. Drawer-style connectors join those active tiles
 to the expanded column.
 
+Vertical groups retain saved proportions when their measured scroll targets fit.
+A scroll target includes fixed controls and four measured rows, or four tile
+heights for continuous content, capped at the panel's natural content height.
+When these targets exceed the available height, groups first retain their fixed
+controls and one measured row, or one tile height of continuous content, for the
+active page. Extra space first provides that unit for every tab, then grows each
+group toward its four-unit target. If the active-page targets cannot fit, groups
+share the space above their fixed controls instead. Fixed controls keep their
+measured height wherever their combined fixed height fits.
+
+Fitted groups yield body space to neighboring groups while retaining their fixed
+scroll controls. Where space permits, neighboring lists retain at least one
+measured row; continuous scroll areas may shrink to their fixed controls. Content
+beyond the allocated scroll area remains reachable by scrolling. Hosts retain the
+last measured row height while lazy rows are absent and replace it when a row
+reports a new height.
+
 There is no Expand button. Escape closes open columns. Auto-hide consumes the outside canvas contact and
 respects popups, nested drawers and active gestures. Open/close is transient;
 membership, preferences, widths and ordinary split ratios are saved. Completed

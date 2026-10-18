@@ -154,6 +154,9 @@ cover UIKit touch routing, full-editor pixels or performance; the named
 Covers both Apple presets and themes, three panel widths, slider endpoints and
 intermediate values, spin fields with units and disabled states, and drives the
 AppKit text-field delegates through real editor actions.
+The native manifest supplies shared numeric captions and formatted range ends,
+so the browser uses the current control contract without recreating copy or
+formatting rules. Panel geometry includes space for shared section headings.
 
 ```sh
 CAPY_TEST_ASSETS_APP="$PWD/apps/layer-apple/DerivedData/NumbersMac/Build/Products/Release/CapyCanvas-Mac.app" \
@@ -186,10 +189,11 @@ node tools/visual/chrome-capture.mjs 116 36 2 artifacts/apple-inline-numbers lig
 
 ## Property and layer choices
 
-Covers the shared dropdown for property choices, the Curves channel selector
-and compact layer blending, with real Rust blend names, short and long
-selections and disabled states. Chrome uses standard selects with the
-production CSS. `EditorLaunchTests/testBlendChoices` covers the real popovers.
+Covers shared property choices, configuration layer selection and compact layer
+blending, with real Rust blend names and short and long selections. Property and
+layer-blend cases include disabled states; configuration selection stays enabled.
+Chrome uses production CSS, standard selects and the layer-blend menu button;
+the manifest supplies the shared panel metrics. `EditorLaunchTests/testBlendChoices` covers the real popovers.
 
 ```sh
 CAPY_TEST_ASSETS_APP="$PWD/apps/layer-apple/DerivedData/ColorMac/Build/Products/Release/CapyCanvas-Mac.app" \
@@ -200,7 +204,8 @@ node tools/visual/chrome-capture.mjs 226 140 2 artifacts/apple-choices light cho
 ```
 
 `choice-geometry.json` summarizes the measured rectangles; each
-`geometry-NAME.json` keeps bounds, font metrics and every error.
+`geometry-NAME.json` keeps bounds, font metrics and every error. The capture
+checks every control against the one-point geometry limit after saving all pairs.
 
 ## Shared icon paints
 
@@ -285,6 +290,8 @@ the three default workspaces, at two widths, both themes, all three title-bar
 sizes and paper or surround backgrounds, with deterministic clock and battery
 inputs. Chrome switches the real workspaces and records the resolved fonts and
 advances beside each measured control.
+Visible batteries also record computed styles and DOM box quads for their tile,
+indicator, shell, fill and terminal to check interior alignment.
 
 ```sh
 CAPY_TEST_ASSETS_APP="$PWD/apps/layer-apple/DerivedData/WorkspaceMac/Build/Products/Release/CapyCanvas-Mac.app" \

@@ -70,6 +70,10 @@ import SwiftUI
                                     EditorHeader(store: store, status: status)
                                 }.frame(width: width, height: height).coordinateSpace(name: "editor-workspace")
                                     .environment(\.colorScheme, theme == "dark" ? .dark : .light)
+                                    .environment(\.editorPalette, palette)
+                                    .environment(\.capyInterfaceLanguage, store.interfaceLanguage)
+                                    .environment(\.capyNativeCopy, store.catalog["native_copy"])
+                                    .environment(\.capyCommonCopy, store.bootstrap["common"])
                                     .environment(\.measureHeaderControls, true)
                                     .onPreferenceChange(HeaderControlFrames.self) { geometry.frames = $0 }
                                     .font(.system(size: store.catalog["text_size_pt"].number * 4 / 3))

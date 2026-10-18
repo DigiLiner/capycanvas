@@ -36,6 +36,116 @@ extension XCTestCase {
         expectLabel(done, "Done")
         workspaceActivate(done)
         expectLabel(layers, "Layers")
+        capturePaintEditor(in: app, theme: theme)
+        editorTool("Pencil", in: app)
+        let sketch = app.buttons["workspace-switch-builtin:workspace:painter"]
+        let paint = app.buttons["workspace-switch-builtin:workspace:illustrator"]
+        workspaceActivate(sketch)
+        let sizeCap = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "slider-cap-", "Brush size")).firstMatch
+        XCTAssertTrue(sizeCap.waitForExistence(timeout: 15))
+        let capID = sizeCap.identifier
+        let preview = app.descendants(matching: .any)["brush-slider-preview"].firstMatch
+        func bookmarkLabels(_ add: String, _ remove: String, _ tag: String) {
+            workspaceActivate(app.buttons[capID])
+            XCTAssertTrue(preview.waitForExistence(timeout: 10))
+            let bookmark = app.buttons["slider-bookmark"]
+            let initial = bookmark.label == remove ? remove : add
+            let opposite = initial == remove ? add : remove
+            expectLabel(bookmark, initial)
+            workspaceActivate(bookmark); expectLabel(bookmark, opposite)
+            workspaceActivate(bookmark); expectLabel(bookmark, initial)
+            attachEditor(in: app, name: "language-bookmark-\(tag)-" + theme)
+            workspaceActivate(sketch)
+            XCTAssertTrue(preview.waitForNonExistence(timeout: 10))
+        }
+        bookmarkLabels("Bookmark this value", "Remove bookmark", "en-before")
+        for (label, doneLabel, add, remove, tag) in [
+            ("日本語", "完了", "この値をブックマーク", "ブックマークを削除", "ja"),
+            ("English", "Done", "Bookmark this value", "Remove bookmark", "en-after")
+        ] {
+            workspaceActivate(paint)
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: paint)
+            waitForExpectations(timeout: 10)
+            workspaceActivate(app.buttons["settings-button"])
+            choose(label); expectLabel(done, doneLabel); workspaceActivate(done)
+            XCTAssertTrue(done.waitForNonExistence(timeout: 10))
+            workspaceActivate(sketch)
+            expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: sketch)
+            waitForExpectations(timeout: 10)
+            bookmarkLabels(add, remove, tag)
+        }
+        workspaceActivate(paint)
+        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: paint)
+        waitForExpectations(timeout: 10)
+        let untouched = editorPixels(in: app)
+        #if os(macOS)
+        let canvas = workspaceViewport(in: app)
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.6))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.6))
+        start.click(forDuration: 0.05, thenDragTo: end)
+        #else
+        editorMenu(in: app, menu: "Select", id: "select_all", label: "Select all pixels")
+        editorMenu(in: app, menu: "Edit", id: "fill_selection", label: "Fill selection")
+        #endif
+        expectation(for: NSPredicate { _, _ in self.editorPixels(in: app) != untouched }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
+        let painted = editorPixels(in: app)
+        for (label, doneLabel, title, help, previewLabel, chooseFile, cancel, save, discard, fileMenu, export, close, closeTitle, undo, redo, tag) in [
+            ("日本語", "完了", "画像を書き出す", "プロファイル付きのコピーを書き出します。編集可能な作品は変わりません。", "出力をプレビュー", "ファイルを選択…", "キャンセル", "保存", "変更を破棄", "ファイル", "書き出し…", "閉じる", "「無題」の変更を保存しますか？", "元に戻す", "やり直す", "ja"),
+            ("English", "Done", "Export image", "Export a profiled copy. The editable drawing stays unchanged.", "Preview Output", "Choose File…", "Cancel", "Save", "Discard Changes", "File", "Export…", "Close", "Save changes to “Untitled”?", "Undo", "Redo", "en")
+        ] {
+            workspaceActivate(app.buttons["settings-button"])
+            choose(label); expectLabel(done, doneLabel); workspaceActivate(done)
+            XCTAssertTrue(done.waitForNonExistence(timeout: 10))
+            func fileCommand(_ id: String, _ caption: String) {
+                editorMenu(in: app, menu: fileMenu, id: id, label: caption)
+            }
+            fileCommand("export_document", export)
+            let exportCancel = app.buttons["export-cancel"], destination = app.buttons["export-choose-file"]
+            XCTAssertTrue(destination.waitForExistence(timeout: 30))
+            expectLabel(destination, chooseFile)
+            expectLabel(app.buttons["export-preview"], previewLabel)
+            expectLabel(exportCancel, cancel)
+            XCTAssertTrue(app.staticTexts[title].exists)
+            XCTAssertTrue(app.staticTexts[help].exists)
+            expectLabel(app.buttons["source-profile-import"], tag == "ja" ? "ICCプロファイルを読み込む…" : "Import ICC Profile…")
+            let profileLibrary = app.buttons["color-profile-library"]
+            expectLabel(profileLibrary, tag == "ja" ? "保存したプロファイル…" : "Saved Profiles…")
+            attachEditor(in: app, name: "language-export-" + tag + "-" + theme)
+            workspaceActivate(profileLibrary)
+            let libraryDone = app.buttons["profile-library-done"]
+            XCTAssertTrue(libraryDone.waitForExistence(timeout: 20))
+            expectLabel(libraryDone, doneLabel)
+            expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: libraryDone)
+            waitForExpectations(timeout: 15)
+            XCTAssertTrue(app.staticTexts[tag == "ja" ? "カラープロファイルライブラリ" : "Color Profile Library"].exists)
+            XCTAssertTrue(app.staticTexts[tag == "ja" ? "読み込んだプロファイルはありません" : "No imported profiles"].exists)
+            attachEditor(in: app, name: "language-profile-library-" + tag + "-" + theme)
+            workspaceActivate(libraryDone)
+            XCTAssertTrue(libraryDone.waitForNonExistence(timeout: 10))
+            workspaceActivate(exportCancel)
+            XCTAssertTrue(exportCancel.waitForNonExistence(timeout: 10))
+            expectPixels(painted, in: app)
+            fileCommand("close_document", close)
+            let confirmation = app.staticTexts[closeTitle].firstMatch
+            XCTAssertTrue(confirmation.waitForExistence(timeout: 15))
+            #if os(macOS)
+            let dialogButtons = app.windows.sheets.containing(.staticText, identifier: closeTitle).buttons
+            #else
+            let dialogButtons = app.buttons
+            #endif
+            XCTAssertTrue(dialogButtons[save].exists)
+            XCTAssertTrue(dialogButtons[discard].exists)
+            let closeCancel = dialogButtons[cancel].firstMatch
+            XCTAssertTrue(closeCancel.exists)
+            attachEditor(in: app, name: "language-close-" + tag + "-" + theme)
+            workspaceActivate(closeCancel)
+            XCTAssertTrue(confirmation.waitForNonExistence(timeout: 10))
+            XCTAssertTrue(app.state == .runningForeground)
+            expectPixels(painted, in: app)
+            editorHistory(undo, in: app); expectPixels(untouched, in: app)
+            editorHistory(redo, in: app); expectPixels(painted, in: app)
+        }
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 }

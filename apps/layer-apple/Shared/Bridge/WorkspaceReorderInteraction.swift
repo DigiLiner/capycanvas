@@ -10,7 +10,7 @@ import SwiftUI
     private var menuSource: String?
     private var menuTarget: String?
     private var request = UUID()
-    private let popup = UUID()
+    let popup = UUID()
     private weak var workspace: WorkspacePresentation?
     private weak var store: EditorStore?
     init(workspace: WorkspacePresentation, store: EditorStore?) {
@@ -68,12 +68,12 @@ import SwiftUI
         store.query(["type": "context", "target": target.raw]) { [weak self] result in
             guard let self, request == generation, enabled,
                   workspace?.sourceInstances[source] != nil else { return }
-            menu = result; workspace?.popover(popup, open: !result.isNull)
+            menu = result
         }
     }
     func closeMenu() {
         request = UUID(); menuSource = nil; menuTarget = nil
-        if !menu.isNull { menu = JSON(); workspace?.popover(popup, open: false) }
+        if !menu.isNull { menu = JSON() }
     }
     func recognizeHold() { contact.recognizeHold(); workspace?.refreshChrome() }
     func cancel() { contact.cancel(); closeMenu(); workspace?.refreshChrome() }
@@ -87,7 +87,7 @@ struct WorkspaceContactMenu: View {
         Color.clear.frame(width: anchor.width, height: anchor.height)
             .editorPopover(isPresented: Binding(get: { !interaction.menu.isNull }, set: {
                 if !$0 { interaction.closeMenu() }
-            }), placement: .inward) {
+            }), placement: .inward, owner: interaction.popup) {
                 WorkspaceMenu(store: store, menu: interaction.menu) { interaction.closeMenu() }
             }
             .offset(x: anchor.minX, y: anchor.minY).allowsHitTesting(false)

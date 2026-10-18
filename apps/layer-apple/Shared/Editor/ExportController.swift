@@ -2,6 +2,72 @@ import SwiftUI
 
 /// One immutable delivery copy. Shared validation, CMM work and previews run on I/O.
 @MainActor final class ExportController: ObservableObject {
+    @Published private(set) var copy: JSON
+    private let currentCopy: () -> JSON
+    @Published private(set) var profileNames: [String] = []
+    @Published private(set) var metadataCopy = JSON()
+    @Published private(set) var outputSize = ""
+    private var projectedError: JSON?
+    private var profileCaptions: [JSON] = []
+    private var copyRevision: UInt64 = 0
+    func refreshCopy() {
+        copy = currentCopy()
+        copyRevision &+= 1
+        guard loaded, !closing, !finished, let native else { return }
+        let revision = copyRevision
+        native.submit(2, JSON(["type": "native_caption", "caption": ["type": "export_size",
+            "width": details["output_extent"][0].uint, "height": details["output_extent"][1].uint]])) { [weak self] value in
+            DispatchQueue.main.async {
+                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
+                self.outputSize = value.string
+            }
+        }
+        if let projectedError {
+            native.submit(2, projectedError) { [weak self] value in
+                DispatchQueue.main.async {
+                    guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
+                    if self.projectedError != nil { self.error = value.string }
+                }
+            }
+        }
+        native.submit(2, JSON(["type": "export_preset_copy", "names": names])) { [weak self] value in
+            DispatchQueue.main.async {
+                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
+                self.names = value.array.map(\.string)
+            }
+        }
+        native.submit(2, JSON(["type": "export_profile_captions_copy", "captions": profileCaptions.map(\.raw)])) { [weak self] value in
+            DispatchQueue.main.async {
+                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
+                self.profileNames = value.array.map(\.string)
+            }
+        }
+        native.submit(2, JSON(["type": "export_metadata_copy", "format": recipe["format"].raw,
+            "keep": recipe["metadata"]["keep"].raw])) { [weak self] value in
+            DispatchQueue.main.async {
+                guard let self, !self.closing, !self.finished, self.copyRevision == revision, let value else { return }
+                self.metadataCopy = value
+            }
+        }
+    }
+    func invalidNumber(_ label: String) {
+        projectedError = JSON(["type": "native_caption", "caption": ["type": "numeric_error", "reason": ["reason": "whole_number", "label": ["message": label]]]])
+        refreshCopy()
+    }
+    private func blockedRange() {
+        busy = false
+        if closing { finish(nil); return }
+        error = currentCopy()["outside_range"].string
+        projectedError = JSON(["type": "color_feature_error_copy", "reason": "HdrRangeBlocked"])
+        refreshCopy()
+    }
+    private func acceptProfileCaptions() {
+        if profileCaptions.isEmpty { profileCaptions = details["form"]["profile_captions"].array }
+        while profileCaptions.count < profiles.count {
+            profileCaptions.append(JSON(["type": "literal", "name": profiles[profileCaptions.count]["name"].string]))
+        }
+        profileNames = profiles.map { $0["name"].string }
+    }
     @Published private(set) var busy = false
     @Published private(set) var loaded = false
     @Published private(set) var choiceRevision = 0
@@ -22,8 +88,9 @@ import SwiftUI
     private var closing = false
     private var finished = false
     private let completion: (NativeProjectTask?, JSON, Int, JSON) -> Void
-    init(native: NativeOwner, request: UInt64, preferences: ColorPreferencesStore,
+    init(native: NativeOwner, request: UInt64, preferences: ColorPreferencesStore, copy: @escaping () -> JSON,
         completion: @escaping (NativeProjectTask?, JSON, Int, JSON) -> Void) {
+        self.currentCopy = copy; self.copy = copy()
         self.native = native; self.request = request; self.preferences = preferences; self.completion = completion
     }
     func load(ready: (() -> Void)? = nil) {
@@ -47,7 +114,7 @@ import SwiftUI
                             self.busy = false
                             if self.closing { self.finish(nil); return }
                             self.details = details; self.accept(view, draft: draft, profiles: profile.0, selected: profile.1)
-                            self.loaded = true; ready?()
+                            self.loaded = true; self.refreshCopy(); ready?()
                         }
                     } catch { let message = error.localizedDescription
                         DispatchQueue.main.async { [weak self] in self?.failed(message) }
@@ -69,9 +136,10 @@ import SwiftUI
         if let draft {
             self.draft = draft; self.profiles = profiles; profileIndex = selected
         }
-        choiceRevision += 1; invalidate()
+        acceptProfileCaptions(); metadataCopy = self.draft["metadata"]
+        choiceRevision += 1; invalidate(); refreshCopy()
     }
-    func invalidate() { previews = []; clipped = 0; error = nil }
+    func invalidate() { previews = []; clipped = 0; projectedError = nil; error = nil }
     func change(_ key: String, _ value: JSON) {
         guard loaded, !busy, !closing, !finished else { return }
         busy = true; invalidate()
@@ -86,6 +154,7 @@ import SwiftUI
                     if self.closing { self.finish(nil); return }
                     self.draft = draft
                     if let selected { self.profiles = selected.0; self.profileIndex = selected.1 }
+                    self.acceptProfileCaptions(); self.metadataCopy = draft["metadata"]; self.refreshCopy()
                 }
             } catch { let message = error.localizedDescription
                 DispatchQueue.main.async { [weak self] in self?.failed(message) }
@@ -131,7 +200,8 @@ import SwiftUI
                 if preview || recipe["format"].string.contains("Hdr") { try task.compare() }
                 let details = try task.details()
                 if !preview && details["range_blocked"].bool {
-                    throw HostFailure(message: "Some colors exceed the selected HDR output range. Enable Clip to output HDR range, or choose SDR output.")
+                    DispatchQueue.main.async { [weak self] in self?.blockedRange() }
+                    return
                 }
                 let images = preview ? try (0..<(details["has_sdr_preview"].bool ? 3 : 2)).map { try task.comparison(index: UInt32($0)) } : []
                 let draft = try preferences.exportDraft(recipe: recipe)
@@ -141,6 +211,7 @@ import SwiftUI
                     if self.closing { self.finish(nil); return }
                     self.draft = draft; self.details = details
                     self.previews = images; self.clipped = details["clipped_channels"].uint
+                    self.metadataCopy = draft["metadata"]; self.refreshCopy()
                     if !preview { self.finish(task) }
                 }
             } catch { let message = error.localizedDescription
@@ -154,7 +225,7 @@ import SwiftUI
         if !busy { finish(nil) }
     }
     private func failed(_ message: String) {
-        busy = false
+        projectedError = nil; busy = false
         if closing { finish(nil) } else { error = message }
     }
     private func finish(_ result: NativeProjectTask?) {

@@ -126,7 +126,7 @@ impl NewDocumentOptions {
     }
 }
 
-fn depth_label(depth: SampleDepth, localization: &Localizer) -> Arc<str> {
+pub(crate) fn depth_label(depth: SampleDepth, localization: &Localizer) -> Arc<str> {
     localization.text(match depth {
         SampleDepth::U8 => MessageId::DOCUMENTS_DEPTH_U8,
         SampleDepth::U16 => MessageId::DOCUMENTS_DEPTH_U16,

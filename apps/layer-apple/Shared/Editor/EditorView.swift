@@ -33,12 +33,13 @@ struct EditorView<Canvas: View>: View {
             if !store.state.isNull && !store.catalog.isNull {
                 EditorHeader(store: store)
                 if !store.snapshot["chrome_hidden"].bool && store.state["workspace"]["layout"]["canvas_info"]["visible"].bool {
-                    HStack {
+                    HStack(alignment: .bottom, spacing: 12) {
                         Spacer()
                         ScreenStatus(store: store, palette: palette)
                         CameraStatus(store: store, camera: store.camera).padding(.horizontal, 10).padding(.vertical, 3)
                             .glassSurface(SquircleShape.tile, fill: palette.chromeSurface)
-                    }.placed(store.snapshot["layout"]["status"])
+                    }.padding(.horizontal, 4).frame(maxHeight: .infinity, alignment: .bottom)
+                        .placed(store.snapshot["layout"]["status"])
                 }
                 WorkspacePanels(store: store, workspace: store.workspace)
                 PressureCalibration(store: store)
@@ -105,6 +106,7 @@ struct EditorView<Canvas: View>: View {
         .modifier(WorkspaceDialogs(store: store))
         .modifier(SizeDialogs(store: store))
         .modifier(PaletteFiles(controller: store.palettes))
+        .modifier(PaperFiles(controller: store.papers))
         .modifier(StrokeRecordingFiles(recording: store.strokeRecording))
         .modifier(ColorEditingPresentation(controller: store.colorEditing))
         .sheet(isPresented: Binding(get: { !store.snapshot["preferences"].isNull }, set: { if !$0 { store.dispatch(["type": "close_settings"]) } }), onDismiss: { store.focusCanvas?() }) {
@@ -115,6 +117,7 @@ struct EditorView<Canvas: View>: View {
         .environment(\.editorPopupStore, store)
         .environment(\.capyInterfaceLanguage, store.interfaceLanguage)
         .environment(\.capyNativeCopy, store.catalog["native_copy"])
+        .environment(\.capyProfileCopy, store.catalog["profile_copy"])
         .environment(\.paintPair, store.paintPair)
         .environment(\.capyCommonCopy, store.bootstrap["common"])
         .environment(\.locale, store.interfaceLanguage.isEmpty ? Locale.current : Locale(identifier: store.interfaceLanguage))

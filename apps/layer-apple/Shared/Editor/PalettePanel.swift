@@ -8,7 +8,6 @@ struct PalettePanel: View {
     @StateObject private var rows = PaletteRowInteraction()
     @State private var width: CGFloat = 264
     @State private var bodyHeight: CGFloat = 0
-    @State private var popupID = UUID()
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var covered: Bool { controller.chooser || controller.expanded }
     private var hdr: Bool { store.snapshot["color_panel"]["hdr"].bool }
@@ -54,18 +53,17 @@ struct PalettePanel: View {
                             .accessibilityIdentifier("palette-message")
                     }
                 }.modifier(PanelBodyMeasurement(panel: "palettes", part: "footer"))
-            }.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            }.frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
                 .padding(8)
                 .modifier(PanelBodyMeasurement(panel: "palettes", part: "padding", intrinsicHeight: 16))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("palette-panel")
                 .onAppear { grid.store = store; rows.store = store; rows.owner = grid.owner }
-                .onChange(of: controller.menu?.owner == grid.owner) { _, open in store.workspace.popover(popupID, open: open) }
                 .onChange(of: store.snapshot["color_panel"]["definition"].stableKey) { _, _ in controller.retireStaleEdit() }
                 .onChange(of: view["palettes"].stableKey) { _, _ in controller.retireStaleEdit() }
                 .onChange(of: view["swatches"].stableKey) { _, _ in grid.validate() }
                 .onDisappear {
                     grid.cancel(); rows.cancel(); controller.closeMenu(owner: grid.owner)
-                    store.workspace.popover(popupID, open: false)
                 }
         }
     }
@@ -223,6 +221,7 @@ private struct PaletteRecentTile: View {
 
 private struct PaletteFooter: View {
     @State private var chooseCaption = ""
+    @State private var width: CGFloat = 264
     @ObservedObject var controller: PaletteController
     let view: JSON
     var measuring = false
@@ -238,7 +237,8 @@ private struct PaletteFooter: View {
                     Text(view["name"].string).lineLimit(1).truncationMode(.tail)
                     SharedIcon(name: "chevron-down", size: 12).rotationEffect(.degrees(180))
                 }.padding(.horizontal, 6).frame(minHeight: 24).contentShape(Rectangle())
-            }.buttonStyle(EditorControlButtonStyle()).frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            }.buttonStyle(EditorControlButtonStyle()).frame(maxWidth: width * 0.55, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                 .help(chooseCaption).accessibilityLabel(controller.copy["choose"].string)
                 .accessibilityValue(view["name"].string).accessibilityIdentifier("palette-chooser")
             VStack(alignment: .trailing, spacing: 0) {
@@ -266,7 +266,8 @@ private struct PaletteFooter: View {
                     .help("sRGB hex preview; saved colors retain their original color space, alpha and HDR intensity")
                     .accessibilityIdentifier("palette-color-detail")
             }.frame(maxWidth: .infinity, alignment: .trailing)
-        }.accessibilityElement(children: .contain).accessibilityIdentifier("palette-footer").onAppear { refreshCaption() }.onChange(of: view["name"].string) { _, _ in refreshCaption() }.onChange(of: controller.interfaceLanguage) { _, _ in refreshCaption() }
+        }.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .accessibilityElement(children: .contain).accessibilityIdentifier("palette-footer").onAppear { refreshCaption() }.onChange(of: view["name"].string) { _, _ in refreshCaption() }.onChange(of: controller.interfaceLanguage) { _, _ in refreshCaption() }
     }
 }
 

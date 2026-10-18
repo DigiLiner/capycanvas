@@ -19,7 +19,7 @@ export async function captureInlineNumbers({manifest, output, evaluate, call}) {
       document.body.style.background=f.palette.panel;
       const panel=document.createElement('div');panel.className='panel';
       panel.style.cssText='position:absolute;left:6px;top:6px;width:'+(f.width-12)+'px;height:auto;padding:0;border:0';
-      const root=createNumberField({control:f.control,label:'Layer opacity',inline:true,
+      const root=createNumberField({control:f.control,label:f.label,labels:f.labels,inline:true,
         resolve:({operation,value})=>{
           if(operation.type!=='format')throw Error('Unexpected edit during inline capture');
           if(value===f.value)return f.formatted;if(value===f.control.min)return f.minimum;

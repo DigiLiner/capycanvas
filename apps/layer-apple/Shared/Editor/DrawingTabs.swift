@@ -243,7 +243,7 @@ struct DrawingTabsHeader: View {
                             Text(tabs.rows.first { $0["id"].uint == tabs.selected }?["title"].string ?? "Untitled").lineLimit(1)
                             Image(systemName: "chevron.down").font(.caption)
                         } else { Text(tabs.selectedDescription).lineLimit(1) }
-                    }.padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
+                    }.fontWeight(.semibold).padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
                 }.buttonStyle(HeaderButtonStyle(radius: tile / 2)).accessibilityIdentifier("document-title")
                     .accessibilityValue(tabs.selectedDescription).help(tabs.selectedDescription)
             }

@@ -3,6 +3,24 @@ import ImageIO
 import UniformTypeIdentifiers
 
 extension XCTestCase {
+    #if os(iOS)
+    @MainActor func documentExportControls(in app: XCUIApplication) -> (filename: XCUIElement, commit: XCUIElement) {
+        let identified = app.textFields["DOCPicker.filenameTextField"]
+        let unnamed = app.otherElements["Browse View (Picker)"].textFields.matching(NSPredicate(format: "identifier == %@", ""))
+        expectation(for: NSPredicate { _, _ in identified.exists || unnamed.count == 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+        let filename: XCUIElement
+        if identified.exists { filename = identified }
+        else {
+            XCTAssertEqual(unnamed.count, 1, "The native export picker needs one filename field")
+            filename = unnamed.firstMatch
+        }
+        let commit = app.navigationBars.buttons.matching(NSPredicate(format: "label IN %@", ["Save", "Move"])).firstMatch
+        XCTAssertTrue(commit.waitForExistence(timeout: 10))
+        return (filename, commit)
+    }
+    #endif
+
     @MainActor func chooseExportDestination(in app: XCUIApplication) {
         let choose = app.buttons["export-choose-file"]
         XCTAssertTrue(choose.waitForExistence(timeout: 15))
@@ -13,7 +31,7 @@ extension XCTestCase {
 
 #if os(macOS)
 extension XCTestCase {
-    @MainActor func checkNativeProfiledExport(in app: XCUIApplication) throws {
+    @MainActor func checkNativeProfiledExport(in app: XCUIApplication, theme: String = "light") throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("Capy Export " + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -30,8 +48,8 @@ extension XCTestCase {
         CGImageDestinationAddImage(file, try XCTUnwrap(context.makeImage()), nil)
         XCTAssertTrue(CGImageDestinationFinalize(file))
         let original = try Data(contentsOf: photo)
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"}]"#
-        app.launch(); capturePaintEditor(in: app)
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
+        app.launch(); capturePaintEditor(in: app, theme: theme)
         func chooseFile(_ url: URL) {
             let open = app.windows.buttons["OKButton"].firstMatch
             XCTAssertTrue(open.waitForExistence(timeout: 15))
@@ -40,7 +58,15 @@ extension XCTestCase {
         }
         editorMenu(in: app, menu: "File", id: "open_document", label: "Open…"); chooseFile(photo)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
+        expectation(for: NSPredicate { _, _ in
+            let sample = self.editorPixels(in: app)
+            return sample.count == 256 && stride(from: 0, to: sample.count, by: 4).allSatisfy {
+                sample[$0] > sample[$0 + 1] && sample[$0 + 1] > sample[$0 + 2]
+            }
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 15)
         let before = editorPixels(in: app)
+        attachEditor(in: app, name: "profiled-export-before-" + theme)
         func openExport() {
             editorMenu(in: app, menu: "File", id: "export_document", label: "Export…")
             let choose = app.buttons["export-choose-file"]
@@ -67,11 +93,11 @@ extension XCTestCase {
             field.typeKey("a", modifierFlags: .command); field.typeText(value)
         }
         openExport(); choice("export-destination", "Further editing")
-        choice("export-format", "JPEG")
+        choice("export-format", "JPEG image")
         let depth = app.descendants(matching: .any).matching(identifier: "export-depth").firstMatch
         expectation(for: NSPredicate(format: "enabled == NO"), evaluatedWith: depth)
         waitForExpectations(timeout: 15)
-        choice("export-format", "TIFF")
+        choice("export-format", "TIFF image")
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: depth)
         waitForExpectations(timeout: 15)
         choice("export-destination", "Further editing")
@@ -80,7 +106,7 @@ extension XCTestCase {
         chooseFile(URL(fileURLWithPath: "/System/Library/ColorSync/Profiles/Generic CMYK Profile.icc"))
         expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: app.buttons["export-choose-file"])
         waitForExpectations(timeout: 20)
-        for (id, excluded) in [("export-format", "PNG"), ("export-background", "Preserve")] {
+        for (id, excluded) in [("export-format", "PNG image"), ("export-background", "Preserve")] {
             let picker = app.descendants(matching: .any).matching(identifier: id).firstMatch
             reveal(picker); workspaceActivate(picker)
             XCTAssertFalse(app.menuItems[excluded].exists, "CMYK must omit unsupported \(excluded)")
@@ -95,9 +121,9 @@ extension XCTestCase {
         reveal(preview); workspaceActivate(preview)
         XCTAssertTrue(app.staticTexts["export-output-size"].waitForExistence(timeout: 60))
         let size = app.staticTexts["export-output-size"]
-        XCTAssertEqual(size.value as? String ?? size.label, "Output: 64 × 48 pixels")
-        reveal(size); attachEditor(in: app, name: "profiled-export-comparison")
-        let presets = app.disclosureTriangles["Saved presets"].firstMatch
+        XCTAssertEqual(size.value as? String ?? size.label, "Output: 64 × 48 px")
+        reveal(size); attachEditor(in: app, name: "profiled-export-comparison-" + theme)
+        let presets = app.disclosureTriangles["Presets"].firstMatch
         reveal(presets)
         // AppKit reports the disclosure hit point left of the clipped scroll
         // content. Click its visible chevron using the measured content edge.
@@ -111,11 +137,13 @@ extension XCTestCase {
         let save = app.windows.buttons["OKButton"].firstMatch
         XCTAssertTrue(save.waitForExistence(timeout: 15))
         app.typeKey(XCUIKeyboardKey.escape.rawValue, modifierFlags: [])
-        XCTAssertTrue(save.waitForNonExistence(timeout: 10)); XCTAssertEqual(editorPixels(in: app), before)
+        XCTAssertTrue(save.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(editorPixels(in: app), before)
+        attachEditor(in: app, name: "profiled-export-after-save-cancel-" + theme)
         openExport(); choice("export-destination", "Studio TIFF")
         let library = app.buttons["color-profile-library"]; reveal(library); workspaceActivate(library)
         let use = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "profile-use-")).firstMatch
-        XCTAssertTrue(use.waitForExistence(timeout: 15)); attachEditor(in: app, name: "saved-icc-profile-library")
+        XCTAssertTrue(use.waitForExistence(timeout: 15)); attachEditor(in: app, name: "saved-icc-profile-library-" + theme)
         workspaceActivate(use); XCTAssertTrue(use.waitForNonExistence(timeout: 10))
         chooseExportDestination(in: app)
         XCTAssertTrue(save.waitForExistence(timeout: 15))

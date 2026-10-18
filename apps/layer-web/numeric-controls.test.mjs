@@ -34,7 +34,20 @@ export async function checkNumericControls({call,evaluate,settle}) {
   const geometry=selector=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),box=n.getBoundingClientRect(),slider=n.querySelector('.number-slider'),track=slider.getBoundingClientRect(),v=n.querySelector('.number-value'),value=v.getBoundingClientRect(),s=getComputedStyle(v),r=document.createRange();r.selectNodeContents(v);const glyph=r.getBoundingClientRect();return{box:box.toJSON(),track:track.toJSON(),value:value.toJSON(),glyph:glyph.toJSON(),font:s.fontFamily,paddingLeft:parseFloat(s.paddingLeft),paddingRight:parseFloat(s.paddingRight),overflow:s.overflow,textOverflow:s.textOverflow,trackHeight:[...document.styleSheets].flatMap(sheet=>[...sheet.cssRules]).find(rule=>rule.selectorText==='.number-slider::-webkit-slider-runnable-track')?.style.height,text:v.textContent}})()`);
   const geometryReports=[],motion=[],fonts=[];
   await call('DOM.enable');await call('CSS.enable');
-  const platformFonts=async selector=>{const {root}=await call('DOM.getDocument');const {nodeId}=await call('DOM.querySelector',{nodeId:root.nodeId,selector});const result=await call('CSS.getPlatformFontsForNode',{nodeId});assert.ok(result.fonts.length&&result.fonts.every(font=>font.familyName==='Adwaita Sans'),'actual Adwaita Sans glyph font: '+JSON.stringify(result));return result;};
+  const platformFonts=async(selector,text)=>{
+    const css=await evaluate(`(()=>{const n=document.createElement('span');n.id='numeric-ui-font-reference';n.textContent=${JSON.stringify(text)};n.style.cssText='position:fixed;left:0;top:0;z-index:2147483647;font:inherit;font-variant-numeric:tabular-nums;white-space:pre;pointer-events:none';n.setAttribute('aria-hidden','true');document.documentElement.append(n);return{root:getComputedStyle(document.documentElement).fontFamily,control:getComputedStyle(document.querySelector(${JSON.stringify(selector)})).fontFamily}})()`);
+    try {
+      assert.equal(css.control,css.root,'numeric controls inherit the configured root UI font');
+      assert.ok(css.root.includes('Adwaita Sans')&&css.root.includes('system-ui'),'preferred UI font and system fallback policy');
+      await evaluate('document.fonts.ready.then(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))');
+      const {root}=await call('DOM.getDocument');
+      const collect=async selector=>{const {nodeId}=await call('DOM.querySelector',{nodeId:root.nodeId,selector});const result=await call('CSS.getPlatformFontsForNode',{nodeId});assert.ok(result.fonts.length&&result.fonts.every(font=>font.glyphCount>0),'actual glyph fonts: '+JSON.stringify(result));return result;};
+      const reference=await collect('#numeric-ui-font-reference'),result=await collect(selector);
+      const families=fonts=>[...new Set(fonts.map(font=>font.familyName))].sort();
+      assert.deepEqual(families(result.fonts),families(reference.fonts),'numeric glyphs match the independently inherited UI font');
+      return{...result,reference,fontFamily:css.root,text};
+    } finally {await evaluate("document.querySelector('#numeric-ui-font-reference')?.remove()");}
+  };
   if(native)await writeFile(`${inputDir}/ready`,'ready');
   try {
     await send({type:'restore_workspace',workspace:fixture});
@@ -42,12 +55,12 @@ export async function checkNumericControls({call,evaluate,settle}) {
       await send({type:'set_theme',theme});
       const measured=[];
       for(const value of [999,1000,1200.5,2048]) {
-        await send({type:'set_brush_size',value});await wait();const g=await geometry(size);measured.push(g);fonts.push({theme,value,role:'readout',...await platformFonts(size+' .number-value')});
+        await send({type:'set_brush_size',value});await wait();const g=await geometry(size);measured.push(g);fonts.push({theme,value,role:'readout',...await platformFonts(size+' .number-value',`${value} px`)});
         assert.equal(g.text,`${value} px`,'complete number and unit');close(g.box.height,36,'panel height');close(g.track.height,16,'slider hit height');assert.equal(g.trackHeight,'4px','visible track height');close(g.track.x-g.box.x,36,'track left');close(g.box.right-g.track.right,76,'track right');close(g.value.bottom,g.box.bottom,'readout bottom');close(g.value.right,g.box.right,'readout right');
         close(g.glyph.right,g.value.right-g.paddingRight,'complete suffix right anchor');assert.ok(g.glyph.left>=g.value.left+g.paddingLeft-.5,'whole readout fits');assert.notEqual(g.textOverflow,'ellipsis');assert.ok(g.font.includes('Adwaita Sans'));
         if(Number.isInteger(value))assert.ok(g.glyph.left>=g.track.right+6,'integer readout clears slider');
         const p=await point(size+' .number-value');await input('mouse','down',p);await input('mouse','up',p);await wait();
-        const entry=await evaluate(`document.querySelector('${size} .number-entry').getBoundingClientRect().toJSON()`);close(entry.width,68,'entry width');close(entry.height,24,'entry height');close(entry.bottom,g.box.bottom,'entry bottom');close(entry.right,g.box.right,'entry right');fonts.push({theme,value,role:'entry',...await platformFonts(size+' .number-entry')});
+        const entry=await evaluate(`document.querySelector('${size} .number-entry').getBoundingClientRect().toJSON()`);close(entry.width,68,'entry width');close(entry.height,24,'entry height');close(entry.bottom,g.box.bottom,'entry bottom');close(entry.right,g.box.right,'entry right');fonts.push({theme,value,role:'entry',...await platformFonts(size+' .number-entry',String(value))});
         close(entry.left-g.track.right,8,'entry slider gap');const editingTrack=await evaluate(`document.querySelector('${size} .number-slider').getBoundingClientRect().toJSON()`);close(editingTrack.left,g.track.left,'stable slider left');close(editingTrack.right,g.track.right,'stable slider right');await key('Escape');await wait();
       }
       close(measured[0].glyph.right,measured[1].glyph.right,'999 and 1000 suffix anchor');geometryReports.push({theme,measured});

@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkspaceSwitcher: View {
     @ObservedObject var workspaces: WorkspaceController
     let palette: EditorPalette
+    let compactTextSize: Double
     var textSize: Double = 44.0 / 3
     var maximumWidth: CGFloat = 420
     var tile: CGFloat = 36
@@ -22,12 +23,10 @@ struct WorkspaceSwitcher: View {
         Group {
             if maximumWidth + 0.5 < naturalWidth {
                 EditorMenuButton(menu: { Self.menu(workspaces) }, identifier: "workspace-switcher-menu") {
-                    HStack(spacing: 8) {
-                        Text(choices.first(where: { $0["current"].bool })?["title"].string ?? workspaces.view["switcher_menu"]["title"].string)
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down").font(.system(size: 11))
-                    }.padding(.horizontal, 12).frame(width: maximumWidth, height: tile)
+                    Text(workspaces.view["switcher_menu"]["title"].string).font(.system(size: compactTextSize, weight: .bold)).lineLimit(1)
+                        .padding(.horizontal, 12).frame(width: maximumWidth, height: tile)
                 }.buttonStyle(HeaderButtonStyle(radius: tile / 2))
+                    .accessibilityValue(choices.first(where: { $0["current"].bool })?["title"].string ?? "")
                     .disabled(!workspaces.ready || workspaces.readOnly)
                     .modifier(WorkspaceSwitcherContext(workspaces: workspaces))
             } else {
@@ -94,7 +93,6 @@ struct WorkspaceSwitcherOptions: View {
     @ObservedObject var workspaces: WorkspaceController
     let palette: EditorPalette
     @State private var open = false
-    @State private var popupID = UUID()
     var body: some View {
         let label = workspaces.view["switcher_options_label"].string
         Button { open.toggle() } label: {
@@ -108,8 +106,6 @@ struct WorkspaceSwitcherOptions: View {
                         identifier: "workspace-switcher-options-menu") { open = false }
                 }
             }
-            .onChange(of: open) { _, open in workspaces.store?.workspace.popover(popupID, open: open) }
-            .onDisappear { workspaces.store?.workspace.popover(popupID, open: false) }
     }
 }
 

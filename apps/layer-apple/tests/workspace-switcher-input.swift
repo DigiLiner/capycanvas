@@ -28,6 +28,7 @@ import SwiftUI
         try event(.leftMouseDragged, at: end, marker: marker, number: 207, tablet: true); try await drain(0.05)
         try require(model.contact.dragging && model.menu == nil, "The held pen contact must continue into a drag")
         try event(.leftMouseUp, at: end, marker: marker, number: 208, tablet: true); try await drain(0.3)
+        try await workspaces.settle()
         try require(workspaces.view["order"].array.last?.string == first && workspaces.view["selected"].string == selected,
             "A native pen drop must change shared order without previewing the dragged row")
         try await workspaces.perform(["type": "edit_switcher", "edit": ["type": "move", "id": first, "before": order[1]]])
@@ -89,6 +90,7 @@ import SwiftUI
         var expected = order.filter { $0 != first }
         expected.insert(first, at: hint.before.flatMap { expected.firstIndex(of: $0) } ?? expected.count)
         try event(.leftMouseUp, at: drop, marker: marker, number: 304); try await drain(0.3)
+        try await workspaces.settle()
         try require(workspaces.view["order"].array.map { $0.string } == expected,
             "The shared drop must match the visible insertion hint after autoscroll")
         note("PASS: native scrolling dismisses menus; edge scrolling retains offscreen capture and commits the measured insertion target")
@@ -136,6 +138,7 @@ import SwiftUI
         try require(model.menu == nil && !model.contact.dragging, "A native mouse row hold must not open a context menu")
         note("Mouse hold observed")
         try event(.leftMouseUp, at: start, marker: marker, number: 102); try await drain(0.2)
+        try await workspaces.settle()
         try require(workspaces.view["selected"].string == first, "A stationary mouse row click must select the row")
         note("Mouse click selected row")
         try event(.rightMouseDown, at: start, marker: marker, number: 103); try await drain(0.02)
@@ -144,6 +147,7 @@ import SwiftUI
         note("Secondary menu observed")
         try key("\u{F701}", code: 125, window: window); try await drain()
         try key("\r", code: 36, window: window); try await drain(0.3)
+        try await workspaces.settle()
         try require(model.menu == nil && workspaces.view["order"][1].string == first,
             "Down/Return must skip the disabled Move Up choice and run Move Down")
         note("Keyboard menu action published shared order")
@@ -154,6 +158,7 @@ import SwiftUI
         try event(.leftMouseDragged, at: end, marker: marker, number: 106); try await drain(0.05)
         try require(model.contact.dragging && model.hint != nil, "Native mouse row motion must immediately begin a measured reorder")
         try event(.leftMouseUp, at: end, marker: marker, number: 107); try await drain(0.3)
+        try await workspaces.settle()
         try require(workspaces.view["order"].array.last?.string == first, "The native drop must publish shared order")
         try require(model.drag == nil && model.hint == nil && model.menu == nil, "Drop must retire native feedback")
         let beforeCancel = workspaces.view["order"].stableKey

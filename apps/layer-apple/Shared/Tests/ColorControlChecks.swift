@@ -9,7 +9,7 @@ extension XCTestCase {
             // Scroll the panel's padding, outside the wheel contact area.
             // A fully visible wheel is necessary for normalized picker contacts.
             for _ in 0..<8 {
-                let viewport = scroll.frame.insetBy(dx: 0, dy: 2), frame = element.frame
+                let viewport = scroll.frame, frame = element.frame
                 if frame.minY >= viewport.minY && frame.maxY <= viewport.maxY { return }
                 let upward = frame.maxY > viewport.maxY
                 #if os(macOS)

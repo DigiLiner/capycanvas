@@ -52,7 +52,7 @@ extension XCTestCase {
         workspaceActivate(status)
         XCTAssertTrue(lock.waitForExistence(timeout: 10))
         XCTAssertTrue(lock.isSelected, "The lock shows its current state")
-        workspaceActivate(app.buttons["menu-action-Reset rotation"])
+        workspaceActivate(app.buttons["command-reset_rotation"])
         expectation(for: NSPredicate { _, _ in readout().hasSuffix(" 0°") }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)

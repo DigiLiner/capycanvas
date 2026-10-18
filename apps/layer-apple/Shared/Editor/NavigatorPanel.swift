@@ -14,10 +14,13 @@ struct NavigatorPanel: View {
         VStack(spacing: store.panelMetrics.spacing) {
             NavigatorDrawing(store: store)
                 .frame(minHeight: 0, idealHeight: 164, maxHeight: .infinity)
+                .modifier(PanelBodyMeasurement(panel: "navigator", part: "overview", kind: .scroll,
+                    naturalHeight: { [aspect] width in max(0, width) * aspect }))
             NavigationButtons(store: store, prefix: "navigator")
+                .modifier(PanelBodyMeasurement(panel: "navigator", part: "commands"))
         }.padding(8)
-            .modifier(PanelBodyMeasurement(panel: "navigator", kind: .scroll,
-                naturalHeight: { [aspect] width in max(0, width - 16) * aspect + 4 + 24 + 16 }))
+            .modifier(PanelBodyMeasurement(panel: "navigator", part: "insets",
+                intrinsicHeight: 16 + store.panelMetrics.spacing))
     }
 }
 

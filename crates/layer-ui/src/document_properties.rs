@@ -40,7 +40,7 @@ pub fn document_properties(info: &layer_color::InspectedDocumentInfo, localizer:
         rows.push((label(MessageId::COLOR_PROPERTIES_HDR_WHITE), localizer.format(MessageId::COLOR_PROPERTIES_HDR_VALUE, &args)));
     }
     let sources = info.sources.iter().map(|source| {
-        let channels = match source.channels { SourceChannels::Rgb | SourceChannels::Rgba => "RGB".into(), SourceChannels::Cmyk => "CMYK".into(), SourceChannels::Gray | SourceChannels::GrayAlpha => label(MessageId::COLOR_FEATURES_PROFILE_GRAYSCALE) };
+        let channels = source_channels_label(source.channels, localizer);
         let retained = match source.policy {
             None => MessageId::COLOR_PROPERTIES_RETAINED_PLACED,
             Some(PaintBasePolicy::WorkingPixels) => MessageId::COLOR_PROPERTIES_RETAINED_RASTERIZED,
@@ -48,11 +48,18 @@ pub fn document_properties(info: &layer_color::InspectedDocumentInfo, localizer:
             Some(PaintBasePolicy::SourceProfile) => MessageId::COLOR_PROPERTIES_RETAINED_ORIGINAL,
         };
         let mut args = FluentArgs::new(); args.set("width", source.extent[0]); args.set("height", source.extent[1]);
-        args.set("bits", source.bits); args.set("channels", channels); args.set("profile", crate::profile_library::profile_description_name(source.profile_description.clone(), localizer));
+        args.set("bits", source.bits); args.set("channels", channels.as_ref()); args.set("profile", crate::profile_library::profile_description_name(source.profile_description.clone(), localizer));
         args.set("assumed", if source.profile_assumed {"yes"} else {"no"}); args.set("retained", label(retained));
         (source.name.clone(), localizer.format(MessageId::COLOR_PROPERTIES_SOURCE, &args))
     }).collect();
     DocumentPropertiesView { title: localizer.text(MessageId::COLOR_PROPERTIES_TITLE), source_images: localizer.text(MessageId::COLOR_PROPERTIES_SOURCE_IMAGES), done: localizer.text(MessageId::COMMON_DONE), proof: localizer.text(MessageId::COLOR_FEATURES_PROOF_TITLE), rows, sources }
+}
+pub(crate) fn source_channels_label(channels: SourceChannels, localizer: &Localizer) -> Arc<str> {
+    match channels {
+        SourceChannels::Rgb | SourceChannels::Rgba => "RGB".into(),
+        SourceChannels::Cmyk => "CMYK".into(),
+        SourceChannels::Gray | SourceChannels::GrayAlpha => localizer.text(MessageId::COLOR_FEATURES_PROFILE_GRAYSCALE),
+    }
 }
 #[cfg(test)]
 mod tests {

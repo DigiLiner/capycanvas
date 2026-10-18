@@ -56,6 +56,147 @@ import SwiftUI
             }
         }
         try await wait("Initial editor") { !store.state.isNull && !store.catalog.isNull }
+        do {
+            let unitStore = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
+            try await wait("Unit measurement editor") {
+                precondition(unitStore.failure == nil, String(describing: unitStore.failure))
+                return !unitStore.state.isNull && !unitStore.catalog.isNull
+            }
+            let retainedUnits = PanelMeasurements(store: unitStore)
+            func measuredUnitPanel() -> JSON {
+                precondition(unitStore.failure == nil, String(describing: unitStore.failure))
+                return unitStore.snapshot["panel_measurements"].array.first { $0["panel"].string == "layers" } ?? JSON()
+            }
+            let rowUnits: [(CGFloat?, CGFloat)] = [(40, 40), (nil, 40), (32, 32), (0, 32)]
+            for (index, row) in rowUnits.enumerated() {
+                let (unit, expected) = row
+                let tabWidth = CGFloat(86 + index)
+                var facts: [PanelSizeKey: CGFloat] = [
+                    PanelSizeKey(panel: "layers", part: "tab", kind: .tab): tabWidth,
+                    PanelSizeKey(panel: "layers", part: "header"): 92,
+                    PanelSizeKey(panel: "layers", part: "rows", kind: .scroll): 120,
+                ]
+                if let unit { facts[PanelSizeKey(panel: "layers", part: "row-unit", kind: .unit)] = unit }
+                retainedUnits.receive(facts)
+                try await wait("Measured row units survive lazy absence and adopt actual smaller rows") {
+                    measuredUnitPanel()["tab_width"].number == Double(tabWidth)
+                        && measuredUnitPanel()["scroll"]["unit_height"].number == expected
+                        && measuredUnitPanel()["content_height"].number == 212
+                }
+            }
+            retainedUnits.receive([
+                PanelSizeKey(panel: "layers", part: "tab", kind: .tab): 86,
+                PanelSizeKey(panel: "layers", part: "rows", kind: .scroll): 0,
+            ])
+            try await wait("Empty content must not invent retained rows") { measuredUnitPanel()["content_height"].number == 0 }
+        }
+        do {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("CapyPanelCache-\(UUID())", isDirectory: true)
+            let cacheStore = EditorStore(platform: platform, persistence: EditorPersistence(root: root))
+            try await wait("Private cache workspace editor") {
+                precondition(cacheStore.failure == nil, String(describing: cacheStore.failure))
+                return cacheStore.workspaces?.ready == true && !cacheStore.state.isNull && !cacheStore.catalog.isNull
+            }
+            cacheStore.native?.resize(width: 1200, height: 900, scale: 1)
+            try await wait("Private cache workspace has the fixture viewport") {
+                precondition(cacheStore.failure == nil, String(describing: cacheStore.failure))
+                return cacheStore.snapshot["layout"]["viewport"].array.map { $0.number } == [1200, 900]
+            }
+            try await cacheStore.workspaces!.started()
+            try await cacheStore.workspaces!.perform(["type": "switch", "id": "builtin:workspace:illustrator"])
+            let cache = PanelMeasurements(store: cacheStore)
+            func cacheMeasured(_ panel: String) -> JSON {
+                precondition(cacheStore.failure == nil, String(describing: cacheStore.failure))
+                return cacheStore.snapshot["panel_measurements"].array.first { $0["panel"].string == panel } ?? JSON()
+            }
+            func registered(_ panel: String) -> Bool {
+                cacheStore.state["workspace"]["layout"]["panels"].array.contains { $0["id"].string == panel }
+            }
+            func presented(_ panel: String) -> Bool {
+                cacheStore.snapshot["panels"].array.contains { $0["id"].string == panel }
+            }
+            func rowFacts(_ unit: CGFloat?, tab: CGFloat) -> [PanelSizeKey: CGFloat] {
+                var facts: [PanelSizeKey: CGFloat] = [
+                    PanelSizeKey(panel: "layers", part: "tab", kind: .tab): tab,
+                    PanelSizeKey(panel: "layers", part: "header"): 60,
+                    PanelSizeKey(panel: "layers", part: "footer"): 32,
+                    PanelSizeKey(panel: "layers", part: "rows", kind: .scroll): 120,
+                ]
+                if let unit { facts[PanelSizeKey(panel: "layers", part: "row-unit", kind: .unit)] = unit }
+                return facts
+            }
+            cache.receive(rowFacts(40, tab: 190))
+            try await wait("Known row unit is measured before the presentation change") {
+                cacheMeasured("layers")["tab_width"].number == 190 && cacheMeasured("layers")["scroll"]["unit_height"].number == 40
+            }
+            try await cacheStore.workspaces!.perform(["type": "switch", "id": "builtin:workspace:painter"])
+            try await wait("Painter keeps Layers registered without presenting it") { registered("layers") && !presented("layers") }
+            var painterPanel = ""
+            try await wait("Painter's configured compact toolbar is presented") {
+                precondition(cacheStore.failure == nil, String(describing: cacheStore.failure))
+                let bands = cacheStore.state["workspace"]["layout"]["bands"].array.filter {
+                    $0["edge"].string == "left" && $0["alignment"].string == "center"
+                }
+                guard bands.count == 1, bands[0]["root"]["kind"].string == "tabs" else { return false }
+                let panel = bands[0]["root"]["active"].string
+                guard !panel.isEmpty && registered(panel) && presented(panel) else { return false }
+                painterPanel = panel
+                return true
+            }
+            cache.receive([PanelSizeKey(panel: painterPanel, part: "tab", kind: .tab): 191])
+            try await wait("Hidden workspace cache publication completes") {
+                cacheMeasured(painterPanel)["tab_width"].number == 191 && cacheMeasured("layers").isNull
+            }
+            let layerHeader = cacheStore.snapshot["header"]["items"].array.first {
+                $0["resolved_control"]["kind"].string == "panel" && $0["resolved_control"]["panel"].string == "layers"
+            }!
+            try await cacheStore.apply(["type": "measure_header", "height": 60,
+                "items": [["id": layerHeader["id"].raw,
+                    "bounds": ["x": 800, "y": 0, "width": 40, "height": 60]]]])
+            try await cacheStore.apply(["type": "customize", "action": ["type": "toggle_header_drawer", "id": layerHeader["id"].raw]])
+            try await wait("Layers is presented again with the same registration") { registered("layers") && presented("layers") }
+            cache.receive(rowFacts(nil, tab: 192))
+            try await wait("Registered row unit survives Painter presentation absence") {
+                cacheMeasured("layers")["tab_width"].number == 192
+                    && cacheMeasured("layers")["scroll"]["unit_height"].number == 40
+                    && cacheMeasured("layers")["content_height"].number == 212
+            }
+            cache.receive(rowFacts(32, tab: 193))
+            try await wait("Actual smaller rows replace the retained unit after reopening") {
+                cacheMeasured("layers")["tab_width"].number == 193 && cacheMeasured("layers")["scroll"]["unit_height"].number == 32
+            }
+            let before = Set(cacheStore.state["workspace"]["layout"]["panels"].array.map { $0["id"].string })
+            try await cacheStore.apply(["type": "customize", "action": ["type": "duplicate_toolbar", "panel": "toolbar"]])
+            try await cacheStore.apply(["type": "customize", "action": ["type": "toolbar_name", "name": "Measurement cache \(platform)"]])
+            try await cacheStore.apply(["type": "customize", "action": ["type": "confirm_toolbar"]])
+            let custom = cacheStore.state["workspace"]["layout"]["panels"].array.first { !before.contains($0["id"].string) }!["id"].string
+            try await wait("The new toolbar is registered and presented") { registered(custom) && presented(custom) }
+            cache.receive([PanelSizeKey(panel: custom, part: "tab", kind: .tab): 194,
+                PanelSizeKey(panel: custom, part: "body"): 99])
+            try await wait("The new toolbar has cached width and body facts") {
+                cacheMeasured(custom)["tab_width"].number == 194 && cacheMeasured(custom)["content_height"].number == 99
+            }
+            try await cacheStore.apply(["type": "customize", "action": ["type": "delete_toolbar", "panel": custom]])
+            try await cacheStore.apply(["type": "customize", "action": ["type": "confirm_toolbar"]])
+            try await wait("Deleting the toolbar removes its registration") { !registered(custom) && !presented(custom) }
+            let remaining = painterPanel
+            cache.receive([PanelSizeKey(panel: remaining, part: "tab", kind: .tab): 195])
+            try await wait("Removed-config cache pruning is published") {
+                cacheMeasured(remaining)["tab_width"].number == 195 && cacheMeasured(custom).isNull
+            }
+            try await cacheStore.apply(["type": "invoke", "command": "undo_workspace"])
+            try await wait("Undo restores the same toolbar registration") { registered(custom) && presented(custom) }
+            cache.receive([PanelSizeKey(panel: remaining, part: "tab", kind: .tab): 196])
+            try await wait("Restored toolbar does not revive its pruned width") {
+                cacheMeasured(remaining)["tab_width"].number == 196 && cacheMeasured(custom).isNull
+            }
+            cache.receive([PanelSizeKey(panel: custom, part: "tab", kind: .tab): 197])
+            try await wait("A fresh tab measurement does not revive the removed body") {
+                cacheMeasured(custom)["tab_width"].number == 197 && cacheMeasured(custom)["content_height"].number == 0
+            }
+            await cacheStore.workspaces!.detached()
+            print("PASS: platform \(platform), registered row cache survives presentation absence and adopts actual smaller rows; removed registration prunes width and body")
+        }
         store.native?.resize(width: 1200, height: 900, scale: 1)
         for panel in ["navigator", "sizes"] where group(panel)["active"].string != panel {
             try await store.apply(["type": "select_panel_tab", "group": group(panel)["id"].raw, "panel": panel])
@@ -106,7 +247,7 @@ import SwiftUI
         try await float("navigator", x: 880)
         let document = store.state["tabs"][0], navigatorWidth = group("navigator")["bounds"].rect.width
         precondition(abs(measured("navigator")["content_height"].number
-            - ((navigatorWidth - 16) * document["height"].number / document["width"].number + 50)) < 0.02,
+            - ((navigatorWidth - 16) * document["height"].number / document["width"].number + store.panelMetrics.height + store.panelMetrics.spacing + 16)) < 0.02,
             "The Navigator measures its overview at the floating width plus its command row")
         precondition(geometry.navigators.count == 1, "Measuring tabs must not mount extra GPU Navigator views")
 

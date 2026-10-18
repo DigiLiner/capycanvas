@@ -100,7 +100,7 @@ import SwiftUI
                         if editing {
                             Button { header.showOverflow(zone) } label: { overflowIcon }
                                 .editorPopover(isPresented: Binding(get: { header.overflowZone == zone },
-                                    set: { if !$0 { header.closeOverflow() } })) { overflowEditor(zone) }
+                                    set: { if !$0 { header.closeOverflow() } }), owner: header.popup) { overflowEditor(zone) }
                         } else {
                             EditorMenuButton(menu: { overflow(zone) }, identifier: "header-overflow-menu") { overflowIcon }
                         }
@@ -125,7 +125,7 @@ import SwiftUI
                     .placed(header.preview["held"]).allowsHitTesting(false).accessibilityHidden(true)
             }
             Color.clear.frame(width: header.menuAnchor.width, height: header.menuAnchor.height)
-                .editorPopover(isPresented: Binding(get: { !header.menu.isNull }, set: { if !$0 { header.closeMenu() } }), placement: .inward) {
+                .editorPopover(isPresented: Binding(get: { !header.menu.isNull }, set: { if !$0 { header.closeMenu() } }), placement: .inward, owner: header.popup) {
                     WorkspaceMenu(store: store, menu: header.menu) { header.closeMenu() }
                 }.offset(x: header.menuAnchor.minX, y: header.menuAnchor.minY).allowsHitTesting(false)
         }
@@ -145,8 +145,9 @@ import SwiftUI
                 .accessibilityLabel(command["label"].string).help(command["tooltip"].string)
                 .onHover { capyHovering = $0 }.onChange(of: capyVisible) { _, visible in if !visible { capyHovering = false } }
                 .modifier(WorkspaceContext(store: store, target: JSON(["kind":"zen_mode"])))
-                .accessibilityIdentifier("zen-button").placed(header.geometry["zen_button"])
+                .accessibilityIdentifier("zen-button")
                 .modifier(HeaderControlMeasurement(id: "zen-button", alias: header.geometry["capy_item"].isNull ? nil : "header-item-\(header.geometry["capy_item"].uint)"))
+                .placed(header.geometry["zen_button"])
                 .allowsHitTesting(capyVisible).accessibilityHidden(!capyVisible)
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(NativeReorderInput(model: header))
@@ -288,6 +289,11 @@ private struct HeaderItemControl: View {
     let inBar: Bool
     @State private var hovering = false
     private var kind: String { entry["item"]["kind"].string }
+    private var compactWorkspaceTextSize: Double {
+        if store.snapshot["layout"]["viewport"][0].number <= 850 { return 12 }
+        let points = store.catalog["text_size_pt"].number
+        return points > 0 ? points * 4 / 3 : 44.0 / 3
+    }
     private var radius: CGFloat { size["tile"].number / 2 }
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var drawerOpen: Bool {
@@ -310,7 +316,7 @@ private struct HeaderItemControl: View {
                     .modifier(HeaderControlMeasurement(id: "settings-button"))
             case "workspaces":
                 if let workspaces = store.workspaces {
-                    WorkspaceSwitcher(workspaces: workspaces, palette: palette, maximumWidth: width, tile: size["tile"].number)
+                    WorkspaceSwitcher(workspaces: workspaces, palette: palette, compactTextSize: compactWorkspaceTextSize, maximumWidth: width, tile: size["tile"].number)
                 } else { Text(store.catalog["native_copy"]["header"]["workspaces"].string).lineLimit(1) }
             case "document_title":
                 DrawingTabsHeader(store: store, tabs: store.drawingTabs, width: width, tile: size["tile"].number, gap: size["gap"].number)
@@ -322,6 +328,7 @@ private struct HeaderItemControl: View {
             case "battery":
                 if let battery = status.battery, store.state["fullscreen"].bool {
                     BatteryIndicator(battery: battery, dark: store.state["theme"].string == "dark")
+                        .scaleEffect(1 + (size["tile"].number - 36) / 60)
                         .modifier(HeaderCaption(enabled: !editing))
                 } else { Text(description["label"].string).lineLimit(1) }
             case "space": Color.clear.contentShape(Rectangle()).modifier(HeaderCaption(enabled: !editing))

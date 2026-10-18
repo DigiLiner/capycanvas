@@ -7,7 +7,6 @@ struct LayerPanel: View {
     @StateObject private var interaction = LayerRowInteraction()
     @State private var popupID = UUID()
     @State private var filterMenu = JSON()
-    @State private var filterPopupID = UUID()
     @StateObject private var scrollPosition = EditorScrollPosition()
     @State private var retainedOffset: CGFloat?
     @State private var paperHover = false
@@ -83,16 +82,14 @@ struct LayerPanel: View {
                 retainedOffset = nil
                 if !current["id"].isNull { scrollPosition.scrollTo(id: current["id"].uint) }
             }
-            .onChange(of: filterMenu.isNull) { _, empty in store.workspace.popover(filterPopupID, open: !empty) }
-            .onChange(of: interaction.menu.isNull) { _, empty in store.workspace.popover(popupID, open: !empty) }
             .onChange(of: store.state["revision"].uint) { _, _ in
                 interaction.validate(); store.layerThumbnails.refresh()
             }
-            .onChange(of: store.state["layer_tools"]["rename_layer"].uint) { _, _ in interaction.validate() }
+            .onChange(of: store.state["layer_tools"]["rename_layer"].optionalUInt) { _, _ in interaction.validate() }
             .onChange(of: store.state["document_file"]["epoch"].uint) { _, _ in
                 interaction.cancel(); filterMenu = JSON()
             }
-            .onDisappear { interaction.cancel(); store.workspace.popover(popupID, open: false); store.workspace.popover(filterPopupID, open: false) }
+            .onDisappear { interaction.cancel() }
 
     }
     @ViewBuilder private var dragPreview: some View {
@@ -143,7 +140,7 @@ struct LayerPanel: View {
         }
     }
     private var footer: some View {
-        HStack(spacing: store.panelMetrics.spacing) {
+        ConfigurationFlow(spacing: store.panelMetrics.spacing, trailingLast: true) {
             LayerButton(icon: "add-layer", label: store.catalog["native_copy"]["layers"]["new_layer"].string) { store.layer(["op": "new", "group": false, "clipped": false]) }
             LayerButton(icon: "folder", label: store.catalog["native_copy"]["layers"]["new_group"].string) { store.layer(["op": "new", "group": true, "clipped": false]) }
             LayerButton(icon: "selection-brush", label: store.catalog["native_copy"]["layers"]["new_selection_layer"].string, enabled: store.command("new_selection_layer")["enabled"].bool) {
@@ -162,7 +159,6 @@ struct LayerPanel: View {
                 store.invoke("import_image")
             }
             LayerButton(icon: "delete", label: store.catalog["native_copy"]["layers"]["delete_selected"].string, enabled: view["can_delete"].bool) { store.layer(["op": "delete_selected"]) }
-            Spacer(minLength: 0)
             LayerButton(icon: "more-small", label: store.catalog["native_copy"]["layers"]["actions"].string, enabled: !current.isNull) {
                 openMenu(current, mask: current["mask_selected"].bool, source: .footer)
             }.editorPopover(isPresented: menuPresented(at: .footer), placement: .inward) { menuContent }
@@ -375,7 +371,7 @@ private struct LayerRow: View {
             }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 6)
                 .modifier(LayerRowMeasurement(id: id, part: \.name, enabled: !preview))
                 .contentShape(Rectangle()).onTapGesture {
-                    if store.state["layer_tools"]["rename_layer"].uint != id {
+                    if store.state["layer_tools"]["rename_layer"].optionalUInt != id {
                         selectRow()
                     }
                 }
@@ -519,7 +515,7 @@ private struct LayerName: View {
     @State private var name = ""
     @State private var finished = false
     @FocusState private var focused: Bool
-    private var renaming: Bool { !preview && store.state["layer_tools"]["rename_layer"].uint == layer["id"].uint }
+    private var renaming: Bool { !preview && store.state["layer_tools"]["rename_layer"].optionalUInt == layer["id"].uint }
     var body: some View {
         Group {
             if renaming {
@@ -550,7 +546,7 @@ struct LayerOpacityField: View {
         let epoch = store.state["document_file"]["epoch"].uint
         let change: (Double, String?, @escaping @MainActor (String?) -> Void) -> Void = { value, phase, completion in
             store.effect(layer["id"].uint, epoch: epoch, key: "opacity",
-                action: ["op": "set", "value": ["kind": "number", "value": value]], phase: phase, completion: completion)
+                action: ["op": "layer_opacity", "opacity": value], phase: phase, completion: completion)
         }
         NumberControl(store: store, label: store.catalog["native_copy"]["layers"]["opacity"].string, value: layer["opacity"].number,
             control: store.catalog[inline ? "layer_opacity" : "opacity"], identifier: "layer-opacity", inline: inline,

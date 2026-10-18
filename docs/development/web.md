@@ -198,8 +198,9 @@ export LAYER_TEST_BASH='C:/Program Files/Git/bin/bash.exe'
 geometry, complete readouts and unit alignment, large pixel scrubbing, typed
 fractions and cancellation in both themes. Mouse and touch use the private
 Wayland display; pen and keyboard use trusted browser input. It verifies the
-actual Adwaita Sans glyph fonts and records three sustained value scrubs per
-theme as browser callback diagnostics.
+actual glyph fonts against an independent inherited UI-font sample, retaining the
+Adwaita Sans preference and system fallback. It records three sustained value
+scrubs per theme as browser callback diagnostics.
 
 `test.mjs --gpu-failure-lifecycle` injects an out-of-memory event on the actual
 canvas device and checks expanded details, copying and restarting in both themes.
@@ -314,11 +315,23 @@ reloading its corrupted workspace and preference fixtures.
 | Workspaces | `--workspace-manager`, `--workspace-switcher`, `--workspace-options`, `--workspace-options-refresh`, `--workspace-focus`, `--workspace-windows`, `--workspace-store` |
 | Settings and retained copy | `--preferences`, `--settings-audit`, `--pressure-calibration`, `--language-switching`, `--live-language-color`, `--live-language-proof`, `--live-language-delivery`, `--live-language-surfaces`, `--live-language-toolbar`, `--live-language-effects` |
 
-`--tool-variations` checks Photo's 15 and Paint's 17 tool buttons, compact variation
+`--header-controls` checks menu focus through compact and overflow layouts.
+Expansion restores the first visible, enabled control in the same zone, skipping
+passive items.
+Battery indicators retain their authored width inside padded status tiles;
+title-bar scaling changes their rendered size without flex shrinkage.
+
+`--tool-variations` checks Photo's 16 and Paint's 18 tool buttons, compact variation
 menus and secondary menus, retained icons and sibling choices in active-tool
 drawers, Paint's command categories and remembered media icons, Sketch's header
 groups, separate manual and automatic selection menus and Tool Set rows,
 and mouse/touch/pen hold-to-reorder with one layout undo/redo in both themes.
+
+Drawer sizing uses each column's final allocated width and its children's natural
+height. Width changes schedule another measurement even with reduced motion;
+the prior scroll viewport height must not prevent a drawer from shrinking.
+`--drawer-switch` checks complete Palette footers on every toolbar edge with
+ordinary and reduced motion.
 
 `--enclose-fill` checks real pointer contacts in both themes against transparent
 reference ink. Two fully enclosed holes fill a separate paint layer; a hole

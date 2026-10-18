@@ -86,6 +86,7 @@ numeric-invalid-expression = Masukkan ekspresi matematika yang valid.
 numeric-range = { $label } harus antara { $min } dan { $max }.
 
 numeric-whole-pixels = { $label } memerlukan jumlah piksel bulat.
+numeric-whole-number = { $label } harus berupa bilangan bulat.
 
 common-close = Tutup
 

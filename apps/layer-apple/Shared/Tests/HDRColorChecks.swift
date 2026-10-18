@@ -1,9 +1,9 @@
 import XCTest
 
 extension XCTestCase {
-    @MainActor func checkNativeHDRColor(in app: XCUIApplication) throws {
+    @MainActor func checkNativeHDRColor(in app: XCUIApplication, theme: String = "dark") throws {
         var actions: [[String: Any]] = [
-            ["type": "set_theme", "theme": "dark"],
+            ["type": "set_theme", "theme": theme],
             ["type": "customize", "action": ["type": "insert_tools", "panel": "commands", "before": NSNull()]]
         ]
         for command in ["change_bit_depth", "sdr_rendition", "histogram", "export_document"] {
@@ -11,7 +11,7 @@ extension XCTestCase {
         }
         actions.append(["type": "customize", "action": ["type": "confirm_tools"]])
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = String(data: try JSONSerialization.data(withJSONObject: actions), encoding: .utf8)
-        app.launch(); capturePaintEditor(in: app)
+        app.launch(); capturePaintEditor(in: app, theme: theme)
         func command(_ text: String) {
             let item = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-commands-", text)).firstMatch
             XCTAssertTrue(item.waitForExistence(timeout: 15))
@@ -43,7 +43,7 @@ extension XCTestCase {
         XCTAssertTrue(headline.waitForExistence(timeout: 5))
         let shown = (headline.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? headline.label
         XCTAssertEqual(shown, presented == "HDR" ? "Showing HDR" : "Showing the SDR version")
-        attachEditor(in: app, name: "hdr-screen-details")
+        attachEditor(in: app, name: "hdr-screen-details-" + theme)
         workspaceViewport(in: app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).clickOrTap()
         XCTAssertTrue(headline.waitForNonExistence(timeout: 5))
         let edit = app.buttons["paint-edit-color"].firstMatch
@@ -52,7 +52,7 @@ extension XCTestCase {
         XCTAssertTrue(use.waitForExistence(timeout: 15))
         editColorValue("ev", "2", in: app)
         XCTAssertTrue(app.descendants(matching: .any)["color-current"].firstMatch.exists && app.descendants(matching: .any)["color-new"].firstMatch.exists)
-        attachEditor(in: app, name: "hdr-edit-color")
+        attachEditor(in: app, name: "hdr-edit-color-" + theme)
         workspaceActivate(use)
         XCTAssertTrue(use.waitForNonExistence(timeout: 15))
         workspaceActivate(edit)
@@ -71,7 +71,7 @@ extension XCTestCase {
         #else
         start.press(forDuration: 0.05, thenDragTo: end)
         #endif
-        attachEditor(in: app, name: "hdr-proof-dial")
+        attachEditor(in: app, name: "hdr-proof-dial-" + theme)
         editorHistory("Undo", in: app); editorHistory("Redo", in: app)
         workspaceActivate(app.buttons["proof-reset"])
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
@@ -84,7 +84,7 @@ extension XCTestCase {
             expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: choice)
         }
         waitForExpectations(timeout: 5)
-        attachEditor(in: app, name: "hdr-print-panel")
+        attachEditor(in: app, name: "hdr-print-panel-" + theme)
         workspaceActivate(app.buttons["proof-mode-off"])
         command("Export…")
         let range = app.descendants(matching: .any)["export-range"].firstMatch
@@ -103,23 +103,23 @@ extension XCTestCase {
             #endif
         }
         choose("export-range", "HDR PNG · BT.2020 PQ")
-        XCTAssertTrue(app.staticTexts["BT.2020 PQ · 16-bit · Transparency preserved"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["HDR PNG · BT.2020 PQ"].waitForExistence(timeout: 15))
         workspaceActivate(app.buttons["export-preview"])
-        XCTAssertTrue(app.staticTexts["HDR output · SDR preview"].waitForExistence(timeout: 60))
-        attachEditor(in: app, name: "hdr-pq-output")
+        XCTAssertTrue(app.staticTexts["Output"].waitForExistence(timeout: 60))
+        attachEditor(in: app, name: "hdr-pq-output-" + theme)
         for format in ["HDR JPEG · gain map", "HDR AVIF · gain map with transparency"] {
             choose("export-range", format)
             workspaceActivate(app.buttons["export-preview"])
             XCTAssertTrue(app.staticTexts["HDR reconstruction · SDR preview"].firstMatch.waitForExistence(timeout: 90))
             choose("export-preview-rendition", "Encoded SDR base")
             XCTAssertTrue(app.staticTexts["Encoded SDR base"].firstMatch.waitForExistence(timeout: 15))
-            attachEditor(in: app, name: format.hasPrefix("HDR JPEG") ? "hdr-jpeg-sdr-base" : "hdr-avif-sdr-base")
+            attachEditor(in: app, name: (format.hasPrefix("HDR JPEG") ? "hdr-jpeg-sdr-base-" : "hdr-avif-sdr-base-") + theme)
             choose("export-preview-rendition", "HDR reconstruction · SDR preview")
         }
         choose("export-range", "OpenEXR · 32-bit float")
         workspaceActivate(app.buttons["export-preview"])
-        XCTAssertTrue(app.staticTexts["SDR display preview. OpenEXR preserves document-linear 32-bit float RGB and alpha."].waitForExistence(timeout: 90))
-        attachEditor(in: app, name: "hdr-exr-output")
+        XCTAssertTrue(app.staticTexts["Mapped SDR preview of lossless Float32 OpenEXR delivery."].waitForExistence(timeout: 90))
+        attachEditor(in: app, name: "hdr-exr-output-" + theme)
         workspaceActivate(app.buttons["export-cancel"])
     }
 }

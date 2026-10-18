@@ -3,6 +3,7 @@ import {mkdir,writeFile} from "node:fs/promises";
 
 export async function checkToolbarDrawerSwitching({call,evaluate,settle}) {
   const saved=await evaluate('(()=>{const s=layerApp.state();return{workspace:s.workspace,brush:s.brush,commands:s.commands}})()'),fixture=structuredClone(saved.workspace);
+  const reducedMotion=await evaluate('matchMedia("(prefers-reduced-motion: reduce)").matches');
   const wait=async()=>{await settle();await evaluate('new Promise(r=>setTimeout(r,300))');};
   const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await wait();};
   const tabs=(id,panels)=>({kind:'tabs',id,panels,active:panels[0],tab_style:'icon_name'});
@@ -33,21 +34,25 @@ export async function checkToolbarDrawerSwitching({call,evaluate,settle}) {
       assert.equal(await evaluate('layerApp.state().brush.tool'),i===0?'brush':'eraser');
     }
     assert.equal(await evaluate('document.querySelectorAll(\'.content-drawer[data-drawer="tool"] > .drawer-column\').length'),i===2?1:2);
+    if(i===2)assert.ok(await evaluate('(()=>{const column=document.querySelector(\'.content-drawer[data-drawer="tool"] > .drawer-column\').getBoundingClientRect(),footer=document.querySelector(\'.content-drawer[data-drawer="tool"] .palette-footer\').getBoundingClientRect();return footer.top>=column.top&&footer.bottom<=column.bottom+1})()'),'The color drawer must show the complete Palette footer');
   };
   const toolCommands=['pen','pencil','brush','eraser','airbrush','decoration','blend','liquify','lasso','move','hand','eyedropper','gradient','figure','ruler','auto_select','fill'];
   const originalTool=saved.commands.find(c=>c.selected&&toolCommands.includes(c.id))?.id;
   try {
     await send({type:'restore_workspace',workspace:fixture});
-    for(const edge of ['top','bottom','left','right']) {
-      await send({type:'move_panel',panel:'toolbar',target:{kind:'edge',edge,outer:true}});
-      await send({type:'invoke',command:'pen'});
-      await click(0);assert.equal(await evaluate('layerApp.state().brush.tool'),'brush',`${edge}: first click selects Brush`);
-      assert.equal(await model(),undefined,'Without an open drawer the first click only selects');
-      await click(0);await check(0);
-      await click(1,0);await check(1);
-      await click(2,1);await check(2);
-      await click(0,2);await check(0);
-      await click(0);assert.equal(await model(),undefined,'Current opener still closes its drawer');
+    for(const motion of ['no-preference','reduce']) {
+      await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:motion}]});
+      for(const edge of ['top','bottom','left','right']) {
+        await send({type:'move_panel',panel:'toolbar',target:{kind:'edge',edge,outer:true}});
+        await send({type:'invoke',command:'pen'});
+        await click(0);assert.equal(await evaluate('layerApp.state().brush.tool'),'brush',`${edge}: first click selects Brush`);
+        assert.equal(await model(),undefined,'Without an open drawer the first click only selects');
+        await click(0);await check(0);
+        await click(1,0);await check(1);
+        await click(2,1);await check(2);
+        await click(0,2);await check(0);
+        await click(0);assert.equal(await model(),undefined,'Current opener still closes its drawer');
+      }
     }
     const contact=async(selector,device)=>{
       const p=await evaluate(`(()=>{const b=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:b.x+b.width/2,y:b.y+b.height/2}})()`);
@@ -82,6 +87,7 @@ export async function checkToolbarDrawerSwitching({call,evaluate,settle}) {
     await click(2);await check(2);await click(1,2);await check(1);await click(0,1);await check(0);
     console.log('PASS: first-click drawer switching on all toolbar edges and inside a collapsed drawer; mouse/touch/pen outside dismissal, menu activation and no canvas marks');
   } finally {
+    await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:reducedMotion?'reduce':'no-preference'}]});
     await send({type:'restore_workspace',workspace:saved.workspace});
     await send({type:'select_brush',id:saved.brush.preset});
     if(originalTool)await send({type:'invoke',command:originalTool});

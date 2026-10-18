@@ -213,6 +213,13 @@ pub struct RetainedTiles {
     pub metadata_bytes: usize,
 }
 impl Editor {
+    pub fn retained_images(&self) -> Vec<crate::Image> {
+        let mut roots=crate::RootInventory::default();roots.document(&self.document);
+        for entry in self.undo.iter().chain(&self.redo) {entry.edit.roots(&mut roots);}
+        let mut images=std::collections::BTreeMap::new();
+        for image in roots.images {images.entry(image.id()).or_insert_with(||image.clone());}
+        images.into_values().collect()
+    }
     pub fn retained_tiles(&self) -> RetainedTiles {
         let mut roots=crate::RootInventory::default();
         roots.document(&self.document);

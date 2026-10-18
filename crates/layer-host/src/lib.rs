@@ -128,11 +128,15 @@ impl NativeHost {
         Self::launch_localized(platform, saved, layer_ui::launch_localization(saved, preferred_tags))
     }
     pub fn launch_localized(platform: layer_ui::Platform, saved: &str, localization: std::sync::Arc<layer_ui::Localizer>) -> Result<Self, String> {
-        let mut host = Self::new_localized(platform, localization)?;
-        if !saved.is_empty() {
-            host.dispatch(UiAction::RestoreSavedSettings { saved: saved.to_owned() })?;
-        }
-        Ok(host)
+        let settings = layer_ui::Settings::restore_localized(saved, &localization);
+        let paper = papers::PreparedPaper { texture: settings.new_document.paper(), identity: None, warning: None };
+        Self::launch_prepared(platform, settings, localization, paper)
+    }
+    pub fn launch_prepared(platform: layer_ui::Platform, settings: layer_ui::Settings, localization: std::sync::Arc<layer_ui::Localizer>,
+        paper: papers::PreparedPaper) -> Result<Self, String> {
+        let mut session = UiSession::blank_with_settings(Renderer::default(), [1, 1], platform, localization, settings, paper.texture.clone())?;
+        paper.apply(&mut session);
+        Ok(Self::from_session(Box::new(session)))
     }
     pub fn bootstrap_view(&self) -> layer_ui::BootstrapView {
         layer_ui::bootstrap_view(self.session.localization())
@@ -159,9 +163,12 @@ impl NativeHost {
         platform: layer_ui::Platform,
         localization: std::sync::Arc<layer_ui::Localizer>,
     ) -> Result<Self, String> {
-        let catalog = Box::new(layer_ui::ui_catalog_localized(&localization));
         let session = UiSession::blank_localized(Renderer::default(), [1, 1], platform, localization).map(Box::new)?;
-        Ok(Self {
+        Ok(Self::from_session(session))
+    }
+    fn from_session(session: Box<UiSession<Renderer>>) -> Self {
+        let catalog = Box::new(layer_ui::ui_catalog_localized(session.localization()));
+        Self {
             session,
             ui_color: UiColor::Mapped,
             logical: [1.0, 1.0],
@@ -192,7 +199,7 @@ impl NativeHost {
             catalog,
             localization_generation: 0,
             thumbnails: Default::default(),
-        })
+        }
     }
     /// Regions changed since the platform service last observed accepted input.
     /// Independent of snapshot publication, so taking a UI update cannot erase
@@ -1174,6 +1181,24 @@ mod tests {
         assert_eq!(host.bootstrap_view().active_tag, "ja");
         assert_eq!(host.bootstrap_view().shipped_tags, layer_ui::UiLanguage::ALL.map(layer_ui::UiLanguage::tag));
         assert!(std::sync::Arc::ptr_eq(host.session.localization(), &layer_ui::launch_localization(saved, &["en"])));
+    }
+
+    #[test]
+    fn launch_uses_saved_creation_defaults_and_paper_before_first_publication() {
+        let mut settings=layer_ui::Settings::default();
+        settings.new_document.paper=Some("rough".into());
+        settings.new_document.defaults.extent=[513,257];settings.new_document.defaults.resolution=150;
+        let saved=serde_json::to_string(&settings).unwrap();
+        for platform in [layer_ui::Platform::Android,layer_ui::Platform::Windows,layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
+            let host=NativeHost::launch(platform,&saved,&["en"]).unwrap();
+            let document=host.session.engine().document();
+            assert_eq!(document.paper(None).texture,settings.new_document.paper());
+            assert_eq!(document.composition().size,[513,257]);
+            assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(150)));
+            assert!(!host.session.state().document_file.modified);
+            assert!(!host.session.engine().can_undo());assert!(!host.session.engine().can_redo());
+            assert!(!host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::SaveSettings {..})));
+        }
     }
 
     #[test]

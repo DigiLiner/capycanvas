@@ -103,10 +103,7 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
     private var dropRequest = UUID()
     private var layers: [JSON] { store?.state["layers"].array ?? [] }
     private var epoch: UInt64 { store?.state["document_file"]["epoch"].uint ?? 0 }
-    private var renaming: UInt64? {
-        guard let value = store?.state["layer_tools"]["rename_layer"], !value.isNull else { return nil }
-        return value.uint
-    }
+    private var renaming: UInt64? { store?.state["layer_tools"]["rename_layer"].optionalUInt }
     var enabled: Bool { store != nil && !layers.isEmpty }
     private func row(at point: CGPoint) -> JSON? {
         guard enabled, viewport.contains(point),

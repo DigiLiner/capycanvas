@@ -59,15 +59,22 @@ pub(super) async fn run(w: &Rc<Workspace>, request: PaperRequest) -> Result<(), 
     let directory = directory(w)?;
     let failed = |w: &Rc<Workspace>, error: PaperLibraryError| error.message(&w.localization());
     let worker = || "Paper library worker failed".to_string();
+    let retained=if matches!(&request,PaperRequest::Load { .. } | PaperRequest::Import { .. }) {w.gpu.borrow().as_ref().map(|gpu|gpu.session.paper_sources()).unwrap_or_default()}else{Vec::new()};
     match request {
         PaperRequest::Import { layer } => {
             let Some(path) = choose_image(w).await? else { return Ok(()) };
-            let (id, image, entries) = gio::spawn_blocking(move || import(directory, path)).await.map_err(|_| worker())?.map_err(|e| failed(w, e))?;
+            let (id, image, entries) = gio::spawn_blocking(move || {
+                let (id,image,entries)=import(directory,path)?;
+                let image=layer_host::papers::canonical_source(&id,image,&retained)?;
+                Ok::<_,PaperLibraryError>((id,image,entries))
+            }).await.map_err(|_| worker())?.map_err(|e| failed(w, e))?;
             apply(w, |session| session.paper_imported(layer, entries, &id, image))
         }
         PaperRequest::Load { id } => {
             let read = id.clone();
-            let image = gio::spawn_blocking(move || layer_host::papers::load(&directory, &read)).await.map_err(|_| worker())??;
+            let image = gio::spawn_blocking(move || {
+                layer_host::papers::canonical_source(&read,layer_host::papers::load(&directory,&read)?,&retained)
+            }).await.map_err(|_| worker())??;
             apply(w, |session| session.paper_loaded(&id, image))
         }
         PaperRequest::Add { layer, name } => {

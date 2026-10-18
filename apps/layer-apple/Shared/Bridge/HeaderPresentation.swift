@@ -18,7 +18,7 @@ import SwiftUI
     private var layout = JSON()
     private var layoutKey = ""
     private var measurementKey = ""
-    private let popup = UUID()
+    let popup = UUID()
     private var menuRequest = UUID()
     private var querying = false
     private struct Drag {
@@ -64,11 +64,11 @@ import SwiftUI
     }
     func removeSelected() { if let selected, enabled { action(["type":"remove", "id":selected]) } }
     func showOverflow(_ zone: Int) {
-        closeMenu(); overflowZone = zone; store?.workspace.popover(popup, open: true)
+        closeMenu(); overflowZone = zone
     }
     func closeOverflow() {
         guard overflowZone != nil else { return }
-        overflowZone = nil; overflowSources = [:]; store?.workspace.popover(popup, open: false)
+        overflowZone = nil; overflowSources = [:]
     }
     func source(at point: CGPoint) -> ReorderTarget? {
         guard enabled, viewport.contains(point), menu.isNull,
@@ -100,12 +100,12 @@ import SwiftUI
         let token = UUID(); menuRequest = token
         store.query(["type":"context", "target":["kind":"header", "id":id]]) { [weak self] value in
             guard let self, self.menuRequest == token, self.enabled else { return }
-            self.menu = value; store.workspace.popover(self.popup, open: !value.isNull)
+            self.menu = value
         }
     }
     func closeMenu() {
         menuRequest = UUID()
-        if !menu.isNull { menu = JSON(); store?.workspace.popover(popup, open: false) }
+        if !menu.isNull { menu = JSON() }
     }
     func cancel() { contact.cancel(); cancelDrag(); closeMenu(); closeOverflow() }
     private func query(_ value: [String: Any], completion: @escaping @MainActor (JSON) -> Void) {

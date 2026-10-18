@@ -51,6 +51,8 @@ enum Payload {
         candidate: Option<Box<UiSession<Renderer>>>,
         source: layer_ui::ImportSource,
         imported: Option<layer_ui::ImportedDocument>,
+        paper_directory: Option<std::path::PathBuf>,
+        paper: Option<layer_host::papers::PreparedPaper>,
     },
     Placed {
         images: layer_ui::ImageImportBatch,
@@ -234,6 +236,8 @@ pub unsafe extern "C" fn capy_apple_project_task(
                 candidate: None,
                 source: layer_ui::ImportSource::Master,
                 imported: None,
+                paper_directory: app.paper_directory.clone(),
+                paper: None,
             }
         } else {
             return Err("Unknown project task kind".into());
@@ -411,7 +415,8 @@ pub unsafe extern "C" fn capy_project_finish_images(task: *const CapyProjectTask
             None => layer_ui::clipboard_document(images.take_sources(task.control.is_cancelled())?, environment.photo_policy, &environment.localization)?,
         };
         let candidate = environment.prepare(document, || task.check_cancelled().is_err())?;
-        *payload = Payload::Open { environment: None, candidate: Some(candidate), source: layer_ui::ImportSource::Photo, imported: None };
+        *payload = Payload::Open { environment: None, candidate: Some(candidate), source: layer_ui::ImportSource::Photo, imported: None,
+            paper_directory: None, paper: None };
         Ok(())
     })
 }
@@ -541,15 +546,19 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
         }
         let input = input?;
         let name = name?;
-        let Payload::Open { environment, candidate, source, imported } = payload else {
+        let Payload::Open { environment, candidate, source, imported, paper_directory, paper } = payload else {
             return Err("Not an open task".into());
         };
         let context = environment.as_ref().ok_or("This open task has already run")?;
         match input {
-            Input::New(options) => *imported = Some(layer_ui::ImportedDocument::new(
-                options.unwrap_or(context.new_options).project_on(context.new_paper.clone(), &context.localization)?,
-                layer_ui::ImportSource::Master,
-            )),
+            Input::New(options) => {
+                let prepared = layer_host::papers::resolve(&context.new_paper, paper_directory.as_deref(), &context.localization);
+                *imported = Some(layer_ui::ImportedDocument::new(
+                    options.unwrap_or(context.new_options).project_on(prepared.texture.clone(), &context.localization)?,
+                    layer_ui::ImportSource::Master,
+                ));
+                *paper = Some(prepared);
+            }
             Input::File(fd) => {
                 let file = host_file(fd);
                 let outcome = context.read(layer_core::Cancellable { inner: &*file, cancelled: || task.check_cancelled().is_err() },
@@ -662,7 +671,7 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
             app.host.apply_change(previous, change);
             return Ok(());
         }
-        let Payload::Open { candidate, source, .. } = &mut state.payload else {
+        let Payload::Open { candidate, source, paper, .. } = &mut state.payload else {
             return Err("Not an open task".into());
         };
         let location = source.adoption_location(location);
@@ -670,6 +679,11 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
         let open = OpenAdoption { epoch: task.epoch, revision: task.revision, location };
         let retired = app.window.adopt(&mut app.host, candidate, open,
             || unsafe { capy_project_begin_commit(task) } >= 0, |session| session)?;
+        if let Some(paper) = paper.take() {
+            let previous = app.host.session.state().revision;
+            let change = paper.apply(&mut app.host.session);
+            app.host.apply_change(previous, change);
+        }
         app.document_retired();
         if let (Some(location), Some(fingerprint)) = (fingerprint_location, state.fingerprint.clone()) {
             app.host.session.record_destination_fingerprint(&location, fingerprint)?;

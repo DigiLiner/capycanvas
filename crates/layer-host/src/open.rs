@@ -19,7 +19,7 @@ pub struct OpenEnvironment {
     pub viewport: [u32; 2],
     pub brush: layer_core::BrushSnapshot,
     pub new_options: layer_ui::NewDocumentOptions,
-    pub new_paper: layer_core::TextureSource,
+    pub new_paper: layer_ui::paper_library::PaperMaterial,
     pub photo_policy: layer_ui::PhotoOpenPolicy,
 }
 
@@ -44,7 +44,7 @@ impl OpenEnvironment {
             viewport: session.state().camera.viewport,
             brush: session.engine().configured_brush().clone(),
             new_options: session.state().settings.new_document.defaults,
-            new_paper: session.new_drawing_paper(),
+            new_paper: session.new_drawing_paper_material(),
             photo_policy: session.state().settings.photo_open,
         })
     }

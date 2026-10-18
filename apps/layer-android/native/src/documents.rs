@@ -185,7 +185,7 @@ fn prepare(t: &mut Task, input: Option<File>, width: u32, height: u32) -> Result
                     extent: [width, height],
                     ..e.open.new_options
                 }
-                .project_on(e.open.new_paper.clone(), &e.open.localization)?, layer_ui::ImportSource::Master)
+                .project_on(e.open.new_paper.fallback(), &e.open.localization)?, layer_ui::ImportSource::Master)
             }
         }
     };

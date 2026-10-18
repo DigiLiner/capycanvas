@@ -40,14 +40,23 @@ export function createNumberField({ control, label, labels: captions, resolve, e
   if (panel) root.classList.add('number-panel');
   const buttonValue = ranged || valueOnly;
   if (ranged) { if (panel) track.append(slider); else track.append(minus, slider, plus); root.append(track); }
-  else { valueBox.classList.add("number-spin"); valueBox.append(minus, plus); entry.size=Math.max(3,...(widthSamples||[control.min,control.max].map(value=>resolve({control,value,operation:{type:"format"}}).text)).map(text=>text.length)); }
+  else {
+    valueBox.classList.add("number-spin"); valueBox.append(minus, plus);
+    const samples=widthSamples||[control.min,control.max].map(value=>resolve({control,value,operation:{type:"format"}}).text);
+    entry.size=Math.max(3,...samples.map(text=>text.length));
+    if(!inline&&!valueOnly) {
+      const field=node('div','number-spin-field'),measure=node('span','number-measure');
+      measure.textContent=[...samples].sort((a,b)=>b.length-a.length)[0].replace(/\p{Number}/gu,'8');
+      measure.setAttribute('aria-hidden','true');field.append(entry,measure);valueBox.replaceChildren(field,minus,plus);
+    }
+  }
   if (inline) {
     root.classList.add("number-inline"); root.title = label;
     labels.remove(); minus.remove(); plus.remove();
     root.replaceChildren(track, valueBox);
     const measure = node("span", "number-measure");
     measure.textContent = (widthSamples || [control.min, control.max].map(value => resolve({ control, value, operation: { type: "format" } }).text))
-      .sort((a, b) => b.length - a.length)[0].replace(/\d/g, "8");
+      .sort((a, b) => b.length - a.length)[0].replace(/\p{Number}/gu, "8");
     valueBox.append(measure);
     if (valueOnly) { root.classList.add('number-value-only'); entry.size = 1; }
   }

@@ -9,27 +9,36 @@ export async function captureChoices({manifest, output, evaluate, call}) {
   for (const fixture of manifest.fixtures) {
     assert.match(fixture.name,/^[a-z0-9-]+$/);
     await call('Emulation.setDeviceMetricsOverride',{width:fixture.width,height:fixture.height,deviceScaleFactor:fixture.scale,mobile:false});
+    assert.ok(fixture.panel_metrics,'Native fixture must supply shared panel metrics');
     const metrics=await evaluate(`(async()=>{
       const f=${JSON.stringify(fixture)};
       document.head.innerHTML='<link rel="stylesheet" href="/style.css">';
       await new Promise((resolve,reject)=>{const link=document.head.querySelector('link');link.onload=resolve;link.onerror=reject;});
       document.body.replaceChildren();document.body.dataset.theme=f.theme;
       document.documentElement.style.setProperty('--ui-text-size',f.text_size+'px');
+      for(const [key,value] of Object.entries(f.panel_metrics))
+        document.documentElement.style.setProperty('--panel-'+key.replaceAll('_','-'),value+'px');
       for(const [key,value] of Object.entries(f.palette))if(typeof value==='string')
         document.body.style.setProperty('--'+key.replaceAll('_','-'),value);
       document.body.style.background=f.palette.panel;
       const make=(tag,css)=>{const n=document.createElement(tag);n.className=css||'';return n;};
-      const select=()=>{const n=make('select');for(const [i,label] of f.options.entries()){
+      const select=(enabled=f.enabled)=>{const n=make('select');for(const [i,label] of f.options.entries()){
         const o=make('option');o.value=i;o.textContent=label;n.append(o);
-      }n.value=f.selected;n.disabled=!f.enabled;return n;};
+      }n.value=f.selected;n.disabled=!enabled;return n;};
       const property=make('div','property-controls'+(f.enabled?'':' disabled'));
       property.style.cssText='position:absolute;left:6px;top:6px;width:'+(f.width-12)+'px';
       const row=make('label','property-row'),label=make('span');label.textContent='Blend mode';
-      const choices={property:select(),wide:select(),compact:select()};row.append(label,choices.property);property.append(row);
-      const wide=make('div','property-controls'+(f.enabled?'':' disabled'));
-      wide.style.cssText='position:absolute;left:6px;top:56px;width:'+(f.width-12)+'px';wide.append(choices.wide);
+      const choices={property:select(),wide:select(true),compact:make('button','layer-blend')};row.append(label,choices.property);property.append(row);
+      const wide=make('div','panel');
+      wide.style.cssText='position:absolute;padding:0;height:auto;left:6px;top:56px;width:'+(f.width-12)+'px';
+      choices.wide.style.width='100%';wide.append(choices.wide);
       const compact=make('div','panel');compact.style.cssText='position:absolute;padding:0;left:6px;top:106px;width:'+(f.width-12)+'px';
-      const grid=make('div','layer-options');grid.append(choices.compact,make('div'));compact.append(grid);
+      const grid=make('div','layer-options'),blendLabel=make('span','layer-blend-label');
+      blendLabel.textContent=f.options[f.selected];choices.compact.disabled=!f.enabled;
+      choices.compact.setAttribute('aria-label','Layer blend mode');choices.compact.setAttribute('aria-haspopup','menu');
+      const sprite=new DOMParser().parseFromString(await(await fetch('/icons.svg')).text(),'image/svg+xml');
+      const arrow=sprite.querySelector('[data-asset="chevron-down"]').cloneNode(true);
+      choices.compact.append(blendLabel,arrow);grid.append(choices.compact,make('div'));compact.append(grid);
       document.body.append(property,wide,compact);
       await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
       const output={};const canvas=document.createElement('canvas'),context=canvas.getContext('2d');
@@ -61,4 +70,6 @@ export async function captureChoices({manifest, output, evaluate, call}) {
   }
   await writeFile(`${output}/choice-geometry.json`,JSON.stringify(reports,null,2)+'\n');
   console.log(`Captured ${reports.length} browser choice fixtures`);
+  assert.ok(reports.every(report=>report.within_one_point),
+    'Choice geometry differs by more than one logical point: '+JSON.stringify(reports.filter(report=>!report.within_one_point)));
 }

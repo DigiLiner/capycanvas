@@ -305,7 +305,7 @@ fn prepare(
     let imported = match source {
         Source::Clip(clip) => return environment.prepare(clip.document(&environment.localization)?, || cancel.load(Ordering::Acquire)).map(Completed::PhotoPrepared),
         Source::Images(sources) => return environment.prepare(layer_ui::clipboard_document(sources, environment.photo_policy, &environment.localization)?, || cancel.load(Ordering::Acquire)).map(Completed::PhotoPrepared),
-        Source::Create(options) => layer_ui::ImportOutcome::Editable(layer_ui::ImportedDocument::new(options.project_on(environment.new_paper.clone(),&environment.localization)?,layer_ui::ImportSource::Master)),
+        Source::Create(options) => layer_ui::ImportOutcome::Editable(layer_ui::ImportedDocument::new(options.project_on(environment.new_paper.fallback(),&environment.localization)?,layer_ui::ImportSource::Master)),
         Source::Interpret(mut imported, profile) => {
             let profile=match profile.resolve(cancel, &environment.localization) { Ok(profile)=>profile,Err(reason)=>return Ok(Completed::ProfileFailure(reason)) };
             imported.interpret(profile)?; layer_ui::ImportOutcome::Editable(*imported)

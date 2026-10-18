@@ -45,6 +45,7 @@ numeric-expression-too-long = Biểu thức này quá dài.
 numeric-invalid-expression = Nhập một biểu thức toán học hợp lệ.
 numeric-range = { $label } phải nằm trong khoảng từ { $min } đến { $max }.
 numeric-whole-pixels = { $label } cần số pixel nguyên.
+numeric-whole-number = { $label } phải là số nguyên.
 common-close = Đóng
 common-remove = Xóa
 common-delete = Xóa

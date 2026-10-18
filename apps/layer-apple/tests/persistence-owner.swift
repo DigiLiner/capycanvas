@@ -41,6 +41,35 @@ private final class State: @unchecked Sendable {
                 page["groups"].array.flatMap { $0["rows"].array }
             }
         }
+        func checkCatalogTrace(platform: UInt32) throws {
+            let output = directory.appendingPathComponent("trace-\(platform)")
+            let previous = ProcessInfo.processInfo.environment["CAPY_TRACE_DIRECTORY"]
+            setenv("CAPY_TRACE_DIRECTORY", output.path, 1)
+            defer {
+                if let previous { setenv("CAPY_TRACE_DIRECTORY", previous, 1) }
+                else { unsetenv("CAPY_TRACE_DIRECTORY") }
+            }
+            let state = State()
+            var owner: NativeOwner? = try NativeOwner(platform: platform, persistence: EditorPersistence(root: nil),
+                traceDuration: 30, receive: { state.receive($0, $1) })
+            let reply = Reply<Bool>(), now = FrameTrace.now()
+            owner!.frame(now: now, target: now + 16_666_667) { _, _, _ in reply.set(true) }
+            precondition(reply.get() && state.read().2 == nil, "The traced native owner must publish without a frame error")
+            owner = nil
+            let deadline = Date().addingTimeInterval(10)
+            var files: [URL] = []
+            while files.isEmpty {
+                files = (try? FileManager.default.contentsOfDirectory(at: output, includingPropertiesForKeys: nil))?
+                    .filter { $0.pathExtension == "jsonl" } ?? []
+                precondition(Date() < deadline, "The native owner must finish its private trace")
+                if files.isEmpty { Thread.sleep(forTimeInterval: 0.01) }
+            }
+            let lines = try String(contentsOf: files[0], encoding: .utf8).split(separator: "\n").dropFirst()
+            let events = try lines.map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [UInt64] }
+            precondition(events.contains { $0[0] == UInt64(FrameTraceEvent.Kind.state.rawValue) && $0[3] & 2 != 0 },
+                "The actual native trace must report its loaded catalog")
+            print("PASS native catalog trace platform \(platform)")
+        }
         func preferenceValue(_ row: JSON) -> JSON {
             let kind = row["kind"]
             switch kind["type"].string {
@@ -142,6 +171,7 @@ private final class State: @unchecked Sendable {
             print("PASS pressure platform \(platform): exact Cancel restoration and Apply/flush/fresh-owner curve persistence")
         }
         for platform: UInt32 in [0,1] {
+            try checkCatalogTrace(platform: platform)
             try checkPreferenceRows(platform: platform)
             try checkPressure(platform: platform)
             let root = directory.appendingPathComponent("platform-\(platform)")

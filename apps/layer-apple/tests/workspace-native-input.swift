@@ -37,15 +37,25 @@ import SwiftUI
             number += 1; try event(type, at: point, marker: marker, number: platform == 0 ? number : 0, tablet: pen)
             try await drain(type == .leftMouseDown ? 0.02 : 0.08)
         }
-        func center(_ item: JSON) -> CGPoint {
-            let bounds = workspace.sources[item.stableKey]!.bounds
-            return CGPoint(x: bounds.midX, y: bounds.midY)
+        func center(_ item: JSON) async throws -> CGPoint {
+            var previous = CGRect.null, stableSince = Date(), point = CGPoint.zero
+            try await wait("Settled native source \(item.stableKey)") {
+                guard let source = workspace.sources[item.stableKey], !source.bounds.isEmpty else {
+                    stableSince = Date(); return false
+                }
+                point = CGPoint(x: source.bounds.midX, y: source.bounds.midY)
+                let hit = workspace.hitSource(at: point)?.1
+                let matches = hit?.item == item.stableKey && hit?.surface == source.surface
+                if source.bounds != previous || !matches { previous = source.bounds; stableSince = Date() }
+                return matches && Date().timeIntervalSince(stableSince) > 0.2
+            }
+            return point
         }
         func action(_ value: [String: Any]) async throws {
             try await store.apply(value)
             try await drain()
         }
-        var start = center(item)
+        var start = try await center(item)
         try await send(.leftMouseDown, start); try await send(.leftMouseUp, start)
         try await wait("Ordinary tile action") { store.panel("toolbar")["tiles"].array.first { $0["id"].uint == tile["id"].uint }?["selected"].bool == true }
         try await action(["type": "invoke", "command": "brush"])
@@ -53,16 +63,20 @@ import SwiftUI
             let item = JSON(["kind": "tile", "panel": "toolbar", "tile": tile["id"].raw])
             try await wait("\(label) source") { workspace.sources[item.stableKey] != nil }
             for pen in [false, true] {
-                let start = center(item)
+                let start = try await center(item)
                 let before = store.state["workspace"].stableKey
                 let selected = store.panel("toolbar")["tiles"].array.filter { $0["selected"].bool }.map { $0["id"].uint }
                 let neighbor = store.panel("toolbar")["tiles"].array.first {
-                    $0["id"].uint != tile["id"].uint && workspace.sources[JSON(["kind": "tile", "panel": "toolbar", "tile": $0["id"].raw]).stableKey] != nil
+                    $0["id"].uint != tile["id"].uint && workspace.sources[JSON(["kind": "tile", "panel": "toolbar", "tile": $0["id"].raw]).stableKey].map { !$0.bounds.isEmpty } == true
                 }!
-                let end = center(JSON(["kind": "tile", "panel": "toolbar", "tile": neighbor["id"].raw]))
+                let destination = workspace.sources[JSON(["kind": "tile", "panel": "toolbar", "tile": neighbor["id"].raw]).stableKey]!.bounds
+                let end = CGPoint(x: destination.minX + min(4, destination.width / 4), y: destination.midY)
                 try await send(.leftMouseDown, start, pen: pen)
-                try require(input.contact.device == (pen ? .pen : .mouse) && input.contact.requiresHold,
-                    "The native tile must classify its actual device and require a hold")
+                let captured = input.contact.target.flatMap { workspace.sourceInstances[$0.id] }
+                try require(input.contact.device == (pen ? .pen : .mouse) && input.contact.requiresHold
+                    && captured?.item == item.stableKey,
+                    "The native tile must capture its intended item and device with hold gating: platform=\(platform), \(label), pen=\(pen), "
+                        + "point=\(start), item=\(item.stableKey), captured=\(String(describing: captured))")
                 try await send(.leftMouseDragged, end, pen: pen)
                 try require(!input.contact.dragging && input.menu.isNull, "Early tile motion must not drag or open a menu")
                 try await send(.leftMouseUp, end, pen: pen)
@@ -78,9 +92,24 @@ import SwiftUI
                 if pen { try key("\u{1b}", code: 53, window: window); try await drain(); try require(input.menu.isNull, "Escape must close the native tile menu") }
 
                 try await send(.leftMouseDown, start, pen: pen); try await drain(hold)
+                let picked = input.contact.target.flatMap { workspace.sourceInstances[$0.id] }
+                try require(picked?.item == item.stableKey, "A held pickup must retain its intended native tile")
                 try await send(.leftMouseDragged, end, pen: pen)
                 try require(input.contact.dragging && input.menu.isNull, "The original held contact must close its menu and start dragging")
+                let planned: JSON = await withCheckedContinuation { done in
+                    store.query(["type": "drop", "item": item.raw, "position": [end.x, end.y],
+                        "tabs": workspace.tabs.map(\.raw), "expansion": workspace.expansion.raw]) { done.resume(returning: $0) }
+                }
+                try require(planned["target"]["kind"].string == "tile" && planned["target"]["panel"].string == "toolbar"
+                    && planned["action"]["type"].string == "move_tile" && planned["action"]["panel"].string == "toolbar"
+                    && planned["action"]["tile"].uint == tile["id"].uint
+                    && planned["action"]["target"].stableKey == planned["target"].stableKey,
+                    "A measured drop must propose a changing reorder of its source: platform=\(platform), \(label), source=\(start), neighbor=\(neighbor["id"].uint), destination=\(destination), end=\(end), hint=\(planned.stableKey)")
+                try require(store.state["workspace"].stableKey == before, "A drop query must not mutate layout or history")
                 try await wait("Shared tile insertion hint") { !workspace.dropHint["action"].isNull }
+                try require(workspace.dropHint["target"].stableKey == planned["target"].stableKey
+                    && workspace.dropHint["action"].stableKey == planned["action"].stableKey,
+                    "The real native contact must resolve the planned shared insertion and action")
                 try await send(.leftMouseUp, end, pen: pen)
                 try await wait("Shared tile drop") { store.state["workspace"].stableKey != before }
                 let after = store.state["workspace"].stableKey
@@ -117,7 +146,7 @@ import SwiftUI
         try await checkTiles("docked")
         // The ribbon grip carries a panel payload but must remain immediate.
         let handle = JSON(["kind": "panel", "panel": "toolbar"])
-        start = center(handle)
+        start = try await center(handle)
         let before = store.state["workspace"].stableKey
         try await send(.leftMouseDown, start, pen: true)
         try require(!input.contact.requiresHold, "The panel grip must remain distinct from a panel icon tile")

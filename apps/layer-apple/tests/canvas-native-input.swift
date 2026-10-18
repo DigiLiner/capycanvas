@@ -1,6 +1,19 @@
 import AppKit
+import CryptoKit
 import ImageIO
 import SwiftUI
+
+private struct RetainedProfileLibraryFixture: View {
+    @ObservedObject var store: EditorStore
+    let preferences: ColorPreferencesStore
+    var body: some View {
+        ColorProfileLibrary(preferences: preferences)
+            .environment(\.capyInterfaceLanguage, store.interfaceLanguage)
+            .environment(\.capyProfileCopy, store.catalog["profile_copy"])
+            .environment(\.capyNativeCopy, store.catalog["native_copy"])
+            .environment(\.colorScheme, store.state["theme"].string == "dark" ? .dark : .light)
+    }
+}
 
 /// Public AppKit event values supplied to the real canvas callbacks. Pointer
 /// contacts below still use the native queue; this does not emulate a trackpad.
@@ -42,11 +55,63 @@ private final class TabletEvent: NSEvent {
     override var rotation: Float { 0 }
 }
 
+private final class PaperCaptureGate: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value:0)
+    private let lock = NSLock()
+    private var started = false
+    private var finished = false
+    private var expired = false
+    func hold(_ accepted: Bool) {
+        lock.lock(); started = accepted; lock.unlock()
+        let timeout = semaphore.wait(timeout:.now() + 10) == .timedOut
+        lock.lock(); expired = timeout; finished = true; lock.unlock()
+    }
+    func release() { semaphore.signal() }
+    var entered: Bool { lock.lock(); defer { lock.unlock() }; return started }
+    var completed: Bool { lock.lock(); defer { lock.unlock() }; return finished }
+    var timedOut: Bool { lock.lock(); defer { lock.unlock() }; return expired }
+}
+
 /// The assembled editor, AppKit event queue, serial owner and Metal renderer.
 /// Actions choose tools; pointer/key/focus events use the native window through
 /// the visible editor's actual hit targets. Not physical Pencil/OS menu delivery.
 @main final class CanvasNativeInputChecks: NativeWorkspaceInputFixture {
+    @MainActor static func paperAttribute(_ root: NSObject, _ name: String) -> Any? {
+        let selector = NSSelectorFromString(name)
+        return root.responds(to:selector) ? root.perform(selector)?.takeUnretainedValue() : nil
+    }
+    @MainActor static func paperElement(_ root: NSObject, _ id: String) -> NSObject? {
+        if paperAttribute(root,"accessibilityIdentifier") as? String == id { return root }
+        return (paperAttribute(root,"accessibilityChildren") as? [NSObject] ?? []).lazy.compactMap { paperElement($0,id) }.first
+    }
+    @MainActor static func paperButton(_ root: NSObject, label: String) -> NSObject? {
+        if paperAttribute(root,"accessibilityRole") as? String == "AXButton",
+            paperAttribute(root,"accessibilityLabel") as? String == label { return root }
+        return (paperAttribute(root,"accessibilityChildren") as? [NSObject] ?? []).lazy.compactMap { paperButton($0,label:label) }.first
+    }
+    @MainActor static func paperPress(_ root: NSObject) -> Bool {
+        let selector = NSSelectorFromString("accessibilityPerformPress")
+        guard root.responds(to:selector) else { return false }
+        let call = unsafeBitCast(root.method(for:selector),to:(@convention(c) (AnyObject,Selector) -> Bool).self)
+        return call(root,selector)
+    }
+    @MainActor static func paperBounds(_ root: NSObject) -> CGRect {
+        let selector = NSSelectorFromString("accessibilityFrame")
+        guard root.responds(to:selector) else { return .zero }
+        let call = unsafeBitCast(root.method(for:selector),to:(@convention(c) (AnyObject,Selector) -> CGRect).self)
+        return call(root,selector)
+    }
+    @MainActor static func paperFields(_ root: NSView) -> [NSTextField] {
+        (root as? NSTextField).map { [$0] } ?? root.subviews.flatMap(paperFields)
+    }
+
+    static func fileIO<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { done in
+            NativeProjectTask.io.async { done.resume(with: Result(catching: work)) }
+        }
+    }
     @MainActor static func run(_ platform: UInt32) async throws {
+        let paperOnly = CommandLine.arguments.contains("--paper")
         for (azimuth, x, y) in [(0.0, 1.0, 0.0), (Double.pi / 2, 0, 1), (Double.pi, -1, 0), (-Double.pi / 2, 0, -1)] {
             let tilt = StylusTilt.towardBarrel(altitude: .pi / 4, azimuth: azimuth)
             try require(abs(tilt.x - x * .pi / 4) < 1e-9 && abs(tilt.y - y * .pi / 4) < 1e-9,
@@ -55,14 +120,39 @@ private final class TabletEvent: NSEvent {
             try require(abs(tablet.x - x * .pi / 4) < 1e-9 && abs(tablet.y - y * .pi / 4) < 1e-9,
                 "AppKit tilt, whose y axis points up, must tilt toward the barrel in view axes")
         }
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("capy-canvas-input-\(UUID())")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: root) }
+        let base = paperOnly ? URL(fileURLWithPath: ProcessInfo.processInfo.environment["CAPY_CANVAS_CAPTURES"] ?? FileManager.default.temporaryDirectory.path)
+            : FileManager.default.temporaryDirectory
+        let root = base.appendingPathComponent("capy-canvas-input-\(UUID())")
+        if paperOnly { try await fileIO { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false) } }
+        else { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false) }
+        defer { if !paperOnly { try? FileManager.default.removeItem(at: root) } }
         let png = root.appendingPathComponent("artwork.png")
-        let project = root.appendingPathComponent("rulers.capy")
-        let store = EditorStore(platform: platform, persistence: EditorPersistence(root: nil))
+        var project = root.appendingPathComponent("rulers.capy")
+        let storageRoot = root.appendingPathComponent("paper-storage")
+        let persistence = EditorPersistence(root:paperOnly ? storageRoot : nil)
+        let paperInput = root.appendingPathComponent("authored-paper.png")
+        var cancelPaperImport = false
+        if paperOnly {
+            try await fileIO {
+                var bytes = Data(count:4096)
+                for index in 0..<4096 {
+                    let x = index % 64, y = index / 64
+                    bytes[index] = UInt8((x * 3 + y * 5) % 256)
+                }
+                guard let provider = CGDataProvider(data:bytes as CFData),
+                    let image = CGImage(width:64,height:64,bitsPerComponent:8,bitsPerPixel:8,bytesPerRow:64,
+                        space:CGColorSpaceCreateDeviceGray(),bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.none.rawValue),
+                        provider:provider,decode:nil,shouldInterpolate:false,intent:.defaultIntent),
+                    let destination = CGImageDestinationCreateWithURL(paperInput as CFURL,"public.png" as CFString,1,nil)
+                    else { throw HostFailure(message:"Private authored grayscale fixture") }
+                CGImageDestinationAddImage(destination,image,nil)
+                try require(CGImageDestinationFinalize(destination),"Write private authored Paper PNG")
+                try bytes.write(to:root.appendingPathComponent("authored-paper-gray.raw"),options:.atomic)
+            }
+        }
+        let store = EditorStore(platform:platform,persistence:persistence)
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(
-            open: { _, done in done([]) }, save: { _, type, done in done(type == .capyProject ? project : png) },
+            open: { _, done in done(paperOnly && !cancelPaperImport ? [paperInput] : []) }, save: { _, type, done in done(type == .capyProject ? project : png) },
             create: { _, done in done(JSON(["extent": [128, 128], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])) }, exportOptions: { $0.choose($0.recipe) }))
         let window = NSWindow(contentRect: CGRect(x: 80, y: 80, width: 1200, height: 870),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -81,9 +171,13 @@ private final class TabletEvent: NSEvent {
         defer { canvas.stop() }
         let originalWindow = window.frame
         var deliveredEvent = -1, nextEvent = 0
+        var deliveredKeys: [String] = []
         let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp,
-            .otherMouseDown, .otherMouseDragged, .otherMouseUp]) { event in
-            if event.window === window { deliveredEvent = event.eventNumber }
+            .otherMouseDown, .otherMouseDragged, .otherMouseUp, .keyDown, .keyUp]) { event in
+            if event.window === window {
+                if event.type == .keyDown || event.type == .keyUp { deliveredKeys.append("\(event.type.rawValue):\(event.isARepeat):\(event.charactersIgnoringModifiers ?? "")") }
+                else { deliveredEvent = event.eventNumber }
+            }
             return event
         }
         defer { if let monitor { NSEvent.removeMonitor(monitor) } }
@@ -118,28 +212,31 @@ private final class TabletEvent: NSEvent {
             try await action(["type":"set_color", "rgba":[0,0,1,1]])
         }
         func pixels() async throws -> Data {
-            try? FileManager.default.removeItem(at: png)
+            try await fileIO { try? FileManager.default.removeItem(at: png) }
             for attempt in 1... {
                 do { try await invoke("export_document"); break } catch let failure as HostFailure
                     where failure.message == "Finish the canvas interaction first" && attempt < 100 {
                     store.failure = nil; try await drain(0.02)
                 }
             }
-            try await wait("Committed PNG export") {
-                FileManager.default.fileExists(atPath: png.path) && !store.projectFiles.busy
-            }
+            var committed = false
+            try await wait("Committed PNG export", failure: { store.projectFiles.error ?? store.failure }, step: {
+                committed = try await fileIO { FileManager.default.fileExists(atPath: png.path) }
+            }) { committed && !store.projectFiles.busy }
             try require(store.projectFiles.error == nil, store.projectFiles.error ?? "")
-            guard let source = CGImageSourceCreateWithURL(png as CFURL, nil),
-                let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw HostFailure(message: "No exported image") }
-            try require(image.width == 128 && image.height == 128, "Export the fixture document, not its viewport")
-            var bytes = Data(count: 128 * 128 * 4)
-            bytes.withUnsafeMutableBytes { buffer in
-                let context = CGContext(data: buffer.baseAddress, width: 128, height: 128, bitsPerComponent: 8,
-                    bytesPerRow: 128 * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
-                context.draw(image, in: CGRect(x: 0, y: 0, width: 128, height: 128))
+            return try await fileIO {
+                guard let source = CGImageSourceCreateWithURL(png as CFURL, nil),
+                    let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw HostFailure(message: "No exported image") }
+                try require(image.width == 128 && image.height == 128, "Export the fixture document, not its viewport")
+                var bytes = Data(count: 128 * 128 * 4)
+                bytes.withUnsafeMutableBytes { buffer in
+                    let context = CGContext(data: buffer.baseAddress, width: 128, height: 128, bitsPerComponent: 8,
+                        bytesPerRow: 128 * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)!
+                    context.draw(image, in: CGRect(x: 0, y: 0, width: 128, height: 128))
+                }
+                return bytes
             }
-            return bytes
         }
         // Read presented pixels before mouse-up: exporting artwork would commit
         // the interaction and could conceal a stale stationary preview.
@@ -264,6 +361,425 @@ private final class TabletEvent: NSEvent {
             let painted = try await pixels()
             try require(blue(painted,32,32) && blue(painted,80,64) && !blue(painted,80,32), "Native lasso must follow its concave path")
             return painted
+        }
+        func paperPackage(_ name: String) async throws -> Data {
+            let destination = root.appendingPathComponent(name + ".capy")
+            try await fileIO {
+                if FileManager.default.fileExists(atPath: destination.path) { throw HostFailure(message:"Private package destination already exists") }
+            }
+            project = destination
+            try await invoke("save_document_as")
+            var committed = false
+            try await wait("Paper package \(name)", failure: { store.projectFiles.error ?? store.failure }, step: {
+                committed = try await fileIO { FileManager.default.fileExists(atPath: destination.path) }
+            }) { committed && !store.projectFiles.busy && store.state["requests"].array.isEmpty }
+            return try await fileIO {
+                let bytes = try Data(contentsOf: destination)
+                try require(bytes.count <= 16 * 1024 * 1024, "Bounded private Paper package")
+                return bytes
+            }
+        }
+        func paperJourney() async throws {
+            func control(_ owner: EditorStore? = nil) -> JSON {
+                (owner ?? store).state["layer_properties"]["controls"].array.first { !$0["paper"].isNull } ?? JSON()
+            }
+            func libraryAction(_ operation: String, _ owner: EditorStore? = nil) -> JSON {
+                control(owner)["paper"]["tiles"].array.flatMap { $0["actions"].array }
+                    .first { $0["action"]["op"].string == operation } ?? JSON()
+            }
+            func checkpoint() throws -> UInt64 {
+                let tabs = store.snapshot["document_tabs"]
+                guard let stamp = tabs["session_stamps"].array.first(where: { $0["id"].uint == tabs["selected"].uint }),
+                    !stamp["stamp"]["checkpoint"].isNull else { throw HostFailure(message:"Missing actual session checkpoint") }
+                return stamp["stamp"]["checkpoint"].uint
+            }
+            func idle(_ owner: EditorStore? = nil) async throws {
+                let owner = owner ?? store
+                await withCheckedContinuation { (done: CheckedContinuation<Void,Never>) in
+                    owner.native!.submit(2,JSON(["type":"bootstrap"])) { _ in done.resume() }
+                }
+                try await wait("Paper worker completion", failure: { owner.failure }) {
+                    !owner.state.isNull && !owner.papers.busy && owner.state["requests"].array.isEmpty
+                }
+            }
+            func selectPaper(_ owner: EditorStore? = nil) async throws {
+                let owner = owner ?? store
+                let layers = owner.state["layers"].array
+                try require(layers.count == 2, "Only the fixture's authored paint and paper layers")
+                try await owner.apply(["type":"layer","action":["op":"select_row","id":layers.last!["id"].raw,"extend":false,"toggle":false]])
+                try await wait("Shared Paper controls", failure: { owner.failure }) { !control(owner).isNull }
+            }
+            func pressID(_ id: String, in root: NSObject? = nil, containerID: String? = nil) async throws {
+                let root = root ?? host
+                func target() -> NSObject? {
+                    if let containerID { return paperElement(root,containerID).flatMap { paperElement($0,id) } }
+                    return paperElement(root,id)
+                }
+                try await wait("Native Paper control \(id)") { target() != nil }
+                try require(paperPress(target()!), "Native Paper control accepts press: \(id)")
+                try await drain()
+            }
+            func popupElement(_ id: String) -> NSObject? {
+                NSApp.windows.lazy.compactMap { paperElement($0,id) }.first
+            }
+            func openPicker() async throws {
+                if paperElement(host,"tool-drawer").flatMap({ paperElement($0,"layer-properties-disclosure") }) == nil {
+                    guard let entry = store.snapshot["header"]["model"]["zones"].array.flatMap(\.array).first(where: {
+                        $0["item"]["kind"].string == "tool" && $0["item"]["control"]["kind"].string == "panel"
+                            && $0["item"]["control"]["panel"].string == "layers"
+                    }) else { throw HostFailure(message:"Missing shared Layers header entry") }
+                    try await action(["type":"customize","action":["type":"toggle_header_drawer","id":entry["id"].raw]])
+                }
+                try await wait("Mounted Layers drawer") {
+                    paperElement(host,"tool-drawer").flatMap { paperElement($0,"layer-properties-disclosure") } != nil
+                }
+                if paperElement(host,"tool-drawer").flatMap({ paperElement($0,"property-texture") }) == nil {
+                    try await pressID("layer-properties-disclosure",containerID:"tool-drawer")
+                }
+                try await pressID("property-texture",containerID:"tool-drawer")
+                try await wait("Registered native Paper popup") {
+                    popupElement("paper-picker") != nil && store.workspace.languageInputBusy
+                }
+            }
+            func clickTile(_ index: Int) async throws {
+                guard let tile = popupElement("paper-tile-\(index)") else { throw HostFailure(message:"Missing native Paper tile") }
+                let frame = paperBounds(tile)
+                try require(frame.width > 0 && frame.height > 0, "Measured native Paper tile")
+                let screenPoint = CGPoint(x:frame.midX,y:frame.midY)
+                guard let popup = NSApp.windows.first(where: { paperElement($0,"paper-tile-\(index)") != nil }),
+                    let content = popup.contentView else { throw HostFailure(message:"Owned Paper popup window") }
+                let local = content.convert(popup.convertPoint(fromScreen:screenPoint),from:nil)
+                for type: NSEvent.EventType in [.leftMouseDown,.leftMouseUp] {
+                    nextEvent += 1
+                    try event(type,at:local,marker:content,number:nextEvent)
+                    try await drain(0.05)
+                }
+                try await wait("Paper tile closes its child popup") { popupElement("paper-picker") == nil }
+                try require(paperElement(host,"layer-properties-disclosure") != nil && paperElement(host,"property-texture") != nil,
+                    "Child Paper contact retains the parent Layers drawer and properties")
+            }
+            func preview(_ lease: NativePaperPreviews, index: Int) async throws -> Data {
+                try await fileIO {
+                    guard let image = lease.decode().images[index], image.bitsPerPixel == 8,
+                        let data = image.dataProvider?.data else { throw HostFailure(message:"Immutable gray Paper preview") }
+                    let bytes = data as Data
+                    try require(bytes.count == image.width * image.height && bytes.count <= 1024 * 1024,
+                        "Bounded exact shared preview bytes")
+                    return bytes
+                }
+            }
+            func renameField(_ text: String) async throws {
+                try await wait("Native Paper rename field") {
+                    guard let sheet = window.attachedSheet, let content = sheet.contentView else { return false }
+                    return paperElement(sheet,"paper-library-name") != nil && paperFields(content).filter { $0.isEditable && $0.isEnabled }.count == 1
+                }
+                let sheet = window.attachedSheet!
+                let field = paperFields(sheet.contentView!).first { $0.isEditable && $0.isEnabled }!
+                try require(sheet.makeFirstResponder(field), "Native Paper rename focus")
+                guard let editor = field.currentEditor() as? NSTextView else { throw HostFailure(message:"Native Paper field editor") }
+                editor.selectAll(nil); editor.insertText(text,replacementRange:editor.selectedRange())
+                try await drain()
+            }
+            try await wait("Private mounted recovery ready", failure: { store.failure }) { !store.recovery.restoring }
+            guard let workspaces = store.workspaces else { throw HostFailure(message:"Private Paper workspace owner") }
+            try await workspaces.started("Private Paper workspace startup")
+            guard let sketch = try await workspaces.workspaceRows().first(where:{ $0["title"].string == "Sketch" }) else {
+                throw HostFailure(message:"Shared Sketch workspace")
+            }
+            try await workspaces.perform(["type":"switch","id":sketch["id"].string])
+            guard let directory = persistence.locations?.papers else { throw HostFailure(message:"Private Paper library directory") }
+            func paperTheme(_ theme: String) async throws {
+                try await action(["type":"set_theme","theme":theme])
+                window.appearance = NSAppearance(named:theme == "light" ? .aqua : .darkAqua)
+                try await newDocument()
+                try await invoke("pen"); try await action(["type":"select_brush","id":1])
+                try await action(["type":"set_brush_size","value":13])
+                let white = try await pixels()
+                try await path([CGPoint(x:24,y:32),CGPoint(x:64,y:32),CGPoint(x:104,y:32)])
+                let first = try await pixels()
+                try await path([CGPoint(x:24,y:88),CGPoint(x:64,y:88),CGPoint(x:104,y:88)])
+                let painted = try await pixels()
+                try require(first != white && painted != first, "Two distinct supplied native pointer strokes")
+                try await selectPaper(); try await idle()
+                try require(!enabled("redo"),"Two-stroke fixture has no Redo entry")
+                let before = try await paperPackage(theme + "-before-import"), beforeCheckpoint = try checkpoint()
+                let importItem = control()["paper"]["import"]
+                try require(!importItem.isNull, "Shared native library import is available")
+                cancelPaperImport = true; store.papers.action(importItem); try await idle(); cancelPaperImport = false
+                let chooserPackage = try await paperPackage(theme + "-chooser-cancel")
+                try require(chooserPackage == before && checkpoint() == beforeCheckpoint,
+                    "Injected chooser Cancel preserves exact authored package and checkpoint")
+                store.papers.action(importItem)
+                try await wait("Imported Paper model", failure: { store.failure }) { !libraryAction("rename_paper").isNull }
+                try await idle()
+                let imported = try await pixels()
+                let importedPackage = try await paperPackage(theme + "-imported"), importedCheckpoint = try checkpoint()
+                let libraryDirty = store.state["document_file"]["modified"].bool
+                try require(!libraryDirty,"Committed private import package is clean")
+                try require(imported == painted && importedCheckpoint != beforeCheckpoint && importedPackage != before, "Import changes authored Paper and checkpoint while preserving existing paint pixels")
+                try await invoke("undo")
+                let undoPixels = try await pixels(), undoPackage = try await paperPackage(theme + "-import-undo")
+                try require(undoPixels == painted && undoPackage == before, "Import Undo restores exact pixels and package")
+                try await invoke("redo")
+                let redoPixels = try await pixels(), redoPackage = try await paperPackage(theme + "-import-redo")
+                try require(redoPixels == imported && redoPackage == importedPackage, "Import Redo restores exact pixels and package")
+                let id = libraryAction("rename_paper")["action"]["id"].string
+                try require(!id.isEmpty, "Shared library identity")
+                let lease: NativePaperPreviews? = await withCheckedContinuation { done in
+                    store.native!.paperPreviews(layer:store.state["layer_properties"]["layer"].uint,
+                        epoch:store.state["document_file"]["epoch"].uint) { done.resume(returning:$0) }
+                }
+                guard let lease else { throw HostFailure(message:"Native immutable preview lease") }
+                let previewIndex = Int(control()["value"]["value"].uint)
+                let originalPreview = try await preview(lease,index:previewIndex)
+                let diskPreview = try await fileIO {
+                    let file = try FileHandle(forReadingFrom:directory.appendingPathComponent(id + ".preview"))
+                    defer { try? file.close() }
+                    let bytes = try file.read(upToCount:1024 * 1024 + 1) ?? Data()
+                    try require(bytes.count <= 1024 * 1024,"Bounded private shared preview file")
+                    return bytes
+                }
+                try require(originalPreview == diskPreview, "Transport preserves exact shared preview bytes")
+                try await openPicker()
+                try await clickTile(previewIndex)
+                let sameTilePixels = try await pixels()
+                try require(sameTilePixels == imported && checkpoint() == importedCheckpoint, "Current native tile does not author another edit")
+                let peer = EditorStore(platform:platform,persistence:EditorPersistence(root:storageRoot),managedWorkspaces:false)
+                let unrelated = EditorStore(platform:platform,persistence:EditorPersistence(root:root.appendingPathComponent("unrelated-" + theme)),managedWorkspaces:false)
+                try await wait("Private peer states",failure:{ peer.failure ?? unrelated.failure }) { !peer.state.isNull && !unrelated.state.isNull }
+                try await idle(peer); try await idle(unrelated); try await selectPaper(peer); try await selectPaper(unrelated)
+                try require(libraryAction("rename_paper",peer)["action"]["id"].string == id, "Same-root peer loads the actual library")
+                let otherGeneration = unrelated.papers.generation, unrelatedControl = control(unrelated)
+                let otherControl = try await fileIO { unrelatedControl.stableKey }
+                let peerGeneration = peer.papers.generation
+                let (profilePreferences, profileMetadata, profileDirectory) = try await fileIO {
+                    guard let locations = StorageLocations.within(root.appendingPathComponent("profile-locale-" + theme)) else {
+                        throw HostFailure(message:"Private profile locale storage")
+                    }
+                    let preferences = ColorPreferencesStore(locations:locations)
+                    guard let bytes = CGColorSpace(name:CGColorSpace.sRGB)?.copyICCData() as Data? else {
+                        throw HostFailure(message:"Private ICC fixture bytes")
+                    }
+                    _ = try preferences.importProfile(bytes)
+                    try Data("Broken private ICC".utf8).write(to:locations.colorProfiles.appendingPathComponent(String(repeating:"f",count:64) + ".icc"))
+                    let metadata = try preferences.profiles()
+                    try require(metadata.count == 2 && metadata.allSatisfy { $0["profile"].isNull }, "Two byte-free retained profile descriptors")
+                    return (preferences,metadata,locations.colorProfiles)
+                }
+                let profileWindow = NSWindow(contentRect:CGRect(x:100,y:100,width:600,height:650),
+                    styleMask:[.titled,.closable],backing:.buffered,defer:false)
+                profileWindow.isReleasedWhenClosed = false
+                profileWindow.contentView = NSHostingView(rootView:RetainedProfileLibraryFixture(store:store,preferences:profilePreferences))
+                profileWindow.orderFront(nil)
+                defer { profileWindow.contentView = nil; profileWindow.close() }
+                func profileRowsVisible(_ tag:String) -> Bool {
+                    func labels(_ element:NSObject) -> [String] {
+                        let label = paperAttribute(element,"accessibilityLabel") as? String ?? ""
+                        let text = label.isEmpty ? paperAttribute(element,"accessibilityValue") as? String ?? "" : label
+                        let own = paperAttribute(element,"accessibilityRole") as? String == "AXStaticText" ? [text] : []
+                        return own + (paperAttribute(element,"accessibilityChildren") as? [NSObject] ?? []).flatMap(labels)
+                    }
+                    let actual = Set(labels(profileWindow))
+                    let projected = ColorUI.profileEntries(profileMetadata,language:tag)
+                    guard profileMetadata.count == 2 && projected.count == profileMetadata.count else { return false }
+                    return projected.allSatisfy { row in
+                        actual.contains(row["name"].string) && actual.contains(row[row["issue"].isNull ? "details" : "issue"].string)
+                    }
+                }
+                try await wait("Nonempty profile rows mounted in English") { profileRowsVisible("en") }
+                try await fileIO {
+                    for entry in profileMetadata {
+                        try FileManager.default.removeItem(at:profileDirectory.appendingPathComponent(entry["id"].string + ".icc"))
+                    }
+                }
+                store.papers.action(libraryAction("rename_paper"))
+                try await renameField("Cotton draft")
+                guard let renameSheet = window.attachedSheet, let renameDraft = store.papers.rename?.id else {
+                    throw HostFailure(message:"Existing native Paper rename sheet and draft")
+                }
+                for (tag, title) in [("ja", "用紙の名前を変更"), ("en", "Rename Paper")] {
+                    guard let index = store.bootstrap["shipped_tags"].array.firstIndex(where:{ $0.string == tag }) else {
+                        throw HostFailure(message:"Registered Paper rename language")
+                    }
+                    try await action(["type":"preferences","action":["type":"edit","id":"language","value":index + 1]])
+                    func hasHeading(_ element: NSObject) -> Bool {
+                        let label = paperAttribute(element,"accessibilityLabel") as? String
+                            ?? paperAttribute(element,"accessibilityValue") as? String
+                        if paperAttribute(element,"accessibilityRole") as? String == "AXStaticText", label == title { return true }
+                        return (paperAttribute(element,"accessibilityChildren") as? [NSObject] ?? []).contains(where:hasHeading)
+                    }
+                    try await wait("Paper rename language publishes " + tag) { store.interfaceLanguage == tag }
+                    try await wait("Paper rename sheet heading follows " + tag) { hasHeading(renameSheet) }
+                    try await wait("Retained profile rows follow " + tag + " without their ICC files") { profileRowsVisible(tag) }
+                    try require(profileWindow.contentView != nil, "Language keeps the nonempty profile library mounted")
+                    let field = paperFields(renameSheet.contentView!).first { $0.isEditable && $0.isEnabled }
+                    let name = (field?.currentEditor() as? NSTextView)?.string ?? field?.stringValue
+                    try require(window.attachedSheet === renameSheet && store.papers.rename?.id == renameDraft
+                        && name == "Cotton draft" && checkpoint() == importedCheckpoint,
+                        "Language preserves the native Paper rename sheet, draft, typed name and artwork checkpoint")
+                }
+                try await renameField("")
+                try await pressID("paper-name-save",in:window.attachedSheet!)
+                try await wait("Shared Paper rename validation") { window.attachedSheet.map { paperElement($0,"paper-name-error") != nil } == true }
+                try require(checkpoint() == importedCheckpoint, "Invalid native rename does not edit artwork")
+                try await renameField("Cotton rag")
+                try await pressID("paper-name-save",in:window.attachedSheet!)
+                try await wait("Native Paper rename commits",failure:{ store.failure }) {
+                    window.attachedSheet == nil && libraryAction("rename_paper")["action"]["name"].string == "Cotton rag"
+                }
+                try await idle(); try await idle(peer)
+                try require(peer.papers.generation > peerGeneration && libraryAction("rename_paper",peer)["action"]["name"].string == "Cotton rag",
+                    "Mutable library reload reaches only stores sharing its actual directory")
+                let afterRenameControl = control(unrelated)
+                let afterRenameKey = try await fileIO { afterRenameControl.stableKey }
+                try require(unrelated.papers.generation == otherGeneration && afterRenameKey == otherControl,
+                    "Unrelated native library transport is not invalidated")
+                try require(store.state["document_file"]["modified"].bool == libraryDirty && checkpoint() == importedCheckpoint,"Rename preserves authored dirty state and checkpoint before Save As")
+                store.papers.action(libraryAction("delete_paper")); try await idle()
+                try await wait("Deleted library entry remains authored Paper") { libraryAction("rename_paper").isNull && !libraryAction("add_paper").isNull }
+                try require(store.state["document_file"]["modified"].bool == libraryDirty,"Delete preserves authored dirty state before Save As")
+                try require(try await preview(lease,index:previewIndex) == originalPreview, "Retained immutable preview survives deletion")
+                let deletedPixels = try await pixels(), deletedPackage = try await paperPackage(theme + "-deleted")
+                try require(deletedPixels == imported && deletedPackage == importedPackage && checkpoint() == importedCheckpoint,
+                    "Rename and Delete preserve exact authored Paper, pixels and checkpoint")
+                guard let native = store.native else { throw HostFailure(message:"Mounted native owner") }
+                let add = libraryAction("add_paper"), gate = PaperCaptureGate()
+                do {
+                    defer { gate.release() }
+                    native.submit(0,JSON(["type":"effect","action":add["action"].raw])) { result in gate.hold(result != nil) }
+                    try await wait("Published Add pending capture",failure:{ store.failure }) {
+                        gate.entered && store.papers.busy && store.state["requests"].array.contains { $0["kind"]["request"]["type"].string == "add" }
+                    }
+                    guard let progress = paperElement(host,"paper-library-progress"),
+                        let cancel = paperButton(progress,label:store.bootstrap["common"]["cancel"].string) else { throw HostFailure(message:"Mounted Paper Cancel button") }
+                    try require(paperPress(cancel), "Native Cancel before queued capture")
+                }
+                try await idle(); try require(gate.completed && !gate.timedOut, "Finite owned queue gate released")
+                store.papers.reload(); try await idle()
+                try require(store.state["document_file"]["modified"].bool == libraryDirty,"Cancelled Add preserves dirty state before Save As")
+                try require(libraryAction("rename_paper").isNull && !libraryAction("add_paper").isNull,
+                    "Cancel before capture must not recreate the deleted library entry")
+                let cancelledPixels = try await pixels(), cancelledPackage = try await paperPackage(theme + "-cancel-before-capture")
+                try require(cancelledPixels == imported && cancelledPackage == importedPackage && checkpoint() == importedCheckpoint,
+                    "Cancelled Add preserves exact artwork and history checkpoint")
+                store.papers.action(libraryAction("add_paper"))
+                try await wait("Fresh Add after cancellation",failure:{ store.failure }) { libraryAction("rename_paper")["action"]["id"].string == id }
+                try await idle(); store.papers.reload(); try await idle(); try await idle(peer)
+                try require(store.state["document_file"]["modified"].bool == libraryDirty,"Add/reload preserves authored dirty state before Save As")
+                try require(libraryAction("rename_paper",peer)["action"]["id"].string == id && unrelated.papers.generation == otherGeneration,
+                    "Add and fresh reload retire cancellation and retain library isolation")
+                let addedPixels = try await pixels(), addedPackage = try await paperPackage(theme + "-added")
+                try require(addedPixels == imported && addedPackage == importedPackage && checkpoint() == importedCheckpoint,
+                    "Library Add and reload do not author history")
+                let afterAddControl = control(unrelated)
+                try require(try await fileIO { afterAddControl.stableKey } == otherControl,"Unrelated library model remains exact after Add")
+                for expected in [painted,first,white] { try await invoke("undo"); try require(try await pixels() == expected,"Exact known three-edit Undo sequence") }
+                try require(!enabled("undo"), "Library actions added no hidden Undo entry")
+                for expected in [first,painted,imported] { try await invoke("redo"); try require(try await pixels() == expected,"Exact known three-edit Redo sequence") }
+                try require(!enabled("redo"), "Known history exhausted")
+                try await action(["type":"effect","action":["op":"reset","layer":store.state["layer_properties"]["layer"].raw,"key":"texture"]])
+                try await idle()
+                note("PASS mounted Mac Paper \(theme): supplied pointer, native picker/Rename/Cancel, exact authored bytes/history and scoped library transport; physical UIKit/presentation/performance UNVERIFIED")
+            }
+            for theme in ["light","dark"] { try await paperTheme(theme) }
+            guard let seedIndex = control()["paper"]["tiles"].array.firstIndex(where: {
+                $0["actions"].array.contains { $0["action"]["op"].string == "rename_paper" }
+            }) else { throw HostFailure(message:"Existing shared-produced seed image") }
+            try await action(["type":"effect","action":["op":"set","layer":store.state["layer_properties"]["layer"].raw,
+                "key":"texture","value":["kind":"choice","value":seedIndex]]])
+            try await idle()
+            let seedID = libraryAction("rename_paper")["action"]["id"].string
+            try require(!seedID.isEmpty && !seedID.contains("/") && !seedID.contains("."), "Shared seed identity is a single filename")
+            store.papers.action(libraryAction("rename_paper"))
+            try await renameField("Cold paper")
+            try await pressID("paper-name-save",in:window.attachedSheet!)
+            try await idle()
+            try require(libraryAction("rename_paper")["action"]["name"].string == "Cold paper", "Shared seed rename committed")
+            guard let seedNative = store.native, let seedSettings = persistence.locations?.settings else {
+                throw HostFailure(message:"Persistent owned seed owner")
+            }
+            for seedTheme in ["light","dark"] {
+                try await action(["type":"set_theme","theme":seedTheme]); try await idle()
+                let saved = await withCheckedContinuation { done in seedNative.flushPersistence { done.resume(returning:$0) } }
+                try require(saved,"Shared seed preferences persisted through the owner/write/ack barrier")
+                let seedName = "capy-test-drawing-paper-" + seedTheme + "-" + UUID().uuidString
+                let destination = root.appendingPathComponent(seedName)
+                try await fileIO {
+                    let manager = FileManager.default
+                    func read(_ url:URL, limit:Int) throws -> Data {
+                        let properties = try url.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
+                        try require(properties.isRegularFile == true && properties.isSymbolicLink != true,"Owned regular seed file")
+                        let file = try FileHandle(forReadingFrom:url); defer { try? file.close() }
+                        let bytes = try file.read(upToCount:limit + 1) ?? Data()
+                        try require(bytes.count <= limit,"Bounded shared-produced seed file")
+                        return bytes
+                    }
+                    let settings = try read(seedSettings,limit:AtomicJSONFile.maximumBytes)
+                    let decoded = try JSON.decode(String(decoding:settings,as:UTF8.self))
+                    try require(decoded["new_document"]["paper"].string == seedID && decoded["theme"].string == seedTheme,
+                        "Persisted shared settings retain the selected image and explicit theme")
+                    let index = try read(directory.appendingPathComponent("index.json"),limit:1024*1024)
+                    let decodedIndex = try JSON.decode(String(decoding:index,as:UTF8.self))
+                    try require(decodedIndex["papers"].array.count == 1 && decodedIndex["papers"][0]["id"].string == seedID
+                        && decodedIndex["papers"][0]["name"].string == "Cold paper","One actual shared-produced seed entry")
+                    let png = try read(directory.appendingPathComponent(seedID + ".png"),limit:1024*1024)
+                    let preview = try read(directory.appendingPathComponent(seedID + ".preview"),limit:96*96)
+                    try require(preview.count == 96*96,"Exact shared preview extent")
+                    let files:[(String,Data)] = [("config/settings.json",settings),("data/papers/index.json",index),
+                        ("data/papers/" + seedID + ".png",png),("data/papers/" + seedID + ".preview",preview)]
+                    try require(!manager.fileExists(atPath:destination.path),"Fresh UUID seed destination")
+                    try manager.createDirectory(at:destination,withIntermediateDirectories:false)
+                    var entries:[[String:Any]] = []
+                    for (relative,bytes) in files {
+                        let target = destination.appendingPathComponent(relative)
+                        try manager.createDirectory(at:target.deletingLastPathComponent(),withIntermediateDirectories:true)
+                        try bytes.write(to:target,options:.withoutOverwriting)
+                        try require(try read(target,limit:bytes.count) == bytes,"Seed copy retains exact original bytes")
+                        entries.append(["path":relative,"bytes":bytes.count,
+                            "sha256":SHA256.hash(data:bytes).map { String(format:"%02x",$0) }.joined()])
+                    }
+                    try require(!manager.fileExists(atPath:destination.appendingPathComponent("state").path)
+                        && !manager.fileExists(atPath:destination.appendingPathComponent("cache").path)
+                        && !manager.fileExists(atPath:destination.appendingPathComponent("temp").path)
+                        && !manager.fileExists(atPath:destination.appendingPathComponent("data/workspaces").path),
+                        "Cold seed excludes recovery, sessions, workspace state and caches")
+                    let report:[String:Any] = ["profile":seedName,"theme":seedTheme,"paperID":seedID,"label":"Cold paper",
+                        "files":entries,"defaults":decoded["new_document"]["defaults"].raw,"recoveryCopied":false]
+                    let reportBytes = try JSONSerialization.data(withJSONObject:report,options:[.sortedKeys])
+                    try require(reportBytes.count <= 16384,"Bounded seed manifest outside the profile")
+                    try reportBytes.write(to:root.appendingPathComponent(seedName + "-manifest.json"),options:.withoutOverwriting)
+                }
+            }
+            let closed = await withCheckedContinuation { done in store.prepareClose { done.resume(returning:$0) } }
+            try require(closed, "Private Paper persistence/recovery close")
+            try await fileIO {}; try await drain(2)
+        }
+        if paperOnly { try await paperJourney(); return }
+
+        for theme in ["light", "dark"] {
+            try await action(["type":"set_theme", "theme":theme]); try await newDocument()
+            try await action(["type":"select_brush", "id":1]); try await action(["type":"set_brush_size", "value":13])
+            try require(window.makeFirstResponder(canvas) && window.firstResponder === canvas, "Size keys belong to the mounted canvas")
+            let paper = try await pixels(), camera = store.state["camera"].stableKey
+            let undo = enabled("undo"), redo = enabled("redo"), start = deliveredKeys.count
+            var expectedEvents: [String] = []
+            for (characters, code, sizes) in [("]", UInt16(30), [15.0, 17, 20]), ("[", UInt16(33), [17.0, 15, 12, 10]), ("]", UInt16(30), [12.0]), ("]", UInt16(30), [15.0])] {
+                let keyName = characters
+                for (index, size) in sizes.enumerated() {
+                    try key(keyName, code: code, window: window, pressed: true, repeatKey: index > 0)
+                    expectedEvents.append("\(NSEvent.EventType.keyDown.rawValue):\(index > 0):\(keyName)")
+                    try await wait("Size preset \(size) after \(keyName) repeat=\(index > 0)") { store.state["brush"]["diameter"].number == size }
+                }
+                try key(keyName, code: code, window: window, pressed: false)
+                expectedEvents.append("\(NSEvent.EventType.keyUp.rawValue):false:\(keyName)")
+                try await wait("Native size-key release") { Array(deliveredKeys.dropFirst(start)) == expectedEvents }
+                try await drain(0.15)
+                try require(store.state["brush"]["diameter"].number == sizes.last!, "Key release adds no extra size step")
+            }
+            try require(store.state["camera"].stableKey == camera && window.frame == originalWindow, "Size keys preserve camera and owned window")
+            try require(enabled("undo") == undo && enabled("redo") == redo, "Size keys preserve artwork history")
+            let unchanged = try await pixels(); try require(unchanged == paper, "Size keys preserve every artwork pixel")
+            note("PASS platform \(platform) \(theme): mounted size key down/repeats/up, fresh same-key contact, unchanged camera/artwork/history")
         }
         // Side buttons use AppKit's tablet-backed right/other mouse callbacks.
         // Exercise both hover-first and mid-stroke presses through the adapter.
@@ -580,6 +1096,39 @@ private final class TabletEvent: NSEvent {
                 "Rotation must preserve its anchor and native direction")
             for theme in ["light", "dark"] {
                 try await action(["type": "set_theme", "theme": theme])
+                try await action(["type": "preferences", "action": ["type": "edit", "id": "wheel_behavior", "value": 1]])
+                before = store.state["camera"]
+                event.flags = []; event.delta = CGPoint(x: 0, y: 40)
+                canvas.scrollWheel(with: event); try await flush()
+                let ratio = store.state["camera"]["zoom"].number / before["zoom"].number
+                try require(ratio > 1 && (0..<2).allSatisfy {
+                    near(store.state["camera"]["translation"][$0].number,
+                        [anchor.x, anchor.y][$0] + (before["translation"][$0].number - [anchor.x, anchor.y][$0]) * ratio)
+                }, "Wheel Zoom must preserve its native anchor in \(theme)")
+                before = store.state["camera"]
+                event.flags = .control; event.delta = CGPoint(x: 0, y: 40)
+                canvas.scrollWheel(with: event); try await flush()
+                try require(store.state["camera"]["zoom"].number > before["zoom"].number,
+                    "Control retains Wheel Zoom in \(theme)")
+                before = store.state["camera"]
+                event.flags = .shift; event.delta = CGPoint(x: 3, y: 4)
+                canvas.scrollWheel(with: event); try await flush()
+                try require(near(store.state["camera"]["zoom"].number, before["zoom"].number)
+                    && near(store.state["camera"]["translation"][0].number - before["translation"][0].number, 7 * scale)
+                    && near(store.state["camera"]["translation"][1].number, before["translation"][1].number),
+                    "Shift pans horizontally with Wheel Zoom in \(theme)")
+                try await action(["type": "preferences", "action": ["type": "edit", "id": "wheel_behavior", "value": 0]])
+                try await action(["type": "preferences", "action": ["type": "edit", "id": "rotate_with_two_fingers", "value": false]])
+                before = store.state["camera"]
+                try await gesture(true, phase: .began); try await gesture(true, phase: .changed, delta: 20)
+                try await gesture(true, phase: .ended)
+                try require(sameCamera(before), "Disabled two-finger rotation must preserve the entire camera in \(theme)")
+                try await gesture(false, phase: .began); try await gesture(false, phase: .changed, delta: 0.1)
+                try await gesture(false, phase: .ended)
+                try require(store.state["camera"]["zoom"].number > before["zoom"].number
+                    && near(store.state["camera"]["rotation"].number, before["rotation"].number),
+                    "Disabling rotation must preserve native pinch zoom in \(theme)")
+                try await action(["type": "preferences", "action": ["type": "edit", "id": "rotate_with_two_fingers", "value": true]])
                 for mode in ["pinch", "rotation", "combined"] {
                     let beginning = store.state["camera"]
                     if mode != "rotation" {
@@ -848,7 +1397,14 @@ private final class TabletEvent: NSEvent {
     @MainActor static func main() {
         _ = NSApplication.shared; NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
-            do { for platform: UInt32 in [0, 1] { try await run(platform) }; exit(0) }
+            do {
+                let paperOnly = CommandLine.arguments.contains("--paper")
+                if paperOnly {
+                    Task { try await Task.sleep(for:.seconds(240)); note("FAIL native fixture deadline; retain private artifacts"); exit(1) }
+                }
+                for platform: UInt32 in paperOnly ? [1] : [0, 1] { try await run(platform) }
+                exit(0)
+            }
             catch { note("FAIL: " + error.localizedDescription); exit(1) }
         }
         NSApp.run()

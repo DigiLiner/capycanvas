@@ -69,7 +69,7 @@ export async function checkToolVariations({call,evaluate,settle}) {
   const original=await evaluate('JSON.parse(layerApp.app.workspace_view()).id');
   await call('Emulation.setDeviceMetricsOverride',{width:1400,height:1000,deviceScaleFactor:1,mobile:false});await settle();
   try {
-    for(const theme of ['light','dark'])for(const [workspace,count,slot] of [['photographer',15,'drawing'],['illustrator',17,'fill']]) {
+    for(const theme of ['light','dark'])for(const [workspace,count,slot] of [['photographer',16,'drawing'],['illustrator',18,'fill']]) {
       console.log(`Tool variations: ${workspace}/${theme}`);
       device='mouse';await click(`.workspace-switcher button[data-workspace-id="builtin:workspace:${workspace}"]`);
       await wait('JSON.parse(layerApp.app.workspace_view()).ready&&!JSON.parse(layerApp.app.workspace_view()).busy');await send({type:'set_theme',theme});
@@ -229,6 +229,6 @@ export async function checkToolVariations({call,evaluate,settle}) {
       await resize(1400);await send({type:'invoke',command:'return_to_artwork'});
     }
     await send({type:'restore_workspace',workspace:saved});
-    console.log('PASS: Photo 15/Paint 17 tools, existing Paint/Sketch command groups, medium icons, disjoint selection menus/Tool Set/drawers, mouse/touch/pen hold/reorder, inset decorative toolbar/header/overflow markers, Small/Medium/Large painted-corner selection/drawers, disabled group rightclick/holds and keyboard menu focus/navigation/activation/Escape in both themes');
+    console.log('PASS: Photo 16/Paint 18 tools, existing Paint/Sketch command groups, medium icons, disjoint selection menus/Tool Set/drawers, mouse/touch/pen hold/reorder, inset decorative toolbar/header/overflow markers, Small/Medium/Large painted-corner selection/drawers, disabled group rightclick/holds and keyboard menu focus/navigation/activation/Escape in both themes');
   } finally {device='mouse';await closeMenu();await resize(1400);await click(`.workspace-switcher button[data-workspace-id="${original}"]`);}
 }

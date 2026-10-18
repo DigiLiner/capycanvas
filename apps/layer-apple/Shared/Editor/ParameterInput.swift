@@ -1,20 +1,32 @@
 import SwiftUI
 
+enum ParameterInputRegion: Equatable {
+    case parameter(hdr: Bool), rectangle
+    func hit(_ point: CGPoint, in bounds: CGRect) -> UInt32 {
+        switch self {
+        case .parameter(let hdr): return capy_apple_parameter_hit(Float(point.x), Float(point.y), Float(bounds.width), hdr)
+        case .rectangle: return bounds.contains(point) ? 1 : 0
+        }
+    }
+}
+
 #if os(macOS)
 import AppKit
 struct ParameterInput: NSViewRepresentable {
-    let hdr: Bool
+    @Environment(\.isEnabled) private var enabled
+    let region: ParameterInputRegion
     let identity: String
     var nudge: ((String, UInt32, [Double]) -> Void)? = nil
     let event: (String, UInt32, CGPoint, CGFloat) -> Void
     func makeNSView(context: Context) -> ContactView { ContactView() }
     func updateNSView(_ view: ContactView, context: Context) {
-        if view.identity != identity { view.cancel() }
-        view.identity = identity; view.hdr = hdr; view.event = event; view.nudge = nudge
+        if view.identity != identity || view.region != region || !enabled { view.cancel() }
+        view.identity = identity; view.region = region; view.enabled = enabled; view.event = event; view.nudge = nudge
     }
     static func dismantleNSView(_ view: ContactView, coordinator: ()) { view.cancel() }
     final class ContactView: NSView {
-        var hdr = false, identity = "", part: UInt32 = 0
+        var region = ParameterInputRegion.parameter(hdr: false), enabled = true
+        var identity = "", part: UInt32 = 0
         var event: (String, UInt32, CGPoint, CGFloat) -> Void = { _, _, _, _ in }
         var point = CGPoint.zero
         var nudge: ((String, UInt32, [Double]) -> Void)?
@@ -23,13 +35,14 @@ struct ParameterInput: NSViewRepresentable {
         override var isFlipped: Bool { true }
         override var acceptsFirstResponder: Bool { true }
         var size: CGFloat { bounds.width }
-        func hit(_ p: CGPoint) -> UInt32 { capy_apple_parameter_hit(Float(p.x), Float(p.y), Float(size), hdr) }
+        func hit(_ p: CGPoint) -> UInt32 { enabled ? region.hit(p, in: bounds) : 0 }
         override func hitTest(_ p: NSPoint) -> NSView? { hit(convert(p, from: superview)) == 0 ? nil : self }
         override func mouseDown(with e: NSEvent) {
             point = convert(e.locationInWindow, from: nil); part = hit(point)
             if part != 0 { selected = part }
-            if part != 0 { window?.makeFirstResponder(self); event(e.clickCount == 2 ? "reset" : "down", part, point, size) }
-            if e.clickCount == 2 { part = 0 }
+            let reset = e.clickCount == 2 && region != .rectangle
+            if part != 0 { window?.makeFirstResponder(self); event(reset ? "reset" : "down", part, point, size) }
+            if reset { part = 0 }
         }
         override func mouseDragged(with e: NSEvent) {
             point = convert(e.locationInWindow, from: nil)
@@ -42,7 +55,7 @@ struct ParameterInput: NSViewRepresentable {
         override func cancelOperation(_ sender: Any?) { cancel() }
         override func keyDown(with e: NSEvent) {
             if e.keyCode == 53 { cancel(); return }
-            guard let nudge, let delta = parameterArrow(e.keyCode, large: e.modifierFlags.contains(.shift)) else { super.keyDown(with: e); return }
+            guard enabled, let nudge, let delta = parameterArrow(e.keyCode, large: e.modifierFlags.contains(.shift)) else { super.keyDown(with: e); return }
             nudge(keyActive ? "move" : "down", selected, delta); keyActive = true
         }
         override func keyUp(with e: NSEvent) {
@@ -60,18 +73,20 @@ struct ParameterInput: NSViewRepresentable {
 #else
 import UIKit
 struct ParameterInput: UIViewRepresentable {
-    let hdr: Bool
+    @Environment(\.isEnabled) private var enabled
+    let region: ParameterInputRegion
     let identity: String
     var nudge: ((String, UInt32, [Double]) -> Void)? = nil
     let event: (String, UInt32, CGPoint, CGFloat) -> Void
     func makeUIView(context: Context) -> ContactView { ContactView() }
     func updateUIView(_ view: ContactView, context: Context) {
-        if view.identity != identity { view.cancel() }
-        view.identity = identity; view.hdr = hdr; view.event = event; view.nudge = nudge
+        if view.identity != identity || view.region != region || !enabled { view.cancel() }
+        view.identity = identity; view.region = region; view.enabled = enabled; view.event = event; view.nudge = nudge
     }
     static func dismantleUIView(_ view: ContactView, coordinator: ()) { view.cancel() }
     final class ContactView: UIView {
-        var hdr = false, identity = ""
+        var region = ParameterInputRegion.parameter(hdr: false), enabled = true
+        var identity = ""
         var event: (String, UInt32, CGPoint, CGFloat) -> Void = { _, _, _, _ in }
         let contact = Contact()
         var nudge: ((String, UInt32, [Double]) -> Void)?
@@ -81,7 +96,7 @@ struct ParameterInput: UIViewRepresentable {
         var size: CGFloat { bounds.width }
         override init(frame: CGRect) { super.init(frame: frame); isOpaque = false; backgroundColor = .clear; addGestureRecognizer(contact) }
         required init?(coder: NSCoder) { fatalError("Use init(frame:)") }
-        func hit(_ p: CGPoint) -> UInt32 { capy_apple_parameter_hit(Float(p.x), Float(p.y), Float(size), hdr) }
+        func hit(_ p: CGPoint) -> UInt32 { enabled ? region.hit(p, in: bounds) : 0 }
         override func point(inside p: CGPoint, with event: UIEvent?) -> Bool { hit(p) != 0 }
         override func didMoveToWindow() { super.didMoveToWindow(); if window == nil { cancel() } }
         override func resignFirstResponder() -> Bool { cancel(); return super.resignFirstResponder() }
@@ -90,7 +105,7 @@ struct ParameterInput: UIViewRepresentable {
             if keyActive { nudge?("cancel", selected, [0, 0]); keyActive = false }
         }
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-            guard let key = presses.first?.key else { super.pressesBegan(presses, with: event); return }
+            guard enabled, let key = presses.first?.key else { super.pressesBegan(presses, with: event); return }
             if key.keyCode == .keyboardEscape { cancel(); return }
             let codes: [UIKeyboardHIDUsage: UInt16] = [.keyboardLeftArrow: 123, .keyboardRightArrow: 124, .keyboardDownArrow: 125, .keyboardUpArrow: 126]
             guard let code = codes[key.keyCode], let delta = parameterArrow(code, large: key.modifierFlags.contains(.shift)), let nudge else { super.pressesBegan(presses, with: event); return }
@@ -111,8 +126,9 @@ struct ParameterInput: UIViewRepresentable {
             point = t.location(in: v); part = v.hit(point)
             guard part != 0 else { state = .failed; return }
             v.selected = part; v.becomeFirstResponder()
-            touch = t; state = .began; v.event(t.tapCount == 2 ? "reset" : "down", part, point, v.size)
-            if t.tapCount == 2 { part = 0 }
+            let reset = t.tapCount == 2 && v.region != .rectangle
+            touch = t; state = .began; v.event(reset ? "reset" : "down", part, point, v.size)
+            if reset { part = 0 }
         }
         override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
             guard let t = touch, touches.contains(t), part != 0, let v = view as? ContactView else { return }

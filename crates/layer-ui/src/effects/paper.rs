@@ -169,7 +169,7 @@ pub(super) fn with_texture(application: &EffectApplication, texture: TextureSour
     Ok(edited)
 }
 
-pub(super) fn edited(application: &EffectApplication, document: &Document, papers: &PaperLibrary, key: &str, value: &EffectValue, l: &Localizer) -> Option<Result<PaperEdit, String>> {
+pub(super) fn edited(application: &EffectApplication, document: &Document, retained: &[layer_core::Image], papers: &PaperLibrary, key: &str, value: &EffectValue, l: &Localizer) -> Option<Result<PaperEdit, String>> {
     if !paper::is_paper(&application.program) { return None; }
     let invalid = || l.text(MessageId::RESOURCES_ERROR_INVALID_LAYER_PROPERTY).to_string();
     let mut edited = application.clone();
@@ -179,7 +179,12 @@ pub(super) fn edited(application: &EffectApplication, document: &Document, paper
             let index = *index as usize;
             if index >= options.len() { return Some(Err(invalid())); }
             return Some(match options.swap_remove(index).choice {
-                PaperChoice::Texture(texture) => with_texture(application, texture).map(PaperEdit::Applied),
+                PaperChoice::Texture(texture) => {
+                    if let TextureSource::Image(image)=&texture && let Some(entry)=papers.entry_of(image)
+                        && retained.iter().any(|retained|retained.id()==image.id() && !Arc::ptr_eq(retained.storage(),image.storage())) {
+                        Ok(PaperEdit::Load(entry.id.clone()))
+                    } else {with_texture(application,texture).map(PaperEdit::Applied)}
+                },
                 PaperChoice::Library(id) => Ok(PaperEdit::Load(id)),
             });
         }
@@ -227,14 +232,14 @@ mod tests {
         let (_, application) = effect_application(&document, document.working.occurrence.unwrap()).unwrap();
         let papers = PaperLibrary::default();
         let applied = |edit: Option<Result<PaperEdit, String>>| match edit.unwrap().unwrap() { PaperEdit::Applied(application) => application, PaperEdit::Load(_) => panic!("built-in papers need no loading") };
-        let rough = applied(edited(application, &document, &papers, TEXTURE, &EffectValue::Choice(2), &l));
+        let rough = applied(edited(application, &document, &[], &papers, TEXTURE, &EffectValue::Choice(2), &l));
         assert_eq!(texture(&rough), Some(&paper::built_in_paper("rough").unwrap().texture));
         assert_eq!(rough.spatial, application.spatial);
-        let doubled = applied(edited(&rough, &document, &papers, SCALE, &EffectValue::Number(2.), &l));
+        let doubled = applied(edited(&rough, &document, &[], &papers, SCALE, &EffectValue::Number(2.), &l));
         let spatial = doubled.spatial.unwrap();
         assert!((paper::scale(&spatial, [300.; 2]) - 2.).abs() < 1e-9);
         assert_eq!(spatial.mapping.0[4..], [0., 0.]);
-        assert!(edited(application, &document, &papers, TEXTURE, &EffectValue::Choice(13), &l).unwrap().is_err());
-        assert!(edited(application, &document, &papers, "color", &EffectValue::Choice(0), &l).is_none());
+        assert!(edited(application, &document, &[], &papers, TEXTURE, &EffectValue::Choice(13), &l).unwrap().is_err());
+        assert!(edited(application, &document, &[], &papers, "color", &EffectValue::Choice(0), &l).is_none());
     }
 }

@@ -346,7 +346,7 @@ export function createHeader({app, state, paintPair, workspace, element, button,
     for(const [id,r] of records)r.root.classList.toggle('in-bar',joined.has(id));
     overflow.forEach((node,i)=>node.classList.toggle('in-bar',g.bars.some(b=>b.overflow===BigInt(i))));
     g.overflow.forEach((b,i)=>{
-      if(!b){overflow[i].open=false;if(overflow[i].contains(document.activeElement))focus=view.model.zones[i].map(e=>records.get(e.id)).find(r=>!r.root.hidden)?.content.querySelector('summary,button')||root;}
+      if(!b){overflow[i].open=false;if(overflow[i].contains(document.activeElement))focus=view.model.zones[i].flatMap(e=>[...records.get(e.id).content.querySelectorAll('summary,button')]).find(node=>!node.disabled&&!node.closest('[hidden],[inert]')&&node.getClientRects().length)||root;}
       overflow[i].hidden=!b;if(b)place(overflow[i],b);
       const summary=overflow[i].firstChild,ids=g.hidden[i];
       if(editing&&ids.length===1)summary.dataset.headerOverflowSource=ids[0];

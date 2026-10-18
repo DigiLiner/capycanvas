@@ -82,6 +82,7 @@ numeric-invalid-expression = 有効な数式を入力してください。
 numeric-range = { $label }は{ $min }から{ $max }の間にしてください。
 
 numeric-whole-pixels = { $label }には整数のピクセル数が必要です。
+numeric-whole-number = { $label } は整数で入力してください。
 
 common-close = 閉じる
 common-remove = 削除

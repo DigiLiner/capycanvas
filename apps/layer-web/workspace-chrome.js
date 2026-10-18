@@ -4,6 +4,13 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
   let resolved,animating=false;
   const send=action=>dispatch({type:"customize",action});
   const local=(b,origin)=>({...b,x:b.x-origin.x,y:b.y-origin.y});
+  function contentHeight(body) {
+    const top=body.getBoundingClientRect().top-body.scrollTop;
+    return [...body.children].reduce((height,child)=>{
+      const bounds=child.getBoundingClientRect();
+      return bounds.height?Math.max(height,bounds.bottom-top+(parseFloat(getComputedStyle(child).marginBottom)||0)):height;
+    },0);
+  }
   function intersect(a,b) {
     const x=Math.max(a.x,b.x),y=Math.max(a.y,b.y),right=Math.min(a.right,b.right),bottom=Math.min(a.bottom,b.bottom);
     return right>x&&bottom>y?{x,y,width:right-x,height:bottom-y}:null;
@@ -219,8 +226,9 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
     for(const node of workspace.querySelectorAll('[data-drawer-facing]'))delete node.dataset.drawerFacing;
     for(const node of workspace.querySelectorAll('[data-drawer-source-corners]'))delete node.dataset.drawerSourceCorners;
     for(const[id,r]of drawers) {
-      const width=r.placement?.columns?.[0]?.width||232;
-      if(!r.closing) for(const body of r.bodies) {
+      const measured=r.placement;
+      if(!r.closing) for(const [index,body] of r.bodies.entries()) {
+        const width=measured?.columns?.[index]?.width||232;
         body.style.width=`${width}px`;
         for(const strip of body.querySelectorAll("[data-drawer-toolbar]")) {
           const geometry=app.drawer_toolbar(strip.dataset.drawerToolbar,width);
@@ -229,7 +237,7 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
         }
       }
       const page=r.inspector?.measure(now);
-      const heights=r.bodies.map(body=>page?.height??body.scrollHeight+(r.drawer.tabs?resolved.tab_bar_height:0));
+      const heights=r.bodies.map(body=>page?.height??contentHeight(body)+(r.drawer.tabs?resolved.tab_bar_height:0));
       const progress=matchMedia("(prefers-reduced-motion: reduce)").matches?1:Math.min(1,(now-r.started)/160);
       const result=app.drawer({viewport:[workspace.clientWidth,workspace.clientHeight],column:r.column,heights,progress,from:r.from??null,closing:!!r.closing});
       if(!result || (r.closing&&progress===1)){dispose(r);drawers.delete(id);continue;}
@@ -250,7 +258,10 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
       r.shadow.style.borderRadius=r.root.style.borderRadius;
 
       r.root.style.zIndex=r.column==null?"1900":"1800";
-      r.placement.columns.forEach((bounds,i)=>place(r.bodies[i],bounds));
+      r.placement.columns.forEach((bounds,i)=>{
+        more ||= bounds.width!==(measured?.columns?.[i]?.width||232);
+        place(r.bodies[i],bounds);
+      });
       r.inspector?.layout();
       if(r.drawer.tabs) {
         let tabs=r.root.querySelector(":scope > .drawer-tabs");

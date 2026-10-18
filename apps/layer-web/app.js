@@ -738,7 +738,7 @@ function measurePanels() {
       const content_height = cached.content?.getBoundingClientRect().height || 0;
       // The unconstrained copy lays out every row, including offscreen rows.
       // Subtract the list itself to keep headers/footers outside the scroll budget.
-      const list = cached.content?.querySelector(".layer-rows, .filter-picker-list, .palette-scroll");
+      const list = cached.content?.querySelector(".layer-rows, .filter-picker-list, .palette-scroll, .navigator-overview");
       const row = list?.querySelector(".layer-row, .filter-row, .palette-tile");
       cached.value = {
         panel: id,

@@ -158,6 +158,25 @@ Canvas presentation callbacks do not measure cached native chrome.
   capability, memory footprint and thermal state. Empty measurements are null.
   Footprint includes startup growth and the recorder's own storage.
 
+Full recorded readiness requires canvas, loaded UI catalog and shader flags.
+`tests/persistence-owner.swift` checks that an owner frame exports the catalog
+flag. Traces missing a required flag cannot establish full readiness.
+
+Canvas traces do not measure cached native chrome. Resizing or scrolling a
+cached Core Animation layer can change its displayed geometry without a new
+GPU surface write. A fresh-surface presentation count therefore cannot establish
+the complete window's motion FPS or interval p99.
+
+When complete presentation data is unavailable, record whole Core Animation
+commits as **renderer submissions**, following the
+[measurement rules](../../docs/performance/measuring.md). Attribute commits to
+the owned process through structured process or thread records; context commits
+and layout callbacks are not whole submissions. Bound intervals within each
+observed gesture and retain thermal coverage, priming, native input and source
+guards. Keep presentation FPS and p99 unavailable; renderer counts do not qualify
+a tier. Alternative display collectors need validated nonempty frame counts and
+interval scope before their rate can support a comparison.
+
 ## JSONL schema 1
 
 The first line is metadata. Each other line is `[kind, a, b, …]` with unsigned

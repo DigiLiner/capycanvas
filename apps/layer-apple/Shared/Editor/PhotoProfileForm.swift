@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct PhotoProfileForm: View {
+    @Environment(\.capyProfileCopy) private var copy
+    @Environment(\.capyInterfaceLanguage) private var language
     let preferences: ColorPreferencesStore
     let interpretation: JSON
     let spaces: [JSON]
@@ -10,21 +12,26 @@ struct PhotoProfileForm: View {
     @State private var space = "Srgb"
     @State private var imported = JSON()
     @State private var readingProfile = false
+    @State private var sourceCaption = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Choose image interpretation").font(.headline)
-            Text("This image has no declared color profile. Choose how to interpret its stored values. The original numbers will be retained.")
+            Text(copy["interpret_title"].string).font(.headline)
+            Text(copy["interpret_help"].string)
             SourceProfilePicker(preferences: preferences, spaces: spaces, selection: $space, imported: $imported, busy: $readingProfile)
-            Text("Source: \(interpretation["channels"].string) · \(interpretation["depth"].string == "U16" ? "16" : "8")-bit")
+            Text(sourceCaption)
                 .foregroundStyle(.secondary)
             if let error { Text(error).foregroundStyle(.red) }
             HStack {
-                Button("Cancel") { choose(nil) }.keyboardShortcut(.cancelAction)
+                Button(copy["common"]["cancel"].string) { choose(nil) }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Use Profile") { choose(space == "imported" ? imported["profile"] : JSON(["Builtin": space])) }.keyboardShortcut(.defaultAction)
+                Button(copy["use_profile"].string) { choose(space == "imported" ? imported["profile"] : JSON(["Builtin": space])) }.keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier("photo-profile-use")
                     .disabled(readingProfile)
             }
         }.padding(24).frame(minWidth: 320, idealWidth: 420, maxWidth: 520).disabled(busy)
+            .onChange(of: [language, interpretation["channels"].string, interpretation["depth"].string], initial: true) { _, _ in
+                sourceCaption = NativeTextContext.caption(["type": "photo_source", "channels": interpretation["channels"].raw,
+                    "depth": interpretation["depth"].raw], language: language)
+            }
     }
 }

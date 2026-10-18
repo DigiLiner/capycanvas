@@ -5,6 +5,10 @@ extension EditorLaunchTests {
         try checkNativeProfiledExport(in: editorCaptureApplication())
     }
 
+    @MainActor func testNativeProfiledExportDark() throws {
+        try checkNativeProfiledExport(in: editorCaptureApplication(), theme: "dark")
+    }
+
     @MainActor func testNativePhotoCorrections() throws {
         try checkNativePhotoCorrections(in: editorCaptureApplication())
     }
