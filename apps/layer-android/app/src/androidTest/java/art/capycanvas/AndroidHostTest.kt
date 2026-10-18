@@ -3447,7 +3447,7 @@ class AndroidHostTest {
                     val labels = compose.onAllNodes(hasText(field.getString("label")) and hasAnyAncestor(hasTestTag("tool-setting-$id")), useUnmergedTree = true).fetchSemanticsNodes()
                     assertEquals("$context $id plain label aligns with the field", bounds.left, labels.single().boundsInRoot.left, 1f)
                     assertEquals("$context $id compact slider row", 36f * density, bounds.height, 1f)
-                    val slider = node("tool_settings", "number-slider-${field.getString("label")}").fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
+                    val slider = compose.onNode(hasTestTag("number-slider-${field.getString("label")}") and hasAnyAncestor(hasTestTag("tool-setting-$id")), useUnmergedTree = true).fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
                     val readout = node("tool_settings", "number-value-$id").fetchSemanticsNode().layoutInfo.coordinates.boundsInRoot()
                     assertEquals("$context $id reserves the upstream editor column", bounds.right - 76f * density, slider.right, 1f)
                     assertEquals("$context $id readout bottom aligns with the slider row", bounds.bottom, readout.bottom, 1f)
@@ -3458,6 +3458,7 @@ class AndroidHostTest {
                     gap("tool_settings", "tool-setting-${first.getString("id")}", "tool-setting-${next.getString("id")}", 4f)
                 }
                 when (context) {
+                    "painting" -> gap("tool_settings", "tool-setting-smoothing_strength", "tool-action-smoothing_adjust_speed", 4f)
                     "zoom" -> gap("tool_settings", "tool-segments-zoom-click", "tool-segments-zoom-drag", 4f)
                     "gradient" -> {
                         gap("tool_settings", "tool-segments-gradient-shape", "gradient-interpolation", 4f)

@@ -81,6 +81,8 @@ function Check-Smoothing{
  [CapyRowPointer]::Key([uint32]$ProcessId,27);Wait-Until {(Field 'smoothing_strength').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value-eq'30'} 'Smoothing Escape did not restore30'
  $speed=Control 'tool-action-smoothing_adjust_speed' ([System.Windows.Automation.ControlType]::CheckBox) -Id
  if($speed.Current.ProcessId-ne$ProcessId){throw 'Smoothing checkbox owner mismatch'}
+ $sliderBounds=$slider.Current.BoundingRectangle;$speedBounds=$speed.Current.BoundingRectangle
+ if($speedBounds.Top-lt$sliderBounds.Bottom-or$speedBounds.Top-$sliderBounds.Bottom-gt48){throw "Adjust by speed is not directly below Smoothing: slider=$sliderBounds; check=$speedBounds"}
  $speed.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle();Wait-Until {((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').selected} 'Smoothing speed toggle did not reach shared state'
  Select-Tool 'pencil';Wait-Until {(Model).brush_ready-and[math]::Abs((Value 'smoothing_strength')-.06)-lt.0001} 'Pencil smoothing default did not prepare' 8
  if(((Model).state.commands|Where-Object id -eq 'smoothing_adjust_speed').selected){throw 'Pen speed adjustment leaked into Pencil'}

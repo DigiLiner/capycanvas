@@ -90,17 +90,19 @@ promotes Paint and Pull, watercolor promotes Water load and Wet edge, and smudge
 promotes Pull. Ordinary brushes promote Hardness when applicable. A promoted
 field appears once, without a category heading.
 
-Secondary categories follow a shared order: Tip, Material, Texture, Bristles,
-Mixing, Watercolor, Bleed, Liquify, Blending and Smoothing. Smoothing has Strength
-from 0 to 100, default 6, and Adjust by speed. Each brush retains these choices;
+Secondary categories follow a shared order: Smoothing, Tip, Material, Texture,
+Bristles, Mixing, Watercolor, Bleed, Liquify and Blending. Smoothing has Strength
+from 0 to 100, default 6, and Adjust by speed. A tool action with a
+`setting_group` follows that category's last field on every host, so Adjust by
+speed sits under the Smoothing slider. Each brush retains these choices;
 selection and coverage-mask tools omit them. Strength uses a logarithmic slider
 with 30 at 75% travel. Command search shows Smoothing › Strength to distinguish
 it from application Strength. Brush Color mixing joins the
 secondary Mixing category in Tool Options. Opacity belongs to Blending, after
 the material controls. Hosts use stable `group_id` values for category boundaries
 and schema identity, with localized `group` text only for headings. Dry media
-therefore show Size, Strength, Texture strength, Material hardness, then Tip angle
-under Tip and Opacity under Blending. Contact softness is hidden and fixed in the
+therefore show Size, Strength, Texture strength, Material hardness, then
+Smoothing, Tip angle under Tip and Opacity under Blending. Contact softness is hidden and fixed in the
 engine. Material hardness controls the pressure response of pigment loading.
 Stable numeric rules retain editors across language changes; localized endpoint
 labels do not form part of schema identity. Tool Settings and Tool Options

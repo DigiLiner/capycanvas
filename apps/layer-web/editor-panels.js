@@ -171,7 +171,10 @@ export function createEditorPanels({ selectionUi, app, wasmModule, state, elemen
             if(!rows.has(spec.row)){const row=element('div','tool-action-row');row.dataset.toolActionRow=spec.row;body.append(row);rows.set(spec.row,row);}
             parent=rows.get(spec.row);
           }
-          parent.append(node);actions.push([spec,node,field]);
+          let anchor=spec.setting_group&&numbers.filter(([id])=>s.tool_settings.find(f=>f.id===id)?.group_id===spec.setting_group).at(-1)?.[1];
+          while(anchor&&anchor.parentElement!==body)anchor=anchor.parentElement;
+          if(anchor)anchor.after(node);else parent.append(node);
+          actions.push([spec,node,field]);
         }
         if(previousBody){
           const children=[...body.children].map(child=>retainedRows.get(child)??child),retained=new Set(children);

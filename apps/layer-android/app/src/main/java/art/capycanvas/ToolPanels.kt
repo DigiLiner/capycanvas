@@ -169,6 +169,8 @@ import kotlinx.coroutines.withContext
                 }
             }
         }
+        val settingGroups = state.array("tool_settings").objects().map { it.getString("group_id") }.toSet()
+        val anchored = actions.filter { action -> !action.optBoolean("segmented") && action.optString("setting_group").let { it.isNotEmpty() && it in settingGroups } }
         state.array("tool_settings").objects().fold(mutableListOf<MutableList<JSONObject>>()) { groups, field ->
             if (groups.lastOrNull()?.last()?.getString("group_id") == field.getString("group_id")) groups.last().add(field)
             else groups.add(mutableListOf(field))
@@ -182,8 +184,10 @@ import kotlinx.coroutines.withContext
                 ToolbarChoice(choice, false, false, false, 20, host::dispatch, prefix = "tool")
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { fields.forEach { fieldControl(it, true) } }
             }
+            val groupActions = anchored.filter { it.getString("setting_group") == fields.first().getString("group_id") }
+            if (groupActions.isNotEmpty()) ToolActionRows(host, state, groupActions, commands)
         }
-        ToolActionRows(host,state,actions.filterNot {it.optBoolean("segmented")},commands)
+        ToolActionRows(host,state,actions.filterNot {it.optBoolean("segmented") || it in anchored},commands)
         }
     }
 }

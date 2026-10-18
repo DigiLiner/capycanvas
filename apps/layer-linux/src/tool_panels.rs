@@ -523,7 +523,12 @@ impl ToolSettings {
                             let row=crate::panel_controls::action_row(crate::panel_controls::CONTROL_SPACING);self.form.append(&row);action_row=Some((pair,row));
                         }
                         action_row.as_ref().unwrap().1.append(&widget);
-                    } else { action_row=None;self.form.append(&widget); }
+                    } else {
+                        action_row=None;
+                        let anchor=action.setting_group().and_then(|group| fields.iter().rev().find(|(control,_)| control.group_id==group.key()))
+                            .and_then(|(_,input)| std::iter::successors(Some(input.clone().upcast::<gtk::Widget>()),|w| w.parent()).find(|w| w.parent().as_ref()==Some(self.form.upcast_ref())));
+                        match anchor { Some(anchor) => self.form.insert_child_after(&widget,Some(&anchor)), None => self.form.append(&widget) }
+                    }
                 }
                 actions.push((*action, caption, widget));
             }

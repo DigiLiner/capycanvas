@@ -45,6 +45,7 @@ export async function checkSmoothing({call, evaluate, settle}) {
       });
       await settle();
       assert.equal(await evaluate('document.querySelector(\'[data-tool-setting="smoothing_strength"] .number-value\').textContent'), "30");
+      assert.equal(await evaluate(`(()=>{let field=document.querySelector('[data-tool-setting="smoothing_strength"]');while(field.parentElement&&!field.parentElement.classList.contains('tool-settings-body'))field=field.parentElement;return field.nextElementSibling?.dataset.toolAction;})()`), "smoothing_adjust_speed");
       await inPage(() => document.querySelector('[data-tool-action="smoothing_adjust_speed"]').click());
       await settle();
       assert.equal(await evaluate('layerApp.state().commands.find(c=>c.id==="smoothing_adjust_speed").selected'), theme === "light");

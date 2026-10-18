@@ -25,6 +25,8 @@ struct ToolSettingActionView {
     #[serde(skip_serializing_if = "Option::is_none")]
     row: Option<&'static str>,
     icon_only: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    setting_group: Option<&'static str>,
 }
 impl From<ToolSettingAction> for ToolSettingActionView {
     fn from(action: ToolSettingAction) -> Self {
@@ -34,7 +36,13 @@ impl From<ToolSettingAction> for ToolSettingActionView {
             segmented: action.group().is_some_and(ToolActionGroup::segmented),
             row: action.row().map(ToolActionRow::id),
             icon_only: action.row().is_some_and(ToolActionRow::icon_only),
+            setting_group: action.setting_group().map(MessageId::key),
         }
+    }
+}
+impl ToolSettingAction {
+    pub fn setting_group(self) -> Option<MessageId> {
+        (self.command == crate::CommandId::SmoothingAdjustSpeed).then_some(MessageId::TOOL_SETTING_GROUP_SMOOTHING)
     }
 }
 
@@ -205,6 +213,7 @@ fn primary(brush: &BrushSnapshot) -> &'static [&'static str] {
 }
 
 const GROUP_ORDER: &[MessageId] = &[
+    MessageId::TOOL_SETTING_GROUP_SMOOTHING,
     MessageId::TOOL_SETTING_GROUP_TIP,
     MessageId::TOOL_SETTING_GROUP_MATERIAL,
     MessageId::TOOL_SETTING_GROUP_TEXTURE,
