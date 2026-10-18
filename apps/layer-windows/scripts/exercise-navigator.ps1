@@ -30,7 +30,7 @@ function Navigator {
 }
 function Capture([string]$Name){
     $rect=[CapyNavigatorCapture+Rect]::new()
-    if(![CapyNavigatorCapture]::GetWindowRect($review.MainWindowHandle,[ref]$rect)){throw 'Window bounds unavailable'}
+    if(![CapyNavigatorCapture]::GetWindowRect($drawingWindow,[ref]$rect)){throw 'Window bounds unavailable'}
     $bitmap=[Drawing.Bitmap]::new($rect.right-$rect.left,$rect.bottom-$rect.top)
     $graphics=[Drawing.Graphics]::FromImage($bitmap)
     try {$graphics.CopyFromScreen($rect.left,$rect.top,0,0,$bitmap.Size)}
@@ -41,8 +41,8 @@ function Capture([string]$Name){
 function Image-Rect {
     $overview=(Control 'navigator-overview').Current.BoundingRectangle
     $window=[CapyNavigatorCapture+Rect]::new()
-    if(![CapyNavigatorCapture]::GetWindowRect($review.MainWindowHandle,[ref]$window)){throw 'Window bounds unavailable'}
-    $scale=[CapyNavigatorCapture]::GetDpiForWindow($review.MainWindowHandle)/96.
+    if(![CapyNavigatorCapture]::GetWindowRect($drawingWindow,[ref]$window)){throw 'Window bounds unavailable'}
+    $scale=[CapyNavigatorCapture]::GetDpiForWindow($drawingWindow)/96.
     $document=(Model).state.tabs[0]
     $fit=[Math]::Min(($overview.Width-8*$scale)/$document.width,($overview.Height-8*$scale)/$document.height)
     $width=$document.width*$fit;$height=$document.height*$fit
@@ -56,7 +56,7 @@ function Image-Rect {
 function Surround-Matches($Capture) {
     $overview=(Control 'navigator-overview').Current.BoundingRectangle
     $window=[CapyNavigatorCapture+Rect]::new()
-    if(![CapyNavigatorCapture]::GetWindowRect($review.MainWindowHandle,[ref]$window)){throw 'Window bounds unavailable'}
+    if(![CapyNavigatorCapture]::GetWindowRect($drawingWindow,[ref]$window)){throw 'Window bounds unavailable'}
     $pixel=$Capture.GetPixel([int]($overview.Left-$window.left+2),[int]($overview.Top-$window.top+2))
     $expected=[Drawing.ColorTranslator]::FromHtml((Model).state.palette.bg)
     $pixel.R -eq $expected.R -and $pixel.G -eq $expected.G -and $pixel.B -eq $expected.B
@@ -78,14 +78,15 @@ try {
     $null=$review.Handle
     [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/navigator-review.json'),(@{process_id=$review.Id;run=$run}|ConvertTo-Json))
     Write-Output "Owned Navigator review $($review.Id)"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready} 'Review did not start' 45
+    $native=@{window=$null}
+    Wait-Until {$native.window=Owned-DrawingWindow $review;$null -ne $native.window -and (Model).brush_ready} 'Review did not start' 45
     if(!(Model).windows_isolated_settings){throw 'Navigator fixture requires an isolated profile'}
     [CapyNavigatorCapture]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $root=$native.window.Root;$drawingWindow=$native.window.Handle
     try{Wait-Until {Find 'navigator-overview'} 'Navigator is hidden by default' 3}catch{Navigator}
     $overview=Control 'navigator-overview'
     $identity=$overview.GetRuntimeId() -join ':'
-    $scale=[CapyNavigatorCapture]::GetDpiForWindow($review.MainWindowHandle)/96.
+    $scale=[CapyNavigatorCapture]::GetDpiForWindow($drawingWindow)/96.
     if($overview.Current.BoundingRectangle.Height -gt 220*$scale+1){throw 'Overview exceeds the shared 220-unit height cap'}
     foreach($id in @('zoom_out','zoom_in','rotate_left','rotate_right','flip_horizontal','flip_vertical')){
         $button=Control ('navigator-'+$id)
@@ -111,7 +112,7 @@ try {
     if(((Control 'navigator-overview').GetRuntimeId() -join ':') -ne $identity){throw 'Camera updates replaced the native overview'}
     $canvas=Control 'drawing-canvas' -Arranged
     $canvas.SetFocus()
-    [CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)|Out-Null
+    [CapyRowPointer]::SetForegroundWindow($drawingWindow)|Out-Null
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     $bounds=$canvas.Current.BoundingRectangle
     [CapyRowPointer]::Hover([int]($bounds.Left+$bounds.Width/2),[int]($bounds.Top+$bounds.Height/2))
@@ -149,7 +150,7 @@ try {
             Surround-Matches $replacement
         }finally{$replacement.Dispose()}
     } 'New document did not fill the expected overview image'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 1550 -Height 1040
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Resize -Width 1550 -Height 1040
     Wait-Until {(Model).state.camera.viewport[0] -gt 1450} 'Native resize did not reach the renderer'
     if(((Control 'navigator-overview').GetRuntimeId() -join ':') -ne $identity){throw 'Resize replaced the native Navigator'}
     Navigator
@@ -172,7 +173,7 @@ try {
         $alternate=Capture 'alternate-theme'
         try{Surround-Matches $alternate}finally{$alternate.Dispose()}
     } 'Navigator surround did not present the alternate theme after Preferences closed'
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native runtime stderr requires inspection'}
     [PSCustomObject]@{
         shared_commands_and_camera='passed';retained_controls_and_resize='passed'

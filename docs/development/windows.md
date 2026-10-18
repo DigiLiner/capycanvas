@@ -713,6 +713,10 @@ disposable profile (see [diagnosis](#diagnose-a-running-app)). Device-specific
 fixtures take `-Device mouse|pen|touch`. Results, captures and profiles stay under
 ignored `artifacts/windows`.
 
+`exercise-navigator.ps1 -Executable <path>` checks Navigator commands, live
+preview pixels, exact Undo, retained controls, resizing and both themes in one
+run. It retains the owned drawing window for capture, input, resize and close.
+
 For switcher visibility and its context menu during title-bar customization, run
 `tools/windows-vm/windows-vm.py fixtures switcher header:options header:options-light header:options-pen header:options-touch`.
 The switcher fixture covers both themes and injected mouse, pen and touch input;
