@@ -2682,7 +2682,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if let UiAction::CurveEditor { target: CurveEditorTarget::Effect { layer, key }, action } = action {
             return self.dispatch(UiAction::Effect { action: action.effect(layer, &key) });
         }
-        self.engine.backend_mut().shader_input();
+        if !action.is_host_report() { self.engine.backend_mut().shader_input(); }
         if self.defer_document_action(&action) {
             return Ok(self.changed(regions::COMMANDS, true));
         }
@@ -9558,6 +9558,28 @@ mod tests {
         assert!(!s.background_readback_idle());
         assert!(s.renderer_mut().validation.is_some());
         assert_eq!(s.engine.backend().shader_idle, (true, true));
+    }
+
+    #[test]
+    fn host_reports_do_not_postpone_background_shaders() {
+        let mut s = session(Platform::Gtk);
+        s.frame(0, 0).unwrap();
+        let inputs = s.engine.backend().shader_inputs;
+        for frame in 1..4 {
+            for report in [
+                UiAction::MeasureDrawerTiles { measurements: vec![] },
+                UiAction::MeasureColumnDrawers { measurements: vec![] },
+                UiAction::MeasureHeader { height: 48., items: vec![] },
+                UiAction::SystemThemeChanged { theme: Theme::Dark, accent: None },
+            ] {
+                assert!(report.is_host_report());
+                s.dispatch(report).unwrap();
+            }
+            s.frame(frame, frame).unwrap();
+        }
+        assert_eq!(s.engine.backend().shader_inputs, inputs);
+        s.dispatch(UiAction::SetBrushSize { value: 30. }).unwrap();
+        assert_eq!(s.engine.backend().shader_inputs, inputs + 1);
     }
 
     #[test]

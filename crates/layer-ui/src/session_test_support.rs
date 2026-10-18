@@ -15,6 +15,7 @@ pub(crate) struct Recorder {
     pub(crate) clipping_previews: Vec<(bool,bool)>,
     pub(crate) settling: bool,
     pub(crate) refining: bool,
+    pub(crate) shader_inputs: usize,
     pub(crate) shader_idle: (bool, bool),
     pub(crate) color: layer_core::color::DocumentColor,
     pub(crate) prepared_color: Option<layer_core::color::DocumentColor>,
@@ -77,6 +78,7 @@ impl CanvasRenderer for Recorder {
     fn has_pending_submission(&self) -> bool { self.settling }
     fn paint_ready(&self, _document: &Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { !self.painting_unready }
     fn has_pending_work(&self) -> bool { self.refining }
+    fn shader_input(&mut self) { self.shader_inputs += 1; }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { self.shader_idle = (idle, speculative_idle); }
     fn can_submit(&self) -> bool { !self.settling }
     fn set_selection_overlay(&mut self, overlay: Option<layer_render::SelectionOverlay>) {self.overlay=overlay;}

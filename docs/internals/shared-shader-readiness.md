@@ -74,11 +74,13 @@ ordered jobs retain queue order. Optional work waits for required jobs to finish
 Required canvas/brush dependencies and explicit package validation retain
 priority and progress while input arrives. Visible optional previews wait for
 200 ms without input; pipeline-cache finalization waits for one second and no
-continuous canvas work. Required compilation renews the quiet interval on
-completion. Strokes, held gestures, queued input, pending edits and settings
-keep optional work parked. Native workers sleep on their existing condition
-variable; browsers use a host timer. An in-flight driver call cannot be
-interrupted; admission happens between jobs.
+continuous canvas work. Host reports, such as layout measurements and system
+theme changes, are not input; a panel that remeasures while it updates must not
+keep the cache unsaved and startup incomplete. Required compilation renews the
+quiet interval on completion. Strokes, held gestures, queued input, pending
+edits and settings keep optional work parked. Native workers sleep on their
+existing condition variable; browsers use a host timer. An in-flight driver call
+cannot be interrupted; admission happens between jobs.
 
 Selected-pixel standby uses the same optional admission. It requests source
 decoding, selection and reduction pipelines before capturing pixels; a frame
