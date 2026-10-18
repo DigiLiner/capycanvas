@@ -158,7 +158,9 @@ export async function checkLayers({ call, evaluate, settle }) {
 export async function checkLayerRelationships({call,evaluate,settle}) {
   const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/layer-attachment-web';
   await mkdir(directory,{recursive:true});
-  const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
+  const wait=expression=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+10000;function check(){if(${expression})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(expression)}));else setTimeout(check,30);}check();})`);
+  const applied=()=>wait('Number(layerApp.app.gpu_diagnostics().session.deferred_edits)===0');
+  const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();await applied();};
   const layer=action=>send({type:'layer',action});
   const invoke=command=>send({type:'invoke',command});
   const active=()=>evaluate('Number(layerApp.state().layer_tools.editing_layer.id)');
@@ -168,9 +170,8 @@ export async function checkLayerRelationships({call,evaluate,settle}) {
     await evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'nearest'})`);await settle();
     return evaluate(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()`);
   };
-  const mouse=async(type,p)=>{await call('Input.dispatchMouseEvent',{type,...p,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1});await settle();};
-  const wait=expression=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+10000;function check(){if(${expression})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(expression)}));else setTimeout(check,30);}check();})`);
-  const attach=async()=>{await evaluate("document.querySelector('.layer-attachment').click()");await settle();};
+  const mouse=async(type,p)=>{await call('Input.dispatchMouseEvent',{type,...p,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1});await settle();await applied();};
+  const attach=async()=>{await evaluate("document.querySelector('.layer-attachment').click()");await settle();await applied();};
   const insert=async effect=>{await send({type:'effect',action:{op:'insert',effect}});return active();};
   await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy');
   await wait('JSON.parse(layerApp.app.workspace_view()).ready&&!JSON.parse(layerApp.app.workspace_view()).busy');
