@@ -3267,6 +3267,55 @@ close preview latency or the earlier presentation failure. Evidence is in
 `latest-Apple-integrated-Release-preparation/runtime-thumbnail-photo20-Light-Mac/`
 and `layer-thumbnail-photo-private-storage-successor/` beside that directory.
 
+The same thumbnail-wake build on the M4 iPad Pro completes the photo workload:
+20.0036 measured seconds, all 4320 samples and three contacts, with zero rejected
+inputs, render errors, missing callbacks or zero-time callbacks in the measured
+interval. Five zero-time callbacks outside that interval remain in the full
+trace. Contact rates are 116.666/112.675/110.175 presentations/s; maximum prepare
+is 74.070 ms and the first-contact maximum displayed gap is 141.670 ms. The
+second and third contacts still miss 114 presentations/s. Both paint-layer
+previews are visible in the reviewed light capture. Direct app launch avoids
+XCTest, so this does not verify the pending interactive iPad journeys. Evidence
+is in `M4-current-thumbnail-Release-photo-Light-current-install/` beside
+`latest-Apple-integrated-Release-preparation/`.
+
+The bounded thumbnail polling change on `39f880308` retains the four-page
+budget and shared input priority, but uses the shared completion-delay hint
+instead of pausing 120 ms between every idle batch. Both normal Release builds,
+three focused Host GPU cases and four mounted replacement cases pass. On the
+M2 Pro, the 61 MP photo preview is still absent at the three-second observation.
+It arrives before the final all-images check in both themes. Elapsed time from document
+activation to the all-images check is 3.943 s light and 3.849 s dark, including
+the fixture's fixed three-second drain; these are upper bounds, not exact
+arrival times. Both photo previews preserve every normalized Display P3 RGBA
+byte. The mounted checks do not qualify UIKit or drawing cadence. Captures,
+timings and exact comparisons are in
+`latest-Apple-integrated-Release-preparation/layer-thumbnail-idle-throttle-verification/`.
+
+The normal Mac Release capture now shows both the painted-ink and photo
+thumbnails. Its unchanged workload guard still fails with one measured
+zero-time presentation, zero missing callbacks, all 4320 samples and no input
+rejections, frame errors or trace drops. The measured interval is
+19.999975 s; contact rates are 87.190/89.459/88.998 presentations/s, maximum
+prepare is 110.205 ms and the first-contact maximum displayed gap is
+177.779 ms. These single cases do not establish a cadence or response gain.
+The trace and capture are in
+`latest-Apple-integrated-Release-preparation/runtime-thumbnail-throttle-photo20-Light-Mac/`.
+
+The M4 iPad Pro's corresponding direct Release case passes its workload guards:
+20.006619 measured seconds, all 4320 samples, priming Undo and three contacts,
+with zero measured missing or zero-time callbacks, rejected inputs, frame errors
+or trace drops. Four zero-time callbacks outside measurement remain recorded.
+Contact rates are 116.327/117.174/115.328 presentations/s; maximum prepare is
+78.687 ms, maximum owner service 78.860 ms and first-contact maximum displayed
+gap 150.004 ms. Contact-three boundary coverage and instrumentation eligibility
+remain false; these synthetic presentation rates do not qualify completed brush
+updates, physical latency or the tier. The reviewed capture has correct ink and
+photo previews; the photo's retained 32 × 32 window crop matches the control
+exactly. Evidence is in
+`M4-current-thumbnail-throttle-Release-photo-Light-current-Mac/` beside
+`latest-Apple-integrated-Release-preparation/`.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized

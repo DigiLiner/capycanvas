@@ -28,12 +28,14 @@ import CoreGraphics
     func refresh() {
         guard task == nil, store?.snapshot["gpu_ready"].bool == true else { return }
         task = Task { [weak self] in
+            var wait = 120
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(120)) } catch { return }
+                do { try await Task.sleep(for: .milliseconds(wait)) } catch { return }
                 guard let self else { return }
                 let more = await self.poll()
                 if Task.isCancelled { return }
-                if !more { self.task = nil; return }
+                guard let more else { self.task = nil; return }
+                wait = max(8, more)
             }
         }
     }
@@ -51,9 +53,9 @@ import CoreGraphics
         }
         return result
     }
-    private func poll() async -> Bool {
+    private func poll() async -> Int? {
         let generation = generation
-        guard let store else { return false }
+        guard let store else { return nil }
         let wanted = desired()
         var requests: [UInt64: Request] = [:]
         for key in wanted.keys.sorted() {
@@ -65,14 +67,14 @@ import CoreGraphics
         let ids = Set(store.state["layers"].array.map { String($0["id"].uint) })
         let obsolete = images.keys.filter { !ids.contains(String($0.split(separator: ":")[0])) }
         for key in obsolete { images.removeValue(forKey: key); completed.removeValue(forKey: key) }
-        guard !requests.isEmpty || !pending.isEmpty else { return false }
+        guard !requests.isEmpty || !pending.isEmpty else { return nil }
         let reply: JSON = await withCheckedContinuation { continuation in
             store.query(["type": "layer_thumbnails", "requests": requests.map { [$0.key, $0.value.version.target] }]) {
                 continuation.resume(returning: $0)
             }
         }
-        guard generation == self.generation else { return false }
-        if reply.isNull { pending.removeAll(); return false }
+        guard generation == self.generation else { return nil }
+        if reply.isNull { pending.removeAll(); return nil }
         if reply["canvas_wake"].bool { store.wake?() }
         for token in reply["accepted"].array { if let request = requests[token.uint] { pending[token.uint] = request } }
         let current = desired()
@@ -91,5 +93,6 @@ import CoreGraphics
         }
         if !reply["images"].array.isEmpty { images = updated }
         return !pending.isEmpty || desired().contains { completed[$0.key] != $0.value }
+            ? Int(reply["wait_ms"].uint) : nil
     }
 }

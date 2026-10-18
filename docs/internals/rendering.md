@@ -1032,8 +1032,10 @@ light on a grid of at most 256 × 256 pixels: from the canvas's prefiltered imag
 levels when every object has them, otherwise from one exact collection evaluation.
 Thumbnail work that leaves decoding or sampling for the canvas schedules a frame.
 The native JSON reply carries `canvas_wake`; pollers forward it even when the
-editor snapshot is unchanged. Shared layer revisions include generator parameters, so all
-hosts request new pixels after a parameter edit or undo. Content requests use
+editor snapshot is unchanged. Its `wait_ms` hint yields while the canvas is busy
+and services bounded preview batches promptly at idle. Shared layer revisions
+include generator parameters, so all hosts request new pixels after a parameter
+edit or undo. Content requests use
 occurrence IDs; mask requests use encoded coverage source IDs. GTK, Web and
 native bridges share `ThumbnailTarget::from_wire_id` to decode both targets.
 

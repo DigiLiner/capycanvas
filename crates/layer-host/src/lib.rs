@@ -993,12 +993,13 @@ impl NativeHost {
                 json!({ "epoch": current, "target": hint.map(|h| h.target), "position": hint.map(|h| h.position), "effect_owner": hint.and_then(|h| h.effect_owner) })
             }
             Query::LayerThumbnails { requests } => {
+                let wait_ms = if self.startup.canvas_ready && self.session.background_readback_idle() { 0 } else { 50 };
                 let (accepted, images) = self.layer_thumbnails(requests)?;
                 let images: Vec<_> = images
                     .into_iter()
                     .map(|image| (image.request_id, image.width, image.height, image.bytes))
                     .collect();
-                json!({ "accepted": accepted, "images": images, "canvas_wake": self.dirty })
+                json!({ "accepted": accepted, "images": images, "canvas_wake": self.dirty, "wait_ms": wait_ms })
             }
             Query::Context { target } => json!(self.session.context_menu(target)?),
             Query::PanelHandleTarget { item } => {
@@ -1533,20 +1534,24 @@ mod tests {
         let (_reference, mut host) = gpu_document_host(layer_ui::Platform::Android, document);
         let clock = std::cell::Cell::new(0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        assert_eq!(host.query(json!({"type":"layer_thumbnails","requests":[]})).unwrap()["wait_ms"].as_u64(), Some(50), "Preview polling yields while the canvas prepares");
         while !host.startup.brush_ready || host.session.engine().wants_continuous_frames() { frame_step(&mut host, &clock, deadline); }
         let mut woke = false;
+        let mut prompt = false;
         loop {
             host.dirty = false;
             let reply = host.query(json!({"type":"layer_thumbnails","requests":[[1,layer_ui::occurrence_token(layer)]]})).unwrap();
             assert_eq!(reply["canvas_wake"].as_bool(), Some(host.dirty), "The query carries frame demand to its native caller");
             let images = reply["images"].as_array().unwrap();
             woke |= host.dirty;
+            prompt |= reply["wait_ms"].as_u64() == Some(0);
             assert!(host.dirty || !host.session.engine().wants_continuous_frames(), "work left for frames schedules one");
             if images.iter().any(|image| image[0].as_u64() == Some(1)) { break; }
             while host.dirty { frame_step(&mut host, &clock, deadline); }
             std::thread::sleep(std::time::Duration::from_millis(16));
         }
         assert!(woke, "the thumbnail leaves decoding for canvas frames");
+        assert!(prompt, "Idle preview batches resume promptly instead of waiting for a UI refresh");
     }
     fn thumbnail(host: &mut NativeHost, clock: &std::cell::Cell<u64>, request: u64, target: u64) -> Vec<u8> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
