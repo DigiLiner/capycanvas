@@ -154,7 +154,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// tools, history, dirty checkpoint or color interpretation.
     pub fn inherit_window_state(&mut self, previous: &Self) -> Result<UiChange, String> {
         let navigation=self.camera_navigation_revision();
-        let camera=(!self.initial_fit).then(||super::session_recovery::SessionCamera::capture(&self.state.camera));
+        let camera=(!self.initial_fit).then(||self.state.camera.clone());
         self.set_localization(previous.localization().clone());
         self.localization_generation = previous.localization_generation;
         self.preferences_revision = self.preferences_revision.max(previous.preferences_revision);
@@ -192,7 +192,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.set_viewport(logical, previous.state.camera.viewport)?;
         }
         self.sync_work_area();
-        if let Some(camera)=camera {self.state.camera=camera.restore(&self.state.camera)?;}
+        if let Some(camera)=camera.filter(|c|(c.viewport,c.work_area)!=(self.state.camera.viewport,self.state.camera.work_area)) {
+            self.state.camera=super::session_recovery::SessionCamera::capture(&camera).restore(&self.state.camera)?;
+        }
         // A window can still have queued native input from the previous tab.
         // Preserve each drawing's camera while retiring that input generation.
         self.state.camera.revision = self.state.camera.revision.max(previous.state.camera.revision)
@@ -381,6 +383,32 @@ mod tests {
 
     fn source(pixel: [u8; 4]) -> layer_core::color::source::SourceImage {
         std::sync::Arc::unwrap_or_clone(layer_core::color::source::rgba8_source([1, 1], |_, _| pixel))
+    }
+
+    #[test]
+    fn reactivation_keeps_the_drawing_camera_exactly_until_the_window_changes() {
+        let mut drawing = session(Platform::Gtk);
+        drawing.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+        drawing.dispatch(UiAction::SetRotation { rotation: 0.47 }).unwrap();
+        invoke(&mut drawing, CommandId::ZoomIn);
+        let mut other = session(Platform::Gtk);
+        other.set_viewport([1600., 1000.], [1600, 1000]).unwrap();
+        let camera = drawing.state.camera.clone();
+        for _ in 0..3 {
+            other.inherit_window_state(&drawing).unwrap();
+            drawing.inherit_window_state(&other).unwrap();
+            assert!(drawing.state.camera.revision > camera.revision);
+            assert_eq!(Camera { revision: camera.revision, ..drawing.state.camera.clone() }, camera);
+        }
+        let center = |s: &UiSession<Recorder>| s.state.camera.input_transform().map(layer_core::Point {
+            x: s.state.camera.work_area_center()[0], y: s.state.camera.work_area_center()[1],
+        });
+        let before = center(&drawing);
+        other.set_viewport([1200., 900.], [1200, 900]).unwrap();
+        drawing.inherit_window_state(&other).unwrap();
+        assert_eq!(drawing.state.camera.viewport, [1200, 900]);
+        let after = center(&drawing);
+        assert!((after.x - before.x).abs() < 1e-3 && (after.y - before.y).abs() < 1e-3, "{before:?} {after:?}");
     }
 
     #[test]

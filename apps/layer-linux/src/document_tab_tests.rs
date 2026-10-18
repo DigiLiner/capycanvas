@@ -350,14 +350,17 @@ fn native_document_tabs_history_storage_and_close() {
         switch(&w, first);
     }
     assert_eq!(w.documents.parked_memory(), (0, true));
-    glib::MainContext::default()
-        .block_on(
-            w.documents
-                .open(&w, (new_drawing(80, 80, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)),
-        )
-        .unwrap();
-    new_photo::ready(&w);
-    let third = w.documents.selected();
+    let mut temporary = Vec::new();
+    for _ in 0..2 {
+        glib::MainContext::default()
+            .block_on(
+                w.documents
+                    .open(&w, (new_drawing(80, 80, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap(), None)),
+            )
+            .unwrap();
+        new_photo::ready(&w);
+        temporary.push(w.documents.selected());
+    }
     w.window.set_default_size(1550, 900);
     pump(300);
     assert_eq!(
@@ -372,7 +375,8 @@ fn native_document_tabs_history_storage_and_close() {
     pump(500);
     assert_eq!(
         w.documents.root.visible_child_name().as_deref(),
-        Some("selector")
+        Some("selector"),
+        "four drawings do not fit as tabs in the narrowest window"
     );
     w.window.set_default_size(1550, 900);
     pump(300);
@@ -380,12 +384,14 @@ fn native_document_tabs_history_storage_and_close() {
         w.documents.root.visible_child_name().as_deref(),
         Some("tabs")
     );
-    w.documents.select(&w, third, true);
-    until(
-        || w.documents.len() == 2 && !w.documents.changing.get(),
-        "temporary tab closes",
-    );
-    new_photo::ready(&w);
+    for (remaining, id) in [(3, temporary[1]), (2, temporary[0])] {
+        w.documents.select(&w, id, true);
+        until(
+            || w.documents.len() == remaining && !w.documents.changing.get(),
+            "temporary tab closes",
+        );
+        new_photo::ready(&w);
+    }
     // Background close uses the same dirty/save decision as Ctrl+W.
     w.documents.select(&w, first, true);
     until(
