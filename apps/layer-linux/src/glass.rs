@@ -158,6 +158,8 @@ fn visit(
         visit(&n.child(), at, surfaces, out)
     } else if let Some(n) = node.downcast_ref::<gsk::IsolationNode>() {
         visit(&n.child(), at, surfaces, out)
+    } else if let Some(n) = node.downcast_ref::<gsk::MaskNode>() {
+        visit(&n.source(), at, surfaces, out)
     } else {
         None
     }

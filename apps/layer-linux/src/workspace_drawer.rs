@@ -83,7 +83,7 @@ impl LayerInspector {
     fn new(w: &Rc<Workspace>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_overflow(gtk::Overflow::Hidden);
-        let layers = Rc::new(LayerPanel::new(w.localization().clone()));
+        let layers = Rc::new(w.layer_panel.sharing(w.localization().clone()));
         margins(&layers.root, PANEL_CONTENT_INSET as i32);
         layers.bind(w);
         let anchor = Rc::new(Cell::new(None));
@@ -422,7 +422,7 @@ impl View {
                     }
                     Panel::Layers if drawer.layer_properties.is_some() => Body::LayerInspector(LayerInspector::new(w)),
                     Panel::Layers => {
-                        let v = Rc::new(LayerPanel::new(w.localization().clone()));
+                        let v = Rc::new(w.layer_panel.sharing(w.localization().clone()));
                         margins(&v.root, PANEL_CONTENT_INSET as i32);
                         v.bind(w);
                         v.root.set_height_request(360);
@@ -524,9 +524,8 @@ impl View {
                 let grip = tiles::grip(&w.localization().text(layer_ui::MessageId::DOCUMENTS_DELIVERY_DRAG_PANEL));
                 grip.set_widget_name("column-drawer-grip");
                 grip.set_size_request(20, 24);
-                grip.set_halign(gtk::Align::End);
                 grip.set_valign(gtk::Align::Center);
-                header.append(&grip);
+                header.append(&crate::panel_tabs::strip_end(&grip));
                 container.append(&header);
                 scroller.add_css_class("panel-body");
                 scroller.set_vexpand(true);

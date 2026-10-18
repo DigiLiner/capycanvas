@@ -121,7 +121,10 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .column-divider separator { min-width: 18px; min-height: 1px; }
 .content-drawer > scrolledwindow + scrolledwindow { border-left: 1px solid alpha(var(--window-fg-color), .12); }
 .panel-context-menu { font-size: var(--ui-text-size); }
-.dock-tabs { background: var(--tabbar-bg); font-size: inherit; }
+.dock-tabs { font-size: inherit; }
+.tab-strip-tint { color: var(--tabbar-bg); }
+.tab-strip-end { background: var(--tabbar-bg); }
+.tab-foot-tint { color: var(--panel-bg); }
 .dock-panel.collapsed-column > button { min-height: 24px; min-width: 0; padding: 0; }
 .collapsed-column .tile-button { min-width: 36px; min-height: 36px; padding: 0; }
 .collapsed-column .panel-footer { min-height: 20px; }
@@ -217,7 +220,6 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .dock-tabs button { border-radius: var(--surface-radius) var(--surface-radius) 0 0; min-height: 28px; padding: 4px 8px; }
 .dock-tabs button.icon-only-tab { min-width: 20px; }
 .dock-tabs button.selected-tool { background: var(--panel-bg); }
-.tab-joins { color: var(--panel-bg); }
 .dock-panel entry, .dock-panel dropdown > button, .dock-panel menubutton.panel-choice > button { background: var(--input-bg); }
 .dock-panel .panel-control-row > button,
 .dock-panel .panel-control-row > dropdown > button,
@@ -253,7 +255,7 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .choice-grid button:checked image { opacity: 1; }
 .dock-panel .size-preset { padding: 0; min-width: 0; min-height: 0; border: 0; border-radius: calc(var(--tile-radius) * var(--corner-fit)); font-weight: normal; }
 .toolbar-controls button.tile-button { min-width: 0; min-height: 0; padding: 0; margin: 0; }
-.dock-panel.expanded-panel { --glass-panel: var(--panel-bg); --glass-strip: var(--tabbar-bg); --glass-tab: var(--panel-bg); --glass-selection: var(--selection-bg); background: transparent; box-shadow: none; }
+.dock-panel.expanded-panel { --glass-panel: var(--panel-bg); --glass-strip: var(--tabbar-bg); --glass-selection: var(--selection-bg); background: transparent; box-shadow: none; }
 .expanded-panel > .panel-preview, .expanded-panel > .panel-configuration { background: var(--panel-bg); border-radius: var(--surface-radius); }
 .expanded-panel.configuration-right .panel-preview { border-bottom-right-radius: 0; }
 .expanded-panel.configuration-right .panel-configuration { border-top-left-radius: 0; border-bottom-left-radius: 0; }
@@ -383,9 +385,10 @@ scale.interval-handle { padding: 0; margin: 0; min-width: 0; min-height: 0; }
 window.capy-workspace.glass .dock-panel { background: var(--glass-panel); }
 window.capy-workspace.glass .dock-panel.tabbed, window.capy-workspace.glass .dock-panel.expanded-panel { background: transparent; }
 window.capy-workspace.glass .dock-panel.tabbed:not(.expanded-panel) .panel-body, window.capy-workspace.glass .dock-panel.tabbed:not(.expanded-panel) .panel-footer { background: var(--glass-panel); }
-window.capy-workspace.glass .dock-tabs { background: var(--glass-strip); }
-window.capy-workspace.glass .dock-tabs button.selected-tool { background: var(--glass-tab); }
-window.capy-workspace.glass .tab-joins { color: var(--glass-tab); }
+window.capy-workspace.glass .tab-strip-tint { color: var(--glass-strip); }
+window.capy-workspace.glass .tab-strip-end { background: var(--glass-strip); }
+window.capy-workspace.glass .tab-foot-tint { color: var(--glass-panel); }
+window.capy-workspace.glass .dock-tabs button.selected-tool { background: var(--glass-panel); }
 window.capy-workspace.glass .drawer-connection { color: var(--glass-panel); }
 window.capy-workspace.glass .selected-tool:not(.color-swatch), window.capy-workspace.glass .layer-row.selected, window.capy-workspace.glass .selection-modes button:checked, window.capy-workspace.glass .toolbar-component .option-action button:checked { background: var(--glass-selection); }
 window.capy-workspace.glass .toolbar-controls.drawer-source { background: var(--glass-source); }

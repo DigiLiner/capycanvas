@@ -69,3 +69,50 @@ fn stripes(w: &Rc<Workspace>) {
     }
     pump(500);
 }
+
+#[test]
+#[ignore = "isolated Mutter compositor captures; LAYER_NATIVE_CAPTURE_DIR=<dir> workspace-motion.sh gtk --native-test=native_active_tab_matches_panel"]
+fn native_active_tab_matches_panel() {
+    let captures = std::path::PathBuf::from(std::env::var("LAYER_NATIVE_CAPTURE_DIR").expect("compositor captures"));
+    let mut input = RemoteInput::new().settle_ms(300).timeout_secs(30);
+    let app = native_test_app("art.capycanvas.ActiveTabShade");
+    let w = fixture_workspace(&app);
+    w.window.maximize();
+    w.window.present();
+    pump(1600);
+    input.ready();
+    pump(300);
+    let origin = w.surface.compute_point(&w.window, &gtk::graphene::Point::zero()).unwrap();
+    let (window_x, window_y) = w.window.surface_transform();
+    let offset = [origin.x() + window_x as f32, origin.y() + window_y as f32];
+    let mut mismatches = Vec::new();
+    for theme in [Theme::Dark, Theme::Light] {
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        for level in [layer_ui::Transparency::Off, layer_ui::Transparency::Low, layer_ui::Transparency::Medium, layer_ui::Transparency::High] {
+            use_transparency(&w, level);
+            pump(400);
+            let name = format!("tab-{theme:?}-{level:?}").to_lowercase();
+            input.perform(serde_json::json!([{ "wait_ms": 300 }, { "capture": name }]));
+            let texture = gdk::Texture::from_filename(captures.join(format!("{name}.png"))).unwrap();
+            let stride = texture.width() as usize * 4;
+            let mut pixels = vec![0; stride * texture.height() as usize];
+            texture.download(&mut pixels, stride);
+            let sample = |x: f32, y: f32| {
+                let i = (y + offset[1]).round() as usize * stride + (x + offset[0]).round() as usize * 4;
+                [pixels[i + 2], pixels[i + 1], pixels[i]]
+            };
+            for group in w.groups.borrow().iter().filter(|g| g.tabs_visible) {
+                let Some((_, tab)) = group.tabs.iter().find(|(_, tab)| tab.has_css_class("selected-tool")) else { continue };
+                let tab = tab.compute_bounds(&w.surface).unwrap();
+                let body = group.stack.compute_bounds(&w.surface).unwrap();
+                let tab_pixel = sample(tab.x() + 4., tab.y() + tab.height() - 3.);
+                let body_pixel = sample(body.x() + 3., body.y() + 3.);
+                if tab_pixel != body_pixel {
+                    mismatches.push(format!("{name} group {}: tab {tab_pixel:?} panel {body_pixel:?}", group.id));
+                }
+            }
+        }
+    }
+    input.finish();
+    assert!(mismatches.is_empty(), "active tabs differ from their panels:\n{}", mismatches.join("\n"));
+}

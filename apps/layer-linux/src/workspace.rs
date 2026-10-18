@@ -795,7 +795,6 @@ struct GroupView {
     stack: gtk::Stack,
     tabs: Vec<(Panel, gtk::Button)>,
     tab_strip: crate::panel_tabs::PanelTabs,
-    tab_joins: gtk::DrawingArea,
 }
 pub(crate) fn native_accelerator(chord: &KeyChord) -> String {
     let name = match chord.key.as_str() {
@@ -837,46 +836,6 @@ pub(crate) fn native_accelerator(chord: &KeyChord) -> String {
         modifiers |= gdk::ModifierType::SHIFT_MASK;
     }
     gtk::accelerator_name(key, modifiers).into()
-}
-
-// GTK CSS has no pseudo-elements. This non-interactive native overlay paints
-// only the selected tab's two concave feet; native buttons still own all input.
-fn tab_joins(header: &crate::panel_tabs::PanelTabs) -> gtk::DrawingArea {
-    let joins = gtk::DrawingArea::new();
-    joins.add_css_class("tab-joins");
-    joins.set_can_target(false);
-    joins.set_draw_func(glib::clone!(
-        #[weak]
-        header,
-        move |area, cr, _, height| {
-            let color = area.color();
-            cr.set_source_rgba(
-                color.red().into(),
-                color.green().into(),
-                color.blue().into(),
-                color.alpha().into(),
-            );
-            let mut child = header.first_child();
-            while let Some(tab) = child {
-                child = tab.next_sibling();
-                if !tab.has_css_class("selected-tool") || tab.opacity() == 0. {
-                    continue;
-                }
-                let Some(bounds) = tab.compute_bounds(area) else {
-                    continue;
-                };
-                let y = height as f64;
-                for (x, direction) in [
-                    (bounds.x() as f64, -1.0),
-                    ((bounds.x() + bounds.width()) as f64, 1.0),
-                ] {
-                    concave_foot(cr, x, y, 6.0, direction);
-                }
-                let _ = cr.fill();
-            }
-        }
-    ));
-    joins
 }
 
 pub(crate) fn system_appearance() -> (Theme, Option<HexColor>) {
@@ -2771,7 +2730,7 @@ impl Workspace {
             self.histogram.refresh(self, &state);self.waveform.refresh(self, &state);self.effects.refresh_histograms(self,&state);
         }
         self.documents.refresh(self);
-        if regions != regions::CAMERA {
+        if regions != regions::CAMERA && !self.workspaces.loading() {
             self.header.refresh(self, &state);
         }
         self.view_info
@@ -2862,7 +2821,7 @@ impl Workspace {
         if regions & regions::HOST != 0 {
             self.notice.publish(self, state.notice.as_ref(), self.notice_clearance());
         }
-        if regions & regions::LAYOUT != 0 {
+        if regions & regions::LAYOUT != 0 && !self.workspaces.loading() {
             self.reconcile_layout(&state.workspace.layout);
         }
         if regions
@@ -3212,8 +3171,7 @@ impl Workspace {
                 header.add_css_class("dock-tabs");
                 header.set_height_request(layer_ui::TAB_BAR_HEIGHT as i32);
                 let labels =
-                    crate::panel_tabs::PanelTabs::new(layout.group_tab_style(group.id).unwrap());
-                let tab_joins = tab_joins(&labels);
+                    crate::panel_tabs::PanelTabs::new(layout.group_tab_style(group.id).unwrap()).with_feet();
                 let mut tabs = Vec::new();
                 if group.tabs_visible {
                     for &panel in &group.panels {
@@ -3240,22 +3198,18 @@ impl Workspace {
                         labels.append(&tab);
                         tabs.push((panel, tab));
                     }
-                    let tab_bar = gtk::Overlay::new();
-                    tab_bar.set_child(Some(&labels));
-                    tab_bar.add_overlay(&tab_joins);
                     let scroll = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
                         .hscrollbar_policy(gtk::PolicyType::External)
                         .vscrollbar_policy(gtk::PolicyType::Never)
                         .hexpand(true)
-                        .child(&tab_bar)
+                        .child(&labels)
                         .build());
                     header.append(&scroll);
                     let grip = tiles::grip(&self.localization().text(layer_ui::MessageId::DOCUMENTS_DELIVERY_DRAG_PANEL));
                     grip.set_size_request(20, 24);
-                    grip.set_halign(gtk::Align::End);
                     grip.set_valign(gtk::Align::Center);
                     self.install_panel_drag(&header, DockItem::Group { group: group.id });
-                    header.append(&grip);
+                    header.append(&crate::panel_tabs::strip_end(&grip));
                     self.install_context(&header, ContextTarget::Group { group: group.id });
                     column.append(&header);
                 }
@@ -3297,7 +3251,6 @@ impl Workspace {
                     stack,
                     tabs,
                     tab_strip: labels,
-                    tab_joins,
                 });
             }
         }
@@ -3425,29 +3378,31 @@ impl Workspace {
             {
                 toolbar.strip.configure(group.axis, !group.tabs_visible);
             }
+            let tab_style = layout.group_tab_style(group.id).unwrap();
             for (panel, button) in &view.tabs {
                 let config = layout.panel(*panel).expect("validated panel");
                 let title = config.title_localized(&self.localization());
-                let tab = layout.tab_presentation(*panel);
                 let content = button.child().and_downcast::<gtk::Box>().unwrap();
                 let icon = self.customization.replace_icon(self, &content, config.icon(), 14);
                 let label = content.last_child().and_downcast::<gtk::Label>().unwrap();
-                icon.set_visible(tab.show_icon);
                 label.set_label(&title);
-                label.set_visible(tab.show_name);
-                if tab.show_name {
-                    button.remove_css_class("icon-only-tab");
-                } else {
-                    button.add_css_class("icon-only-tab");
+                if tab_style != TabStyle::Automatic {
+                    let tab = layout.tab_presentation(*panel);
+                    icon.set_visible(tab.show_icon);
+                    label.set_visible(tab.show_name);
+                    if tab.show_name {
+                        button.remove_css_class("icon-only-tab");
+                    } else {
+                        button.add_css_class("icon-only-tab");
+                    }
                 }
                 button.set_tooltip_text(Some(&title));
                 button.update_property(&[gtk::accessible::Property::Label(&title)]);
                 selected(button, *panel == group.active);
             }
-            view.tab_strip
-                .set_style(layout.group_tab_style(group.id).unwrap());
+            view.tab_strip.set_style(tab_style);
             view.tab_strip.queue_resize();
-            view.tab_joins.queue_draw();
+            view.tab_strip.queue_draw();
         }
         self.columns.reconcile(self, layout, &resolved);
         self.surface.queue_allocate();

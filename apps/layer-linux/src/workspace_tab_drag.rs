@@ -195,7 +195,9 @@ impl Workspace {
             let mut tabs = Vec::new();
             while let Some(tab) = child {
                 child = tab.next_sibling();
-                if let Some(tab) = snapshot_tab(tab, &self.surface, palette) {
+                if tab.is::<gtk::Button>()
+                    && let Some(tab) = snapshot_tab(tab, &self.surface, palette)
+                {
                     tabs.push(tab);
                 }
             }
@@ -211,7 +213,7 @@ impl Workspace {
         drag.tab = drag.tab_grab.take();
         if let Some(tab) = &drag.tab {
             tab.hide();
-            self.queue_tab_joins();
+            self.queue_tab_strips();
         }
     }
 
@@ -238,14 +240,14 @@ impl Workspace {
     pub(super) fn clear_tab_slide(&self, drag: &mut NativeWorkspaceDrag) {
         if let Some(tab) = drag.tab.take() {
             tab.restore();
-            self.queue_tab_joins();
+            self.queue_tab_strips();
             self.surface.queue_draw();
         }
     }
 
-    fn queue_tab_joins(&self) {
+    fn queue_tab_strips(&self) {
         for group in self.groups.borrow().iter() {
-            group.tab_joins.queue_draw();
+            group.tab_strip.queue_draw();
         }
     }
 }
@@ -288,8 +290,7 @@ fn snapshot_tab(
     .0;
     let color = gdk::RGBA::new(r as f32 / 255., g as f32 / 255., b as f32 / 255., 1.);
     SlidingTab::capture(widget, surface.upcast_ref(), |snapshot, rect| {
-        let radius = SURFACE_RADIUS * crate::squircle::CORNER_FIT;
-        let top = gtk::graphene::Size::new(radius, radius);
+        let top = gtk::graphene::Size::new(crate::panel_tabs::TAB_RADIUS, crate::panel_tabs::TAB_RADIUS);
         let square = gtk::graphene::Size::new(0., 0.);
         snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::new(*rect, top, top, square, square));
         snapshot.append_color(&color, rect);
@@ -307,9 +308,7 @@ fn snapshot_tab(
                 color.blue().into(),
                 1.,
             );
-            let y = (rect.y() + rect.height()) as f64;
-            concave_foot(&cr, rect.x() as f64, y, 6., -1.);
-            concave_foot(&cr, (rect.x() + rect.width()) as f64, y, 6., 1.);
+            crate::panel_tabs::feet(&cr, rect, rect.y() + rect.height());
             let _ = cr.fill();
         }
     })

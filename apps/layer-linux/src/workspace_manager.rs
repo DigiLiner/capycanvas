@@ -226,6 +226,9 @@ impl NativeWorkspaces {
     pub fn starting(&self) -> bool {
         self.controller.borrow().is_some() && !self.view.borrow().ready
     }
+    pub fn loading(&self) -> bool {
+        self.controller.try_borrow().is_ok_and(|c| c.as_ref().is_some_and(|c| !c.view.ready && c.view.error.is_none()))
+    }
     pub(crate) fn set_localization(&self, w: &Rc<Workspace>, localization: std::sync::Arc<layer_ui::Localizer>) {
         if let Some(controller) = self.controller.borrow_mut().as_mut() {
             controller.set_localization(localization);

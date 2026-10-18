@@ -3,12 +3,15 @@
 use gtk::{glib, prelude::*, subclass::prelude::*};
 use layer_ui::TabStyle;
 use std::cell::{Cell, RefCell};
+pub(crate) const TAB_RADIUS: f32 = layer_ui::SURFACE_RADIUS * crate::squircle::CORNER_FIT;
 mod imp {
     use super::*;
     #[derive(Default)]
     pub struct Strip {
         pub buttons: RefCell<Vec<gtk::Button>>,
         pub style: Cell<TabStyle>,
+        pub tints: RefCell<Option<[gtk::Box; 2]>>,
+        pub feet: Cell<bool>,
     }
     #[glib::object_subclass]
     impl ObjectSubclass for Strip {
@@ -20,6 +23,9 @@ mod imp {
         fn dispose(&self) {
             for button in self.buttons.take() {
                 button.unparent();
+            }
+            for tint in self.tints.take().into_iter().flatten() {
+                tint.unparent();
             }
         }
     }
@@ -79,10 +85,41 @@ mod imp {
                 );
                 x = end;
             }
+            for tint in self.tints.borrow().iter().flatten() {
+                tint.allocate(0, 0, -1, None);
+            }
         }
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
-            for button in self.buttons.borrow().iter() {
-                self.obj().snapshot_child(button, snapshot);
+            let obj = self.obj();
+            let buttons = self.buttons.borrow();
+            let bounds = gtk::graphene::Rect::new(0., 0., obj.width() as f32, obj.height() as f32);
+            let Some([strip, foot]) = self.tints.borrow().clone() else { return };
+            let active = buttons.iter().find(|b| b.has_css_class("selected-tool") && b.opacity() > 0.)
+                .and_then(|tab| tab.compute_bounds(&*obj));
+            let feet = active.filter(|_| self.feet.get());
+            let draw_feet = |color: &gtk::gdk::RGBA| {
+                if let Some(tab) = feet {
+                    let cr = snapshot.append_cairo(&bounds);
+                    cr.set_source_rgba(color.red().into(), color.green().into(), color.blue().into(), color.alpha().into());
+                    super::feet(&cr, &tab, bounds.height());
+                    let _ = cr.fill();
+                }
+            };
+            snapshot.push_mask(gtk::gsk::MaskMode::InvertedAlpha);
+            if let Some(tab) = active {
+                let radius = gtk::graphene::Size::new(TAB_RADIUS, TAB_RADIUS);
+                let square = gtk::graphene::Size::new(0., 0.);
+                snapshot.push_rounded_clip(&gtk::gsk::RoundedRect::new(tab, radius, radius, square, square));
+                snapshot.append_color(&gtk::gdk::RGBA::BLACK, &tab);
+                snapshot.pop();
+            }
+            draw_feet(&gtk::gdk::RGBA::BLACK);
+            snapshot.pop();
+            snapshot.append_color(&strip.color(), &bounds);
+            snapshot.pop();
+            draw_feet(&foot.color());
+            for button in buttons.iter() {
+                obj.snapshot_child(button, snapshot);
             }
         }
     }
@@ -96,7 +133,19 @@ impl PanelTabs {
         let tabs: Self = glib::Object::new();
         tabs.imp().style.set(style);
         tabs.set_hexpand(true);
+        let tints = ["tab-strip-tint", "tab-foot-tint"].map(|class| {
+            let tint = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            tint.add_css_class(class);
+            tint.set_can_target(false);
+            tint.set_parent(&tabs);
+            tint
+        });
+        *tabs.imp().tints.borrow_mut() = Some(tints);
         tabs
+    }
+    pub fn with_feet(self) -> Self {
+        self.imp().feet.set(true);
+        self
     }
     pub fn set_style(&self, style: TabStyle) {
         if self.imp().style.replace(style) != style {
@@ -138,4 +187,18 @@ impl PanelTabs {
             })
             .collect()
     }
+}
+
+pub(crate) fn feet(cr: &gtk::cairo::Context, tab: &gtk::graphene::Rect, bottom: f32) {
+    for (x, direction) in [(tab.x(), -1.), (tab.x() + tab.width(), 1.)] {
+        crate::squircle::concave_foot(cr, f64::from(x), f64::from(bottom), 6., direction);
+    }
+}
+
+pub(crate) fn strip_end(child: &impl IsA<gtk::Widget>) -> gtk::Box {
+    let end = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    end.add_css_class("tab-strip-end");
+    end.set_halign(gtk::Align::End);
+    end.append(child);
+    end
 }

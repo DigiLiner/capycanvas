@@ -403,6 +403,12 @@ impl LayerPanel {
         })
     }
     pub fn new(localization: std::sync::Arc<layer_ui::Localizer>) -> Self {
+        Self::with_previews(localization, Previews::default())
+    }
+    pub fn sharing(&self, localization: std::sync::Arc<layer_ui::Localizer>) -> Self {
+        Self::with_previews(localization, self.previews.clone())
+    }
+    fn with_previews(localization: std::sync::Arc<layer_ui::Localizer>, previews: Previews) -> Self {
         let copy = Rc::new(RefCell::new(LayerCopy::new(&localization)));
         let owner: Rc<RefCell<Weak<Workspace>>> = Rc::default();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -477,7 +483,6 @@ impl LayerPanel {
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
         let rows: Rc<RefCell<HashMap<usize, Row>>> = Rc::default();
-        let previews = Previews::default();
         let connections = connections::Connections::new(rows.clone());
         factory.connect_setup(glib::clone!(
             #[weak]
