@@ -1294,6 +1294,7 @@ impl Drop for NativeTestApp {
     }
 }
 pub(crate) fn native_test_app(id: &str) -> NativeTestApp {
+    assert_ne!(glib::user_data_dir(), glib::home_dir().join(".local/share"), "native tests need a private XDG_DATA_HOME so GTK's recent files stay out of the user's");
     adw::init().unwrap();
     let css = crate::stylesheet_provider();
     gtk::style_context_add_provider_for_display(

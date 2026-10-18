@@ -36,6 +36,8 @@ export GDK_BACKEND=wayland GSK_RENDERER=vulkan GTK_A11Y=none
 if [[ "$motion_platform" == gtk ]]; then
     export GDK_DEBUG="${GDK_DEBUG:+$GDK_DEBUG:}no-portals:color-mgmt"
     export XDG_CONFIG_DIRS="$PWD/tools/performance/gtk-config:${XDG_CONFIG_DIRS:-/etc/xdg}"
+    export XDG_DATA_HOME="$motion_run_dir/data"
+    mkdir "$XDG_DATA_HOME"
 fi
 export LAYER_NATIVE_INPUT_DIR="$motion_run_dir/input"
 export CAPY_STORAGE_DIR="$motion_run_dir/storage"

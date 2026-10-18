@@ -434,7 +434,9 @@ Rules and pitfalls:
   back to your own settings, workspaces or recovery files. A test stores files
   only under a fresh `CAPY_STORAGE_DIR`, and uses its workspaces and sessions
   only when `data/workspaces` or `state/sessions` exist there; the runners
-  create the folder and those subfolders.
+  create the folder and those subfolders. They also give GTK a private
+  `XDG_DATA_HOME`, so the file chooser neither lists nor records your recent
+  files, and `native_test_app` refuses to start without one.
 - **Inject input only on the private display.** `native-input.js` drives
   Mutter's RemoteDesktop API and refuses any display not named `layer-bench-*`.
   Never point it at a desktop session.
@@ -461,8 +463,8 @@ session, for example to attach a debugger. Give it fresh storage:
 
 ```bash
 gtk_test_dir=$(mktemp -d)
-mkdir -p "$gtk_test_dir/data/workspaces"
-CAPY_STORAGE_DIR="$gtk_test_dir" \
+mkdir -p "$gtk_test_dir/data/workspaces" "$gtk_test_dir/xdg-data"
+CAPY_STORAGE_DIR="$gtk_test_dir" XDG_DATA_HOME="$gtk_test_dir/xdg-data" \
 GDK_BACKEND=wayland GSK_RENDERER=vulkan G_DEBUG=fatal-criticals RUST_BACKTRACE=1 \
   cargo test --locked --release -p layer-linux \
   workspace::tests::workspace_switcher_tests::native_active_workspace_delete \
