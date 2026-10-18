@@ -407,12 +407,16 @@ private struct LayerRow: View {
     }
     private func thumbnail(mask: Bool) -> some View {
         let editing = mask ? layer["mask_selected"].bool : layer["content_selected"].bool
+        let target: [String: Any] = !mask && layer["group"].bool ? ["op": "collapse", "id": id] : ["op": "select", "id": id, "mask": mask]
+        let copy = store.catalog["native_copy"]["layers"]
+        let label = mask ? copy["edit_mask"].string : layer["group"].bool ? copy[layer["collapsed"].bool ? "expand" : "collapse"].string
+            : layer["selection_layer"].bool ? copy["edit_selection"].string : copy["edit_content"].string
         return Button {
             perform {
                 if let load = ThumbnailSelectionLoad.current(), !layer["group"].bool {
                     store.dispatch(["type": "selection", "action": ["op": "load_thumbnail", "id": id, "mask": mask, "shift": load.shift, "alt": load.alt]])
                 } else {
-                    store.layer(!mask && layer["group"].bool ? ["op": "collapse", "id": id] : ["op": "select", "id": id, "mask": mask])
+                    store.layer(target)
                     let fill = layer["fill_color"]
                     if !mask && !fill.isNull {
                         store.colorEditing.open(colors: store.displayColors, value: fill["color"], opaque: fill["opaque"].bool, viewing: store.colorViewing) { color, _ in
@@ -459,8 +463,8 @@ private struct LayerRow: View {
                 // Bound the hit region as well as the drawing. Without this,
                 // iPad thumbnail hits can consume the adjacent checkbox tap.
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel(mask ? store.catalog["native_copy"]["layers"]["edit_mask"].string : layer["group"].bool ? store.catalog["native_copy"]["layers"][layer["collapsed"].bool ? "expand" : "collapse"].string
-            : layer["selection_layer"].bool ? store.catalog["native_copy"]["layers"]["edit_selection"].string : store.catalog["native_copy"]["layers"]["edit_content"].string)
+        }.buttonStyle(.plain).accessibilityLabel(label)
+            .modifier(ActionHelp(store: store, label: label, action: JSON(["type": "layer", "action": target])))
             .accessibilityIdentifier("layer-thumbnail-\(id)-\(mask ? "mask" : "content")")
             .accessibilityValue(thumbnailCaptureStatus(mask: mask))
             .accessibilityAddTraits((mask ? layer["mask_selected"].bool : layer["content_selected"].bool) ? .isSelected : [])

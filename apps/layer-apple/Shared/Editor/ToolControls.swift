@@ -65,11 +65,29 @@ struct ToolSetControls: View {
                     .contentShape(Rectangle())
             }.buttonStyle(EditorControlButtonStyle(selected: item["selected"].bool))
                 .disabled(!enabled).opacity(enabled ? 1 : 0.36)
-                .help(command.isNull ? item["label"].string : command["tooltip"].string)
+                .modifier(ActionHelp(store: store, label: item["label"].string, action: item["action"], tooltip: command["tooltip"].string))
                 .accessibilityLabel(item["label"].string)
                 .accessibilityAddTraits(item["selected"].bool ? .isSelected : [])
                 .accessibilityIdentifier(sets ? "\(panel)-\(item["label"].string)" : item["preview"].isNull ? "tool-\(group ? "group" : "subtool")-\(index)" : "brush-\(item["preview"].uint)")
         }
+    }
+}
+
+struct ActionHelp: ViewModifier {
+    let store: EditorStore
+    let label: String
+    let action: JSON
+    var tooltip = ""
+    @State private var resolved: (request: String, text: String)?
+    func body(content: Content) -> some View {
+        let request = label + "\n" + action.stableKey
+        content.help(!tooltip.isEmpty ? tooltip : resolved?.request == request ? resolved?.text ?? label : label)
+            .onHover { inside in
+                guard inside, tooltip.isEmpty else { return }
+                store.query(["type": "action_tooltip", "label": label, "action": action.raw]) { reply in
+                    if !reply.string.isEmpty { resolved = (request, reply.string) }
+                }
+            }
     }
 }
 

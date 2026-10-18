@@ -90,6 +90,10 @@ struct CanvasPreviewPanel: View {
     private func send(_ op: String, _ fields: [String: Any] = [:]) {
         store.dispatch(["type": operations.type, "action": fields.merging(["op": op]) { $1 }])
     }
+    private func respond(_ apply: Bool) {
+        if apply { if commitNumber?(false) != false { send(operations.apply) } }
+        else { _ = commitNumber?(true); send(operations.cancel) }
+    }
     var body: some View {
         let identifier = operations.identifier
         VStack(alignment: .leading, spacing: 10) {
@@ -100,11 +104,14 @@ struct CanvasPreviewPanel: View {
             }.id(view["kind"].string)
             HStack(spacing: 8) {
                 Spacer()
-                Button(common["cancel"].string) { _ = commitNumber?(true); send(operations.cancel) }.buttonStyle(.bordered)
-                    .accessibilityIdentifier(identifier + "-cancel")
-                Button(common["apply"].string) { if commitNumber?(false) != false { send(operations.apply) } }.buttonStyle(.borderedProminent).tint(palette.accent)
-                    .accessibilityIdentifier(identifier + "-apply")
+                Button(common["cancel"].string) { respond(false) }.buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction).accessibilityIdentifier(identifier + "-cancel")
+                Button(common["apply"].string) { respond(true) }.buttonStyle(.borderedProminent).tint(palette.accent)
+                    .keyboardShortcut(.defaultAction).accessibilityIdentifier(identifier + "-apply")
             }.focusable(false)
+            #if os(macOS)
+            .background(PreviewPanelKeys(workspace: store.workspace, respond: respond).frame(width: 0, height: 0))
+            #endif
         }.padding(.top, 14).padding(.horizontal, 16).padding(.bottom, 12)
             .foregroundStyle(palette["text"])
             .background {
@@ -113,6 +120,36 @@ struct CanvasPreviewPanel: View {
             .accessibilityElement(children: .contain).accessibilityIdentifier(identifier + "-panel")
     }
 }
+
+#if os(macOS)
+private struct PreviewPanelKeys: NSViewRepresentable {
+    let workspace: WorkspacePresentation
+    let respond: (Bool) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(), coordinator = context.coordinator
+        coordinator.respond = respond
+        coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak view, weak coordinator, weak workspace] event in
+            guard let window = view?.window, event.window === window, window.isKeyWindow, !event.isARepeat,
+                  !(window.firstResponder is NSText), workspace?.hasPopover(excluding: UUID()) == false,
+                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                  let apply = [36: true, 76: true, 53: false][event.keyCode] else { return event }
+            coordinator?.respond?(apply)
+            return nil
+        }
+        return view
+    }
+    func updateNSView(_ view: NSView, context: Context) { context.coordinator.respond = respond }
+    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+        coordinator.monitor = nil; coordinator.respond = nil
+    }
+    final class Coordinator {
+        var monitor: Any?
+        var respond: ((Bool) -> Void)?
+    }
+}
+#endif
 
 enum ThumbnailSelectionLoad {
     struct Modifiers { let shift: Bool; let alt: Bool; let toggle: Bool }

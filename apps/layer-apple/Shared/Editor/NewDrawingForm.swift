@@ -13,6 +13,7 @@ struct NewDrawingChoice {
 /// Rust validates the candidate document and any saved creation settings.
 struct NewDrawingForm: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
+    @Environment(\.editorPopupStore) private var store
     let spec: JSON
     let error: String?
     let busy: Bool
@@ -23,6 +24,8 @@ struct NewDrawingForm: View {
     @State private var resolution: String
     @State private var presetName = ""
     @State private var useAsDefaults = false
+    @State private var presets: [JSON]
+    @State private var removalError: String?
     #if os(iOS)
     @State private var focusedDimension: String?
     #endif
@@ -33,6 +36,7 @@ struct NewDrawingForm: View {
         _width = State(initialValue: String(options["extent"][0].uint))
         _height = State(initialValue: String(options["extent"][1].uint))
         _resolution = State(initialValue: String(options["resolution"].uint))
+        _presets = State(initialValue: spec["creation"]["presets"].array)
     }
     private var selectedOptions: JSON? {
         guard let width = UInt32(width.trimmingCharacters(in: .whitespacesAndNewlines)),
@@ -43,8 +47,8 @@ struct NewDrawingForm: View {
             [width, height].allSatisfy({ $0 >= spec["minimum"].uint && $0 <= spec["maximum"].uint }) else { return nil }
         return options.replacing("extent", with: JSON([width, height])).replacing("resolution", with: JSON(resolution))
     }
-    private var presets: [JSON] { spec["creation"]["presets"].array }
     private var text: JSON { spec["creation"]["text"] }
+    private var removal: JSON { presets.first { $0["id"].stableKey == preset.wrappedValue }?["remove"] ?? JSON() }
     private var preset: Binding<String> {
         Binding(get: { presets.first { $0["options"].stableKey == selectedOptions?.stableKey }?["id"].stableKey ?? "custom" }, set: { id in
             guard let chosen = presets.first(where: { $0["id"].stableKey == id }) else { return }
@@ -64,10 +68,16 @@ struct NewDrawingForm: View {
             Text(spec["title"].string).font(.headline)
             EditorScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    FormPicker(text["preset"].string, selection: preset) {
-                        Text(text["custom"].string).tag("custom")
-                        ForEach(presets.indices, id: \.self) { Text(presets[$0]["name"].string).tag(presets[$0]["id"].stableKey) }
-                    }.accessibilityIdentifier("new-document-preset")
+                    HStack(alignment: .bottom) {
+                        FormPicker(text["preset"].string, selection: preset) {
+                            Text(text["custom"].string).tag("custom")
+                            ForEach(presets.indices, id: \.self) { Text(presets[$0]["name"].string).tag(presets[$0]["id"].stableKey) }
+                        }.accessibilityIdentifier("new-document-preset")
+                        Button(action: removePreset) { SharedIcon(name: "delete").frame(width: 28, height: 28).contentShape(Rectangle()) }
+                            .buttonStyle(.borderless).disabled(removal.isNull || store == nil)
+                            .help(text["remove_preset"].string).accessibilityLabel(text["remove_preset"].string)
+                            .accessibilityIdentifier("new-document-remove-preset")
+                    }
                     Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 12) {
                         GridRow {
                             Text(spec["labels"][0].string)
@@ -111,7 +121,7 @@ struct NewDrawingForm: View {
                     TextField(text["save_preset"].string, text: $presetName).textFieldStyle(.roundedBorder)
                         .accessibilityIdentifier("new-document-preset-name")
                     Toggle(text["use_defaults"].string, isOn: $useAsDefaults).accessibilityIdentifier("new-document-defaults")
-                    if let error { Text(error).foregroundStyle(.red).accessibilityIdentifier("new-document-error") }
+                    if let error = removalError ?? error { Text(error).foregroundStyle(.red).accessibilityIdentifier("new-document-error") }
                 }
             }
             HStack {
@@ -124,6 +134,14 @@ struct NewDrawingForm: View {
             }
         }.disabled(busy).padding(24).frame(minWidth: 320, idealWidth: 400, maxWidth: 500,
             minHeight: 440, idealHeight: 540)
+            .onChange(of: spec["creation"]["presets"].stableKey) { _, _ in presets = spec["creation"]["presets"].array }
+    }
+    private func removePreset() {
+        guard let store, !removal.isNull else { return }
+        store.edit(["type": "new_document_preferences", "action": removal.raw]) { error in
+            removalError = error
+            presets = store.snapshot["document_options"]["creation"]["presets"].array
+        }
     }
     private func create() {
         #if os(iOS)

@@ -203,6 +203,8 @@ final class EditorLaunchTests: XCTestCase {
         try await checkOrdinaryPaperLibrary(in:editorCaptureApplication(),theme:"dark")
     }
 
+    @MainActor func testColumnWidthReset() { checkColumnWidthReset(in: ignoringSavedWindows(editorTestApplication()), theme: "light") }
+    @MainActor func testColumnWidthResetDark() { checkColumnWidthReset(in: ignoringSavedWindows(editorTestApplication()), theme: "dark") }
     @MainActor func testColumnStacks() { checkColumnStacks(in: editorTestApplication()) }
 
     @MainActor func testColumnStacksDark() { checkColumnStacks(in: editorTestApplication(), theme: "dark") }
@@ -292,6 +294,9 @@ final class EditorLaunchTests: XCTestCase {
         checkNativeSDRCreationAndColorEditing(in: app)
     }
 
+    @MainActor func testNewDrawingPresetRemoval() { checkNewDrawingPresetRemoval(in: ignoringSavedWindows(editorTestApplication()), theme: "light") }
+    @MainActor func testNewDrawingPresetRemovalDark() { checkNewDrawingPresetRemoval(in: ignoringSavedWindows(editorTestApplication()), theme: "dark") }
+
     @MainActor func testNewDrawingAndExportCancellation() throws {
         let app = ignoringSavedWindows(editorTestApplication())
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"new_document"}]"#
@@ -324,6 +329,9 @@ final class EditorLaunchTests: XCTestCase {
             #endif
         }
     }
+
+    @MainActor func testPaintColorMenu() { checkPaintColorMenu(in: ignoringSavedWindows(editorTestApplication()), theme: "light") }
+    @MainActor func testPaintColorMenuDark() { checkPaintColorMenu(in: ignoringSavedWindows(editorTestApplication()), theme: "dark") }
 
     @MainActor func testCompleteEditorCapture() {
         let app = ignoringSavedWindows(editorCaptureApplication())

@@ -47,9 +47,20 @@ extension XCTestCase {
         XCTAssertEqual((title.value as? String).flatMap { $0.isEmpty ? nil : $0 } ?? title.label, "Grow Selection")
         XCTAssertTrue(app.buttons["number-value-selection-refine-value"].exists || app.textFields["number-entry-selection-refine-value"].exists)
         attachEditor(in: app, name: "selection-grow-panel")
+        #if os(macOS)
+        app.typeKey(.return, modifierFlags: [])
+        #else
         workspaceActivate(apply)
+        #endif
         expectation(for: NSPredicate(format: "exists == NO"), evaluatedWith: apply)
         waitForExpectations(timeout: 10)
+        #if os(macOS)
+        workspaceActivate(app.buttons["selection-menu-selection"])
+        workspaceActivate(grow)
+        XCTAssertTrue(apply.waitForExistence(timeout: 10))
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(apply.waitForNonExistence(timeout: 10), "Escape cancels the Refine panel")
+        #endif
         editorMenu(in: app, menu: "Select", id: "quick_mask", label: "Quick Mask")
         let quick = app.descendants(matching: .any)["layer-row-0"].firstMatch
         XCTAssertTrue(quick.waitForExistence(timeout: 10), "Quick Mask adds a temporary Layers row")

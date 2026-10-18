@@ -4,8 +4,8 @@
 
 Paint places the Palettes tab immediately after Color; Sketch shows
 the same component below the wheel in its color drawer. Customized layouts can
-show Palettes through the Window menu (GTK, Android and Windows also through the
-color swatch menu's Palettes action). GTK
+show Palettes through the Window menu (GTK, Android, Windows and Apple also
+through the color swatch menu's Palettes action). GTK
 ([`color_library.rs`](../../apps/layer-linux/src/color_library.rs)),
 Web ([`palettes.js`](../../apps/layer-web/palettes.js)), Android
 ([`Palettes.kt`](../../apps/layer-android/app/src/main/java/art/capycanvas/Palettes.kt)),

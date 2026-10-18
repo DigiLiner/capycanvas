@@ -116,21 +116,53 @@ extension XCTestCase {
         #endif
         XCTAssertEqual(field.value as? String, value)
     }
+    @MainActor func chooseFormOption(_ id: String, _ label: String, in app: XCUIApplication) {
+        #if os(macOS)
+        workspaceActivate(app.descendants(matching: .any).matching(identifier: id).firstMatch)
+        workspaceActivate(app.menuItems[label].firstMatch)
+        #else
+        workspaceActivate(app.buttons[id].firstMatch)
+        workspaceActivate(app.buttons[label].firstMatch)
+        #endif
+    }
+    @MainActor func checkNewDrawingPresetRemoval(in app: XCUIApplication, theme: String) {
+        let options = #"{"extent":[79,53],"color":{"space":"DisplayP3","depth":"U16"},"background":"Transparent"}"#
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"new_document_preferences","action":{"type":"remember","options":\#(options),"name":"Studio P3","defaults":false}},{"type":"invoke","command":"new_document"}]"#
+        app.launch()
+        let remove = app.buttons["new-document-remove-preset"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 60), "The initial New Drawing form opens after canvas startup")
+        chooseFormOption("new-document-preset", "Wide color", in: app)
+        XCTAssertFalse(remove.isEnabled, "Built-in presets cannot be removed")
+        chooseFormOption("new-document-preset", "Studio P3", in: app)
+        expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: remove)
+        waitForExpectations(timeout: 10)
+        attachEditor(in: app, name: "new-drawing-saved-preset-\(theme)")
+        workspaceActivate(remove)
+        expectation(for: NSPredicate(format: "enabled == NO"), evaluatedWith: remove)
+        waitForExpectations(timeout: 10)
+        #if os(macOS)
+        workspaceActivate(app.descendants(matching: .any).matching(identifier: "new-document-preset").firstMatch)
+        XCTAssertTrue(app.menuItems["Wide color"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.menuItems["Studio P3"].exists, "The removed preset leaves the list")
+        workspaceActivate(app.menuItems["Wide color"].firstMatch)
+        #else
+        workspaceActivate(app.buttons["new-document-preset"].firstMatch)
+        XCTAssertTrue(app.buttons["Wide color"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Studio P3"].exists, "The removed preset leaves the list")
+        workspaceActivate(app.buttons["Wide color"].firstMatch)
+        #endif
+        XCTAssertFalse(app.staticTexts["new-document-error"].exists)
+        workspaceActivate(app.buttons["new-document-cancel"])
+        XCTAssertTrue(remove.waitForNonExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
     @MainActor func checkNativeSDRCreationAndColorEditing(in app: XCUIApplication) {
         // Initial actions run only after native GPU startup completes.
         guard app.textFields["new-document-width"].waitForExistence(timeout: 60) else {
             XCTFail("The initial New Drawing form did not open after canvas startup")
             return
         }
-        func choose(_ id: String, _ label: String) {
-            #if os(macOS)
-            workspaceActivate(app.descendants(matching: .any).matching(identifier: id).firstMatch)
-            workspaceActivate(app.menuItems[label].firstMatch)
-            #else
-            workspaceActivate(app.buttons[id].firstMatch)
-            workspaceActivate(app.buttons[label].firstMatch)
-            #endif
-        }
+        func choose(_ id: String, _ label: String) { chooseFormOption(id, label, in: app) }
         choose("new-document-preset", "Wide color")
         choose("new-document-depth", "16-bit SDR")
         choose("new-document-background", "Transparent")

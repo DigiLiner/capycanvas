@@ -50,6 +50,7 @@ struct ColorPanel: View {
                         .accessibilityLabel(swatch["label"].string)
                         .accessibilityAddTraits(swatch["selected"].bool ? .isSelected : [])
                         .accessibilityIdentifier("color-" + slot)
+                        .modifier(PaintSwatchMenu(store: store, slot: slot))
                         .colorPlaced(layout[slot], id: slot)
                         .zIndex(model["front_swatch"].string == slot ? 1 : 0)
                 }
@@ -102,6 +103,46 @@ struct ColorPanel: View {
     private func color(_ action: [String: Any]) { store.dispatch(["type": "color", "action": action]) }
     static func aspect(hdr: Bool) -> CGFloat {
         hdr ? max(226, ColorUI.resolve(["type": "picker_layout", "size": 226, "hdr": true])["height"].number) / 226 : 1
+    }
+}
+
+extension EditorStore {
+    func editPaintColor(_ slot: String) {
+        guard slot != "transparent" else { return }
+        colorEditing.open(colors: displayColors, slot: slot, viewing: colorViewing) { [weak self] color, intensity in
+            var action: [String: Any] = ["op": intensity == nil ? "set_slot" : "set_slot_intensity", "slot": slot, "color": color.raw]
+            if let intensity { action["stops"] = intensity }
+            self?.edit(["type": "color", "action": action]) { if let error = $0 { self?.failure = error } }
+        }
+    }
+}
+
+private struct PaintSwatchMenu: ViewModifier {
+    @ObservedObject var store: EditorStore
+    let slot: String
+    @State private var popupID = UUID()
+    @ViewBuilder func body(content: Content) -> some View {
+        if slot == "transparent" { content }
+        else {
+            content.simultaneousGesture(TapGesture(count: 2).onEnded { choose("edit") })
+                .nativeEditorContextMenu(identity: "color-swatch-" + slot, load: { $0(menu) },
+                    visibility: { store.workspace.popover(popupID, open: $0) })
+                .onDisappear { store.workspace.popover(popupID, open: false) }
+        }
+    }
+    private var menu: AppleContextMenu {
+        let copy = store.catalog["native_copy"]["color"]
+        func item(_ op: String, _ label: String, icon: String = "") -> [String: Any] {
+            ["label": copy[label].raw, "icon": icon, "enabled": true, "identifier": "color-\(op)-menu", "action": ["op": op]]
+        }
+        return AppleContextMenu(JSON(["sections": [[item("edit", "edit_menu"), item("library", "palettes"),
+            item("swap", "swap", icon: "color-swap")]]])) { choose($0["op"].string) }
+    }
+    private func choose(_ op: String) {
+        if op == "swap" { store.dispatch(["type": "color", "action": ["op": "swap"]]); return }
+        store.dispatch(["type": "color", "action": ["op": "select", "slot": slot]])
+        if op == "edit" { store.editPaintColor(slot) }
+        else { store.query(["type": "reveal_panel", "panel": "palettes"]) { _ in } }
     }
 }
 

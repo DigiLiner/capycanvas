@@ -2,26 +2,7 @@ import XCTest
 
 extension XCTestCase {
     @MainActor func checkColorControls(in app: XCUIApplication, capture: (String, CGRect, [String: Any]) -> Void) {
-        let scroll = app.scrollViews.containing(.any, identifier: "color-panel-controls").firstMatch
-        func reveal(_ element: XCUIElement) {
-            XCTAssertTrue(element.waitForExistence(timeout: 5))
-            guard scroll.exists else { return }
-            // Scroll the panel's padding, outside the wheel contact area.
-            // A fully visible wheel is necessary for normalized picker contacts.
-            for _ in 0..<8 {
-                let viewport = scroll.frame, frame = element.frame
-                if frame.minY >= viewport.minY && frame.maxY <= viewport.maxY { return }
-                let upward = frame.maxY > viewport.maxY
-                #if os(macOS)
-                scroll.scroll(byDeltaX: 0, deltaY: upward ? -80 : 80)
-                #else
-                let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: upward ? 0.8 : 0.2))
-                let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: upward ? 0.2 : 0.8))
-                start.press(forDuration: 0.05, thenDragTo: end)
-                #endif
-            }
-            XCTFail("Color control did not become fully visible: \(element.identifier)")
-        }
+        func reveal(_ element: XCUIElement) { revealColorControl(element, in: app) }
         func activate(_ element: XCUIElement) {
             reveal(element)
             // The readout's rectangular AX frame includes the excluded wheel.
@@ -95,6 +76,87 @@ extension XCTestCase {
         XCTAssertTrue(app.buttons["color-background"].isSelected)
         tap(0.02,0.02); expect(0,240)
         activate(app.buttons["color-swap"]); expect(0,180)
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
+
+    @MainActor func revealColorControl(_ element: XCUIElement, in app: XCUIApplication) {
+        let scroll = app.scrollViews.containing(.any, identifier: "color-panel-controls").firstMatch
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        guard scroll.exists else { return }
+        // Scroll the panel's padding, outside the wheel contact area.
+        // A fully visible wheel is necessary for normalized picker contacts.
+        for _ in 0..<8 {
+            let viewport = scroll.frame, frame = element.frame
+            if frame.minY >= viewport.minY && frame.maxY <= viewport.maxY { return }
+            let upward = frame.maxY > viewport.maxY
+            #if os(macOS)
+            scroll.scroll(byDeltaX: 0, deltaY: upward ? -80 : 80)
+            #else
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: upward ? 0.8 : 0.2))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: upward ? 0.2 : 0.8))
+            start.press(forDuration: 0.05, thenDragTo: end)
+            #endif
+        }
+        XCTFail("Color control did not become fully visible: \(element.identifier)")
+    }
+
+    @MainActor func checkPaintColorMenu(in app: XCUIApplication, theme: String) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"customize","action":{"type":"set_panel_visible","panel":"color","visible":true}},{"type":"color","action":{"op":"select","slot":"background"}},{"type":"set_color","rgba":[0,0,1,1]},{"type":"color","action":{"op":"select","slot":"foreground"}},{"type":"set_color","rgba":[1,0,0,1]}]"#
+        app.launchEnvironment["CAPY_COLOR_PROBE"] = "1"
+        app.launch()
+        let wheel = app.descendants(matching: .any)["color-wheel"].firstMatch
+        let foreground = app.buttons["color-foreground"], background = app.buttons["color-background"]
+        let use = app.buttons["color-use"]
+        func expect(_ rgba: [Double], selected: XCUIElement, _ message: String) {
+            let predicate = NSPredicate { _, _ in
+                guard let encoded = wheel.value as? String,
+                      let state = try? JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any] else { return false }
+                return state["rgba"] as? [Double] == rgba && selected.isSelected
+            }
+            let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: wheel)], timeout: 10)
+            XCTAssertEqual(result, .completed, "\(message); accepted state: \(String(describing: wheel.value))")
+        }
+        func center(_ swatch: XCUIElement) -> XCUICoordinate {
+            revealColorControl(swatch, in: app)
+            let background = swatch.identifier == "color-background"
+            return swatch.coordinate(withNormalizedOffset: CGVector(dx: background ? 0.85 : 0.3, dy: background ? 0.5 : 0.3))
+        }
+        func choose(_ swatch: XCUIElement, _ identifier: String, _ label: String, capture: String? = nil) {
+            #if os(macOS)
+            center(swatch).rightClick()
+            let item = app.menuItems[label]
+            #else
+            center(swatch).press(forDuration: 0.8)
+            let item = app.buttons[identifier]
+            #endif
+            XCTAssertTrue(item.waitForExistence(timeout: 5), "The paint color menu offers \(label)")
+            if let capture { attachEditor(in: app, name: capture) }
+            item.clickOrTap()
+        }
+        func cancelEditor(_ message: String) {
+            XCTAssertTrue(use.waitForExistence(timeout: 10), message)
+            workspaceActivate(app.buttons["color-cancel"])
+            XCTAssertTrue(use.waitForNonExistence(timeout: 10))
+        }
+        XCTAssertTrue(wheel.waitForExistence(timeout: 30))
+        expect([1, 0, 0, 1], selected: foreground, "The foreground paint starts selected")
+        choose(foreground, "color-swap-menu", "Swap foreground and background", capture: "paint-color-menu-\(theme)")
+        expect([0, 0, 1, 1], selected: foreground, "Swap exchanges the paint colors and keeps the selection")
+        choose(background, "color-edit-menu", "Edit Color…")
+        cancelEditor("Edit Color… opens the color editor")
+        expect([1, 0, 0, 1], selected: background, "Edit Color… selects the color it edits")
+        #if os(macOS)
+        center(foreground).doubleClick()
+        #else
+        center(foreground).doubleTap()
+        #endif
+        cancelEditor("Double-clicking a paint color opens the color editor")
+        expect([0, 0, 1, 1], selected: foreground, "Double-clicking selects the color it edits")
+        let palettes = app.buttons["panel-tab-palettes"]
+        XCTAssertFalse(palettes.isSelected)
+        choose(background, "color-library-menu", "Palettes…")
+        expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: palettes)
+        waitForExpectations(timeout: 10)
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 

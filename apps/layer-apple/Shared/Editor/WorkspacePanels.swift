@@ -32,7 +32,11 @@ struct WorkspacePanels: View {
                 ForEach(store.snapshot["layout"]["dividers"].array.indices, id: \.self) { index in
                     let divider = store.snapshot["layout"]["dividers"][index]
                     if !divider["fixed"].bool {
-                        WorkspaceResizeHandle(store: store, action: JSON(["type": "drag_divider", "id": divider["id"].raw]))
+                        WorkspaceResizeHandle(store: store, action: JSON(["type": "drag_divider", "id": divider["id"].raw]),
+                            reset: divider["band"].bool && divider["axis"].string == "horizontal" ? {
+                                store.dispatch(["type": "reset_column_width", "id": divider["id"].raw,
+                                    "viewport": store.snapshot["layout"]["viewport"].raw])
+                            } : nil)
                             .placed(divider["bounds"])
                             .accessibilityIdentifier("workspace-divider-\(divider["id"].uint)")
                             .accessibilityAdjustableAction { direction in
@@ -71,14 +75,19 @@ struct WorkspacePanels: View {
 struct WorkspaceResizeHandle: View {
     @ObservedObject var store: EditorStore
     let action: JSON
-    var label = "Resize panel"
+    var reset: (() -> Void)? = nil
     @State private var hovering = false
     @Environment(\.editorPalette) private var palette
     var body: some View {
         Color.clear.contentShape(Rectangle())
             .background(hovering ? palette.accent.opacity(0.3) : Color.clear)
-            .onHover { hovering = $0 }.accessibilityElement().accessibilityLabel(label)
+            .onHover { hovering = $0 }.accessibilityElement()
+            .accessibilityLabel(store.catalog["document_delivery_copy"]["resize_dock"].string)
             .modifier(WorkspaceDrag(workspace: store.workspace, item: action))
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                guard !store.workspace.input.contact.consumeClick() else { return }
+                reset?()
+            }, isEnabled: reset != nil)
     }
 }
 
@@ -188,6 +197,7 @@ struct WorkspaceToolbar: View {
     let panel: JSON
     let geometry: JSON
     var vertical = false
+    @State private var gripCaption = ""
     private var presented: JSON {
         guard !geometry["tile_style"].isNull else { return panel }
         var merged = panel.object
@@ -219,7 +229,7 @@ struct WorkspaceToolbar: View {
             if !geometry["grip"].isNull {
                 PanelGrip(vertical: vertical).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
-                .accessibilityElement().accessibilityLabel("Toolbar options for " + panel["title"].string)
+                .accessibilityElement().accessibilityLabel(gripCaption)
                 .accessibilityIdentifier("toolbar-options-" + panel["id"].string)
                 .accessibilityValue(panel["title"].string)
                 .accessibilityHidden(false)
@@ -228,6 +238,8 @@ struct WorkspaceToolbar: View {
                     doubleClick: { store.doubleClickHandle(JSON(["kind": "panel", "panel": panel["id"].raw])) }))
                 .placed(geometry["grip"])
             }
+        }.onChange(of: [self.panel["title"].string, store.interfaceLanguage], initial: true) { _, key in
+            gripCaption = NativeTextContext.caption(["type": "options_for", "title": key[0]], language: key[1])
         }
     }
 }

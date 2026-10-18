@@ -79,6 +79,34 @@ extension XCTestCase {
         }
     }
 
+    @MainActor func checkColumnWidthReset(in app: XCUIApplication, theme: String) {
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"}]"#
+        app.launch()
+        func matching(_ prefix: String) -> [XCUIElement] {
+            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix)).allElementsBoundByIndex
+        }
+        waitForEditorInteraction(in: app)
+        let viewport = workspaceViewport(in: app).frame
+        guard let handle = matching("workspace-divider-").filter({ $0.frame.height > $0.frame.width && $0.frame.midX < viewport.midX })
+            .max(by: { $0.frame.minX < $1.frame.minX }),
+            let group = matching("workspace-group-").first(where: { abs($0.frame.maxX - handle.frame.minX) < 12 && $0.frame.width > 100 })
+        else { XCTFail("The left column must expose its canvas-facing resize edge"); return }
+        let originalWidth = group.frame.width
+        let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 60, dy: 0)))
+        expectation(for: NSPredicate { _, _ in group.frame.width > originalWidth + 25 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        attachEditor(in: app, name: "column-width-resized-\(theme)")
+        #if os(macOS)
+        handle.doubleClick()
+        #else
+        handle.doubleTap()
+        #endif
+        expectation(for: NSPredicate { _, _ in abs(group.frame.width - originalWidth) <= 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
+    }
+
     @MainActor func checkColumnStacks(in app: XCUIApplication, theme: String = "light") {
         let actions: [[String: Any]] = [
             ["type":"set_theme", "theme":theme],
@@ -136,6 +164,16 @@ extension XCTestCase {
         expectation(for: NSPredicate { _, _ in abs(layerGroup.frame.width - originalWidth) <= 1 }, evaluatedWith: app)
         waitForExpectations(timeout: 10)
         workspaceActivate(history("Redo Layout Change"))
+        expectation(for: NSPredicate { _, _ in abs(layerGroup.frame.width - resizedWidth) <= 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        #if os(macOS)
+        handle.doubleClick()
+        #else
+        handle.doubleTap()
+        #endif
+        expectation(for: NSPredicate { _, _ in abs(layerGroup.frame.width - originalWidth) <= 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        workspaceActivate(history("Undo Layout Change"))
         expectation(for: NSPredicate { _, _ in abs(layerGroup.frame.width - resizedWidth) <= 1 }, evaluatedWith: app)
         waitForExpectations(timeout: 10)
         #if os(macOS)
