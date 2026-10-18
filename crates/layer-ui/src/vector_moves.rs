@@ -32,7 +32,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let doc = self.engine.document();
         doc.working.vector_items.as_ref().filter(|selection| Some(selection.layer) == doc.working.occurrence)
     }
-    fn select_vector_items(&mut self, layer: OccurrenceHandle, items: BTreeSet<ItemId>) -> Result<Arc<BTreeSet<ItemId>>, String> {
+    pub(super) fn select_vector_items(&mut self, layer: OccurrenceHandle, items: BTreeSet<ItemId>) -> Result<Arc<BTreeSet<ItemId>>, String> {
         let current = self.engine.document().working.vector_items.clone();
         if let Some(current) = current.filter(|c| c.layer == layer && *c.items == items) { return Ok(current.items); }
         let items = Arc::new(items);

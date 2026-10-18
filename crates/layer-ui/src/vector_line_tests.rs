@@ -155,6 +155,39 @@ fn arrange_commands_restack_selected_paths_one_step_at_a_time() {
 }
 
 #[test]
+fn figure_shapes_on_vector_layers_become_selected_editable_paths() {
+    use layer_core::authored::vector::{Cap, Join, PaintEntry, ShapeKind};
+    let (mut s, layer) = vector_session();
+    let prohibited = |s: &mut UiSession<Recorder>| { s.cursor_input(Some(event(s, 1, PenPhase::Hover, 0.))); s.canvas_cursor().is_some_and(|c| c.segments.iter().any(|segment| segment.marker == 6.)) };
+    let drag = |s: &mut UiSession<Recorder>, first: u64, from: [f64; 2], to: [f64; 2]| { let points = [surface_at(s, from), surface_at(s, [(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5]), surface_at(s, to)]; press(s, first, &points); };
+    let front = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().paths().next().map(|(_, p)| p.clone());
+    for (shape, paint, first) in [(FigureShape::Rectangle, FigurePaint::Both, 100), (FigureShape::Ellipse, FigurePaint::Fill, 200), (FigureShape::Line, FigurePaint::Outline, 300)] {
+        s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape, paint } } }).unwrap();
+        assert!(!prohibited(&mut s), "{shape:?} works on a vector layer");
+        drag(&mut s, first, [100., 120.], [260., 200.]);
+        let path = front(&s).expect("the figure becomes a path");
+        assert_eq!(s.engine.document().working.vector_items.as_ref().map(|selection| (*selection.items).clone()), Some([path.id].into()), "the new path is selected");
+        let [x0, y0, x1, y1] = path.geometry.hull();
+        assert!((x0 - 100.).abs() < 1e-3 && (y0 - 120.).abs() < 1e-3 && (x1 - 260.).abs() < 1e-3 && (y1 - 200.).abs() < 1e-3, "{shape:?} spans the drag: {:?}", path.geometry.hull());
+        match shape {
+            FigureShape::Rectangle => {
+                assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Rectangle { .. }, .. })));
+                assert!(matches!(path.style.entries[..], [PaintEntry::Fill(_), PaintEntry::Stroke(ref s)] if s.join == Join::Miter), "Both fills below the outline");
+            }
+            FigureShape::Ellipse => {
+                assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Ellipse, .. })));
+                assert!(matches!(path.style.entries[..], [PaintEntry::Fill(_)]));
+            }
+            FigureShape::Line => assert!(path.shape.is_none() && matches!(path.style.entries[..], [PaintEntry::Stroke(ref s)] if s.cap == Cap::Round)),
+        }
+    }
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 3);
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(9_000_000_000, 9_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 2, "each figure is one undo step");
+}
+
+#[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {
     use layer_core::authored::vector::*;

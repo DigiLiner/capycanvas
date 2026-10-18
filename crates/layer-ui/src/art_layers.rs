@@ -1683,6 +1683,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let id = doc.working.occurrence.ok_or("Unknown layer")?;
                 let layer = doc.scene().occurrence(id).ok_or("Unknown layer")?;
                 match self.layer_interaction.tool {
+                    LayerCanvasTool::Figure { .. } if self.vector_figure_layer().is_some() => (),
                     LayerCanvasTool::LassoFill | LayerCanvasTool::EncloseFill { .. } | LayerCanvasTool::Gradient { .. } | LayerCanvasTool::Figure { .. }
                         if doc.drawing_content().is_none() && self.selection_masks.target().is_none() =>
                     {

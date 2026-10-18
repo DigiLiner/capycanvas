@@ -971,7 +971,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let blocked = if self.selection_masks.target().is_some() { self.mask_brush_reason().is_some() }
             else { self.layer_interaction.tool.draws()
             && if painting { self.engine.document().drawing_target().is_none() && self.vector_drawing_layer().is_none() && self.vector_erasing_layer(erasing).is_none() }
-                else { self.engine.document().drawing_content().is_none() } };
+                else { self.engine.document().drawing_content().is_none() && !(matches!(self.layer_interaction.tool, LayerCanvasTool::Figure { .. }) && self.vector_figure_layer().is_some()) } };
         let contact = self.interaction.pointer.is_some_and(|p| p.paint);
         let mode = if !painting && self.state.settings.cursor.has_tool() {
             CursorMode::Tool

@@ -13,6 +13,17 @@ cubic segments with a pressure width profile and added as one path in one undo
 step. Other brushes refuse the stroke with a notice, and the canvas cursor shows
 the refusal before contact.
 
+## Figures
+
+On a vector layer, Figure's Line, Rectangle and Ellipse add one path each,
+selected and in front of the others, instead of painting pixels. Line draws with
+round caps. Rectangle and Ellipse keep their frame as a live shape, so later
+moves, rotations and uniform scaling keep them editable shapes. Outline strokes
+with the foreground color at the line width; Fill fills with it; Outline and
+Fill fills with the background and strokes with the foreground above it.
+Rectangles get sharp corners. Shift makes squares, circles and 45° lines, and
+brush opacity sets the color's alpha. Transparent paint is refused.
+
 ## Erasing
 
 The Eraser, transparent paint and the pen's eraser end erase paths on a vector
@@ -48,7 +59,8 @@ restored with a session.
 ## Tests
 
 `move_tool_selects_drags_and_deletes_vector_paths`,
-`arrange_commands_restack_selected_paths_one_step_at_a_time` and
+`arrange_commands_restack_selected_paths_one_step_at_a_time`,
+`figure_shapes_on_vector_layers_become_selected_editable_paths` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

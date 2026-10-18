@@ -2,6 +2,7 @@
 use crate::*;
 use layer_core::{Figure, RasterOperationKind, Point};
 use layer_render::CanvasRenderer;
+use std::sync::Arc;
 
 pub(crate) fn modes(shape: FigureShape, paint: FigurePaint, localizer: &crate::localization::Localizer) -> Vec<ToolSetItem> {
     let item = |label, icon, shape, paint, selected| ToolSetItem { enabled: true,
@@ -37,6 +38,46 @@ pub(crate) fn modes(shape: FigureShape, paint: FigurePaint, localizer: &crate::l
 }
 
 impl<B: CanvasRenderer> UiSession<B> {
+    pub(super) fn vector_figure_layer(&self) -> Option<layer_core::authored::OccurrenceHandle> {
+        let doc = self.engine.document();
+        let layer = doc.working.occurrence?;
+        doc.scene().vector_layer(layer)?;
+        (!self.state.colors.transparent() && self.selection_masks.target().is_none()).then_some(layer)
+    }
+    fn commit_vector_figure(&mut self, layer: layer_core::authored::OccurrenceHandle, figure: &Figure) -> Result<(), String> {
+        use layer_core::authored::vector::*;
+        if self.engine.document().is_locked(layer) { return Err(self.localization().text(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED).to_string()); }
+        let space = self.engine.document().composition().color.space;
+        let paint = |rgba: [f32; 4]| layer_core::color::RgbColor::from_linear(space, rgba).map(Paint::color).map_err(|e| e.to_string());
+        let width = f64::from(figure.width);
+        let outline = |rgba: [f32; 4], cap: Cap, join: Join| -> Result<PaintEntry, String> {
+            let mut stroke = Stroke::new(paint(rgba)?, width);
+            (stroke.cap, stroke.join) = (cap, join);
+            Ok(PaintEntry::Stroke(stroke))
+        };
+        let fill = |rgba: [f32; 4]| -> Result<PaintEntry, String> { Ok(PaintEntry::Fill(Fill { paint: paint(rgba)?, unknown: None })) };
+        let (start, end) = ([f64::from(figure.start.x), f64::from(figure.start.y)], [f64::from(figure.end.x), f64::from(figure.end.y)]);
+        let join = if figure.shape == FigureShape::Rectangle { Join::Miter } else { Join::Round };
+        let entries = match figure.paint {
+            FigurePaint::Outline => vec![outline(figure.colors[0], if figure.shape == FigureShape::Line { Cap::Round } else { Cap::Butt }, join)?],
+            FigurePaint::Fill => vec![fill(figure.colors[0])?],
+            FigurePaint::Both => vec![fill(figure.colors[1])?, outline(figure.colors[0], Cap::Butt, join)?],
+        };
+        let doc = self.engine.document();
+        let object = doc.scene().vector_layer(layer).ok_or("The vector layer was removed")?;
+        let id = object.allocate_id();
+        let line = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(start), Anchor::corner(end)], false)]).map_err(str::to_string)?;
+        let path = PathItem::new(id, Arc::new(line), Arc::new(Style::new(entries)));
+        let shape = |kind| LiveShape { kind, center: [(start[0] + end[0]) * 0.5, (start[1] + end[1]) * 0.5], size: [(end[0] - start[0]).abs(), (end[1] - start[1]).abs()], rotation: 0. };
+        let path = match figure.shape {
+            FigureShape::Line => path,
+            FigureShape::Rectangle => path.with_shape(shape(ShapeKind::Rectangle { radii: [0.; 4] })).map_err(str::to_string)?,
+            FigureShape::Ellipse => path.with_shape(shape(ShapeKind::Ellipse)).map_err(str::to_string)?,
+        };
+        let edit = doc.vector_object_edit(layer, object.insert_front(vec![Record::Path(path)])).map_err(|e| e.to_string())?;
+        self.layer_edit(edit)?;
+        self.select_vector_items(layer, [id].into()).map(|_| ())
+    }
     /// Local-space operation snapshot; pointer moves only update the guide.
     pub(super) fn current_figure(&self) -> Option<Figure> {
         let LayerCanvasTool::Figure { shape, paint } = self.layer_interaction.tool else {
@@ -51,9 +92,13 @@ impl<B: CanvasRenderer> UiSession<B> {
             *end
         };
         let doc = self.engine.document();
-        let id = doc.drawing_content()?;
-        let layer = doc.scene().occurrence(doc.target_owner(id)?)?;
-        let offset = layer_core::offsets::point(doc.target_offset(id));
+        let (alpha_locked, offset) = match self.vector_figure_layer() {
+            Some(layer) => { let [x, y] = doc.scene().occurrence_offset64(layer); (false, Point { x: x as f32, y: y as f32 }) }
+            None => {
+                let id = doc.drawing_content()?;
+                (doc.scene().occurrence(doc.target_owner(id)?)?.alpha_locked, layer_core::offsets::point(doc.target_offset(id)))
+            }
+        };
         let local = |p: Point| Point {
             x: p.x - offset.x,
             y: p.y - offset.y,
@@ -78,7 +123,7 @@ impl<B: CanvasRenderer> UiSession<B> {
             end: local(end),
             width: self.state.brush.diameter,
             colors,
-            alpha_locked: layer.alpha_locked,
+            alpha_locked,
             erase: self.state.colors.transparent(),
         })
     }
@@ -95,6 +140,7 @@ impl<B: CanvasRenderer> UiSession<B> {
         {
             return Ok(());
         }
+        if let Some(layer) = self.vector_figure_layer() { return self.commit_vector_figure(layer, &figure); }
         let both = figure.paint == FigurePaint::Both;
         let colors = if both {
             [self.state.colors.foreground, self.state.colors.background]
