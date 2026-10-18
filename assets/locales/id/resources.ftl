@@ -753,6 +753,19 @@ resources-layer-menu-new-clipping-layer = Lapisan kliping baru
 
 resources-layer-menu-new-group = Grup baru
 resources-layer-menu-new-vector-layer = Lapisan vektor baru
+resources-path-fill = Isian
+resources-path-fill-color = Warna isian
+resources-path-outline = Garis tepi
+resources-path-outline-color = Warna garis tepi
+resources-path-width = Lebar garis tepi
+resources-path-ends = Ujung garis
+resources-path-ends-flat = Datar
+resources-path-ends-round = Bulat
+resources-path-ends-square = Persegi
+resources-path-corners = Sudut
+resources-path-corners-sharp = Tajam
+resources-path-corners-round = Bulat
+resources-path-corners-beveled = Terpotong
 
 resources-layer-menu-new-selection-layer-in-group = Lapisan Seleksi Baru dalam Grup…
 

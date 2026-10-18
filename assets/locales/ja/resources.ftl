@@ -441,6 +441,19 @@ resources-layer-menu-new-clipping-layer = 新規クリッピングレイヤー
 
 resources-layer-menu-new-group = 新規グループ
 resources-layer-menu-new-vector-layer = 新規ベクターレイヤー
+resources-path-fill = 塗り
+resources-path-fill-color = 塗りの色
+resources-path-outline = 線
+resources-path-outline-color = 線の色
+resources-path-width = 線の幅
+resources-path-ends = 線端
+resources-path-ends-flat = 平ら
+resources-path-ends-round = 丸
+resources-path-ends-square = 四角
+resources-path-corners = 角
+resources-path-corners-sharp = とがり
+resources-path-corners-round = 丸
+resources-path-corners-beveled = 面取り
 
 resources-layer-menu-new-selection-layer-in-group = グループ内に新規選択範囲レイヤー…
 

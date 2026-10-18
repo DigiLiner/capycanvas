@@ -24,6 +24,17 @@ Fill fills with the background and strokes with the foreground above it.
 Rectangles get sharp corners. Shift makes squares, circles and 45° lines, and
 brush opacity sets the color's alpha. Transparent paint is refused.
 
+## Properties
+
+With paths selected, the layer's Properties add Fill, Fill color, Outline,
+Outline color, Outline width, Line ends (Flat, Round, Square) and Corners
+(Sharp, Round, Beveled). They show the front-most selected path. An edit applies
+to every selected path: colors change the first fill and the top outline, a path
+whose style holds more fills or outlines keeps the others, and paths that shared
+a style keep sharing one. Turning Fill or Outline on adds the background or
+foreground color. Each change, or each drag of a number or color, is one undo
+step.
+
 ## Erasing
 
 The Eraser, transparent paint and the pen's eraser end erase paths on a vector
@@ -69,7 +80,8 @@ restored with a session.
 `move_tool_selects_drags_and_deletes_vector_paths`,
 `arrange_commands_restack_selected_paths_one_step_at_a_time`,
 `figure_shapes_on_vector_layers_become_selected_editable_paths`,
-`move_tool_nudges_duplicates_and_copies_paths` and
+`move_tool_nudges_duplicates_and_copies_paths`,
+`properties_restyle_every_selected_path_in_one_undo_step` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

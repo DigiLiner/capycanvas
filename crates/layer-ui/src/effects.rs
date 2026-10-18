@@ -757,6 +757,7 @@ pub(super) fn properties(doc: &Document, painting: layer_core::SelectionPaintBeh
             controls.push(PropertyControl::new("color_mode", &l.text(MessageId::RESOURCES_LAYER_COLOR_MODE), PropertyKind::Choice { options },
                 EffectValue::Choice(value), EffectValue::Choice(0)));
         }
+        controls.extend(super::vector_properties::controls(doc, handle, l));
         String::new()
     };
     LayerPropertiesView {
@@ -852,14 +853,17 @@ pub(super) fn effect_baseline(document: &Document, occurrence: OccurrenceHandle)
 enum PropertyBaseline {
     Effect {value: EffectBaseline},
     Occurrence {handle: OccurrenceHandle, value: Occurrence},
+    Paths {handle: OccurrenceHandle, value: layer_core::authored::vector::VectorObject},
     SelectionDisplay {occurrence: OccurrenceHandle, handle: SelectionHandle, value: Option<layer_core::SelectionMaskProperties>},
 }
 impl PropertyBaseline {
-    fn capture(document: &Document, handle: OccurrenceHandle, layer_opacity: bool) -> Result<Self, String> {
+    fn capture(document: &Document, handle: OccurrenceHandle, key: &str, layer_opacity: bool) -> Result<Self, String> {
         if layer_opacity {
             return Ok(Self::Occurrence {handle, value: document.scene().occurrence(handle).ok_or("Unknown occurrence")?.clone()});
         }
-        if let Some(SourceTarget::Selection(selection)) = document.scene().source_target(handle) {
+        if super::vector_properties::is_path_property(key) {
+            Ok(Self::Paths {handle, value: document.scene().vector_layer(handle).ok_or("Select a vector layer")?.clone()})
+        } else if let Some(SourceTarget::Selection(selection)) = document.scene().source_target(handle) {
             let value = document.working.selection_overlays.properties.get(&selection).cloned();
             Ok(Self::SelectionDisplay {occurrence: handle, handle: selection, value})
         } else if let Ok(value) = effect_baseline(document, handle) {
@@ -869,13 +873,14 @@ impl PropertyBaseline {
         }
     }
     fn occurrence(&self) -> OccurrenceHandle {
-        match self {Self::Effect {value,..} => value.occurrence, Self::Occurrence {handle,..} => *handle, Self::SelectionDisplay {occurrence,..} => *occurrence}
+        match self {Self::Effect {value,..} => value.occurrence, Self::Occurrence {handle,..} | Self::Paths {handle,..} => *handle, Self::SelectionDisplay {occurrence,..} => *occurrence}
     }
     fn edit(&self, document: &Document) -> Result<Edit, String> {
         let art = &document.artwork;
         match self {
             Self::Effect {value} => Ok(Edit::Effect(RecordChange::replace(&art.effects, value.effect, Some(value.application.clone())).map_err(str::to_string)?)),
             Self::Occurrence {handle, value} => Ok(Edit::Occurrence(RecordChange::replace(&art.occurrences, *handle, Some(value.clone())).map_err(str::to_string)?)),
+            Self::Paths {handle, value} => document.vector_object_edit(*handle, value.clone()).map_err(|e| e.to_string()),
             Self::SelectionDisplay {handle, value, ..} => {
                 let mut working=document.working.clone();
                 match value {Some(value)=>{working.selection_overlays.properties.insert(*handle,value.clone());},None=>{working.selection_overlays.properties.remove(handle);}}
@@ -974,7 +979,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if phase == ContactPhase::Down {
             self.require_idle()?;
             let handle = occurrence_handle(layer)?;
-            let original = PropertyBaseline::capture(self.engine.document(), handle, layer_opacity)?;
+            let original = PropertyBaseline::capture(self.engine.document(), handle, &key, layer_opacity)?;
             if self.engine.document().is_locked(handle) {
                 return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string());
             }
@@ -1007,7 +1012,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if phase == ContactPhase::Up {
             let gesture = self.effect_gesture.take().unwrap();
             if gesture.detached_curve_point {self.property_editor.clear_selection(&gesture.key);}
-            let edited = PropertyBaseline::capture(self.engine.document(), gesture.original.occurrence(), gesture.layer_opacity)?;
+            let edited = PropertyBaseline::capture(self.engine.document(), gesture.original.occurrence(), &gesture.key, gesture.layer_opacity)?;
             let changed = edited != gesture.original;
             let original_edit = gesture.original.edit(self.engine.document())?;
             self.engine.preview_edit(original_edit).map_err(error)?;
@@ -1442,6 +1447,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let handle = occurrence_handle(id)?;
                 let document = self.engine.document();
                 document.scene().occurrence(handle).ok_or_else(|| self.state.localization.text(MessageId::RESOURCES_ERROR_UNKNOWN_LAYER).to_string())?;
+                if super::vector_properties::is_path_property(&key) {
+                    return self.set_path_property(handle, &key, &value);
+                }
                 if document.scene().effect(handle).is_none() {
                     return match (key.as_str(), value) {
                         ("opacity", EffectValue::Number(opacity)) => {

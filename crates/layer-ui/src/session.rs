@@ -69,6 +69,8 @@ mod painted_selections;
 mod vector_lines;
 #[path = "vector_moves.rs"]
 mod vector_moves;
+#[path = "vector_properties.rs"]
+mod vector_properties;
 #[path = "deferred_edits.rs"]
 mod deferred_edits;
 pub use painted_selections::SelectionBrushOptions;

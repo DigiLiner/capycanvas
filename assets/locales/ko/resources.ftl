@@ -441,6 +441,19 @@ resources-layer-menu-new-clipping-layer = 새 클리핑 레이어
 
 resources-layer-menu-new-group = 새 그룹
 resources-layer-menu-new-vector-layer = 새 벡터 레이어
+resources-path-fill = 칠
+resources-path-fill-color = 칠 색상
+resources-path-outline = 외곽선
+resources-path-outline-color = 외곽선 색상
+resources-path-width = 외곽선 두께
+resources-path-ends = 선 끝
+resources-path-ends-flat = 평평
+resources-path-ends-round = 둥글게
+resources-path-ends-square = 사각
+resources-path-corners = 모서리
+resources-path-corners-sharp = 뾰족
+resources-path-corners-round = 둥글게
+resources-path-corners-beveled = 깎기
 
 resources-layer-menu-new-selection-layer-in-group = 그룹에 새 선택 영역 레이어 만들기…
 

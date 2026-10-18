@@ -441,6 +441,19 @@ resources-layer-menu-new-clipping-layer = 新建剪贴图层
 
 resources-layer-menu-new-group = 新建图层组
 resources-layer-menu-new-vector-layer = 新建矢量图层
+resources-path-fill = 填充
+resources-path-fill-color = 填充颜色
+resources-path-outline = 描边
+resources-path-outline-color = 描边颜色
+resources-path-width = 描边宽度
+resources-path-ends = 线端
+resources-path-ends-flat = 平头
+resources-path-ends-round = 圆头
+resources-path-ends-square = 方头
+resources-path-corners = 转角
+resources-path-corners-sharp = 尖角
+resources-path-corners-round = 圆角
+resources-path-corners-beveled = 斜角
 
 resources-layer-menu-new-selection-layer-in-group = 在组内新建选区图层…
 
