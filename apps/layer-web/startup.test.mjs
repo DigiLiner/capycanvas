@@ -23,7 +23,7 @@ export async function checkStagedStartup({ call, evaluate, settle, canvasPixels 
         p.pipelines.push({method:name,label:descriptor.label,time:performance.now(),canvas:times?.canvas,brush:times?.brush});
         let hold;
         const stage=descriptor.compute;
-        if(['compute_coverage','compute_color'].includes(stage?.entryPoint)&&/^dry material (?:Exact|InPlace|Tracked) compute_(?:coverage|color) operation=1 contact=0x81$/.test(descriptor.label)&&times?.brush==null&&!p.requiredReleased){p.required=true;hold='required'}
+        if(['compute_coverage','compute_color'].includes(stage?.entryPoint)&&/^dry material compute_(?:coverage|color) operation=1 contact=0x81$/.test(descriptor.label)&&times?.brush==null&&!p.requiredReleased){p.required=true;hold='required'}
         if(hold&&name.endsWith('Async')) return original.call(this,descriptor).then(pipeline=>{
           if(hold==='required'&&p.requiredReleased)return pipeline;
           return new Promise(resolve=>{
@@ -72,6 +72,7 @@ export async function checkStagedStartup({ call, evaluate, settle, canvasPixels 
     }
     const heldPan = await evaluate("layerApp.state().camera.translation");
     const panScale = await evaluate("layerApp.canvas.width/layerApp.canvas.getBoundingClientRect().width");
+    await evaluate("layerApp.canvas.focus()");
     await call("Input.dispatchKeyEvent", { type:"keyDown", key:" ", code:"Space", windowsVirtualKeyCode:32 });
     for (const [type, x, buttons] of [["mousePressed",600,1],["mouseMoved",660,1],["mouseReleased",660,0]]) {
       await call("Input.dispatchMouseEvent", { type, x, y:450, button:"left", buttons, clickCount:1 });
