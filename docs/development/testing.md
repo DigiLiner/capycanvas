@@ -587,6 +587,14 @@ are your task, and remove an entry when you fix it.
   `AndroidWorkspaceSwitcherTest#nativeOptionsVisibilityInputsAndRestart` fail on
   MovinkPad Pro 14. `AndroidWorkspaceOwnershipTest` expects `focus_window` to be
   a workspace ID, but the view now names the owning window too.
+- Android `AndroidHostTest#curvesPagesNativeContactsAndExactCoordinates` on
+  unmodified `8a819ffa1` passes the light-theme calibrations, then a later save
+  finds no `document` request (`NoSuchElementException` at
+  `CapyDeviceTest.kt:360`) on MovinkPad 11 and Huion Kamvas Pad 12.
+- Headed Web `--tonal-controls` on unmodified `8a819ffa1`: Auto leaves the
+  bounded-range fixture unchanged ("Valid Auto changes the uncorrected
+  bounded-range fixture"), and `LAYER_TONAL_PHASE=calibration` cannot find
+  `.curve-editor circle:nth-child(2)` after reopening the drawing.
 - Windows `exercise-layers.ps1` on Iris Xe fails "Outer editing edge did not use
   the accent color": the PrintWindow thumbnail probe reads `#A94EC1` for palette
   `#A94DC1`. The `-Relationships` variant passes that check in dark theme, then
@@ -612,8 +620,7 @@ are your task, and remove an entry when you fix it.
   then exits with `0xC0000005` at shutdown. The original fixture and production
   build at untouched `ee80dc2b` reproduce the same fault in
   `Microsoft.UI.Xaml.dll` 3.1.8.0, offset `0x83af7`. Keep the shutdown assertion.
-- Windows fixtures that also fail on the unported upstream build: `exercise-color-picker.ps1`
-  ("Moving the held finger did not sample the stroke above it"), `exercise-pen-buttons.ps1` (Transform is
+- Windows fixtures that also fail on the unported upstream build: `exercise-pen-buttons.ps1` (Transform is
   enabled on the empty starting layer), `exercise-persistence.ps1` (the unreadable database writes a
   storage diagnostic to stderr) and `exercise-proof.ps1` (UI Automation times out
   choosing sRGB in Proof Setup after the drawing is saved and reopened).

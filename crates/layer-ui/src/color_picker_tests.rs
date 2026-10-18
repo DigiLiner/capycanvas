@@ -274,7 +274,9 @@ fn color_picker_touch_tracks_one_contact_toggles_source_and_commits_on_lift() {
     .unwrap();
     let ring = s.color_picker_overlay().unwrap();
     assert_eq!(ring.center, [250., 256.]);
-    assert_eq!(ring.sample, ring.center);
+    assert_eq!(ring.sample, [250., 300.]);
+    assert_eq!(s.state.color_picker.sample_point, Some(ring.sample));
+    assert_eq!(s.state.color_picker.loupe_point, Some(ring.center));
     assert!(!ring.layer);
     picker_pointer(
         &mut s,
@@ -291,7 +293,8 @@ fn color_picker_touch_tracks_one_contact_toggles_source_and_commits_on_lift() {
         [800., 600.],
     );
     assert!(s.state.color_picker.layer);
-    assert_eq!(s.color_picker_overlay().unwrap().sample, [300., 306.]);
+    assert_eq!(s.color_picker_overlay().unwrap().sample, [300., 350.]);
+    assert_eq!(s.color_picker_overlay().unwrap().center, [300., 306.]);
     assert!(s.color_picker_overlay().unwrap().layer);
     picker_pointer(
         &mut s,
@@ -317,7 +320,7 @@ fn color_picker_touch_tracks_one_contact_toggles_source_and_commits_on_lift() {
         .state
         .camera
         .input_transform()
-        .map(layer_core::Point { x: 300., y: 306. });
+        .map(layer_core::Point { x: 300., y: 350. });
     assert_eq!(
         s.renderer_mut().sample_requests.last().unwrap().position,
         [aim.x.floor() as u32, aim.y.floor() as u32]
@@ -370,6 +373,22 @@ fn color_picker_retires_touches_that_predate_toolbar_entry() {
                 assert_ne!(s.state.camera.rotation, camera.rotation);
             }
         }
+    }
+}
+
+#[test]
+fn color_picker_touch_samples_the_contact_under_an_edge_clamped_loupe() {
+    for (contact, center) in [([990., 500.], [952., 456.]), ([30., 400.], [48., 356.]), ([500., 60.], [500., 48.])] {
+        let mut s = session(Platform::Gtk);
+        s.dispatch(UiAction::SetZoom { zoom: 4. }).unwrap();
+        picker_pointer(&mut s, 8, ContactPhase::Down, PointerKind::Touch, contact);
+        s.input(UiInput::ColorPickerHold { id: 8, position: contact, offset: 44. }).unwrap();
+        let ring = s.color_picker_overlay().unwrap();
+        assert_eq!((ring.center, ring.sample), (center, contact));
+        assert_eq!((s.state.color_picker.sample_point, s.state.color_picker.loupe_point), (Some(contact), Some(center)));
+        s.frame(1, 1).unwrap();
+        let aim = s.state.camera.input_transform().map(layer_core::Point { x: contact[0], y: contact[1] });
+        assert_eq!(s.renderer_mut().sample_requests.last().unwrap().position, [aim.x.floor() as u32, aim.y.floor() as u32]);
     }
 }
 

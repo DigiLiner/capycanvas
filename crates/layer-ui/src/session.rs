@@ -4551,8 +4551,9 @@ impl<R: CanvasRenderer> UiSession<R> {
             && self.eyedropper.sample.is_none() && self.state.color_picker.preview.take().is_some() {
             changed |= regions::COLOR_PREVIEW;
         }
-        if self.eyedropper.editor && self.eyedropper.picking.published_point != self.state.color_picker.sample_point {
-            self.eyedropper.picking.published_point = self.state.color_picker.sample_point;
+        let points = [self.state.color_picker.sample_point, self.state.color_picker.loupe_point];
+        if self.eyedropper.editor && self.eyedropper.picking.published_point != points {
+            self.eyedropper.picking.published_point = points;
             changed |= regions::COLOR_PREVIEW;
         }
         if self.eyedropper.calibration.is_none() && self.eyedropper.picking.finishing && !self.eyedropper.busy() {

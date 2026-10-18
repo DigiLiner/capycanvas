@@ -78,7 +78,8 @@ fn native_white_balance_picker_contacts_and_atomic_history() {
                         let overlay = ui_session(&w).color_picker_overlay().unwrap();
                         let matrix = state(&w).camera.document_to_surface();
                         let contact_y = matrix[1] * 128. + matrix[3] * 128. + matrix[5];
-                        assert!(overlay.sample[1] < contact_y - 20. * w.area.scale_factor() as f32);
+                        assert!((overlay.sample[1] - contact_y).abs() < w.area.scale_factor() as f32, "touch samples under the finger");
+                        assert!(overlay.center[1] < contact_y - 20. * w.area.scale_factor() as f32, "loupe lifts above the finger");
                         crate::snapshot(&w).save_to_png(output.join(format!("loupe-{width}-{theme:?}.png"))).unwrap();
                         input.perform(json!([{"touch":"up"}]));
                     }

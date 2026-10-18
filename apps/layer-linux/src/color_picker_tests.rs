@@ -324,8 +324,9 @@ fn native_color_picker_input() {
         ui_session(&d.w)
             .color_picker_overlay()
             .unwrap();
-    assert_eq!(ring.center, ring.sample);
-    assert!(ring.center[1] < 500.);
+    let scale = d.w.area.scale_factor() as f32;
+    assert_eq!(ring.sample, [860. * scale, 530. * scale]);
+    assert!(ring.center[1] < ring.sample[1] - 20. * scale);
     assert_eq!(state(&d.w).colors, before);
     d.capture_canvas("color-picker-touch.png");
     let camera = state(&d.w).camera;

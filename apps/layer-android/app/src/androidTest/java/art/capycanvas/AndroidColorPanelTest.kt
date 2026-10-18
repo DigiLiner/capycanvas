@@ -560,15 +560,14 @@ class AndroidColorPanelTest {
         waitFor("pen lift accepts") {state().getJSONObject("layer_tools").getString("tool")=="paint"}
         assertTrue(colors().getJSONObject("foreground").array("rgba").getDouble(0)>.8)
         action(obj("type" to "set_color","rgba" to JSONArray(listOf(0,1,0,1))))
-        val metrics=activity.resources.displayMetrics
-        val offset=(metrics.ydpi*10f/25.4f).coerceIn(36f*density,64f*density)
         tool=MotionEvent.TOOL_TYPE_FINGER
-        event(MotionEvent.ACTION_DOWN,p+Offset(0f,offset))
-        waitFor("finger hold samples above contact") {picker().objectOrNull("preview")!=null}
+        event(MotionEvent.ACTION_DOWN,p)
+        waitFor("finger hold samples under the contact") {picker().objectOrNull("preview")!=null}
         assertTrue("Red sample: ${picker()}",picker().getJSONObject("preview").array("rgba").getDouble(0)>.8 && picker().getJSONObject("preview").array("rgba").getDouble(1)<.2)
+        assertTrue("Loupe lifted above the finger: ${picker()}",picker().array("loupe_point").getDouble(1)<picker().array("sample_point").getDouble(1)-30*density)
         secondFinger(true);settle()
         assertTrue("Second finger selects layer",picker().getBoolean("layer"))
-        fullCapture("picker-touch-offset")
+        fullCapture("picker-touch")
         secondFinger(false)
         event(MotionEvent.ACTION_UP)
         waitFor("finger lift accepts") {state().getJSONObject("layer_tools").getString("tool")=="paint"}

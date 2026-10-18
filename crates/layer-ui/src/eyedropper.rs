@@ -35,6 +35,7 @@ pub struct ColorPickerState {
     pub editor: bool,
     pub picked: Option<RgbColor>,
     pub sample_point: Option<[f32; 2]>,
+    pub loupe_point: Option<[f32; 2]>,
 }
 impl crate::UiState {
     pub fn preview_colors(&self) -> std::borrow::Cow<'_, ColorState> {
@@ -53,7 +54,7 @@ pub(crate) struct Picking {
     pub previous: Option<LayerCanvasTool>,
     pub original: Option<RgbColor>,
     pub position: Option<[f32; 2]>,
-    pub published_point: Option<[f32; 2]>,
+    pub published_point: [Option<[f32; 2]>; 2],
     pub touch: Option<u64>,
     pub touch_offset: f32,
     pub finishing: bool,
@@ -143,7 +144,7 @@ impl Eyedropper {
 impl Default for ColorPickerState {
     fn default() -> Self {
         Self { calibrating: false, style: ColorPickerStyle::Glass, layer: false, sample_width: 1,
-            can_sample_layer: false, preview: None, sample_sizes: &COLOR_SAMPLE_WIDTHS, editor: false, picked: None, sample_point: None }
+            can_sample_layer: false, preview: None, sample_sizes: &COLOR_SAMPLE_WIDTHS, editor: false, picked: None, sample_point: None, loupe_point: None }
     }
 }
 

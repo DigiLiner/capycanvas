@@ -52,10 +52,11 @@ export async function checkColorPicker({call,evaluate,settle}) {
   await mouse('mouseReleased',point);await wait('layerApp.state().layer_tools.tool==="paint"');
   assert.ok((await state()).colors.foreground.rgba[0]>.8,'pen lift accepts');
   await send({type:'set_color',rgba:[0,1,0,1]});
-  const contact={x:point.x,y:point.y+44};
+  const contact=point;
   await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...contact}]});
   await wait('layerApp.state().color_picker.preview!=null');
-  assert.ok((await state()).color_picker.preview.rgba[0]>.8&&(await state()).color_picker.preview.rgba[1]<.2,'touch samples crosshair above the finger');
+  assert.ok((await state()).color_picker.preview.rgba[0]>.8&&(await state()).color_picker.preview.rgba[1]<.2,'touch samples under the finger');
+  const lifted=(await state()).color_picker;assert.ok(lifted.loupe_point[1]<lifted.sample_point[1]-30,'touch lifts the loupe above the finger');
   await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...contact},{id:2,x:contact.x+100,y:contact.y}]});await settle();
   assert.equal((await state()).color_picker.layer,true,'second finger toggles source');await shot('glass-layer-touch');
   await call('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[{id:1,...contact}]});
@@ -132,5 +133,5 @@ export async function checkColorPicker({call,evaluate,settle}) {
   await send({type:'open_settings',page:'input'});
   await send({type:'preferences',action:{type:'reset_trigger',trigger:'pen.button.primary'}});
   await send({type:'close_settings'});
-  console.log('PASS: picker tiles, settings, real sampling, pen lift, touch offset/source/cancel, retained asynchronous wheel preview, category drawer, finger taps and pen side buttons');
+  console.log('PASS: picker tiles, settings, real sampling, pen lift, touch contact/source/cancel, retained asynchronous wheel preview, category drawer, finger taps and pen side buttons');
 }

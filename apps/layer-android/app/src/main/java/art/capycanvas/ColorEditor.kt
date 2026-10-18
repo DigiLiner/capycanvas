@@ -536,13 +536,13 @@ private fun copyText(context: android.content.Context, text: String) {
     }
     val density = LocalDensity.current.density
     val area = host.snapshot?.objectOrNull("state")?.objectOrNull("camera")?.array("work_area")
-    val point: JSONArray? = picker.optJSONArray("sample_point")
+    val points = listOfNotNull(picker.optJSONArray("sample_point"), picker.optJSONArray("loupe_point"))
     val corner = remember { arrayOf("top_right") }
     var height by remember { mutableIntStateOf(0) }
     var hover by remember { mutableStateOf<Offset?>(null) }
-    val origin = remember(area.toString(), point.toString(), height, hover) {
+    val origin = remember(area.toString(), points.toString(), height, hover) {
         area?.let {
-            val avoid = JSONArray(listOfNotNull(point, hover?.let { JSONArray(listOf(it.x, it.y)) }))
+            val avoid = JSONArray(points + listOfNotNull(hover?.let { JSONArray(listOf(it.x, it.y)) }))
             JSONObject(Native.colorUi(obj("type" to "strip_placement", "area" to it, "size" to JSONArray(listOf(272f * density, height)), "scale" to density,
                 "avoid" to avoid, "corner" to corner[0]).toString(), host.languageTag)).also { placed -> corner[0] = placed.getString("corner") }.array("origin")
         }

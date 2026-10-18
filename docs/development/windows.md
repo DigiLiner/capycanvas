@@ -247,8 +247,8 @@ active; the native fixture does not claim retained sampler identity across Blur.
 Run `exercise-color-picker.ps1 -Executable <path> -Theme dark` and repeat with
 `-Theme light` to check native double presses, sample choices and picker previews
 in isolated profiles. The held-finger check scans within the visible canvas bounds
-and checks that the accepted color comes from above the finger at the current
-display scale.
+and checks that the accepted color comes from under the finger while the loupe
+is lifted above it at the current display scale.
 
 The Layers panel presents shared attachment actions, owner visibility and group mode.
 Decorative clipping rails and effect links use realized thumbnail geometry and remain

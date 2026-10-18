@@ -23,7 +23,7 @@ export async function checkTonalControls({call,evaluate,settle}) {
     const originalCurves=drag?JSON.stringify((await view()).controls.filter(c=>c.curve).map(c=>c.value)):null;
     const p=await documentPoint(role==='black'?[32,32]:role==='white'?[224,224]:[128,128]),end={x:p.x,y:p.y-30};
     if(device==='touch'){
-      const start=drag?p:{x:p.x,y:p.y+60},finish=drag?end:{x:p.x,y:p.y+44};
+      const start=drag?p:{x:p.x,y:p.y+16},finish=drag?end:p;
       await call('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{id:1,...start}]});
       if(!drag){await preview();}
       const beforePreview=await evaluate('JSON.stringify(layerApp.state().color_picker.preview)');

@@ -1096,11 +1096,11 @@ impl Strip {
     }
     fn place(&self, workspace: &Workspace) {
         let Some(parent) = self.root.parent() else { return; };
-        let Some((area, sample)) = workspace.gpu.borrow().as_ref().map(|g| (g.session.state().camera.work_area, g.session.state().color_picker.sample_point)) else { return; };
+        let Some((area, points)) = workspace.gpu.borrow().as_ref().map(|g| (g.session.state().camera.work_area, [g.session.state().color_picker.sample_point, g.session.state().color_picker.loupe_point])) else { return; };
         let scale = workspace.area.scale_factor() as f32;
         let origin = workspace.area.compute_point(&parent, &gtk::graphene::Point::zero()).unwrap_or_else(gtk::graphene::Point::zero);
         let height = self.root.child().map_or(0, |content| content.measure(gtk::Orientation::Vertical, -1).1) + 16;
-        let avoid: Vec<[f32; 2]> = sample.into_iter().chain(self.hover.get()).collect();
+        let avoid: Vec<[f32; 2]> = points.into_iter().flatten().chain(self.hover.get()).collect();
         let placement = ColorStripPlacement::new(area, [self.root.width_request(), height].map(|v| v as f32 * scale), scale, &avoid, self.corner.get());
         self.corner.set(placement.corner);
         self.root.set_margin_start((origin.x() + placement.origin[0] / scale).max(0.).round() as i32);

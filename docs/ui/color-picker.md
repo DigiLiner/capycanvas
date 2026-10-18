@@ -123,12 +123,12 @@ Web, Android, Apple and Windows use the stateless `editor_open`, `editor`,
   pick publishes `color_picker.picked` and the dialog returns with it. A strip
   in a corner of the canvas work area, between the panels, shows the hex and
   the current shape's values. It starts top-right and stays in its corner until
-  `color_picker.sample_point` or a hovering mouse or pen covers it; it then
-  moves to the first free corner of top-right, top-left, bottom-right and
-  bottom-left, so the bottom corners serve work areas too narrow for two strips
-  side by side (`ColorStripPlacement`). A corner is free only when it covers
-  neither point, so the strip cannot oscillate. Escape, or tapping the strip,
-  returns without a change.
+  `color_picker.sample_point`, `color_picker.loupe_point` or a hovering mouse or
+  pen covers it; it then moves to the first free corner of top-right, top-left,
+  bottom-right and bottom-left, so the bottom corners serve work areas too
+  narrow for two strips side by side (`ColorStripPlacement`). A corner is free
+  only when it covers none of these points, so the strip cannot oscillate.
+  Escape, or tapping the strip, returns without a change.
 
 On the OKLCH circle, dragging from the field out past the hue ring snaps to
 white, full color or black within 18° of their directions. The panel and the
@@ -187,9 +187,10 @@ opening a dropdown must not trigger canvas blur. Leaving the application still
 cancels temporary picking.
 
 Touch and hold on the canvas starts the same picker with the loupe lifted above
-the finger. The sampled point and magnified view are both centered at the visible
-crosshair above the finger, including when the loupe is clamped at a viewport
-edge. Lifting accepts.
+the finger, so the finger does not hide it. The sampled point and the magnified
+view stay centered on the finger's contact, including when the loupe is clamped
+at a viewport edge; the crosshair at the loupe's center marks that contact. Pen
+and mouse sample at the pointer. Lifting accepts.
 A second finger toggles visible/selected-layer sampling when a paintable layer
 is selected. A fine stacked-layer mark above and to the right of the crosshair indicates raw layer
 sampling, whether changed by touch or the Source dropdown. Changing source keeps
@@ -273,8 +274,9 @@ preserve the saturation of arbitrary contrasting colors.
 Properties offer an eyedropper button, **Pick neutral point**, for White Balance. The canvas bar
 keeps Sample size and Cancel available; calibration starts at 5 pixels. A mouse
 or pen release samples the input before that adjustment, including its actual
-group and clipping scope. Touch uses the lifted contact point. Its glass shows
-the sampled input color, with a checker while the asynchronous sample is pending.
+group and clipping scope. Touch samples under the finger, as in the picker. Its
+glass shows the sampled input color, with a checker while the asynchronous
+sample is pending.
 This color swatch stays independent of the corrected canvas and paint color wheel.
 
 Calibration averages alpha-weighted linear document RGB, using circular widths

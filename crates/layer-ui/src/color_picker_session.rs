@@ -174,6 +174,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn clear_picker_position(&mut self) {
         self.eyedropper.picking.position = None;
         self.state.color_picker.sample_point = None;
+        self.state.color_picker.loupe_point = None;
     }
 
     pub(super) fn picker_position(&mut self, position: [f32; 2]) {
@@ -181,11 +182,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             return;
         }
         self.eyedropper.picking.position = Some(position);
-        let (_, sample, _) = self.picker_geometry(position);
-        self.state.color_picker.sample_point = Some(sample);
+        self.state.color_picker.sample_point = Some(position);
+        self.state.color_picker.loupe_point = Some(self.loupe_geometry(position).0);
         let point = self.state.camera.input_transform().map(Point {
-            x: sample[0],
-            y: sample[1],
+            x: position[0],
+            y: position[1],
         });
         if self.eyedropper.calibration.is_some() {
             self.queue_calibration([point.x, point.y]);
@@ -345,13 +346,18 @@ impl<R: CanvasRenderer> UiSession<R> {
         Ok(Some(self.changed(changed, true)))
     }
 
-    /// Touch aims at the visible crosshair above the contact. Keep sampling and
-    /// magnification on the same clamped surface point, including at the edges.
-    fn picker_geometry(&self, position: [f32; 2]) -> ([f32; 2], [f32; 2], f32) {
+    /// Touch lifts the loupe above its contact; sampling and magnification stay
+    /// at the contact, including when the loupe is clamped at the edges.
+    fn loupe_geometry(&self, position: [f32; 2]) -> ([f32; 2], f32, bool) {
         let picking = &self.eyedropper.picking;
         let scale = self
             .logical_viewport
             .map_or(1., |v| self.state.camera.viewport[0] as f32 / v[0]);
+        let classic = self.state.color_picker.style == ColorPickerStyle::Eyedropper
+            && picking.touch.is_none();
+        if classic {
+            return (position, scale, true);
+        }
         let mut center = position;
         if picking.touch.is_some() {
             center[1] -= picking.touch_offset;
@@ -364,12 +370,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     .max(radius + 2. * scale),
             );
         }
-        let sample = if picking.touch.is_some() {
-            center
-        } else {
-            position
-        };
-        (center, sample, scale)
+        (center, scale, false)
     }
 
     /// Physical surface geometry and document-linear colors; display-only GPU
@@ -380,16 +381,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             return None;
         }
         let position = picking.position?;
-        let (center, sample, scale) = self.picker_geometry(position);
+        let (center, scale, classic) = self.loupe_geometry(position);
         let old = picking.original?;
         let new = self.state.color_picker.preview.unwrap_or(old);
         let space = self.engine.document().composition().color.space;
-        let classic = self.state.color_picker.style == ColorPickerStyle::Eyedropper
-            && picking.touch.is_none();
         Some(ColorPickerOverlay {
             sample_color_only: self.eyedropper.calibration.is_some(),
-            center: if classic { position } else { center },
-            sample,
+            center,
+            sample: position,
             scale,
             classic,
             layer: self.eyedropper.layer && self.picker_layer_available(),

@@ -180,7 +180,7 @@ try {
     [CapyCanvasTouch]::Initialize([uint32]$review.Id)
     $finger=@{x=$paper.x;y=$paper.y+40}
     [CapyCanvasTouch]::Down(1,$finger.x,$finger.y)
-    Wait-Until {(Picking) -and (Light (Preview).rgba)} 'Touch and hold did not start the lifted picker' 6
+    Wait-Until {(Picking) -and (Light (Preview).rgba)} 'Touch and hold did not start the picker on paper' 6
     $layer=(Model).state.color_picker.layer
     if((Model).state.color_picker.can_sample_layer){
         [CapyCanvasTouch]::Down(2,($finger.x+160),$finger.y)
@@ -196,11 +196,13 @@ try {
     for($scanY=$finger.y+3;$scanY -le $scanBottom -and $scanWatch.Elapsed.TotalSeconds -lt $CapyWaitSeconds -and !(Inked (Preview).rgba);$scanY+=3){
         [CapyCanvasTouch]::Move(1,$finger.x,$scanY);Start-Sleep -Milliseconds 30;$offset=$scanY-$finger.y
     }
-    if(!(Inked (Preview).rgba)){throw 'Moving the held finger did not sample the stroke above it'}
-    $lifted=$finger.y+$offset-$center.y
+    if(!(Inked (Preview).rgba)){throw 'Moving the held finger onto the stroke did not sample it'}
+    $reached=$finger.y+$offset-$center.y
+    $picker=(Model).state.color_picker;$lifted=$picker.sample_point[1]-$picker.loupe_point[1]
     [CapyCanvasTouch]::Up(1)
     Wait-Until {(Tool) -eq 'paint' -and (Inked (Foreground))} 'Lifting the held finger did not accept its sample'
-    if($lifted -lt 20){throw "Touch sample was not lifted above the finger ($lifted px)"}
+    if($lifted -lt 20){throw "Touch loupe was not lifted above the finger ($lifted px)"}
+    if($reached -gt $lifted/2){throw "Touch sampled $reached px above the finger instead of under it (loupe lift $lifted px)"}
     [CapyCanvasTouch]::Dispose()
     [CapyRowPointer]::Initialize([uint32]$review.Id)
 
@@ -241,7 +243,7 @@ try {
     if(!$review.WaitForExit(8000)){throw 'Color picker review did not close'}
     if((Get-Item -LiteralPath $stderr).Length){throw 'Color picker review wrote to stderr'}
     $counts={param($p)@{full=$p.full_updates;motion=$p.motion_updates}}
-    @{tooltip=$tooltip;touch_lift_pixels=$lifted;column_resize='retained wheel scaled during the drag; final raster at release without moving controls';sweep_before=(& $counts $before);sweep_after=(& $counts $after)}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $run 'result.json')
+    @{tooltip=$tooltip;touch_lift_pixels=$lifted;touch_reach_pixels=$reached;column_resize='retained wheel scaled during the drag; final raster at release without moving controls';sweep_before=(& $counts $before);sweep_after=(& $counts $after)}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $run 'result.json')
     Write-Output "Color picker acceptance passed: $run"
 }catch{
     try{Capture 'failure'}catch{}

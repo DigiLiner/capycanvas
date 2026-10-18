@@ -205,16 +205,17 @@ fn calibration_save_waits_for_atomic_correction_then_captures_corrected_values()
 }
 
 #[test]
-fn calibration_touch_loupe_samples_released_offset_contact_without_changing_paint_color() {
+fn calibration_touch_loupe_samples_released_contact_without_changing_paint_color() {
     let mut s = calibration_session();
     let colors = s.state.colors.clone();
     arm_calibration(&mut s);
     picker_pointer(&mut s, 8, ContactPhase::Down, PointerKind::Touch, [400., 400.]);
     assert!(s.eyedropper.calibration.is_some());
     s.input(UiInput::ColorPickerHold { id: 8, position: [400., 400.], offset: 44. }).unwrap();
-    assert_eq!(s.color_picker_overlay().unwrap().sample, [400., 356.]);
+    assert_eq!(s.color_picker_overlay().unwrap().center, [400., 356.]);
+    assert_eq!(s.color_picker_overlay().unwrap().sample, [400., 400.]);
     picker_pointer(&mut s, 8, ContactPhase::Move, PointerKind::Touch, [420., 430.]);
-    let point = s.state.camera.input_transform().map(Point { x: 420., y: 386. });
+    let point = s.state.camera.input_transform().map(Point { x: 420., y: 430. });
     picker_pointer(&mut s, 8, ContactPhase::Up, PointerKind::Touch, [420., 430.]);
     s.frame(2, 2).unwrap();
     let layer_render::SnapshotRequest::ArtworkSample(request) = s.engine.backend().snapshot_requests.last().unwrap() else { panic!("expected sample"); };
@@ -255,14 +256,14 @@ fn calibration_touch_preview_coalesces_without_editing_and_release_waits_for_new
     let preview = s.state.color_picker.preview.unwrap().linear_in(s.engine.document().composition().color.space).unwrap();
     for (actual, expected) in preview.into_iter().zip([0.125, 0.25, 0.5, 1.]) { assert!((actual - expected).abs() < 1e-5); }
     assert_eq!(s.engine.backend().snapshot_requests.len(), 2);
-    let point = s.state.camera.input_transform().map(Point { x: 420., y: 386. });
+    let point = s.state.camera.input_transform().map(Point { x: 420., y: 430. });
     assert_eq!(last_calibration_request(&s).position, [point.x, point.y]);
     let cancelled = s.engine.backend().snapshot_cancels;
     picker_pointer(&mut s, 8, ContactPhase::Up, PointerKind::Touch, [440., 450.]);
     s.frame(32, 32).unwrap();
     assert!(s.engine.backend().snapshot_cancels > cancelled);
     assert_eq!(s.engine.backend().snapshot_requests.len(), 3);
-    let point = s.state.camera.input_transform().map(Point { x: 440., y: 406. });
+    let point = s.state.camera.input_transform().map(Point { x: 440., y: 450. });
     assert_eq!(last_calibration_request(&s).position, [point.x, point.y]);
     assert_eq!(s.engine.document().artwork, before);
     calibration_reply(&mut s, Ok(layer_core::ArtworkSample::Color([0.25; 4])));
@@ -282,7 +283,7 @@ fn calibration_touch_width_change_cancels_old_preview_and_resamples_latest_conta
     s.frame(3, 3).unwrap();
     assert_eq!(s.engine.backend().snapshot_requests.len(), 2);
     assert_eq!(last_calibration_request(&s).width, 51);
-    let point = s.state.camera.input_transform().map(Point { x: 420., y: 386. });
+    let point = s.state.camera.input_transform().map(Point { x: 420., y: 430. });
     assert_eq!(last_calibration_request(&s).position, [point.x, point.y]);
     calibration_reply(&mut s, Ok(layer_core::ArtworkSample::Color([0.25; 4])));
     assert!(s.state.color_picker.preview.is_some());

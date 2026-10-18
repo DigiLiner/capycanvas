@@ -487,7 +487,7 @@ private struct ColorPickStrip: View {
         let previews = ColorUI.resolve(["type": "preview", "colors": [session.view["value"].raw, sample.raw],
             "document_space": session.view["panel"]["rgb_space"].raw, "display_space": "DisplayP3", "rendition": session.rendition.raw])
         let area = store.snapshot["layout"]["work_area"].rect
-        let avoid: [Any] = [picker["sample_point"], hover.map { JSON([$0.x, $0.y]) } ?? JSON()].filter { !$0.isNull }.map(\.raw)
+        let avoid: [Any] = [picker["sample_point"], picker["loupe_point"], hover.map { JSON([$0.x, $0.y]) } ?? JSON()].filter { !$0.isNull }.map(\.raw)
         let placed = ColorUI.resolve(["type": "strip_placement", "area": [area.minX, area.minY, area.width, area.height],
             "size": [size.width, size.height], "scale": 1, "avoid": avoid, "corner": corner])
         Button { session.stopPicking() } label: {

@@ -83,8 +83,8 @@ struct ColorStrip:std::enable_shared_from_this<ColorStrip>{
         float width=float(Width),height=std::ceil(root.DesiredSize().Height);
         double scale=viewport.GetNumberAt(0)/host.ActualWidth();
         A avoid,size;size.Append(N(width*scale));size.Append(N(height*scale));
-        auto point=object(data->colorPreview,L"picker").GetNamedValue(L"sample_point",JsonValue::CreateNullValue());
-        if(point.ValueType()==JsonValueType::Array)avoid.Append(point);
+        auto picker=object(data->colorPreview,L"picker");
+        for(auto name:{L"sample_point",L"loupe_point"}){auto point=picker.GetNamedValue(name,JsonValue::CreateNullValue());if(point.ValueType()==JsonValueType::Array)avoid.Append(point);}
         if(hover){A at;at.Append(N(hover->X*scale));at.Append(N(hover->Y*scale));avoid.Append(at);}
         auto placed=colorUi(data->localization.get(),O({{L"type",S(L"strip_placement")},{L"area",area},{L"size",size},{L"scale",N(scale)},{L"avoid",avoid},{L"corner",S(corner)}})).GetObject();
         corner=str(placed,L"corner",corner);auto origin=array(placed,L"origin");

@@ -299,9 +299,9 @@ export function chooseColor({app, color, slot, element, button, opaque = false})
     let stripCorner = 'top_right', stripHover = null;
     const canvasRect = () => document.getElementById('canvas')?.getBoundingClientRect();
     const placeStrip = () => {
-      const surface = canvasRect(), camera = app.camera(), sample = app.color_preview().picker.sample_point;
+      const surface = canvasRect(), camera = app.camera(), picker = app.color_preview().picker;
       if (!surface?.width || !camera?.viewport?.[0]) return;
-      const scale = Number(camera.viewport[0]) / surface.width, avoid = [sample, stripHover && [(stripHover[0] - surface.x) * scale, (stripHover[1] - surface.y) * scale]].filter(Boolean);
+      const scale = Number(camera.viewport[0]) / surface.width, avoid = [picker.sample_point, picker.loupe_point, stripHover && [(stripHover[0] - surface.x) * scale, (stripHover[1] - surface.y) * scale]].filter(Boolean);
       const placed = app.color_ui({type:'strip_placement', area:camera.work_area.map(Number), size:[strip.offsetWidth * scale, strip.offsetHeight * scale], scale, avoid, corner:stripCorner});
       stripCorner = placed.corner; strip.style.left = `${surface.x + placed.origin[0] / scale}px`; strip.style.top = `${surface.y + placed.origin[1] / scale}px`;
     };
