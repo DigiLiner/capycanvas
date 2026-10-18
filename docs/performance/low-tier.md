@@ -1450,6 +1450,30 @@ Target: **60 completed updates/s** at the guaranteed size, on the 12 MP canvas.
 
 ### Dry-media contact model
 
+Measured on 2026-10-17 UTC with dry kernels specialized to normal blending and
+zoomed-out dry relief previews evaluated at display resolution, applied to the
+control `c674ee521`. The builds alternate for two passes each with the contained
+45° profile described below; the Smoothing 100% row sets Curve fit to its
+maximum, which lengthens the predicted tail. Optimized APK SHA-256
+`1c8474b097ad06cff2f84aff7eee75be6025f09a739187344eddfc823c097a1f`, control
+`4159a2cb7a267538ee3a0ac46d5bc8830686e04e70c07e69629e7b12a755f3ed`. Thermal
+status was zero in every record. Ranges cover all six contacts; gaps are the
+worst per-contact p99 between fresh completions.
+
+| Brush and Size | Before completed updates/s | After completed updates/s | After fresh input updates/s | After worst fresh p99 gap | After input-to-GPU p99 | 60/s, 33.3 ms gate |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pencil 1024 px | 43.37–44.25 | 86.92–90.00 | 86.92–90.00 | 21.89 ms | 47.21–60.11 ms | Meets |
+| Pointy Pencil 1024 px | 49.32–50.20 | 90.69–94.95 | 90.52–94.95 | 20.63 ms | 39.06–59.12 ms | Meets |
+| Charcoal 1024 px | 42.19–43.40 | 87.50–90.37 | 87.34–90.37 | 22.59 ms | 52.59–62.37 ms | Meets |
+| Pastel Block 1024 px | 33.36–33.95 | 72.83–74.58 | 72.69–74.58 | 31.83 ms | 57.45–69.61 ms | Meets |
+| Pencil 1024 px, Smoothing 100% | 35.41–36.09 | 82.99–85.92 | 82.82–85.92 | 23.37 ms | 43.91–61.54 ms | Meets |
+
+First selection after clearing app data (`--probe-presets 2,25,6`, three runs)
+takes Pencil 2.52 → 1.81 s, Pointy Pencil 1.96 → 1.32 s and Chalk 0.95 → 0.72 s;
+Chalk's background compile order varies between runs. Raw runs are under
+`artifacts/dry-preview-speed/tcl/`. The earlier 2026-10-17 rows below measure
+the previous build.
+
 Measured on 2026-10-17 UTC with the one-kernel dry evaluator, two fine-tip
 nodes from 4 px minor radius, Curve fit vertices bounded by 1% of the contact
 radius and five-point Gauss–Legendre for short segments, applied to the control

@@ -539,6 +539,30 @@ Reports: `artifacts/simplification-cleanup/performance/m28/`.
 
 ### Dry-media contact model
 
+Measured on 2026-10-17 UTC with dry kernels specialized to normal blending and
+zoomed-out dry relief previews evaluated at display resolution, applied to the
+control `c674ee521`. The builds alternate for two passes each with the contained
+45° profile described below; the Smoothing 100% row sets Curve fit to its
+maximum, which lengthens the predicted tail. Optimized APK SHA-256
+`1c8474b097ad06cff2f84aff7eee75be6025f09a739187344eddfc823c097a1f`, control
+`4159a2cb7a267538ee3a0ac46d5bc8830686e04e70c07e69629e7b12a755f3ed`. Thermal
+status was zero in every record. Ranges cover all six contacts; gaps are the
+worst per-contact p99 between fresh completions.
+
+| Brush and Size | Before completed updates/s | After completed updates/s | After fresh input updates/s | After worst fresh p99 gap | After input-to-GPU p99 | 90/s, 22.2 ms fresh profile |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pencil 1536 px | 41.98–42.71 | 123.82–124.82 | 123.49–124.82 | 18.67 ms | 35.88–38.56 ms | Meets |
+| Pointy Pencil 1536 px | 48.34–49.42 | 136.17–137.53 | 136.17–137.20 | 15.57 ms | 31.84–33.59 ms | Meets |
+| Charcoal 1536 px | 41.26–42.05 | 123.05–124.06 | 122.88–123.90 | 18.58 ms | 36.78–41.75 ms | Meets |
+| Pastel Block 1024 px | 62.79–63.35 | 161.82–164.46 | 160.32–162.29 | 13.12 ms | 27.89–38.39 ms | Meets |
+| Pencil 1536 px, Smoothing 100% | 35.09–35.93 | 109.49–114.83 | 109.32–114.67 | 18.18 ms | 37.21–48.83 ms | Meets |
+
+First selection after clearing app data (`--probe-presets 2,25,6`, three runs)
+takes Pencil 1.22 → 0.89 s, Pointy Pencil 0.94 → 0.62 s and Chalk 0.72 → 0.95 s;
+Chalk's background compile order varies between runs. Raw runs are under
+`artifacts/dry-preview-speed/movinkpad11/`. The earlier 2026-10-17 rows below
+measure the previous build.
+
 Measured on 2026-10-17 UTC with the one-kernel dry evaluator, two fine-tip
 nodes from 4 px minor radius, Curve fit vertices bounded by 1% of the contact
 radius and five-point Gauss–Legendre for short segments, applied to the control

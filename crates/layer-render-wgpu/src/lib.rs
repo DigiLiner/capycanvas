@@ -4095,13 +4095,13 @@ impl WgpuRasterizer {
         let mut preview_contribution=new_preview_from_persistent && self.scale_display.as_ref().is_some_and(|cache|
                 new_preview_layer.is_some_and(|id|cache.native_preview_input(packet,id)))
             && packet.dab_batches.iter().filter(|b|b.kind==DabBatchKind::Preview && b.dab_count!=0)
-                .all(|b|b.style.opacity==1. && (dry_material::display_preview_eligible(&b.style) || dry_material::native_dry_preview_eligible(&b.style)) && b.style.mode==DabMode::Paint
+                .all(|b|b.style.opacity==1. && dry_material::reduced_preview_eligible(&b.style) && b.style.mode==DabMode::Paint
                     && b.style.blend_space==packet.blend_space
                     && packet.scene.color_mode(b.target)==layer_core::color::LayerColorMode::FullColor);
         if preview_contribution {new_preview_requires_base=false;}
         let preview_level = self.scale_display.as_ref().filter(|_| new_preview_from_persistent
             && packet.dab_batches.iter().filter(|b| b.kind == DabBatchKind::Preview && b.dab_count != 0)
-                .all(|b| dry_material::display_preview_eligible(&b.style)))
+                .all(|b| dry_material::reduced_preview_eligible(&b.style)))
             .map_or(0, |cache| new_preview_layer.map_or(0, |id| cache.preview_level(self, packet, id, preview_contribution)));
         preview_contribution &= preview_level>0 || native_dry_preview;
         if !preview_contribution && new_preview_from_persistent {new_preview_requires_base=true;}
@@ -5953,7 +5953,7 @@ fn target_bytes(target: &TargetGpu) -> &[u8] {
 }
 
 fn preview_block(document_to_surface: [f32; 6]) -> u32 {
-    1 << display_mips::view_level(document_to_surface, 3).unwrap_or(0).saturating_sub(1).min(2)
+    1 << display_mips::view_level(document_to_surface, 3).unwrap_or(0).min(2)
 }
 
 fn dab_bytes(dabs: &[DabGpu]) -> &[u8] {
@@ -6312,11 +6312,12 @@ use layer_render::{DabBatchKind, DabStyle, FramePacket, ViewState};
     }
 
     #[test]
-    fn zoomed_out_previews_evaluate_paint_in_blocks_under_half_a_surface_pixel() {
+    fn zoomed_out_previews_evaluate_paint_in_blocks_no_larger_than_a_surface_pixel() {
         let scaled = |scale: f32| [scale, 0., 0., scale, 0., 0.];
         assert_eq!(preview_block(scaled(1.)), 1);
-        assert_eq!(preview_block(scaled(0.3)), 1);
-        assert_eq!(preview_block(scaled(0.2)), 2);
+        assert_eq!(preview_block(scaled(0.6)), 1);
+        assert_eq!(preview_block(scaled(0.3)), 2);
+        assert_eq!(preview_block(scaled(0.2)), 4);
         assert_eq!(preview_block(scaled(0.1)), 4);
         let (sin, cos) = 0.7_f32.sin_cos();
         assert_eq!(preview_block([0.1 * cos, 0.1 * sin, -0.1 * sin, 0.1 * cos, 40., 9.]), 4);

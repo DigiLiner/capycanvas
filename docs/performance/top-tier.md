@@ -1729,6 +1729,31 @@ the binary and source snapshot are under `artifacts/layer-modes/rebased-build/`.
 
 ### Dry-media contact model
 
+Measured on 2026-10-17 UTC with dry kernels specialized to normal blending and
+zoomed-out dry relief previews evaluated at display resolution, applied to the
+control `c674ee521`. The builds alternate for two passes each with the contained
+45° profile described below; the Smoothing 100% row sets Curve fit to its
+maximum, which lengthens the predicted tail. Optimized APK SHA-256
+`1c8474b097ad06cff2f84aff7eee75be6025f09a739187344eddfc823c097a1f`, control
+`4159a2cb7a267538ee3a0ac46d5bc8830686e04e70c07e69629e7b12a755f3ed`. Thermal
+status was zero in every record. Ranges cover all six contacts; gaps are the
+worst per-contact p99 between fresh completions.
+
+| Brush and Size | Before completed updates/s | After completed updates/s | After fresh input updates/s | After worst fresh p99 gap | After input-to-GPU p99 | 120/s, 16.7 ms fresh profile |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pencil 2048 px | 76.19–77.22 | 156.00–161.53 | 149.18–156.04 | 17.11 ms | 67.46–88.97 ms | **Not met** |
+| Pointy Pencil 2048 px | 88.21–89.49 | 168.66–177.39 | 155.52–163.41 | 16.59 ms | 60.47–106.47 ms | Meets |
+| Charcoal 2048 px | 73.35–74.50 | 158.98–161.91 | 152.55–155.85 | 16.19 ms | 63.69–102.37 ms | Meets |
+| Pastel Block 1024 px | 192.57–195.62 | 231.67–262.38 | 178.24–191.31 | 14.44 ms | 36.40–47.24 ms | Meets |
+| Pencil 2048 px, Smoothing 100% | 66.51–68.03 | 161.11–165.14 | 154.37–160.14 | 16.35 ms | 56.59–105.64 ms | Meets |
+
+Pencil misses only the gap, by 0.41 ms; an earlier round of this change
+measured 15.2 ms. First selection after clearing app data (`--probe-presets
+2,25,6`, three runs) takes Pencil 0.99 → 0.78 s, Pointy Pencil 0.92 → 0.64 s and
+Chalk 0.43 → 0.41 s; Chalk's background compile order varies between runs. Raw
+runs are under `artifacts/dry-preview-speed/movinkpad14/`. The earlier
+2026-10-17 rows below measure the previous build.
+
 Measured on 2026-10-17 UTC with the one-kernel dry evaluator, two fine-tip
 nodes from 4 px minor radius, Curve fit vertices bounded by 1% of the contact
 radius and five-point Gauss–Legendre for short segments, applied to the control

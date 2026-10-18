@@ -45,24 +45,22 @@
   - Earlier measurements of the other complex presets reach 76–118 updates/s
     on Top, about 6–25 on Mid and 3–19 on Low. They need current measurements.
 - **Dry-media qualification remains incomplete.**
-  - Size denotes the 45° writing-pose long axis. Current Strength 100%, Material
-    hardness and default Smoothing 6% profiles miss the nominal Pencil, Pointy
-    and Charcoal rate targets on all native tiers. Only native Low Pencil's
-    and Pointy's gaps meet their limit. Current native Pencil reaches
-    44.02–44.76/s on Low, 38.27–39.08/s on Mid and 72.51–74.56/s on Top.
-  - Compile-time aggregate specialization restores substantial throughput
-    relative to the matched runtime branch. Same-APK Pencil Smoothing 0%
-    diagnostics reach 54.80–55.52/s on Low, 50.91–51.63/s on Mid and
-    83.51–86.23/s on Top, still below nominal rates. This isolates Curve fit
-    work without attributing all remaining cost to it. Partial Opacity and
-    other tilts remain unmeasured; earlier recipes do not qualify them.
+  - Size denotes the 45° writing-pose long axis. With display-resolution
+    predictions, native Pencil, Pointy, Charcoal and Pastel writing profiles meet
+    rate and gap on all three tiers, including Pencil at Smoothing 100%, except
+    MovinkPad 14 Pencil's 17.11 ms gap against 16.7 ms. Current native Pencil
+    reaches 86.92–90.00/s on Low, 123.49–124.82/s on Mid and 149.18–156.04/s on
+    Top.
+  - Those predictions cost MovinkPad 14 Pencil at 256 px in screen strokes:
+    313.7 → 261.9/s, with the worst gap 11.3 → 17.2 ms. GPU time falls; the
+    extra display gather adds frame latency.
   - TCL Web remains unqualified; see the
     [low-tier table](low-tier.md#dry-media-contact-model).
   - Passing native rows cover only their measured profiles and poses; Shading
     Pencil, Chalk and Crayon remain unmeasured. Physical input-to-present latency
     is unmeasured.
   - First dry-brush selection remains slow. After clearing app data, native
-    Pencil takes 2.49 s on Low, 1.22 s on Mid and 1.05 s on Top. On the earlier
+    Pencil takes 1.81 s on Low, 0.89 s on Mid and 0.78 s on Top. On the earlier
     build TCL Web Pencil took 14.80 s and the primed native probe 35.53 s, with
     driver caches retained; neither has been remeasured. Cached selection is
     quick; that does not qualify first-use latency.

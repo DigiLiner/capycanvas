@@ -104,6 +104,7 @@ pub(super) fn kernel_source(space:layer_core::color::RgbSpace,float_sampling:&st
 /// and starting paint.
 pub(super) struct DisplayInputs {
     views: [wgpu::TextureView; 3],
+    inputs: bindings::MaterialInput,
     gather: bindings::CachedBinding<(wgpu::Buffer, wgpu::TextureView)>,
 }
 
@@ -113,6 +114,7 @@ impl DisplayInputs {
     pub fn new(device: &wgpu::Device) -> Self {
         Self {
             views: Self::FORMATS.map(|format| create_target(device, [PAGE_SIZE / 2; 2], format, "dry display inputs").1),
+            inputs: Default::default(),
             gather: Default::default(),
         }
     }
@@ -126,8 +128,10 @@ impl DisplayInputs {
     pub fn inputs(&self, r: &WgpuRasterizer, neighborhood: [&wgpu::TextureView; 9]) -> wgpu::BindGroup {
         let mut views = neighborhood;
         views[4] = &self.views[0];
-        create_material_bind_group(&r.device, &r.material_layout, &views, &r.dab_buffer,
-            &self.views[1], &self.views[2], wgpu::BindingResource::Buffer(r.dry_records.binding()))
+        let bound = std::array::from_fn(|i| match i { 9 => &self.views[1], 10 => &self.views[2], _ => views[i] }.clone());
+        self.inputs.get(([r.dab_buffer.clone(), r.dry_records.binding().buffer.clone()], bound), || create_material_bind_group(
+            &r.device, &r.material_layout, &views, &r.dab_buffer,
+            &self.views[1], &self.views[2], wgpu::BindingResource::Buffer(r.dry_records.binding())))
     }
 
     /// The gather pass's outputs. Where the start is stored, the averaged
@@ -557,6 +561,12 @@ pub(super) fn native_dry_preview_eligible(style: &layer_render::DabStyle) -> boo
         && style.contact.is_some_and(|c| c.dry.is_some()) && contact_flags(style.contact) & !(67|2048|4096|32768) == 0
         && style.rendering.accumulation == BrushAccumulation::Flow && !style.rendering.edge_after_stroke
         && !style.alpha_locked && style.selection.is_none()
+}
+
+/// Predictions of these contacts evaluate at the reduced display level when
+/// the view is zoomed out; the committed stroke replaces them at full resolution.
+pub(super) fn reduced_preview_eligible(style: &layer_render::DabStyle) -> bool {
+    display_preview_eligible(style) || native_dry_preview_eligible(style)
 }
 
 #[cfg(test)]

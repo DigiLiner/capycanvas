@@ -127,13 +127,14 @@ The engine can draw temporary predicted contacts to reduce the apparent gap
 between the pen and the stroke. Prediction uses replaceable preview state, leaving
 committed paint, material state and undo history unchanged. Real input replaces
 that preview. Predictions are not saved into the document. When the view is
-zoomed out so far that a 4×4 or 2×2 block of document pixels covers at most
-half a surface pixel, dry preview paint is evaluated once per block; committed
-paint is always evaluated per pixel.
+zoomed out so far that a 4×4 or 2×2 block of document pixels covers at most one
+surface pixel, dry preview paint is evaluated once per block; committed paint is
+always evaluated per pixel.
 Partial-opacity analytic prediction averages both current paint and immutable
 stroke-start paint over the same display footprint, then writes its full RGBA
 result. It cannot use the full-opacity pigment-contribution shortcut. Paper
-texture predictions retain their full-resolution evaluator.
+texture predictions also evaluate per block, against the block's averaged
+paper, so the predicted head's grain looks coarser until real input commits it.
 
 Replay uses the stored real samples and brush snapshot. Any brush change should
 therefore be tested both while drawing and after undo/redo or reopening a project.

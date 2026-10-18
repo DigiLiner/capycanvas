@@ -831,7 +831,7 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
 #[test]
 fn source_only_dry_updates_reach_the_next_prediction_and_display() {
     let extent=[517,259];
-    for preset in [DefaultBrushPreset::Pencil,DefaultBrushPreset::PointyPencil,DefaultBrushPreset::ShadingPencil,DefaultBrushPreset::Charcoal,DefaultBrushPreset::Chalk,DefaultBrushPreset::PastelBlock,DefaultBrushPreset::Crayon] {for mode in [DabMode::Paint,DabMode::Erase] {for readonly in [false,true] {
+    for preset in [DefaultBrushPreset::Pencil,DefaultBrushPreset::PointyPencil,DefaultBrushPreset::ShadingPencil,DefaultBrushPreset::Charcoal,DefaultBrushPreset::Chalk,DefaultBrushPreset::PastelBlock,DefaultBrushPreset::Crayon] {for mode in [DabMode::Paint,DabMode::Erase] {for readonly in [false,true] {for opacity in [1.,0.5] {
         let mut doc=document_at(extent);composition_mut(&mut doc).blend=layer_core::BlendSpace::Perceptual;
         let target=source_at(&doc,0);
         let mut view=crate::test_support::view(extent);view.document_to_surface=[0.25,0.,0.,0.25,0.,0.];
@@ -840,7 +840,7 @@ fn source_only_dry_updates_reach_the_next_prediction_and_display() {
         let mut reference=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         if readonly {crate::test_support::write_only_dry_material(&mut r);crate::test_support::write_only_dry_material(&mut reference);}
         for backend in [&mut r,&mut reference] {backend.submit(frame).unwrap();}
-        let mut style=crate::layer_tests::preset_style(preset);style.mode=mode;style.blend_space=frame.blend_space;
+        let mut style=crate::layer_tests::preset_style(preset);style.mode=mode;style.blend_space=frame.blend_space;style.opacity=opacity;
         let dry=style.contact.unwrap().dry.unwrap();let relief=dry.pose(0.85).relief;
         let mut dab=crate::tests::test_dab([125.5,127.5],[0.031,0.13,0.29,0.63],0.8);
         dab.radii=[32.,21.];dab.previous=[32.,21.,1.,0.];dab.motion=[4.,1.];
@@ -870,13 +870,13 @@ fn source_only_dry_updates_reach_the_next_prediction_and_display() {
                 r.submit(current).unwrap();reference.submit(FramePacket {composite_all:true,..current}).unwrap();
             }
             r.wait_idle().unwrap();reference.wait_idle().unwrap();
-            assert_eq!(r.preview_level,0,"must exercise full-native prediction");assert!(!r.preview_contribution);
+            assert_eq!(r.preview_level==0,opacity<1.,"only partial opacity keeps a full-native prediction");assert!(!r.preview_contribution);
             for page in &r.preview_pages {
                 if !r.preview_contact_tiles.as_ref().unwrap().contains(&page.coordinate) {continue;}
                 let oracle=reference.preview_page(page.coordinate).unwrap();
                 assert_eq!(crate::layer_tests::page_bytes(&r,&page.primary.texture),crate::layer_tests::page_bytes(&reference,&oracle.primary.texture),"{preset:?} {mode:?} readonly={readonly} step{step} page{:?}",page.coordinate);
             }
-            assert_pixels_equal(&display_pixels(&r),&display_pixels(&reference),r.scale_display.as_ref().unwrap().plan.size[0],(preset,mode,readonly,step));
+            assert_pixels_equal(&display_pixels(&r),&display_pixels(&reference),r.scale_display.as_ref().unwrap().plan.size[0],(preset,mode,readonly,opacity,step));
         }
-    }}}
+    }}}}
 }

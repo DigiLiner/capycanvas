@@ -184,11 +184,13 @@ Dry ellipse Flow tile bounds share the evaluator's midpoint geometry. Cached
 display levels reduce only their stale regions, rounded outward to complete
 averaging texels; cold, shifted and streamed inputs retain their full-page path.
 
-Dry-flow prediction can render its full-resolution pigment contribution over a
-transparent GPU target, then combine it with the persistent paint. This uses the
-same paper samples and integral, avoiding reads of old paint during prediction.
-Fine grain remains at native resolution. Alpha lock, selections and other material
-responses and partial-opacity strokes retain their existing destination path.
+Dry-flow prediction can render its pigment contribution over a transparent GPU
+target, then combine it with the persistent paint. This uses the same integral,
+avoiding reads of old paint during prediction. Zoomed out, prediction evaluates
+one sample per display block with the block's averaged paper, which coarsens the
+predicted head's grain until it is committed; committed paint keeps native grain.
+Alpha lock, selections and other material responses and partial-opacity strokes
+retain their existing destination path.
 
 Updates submitted without presentation keep their source damage pending until
 composition succeeds. Prediction can replace its own footprint without dropping
