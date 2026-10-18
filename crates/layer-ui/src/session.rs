@@ -4466,6 +4466,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.effect_analyses.busy() || (self.histogram.demand && !self.histogram.settled) || (self.tonal_histogram.demand && !self.tonal_histogram.settled)
             || self.interaction.axes.active()
             || self.paper_preview.active()
+            || (!self.rendering_suspended && self.papers.pending.as_ref().is_some_and(|pending| pending.image.is_some()))
             || self.engine.wants_continuous_frames()
             || self.pending_filters.is_some()
             || self.targeted_curve_busy()

@@ -124,15 +124,25 @@ fn a_paper_that_loads_during_a_stroke_applies_after_it() {
     let paper = crate::occurrence_token(s.engine.document().bottom_paper().unwrap());
     let id = "01".repeat(32);
     s.papers.pending = Some(crate::paper_library::PendingPaper { id: id.clone(), layer: paper, epoch: s.state.document_file.epoch, image: None });
+    assert!(!s.wants_continuous_frames(), "Waiting for the Paper image does not poll frames");
     s.pen(event(&s, 1, PenPhase::Down, 0.5));
     s.frame(2, 2).unwrap();
     s.paper_loaded(&id, paper_source()).unwrap();
     assert!(s.papers.pending.is_some(), "the chosen paper waits for the stroke");
     assert!(s.paper_image(paper).is_none());
     s.pen(event(&s, 2, PenPhase::Up, 0.5));
-    settle(&mut s);
+    let mut wake = true;
+    let mut frame = 2;
+    while s.papers.pending.is_some() && (wake || s.wants_continuous_frames()) {
+        assert!(frame < 40, "Paper completion must settle within the existing frame budget");
+        wake = s.frame(frame * 10_000_000, frame * 10_000_000).unwrap().canvas_wake;
+        frame += 1;
+    }
     assert!(s.papers.pending.is_none());
     assert!(s.paper_image(paper).is_some(), "the chosen paper applies once the stroke ends");
+    let expired = frame * 10_000_000 + 1_300_000_000;
+    s.frame(expired, expired).unwrap();
+    assert!(!s.wants_continuous_frames(), "Completed Paper work stops polling after its relief preview");
 }
 
 #[test]

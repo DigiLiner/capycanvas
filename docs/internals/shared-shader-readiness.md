@@ -130,6 +130,11 @@ brush it began with. While samples are held, document snapshots such as Save
 wait, and parking, suspension and renderer replacement retire them with the
 queue, so they never reach another drawing.
 
+A loaded Paper waits until earlier drawing work finishes. Its decoded pending
+image keeps shared frame demand active until the choice is applied or rejected.
+Waiting for disk I/O and suspended painting do not request polling. Once Paper
+applies, its relief preview finishes before frame demand returns to idle.
+
 Frame readiness covers each batch's actual dependencies. For every distinct
 batch style, `raster_dependencies_ready` requests the style's Paper bake and tip
 mask, and its pipelines when the startup brush does not cover it; encoding
