@@ -3237,6 +3237,25 @@ updates and physical latency remain unqualified. Traces and reviewed light
 captures are in `empty-backed-neighbor-Release-refresh/runtime-Light/` beside
 the preceding controls. These builds precede the Paper texture-dialog changes.
 
+On 2026-10-18, one Mac light-theme case at `f147c48b7` includes the Paper dialog
+integration and retained display-sampler bindings. The normal Release build uses
+the same photo, 512 px Wet Watercolor, priming Undo and three contacts:
+
+| Device | Contact presentations/s | Maximum prepare | First-contact maximum displayed gap |
+| --- | --- | --- | --- |
+| M2 Pro Mac mini, 90 Hz | 87.133 / 89.475 / 89.335 | 106.590 ms | 177.779 ms |
+
+The measured interval is 19.991034 s, with all 4320 real samples and 1725
+presentations. All input, readiness, Undo and callback-accounting guards pass;
+missing, zero-time and duplicate callbacks are zero, with nominal thermal state.
+Contact interval p99 is 11.111 ms. Maximum owner service is 106.807 ms, versus
+101.061 ms in the preceding case; these single cases do not establish a gain.
+The initial response gap remains open. This 90 Hz Mac observation does not
+qualify top-tier cadence, GPU-completed brush updates or physical latency.
+The current iPad build passes signing and minimum-OS inspection, but has no
+corresponding runtime measurement. The Mac trace and reviewed capture are in
+`latest-Apple-integrated-Release-preparation/runtime-photo20-Light-Mac/`.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized
