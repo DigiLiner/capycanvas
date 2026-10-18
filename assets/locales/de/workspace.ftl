@@ -599,3 +599,8 @@ workspace-backup-saved = Arbeitsbereichssicherung gespeichert.
 workspace-tool-description-waveform = Farbe und Helligkeit von links nach rechts prüfen
 workspace-tool-strength-slider = Stärkeregler
 workspace-tool-strength-slider-description = Werkzeugstärke direkt in der Symbolleiste anpassen
+workspace-owner-lost = Änderungen an diesem Arbeitsbereich können gerade nicht gespeichert werden.
+workspace-picker-selected = { $count ->
+    [one] { $count } ausgewählt
+   *[other] { $count } ausgewählt
+    }

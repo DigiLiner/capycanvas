@@ -1176,3 +1176,5 @@ workspace-backup-saved = Cadangan ruang kerja disimpan.
 workspace-tool-description-waveform = Periksa warna dan kecerahan dari kiri ke kanan
 workspace-tool-strength-slider = Penggeser kekuatan
 workspace-tool-strength-slider-description = Atur kekuatan alat langsung di bilah alat
+workspace-owner-lost = Perubahan pada ruang kerja ini tidak dapat disimpan saat ini.
+workspace-picker-selected = { $count } dipilih

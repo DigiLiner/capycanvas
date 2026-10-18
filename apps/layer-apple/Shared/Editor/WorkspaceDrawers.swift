@@ -79,7 +79,7 @@ private struct WorkspaceCollapsedColumnContent: View {
             }.environment(\.workspaceClip, clip.rect)
                 .scrollIndicators(.hidden).placed(clip.relative(to: base))
             PanelGrip(vertical: true).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
-                .accessibilityElement().accessibilityHidden(false).accessibilityLabel("Move column")
+                .accessibilityElement().accessibilityHidden(false).accessibilityLabel(store.catalog["document_delivery_copy"]["move_column"].string)
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: JSON(["kind": "column", "column": column["id"].raw]),
                     context: JSON(["kind": "column", "column": column["id"].raw]), openOnTap: true))
                 .placed(column["grip"].relative(to: base)).accessibilityIdentifier("column-grip-\(column["id"].uint)")

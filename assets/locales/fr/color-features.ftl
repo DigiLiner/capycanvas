@@ -404,3 +404,5 @@ color-proof-already-sdr = Ce dessin est déjà SDR
 color-proof-hdr-artwork = Les réglages de rendu SDR nécessitent une œuvre HDR
 color-proof-invalid-rendition = Réglages de rendu SDR non valides
 color-proof-invalid-value = Valeur d’épreuvage non valide
+color-features-color-applying = Application du changement de couleur…
+color-features-color-file-exists = Un fichier portant ce nom existe déjà. Choisir un autre nom.

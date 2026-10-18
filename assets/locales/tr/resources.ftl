@@ -579,3 +579,4 @@ resources-paper-unryu = Unryu
 resources-paper-unsupported = Kâğıt olarak RGB veya gri tonlamalı bir görüntü kullanın
 resources-paper-washi = Washi
 resources-layer-add-paper = Kâğıt ekle
+resources-size-unit = Birim

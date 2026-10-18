@@ -20,7 +20,8 @@ struct ToneStatusLabel: View {
     private var text: String {
         let status = store.snapshot["display_status"]
         guard status["hdr"].bool, !status["hdr_output"].bool else { return "" }
-        return !status["error"].isNull ? "SDR preview unavailable" : status["retained"].bool ? "" : "Preparing SDR…"
+        return !status["error"].isNull ? store.catalog["proof_copy"]["sdr_unavailable"].string
+            : status["retained"].bool ? "" : store.catalog["proof_copy"]["preparing_sdr"].string
     }
     var body: some View {
         if !text.isEmpty {
@@ -36,6 +37,7 @@ struct ScreenStatus: View {
     let palette: EditorPalette
     @State private var open = false
     private var screen: JSON { store.state["screen"] }
+    private var copy: JSON { store.catalog["native_copy"]["color"] }
     private var warning: Color { Color(hex: store.state["theme"].string == "dark" ? "#e5a50a" : "#9c5700") }
     var body: some View {
         let chip = screen["chip"]
@@ -45,7 +47,7 @@ struct ScreenStatus: View {
                     if chip["warning"].bool { SharedIcon(name: "warning", size: 16).foregroundStyle(warning) }
                     Text(chip["label"].string).lineLimit(1)
                 }.padding(.horizontal, 10).padding(.vertical, 3)
-            }.buttonStyle(ReadoutButtonStyle(palette: palette)).focusable(false).help("Screen details")
+            }.buttonStyle(ReadoutButtonStyle(palette: palette)).focusable(false).help(copy["screen_details"].string)
                 .accessibilityIdentifier("screen-status")
                 .editorPopover(isPresented: Binding(get: { open && !screen["details"].isNull }, set: { open = $0 })) { details }
         }
@@ -61,7 +63,7 @@ struct ScreenStatus: View {
                 Text(details["body"].string).fixedSize(horizontal: false, vertical: true)
             }
             if !details["show_clipped"].isNull {
-                Toggle("Highlight these colors", isOn: Binding(get: { details["show_clipped"].bool },
+                Toggle(copy["highlight_clipped_colors"].string, isOn: Binding(get: { details["show_clipped"].bool },
                     set: { store.dispatch(["type": "show_clipped_colors", "visible": $0]) }))
                     .accessibilityIdentifier("screen-show-clipped")
             }

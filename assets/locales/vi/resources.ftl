@@ -580,3 +580,4 @@ resources-paper-unryu = Unryu
 resources-paper-unsupported = Dùng ảnh RGB hoặc thang xám làm giấy
 resources-paper-washi = Washi
 resources-layer-add-paper = Thêm giấy
+resources-size-unit = Đơn vị

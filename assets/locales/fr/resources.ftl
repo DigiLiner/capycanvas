@@ -579,3 +579,4 @@ resources-paper-unryu = Unryu
 resources-paper-unsupported = Utiliser une image RVB ou en niveaux de gris comme papier
 resources-paper-washi = Washi
 resources-layer-add-paper = Ajouter du papier
+resources-size-unit = Unité

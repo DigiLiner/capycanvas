@@ -599,3 +599,8 @@ workspace-backup-saved = Copia de seguridad del espacio de trabajo guardada.
 workspace-tool-description-waveform = Inspeccionar color y brillo de izquierda a derecha
 workspace-tool-strength-slider = Control de intensidad
 workspace-tool-strength-slider-description = Ajustar la intensidad de la herramienta en la barra
+workspace-owner-lost = Los cambios en este espacio de trabajo no se pueden guardar ahora.
+workspace-picker-selected = { $count ->
+    [one] { $count } seleccionado
+   *[other] { $count } seleccionados
+    }

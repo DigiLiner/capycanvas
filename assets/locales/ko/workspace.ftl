@@ -625,3 +625,5 @@ workspace-backup-saved = 작업 공간 백업을 저장했습니다.
 workspace-tool-description-waveform = 왼쪽부터 오른쪽까지 색상과 밝기 확인
 workspace-tool-strength-slider = 강도 슬라이더
 workspace-tool-strength-slider-description = 도구 모음에서 도구 강도 조절
+workspace-owner-lost = 지금은 이 작업 영역의 변경 사항을 저장할 수 없습니다.
+workspace-picker-selected = { $count }개 선택됨

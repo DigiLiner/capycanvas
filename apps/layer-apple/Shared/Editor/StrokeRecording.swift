@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
     @Published var error: String?
     private var polling: Task<Void, Never>?
     init(store: EditorStore) { self.store = store }
-    var label: String { status["label"].isNull ? "Start stroke recording" : status["label"].string }
+    var label: String { status["label"].isNull ? store?.catalog["native_copy"]["color"]["record_tablet"].string ?? "" : status["label"].string }
 
     func refresh() { request(nil) }
     func activate() {
@@ -41,8 +41,9 @@ import UniformTypeIdentifiers
     private func save() {
         guard let native = store?.native, !busy else { return }
         busy = true
+        let fallback = store?.bootstrap["action_failed"].string ?? ""
         native.strokeRecordingData { [weak self] result in
-            let compressed = result.flatMap { raw in Result { try Self.compress(raw) } }
+            let compressed = result.flatMap { raw in Result { try Self.compress(raw, failure: fallback) } }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 busy = false
@@ -53,10 +54,10 @@ import UniformTypeIdentifiers
             }
         }
     }
-    nonisolated private static func compress(_ raw: Data) throws -> Data {
+    nonisolated private static func compress(_ raw: Data, failure message: String) throws -> Data {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("capy-strokes-" + UUID().uuidString)
         guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
-            throw HostFailure(message: "Could not prepare the stroke recording")
+            throw HostFailure(message: message)
         }
         defer { try? FileManager.default.removeItem(at: url) }
         let file = try FileHandle(forWritingTo: url)
@@ -66,7 +67,7 @@ import UniformTypeIdentifiers
         try file.close()
         if let failure {
             defer { capy_apple_string_free(failure) }
-            throw HostFailure(message: (try? JSON.decode(String(cString: failure)))?["error"].string ?? "Could not save the stroke recording")
+            throw HostFailure(message: (try? JSON.decode(String(cString: failure)))?["error"].string ?? message)
         }
         return try Data(contentsOf: url)
     }
@@ -83,13 +84,14 @@ import UniformTypeIdentifiers
 
 struct StrokeRecordingFiles: ViewModifier {
     @ObservedObject var recording: StrokeRecording
+    @Environment(\.capyCommonCopy) private var common
     func body(content: Content) -> some View {
         content
             .fileExporter(isPresented: Binding(get: { recording.export != nil }, set: { if !$0 { recording.export = nil } }),
                 document: recording.export, contentType: UTType(filenameExtension: "capystrokes") ?? .data,
                 defaultFilename: "stroke-recording.capystrokes") { recording.exported($0) }
-            .alert("Stroke recording", isPresented: Binding(get: { recording.error != nil }, set: { if !$0 { recording.error = nil } })) {
-                Button("OK", role: .cancel) { recording.error = nil }
-            } message: { Text(recording.error ?? "") }
+            .alert(recording.error ?? "", isPresented: Binding(get: { recording.error != nil }, set: { if !$0 { recording.error = nil } })) {
+                Button(common["ok"].string, role: .cancel) { recording.error = nil }
+            }
     }
 }

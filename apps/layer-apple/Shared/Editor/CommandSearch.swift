@@ -172,7 +172,7 @@ private struct CommandSearchBar: View {
             HStack(spacing: inset) {
                 Text(command["label"].string).lineLimit(1).truncationMode(.tail)
                     .opacity(enabled ? 1 : 0.5).frame(maxWidth: .infinity, alignment: .leading)
-                if command["selected"].bool { SharedIcon(name: "check").accessibilityLabel("On") }
+                if command["selected"].bool { SharedIcon(name: "check").accessibilityLabel(store.catalog["native_copy"]["header"]["on"].string) }
                 Text(command["shortcut"].string).font(.system(size: textSize * 0.85)).opacity(0.65).lineLimit(1)
             }
             .padding(.horizontal, inset).frame(minHeight: height)
@@ -186,6 +186,6 @@ private struct CommandSearchBar: View {
         .accessibilityIdentifier("command-result-\(index)")
         .accessibilityHint(explanation(command))
         .accessibilityAddTraits(current ? .isSelected : [])
-        .accessibilityValue(enabled ? "" : "Unavailable")
+        .accessibilityValue(enabled ? "" : copy["unavailable"].string)
     }
 }

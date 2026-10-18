@@ -579,3 +579,4 @@ resources-paper-unryu = Unryu
 resources-paper-unsupported = Ein RGB- oder Graustufenbild als Papier verwenden
 resources-paper-washi = Washi
 resources-layer-add-paper = Papier hinzufügen
+resources-size-unit = Einheit

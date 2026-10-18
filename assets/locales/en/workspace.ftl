@@ -599,3 +599,8 @@ workspace-backup-saved = Workspace backup saved.
 workspace-tool-description-waveform = Inspect color and brightness from left to right
 workspace-tool-strength-slider = Strength slider
 workspace-tool-strength-slider-description = Adjust tool strength directly in the toolbar
+workspace-owner-lost = Changes to this workspace can’t be saved right now.
+workspace-picker-selected = { $count ->
+    [one] { $count } selected
+   *[other] { $count } selected
+    }

@@ -404,3 +404,5 @@ color-proof-already-sdr = Diese Zeichnung ist bereits SDR
 color-proof-hdr-artwork = Die SDR-Darstellungseinstellungen erfordern HDR-Bildmaterial
 color-proof-invalid-rendition = Ungültige SDR-Darstellungseinstellungen
 color-proof-invalid-value = Ungültiger Softproof-Wert
+color-features-color-applying = Farbänderung wird angewendet…
+color-features-color-file-exists = Eine Datei mit diesem Namen ist bereits vorhanden. Einen anderen Namen wählen.

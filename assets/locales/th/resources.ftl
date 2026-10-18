@@ -580,3 +580,4 @@ resources-paper-unryu = กระดาษอุนริว
 resources-paper-unsupported = ใช้ภาพ RGB หรือภาพระดับสีเทาเป็นกระดาษ
 resources-paper-washi = กระดาษวาชิ
 resources-layer-add-paper = เพิ่มกระดาษ
+resources-size-unit = หน่วย

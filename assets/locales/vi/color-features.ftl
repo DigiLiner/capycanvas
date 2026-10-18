@@ -404,3 +404,5 @@ color-proof-already-sdr = Bản vẽ này đã là SDR
 color-proof-hdr-artwork = Thiết lập hiển thị SDR yêu cầu tác phẩm HDR
 color-proof-invalid-rendition = Thiết lập hiển thị SDR không hợp lệ
 color-proof-invalid-value = Giá trị Mô phỏng màu không hợp lệ
+color-features-color-applying = Đang áp dụng thay đổi màu…
+color-features-color-file-exists = Đã có tệp trùng tên. Hãy chọn tên khác.

@@ -401,3 +401,5 @@ color-proof-already-sdr = 此繪畫已經是SDR
 color-proof-hdr-artwork = SDR呈現設定需要HDR作品
 color-proof-invalid-rendition = SDR呈現設定無效
 color-proof-invalid-value = 校樣值無效
+color-features-color-applying = 正在套用色彩變更…
+color-features-color-file-exists = 已有同名檔案。請選擇其他名稱。

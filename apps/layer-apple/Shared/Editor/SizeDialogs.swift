@@ -42,7 +42,7 @@ private struct SizeForm: View {
                 let op = axis == 0 ? "width" : "height"
                 number(view["labels"][axis].string, value: view["values"][axis].number, control: view["numeric"][axis], op: op)
             }
-            Picker("Unit", selection: Binding(get: { view["unit"].string }, set: { choose(["op": "unit", "unit": $0]) })) {
+            Picker(view["unit_label"].string, selection: Binding(get: { view["unit"].string }, set: { choose(["op": "unit", "unit": $0]) })) {
                 ForEach(view["units"].array.indices, id: \.self) { index in
                     Text(view["units"][index]["label"].string).tag(view["units"][index]["unit"].string)
                 }

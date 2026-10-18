@@ -3,8 +3,8 @@ import Foundation
 /// The OS owns destination-profile conversion. These are observations of the
 /// window's current screen, never document or export preferences.
 struct DisplayDetails: Equatable {
-    var screen = "Waiting for canvas"
-    var destination = "Unavailable"
+    var screen = ""
+    var destination = ""
 }
 
 /// Shared parsing and color transforms, independent of the renderer owner.

@@ -20,9 +20,10 @@ import UniformTypeIdentifiers
     let history: Bool
     let properties: Bool
     let source: Bool
-    @Published private(set) var title: String
+    private let redo: Bool
+    @Published private(set) var catalog = JSON()
+    @Published private(set) var bootstrap = JSON()
     @Published private(set) var propertiesView = JSON()
-    @Published private(set) var propertiesDone: String
     private weak var store: EditorStore?
     private let expected: (UInt64, UInt64)?
     private let completion: (Bool) -> Void
@@ -36,10 +37,24 @@ import UniformTypeIdentifiers
         operation = source ? request["type"].string : request["operation"].string
         history = request["type"].string == "color_history"
         properties = request["type"].string == "properties"
-        propertiesDone = store.bootstrap["common"]["done"].string
-        title = properties ? store.bootstrap["preparing_document"].string : history ? (request["redo"].bool ? "Redo Color Change" : "Undo Color Change")
-            : operation == "repair_source_profile" ? "Repair Source Profile" : operation == "rasterize_source" ? "Rasterize Retained Source"
-            : operation == "assign" ? "Assign Profile" : operation == "depth" ? "Change Bit Depth" : "Convert Color Space"
+        redo = request["redo"].bool
+        refreshCopy()
+    }
+    var text: JSON { catalog["document_color_copy"] }
+    var title: String {
+        if properties { return propertiesView["title"].isNull ? bootstrap["preparing_document"].string : propertiesView["title"].string }
+        if history { return text[redo ? "redo_title" : "undo_title"].string }
+        let titles = ["repair_source_profile": "repair_title", "rasterize_source": "rasterize_title", "assign": "assign_title", "depth": "depth_title"]
+        return text[titles[operation] ?? "convert_title"].string
+    }
+    var propertiesDone: String { propertiesView["done"].isNull ? bootstrap["common"]["done"].string : propertiesView["done"].string }
+    func refreshCopy() {
+        guard let store else { return }
+        catalog = store.catalog; bootstrap = store.bootstrap
+    }
+    func convertedName(_ completion: @escaping @MainActor (String) -> Void) {
+        let name = (store?.state["tabs"][0]["title"].string ?? "") as NSString
+        store?.query(["type": "document_delivery_message", "message": ["type": "converted_name", "name": name.deletingPathExtension]]) { completion($0.string) }
     }
     func load() {
         if properties || source {
@@ -50,7 +65,7 @@ import UniformTypeIdentifiers
                         DispatchQueue.main.async {
                             guard let self else { return }
                             if self.source { self.sourceInfo = details; self.color = details["color"] }
-                            else { self.propertiesView = details; self.rows = details["rows"].array; self.title = details["title"].string; self.propertiesDone = details["done"].string }
+                            else { self.propertiesView = details; self.rows = details["rows"].array }
                             self.loaded = true; self.busy = false; self.task = nil
                             if self.closing { self.finish(false) }
                         }
@@ -62,7 +77,7 @@ import UniformTypeIdentifiers
         } else {
             store?.query(["type": "document_color"]) { [weak self] value in
                 guard let self, !finished else { return }
-                guard !value["space"].string.isEmpty else { failed("The document color is unavailable"); return }
+                guard !value["space"].string.isEmpty else { failed(bootstrap["action_failed"].string); return }
                 color = value; loaded = true
                 if history { prepare(nil) }
             }
@@ -70,13 +85,13 @@ import UniformTypeIdentifiers
     }
     private func capture(_ kind: NativeProjectTask.Kind, work: @escaping (NativeProjectTask) -> Void) {
         guard !busy, !closing, !finished else { return }
-        guard let native = store?.native else { failed("The canvas session is unavailable"); return }
+        guard let native = store?.native else { failed(catalog["native_copy"]["color"]["canvas_unavailable"].string); return }
         busy = true; ready = false; error = nil
         native.projectTask(kind: kind, expected: expected) { [weak self] task, error in
             DispatchQueue.main.async {
                 guard let self else { task?.cancel(); return }
                 if self.closing { task?.cancel(); self.busy = false; self.finish(false); return }
-                guard let task else { self.failed(error ?? "The document is unavailable"); return }
+                guard let task else { self.failed(error ?? self.bootstrap["action_failed"].string); return }
                 self.task = task; work(task)
             }
         }
@@ -130,11 +145,13 @@ import UniformTypeIdentifiers
     func saveCopy(to url: URL, access: URL? = nil) {
         guard !busy, ready, copy, !closing, !finished, let task else { return }
         let source = URL(string: store?.state["document_file"]["location"]["uri"].string ?? "")
-        guard url.pathExtension.lowercased() == "capy" else { error = "Use a .capy filename for the converted drawing."; return }
+        let delivery = catalog["document_delivery_copy"]
+        guard url.pathExtension.lowercased() == "capy" else { error = delivery["converted_filename_invalid"].string; return }
         guard source?.standardizedFileURL.resolvingSymlinksInPath() != url.standardizedFileURL.resolvingSymlinksInPath() else {
-            error = "Choose a different file to keep the editable drawing."; return
+            error = delivery["separate_copy"].string; return
         }
         busy = true; error = nil
+        let exists = text["file_exists"].string
         NativeProjectTask.io.async { [weak self] in
             let scope = access?.startAccessingSecurityScopedResource() == true
             defer { if scope { access?.stopAccessingSecurityScopedResource() } }
@@ -142,7 +159,7 @@ import UniformTypeIdentifiers
                 // A folder choice grants a destination, not permission to
                 // replace an existing file. AppKit's Save panel asks separately.
                 if access != nil && FileManager.default.fileExists(atPath: url.path) {
-                    throw HostFailure(message: "A file with that name already exists. Choose another name.")
+                    throw HostFailure(message: exists)
                 }
                 try task.write(to: url)
                 DispatchQueue.main.async { self?.busy = false; self?.finish(true) }

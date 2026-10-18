@@ -16,6 +16,7 @@ struct WorkspaceDialogs: ViewModifier {
 private struct WorkspaceDialog: View {
     @ObservedObject var store: EditorStore
     private var snapshot: SnapshotProjection { store.snapshot }
+    private var common: JSON { store.bootstrap["common"] }
     var body: some View {
         Group {
             if !snapshot["toolbar_prompt"].isNull { prompt(snapshot["toolbar_prompt"]) }
@@ -61,9 +62,9 @@ private struct WorkspaceDialog: View {
             }.frame(minHeight: 120, idealHeight: 340, maxHeight: 400)
             error(view)
             HStack {
-                Text("\(view["selected_count"].uint) selected").foregroundStyle(.secondary)
+                Text(view["selected_label"].string).foregroundStyle(.secondary)
                 Spacer()
-                Button("Cancel", role: .cancel) { action("cancel_tools") }.keyboardShortcut(.cancelAction)
+                Button(common["cancel"].string, role: .cancel) { action("cancel_tools") }.keyboardShortcut(.cancelAction)
                 Button(view["confirm_label"].string) { action("confirm_tools") }
                     .buttonStyle(.borderedProminent).foregroundStyle(.white)
                     .keyboardShortcut(.defaultAction).disabled(!view["can_confirm"].bool)
@@ -132,7 +133,7 @@ private struct WorkspaceDialog: View {
                 ColorPanel(store: store).frame(maxWidth: 320)
                 PaintColorControls(store: store)
             }
-            HStack { Spacer(); Button("Done", role: .cancel) { action("close_control") }.keyboardShortcut(.cancelAction) }
+            HStack { Spacer(); Button(common["done"].string, role: .cancel) { action("close_control") }.keyboardShortcut(.cancelAction) }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("toolbar-control-popup")
     }
 }

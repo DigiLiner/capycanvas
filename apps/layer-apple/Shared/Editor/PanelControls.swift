@@ -104,8 +104,8 @@ struct PanelControls: View {
         case "properties": LayerPropertiesPanel(store: store)
         case "histogram", "waveform": ScopeControl(store: store, kind: item["control"].string)
         case "stats": RendererStatsPanel(store: store, stats: store.rendererStats)
-        case "brush_size": number("Brush size", key: "diameter", spec: "brush_size", action: "set_brush_size")
-        case "brush_opacity": number("Brush opacity", key: "opacity", spec: "opacity", action: "set_brush_opacity")
+        case "brush_size": number(item["label"].string, key: "diameter", spec: "brush_size", action: "set_brush_size")
+        case "brush_opacity": number(item["label"].string, key: "opacity", spec: "opacity", action: "set_brush_opacity")
         case "size_presets": sizes
         case "brush_color":
             BrushColorButton(store: store, label: item["label"].string)

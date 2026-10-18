@@ -481,6 +481,9 @@ pub struct DocumentColorCopy {
     pub rasterize_comparison: Arc<str>,
     pub source_clipped: Arc<str>,
     pub rasterize_compare: Arc<str>,
+    pub applying: Arc<str>,
+    pub file_exists: Arc<str>,
+    pub choose_filename: Arc<str>,
 }
 impl DocumentColorCopy {
     pub fn new(localizer: &Localizer) -> Self {
@@ -507,6 +510,9 @@ impl DocumentColorCopy {
             rasterize_comparison: localizer.text(MessageId::COLOR_FEATURES_COLOR_RASTERIZE_COMPARISON),
             source_clipped: localizer.text(MessageId::COLOR_FEATURES_COLOR_SOURCE_CLIPPED),
             rasterize_compare: localizer.text(MessageId::COLOR_FEATURES_COLOR_RASTERIZE_COMPARE),
+            applying: localizer.text(MessageId::COLOR_FEATURES_COLOR_APPLYING),
+            file_exists: localizer.text(MessageId::COLOR_FEATURES_COLOR_FILE_EXISTS),
+            choose_filename: localizer.text(MessageId::DOCUMENTS_ERROR_FILENAME),
 
             assign_title: localizer.text(MessageId::COLOR_FEATURES_COLOR_ASSIGN_TITLE),
             convert_title: localizer.text(MessageId::COLOR_FEATURES_COLOR_CONVERT_TITLE),

@@ -580,3 +580,4 @@ resources-paper-unryu = Unryu
 resources-paper-unsupported = Usa un'immagine RGB o in scala di grigi come carta
 resources-paper-washi = Washi
 resources-layer-add-paper = Aggiungi carta
+resources-size-unit = Unità

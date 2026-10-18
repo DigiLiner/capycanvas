@@ -605,3 +605,5 @@ workspace-backup-saved = Резервная копия рабочего прос
 workspace-tool-description-waveform = Проверить цвет и яркость слева направо
 workspace-tool-strength-slider = Ползунок силы
 workspace-tool-strength-slider-description = Настроить силу инструмента на панели
+workspace-owner-lost = Изменения в этом рабочем пространстве сейчас нельзя сохранить.
+workspace-picker-selected = Выбрано: { $count }

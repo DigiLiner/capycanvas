@@ -197,7 +197,8 @@ deterministic. Import is previewed before anything changes:
 Each host provides the file chooser. GTK uses `GtkFileDialog`, Web uses a
 download link and a file input, Android uses the Storage Access Framework,
 Windows uses the Windows App SDK file pickers and reads or writes the file off
-the UI thread, and macOS and iPadOS use the system file exporter and importer.
+the UI thread, and macOS and iPadOS use the system file exporter and importer
+and read the chosen file on the file queue.
 
 The binding editor shows the action's description, its keys and default, and
 any chord that a more or less specific scope resolves differently.

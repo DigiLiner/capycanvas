@@ -771,3 +771,5 @@ color-proof-already-sdr = Gambar ini sudah SDR
 color-proof-hdr-artwork = Pengaturan tampilan SDR memerlukan karya HDR
 color-proof-invalid-rendition = Pengaturan tampilan SDR tidak valid
 color-proof-invalid-value = Nilai Simulasi Cetak tidak valid
+color-features-color-applying = Menerapkan perubahan warna…
+color-features-color-file-exists = File dengan nama itu sudah ada. Pilih nama lain.

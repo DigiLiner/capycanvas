@@ -18,7 +18,7 @@ struct WorkspaceStartupNotice: View {
     var body: some View {
         if !workspaces.presented && (workspaces.visibleError != nil || workspaces.error == nil && (workspaces.readOnly || !workspaces.ready)) {
             EditorNotice(message: workspaces.visibleError
-                ?? (workspaces.view["owner_lost"].bool ? "Workspace ownership needs recovery."
+                ?? (workspaces.view["owner_lost"].bool ? copy["header"]["owner_lost"].string
                     : workspaces.readOnly ? (workspaces.store?.bootstrap["recovery"]["saving_workspace"].string ?? "")
                         : (workspaces.store?.bootstrap["recovery"]["opening_workspace"].string ?? "")),
                 working: workspaces.busy || workspaces.error == nil && !workspaces.ready) {
@@ -45,8 +45,12 @@ struct WorkspaceInteraction: ViewModifier {
 
 struct WorkspaceManagerView: View {
     @Environment(\.capyNativeCopy) private var nativeCopy
+    @Environment(\.capyCommonCopy) private var common
+    @Environment(\.capyInterfaceLanguage) private var language
     @ObservedObject var workspaces: WorkspaceController
     @State private var query = ""
+    @State private var optionCaptions: [String: String] = [:]
+    private var header: JSON { nativeCopy["header"] }
     private var view: JSON { workspaces.view }
     private var toolbarMode: Bool { ["this_workspace", "toolbar_library"].contains(workspaces.page) }
     private var message: String? {
@@ -63,11 +67,11 @@ struct WorkspaceManagerView: View {
                     Button {
                         workspaces.form(["type": "new"])
                     } label: { SharedIcon(name: "plus").frame(width: 24, height: 24) }
-                        .accessibilityLabel("New Workspace")
+                        .accessibilityLabel(header["new_workspace"].string)
                         .accessibilityIdentifier("workspace-action-new")
                         .disabled(workspaces.busy)
                 } else if view["prompt"].isNull && toolbarMode {
-                    Button("Close", role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
+                    Button(common["close"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
                         .disabled(workspaces.busy).accessibilityIdentifier("workspace-manager-close")
                 }
             }
@@ -83,12 +87,19 @@ struct WorkspaceManagerView: View {
             .interactiveDismissDisabled(workspaces.busy)
             .accessibilityElement(children: .contain).accessibilityIdentifier("workspace-library-manager")
             .onChange(of: workspaces.page) { _, _ in query = "" }
+            .onChange(of: [language] + view["rows"].array.map { $0["title"].string }, initial: true) { _, _ in refreshCaptions() }
+    }
+    private func refreshCaptions() {
+        optionCaptions = Dictionary(view["rows"].array.map { row in
+            let title = row["title"].string
+            return (title, NativeTextContext.caption(["type": "options_for", "title": title], language: language))
+        }, uniquingKeysWith: { first, _ in first })
     }
     private var browser: some View {
         VStack(alignment: .leading, spacing: 14) {
             if toolbarMode {
                 HStack {
-                    ForEach([("this_workspace", "This Workspace"), ("toolbar_library", "Saved Toolbars")], id: \.0) { page in
+                    ForEach([("this_workspace", header["this_workspace"].string), ("toolbar_library", header["saved_toolbars"].string)], id: \.0) { page in
                         Button(page.1) { workspaces.open(page.0) }
                             .tint(workspaces.page == page.0 ? .accentColor : .secondary)
                     }
@@ -98,10 +109,10 @@ struct WorkspaceManagerView: View {
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if toolbarMode { HStack {
-                TextField("Search", text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
+                TextField(header["search"].string, text: $query).editorSearchInput().textFieldStyle(.roundedBorder)
                     .onChange(of: query) { _, value in workspaces.search(value) }.accessibilityIdentifier("workspace-manager-search")
                 if workspaces.page == "this_workspace" {
-                    Button("New Toolbar…") { workspaces.form(["type": "new_toolbar", "value": NSNull()]) }
+                    Button(header["new_toolbar_action"].string) { workspaces.form(["type": "new_toolbar", "value": NSNull()]) }
                         .accessibilityIdentifier("workspace-action-new_toolbar")
                 }
             } }
@@ -121,7 +132,7 @@ struct WorkspaceManagerView: View {
             } }
             if !toolbarMode {
                 HStack(spacing: 8) {
-                    Button("Cancel", role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
+                    Button(common["cancel"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
                         .accessibilityIdentifier("workspace-manager-close")
                         .buttonStyle(WorkspaceManagerButtonStyle())
                     Button(view["primary"].string) { workspaces.send(["type": "confirm"]) }
@@ -151,7 +162,7 @@ struct WorkspaceManagerView: View {
                 EditorMenuButton(menu: {
                     AppleContextMenu(JSON(["sections": [secondary.map(\.raw)]])) { workspaces.activate($0) }
                 }) { SharedIcon(name: "more").frame(width: 20) }
-                    .accessibilityLabel("Actions for " + row["title"].string)
+                    .accessibilityLabel(optionCaptions[row["title"].string] ?? "")
             }
         }.fixedSize(horizontal: true, vertical: false)
     }
@@ -174,7 +185,7 @@ struct WorkspaceManagerView: View {
                 }
             }.disabled(workspaces.busy)
             HStack {
-                Button("Cancel", role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
+                Button(common["cancel"].string, role: .cancel) { workspaces.dismiss() }.keyboardShortcut(.cancelAction)
                     .buttonStyle(WorkspaceManagerButtonStyle())
                 Button(view["primary"].string) { workspaces.send(["type": "confirm"]) }
                     .buttonStyle(WorkspaceManagerButtonStyle(primary: true))
@@ -210,6 +221,7 @@ private struct WorkspaceManagerButtonStyle: ButtonStyle {
 
 private struct WorkspaceManagerForm: View {
     @Environment(\.capyCommonCopy) private var common
+    @Environment(\.capyNativeCopy) private var nativeCopy
     @ObservedObject var workspaces: WorkspaceController
     let spec: JSON
     var body: some View {
@@ -220,7 +232,7 @@ private struct WorkspaceManagerForm: View {
                     .accessibilityIdentifier("workspace-form-name")
             }
             if !spec["description"].isNull {
-                TextField("Description (optional)", text: $workspaces.formDescription, axis: .vertical)
+                TextField(nativeCopy["header"]["description"].string, text: $workspaces.formDescription, axis: .vertical)
                     .textFieldStyle(.roundedBorder).lineLimit(3...6).accessibilityIdentifier("workspace-form-description")
             }
             if !spec["choices"].array.isEmpty {
@@ -232,7 +244,7 @@ private struct WorkspaceManagerForm: View {
             Spacer(minLength: 16)
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { workspaces.cancelPrompt() }.keyboardShortcut(.cancelAction)
+                Button(common["cancel"].string, role: .cancel) { workspaces.cancelPrompt() }.keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("workspace-form-cancel")
                 Button(spec["confirm"].string, role: spec["destructive"].bool ? .destructive : nil) { workspaces.submit() }
                     .keyboardShortcut(.defaultAction)

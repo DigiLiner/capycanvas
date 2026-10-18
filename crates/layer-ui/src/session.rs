@@ -49,6 +49,7 @@ pub use document_color_edit::ProofMode;
 #[path = "screen_status.rs"]
 mod screen_status;
 pub use screen_status::{ScreenChip, ScreenDetails, ScreenState};
+pub(crate) use screen_status::screen_headroom_text;
 #[path = "figures.rs"]
 pub(crate) mod figures;
 #[path = "operation.rs"]

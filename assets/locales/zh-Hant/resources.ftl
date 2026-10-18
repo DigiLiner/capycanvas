@@ -696,3 +696,4 @@ resources-paper-unryu = 雲龍紙
 resources-paper-unsupported = 請使用 RGB 或灰階影像作為紙張
 resources-paper-washi = 和紙
 resources-layer-add-paper = 加入紙張
+resources-size-unit = 單位

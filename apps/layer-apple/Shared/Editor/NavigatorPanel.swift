@@ -79,8 +79,8 @@ private struct NavigatorDrawing: View {
                 .onDisappear { if started { send("cancel"); started = false } }
                 .accessibilityElement().accessibilityLabel(store.catalog["native_copy"]["color"]["navigator"].string)
                 .accessibilityAddTraits(.isImage)
-                .accessibilityValue(store.canvasReady ? "Live preview" : "Preparing preview")
-                .accessibilityHint("Drag the work area to move the canvas")
+                .accessibilityValue(store.catalog["native_copy"]["color"][store.canvasReady ? "navigator_live" : "navigator_preparing"].string)
+                .accessibilityHint(store.catalog["native_copy"]["color"]["navigator_hint"].string)
                 .accessibilityIdentifier("navigator-overview")
         }
     }

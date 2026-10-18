@@ -587,3 +587,5 @@ workspace-backup-saved = บันทึกสำรองพื้นที่�
 workspace-tool-description-waveform = ตรวจสอบสีและความสว่างจากซ้ายไปขวา
 workspace-tool-strength-slider = แถบเลื่อนความแรง
 workspace-tool-strength-slider-description = ปรับความแรงของเครื่องมือในแถบเครื่องมือ
+workspace-owner-lost = ขณะนี้บันทึกการเปลี่ยนแปลงของพื้นที่ทำงานนี้ไม่ได้
+workspace-picker-selected = เลือก { $count } รายการ

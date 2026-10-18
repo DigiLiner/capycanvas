@@ -83,7 +83,7 @@ extension XCTestCase {
         }
         attachWorkspaceScreen(app, name: "toolbar-tool-picker")
         workspaceActivate(app.buttons["tool-picker-confirm"])
-        let created = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Toolbar options for Toolbar 1")).firstMatch
+        let created = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Options for Toolbar 1")).firstMatch
         XCTAssertTrue(created.waitForExistence(timeout: 10))
         let identifier = created.identifier
         let panel = String(identifier.dropFirst("toolbar-options-".count))
@@ -99,7 +99,7 @@ extension XCTestCase {
         menu("Duplicate ")
         workspaceText(app.textFields["toolbar-name"], "Copy tools")
         workspaceActivate(app.buttons["toolbar-prompt-confirm"])
-        let copied = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Toolbar options for Copy tools")).firstMatch
+        let copied = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-options-", "Options for Copy tools")).firstMatch
         XCTAssertTrue(copied.waitForExistence(timeout: 10))
         let copyIdentifier = copied.identifier
         let copyPanel = String(copyIdentifier.dropFirst("toolbar-options-".count))

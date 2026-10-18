@@ -404,3 +404,5 @@ color-proof-already-sdr = Этот рисунок уже в SDR
 color-proof-hdr-artwork = Для настройки отображения SDR требуется изображение HDR
 color-proof-invalid-rendition = Недопустимые настройки отображения SDR
 color-proof-invalid-value = Недопустимое значение цветопробы
+color-features-color-applying = Применение изменения цвета…
+color-features-color-file-exists = Файл с таким именем уже существует. Выберите другое имя.

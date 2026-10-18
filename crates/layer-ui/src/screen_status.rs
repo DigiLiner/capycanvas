@@ -152,13 +152,17 @@ impl<R: CanvasRenderer> UiSession<R> {
         {
             return body.clone();
         }
-        let mut args = FluentArgs::new();
-        args.set("times", times(headroom));
-        args.set("ev", format!("{:+.1}", headroom.log2()));
-        let body: std::sync::Arc<str> = l.format(MessageId::COMMON_SCREEN_HDR_HEADROOM, &args).into();
+        let body: std::sync::Arc<str> = screen_headroom_text(l, headroom).into();
         *cached = Some((key.0, key.1, body.clone()));
         body
     }
+}
+
+pub(crate) fn screen_headroom_text(l: &Localizer, headroom: f32) -> String {
+    let mut args = FluentArgs::new();
+    args.set("times", times(headroom));
+    args.set("ev", format!("{:+.1}", headroom.log2()));
+    l.format(MessageId::COMMON_SCREEN_HDR_HEADROOM, &args)
 }
 
 fn times(value: f32) -> String {

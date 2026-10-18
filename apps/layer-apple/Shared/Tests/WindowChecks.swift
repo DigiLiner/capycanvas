@@ -161,7 +161,7 @@ extension XCTestCase {
             // Returning from the sheet revalidates workspace ownership.
             expectation(for: NSPredicate { _, _ in
                 app.buttons["workspace-switch-builtin:workspace:illustrator"].isEnabled
-                    && !app.staticTexts["Workspace ownership needs recovery."].exists
+                    && !app.staticTexts["Changes to this workspace can’t be saved right now."].exists
             }, evaluatedWith: app)
             waitForExpectations(timeout: 15)
         }

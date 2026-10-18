@@ -6,6 +6,7 @@ import AppKit
 
 struct DocumentColorForm: View {
     @ObservedObject var editor: DocumentColorController
+    @Environment(\.capyInterfaceLanguage) private var language
     let spaces: [JSON]
     @State private var space = "Srgb"
     @State private var depth = "U16"
@@ -14,8 +15,28 @@ struct DocumentColorForm: View {
     @State private var copy = false
     @State private var imported = JSON()
     @State private var readingProfile = false
-    @State private var filename = "Converted copy.capy"
+    @State private var filename = ""
     @State private var choosingFolder = false
+    private var text: JSON { editor.text }
+    private var exportCopy: JSON { editor.catalog["export_copy"] }
+    private var delivery: JSON { editor.catalog["document_delivery_copy"] }
+    private var help: String {
+        let keys = ["rasterize_source": "rasterize_help", "repair_source_profile": "repair_help", "assign": "assign_help", "depth": "depth_help"]
+        return text[keys[editor.operation] ?? "convert_help"].string
+    }
+    private var progress: String {
+        if editor.publishing { return text["applying"].string }
+        if !editor.loaded { return editor.bootstrap["preparing_document"].string }
+        if editor.ready { return delivery["writing_converted_copy"].string }
+        if editor.source { return text[editor.operation == "rasterize_source" ? "rasterize_comparison" : "preparing_comparison"].string }
+        return editor.copy ? delivery["preparing_converted_copy"].string : text["preparing"].string
+    }
+    private var applyLabel: String {
+        if editor.copy { return text["save_copy"].string }
+        if editor.operation == "rasterize_source" { return text["rasterize"].string }
+        if editor.sourceInfo["adds_layer"].bool { return text["add_source"].string }
+        return editor.source ? text["apply_profile"].string : text["common"]["apply"].string
+    }
     private var choice: JSON? {
         switch editor.operation {
         case "repair_source_profile": return space == "imported" ? imported["profile"] : JSON(["Builtin": space])
@@ -43,48 +64,40 @@ struct DocumentColorForm: View {
                             }
                         }
                     } else if !editor.history {
-                        Text(editor.operation == "rasterize_source"
-                            ? "Convert the original to the document color space and bit depth at its full size. Paint, position, masks and adjustments stay intact. Undo restores the original profile and precision."
-                            : editor.operation == "repair_source_profile"
-                            ? "Correct how original image numbers are interpreted, retaining their samples and depth. Pixel edits stay intact on the existing layer."
-                            : editor.operation == "assign"
-                            ? "Keep document RGB numbers and reinterpret their color. Retained original photos keep their source profile."
-                            : editor.operation == "depth" ? "Change stored precision. Effects and blending remain the same."
-                            : "Converting editable layers can change blending and effects. Compare the complete composition before applying; original photo samples stay retained.")
+                        Text(help)
                         choices.disabled(editor.busy || !editor.loaded)
-                        Button("Preview Complete Result") { editor.prepare(choice, copy: copy) }
+                        Button(text["preview"].string) { editor.prepare(choice, copy: copy) }
                             .disabled(editor.busy || !editor.loaded || readingProfile).accessibilityIdentifier("document-color-preview")
                     }
-                    if editor.busy { ProgressView(editor.publishing ? "Applying color result…" : "Preparing document…") }
-                    if editor.clipped > 0 { Text("Some colors exceed the destination gamut. Compare the result before applying.") }
+                    if editor.busy { ProgressView(progress) }
+                    if editor.clipped > 0 { Text(text[editor.source ? "source_clipped" : "outside_gamut"].string) }
                     if editor.source {
-                        Text("Current source profile: \(editor.sourceInfo["source_profile"].string)")
-                        if editor.sourceInfo["adds_layer"].bool {
-                            Text("Apply adds a corrected original as a new layer. The existing layer keeps its edits, masks and adjustments.")
-                        }
+                        Text(text["current_source"].string).font(.headline)
+                        Text(editor.sourceInfo["source_profile"].string).textSelection(.enabled)
+                        if editor.sourceInfo["adds_layer"].bool { Text(text["adds_layer"].string) }
                     }
                     ForEach(Array(editor.previews.enumerated()), id: \.offset) { index, image in
-                        Text(index == 0 ? "Before" : "After").font(.headline)
+                        Text(text[index == 0 ? "before" : "after"].string).font(.headline)
                         Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: .fit)
                             .frame(maxWidth: .infinity, maxHeight: 180)
-                            .accessibilityLabel(index == 0 ? "Original composition" : "Prepared composition")
+                            .accessibilityLabel(text[index == 0 ? "original_composition" : "prepared_composition"].string)
                     }
                     if let error = editor.error { Text(error).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
-                Button(editor.properties ? editor.propertiesDone : "Cancel") { editor.cancel() }
+                Button(editor.properties ? editor.propertiesDone : text["common"]["cancel"].string) { editor.cancel() }
                     .keyboardShortcut(.cancelAction).disabled(editor.publishing)
                 Spacer()
                 if !editor.properties && !editor.history {
-                    Button(editor.copy ? "Save Copy…" : editor.operation == "rasterize_source" ? "Rasterize"
-                        : editor.sourceInfo["adds_layer"].bool ? "Add Corrected Source" : editor.source ? "Apply Profile" : "Apply") {
+                    Button(applyLabel) {
                         if editor.copy { saveCopy() } else { editor.apply() }
                     }.keyboardShortcut(.defaultAction).disabled(!editor.ready || editor.busy || readingProfile)
                         .accessibilityIdentifier("document-color-apply")
                 }
             }
         }.padding(24).frame(minWidth: 340, idealWidth: 520, maxWidth: 620, minHeight: 260, idealHeight: 640, maxHeight: 720)
+            .onChange(of: language, initial: true) { _, _ in editor.refreshCopy() }
             .onChange(of: editor.color.stableKey, initial: true) { _, _ in
                 if editor.loaded {
                     space = editor.source ? editor.sourceInfo["profile_builtin"].string : editor.color["space"].string
@@ -95,7 +108,10 @@ struct DocumentColorForm: View {
             // Imported ICC payloads are large. Their explicit import callback
             // invalidates previews without serializing those bytes during layout.
             .onChange(of: editor.source ? space : (choice ?? JSON()).stableKey) { _, _ in editor.invalidate() }
-            .onChange(of: copy) { _, _ in editor.invalidate() }
+            .onChange(of: copy) { _, next in
+                editor.invalidate()
+                if next && filename.isEmpty { editor.convertedName { if filename.isEmpty { filename = $0 } } }
+            }
             #if os(iOS)
             .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
                 switch result {
@@ -113,25 +129,32 @@ struct DocumentColorForm: View {
         if editor.operation == "repair_source_profile" {
             SourceProfilePicker(preferences: editor.preferences, spaces: spaces, selection: $space, imported: $imported, busy: $readingProfile, onImport: editor.invalidate)
         } else if editor.operation != "depth" && editor.operation != "rasterize_source" {
-            FormPicker("Color space", selection: $space) {
+            FormPicker(text["space"].string, selection: $space) {
                 ForEach(spaces, id: \.stableKey) { Text($0[1].string).tag($0[0].string) }
             }.accessibilityIdentifier("document-color-space")
         }
         if editor.operation == "depth" {
-            FormPicker("Bit depth", selection: $depth) { Text("8-bit SDR").tag("U8"); Text("16-bit SDR").tag("U16"); Text("16-bit float HDR").tag("F16"); Text("32-bit float HDR").tag("F32") }
+            FormPicker(text["depth"].string, selection: $depth) {
+                Text(text["depth_8"].string).tag("U8"); Text(text["depth_16"].string).tag("U16")
+                Text(text["depth_float16"].string).tag("F16"); Text(text["depth_float32"].string).tag("F32")
+            }
                 .accessibilityIdentifier("document-color-depth")
             if depth == "U8" {
-                FormPicker("Dither", selection: $dither) { Text("None").tag("None"); Text("Stochastic").tag("Stochastic8") }
+                FormPicker(text["dither"].string, selection: $dither) {
+                    Text(exportCopy["dither_none"].string).tag("None"); Text(text["dither_stochastic"].string).tag("Stochastic8")
+                }
             }
         }
         if editor.operation == "convert" {
-            FormPicker("Result", selection: $copy) { Text("Editable layers").tag(false); Text("Save flattened copy").tag(true) }
-            FormPicker("Rendering intent", selection: $intent) {
-                Text("Relative colorimetric").tag("RelativeColorimetric"); Text("Perceptual").tag("Perceptual")
-                Text("Saturation").tag("Saturation"); Text("Absolute colorimetric").tag("AbsoluteColorimetric")
+            FormPicker(text["result"].string, selection: $copy) {
+                Text(text["editable_layers"].string).tag(false); Text(text["flattened_copy"].string).tag(true)
+            }
+            FormPicker(exportCopy["intent"].string, selection: $intent) {
+                Text(exportCopy["relative"].string).tag("RelativeColorimetric"); Text(exportCopy["perceptual"].string).tag("Perceptual")
+                Text(exportCopy["saturation"].string).tag("Saturation"); Text(exportCopy["absolute"].string).tag("AbsoluteColorimetric")
             }
             #if os(iOS)
-            if copy { TextField("Copy filename", text: $filename).textFieldStyle(.roundedBorder) }
+            if copy { TextField(text["common"]["name"].string, text: $filename).textFieldStyle(.roundedBorder) }
             #endif
         }
     }
@@ -143,7 +166,7 @@ struct DocumentColorForm: View {
         #else
         filename = filename.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !filename.isEmpty, !filename.contains("/"), filename != ".", filename != ".." else {
-            editor.error = "Choose a filename without folders."; return
+            editor.error = text["choose_filename"].string; return
         }
         if !filename.lowercased().hasSuffix(".capy") { filename += ".capy" }
         choosingFolder = true

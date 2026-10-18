@@ -24,6 +24,7 @@ copy_struct! { SearchCopy {
     commands: COMMANDS_COMMANDS,
     title: NATIVE_SEARCH_TITLE,
     selected: NATIVE_SEARCH_SELECTED,
+    unavailable: NATIVE_SEARCH_UNAVAILABLE,
 } }
 
 copy_struct! { LayerCopy {
@@ -111,6 +112,9 @@ copy_struct! { PaletteCopy {
 copy_struct! { HeaderCopy {
     save_as_new_workspace: WORKSPACE_ACTION_SAVE_AS_NEW_WORKSPACE,
     owned_elsewhere: WORKSPACE_REFUSAL_THIS_WORKSPACE_IS_OPEN_IN_ANOTHER_WINDOW,
+    owner_lost: WORKSPACE_OWNER_LOST,
+    description: COMMON_DESCRIPTION,
+    new_toolbar_action: WORKSPACE_ACTION_NEW_TOOLBAR,
     on: SETTINGS_ON,
     off: SETTINGS_OFF,
     zoom: MENU_ZOOM,
@@ -235,6 +239,17 @@ copy_struct! { ColorCopy {
     navigator: WORKSPACE_PANEL_NAVIGATOR,
     navigator_panel: COMMANDS_SHOW_NAVIGATOR,
     navigator_overview: NATIVE_COLOR_NAVIGATOR_OVERVIEW,
+    navigator_live: NATIVE_COLOR_NAVIGATOR_LIVE,
+    navigator_preparing: NATIVE_COLOR_NAVIGATOR_PREPARING,
+    navigator_hint: NATIVE_COLOR_NAVIGATOR_HINT,
+    preview_ready: NATIVE_COLOR_PREVIEW_READY,
+    preview_pending: NATIVE_COLOR_PREVIEW_PENDING,
+    display_previews: NATIVE_COLOR_DISPLAY_PREVIEWS,
+    display_previews_hdr: NATIVE_COLOR_DISPLAY_PREVIEWS_HDR,
+    display_previews_sdr: NATIVE_COLOR_DISPLAY_PREVIEWS_SDR,
+    display_conversion: NATIVE_COLOR_DISPLAY_CONVERSION,
+    display_help: NATIVE_COLOR_DISPLAY_HELP,
+    screen: COMMON_SCREEN_TITLE,
     record_tablet: NATIVE_COLOR_RECORD_TABLET,
     histogram: NATIVE_COLOR_HISTOGRAM,
     auto_update: NATIVE_COLOR_AUTO_UPDATE,
@@ -302,6 +317,7 @@ copy_struct! { ShortcutCopy {
     search_help: SHORTCUT_SEARCH_EMPTY_HELP,
     pen_action_help: SHORTCUT_PEN_ACTION_HELP,
     updated: NATIVE_SHORTCUTS_UPDATED,
+    keymap_invalid: SETTINGS_KEYMAP_INVALID,
 } }
 
 copy_struct! { ToolControlCopy {
@@ -396,6 +412,7 @@ pub enum NativeCaption {
     InspectionClipped { count: u64 },
     ShortcutDefaults { keys: Vec<String> },
     ModifierHold { label: String },
+    ScreenHeadroom { headroom: f32 },
     SwitchWorkspace { title: String },
     Reorder { title: String },
     ColorShape { shape: crate::ColorShape },
@@ -428,6 +445,7 @@ impl NativeCaption {
             Self::InspectionClipped { count } => { args.set("count", *count); MessageId::NATIVE_INSPECTION_CLIPPED },
             Self::ShortcutDefaults { keys } => return crate::shortcut_default_caption(l, keys),
             Self::ModifierHold { label } => return crate::modifier_hold_help(l, label),
+            Self::ScreenHeadroom { headroom } => return crate::session::screen_headroom_text(l, *headroom),
             Self::SwitchWorkspace { title } => { args.set("title", title.as_str()); MessageId::NATIVE_SWITCH_WORKSPACE },
             Self::Reorder { title } => { args.set("title", title.as_str()); MessageId::NATIVE_REORDER },
             Self::ColorShape { shape } => return l.text(match shape {
@@ -494,6 +512,7 @@ copy_struct! { RecoveryCopy {
     window_failed: NATIVE_DIALOG_WINDOW_FAILED,
     fullscreen_failed: NATIVE_DIALOG_FULLSCREEN_FAILED,
     link_unavailable: NATIVE_DIALOG_LINK_UNAVAILABLE,
+    link_open_failed: NATIVE_DIALOG_LINK_OPEN_FAILED,
     drop_drawings: NATIVE_DIALOG_DROP_DRAWINGS,
     workspace_not_saved: NATIVE_DIALOG_WORKSPACE_NOT_SAVED,
     workspace_not_opened: NATIVE_DIALOG_WORKSPACE_NOT_OPENED,

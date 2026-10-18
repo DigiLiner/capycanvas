@@ -404,3 +404,5 @@ color-proof-already-sdr = Bu çizim zaten SDR
 color-proof-hdr-artwork = SDR görünüm ayarları HDR resim gerektirir
 color-proof-invalid-rendition = Geçersiz SDR görünüm ayarları
 color-proof-invalid-value = Geçersiz Renk provası değeri
+color-features-color-applying = Renk değişikliği uygulanıyor…
+color-features-color-file-exists = Bu adla bir dosya zaten var. Başka bir ad seçin.

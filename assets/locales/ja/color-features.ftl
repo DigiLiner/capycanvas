@@ -401,3 +401,5 @@ color-proof-already-sdr = この描画はすでにSDRです。
 color-proof-hdr-artwork = SDR表示の設定にはHDRの作品が必要です。
 color-proof-invalid-rendition = SDR表示の設定が無効です。
 color-proof-invalid-value = プルーフの値が無効です。
+color-features-color-applying = 色の変更を適用中…
+color-features-color-file-exists = 同じ名前のファイルがすでにあります。別の名前を選んでください。

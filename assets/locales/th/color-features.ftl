@@ -392,3 +392,5 @@ color-proof-already-sdr = ภาพวาดนี้เป็น SDR อยู�
 color-proof-hdr-artwork = การตั้งค่าการแสดงผล SDR ต้องใช้ภาพวาด HDR
 color-proof-invalid-rendition = การตั้งค่าการแสดงผล SDR ไม่ถูกต้อง
 color-proof-invalid-value = ค่าปรู๊ฟสีไม่ถูกต้อง
+color-features-color-applying = กำลังใช้การเปลี่ยนสี…
+color-features-color-file-exists = มีไฟล์ชื่อนี้อยู่แล้ว เลือกชื่ออื่น

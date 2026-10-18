@@ -1472,6 +1472,7 @@ pub struct ToolPickerView {
     pub query: String,
     pub choices: Vec<ToolChoice>,
     pub selected_count: usize,
+    pub selected_label: String,
     pub can_confirm: bool,
     pub error: Option<String>,
 }
@@ -1703,6 +1704,7 @@ impl ToolPicker {
             query: self.query.clone(),
             choices,
             selected_count: self.selected.len(),
+            selected_label: { let mut args = crate::FluentArgs::new(); args.set("count", self.selected.len()); localization.format(MessageId::WORKSPACE_PICKER_SELECTED, &args) },
             can_confirm: self.validate(layout, localization).is_ok(),
             error: self.error.as_ref().map(|error| error.source.message(localization)).or_else(|| match &self.destination {
                 ToolDestination::NewToolbar { name, .. } => {
@@ -2539,6 +2541,8 @@ mod tests {
             let view = picker.view_localized(&layout, Platform::Gtk, &localization);
             assert!(view.choices.iter().any(|choice| choice.control == ToolbarControl::BrushSizeSlider));
             assert_eq!(view.selected_count, 1);
+            assert!(view.selected_label.contains('1'));
+            assert!(language == UiLanguage::English || view.selected_label != picker.view_localized(&layout, Platform::Gtk, &Localizer::shared(UiLanguage::English)).selected_label, "{language:?}");
             assert!(std::sync::Arc::ptr_eq(&view.search_hint, &localization.text(MessageId::WORKSPACE_PICKER_SEARCH_HINT)));
         }
     }

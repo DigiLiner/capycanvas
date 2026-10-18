@@ -42,15 +42,15 @@ struct ShortcutSettingsView: View {
                 }
         }
         .fileExporter(isPresented: Binding(get: { exporting != nil }, set: { if !$0 { exporting = nil } }),
-            document: exporting, contentType: .capyKeymap, defaultFilename: exportName) { _ in exporting = nil }
+            document: exporting, contentType: .capyKeymap, defaultFilename: exportName) { result in
+            exporting = nil
+            if case .failure(let error) = result { Self.report(error, to: store) }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.capyKeymap, .json]) { result in
-            guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url), data.count <= 1 << 20, let text = String(data: data, encoding: .utf8) else {
-                store.failure = "The keymap file could not be read"; return
+            switch result {
+            case .success(let url): Self.importKeymap(url, to: store)
+            case .failure(let error): Self.report(error, to: store)
             }
-            action(["type": "import_keymap", "text": text])
         }
         .onChange(of: keymapRequests.map { $0["id"].uint }, initial: true) { _, _ in
             for request in keymapRequests where !handledRequests.contains(request["id"].uint) {
@@ -68,6 +68,31 @@ struct ShortcutSettingsView: View {
     }
     private func closeEditor() {
         action(["type": model["capture"].isNull ? "close_shortcut_editor" : "cancel_shortcut"])
+    }
+    private static func report(_ error: Error, to store: EditorStore) {
+        let native = error as NSError
+        guard native.domain != NSCocoaErrorDomain || native.code != NSUserCancelledError else { return }
+        store.failure = store.bootstrap["action_failed"].string + "\n" + error.localizedDescription
+    }
+    private static func importKeymap(_ url: URL, to store: EditorStore) {
+        let tooLarge = store.catalog["document_delivery_copy"]["keymap_too_large"].string
+        let invalid = store.catalog["native_copy"]["shortcuts"]["keymap_invalid"].string
+        NativeProjectTask.io.async {
+            let read = Result { try ProjectFileIO.coordinate(url, writing: false) { source in
+                let file = try FileHandle(forReadingFrom: source)
+                defer { try? file.close() }
+                return try file.read(upToCount: KeymapDocument.readLimit + 1) ?? Data()
+            } }
+            DispatchQueue.main.async {
+                switch read {
+                case .failure(let error): report(error, to: store)
+                case .success(let data) where data.count > KeymapDocument.readLimit: store.failure = tooLarge
+                case .success(let data):
+                    guard let text = String(data: data, encoding: .utf8) else { store.failure = invalid; return }
+                    store.dispatch(["type": "preferences", "action": ["type": "import_keymap", "text": text]])
+                }
+            }
+        }
     }
 }
 
@@ -239,6 +264,7 @@ private struct ShortcutRow: View {
 
 private struct ModifierKeyPane: View {
     @ObservedObject var store: EditorStore
+    @State private var holdCaption = ""
     private var editor: JSON { store.snapshot["preferences"]["modifier_editor"] }
     private func action(_ value: [String: Any]) { store.dispatch(["type": "preferences", "action": value]) }
     var body: some View {
@@ -262,7 +288,7 @@ private struct ModifierKeyPane: View {
                     }
                 }
             } footer: {
-                Text("Hold \(editor["label"].string) to use an action until you let go.")
+                Text(holdCaption).accessibilityIdentifier("modifier-hold-summary")
             }
             Section {
                 Button(role: .destructive) { action(["type": "remove_modifier_key", "key": editor["key"].raw]) } label: {
@@ -270,6 +296,9 @@ private struct ModifierKeyPane: View {
                 }.accessibilityIdentifier("modifier-remove")
             }
         }.formStyle(.grouped)
+            .onChange(of: [store.interfaceLanguage, editor["label"].string], initial: true) { _, _ in
+                holdCaption = NativeTextContext.caption(["type": "modifier_hold", "label": editor["label"].string], language: store.interfaceLanguage)
+            }
     }
 }
 
@@ -427,6 +456,7 @@ private struct RecordingRow: View {
 
 private struct ShortcutEditorSheet: View {
     @ObservedObject var store: EditorStore
+    @State private var defaultsCaption = ""
     private var model: JSON { store.snapshot["preferences"] }
     private var editor: JSON { model["shortcut_editor"] }
     private var capture: JSON { model["capture"]["id"].string == editor["id"].string ? model["capture"] : JSON() }
@@ -469,8 +499,7 @@ private struct ShortcutEditorSheet: View {
                         }
                     }
                 } footer: {
-                    Text((["Default: " + (editor["defaults"].array.isEmpty ? "none" : editor["defaults"].array.map(\.string).joined(separator: " / "))]
-                        + editor["overlaps"].array.map(\.string)).joined(separator: "\n"))
+                    Text(([defaultsCaption] + editor["overlaps"].array.map(\.string)).joined(separator: "\n"))
                 }
                 if !editor["gestures"].array.isEmpty {
                     Section {
@@ -486,6 +515,10 @@ private struct ShortcutEditorSheet: View {
                     }
                 }
         }.frame(minWidth: 360, idealWidth: 460, minHeight: 320)
+            .onChange(of: [store.interfaceLanguage] + editor["defaults"].array.map(\.string), initial: true) { _, _ in
+                defaultsCaption = NativeTextContext.caption(["type": "shortcut_defaults", "keys": editor["defaults"].array.map(\.string)],
+                    language: store.interfaceLanguage)
+            }
     }
 }
 
@@ -620,18 +653,18 @@ private struct KeymapImportSheet: View {
             Form {
                 if sections.isEmpty { Text(store.catalog["native_copy"]["shortcuts"]["no_changes"].string) }
                 ForEach(sections, id: \.0) { title, items in
-                    Section("\(title) (\(items.count))") {
+                    Section(title) {
                         ForEach(items.indices, id: \.self) { index in Text(items[index].string) }
                     }
                 }
             }.formStyle(.grouped)
-                .navigationTitle("Import \(preview["title"].string)?")
+                .navigationTitle(preview["heading"].string)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button(store.bootstrap["common"]["cancel"].string) { action(["type": "cancel_keymap_import"]) }.accessibilityIdentifier("cancel-keymap-import")
+                        Button(preview["cancel_label"].string) { action(["type": "cancel_keymap_import"]) }.accessibilityIdentifier("cancel-keymap-import")
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(store.bootstrap["common"]["import"].string) { action(["type": "confirm_keymap_import"]) }.accessibilityIdentifier("confirm-keymap-import")
+                        Button(preview["import_label"].string) { action(["type": "confirm_keymap_import"]) }.accessibilityIdentifier("confirm-keymap-import")
                     }
                 }
         }.frame(minWidth: 380, idealWidth: 460, minHeight: 320)
@@ -639,6 +672,7 @@ private struct KeymapImportSheet: View {
 }
 
 struct KeymapDocument: FileDocument {
+    static let readLimit = 1 << 20
     static var readableContentTypes: [UTType] { [.capyKeymap, .json] }
     let text: String
     init(text: String) { self.text = text }

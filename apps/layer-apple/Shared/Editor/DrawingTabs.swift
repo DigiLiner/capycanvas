@@ -17,12 +17,17 @@ import UniformTypeIdentifiers
     init(store: EditorStore) { self.store = store }
     var rows: [JSON] { view["tabs"].array }
     var selected: UInt64 { view["selected"].uint }
-    var selectedDescription: String {
-        guard let tab = store?.state["tabs"][0] else { return "" }
-        return "\(tab["title"].string) · \(tab["width"].uint) × \(tab["height"].uint)"
-    }
+    @Published private(set) var selectedDescription = ""
+    private var descriptionKey: [String] = []
     func receive() {
         guard let store else { return }
+        let tab = store.state["tabs"][0]
+        let key = [store.interfaceLanguage, tab["title"].string, String(tab["width"].uint), String(tab["height"].uint)]
+        if key != descriptionKey {
+            descriptionKey = key
+            selectedDescription = tab.isNull ? "" : NativeTextContext.caption(["type": "drawing_title", "title": tab["title"].string,
+                "width": tab["width"].uint, "height": tab["height"].uint], language: store.interfaceLanguage)
+        }
         let next = store.snapshot["document_tabs"]
         if captionLanguage != store.interfaceLanguage || !SnapshotProjection.equal(view.raw, next.raw) {
             if captionLanguage != store.interfaceLanguage { closeTitles = [:]; captionLanguage = store.interfaceLanguage }
@@ -50,7 +55,7 @@ import UniformTypeIdentifiers
         busy = true
         store.recovery.flush { [weak self] saved in
             guard let self else { completion(false); return }
-            guard saved else { busy = false; store.projectFiles.error = store.recovery.failure ?? "Could not preserve the current drawing for recovery"; completion(false); return }
+            guard saved else { busy = false; store.projectFiles.error = store.recovery.failure ?? store.bootstrap["action_failed"].string; completion(false); return }
             store.native?.switchDocument(id) { [weak self] error in DispatchQueue.main.async {
                 guard let self else { completion(false); return }
                 self.busy = false; if let error { store.projectFiles.error = error }
@@ -240,7 +245,7 @@ struct DrawingTabsHeader: View {
                 Button { tabs.presented = true } label: {
                     HStack(spacing: 5) {
                         if tabs.rows.count > 1 {
-                            Text(tabs.rows.first { $0["id"].uint == tabs.selected }?["title"].string ?? "Untitled").lineLimit(1)
+                            Text(tabs.rows.first { $0["id"].uint == tabs.selected }?["title"].string ?? store.catalog["document_delivery_copy"]["untitled"].string).lineLimit(1)
                             Image(systemName: "chevron.down").font(.caption)
                         } else { Text(tabs.selectedDescription).lineLimit(1) }
                     }.fontWeight(.semibold).padding(.horizontal, 8).frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
@@ -380,7 +385,7 @@ struct DrawingTabsPresentation: ViewModifier {
     @ObservedObject var tabs: DrawingTabsController
     func body(content: Content) -> some View {
         content.allowsHitTesting(!tabs.busy).overlay {
-            if tabs.busy { ProgressView("Switching drawing…").padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
+            if tabs.busy { ProgressView(store.catalog["document_delivery_copy"]["switching_drawing"].string).padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) }
         }.sheet(isPresented: $tabs.presented) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(store.catalog["native_copy"]["header"]["drawings"].string).font(.headline)

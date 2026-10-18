@@ -97,7 +97,7 @@ private struct AdjustmentRow: View {
             .help(choice["tooltip"].string)
             .accessibilityAddTraits(store.state["filter_picker"]["selected"].string == choice["id"].string ? .isSelected : [])
             .accessibilityIdentifier("adjustment-" + choice["id"].string)
-            .accessibilityValue(previews.images[choice["id"].string] == nil ? "Preview pending" : "Preview ready")
+            .accessibilityValue(store.catalog["native_copy"]["color"][previews.images[choice["id"].string] == nil ? "preview_pending" : "preview_ready"].string)
     }
 }
 
@@ -120,7 +120,7 @@ struct FilterTypesPanel: View {
                     }
                 }.modifier(PanelBodyMeasurement(panel: "filter_types", part: "choices", kind: .scroll))
             }
-            Button("Cancel") { store.dispatch(["type": "effect", "action": ["op": "cancel_filter"]]) }
+            Button(store.bootstrap["common"]["cancel"].string) { store.dispatch(["type": "effect", "action": ["op": "cancel_filter"]]) }
                 .accessibilityIdentifier("cancel-filter")
                 .modifier(PanelBodyMeasurement(panel: "filter_types", part: "footer"))
         }.padding(8).modifier(PanelBodyMeasurement(panel: "filter_types", part: "insets", intrinsicHeight: 22))

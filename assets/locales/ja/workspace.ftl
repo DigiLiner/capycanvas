@@ -625,3 +625,5 @@ workspace-backup-saved = ワークスペースのバックアップを保存し�
 workspace-tool-description-waveform = 画像の左右に沿って色と明るさを確認
 workspace-tool-strength-slider = 強度スライダー
 workspace-tool-strength-slider-description = ツールバーでツールの強度を調整
+workspace-owner-lost = このワークスペースの変更は現在保存できません。
+workspace-picker-selected = { $count } 件選択中

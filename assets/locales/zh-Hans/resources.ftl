@@ -696,3 +696,4 @@ resources-paper-unryu = 云龙纸
 resources-paper-unsupported = 请使用 RGB 或灰度图像作为纸张
 resources-paper-washi = 和纸
 resources-layer-add-paper = 添加纸张
+resources-size-unit = 单位

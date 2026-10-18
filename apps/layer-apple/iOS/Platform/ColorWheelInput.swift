@@ -11,6 +11,7 @@ struct ColorWheelInput: UIViewRepresentable {
         if view.colorContext != self.context { view.contact.cancel() }
         view.shape = shape; view.colorContext = self.context; view.pick = pick
         view.accessibilityValue = value
+        view.accessibilityLabel = context.environment.capyNativeCopy["color"]["wheel"].string
     }
     final class ContactView: UIView {
         var shape: UInt32 = 0
@@ -21,7 +22,7 @@ struct ColorWheelInput: UIViewRepresentable {
         override init(frame: CGRect) {
             super.init(frame: frame)
             isOpaque = false; backgroundColor = .clear
-            isAccessibilityElement = true; accessibilityLabel = "Color wheel"; accessibilityIdentifier = "color-wheel"
+            isAccessibilityElement = true; accessibilityIdentifier = "color-wheel"
             addGestureRecognizer(contact)
         }
         required init?(coder: NSCoder) { fatalError("Use init(frame:)") }

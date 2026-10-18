@@ -401,3 +401,5 @@ color-proof-already-sdr = 이 그림은 이미 SDR입니다.
 color-proof-hdr-artwork = SDR 표현 설정에는 HDR 작품이 필요합니다.
 color-proof-invalid-rendition = SDR 표현 설정이 유효하지 않습니다.
 color-proof-invalid-value = 화면 교정 값이 유효하지 않습니다.
+color-features-color-applying = 색 변경 적용 중…
+color-features-color-file-exists = 같은 이름의 파일이 이미 있습니다. 다른 이름을 선택하세요.

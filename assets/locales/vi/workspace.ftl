@@ -596,3 +596,5 @@ workspace-backup-saved = Đã lưu bản sao lưu không gian làm việc.
 workspace-tool-description-waveform = Kiểm tra màu và độ sáng từ trái sang phải
 workspace-tool-strength-slider = Thanh trượt cường độ
 workspace-tool-strength-slider-description = Điều chỉnh cường độ công cụ trên thanh công cụ
+workspace-owner-lost = Hiện không thể lưu thay đổi của không gian làm việc này.
+workspace-picker-selected = Đã chọn { $count }

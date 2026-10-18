@@ -599,3 +599,5 @@ workspace-backup-saved = Çalışma alanı yedeği kaydedildi.
 workspace-tool-description-waveform = Rengi ve parlaklığı soldan sağa incele
 workspace-tool-strength-slider = Güç kaydırıcısı
 workspace-tool-strength-slider-description = Araç gücünü doğrudan araç çubuğundan ayarla
+workspace-owner-lost = Bu çalışma alanındaki değişiklikler şu anda kaydedilemiyor.
+workspace-picker-selected = { $count } seçili

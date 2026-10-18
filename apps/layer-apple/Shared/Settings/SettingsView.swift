@@ -7,7 +7,9 @@ struct SettingsView: View {
     @State private var numberResets: [String: UInt64] = [:]
     @State private var linkFailed = false
     @State private var profiles = false
+    @State private var headroomCaption = ""
     private var model: JSON { store.snapshot["preferences"] }
+    private var color: JSON { store.catalog["native_copy"]["color"] }
     private var page: JSON { model["pages"].array.first { $0["id"].string == model["page"].string } ?? JSON() }
     var body: some View {
         NavigationSplitView {
@@ -89,20 +91,22 @@ struct SettingsView: View {
                         GestureTriggerSections(store: store)
                     }
                     if model["page"].string == "color" {
-                        Section("Display Details") {
-                            LabeledContent("Canvas and color previews", value: store.snapshot["color_panel"]["hdr"].bool ? "Extended linear sRGB · HDR" : "Display P3 · SDR")
-                            if store.snapshot["color_panel"]["hdr"].bool {
-                                LabeledContent("Current display headroom", value: String(format: "%.1f× SDR white", store.displayHeadroom))
-                            }
-                            LabeledContent("Screen", value: store.displayDetails.screen)
-                            LabeledContent("Display conversion", value: store.displayDetails.destination)
-                            Text("The system converts tagged colors for this display, including sRGB screens. Document and export colors are independent of the screen.").font(.caption).foregroundStyle(.secondary)
+                        Section(color["screen_details"].string) {
+                            LabeledContent(color["display_previews"].string,
+                                value: color[store.snapshot["color_panel"]["hdr"].bool ? "display_previews_hdr" : "display_previews_sdr"].string)
+                            if store.snapshot["color_panel"]["hdr"].bool { Text(headroomCaption) }
+                            LabeledContent(color["screen"].string, value: store.displayDetails.screen.isEmpty ? store.bootstrap["starting_canvas"].string : store.displayDetails.screen)
+                            LabeledContent(color["display_conversion"].string,
+                                value: store.displayDetails.destination.isEmpty ? store.catalog["native_copy"]["search"]["unavailable"].string : store.displayDetails.destination)
+                            Text(color["display_help"].string).font(.caption).foregroundStyle(.secondary)
+                        }.onChange(of: [store.interfaceLanguage, String(store.displayHeadroom)], initial: true) { _, _ in
+                            headroomCaption = NativeTextContext.caption(["type": "screen_headroom", "headroom": store.displayHeadroom], language: store.interfaceLanguage)
                         }
-                        Button("Manage Color Profiles…") { profiles = true }
+                        Button(color["manage_profiles"].string) { profiles = true }
                             .accessibilityIdentifier("settings-color-profiles")
                     }
                     if !model["error"].isNull { Text(model["error"].string).foregroundStyle(.red) }
-                    if linkFailed { Text("Could not open the link").foregroundStyle(.red) }
+                    if linkFailed { Text(store.bootstrap["recovery"]["link_open_failed"].string).foregroundStyle(.red) }
                 }.formStyle(.grouped)
                     .onChange(of: model["reveal"].string, initial: true) { _, id in
                         if !id.isEmpty { scroll.scrollTo(id) }

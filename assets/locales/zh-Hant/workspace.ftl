@@ -625,3 +625,5 @@ workspace-backup-saved = 已儲存工作區備份。
 workspace-tool-description-waveform = 從左到右檢視色彩和亮度
 workspace-tool-strength-slider = 強度滑桿
 workspace-tool-strength-slider-description = 直接在工具列調整工具強度
+workspace-owner-lost = 目前無法儲存此工作區的變更。
+workspace-picker-selected = 已選取 { $count } 項

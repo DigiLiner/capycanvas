@@ -580,3 +580,4 @@ resources-paper-unryu = Унрю
 resources-paper-unsupported = Используйте изображение RGB или в оттенках серого
 resources-paper-washi = Васи
 resources-layer-add-paper = Добавить бумагу
+resources-size-unit = Единицы

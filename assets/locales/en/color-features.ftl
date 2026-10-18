@@ -404,3 +404,5 @@ color-proof-already-sdr = This drawing is already SDR
 color-proof-hdr-artwork = SDR rendition settings require HDR artwork
 color-proof-invalid-rendition = Invalid SDR rendition settings
 color-proof-invalid-value = Invalid Proof value
+color-features-color-applying = Applying color change…
+color-features-color-file-exists = A file with that name already exists. Choose another name.

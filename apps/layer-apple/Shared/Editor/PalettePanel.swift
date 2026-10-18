@@ -263,7 +263,7 @@ private struct PaletteFooter: View {
                 }
                 Text(view["color_detail"].string).font(.system(size: 12)).foregroundStyle(palette["text"].opacity(0.6))
                     .multilineTextAlignment(.trailing).fixedSize(horizontal: false, vertical: true).padding(.trailing, 6)
-                    .help("sRGB hex preview; saved colors retain their original color space, alpha and HDR intensity")
+                    .help(controller.copy["hex_help"].string)
                     .accessibilityIdentifier("palette-color-detail")
             }.frame(maxWidth: .infinity, alignment: .trailing)
         }.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
