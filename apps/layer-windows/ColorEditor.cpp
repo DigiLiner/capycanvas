@@ -359,9 +359,9 @@ struct Editor:std::enable_shared_from_this<Editor>{
         recentFrame.SizeChanged([](auto&& sender,SizeChangedEventArgs const& e){
             RectangleGeometry clip;clip.Rect({0,0,e.NewSize().Width,e.NewSize().Height});sender.template as<Grid>().Clip(clip);
         });
-        framePair(miniPair,38);miniPair.VerticalAlignment(VerticalAlignment::Center);
+        framePair(miniPair,38);miniPair.VerticalAlignment(VerticalAlignment::Center);AutomationProperties::SetAutomationId(miniPair,L"edit-color-mini-pair");
         AutomationProperties::SetAutomationId(miniCurrent,L"edit-color-mini-current");AutomationProperties::SetAutomationId(miniNew,L"edit-color-mini-new");
-        miniCurrent.Height(32);miniNew.Height(32);Grid::SetColumn(miniNew,1);
+        Grid::SetColumn(miniNew,1);
         miniPair.Children().Append(miniCurrent);miniPair.Children().Append(miniNew);
         miniHex.Foreground(data->brush(L"text"));miniHex.VerticalAlignment(VerticalAlignment::Center);miniHex.FontWeight(winrt::Windows::UI::Text::FontWeights::Medium());
         mini.Orientation(Orientation::Horizontal);mini.Spacing(8);mini.VerticalAlignment(VerticalAlignment::Center);
@@ -372,6 +372,8 @@ struct Editor:std::enable_shared_from_this<Editor>{
         RotateTransform turn;turn.Angle(180);moreGlyph.RenderTransform(turn);more.Content(moreGlyph);
         AutomationProperties::SetAutomationId(more,L"edit-color-swatches");Grid::SetColumn(more,1);footer.Children().Append(more);
         cancel=pickerButton(data,L"edit-color-cancel",2,false,[weak]{if(auto self=weak.lock())self->close(false);});footer.Children().Append(cancel);
+        miniPair.Height(cancel.MinHeight());
+        cancel.SizeChanged([pair=make_weak(miniPair)](auto&&,SizeChangedEventArgs const& e){if(auto frame=pair.get())frame.Height(e.NewSize().Height);});
         apply=pickerButton(data,L"edit-color-apply",3,true,[weak]{if(auto self=weak.lock();self&&self->apply.IsEnabled())self->close(true);});footer.Children().Append(apply);
     }
 
@@ -508,7 +510,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
     }
 
     void relabel(){
-        auto edit=copy(L"edit");title.Text(edit);AutomationProperties::SetName(dialog,edit);AutomationProperties::SetName(root,edit);
+        auto edit=copy(L"edit");title.Text(edit);AutomationProperties::SetName(dialog,edit);AutomationProperties::SetName(root,edit);AutomationProperties::SetName(miniPair,edit);
         currentCaption.Text(copy(L"current"));newCaption.Text(copy(L"new"));
         AutomationProperties::SetName(current,copy(L"current"));tooltip(current,copy(L"current"));AutomationProperties::SetName(fresh,copy(L"new"));
         AutomationProperties::SetName(miniCurrent,copy(L"current"));AutomationProperties::SetName(miniNew,copy(L"new"));

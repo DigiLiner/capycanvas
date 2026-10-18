@@ -146,10 +146,14 @@ try {
     $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('')
     Wait-Until {Find 'edit-color-sheet-tile-0'} 'The sheet did not list swatches'
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
-    $old=(Control 'edit-color-mini-current' -Arranged).Current.BoundingRectangle;$new=(Control 'edit-color-mini-new' -Arranged).Current.BoundingRectangle;$cancel=(Control 'edit-color-cancel' -Arranged).Current.BoundingRectangle
-    @{current=$old;new=$new;cancel=$cancel;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run "sheet-footer-$Theme.json")
+    $oldPeer=Control 'edit-color-mini-current' -Arranged;$newPeer=Control 'edit-color-mini-new' -Arranged
+    $old=$oldPeer.Current.BoundingRectangle;$new=$newPeer.Current.BoundingRectangle;$cancel=(Control 'edit-color-cancel' -Arranged).Current.BoundingRectangle
+    $frame=Control 'edit-color-mini-pair' -Arranged
+    $frameBounds=$frame.Current.BoundingRectangle
+    @{current=$old;new=$new;frame=$frameBounds;frame_class=$frame.Current.ClassName;frame_runtime=($frame.GetRuntimeId() -join ':');cancel=$cancel;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run "sheet-footer-$Theme.json")
+    if($frameBounds.IsEmpty -or !$frameBounds.Contains($old) -or !$frameBounds.Contains($new) -or ($frameBounds.Width-$old.Width-$new.Width) -le 0 -or ($frameBounds.Width-$old.Width-$new.Width) -gt 4*$scale -or [Math]::Abs(($frameBounds.Height-$cancel.Height)/$scale) -gt .5 -or [Math]::Abs(($frameBounds.Y+$frameBounds.Height/2)-($cancel.Y+$cancel.Height/2)) -gt 1){throw 'The footer Current|New frame is not as tall and centered as the footer buttons'}
     foreach($half in @($old,$new)){
-        if([Math]::Abs($half.Width/$scale-38) -gt .5 -or [Math]::Abs($half.Height/$scale+2-$cancel.Height/$scale) -gt .5 -or [Math]::Abs(($half.Y+$half.Height/2)-($cancel.Y+$cancel.Height/2)) -gt 1){throw 'The footer Current|New pair is not two 38-DIP halves inside a frame as tall as the footer buttons'}
+        if([Math]::Abs($half.Width/$scale-38) -gt .5 -or [Math]::Abs(($half.Y+$half.Height/2)-($cancel.Y+$cancel.Height/2)) -gt 1){throw 'The footer Current|New pair is not two 38-DIP halves inside a frame as tall as the footer buttons'}
     }
     if([Math]::Abs($new.Left-$old.Right) -gt 1){throw 'The footer Current|New halves do not touch'}
     Capture "sheet-$Theme"

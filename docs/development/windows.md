@@ -612,7 +612,9 @@ shortcut hints. Repeat with `-Theme light`.
 native clipboard ownership and the Paper fill. It records the immediate fill,
 then waits for the same layer thumbnail to be ready before capturing it again.
 Review the thumbnail color in both themes; readiness alone does not prove its
-visible content. Repeat with `-Theme light`.
+visible content. Check the split footer preview against its actual shared frame
+and the footer buttons; fractional display scaling rounds border pixels.
+Repeat with `-Theme light`.
 
 `exercise-idle-brush.ps1 -Executable <path> -Theme dark` checks painting as soon
 as the selected brush is ready, later Wet Round, Smudge, Liquify and G-Pen
