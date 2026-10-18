@@ -104,10 +104,23 @@
   | Drag frame p50, 1 / 100 / 5,000 paths | 2.8 / 4.4 / 18.4 ms | 1.9 / 2.3 / 10.8 ms | 0.6 / 1.3 / 2.8 ms |
   | Stroke commit / undo, 50,000 paths | 96 / 93 ms | 51 / 60 ms | 22 / 30 ms |
 
+  - The headless frame times wait for the GPU after every frame. Inking in the
+    app, measured with presented frames by the Android brush benchmark on a
+    `crowded_vector_fixture` canvas (4248 × 2832, 10,000 paths, Ink under a
+    translucent Tones layer, G-Pen 24 px), keeps frame gaps at p50 4.1–4.2 ms,
+    p95 5.8–6.5 ms and p99 6.7–7.7 ms on the Huion KP1202, whose Mali-G57 MC2
+    is the mid tier's GPU, against 3.5–3.6 / 5.0–5.1 / 6.0 ms for the same
+    strokes on a paint layer (2026-10-18, `628d7e56e`, ABBA). The reference
+    tiers are not yet measured this way.
   - Gaps against the targets: a 5,000-path drag on the low tier runs slower
-    than 60 fps, drag starts of 100 or more paths exceed the 100 ms press response
-    on the low and mid tiers, and committing or undoing a long stroke across a
-    crowded layer repaints its tiles for 50–100 ms on the low tier.
+    than 60 fps, with every frame repainting the whole view as a pan does; drag
+    starts of 100 or more paths exceed the 100 ms press response on the low and
+    mid tiers, almost all of it GPU time repainting the crowded tiles the moving
+    paths leave (54 ms of the 86 ms p50 on the Huion); and committing or undoing
+    a long stroke across a crowded layer recomposites its pages for 50–100 ms on
+    the low tier.
+  - The provisional vector line does not draw the predicted tail that the
+    raster pen previews ahead of the stylus.
   - Drawing on the top tier spends about 14 ms of CPU on every eighth frame;
     the desktop and the Mali tablets do not. The cause is not yet traced.
   - At 0.4× the low tier opens in 1.9 / 3.7 s and drags 5,000 paths at 7.0 ms
