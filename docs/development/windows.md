@@ -866,7 +866,10 @@ presentation.
 `color-editor` (dark) and `color-editor:light` walk Edit Color: format rows, paste
 and copy, typing and refusal, value scrubbing and arrow steps, Current, the
 swatch sheet and its search, remembered formats, canvas picking through the
-strip, Use Color and the Paper's fill thumbnail.
+strip, Use Color and the Paper's fill thumbnail. Resolve the active
+`edit-color-dialog-frame` after opening or returning to Edit Color, and scope
+its arranged geometry checks to that frame; canvas and popup choices retain
+their original scope.
 `enclose-fill` (dark) and `enclose-fill:light` draw an Enclose and Fill loop with
 the mouse over reference ink: two closed holes fill a new layer, a crossed hole
 and the exterior stay empty, and one Undo, Redo and Escape behave as on GTK.

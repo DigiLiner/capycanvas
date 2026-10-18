@@ -848,6 +848,11 @@ void CanvasWindow::Run() {
         if(!prepared) {std::string cause=capy_error();OutputDebugStringA(cause.c_str());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed"))+"\n\n"+cause);}
         else {std::lock_guard lock(mutex);resize=true;}
         bool dirty=true;
+        auto refreshFrameDemand=[&]{
+            auto requested=capy_needs_frame(host);
+            if(requested<0)throw std::runtime_error(capy_error());
+            dirty|=requested!=0;
+        };
         bool inputStarted=false;
         bool brushReady=false;
         bool probeReady=false;
@@ -898,6 +903,7 @@ void CanvasWindow::Run() {
             if(idleQuery){
                 PreviewPacket packet(capy_workspace_query(host,idleQuery->json.c_str()),capy_preview_free);
                 if(!packet&&!capy_device_lost(host))Fail(capy_error());
+                refreshFrameDemand();
                 idleQuery->reply(std::move(packet));continue;
             }
             if(lastPresent){
@@ -983,6 +989,7 @@ void CanvasWindow::Run() {
                     preview->kind==CanvasQueryKind::Document?capy_document_preview:capy_workspace_query;
                 PreviewPacket packet(request(host,preview->json.c_str()),capy_preview_free);
                 if(!packet&&!capy_device_lost(host))Fail(capy_error());
+                refreshFrameDemand();
                 preview->reply(std::move(packet));
             }
             if(overflow)break;

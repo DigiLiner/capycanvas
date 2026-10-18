@@ -1050,7 +1050,10 @@ levels when every object has them, otherwise from one exact collection evaluatio
 Thumbnail work that leaves decoding or sampling for the canvas schedules a frame.
 The native JSON reply carries `canvas_wake`; pollers forward it even when the
 editor snapshot is unchanged. Its `wait_ms` hint yields while the canvas is busy
-and services bounded preview batches promptly at idle. Shared layer revisions
+and services bounded preview batches promptly at idle. Windows uses the same
+delay for binary thumbnail polling and checks `capy_needs_frame` after each
+binary preview or workspace query, preserving any
+existing frame request before the worker waits again. Shared layer revisions
 include generator parameters, so all hosts request new pixels after a parameter
 edit or undo. Content requests use
 occurrence IDs; mask requests use encoded coverage source IDs. GTK, Web and

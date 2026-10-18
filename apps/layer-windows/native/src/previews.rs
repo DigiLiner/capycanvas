@@ -139,11 +139,13 @@ impl ThumbnailQuery {
 pub fn layer_thumbnails(host: &mut NativeHost, json: &str) -> Result<CapyPreview, String> {
     let query: ThumbnailQuery = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let epoch = host.session.state().document_file.epoch;
+    let wait_ms = host.layer_thumbnail_wait_ms();
     let (accepted, images) = host.layer_thumbnails(query.requests(epoch)?)?;
-    pack_layer_thumbnails(epoch, accepted, images)
+    pack_layer_thumbnails(epoch, wait_ms, accepted, images)
 }
 fn pack_layer_thumbnails(
     epoch: u64,
+    wait_ms: u64,
     accepted: Vec<u64>,
     images: Vec<layer_render::ReadbackImage>,
 ) -> Result<CapyPreview, String> {
@@ -165,7 +167,7 @@ fn pack_layer_thumbnails(
         bytes.extend(image.bytes);
     }
     CapyPreview::packet(
-        serde_json::json!({"epoch":epoch.to_string(),
+        serde_json::json!({"epoch":epoch.to_string(),"wait_ms":wait_ms,
         "accepted":accepted.into_iter().map(|id|id.to_string()).collect::<Vec<_>>(),"images":rows}),
         bytes,
     )
@@ -392,16 +394,20 @@ mod tests {
             bytes: vec![17; 4096],
         };
         let packet =
-            pack_layer_thumbnails(u64::MAX, vec![u64::MAX], vec![image.clone(), image.clone()])
+            pack_layer_thumbnails(u64::MAX, 0, vec![u64::MAX], vec![image.clone(), image.clone()])
                 .unwrap();
         let metadata: serde_json::Value =
             serde_json::from_str(packet.metadata.to_str().unwrap()).unwrap();
         assert_eq!(metadata["epoch"], u64::MAX.to_string());
+        assert_eq!(metadata["wait_ms"], 0);
+        let deferred = pack_layer_thumbnails(0, 50, vec![], vec![]).unwrap();
+        let deferred: serde_json::Value = serde_json::from_str(deferred.metadata.to_str().unwrap()).unwrap();
+        assert_eq!(deferred["wait_ms"], 50);
         assert_eq!(metadata["accepted"][0], u64::MAX.to_string());
         assert_eq!(metadata["images"][1]["offset"], 4096);
         assert_eq!(packet.bytes, vec![17; 8192]);
         assert!(metadata.to_string().len() < 512);
-        assert!(pack_layer_thumbnails(0, vec![], vec![image.clone(); 9]).is_err());
+        assert!(pack_layer_thumbnails(0, 0, vec![], vec![image.clone(); 9]).is_err());
         for field in 0..4 {
             let mut invalid = image.clone();
             match field {
@@ -412,7 +418,7 @@ mod tests {
                     invalid.bytes.pop();
                 }
             }
-            assert!(pack_layer_thumbnails(0, vec![], vec![invalid]).is_err());
+            assert!(pack_layer_thumbnails(0, 0, vec![], vec![invalid]).is_err());
         }
     }
     #[test]

@@ -578,6 +578,13 @@ pub unsafe extern "C" fn capy_start_services(
     })
 }
 /// # Safety
+/// Exclusive render-owner access to a live host.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_needs_frame(host: *mut CapyHost) -> i32 {
+    guard(host, |host| Ok(i32::from(host.native.dirty)))
+}
+
+/// # Safety
 /// `host` must be null or a live host exclusively accessed by this caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_poll_services(host: *mut CapyHost) -> i32 {

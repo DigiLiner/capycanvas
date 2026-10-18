@@ -290,7 +290,7 @@ void LayersView::layoutConnections(){
     for(size_t i=0;i<glyphs.size();i++){Canvas::SetLeft(connectionGlyphs[i],glyphs[i].X);Canvas::SetTop(connectionGlyphs[i],glyphs[i].Y);}
 }
 void LayersView::preview(){
-    if(!root.IsLoaded()||!root.XamlRoot()||!root.XamlRoot().IsHostVisible()||list.ActualHeight()<=0)return;
+    if(!root.IsLoaded()||!root.XamlRoot()||!root.XamlRoot().IsHostVisible()||list.ActualHeight()<=0){timer.Interval(std::chrono::milliseconds(120));return;}
     // Templates can create or replace the scroll provider after Loaded.
     if(auto presenter=list.ScrollPresenter();presenter&&AutomationProperties::GetAutomationId(presenter)!=L"layer-list"){
         AutomationProperties::SetAutomationId(presenter,L"layer-list");copyName(data,presenter,data->copyCaption(L"layers",L"title"));
@@ -302,7 +302,8 @@ void LayersView::preview(){
         auto rect=row->root.TransformToVisual(list).TransformBounds({0,0,float(row->root.ActualWidth()),float(row->root.ActualHeight())});
         if(rect.Y+rect.Height>0&&rect.Y<list.ActualHeight())row->thumbnails(visible);
     }
-    RefreshLayerThumbnails(data->thumbnails,epoch,visible);
+    auto interval=RefreshLayerThumbnails(data->thumbnails,epoch,visible);
+    if(timer.Interval()!=interval)timer.Interval(interval);
 }
 void LayersView::showMenu(J spec, FrameworkElement const& anchor){
     if(data->updating||!spec.Size()||!anchor.XamlRoot())return;

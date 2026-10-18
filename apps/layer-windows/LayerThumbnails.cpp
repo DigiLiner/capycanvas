@@ -22,6 +22,7 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
     uint64_t serial=0,clock=0;
     bool busy=false;
     std::chrono::steady_clock::time_point last{};
+    std::chrono::milliseconds wait{120};
     ~LayerThumbnailCache(){for(auto& [id,tile]:images)tile.upload->Close();}
     void upload(PreviewPacket packet,hstring const& generation,std::vector<Readback> const& readbacks){
         if(readbacks.empty()||readbacks.size()>8)return;
@@ -56,6 +57,7 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
         try{
             auto status=J::Parse(to_hstring(capy_preview_metadata(packet.get())));
             if(str(status,L"epoch")!=epoch)return;
+            wait=std::chrono::milliseconds(std::max(8,int(num(status,L"wait_ms"))));
             for(auto value:array(status,L"accepted")){
                 auto found=proposed.find(value.GetString());
                 if(found!=proposed.end())pending.insert_or_assign(found->first,found->second);
@@ -74,14 +76,17 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
             if(!readbacks.empty())upload(std::move(packet),generation,readbacks);
         }catch(hresult_error const& e){OutputDebugStringW(e.message().c_str());}
     }
-    void refresh(hstring const& generation,std::vector<LayerThumbnail> const& visible){
+    std::chrono::milliseconds refresh(hstring const& generation,std::vector<LayerThumbnail> const& visible){
         if(epoch!=generation){epoch=generation;pending.clear();wanted.clear();for(auto& [id,tile]:images)tile.upload->Close();images.clear();}
+        bool needed=!pending.empty();
         wanted.clear();for(auto const& item:visible){
-            auto id=slot(item);wanted.insert_or_assign(id,key(item));auto found=images.find(id);
+            auto id=slot(item),revision=key(item);wanted.insert_or_assign(id,revision);auto found=images.find(id);
             if(found!=images.end()&&found->second.target!=item.target){found->second.key=L"";found->second.target=item.target;found->second.upload->Clear();}
+            needed|=found==images.end()||found->second.key!=revision;
         }
         auto now=std::chrono::steady_clock::now();
-        if(busy||now-last<std::chrono::milliseconds(120))return;
+        if(!busy&&!needed)return std::chrono::milliseconds(120);
+        if(busy||now-last<wait)return wait;
         A requests;std::map<hstring,LayerThumbnail> proposed;
         std::set<hstring> outstanding;for(auto const& [id,item]:pending)outstanding.insert(slot(item));
         for(auto const& item:visible){
@@ -91,7 +96,7 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
             auto request=to_hstring(++serial);A pair;pair.Append(S(request));pair.Append(S(item.target));requests.Append(pair);
             proposed.emplace(request,item);outstanding.insert(id);
         }
-        if(pending.empty()&&proposed.empty())return;
+        if(pending.empty()&&proposed.empty())return std::chrono::milliseconds(120);
         auto query=O({{L"epoch",S(epoch)},{L"requests",requests}});
         auto weak=weak_from_this();auto queue=dispatcher;busy=true;
         bool sent=transport(CanvasQueryKind::Thumbnails,to_string(query.Stringify()),
@@ -101,13 +106,14 @@ struct LayerThumbnailCache : std::enable_shared_from_this<LayerThumbnailCache> {
                 });
             });
         if(sent)last=now;else busy=false;
+        return wait;
     }
 };
 std::shared_ptr<LayerThumbnailCache> CreateLayerThumbnailCache(PreviewTransport transport){
     auto cache=std::make_shared<LayerThumbnailCache>();cache->transport=std::move(transport);return cache;
 }
-void RefreshLayerThumbnails(std::shared_ptr<LayerThumbnailCache> const& cache,hstring const& epoch,std::vector<LayerThumbnail> const& visible){
-    if(cache)cache->refresh(epoch,visible);
+std::chrono::milliseconds RefreshLayerThumbnails(std::shared_ptr<LayerThumbnailCache> const& cache,hstring const& epoch,std::vector<LayerThumbnail> const& visible){
+    return cache?cache->refresh(epoch,visible):std::chrono::milliseconds(120);
 }
 ImageSource LayerThumbnailSource(std::shared_ptr<LayerThumbnailCache> const& cache,hstring const& epoch,LayerThumbnail const& item){
     if(cache&&cache->epoch==epoch){

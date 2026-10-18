@@ -325,6 +325,10 @@ impl NativeHost {
         Ok(())
     }
 
+    pub fn layer_thumbnail_wait_ms(&self) -> u64 {
+        if self.startup.canvas_ready && self.session.background_readback_idle() { 0 } else { 50 }
+    }
+
     /// Idle-time layer thumbnails with owned pixels, also used by JSON adapters.
     /// Native binary bridges can keep pixel arrays out of their metadata format.
     pub fn layer_thumbnails(
@@ -977,7 +981,7 @@ impl NativeHost {
                 json!({ "epoch": current, "target": hint.map(|h| h.target), "position": hint.map(|h| h.position), "effect_owner": hint.and_then(|h| h.effect_owner) })
             }
             Query::LayerThumbnails { requests } => {
-                let wait_ms = if self.startup.canvas_ready && self.session.background_readback_idle() { 0 } else { 50 };
+                let wait_ms = self.layer_thumbnail_wait_ms();
                 let (accepted, images) = self.layer_thumbnails(requests)?;
                 let images: Vec<_> = images
                     .into_iter()
@@ -1567,13 +1571,16 @@ mod tests {
         let (_reference, mut host) = gpu_document_host(layer_ui::Platform::Android, document);
         let clock = std::cell::Cell::new(0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        assert_eq!(host.layer_thumbnail_wait_ms(), 50);
         assert_eq!(host.query(json!({"type":"layer_thumbnails","requests":[]})).unwrap()["wait_ms"].as_u64(), Some(50), "Preview polling yields while the canvas prepares");
         while !host.startup.brush_ready || host.session.engine().wants_continuous_frames() { frame_step(&mut host, &clock, deadline); }
         let mut woke = false;
         let mut prompt = false;
         loop {
             host.dirty = false;
+            let wait_ms = host.layer_thumbnail_wait_ms();
             let reply = host.query(json!({"type":"layer_thumbnails","requests":[[1,layer_ui::occurrence_token(layer)]]})).unwrap();
+            assert_eq!(reply["wait_ms"].as_u64(), Some(wait_ms));
             assert_eq!(reply["canvas_wake"].as_bool(), Some(host.dirty), "The query carries frame demand to its native caller");
             let images = reply["images"].as_array().unwrap();
             woke |= host.dirty;

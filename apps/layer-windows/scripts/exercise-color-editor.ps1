@@ -9,7 +9,7 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/color-editor/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
-function Center([string]$Id){$b=(Control $Id -Arranged).Current.BoundingRectangle;@{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}
+function Center([string]$Id){$b=(Control $Id -Within $editorFrame -Arranged).Current.BoundingRectangle;@{x=[int]($b.X+$b.Width/2);y=[int]($b.Y+$b.Height/2)}}
 function Shown([string]$Id){$name=(Control $Id).Current.Name;$name.Substring($name.LastIndexOf(' ')+1)}
 function Row([int]$Row){@(0..2|ForEach-Object {Shown "edit-color-$Row-$_"})}
 function Foreground{(Model).state.colors.foreground.rgba}
@@ -21,8 +21,9 @@ function Same($a,$b){$a -and $b -and @(0..3|Where-Object {[Math]::Abs($a[$_]-$b[
 function Open-Editor{
     Invoke-Id 'color-edit'
     Wait-Until {$apply=Find 'edit-color-apply';$apply -and !$apply.Current.IsOffscreen} 'Edit Color did not open'
+    $script:editorFrame=Control 'edit-color-dialog-frame'
 }
-function Closed-Editor([string]$Message){Wait-Until {!(Find 'edit-color-apply')} $Message}
+function Closed-Editor([string]$Message){Wait-Until {!(Find 'edit-color-apply')} $Message;$script:editorFrame=$null}
 function Key([uint16]$Code){[CapyRowPointer]::Key([uint32]$review.Id,$Code)}
 function Type-Into([string]$Id,[string]$Text){
     Invoke $Id
@@ -74,9 +75,9 @@ try {
     $forms=@(0..2|ForEach-Object {(Control "edit-color-form-$_").Current.Name})
     if(($forms -join ',') -ne 'RGB,HSB,OKLCH'){throw "Unexpected default formats: $($forms -join ',')"}
     if(((Row 0) -join ',') -ne '255,255,255'){throw "White did not show 255 255 255: $((Row 0) -join ',')"}
-    $wheel=(Control 'edit-color-wheel' -Arranged).Current.BoundingRectangle;$values=(Control 'edit-color-0-0' -Arranged).Current.BoundingRectangle
+    $wheel=(Control 'edit-color-wheel' -Within $editorFrame -Arranged).Current.BoundingRectangle;$values=(Control 'edit-color-0-0' -Within $editorFrame -Arranged).Current.BoundingRectangle
     if($wheel.X -ge $values.X){throw 'A wide window must keep the wheel beside the values'}
-    $copies=@('edit-color-hex-copy','edit-color-copy-0','edit-color-copy-2'|ForEach-Object {$b=(Control $_ -Arranged).Current.BoundingRectangle;$b.X+$b.Width})
+    $copies=@('edit-color-hex-copy','edit-color-copy-0','edit-color-copy-2'|ForEach-Object {$b=(Control $_ -Within $editorFrame -Arranged).Current.BoundingRectangle;$b.X+$b.Width})
     if(($copies|Measure-Object -Maximum).Maximum-($copies|Measure-Object -Minimum).Minimum -gt 2){throw "Copy buttons do not line up: $($copies -join ',')"}
 
     Paste 'rgb(202 75 53)'
@@ -146,9 +147,9 @@ try {
     $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('')
     Wait-Until {Find 'edit-color-sheet-tile-0'} 'The sheet did not list swatches'
     $scale=[CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.
-    $oldPeer=Control 'edit-color-mini-current' -Arranged;$newPeer=Control 'edit-color-mini-new' -Arranged
-    $old=$oldPeer.Current.BoundingRectangle;$new=$newPeer.Current.BoundingRectangle;$cancel=(Control 'edit-color-cancel' -Arranged).Current.BoundingRectangle
-    $frame=Control 'edit-color-mini-pair' -Arranged
+    $oldPeer=Control 'edit-color-mini-current' -Within $editorFrame -Arranged;$newPeer=Control 'edit-color-mini-new' -Within $editorFrame -Arranged
+    $old=$oldPeer.Current.BoundingRectangle;$new=$newPeer.Current.BoundingRectangle;$cancel=(Control 'edit-color-cancel' -Within $editorFrame -Arranged).Current.BoundingRectangle
+    $frame=Control 'edit-color-mini-pair' -Within $editorFrame -Arranged
     $frameBounds=$frame.Current.BoundingRectangle
     @{current=$old;new=$new;frame=$frameBounds;frame_class=$frame.Current.ClassName;frame_runtime=($frame.GetRuntimeId() -join ':');cancel=$cancel;scale=$scale}|ConvertTo-Json|Set-Content (Join-Path $run "sheet-footer-$Theme.json")
     if($frameBounds.IsEmpty -or !$frameBounds.Contains($old) -or !$frameBounds.Contains($new) -or ($frameBounds.Width-$old.Width-$new.Width) -le 0 -or ($frameBounds.Width-$old.Width-$new.Width) -gt 4*$scale -or [Math]::Abs(($frameBounds.Height-$cancel.Height)/$scale) -gt .5 -or [Math]::Abs(($frameBounds.Y+$frameBounds.Height/2)-($cancel.Y+$cancel.Height/2)) -gt 1){throw 'The footer Current|New frame is not as tall and centered as the footer buttons'}
@@ -177,6 +178,7 @@ try {
     Wait-Until {(Shown 'edit-color-hex') -eq '#000000'} 'Pasting a hex did not set the draft'
     Invoke 'edit-color-pick'
     Wait-Until {!(Find 'edit-color-apply') -and (Model).state.color_picker.editor} 'The eyedropper did not start picking on the canvas'
+    $script:editorFrame=$null
     $paper=Paper-Point
     for($i=0;$i -lt 6;$i++){[CapyRowPointer]::Hover($paper.x+$i,$paper.y);Start-Sleep -Milliseconds 40}
     $strip=Control 'edit-color-strip' -Arranged
@@ -186,13 +188,16 @@ try {
     Wait-Until {$moved=(Control 'edit-color-strip').Current.BoundingRectangle;$moved.X -ne $first.X -or $moved.Y -ne $first.Y} 'The strip did not move away from a hovering pointer'
     Invoke 'edit-color-strip'
     Wait-Until {(Find 'edit-color-apply') -and !(Model).state.color_picker.editor} 'Tapping the strip did not return to Edit Color'
+    $script:editorFrame=Control 'edit-color-dialog-frame'
     if((Shown 'edit-color-hex') -ne '#000000'){throw 'Leaving through the strip changed the draft'}
     Invoke 'edit-color-pick'
     Wait-Until {!(Find 'edit-color-apply') -and (Model).state.color_picker.editor} 'The eyedropper did not start picking again'
+    $script:editorFrame=$null
     for($i=0;$i -lt 6;$i++){[CapyRowPointer]::Hover($paper.x+$i,$paper.y);Start-Sleep -Milliseconds 40}
     Wait-Until {(Model).state.color_picker.sample_point} 'Hovering the canvas did not sample it'
     [CapyRowPointer]::Down('mouse',$paper.x,$paper.y);Start-Sleep -Milliseconds 40;[CapyRowPointer]::Up()
     Wait-Until {Find 'edit-color-apply'} 'Picking did not return to Edit Color'
+    $script:editorFrame=Control 'edit-color-dialog-frame'
     Wait-Until {(Shown 'edit-color-hex') -eq '#FFFFFF'} 'The picked paper color did not reach the draft'
     if(!(Same (Foreground) $white)){throw 'Picking changed the paint'}
     if((Model).state.document_file.revision -ne $revision){throw 'Picking changed the drawing'}
@@ -206,6 +211,7 @@ try {
     if(!$paper){throw 'The Paper did not publish its fill color'}
     Invoke ("layer-$($paper.id)-content")
     Wait-Until {Find 'edit-color-apply'} 'The Paper thumbnail did not open Edit Color'
+    $script:editorFrame=Control 'edit-color-dialog-frame'
     Paste '#DCECFB'
     Wait-Until {(Shown 'edit-color-hex') -eq '#DCECFB'} 'Pasting a hex did not set the fill draft'
     Invoke 'edit-color-apply'

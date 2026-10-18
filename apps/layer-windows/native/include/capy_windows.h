@@ -60,6 +60,7 @@ __declspec(dllimport) int32_t capy_test_device_loss(CapyHost*,char const*);
    storage thread and must only signal owned synchronization state. */
 __declspec(dllimport) int32_t capy_start_services(CapyHost*, void* context, void (*wake)(void*));
 /* Returns 1 when canvas work is pending; 0 permits an idle service-only tick. */
+__declspec(dllimport) int32_t capy_needs_frame(CapyHost*);
 __declspec(dllimport) int32_t capy_poll_services(CapyHost*);
 __declspec(dllimport) int32_t capy_workspace_action(CapyHost*, const char* json);
 /* Cold runtime package transport on the render owner. JSON: directory (optional),
