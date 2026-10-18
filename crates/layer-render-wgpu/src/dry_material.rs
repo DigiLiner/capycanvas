@@ -55,8 +55,11 @@ pub(super) fn material_fragment_entries(slot: usize) -> (u32, Entries) {
 
 /// `blend` as `blend_modes.wgsl` defines it for one mode's code alone.
 fn blend_source(mode: u32) -> Cow<'static, str> {
+    blend_source_from(include_str!("blend_modes.wgsl"), mode)
+}
+fn blend_source_from(source: &str, mode: u32) -> Cow<'_, str> {
     if mode == 0 {return include_str!("blend_normal.wgsl").into();}
-    let (head, cases) = include_str!("blend_modes.wgsl").split_once("    switch blend_mode(code) {\n").unwrap();
+    let (head, cases) = source.split_once("    switch blend_mode(code) {").unwrap();
     let case = cases.split("        case ").find_map(|case| case.strip_prefix(&format!("{mode}u: "))).expect("a blend mode formula");
     format!("{head}    {}\n}}\n", case.split("        default").next().unwrap().trim()).into()
 }
@@ -678,6 +681,23 @@ mod tests {
         let internal = pollster::block_on(internal_scope.pop());
         assert!(validation.is_none() && internal.is_none(), "validation={validation:?}; internal={internal:?}");
         assert!(pipeline.ready());
+    }
+
+    #[test]
+    fn blend_specialization_accepts_lf_and_crlf_sources() {
+        let lf = include_str!("blend_modes.wgsl").replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        for mode in MATERIAL_BLENDS.map(|blend| layer_core::LayerBlend::from(blend).code()) {
+            let expected = blend_source_from(&lf, mode);
+            for source in [&lf, &crlf] {
+                let blend = blend_source_from(source, mode);
+                assert_eq!(blend.replace("\r\n", "\n"), expected.replace("\r\n", "\n"));
+                let source = format!("{}\n{}\n{}", working_color::source(Default::default()), include_str!("blend_codes.wgsl"), blend);
+                let module = naga::front::wgsl::parse_str(&source).unwrap();
+                naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                    .validate(&module).unwrap();
+            }
+        }
     }
 
     #[test]

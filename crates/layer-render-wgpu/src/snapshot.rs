@@ -634,7 +634,11 @@ impl SnapshotRenderer {
                             self.renderer.scene.as_ref().and_then(|scene| scene.mesh_geometry(&geometry)))?
                     }
                     None => window.expand(halo.ceil() as u32).translated(view.target_offset(id).map(|v| -v)).in_frame(extent),
-                }.expand(if mask { 1 } else { PAGE_SIZE }, extent);
+                }.expand(if mask { 1 } else if self.raw_plan.is_none() && original.watercolor.is_none()
+                    && view.evaluation_offset64() == [0.; 2] && view.target_origin(id) == [0; 2]
+                    && matches!(&self.scope, SceneScope::Raw(target) if *target == id && !id.is_coverage()) {
+                    0
+                } else { PAGE_SIZE }, extent);
                 if mask {
                     masks.insert(id, local);
                 }

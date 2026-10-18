@@ -1349,3 +1349,42 @@ fn native_publication_recipes_are_reused_across_compatible_captures() {
     first.control.cancel();
     assert!(!second.control.is_cancelled() && !third.control.is_cancelled());
 }
+
+#[test]
+fn raw_paint_regions_restore_only_the_unfiltered_page() {
+    let color = DocumentColor { depth: SampleDepth::F32, ..Default::default() };
+    let mut document = Document::new(PortableId::random(), 3 * PAGE_SIZE, 3 * PAGE_SIZE,
+        layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+    document.artwork.compositions.get_mut(document.artwork.root).unwrap().color = color;
+    hide_paper(&mut document);
+    let paint = paint_id(&document);
+    let target = SourceTarget::Paint(paint);
+    let pixel = [0.25f32, 0.5, 0.75, 1.];
+    let bytes: Vec<_> = pixel.into_iter().flat_map(f32::to_le_bytes).collect();
+    let blob = Arc::new(TileBlob::encode(color.paint_descriptor(), &bytes.repeat((PAGE_SIZE * PAGE_SIZE) as usize)).unwrap());
+    let mut data = RasterData::default();
+    for y in 0..3 { for x in 0..3 {
+        data.tiles.insert(TileKey { plane: RasterPlane::Color, coordinate: [x, y] }, RasterTile::backed_shared(blob.clone()));
+    }}
+    paint_mut(&mut document).base = None;
+    paint_mut(&mut document).raster = RasterRevision::backed(data);
+    refresh(&mut document);
+    let mut reader = gpu().capture_scene(document.snapshot(), SceneScope::Raw(target), Default::default()).unwrap();
+    let pixels = reader.read_region([PAGE_SIZE, PAGE_SIZE, PAGE_SIZE, PAGE_SIZE]).unwrap();
+    assert_eq!(reader.resident[&target].tiles.len(), 1, "an unfiltered raw read must not restore its eight neighbors");
+    assert_eq!(pixels.len(), (PAGE_SIZE * PAGE_SIZE) as usize);
+    assert!(pixels.into_iter().all(|actual| actual == pixel));
+    let mut composed = gpu().capture_scene(document.snapshot(), SceneScope::All, Default::default()).unwrap();
+    let pixels = composed.read_region([PAGE_SIZE, PAGE_SIZE, PAGE_SIZE, PAGE_SIZE]).unwrap();
+    assert_eq!(composed.resident[&target].tiles.len(), 9, "composition retains its existing page halo");
+    assert!(pixels.into_iter().all(|actual| actual == pixel));
+    let mut shifted = (*document.snapshot()).clone();
+    shifted.offset = [0.5, 0.];
+    let mut shifted = gpu().capture_scene(Arc::new(shifted), SceneScope::Raw(target), Default::default()).unwrap();
+    let pixels = shifted.read_region([PAGE_SIZE, PAGE_SIZE, PAGE_SIZE, PAGE_SIZE]).unwrap();
+    assert_eq!(shifted.resident[&target].tiles.len(), 9, "fractional evaluation offsets retain the existing halo");
+    assert!(pixels.into_iter().all(|actual| actual == pixel));
+    let request = layer_core::ContentBoundsRequest::new(&document, layer_core::ContentScope::Target(target));
+    assert_eq!(pollster::block_on(gpu().content_bounds(request, Default::default())).unwrap(),
+        layer_core::Rect::from_extent([3 * PAGE_SIZE; 2]));
+}

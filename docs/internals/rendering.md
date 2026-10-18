@@ -257,6 +257,10 @@ its evaluated density; native completion also invalidates consumers of native im
 inputs. Main and overview refinement preserve each other's completed pixels. Canonical
 captures use the authored kernel, submit bounded worker chunks and check capture
 cancellation between chunks. Display approximations never become capture inputs.
+Untransformed raw paint captures at the source origin restore only the pages
+intersecting their region when watercolor is absent. Composed, transformed,
+shifted and watercolor captures retain neighboring pages for their sampling
+footprints.
 Snapshot region planning defers pending object work to a separate exact-result
 cache. A region capture first queues the object pages of its whole capture window
 and defers before encoding anything until they are all complete, so one drain
