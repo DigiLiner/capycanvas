@@ -216,6 +216,30 @@ fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render()
     }
 }
 
+#[test]
+fn removing_or_dragging_a_lone_path_clears_tiles_no_other_path_covers() {
+    use std::collections::BTreeSet;
+    let records = vec![stroke(1, &[[40., 40.], [120., 60.]], 6., [0.9, 0.2, 0.1, 1.]), stroke(2, &[[200., 150.], [280., 170.]], 6., [0.1, 0.2, 0.9, 1.])];
+    let (mut editor, layer) = document([300, 200], records);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, packet(editor.document().scene(), [300, 200]));
+    let fresh = |editor: &layer_core::Editor| {
+        let mut fresh = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut fresh, packet(editor.document().scene(), [300, 200]));
+        display(&fresh)
+    };
+    let items: Arc<BTreeSet<ItemId>> = Arc::new([ItemId(1)].into());
+    r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [30., 20.] }));
+    submit_ready(&mut r, FramePacket { composite_all: false, ..packet(editor.document().scene(), [300, 200]) });
+    r.set_vector_motion(None);
+    submit_ready(&mut r, FramePacket { composite_all: false, ..packet(editor.document().scene(), [300, 200]) });
+    assert!(max_error(&display(&r), &fresh(&editor)) < 1e-5, "a cancelled drag restores the lone path");
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    editor.perform(editor.document().vector_object_edit(layer, object.replace([(object.find(ItemId(1)).unwrap(), None)])).unwrap()).unwrap();
+    submit_ready(&mut r, FramePacket { composite_all: true, ..packet(editor.document().scene(), [300, 200]) });
+    assert!(max_error(&display(&r), &fresh(&editor)) < 1e-5, "removing the lone path clears its tiles");
+}
+
 fn presented(r: &WgpuRasterizer, view: layer_render::ViewState) -> Vec<u8> {
     let (texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
@@ -288,6 +312,18 @@ fn crowded_vector_layer_edit_frames() {
     let (_texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     presenter.set_target_retention(true);
+    {
+        let points: Vec<_> = (0..400).map(|i| Anchor::corner([1200. + (i % 40) as f64 * 70., 1300. + (i / 40) as f64 * 170. + (i % 2) as f64 * 60.])).collect();
+        let mut stroke = Stroke::new(paint([0.1, 0.2, 0.9, 1.]), 3.);
+        stroke.cap = Cap::Round; stroke.join = Join::Round;
+        let path = Arc::new(PathItem::new(ItemId(u64::MAX - 9), Arc::new(PathGeometry::new(vec![Subpath::new(&points, false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)]))));
+        r.set_vector_preview(Some(layer_render::VectorPreview { owner: layer, path, revision: 1 }));
+        timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        r.set_vector_preview(None);
+        let hidden = timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        eprintln!("recompositing without vector work over {} pages: frame cpu {:.2} wall {:.2} ms", r.metrics.frame_composited_pages.len(), hidden.0, hidden.1);
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+    }
     for k in [1usize, 100, 5000] {
         let selected: BTreeSet<ItemId> = ids.iter().copied().take(k).collect();
         let items = Arc::new(selected.clone());
@@ -315,12 +351,13 @@ fn crowded_vector_layer_edit_frames() {
         editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
         let perform = start.elapsed().as_secs_f64() * 1e3;
         let commit = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        let pages = r.metrics.frame_composited_pages.len();
         let start = std::time::Instant::now();
         editor.undo().unwrap();
         let undo_perform = start.elapsed().as_secs_f64() * 1e3;
         let undo = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
-        eprintln!("move {k} of {count}: transform {transform:.2} ms, perform {perform:.2} ms, frame cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms, frame cpu {:.2} wall {:.2} ms",
+        eprintln!("move {k} of {count}: transform {transform:.2} ms, perform {perform:.2} ms, frame over {pages} pages cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms, frame cpu {:.2} wall {:.2} ms",
             commit.0, commit.1, undo.0, undo.1);
     }
 }

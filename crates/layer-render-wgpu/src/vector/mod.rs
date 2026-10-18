@@ -216,11 +216,11 @@ impl Kernel {
         let rows = tiles.div_ceil(columns);
         let base_origin = base.map_or([0; 2], |(_, origin)| origin);
         let params: [u32; 12] = [batch.size[0], batch.size[1], tiles, columns, u32::from(base.is_some()), 0, batch.origin[0] as i32 as u32, batch.origin[1] as i32 as u32, base_origin[0] as u32, base_origin[1] as u32, 0, 0];
-        let sizes = [48, batch.tiles.len() * 16, batch.commands.len() * 16, batch.colors.len().max(1) * 16];
+        let sizes = [48, batch.tiles.len() * 16, batch.commands.len().max(1) * 16, batch.colors.len().max(1) * 16];
         let buffers: Vec<wgpu::Buffer> = (0..4).map(|i| Self::buffer(scratch, device, i, sizes[i] as u64)).collect();
         write_words(uploads, encoder, &buffers[0], params.into_iter(), 12)?;
         write_words(uploads, encoder, &buffers[1], batch.tiles.iter().flat_map(|t| t.map(|v| v as u32)), batch.tiles.len() * 4)?;
-        write_words(uploads, encoder, &buffers[2], batch.commands.iter().flatten().copied(), batch.commands.len() * 4)?;
+        if !batch.commands.is_empty() { write_words(uploads, encoder, &buffers[2], batch.commands.iter().flatten().copied(), batch.commands.len() * 4)?; }
         if !batch.colors.is_empty() { write_words(uploads, encoder, &buffers[3], batch.colors.iter().flatten().map(|v| v.to_bits()), batch.colors.len() * 4)?; }
         let binding = crate::bindings::group(device, "vector coverage", &self.layout, buffers.iter().map(|b| b.as_entire_binding())
             .chain([pool.as_entire_binding(), wgpu::BindingResource::TextureView(base.map_or(empty, |(view, _)| view)), wgpu::BindingResource::TextureView(output)]).collect::<Vec<_>>());
