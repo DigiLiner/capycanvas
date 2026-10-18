@@ -4242,7 +4242,7 @@ fn ribbon_cross_width(node: &DockNode, ribbon_axis: Axis, length: f32, layout: &
     if layout.is_collapsed(node.id()) {
         return TILE_SIZE + if open_columns {
             layout.open_stack_column(node.id()).map_or(0., |member| {
-                expanded_ribbon_cross_width(node.find(member).unwrap(), ribbon_axis, length, layout, false, preferred) + WORKSPACE_SPACING * 2.
+                expanded_ribbon_cross_width(node.find(member).unwrap(), ribbon_axis, length, layout, false, preferred) + WORKSPACE_SPACING
             })
         } else { 0. };
     }

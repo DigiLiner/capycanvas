@@ -518,7 +518,21 @@ fn check_paint_default_stack(platform: Platform) {
             for group in &column.groups {
                 assert!(resolved.groups.iter().any(|g| g.id == group.group));
             }
+            assert_eq!(column.bounds.x - open.bounds.x - open.bounds.width, WORKSPACE_SPACING);
         }
+        let commands = resolved
+            .groups
+            .iter()
+            .find(|g| g.panels.contains(&Panel::Commands))
+            .unwrap()
+            .bounds;
+        let end = commands.x + commands.width;
+        let left = resolved.groups.iter().map(|g| g.bounds.x + g.bounds.width)
+            .filter(|x| *x <= commands.x).fold(f32::MIN, f32::max);
+        let right = resolved.groups.iter().map(|g| g.bounds.x)
+            .filter(|x| *x >= end).fold(f32::MAX, f32::min);
+        assert_eq!(commands.x - left, WORKSPACE_SPACING);
+        assert_eq!(right - end, WORKSPACE_SPACING);
     };
     s.adopt_workspace(crate::PreparedWorkspace::new(capture.clone()).unwrap())
         .unwrap();
@@ -774,6 +788,7 @@ fn opening_a_member_uses_all_ordinary_groups_and_switches_within_the_stack() {
     let c = resolved.collapsed.iter().find(|c| c.id == left).unwrap();
     let open = c.open.as_ref().unwrap();
     assert!((open.bounds.x - c.bounds.x - c.bounds.width - WORKSPACE_SPACING).abs() < 0.01);
+    assert_eq!(resolved.work_area.x - open.bounds.x - open.bounds.width, WORKSPACE_SPACING);
     assert_eq!(open.bounds.y, HEADER_HEIGHT);
     assert_eq!(
         open.bounds.y + open.bounds.height,

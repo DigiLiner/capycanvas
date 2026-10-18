@@ -45,7 +45,8 @@ a member. Top padding retains the drop target for inserting a first group.
 
 An open member uses the full available workspace height, aligned with the
 stack’s top and bottom. It keeps the normal outer workspace inset, without
-additional vertical padding. Horizontal spacing separates it from the stack.
+additional vertical padding. One 6 px workspace gap separates it from the stack,
+and one from the canvas and toolbars beside it, as for an expanded column.
 Its normal tab groups and split dividers are rendered by the ordinary dock views. The sidebar highlights the active tile of every visible
 tab group in the open column. Drawer-style connectors join those active tiles
 to the expanded column.

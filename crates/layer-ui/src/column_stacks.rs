@@ -95,7 +95,7 @@ impl ResolvedLayout {
                 Edge::Left => open.bounds.x - d.bounds.x - d.bounds.width,
                 _ => return None,
             };
-            ((gap - WORKSPACE_SPACING).abs() < 0.5
+            (gap.abs() < 0.5
                 && open.bounds.y < d.bounds.y + d.bounds.height
                 && d.bounds.y < open.bounds.y + open.bounds.height)
                 .then_some(open.column)
@@ -260,7 +260,7 @@ impl DockLayout {
             if layout.is_collapsed(node.id()) {
                 return TILE_SIZE
                     + layout.open_stack_column(node.id()).map_or(0., |c| {
-                        layout.expanded_column_width(c, viewport_width) + WORKSPACE_SPACING * 2.
+                        layout.expanded_column_width(c, viewport_width) + WORKSPACE_SPACING
                     });
             }
             match node {
@@ -374,10 +374,10 @@ impl DockLayout {
                     x: if direction == Edge::Right {
                         strip.x + strip.width + WORKSPACE_SPACING
                     } else {
-                        bounds.x + WORKSPACE_SPACING
+                        bounds.x
                     },
                     y: 0.,
-                    width: (bounds.width - strip.width - WORKSPACE_SPACING * 2.).max(0.),
+                    width: (bounds.width - strip.width - WORKSPACE_SPACING).max(0.),
                     height: result.viewport[1],
                 };
                 let mut expanded = self.clone();
