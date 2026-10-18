@@ -44,7 +44,7 @@ pub(super) fn parse_color_text(text: &str, document: RgbSpace, form: Option<Colo
     let fraction = |n: Number, full: f64| if n.percent { n.value / 100. } else { n.value / full };
     let srgb = |rgb: [f64; 3]| Ok(RgbColor::new(RgbSpace::Srgb, [rgb[0] as f32, rgb[1] as f32, rgb[2] as f32, 1.])?);
     match function {
-        "rgb" | "rgba" => srgb([a, b, c].map(|n| fraction(n, 255.).clamp(0., 1.))),
+        "rgb" | "rgba" => srgb([a, b, c].map(|n| fraction(n, 255.))),
         "hsl" | "hsla" => srgb(from_cylinder(ColorSpace::Hls, a.value, fraction(b, 100.), fraction(c, 100.))),
         "hsb" | "hsv" => srgb(from_cylinder(ColorSpace::Hsv, a.value, fraction(b, 100.), fraction(c, 100.))),
         "oklch" => {
@@ -74,7 +74,7 @@ pub(super) fn parse_color_text(text: &str, document: RgbSpace, form: Option<Colo
             } else {
                 ColorForm::Rgb
             });
-            form.color([a.value, b.value, c.value], document, 1.)
+            form.color(form.limit([a.value, b.value, c.value]), document, 1.)
         }
         _ => Err(ColorEditorError::ColorSyntax),
     }

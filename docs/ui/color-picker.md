@@ -105,9 +105,15 @@ Web, Android, Apple and Windows use the stateless `editor_open`, `editor`,
   Escape cancels. A refused value stays open with its message and blocks Use
   Color. Any field, and paste anywhere on the dialog, also accepts a whole
   color: hex, CSS names, `rgb()`, `hsl()`, `hsb()`, `oklch()`, `oklab()` and
-  `color()` in the four RGB spaces. Colors have no alpha.
+  `color()` in the four RGB spaces. Colors have no alpha. Typed and pasted
+  values share one range: RGB, OKLab and OKLCH values outside the usual scale
+  are kept, a value the drawing cannot store is refused, and only hue,
+  saturation, value and lightness, and negative OKLCH lightness or chroma,
+  are brought into their model's range.
 - Dragging a number up or down adjusts it from its value at the start of the
   drag (Shift for larger steps, Alt or Ctrl for finer); arrow keys step it.
+  A drag stays within the usual scale but never pulls a value already outside
+  it back in.
 - Each row and the hex have a copy button. Copies use standard notations:
   `rgb()` and `hsl()` in sRGB drawings, `color()` with the drawing's space
   otherwise, and `oklch()`.

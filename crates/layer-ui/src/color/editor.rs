@@ -68,6 +68,7 @@ struct Component {
     unit: &'static str,
     min: f64,
     max: f64,
+    range: (f64, f64),
     wrap: bool,
     step: f64,
     digits: usize,
@@ -75,7 +76,7 @@ struct Component {
 }
 impl Component {
     const fn new(name: ColorValueName, unit: &'static str, max: f64, digits: usize, edit_digits: usize) -> Self {
-        Self { name, unit, min: 0., max, wrap: false, step: 1., digits, edit_digits }
+        Self { name, unit, min: 0., max, range: (f64::NEG_INFINITY, f64::INFINITY), wrap: false, step: 1., digits, edit_digits }
     }
     const fn fine(self, min: f64, step: f64) -> Self {
         Self { min, step, ..self }
@@ -83,8 +84,14 @@ impl Component {
     const fn hue(self) -> Self {
         Self { wrap: true, ..self }
     }
-    fn bound(self, value: f64) -> f64 {
-        if self.wrap { value.rem_euclid(360.) } else { value.clamp(self.min, self.max) }
+    const fn within(self, low: f64, high: f64) -> Self {
+        Self { range: (low, high), ..self }
+    }
+    fn typed(self, value: f64) -> f64 {
+        if self.wrap { value.rem_euclid(360.) } else { value.clamp(self.range.0, self.range.1) }
+    }
+    fn scrubbed(self, start: f64, value: f64) -> f64 {
+        if self.wrap { self.typed(value) } else { self.typed(value.clamp(self.min.min(start), self.max.max(start))) }
     }
     fn display(self, value: f64) -> String {
         let value = if self.wrap && self.digits == 0 { value.round().rem_euclid(360.) } else { value };
@@ -126,15 +133,15 @@ impl ColorForm {
     fn components(self) -> [Component; 3] {
         let rgb = [Id::SETTINGS_RED, Id::SETTINGS_GREEN, Id::SETTINGS_BLUE];
         let hue = Component::new(M(Id::COLOR_FORM_FIELD_HUE), "°", 360., 0, 2).hue();
-        let percent = |id| Component::new(M(id), "%", 100., 0, 2);
-        let lightness = Component::new(M(Id::COLOR_FORM_FIELD_LIGHTNESS), "%", 100., 1, 2);
+        let percent = |id| Component::new(M(id), "%", 100., 0, 2).within(0., 100.);
+        let lightness = Component::new(M(Id::COLOR_FORM_FIELD_LIGHTNESS), "%", 100., 1, 2).within(0., f64::INFINITY);
         match self {
             Self::Rgb => rgb.map(|id| Component::new(M(id), "", 255., 0, 2)),
             Self::RgbUnit => rgb.map(|id| Component::new(M(id), "", 1., 3, 5).fine(0., 0.001)),
             Self::LinearRgb => rgb.map(|id| Component::new(M(id), "", 1., 3, 5).fine(0., 0.001)),
             Self::Hsb => [hue, percent(Id::COLOR_FORM_FIELD_SATURATION), percent(Id::COLOR_FORM_FIELD_VALUE)],
             Self::Hsl => [hue, percent(Id::COLOR_FORM_FIELD_SATURATION), percent(Id::COLOR_FORM_FIELD_LIGHTNESS)],
-            Self::Oklch => [lightness, Component::new(M(Id::COLOR_FORM_FIELD_CHROMA), "", 0.5, 3, 4).fine(0., 0.001), hue],
+            Self::Oklch => [lightness, Component::new(M(Id::COLOR_FORM_FIELD_CHROMA), "", 0.5, 3, 4).fine(0., 0.001).within(0., f64::INFINITY), hue],
             Self::Oklab => [
                 lightness,
                 Component::new(ColorValueName::Literal("a"), "", 0.5, 3, 4).fine(-0.5, 0.001),
@@ -178,6 +185,10 @@ impl ColorForm {
                 [l * 100., a, b]
             }
         })
+    }
+    pub(super) fn limit(self, values: [f64; 3]) -> [f64; 3] {
+        let components = self.components();
+        std::array::from_fn(|i| components[i].typed(values[i]))
     }
     pub(super) fn color(self, values: [f64; 3], space: RgbSpace, alpha: f32) -> Result<RgbColor, ColorEditorError> {
         let [a, b, c] = values;
@@ -504,7 +515,7 @@ impl ColorEditor {
                 match parse_value(&text, component) {
                     Ok(value) => {
                         let mut values = self.row_values(row)?;
-                        values[index] = component.bound(value);
+                        values[index] = value;
                         self.set_row(form, values)
                     }
                     Err(reason) => match parse_color_text(&text, self.space(), Some(form)) {
@@ -580,7 +591,7 @@ impl ColorEditor {
                 let form = self.form(row)?;
                 let component = *form.components().get(index).ok_or("Invalid color value")?;
                 let mut values = scrub.values;
-                values[index] = component.bound(values[index] + steps * component.step);
+                values[index] = component.scrubbed(values[index], values[index] + steps * component.step);
                 self.set_row(form, values)
             }
             ColorEditorTarget::Intensity => {
@@ -603,6 +614,7 @@ impl ColorEditor {
         Ok(())
     }
     fn set_row(&mut self, form: ColorForm, values: [f64; 3]) -> Result<(), ColorEditorError> {
+        let values = form.limit(values);
         self.set_base(form.color(values, self.space(), self.alpha())?)?;
         let index = self.picker.index();
         let hue = values[0] as f32;
@@ -777,6 +789,42 @@ mod tests {
         assert_eq!(editor, before);
         editor.apply(ColorEditorAction::Value { row: 1, index: 1, text: "250%".into() }).unwrap();
         assert_eq!(texts(&view(&editor).rows[1])[1], "100%");
+    }
+
+    #[test]
+    fn typed_rgb_values_keep_the_drawing_range_exactly_like_color_text() {
+        let linear = |editor: &ColorEditor| editor.value().linear_in(RgbSpace::Srgb).unwrap();
+        let close = |a: [f32; 4], b: [f32; 4]| (0..3).all(|c| (a[c] - b[c]).abs() < 1e-4);
+        let mut hdr = colors(RgbSpace::Srgb);
+        hdr.set_document_depth(layer_core::color::SampleDepth::F16).unwrap();
+        let mut typed = ColorEditor::for_color(&hdr, RgbColor::BLACK, false).unwrap();
+        typed.apply(ColorEditorAction::Form { row: 0, form: ColorForm::LinearRgb }).unwrap();
+        for (index, text) in ["-4", "4", "1"].into_iter().enumerate() {
+            typed.apply(ColorEditorAction::Value { row: 0, index, text: text.into() }).unwrap();
+        }
+        let mut pasted = ColorEditor::for_color(&hdr, RgbColor::BLACK, false).unwrap();
+        pasted.apply(ColorEditorAction::Text { text: "color(srgb-linear -4 4 1)".into(), row: None }).unwrap();
+        assert!(close(linear(&typed), [-4., 4., 1., 1.]), "{:?}", linear(&typed));
+        assert!(close(linear(&typed), linear(&pasted)));
+        let target = ColorEditorTarget::Value { row: 0, index: 0 };
+        typed.apply(ColorEditorAction::Scrub { target, pixels: 0., speed: ColorScrubSpeed::Normal }).unwrap();
+        typed.apply(ColorEditorAction::EndScrub { cancel: false }).unwrap();
+        assert!(close(linear(&typed), [-4., 4., 1., 1.]), "a drag keeps an extended start");
+        let stored = typed.clone();
+        assert!(typed.apply(ColorEditorAction::Value { row: 0, index: 1, text: "100000".into() }).is_err());
+        assert!(pasted.apply(ColorEditorAction::Text { text: "color(srgb-linear 1 100000 1)".into(), row: None }).is_err());
+        assert_eq!(typed, stored, "values the drawing cannot store are refused, not clamped");
+
+        let mut sdr = editor(0x000000);
+        sdr.apply(ColorEditorAction::Value { row: 0, index: 0, text: "300".into() }).unwrap();
+        assert_eq!(texts(&view(&sdr).rows[0]), ["300", "0", "0"]);
+        for text in ["300 0 0", "rgb(300 0 0)", &view(&sdr).rows[0].copy] {
+            let mut other = editor(0x000000);
+            other.apply(ColorEditorAction::Text { text: text.into(), row: None }).unwrap();
+            assert!(close(other.value().encoded_in(RgbSpace::Srgb).unwrap(), [300. / 255., 0., 0., 1.]), "{text}");
+        }
+        sdr.apply(ColorEditorAction::Value { row: 1, index: 1, text: "-20".into() }).unwrap();
+        assert_eq!(texts(&view(&sdr).rows[1])[1], "0%", "HSB saturation keeps its model range");
     }
 
     #[test]
