@@ -513,6 +513,9 @@ consumers one shared 60-second budget; normal hardware builds retain 30 seconds.
 The large-canvas fixture keeps its 60-second overall deadline and exact pose and
 pixel checks. Hardware qualification uses normal builds.
 
+Failed rendering waits report pending bounds, capture and edit jobs alongside the
+shared notice, so completed work can be distinguished from a stalled operation.
+
 `scripts/test-input.ps1` compiles the C++ input queue and composition-key tests
 with `cl` and needs a Visual Studio developer shell. `TextInput.cpp` observes the
 focused TextBox's public TSF edit notifications so overlapping syllables and a

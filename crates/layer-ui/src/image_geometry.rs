@@ -77,6 +77,22 @@ pub(super) struct ContentBounds {
 impl ContentBounds {
     pub(super) fn busy(&self) -> bool { self.job.is_some() || self.baking() }
     pub(super) fn baking(&self) -> bool { self.bake.is_some() || self.remap.is_some() }
+    pub(super) fn diagnostics(&self) -> serde_json::Value {
+        serde_json::json!({
+            "scan": self.job.as_ref().map(|job| serde_json::json!({
+                "purpose": format!("{:?}", job.purpose), "revision": job.revision,
+                "target": job.target, "roots": job.roots, "scope": job.request.scope,
+                "owner": job.request.snapshot.owner, "submitted": job.submitted,
+            })),
+            "bake": self.bake.as_ref().map(|job| serde_json::json!({
+                "epoch": job.epoch, "revision": job.revision, "submitted": job.submitted,
+            })),
+            "remap": self.remap.as_ref().map(|job| serde_json::json!({
+                "epoch": job.epoch, "revision": job.revision, "submitted": job.submitted,
+            })),
+            "moving": self.moving.is_some(),
+        })
+    }
 }
 
 fn same_destination(actual: &Edit, expected: &Edit) -> bool {

@@ -53,6 +53,11 @@ impl<R: CanvasRenderer> UiSession<R> {
             "transform_selection_pending": self.region_tools.applying_transform(),
             "transform_tool_requested": self.operation.next_tool.is_some(),
             "raster_backing_pending": self.engine.raster_backing_pending(),
+            "content_bounds": self.content_bounds.diagnostics(),
+            "input_pending": self.engine.has_pending_input(), "stroke_active": self.engine.has_active_stroke(),
+            "deferred_edits": self.deferred_edits.len(), "file_pending": self.files.pending.is_some(),
+            "painted_selection_pending": self.painted_selections.busy(),
+            "selection_edit_pending": self.region_tools.publishing_edit(), "notice": self.state.notice,
             "suspended": self.rendering_suspended, "tracked_renderer_bytes": telemetry.resident_bytes,
             "submitted_frames": telemetry.submissions})
     }
