@@ -46,8 +46,8 @@ root, build and run:
 .\apps\layer-windows\run.cmd
 ```
 
-The launcher builds Debug and opens the app after a successful build. Use
-`.\apps\layer-windows\run.cmd -Configuration Release` for an optimized build.
+The launcher builds optimized Release and opens the app after a successful build.
+Use `.\apps\layer-windows\run.cmd -Configuration Debug` for an unoptimized build.
 It sets the script execution policy for its child PowerShell process, leaving
 your settings intact.
 
@@ -713,7 +713,9 @@ and saves an access-violation stack and dump in the run directory.
 Panel tab strips use `ScrollView` with horizontal content and reserve touch and
 pen input for workspace dragging. Wheel scrolling remains native. Run every
 `tab-pickup` device variant and `tab-drag` after changing the strip or its preview
-clipping; they cover direct tear-off, retained contact, cancellation and history.
+clipping; they cover drifting panel/drawer tab taps, direct tear-off, retained
+contact, cancellation and history. `exercise-hdr.ps1` also checks drifting pen
+taps on drawing tabs before reordering and Undo/Redo.
 
 `exercise-illustration-filters.ps1 -Executable <path> -Theme dark` checks
 Brightness to Opacity and Threshold through the native Filters and Properties

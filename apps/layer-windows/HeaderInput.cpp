@@ -27,7 +27,7 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     std::vector<std::pair<weak_ref<UIElement>,ManipulationModes>> scrollModes;
     std::optional<uint32_t> pointer;
     Input::Pointer contact{nullptr};
-    NativeInput::GestureRecognizer recognizer;
+    PointerGesture recognizer;
     NativeInput::PointerDeviceType device=NativeInput::PointerDeviceType::Mouse;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     MenuFlyout menu{nullptr};
@@ -35,7 +35,6 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
     HWND owner=nullptr;
     uint32_t selected=0;
     uint64_t generation=0,menuGeneration=0;
-    double slopX=4,slopY=4;
     bool editing=false,dragging=false,starting=false,started=false,busy=false,ending=false,cancelled=false;
     bool dirty=false,held=false,recognizing=false,releasing=false,menuOpen=false,workspaceMenu=false,normalContact=false,released=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
@@ -236,15 +235,11 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         origin=position=p.Position();pointer=p.PointerId();contact=e.Pointer();device=p.PointerDeviceType();normalContact=!flag(data->model,L"chrome_hidden");
         chrome(position);
         if(kind==L"background"&&editable()){selected=0;notify();e.Handled(true);}
-        owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);auto dpi=GetDpiForWindow(owner);
-        slopX=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));
-        slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
+        owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
         beginRequest=J::Parse(configuration.Stringify());beginRequest.Insert(L"op",S(L"begin"));
         beginRequest.Insert(L"source",source);beginRequest.Insert(L"press",point(origin));
         beginRequest.Insert(L"grab",rectangle(visibleBounds(element,root)));
-        if((isItem||kind==L"capy")&&device!=NativeInput::PointerDeviceType::Mouse){
-            recognizing=true;recognizer.GestureSettings(NativeInput::GestureSettings::Hold);recognizer.ProcessDownEvent(p);
-        }
+        recognizing=true;recognizer.Begin(p,(isItem||kind==L"capy")&&device!=NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::Hold:NativeInput::GestureSettings::None);
         if(editable()&&kind!=L"background"){claim();e.Handled(true);}
         timer.Start();notify();
     }
@@ -253,8 +248,8 @@ struct HeaderInput::Impl:std::enable_shared_from_this<Impl>{
         if(!focused()||!current()){cancel(L"source_or_focus_lost");return;}
         if(!editable()&&device==NativeInput::PointerDeviceType::Mouse)return;
         auto next=e.GetCurrentPoint(root).Position();
-        if(recognizing&&!held)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
-        bool moved=std::abs(next.X-origin.X)>slopX||std::abs(next.Y-origin.Y)>slopY;
+        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
+        bool moved=recognizer.Moved();
         if(!dragging&&moved){
             if(!editable()){stopRecognition();return;}
             if(!claim())return;

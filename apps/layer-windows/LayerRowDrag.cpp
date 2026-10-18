@@ -28,7 +28,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     std::weak_ptr<LayerRow> source;
     Input::Pointer pointer{nullptr};
     std::optional<uint32_t> rejected;
-    NativeInput::GestureRecognizer recognizer;
+    PointerGesture recognizer;
     NativeInput::PointerDeviceType device=NativeInput::PointerDeviceType::Mouse;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::vector<weak_ref<UIElement>> path;
@@ -37,7 +37,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     struct Hit {double id;int zone;bool thumbnail;bool operator==(Hit const&)const=default;};
     std::optional<Hit> hit,answered;
     hstring placement,epoch;
-    double id=-1,normalizedTarget=-1,effectOwner=-1,slopX=4,slopY=4;
+    double id=-1,normalizedTarget=-1,effectOwner=-1;
     Point origin{},position{};
     double initialScroll=0,sourceOpacity=1,initialSwipe=0;
     bool swiping=false;
@@ -49,7 +49,7 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     J lastRelease,lastCancel,lastCaptureLoss,lastMove;
     std::chrono::steady_clock::time_point tickAt;
     bool focus()const{return windowHandle&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==windowHandle&&!IsIconic(windowHandle);}
-    bool crossed(Point at)const{return std::abs(at.X-origin.X)>slopX||std::abs(at.Y-origin.Y)>slopY;}
+    bool crossed()const{return recognizer.Moved();}
     bool owns(UIElement const& element)const{
         if(auto captures=element.PointerCaptures())for(auto captured:captures)
             if(pointer&&captured.PointerId()==pointer.PointerId())return true;
@@ -173,13 +173,10 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
             if(initialSwipe==0&&movable(row->model()))for(auto value:array(row->model(),L"drag_from_body"))if(value.GetString()==kind)pickup=true;
             for(auto const& [key,other]:owner->rows)if(other!=row)other->swipe(0);
             origin=position=point.Position();initialScroll=list.VerticalOffset();windowHandle=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
-            auto dpi=GetDpiForWindow(windowHandle);
-            slopX=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));
-            slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
             for(auto node=original;node&&node!=surface;node=VisualTreeHelper::GetParent(node))
                 if(auto item=node.try_as<UIElement>())path.emplace_back(make_weak(item));
             if(grip&&pickup){ignoreClick=true;if(!claim())return;}
-            if(device!=NativeInput::PointerDeviceType::Mouse){recognizing=true;recognizer.ProcessDownEvent(point);}
+            recognizing=true;recognizer.Begin(point,device==NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::None:NativeInput::GestureSettings::Hold);
             tickAt=std::chrono::steady_clock::now();timer.Start();evidence();return;
         }
     }
@@ -238,8 +235,8 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
         if(!pointer||pointer.PointerId()!=e.Pointer().PointerId()||finishing)return;
         if(!current()){cancel(L"source_invalid");return;}
         position=e.GetCurrentPoint(surface).Position();
-        if(recognizing&&!held)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(surface));
-        if(!dragging&&!swiping&&crossed(position)){
+        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(surface));
+        if(!dragging&&!swiping&&crossed()){
             if(device!=NativeInput::PointerDeviceType::Mouse&&!grip&&!held){
                 auto row=source.lock();double dx=position.X-origin.X,dy=position.Y-origin.Y;
                 if(row&&std::abs(dx)>std::abs(dy)&&((dx<0&&row->canSwipe())||(dx>0&&(initialSwipe>0||object(row->model(),L"right_swipe").Size())))){
@@ -326,7 +323,6 @@ struct LayerRowDrag::Impl:std::enable_shared_from_this<Impl>{
     }
     ~Impl(){detachInput();}
     void init(){
-        recognizer.GestureSettings(NativeInput::GestureSettings::Hold);
         recognizer.Holding([weak=weak_from_this()](auto&&,NativeInput::HoldingEventArgs const& e){if(auto self=weak.lock())self->hold(e);});
         timer=surface.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(16));
         timer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->tick();});

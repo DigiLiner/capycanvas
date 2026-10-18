@@ -35,7 +35,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
     J action,sourceTag;
     weak_ref<FrameworkElement> source;
     Input::Pointer contact{nullptr};
-    NativeInput::GestureRecognizer recognizer;
+    PointerGesture recognizer;
     NativeInput::PointerDeviceType device=NativeInput::PointerDeviceType::Mouse;
     HWND owner=nullptr;
     Point origin{},position{};
@@ -43,11 +43,10 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
     bool needsHold=false,contextOnly=false,held=false,recognizing=false,ignoreClick=false,menuOpen=false,menuPending=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
     uint64_t generation=0,motion=0,menuGeneration=0;
-    double slopX=4,slopY=4;
     J lastRelease,lastCancel,lastCaptureLoss,lastDown;
     uint64_t contactVersion=0,contactToken=0;
     bool ownsFocus()const{return owner&&GetAncestor(GetForegroundWindow(),GA_ROOTOWNER)==owner&&!IsIconic(owner);}
-    bool crossed(Point at)const{return std::abs(at.X-origin.X)>slopX||std::abs(at.Y-origin.Y)>slopY;}
+    bool crossed()const{return recognizer.Moved();}
     bool owns(UIElement const& element)const{
         if(auto captures=element.PointerCaptures())for(auto captured:captures)
             if(pointer&&captured.PointerId()==*pointer)return true;
@@ -277,19 +276,13 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         }
         contactToken=(++contactVersion<<32)|uint64_t(p.PointerId());
         owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
-        auto dpi=GetDpiForWindow(owner);
-        slopX=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));
-        slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
         tabSlide->Grab(tab,tabs);
         // Handles and tabs keep immediate drag arbitration. Tile bodies defer
         // both capture and scroll interception until the native hold starts.
         if(!needsHold)claimScrolling();
-        if(needsHold||device!=NativeInput::PointerDeviceType::Mouse){
-            recognizing=true;
-            recognizer.GestureSettings(NativeInput::GestureSettings::Hold|
-                (needsHold?NativeInput::GestureSettings::HoldWithMouse:NativeInput::GestureSettings::None));
-            recognizer.ProcessDownEvent(p);
-        }
+        recognizing=true;
+        recognizer.Begin(p,NativeInput::GestureSettings::Hold|
+            (needsHold?NativeInput::GestureSettings::HoldWithMouse:NativeInput::GestureSettings::None));
         timer.Start();evidence();
         if(needsHold)for(auto const& weak:pressedPath)if(auto element=weak.get())if(auto scroll=element.try_as<ScrollViewer>()){
             auto epoch=contactToken;
@@ -307,8 +300,8 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         if(!pointer||*pointer!=e.Pointer().PointerId()||finishing)return;
         if(!current()){cancel(L"source_invalid");return;}
         auto next=e.GetCurrentPoint(root).Position();
-        if(recognizing&&!held)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
-        if(!dragging&&crossed(next)){
+        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(root));
+        if(!dragging&&crossed()){
             // Motion disarms pickup; the native Button still owns a short tap.
             // Tablet jitter inside its bounds must not swallow its Click.
             if(needsHold&&!held){rejectedPointer=pointer;cancel(L"motion_before_hold",false);return;}
@@ -326,7 +319,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         if(!ownsFocus()){cancel(L"focus_lost");e.Handled(true);return;}
         auto p=e.GetCurrentPoint(root);
         if(p.Properties().IsCanceled()){cancel(L"pointer_canceled");e.Handled(true);return;}
-        if(needsHold&&!held&&!dragging&&crossed(p.Position())){cancel(L"motion_before_hold",false);return;}
+        if(needsHold&&!held&&!dragging&&crossed()){cancel(L"motion_before_hold",false);return;}
         if(recognizing){recognizing=false;recognizer.ProcessUpEvent(p);}
         if(trace)lastRelease=O({{L"generation",N(double(generation))},{L"source",object(action,L"item")},
             {L"dragged",B(dragging)},{L"held",B(held)}});
@@ -422,8 +415,9 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
         root.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->move(e);})),true);
         root.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){if(auto self=weak.lock())self->up(e);})),true);
         root.AddHandler(UIElement::PointerExitedEvent(),box_value(PointerEventHandler([weak](auto&&,auto&& e){
-            if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()&&self->needsHold&&!self->held&&!self->dragging
-                &&self->crossed(e.GetCurrentPoint(self->root).Position())){
+            if(auto self=weak.lock();self&&self->pointer==e.Pointer().PointerId()&&self->needsHold&&!self->held&&!self->dragging){
+                if(self->recognizing)self->recognizer.ProcessMoveEvents(e.GetIntermediatePoints(self->root));
+                if(!self->crossed())return;
                 // Disabled commands can lack Button capture. Leaving their
                 // hit target must retire pickup even over the canvas sibling.
                 self->rejectedPointer=self->pointer;self->cancel(L"motion_before_hold",false);

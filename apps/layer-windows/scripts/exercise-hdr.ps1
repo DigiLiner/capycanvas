@@ -181,6 +181,28 @@ try {
   $from=(Control 'drawing-tab-1').Current.BoundingRectangle;$to=(Control 'drawing-tab-2').Current.BoundingRectangle
   $dpi=[CapyRowPointer]::SetThreadDpiAwarenessContext([IntPtr](-4));[CapyRowPointer]::Initialize([uint32]$review.Id)
   try {
+   if($device -eq 'pen'){
+    Invoke 'drawing-tab-2'
+    Wait-Until {(Model).windows_tabs.selected -eq 2 -and (Model).windows_tabs.available} 'Drawing-tab drift fixture did not select its initial drawing'
+    $drifts=@(@(6,0),@(0,6),@(4,4),@(-6,0),@(0,-6),@(-4,-4))
+    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Cannot read the owned drawing window DPI'}
+    for($i=0;$i -lt $drifts.Count;$i++){
+     $id=if($i%2 -eq 0){1}else{2}
+     if((Model).windows_tabs.selected -eq $id){throw 'Drifting drawing-tab tap did not target an inactive drawing'}
+     $bounds=(Control ('drawing-tab-'+$id)).Current.BoundingRectangle
+     $x=[int]($bounds.X+$bounds.Width/2);$y=[int]($bounds.Y+$bounds.Height/2)
+     $toX=[int]($x+$drifts[$i][0]*$scale);$toY=[int]($y+$drifts[$i][1]*$scale)
+     if($toX -le $bounds.Left -or $toX -ge $bounds.Right -or $toY -le $bounds.Top -or $toY -ge $bounds.Bottom){throw 'Drawing-tab drift left its hit bounds'}
+     [CapyRowPointer]::PenHover($x,$y);Start-Sleep -Milliseconds 35
+     [CapyRowPointer]::Down('pen',$x,$y);Start-Sleep -Milliseconds 35
+     [CapyRowPointer]::Move($toX,$toY);Start-Sleep -Milliseconds 35
+     [CapyRowPointer]::Up($true)
+     Wait-Until {(Model).windows_tabs.selected -eq $id -and (Model).windows_tabs.available -and (Model).brush_ready} 'One drifting pen tap did not select its drawing' 60
+     Start-Sleep -Milliseconds 150
+     if((Model).windows_tabs.selected -ne $id -or ((Model).windows_tabs.tabs.id -join ',') -ne $beforeOrder){throw 'Drifting drawing-tab tap changed the settled selection or drawing order'}
+    }
+   }
    [CapyRowPointer]::Down($device,[int]($from.X+$from.Width/2),[int]($from.Y+$from.Height/2))
    [CapyRowPointer]::Move([int]($to.X+$to.Width-8),[int]($to.Y+$to.Height/2))
    Wait-Until {(Control 'drawing-tabs').Current.ItemStatus -eq 'Dragging'} 'Tab movement did not capture'
@@ -200,7 +222,7 @@ try {
    [CapyRowPointer]::Down($device,[int]($from.X+$from.Width/2),[int]($from.Y+$from.Height/2))
    [CapyRowPointer]::Move([int]($to.X+$to.Width-8),[int]($to.Y+$to.Height/2));[CapyRowPointer]::Up()
   }finally{[CapyRowPointer]::Dispose();[CapyRowPointer]::SetThreadDpiAwarenessContext($dpi)|Out-Null}
-  Wait-Until {((Model).windows_tabs.tabs.id -join ',') -ne $beforeOrder} 'A tab did not reorder immediately after slop'
+   Wait-Until {((Model).windows_tabs.tabs.id -join ',') -ne $beforeOrder} 'A native tab drag did not reorder on release'
   if(((Control 'drawing-tab-1').GetRuntimeId() -join ':') -ne $tabWidget){throw 'Reorder rebuilt the native tab'}
   foreach($history in @('undo','redo','undo')){
    (Control 'drawing-tab-1').SetFocus();[CapyRowPointer]::Key([uint32]$review.Id,0x5D);Invoke ('drawing-order-'+$history)

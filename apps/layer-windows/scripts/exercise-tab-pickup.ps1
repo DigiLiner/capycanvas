@@ -26,6 +26,7 @@ function Point([string]$Id,[switch]$Name) {
 function Gesture {try{(Workspace-Root).Current.HelpText|ConvertFrom-Json}catch{}}
 function Presentation {try{(Workspace-Root).Current.ItemStatus|ConvertFrom-Json}catch{}}
 function Layout {(Model).layout|ConvertTo-Json -Depth 80 -Compress}
+function Tab-Placement {((Model).state.workspace.layout|ConvertTo-Json -Depth 80 -Compress) -replace '"active":"[^"]*"','"active":null'}
 function Panel-Group([string]$Panel) {(Model).layout.groups|Where-Object {$_.panels -contains $Panel}}
 function Workspace-History([string]$Id) {
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'window'
@@ -36,6 +37,31 @@ function Tap([string]$Id) {
     [CapyRowPointer]::Down($Device,$at.x,$at.y)
     Start-Sleep -Milliseconds 35
     [CapyRowPointer]::Up()
+}
+function Drifting-TabTaps([string]$Prefix,[string[]]$Panels,[switch]$Drawer) {
+    $before=Tab-Placement
+    $expanded=(Model).state.customization.expanded|ConvertTo-Json -Depth 30 -Compress
+    $drifts=@(@(6,0),@(0,6),@(4,4),@(-6,0),@(0,-6),@(-4,-4))
+    if($Device -eq 'mouse'){$drifts=@(@(1,0),@(0,1),@(1,1),@(-1,0),@(0,-1),@(-1,-1))}
+    $scale=[CapyRowPointer]::GetDpiForWindow($review.MainWindowHandle)/96.
+    if($scale -le 0 -or [double]::IsNaN($scale) -or [double]::IsInfinity($scale)){throw 'Cannot read the owned tab window DPI'}
+    for($i=0;$i -lt $drifts.Count;$i++){
+        $panel=$Panels[$i%$Panels.Count];$id=$Prefix+$panel;$script:case="$id-drift-$i"
+        $selected={if($Drawer){@((Model).state.customization.column_drawers|Where-Object {$_.tabs.active -eq $panel}).Count -eq 1}else{(Panel-Group $panel).active -eq $panel}}
+        if(& $selected){throw "$case did not target an inactive tab"}
+        $at=Point $id;$bounds=(Control $id).Current.BoundingRectangle
+        $x=[int]($at.x+$drifts[$i][0]*$scale);$y=[int]($at.y+$drifts[$i][1]*$scale)
+        if($x -le $bounds.Left -or $x -ge $bounds.Right -or $y -le $bounds.Top -or $y -ge $bounds.Bottom){throw "$case left its tab bounds"}
+        if($Device -eq 'pen'){[CapyRowPointer]::PenHover($at.x,$at.y);Start-Sleep -Milliseconds 35}
+        [CapyRowPointer]::Down($Device,$at.x,$at.y)
+        Start-Sleep -Milliseconds 35
+        [CapyRowPointer]::Move($x,$y)
+        Start-Sleep -Milliseconds 35
+        [CapyRowPointer]::Up($Device -eq 'pen')
+        Wait-Until {(& $selected) -and (Gesture).phase -eq 'idle' -and !(Gesture).ignore_click} "$case did not select on its first tap"
+        Start-Sleep -Milliseconds 150
+        if(!(& $selected) -or (Tab-Placement) -ne $before -or ((Model).state.customization.expanded|ConvertTo-Json -Depth 30 -Compress) -ne $expanded){throw "$case changed the settled selection, order, layout or configuration"}
+    }
 }
 function Cancel-Contact {
     if($Device -eq 'mouse'){[CapyRowPointer]::Key(0x1b);[CapyRowPointer]::Up()}
@@ -92,13 +118,32 @@ try {
     Wait-Until {(Panel-Group 'sizes').active -eq 'sizes'} 'Short tab click did not select Sizes'
     Tap 'panel-tab-tool_settings'
     Wait-Until {(Panel-Group 'tool_settings').active -eq 'tool_settings'} 'Short tab click did not restore Properties'
+    Drifting-TabTaps 'panel-tab-' @('sizes','tool_settings')
+    $before=Tab-Placement
+    $at=Point 'panel-tab-properties';[CapyRowPointer]::RightClick($at.x,$at.y);Invoke 'Collapse column' -Name
+    $restoreSteps=1
+    Wait-Until {$null -ne (Find 'column-icon-properties')} 'Properties column did not collapse'
+    $at=Point 'column-icon-properties';[CapyRowPointer]::RightClick($at.x,$at.y)
+    $toggle=(Control 'Open individual panels' -Name).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::Off){$toggle.Toggle();$restoreSteps++}
+    [CapyRowPointer]::Key(0x1b)
+    Tap 'column-icon-properties'
+    Wait-Until {$null -ne (Find 'drawer-tab-adjustments')} 'Properties drawer did not expose its tabs'
+    Invoke 'drawer-tab-properties'
+    Wait-Until {@((Model).state.customization.column_drawers|Where-Object {$_.tabs.active -eq 'properties'}).Count -eq 1} 'Drawer did not select its initial Properties tab'
+    Drifting-TabTaps 'drawer-tab-' @('adjustments','properties') -Drawer
+    for($i=0;$i -lt $restoreSteps;$i++){
+        $previous=Tab-Placement;Workspace-History 'undo_workspace'
+        Wait-Until {(Tab-Placement) -ne $previous} 'Drawer setup Undo did not finish'
+    }
+    Wait-Until {(Tab-Placement) -eq $before -and $null -ne (Find 'panel-tab-properties')} 'Drawer tap fixture did not restore the docked column'
     Tear-Off 'layers'
     Tear-Off 'layers' -Cancel
     Tear-Off 'tool_settings' -Gradual
     Tear-Off 'tool_settings' -Gradual -Cancel
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
     if((Get-Item -LiteralPath $stderr).Length){throw 'Native stderr requires inspection'}
-    [pscustomobject]@{device=$Device;short_click='passed';direct_tearoff='passed';gradual_tearoff='passed';retained_contact='passed';capture_cancel='passed';workspace_undo_redo='passed';zero_exit='passed';scope='OS-injected input; physical digitizers and latency remain separate'}|ConvertTo-Json
+    [pscustomobject]@{device=$Device;short_click='passed';drifting_panel_tabs='passed';drifting_drawer_tabs='passed';direct_tearoff='passed';gradual_tearoff='passed';retained_contact='passed';capture_cancel='passed';workspace_undo_redo='passed';zero_exit='passed';scope='OS-injected input; physical digitizers and latency remain separate'}|ConvertTo-Json
 }catch{
     $failure=$_
     @{case=$script:case;injection_gap_ms=[CapyRowPointer]::MaxGapMilliseconds;error=$failure.ToString();gesture=(Gesture);presentation=(Presentation)}|ConvertTo-Json -Depth 60|Set-Content (Join-Path $run 'failure.json')

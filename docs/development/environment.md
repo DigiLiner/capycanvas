@@ -38,7 +38,7 @@ repeated edit/run builds.
 | `cargo test` for shared crates | `test` (unoptimized) |
 | GTK native tests, `tools/performance/workspace-motion.sh`, `gtk-raster.sh` | `release` |
 | Apple and Windows Debug builds | `dev` |
-| Apple and Windows Release builds, Android release and benchmark APKs, the GTK package | `release` |
+| Windows `run.cmd`, Apple and Windows Release builds, Android release and benchmark APKs, the GTK package | `release` |
 | Web package (`apps/layer-web/package.mjs`) | `web-release`: ThinLTO, one codegen unit |
 
 `CAPY_RUST_PROFILE` overrides the GTK and Web scripts; Android also accepts

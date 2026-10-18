@@ -18,9 +18,9 @@ namespace {
 constexpr double Cell=40,Gap=4,Pitch=Cell+Gap;
 struct Tile{uint64_t id=0;Button node{nullptr};Border patch{nullptr};J swatch;double x=0,y=0;Microsoft::UI::Composition::Vector3KeyFrameAnimation animation{nullptr};};
 struct Drag{
-    uint32_t pointer=0;uint64_t id=0,palette=0;winrt::Windows::Foundation::Point origin{},point{},grab{};
+    uint32_t pointer=0;uint64_t id=0,palette=0;winrt::Windows::Foundation::Point point{},grab{};
     bool started=false,held=false;std::optional<int> slot;J action;uint64_t generation=0;
-    Primitives::Popup ghost{nullptr};Microsoft::UI::Input::GestureRecognizer hold{nullptr};
+    Primitives::Popup ghost{nullptr};PointerGesture hold;
 };
 struct PalettesView:std::enable_shared_from_this<PalettesView>{
     std::shared_ptr<WorkspaceData> data;
@@ -285,16 +285,15 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         auto type=point.PointerDeviceType();bool mouse=type==Microsoft::UI::Input::PointerDeviceType::Mouse;
         if(mouse&&!point.Properties().IsLeftButtonPressed())return;
         auto node=tiles.at(id).node;auto local=e.GetCurrentPoint(node).Position();
-        Drag d;d.pointer=point.PointerId();d.id=id;d.palette=uint64_t(num(view(),L"palette"));d.origin=d.point=point.Position();d.grab=local;
+        Drag d;d.pointer=point.PointerId();d.id=id;d.palette=uint64_t(num(view(),L"palette"));d.point=point.Position();d.grab=local;
         if(!node.CapturePointer(e.Pointer()))return;
         if(!mouse){
-            d.hold=Microsoft::UI::Input::GestureRecognizer();d.hold.GestureSettings(Microsoft::UI::Input::GestureSettings::Hold);
             auto weak=weak_from_this();
             d.hold.Holding([weak,id](auto&&,Microsoft::UI::Input::HoldingEventArgs const& h){if(auto self=weak.lock();self&&self->drag&&!self->drag->started&&h.HoldingState()==Microsoft::UI::Input::HoldingState::Started){
                 self->drag->held=true;auto s=self->swatch(id);self->menu(O({{L"kind",S(L"color")},{L"id",N(double(id))}}),self->tiles.at(id).node,s?str(*s,L"name"):L"");
             }});
-            d.hold.ProcessDownEvent(e.GetCurrentPoint(node));
         }
+        d.hold.Begin(e.GetCurrentPoint(node),mouse?Microsoft::UI::Input::GestureSettings::None:Microsoft::UI::Input::GestureSettings::Hold);
         drag=std::move(d);
     }
     void moved(PointerRoutedEventArgs const& e){
@@ -302,8 +301,7 @@ struct PalettesView:std::enable_shared_from_this<PalettesView>{
         drag->point=e.GetCurrentPoint(root).Position();
         if(drag->hold&&!drag->started&&tiles.contains(drag->id))drag->hold.ProcessMoveEvents(e.GetIntermediatePoints(tiles.at(drag->id).node));
         if(!drag->started){
-            auto dpi=GetDpiForWindow(GetForegroundWindow());double slop=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));
-            if(std::abs(drag->point.X-drag->origin.X)<=slop&&std::abs(drag->point.Y-drag->origin.Y)<=slop)return;
+            if(!drag->hold.Moved())return;
             start();
         }
         update();e.Handled(true);

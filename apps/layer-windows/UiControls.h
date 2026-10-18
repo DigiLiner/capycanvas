@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "FilterPreviews.h"
 #include "LayerThumbnails.h"
+#include "PointerGesture.h"
 #include "native/include/capy_windows.h"
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>

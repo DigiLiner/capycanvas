@@ -38,15 +38,15 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
     std::vector<hstring> order;
     std::optional<Row> source;
     Input::Pointer pointer{nullptr};
-    NativeInput::GestureRecognizer recognizer;
+    PointerGesture recognizer;
     Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
     std::vector<weak_ref<UIElement>> path;
     std::vector<std::pair<weak_ref<UIElement>,ManipulationModes>> scrollModes;
-    Point origin{},position{};
+    Point position{};
     NativeInput::PointerDeviceType device=NativeInput::PointerDeviceType::Mouse;
     HWND owner=nullptr;
     std::optional<hstring> before;
-    double slopX=4,slopY=4,sourceOpacity=1;
+    double sourceOpacity=1;
     bool held=false,dragging=false,grip=false,child=false,releasing=false;
     bool ignoreClick=false,suppressContext=false,valid=false,recognizing=false;
     bool trace=GetEnvironmentVariableW(L"CAPY_TRACE_UI",nullptr,0)!=0;
@@ -144,13 +144,10 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             auto point=e.GetCurrentPoint(surface);
             if(!point.IsInContact())return;
             source=row;pointer=e.Pointer();device=point.PointerDeviceType();
-            origin=position=point.Position();grip=inside(original,row.grip.get());
+            position=point.Position();grip=inside(original,row.grip.get());
             child=inside(original,row.more.get())||point.Properties().IsRightButtonPressed()||point.Properties().IsBarrelButtonPressed();
             ignoreClick=grip||child;
             owner=GetAncestor(GetForegroundWindow(),GA_ROOTOWNER);
-            auto dpi=GetDpiForWindow(owner);
-            slopX=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));
-            slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
             auto node=original;
             while(node&&node!=surface){
                 if(auto element=node.try_as<UIElement>())path.emplace_back(make_weak(element));
@@ -160,14 +157,12 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
                 // Grips bypass hold and claim panning immediately, but movement
                 // still has to cross the system drag slop.
                 if(grip&&!claim())return;
-                if(device!=NativeInput::PointerDeviceType::Mouse){
-                    recognizing=true;recognizer.ProcessDownEvent(e.GetCurrentPoint(surface));
-                }
+                recognizing=true;recognizer.Begin(point,device==NativeInput::PointerDeviceType::Mouse?NativeInput::GestureSettings::None:NativeInput::GestureSettings::Hold);
             }
             tickAt=std::chrono::steady_clock::now();timer.Start();evidence();return;
         }
     }
-    bool crossed(Point at)const{return std::abs(at.X-origin.X)>slopX||std::abs(at.Y-origin.Y)>slopY;}
+    bool crossed()const{return recognizer.Moved();}
     void target(){
         valid=false;before.reset();hint.Visibility(Visibility::Collapsed);
         if(!dragging||!current()||position.X<0||position.X>surface.ActualWidth()
@@ -200,8 +195,8 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
         if(!current()){cancel();return;}
         position=e.GetCurrentPoint(surface).Position();
         if(child)return;
-        if(recognizing&&!held)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(surface));
-        if(!dragging&&crossed(position)){
+        if(recognizing)recognizer.ProcessMoveEvents(e.GetIntermediatePoints(surface));
+        if(!dragging&&crossed()){
             if(!grip&&device!=NativeInput::PointerDeviceType::Mouse&&!held){
                 // Ordinary scroll motion retires this hold without claiming it.
                 cancel();return;
@@ -225,7 +220,7 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             {L"canceled",B(e.GetCurrentPoint(surface).Properties().IsCanceled())},
             {L"before",before?S(*before):JsonValue::CreateNullValue()},
             {L"position",O({{L"x",N(position.X)},{L"y",N(position.Y)}})}});
-        bool tapped=!ignoreClick&&!held&&!dragging&&!grip&&!child&&!crossed(position)&&current();
+        bool tapped=!ignoreClick&&!held&&!dragging&&!grip&&!child&&!crossed()&&current();
         bool handled=held||dragging||grip||tapped;
         ignoreClick=ignoreClick||handled;
         // A held release keeps its menu; dragging/cancellation closes it.
@@ -296,7 +291,6 @@ struct WorkspaceRowDrag::Impl:std::enable_shared_from_this<Impl>{
             scroll.DirectManipulationStarted([weak](auto&&,auto&&){if(auto owner=weak.lock()){owner->panning=true;owner->evidence();}});
             scroll.DirectManipulationCompleted([weak](auto&&,auto&&){if(auto owner=weak.lock()){owner->panning=false;owner->evidence();}});
         }});
-        recognizer.GestureSettings(NativeInput::GestureSettings::Hold);
         recognizer.Holding([weak=weak_from_this()](auto&&,NativeInput::HoldingEventArgs const& e){if(auto self=weak.lock())self->hold(e);});
         timer=surface.DispatcherQueue().CreateTimer();timer.Interval(std::chrono::milliseconds(16));
         timer.Tick([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->tick();});

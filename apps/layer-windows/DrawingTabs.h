@@ -21,7 +21,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
     struct SlideCopy{uint64_t id=0;Border copy;double target=0;Microsoft::UI::Composition::Vector3KeyFrameAnimation animation{nullptr};};
     Canvas overlay;std::vector<SlideCopy> copies;A slideOrder,slideHits;J slideClip,slide;bool animateSlide=true;
     std::optional<uint32_t> pointer;uint64_t source=0;Windows::Foundation::Point origin{},position{};
-    Microsoft::UI::Input::GestureRecognizer hold;bool recognizing=false,dragging=false,held=false,updating=false,showing=false;double slopX=4,slopY=4;
+    PointerGesture hold;bool recognizing=false,dragging=false,held=false,updating=false,showing=false;
     uint64_t selectedModel=0;
     hstring epoch,plainSource,plainCaption,storageError;bool storageTooltipReady=false;J model(){return object(data->model,L"windows_tabs");}
     bool available(){return flag(model(),L"available")&&!flag(object(data->model,L"header"),L"editing");}
@@ -125,7 +125,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
         if(recognizing){recognizing=false;hold.CompleteGesture();}if(tabs.contains(source))tabs.at(source).menu.Hide();AutomationProperties::SetItemStatus(root,data->caption(L"header",L"ready"));}
     void move(PointerRoutedEventArgs const& e){if(pointer!=e.Pointer().PointerId())return;position=e.GetCurrentPoint(root).Position();
         if(recognizing)hold.ProcessMoveEvents(e.GetIntermediatePoints(root));
-        if(!dragging&&(std::abs(position.X-origin.X)>slopX||std::abs(position.Y-origin.Y)>slopY)){dragging=true;held=false;dragCursor(root,e.Pointer().PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Touch,true);if(tabs.contains(source))tabs.at(source).menu.Hide();beginSlide();}
+        if(!dragging&&hold.Moved()){dragging=true;held=false;dragCursor(root,e.Pointer().PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Touch,true);if(tabs.contains(source))tabs.at(source).menu.Hide();beginSlide();}
         if(dragging){updateSlide();AutomationProperties::SetItemStatus(root,data->caption(L"header",L"dragging"));}e.Handled(true);
     }
     void activateItem(winrt::Windows::Foundation::IInspectable const& value){for(auto const& [id,row]:rows)if(value==row.item||value==row.item.Content()){select(id);return;}}
@@ -161,8 +161,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
                     auto p=e.GetCurrentPoint(self->root);if(p.Properties().IsMiddleButtonPressed()){self->close(id);e.Handled(true);return;}
                     if(!self->available()||self->pointer||!p.IsInContact()||p.Properties().IsRightButtonPressed()||p.Properties().IsBarrelButtonPressed())return;
                     self->tabs.at(id).select.Focus(FocusState::Pointer);self->tabs.at(id).select.CancelDirectManipulations();self->tabs.at(id).select.ReleasePointerCapture(e.Pointer());if(!self->root.CapturePointer(e.Pointer()))return;AutomationProperties::SetItemStatus(self->root,self->data->caption(L"header",L"pressed"));self->source=id;self->pointer=p.PointerId();self->origin=self->position=p.Position();self->epoch=to_hstring(uint64_t(num(object(self->data->state,L"document_file"),L"epoch")));
-                    auto dpi=GetDpiForWindow(GetForegroundWindow());self->slopX=std::max(2.,double(GetSystemMetricsForDpi(SM_CXDRAG,dpi))*96./std::max(96u,dpi));self->slopY=std::max(2.,double(GetSystemMetricsForDpi(SM_CYDRAG,dpi))*96./std::max(96u,dpi));
-                    if(p.PointerDeviceType()!=Microsoft::UI::Input::PointerDeviceType::Mouse){self->recognizing=true;self->hold.ProcessDownEvent(p);}e.Handled(true);
+                    self->recognizing=true;self->hold.Begin(p,p.PointerDeviceType()==Microsoft::UI::Input::PointerDeviceType::Mouse?Microsoft::UI::Input::GestureSettings::None:Microsoft::UI::Input::GestureSettings::Hold);e.Handled(true);
                 }})),true);t.box.Children().Append(t.select);t.box.Children().Append(t.close);styleTab(t);tabs.emplace(id,t);
                 Row r;r.item.Tag(box_value(key));AutomationProperties::SetAutomationId(r.item,L"drawing-row-"+key);Grid row;row.ColumnDefinitions().Append(ColumnDefinition());ColumnDefinition first;first.Width({28,GridUnitType::Pixel});row.ColumnDefinitions().InsertAt(0,first);ColumnDefinition lastColumn;lastColumn.Width({28,GridUnitType::Pixel});row.ColumnDefinitions().Append(lastColumn);auto title=str(spec,L"title");
                 r.grip=button(data,data->copyCaption(L"header",L"reorder_drawing"),[]{});r.grip.Content(panelGrip(data->theme()));r.grip.Padding({0});r.grip.MinWidth(0);AutomationProperties::SetAutomationId(r.grip,L"drawing-grip-"+key);
@@ -219,7 +218,7 @@ struct DrawingTabs:std::enable_shared_from_this<DrawingTabs>{
                 for(auto const& [id,row]:s->rows)if(node==row.item){e.Handled(true);s->select(id);return;}
             }
         }});
-        hold.GestureSettings(Microsoft::UI::Input::GestureSettings::Hold);hold.Holding([weak](auto&&,Microsoft::UI::Input::HoldingEventArgs const& e){if(auto s=weak.lock();s&&s->pointer&&!s->dragging&&e.HoldingState()==Microsoft::UI::Input::HoldingState::Started){s->held=true;if(s->tabs.contains(s->source)){Primitives::FlyoutShowOptions options;options.ShowMode(Primitives::FlyoutShowMode::Transient);s->tabs.at(s->source).menu.ShowAt(s->tabs.at(s->source).select,options);}}});
+        hold.Holding([weak](auto&&,Microsoft::UI::Input::HoldingEventArgs const& e){if(auto s=weak.lock();s&&s->pointer&&!s->dragging&&e.HoldingState()==Microsoft::UI::Input::HoldingState::Started){s->held=true;if(s->tabs.contains(s->source)){Primitives::FlyoutShowOptions options;options.ShowMode(Primitives::FlyoutShowMode::Transient);s->tabs.at(s->source).menu.ShowAt(s->tabs.at(s->source).select,options);}}});
         root.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,PointerRoutedEventArgs const& e){if(auto s=weak.lock())s->move(e);})),true);
         root.AddHandler(UIElement::PointerReleasedEvent(),box_value(PointerEventHandler([weak](auto&&,PointerRoutedEventArgs const& e){if(auto s=weak.lock();s&&s->pointer==e.Pointer().PointerId()){
             if(e.GetCurrentPoint(s->root).Properties().IsCanceled()){s->cancel();e.Handled(true);return;}
