@@ -68,6 +68,22 @@ fn space_and_alt_choose_zoom_out_in_every_press_and_release_order() {
 }
 
 #[test]
+fn apple_space_then_command_chooses_zoom_without_the_spotlight_chord() {
+    let mode = |s: &UiSession<Recorder>| s.interaction.navigation.as_ref().map(|(_, mode)| *mode);
+    for platform in [Platform::Mac, Platform::Ios] {
+        let mut s = session(platform);
+        held_key(&mut s, " ", true, Modifiers::default());
+        assert_eq!(mode(&s), Some(NavigationMode::Pan), "{platform:?}");
+        held_key(&mut s, "Meta", true, Modifiers { command: true, ..Modifiers::default() });
+        assert_eq!(mode(&s), Some(NavigationMode::Zoom), "{platform:?}");
+        held_key(&mut s, "Meta", false, Modifiers::default());
+        assert_eq!(mode(&s), Some(NavigationMode::Pan), "{platform:?}");
+        held_key(&mut s, " ", false, Modifiers::default());
+        assert!(s.interaction.navigation.is_none());
+    }
+}
+
+#[test]
 fn tool_keys_switch_on_tap_and_return_after_a_held_use() {
     let mut s = session(Platform::Gtk);
     let preset = s.state.brush.preset;

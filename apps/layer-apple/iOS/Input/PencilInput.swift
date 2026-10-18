@@ -272,14 +272,35 @@ extension CanvasView {
     func routeKeys(_ presses: Set<UIPress>, pressed: Bool) {
         for press in presses {
             guard let key = press.key else { continue }
-            if pressed {
-                guard isFirstResponder, window?.isKeyWindow == true,
-                    window?.rootViewController?.presentedViewController == nil,
-                    !NativeTextContext.composing else { continue }
-            }
+            if pressed { guard acceptsKeys else { continue } }
             modifiers = key.modifierFlags
-            sendKey(AppleKeyName.name(key), pressed: pressed, flags: modifiers)
+            let name = AppleKeyName.name(key)
+            sendKey(name, pressed: pressed, flags: modifiers)
+            let modifier = (224...231).contains(key.keyCode.rawValue) || key.keyCode == .keyboardCapsLock
+            if pressed && !modifier { repeatKey(key.keyCode, name: name) }
+            else if modifier || keyRepeat?.code == key.keyCode { endKeyRepeat() }
         }
+    }
+    private var acceptsKeys: Bool {
+        isFirstResponder && window?.isKeyWindow == true
+            && window?.rootViewController?.presentedViewController == nil && !NativeTextContext.composing
+    }
+    private func repeatKey(_ code: UIKeyboardHIDUsage, name: String) {
+        endKeyRepeat()
+        let timer = Timer(timeInterval: KeyRepeat.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                guard self.acceptsKeys else { self.endKeyRepeat(); return }
+                self.sendKey(name, pressed: true, repeatKey: true, flags: self.modifiers)
+            }
+        }
+        timer.fireDate = Date(timeIntervalSinceNow: KeyRepeat.delay)
+        RunLoop.main.add(timer, forMode: .common)
+        keyRepeat = KeyRepeat(code: code, timer: timer)
+    }
+    func endKeyRepeat() {
+        keyRepeat?.timer.invalidate()
+        keyRepeat = nil
     }
     private func updateModifiers(_ next: UIKeyModifierFlags, force: Bool = false) {
         // A modifier may change while another native control owns key focus.
@@ -292,11 +313,18 @@ extension CanvasView {
         }
         modifiers = next
     }
-    private func sendKey(_ key: String, pressed: Bool, flags: UIKeyModifierFlags) {
-        store.input(["type": "key", "key": key, "pressed": pressed,
+    private func sendKey(_ key: String, pressed: Bool, repeatKey: Bool = false, flags: UIKeyModifierFlags) {
+        store.input(["type": "key", "key": key, "pressed": pressed, "repeat": repeatKey,
             "modifiers": ["command": !flags.intersection([.command, .control]).isEmpty,
                 "alt": flags.contains(.alternate), "shift": flags.contains(.shift)]])
     }
+}
+
+struct KeyRepeat {
+    static let delay: TimeInterval = 0.4
+    static let interval: TimeInterval = 0.1
+    let code: UIKeyboardHIDUsage
+    let timer: Timer
 }
 
 extension CanvasView: UIGestureRecognizerDelegate {

@@ -36,6 +36,7 @@ final class CanvasView: UIView {
     var pickerHold: PickerHold?
     var estimates = EstimatedInput()
     var modifiers: UIKeyModifierFlags = []
+    var keyRepeat: KeyRepeat?
 
     init(store: EditorStore) {
         self.store = store
@@ -84,6 +85,7 @@ final class CanvasView: UIView {
     }
     required init?(coder: NSCoder) { fatalError("Use init(store:)") }
     override var canBecomeFirstResponder: Bool { true }
+    override var editingInteractionConfiguration: UIEditingInteractionConfiguration { .none }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -205,6 +207,7 @@ final class CanvasView: UIView {
     }
     func stop() {
         frames.deactivate()
+        endKeyRepeat()
         store.input(["type": "blur"])
         displayLink?.invalidate(); displayLink = nil
         if attached { store.native?.detach(); attached = false }
@@ -213,6 +216,7 @@ final class CanvasView: UIView {
     func setSceneActive(_ active: Bool) {
         guard sceneActive != active else { return }
         sceneActive = active
+        if !active { endKeyRepeat() }
         wake()
     }
     func wake() { frames.wake() }

@@ -73,6 +73,15 @@ roll, as Apple documents in
   overflow the oldest token is released with its last known values. Blur and
   cancellation release the contact's tokens.
 
+## Keyboard and system gestures
+
+AppKit forwards the system's key repeats. UIKit reports one press per key, so the
+iPad canvas repeats a held non-modifier key itself after 0.4 s and then every
+0.1 s while it keeps key focus; release, a modifier change, focus loss and scene
+deactivation stop the repeat. Shared Rust decides which actions accept repeats. The canvas opts out
+of the system's three-finger editing gestures, so finger taps reach the shared
+touch gestures.
+
 ## Text composition
 
 Native marked text takes precedence over shortcut capture and numeric submit,
