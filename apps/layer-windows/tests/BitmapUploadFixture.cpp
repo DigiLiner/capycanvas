@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ControlContext.h"
 #include "BitmapUpload.h"
+#include <winrt/Microsoft.UI.Xaml.Shapes.h>
 #include "../LayerThumbnails.cpp"
 #include <winrt/Windows.Storage.Streams.h>
 #include <robuffer.h>
@@ -17,7 +18,8 @@ struct Frame {
     int width=3,height=2;bool rgba=true;
 };
 struct Frames {
-    Frame rgba,bgra,newer,largeRed,largeGreen;
+    Frame rgba,bgra,newer,largeRed,largeGreen,paperWhite,paperBlue;
+    std::shared_ptr<std::vector<uint8_t>> paperBlueBgra;
     std::shared_ptr<std::vector<uint8_t>> blank=std::make_shared<std::vector<uint8_t>>(24);
     std::shared_ptr<std::vector<uint8_t>> expected=std::make_shared<std::vector<uint8_t>>(std::initializer_list<uint8_t>{0,0,255,255,0,128,0,128,0,0,0,0,255,0,0,255,10,20,30,64,23,22,21,255});
     Frames(){
@@ -25,6 +27,14 @@ struct Frames {
             255,0,0,255,0,255,0,128,50,100,200,0,0,0,255,255,120,80,40,64,21,22,23,255});
         bgra.bytes=std::make_shared<std::vector<uint8_t>>(*expected);bgra.rgba=false;
         newer.bytes=std::make_shared<std::vector<uint8_t>>(std::initializer_list<uint8_t>{11,22,33,255,11,22,33,255,11,22,33,255,11,22,33,255,11,22,33,255,11,22,33,255});newer.rgba=false;
+        paperWhite.width=paperWhite.height=paperBlue.width=paperBlue.height=32;
+        paperWhite.bytes=std::make_shared<std::vector<uint8_t>>(32*32*4,255);
+        paperBlue.bytes=std::make_shared<std::vector<uint8_t>>(32*32*4);
+        paperBlueBgra=std::make_shared<std::vector<uint8_t>>(32*32*4);
+        for(size_t p=0;p<paperBlue.bytes->size();p+=4){
+            (*paperBlue.bytes)[p]=220;(*paperBlue.bytes)[p+1]=236;(*paperBlue.bytes)[p+2]=251;(*paperBlue.bytes)[p+3]=255;
+            (*paperBlueBgra)[p]=251;(*paperBlueBgra)[p+1]=236;(*paperBlueBgra)[p+2]=220;(*paperBlueBgra)[p+3]=255;
+        }
         for(auto [frame,green]:{std::pair{&largeRed,false},std::pair{&largeGreen,true}}){
             frame->width=frame->height=1024;frame->rgba=false;
             frame->bytes=std::make_shared<std::vector<uint8_t>>(1024*1024*4);
@@ -82,24 +92,26 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         require(!result->precondition,L"Async-cancellation prerequisite did not interleave");
         require(!result->callbackFault&& !result->duplicate,L"Completion thread, source binding or exactly-once check failed");
     }
-    winrt::Windows::Foundation::IAsyncAction rendered(){
-        auto root=image.XamlRoot();
-        require(image.IsLoaded()&&root&&root.IsHostVisible(),L"Capture image is not loaded and connected before rendering wait");
+    winrt::Windows::Foundation::IAsyncAction rendered(FrameworkElement target=nullptr){
+        if(!target)target=image;
+        auto root=target.XamlRoot();
+        require(target.IsLoaded()&&root&&root.IsHostVisible(),L"Capture image is not loaded and connected before rendering wait");
         winrt::handle event{CreateEventW(nullptr,true,false,nullptr)};
-        auto frame=CompositionTarget::Rendering(auto_revoke,[this,signal=event.get()](auto&&,auto&&){
-            auto root=image.XamlRoot();
-            if(root&&root.IsHostVisible()&&image.ActualWidth()>0&&image.ActualHeight()>0)SetEvent(signal);
+        auto frame=CompositionTarget::Rendering(auto_revoke,[target,signal=event.get()](auto&&,auto&&){
+            auto root=target.XamlRoot();
+            if(root&&root.IsHostVisible()&&target.ActualWidth()>0&&target.ActualHeight()>0)SetEvent(signal);
         });
         bool signaled=co_await resume_on_signal(event.get(),std::chrono::seconds(10));
         co_await apartment;frame.revoke();
         require(signaled,L"Loaded visible image did not reach CompositionTarget.Rendering within 10 seconds");
     }
-    winrt::Windows::Foundation::IAsyncAction pixels(std::shared_ptr<std::vector<uint8_t>> expected,int width=3,int height=2,bool current=true){
+    winrt::Windows::Foundation::IAsyncAction pixels(std::shared_ptr<std::vector<uint8_t>> expected,int width=3,int height=2,bool current=true,FrameworkElement target=nullptr){
+        if(!target)target=image;
         require(!current||image.Source()==upload->Image(),L"Image not bound to completed source");
-        auto scale=image.XamlRoot().RasterizationScale();
-        image.Width(width/scale);image.Height(height/scale);
-        co_await rendered();
-        Imaging::RenderTargetBitmap shot;co_await shot.RenderAsync(image);
+        auto scale=target.XamlRoot().RasterizationScale();
+        target.Width(width/scale);target.Height(height/scale);
+        co_await rendered(target);
+        Imaging::RenderTargetBitmap shot;co_await shot.RenderAsync(target);
         auto buffer=co_await shot.GetPixelsAsync();auto uiThread=ui;
         auto renderedWidth=shot.PixelWidth(),renderedHeight=shot.PixelHeight();
         auto sample=output.parent_path()/(L"pixels-"+std::wstring(phase)+L"-"+std::to_wstring(checks));
@@ -235,12 +247,31 @@ struct Fixture:std::enable_shared_from_this<Fixture> {
         require(*calls==1&&!cache->busy,L"Discarding old document upload stranded new-document thumbnail request");
         co_await wait(result);require(!result->accepted.at(1),L"Discarded document thumbnail was accepted");++checks;
     }
+    winrt::Windows::Foundation::IAsyncAction paperRecolor(){
+        ImageBrush brush;brush.Stretch(Stretch::Fill);
+        Shapes::Rectangle row;row.Fill(brush);row.UseLayoutRounding(false);
+        row.Width(32/image.XamlRoot().RasterizationScale());row.Height(row.Width());
+        winrt::handle loaded{CreateEventW(nullptr,true,false,nullptr)};
+        auto loading=row.Loaded(auto_revoke,[signal=loaded.get()](auto&&,auto&&){SetEvent(signal);});
+        surface.Children().Append(row);
+        require(co_await resume_on_signal(loaded.get(),std::chrono::seconds(10)),L"Paper thumbnail row did not load");
+        co_await apartment;loading.revoke();
+        co_await submit(frames->paperWhite);
+        auto source=upload->Image();require(source!=nullptr,L"White Paper upload has no source");
+        brush.ImageSource(source);
+        co_await pixels(frames->paperWhite.bytes,32,32,false,row);
+        co_await submit(frames->paperBlue);
+        require(upload->Image()==source&&brush.ImageSource()==source,L"Paper recolor replaced its retained ImageBrush source");
+        require(frames->paperBlue.reads->load()==1,L"Blue Paper bytes were not read exactly once");
+        co_await pixels(frames->paperBlueBgra,32,32,false,row);
+        surface.Children().RemoveAtEnd();++checks;
+    }
     winrt::fire_and_forget run(){
         auto self=shared_from_this();hstring error;
         try{
             phase=L"encoding";co_await encoding();phase=L"reentrancy";co_await coalescing();
             phase=L"before-copy-context";co_await invalidation();phase=L"throwing-callbacks";co_await exceptions();
-            phase=L"predicate-reentry";co_await predicateReentry();phase=L"awaited-context";co_await awaitedCancellation();phase=L"thumbnail-epoch";co_await thumbnailEpoch();phase=L"close";
+            phase=L"predicate-reentry";co_await predicateReentry();phase=L"awaited-context";co_await awaitedCancellation();phase=L"thumbnail-epoch";co_await thumbnailEpoch();phase=L"paper-recolor";co_await paperRecolor();phase=L"close";
             auto result=std::make_shared<Outcome>();upload->Close();
             upload->Submit(request(frames->rgba,result,1));co_await wait(result);
             require(!result->accepted.at(1),L"Closed owner accepted new pixels");++checks;

@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 $settingsOnly=$Theme.StartsWith('settings-');if($settingsOnly){$Theme=$Theme.Substring(9)}
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='visible'
+$CapyCaptureDelay=250
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'CanvasTouchDriver.cs')
 $null=[CapyCanvasTouch]::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -14,10 +15,10 @@ $run=Join-Path $repo ('artifacts/windows/selection/'+[Guid]::NewGuid().ToString(
 $ControlType=[System.Windows.Automation.ControlType]
 Add-Type -AssemblyName System.Drawing
 Add-Type -Name SelectionDpi -Namespace Capy -MemberDefinition '[DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);[DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window,int[] point);'
-function Dip($element){$element.Current.BoundingRectangle.Height/([Capy.SelectionDpi]::GetDpiForWindow($review.MainWindowHandle)/96.)}
+function Dip($element){$element.Current.BoundingRectangle.Height/([Capy.SelectionDpi]::GetDpiForWindow($drawingWindow)/96.)}
 function Outline([string]$Name,[int]$Left,[int]$Right,[int]$Y){
     Capture $Name -Composed
-    $origin=[int[]]@(0,0);$null=[Capy.SelectionDpi]::ClientToScreen($review.MainWindowHandle,$origin)
+    $origin=[int[]]@(0,0);$null=[Capy.SelectionDpi]::ClientToScreen($drawingWindow,$origin)
     $image=[System.Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
     try{
         $marked=0
@@ -67,10 +68,6 @@ function Drag($from,$to,[string]$Device='mouse'){
     for($i=1;$i -le 12;$i++){[CapyRowPointer]::Move([int]($from.x+($to.x-$from.x)*$i/12),[int]($from.y+($to.y-$from.y)*$i/12));Start-Sleep -Milliseconds 12}
     [CapyRowPointer]::Up()
 }
-function Tile-Id([string]$Command){
-    foreach($panel in @((Model).panels)){foreach($tile in @($panel.tiles)){if($tile.control.kind -eq 'command' -and $tile.control.command -eq $Command){return "tile-$($panel.id)-$($tile.id)"}}}
-    throw "No $Command tile"
-}
 function Header-Id([string]$Command){
     foreach($zone in @((Model).header.model.zones)){foreach($entry in @($zone)){if($entry.item.control.command -eq $Command){return $entry.id}}}
 }
@@ -78,7 +75,7 @@ function Header-Icon([string]$Id){((Model).header.items|Where-Object id -eq $Id)
 function Menu-Items{
     $items=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,$ControlType::MenuItem))
-    @($items|Where-Object {$_.Current.ProcessId -eq $review.Id -and !$_.Current.IsOffscreen})
+    @($items|Where-Object {$_.Current.ProcessId -eq $review.Id -and !$_.Current.IsOffscreen -and [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($_).Current.ControlType -eq $ControlType::Menu})
 }
 function Close-Menu{
     for($i=0;$i -lt 3 -and @(Menu-Items).Count;$i++){[CapyRowPointer]::Key([uint16]0x1B);Start-Sleep -Milliseconds 150}
@@ -109,17 +106,28 @@ try {
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     Write-Output "Owned selection review $($review.Id): $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Selection review did not start' 90
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    $owned=@{window=$null}
+    Wait-Until {$owned.window=Owned-DrawingWindow $review;$null -ne $owned.window -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Selection review did not start' 90
+    $root=$owned.window.Root;$drawingWindow=$owned.window.Handle
     $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
     Start-Sleep -Milliseconds 600
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
 
     if(!$settingsOnly){
         Switch-Workspace 'Photo' 'builtin:workspace:photographer'
-        foreach($command in @('rectangle_select','ellipse_select','polygon_select','color_select')){
-            Wait-Until {@((Model).panels|ForEach-Object {$_.tiles}|Where-Object {$_.control.command -eq $command}).Count -gt 0} "Photo has no $command tool"
+        foreach($group in @(@('rectangle_select','ellipse_select'),@('lasso','polygon_select'),@('auto_select','color_select'))){
+            $tile=Control (Tool-Tile $group[0]) -Arranged
+            $tile.SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+            foreach($command in $group){
+                $label=(Command $command).label
+                Wait-Until {
+                    $item=@(Menu-Items|Where-Object {$_.Current.Name -eq $label})|Select-Object -First 1
+                    $toggle=$null
+                    $item -and $item.Current.IsEnabled -and $item.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern,[ref]$toggle)
+                } "Photo has no enabled $command variation"
+            }
+            Close-Menu
         }
     }
     Switch-Workspace 'Sketch' 'builtin:workspace:painter'
@@ -164,16 +172,16 @@ try {
             $b=$track.Current.BoundingRectangle
             Drag @{x=[int]($b.X+10);y=[int]($b.Y+$b.Height/2)} @{x=[int]($b.X+$b.Width*.3);y=[int]($b.Y+$b.Height/2)}
             Wait-Until {((Model).state.tool_settings|Where-Object id -eq 'tonal_lower').value -ne $lower} 'Range handle drag did not move the lower endpoint'
-            Capture 'tonal-settings'
+            Capture 'tonal-settings' -Composed
         }else{
             if(!$brush){$null=Control 'selection-actions-menu'}
         }
     }
     Tap (Center (Control 'tool-subtool-0'))
     Wait-Until {$current=Model;$current -and $current.state.tool_set.subtools[0].selected} 'Rectangle Select did not restore'
-    Capture 'select-drawer'
+    Capture 'select-drawer' -Composed
     if($settingsOnly){
-        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+        & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
         @{theme=$Theme;selection_controls='passed';custom_tonal_range='passed'}|ConvertTo-Json|Set-Content (Join-Path $run 'results.json')
         return
     }
@@ -192,20 +200,23 @@ try {
     if(@($rows|Where-Object {$_.Current.Name -eq 'Modify'}).Count){throw 'Selection Actions still nests Modify'}
     Close-Menu
 
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     Key 0x1B
     Wait-Until {!(Model).state.customization.drawer} 'Escape did not close the Select drawer'
 
     Switch-Workspace 'Photo' 'builtin:workspace:photographer'
     Fit-Canvas;Start-Sleep -Milliseconds 300;Canvas-Points
-    Invoke (Tile-Id 'rectangle_select')
+    if(!(Command 'rectangle_select').selected){Invoke (Tool-Tile 'rectangle_select')}
     Wait-Until {(Tools).tool.selection.kind -eq 'rectangle' -and (Command 'select_all').enabled} 'Photo Rectangle Select did not activate'
+    Invoke 'toolbar-segment-selection-mode-0'
+    Wait-Until {(Command 'selection_new').selected} 'New selection mode did not activate'
     if((Tools).has_selection){
         & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Select'
         $deselect=@{item=$null};Wait-Until {$deselect.item=@(Menu-Items)|Where-Object {$_.Current.AutomationId -eq 'deselect'}|Select-Object -First 1;$deselect.item} 'Select menu has no Deselect'
         $deselect.item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until {!(Tools).has_selection} 'Deselect did not clear the tonal selection'
     }
+    if((Model).state.customization.drawer){throw 'Photo selection drawer remained open before the gesture'}
     $a=@{x=$center.x-80;y=$center.y-60};$b=@{x=$center.x+80;y=$center.y+60}
     @{from=$a;to=$b;model=(Model)}|ConvertTo-Json -Depth 70|Set-Content (Join-Path $run 'rectangle-before.json')
     Drag $a $b
@@ -218,13 +229,13 @@ try {
     Wait-Until {(Outline 'subtract' ($center.x-12) ($center.x+12) ($center.y-20)) -gt .3} 'Alt-latched Subtract hole was not presented without further input'
     if(@(Menu-Items).Count){throw 'Releasing Alt opened a menu'}
     if(!(Tools).has_selection){throw 'Subtracting a hole cleared the selection'}
-    Invoke (Tile-Id 'undo')
+    Invoke (Tool-Tile 'undo')
     Wait-Until {(Outline 'undo-subtract' ($center.x-12) ($center.x+12) ($center.y-20)) -lt .1} 'Undo did not remove only the Subtract hole'
     if(!(Tools).has_selection){throw 'Alt-latched Subtract was not its own undo step'}
-    Invoke (Tile-Id 'undo')
+    Invoke (Tool-Tile 'undo')
     Wait-Until {!(Tools).has_selection} 'Rectangle selection was not one undo step'
-    Invoke (Tile-Id 'redo');Wait-Until {(Tools).has_selection} 'Redo did not restore the rectangle'
-    Invoke (Tile-Id 'redo')
+    Invoke (Tool-Tile 'redo');Wait-Until {(Tools).has_selection} 'Redo did not restore the rectangle'
+    Invoke (Tool-Tile 'redo')
     Wait-Until {(Outline 'redo-subtract' ($center.x-12) ($center.x+12) ($center.y-20)) -gt .3} 'Redo did not restore the Subtract hole'
 
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'Select'
@@ -235,24 +246,18 @@ try {
     $distance.SetFocus()
     $distance.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('8')
     $null=Control 'selection-refine-panel'
-    Capture 'grow-dialog'
+    Capture 'grow-dialog' -Composed
     Invoke 'selection-refine-apply'
     Wait-Until {!(Tools).selection_resize} 'Apply did not finish the resize draft' 20
     if(!(Tools).has_selection){throw 'Grow lost the selection'}
     Wait-Until {(Command 'select_all').enabled} 'Grow did not finish' 20
 
-    $family=$null
-    foreach($panel in @((Model).panels)){foreach($tile in @($panel.tiles)){foreach($option in @($tile.component.options)){
-        if($option.Choice -and @($option.Choice.items|Where-Object label -eq 'Tonal range').Count){$family=$option.Choice}
-    }}}
-    if(!$family){throw 'Tool Options has no selection family choice'}
-    Invoke ('toolbar-choice-'+$family.id)
-    $tonalItem=@{item=$null}
-    Wait-Until {$tonalItem.item=@(Menu-Items)|Where-Object {$_.Current.Name -eq 'Tonal range'}|Select-Object -First 1;$tonalItem.item} 'Tool Options family menu lacks Tonal range'
-    $pattern=$null
-    if($tonalItem.item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)){$pattern.Invoke()}
-    else{$tonalItem.item.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()}
-    Wait-Until {(Tools).tool.selection.kind -eq 'tonal'} 'Tool Options did not choose Tonal range'
+    (Control 'drawing-canvas').SetFocus()
+    [CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(17),0x4B)
+    (Control 'command-search').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue((Command 'tonal_select').label)
+    Wait-Until {$result=Find 'command-result-0';$result -and $result.Current.IsEnabled -and $result.Current.Name -eq (Command 'tonal_select').label} 'Command search has no Tonal range'
+    Invoke 'command-result-0'
+    Wait-Until {!(Find 'command-search') -and (Tools).tool.selection.kind -eq 'tonal'} 'Tonal range did not activate'
     $tones=$null
     foreach($panel in @((Model).panels)){foreach($tile in @($panel.tiles)){foreach($option in @($tile.component.options)){if($option.Choice.id -eq 'tonal-tones'){$tones=$option.Choice}}}}
     if(!$tones){throw 'Tool Options lacks the tone bar'}
@@ -263,13 +268,13 @@ try {
     $track=(Control 'toolbar-range-track').Current.BoundingRectangle
     Drag @{x=[int]($track.X+$track.Width-10);y=[int]($track.Y+$track.Height/2)} @{x=[int]($track.X+$track.Width*.7);y=[int]($track.Y+$track.Height/2)}
     Wait-Until {((Model).state.tool_settings|Where-Object id -eq 'tonal_upper').value -ne $upper} 'Tool Options range drag did not move the upper endpoint'
-    Capture 'toolbar-tonal'
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    Capture 'toolbar-tonal' -Composed
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     Key 0x1B
-    Invoke (Tile-Id 'rectangle_select')
+    if(!(Command 'rectangle_select').selected){Invoke (Tool-Tile 'rectangle_select')}
     Wait-Until {(Tools).tool.selection.kind -eq 'rectangle' -and (Command 'select_all').enabled} 'Rectangle Select did not restore after Tonal range'
 
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     $artwork=(Model).state.colors.foreground.rgba|ConvertTo-Json -Compress
     Key 0x51
     Wait-Until {(Tools).quick_mask} 'Q did not enter Quick Mask'
@@ -284,9 +289,9 @@ try {
     if(((Model).state.colors.foreground.rgba|ConvertTo-Json -Compress) -ne $artwork){throw 'Resetting mask colors changed artwork colors'}
     [CapyRowPointer]::RightClick((Center (Control 'layer-0-name')).x,(Center (Control 'layer-0-name')).y)
     Wait-Until {@(Menu-Items|Where-Object {$_.Current.Name -eq 'Save as Selection Layer'}).Count} 'Quick Mask row menu lacks Save as Selection Layer'
-    Capture 'quick-mask-menu'
+    Capture 'quick-mask-menu' -Composed
     Close-Menu
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     Key 0x1B
     Wait-Until {!(Tools).quick_mask} 'Escape did not leave Quick Mask'
     if(((Model).state.colors.foreground.rgba|ConvertTo-Json -Compress) -ne $artwork){throw 'Leaving Quick Mask changed artwork colors'}
@@ -297,7 +302,7 @@ try {
     Wait-Until {$layer=@((Model).state.layers|Where-Object {$_.selection_layer -and $before -notcontains $_.id})[0];$created.id=$layer.id;$null -ne $layer} 'New Selection Layer did not add a row'
     $id=$created.id
     Wait-Until {(Find ('layer-'+$id+'-rename')).Current.HasKeyboardFocus} 'New Selection Layer did not focus inline rename'
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     [CapyRowPointer]::Key([uint16]0x0D)
     Wait-Until {!(Find ('layer-'+$id+'-rename'))} 'Rename did not finish'
     Start-Sleep -Milliseconds 400
@@ -309,17 +314,17 @@ try {
     if($load.Current.Name -ne $tooltip){throw 'Load button does not use the shared tooltip'}
     $load.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Wait-Until {$current=Model;$current -and $current.state.layer_tools.has_selection -and !$current.state.layers.Where({$_.id -eq $id})[0].editing} 'Load did not load coverage and return to artwork'
-    Capture 'selection-layer'
+    Capture 'selection-layer' -Composed
     [CapyRowPointer]::Verify();[CapyRowPointer]::Dispose()
 
-    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
+    & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -WindowHandle $drawingWindow.ToInt64() -Action Close -DiscardUnsaved
     if(!$review.WaitForExit(8000)){throw 'Selection review did not close'}
     if((Get-Item -LiteralPath $stderr).Length){throw 'Selection review wrote to stderr'}
     @{tools=@($choices|ForEach-Object {$_.label});selection_layer=$id}|ConvertTo-Json -Depth 4|Set-Content (Join-Path $run 'result.json')
     Write-Output "Selection acceptance passed: $run"
 }catch{
     try{Capture 'failure'}catch{}
-    try{@{tools=(Tools);drawer=(Model).state.customization.drawer;subtools=(Model).state.tool_set.subtools}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'failure-state.json')}catch{}
+    try{@{tools=(Tools);drawer=(Model).state.customization.drawer;subtools=(Model).state.tool_set.subtools;menus=@(Menu-Items|ForEach-Object {Control-Trace $_})}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run 'failure-state.json')}catch{}
     Set-Content -LiteralPath (Join-Path $run 'failure.txt') -Value ($_|Out-String)
     throw
 }finally{

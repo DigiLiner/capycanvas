@@ -791,6 +791,10 @@ the focused header journeys also check placement cancellation and keyboard input
   not prove that a new stroke has committed.
   Shared worker notifications can arrive before the document operation finishes;
   wait for its completion state.
+- **Prepare the selected tool.** Invoking an already selected grouped tool opens
+  its drawer. Skip that invocation when restoring the current variant, then
+  check the selection mode and closed drawer before a canvas gesture. The first
+  outside contact dismisses an open drawer.
 - **Capture composed pixels.** GPU pixel assertions use the owned window's
   screen rectangle on the private desktop. `PrintWindow` can return an earlier
   SwapChainPanel image. Wait for the expected visible change before comparing
@@ -969,14 +973,15 @@ $env:CAPY_BITMAP_FIXTURE = Join-Path (Resolve-Path $run).Path 'input.json'
 Launch `artifacts/windows/BitmapReview/CapyCanvas.exe` visibly on the fixture
 runner's private test desktop with that environment. The input path must be
 absolute; the review creates its isolated context beside it. Require exit code
-zero and `bitmap-upload-fixture-result.json` with `passed: 12`. Keep the
+zero and `bitmap-upload-fixture-result.json` with `passed: 13`. Keep the
 90-second outer, 10-second callback and five-second close bounds.
 
 The review checks real asynchronous uploads and rendered pixels, RGBA/BGRA
 encoding, two-buffer reuse, failed-copy retirement, latest-request coalescing,
 callback reentrancy and exceptions, context cancellation during upload,
 closed-owner rejection, and new-document thumbnail requests after cancelling
-an old document's active upload. It checks loaded, connected state before waiting for a
+an old document's active upload. A retained ImageBrush also checks exact white-to-blue
+Paper pixels at 32 × 32. It checks loaded, connected state before waiting for a
 visible rendering event. Its 3 × 2 source-pixel oracle uses Image dimensions
 divided by `XamlRoot.RasterizationScale` and a natural-size `RenderTargetBitmap`
 capture, preserving exact physical pixels at the actual display scale.

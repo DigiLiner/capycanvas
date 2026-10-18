@@ -1305,25 +1305,39 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !host.startup.complete { frame_step(&mut host, &clock, deadline); }
         let fill = layer_ui::occurrence_token(*host.session.engine().document().scene().constant_backdrop().first().unwrap());
+        assert_eq!(Some(fill), host.session.engine().document().bottom_paper().map(layer_ui::occurrence_token));
+        let mut images = Vec::new();
+        loop {
+            let (accepted, completed) = host.layer_thumbnails([(1, fill)]).unwrap();
+            images.extend(completed);
+            if accepted.contains(&1) { break; }
+            frame_step(&mut host, &clock, deadline);
+        }
         for action in [
             json!({"type":"select_layer","id":fill}),
-            json!({"type":"effect","action":{"op":"set","layer":fill,"key":"color","value":{"kind":"color","value":{"space":"Srgb","rgba":[1.,0.,0.,1.]}}}}),
+            json!({"type":"effect","action":{"op":"set","layer":fill,"key":"color","value":{"kind":"color","value":{"space":"Srgb","rgba":[220. / 255.,236. / 255.,251. / 255.,1.]}}}}),
         ] { host.dispatch(serde_json::from_value(action).unwrap()).unwrap(); }
         frame_step(&mut host, &clock, deadline);
         assert!(host.session.background_readback_idle());
-        loop {
-            let (_, images) = host.layer_thumbnails([(1, fill)]).unwrap();
-            if let Some(image) = images.iter().find(|image| image.request_id == 1) {
-                assert!(image.bytes.as_chunks::<4>().0.iter().all(|pixel| *pixel == [255, 0, 0, 255]));
-                break;
-            }
-            frame_step(&mut host, &clock, deadline);
+        let mut accepted = false;
+        while !accepted || images.len() < 2 {
+            let requests = (!accepted).then_some((2, fill));
+            let (submitted, completed) = host.layer_thumbnails(requests).unwrap();
+            accepted |= submitted.contains(&2);
+            images.extend(completed);
+            if !accepted || images.len() < 2 { frame_step(&mut host, &clock, deadline); }
+        }
+        images.sort_by_key(|image| image.request_id);
+        assert_eq!(images.iter().map(|image| image.request_id).collect::<Vec<_>>(), [1, 2]);
+        for (image, expected) in images.iter().zip([[255; 4], [220, 236, 251, 255]]) {
+            assert_eq!((image.width, image.height, image.bytes.len()), (32, 32, 4096));
+            assert!(image.bytes.as_chunks::<4>().0.iter().all(|pixel| *pixel == expected), "request {}", image.request_id);
         }
         host.dispatch(serde_json::from_value(json!({"type":"layer","action":{"op":"add_mask","id":fill,"replace":false}})).unwrap()).unwrap();
         let mask = host.session.state().layers.iter().find(|layer| layer.id == fill).unwrap().mask_id.unwrap();
         loop {
-            let (_, images) = host.layer_thumbnails([(2, mask)]).unwrap();
-            if let Some(image) = images.iter().find(|image| image.request_id == 2) {
+            let (_, images) = host.layer_thumbnails([(3, mask)]).unwrap();
+            if let Some(image) = images.iter().find(|image| image.request_id == 3) {
                 assert!(image.bytes.as_chunks::<4>().0.iter().all(|pixel| *pixel == [255; 4]));
                 break;
             }
