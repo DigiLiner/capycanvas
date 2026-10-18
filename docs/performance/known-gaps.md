@@ -88,3 +88,18 @@
   measurements on the three reference canvases. Existing object and placed-photo
   results in the tier tables describe earlier builds. Desktop browser callbacks
   and renderer timings do not establish presented-frame rates or qualify a tier.
+- **Vector layers have no reference-tablet measurements.** The headless renderer
+  benchmarks `scene::vectors::tests::crowded_vector_layer_drawing_frames` and
+  `crowded_vector_layer_edit_frames` (`VECTOR_ZOOM` sets the zoom) ran only on the
+  Huion KP1202, whose Mali-G57 MC2 matches the mid tier's GPU but is not a
+  reference device. On its 4000 × 3000 canvas with 50,000 hatching paths
+  (2026-10-17):
+  - Drawing frames p50 3.7–3.9 ms at 0.4× and 1.0×, independent of crowd size.
+  - Drag frames, including a 1920 × 1200 present, p50 0.7–4.9 ms for 1 to 5,000
+    moving paths; preparing a drag of 100–5,000 scattered paths takes
+    125–230 ms.
+  - Committing a stroke takes 11–37 ms. Undoing one takes 21.5–46 ms, and
+    committing a move of 100 scattered paths 87–165 ms. Each repaints the
+    crowded tiles it changes.
+  - Tier canvases, presented-frame rates and the session cost on device remain
+    unmeasured.
