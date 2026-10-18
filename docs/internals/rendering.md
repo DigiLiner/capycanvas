@@ -276,7 +276,8 @@ and changes to input interpretation discard that unfinished gather.
 Before a cold live object can interrupt composition, the renderer copies the
 accepted viewport inputs on the GPU and retains their geometry. Physical copies
 are unique per source texture and mip, while logical sampling views remain
-available. Source uploads, paint and private sampling can submit while later
+available. Display reduction keeps its immutable sampler with the retained
+uniform-record binding; changing page bindings contain only texture views. Source uploads, paint and private sampling can submit while later
 filter windows await prepared image tiles. The viewport uses those retained
 inputs until a complete composition publishes; its evaluated object revision advances with that publication. Completed
 internal regions remain valid through submitted retries and release copied

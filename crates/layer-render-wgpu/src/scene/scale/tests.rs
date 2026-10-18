@@ -2004,3 +2004,40 @@ fn projective_compute_display_matches_analytic_bilinear_pigment_and_composition(
         assert!(maximum.into_iter().all(|error|error<1./255.),"reduced U8 display is within one channel code of analytic bilinear pigment: {maximum:?}");
     }
 }
+
+#[test]
+fn reduction_samplers_live_with_records_not_page_views() {
+    let ownership = |source: &str| {
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module).unwrap();
+        let mut records = BTreeSet::new();
+        let mut images = BTreeSet::new();
+        let mut samplers = Vec::new();
+        for (_, global) in module.global_variables.iter() {
+            let Some(binding) = global.binding.as_ref() else { continue; };
+            if global.space == naga::AddressSpace::Uniform { records.insert(binding.group); }
+            match module.types[global.ty].inner {
+                naga::TypeInner::Image { .. } => { images.insert(binding.group); }
+                naga::TypeInner::Sampler { .. } => samplers.push(binding.clone()),
+                _ => (),
+            }
+        }
+        assert!(!records.is_empty() && !images.is_empty() && !samplers.is_empty());
+        let owned = samplers.iter().all(|binding| records.contains(&binding.group) && !images.contains(&binding.group));
+        (owned, module, samplers)
+    };
+    for filterable in [true, false] {
+        let source = shader_source(Default::default(), crate::pipeline_device::float_sampling_wgsl(filterable));
+        let (owned, module, samplers) = ownership(&source);
+        assert!(owned, "page input bindings must not allocate sampler-index storage");
+        let page_group = module.global_variables.iter().find_map(|(_, global)|
+            matches!(module.types[global.ty].inner, naga::TypeInner::Image { .. }).then(|| global.binding.as_ref().unwrap().group)).unwrap();
+        let last = module.global_variables.iter().filter_map(|(_, global)| global.binding.as_ref())
+            .filter(|binding| binding.group == page_group).map(|binding| binding.binding).max().unwrap() + 1;
+        let sampler = &samplers[0];
+        let previous = source.replace(&format!("@group({}) @binding({}) var area_sampler", sampler.group, sampler.binding),
+            &format!("@group({page_group}) @binding({last}) var area_sampler"));
+        assert!(!ownership(&previous).0, "the previous per-page sampler ownership must be rejected");
+    }
+}

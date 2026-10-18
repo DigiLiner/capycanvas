@@ -17,7 +17,7 @@ struct Region {
 @group(1) @binding(2) var output: texture_storage_2d<rgba32float, write>;
 @group(1) @binding(3) var source_preview: texture_2d<f32>;
 @group(1) @binding(4) var base_preview: texture_2d<f32>;
-@group(1) @binding(5) var area_sampler: sampler;
+@group(0) @binding(1) var area_sampler: sampler;
 
 @compute @workgroup_size(8, 8)
 fn reduce(@builtin(global_invocation_id) id: vec3<u32>) {

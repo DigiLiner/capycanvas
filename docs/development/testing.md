@@ -22,6 +22,9 @@ declares them. This catches the dry-brush recipe mismatch; browser compiler
 failures still need checks in the actual browser. Native Metal and Chrome use
 different shader compilers from Safari.
 
+Renderer `reduction_samplers_live_with_records_not_page_views` validates the
+actual composed display shaders and rejects per-page sampler ownership.
+
 The renderer's `first_watercolor_frame_batches_page_initialization` bounds the
 passes needed for the first contact across four tiles.
 `page_zero_copies_reclear_both_formats_and_reduced_extents` checks exact zero

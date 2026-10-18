@@ -92,6 +92,9 @@ pub(crate) struct Pipelines {
     pub reduce_pair: Deferred<wgpu::ComputePipeline>,
     pub compose: Deferred<wgpu::ComputePipeline>,
 }
+fn shader_source(space: layer_core::color::RgbSpace, sampling: &str) -> std::borrow::Cow<'static, str> {
+    compose_wgsl(&[&working_color::source(space), sampling, include_str!("../blend_codes.wgsl"), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")])
+}
 impl Pipelines {
     pub fn new(device: &PipelineDevice) -> Self {
         let records_layout = crate::bindings::layout(
@@ -103,7 +106,7 @@ impl Pipelines {
                 wgpu::BufferBindingType::Uniform,
                 true,
                 NonZeroU64::new(80),
-            )],
+            ), crate::bindings::sampler(1, wgpu::ShaderStages::COMPUTE, wgpu::SamplerBindingType::Filtering)],
         );
         let inputs = crate::bindings::layout(
             device,
@@ -119,7 +122,6 @@ impl Pipelines {
                 ),
                 crate::bindings::float_texture(3, wgpu::ShaderStages::COMPUTE, device),
                 crate::bindings::float_texture(4, wgpu::ShaderStages::COMPUTE, device),
-                crate::bindings::sampler(5, wgpu::ShaderStages::COMPUTE, wgpu::SamplerBindingType::Filtering),
             ],
         );
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -130,7 +132,7 @@ impl Pipelines {
         let shader = Deferred::wgsl(
             device,
             "display resolution composition",
-            compose_wgsl(&[&working_color::shader(device), device.float_sampling_wgsl(), include_str!("../blend_codes.wgsl"), include_str!("../blend_modes.wgsl"), include_str!("scale.wgsl"), include_str!("scale/compose.wgsl")]),
+            shader_source(device.working_space(), device.float_sampling_wgsl()),
         );
         Self {
             records: records_layout,
@@ -208,7 +210,8 @@ impl Commands {
     }
     pub(super) fn record_binding(r: &WgpuRasterizer, records: &wgpu::Buffer) -> wgpu::BindGroup {
         crate::bindings::group(&r.device, "display composition regions", &r.scene_pipelines.scale.records,
-            [wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: records, offset: 0, size: NonZeroU64::new(80) })])
+            [wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: records, offset: 0, size: NonZeroU64::new(80) }),
+                wgpu::BindingResource::Sampler(&r.scene_pipelines.resample.sampler)])
     }
     pub fn begin(&mut self) { self.cursor = 0; self.jobs.clear(); }
     pub fn storage_bytes(&self) -> u64 { self.records.size() }
@@ -231,7 +234,6 @@ impl Commands {
                 wgpu::BindingResource::TextureView(output),
                 wgpu::BindingResource::TextureView(sources[2]),
                 wgpu::BindingResource::TextureView(sources[3]),
-                wgpu::BindingResource::Sampler(&r.scene_pipelines.resample.sampler),
             ],
         )
     }
