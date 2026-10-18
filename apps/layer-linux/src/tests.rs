@@ -13379,48 +13379,42 @@ fn native_named_workspace_manager_library_and_history() {
 }
 
 #[test]
-#[ignore = "isolated Wayland and private storage"]
+#[ignore = "requires native workspace storage and a native GTK/Vulkan display"]
 fn native_workspace_unavailable_close_recovery() {
-    let blocked = crate::storage::roots().unwrap().workspaces();
-    std::fs::create_dir_all(blocked.parent().unwrap()).unwrap();
-    std::fs::write(&blocked, b"not a folder").unwrap();
-    let original = std::fs::read(&blocked).unwrap();
+    let database = crate::storage::workspaces().expect("run with --native-storage").join("workspaces.sqlite3");
     let app = native_test_app("art.capycanvas.WorkspaceUnavailable");
     gtk::Settings::default()
         .unwrap()
         .set_gtk_enable_animations(false);
-    let w = Workspace::new_localized(&app, Localizer::shared(UiLanguage::Japanese));
+    let w = Workspace::new(&app);
+    apply_fixture_theme(&w);
     w.window.present();
-    until(
-        || !w.workspaces.busy() && w.workspaces.view().error.is_some(),
-        "startup error was not presented",
-    );
-    assert!(!w.workspaces.ready());
-    assert_eq!(w.localization().language(), UiLanguage::Japanese);
+    wait_workspaces(&w);
     let copy = layer_ui::bootstrap_view(&w.localization());
-    let diameter = state(&w).brush.diameter;
     w.dispatch(UiAction::SetBrushSize { value: 83. });
-    assert_eq!(state(&w).brush.diameter, diameter);
+    let other = rusqlite::Connection::open(&database).unwrap();
+    other.execute_batch("BEGIN EXCLUSIVE").unwrap();
+    let prompt = || canvas_bar_tests::until_some(
+        || find_named(w.window.upcast_ref(), "workspace-close-recovery").filter(|d| d.is_mapped()),
+        "a failed close save offers recovery",
+    );
     w.window.close();
-    pump(100);
-    let dialog = find_named(w.window.upcast_ref(), "workspace-close-recovery").unwrap();
+    let dialog = prompt();
     let alert = dialog.clone().downcast::<adw::AlertDialog>().unwrap();
     assert_eq!(alert.heading().as_deref(), Some(copy.recovery.workspace_not_saved.as_ref()));
     assert_eq!(alert.body().as_str(), copy.recovery.close_save_failed.as_ref());
     find_button(&dialog, &copy.common.keep_open).unwrap().emit_clicked();
     pump(100);
     assert!(w.window.is_visible());
-    assert_eq!(state(&w).brush.diameter, diameter);
+    assert_eq!(state(&w).brush.diameter, 83.);
     assert!(!state(&w).document_file.close_ready);
     w.window.close();
-    pump(100);
-    let dialog = find_named(w.window.upcast_ref(), "workspace-close-recovery").unwrap();
+    let dialog = prompt();
     find_button(&dialog, &copy.recovery.close_without_saving)
         .unwrap()
         .emit_clicked();
-    pump(200);
-    assert!(!w.window.is_visible());
-    assert_eq!(std::fs::read(&blocked).unwrap(), original);
+    until(|| !w.window.is_visible(), "Close Without Saving closes the window");
+    other.execute_batch("ROLLBACK").unwrap();
 }
 
 #[test]

@@ -530,10 +530,11 @@ fn native_embedded_proof_replacement_preserves_local_copy_and_saves_one_profile(
     // A failed local preservation must leave the previous saved recipe intact.
     std::fs::create_dir_all(library.parent().unwrap()).unwrap();
     std::fs::write(&library,b"not a directory").unwrap();
+    let reason=std::fs::read_dir(&library).unwrap_err().to_string();
     profile_action(&w,"proof","builtin-0");
     let deadline=Instant::now()+Duration::from_secs(40);
     loop {pump(20);let issue=named::<gtk::Label>(w.proof_panel.root.upcast_ref(),"proof-setup-error");
-        if issue.is_visible(){assert!(issue.text().starts_with("Could not save the previous proof profile"));break;}
+        if issue.is_visible(){assert_eq!(issue.text(),reason,"the library's storage error is shown");break;}
         assert!(Instant::now()<deadline,"profile preservation error");
     }
     assert_eq!(snapshot(&w),original);std::fs::remove_file(&library).unwrap();
@@ -556,10 +557,16 @@ fn native_embedded_proof_replacement_preserves_local_copy_and_saves_one_profile(
     file.response(gtk::ResponseType::Accept);
     finish(&w);
     let archive = std::fs::read(&master).unwrap();
-    assert!(!archive.windows(a.len()).any(|bytes| bytes == a));
+    let mut package = std::io::Cursor::new(archive.as_slice());
+    let directory = layer_core::package::archive::Directory::read(&mut package, 262_144, 64 << 20).unwrap();
+    let manifest = directory.read_member(&mut package, directory.member("manifest.json").unwrap(), 64 << 20).unwrap();
+    let Ok(layer_core::package::manifest::ManifestRead::Known(manifest)) = layer_core::package::manifest::Manifest::parse(&manifest, &directory, Default::default()) else {
+        panic!("the saved package has a readable manifest");
+    };
     assert_eq!(
-        archive.windows(b.len()).filter(|bytes| *bytes == b).count(),
-        1
+        manifest.resources.values().filter(|resource| resource.value["type"] == "capy.icc/1").count(),
+        1,
+        "only the active proof profile travels"
     );
     let reopened = open_native_document(std::io::Cursor::new(archive.as_slice()));
     assert_eq!(reopened.output().proof.as_ref().unwrap().profile, b_profile);

@@ -537,10 +537,6 @@ are your task, and remove an entry when you fix it.
   `native_workspace_motion_input`, and `native_workspace_switcher_input`
   (intermittent). `native_workspace_resize_input` presents below its rate
   threshold under the runner's `color-mgmt`.
-- GTK `native_embedded_proof_replacement_preserves_local_copy_and_saves_one_profile`
-  expects error text the app no longer shows, and
-  `native_workspace_unavailable_close_recovery` expects a startup error where
-  unavailable storage now starts in memory.
 - Android: 7 of 15 `AndroidTitleBarTest` cases;
   `detachedPanelsKeepBodiesAndWiderResizeTargets`;
   `AndroidInteractionTest#cachedPanelsMatchDirectDrawing` (light docked panels);
@@ -622,7 +618,3 @@ are your task, and remove an entry when you fix it.
   `testSettingsTextSelectionShortcut`: XCTest keys don't reach UIKit key commands.
 - Tablet Chrome `--workspace-manager` cannot find its new-workspace name input
   on MovinkPad 11.
-- GTK `native_workspace_unavailable_close_recovery` waits for a startup error
-  that never comes: a file at the workspaces path no longer blocks storage, so
-  the workspace opens and the close recovery prompt is not reached. Reproduced
-  with the unmodified test body on `fb37c5d3d`.
