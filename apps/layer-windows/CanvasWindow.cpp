@@ -1294,7 +1294,7 @@ void CanvasWindow::ApplyDialogs() {
     workspaceDialogs->Apply(lastModel,!workspaceDialogs->IsOpen()&&ModalOpen());
     for(auto const& dialog:{&canvasSize,&imageSize})(*dialog)->Apply(lastModel,!(*dialog)->IsOpen()&&ModalOpen());
     documents->Apply(lastModel,!documents->IsOpen()&&ModalOpen());
-    workspaceStorage->Apply(lastModel,!workspaceStorage->IsOpen()&&ModalOpen());
+    workspaceStorage->Apply(lastModel,bootstrap,!workspaceStorage->IsOpen()&&ModalOpen());
     workspaceManager->Apply(lastModel,!workspaceManager->IsOpen()&&ModalOpen());
     UpdatePopup();
 }

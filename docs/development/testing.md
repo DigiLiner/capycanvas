@@ -640,3 +640,7 @@ are your task, and remove an entry when you fix it.
 - Web `--layers` fails "one Undo restores the effect owner" (`1 !== 4`) in
   `checkLayerRelationships` on unmodified `d0b6c3bd2`, after the detaching drop
   itself passes.
+- GTK `native_workspace_unavailable_close_recovery` waits for a startup error
+  that never comes: a file at the workspaces path no longer blocks storage, so
+  the workspace opens and the close recovery prompt is not reached. Reproduced
+  with the unmodified test body on `fb37c5d3d`.

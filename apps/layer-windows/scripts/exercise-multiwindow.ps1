@@ -241,12 +241,12 @@ try {
         Wait-Until {(Model $second).state.document_file.modified} 'Other window could not redo while its peer awaited preference recovery'
         Use-Window $first
         $attempt=(Model $first).windows_settings_close.attempt
-        Invoke 'Retry' -Name -Within (Control 'preferences-close-error')
+        Invoke 'Retry Storage' -Name -Within (Control 'preferences-close-error')
         Wait-Until {(Model $first).windows_settings_close.attempt -gt $attempt} 'Failed preference retry did not start'
         Wait-PreferenceRecovery
         if((Get-FileHash -LiteralPath $settingsFile).Hash -ne $savedHash){throw 'Failed preference retry changed saved bytes'}
         $lockedPreferences.Dispose();$lockedPreferences=$null
-        Invoke 'Retry' -Name -Within (Control 'preferences-close-error')
+        Invoke 'Retry Storage' -Name -Within (Control 'preferences-close-error')
     }
     Wait-Until {![CapyWindowTest]::IsWindow([IntPtr]$first.hwnd) -and @(Windows).Count -eq 1} 'Initial window did not close independently'
     if($FailPreferences -and ((Saved-Preferences).dark_base -ne $expectedDark -or (Saved-Preferences).light_base -ne '#dcecfb')){throw 'Closing retry did not preserve both windows preference edits'}

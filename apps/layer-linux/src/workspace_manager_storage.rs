@@ -9,12 +9,13 @@ impl NativeWorkspaces {
             #[weak]
             w,
             async move {
-                let prompt = adw::AlertDialog::builder().heading("Workspace Changes Aren’t Saved")
-                    .body("Your latest layout changes couldn’t be saved. Keep this window open and try saving again.").build();
+                let copy = layer_ui::bootstrap_view(&w.localization());
+                let prompt = adw::AlertDialog::builder().heading(copy.recovery.workspace_not_saved.as_ref())
+                    .body(copy.recovery.close_save_failed.as_ref()).build();
                 prompt.set_widget_name("workspace-close-recovery");
                 prompt.add_responses(&[
-                    ("cancel", "Keep Open"),
-                    ("discard", "Discard Unsaved Changes"),
+                    ("cancel", copy.common.keep_open.as_ref()),
+                    ("discard", copy.recovery.close_without_saving.as_ref()),
                 ]);
                 prompt.set_close_response("cancel");
                 prompt.set_default_response(Some("cancel"));

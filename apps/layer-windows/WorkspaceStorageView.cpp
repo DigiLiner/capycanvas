@@ -12,7 +12,7 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
     Dispatch send;
     std::function<void()> changed;
     Window window{nullptr};
-    J model;
+    J model,copy;
     Border root;
     TextBlock message;
     StackPanel buttons;
@@ -25,7 +25,8 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
     void dispatch(hstring operation) { send(to_string(O({{L"operation",S(operation)}}).Stringify())); }
     static J input(J const& value) { return O({{L"operation",S(L"input")},{L"input",value}}); }
     static J input(hstring const& type) { return input(O({{L"type",S(type)}})); }
-    void failure() { send(to_string(O({{L"operation",S(L"failure")},{L"error",S(L"Windows could not show the workspace dialog. Try again.")}}).Stringify())); }
+    hstring text(wchar_t const* key)const{return str(object(copy,L"recovery"),key);}
+    void failure() { send(to_string(O({{L"operation",S(L"failure")},{L"error",S(text(L"workspace_dialog_failed"))}}).Stringify())); }
     void init() {
         root.HorizontalAlignment(HorizontalAlignment::Center);root.VerticalAlignment(VerticalAlignment::Bottom);
         root.Margin({16,16,16,64});root.Padding({12,12,12,12});root.CornerRadius({8,8,8,8});
@@ -34,7 +35,6 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
         StackPanel content;content.Spacing(8);
         message.TextWrapping(TextWrapping::Wrap);content.Children().Append(message);
         buttons.Orientation(Orientation::Horizontal);buttons.Spacing(8);
-        retry.Content(box_value(L"Retry"));saveNew.Content(box_value(L"Save as new workspace…"));backup.Content(box_value(L"Export backup…"));
         AutomationProperties::SetAutomationId(retry,L"workspace-storage-retry");
         AutomationProperties::SetAutomationId(saveNew,L"workspace-storage-save-new");
         AutomationProperties::SetAutomationId(backup,L"workspace-storage-backup");
@@ -65,14 +65,11 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
             StackPanel body;body.Spacing(12);body.MaxWidth(460);
             TextBlock explanation;explanation.TextWrapping(TextWrapping::Wrap);
             bool ready=flag(object(model,L"windows_workspace"),L"ready");
-            dialog.Title(box_value(preferences?L"Preferences could not be saved":ready?L"Workspace changes could not be saved":L"Workspace could not be opened"));
-            dialog.PrimaryButtonText(L"Retry");
-            dialog.SecondaryButtonText(L"Close without saving");
-            dialog.CloseButtonText(L"Keep open");
-            hstring recovery=preferences?
-                L"Keep this window open to retain the current preferences and try again. Closing without saving leaves the last saved preferences unchanged.":ready?
-                L"Keep this window open to save a new workspace or export a backup. Closing without saving discards unsaved layout and tool changes.":
-                L"Keep this window open to retry opening the workspace or export a database backup. Closing leaves the original workspace database unchanged.";
+            dialog.Title(box_value(text(preferences?L"preferences_not_saved":ready?L"workspace_not_saved":L"workspace_not_opened")));
+            dialog.PrimaryButtonText(text(L"retry"));
+            dialog.SecondaryButtonText(text(L"close_without_saving"));
+            dialog.CloseButtonText(str(object(copy,L"common"),L"keep_open"));
+            hstring recovery=text(preferences?L"preferences_not_saved_help":ready?L"workspace_not_saved_help":L"workspace_not_opened_help");
             explanation.Text(str(object(model,preferences?L"windows_settings_close":L"windows_workspace"),L"error")+L"\n\n"+recovery);
             body.Children().Append(explanation);
             AutomationProperties::SetAutomationId(dialog,preferences?L"preferences-close-error":L"workspace-close-error");
@@ -95,9 +92,9 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
             bool workspace=flag(object(model,L"windows_workspace"),L"ready");
             hstring extension=workspace?L".capyworkspace":L".sqlite3";
             Pickers::FileSavePicker save(window.AppWindow().Id());
-            save.CommitButtonText(L"Export backup");save.DefaultFileExtension(extension);
-            save.SuggestedFileName(workspace?L"Workspace backup":L"Original workspace database");
-            save.FileTypeChoices().Insert(workspace?L"Workspace Backup":L"SQLite database",single_threaded_vector<hstring>({extension}));
+            save.CommitButtonText(str(object(copy,L"common"),L"save"));save.DefaultFileExtension(extension);
+            save.SuggestedFileName(text(workspace?L"workspace_backup":L"workspace_database"));
+            save.FileTypeChoices().Insert(text(workspace?L"workspace_backup":L"database_type"),single_threaded_vector<hstring>({extension}));
             picker=save.PickSaveFileAsync();
             auto selected=co_await picker;
             if(selected&&!stopping)send(to_string(O({{L"operation",S(workspace?L"export_backup":L"backup_database")},{L"path",S(selected.Path())}}).Stringify()));
@@ -105,16 +102,17 @@ struct WorkspaceStorageView::Impl : std::enable_shared_from_this<Impl> {
         } catch(...) {if(!stopping)failure();}
         picker=nullptr;showing=false;changed();
     }
-    void apply(J const& snapshot,bool blocked) {
-        model=snapshot;
+    void apply(J const& snapshot,J const& bootstrap,bool blocked) {
+        model=snapshot;copy=bootstrap;
+        retry.Content(box_value(text(L"retry")));saveNew.Content(box_value(text(L"save_as_new_workspace")));backup.Content(box_value(text(L"export_backup")));
         auto storage=object(model,L"windows_workspace");
         if(!storage.Size())return;
         auto error=str(storage,L"error"),notice=str(storage,L"notice");
-        hstring text=error;
-        if(!notice.empty())text=text.empty()?notice:text+L"\n"+notice;
-        if(text.empty()&&!flag(storage,L"ready"))text=L"Opening workspace…";
-        if(text.empty()&&flag(storage,L"closing"))text=L"Saving workspace…";
-        message.Text(text);root.Visibility(text.empty()?Visibility::Collapsed:Visibility::Visible);
+        hstring status=error;
+        if(!notice.empty())status=status.empty()?notice:status+L"\n"+notice;
+        if(status.empty()&&!flag(storage,L"ready"))status=text(L"opening_workspace");
+        if(status.empty()&&flag(storage,L"closing"))status=text(L"saving_workspace");
+        message.Text(status);root.Visibility(status.empty()?Visibility::Collapsed:Visibility::Visible);
         auto preferences=object(model,L"windows_settings_close");
         if(flag(preferences,L"requested")&&!flag(preferences,L"ready")){
             root.Visibility(Visibility::Collapsed);
@@ -142,7 +140,7 @@ WorkspaceStorageView::WorkspaceStorageView(Dispatch send,Window window,std::func
 }
 WorkspaceStorageView::~WorkspaceStorageView()=default;
 FrameworkElement WorkspaceStorageView::Root()const{return impl->root;}
-void WorkspaceStorageView::Apply(Json const& snapshot,bool blocked){impl->apply(snapshot,blocked);}
+void WorkspaceStorageView::Apply(Json const& snapshot,Json const& bootstrap,bool blocked){impl->apply(snapshot,bootstrap,blocked);}
 bool WorkspaceStorageView::IsOpen()const{return impl->showing;}
 void WorkspaceStorageView::Hide(){
     impl->stopping=true;

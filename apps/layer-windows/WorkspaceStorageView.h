@@ -10,7 +10,7 @@ public:
     WorkspaceStorageView(Dispatch send,winrt::Microsoft::UI::Xaml::Window window,std::function<void()> changed);
     ~WorkspaceStorageView();
     winrt::Microsoft::UI::Xaml::FrameworkElement Root()const;
-    void Apply(Json const& snapshot,bool blocked);
+    void Apply(Json const& snapshot,Json const& bootstrap,bool blocked);
     bool IsOpen()const;
     void Hide();
 private:

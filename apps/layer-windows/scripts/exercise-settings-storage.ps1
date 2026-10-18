@@ -170,7 +170,7 @@ try {
     $workspaceId=(Model).windows_workspace.id
     Request-CloseError
     & (Join-Path $PSScriptRoot 'inspect-window.ps1') -ProcessId $review.Id -Output (Join-Path $run 'preferences-close-error.png') -ClientOnly *> (Join-Path $run 'preferences-close-error.json')
-    Recovery-Choice 'Keep open'
+    Recovery-Choice 'Keep Open'
     Wait-Until {!(Model).windows_settings_close.requested -and !(Model).state.document_file.close_ready -and !(Close-Error)} 'Keep open did not cancel preferences close'
     if((Model).state.settings.dark_base -ne '#304050' -or (Model).windows_workspace.id -ne $workspaceId -or (Model).windows_workspace.closing){throw 'Keep open lost preferences or released the workspace'}
     Wait-Until {
@@ -185,12 +185,12 @@ try {
     Wait-Until {!(Control 'Undo').Current.IsEnabled} 'The controlled stroke could not be undone after a save failure'
     Request-CloseError
     $attempt=(Model).windows_settings_close.attempt
-    Recovery-Choice 'Retry'
+    Recovery-Choice 'Retry Storage'
     Wait-Until {(Model).windows_settings_close.attempt -gt $attempt} 'Retry did not start a new save attempt'
     Wait-CloseError
     if((Saved).dark_base -ne '#203040'){throw 'Failed close retry changed the saved file'}
     $locked.Dispose();$locked=$null
-    Recovery-Choice 'Retry'
+    Recovery-Choice 'Retry Storage'
     Check-Exit
     if((Saved).dark_base -ne '#304050'){throw 'Close retry did not save the retained preferences'}
     Start-App
@@ -213,7 +213,7 @@ try {
     Close-Preferences
     Request-CloseError
     if((Model).state.document_file.modified){throw 'Preference discard fixture has unexpected drawing changes'}
-    Recovery-Choice 'Close without saving'
+    Recovery-Choice 'Close Without Saving'
     Check-Exit
     $locked.Dispose();$locked=$null
     if((Get-FileHash -LiteralPath $settingsFile).Hash -ne $savedHash){throw 'Explicit discard changed the last saved preferences'}

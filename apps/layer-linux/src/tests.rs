@@ -13390,20 +13390,25 @@ fn native_workspace_unavailable_close_recovery() {
     gtk::Settings::default()
         .unwrap()
         .set_gtk_enable_animations(false);
-    let w = Workspace::new(&app);
+    let w = Workspace::new_localized(&app, Localizer::shared(UiLanguage::Japanese));
     w.window.present();
     until(
         || !w.workspaces.busy() && w.workspaces.view().error.is_some(),
         "startup error was not presented",
     );
     assert!(!w.workspaces.ready());
+    assert_eq!(w.localization().language(), UiLanguage::Japanese);
+    let copy = layer_ui::bootstrap_view(&w.localization());
     let diameter = state(&w).brush.diameter;
     w.dispatch(UiAction::SetBrushSize { value: 83. });
     assert_eq!(state(&w).brush.diameter, diameter);
     w.window.close();
     pump(100);
     let dialog = find_named(w.window.upcast_ref(), "workspace-close-recovery").unwrap();
-    find_button(&dialog, "Keep Open").unwrap().emit_clicked();
+    let alert = dialog.clone().downcast::<adw::AlertDialog>().unwrap();
+    assert_eq!(alert.heading().as_deref(), Some(copy.recovery.workspace_not_saved.as_ref()));
+    assert_eq!(alert.body().as_str(), copy.recovery.close_save_failed.as_ref());
+    find_button(&dialog, &copy.common.keep_open).unwrap().emit_clicked();
     pump(100);
     assert!(w.window.is_visible());
     assert_eq!(state(&w).brush.diameter, diameter);
@@ -13411,12 +13416,12 @@ fn native_workspace_unavailable_close_recovery() {
     w.window.close();
     pump(100);
     let dialog = find_named(w.window.upcast_ref(), "workspace-close-recovery").unwrap();
-    find_button(&dialog, "Discard Unsaved Changes")
+    find_button(&dialog, &copy.recovery.close_without_saving)
         .unwrap()
         .emit_clicked();
     pump(200);
     assert!(!w.window.is_visible());
-    assert_eq!(std::fs::read(blocked).unwrap(), original);
+    assert_eq!(std::fs::read(&blocked).unwrap(), original);
 }
 
 #[test]

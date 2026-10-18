@@ -491,6 +491,21 @@ copy_struct! { RecoveryCopy {
     fullscreen_failed: NATIVE_DIALOG_FULLSCREEN_FAILED,
     link_unavailable: NATIVE_DIALOG_LINK_UNAVAILABLE,
     drop_drawings: NATIVE_DIALOG_DROP_DRAWINGS,
+    workspace_not_saved: NATIVE_DIALOG_WORKSPACE_NOT_SAVED,
+    workspace_not_opened: NATIVE_DIALOG_WORKSPACE_NOT_OPENED,
+    preferences_not_saved: NATIVE_DIALOG_PREFERENCES_NOT_SAVED,
+    close_without_saving: NATIVE_DIALOG_CLOSE_WITHOUT_SAVING,
+    workspace_not_saved_help: NATIVE_DIALOG_WORKSPACE_NOT_SAVED_HELP,
+    workspace_not_opened_help: NATIVE_DIALOG_WORKSPACE_NOT_OPENED_HELP,
+    preferences_not_saved_help: NATIVE_DIALOG_PREFERENCES_NOT_SAVED_HELP,
+    save_as_new_workspace: WORKSPACE_ACTION_SAVE_AS_NEW_WORKSPACE,
+    export_backup: NATIVE_DIALOG_EXPORT_BACKUP,
+    workspace_backup: NATIVE_DIALOG_WORKSPACE_BACKUP,
+    workspace_database: NATIVE_DIALOG_WORKSPACE_DATABASE,
+    database_type: NATIVE_DIALOG_DATABASE_TYPE,
+    opening_workspace: NATIVE_DIALOG_OPENING_WORKSPACE,
+    saving_workspace: NATIVE_DIALOG_SAVING_WORKSPACE,
+    workspace_dialog_failed: NATIVE_DIALOG_WORKSPACE_DIALOG_FAILED,
 } }
 
 #[cfg(test)]
