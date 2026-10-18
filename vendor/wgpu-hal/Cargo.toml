@@ -474,6 +474,7 @@ features = [
     "objc2-core-graphics",
     "CALayer",
     "CAMetalLayer",
+    "CATransaction",
     "objc2-metal",
 ]
 optional = true

@@ -598,3 +598,12 @@ admitting presentation. Hidden-window wakes remain paused; visibility changes
 redraw and resume the retained renderer. Metal acquisition must not query AppKit
 from the render queue. Check minimize/restore with retained pixels and history,
 and inspect Main Thread Checker output when changing this boundary.
+
+Metal surface configuration runs inside a balanced Core Animation transaction
+with implicit actions disabled. The render worker commits after releasing the
+layer lock, including error returns and Rust unwinding; it needs no run loop to
+publish attach, resize or color-format changes. `tests/managed-display.swift`
+observes the real background layer setter and checks the scoped transaction,
+rendered pixels, display tags, resize, layer replacement and unchanged saved
+artwork for both Apple policies. Retain `CA_DEBUG_TRANSACTIONS=1` diagnostics when
+checking this boundary, and measure affected resize motion in Release.

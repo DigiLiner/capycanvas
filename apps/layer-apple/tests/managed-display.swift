@@ -11,6 +11,20 @@ private final class DisplayCaptureLayer: CAMetalLayer, @unchecked Sendable {
     private let lock = NSLock()
     private var armed = false
     private var captured: (any CAMetalDrawable)?
+    private var configurations: [(background: Bool, disabled: Bool)] = []
+    override var allowsNextDrawableTimeout: Bool {
+        get { super.allowsNextDrawableTimeout }
+        set {
+            lock.lock()
+            configurations.append((!Thread.isMainThread, CATransaction.disableActions()))
+            lock.unlock()
+            super.allowsNextDrawableTimeout = newValue
+        }
+    }
+    func configurationIsScoped() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return !configurations.isEmpty && configurations.allSatisfy { $0.background && $0.disabled }
+    }
     override var framebufferOnly: Bool {
         get { super.framebufferOnly }
         set { super.framebufferOnly = false }
@@ -62,7 +76,7 @@ private final class DisplayCaptureLayer: CAMetalLayer, @unchecked Sendable {
             context.draw(image, in: CGRect(x: 0, y: 0, width: 20, height: 10))
             let bytes = data.assumingMemoryBound(to: UInt8.self)
             // Sample each checker level; vertical origin does not affect the pair.
-            for level in [0.8, 0.55] {
+            for level in [220.0 / 255, 170.0 / 255] {
                 let expected = [1.0, 0.5, 0.0].map { encode(decode($0) * alpha + decode(level) * (1 - alpha)) }
                 let matches = stride(from: 0, to: 800, by: 4).filter { offset in
                     (0..<3).allSatisfy { abs(Int(bytes[offset + $0]) - expected[$0]) <= 2 }
@@ -109,6 +123,7 @@ private final class DisplayCaptureLayer: CAMetalLayer, @unchecked Sendable {
             defer { native.detach(); withExtendedLifetime(surface) {} }
             try await wait("Metal startup", store: store) { store.snapshot["shaders_ready"].bool }
             func tag() throws {
+                try require(surface.configurationIsScoped(), "Background Metal configuration must disable implicit layer actions")
                 try require(surface.colorspace?.name == CGColorSpace.displayP3, "Metal must retain its explicit P3 tag")
                 try require(!surface.wantsExtendedDynamicRangeContent, "SDR viewing must not opt into HDR")
             }
@@ -125,14 +140,23 @@ private final class DisplayCaptureLayer: CAMetalLayer, @unchecked Sendable {
             }
             for next in ["Srgb", "DisplayP3", "ProPhoto", "AdobeRgb"] {
                 space = next
-                try await invoke("new_document"); try await idle()
+                let drawing = store.drawingTabs.selected
+                try await invoke("new_document")
+                try await wait("New drawing adoption", store: store) { store.drawingTabs.selected != drawing }
+                try await idle()
+                try require(store.state["document_file"]["location"].isNull, "A new drawing must start without a save destination")
                 let color = JSON(["space": space, "rgba": [0.65, 0.5, 0.25, 1.0]])
                 try await store.apply(["type": "color", "action": ["op": "definition", "color": color.raw]])
                 try await invoke("select_all")
                 try await store.apply(["type": "layer", "action": ["op": "fill_selection"]])
                 try await invoke("deselect")
                 try await invoke("fit_canvas")
-                try await invoke("save_document"); try await idle()
+                try await invoke("save_document")
+                try await wait("Saved current drawing", store: store) {
+                    store.state["document_file"]["location"]["uri"].string == master.absoluteString
+                        && !store.state["document_file"]["modified"].bool
+                }
+                try await idle()
                 let original = try Data(contentsOf: master)
                 let state = store.state["document_file"].stableKey
                 let expected = ColorUI.preview(color)["rgba"].array.prefix(3).map { Int(($0.number * 255).rounded()) }

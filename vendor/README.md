@@ -143,6 +143,14 @@ the `supports32BitFloatFiltering` qualification for older iPad GPU families.
 Devices without that capability still report it unavailable. No texture
 precision, publication, rendering or presentation algorithm is changed.
 
+`wgpu-metal-layer-transactions.patch` wraps Metal surface configuration in an
+explicit Core Animation transaction with implicit actions disabled. A scope guard
+commits after releasing the layer mutex, including on early return or Rust
+unwind. Render workers need no run loop to commit layer configuration; attach,
+resize, color-format changes and surface recovery use the same path. The managed
+display fixture observes the real background layer setter and retains its pixel,
+color-tag, resize and saved-document assertions.
+
 `wgpu-metal-main-thread.patch` prevents Metal surface acquisition on a render
 worker from querying an AppKit view or window. The hosting-window helper only
 runs on the main thread; the Mac client admits presentation using its existing

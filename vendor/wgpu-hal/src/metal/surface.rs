@@ -12,7 +12,7 @@ use objc2_core_foundation::{CFString, CGSize};
 use objc2_core_graphics::CGColorSpace;
 use objc2_foundation::NSObjectProtocol;
 use objc2_metal::MTLTextureType;
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 use parking_lot::{Mutex, RwLock};
 
 use super::OsFeatures;
@@ -243,6 +243,14 @@ static COLOR_SPACES: LazyLock<Result<ColorSpaces, crate::SurfaceError>> = LazyLo
     })
 });
 
+struct LayerConfiguration;
+
+impl Drop for LayerConfiguration {
+    fn drop(&mut self) {
+        CATransaction::commit();
+    }
+}
+
 impl crate::Surface for super::Surface {
     type A = super::Api;
 
@@ -257,6 +265,9 @@ impl crate::Surface for super::Surface {
         *self.swapchain_format.write() = Some(config.format);
         *self.extent.write() = config.extent;
 
+        CATransaction::begin();
+        let _transaction = LayerConfiguration;
+        CATransaction::setDisableActions(true);
         let render_layer = self.render_layer.lock();
         let framebuffer_only = config.usage == wgt::TextureUses::COLOR_TARGET;
         let display_sync = match config.present_mode {
