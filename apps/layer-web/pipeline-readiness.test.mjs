@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {tracePipelineCalls} from './pipeline-trace.test.mjs';
+import {installPipelineWait} from './pipeline-wait.mjs';
 import {readPackage,packageComposition,packageObjects,rasterIdentity} from './package-fixture.test.mjs';
 
 export async function checkPipelineReadiness({cdp,call,evaluate,settle}) {
@@ -38,17 +39,7 @@ export async function checkPipelineReadiness({cdp,call,evaluate,settle}) {
   await evaluate(`layerApp.dispatch({type:'invoke',command:'select_all'})`);
   await wait('layerApp.app.brush_ready()&&!layerApp.app.shader_work_pending(false)');
   await settle();
-  await evaluate(`(()=>{
-    const originals={},held=[];
-    window.pipelineWait={calls:[],held,release(){for(const resolve of held.splice(0))resolve()},restore(){for(const [method,original] of Object.entries(originals))GPUDevice.prototype[method]=original}};
-    for(const method of ['createComputePipelineAsync','createRenderPipelineAsync']){
-      const original=originals[method]=GPUDevice.prototype[method];
-      GPUDevice.prototype[method]=function(descriptor){
-        pipelineWait.calls.push({method,label:descriptor.label,recipe:__pipelineTraceFingerprint(this,descriptor)});
-        return original.call(this,descriptor).then(pipeline=>new Promise(resolve=>held.push(()=>resolve(pipeline))));
-      };
-    }
-  })()`);
+  await evaluate(`(${installPipelineWait.toString()})()`);
   await evaluate(`layerApp.dispatch({type:'invoke',command:'fill_selection'})`);
   const revision=await evaluate('String(layerApp.state().document_file.revision)');
   await wait('pipelineWait.held.length>0');

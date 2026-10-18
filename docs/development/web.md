@@ -471,6 +471,8 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
   checks pixels and undo history, then applies a cold transform and commits
   another by switching tools. It instruments both page and worker devices before
   startup and requires zero blocking pipeline creation calls.
+  Run `node --test apps/layer-web/pipeline-wait.test.mjs` to check that releasing
+  held compilation also releases pipeline promises that finish later.
 - Use `chrome://inspect/#devices` in desktop Chrome for interactive inspection.
   Desktop headless results do not establish tablet performance.
 
