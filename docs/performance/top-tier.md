@@ -102,7 +102,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Navigation with Gaussian Blur, Radius 85 | 120 | **Not met.** 40.55–41.09 presents/s; interval p99 33.33 ms | [Gaussian Blur and Unsharp Mask](#gaussian-blur-and-unsharp-mask), 2026-10-03 |
 | Saved spatial lengths beyond editor bounds, including Gaussian sigma >85 | 120, soft | Unmeasured | Full authored lengths need moving-frame qualification; earlier capped-value measurements do not apply |
 | Edge-Preserving Smooth slider | 120, soft | | |
-| Animated or warping filter: Domain Warp, Ripple | 120, soft | Unmeasured on the reference tablet | [Windows Domain Warp comparison](#windows-domain-warp-comparison) |
+| Animated or warping filter: Domain Warp, Ripple | 120, soft | **Unqualified.** 9504 × 6336 on the 2376 × 1584 display grid of a non-reference Mali-G57 MC2 tablet: Ripple 58.8 ms, Domain Warp 74.4 ms, from 7.5–8.5 s. Fit between 25% and 50% still evaluates at document resolution; reference tablet unmeasured | [Animated filters diagnostic](mid-tier.md#animated-filters-diagnostic), 2026-10-18; [Windows Domain Warp comparison](#windows-domain-warp-comparison) |
 | Fill layer or gradient-fill edit | 120, soft | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Navigation with proof or tone guide shown | 120 | | |
 | Navigation with exact artwork sampling (61 MP) | 120 | **Not met.** 48.43–49.89 canvas presents/s; interval p99 25.00 ms | [Exact artwork samples](#exact-artwork-samples), 2026-10-02 |

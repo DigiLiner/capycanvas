@@ -12,19 +12,23 @@ fn fx_axis(degrees:f32)->vec2<f32> {
 }
 fn fx_rotate(p:vec2<f32>,axis:vec2<f32>)->vec2<f32> {return vec2<f32>(p.x*axis.x-p.y*axis.y,p.x*axis.y+p.y*axis.x);}
 fn fx_straight(c:vec4<f32>)->vec3<f32> {return fx_unassociate(c);}
-fn fx_random(p:vec2<f32>,seed:u32)->f32 {
-    let q=vec2<u32>(vec2<i32>(floor(p)));
-    var h=q.x*1664525u+q.y*1013904223u+seed*747796405u;
-    h=(h^(h>>15u))*2246822519u;
-    return f32(h^(h>>13u))/4294967295.;
+fn fx_cell(p:vec2<f32>,seed:u32)->u32 {
+    let q=vec2<u32>(vec2<i32>(floor(p)));return q.x*1664525u+q.y*1013904223u+seed*747796405u;
 }
+fn fx_hash(cell:u32)->f32 {let h=(cell^(cell>>15u))*2246822519u;return f32(h^(h>>13u))/4294967295.;}
+fn fx_random(p:vec2<f32>,seed:u32)->f32 {return fx_hash(fx_cell(p,seed));}
 fn fx_noise(p:vec2<f32>,seed:u32)->f32 {
-    let q=floor(p);let f=fract(p);let t=f*f*(3.-2.*f);
-    return mix(mix(fx_random(q,seed),fx_random(q+vec2<f32>(1.,0.),seed),t.x),mix(fx_random(q+vec2<f32>(0.,1.),seed),fx_random(q+1.,seed),t.x),t.y)*2.-1.;
+    let f=fract(p);let t=f*f*(3.-2.*f);let h=fx_cell(p,seed);
+    return mix(mix(fx_hash(h),fx_hash(h+1664525u),t.x),mix(fx_hash(h+1013904223u),fx_hash(h+1015568748u),t.x),t.y)*2.-1.;
 }
-fn fx_fbm(p:vec2<f32>,octaves:u32,seed:u32)->f32 {
-    var q=p;var total=0.;var weight=.5;var norm=0.;
-    for(var i=0u;i<octaves;i+=1u){total+=fx_noise(q,seed+i)*weight;norm+=weight;q=fx_rotate(q,vec2<f32>(.8,.6))*2.07+7.3;weight*=.5;}
+fn fx_hash2(cell:u32)->vec2<f32> {let h=(cell^(cell>>15u))*2246822519u;let v=h^(h>>13u);return vec2<f32>(vec2<u32>(v>>16u,v&65535u))/65535.;}
+fn fx_noise2(p:vec2<f32>,seed:u32)->vec2<f32> {
+    let f=fract(p);let t=f*f*(3.-2.*f);let h=fx_cell(p,seed);
+    return mix(mix(fx_hash2(h),fx_hash2(h+1664525u),t.x),mix(fx_hash2(h+1013904223u),fx_hash2(h+1015568748u),t.x),t.y)*2.-1.;
+}
+fn fx_fbm(p:vec2<f32>,octaves:u32,seed:u32)->vec2<f32> {
+    var q=p;var total=vec2<f32>(0.);var weight=.5;var norm=0.;
+    for(var i=0u;i<octaves;i+=1u){total+=fx_noise2(q,seed+i)*weight;norm+=weight;q=fx_rotate(q,vec2<f32>(.8,.6))*2.07+7.3;weight*=.5;}
     return total/max(norm,.00001);
 }
 fn fx_bright(c:vec4<f32>,threshold:f32)->vec4<f32> {
@@ -257,9 +261,9 @@ fn capy_crt(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
 }
 fn capy_heat_haze(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let q=p/fx_period(fx_parameter(b,1u).x)+vec2<f32>(0.,-fx_time(b));let detail=fx_parameter(b,3u).x/100.;
-    let noise=mix(fx_noise(q,13u),fx_noise(q*3.7,47u),detail*.5);let side=fx_noise(q+11.7,29u);
+    let wave=fx_noise2(q,13u);let noise=mix(wave.x,fx_noise(q*3.7,47u),detail*.5);
     let amount=fx_parameter(b,0u).x*smoothstep(0.,1.,p.y/fx_extent().y);
-    return fx_sample(p+vec2<f32>(noise,side*.35)*amount);
+    return fx_sample(p+vec2<f32>(noise,wave.y*.35)*amount);
 }
 fn capy_iridescence(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let rgb=fx_rgb(c);let l=fx_luma(rgb);let thickness=l*2.+fx_noise(p/fx_period(fx_parameter(b,1u).x),7u)*.35+fx_time(b);
@@ -267,10 +271,8 @@ fn capy_iridescence(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     return fx_rgba(mix(rgb,fx_preserve_luma(film,l),fx_parameter(b,0u).x/100.),c.a);
 }
 fn capy_domain_warp(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
-    let octaves=3u;let time=fx_time(b);let q=p/fx_period(fx_parameter(b,1u).x)+vec2<f32>(time*.17,-time*.23);
-    let bend=vec2<f32>(fx_fbm(q,octaves,3u),fx_fbm(q+19.3,octaves,31u));
-    let warp=vec2<f32>(fx_fbm(q+bend*1.4,octaves,71u),fx_fbm(q+bend*1.4+7.9,octaves,113u));
-    return fx_sample(p+warp*fx_parameter(b,0u).x);
+    let time=fx_time(b);let q=p/fx_period(fx_parameter(b,1u).x)+vec2<f32>(time*.17,-time*.23);
+    return fx_sample(p+fx_fbm(q+fx_fbm(q,2u,3u)*1.4,2u,71u)*fx_parameter(b,0u).x);
 }
 fn capy_gradient_fill(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let extent=fx_extent();let delta=p-extent*vec2(fx_parameter(b,68u).x,fx_parameter(b,69u).x)/100.;

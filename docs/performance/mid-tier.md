@@ -84,7 +84,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Pointwise adjustment slider: Levels, Curves, Exposure, Hue/Saturation, Color Balance, White Balance, Black & White | 90, soft | | |
 | Neighbourhood filter slider: Gaussian Blur, Unsharp Mask, Edge-Preserving Smooth | 90, soft | Gaussian at 50%: 7.2/s small, 4.6/s large fresh completed canvas updates; UI 58.7–59.3/s and 40.3–41.8/s. Fit: 38.9/s and 26.1/s fresh canvas updates | Spatial composition comparison below; target not met; other filters unmeasured |
 | Saved spatial lengths beyond editor bounds, including Gaussian sigma >85 | 90, soft | Unmeasured | Full authored lengths need moving-frame qualification; earlier capped-value measurements do not apply |
-| Animated or warping filter: Domain Warp, Ripple | 90, soft | | |
+| Animated or warping filter: Domain Warp, Ripple | 90, soft | **Unqualified.** Non-reference Mali-G57 MC2 tablet, 6000 × 4000 at Fit: Ripple 87.6 ms, Domain Warp 113.1 ms per animated frame, from 3.3–3.8 s; reference tablet unmeasured | [Animated filters diagnostic](#animated-filters-diagnostic), 2026-10-18 |
 | Fill layer or gradient-fill edit | 90, soft | Solid Color revision unmeasured on this reference device | [Low-tier measurements](low-tier.md#solid-color-fills) do not qualify this tier |
 | Navigation with proof or tone guide shown | 90 | | |
 | Gradient drag | 90 | | |
@@ -1160,3 +1160,43 @@ The physical panel was running at 60 Hz and would not change refresh mode.
 These are GPU completion measurements, not scanout timestamps. The pressure
 utility's 90 Hz presentation target remains unmeasured. Raw reports, APK/JNI
 hashes and provenance are in `artifacts/pen-pressure/android-mid-20261010/`.
+
+## Animated filters diagnostic
+
+Measured on 2026-10-18 on an XP-Pen Magic Note Pad, whose Mali-G57 MC2 matches
+this tier's GPU; it is not the reference tablet. The ignored renderer test
+`photo_filter_frame_time`, cross-built with `cargo ndk` in release, renders the
+6000 × 4000 reference photo under each filter at Fit in a 1920 × 1200 view and
+advances its animation one frame at a time. The control is `9a2dba37f`; the
+optimized build adds display-grid evaluation and the noise changes. Values are
+the median time to GPU completion of ten animated frames from two ABBA-ordered
+runs, with thermal status zero before each run. A full recomposite without a
+filter takes 39 ms in both builds. Each run sets `CAPY_FILTER_NAME`,
+`CAPY_FILTER_EXTENT=6000x4000`, `CAPY_FILTER_VIEW=1920x1200` and
+`CAPY_FILTER_PHOTO_RGBA` (raw RGBA of the photo at that extent), then runs the test
+binary with `--ignored --exact tests::filter_library::investigation::photo_filter_frame_time`.
+
+| Filter | Before ms | After ms | Speedup |
+| --- | ---: | ---: | ---: |
+| Film Grain | 3360 | 43.0 | 78× |
+| Ripple | 3326 | 87.6 | 38× |
+| Rainy Glass | 3321 | 85.1 | 39× |
+| VHS | 3366 | 97.6 | 34× |
+| CRT | 3392 | 99.6 | 34× |
+| Heat Haze | 3416 | 96.4 | 35× |
+| Iridescence | 3388 | 43.9 | 77× |
+| Domain Warp | 3762 | 113.1 | 33× |
+
+Before, every animated frame evaluated the filter at document resolution.
+The filters now run on the reduced display grid, 3000 × 2000 here; Film Grain
+and Iridescence share the fused pointwise pass. The remaining image-filter
+cost is mostly that grid's Float32 input and output traffic: the same frame
+with a pass-through Ripple takes about 67 ms. The 512-texel window split that
+keeps native controls responsive costs about 8 ms of it.
+
+The 9504 × 6336 top-tier photo in the same view fits on the 2376 × 1584 grid:
+Ripple 7461 → 58.8 ms (127×) and Domain Warp 8461 → 74.4 ms (114×). When Fit
+falls between 25% and 50%, that photo's reduced grid exceeds the display cache
+budget and evaluation stays at document resolution; a Samsung Tab S7 at
+2560 × 1600 took 5.7–9.0 s per frame in both builds. Raw logs and binary
+hashes are in `artifacts/animated-filters-20261018/`.

@@ -87,7 +87,7 @@ fn cases(saved: &Document) -> BTreeMap<String,(Document,bool)> {
     sdr.artwork.outputs.get_mut(sdr.artwork.default_output).unwrap().sdr=saved.artwork.outputs.get(saved.artwork.default_output).unwrap().sdr;
     refresh(&mut sdr);cases.insert("output/sdr".into(),(sdr,true));
     let grain=filters["film_grain"].0.program.clone();let mut sources=grain.wgsl.sources().unwrap().to_vec();
-    sources.push("fn saved_fbm(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{return vec4<f32>(fx_fbm(p*.37,5u,17u),fx_fbm(p*.73,3u,101u),fx_fbm(p*.19,7u,3u),1.);}".into());
+    sources.push("fn saved_fbm(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{return vec4<f32>(fx_fbm(p*.37,5u,17u),fx_fbm(p*.19,7u,3u).x,1.);}".into());
     let program=Arc::new(layer_core::EffectProgram {id:"saved_fbm".into(),label:"Saved FBM".into(),wgsl:layer_core::EffectShader::Linked {sources:sources.into()},
         entry:"saved_fbm".into(),time:false,parameters:Default::default(),pages:Default::default(),constraints:Default::default(),..(*grain).clone()});
     cases.insert("procedural/fbm".into(),(filtered(base(SampleDepth::F32,false),EffectInstance::new(program),None),false));

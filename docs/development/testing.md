@@ -159,7 +159,9 @@ and procedural evaluation. The baseline was captured with Vulkan on an NVIDIA
 RTX PRO 6000 Blackwell GPU. Qualify other hardware backends with the same inputs
 and tolerances; a CPU adapter is rejected. Keep these baselines fixed. A change
 beyond tolerance requires a regression fix or a new authored data version,
-converter and unchanged-file regression. The suite has no baseline-update mode.
+converter and unchanged-file regression. A reviewed appearance change to an
+evolving procedural filter under the [package policy](../reference/capy-package.md#adding-controls-after-ga)
+replaces only that filter's rows. The suite has no baseline-update mode.
 A deliberate white-balance coefficient change from `.8` to `.7` must fail;
 restoring `.8` must pass.
 
