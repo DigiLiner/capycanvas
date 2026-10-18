@@ -507,37 +507,18 @@ are your task, and remove an entry when you fix it.
   neighborhoods from the NVIDIA Vulkan reference; the original images and
   tolerances remain required.
 
-- `layer-render-wgpu --test merge`: seven of nine tests fail pixel comparisons
-  on an unmodified `b3f6f8e51` export, with maximum differences of 56–166 U8
-  codes. Stroke-only, adjustment, clipping, merge, hidden-pixel and placed-photo
-  cases reproduce independently of the gradient changes; the blur/save and
-  stamp-visible cases pass. Keep the existing pixel bounds when testing changes.
-
-- Renderer `scene::scale::tests::refinement::global_filters_evict_optional_levels_before_rejecting_the_document`
-  rejects the document during submission after its initial budget assertions
-  pass. The same image-pixel limit failure occurs on the unmodified baseline.
-- Renderer failures reproduced on unmodified `5c76e202f`:
+- Renderer failure reproduced on unmodified `5c76e202f`:
   `the_crop_shield_dims_outside_the_crop_and_shows_added_canvas_as_transparency`
   changes an interior blue channel from 123 to 124 because the crop shield
-  disables presentation quantization; `oversized_photo_preview_uses_admitted_memory_across_scale_boundary`
-  replaces a 384-square cache with a 512-square cache and increases updates from
-  9 to 14; `placed_photo_display_cache_updates_paint_preview_undo_and_retains_lod`
-  retains a placement cache where the fixture expects borrowed native tiles;
-  `accepted_photo_keeps_raw_lod_for_sparse_watercolor_and_transform_reopen`
-  repairs 70 pages where the fixture expects fewer than 64. Keep these assertions
-  when checking renderer changes.
+  disables presentation quantization. Keep this assertion when checking
+  renderer changes.
 - Renderer failures reproduced on unmodified `0eb2b6720` on Linux:
   `statistics_extreme_finite_rgb_uses_f64_classification_without_unassociation_overflow`,
   `statistics_rgb_exact_correction_matches_f64_at_boundary_neighbors` and
   `waveform_reuses_exact_rgb_and_luminance_classification_for_hdr_and_tiny_alpha`
-  report different classification counts;
+  report different classification counts, and
   `levels_statistics_constant_empty_hdr_tiny_alpha_and_cancellation_are_explicit`
-  finds no usable pixels for Auto;
-  `native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear` reports
-  "first prediction must force cold work"; and
-  `a_pointwise_filter_cannot_follow_the_documents_blending` validates the
-  program it expects to reject. `repeated_native_threshold_updates_reuse_an_oversized_decoded_working_set`
-  fails there as on Iris Xe.
+  finds no usable pixels for Auto.
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
   `saved_artwork_render_contracts` reports
   `domain_warp/F32` maximum drift 0.000232696533203125 against 0.0002.
