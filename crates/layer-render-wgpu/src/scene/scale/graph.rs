@@ -185,6 +185,7 @@ pub(super) struct Branch {
 pub(super) struct Graph {
     pub root: Option<Node>,
     pub motion: Option<[Node; 2]>,
+    pub split_changed: bool,
     branches: HashMap<Node, Branch>,
     effects: HashMap<OccurrenceHandle, (metadata::Metadata, u64)>,
     revision: u64,
@@ -194,7 +195,7 @@ pub(super) struct Graph {
 impl Graph {
     pub fn objects(&self)->&object_spatial::SpatialIndex {&self.objects}
     pub fn without_pixels(&self) -> Self {
-        Self { root: self.root.clone(), motion: None, branches: HashMap::new(), effects: self.effects.clone(),
+        Self { root: self.root.clone(), motion: None, split_changed: false, branches: HashMap::new(), effects: self.effects.clone(),
             revision: self.revision, blend_space: self.blend_space, objects:self.objects.clone() }
     }
     pub fn prepare(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>, sources: &Sources, plan: display_mips::Plan, budget: u64) -> Result<(), GpuRasterError> {
@@ -208,6 +209,7 @@ impl Graph {
                 self.effects.insert(handle, (metadata, self.revision));
             }
         }
+        let before = self.motion.take();
         self.motion = match &sources.motion_split {
             Some(split) => {
                 let half = |scope| compose(FramePacket { scene: packet.scene.with_scope(scope), ..packet }, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), None)
@@ -216,6 +218,7 @@ impl Graph {
             }
             None => None,
         };
+        self.split_changed = before != self.motion;
         let root = match &self.motion {
             Some([above, below]) => Expression::combine(above.clone(), below.clone(), layer_core::LayerBlend::Normal, 0),
             None => compose(packet, Some(sources), Some(&self.effects), plan.level, r.device.working_space(), Some(&mut self.objects))?,
@@ -246,6 +249,9 @@ impl Graph {
         let branch = self.branches.get(node)?;
         let image = branch.image.as_ref()?;
         pages.iter().all(|page| branch.valid.contains(page)).then_some((&image.view, image.plan))
+    }
+    pub fn branch_valid(&self, node: &Node, page: [u32; 2]) -> bool {
+        self.branches.get(node).is_some_and(|branch| branch.image.is_some() && branch.valid.contains(&page))
     }
     pub fn reserved_bytes(&self, plan: display_mips::Plan) -> u64 { self.branches.len() as u64 * plan.level_bytes(plan.level) }
     pub fn storage_bytes(&self) -> u64 {

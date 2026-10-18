@@ -469,7 +469,11 @@ fn crowded_vector_layer_edit_frames() {
     let probes: Vec<_> = (0..100).map(|i| index.hit(&object, [1200. + i as f64 * 13., 1400. + (i % 7) as f64 * 31.], 4.)).collect();
     let hit = start.elapsed().as_secs_f64() * 1e3 / 100.;
     eprintln!("hit index build {build:.2} ms, then {hit:.4} ms per probe, {} hits of 100", probes.iter().flatten().count());
-    let ids: Vec<ItemId> = object.paths().filter(|(_, p)| { let b = p.bounds(); b[0] > 1200. && b[1] > 1300. }).map(|(_, p)| p.id).collect();
+    let [a, _, _, d, tx, ty] = view.document_to_surface.map(f64::from);
+    let center = [(f64::from(view.width_px) * 0.5 - tx) / a, (f64::from(view.height_px) * 0.5 - ty) / d];
+    let mut nearest: Vec<(f64, ItemId)> = object.paths().map(|(_, p)| { let b = p.bounds(); ((b[0] + b[2] - 2. * center[0]).hypot(b[1] + b[3] - 2. * center[1]), p.id) }).collect();
+    nearest.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let ids: Vec<ItemId> = nearest.into_iter().map(|(_, id)| id).collect();
     let (_texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
     let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
     presenter.set_target_retention(true);
@@ -484,6 +488,8 @@ fn crowded_vector_layer_edit_frames() {
         let hidden = timed(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         eprintln!("recompositing without vector work over {} pages: frame cpu {:.2} wall {:.2} ms", r.metrics.frame_composited_pages.len(), hidden.0, hidden.1);
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        presenter.present(&r, &target, view, [1.; 4]).unwrap();
+        r.wait_idle().unwrap();
     }
     for k in [1usize, 100, 5000] {
         let selected: BTreeSet<ItemId> = ids.iter().copied().take(k).collect();
@@ -500,7 +506,7 @@ fn crowded_vector_layer_edit_frames() {
         }
         let first = drags[0];
         let (mut cpu, mut wall): (Vec<f64>, Vec<f64>) = drags[1..].iter().copied().unzip();
-        eprintln!("drag {k} of {count}: first frame wall {:.2} ms; frame cpu p50 {:.2} p95 {:.2} ms, wall p50 {:.2} p95 {:.2} ms", first.1,
+        eprintln!("drag {k} of {count}: first frame cpu {:.2} wall {:.2} ms; frame cpu p50 {:.2} p95 {:.2} ms, wall p50 {:.2} p95 {:.2} ms", first.0, first.1,
             percentile(&mut cpu, 0.5), percentile(&mut cpu, 0.95), percentile(&mut wall, 0.5), percentile(&mut wall, 0.95));
         r.set_vector_motion(None);
         submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
@@ -521,6 +527,41 @@ fn crowded_vector_layer_edit_frames() {
         eprintln!("move {k} of {count}: transform {transform:.2} ms, perform {perform:.2} ms, frame over {pages} pages cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms, frame cpu {:.2} wall {:.2} ms",
             commit.0, commit.1, undo.0, undo.1);
     }
+}
+
+#[test]
+fn split_drags_redraw_neither_the_overview_nor_the_navigator() {
+    use std::collections::BTreeSet;
+    let extent = [2400u32, 1800u32];
+    let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [1., 0., 0., 1., -300., -200.] };
+    let mut records: Vec<Record> = (0..4).map(|i| stroke(9000 + i, &[[400. + i as f64 * 40., 300.], [600. + i as f64 * 30., 500.]], 9., [0.9, 0.2, 0.1, 0.8])).collect();
+    records.extend(crate::vector::bench::scene_b([2400., 1800.], 1500).into_iter().map(Record::Path));
+    let (mut editor, layer) = document(extent, records);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    fn frame(editor: &layer_core::Editor, view: layer_render::ViewState, extent: [u32; 2], time_seconds: f32) -> FramePacket<'_> {
+        FramePacket { view, time_seconds, composite_all: false, ..packet(editor.document().scene(), extent) }
+    }
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let navigator = r.navigator.revision;
+    let items: Arc<BTreeSet<ItemId>> = Arc::new((9000..9004).map(ItemId).collect());
+    let mut filled = BTreeSet::new();
+    for i in 1..=12u32 {
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [f64::from(i) * 3., f64::from(i) * -2.] }));
+        r.submit(frame(&editor, view, extent, i as f32 * 0.03)).unwrap();
+        r.wait_idle().unwrap();
+        assert!(r.display_motion().is_some(), "a top vector layer drags through the split preview");
+        let region = r.vector_motion_region(extent).unwrap();
+        for &(level, page) in &r.metrics.frame_composited_pages {
+            assert!(level == 0 && !page_rect(page).intersect(region).is_empty() && filled.insert(page), "drag frame {i} recomposited {:?} outside {region:?} or again", (level, page));
+        }
+    }
+    assert_eq!(r.navigator.revision, navigator, "the Navigator keeps the layer as it was until the move commits");
+    let moved = editor.document().scene().vector_layer(layer).unwrap().transform_items(&items, layer_core::authored::Affine64([1., 0., 0., 1., 36., -24.])).unwrap();
+    editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
+    r.set_vector_motion(None);
+    r.submit(FramePacket { composite_all: true, ..frame(&editor, view, extent, 1.) }).unwrap();
+    r.wait_idle().unwrap();
+    assert_ne!(r.navigator.revision, navigator, "the committed move refreshes the Navigator");
 }
 
 #[test]

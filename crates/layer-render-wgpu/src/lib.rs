@@ -1478,17 +1478,27 @@ impl WgpuRasterizer {
     pub(crate) fn display_geometry(&self)->Option<&wgpu::Buffer> {
         self.display_backup.as_ref().map(|backup|&backup.geometry).or_else(||self.scale_display.as_ref().map(|cache|&cache.geometry))
     }
-    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;3],[f32;16],DocRect)> {
+    fn vector_motion_moved(&self) -> Option<(DocRect, DocRect)> {
         let (motion, bounds) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_split.is_some())?;
+        Some((*bounds, DocRect { min: [0, 1].map(|i| (bounds.min[i] as f64 + motion.offset[i]).floor() as i64 - 2), max: [0, 1].map(|i| (bounds.max[i] as f64 + motion.offset[i]).ceil() as i64 + 2) }))
+    }
+    pub(crate) fn vector_motion_region(&self, extent: [u32; 2]) -> Option<PixelRect> {
+        let (bounds, moved) = self.vector_motion_moved()?;
+        Some(DocRect { min: bounds.min.map(|v| v - 2), max: bounds.max.map(|v| v + 2) }.union(moved).in_frame(extent))
+    }
+    pub(crate) fn display_motion(&self)->Option<([&wgpu::TextureView;3],[f32;20],DocRect)> {
+        let (motion, _) = self.vector_motion_drawn.as_ref().filter(|_| self.vector_motion_split.is_some())?;
+        let (_, moved) = self.vector_motion_moved()?;
+        let region = self.vector_motion_region(self.document_extent)?;
         let (view, window, level, size) = self.scene.as_ref()?.presented_motion(motion)?;
-        let [(above, plan), (below, _)] = self.scale_display.as_ref()?.motion_layers()?;
+        let [(above, plan), (below, _)] = self.scale_display.as_ref()?.motion_layers(region)?;
         let [x, y] = window.min.map(|v| v as f32);
         let [w, h] = size.map(|v| v as f32);
         let [sx, sy] = plan.doc_bounds.min.map(|v| v as f32);
         let [sw, sh] = plan.size.map(|v| v as f32);
         let offset = motion.offset.map(|v| v as f32);
-        let moved = DocRect { min: [0, 1].map(|i| (bounds.min[i] as f64 + motion.offset[i]).floor() as i64 - 2), max: [0, 1].map(|i| (bounds.max[i] as f64 + motion.offset[i]).ceil() as i64 + 2) };
-        Some(([view, above, below], [x, y, (1u32 << level) as f32, 1., offset[0], offset[1], w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0.], moved))
+        let [rx0, ry0, rx1, ry1] = [region.min_x(), region.min_y(), region.max_x(), region.max_y()].map(|v| v as f32);
+        Some(([view, above, below], [x, y, (1u32 << level) as f32, 1., offset[0], offset[1], w, h, sx, sy, (1u32 << plan.level) as f32, 1., sw, sh, 0., 0., rx0, ry0, rx1, ry1], moved))
     }
     pub(crate) fn display_placement(&self)->[f32;20] {
         self.display_backup.as_ref().map_or_else(||self.scale_display.as_ref().unwrap().placement_values(),|backup|backup.placement)
@@ -3999,8 +4009,10 @@ impl WgpuRasterizer {
         };
         self.validate_and_prepare_brush_resources(packet.dab_batches)?;
         let blending_changed = std::mem::replace(&mut self.blend_space, packet.blend_space) != packet.blend_space;
-        let unchanged = !preview_changed && !motion_changed && self.artwork_frame.as_ref().is_some_and(|frame|
-            frame.same_artwork(packet));
+        let same_artwork = self.artwork_frame.as_ref().is_some_and(|frame| frame.same_artwork(packet));
+        let unchanged = !preview_changed && !motion_changed && same_artwork;
+        let motion_held = self.vector_motion_split.is_some();
+        let navigator_unchanged = !preview_changed && (!motion_changed || motion_held) && same_artwork;
         if packet.commit_rasters && (!unchanged || packet.composite_all || packet.reset_layers || self.object_deferred
             || self.scene.as_ref().is_some_and(|scene|scene.objects_pending())
             || self.artwork_frame.as_ref().is_none_or(|frame|frame.view!=packet.view)) {
@@ -4810,8 +4822,8 @@ impl WgpuRasterizer {
         }
         let mut navigator = std::mem::take(&mut self.navigator);
         let navigator_revision = navigator.revision;
-        let result = navigator.refresh(self, packet, !dirty.is_empty() || animated || !unchanged,
-            reset || blending_changed, &mut encoder);
+        let result = navigator.refresh(self, packet, !dirty.is_empty() || animated || !navigator_unchanged,
+            reset || blending_changed, motion_held, &mut encoder);
         self.navigator = navigator;
         result?;
         if let Some(transforms)=&mut self.transforms {transforms.finish_frame();}

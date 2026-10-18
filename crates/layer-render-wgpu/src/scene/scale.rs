@@ -939,6 +939,10 @@ impl Cache {
                 self.reuse_output = false;
                 return Ok(());
             }
+            if self.graph.split_changed && r.artwork_frame.as_ref().is_some_and(|old| old.same_artwork(packet)) {
+                self.reuse_output = false;
+                return Ok(());
+            }
             let tiles = tiles.filter(|_| r.artwork_frame.as_ref().is_some_and(|old|
                 old.blend_space == packet.blend_space
                     && (old.time == packet.time_seconds || !packet.scene.order().iter().any(|handle|
@@ -1028,11 +1032,17 @@ impl Cache {
             width, height, (1 << (root.coarse_level - root.value.plan.level)) as f32, 2.,
             root.value.opacity, 1., root.value.outside, f32::from(root.value.encode), r, g, b, a]
     }
-    pub(crate) fn motion_layers(&self) -> Option<[(&wgpu::TextureView, display_mips::Plan); 2]> {
-        let pages: Vec<_> = page_coordinates(self.plan.bounds).collect();
+    pub(crate) fn motion_layers(&self, region: PixelRect) -> Option<[(&wgpu::TextureView, display_mips::Plan); 2]> {
+        let pages: Vec<_> = page_coordinates(region.intersect(self.plan.bounds)).collect();
         let layer = |node: &graph::Node| self.graph.branch_image(node, &pages);
         let [above, below] = self.graph.motion.as_ref()?;
         Some([layer(above)?, layer(below)?])
+    }
+    fn motion_missing(&self, region: PixelRect) -> Damage {
+        let Some(motion) = &self.graph.motion else { return Damage::EMPTY };
+        Damage::from_regions(page_coordinates(region.intersect(self.plan.bounds))
+            .filter(|page| motion.iter().any(|node| !self.graph.branch_valid(node, *page)))
+            .map(|page| page_rect(page).intersect(self.plan.bounds)))
     }
     pub fn resample_values(&self) -> [u8; scene::resample::UNIFORM_BYTES as usize] {
         match &self.placed { Some(Presentation::Mapped(mapped)) => mapped.values, _ => [0; scene::resample::UNIFORM_BYTES as usize] }
@@ -1105,7 +1115,7 @@ impl Cache {
             .chain(r.transform_damage.iter().map(|&(target, region)|
                 brush_tiles::document_damage(packet.scene, target, region, packet.document_extent)))))
             .union(root.damage(&scene.scale_sources, self.plan))
-            .union(if self.motion_layers().is_none() && self.graph.motion.is_some() { Damage::from(self.plan.bounds) } else { Damage::EMPTY });
+            .union(match (&destination, r.vector_motion_region(packet.document_extent)) { (Destination::View, Some(region)) => self.motion_missing(region), _ => Damage::EMPTY });
         if objects || packet.scene.order().iter().any(|&owner| packet.scene.vector_layer(owner).is_some()) { self.valid.retain(|c| !invalid.intersects(page_rect(*c))); }
         self.refined.retain(|c| !invalid.intersects(page_rect(*c)));
         let regions = invalid.update_regions(self.plan, &self.valid);

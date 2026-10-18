@@ -22,7 +22,7 @@ impl Navigator {
     pub fn storage_bytes(&self) -> u64 { self.cache.as_ref().map_or(0, Cache::storage_bytes) }
 
     pub fn refresh(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, changed: bool,
-        reset: bool, encoder: &mut crate::submission::CommandEncoder,
+        reset: bool, held: bool, encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
         crate::performance_trace::counter(c"Capy Navigator age us", ((packet.time_seconds - self.refreshed).max(0.) * 1e6) as u64);
         crate::performance_trace::counter(c"Capy Navigator pending", u64::from(self.pending()));
@@ -30,7 +30,7 @@ impl Navigator {
         if reset { self.cache = None; }
         self.pending |= changed;
         let missing = self.view().is_none();
-        if !missing && (!self.pending() || (changed && packet.time_seconds >= self.refreshed
+        if !missing && (held || !self.pending() || (changed && packet.time_seconds >= self.refreshed
             && packet.time_seconds - self.refreshed < 0.05)) { return Ok(()); }
         let Some(display) = r.scale_display.as_ref() else { return Ok(()); };
         let base = display_mips::Plan::new(packet.document_extent)?;
@@ -234,7 +234,7 @@ mod tests {
         let mut navigator = std::mem::take(&mut r.navigator);
         {
             let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
-            navigator.refresh(&mut r, FramePacket { time_seconds: 0.1, ..frame }, true, false, &mut encoder).unwrap();
+            navigator.refresh(&mut r, FramePacket { time_seconds: 0.1, ..frame }, true, false, false, &mut encoder).unwrap();
         }
         assert!(navigator.pending());
         assert!(navigator.view().is_none());

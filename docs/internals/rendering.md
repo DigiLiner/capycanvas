@@ -364,10 +364,14 @@ and the moving paths render once into a texture at the display level. When the
 vector layer, its groups and every layer above it blend normally at full
 opacity, with no mask, attached filter, adjustment layer or clipping that reaches
 down to it, the composition graph splits its root into the layers above and
-everything below, the rest of the vector layer included, and keeps both as
-window-sized branches. The viewport presenter then draws above, moving paths
-and below at the sub-pixel offset, so drag frames recomposite no pages; the
-split costs one window recomposite when the drag starts. Otherwise the
+everything below, the rest of the vector layer included, and caches both
+only over the pages the moving paths cover at their start and at the current
+offset, filling pages as the drag reaches them. Splitting or unsplitting the
+graph keeps every other page, whose composite already equals above over below.
+Where the moving texture has coverage, the viewport presenter draws above,
+moving paths and below at the sub-pixel offset; elsewhere it shows the
+composite. Drag frames recomposite no pages, and the overview and the Navigator
+keep the paths where they were until the move commits. Otherwise the
 composition graph copies the moving texture at the offset rounded to the
 level's pixels above the cached layer. Moving paths draw above the rest of
 their layer until the move commits.

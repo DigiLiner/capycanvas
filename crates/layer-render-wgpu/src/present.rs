@@ -3,7 +3,7 @@
 use crate::{BackdropBlurStyle, BackdropRegion, GpuRasterError, SdrSurfaceColor, Uploads, WgpuRasterizer};
 use layer_render::{CanvasRenderer, CursorSegment, ViewState};
 
-const CAMERA_SIZE: u64 = 576;
+const CAMERA_SIZE: u64 = 592;
 const SOURCE_CAMERA: u32 = 768;
 
 /// A native UI's document overview, sampled from the existing GPU image.
@@ -78,17 +78,17 @@ pub struct ViewportPresenter {
     cursor_buffer: wgpu::Buffer,
     cursor_vertices: Vec<CursorSegment>,
     uploads: Uploads,
-    camera_data: Option<[f32; 144]>,
+    camera_data: Option<[f32; 148]>,
     quarter_turns: u32,
     retained: bool,
     history: crate::present_damage::Retained,
     presented_view: Option<(ViewState, [f32; 4], u32, f32)>,
     presented_selection_overlay: Option<layer_render::SelectionOverlay>,
-    presented_motion: Option<([f32; 16], crate::pixel_rect::DocRect)>,
+    presented_motion: Option<([f32; 20], crate::pixel_rect::DocRect)>,
     motion_views: Option<[wgpu::TextureView; 3]>,
     overlays_changed: bool,
     backdrop: Option<crate::backdrop_blur::BackdropBlur>,
-    source_camera: Option<[f32; 144]>,
+    source_camera: Option<[f32; 148]>,
     presented_area: u64,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
@@ -1016,7 +1016,7 @@ impl ViewportPresenter {
         let overlay_color = overlay.map_or([0.;4],|o| o.color);
         let crop = renderer.crop_overlay.filter(|c| c.to_crop.inverse().is_some());
         let [ca, cb, cc, cd, cx, cy] = crop.map_or([0.; 6], |c| c.to_crop.0);
-        let mut data = [0.; 144];
+        let mut data = [0.; 148];
         data[..40].copy_from_slice(&[
             d / det,
             -b / det,
@@ -1054,7 +1054,7 @@ impl ViewportPresenter {
         data[60] = f32::from(renderer.blend_space == layer_core::BlendSpace::Perceptual);
         data[61] = renderer.navigator.scale();
         data[62..64].copy_from_slice(&renderer.clipping_preview.map(f32::from));
-        data[128..144].copy_from_slice(&motion.map_or([0.; 16], |(_, values, _)| values));
+        data[128..148].copy_from_slice(&motion.map_or([0.; 20], |(_, values, _)| values));
         // A fixed f32 array has no padding or uninitialized bytes.
         let bytes = unsafe {
             std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(&data))

@@ -17,6 +17,7 @@ struct Camera {
     motion_offset: vec4<f32>,
     split: vec4<f32>,
     split_size: vec4<f32>,
+    split_region: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var moved: texture_2d<f32>;
@@ -156,15 +157,15 @@ fn artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     return grid_artwork_at(p,dx,dy);
 }
 fn moving_between(p: vec2<f32>, composite: vec4<f32>) -> vec4<f32> {
-    if camera.split.w == 0. { return composite; }
-    let s = (p - camera.split.xy) / camera.split.z;
-    if any(s < vec2<f32>(0.)) || any(s >= camera.split_size.xy) { return composite; }
-    let below = sample_float(below_paths, linear_sampler, s / camera.split_size.xy, 0.);
-    let above = sample_float(above_paths, linear_sampler, s / camera.split_size.xy, 0.);
+    if camera.split.w == 0. || any(p < camera.split_region.xy) || any(p >= camera.split_region.zw) { return composite; }
     let q = (p - camera.motion_offset.xy - camera.motion.xy) / camera.motion.z;
     let size = camera.motion_offset.zw;
-    var moving = vec4<f32>(0.);
-    if all(q >= vec2<f32>(-1.)) && all(q <= size + 1.) { moving = sample_float(moving_paths, linear_sampler, q / size, 0.); }
+    if any(q < vec2<f32>(-1.)) || any(q > size + 1.) { return composite; }
+    let moving = sample_float(moving_paths, linear_sampler, q / size, 0.);
+    if moving.a <= 0. { return composite; }
+    let s = (p - camera.split.xy) / camera.split.z / camera.split_size.xy;
+    let below = sample_float(below_paths, linear_sampler, s, 0.);
+    let above = sample_float(above_paths, linear_sampler, s, 0.);
     let lower = moving + below * (1. - moving.a);
     return above + lower * (1. - above.a);
 }
