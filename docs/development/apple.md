@@ -72,6 +72,11 @@ Arguments after the platform are passed to `xcodebuild`.
   the `xcodebuild` command line overrides both the Cargo output and library path.
 - macOS builds are ad-hoc signed unless `CAPY_APPLE_TEAM` is set.
 
+Keep each `CAPY_RUST_BUILD_ROOT` override specific to its deployment target;
+do not reuse a directory built for a different minimum OS. Check linker output
+for Rust objects built for a newer OS. A successful link with those warnings
+does not establish support for the app's declared minimum.
+
 Build both Xcode targets to check Swift types; parsing Swift sources alone does
 not check closure calls or platform-specific APIs. For startup failures, record
 the app version/build and OS version before changing the installation. The canvas
