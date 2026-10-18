@@ -591,15 +591,6 @@ are your task, and remove an entry when you fix it.
 - Windows `exercise-persistence.ps1`: "Missing control: Brush size slider"
   (the slider is named "Brush size"). `documents:RecoverGpu` on a VM: "GPU
   reconstruction did not start".
-- Windows `exercise-selection.ps1` exits with an access violation in roughly a third
-  of runs, on untouched upstream as well, after it closes the Select drawer and
-  switches workspaces. The fault is in WinUI's `ScrollView::OnHideIndicatorsTimerTick`
-  (Microsoft.UI.Xaml.Controls.dll), which reads released scroll-controller tracker
-  references of a panel or drawer `ScrollView` that left the tree.
-- Windows `exercise-color-editor.ps1` on WARP passes its interaction assertions,
-  then exits with `0xC0000005` at shutdown. The original fixture and production
-  build at untouched `ee80dc2b` reproduce the same fault in
-  `Microsoft.UI.Xaml.dll` 3.1.8.0, offset `0x83af7`. Keep the shutdown assertion.
 - Windows fixtures that also fail on the unported upstream build: `exercise-pen-buttons.ps1` (Transform is
   enabled on the empty starting layer), `exercise-persistence.ps1` (the unreadable database writes a
   storage diagnostic to stderr) and `exercise-proof.ps1` (UI Automation times out

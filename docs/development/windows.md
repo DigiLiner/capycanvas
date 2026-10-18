@@ -74,6 +74,8 @@ and the project imports at the versions required by the SDK package. This includ
 Microsoft's ScrollView hide-indicators timer lifetime fix and later popup and
 shutdown fixes. After updating the runtime, run `exercise-selection.ps1` and
 `exercise-color-editor.ps1` in both themes, retaining their close assertions.
+To compare with an older runtime, build it into a new `-OutputDirectory`; an
+existing output keeps the newer runtime DLLs.
 See the [WinUI release notes](https://github.com/microsoft/microsoft-ui-xaml/releases).
 
 For a Debug build, pass `-Configuration Debug`; the output is `artifacts/windows/Debug`.
