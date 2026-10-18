@@ -36,6 +36,17 @@ a style keep sharing one. Turning Fill or Outline on adds the background or
 foreground color. Each change, or each drag of a number or color, is one undo
 step.
 
+## Path
+
+Figure's **Path** draws a path anchor by anchor on a vector layer. A click adds
+a corner; a press and drag pulls out symmetric handles for a smooth anchor, and
+Alt drags only the outgoing handle. Shift keeps the new anchor at 45° steps from
+the last. The canvas bar's Remove Point (Backspace), Cancel (Escape) and Finish
+(Enter) work as for polygon selections; clicking the first anchor closes the
+path. The finished path uses Figure's paint mode, line width and colors, with
+sharp corners and flat ends, and is selected, in one undo step. Paint layers
+refuse Path with a notice.
+
 ## Erasing
 
 The Eraser, transparent paint and the pen's eraser end erase paths on a vector
@@ -98,7 +109,8 @@ layers ([Object layers](image-objects.md)).
 `properties_restyle_every_selected_path_in_one_undo_step`,
 `rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step`,
 `monoline_draws_constant_width_vector_lines`,
-`move_frame_scales_and_rotates_selected_paths_in_one_undo_step` and
+`move_frame_scales_and_rotates_selected_paths_in_one_undo_step`,
+`path_tool_builds_open_and_closed_paths_anchor_by_anchor` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

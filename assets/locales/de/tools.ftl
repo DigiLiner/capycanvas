@@ -90,6 +90,7 @@ tool-family-retouch = Retuschierwerkzeuge
 tool-figures-ellipse = Ellipse
 tool-figures-fill = Füllung
 tool-figures-line = Linie
+tool-figures-path = Pfad
 tool-figures-outline = Umriss
 tool-figures-outline-and-fill = Umriss + Füllung
 tool-figures-rectangle = Rechteck

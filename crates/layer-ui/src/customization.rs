@@ -1256,6 +1256,8 @@ pub fn tool_choice_localized(control: ToolbarControl, localization: &Localizer) 
                 CommandId::AddLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_ADD_LAYER).to_string(),
                 CommandId::DeleteLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_DELETE_LAYER).to_string(),
                 CommandId::RaiseLayer => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_RAISE_LAYER).to_string(),
+                CommandId::FinishPath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_FINISH_PATH).to_string(),
+                CommandId::CancelPath => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_CANCEL_PATH).to_string(),
                 CommandId::BringToFront => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_BRING_TO_FRONT).to_string(),
                 CommandId::BringForward => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_BRING_FORWARD).to_string(),
                 CommandId::SendBackward => localization.text(MessageId::WORKSPACE_TOOL_DESCRIPTION_SEND_BACKWARD).to_string(),

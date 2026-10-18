@@ -90,6 +90,7 @@ tool-family-retouch = Retouching tools
 tool-figures-ellipse = Ellipse
 tool-figures-fill = Fill
 tool-figures-line = Line
+tool-figures-path = Path
 tool-figures-outline = Outline
 tool-figures-outline-and-fill = Outline + fill
 tool-figures-rectangle = Rectangle

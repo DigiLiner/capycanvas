@@ -75,7 +75,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let edit = self.engine.document().vector_object_edit(*layer, result).map_err(|e| e.to_string())?;
         self.engine.preview_edit(edit).map_err(|e| e.to_string())
     }
-    fn document_per_surface_pixel(&self) -> f64 {
+    pub(super) fn document_per_surface_pixel(&self) -> f64 {
         let [m0, m1, m2, m3, _, _] = self.state.camera.input_transform().surface_to_document;
         f64::from((m0 * m3 - m1 * m2).abs().sqrt()).max(1e-6)
     }

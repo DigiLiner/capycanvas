@@ -641,6 +641,8 @@ workspace-tool-description-add-layer = Buat lapisan cat baru
 workspace-tool-description-delete-layer = Hapus lapisan aktif
 
 workspace-tool-description-raise-layer = Pindahkan lapisan aktif ke atas
+workspace-tool-description-finish-path = Tambahkan jalur yang sedang digambar
+workspace-tool-description-cancel-path = Buang jalur yang sedang digambar
 workspace-tool-description-bring-to-front = Pindahkan jalur terpilih ke depan jalur lain di lapisannya
 workspace-tool-description-bring-forward = Majukan jalur terpilih satu langkah
 workspace-tool-description-send-backward = Mundurkan jalur terpilih satu langkah

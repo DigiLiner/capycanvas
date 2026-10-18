@@ -69,6 +69,8 @@ mod painted_selections;
 mod vector_lines;
 #[path = "vector_moves.rs"]
 mod vector_moves;
+#[path = "vector_paths.rs"]
+mod vector_paths;
 #[path = "vector_properties.rs"]
 mod vector_properties;
 #[path = "transform_frame.rs"]
@@ -273,6 +275,7 @@ pub struct UiSession<R: CanvasRenderer> {
     painted_selections: painted_selections::PaintedSelections,
     vector_lines: vector_lines::VectorLines,
     vector_moves: vector_moves::VectorMoves,
+    vector_paths: vector_paths::VectorPaths,
     deferred_edits: std::collections::VecDeque<deferred_edits::DeferredEdit>,
     selection_masks: selection_masks::SelectionMasks,
     canvas_size: Option<canvas_size::CanvasSizeDraft>,
@@ -481,6 +484,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             painted_selections: Default::default(),
             vector_lines: Default::default(),
             vector_moves: Default::default(),
+            vector_paths: Default::default(),
             deferred_edits: Default::default(),
             selection_masks: Default::default(),
             canvas_size: None,
@@ -1402,7 +1406,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     reply.handled = true;
                     return Ok(reply);
                 }
-                if pressed && !editing && self.state.preferences.capture.is_none() && self.selection_key(&key)? {
+                if pressed && !editing && self.state.preferences.capture.is_none() && (self.selection_key(&key)? || self.vector_path_key(&key)?) {
                     self.refresh_commands();
                     reply.change = self.changed(regions::BRUSH | regions::DOCUMENT | regions::COMMANDS, true);
                     reply.handled = true;
@@ -2507,9 +2511,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                 !self.layer_interaction.path.is_empty() && self.layer_interaction.tool.selection_tool().is_some()
             }
             CommandId::RemoveSelectionPoint => {
-                self.layer_interaction.tool == (LayerCanvasTool::Selection { kind: SelectionTool::Polygon })
+                self.vector_paths.drafting() || self.layer_interaction.tool == (LayerCanvasTool::Selection { kind: SelectionTool::Polygon })
                     && !self.layer_interaction.path.is_empty()
             }
+            CommandId::FinishPath | CommandId::CancelPath => self.vector_paths.drafting(),
             CommandId::MaskSelection => {
                 idle && document.working.selection.is_some()
                     && self.selection_masks.target().is_none()
@@ -4933,7 +4938,15 @@ impl<R: CanvasRenderer> UiSession<R> {
                 Ok((DOCUMENT | BRUSH | COMMANDS, true))
             }
             CommandId::RemoveSelectionPoint => {
-                self.remove_polygon_point();
+                if !self.remove_vector_path_point()? { self.remove_polygon_point(); }
+                Ok((DOCUMENT | BRUSH | COMMANDS, true))
+            }
+            CommandId::FinishPath => {
+                self.finish_vector_path(false)?;
+                Ok((DOCUMENT | BRUSH | COMMANDS, true))
+            }
+            CommandId::CancelPath => {
+                self.cancel_vector_path();
                 Ok((DOCUMENT | BRUSH | COMMANDS, true))
             }
             CommandId::MaskSelection => {
@@ -8575,7 +8588,7 @@ mod tests {
         let mut s = session(Platform::Gtk);
         assert!(key(&mut s, "u", true, false, false).handled);
         key(&mut s, "u", false, false, false);
-        assert_eq!(s.state.tool_set.groups.len(), 3);
+        assert_eq!(s.state.tool_set.groups.len(), 4);
         assert_eq!(s.state.tool_set.subtools.len(), 1);
         assert_eq!(
             s.state
@@ -15392,7 +15405,7 @@ mod tests {
                 assert_eq!(combined.segments.iter().any(|segment| segment.marker == 0.), kind == SelectionTool::Brush);
                 s.state.settings.cursor = CursorMode::Tool;
             }
-            for shape in [FigureShape::Line, FigureShape::Rectangle, FigureShape::Ellipse] {
+            for shape in [FigureShape::Line, FigureShape::Rectangle, FigureShape::Ellipse, FigureShape::Path] {
                 s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape, paint: FigurePaint::Outline } } }).unwrap();
                 let icon = ToolVariant::Figure { shape }.icon();
                 assert_eq!(s.canvas_cursor().unwrap().segments[0].marker, layer_render::tool_cursor_marker(icon).unwrap());

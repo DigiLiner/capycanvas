@@ -10,6 +10,7 @@ pub enum FigureShape {
     Line,
     Rectangle,
     Ellipse,
+    Path,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u32)]
@@ -71,6 +72,7 @@ impl Figure {
                 .colors
                 .iter()
                 .all(|c| c.iter().all(|v| v.is_finite()) && (0.0..=1.0).contains(&c[3]))
+            && self.shape != FigureShape::Path
             && if self.shape == FigureShape::Line {
                 self.paint == FigurePaint::Outline && dx.hypot(dy) >= 0.001
             } else {
@@ -82,7 +84,7 @@ impl FigureShape {
     /// Shift constrains lines to 45-degree steps and boxes to equal sides.
     pub fn constrained_end(self, start: Point, end: Point) -> Point {
         let (dx, dy) = (end.x - start.x, end.y - start.y);
-        if self == Self::Line {
+        if matches!(self, Self::Line | Self::Path) {
             let angle =
                 (dy.atan2(dx) / std::f32::consts::FRAC_PI_4).round() * std::f32::consts::FRAC_PI_4;
             let r = dx.hypot(dy);
@@ -101,7 +103,7 @@ impl FigureShape {
     /// Display-only rubber-band outline, independent of the raster algorithm.
     pub fn guide(self, start: Point, end: Point, zoom: f32) -> Vec<Point> {
         match self {
-            Self::Line => vec![start, end],
+            Self::Line | Self::Path => vec![start, end],
             Self::Rectangle => vec![
                 start,
                 Point {

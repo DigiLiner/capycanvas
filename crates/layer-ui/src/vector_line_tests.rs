@@ -178,7 +178,7 @@ fn figure_shapes_on_vector_layers_become_selected_editable_paths() {
                 assert!(matches!(path.shape.as_deref(), Some(layer_core::authored::vector::LiveShape { kind: ShapeKind::Ellipse, .. })));
                 assert!(matches!(path.style.entries[..], [PaintEntry::Fill(_)]));
             }
-            FigureShape::Line => assert!(path.shape.is_none() && matches!(path.style.entries[..], [PaintEntry::Stroke(ref s)] if s.cap == Cap::Round)),
+            FigureShape::Line | FigureShape::Path => assert!(path.shape.is_none() && matches!(path.style.entries[..], [PaintEntry::Stroke(ref s)] if s.cap == Cap::Round)),
         }
     }
     assert_eq!(s.engine.document().scene().vector_layer(layer).unwrap().path_count(), 3);
@@ -353,6 +353,47 @@ fn move_frame_scales_and_rotates_selected_paths_in_one_undo_step() {
     let (before, after) = (first(&drawn), first(&object(&s)));
     let expected = [centre[0] - (before[1] - centre[1]), centre[1] + (before[0] - centre[0])];
     assert!((after[0] - expected[0]).abs() < 0.5 && (after[1] - expected[1]).abs() < 0.5, "the rotate handle turns the paths about their centre: {after:?} vs {expected:?}");
+}
+
+#[test]
+fn path_tool_builds_open_and_closed_paths_anchor_by_anchor() {
+    use layer_core::authored::vector::AnchorKind;
+    let (mut s, layer) = vector_session();
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } } }).unwrap();
+    let object = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let click = |s: &mut UiSession<Recorder>, first: u64, at: [f64; 2]| { let p = surface_at(s, at); press(s, first, &[p, p]); };
+    click(&mut s, 10, [100., 100.]);
+    let (smooth, handle) = (surface_at(&s, [200., 150.]), surface_at(&s, [240., 150.]));
+    press(&mut s, 20, &[smooth, handle]);
+    click(&mut s, 30, [300., 100.]);
+    click(&mut s, 40, [350., 300.]);
+    assert_eq!(object(&s).path_count(), 0, "nothing is added while drawing");
+    assert!(s.command(CommandId::FinishPath).enabled && s.command(CommandId::RemoveSelectionPoint).enabled);
+    let mut overlay = Vec::new();
+    s.append_layer_overlay(&mut overlay);
+    assert!(overlay.iter().filter(|segment| segment.marker == 2.).count() >= 4, "anchors and handles show while drawing");
+    invoke(&mut s, CommandId::RemoveSelectionPoint);
+    key(&mut s, "enter", true, false, false);
+    let open = object(&s);
+    assert_eq!(open.path_count(), 1);
+    let (_, path) = open.paths().next().unwrap();
+    let subpath = &path.geometry.subpaths()[0];
+    assert!(!subpath.closed && subpath.len() == 3, "Remove Point drops the last anchor and Enter finishes an open path");
+    assert_eq!(subpath.anchor(1).kind, AnchorKind::SYMMETRIC, "dragging makes a smooth anchor");
+    assert!((subpath.anchor(1).out_handle()[0] - 40.).abs() < 0.5, "{:?}", subpath.anchor(1).out_handle());
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|selection| (*selection.items).clone()), Some([path.id].into()));
+    for (i, at) in [[400., 400.], [500., 400.], [450., 480.]].into_iter().enumerate() { click(&mut s, 100 + i as u64 * 5, at); }
+    click(&mut s, 200, [401., 401.]);
+    let closed = object(&s);
+    assert_eq!(closed.path_count(), 2);
+    assert!(closed.paths().next().unwrap().1.geometry.subpaths()[0].closed, "clicking the first anchor closes the path");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(9_000_000_000, 9_000_000_000).unwrap();
+    assert_eq!(object(&s).path_count(), 1, "each path is one undo step");
+    s.dispatch(UiAction::Layer { action: LayerAction::New { group: false, clipped: false } }).unwrap();
+    s.dispatch(UiAction::Layer { action: LayerAction::Tool { tool: LayerCanvasTool::Figure { shape: FigureShape::Path, paint: FigurePaint::Outline } } }).unwrap();
+    click(&mut s, 300, [100., 100.]);
+    assert!(s.state.notice.is_some(), "paint layers refuse the Path tool");
 }
 
 #[test]

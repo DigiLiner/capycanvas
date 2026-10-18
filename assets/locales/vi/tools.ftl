@@ -90,6 +90,7 @@ tool-family-retouch = Công cụ chỉnh sửa ảnh
 tool-figures-ellipse = Elip
 tool-figures-fill = Tô đầy
 tool-figures-line = Đường thẳng
+tool-figures-path = Đường
 tool-figures-outline = Viền
 tool-figures-outline-and-fill = Viền + tô đầy
 tool-figures-rectangle = Hình chữ nhật

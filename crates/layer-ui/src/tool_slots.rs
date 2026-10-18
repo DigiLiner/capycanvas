@@ -160,6 +160,9 @@ impl ToolSlotId {
                         V::Figure {
                             shape: FigureShape::Ellipse,
                         },
+                        V::Figure {
+                            shape: FigureShape::Path,
+                        },
                     ]
                 }
             }
@@ -244,6 +247,7 @@ impl ToolVariant {
                 FigureShape::Line => "line",
                 FigureShape::Rectangle => "rectangle",
                 FigureShape::Ellipse => "ellipse",
+                FigureShape::Path => "path",
             },
             Self::Ruler { kind } => match kind {
                 RulerKind::Straight => "ruler",
@@ -272,6 +276,9 @@ impl ToolVariant {
             Self::Figure {
                 shape: FigureShape::Ellipse,
             } => MessageId::TOOL_FIGURES_ELLIPSE,
+            Self::Figure {
+                shape: FigureShape::Path,
+            } => MessageId::TOOL_FIGURES_PATH,
             Self::Ruler {
                 kind: RulerKind::Straight,
             } => MessageId::TOOL_RULERS_STRAIGHT,

@@ -90,6 +90,7 @@ tool-family-retouch = Инструменты ретуши
 tool-figures-ellipse = Эллипс
 tool-figures-fill = Заливка
 tool-figures-line = Линия
+tool-figures-path = Контур
 tool-figures-outline = Контур
 tool-figures-outline-and-fill = Контур + заливка
 tool-figures-rectangle = Прямоугольник

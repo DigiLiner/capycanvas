@@ -179,6 +179,7 @@ tool-figures-ellipse = Elips
 tool-figures-fill = Isi
 
 tool-figures-line = Garis
+tool-figures-path = Jalur
 
 tool-figures-outline = Garis luar
 

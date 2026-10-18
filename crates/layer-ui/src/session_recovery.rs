@@ -188,7 +188,7 @@ impl<R:CanvasRenderer> UiSession<R> {
             panel_copy:_,customization_copy:_,command_search:_,last_toolbar_context:_,brush_stamps:_,canvas_bar:_,notices:_,
             pen:_,input_pending:_,host_requests_changed:_,pen_contact:_,discarded_contacts:_,rendering_suspended:_,touch:_,navigation:_,navigator_drag:_,
             effect_gesture:_,paper_preview:_,papers:_,object_motion:_,property_editor:_,sdr_gesture:_,last_proof_mode:_,proof_setup_pending:_,filter_previews:_,
-            eyedropper:_,region_tools:_,selection_tools:_,tonal_tools:_,painted_selections:_,vector_lines:_,vector_moves:_,deferred_edits:_,selection_masks:_,
+            eyedropper:_,region_tools:_,selection_tools:_,tonal_tools:_,painted_selections:_,vector_lines:_,vector_moves:_,vector_paths:_,deferred_edits:_,selection_masks:_,
             canvas_size:_,image_size:_,frequency_separation:_,content_bounds:_,conversion:_,rulers:_,retouch:_,operation:_,objects:_,
             system_theme:_,system_accent:_,platform_prediction_available:_,logical_viewport:_,initial_fit:_,
             automatic_camera_revision:_,divider_drag:_,floating_resize:_,workspace_drag:_,workspace_tab_drag:_,

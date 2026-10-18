@@ -570,6 +570,8 @@ command_ids! {
     AddLayer,
     DeleteLayer,
     RaiseLayer,
+    FinishPath,
+    CancelPath,
     BringToFront,
     BringForward,
     SendBackward,
@@ -703,7 +705,7 @@ impl CommandId {
     }
     /// Polygon construction spans several contacts; these follow it live.
     pub fn follows_construction(self) -> bool {
-        matches!(self, Self::CompleteSelection | Self::CancelSelection | Self::RemoveSelectionPoint)
+        matches!(self, Self::CompleteSelection | Self::CancelSelection | Self::RemoveSelectionPoint | Self::FinishPath | Self::CancelPath)
     }
     /// Retained on/off commands can be presented as checkable menu items.
     pub fn is_toggle(self) -> bool {
@@ -864,6 +866,8 @@ impl CommandId {
             Self::DeleteLayer => "delete",
             Self::RaiseLayer | Self::BringForward => "up",
             Self::BringToFront => "bring-to-front",
+            Self::FinishPath => "check",
+            Self::CancelPath => "close",
             Self::SendBackward => "down",
             Self::SendToBack => "send-to-back",
             Self::LowerLayer => "down",
@@ -1137,6 +1141,8 @@ impl CommandId {
             Self::DeleteLayer => MessageId::COMMAND_DELETE_LAYER,
             Self::RaiseLayer => MessageId::COMMAND_RAISE_LAYER,
             Self::BringToFront => MessageId::COMMAND_BRING_TO_FRONT,
+            Self::FinishPath => MessageId::COMMAND_FINISH_PATH,
+            Self::CancelPath => MessageId::COMMAND_CANCEL_PATH,
             Self::BringForward => MessageId::COMMAND_BRING_FORWARD,
             Self::SendBackward => MessageId::COMMAND_SEND_BACKWARD,
             Self::SendToBack => MessageId::COMMAND_SEND_TO_BACK,

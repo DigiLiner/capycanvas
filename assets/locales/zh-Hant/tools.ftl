@@ -90,6 +90,7 @@ tool-family-retouch = 修飾工具
 tool-figures-ellipse = 橢圓
 tool-figures-fill = 填色
 tool-figures-line = 直線
+tool-figures-path = 路徑
 tool-figures-outline = 輪廓
 tool-figures-outline-and-fill = 輪廓＋填色
 tool-figures-rectangle = 矩形

@@ -90,6 +90,7 @@ tool-family-retouch = Herramientas de retoque
 tool-figures-ellipse = Elipse
 tool-figures-fill = Rellenar
 tool-figures-line = Línea
+tool-figures-path = Trazado
 tool-figures-outline = Contorno
 tool-figures-outline-and-fill = Contorno + relleno
 tool-figures-rectangle = Rectángulo

@@ -90,6 +90,7 @@ tool-family-retouch = เครื่องมือรีทัช
 tool-figures-ellipse = วงรี
 tool-figures-fill = เติมสี
 tool-figures-line = เส้น
+tool-figures-path = พาธ
 tool-figures-outline = เส้นขอบ
 tool-figures-outline-and-fill = เส้นขอบ + เติมสี
 tool-figures-rectangle = สี่เหลี่ยมผืนผ้า

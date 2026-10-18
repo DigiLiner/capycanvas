@@ -151,7 +151,7 @@ impl CanvasBarView {
 pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::sync::Arc<str> {
     localizer.text(match command {
         CommandId::ApplyTransform => MessageId::TOOLBAR_APPLY,
-        CommandId::CancelTransform | CommandId::CancelSelection => MessageId::TOOLBAR_CANCEL,
+        CommandId::CancelTransform | CommandId::CancelSelection | CommandId::CancelPath => MessageId::TOOLBAR_CANCEL,
         CommandId::PlacementOriginalSize => MessageId::TOOLBAR_ORIGINAL_SIZE,
         CommandId::TransformFree => MessageId::TOOLBAR_FREE,
         CommandId::TransformUniform => MessageId::TOOLBAR_UNIFORM,
@@ -170,7 +170,7 @@ pub(crate) fn short_label(command: CommandId, localizer: &Localizer) -> std::syn
         CommandId::MaskSelection => MessageId::TOOLBAR_MASK,
         CommandId::FillSelection => MessageId::TOOLBAR_FILL,
         CommandId::SaveSelectionLayer => MessageId::TOOLBAR_SAVE,
-        CommandId::CompleteSelection => MessageId::TOOLBAR_FINISH,
+        CommandId::CompleteSelection | CommandId::FinishPath => MessageId::TOOLBAR_FINISH,
         CommandId::FillSelectionMask => MessageId::TOOLBAR_FILL,
         CommandId::ClearSelectionMask => MessageId::TOOLBAR_CLEAR,
         CommandId::LoadSelectionLayer => MessageId::TOOLBAR_LOAD,
@@ -488,6 +488,15 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if let Some(plan) = self.object_plan(completion) {
             return Some(plan);
+        }
+        if !self.operation.active() && self.vector_paths.drafting() {
+            return Some(Plan {
+                kind: CanvasBarKind::Polygon,
+                label: None,
+                items: vec![PlanItem::Command(CommandId::RemoveSelectionPoint)],
+                completion: [CommandId::CancelPath, CommandId::FinishPath].map(PlanItem::Command).into(),
+                placement: Some(CanvasBarPlacement::BottomEdge),
+            });
         }
         if !self.operation.active() {
             let polygon = self.layer_interaction.tool

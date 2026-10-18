@@ -687,7 +687,7 @@ fn command_section(command: CommandId) -> ShortcutSection {
         | C::FillSelectionMask | C::ClearSelectionMask | C::SelectionBrushPressure | C::SelectionNew | C::SelectionAdd
         | C::SelectionSubtract | C::SelectionIntersect | C::SelectionAntialias | C::SelectionConstrainAngles
         | C::SelectionFixedRatio | C::SelectionFixedSize | C::SelectionFromCenter | C::CompleteSelection
-        | C::CancelSelection | C::SelectionVisible | C::SelectionEditing | C::SelectionReference | C::SelectAll
+        | C::CancelSelection | C::FinishPath | C::CancelPath | C::SelectionVisible | C::SelectionEditing | C::SelectionReference | C::SelectAll
         | C::Deselect | C::InvertSelection | C::RemoveSelectionPoint | C::MaskSelection | C::LoadSelectionLayer
         | C::InvertSelectionLayer | C::GrowSelection | C::ShrinkSelection | C::FeatherSelection | C::BorderSelection
         | C::SmoothSelection | C::TransformSelectionOutline => ShortcutSection::Select,

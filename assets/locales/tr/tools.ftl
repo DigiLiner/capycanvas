@@ -90,6 +90,7 @@ tool-family-retouch = Rötuş araçları
 tool-figures-ellipse = Elips
 tool-figures-fill = Dolgu
 tool-figures-line = Çizgi
+tool-figures-path = Yol
 tool-figures-outline = Anahat
 tool-figures-outline-and-fill = Anahat + dolgu
 tool-figures-rectangle = Dikdörtgen

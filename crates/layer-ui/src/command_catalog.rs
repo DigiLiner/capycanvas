@@ -1061,7 +1061,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             C::SaveDocument | C::SaveDocumentAs => self.require_raster_snapshot(),
             C::CloseDocument => self.require_document_snapshot_idle(),
             C::ResetLayout if self.managed_workspace.is_some() => self.require_workspace_idle(),
-            C::CompleteSelection | C::CancelSelection | C::RemoveSelectionPoint | C::GamutWarning | C::UndoWorkspace | C::RedoWorkspace => Ok(()),
+            C::CompleteSelection | C::CancelSelection | C::RemoveSelectionPoint | C::FinishPath | C::CancelPath | C::GamutWarning | C::UndoWorkspace | C::RedoWorkspace => Ok(()),
             _ => self.require_idle(),
         };
         if let Err(reason) = gate {
@@ -1274,6 +1274,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             C::ClearLayer | C::FillSelection if !paint => l.text(MessageId::COMMANDS_SELECT_A_PAINT_LAYER),
             C::ClearLayer | C::FillSelection if document.working.target.is_some_and(layer_core::SourceTarget::is_coverage) => l.text(MessageId::COMMANDS_RETURN_TO_THE_LAYER_S_ARTWORK_FIRST),
             C::BringToFront | C::BringForward | C::SendBackward | C::SendToBack => l.text(MessageId::COMMANDS_SELECT_PATHS_ON_A_VECTOR_LAYER),
+            C::FinishPath | C::CancelPath => l.text(MessageId::COMMANDS_DRAW_PATHS_ON_A_VECTOR_LAYER),
             C::RaiseLayer | C::LowerLayer => match self.layer_step_edit(command == C::RaiseLayer).err() {
                 Some(layer_core::DocumentError::InvalidLayerOperation("Invalid layer position")) => l.text(if command == C::RaiseLayer {
                     MessageId::COMMANDS_THE_LAYER_IS_ALREADY_AT_THE_TOP
