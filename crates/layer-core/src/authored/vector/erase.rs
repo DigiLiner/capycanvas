@@ -48,15 +48,16 @@ impl Eraser {
 
 #[derive(Clone, Copy)]
 struct Origin { segment: u32, from: f64, to: f64 }
+type Pieces = Vec<Vec<(usize, f64, f64)>>;
 
 fn portion(segment: Segment, from: f64, to: f64) -> Segment {
     let right = if from > 0. { segment.split(from).1 } else { segment };
     if to < 1. { right.split((to - from) / (1. - from)).0 } else { right }
 }
 
-fn kept(subpath: &Subpath, eraser: &Eraser) -> Option<Vec<Vec<(usize, f64, f64)>>> {
+fn kept(subpath: &Subpath, eraser: &Eraser) -> Option<Pieces> {
     if subpath.segment_count() == 0 { return eraser.covers(subpath.anchor(0).point(), 0.).then(Vec::new); }
-    let mut pieces: Vec<Vec<(usize, f64, f64)>> = Vec::new();
+    let mut pieces: Pieces = Vec::new();
     let mut open = false;
     let mut touched = false;
     for index in 0..subpath.segment_count() {
@@ -137,7 +138,7 @@ impl PathItem {
         let area = eraser.bounds();
         if area[2] < x0 || area[0] > x1 || area[3] < y0 || area[1] > y1 { return None; }
         let mut base = 0u32;
-        let mut results: Vec<Option<Vec<Vec<(usize, f64, f64)>>>> = Vec::new();
+        let mut results: Vec<Option<Pieces>> = Vec::new();
         for subpath in self.geometry.subpaths() { results.push(kept(subpath, eraser)); }
         if results.iter().all(Option::is_none) { return None; }
         let compound = self.geometry.subpaths().len() > 1;
