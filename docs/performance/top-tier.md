@@ -3168,6 +3168,20 @@ its failed light case has no retained screenshot. Evidence remains under
 `reference-photo-Release-refresh/runtime/` and `runtime-Dark/` beside the
 transport artifacts.
 
+A further light-theme pair uses the shader specialization from `10d515055`
+and Apple sources at `3d842c718`, with the same package, brush, priming Undo
+and three contacts. Both complete all samples with zero measured render,
+input, readiness, missing-callback or zero-time-callback failures. Mac contacts
+measure 87.34/89.31/89.32 presentations/s on its 90 Hz display; M4 measures
+106.48/109.82/108.99/s with interval p99 about 16.667 ms. The first-contact
+maximum displayed gaps remain 177.779 ms and 141.670 ms. Maximum owner service
+is 115.400 ms on Mac and 79.313 ms on M4, versus 118.292 and 76.227 ms in the
+retained light controls. No material first-contact or pacing gain is established.
+One zero-free Mac case does not establish that the earlier idle/resume issue is
+fixed. Engine progress and presentation observations still do not qualify GPU
+completed-update throughput. Current traces and both reviewed light captures
+remain under `current10d-Release-refresh/runtime-Light/` beside those controls.
+
 Separate native drawing diagnostics on 2026-10-18 use the ordinary `ink` and
 `wet-watercolor` workload profiles, with ten seconds of warm-up, about thirty
 seconds of measurement and ten seconds of postlude. These private optimized
