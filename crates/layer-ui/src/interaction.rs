@@ -11,6 +11,16 @@ pub struct Modifiers {
     pub alt: bool,
 }
 
+/// Whether a focused native button, switch, check box or list row takes `key`
+/// for its own activation instead of the canvas.
+pub fn control_takes_key(key: &str, modifiers: Modifiers, keyboard_focus: bool) -> bool {
+    !modifiers.command && !modifiers.alt && match key.to_ascii_lowercase().as_str() {
+        "enter" => true,
+        " " | "space" => keyboard_focus,
+        _ => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PointerKind {
@@ -328,5 +338,22 @@ impl NavigationAxes {
         let dt = self.last_ns.map_or(0., |last| now_ns.saturating_sub(last) as f32 / 1e9).min(0.1);
         self.last_ns = Some(now_ns);
         (dt > 0.).then(|| (self.pan.map(|v| v * dt), self.zoom * dt))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn space_activates_only_a_keyboard_focused_control_and_enter_always_does() {
+        let plain = Modifiers::default();
+        assert!(control_takes_key(" ", plain, true));
+        assert!(!control_takes_key(" ", plain, false), "a clicked button leaves Space to the canvas");
+        assert!(control_takes_key("Enter", plain, false) && control_takes_key("enter", plain, true));
+        assert!(!control_takes_key(" ", Modifiers { command: true, ..plain }, true));
+        assert!(!control_takes_key("Enter", Modifiers { alt: true, ..plain }, false));
+        assert!(control_takes_key(" ", Modifiers { shift: true, ..plain }, true));
+        assert!(!control_takes_key("a", plain, true));
     }
 }

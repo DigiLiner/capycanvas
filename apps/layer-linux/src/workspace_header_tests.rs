@@ -2727,6 +2727,43 @@ fn native_layer_preview_selection() {
 }
 
 #[test]
+#[ignore = "isolated native-input.js --native-test=native_space_pans_after_a_clicked_button"]
+fn native_space_pans_after_a_clicked_button() {
+    let mut d = Driver::new("art.capycanvas.SpaceFocus");
+    for theme in [Theme::Light, Theme::Dark] {
+        d.w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        pump(200);
+        let root = d.named(&d.header_tool(ToolbarControl::Command { command: CommandId::Eraser }));
+        let button = widgets(&root).find_map(|w| w.downcast::<gtk::Button>().ok()).unwrap();
+        let clicks = Rc::new(Cell::new(0));
+        let counter = button.connect_clicked(glib::clone!(
+            #[strong]
+            clicks,
+            move |_| clicks.set(clicks.get() + 1)
+        ));
+        d.click(button.upcast_ref());
+        assert!(button.has_focus(), "a clicked header button keeps the focus");
+        assert_eq!(clicks.get(), 1);
+        let before = state(&d.w).camera.translation;
+        let start = screen_point(d.w.area.upcast_ref(), &d.w.window, [0.5, 0.5]);
+        d.input.perform(serde_json::json!([{ "key": 0x20, "down": true }, { "point": start }, { "down": true },
+            { "point": [start[0] + 30., start[1]] }, { "point": [start[0] + 60., start[1]] }, { "down": false }, { "key": 0x20, "down": false }]));
+        pump(400);
+        let dpi = d.w.area.scale_factor() as f32;
+        let after = state(&d.w).camera.translation;
+        assert_eq!(clicks.get(), 1, "Space after clicking a button pans instead of pressing it again");
+        assert!((after[0] - before[0] - 60. * dpi).abs() <= dpi && (after[1] - before[1]).abs() <= dpi, "Space-drag pans: {before:?} -> {after:?}");
+        d.input.key(0xff1b);
+        gtk::prelude::GtkWindowExt::set_focus(&d.w.window, gtk::Widget::NONE);
+        assert!(button.grab_focus());
+        d.input.key(0x20);
+        until(|| clicks.get() == 2, "Space presses a button reached with the keyboard");
+        button.disconnect(counter);
+    }
+    d.finish();
+}
+
+#[test]
 #[ignore = "isolated native-input.js --native-test=native_panel_pen_input --tablet"]
 fn native_panel_pen_input() {
     let mut d = Driver::new("art.capycanvas.PanelPen");

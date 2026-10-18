@@ -416,6 +416,13 @@ out, and Shift+Space rotates. Middle/right drag also pans. Once captured, a
 contact retains its navigation mode through key release until up or cancellation.
 Space with arrow keys pans in keyboard-sized steps; Page Up/Down while panning
 moves almost one visible page. Ordinary arrow keys retain their editing behavior.
+A focused button, switch, check box or list row takes Enter, and takes Space only
+when the painter reached it with the keyboard; after a click, Space still pans.
+`control_takes_key` decides this for every host. Hosts report whether the focus
+came from the keyboard: Web from the last input before `focusin`, GTK from the
+last input before the focus widget changed, and Windows from `FocusState`. A
+pointer press makes the focused control count as pointer-focused again. Android
+and Apple controls do not take focus from a tap or click.
 
 Zoom Tool Settings expose Click (In/Out), Drag (Smooth/Area/Click only),
 Direction (Left/right or Up/down), and Center clicked point. Defaults are In,

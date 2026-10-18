@@ -19,6 +19,14 @@ pub unsafe extern "C" fn capy_localization_free(context: *mut CapyLocalization) 
     if !context.is_null() { drop(unsafe { Box::from_raw(context) }); }
 }
 /// # Safety
+/// The key is a readable NUL-terminated UTF-8 shared key name.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_control_takes_key(key: *const c_char, command: bool, alt: bool, keyboard_focus: bool) -> bool {
+    if key.is_null() { return false; }
+    let Ok(key) = unsafe { CStr::from_ptr(key) }.to_str() else { return false };
+    layer_ui::control_takes_key(key, layer_ui::Modifiers { command, shift: false, alt }, keyboard_focus)
+}
+/// # Safety
 /// Input is readable NUL-terminated UTF-8 JSON for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_proof_dial(input: *const c_char) -> *mut c_char {
@@ -183,6 +191,12 @@ pub unsafe extern "C" fn capy_document_tab_slide(input: *const c_char) -> *mut c
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn button_activation_keys_follow_the_shared_focus_rule() {
+        let key = |name: &str, keyboard| unsafe { capy_control_takes_key(CString::new(name).unwrap().as_ptr(), false, false, keyboard) };
+        assert!(key(" ", true) && !key(" ", false) && key("enter", false));
+        assert!(!unsafe { capy_control_takes_key(std::ptr::null(), false, false, true) });
+    }
     fn slide(point: [f32; 2], order: [u64; 3]) -> serde_json::Value {
         let hits: Vec<_> = [1u64, 2, 3]
             .iter()

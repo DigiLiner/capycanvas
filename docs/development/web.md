@@ -499,8 +499,10 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
   `CAPY_ANDROID_SERIAL` set, `--canvas-bar`, `--zoom-readout`,
   `--image-placement` and `--paper-rows` also send real OS taps through `adb`.
 - `--staged-startup` holds shader validation and checks that controls, paper and
-  painting become usable in order; `--filter-previews` checks preview pixels and
-  cache lifecycle.
+  painting become usable in order, including Space-drag right after Preferences
+  closes and returns focus to its clicked button; `--filter-previews` checks
+  preview pixels and cache lifecycle. `--paper-rows` checks that Space presses
+  a keyboard-focused button.
 - `--pipeline-readiness` holds compilation during Fill followed by Deselect,
   checks pixels and undo history, then applies a cold transform and commits
   another by switching tools. It instruments both page and worker devices before

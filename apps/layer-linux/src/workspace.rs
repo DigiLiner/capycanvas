@@ -1490,15 +1490,19 @@ impl Workspace {
         self.color.bind(self, |workspace, color| workspace.dispatch(UiAction::Color {
             action: layer_ui::ColorAction::Definition { color },
         }));
+        let keyboard_focus = crate::input::keyboard_focus(&self.window);
         let keys = gtk::EventControllerKey::new();
         keys.set_name(Some("workspace-shortcuts"));
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         keys.connect_key_pressed(glib::clone!(
             #[weak(rename_to = this)]
             self,
+            #[strong]
+            keyboard_focus,
             #[upgrade_or]
             glib::Propagation::Proceed,
-            move |_, key, _, modifiers| {
+            move |controller, key, _, modifiers| {
+                keyboard_focus.key_pressed(controller);
                 this.update_zen();
                 if this.preferences.recording() {
                     this.interact(crate::input::key_input(key, true, modifiers, false, None));
@@ -1520,12 +1524,11 @@ impl Workspace {
                 {
                     return glib::Propagation::Proceed;
                 }
-                if matches!(key, gdk::Key::space | gdk::Key::Return | gdk::Key::KP_Enter)
-                    && !modifiers.intersects(gdk::ModifierType::CONTROL_MASK|gdk::ModifierType::ALT_MASK|gdk::ModifierType::SUPER_MASK|gdk::ModifierType::META_MASK)
-                    && gtk::prelude::GtkWindowExt::focus(&this.window).is_some_and(|w| {
+                if gtk::prelude::GtkWindowExt::focus(&this.window).is_some_and(|w| {
                         w.is::<gtk::Button>() || w.is::<gtk::Switch>() || w.is::<gtk::CheckButton>()
                             || w.is::<gtk::ListView>() || w.parent().is_some_and(|parent| parent.is::<gtk::ListView>())
                     })
+                    && crate::input::control_takes_key(&crate::input::key_input(key, true, modifiers, false, None), keyboard_focus.focused())
                 {
                     return glib::Propagation::Proceed;
                 }
@@ -1535,7 +1538,6 @@ impl Workspace {
                         || w.is::<gtk::TextView>()
                         || w.is::<gtk::Range>()
                         || w.is::<gtk::DropDown>()
-                        || w.is::<gtk::CheckButton>()
                 });
                 if this
                     .interact(crate::input::key_input(key, true, modifiers, editing, None))

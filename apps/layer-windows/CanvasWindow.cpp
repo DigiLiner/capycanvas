@@ -728,8 +728,9 @@ void CanvasWindow::Key(KeyRoutedEventArgs const& e,bool pressed) {
         std::wstring id=Automation::AutomationProperties::GetAutomationId(element).c_str();
         if(id.starts_with(L"divider-"))divider=uint32_t(std::stoul(id.substr(8)));
     }
-    // Ordinary buttons keep application shortcuts after a click. Their native
-    // activation/navigation keys, editors and open menus retain keyboard input.
+    // Ordinary buttons keep application shortcuts after a click. Their navigation
+    // keys, the activation keys the shared rule grants them, editors and open
+    // menus retain keyboard input.
     // Releases still clear shared held state when focus moves during a gesture.
     bool button=focused&&bool(focused.try_as<Primitives::ButtonBase>());
     bool ownedKeys=false;
@@ -743,7 +744,11 @@ void CanvasWindow::Key(KeyRoutedEventArgs const& e,bool pressed) {
         (key!=VirtualKey::Menu&&(GetKeyState(VK_MENU)&0x8000)&&!(GetKeyState(VK_CONTROL)&0x8000));
     // F11 remains a window action while a toolbar button or native field has focus.
     bool arrow=key==VirtualKey::Left||key==VirtualKey::Right||key==VirtualKey::Up||key==VirtualKey::Down;
-    bool editing=key!=VirtualKey::F11&&(ownedKeys||menuOpen.load()||(divider?navigation&&!arrow:!canvas&&(!button||navigation)));
+    bool activation=key==VirtualKey::Space||key==VirtualKey::Enter;
+    bool keyboardFocus=false;
+    if(auto element=focused.try_as<UIElement>())keyboardFocus=element.FocusState()==FocusState::Keyboard;
+    bool takes=button&&activation&&capy_control_takes_key(to_string(name).c_str(),(GetKeyState(VK_CONTROL)&0x8000)!=0,(GetKeyState(VK_MENU)&0x8000)!=0,keyboardFocus);
+    bool editing=key!=VirtualKey::F11&&(ownedKeys||menuOpen.load()||(divider?navigation&&!arrow:!canvas&&(!button||takes||(navigation&&!activation))));
     if(key==VirtualKey::F4&&(GetKeyState(VK_MENU)&0x8000))return;
     using namespace Windows::Data::Json;
     JsonObject modifiers;

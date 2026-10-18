@@ -642,6 +642,50 @@ pub fn key_input(
     }
 }
 
+pub(crate) fn control_takes_key(input: &UiInput, keyboard_focus: bool) -> bool {
+    matches!(input, UiInput::Key { key, modifiers, .. } if layer_ui::control_takes_key(key, *modifiers, keyboard_focus))
+}
+
+/// Whether the focused widget was reached with the keyboard rather than a pointer.
+#[derive(Default)]
+pub(crate) struct KeyboardFocus {
+    modality: Cell<bool>,
+    focused: Cell<bool>,
+}
+impl KeyboardFocus {
+    pub(crate) fn focused(&self) -> bool {
+        self.focused.get()
+    }
+    pub(crate) fn key_pressed(&self, controller: &gtk::EventControllerKey) {
+        if controller.current_event().and_then(|event| event.downcast::<gdk::KeyEvent>().ok()).is_some_and(|key| !key.is_modifier()) {
+            self.modality.set(true);
+        }
+    }
+}
+pub(crate) fn keyboard_focus(window: &adw::ApplicationWindow) -> Rc<KeyboardFocus> {
+    let focus = Rc::new(KeyboardFocus::default());
+    let input = gtk::EventControllerLegacy::new();
+    input.set_propagation_phase(gtk::PropagationPhase::Capture);
+    input.connect_event(glib::clone!(
+        #[strong]
+        focus,
+        move |_, event| {
+            if matches!(event.event_type(), gdk::EventType::ButtonPress | gdk::EventType::TouchBegin) {
+                focus.modality.set(false);
+                focus.focused.set(false);
+            }
+            glib::Propagation::Proceed
+        }
+    ));
+    window.add_controller(input);
+    window.connect_focus_widget_notify(glib::clone!(
+        #[strong]
+        focus,
+        move |_| focus.focused.set(focus.modality.get())
+    ));
+    focus
+}
+
 /// Tablet pad buttons the compositor leaves to the app arrive as keys.
 pub fn pad_buttons(workspace: &Rc<Workspace>) -> gtk::EventControllerLegacy {
     let pads = gtk::EventControllerLegacy::new();

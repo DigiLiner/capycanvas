@@ -1611,7 +1611,7 @@ function keyInput(e, pressed, divider = null) {
       composingKey(e) ||
       (e.target instanceof Element &&
         (!!e.target.closest("input,select,textarea,[contenteditable]:not([contenteditable=false])") ||
-          (!e.ctrlKey && !e.metaKey && !e.altKey && ["Enter", " "].includes(e.key) && !!e.target.closest("button,summary")))),
+          (!!e.target.closest("button,summary") && app.control_takes_key(e.key, e.ctrlKey || e.metaKey, e.altKey, keyboardFocused.has(e.target))))),
     divider,
   });
   if (reply.handled) {
@@ -1619,6 +1619,11 @@ function keyInput(e, pressed, divider = null) {
     e.stopPropagation();
   }
 }
+const keyboardFocused = new WeakSet();
+let keyboardModality = false;
+window.addEventListener("pointerdown", () => { keyboardModality = false; keyboardFocused.delete(document.activeElement); }, { capture: true });
+window.addEventListener("keydown", e => { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) keyboardModality = true; }, { capture: true });
+document.addEventListener("focusin", e => { if (keyboardModality) keyboardFocused.add(e.target); else keyboardFocused.delete(e.target); }, { capture: true });
 window.addEventListener("keydown", e => {
   if (!composingKey(e) && e.key === "Escape" && workspaceGesture) { endWorkspaceGesture(null, true); e.preventDefault(); e.stopPropagation(); }
 }, {capture:true});
