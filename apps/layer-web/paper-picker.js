@@ -65,13 +65,26 @@ export function chooseTexture({app, layer, state, dispatch, element, button, ico
   menu.addEventListener('toggle', e => { if (e.newState === 'closed' && !grid.contains(document.activeElement)) reveal(); });
   root.append(content, menu); document.body.append(root); addScrollbar(page, content);
   let shown = null, shownKey = '', pending = null, tiles = [];
-  const actions = index => shown.tiles[index].actions.filter(entry => entry.action.op !== 'rename_paper');
+  function rename(action) {
+    const form = element('dialog', 'workspace-form'); form.id = 'paper-rename-dialog';
+    bindCopy(form, () => copy.rename_title, 'ariaLabel');
+    const label = element('label', '', () => bootstrap.common.name), input = element('input'), error = element('p', 'workspace-error'), footer = element('footer');
+    input.id = 'paper-rename-name'; input.value = action.name; input.maxLength = 64; label.append(input);
+    const save = button(() => copy.rename, () => { form.close(); dispatch({type: 'effect', action: {...action, name: input.value}}); }, 'suggested-action');
+    const validate = () => { error.textContent = app.native_caption({type: 'paper_name_error', name: input.value}); save.disabled = !!error.textContent; };
+    input.oninput = validate;
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!save.disabled) save.click(); } };
+    footer.append(button(() => bootstrap.common.cancel, () => form.close()), save);
+    form.append(element('h2', '', () => copy.rename_title), label, error, footer);
+    form.addEventListener('close', () => { form.remove(); reveal(); });
+    validate(); document.body.append(form); form.showModal(); input.select();
+  }
   function openMenu(index, e) {
-    const items = actions(index);
+    const items = shown.tiles[index].actions;
     if (!items.length) return;
     e.preventDefault(); e.stopPropagation();
     menu.replaceChildren(...items.map(entry => {
-      const item = button(entry.label, () => { menu.hidePopover(); dispatch({type: 'effect', action: entry.action}); });
+      const item = button(entry.label, () => { menu.hidePopover(); if (entry.action.op === 'rename_paper') rename(entry.action); else dispatch({type: 'effect', action: entry.action}); });
       item.setAttribute('role', 'menuitem'); return item;
     }));
     menu.showPopover();

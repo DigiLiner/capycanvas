@@ -59,16 +59,33 @@ export async function checkPaperLibrary({call,evaluate,settle}) {
     await press(select('#property-texture'));await wait(opened);
     await evaluate(`window.textureLibraryDialog=${select(dialog)}`);
     assert.deepEqual((await tiles()).find(t=>t.label==='Linen scan'),{label:'Linen scan',checked:true,preview:true},'The imported paper is the current tile, with its preview');
-    await send({type:'effect',action:{op:'rename_paper',id,name:'Cotton rag'}});
+    const linen=(await tile(".find(t=>t.label==='Linen scan')")).actions;
+    assert.deepEqual(linen.map(a=>a.op),['rename_paper','delete_paper']);
+    assert.deepEqual(await menu(caption('Linen scan')),linen.map(a=>a.label),'Imported papers offer Rename and Delete in their menu');
+    await capture(`texture-library-menu-${theme}`);
+    await choose(linen.find(a=>a.op==='rename_paper').label);
+    const prompt='#paper-rename-dialog[open]',copy="layerApp.app.catalog().native_copy.paper";
+    await wait(`!!document.querySelector('${prompt}')`);
+    const field=()=>evaluate(`(()=>{const f=document.querySelector('${prompt}'),n=f.querySelector('#paper-rename-name'),save=f.querySelector('.suggested-action');return{title:f.querySelector('h2').textContent===${copy}.rename_title,save:save.textContent===${copy}.rename,enabled:!save.disabled,error:f.querySelector('.workspace-error').textContent,value:n.value,focused:document.activeElement===n,selected:n.selectionStart===0&&n.selectionEnd===n.value.length}})()`);
+    assert.deepEqual(await field(),{title:true,save:true,enabled:true,error:'',value:'Linen scan',focused:true,selected:true},'Rename opens with the paper name selected');
+    await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8});
+    await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Backspace',code:'Backspace',windowsVirtualKeyCode:8});await settle();
+    const empty=await field();
+    assert.deepEqual([empty.value,empty.enabled,empty.error===await evaluate(`layerApp.app.native_caption({type:'paper_name_error',name:''})`)&&empty.error!==''],['',false,true],'An empty name cannot be saved');
+    await capture(`texture-library-rename-${theme}`);
+    await call('Input.insertText',{text:'Cotton rag'});await settle();
+    assert.deepEqual([(await field()).value,(await field()).enabled],['Cotton rag',true]);
+    await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+    await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});await settle();
+    await wait(`!document.querySelector('${prompt}')`);
     await wait(`${idle}&&${texture}.paper.tiles.some(t=>t.label==='Cotton rag')`);
+    assert.equal(await evaluate(`textureLibraryDialog===${select(dialog)}&&textureLibraryDialog.contains(document.activeElement)`),true,'Rename returns to the open dialog');
     await evaluate('layerApp.documents.loadPapers()');
     await wait(`${idle}&&${texture}.paper.tiles.some(t=>t.label==='Cotton rag')`);
     await wait(`${caption('Cotton rag')}?.getAttribute('aria-checked')==='true'`);
     assert.equal(await evaluate(`textureLibraryDialog===${select(dialog)}`),true,'The open dialog follows library changes');
     const paperActions=(await tile(".find(t=>t.label==='Cotton rag')")).actions;
-    assert.deepEqual(paperActions.map(a=>a.op),['rename_paper','delete_paper']);
-    assert.deepEqual(await menu(caption('Cotton rag')),paperActions.filter(a=>a.op==='delete_paper').map(a=>a.label),'Imported papers offer Delete in their menu');
-    await capture(`texture-library-menu-${theme}`);
+    assert.deepEqual(await menu(caption('Cotton rag')),paperActions.map(a=>a.label),'The renamed paper keeps its menu');
     await choose(paperActions.find(a=>a.op==='delete_paper').label);
     await wait(`${idle}&&${library}.length===0`);
     await wait(`!${caption('Cotton rag')}`);
@@ -89,5 +106,5 @@ export async function checkPaperLibrary({call,evaluate,settle}) {
     await press(select(`${dialog} #texture-cancel`));await wait(closed);
     assert.equal(await evaluate('layerApp.state().host_error??null'),null);
   }
-  console.log('PASS: paper library Import… from Choose Texture, rename and relist in the open dialog, tile-menu Delete and Add to Library, in both themes');
+  console.log('PASS: paper library Import… from Choose Texture, tile-menu Rename and relist in the open dialog, tile-menu Delete and Add to Library, in both themes');
 }

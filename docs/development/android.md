@@ -325,8 +325,9 @@ manual save checkpoints and undo/redo after an actual process death.
   painting on the layer above, existing mask selection and the texture
   thumbnail after a Paper mask.
 - `AndroidFeatureParityTest#paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`
-  imports through Import… in Choose Texture, deletes through the open dialog's
-  tile menu and adds the drawing's own paper back with Add to Library; pass
+  imports through Import… in Choose Texture, renames and deletes through the
+  open dialog's tile menu and adds the drawing's own paper back with Add to
+  Library; pass
   `-e theme light` or `dark`.
 - `AndroidRasterTest#paperTextureChangesRetainImmediatePencilContacts` changes
   built-in Paper textures and immediately sends whole Pencil contacts while

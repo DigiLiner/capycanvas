@@ -484,7 +484,7 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
   the Paper row and Properties: its size against Edit Color, Cancel, Use Texture
   with one Undo, a locked Paper and a Paper with a mask.
 - `--paper-library` imports an image with Import… in Choose Texture, then
-  renames, relists and deletes it through the open dialog's tile menu, adds the
+  renames it in the tile menu's Rename prompt, relists it, deletes it, adds the
   drawing's own paper back with Add to Library, and checks that library edits
   leave the drawing alone.
   The raster worker keeps the library in IndexedDB and decodes, converts and

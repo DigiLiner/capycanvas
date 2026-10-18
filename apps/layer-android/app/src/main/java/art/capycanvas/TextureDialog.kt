@@ -131,6 +131,8 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
         return
     }
     var pending by remember { mutableStateOf<Pick?>(null) }
+    var renaming by remember { mutableStateOf<JSONObject?>(null) }
+    val act = { action: JSONObject -> if (action.getString("op") == "rename_paper") renaming = action else host.dispatch(obj("type" to "effect", "action" to action)) }
     val choice = pending?.takeIf { pick -> picker.tiles.any { it.paperId() == pick.id } } ?: Pick(picker.tiles.getOrNull(picker.selected)?.paperId())
     SideEffect { if (pending != choice) pending = choice }
     fun use() {
@@ -164,7 +166,7 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TextureGap)) {
                             row.forEach { (index, tile) ->
                                 val chosen = tile.paperId() == choice.id
-                                TextureTile(host, tile, index, chosen, Modifier.weight(1f).then(if (chosen) Modifier.onPlaced { placed[1] = it }.focusRequester(focus) else Modifier)) { pending = Pick(tile.paperId()) }
+                                TextureTile(host, tile, index, chosen, Modifier.weight(1f).then(if (chosen) Modifier.onPlaced { placed[1] = it }.focusRequester(focus) else Modifier), act) { pending = Pick(tile.paperId()) }
                             }
                             repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                         }
@@ -192,16 +194,32 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
         DialogButton(common.getString("cancel"), "texture-cancel") { host.textureDialog = null }
         DialogButton(copy.getString("use_texture"), "texture-use", accent = true) { use() }
     }
+    renaming?.let { action -> PaperRenameDialog(host, action) { renaming = null } }
+}
+
+@Composable private fun PaperRenameDialog(host: CanvasHost, action: JSONObject, close: () -> Unit) {
+    val copy = host.catalog.getJSONObject("native_copy").getJSONObject("paper")
+    var name by remember { mutableStateOf(action.getString("name")) }
+    val error = remember(name, host.languageTag) { JSONObject(Native.nativeCaption(obj("type" to "paper_name_error", "name" to name).toString(), host.languageTag)).getString("text") }
+    AlertDialog(onDismissRequest = close, modifier = Modifier.testTag("paper-rename-dialog"),
+        title = { Text(copy.getString("rename_title")) },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CoreTextField(name, { name = it }, Modifier.fillMaxWidth().testTag("paper-rename-name"), maxLength = 64, focusRequest = 1)
+            if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error)
+        } },
+        dismissButton = { TextButton(close) { Text(host.bootstrap!!.getJSONObject("common").getString("cancel")) } },
+        confirmButton = { TextButton({ close(); host.dispatch(obj("type" to "effect", "action" to JSONObject(action.toString()).put("name", name))) },
+            enabled = error.isEmpty(), modifier = Modifier.testTag("paper-rename-save")) { Text(copy.getString("rename")) } })
 }
 
 private val TextureFrame = 102.dp
 private val TexturePageEnd = 20.dp
 private val TextureGap = 12.dp
 
-@Composable private fun TextureTile(host: CanvasHost, tile: JSONObject, index: Int, chosen: Boolean, modifier: Modifier, choose: () -> Unit) {
+@Composable private fun TextureTile(host: CanvasHost, tile: JSONObject, index: Int, chosen: Boolean, modifier: Modifier, act: (JSONObject) -> Unit, choose: () -> Unit) {
     val colors = LocalPalette.current
     val label = tile.getString("label")
-    val actions = tile.array("actions").objects().filter { it.getJSONObject("action").getString("op") != "rename_paper" }
+    val actions = tile.array("actions").objects()
     val interactions = remember { MutableInteractionSource() }
     val hovered by interactions.collectIsHoveredAsState()
     var menu by remember { mutableStateOf(false) }
@@ -231,7 +249,7 @@ private val TextureGap = 12.dp
         DropdownMenu(menu, { menu = false }) {
             actions.forEach { action ->
                 DropdownMenuItem(text = { Text(action.getString("label")) }, modifier = Modifier.testTag("texture-action-${action.getJSONObject("action").getString("op")}"),
-                    onClick = { menu = false; host.dispatch(obj("type" to "effect", "action" to action.getJSONObject("action"))) })
+                    onClick = { menu = false; act(action.getJSONObject("action")) })
             }
         }
     }
