@@ -5570,7 +5570,7 @@ mod tests {
                 assert_eq!(drawn.len(), expected.len(), "{label}");
                 for (a, b) in drawn.iter().zip(expected) { assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3), "{label}: {a:?} vs {b:?}"); }
             };
-            let mut vector = engine.begin_vector_stroke(1, events[0], [0.; 2]);
+            let mut vector = engine.begin_vector_stroke(1, events[0], [0.; 2], 0.5);
             let mut predicted_frames = 0;
             for (i, sample) in events.iter().enumerate() {
                 let (now, presented) = (sample.timestamp_ns, sample.timestamp_ns + 8_000_000);

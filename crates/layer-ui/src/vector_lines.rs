@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 const LINE_TOLERANCE: f64 = 0.5;
 
-struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, tolerance: f64, shown: Vec<VectorSample> }
+struct Line { layer: OccurrenceHandle, stroke: VectorStroke, paint: Paint, shown: Vec<VectorSample> }
 struct Drawn { line: Line, id: ItemId, checkpoint: u64 }
 struct Erasing { layer: OccurrenceHandle, original: VectorObject, current: VectorObject, last: [f64; 2], radius: f64, whole: bool }
 
@@ -116,8 +116,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let [r, g, b, a] = brush.color_rgba_linear;
                 let color = layer_core::color::RgbColor::from_linear(space, [r, g, b, (a * brush.opacity).clamp(0., 1.)]).map_err(|e| e.to_string())?;
                 let offset = self.engine.document().scene().occurrence_offset64(layer);
-                let stroke = self.engine.begin_vector_stroke(self.vector_lines.revision + 1, event, offset);
-                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), tolerance: LINE_TOLERANCE * self.document_per_surface_pixel(), shown: Vec::new() });
+                let stroke = self.engine.begin_vector_stroke(self.vector_lines.revision + 1, event, offset, LINE_TOLERANCE * self.document_per_surface_pixel());
+                self.vector_lines.line = Some(Line { layer, stroke, paint: Paint::color(color), shown: Vec::new() });
             }
             PenPhase::Move => self.push_vector_sample(event),
             PenPhase::Up => {
@@ -149,7 +149,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn finish_vector_line(&mut self) -> Result<(), String> {
         let Some(line) = self.vector_lines.line.take() else { return Ok(()) };
         let result = (|| {
-            let Some(fitted) = layer_engine::fit_line(&line.stroke.samples(), line.tolerance) else { return Ok(()) };
+            let Some(fitted) = line.stroke.fitted() else { return Ok(()) };
             let document = self.engine.document();
             let object = document.scene().vector_layer(line.layer).ok_or("The vector layer was removed")?;
             let id = object.allocate_id();
@@ -173,7 +173,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             if drawn.checkpoint == self.engine.checkpoint() && drawn.line.stroke.awaits_corrections() { self.vector_lines.drawn = Some(drawn); }
             return Ok(());
         }
-        let Some(fitted) = layer_engine::fit_line(&drawn.line.stroke.samples(), drawn.line.tolerance) else { return Ok(()) };
+        let Some(fitted) = drawn.line.stroke.fitted() else { return Ok(()) };
         let document = self.engine.document();
         let object = document.scene().vector_layer(drawn.line.layer).ok_or("The vector layer was removed")?;
         let Some(position) = object.find(drawn.id) else { return Ok(()) };

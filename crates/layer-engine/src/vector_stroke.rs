@@ -21,14 +21,16 @@ pub struct VectorStroke {
     feedback: InstantFeedbackConfig,
     surface: [f32; 6],
     dabs: Vec<Dab>,
+    fit: LineFit,
     id: u64,
 }
 impl VectorStroke {
-    fn new(id: u64, brush: BrushSnapshot, curve: PressureCurve, offset: [f64; 2], feedback: InstantFeedbackConfig, surface: [f32; 6]) -> Self {
+    fn new(id: u64, brush: BrushSnapshot, curve: PressureCurve, offset: [f64; 2], feedback: InstantFeedbackConfig, surface: [f32; 6], tolerance: f64) -> Self {
         let mut generator = DabGenerator::new(layer_core::color::RgbSpace::Srgb);
         generator.reset_for_stroke(StrokeId(id), &brush);
+        let fit = LineFit::new(tolerance, (tolerance * 8.).max(f64::from(brush.diameter) * 0.5));
         Self { brush, generator, curve, offset: offset.map(|v| v as f32), ruler: None, builder: StrokeBuilder::default(), finalized: 0, estimates: BTreeMap::new(),
-            tip: PreviewTip::default(), feedback, surface, dabs: Vec::new(), id }
+            tip: PreviewTip::default(), feedback, surface, dabs: Vec::new(), fit, id }
     }
     pub fn brush(&self) -> &BrushSnapshot { &self.brush }
     pub fn awaits_corrections(&self) -> bool { !self.estimates.is_empty() }
@@ -88,8 +90,12 @@ impl VectorStroke {
             }
             None => { self.generator.preview().flush_contact(&self.brush, &mut tail); }
         }
-        samples(self.dabs.iter().chain(&tail))
+        let mut shown = samples(self.dabs.iter());
+        self.fit.advance(&shown, FRAME_WORK);
+        extend_samples(&mut shown, &tail);
+        shown
     }
+    pub fn fitted(&self) -> Option<(PathGeometry, Option<WidthProfile>, f64)> { self.fit.fitted(&self.samples()) }
     pub fn samples(&self) -> Vec<Sample> {
         if self.brush.taper.end_distance_diameters > 0. && !self.builder.real_points().is_empty()
             && let Ok(stroke) = layer_core::Stroke::new(StrokeId(self.id), layer_core::SourceTarget::Paint(layer_core::authored::PaintHandle::from_index(0)),
@@ -107,9 +113,9 @@ impl VectorStroke {
 }
 
 impl<B: CanvasRenderer> CanvasEngine<B> {
-    pub fn begin_vector_stroke(&self, id: u64, event: PenEvent, offset: [f64; 2]) -> VectorStroke {
+    pub fn begin_vector_stroke(&self, id: u64, event: PenEvent, offset: [f64; 2], tolerance: f64) -> VectorStroke {
         let mut stroke = VectorStroke::new(id, self.stroke_brush(&event), self.configured_pressure_curve().clone(), offset,
-            self.instant_feedback(), self.view().document_to_surface);
+            self.instant_feedback(), self.view().document_to_surface, tolerance);
         self.push_vector_stroke(&mut stroke, event);
         stroke
     }
@@ -126,12 +132,15 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
 
 pub(crate) fn samples<'a>(dabs: impl Iterator<Item = &'a Dab>) -> Vec<Sample> {
     let mut out: Vec<Sample> = Vec::new();
+    extend_samples(&mut out, dabs);
+    out
+}
+fn extend_samples<'a>(out: &mut Vec<Sample>, dabs: impl IntoIterator<Item = &'a Dab>) {
     for dab in dabs {
         let sample = ([f64::from(dab.center.x), f64::from(dab.center.y)], f64::from(dab.radii[0].max(0.)));
         if let Some(last) = out.last_mut() && distance(last.0, sample.0) < 1e-6 { *last = sample; continue; }
         out.push(sample);
     }
-    out
 }
 
 fn sub(a: [f64; 2], b: [f64; 2]) -> [f64; 2] { [a[0] - b[0], a[1] - b[1]] }
@@ -154,7 +163,6 @@ pub fn polyline(samples: &[Sample]) -> Option<(PathGeometry, Option<WidthProfile
     Some((geometry, WidthProfile::new(knots).ok(), half * 2.))
 }
 
-struct Fitted { cubics: Vec<[[f64; 2]; 4]>, params: Vec<(usize, f64)> }
 struct Segment { cubic: [[f64; 2]; 4], u: Vec<f64>, error: f64 }
 
 fn chord_parameters(points: &[[f64; 2]]) -> Vec<f64> {
@@ -187,12 +195,12 @@ fn solve<const N: usize>(mut a: [[f64; N]; N], mut b: [f64; N]) -> Option<[f64; 
     for row in (0..N).rev() { x[row] = (b[row] - (row + 1..N).map(|k| a[row][k] * x[k]).sum::<f64>()) / a[row][row]; }
     Some(x)
 }
-fn least_squares(points: &[[f64; 2]], u: &[f64], left: Option<[f64; 2]>, right: Option<[f64; 2]>) -> Option<[[f64; 2]; 4]> {
+fn least_squares(points: &[[f64; 2]], u: &[f64], weights: &[f64], left: Option<[f64; 2]>, right: Option<[f64; 2]>) -> Option<[[f64; 2]; 4]> {
     let (first, last) = (points[0], points[points.len() - 1]);
     let n = 2 + usize::from(left.is_none()) + usize::from(right.is_none());
     let mut normal = [[0.; 4]; 4];
     let mut rhs = [0.; 4];
-    for (p, &t) in points.iter().zip(u) {
+    for ((p, &t), &weight) in points.iter().zip(u).zip(weights) {
         let s = 1. - t;
         let (b1, b2) = (3. * s * s * t, 3. * s * t * t);
         let mut fixed = add(scale(first, s * s * s), scale(last, t * t * t));
@@ -208,8 +216,8 @@ fn least_squares(points: &[[f64; 2]], u: &[f64], left: Option<[f64; 2]>, right: 
         }
         let r = sub(*p, fixed);
         for i in 0..n {
-            for j in 0..n { normal[i][j] += dot(columns[i], columns[j]); }
-            rhs[i] += dot(columns[i], r);
+            for j in 0..n { normal[i][j] += weight * dot(columns[i], columns[j]); }
+            rhs[i] += weight * dot(columns[i], r);
         }
     }
     let x = match n {
@@ -252,9 +260,10 @@ fn worst(points: &[[f64; 2]], u: &[f64], c: &[[f64; 2]; 4]) -> f64 {
 fn segment(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>, tolerance: f64) -> Option<Segment> {
     let (first, last) = (points[0], points[points.len() - 1]);
     let mut u = chord_parameters(points);
+    let weights = vec![1.; points.len()];
     let mut best: Option<Segment> = None;
     for iteration in 0..6 {
-        let Some(cubic) = least_squares(points, &u, left, right) else { break };
+        let Some(cubic) = least_squares(points, &u, &weights, left, right) else { break };
         u = project(&cubic, points, &u);
         let error = worst(points, &u, &cubic);
         if best.as_ref().is_none_or(|b| error < b.error) { best = Some(Segment { cubic, u: u.clone(), error }); }
@@ -275,57 +284,130 @@ fn start_direction(c: &[[f64; 2]; 4]) -> [f64; 2] {
 fn end_direction(c: &[[f64; 2]; 4]) -> [f64; 2] {
     unit([sub(c[3], c[2]), sub(c[3], c[1]), sub(c[3], c[0])].into_iter().find(|v| dot(*v, *v) > 1e-18).unwrap_or([1., 0.]))
 }
-fn longest(points: &[[f64; 2]], start: usize, left: Option<[f64; 2]>, tolerance: f64) -> (usize, Segment) {
-    let last = points.len() - 1;
-    let fits = |end: usize| segment(&points[start..=end], left, None, tolerance).filter(|s| s.error <= tolerance);
-    let mut good = (start + 1, segment(&points[start..=start + 1], left, None, tolerance).unwrap());
-    let mut step = 2;
-    let mut bad = None;
-    while good.0 < last {
-        let end = (start + step).min(last);
-        match fits(end) { Some(s) => good = (end, s), None => { bad = Some(end); break; } }
-        step *= 2;
+fn refined(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>, tolerance: f64) -> Option<Segment> {
+    let mut found = segment(points, left, right, tolerance)?;
+    if found.error <= tolerance || found.error > tolerance * 2. || points.len() <= 3 { return Some(found); }
+    let (mut cubic, mut u) = (found.cubic, found.u.clone());
+    let mut weights = vec![1.; points.len()];
+    for _ in 0..12 {
+        let errors: Vec<f64> = points.iter().zip(&u).map(|(p, t)| distance(bezier(&cubic, *t), *p)).collect();
+        let bound = (weights.iter().zip(&errors).map(|(w, e)| w * e * e).sum::<f64>() / weights.iter().sum::<f64>()).sqrt();
+        if bound > tolerance { break; }
+        let total = weights.iter().zip(&errors).map(|(w, e)| w * e).sum::<f64>().max(1e-12);
+        for (w, e) in weights.iter_mut().zip(&errors) { *w = (*w * e * points.len() as f64 / total).max(1e-4); }
+        let Some(next) = least_squares(points, &u, &weights, left, right) else { break };
+        cubic = next;
+        u = project(&cubic, points, &u);
+        let error = worst(points, &u, &cubic);
+        if error < found.error { found = Segment { cubic, u: u.clone(), error }; }
+        if found.error <= tolerance { break; }
     }
-    if let Some(mut high) = bad {
-        let mut low = good.0;
-        while high - low > 1 {
-            let middle = (low + high) / 2;
-            match fits(middle) { Some(s) => { good = (middle, s); low = middle; } None => high = middle }
-        }
-    }
-    good
+    Some(found)
 }
-fn fit(points: &[[f64; 2]], tolerance: f64, out: &mut Fitted, offset: usize) {
-    let last = points.len() - 1;
-    let mut pieces: Vec<(usize, Option<[f64; 2]>, Segment)> = Vec::new();
-    let mut start = 0;
-    while start < last {
-        let (mut end, mut next) = longest(points, start, None, tolerance);
-        if let Some((from, left, previous)) = pieces.last_mut() {
-            let (incoming, outgoing) = (end_direction(&previous.cubic), start_direction(&next.cubic));
-            let joined = [0., 0.25, 0.5, 0.75, 1.].into_iter().filter_map(|w| {
-                let d = unit(add(scale(outgoing, 1. - w), scale(incoming, w)));
-                let a = segment(&points[*from..=start], *left, Some(d), tolerance).filter(|a| a.error <= tolerance)?;
-                let b = segment(&points[start..=end], Some(d), None, tolerance)?;
-                Some((d, a, b))
-            }).min_by(|x, y| x.2.error.total_cmp(&y.2.error));
-            let d = match joined {
-                Some((d, a, b)) => {
-                    *previous = a;
-                    if b.error <= tolerance { next = b } else { (end, next) = longest(points, start, Some(d), tolerance) }
-                    d
-                }
-                None => { (end, next) = longest(points, start, Some(incoming), tolerance); incoming }
-            };
-            pieces.push((start, Some(d), next));
-        } else {
-            pieces.push((start, None, next));
-        }
-        start = end;
+fn fits(points: &[[f64; 2]], left: Option<[f64; 2]>, right: Option<[f64; 2]>, tolerance: f64) -> bool {
+    points.len() <= 2 || refined(points, left, right, tolerance).is_some_and(|s| s.error <= tolerance)
+}
+
+const LOOKBACK: usize = 8;
+const FRAME_WORK: usize = 512;
+const BLENDS: [f64; 5] = [0., 0.25, 0.5, 0.75, 1.];
+
+#[derive(Clone, Debug)]
+struct Piece { start: usize, end: usize, cubic: [[f64; 2]; 4], u: Vec<f64>, next: [f64; 2], hint: usize, seen: usize }
+
+#[derive(Clone, Copy, Debug)]
+struct Search { start: usize, left: Option<[f64; 2]>, from: usize, good: Option<usize>, step: usize, high: Option<usize>, retry: bool }
+impl Search {
+    fn new(start: usize, from: usize, left: Option<[f64; 2]>, retry: bool) -> Self { Self { start, left, from, good: None, step: 1, high: None, retry } }
+}
+
+#[derive(Clone, Debug)]
+struct Decision {
+    first: usize, start: usize, left: Option<[f64; 2]>, longest: Search, reach: Option<usize>, free: Option<Search>, leaving: Option<usize>, candidate: usize,
+    sides: Option<(usize, [f64; 2], [f64; 2])>, trial: Option<(usize, [f64; 2], Search)>, best: Option<(usize, usize, [f64; 2])>, seen: usize,
+}
+
+struct Run<'a> { points: &'a [[f64; 2]], tolerance: f64, seen: std::cell::Cell<usize>, work: std::cell::Cell<usize> }
+impl Run<'_> {
+    fn last(&self) -> usize { self.points.len() - 1 }
+    fn span(&self, start: usize, end: usize) -> &[[f64; 2]] {
+        self.seen.set(self.seen.get().max(end));
+        self.work.set(self.work.get() + end - start + 1);
+        &self.points[start..=end]
     }
-    for (start, _, s) in pieces {
-        out.cubics.push(s.cubic);
-        for (i, t) in s.u.iter().enumerate().skip(1) { out.params[offset + start + i] = (out.cubics.len() - 1, *t); }
+    fn beyond(&self, index: usize) -> bool {
+        let beyond = index > self.last();
+        if beyond { self.seen.set(self.last()); }
+        beyond
+    }
+    fn fits(&self, start: usize, end: usize, left: Option<[f64; 2]>, right: Option<[f64; 2]>) -> bool { fits(self.span(start, end), left, right, self.tolerance) }
+    fn search(&self, search: &mut Search) -> Option<Option<usize>> {
+        let (last, start, left) = (self.last(), search.start, search.left);
+        match (search.good, search.high) {
+            (None, _) => {
+                let from = search.from.clamp(start + 1, last);
+                if self.fits(start, from, left, None) { search.good = Some(from); }
+                else if search.retry { search.from = start + 1 + (from - start - 1) / 2; }
+                else { return Some(None); }
+            }
+            (Some(good), None) => {
+                if good == last { return Some(Some(good)); }
+                let end = (good + search.step).min(last);
+                if self.fits(start, end, left, None) { (search.good, search.step) = (Some(end), search.step * 2); } else { search.high = Some(end); }
+            }
+            (Some(good), Some(high)) => {
+                if high - good <= 1 { return Some(Some(good)); }
+                let middle = (good + high) / 2;
+                if self.fits(start, middle, left, None) { search.good = Some(middle); } else { search.high = Some(middle); }
+            }
+        }
+        None
+    }
+    fn step(&self, decision: &mut Decision) -> Option<Piece> {
+        let (last, start, left) = (self.last(), decision.start, decision.left);
+        let Some(longest) = decision.reach else {
+            decision.reach = self.search(&mut decision.longest).flatten();
+            return None;
+        };
+        if longest < last {
+            let Some(free) = decision.leaving else {
+                let search = decision.free.get_or_insert(Search::new(longest, 2 * longest - start, None, true));
+                decision.leaving = self.search(search).flatten();
+                return None;
+            };
+            if let Some((end, tangent, search)) = decision.trial.as_mut() {
+                if let Some(found) = self.search(search) {
+                    if let Some(next) = found { decision.best = Some((next, *end, *tangent)); }
+                    decision.trial = None;
+                }
+                return None;
+            }
+            while decision.candidate < (LOOKBACK + 1) * BLENDS.len() {
+                let (back, blend) = (decision.candidate / BLENDS.len(), BLENDS[decision.candidate % BLENDS.len()]);
+                decision.candidate += 1;
+                let Some(end) = longest.checked_sub(back).filter(|end| *end > start) else { continue };
+                let (arriving, leaving) = match decision.sides {
+                    Some((at, arriving, leaving)) if at == end => (arriving, leaving),
+                    _ => {
+                        let Some(incoming) = segment(self.span(start, end), left, None, self.tolerance) else {
+                            decision.candidate = (back + 1) * BLENDS.len();
+                            continue;
+                        };
+                        let arriving = end_direction(&incoming.cubic);
+                        let leaving = segment(self.span(end, free.max(end + 2).min(last)), None, None, self.tolerance).map_or(arriving, |s| start_direction(&s.cubic));
+                        decision.sides = Some((end, arriving, leaving));
+                        (arriving, leaving)
+                    }
+                };
+                let tangent = unit(add(scale(leaving, 1. - blend), scale(arriving, blend)));
+                let floor = decision.best.map_or(end + 1, |(next, _, _)| next + 1);
+                if !self.beyond(floor) && self.fits(start, end, left, Some(tangent)) { decision.trial = Some((end, tangent, Search::new(end, floor, Some(tangent), false))); }
+                return None;
+            }
+        }
+        let (end, right, hint) = decision.best.map_or((longest, None, longest + 1), |(next, end, tangent)| (end, Some(tangent), next));
+        let found = refined(self.span(start, end), left, right, self.tolerance).unwrap();
+        Some(Piece { start, end, next: right.unwrap_or_else(|| end_direction(&found.cubic)), hint, cubic: found.cubic, u: found.u, seen: self.seen.get() })
     }
 }
 
@@ -339,94 +421,179 @@ fn tangent_at(points: &[[f64; 2]], from: usize, toward: isize, reach: f64) -> [f
     }
     unit(sub(points[j as usize], points[from]))
 }
-fn corners(points: &[[f64; 2]], reach: f64) -> Vec<usize> {
-    let mut result = vec![0];
-    let angles: Vec<f64> = (0..points.len()).map(|i| {
-        if i == 0 || i + 1 == points.len() { return 0.; }
-        let a = tangent_at(points, i, -1, reach);
-        let b = tangent_at(points, i, 1, reach);
-        (-dot(a, b)).clamp(-1., 1.).acos()
-    }).collect();
-    let limit = 55f64.to_radians();
-    for i in 1..points.len().saturating_sub(1) {
-        if angles[i] > limit && angles[i] >= angles[i - 1] && angles[i] > angles[i + 1] && distance(points[i], points[*result.last().unwrap()]) > reach * 0.5 { result.push(i); }
-    }
-    result.push(points.len() - 1);
-    result.dedup();
-    result
+fn ahead(points: &[[f64; 2]], from: usize, reach: f64, open: bool) -> Option<([f64; 2], usize)> {
+    let found = (from + 1..points.len()).find(|&j| distance(points[j], points[from]) >= reach);
+    let j = if open { found? } else { found.unwrap_or(points.len() - 1) };
+    Some((unit(sub(points[j], points[from])), j))
 }
 
-fn simplify(values: &[[f64; 2]], tolerance: f64, keep: &mut [bool], range: std::ops::Range<usize>) {
-    if range.len() < 3 { return; }
-    let (a, b) = (values[range.start], values[range.end - 1]);
-    let mut worst = (0., range.start);
-    for (i, value) in values.iter().enumerate().take(range.end - 1).skip(range.start + 1) {
-        let t = if b[0] > a[0] { (value[0] - a[0]) / (b[0] - a[0]) } else { 0. };
-        let error = (value[1] - (a[1] + (b[1] - a[1]) * t)).abs();
-        if error > worst.0 { worst = (error, i); }
-    }
-    if worst.0 > tolerance {
-        keep[worst.1] = true;
-        simplify(values, tolerance, keep, range.start..worst.1 + 1);
-        simplify(values, tolerance, keep, worst.1..range.end);
-    }
-}
-
-pub fn fit_line(samples: &[Sample], tolerance: f64) -> Option<(PathGeometry, Option<WidthProfile>, f64)> {
-    let half = samples.iter().map(|s| s.1).fold(0., f64::max);
-    if samples.is_empty() || half <= 0. { return None; }
+fn merged(samples: &[Sample], tolerance: f64) -> Vec<Sample> {
     let mut kept: Vec<Sample> = Vec::with_capacity(samples.len());
     for sample in samples {
         if let Some(last) = kept.last_mut() && distance(last.0, sample.0) < tolerance * 0.25 { last.1 = last.1.max(sample.1); continue; }
         kept.push(*sample);
     }
-    if let Some(end) = samples.last() && kept.len() > 1 && let Some(last) = kept.last_mut() { last.0 = end.0; }
-    let points: Vec<[f64; 2]> = kept.iter().map(|s| s.0).collect();
-    if points.len() == 1 {
-        let geometry = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(points[0])], false)]).ok()?;
-        return Some((geometry, None, half * 2.));
+    kept
+}
+
+#[derive(Clone, Debug)]
+struct LineFit { tolerance: f64, reach: f64, kept: Vec<Sample>, angles: Vec<(f64, usize)>, corners: Vec<usize>, examined: usize, pieces: Vec<Piece>, pending: Option<Decision>, wait: usize }
+impl LineFit {
+    fn new(tolerance: f64, reach: f64) -> Self {
+        Self { tolerance, reach, kept: Vec::new(), angles: vec![(0., 0)], corners: vec![0], examined: 1, pieces: Vec::new(), pending: None, wait: 0 }
     }
-    let reach = (tolerance * 8.).max(half);
-    let corners = corners(&points, reach);
-    let mut fitted = Fitted { cubics: Vec::new(), params: vec![(0, 0.); points.len()] };
-    let mut kinds = Vec::new();
-    for pair in corners.windows(2) {
-        let start = fitted.cubics.len();
-        fit(&points[pair[0]..=pair[1]], tolerance, &mut fitted, pair[0]);
-        kinds.push(AnchorKind::CORNER);
-        kinds.extend(std::iter::repeat_n(AnchorKind::SMOOTH, fitted.cubics.len() - start - 1));
+    fn extend(&mut self, samples: &[Sample]) {
+        let kept = merged(samples, self.tolerance);
+        let same = self.kept.iter().zip(&kept).take_while(|(a, b)| a.0 == b.0).count();
+        if same < self.kept.len() { self.rollback(same); }
+        self.kept = kept;
     }
-    kinds.push(AnchorKind::CORNER);
-    let mut anchors: Vec<Anchor> = Vec::with_capacity(fitted.cubics.len() + 1);
-    for (i, cubic) in fitted.cubics.iter().enumerate() {
-        if i == 0 { anchors.push(Anchor::new(cubic[0], [0.; 2], sub(cubic[1], cubic[0]), kinds[0])); }
-        else { let last = anchors.last_mut().unwrap(); *last = last.with_out_handle(sub(cubic[1], cubic[0])); }
-        anchors.push(Anchor::new(cubic[3], sub(cubic[2], cubic[3]), [0.; 2], kinds[i + 1]));
+    fn rollback(&mut self, changed: usize) {
+        let angled = self.angles.iter().position(|&(_, seen)| seen >= changed).unwrap_or(self.angles.len()).min(changed);
+        self.angles.truncate(angled.max(1));
+        self.examined = self.examined.min(self.angles.len().saturating_sub(1).max(1));
+        let examined = self.examined;
+        self.corners.retain(|&corner| corner < examined);
+        let cutoff = changed.min(examined);
+        let valid = self.pieces.iter().position(|piece| piece.seen >= cutoff).unwrap_or(self.pieces.len());
+        self.pieces.truncate(valid);
+        self.pending = None;
+        self.wait = 0;
     }
-    let geometry = PathGeometry::new(vec![Subpath::new(&anchors, false)]).ok()?;
-    let widths: Vec<f64> = kept.iter().map(|s| s.1).collect();
-    let (low, high) = widths.iter().fold((f64::INFINITY, 0f64), |(l, h), w| (l.min(*w), h.max(*w)));
-    if high - low <= tolerance { return Some((geometry, None, high * 2.)); }
-    let values: Vec<[f64; 2]> = fitted.params.iter().zip(&widths).map(|((segment, t), w)| [*segment as f64 + t, *w]).collect();
-    let mut keep = vec![false; values.len()];
-    keep[0] = true;
-    *keep.last_mut().unwrap() = true;
-    simplify(&values, tolerance, &mut keep, 0..values.len());
-    let mut knots: Vec<WidthKnot> = Vec::new();
-    for (i, w) in widths.iter().enumerate().filter(|(i, _)| keep[*i]) {
-        let (segment, t) = fitted.params[i];
-        let knot = WidthKnot::new(segment as u32, t.clamp(0., 1.), w / high, w / high);
-        match knots.last_mut() {
-            Some(last) if (last.segment(), last.t()) >= (knot.segment(), knot.t()) => if knot.left() > last.left() { *last = WidthKnot::new(last.segment(), last.t(), knot.left(), knot.right()) },
-            _ => knots.push(knot),
+    fn advance(&mut self, samples: &[Sample], budget: usize) {
+        self.extend(samples);
+        self.progress(true, budget);
+    }
+    fn progress(&mut self, open: bool, budget: usize) {
+        let points: Vec<[f64; 2]> = self.kept.iter().map(|s| s.0).collect();
+        let visible = if open { points.len().saturating_sub(1) } else { points.len() };
+        while self.angles.len() < visible {
+            let i = self.angles.len();
+            if i + 1 == visible && !open { self.angles.push((0., i)); continue; }
+            let Some((forward, seen)) = ahead(&points[..visible], i, self.reach, open) else { break };
+            let backward = tangent_at(&points, i, -1, self.reach);
+            self.angles.push(((-dot(backward, forward)).clamp(-1., 1.).acos(), seen));
+        }
+        let limit = 55f64.to_radians();
+        while self.examined + 1 < self.angles.len() {
+            let i = self.examined;
+            let angle = self.angles[i].0;
+            let previous = *self.corners.last().unwrap();
+            if angle > limit && angle >= self.angles[i - 1].0 && angle > self.angles[i + 1].0 && distance(points[i], points[previous]) > self.reach * 0.5 { self.corners.push(i); }
+            self.examined += 1;
+        }
+        let mut spent = 0;
+        while spent < budget && (!open || points.len() >= self.wait) {
+            let cursor = self.pieces.last().map_or(0, |piece| piece.end);
+            let first = *self.corners.iter().rev().find(|&&corner| corner <= cursor).unwrap();
+            let (last, closed) = match self.corners.iter().find(|&&corner| corner > cursor) {
+                Some(&corner) => (corner, true),
+                None if open => (self.examined - 1, false),
+                None => (visible.saturating_sub(1), true),
+            };
+            if last <= cursor { break; }
+            let mut decision = match self.pending.take() {
+                Some(decision) if decision.first == first && decision.start + first == cursor => decision,
+                _ => {
+                    let (left, hint) = match self.pieces.last() { Some(piece) if piece.end > first => (Some(piece.next), piece.hint), _ => (None, cursor + 1) };
+                    Decision { first, start: cursor - first, left, longest: Search::new(cursor - first, hint - first, left, true), reach: None, free: None, leaving: None,
+                        candidate: 0, sides: None, trial: None, best: None, seen: 0 }
+                }
+            };
+            let run = Run { points: &points[first..=last], tolerance: self.tolerance, seen: std::cell::Cell::new(decision.seen), work: std::cell::Cell::new(0) };
+            let piece = loop {
+                let piece = run.step(&mut decision);
+                if piece.is_some() || (!closed && run.seen.get() >= run.last()) || spent + run.work.get() >= budget { break piece; }
+            };
+            spent += run.work.get();
+            decision.seen = run.seen.get();
+            if !closed && decision.seen >= run.last() {
+                self.wait = points.len() + 4.max((points.len() - cursor) / 4);
+                break;
+            }
+            let Some(piece) = piece else {
+                self.pending = Some(decision);
+                break;
+            };
+            self.pieces.push(Piece { start: piece.start + first, end: piece.end + first, hint: piece.hint + first, seen: piece.seen + first, ..piece });
         }
     }
-    Some((geometry, WidthProfile::new(knots).ok(), high * 2.))
+    fn fitted(&self, samples: &[Sample]) -> Option<(PathGeometry, Option<WidthProfile>, f64)> {
+        let half = samples.iter().map(|s| s.1).fold(0., f64::max);
+        if samples.is_empty() || half <= 0. { return None; }
+        let mut fit = self.clone();
+        fit.extend(samples);
+        let last = fit.kept.len() - 1;
+        let end = samples[samples.len() - 1].0;
+        if last > 0 && fit.kept[last].0 != end {
+            fit.rollback(last);
+            fit.kept[last].0 = end;
+        }
+        if last == 0 {
+            let geometry = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(fit.kept[0].0)], false)]).ok()?;
+            return Some((geometry, None, half * 2.));
+        }
+        fit.progress(false, usize::MAX);
+        let mut anchors: Vec<Anchor> = Vec::with_capacity(fit.pieces.len() + 1);
+        let mut params = vec![(0, 0.); fit.kept.len()];
+        for (i, piece) in fit.pieces.iter().enumerate() {
+            let [from, out, into, to] = piece.cubic;
+            match anchors.last_mut() {
+                Some(anchor) => *anchor = anchor.with_out_handle(sub(out, from)),
+                None => anchors.push(Anchor::new(from, [0.; 2], sub(out, from), AnchorKind::CORNER)),
+            }
+            let kind = if fit.pieces.get(i + 1).is_none_or(|next| fit.corners.contains(&next.start)) { AnchorKind::CORNER } else { AnchorKind::SMOOTH };
+            anchors.push(Anchor::new(to, sub(into, to), [0.; 2], kind));
+            for (k, t) in piece.u.iter().enumerate().skip(1) { params[piece.start + k] = (i, *t); }
+        }
+        let geometry = PathGeometry::new(vec![Subpath::new(&anchors, false)]).ok()?;
+        let widths: Vec<f64> = fit.kept.iter().map(|s| s.1).collect();
+        let (low, high) = widths.iter().fold((f64::INFINITY, 0f64), |(l, h), w| (l.min(*w), h.max(*w)));
+        if high - low <= fit.tolerance { return Some((geometry, None, high * 2.)); }
+        let values: Vec<[f64; 2]> = params.iter().zip(&widths).map(|((segment, t), w)| [*segment as f64 + t, *w]).collect();
+        let knots = fewest_knots(&values, fit.tolerance).into_iter().map(|i| {
+            let (segment, t) = params[i];
+            WidthKnot::new(segment as u32, t.clamp(0., 1.), widths[i] / high, widths[i] / high)
+        }).collect();
+        Some((geometry, WidthProfile::new(knots).ok(), high * 2.))
+    }
+}
+
+fn fewest_knots(values: &[[f64; 2]], tolerance: f64) -> Vec<usize> {
+    let mut places: Vec<(usize, [f64; 2])> = Vec::with_capacity(values.len());
+    for (i, value) in values.iter().enumerate() {
+        match places.last_mut() {
+            Some((index, place)) if value[0] <= place[0] => if value[1] > place[1] { (*index, place[1]) = (i, value[1]) },
+            _ => places.push((i, *value)),
+        }
+    }
+    let n = places.len();
+    let (mut count, mut previous) = (vec![usize::MAX; n], vec![0; n]);
+    count[0] = 0;
+    for i in 0..n - 1 {
+        let [x, y] = places[i].1;
+        let (mut low, mut high) = (f64::NEG_INFINITY, f64::INFINITY);
+        for j in i + 1..n {
+            let [xj, yj] = places[j].1;
+            let run = xj - x;
+            if (low..=high).contains(&((yj - y) / run)) && count[i] + 1 < count[j] { (count[j], previous[j]) = (count[i] + 1, i); }
+            low = low.max((yj - tolerance - y) / run);
+            high = high.min((yj + tolerance - y) / run);
+            if low > high { break; }
+        }
+    }
+    let mut kept = vec![n - 1];
+    while let Some(&j) = kept.last() && j > 0 { kept.push(previous[j]); }
+    kept.into_iter().rev().map(|j| places[j].0).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn fit_line(samples: &[Sample], tolerance: f64) -> Option<(PathGeometry, Option<WidthProfile>, f64)> {
+        let half = samples.iter().map(|s| s.1).fold(0., f64::max);
+        LineFit::new(tolerance, (tolerance * 8.).max(half)).fitted(samples)
+    }
     fn sample_curve(n: usize, radius: impl Fn(f64) -> f64) -> Vec<Sample> {
         (0..n).map(|i| { let t = i as f64 / (n - 1) as f64; ([t * 300., 80. * (t * 6.).sin() + t * t * 40.], radius(t)) }).collect()
     }
@@ -460,7 +627,7 @@ mod tests {
     fn drawn(events: &[PenEvent], strength: f32) -> VectorStroke {
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         brush.stabilization.strength = strength;
-        let mut stroke = VectorStroke::new(1, brush, PressureCurve::default(), [0.; 2], InstantFeedbackConfig::default(), [1., 0., 0., 1., 0., 0.]);
+        let mut stroke = VectorStroke::new(1, brush, PressureCurve::default(), [0.; 2], InstantFeedbackConfig::default(), [1., 0., 0., 1., 0., 0.], 0.5);
         for event in events {
             if event.flags.contains(SampleFlags::CORRECTION) { stroke.correct(*event); } else { stroke.push(*event, ViewTransform::IDENTITY); }
         }
@@ -481,16 +648,35 @@ mod tests {
     #[test]
     fn hand_drawn_lines_keep_few_anchors_within_tolerance() {
         let tolerance = 0.5;
-        for (kind, most) in [(0, 7), (1, 5), (2, 2), (3, 12)] {
+        for (kind, most) in [(0, 5), (1, 4), (2, 2), (3, 11)] {
             for strength in [0., 0.06, 0.4] {
                 let samples = drawn(&hand(kind), strength).samples();
                 let (geometry, profile, width) = fit_line(&samples, tolerance).unwrap();
                 let knots = profile.as_ref().map_or(0, |p| p.knots().len());
                 let label = format!("stroke {kind}, smoothing {strength}: {} anchors, {knots} knots, error {:.3}, width error {:.3}", geometry.anchor_count(), deviation(&geometry, &samples), width_error(&geometry, profile.as_ref(), width, &samples));
                 assert!(geometry.anchor_count() <= most, "{label}");
-                assert!(knots <= 12, "{label}");
+                assert!(knots <= 9, "{label}");
                 assert!(deviation(&geometry, &samples) <= tolerance * 1.02, "{label}");
                 assert!(width_error(&geometry, profile.as_ref(), width, &samples) <= tolerance * 1.2, "{label}");
+            }
+        }
+    }
+    #[test]
+    fn fitting_while_drawing_matches_fitting_at_pen_up() {
+        for kind in 0..4 {
+            for (strength, late) in [(0., 0), (0.06, 0), (0.4, 0), (0.06, 12), (0.06, 80)] {
+                let events = hand(kind);
+                let estimated = SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::ESTIMATED.0);
+                let mut stroke = drawn(&[], strength);
+                for (i, event) in events.iter().enumerate() {
+                    if late > 0 { stroke.push(PenEvent { pressure: event.pressure * 0.4, flags: estimated, ..*event }, ViewTransform::IDENTITY); } else { stroke.push(*event, ViewTransform::IDENTITY); }
+                    if late > 0 && i >= late { stroke.correct(PenEvent { flags: SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::CORRECTION.0), ..events[i - late] }); }
+                    if i % 2 == 1 { stroke.preview(Some(event.timestamp_ns), Some(event.timestamp_ns + 8_000_000)); }
+                }
+                for event in events.iter().skip(events.len().saturating_sub(late)).filter(|_| late > 0) { stroke.correct(PenEvent { flags: SampleFlags(SampleFlags::PRIMARY.0 | SampleFlags::CORRECTION.0), ..*event }); }
+                let label = format!("stroke {kind}, smoothing {strength}, pressure {late} samples late: {} pieces before pen-up", stroke.fit.pieces.len());
+                assert!(late > 12 || stroke.fit.pieces.len() + 2 >= stroke.fitted().unwrap().0.anchor_count() / 2, "{label}");
+                assert_eq!(stroke.fitted(), LineFit::new(0.5, stroke.fit.reach).fitted(&stroke.samples()), "{label}");
             }
         }
     }

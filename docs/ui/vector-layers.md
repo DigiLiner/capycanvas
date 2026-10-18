@@ -12,12 +12,24 @@ width, and Monoline, which keeps one width. The line follows the same Smoothing,
 pressure curve, rulers and late stylus pressure updates as the brush does on a
 paint layer. While the pen is down it shows as a provisional path whose tip
 reaches ahead of the stylus with the paint layer's prediction; at pen-up it
-is fitted to as few cubic segments as stay within half a screen pixel of the
-drawn line, with smooth anchors where curves meet and corners where the line
-turns sharply, and added as one path in one undo step. Its width profile keeps
-pressure changes to the same half pixel. Pressure updates that arrive after
-pen-up reshape that path within its undo step. Other brushes refuse the stroke
-with a notice, and the canvas cursor shows the refusal before contact.
+becomes one path in one undo step, made of as few cubic segments as stay within
+half a screen pixel of the drawn line, with smooth anchors where curves meet and
+corners where the line turns sharply. Its width profile keeps pressure changes
+to the same half pixel with the fewest width points. Pressure updates that
+arrive after pen-up reshape that path within its undo step. Other brushes refuse
+the stroke with a notice, and the canvas cursor shows the refusal before
+contact.
+
+The line is fitted while it is drawn, a bounded amount each frame, so pen-up
+fits only its last segments. Each segment reaches as far as one cubic stays
+within the tolerance, with a minimax refinement when least squares narrowly
+misses it. Each smooth anchor is placed by trying the last few points before
+that reach and a few tangents between the arriving and leaving directions, and
+keeping the one that lets the next segment reach farthest. A decision that
+would depend on input not yet drawn waits, and late pressure updates undo only
+the decisions that saw the changed samples, so the result matches fitting the
+whole line at pen-up. Width points are the fewest that keep every sample within
+the tolerance, found as a shortest path.
 
 ## Figures
 
@@ -140,10 +152,12 @@ its paths are written back unchanged when the drawing is saved.
 takes the raster stroke's dabs and shows its predicted preview on every frame,
 `vector_line_previews_reach_predicted_samples_without_drawing_them` checks the
 session forwards platform predictions to the preview only, and
-`hand_drawn_lines_keep_few_anchors_within_tolerance` and
+`hand_drawn_lines_keep_few_anchors_within_tolerance`,
+`fitting_while_drawing_matches_fitting_at_pen_up` and
 `late_pressure_corrections_replay_the_line` in
 [`vector_stroke.rs`](../../crates/layer-engine/src/vector_stroke.rs) bound the
-fitted anchors, widths and corrections.
+fitted anchors, widths and corrections and check that fitting while drawing
+gives the same path as fitting at pen-up.
 `vector_lines_land_under_the_pen_on_moved_layers`,
 `late_pressure_corrections_reshape_the_drawn_line_in_its_undo_step`,
 `move_tool_selects_drags_and_deletes_vector_paths`,
