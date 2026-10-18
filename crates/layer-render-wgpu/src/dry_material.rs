@@ -32,10 +32,33 @@ pub(super) const FINE_TIP: u32 = 16384;
 /// Contact flags that destination-material modules are specialized for; any
 /// other contact evaluates the flags each dab carries.
 pub(super) const MATERIAL_CONTACTS: [u32; 3] = [0, 128, u32::MAX];
+/// Brush blend modes that destination fragments compile only the formula of.
+pub(super) const MATERIAL_BLENDS: [BrushBlendMode; 8] = [BrushBlendMode::Normal, BrushBlendMode::Multiply, BrushBlendMode::Screen,
+    BrushBlendMode::Add, BrushBlendMode::Subtract, BrushBlendMode::Darken, BrushBlendMode::Lighten, BrushBlendMode::Overlay];
+pub(super) const MATERIAL_SLOTS: usize = MATERIAL_CONTACTS.len() * MATERIAL_BLENDS.len();
 
 pub(super) fn material_contact_slot(style: &layer_render::DabStyle) -> usize {
     let flags = contact_flags(style.contact) | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 };
     MATERIAL_CONTACTS.iter().position(|&key| key == flags).unwrap_or(MATERIAL_CONTACTS.len() - 1)
+}
+
+/// The contact and blend specialization of a style's destination fragments.
+pub(super) fn material_slot(style: &layer_render::DabStyle) -> usize {
+    material_contact_slot(style) * MATERIAL_BLENDS.len()
+        + MATERIAL_BLENDS.iter().position(|&blend| blend == style.rendering.blend_mode).unwrap()
+}
+
+pub(super) fn material_fragment_entries(slot: usize) -> (u32, Entries) {
+    let blend = layer_core::LayerBlend::from(MATERIAL_BLENDS[slot % MATERIAL_BLENDS.len()]);
+    (MATERIAL_CONTACTS[slot / MATERIAL_BLENDS.len()], Entries::Fragment(blend.code()))
+}
+
+/// `blend` as `blend_modes.wgsl` defines it for one mode's code alone.
+fn blend_source(mode: u32) -> Cow<'static, str> {
+    if mode == 0 {return include_str!("blend_normal.wgsl").into();}
+    let (head, cases) = include_str!("blend_modes.wgsl").split_once("    switch blend_mode(code) {\n").unwrap();
+    let case = cases.split("        case ").find_map(|case| case.strip_prefix(&format!("{mode}u: "))).expect("a blend mode formula");
+    format!("{head}    {}\n}}\n", case.split("        default").next().unwrap().trim()).into()
 }
 
 /// A destination-material module for one operation and contact specialization.
@@ -72,8 +95,8 @@ fn destination(start: Start) -> Cow<'static, str> {
 pub(super) enum Entries {
     /// Dry compute kernels.
     Kernel(Start),
-    /// The material fragment and the wet reservoir exchange.
-    Fragment,
+    /// The material fragment and the wet reservoir exchange for one blend code.
+    Fragment(u32),
     /// Distant samples gathered for Liquify and Smudge.
     Gather,
 }
@@ -121,18 +144,20 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
     };
     let entry=match entries {
         Entries::Kernel(_) => include_str!("material_compute.wgsl").into(),
-        Entries::Fragment => include_str!("material_brush.wgsl").into(),
+        Entries::Fragment(_) => include_str!("material_brush.wgsl").into(),
         Entries::Gather => compose_wgsl(&[include_str!("material_brush.wgsl"),include_str!("material_gather.wgsl")]),
     };
-    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),
-        if kernel {include_str!("blend_normal.wgsl")} else {include_str!("blend_modes.wgsl")},float_sampling,
+    let blend=match entries {Entries::Kernel(_) => blend_source(0), Entries::Fragment(mode) => blend_source(mode), Entries::Gather => include_str!("blend_modes.wgsl").into()};
+    let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),&blend,float_sampling,
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
-        include_str!("material_common.wgsl"),&operation_source,leaf,&entry,&coverage_source(flags),include_str!("selection_clip.wgsl")]);
+        include_str!("material_common.wgsl"),&operation_source,leaf,&entry,&coverage_source(flags),
+        if flags!=u32::MAX && flags&AGGREGATE!=0 {include_str!("selection_absent.wgsl")} else {include_str!("selection_clip.wgsl")}]);
     let absent=if kernel || matches!(operation,M::Deposit|M::Coverage) {0} else {64};
-    let source=specialize_contact(source,flags)
+    let normal=matches!(entries,Entries::Kernel(_)|Entries::Fragment(0));
+    specialize_contact(source,flags)
         .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32))
-        .replace("override CONTACT_ABSENT: u32 = 0u;",&format!("const CONTACT_ABSENT: u32 = {absent}u;"));
-    if kernel {source.replace("override MATERIAL_NORMAL_BLEND: bool = false;","const MATERIAL_NORMAL_BLEND: bool = true;").into()} else {source.into()}
+        .replace("override CONTACT_ABSENT: u32 = 0u;",&format!("const CONTACT_ABSENT: u32 = {absent}u;"))
+        .replace("override MATERIAL_NORMAL_BLEND: bool = false;",&format!("const MATERIAL_NORMAL_BLEND: bool = {normal};")).into()
 }
 
 /// One reduced-resolution page of averaged original paint, stroke coverage
@@ -684,10 +709,11 @@ mod tests {
                     "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}}}
-        for &flags in &MATERIAL_CONTACTS {for operation in MaterialOperation::ALL {for filterable in [true, false] {
+        for slot in 0..MATERIAL_SLOTS {for operation in MaterialOperation::ALL {for filterable in [true, false] {
             let sampling = crate::pipeline_device::float_sampling_wgsl(filterable);
-            let gathered = matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge);
-            let modules = [(Entries::Fragment, &["fragment_main", "reservoir_fragment"][..usize::from(operation == MaterialOperation::Wet) + 1]),
+            let (flags, fragment) = material_fragment_entries(slot);
+            let gathered = slot % MATERIAL_BLENDS.len() == 0 && matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge);
+            let modules = [(fragment, &["fragment_main", "reservoir_fragment"][..usize::from(operation == MaterialOperation::Wet) + 1]),
                 (Entries::Gather, &["gather_fragment"][..usize::from(gathered)])];
             for (entries, used_entries) in modules {
                 if used_entries.is_empty() {continue;}
@@ -716,7 +742,8 @@ mod tests {
             let mut module = naga::front::wgsl::parse_str(&source).unwrap();
             module.entry_points.retain(|e| e.name == entry);
             naga::compact::compact(&mut module, naga::compact::KeepUnused::No);
-            module.functions.iter().filter_map(|(_, f)| f.name.clone()).collect::<BTreeSet<_>>()
+            module.functions.iter().filter_map(|(_, f)| f.name.clone())
+                .chain(module.global_variables.iter().filter_map(|(_, v)| v.name.clone())).collect::<BTreeSet<_>>()
         };
         let relief = names(&[include_str!("relief.wgsl"), include_str!("relief_fine.wgsl")], &["relief_contact"]);
         let bristle = names(&[include_str!("bristle.wgsl")], &["bristles_enabled", "bristle_footprint"]);
@@ -740,13 +767,14 @@ mod tests {
                 if flags & 64 == 0 { absent(&present, &relief, &what); }
                 if flags & 512 == 0 { absent(&present, &bristle, &what); }
                 if operation != MaterialOperation::Clone { absent(&present, &clone, &what); }
+                if extra == AGGREGATE { absent(&present, &BTreeSet::from(["brush_selection".to_string()]), &what); }
                 absent(&present, &blend, &what);
             }
         }
         for flags in [0, 128] {for operation in [MaterialOperation::Liquify, MaterialOperation::Smudge, MaterialOperation::Wet, MaterialOperation::Watercolor] {
             let what = format!("{operation:?} fragment {flags:#x}");
-            let present = compiled(Entries::Fragment, flags, operation, "fragment_main");
-            for feature in [&relief, &bristle, &clone, &pointwise] { absent(&present, feature, &what); }
+            let present = compiled(Entries::Fragment(0), flags, operation, "fragment_main");
+            for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
             let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
             assert_eq!(operations.len(), 1, "{what} reaches {operations:?}");
             if matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge) {
@@ -754,5 +782,8 @@ mod tests {
                 for feature in [&relief, &bristle, &clone, &pointwise] { absent(&present, feature, &format!("{operation:?} gather {flags:#x}")); }
             }
         }}
+        let multiply = Entries::Fragment(layer_core::LayerBlend::from(BrushBlendMode::Multiply).code());
+        let formulas = blend.iter().filter(|f| *f != "blend_luma").cloned().collect();
+        absent(&compiled(multiply, 0, MaterialOperation::Deposit, "fragment_main"), &formulas, "Multiply fragment");
     }
 }

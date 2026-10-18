@@ -26,9 +26,10 @@ selection can wait for compilation, while later selections reuse those handles.
 Startup cannot fail because of shaders needed only by an unused brush.
 Each material operation compiles its own modules, specialized for brushes
 without contact; other contacts share a module that reads each dab's flags.
+Destination fragments are also specialized for the brush blend mode.
 Non-dry operations exclude dry relief. Deposit and coverage retain their
 captured contact capabilities.
-Material recipes use the captured contact flags and accumulation mode, with
+Material recipes use the captured contact flags, accumulation and blend mode, with
 separate entries for destination targets, gathering and reservoir exchange.
 Readiness requests only the entries used by the selected pass plan, including
 its compute and display-preview eligibility; custom contacts use the same recipe

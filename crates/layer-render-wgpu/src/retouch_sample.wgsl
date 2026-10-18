@@ -43,7 +43,7 @@ fn retouch_block_page(p: vec2<i32>, block: vec2<i32>) -> i32 {
     if (any(local < vec2<i32>(0)) || any(local >= vec2<i32>(512))) {
         return -1;
     }
-    let page = local / 256;
+    let page = local >> vec2<u32>(8u);
     return page.x + page.y * 2;
 }
 
@@ -52,7 +52,7 @@ fn retouch_target_texel(m: RetouchMapping, p: vec2<i32>) -> vec4<f32> {
     if page < 0 {
         return vec4<f32>(0.0);
     }
-    return retouch_target_load(page, (p - m.target_block) % 256);
+    return retouch_target_load(page, (p - m.target_block) & vec2<i32>(255));
 }
 
 fn retouch_reference_texel(m: RetouchMapping, p: vec2<i32>) -> vec4<f32> {
@@ -60,7 +60,7 @@ fn retouch_reference_texel(m: RetouchMapping, p: vec2<i32>) -> vec4<f32> {
     if page < 0 || any(p < vec2<i32>(0)) || any(p >= m.document) {
         return vec4<f32>(0.0);
     }
-    return retouch_reference_load(page, (p - m.reference_block) % 256);
+    return retouch_reference_load(page, (p - m.reference_block) & vec2<i32>(255));
 }
 
 // Bilinear taps at texel centers. A whole-pixel mapping lands on texel
@@ -68,11 +68,12 @@ fn retouch_reference_texel(m: RetouchMapping, p: vec2<i32>) -> vec4<f32> {
 fn retouch_sample_target(m: RetouchMapping, point: vec2<f32>) -> vec4<f32> {
     let position = point - vec2<f32>(0.5);
     let base = vec2<i32>(floor(position));
+    let first = retouch_target_texel(m, base);
     if m.exact {
-        return retouch_target_texel(m, base);
+        return first;
     }
     let f = position - floor(position);
-    let top = mix(retouch_target_texel(m, base), retouch_target_texel(m, base + vec2<i32>(1, 0)), f.x);
+    let top = mix(first, retouch_target_texel(m, base + vec2<i32>(1, 0)), f.x);
     let bottom = mix(retouch_target_texel(m, base + vec2<i32>(0, 1)), retouch_target_texel(m, base + vec2<i32>(1, 1)), f.x);
     return mix(top, bottom, f.y);
 }
@@ -80,11 +81,12 @@ fn retouch_sample_target(m: RetouchMapping, point: vec2<f32>) -> vec4<f32> {
 fn retouch_sample_reference(m: RetouchMapping, point: vec2<f32>) -> vec4<f32> {
     let position = point - vec2<f32>(0.5);
     let base = vec2<i32>(floor(position));
+    let first = retouch_reference_texel(m, base);
     if m.exact {
-        return retouch_reference_texel(m, base);
+        return first;
     }
     let f = position - floor(position);
-    let top = mix(retouch_reference_texel(m, base), retouch_reference_texel(m, base + vec2<i32>(1, 0)), f.x);
+    let top = mix(first, retouch_reference_texel(m, base + vec2<i32>(1, 0)), f.x);
     let bottom = mix(retouch_reference_texel(m, base + vec2<i32>(0, 1)), retouch_reference_texel(m, base + vec2<i32>(1, 1)), f.x);
     return mix(top, bottom, f.y);
 }

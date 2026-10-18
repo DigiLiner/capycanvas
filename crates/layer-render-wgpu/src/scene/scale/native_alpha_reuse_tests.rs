@@ -540,7 +540,7 @@ fn native_alpha_reuse_only_read_write_dry_kernels_bind_writable_cells() {
                 .then_some((variable.name.clone(), variable.binding.as_ref().map(|binding| (binding.group, binding.binding))))
         }).collect::<Vec<_>>()
     };
-    let fragment = crate::dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), crate::dry_material::Entries::Fragment, u32::MAX, MaterialOperation::Deposit);
+    let fragment = crate::dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), crate::dry_material::Entries::Fragment(0), u32::MAX, MaterialOperation::Deposit);
     assert_eq!(writable(&fragment), vec![], "fragment dry evaluation writes no cell flags");
     for start in [Start::Stored, Start::Sampled] {
         let kernel = crate::dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), crate::dry_material::Entries::Kernel(start), u32::MAX, MaterialOperation::Deposit);

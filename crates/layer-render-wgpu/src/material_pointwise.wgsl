@@ -38,9 +38,10 @@ fn pointwise_paint_fragment(fragment_position:vec4<f32>)->MaterialOutput {
     let first_coverage = stroke_coverage;
     let tooth = contact_paper(world);
     let field = contact_field_with_paper(world, tooth);
+    let selected = brush_selection_at(world);
     for (var offset = 0u; offset < range.y; offset += 1u) {
         let dab = dabs[range.x + offset];
-        let contact=material_contact(dab,world,field,stroke_coverage);
+        let contact=material_contact(dab,world,field,stroke_coverage,selected);
         if contact.held {
             stroke_coverage=max(stroke_coverage,contact.coverage);
             continue;
@@ -50,7 +51,6 @@ fn pointwise_paint_fragment(fragment_position:vec4<f32>)->MaterialOutput {
         let repaint=contact.repaint;
         if aggregate {dose+=coverage*dab.flow*dab.color.a;continue;}
         if coverage <= 0.0 { continue; }
-        let selected = brush_selection_at(world);
         let requested_alpha = brush_alpha(dab,coverage/max(selected,0.000001))*selected;
         if telescoped {
             stroke_coverage = max(stroke_coverage,requested_alpha);
@@ -99,17 +99,12 @@ fn pointwise_paint_fragment(fragment_position:vec4<f32>)->MaterialOutput {
                 stroke_coverage = next_coverage;
             }
         }
-        if grouped && source_alpha>0.0 {
-            if !deposited { deposited = true; result = deposit_paint(result); }
-            result = grouped_deposit(result,background,select(pigment,clone_source.rgb,MATERIAL_OPERATION==OP_CLONE),source_alpha);
-        } else if style.operation.w != 0u { result *= 1.0 - source_alpha; }
+        if !grouped && style.operation.w != 0u { result *= 1.0 - source_alpha; }
         else if source_alpha > 0.0 {
-            if !deposited {
-                deposited = true;
-                result = deposit_paint(result);
-            }
-            if MATERIAL_OPERATION == OP_CLONE { result = source_over(result, clone_source.rgb, source_alpha); }
-            else { result = source_over(result, pigment, source_alpha); }
+            if !deposited { deposited = true; result = deposit_paint(result); }
+            let color = select(pigment, clone_source.rgb, MATERIAL_OPERATION == OP_CLONE);
+            if grouped { result = grouped_deposit(result, background, color, source_alpha); }
+            else { result = source_over(result, color, source_alpha); }
         }
     }
     if aggregate {

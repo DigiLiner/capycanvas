@@ -91,8 +91,19 @@ fn bristle_rough(point: vec2<f32>, lens: BristleLens, origin: f32) -> f32 {
 // Approximate signed distance in pixels inside the ellipse of engaged hairs,
 // clipped to the fan's width, less the hairs' shortfall.
 fn bristle_margin(point: vec2<f32>, lens: BristleLens, shortfall: vec2<f32>) -> f32 {
+    return bristle_short(bristle_edge(point, lens), shortfall);
+}
+
+fn bristle_short(edge: vec2<f32>, shortfall: vec2<f32>) -> f32 {
+    if edge.y < 0.0 { return edge.x; }
+    return edge.x - mix(shortfall.y, shortfall.x, edge.y);
+}
+
+// The distance inside the full ellipse and how far toward its end the point
+// lies; a negative end means no hair is engaged.
+fn bristle_edge(point: vec2<f32>, lens: BristleLens) -> vec2<f32> {
     let room = lens.reach + lens.slope * lens.slope / 3.6;
-    if room <= 0.0 { return -1.0e9; }
+    if room <= 0.0 { return vec2<f32>(-1.0e9, -1.0); }
     let half_width = lens.half_width;
     let depth = lens.depth;
     let reach = sqrt(room / 0.9) * half_width;
@@ -102,7 +113,7 @@ fn bristle_margin(point: vec2<f32>, lens: BristleLens, shortfall: vec2<f32>) -> 
     let slope = length(scaled / vec2<f32>(reach, depth)) / max(radius, 0.000001);
     let ellipse = (1.0 - radius) / max(slope, 0.000001);
     let end = scaled.x * scaled.x / max(dot(scaled, scaled), 0.000001);
-    return min(ellipse, (1.0 - abs(point.x)) * half_width) - mix(shortfall.y, shortfall.x, end);
+    return vec2<f32>(min(ellipse, (1.0 - abs(point.x)) * half_width), end);
 }
 
 // Light pressure presses less paint from the hairs, far less than a brush
@@ -330,12 +341,14 @@ fn bristle_paint(dab: Dab, world: vec2<f32>, paper: f32) -> BristleDeposit {
     lens_end.depth = pose.depth.y;
     lens_end.heading = pose.end_heading;
     deposit.held = true;
-    let inside = bristle_margin(last, lens_end, bristle_ragged(lens_end));
+    let edge_end = bristle_edge(last, lens_end);
+    let ragged_end = bristle_ragged(lens_end);
+    let inside = bristle_short(edge_end, ragged_end);
     deposit.coverage = clamp(inside + 0.5, 0.0, 1.0);
     if inside > 0.0 { return deposit; }
     let rough = bristle_rough(last, lens_end, origin);
-    if bristle_margin(last, lens_end, vec2<f32>(0.0)) > 0.0 {
-        let held = bristle_margin(last, lens_end, bristle_ragged(lens_end) * rough);
+    if bristle_short(edge_end, vec2<f32>(0.0)) > 0.0 {
+        let held = bristle_short(edge_end, ragged_end * rough);
         deposit.coverage = clamp(held + 0.5, 0.0, 1.0);
         if held > 0.0 { return deposit; }
     }
@@ -356,13 +369,14 @@ fn bristle_paint(dab: Dab, world: vec2<f32>, paper: f32) -> BristleDeposit {
     let inner = bristle_pass(line, first, last, 0.0, 1.0);
     let clearance = 1.3 + 1.0 / min(semi_axis * lens_middle.half_width, lens_middle.depth);
     let lens_start = bristle_lens(dab, pose, 0.0);
-    if inner.gap > clearance * clearance && bristle_margin(first, lens_start, vec2<f32>(0.0)) <= -0.5 { return deposit; }
+    let edge_start = bristle_edge(first, lens_start);
+    if inner.gap > clearance * clearance && bristle_short(edge_start, vec2<f32>(0.0)) <= -0.5 { return deposit; }
     let travel = max(length(dab.motion), 0.0001);
     let lens_inner = bristle_lens(dab, pose, inner.time);
     let rough_start = bristle_rough(first, lens_start, origin);
     let reached = bristle_ragged(lens_inner) * mix(rough_start, rough, clamp(inner.time, 0.0, 1.0));
     let margin = max(bristle_margin(inner.point, lens_inner, reached),
-        bristle_margin(first, lens_start, bristle_ragged(lens_start) * rough_start));
+        bristle_short(edge_start, bristle_ragged(lens_start) * rough_start));
     let soon = min(2.0 / travel, 0.5);
     let near = bristle_pass(line, first, last, -soon, 1.0 + soon);
     let reach = bristle_margin(near.point, bristle_lens(dab, pose, clamp(near.time, 0.0, 1.0)), reached);

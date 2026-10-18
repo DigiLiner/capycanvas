@@ -86,7 +86,8 @@ selecting Pencil fell from 10.8–11.6 s to 0.88–1.15 s.
 Each brush shader module contains only the code its material operation and
 contact flags can reach ([contact brush engine](../internals/contact-brush-engine.md)).
 Measured on 2026-10-18 on the TCL TAB 11 Gen 2 with release benchmark builds of
-`1382cea74`, the reservoir change and this change, using
+`1382cea74` (Before) and of the blend, selection and bristle specializations on
+`4261f70b9` (After), using
 `android-brush-benchmark.py --presets N --size 64 --probe-presets N --wait-for-warmup --warmup-idle-ms 8000`
 on the 12 MP tier photo. Each launch clears the application data, starts with
 G-Pen and idles for 8 s before selecting the brush. Values are medians of two
@@ -94,21 +95,21 @@ alternating launches, from selecting the brush to brush readiness.
 
 | Brush | Before | After |
 | --- | ---: | ---: |
-| Opaque Gouache | 11.16 s | 2.15 s |
-| Natural Blender | 10.70 s | 2.10 s |
-| Wet Round | 6.96 s | 1.18 s |
-| Multiply Glaze | 6.50 s | 0.77 s |
-| Smudge | 6.24 s | 1.22 s |
-| Watercolor Wash | 5.75 s | 1.90 s |
-| Liquify Push | 4.62 s | 0.60 s |
-| Clone Stamp | 2.57 s | 2.12 s |
-| Shading Pencil | 2.50 s | 2.30 s |
-| Bristle Paintbrush | 2.32 s | 2.00 s |
-| Pencil | 1.86 s | 1.76 s |
-| Rough G-Pen | 1.41 s | 0.84 s |
-| Chalk | 1.24 s | 1.14 s |
+| Opaque Gouache | 11.16 s | 1.83 s |
+| Natural Blender | 10.70 s | 2.14 s |
+| Wet Round | 6.96 s | 0.99 s |
+| Multiply Glaze | 6.50 s | 0.41 s |
+| Smudge | 6.24 s | 1.25 s |
+| Watercolor Wash | 5.75 s | 1.77 s |
+| Liquify Push | 4.62 s | 0.59 s |
+| Clone Stamp | 2.57 s | 1.83 s |
+| Shading Pencil | 2.50 s | 2.16 s |
+| Bristle Paintbrush | 2.32 s | 1.77 s |
+| Pencil | 1.86 s | 1.65 s |
+| Rough G-Pen | 1.41 s | 0.74 s |
+| Chalk | 1.24 s | 1.06 s |
 | Paintbrush | 1.17 s | 0.90 s |
-| Eraser | 0.80 s | 0.48 s |
+| Eraser | 0.80 s | 0.44 s |
 
 Paper-grain brushes still compile the paper probe and bake, about 0.33 s, the
 first time they select a paper. Gouache, Loaded Oil, Palette Knife and Natural

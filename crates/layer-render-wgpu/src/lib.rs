@@ -870,10 +870,10 @@ struct Pipelines {
     dry_material: dry_material::Pipelines,
     direct: [Deferred<wgpu::RenderPipeline>; DirectPipelineKind::COUNT],
     material: [[Deferred<wgpu::RenderPipeline>;
-        MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_CONTACTS.len()],
+        MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_SLOTS],
     material_gather: [[Deferred<wgpu::RenderPipeline>; 2]; dry_material::MATERIAL_CONTACTS.len()],
     watercolor_transport: [Deferred<wgpu::ComputePipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
-    reservoir: [Deferred<wgpu::RenderPipeline>; dry_material::MATERIAL_CONTACTS.len()],
+    reservoir: [Deferred<wgpu::RenderPipeline>; dry_material::MATERIAL_SLOTS],
     stroke_edge: Deferred<wgpu::RenderPipeline>,
     watercolor_composite: Deferred<wgpu::RenderPipeline>,
     watercolor_compute: (wgpu::BindGroupLayout, Deferred<wgpu::ComputePipeline>),
@@ -891,7 +891,7 @@ impl Pipelines {
         operation: MaterialOperation,
         kind: MaterialPipelineKind,
     ) -> &Deferred<wgpu::RenderPipeline> {
-        &self.material[dry_material::material_contact_slot(style)][kind.index(operation)]
+        &self.material[dry_material::material_slot(style)][kind.index(operation)]
     }
 
     fn material_gather(&self, style: &layer_render::DabStyle, index: usize) -> &Deferred<wgpu::RenderPipeline> {
@@ -899,7 +899,7 @@ impl Pipelines {
     }
 
     fn reservoir(&self, style: &layer_render::DabStyle) -> &Deferred<wgpu::RenderPipeline> {
-        &self.reservoir[dry_material::material_contact_slot(style)]
+        &self.reservoir[dry_material::material_slot(style)]
     }
 }
 
@@ -5775,10 +5775,12 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             "layer watercolor brush with wetness state",
         ),
     ];
-    // Each destination operation and contact specialization compiles its own
-    // module; attachment variants of one operation share it.
-    let paint_shaders: [[_; MaterialOperation::ALL.len()]; dry_material::MATERIAL_CONTACTS.len()] = std::array::from_fn(|slot|
-        MaterialOperation::ALL.map(|operation| dry_material::material_shader(device, dry_material::Entries::Fragment, dry_material::MATERIAL_CONTACTS[slot], operation)));
+    // Each destination operation, contact and blend specialization compiles its
+    // own module; attachment variants of one operation share it.
+    let paint_shaders: [[_; MaterialOperation::ALL.len()]; dry_material::MATERIAL_SLOTS] = std::array::from_fn(|slot| {
+        let (flags, entries) = dry_material::material_fragment_entries(slot);
+        MaterialOperation::ALL.map(|operation| dry_material::material_shader(device, entries, flags, operation))
+    });
     let material = std::array::from_fn(|slot| std::array::from_fn(|index| {
         let operation = MaterialOperation::ALL[index / MaterialPipelineKind::COUNT];
         let (targets, label) = material_targets[index % MaterialPipelineKind::COUNT].clone();
