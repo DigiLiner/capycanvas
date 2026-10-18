@@ -136,7 +136,7 @@ struct EditorView<Canvas: View>: View {
                 openWindow(id: "editor")
                 store.dispatch(["type": "complete_request", "id": id, "error": NSNull()])
             } else {
-                let error = "Multiple drawing windows are unavailable in this environment"
+                let error = store.bootstrap["recovery"]["new_window_unavailable"].string
                 store.dispatch(["type": "complete_request", "id": id, "error": error])
                 store.projectFiles.error = error
             }
@@ -155,7 +155,7 @@ struct EditorView<Canvas: View>: View {
         }
     }
     private func completeLink(_ id: UInt64, accepted: Bool) {
-        let error = accepted ? nil : "Could not open the link"
+        let error = accepted ? nil : store.bootstrap["recovery"]["link_open_failed"].string
         store.dispatch(["type": "complete_request", "id": id, "error": error as Any? ?? NSNull()])
         if let error { store.failure = error }
     }

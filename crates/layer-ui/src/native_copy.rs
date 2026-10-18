@@ -488,6 +488,7 @@ copy_struct! { RecoveryCopy {
     quit_unsaved_description: NATIVE_DIALOG_QUIT_UNSAVED_DESCRIPTION,
     quit_anyway: NATIVE_DIALOG_QUIT_ANYWAY,
     drawing_window_unavailable: NATIVE_DIALOG_DRAWING_WINDOW_UNAVAILABLE,
+    new_window_unavailable: DOCUMENTS_ERROR_NEW_WINDOW_UNAVAILABLE,
     preferences_failed: NATIVE_DIALOG_PREFERENCES_FAILED,
     open: DOCUMENTS_OPEN_ACCEPT,
     import: DOCUMENTS_IMPORT_ACCEPT,
