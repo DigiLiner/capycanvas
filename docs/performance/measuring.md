@@ -10,8 +10,8 @@ frames:
 - Brush strokes use **completed canvas updates per second**, as reported by
   `completed_updates_per_s` in `tools/performance/android-brush-report.py`. This
   counts GPU-completed, nonempty canvas updates inside the input window. Android
-  draws ink into the front buffer, so this rate can exceed the display's refresh
-  rate.
+  draws ink into the front buffer where the driver allows it, so this rate can
+  exceed the display's refresh rate; FIFO ink follows the display.
   Record `input_updates_per_s` and `input_completion_gap_p99_ms` alongside it.
   These count the first completed update consuming each new down or move input;
   prediction and refinement can produce further canvas updates between inputs.

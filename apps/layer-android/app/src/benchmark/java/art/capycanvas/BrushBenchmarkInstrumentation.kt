@@ -681,8 +681,9 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 }
                 val displayAfterInput = display()
                 if (mode !in listOf("settle", "object-affine")) {
-                    check(displayAfterInput.getString("present_mode") == "SharedDemandRefresh")
-                    check(displayAfterInput.getBoolean("retained_target"))
+                    val ink = displayAfterInput.getString("ink_present_mode")
+                    check(displayAfterInput.getString("present_mode") == ink)
+                    check(displayAfterInput.getBoolean("retained_target") == (ink == "SharedDemandRefresh"))
                 }
                 waitFor { !native { Native.renderingPending(it) } }
                 val settled = System.nanoTime()

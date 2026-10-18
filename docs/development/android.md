@@ -373,9 +373,10 @@ manual save checkpoints and undo/redo after an actual process death.
     active tab, camera, saved checkpoints and independent undo/redo history.
     `#failedInactiveSessionRetriesWithoutLosingNewDrawing` preserves a failed
     checkpoint while another drawing is edited, then retries and restarts.
-  - `#navigationBuffersAndPenReturnsToFrontBuffer` and
+  - `#navigationBuffersAndPenReturnsToInkPresentation` and
     `#frontBufferSurfaceLifecycle` cover the switch between buffered navigation
-    and front-buffer ink, rotation, surface recreation and GPU recovery,
+    and ink presentation (front-buffer, or FIFO where the driver lacks shared
+    presentation), rotation, surface recreation and GPU recovery,
     including capture, detach and device loss with an unpresented FIFO image.
   - `#hdrDisplayNegotiation` takes `-e hdrFile <device path of a PQ PNG>`;
     `-e requireHdr true` fails instead of passing on an SDR-only display.
@@ -708,7 +709,9 @@ size. Then
 `python3 tools/performance/android-brush-benchmark.py OUT --serial "$CAPY_ANDROID_SERIAL" --presets 1 --size 1000`
 passes `-e preset`, `-e brushSize` and `-e mode` (`constant`, `pressure`, `tilt`,
 `stationary`, `lifts`, `pauses`, `settle`, `visual` or `pinch`); `--trace` and `--profile` add
-Perfetto and simpleperf captures. The default preset list is the dry brushes;
+Perfetto and simpleperf captures. Strokes must present in the display status's
+`ink_present_mode`: `SharedDemandRefresh`, or `Fifo` on drivers without shared
+presentation. The default preset list is the dry brushes;
 the default workspace keeps Stats closed. `--stats` opens Stats and enables GPU
 timing; use `--trace --stats` for GPU phase diagnostics. Report these runs
 separately because Stats changes the workspace and adds measurement work.

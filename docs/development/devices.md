@@ -16,6 +16,7 @@ without disturbing anyone else. Shared machine resources are in
 | `movinkpad14` | Wacom MovinkPad Pro 14 (DTHA140) | Top tier reference | Adreno 735 |
 | `huion` | Huion Kamvas Pad 12 (KP1202) | Pen input testing | Mali-G57 |
 | `xppen` | XP-Pen Magic Note Pad (MNP1095) | Pen input testing | Mali-G57 |
+| `sm_t878u` | Samsung Galaxy Tab S7 (SM-T878U) | Android 13 without shared presentation | Adreno 650 |
 
 [Tier hardware](../performance/hardware.md) has the full specifications.
 Device quirks that affect tests:
@@ -30,6 +31,9 @@ Device quirks that affect tests:
   navigation crash seen only on the XP-Pen points there first.
 - The Huion launcher force-stops an app it sees updated; wait a few seconds after
   `adb install` before starting instrumentation.
+- The Galaxy Tab S7 runs Android 13, whose Vulkan loader has no swapchain
+  maintenance, so ink uses [FIFO presentation](gpu-fallbacks.md#android-presentation).
+  Its factory Chrome 111 has no WebGPU.
 - An install can stall on a Play Protect dialog. These are test devices:
   `adb shell settings put global verifier_verify_adb_installs 0` turns the check off.
 

@@ -34,7 +34,7 @@ feature allows and approximate only where an exact result costs too much.
 | --- | --- | --- |
 | Float32 filtering (`FLOAT32_FILTERABLE`) | Apple A9–A16 iPads (Apple's Metal feature tables grant it to Apple9 and later and only some Apple7/8 devices; an iPad mini 6 reports it missing), the iOS simulator, Adreno 6xx/7xx on Qualcomm drivers older than 512.700, Adreno 4xx/5xx, PowerVR, Samsung Xclipse | Texel-load sampling; see [Float32 filtering](#float32-filtering) |
 | Float32 blending (`FLOAT32_BLENDABLE`) | Every Mali generation, including the low- and mid-tier reference tablets; Adreno 5xx | Works through the slow `portable_blend` path |
-| Android shared presentation (`SharedDemandRefresh`) | Probably Android 10–13, which lack the platform swapchain extension the mode needs; `minSdk` is 29 | Buffered FIFO presentation; see [Android presentation](#android-presentation) |
+| Android shared presentation (`SharedDemandRefresh`) | Android 13 and probably 10–12: the platform loader adds `VK_EXT_swapchain_maintenance1` and `VK_EXT_surface_maintenance1` only from Android 14. A Galaxy Tab S7 (Adreno 650, Android 13) has `VK_KHR_shared_presentable_image` but neither maintenance extension. `minSdk` is 29 | FIFO ink presentation; see [Android presentation](#android-presentation) |
 | Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | `rendering_features` requests it only when both storage formats allow read-write access; otherwise dry media use separate candidates |
 | Wayland mailbox presentation | Unknown | The GTK host refuses to start |
 | Timestamp queries, pipeline cache | Many mobile GPUs, Metal, Web | Already optional |
@@ -100,13 +100,22 @@ so one merge equals blending each dab in turn:
 
 ## Android presentation
 
-When the surface has no `SharedDemandRefresh`, the Android host presents ink
-through the buffered FIFO path the canvas already uses while the camera moves
-(`android.rs`) and never switches modes. Pen latency rises by about one frame and
-ink cannot tear. Stroke prediction continues to hide part of that latency.
-Remaining work: verify on an Android 13 tablet and measure pen latency on the low
-tier. The alternative, raising `minSdk` to 34, removes Android 10–13 from the
-Play Store; keep it only if the buffered path cannot meet the low tier.
+When the surface has no `SharedDemandRefresh`, the Android host presents each ink
+frame through FIFO as soon as it is submitted, with a frame latency of one
+(`android.rs`). Camera changes use the buffered navigation path, which holds each
+frame until its GPU work completes and allows three frames in flight; moving
+between the two reconfigures the swapchain, as it does on front-buffer devices.
+Ink cannot tear, its update rate follows the display, and stroke prediction hides
+part of the added latency.
+
+On a Galaxy Tab S7 (Adreno 650, Android 13, 60 Hz) drawing on a 12 MP photo,
+G-Pen, Pencil and Charcoal at 1024 px reach 61.4–67.1 completed updates/s with
+completion-gap p99 18.6–28.0 ms, untraced. Under Perfetto, each ink frame waits
+27 ms median and 44 ms p99 in the queue before SurfaceFlinger takes it, about one
+frame more than shared ink. Presenting ink through the navigation path, as before,
+held the same tablet to 20 updates/s. Raising `minSdk` to 34 is not needed.
+Remaining work: a low-tier-class GPU on Android 13; the Tab S7 is faster than the
+low tier's Mali-G52.
 
 ## Smaller fixes
 
@@ -148,18 +157,16 @@ storage range. The validator stays as the backstop.
 1. **Diagnostics** from the previous section.
 2. **Float32 blending accumulation.** Measure mask painting and composition on
    the low- and mid-tier tablets before and after.
-3. **Android buffered presentation.** Verify on an Android 13 tablet and
-   measure the low tier.
-4. **Wayland, timestamps and memory.**
-5. **Numeric robustness** of working-page writes.
-6. **A-series tier qualification** of the Float32 filtering fallback.
+3. **Wayland, timestamps and memory.**
+4. **Numeric robustness** of working-page writes.
+5. **A-series tier qualification** of the Float32 filtering fallback.
 
 ## Not yet verified
 
 - Which Apple7/8 iPads report Float32 filtering; only the iPad mini 6 has been
   observed without it.
-- That Android 10–13 lack shared presentation; no Android 13 device has been
-  tested.
+- That Android 10–12 lack shared presentation; only one Android 13 tablet has
+  been tested.
 - Whether any current GPU lacks read-write Float32 storage.
 - The cost of each fallback on its tier's reference hardware.
 - The cause of the Galaxy Tab S6 Lite failure.

@@ -57,6 +57,7 @@ pub(crate) struct Surface {
     last_presentation_switch_ns: u64,
     navigation_latency: u32,
     ink_present_mode: wgpu::PresentMode,
+    ink: bool,
     _instance: wgpu::Instance,
     _window: Window,
 }
@@ -75,9 +76,10 @@ impl Surface {
         self.presenter.set_target_retention(self.config.present_mode == wgpu::PresentMode::SharedDemandRefresh);
         Ok(())
     }
-    fn present_with(&mut self, mode: wgpu::PresentMode) {
-        self.config.present_mode = mode;
-        self.config.desired_maximum_frame_latency = if mode == wgpu::PresentMode::Fifo { self.navigation_latency } else { 1 };
+    fn present_with(&mut self, ink: bool) {
+        self.ink = ink;
+        self.config.present_mode = if ink { self.ink_present_mode } else { wgpu::PresentMode::Fifo };
+        self.config.desired_maximum_frame_latency = if ink { 1 } else { self.navigation_latency };
     }
 }
 
@@ -147,6 +149,7 @@ pub extern "system" fn Java_art_capycanvas_Native_displayStatus(
                 "format": format!("{:?}", surface.config.format),
                 "color_space": format!("{:?}", surface.config.color_space),
                 "present_mode": format!("{:?}", surface.config.present_mode),
+                "ink_present_mode": format!("{:?}", surface.ink_present_mode),
                 "retained_target": surface.presenter.retains_target(),
                 "pending_composition": layer_render::CanvasRenderer::has_pending_work(gpu.as_ref()),
                 "pending_edits": a.host.session.engine().has_pending_document_edits(),
@@ -483,10 +486,11 @@ impl App {
             last_presentation_switch_ns: 0,
             navigation_latency,
             ink_present_mode,
+            ink: true,
             _instance: instance,
             _window: window,
         };
-        surface.present_with(ink_present_mode);
+        surface.present_with(true);
         surface.configure(gpu, [width, height])?;
         self.surface = Some(surface);
         self.sync_hdr_display();
@@ -559,18 +563,18 @@ impl App {
             let surface = self.surface.as_mut().unwrap();
             let gpu = self.host.session.engine().backend().0.as_ref().unwrap();
             // Navigation rewrites the whole displayed image. Keep it buffered even
-            // after the gesture settles; only a new brush stroke returns to shared
+            // after the gesture settles; only a new brush stroke returns to ink
             // presentation. A simultaneous view change takes precedence over ink.
-            let present_mode = if surface.last_view.is_some_and(|previous| previous != view) {
-                wgpu::PresentMode::Fifo
+            let ink = if surface.last_view.is_some_and(|previous| previous != view) {
+                false
             } else if paint_start != surface.last_paint_start {
-                surface.ink_present_mode
+                true
             } else {
-                surface.config.present_mode
+                surface.ink
             };
-            if surface.config.present_mode != present_mode {
+            if surface.ink != ink {
                 if surface.completed_frames.load(Ordering::Acquire) < surface.submitted_frames { return Ok(true); }
-                surface.present_with(present_mode);
+                surface.present_with(ink);
                 let switch_started = std::time::Instant::now();
                 surface.configure(gpu, [view.width_px, view.height_px])?;
                 surface.last_presentation_switch_ns = switch_started.elapsed().as_nanos() as u64;
@@ -657,7 +661,7 @@ impl App {
             .map_err(error)?;
         self.frame_cost[2] = elapsed() - self.frame_cost[0] - self.frame_cost[1];
         let submitted_ns = surface.completion_observer.as_ref().map_or(0, |_| monotonic_ns());
-        if surface.config.present_mode == wgpu::PresentMode::Fifo { surface.pending_target = Some(target); }
+        if !surface.ink { surface.pending_target = Some(target); }
         else { gpu.queue().present(target); }
         surface.last_view = Some(view);
         surface.last_paint_start = paint_start;

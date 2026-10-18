@@ -249,8 +249,9 @@ class AndroidViewportBenchmarkTest {
             info.put("thermal_status",activity.getSystemService(android.os.PowerManager::class.java).currentThermalStatus)
             if (smoothZoom) info.put("state", host.snapshot!!.getJSONObject("state"))
             File(output, "$label-info.json").writeText(info.toString(2))
-            assertEquals(if (retainedMotion) "SharedDemandRefresh" else "Fifo", info.getJSONObject("display").getString("present_mode"))
-            assertEquals(retainedMotion, info.getJSONObject("display").getBoolean("retained_target"))
+            val ink = info.getJSONObject("display").getString("ink_present_mode")
+            assertEquals(if (retainedMotion) ink else "Fifo", info.getJSONObject("display").getString("present_mode"))
+            assertEquals(retainedMotion && ink == "SharedDemandRefresh", info.getJSONObject("display").getBoolean("retained_target"))
             assertEquals("Navigator visibility after adoption", navigator, info.getJSONObject("display").getInt("overview_count") > 0)
             native { Native.presentationTimings(it, true) }
             repeat(repeats) { run ->

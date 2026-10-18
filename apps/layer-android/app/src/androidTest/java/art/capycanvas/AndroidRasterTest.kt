@@ -4447,15 +4447,17 @@ class AndroidRasterTest {
         assertEquals(exact, jsonValue(scope()!!.getJSONObject("data")))
         assertNull(host.failure)
     }
-    @Test fun navigationBuffersAndPenReturnsToFrontBuffer() {
+    @Test fun navigationBuffersAndPenReturnsToInkPresentation() {
         fun display() = native { JSONObject(Native.displayStatus(it)) }
+        val ink = display().getString("ink_present_mode")
+        val shared = ink == "SharedDemandRefresh"
         repeat(3) { index ->
             point(1, 0.0, index * 20.0)
-            assertEquals("The first ink frame uses the front buffer", "SharedDemandRefresh", display().getString("present_mode"))
+            assertEquals("The first ink frame uses the ink presentation", ink, display().getString("present_mode"))
             for (step in 1..6) { SystemClock.sleep(10); point(2, step * 15.0, index * 20.0) }
             point(3, 90.0, index * 20.0)
-            assertEquals("SharedDemandRefresh", display().getString("present_mode"))
-            assertTrue(display().getBoolean("retained_target"))
+            assertEquals(ink, display().getString("present_mode"))
+            assertEquals(shared, display().getBoolean("retained_target"))
             assertEquals(1, display().getInt("desired_maximum_frame_latency"))
             val painted = hash(png("presentation-before-$index.png"))
             val revision = native { state(it).getJSONObject("document_file").getLong("revision") }
@@ -4470,8 +4472,8 @@ class AndroidRasterTest {
             assertTrue("Buffered view contains artwork", (pixels.indices step 97).map { pixels[it] }.toSet().size > 8)
         }
         stroke(80.0)
-        assertEquals("SharedDemandRefresh", display().getString("present_mode"))
-        assertTrue(display().getBoolean("retained_target"))
+        assertEquals(ink, display().getString("present_mode"))
+        assertEquals(shared, display().getBoolean("retained_target"))
         assertTrue(display().getLong("presentation_switches") >= 6)
         assertNull(host.failure)
     }
