@@ -1,4 +1,4 @@
-use super::tiles::{Frame, TOLERANCE, flatten};
+use super::tiles::{Frame, TOLERANCE};
 use layer_core::authored::vector::{Cap, Join, PathItem, Stroke};
 
 struct Point { p: [f64; 2], left: f64, right: f64 }
@@ -90,7 +90,7 @@ pub(crate) fn outline(path: &PathItem, stroke: &Stroke, frame: &Frame) -> Vec<Ve
         let mut points = vec![Point { p: map(subpath.anchor(0).point()), left: l, right: r }];
         for (index, segment) in subpath.segments().enumerate() {
             let global = base + index as u32;
-            flatten(&segment, map, TOLERANCE, |p, t| { let [left, right] = width(global, t); points.push(Point { p, left, right }); });
+            segment.map(map).flatten(TOLERANCE, |p, t| { let [left, right] = width(global, t); points.push(Point { p, left, right }); });
         }
         base += subpath.segment_count() as u32;
         points.dedup_by(|a, b| sub(a.p, b.p).iter().all(|v| v.abs() < 1e-9));

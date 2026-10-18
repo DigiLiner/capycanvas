@@ -9,6 +9,15 @@ const DERIVED_BYTES: usize = 256 << 20;
 
 struct Derived { level: u32, offset: [i64; 2], geometry: Arc<LevelGeometry>, base: Option<u32>, used: u64 }
 struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Arc<[[f32; 4]]>, derived: Vec<Derived>, seen: u64 }
+impl Item {
+    fn derived_at(&mut self, level: u32, offset: [i64; 2], frame: &Frame, bytes: &mut usize) -> usize {
+        if let Some(at) = self.derived.iter().position(|d| d.level == level && d.offset == offset) { return at; }
+        let geometry = Arc::new(tiles::derive(&self.path, frame));
+        *bytes += geometry.bytes();
+        self.derived.push(Derived { level, offset, geometry, base: None, used: 0 });
+        self.derived.len() - 1
+    }
+}
 
 #[derive(Default)]
 struct LayerCache {
@@ -19,7 +28,15 @@ struct LayerCache {
     grid: HashMap<[i32; 2], Vec<u32>>,
     chunks: HashMap<usize, u32>,
     palette: Option<(layer_core::color::RgbSpace, layer_core::BlendSpace)>,
-    appended: Option<Vec<u32>>,
+    pending: Change,
+    change: Change,
+    derived_bytes: usize,
+}
+#[derive(Default)]
+struct Change { damage: Vec<[f64; 4]>, appended: Vec<u32>, touched: Vec<u32>, removed: Vec<Item>, mixed: bool, full: bool }
+impl Change {
+    fn appended(&self) -> Option<&[u32]> { (!self.full && !self.mixed && !self.appended.is_empty()).then_some(&self.appended) }
+    fn damage(&self) -> Option<&[[f64; 4]]> { (!self.full && !self.damage.is_empty()).then_some(&self.damage) }
 }
 
 fn chunk_key(chunk: &layer_core::authored::Resource<layer_core::authored::vector::VectorChunk>) -> usize { Arc::as_ptr(chunk.storage()) as usize }
@@ -53,14 +70,16 @@ impl LayerCache {
         for y in y0..y1 { for x in x0..x1 {
             if let Some(list) = self.grid.get_mut(&[x, y]) { if let Some(i) = list.iter().position(|s| *s == slot) { list.swap_remove(i); } if list.is_empty() { self.grid.remove(&[x, y]); } }
         }}
-        for derived in &item.derived { if let Some(base) = derived.base { pool.release(base, &derived.geometry); } }
+        for derived in &item.derived {
+            if let Some(base) = derived.base { pool.release(base, &derived.geometry); }
+            self.derived_bytes = self.derived_bytes.saturating_sub(derived.geometry.bytes());
+        }
         self.ids.remove(&item.path.id);
         self.free.push(slot);
         item
     }
-    fn update(&mut self, object: &VectorObject, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), pool: &mut Pool) -> Vec<[f64; 4]> {
-        if self.root.same_root(object) && self.palette == Some(palette) { return Vec::new(); }
-        self.appended = None;
+    fn update(&mut self, object: &VectorObject, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), pool: &mut Pool) {
+        if self.root.same_root(object) && self.palette == Some(palette) { return; }
         let first = self.root.chunks().is_empty() && self.items.iter().all(Option::is_none);
         let mut added = Vec::new();
         let mut other = !first && self.palette.is_some() && self.palette != Some(palette);
@@ -92,29 +111,41 @@ impl LayerCache {
                     }
                     (_, Some(slot)) => {
                         other = true;
-                        damage.push(self.remove(slot, pool).bounds);
+                        let removed = self.remove(slot, pool);
+                        damage.push(removed.bounds);
+                        self.pending.removed.push(removed);
                         damage.push(self.insert(path.clone(), chunk, index as u32, palette));
+                        added.push(path.id);
                     }
                     (_, None) => { damage.push(self.insert(path.clone(), chunk, index as u32, palette)); added.push(path.id); }
                 }
             }
         }
         for id in previous.keys().filter(|id| !seen.contains(*id)) {
-            if let Some(slot) = self.ids.get(id).copied() { other = true; damage.push(self.remove(slot, pool).bounds); }
+            if let Some(slot) = self.ids.get(id).copied() {
+                other = true;
+                let removed = self.remove(slot, pool);
+                damage.push(removed.bounds);
+                self.pending.removed.push(removed);
+            }
         }
         let mut ranks: Vec<usize> = common.iter().map(|(rank, _)| *rank).collect();
         if !ranks.is_sorted() {
             other = true;
             ranks.sort_unstable();
-            for ((rank, slot), expected) in common.iter().zip(ranks) { if *rank != expected { damage.push(self.items[*slot as usize].as_ref().unwrap().bounds); } }
+            for ((rank, slot), expected) in common.iter().zip(ranks) {
+                if *rank != expected { damage.push(self.items[*slot as usize].as_ref().unwrap().bounds); self.pending.touched.push(*slot); }
+            }
         }
-        if !first && !other && !added.is_empty() {
-            let set: HashSet<ItemId> = added.iter().copied().collect();
-            let leading = object.records().take_while(|(_, record)| record.id().is_some_and(|id| set.contains(&id))).count();
-            if leading == added.len() { self.appended = Some(added.iter().filter_map(|id| self.ids.get(id).copied()).collect()); }
-        }
+        let set: HashSet<ItemId> = added.iter().copied().collect();
+        let leading = object.records().take_while(|(_, record)| record.id().is_some_and(|id| set.contains(&id))).count();
+        let slots: Vec<u32> = added.iter().filter_map(|id| self.ids.get(id).copied()).collect();
+        let pending = &mut self.pending;
+        pending.full |= first;
+        if !other && !added.is_empty() && leading == added.len() { pending.appended.extend(&slots); } else { pending.mixed = true; }
+        pending.touched.extend(slots);
+        pending.damage.extend(damage);
         self.root = object.clone();
-        damage
     }
     fn order(&self, item: &Item) -> u64 { u64::from(self.chunks.get(&item.chunk).copied().unwrap_or(0)) << 32 | u64::from(item.index) }
 }
@@ -165,6 +196,11 @@ pub(crate) fn preview_damage(scene: SceneView<'_>, old: Option<&layer_render::Ve
     }
     bounds.map(|[x0, y0, x1, y1]| DocRect { min: [(x0 + offset[0]).floor() as i64 - 1, (y0 + offset[1]).floor() as i64 - 1], max: [(x1 + offset[0]).ceil() as i64 + 1, (y1 + offset[1]).ceil() as i64 + 1] }).into_iter().collect()
 }
+fn level_frame(offset: [f64; 2], level: u32, extent: [u32; 2]) -> Frame {
+    let side = 1i64 << level;
+    let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
+    Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] }
+}
 pub(super) fn edit_damage(before: &VectorObject, after: &VectorObject) -> Vec<[f64; 4]> {
     if before.same_root(after) { return Vec::new(); }
     let old: HashSet<usize> = before.chunks().iter().map(chunk_key).collect();
@@ -194,7 +230,6 @@ pub(super) struct Vectors {
     frame: u64,
     stamp: u64,
     preview: Option<((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Arc<[[f32; 4]]>)>,
-    derived_bytes: usize,
     buffers: [Option<wgpu::Buffer>; 4],
 }
 #[derive(Clone)]
@@ -255,8 +290,9 @@ impl Vectors {
         let offset = scene.occurrence_offset64(owner);
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let layer = self.layers.entry(handle).or_default();
-        let rects = layer.update(object, palette, pool);
-        rects.into_iter().map(|[x0, y0, x1, y1]| DocRect {
+        layer.update(object, palette, pool);
+        layer.change = std::mem::take(&mut layer.pending);
+        layer.change.damage.iter().map(|[x0, y0, x1, y1]| DocRect {
             min: [(x0 + offset[0]).floor() as i64 - 16, (y0 + offset[1]).floor() as i64 - 16],
             max: [(x1 + offset[0]).ceil() as i64 + 16, (y1 + offset[1]).ceil() as i64 + 16],
         }).collect()
@@ -280,35 +316,102 @@ impl Vectors {
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let layer = self.layers.get_mut(&handle)?;
         layer.update(object, palette, pool);
-        let slots = layer.appended.clone()?;
+        let slots = layer.change.appended()?.to_vec();
+        let entries = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent);
+        let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
+        let mut batch = Batch::default();
+        let side = 1i64 << level;
+        batch.build(&layers, [origin[0].div_euclid(side), origin[1].div_euclid(side)], size);
+        Some(batch)
+    }
+    #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent and color domain")]
+    pub fn repaint_batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Option<Batch> {
+        let handle = scene.vector_handle(owner)?;
+        let object = scene.vector(handle)?;
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let layer = self.layers.get_mut(&handle)?;
+        layer.update(object, palette, pool);
+        layer.change.damage()?;
         let offset = scene.occurrence_offset64(owner);
         let side = 1i64 << level;
-        let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
-        let frame = Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] };
+        let tile = i64::from(TILE);
+        let level_origin = origin.map(|v| v.div_euclid(side));
+        let t0 = level_origin.map(|v| v.div_euclid(tile) as i32);
+        let t1 = [0, 1].map(|i| (level_origin[i] + i64::from(size[i]) + tile - 1).div_euclid(tile) as i32);
+        let columns = (t1[0] - t0[0]).max(0) as usize;
+        let rows = (t1[1] - t0[1]).max(0) as usize;
+        let mut mask = vec![false; columns * rows];
+        let frame = level_frame(offset, level, extent);
         let integer_offset = offset.map(|v| v as i64);
-        let mut keyed: Vec<(u64, u32)> = slots.iter().map(|s| (layer.order(layer.items[*s as usize].as_ref().unwrap()), *s)).collect();
+        let window = [0, 1].map(|i| (origin[i] as f64 - offset[i], origin[i] as f64 - offset[i] + f64::from(size[i]) * side as f64));
+        let inside = |b: [f64; 4]| b[2] >= window[0].0 - 16. && b[0] <= window[0].1 + 16. && b[3] >= window[1].0 - 16. && b[1] <= window[1].1 + 16.;
+        let LayerCache { items, change, derived_bytes, .. } = layer;
+        let mut mark = |item: &mut Item| if inside(item.bounds) {
+            let at = item.derived_at(level, integer_offset, &frame, derived_bytes);
+            for t in item.derived[at].geometry.tile_range(t0[1]..t1[1], t0[0]..t1[0]) { mask[(t.tile[1] - t0[1]) as usize * columns + (t.tile[0] - t0[0]) as usize] = true; }
+        };
+        for item in change.removed.iter_mut() { mark(item); }
+        for slot in &change.touched { if let Some(item) = items[*slot as usize].as_mut() { mark(item); } }
+        if mask.iter().filter(|m| **m).count() * 2 > mask.len() { return None; }
+        let mut covered = vec![0u32; (columns + 1) * (rows + 1)];
+        for y in 0..rows { for x in 0..columns {
+            covered[(y + 1) * (columns + 1) + x + 1] = u32::from(mask[y * columns + x]) + covered[y * (columns + 1) + x + 1] + covered[(y + 1) * (columns + 1) + x] - covered[y * (columns + 1) + x];
+        }}
+        let masked = |bounds: [f64; 4]| {
+            let tile_of = |v: f64, i: usize| (((v + offset[i]) / side as f64).floor() as i64).div_euclid(tile) as i32;
+            let bounds = [bounds[0] - side as f64, bounds[1] - side as f64, bounds[2] + side as f64, bounds[3] + side as f64];
+            let [x0, y0] = [tile_of(bounds[0], 0).max(t0[0]) - t0[0], tile_of(bounds[1], 1).max(t0[1]) - t0[1]].map(|v| v.max(0) as usize);
+            let [x1, y1] = [((tile_of(bounds[2], 0) + 1).min(t1[0]) - t0[0]).max(0) as usize, ((tile_of(bounds[3], 1) + 1).min(t1[1]) - t0[1]).max(0) as usize];
+            x0 < x1 && y0 < y1 && covered[y1 * (columns + 1) + x1] + covered[y0 * (columns + 1) + x0] > covered[y0 * (columns + 1) + x1] + covered[y1 * (columns + 1) + x0]
+        };
+        self.stamp += 1;
+        let stamp = self.stamp;
+        let layer = self.layers.get_mut(&handle)?;
+        let [cx0, cy0, cx1, cy1] = cells([window[0].0 - 16., window[1].0 - 16., window[0].1 + 16., window[1].1 + 16.]);
+        let mut slots = Vec::new();
+        for y in cy0..cy1 { for x in cx0..cx1 {
+            for slot in layer.grid.get(&[x, y]).into_iter().flatten() {
+                let item = layer.items[*slot as usize].as_mut().unwrap();
+                if item.seen == stamp { continue; }
+                item.seen = stamp;
+                if masked(item.bounds) { slots.push(*slot); }
+            }
+        }}
+        let entries = self.entries(handle, slots, offset, level, extent);
+        let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
+        let mut batch = Batch::default();
+        batch.build_within(&layers, level_origin, size, Some(&mask));
+        Some(batch)
+    }
+    fn entries(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2]) -> Vec<(Arc<LevelGeometry>, u32, Arc<[[f32; 4]]>)> {
+        let frame = level_frame(offset, level, extent);
+        let integer_offset = offset.map(|v| v as i64);
+        let frame_number = self.frame;
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let Some(layer) = self.layers.get_mut(&handle) else { return Vec::new() };
+        let mut keyed: Vec<(u64, u32)> = slots.into_iter().map(|s| (layer.order(layer.items[s as usize].as_ref().unwrap()), s)).collect();
         keyed.sort_unstable_by(|a, b| b.0.cmp(&a.0));
         let mut entries = Vec::with_capacity(keyed.len());
         for (_, slot) in keyed {
-            let item = layer.items[slot as usize].as_mut()?;
-            let at = match item.derived.iter().position(|d| d.level == level && d.offset == integer_offset) {
-                Some(at) => at,
-                None => {
-                    let geometry = Arc::new(tiles::derive(&item.path, &frame));
-                    self.derived_bytes += geometry.bytes();
-                    item.derived.push(Derived { level, offset: integer_offset, geometry, base: None, used: 0 });
-                    item.derived.len() - 1
-                }
-            };
+            let item = layer.items[slot as usize].as_mut().unwrap();
+            let at = item.derived_at(level, integer_offset, &frame, &mut layer.derived_bytes);
             let derived = &mut item.derived[at];
-            derived.used = self.frame;
+            derived.used = frame_number;
             if derived.base.is_none() { derived.base = pool.allocate(&derived.geometry); }
-            entries.push((derived.geometry.clone(), derived.base?, item.colors.clone()));
+            if derived.base.is_none() {
+                let geometry = derived.geometry.clone();
+                for other in layer.items.iter_mut().flatten() {
+                    for d in other.derived.iter_mut().filter(|d| d.used < frame_number) { if let Some(b) = d.base.take() { pool.release(b, &d.geometry); } }
+                }
+                let item = layer.items[slot as usize].as_mut().unwrap();
+                item.derived[at].base = pool.allocate(&geometry);
+            }
+            let item = layer.items[slot as usize].as_ref().unwrap();
+            let derived = &item.derived[at];
+            let Some(base) = derived.base else { continue };
+            entries.push((derived.geometry.clone(), base, item.colors.clone()));
         }
-        let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
-        let mut batch = Batch::default();
-        batch.build(&layers, [origin[0].div_euclid(side), origin[1].div_euclid(side)], size);
-        Some(batch)
+        entries
     }
     #[expect(clippy::too_many_arguments, reason = "A window names its layer, placement, level, extent, color domain and provisional path")]
     fn batch_with(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), preview: Option<&Arc<PathItem>>) -> Batch {
@@ -316,7 +419,6 @@ impl Vectors {
         let Some(handle) = scene.vector_handle(owner) else { return batch };
         let Some(object) = scene.vector(handle) else { return batch };
         let offset = scene.occurrence_offset64(owner);
-        let frame_number = self.frame;
         self.stamp += 1;
         let stamp = self.stamp;
         let side = 1i64 << level;
@@ -338,39 +440,10 @@ impl Vectors {
                 slots.push(*slot);
             }
         }}
-        let mut keyed: Vec<(u64, u32)> = slots.into_iter().map(|s| (layer.order(layer.items[s as usize].as_ref().unwrap()), s)).collect();
-        keyed.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        let mut entries = self.entries(handle, slots, offset, level, extent);
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let tiles = extent.map(|v| (i64::from(v).div_euclid(side) as i32).div_euclid(TILE) + 1);
         let frame = Frame { scale: 1. / side as f64, origin: offset, clip: [0, 0, tiles[0], tiles[1]] };
-        let mut entries: Vec<(Arc<LevelGeometry>, u32, Arc<[[f32; 4]]>)> = Vec::with_capacity(keyed.len());
-        for (_, slot) in keyed {
-            let item = layer.items[slot as usize].as_mut().unwrap();
-            let integer_offset = offset.map(|v| v as i64);
-            let at = match item.derived.iter().position(|d| d.level == level && d.offset == integer_offset) {
-                Some(at) => at,
-                None => {
-                    let geometry = Arc::new(tiles::derive(&item.path, &frame));
-                    self.derived_bytes += geometry.bytes();
-                    item.derived.push(Derived { level, offset: integer_offset, geometry, base: None, used: 0 });
-                    item.derived.len() - 1
-                }
-            };
-            let derived = &mut item.derived[at];
-            derived.used = frame_number;
-            if derived.base.is_none() { derived.base = pool.allocate(&derived.geometry); }
-            if derived.base.is_none() {
-                let geometry = derived.geometry.clone();
-                for other in layer.items.iter_mut().flatten() {
-                    for d in other.derived.iter_mut().filter(|d| d.used < frame_number) { if let Some(b) = d.base.take() { pool.release(b, &d.geometry); } }
-                }
-                let item = layer.items[slot as usize].as_mut().unwrap();
-                item.derived[at].base = pool.allocate(&geometry);
-            }
-            let item = layer.items[slot as usize].as_mut().unwrap();
-            let derived = &item.derived[at];
-            let Some(base) = derived.base else { continue };
-            entries.push((derived.geometry.clone(), base, item.colors.clone()));
-        }
         if let Some(path) = preview {
             let key = (Arc::as_ptr(path) as usize, level, offset.map(f64::to_bits));
             if self.preview.as_ref().is_none_or(|p| p.0 != key) {
@@ -407,11 +480,11 @@ impl Vectors {
         r.scene_pipelines.vector.encode(&r.device, encoder, &mut r.uploads, &mut self.buffers, &job.batch, &buffer, job.base.as_ref().map(|(view, origin)| (view, *origin)), &r.empty_view, &job.output)
     }
     pub fn trim(&mut self) {
-        if self.derived_bytes <= DERIVED_BYTES { return; }
+        if self.layers.values().map(|layer| layer.derived_bytes).sum::<usize>() <= DERIVED_BYTES { return; }
         let frame = self.frame;
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
-        let mut freed = 0usize;
         for layer in self.layers.values_mut() {
+            let mut freed = 0usize;
             for item in layer.items.iter_mut().flatten() {
                 item.derived.retain(|d| {
                     let keep = d.used + 2 >= frame;
@@ -419,8 +492,8 @@ impl Vectors {
                     keep
                 });
             }
+            layer.derived_bytes = layer.derived_bytes.saturating_sub(freed);
         }
-        self.derived_bytes = self.derived_bytes.saturating_sub(freed);
     }
 }
 

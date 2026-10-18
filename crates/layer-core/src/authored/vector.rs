@@ -1,4 +1,4 @@
-use super::{PortableId, Resource};
+use super::{Affine64, PortableId, Resource};
 use crate::color::RgbColor;
 use std::{collections::{BTreeMap, HashSet}, sync::{Arc, OnceLock}};
 
@@ -64,6 +64,17 @@ impl Segment {
         let u = 1. - t;
         let [a, b, c, d] = [u * u * u, 3. * u * u * t, 3. * u * t * t, t * t * t];
         std::array::from_fn(|i| a * self.from[i] + b * self.control[0][i] + c * self.control[1][i] + d * self.to[i])
+    }
+    pub fn map(&self, map: impl Fn([f64; 2]) -> [f64; 2]) -> Self {
+        Self { from: map(self.from), control: [map(self.control[0]), map(self.control[1])], to: map(self.to) }
+    }
+    pub fn flatten(&self, tolerance: f64, mut emit: impl FnMut([f64; 2], f64)) {
+        let [p0, p1, p2, p3] = [self.from, self.control[0], self.control[1], self.to];
+        let second = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| ((a[0] - 2. * b[0] + c[0]).powi(2) + (a[1] - 2. * b[1] + c[1]).powi(2)).sqrt();
+        let bend = second(p0, p1, p2).max(second(p1, p2, p3));
+        let count = if self.is_line() { 1 } else { ((0.75 * bend / tolerance).sqrt().ceil() as usize).clamp(1, 4096) };
+        for i in 1..count { let t = i as f64 / count as f64; emit(self.point(t), t); }
+        emit(p3, 1.);
     }
     pub fn split(&self, t: f64) -> (Self, Self) {
         let lerp = |a: [f64; 2], b: [f64; 2]| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
@@ -301,6 +312,71 @@ impl PathItem {
         }
         Ok(())
     }
+    pub fn hit(&self, point: [f64; 2], slop: f64) -> bool {
+        let [x0, y0, x1, y1] = self.bounds();
+        if self.hidden || point[0] < x0 - slop || point[1] < y0 - slop || point[0] > x1 + slop || point[1] > y1 + slop { return false; }
+        let tolerance = (slop * 0.25).max(0.05);
+        self.style.entries.iter().any(|entry| match entry {
+            PaintEntry::Fill(_) => self.winds(point, tolerance),
+            PaintEntry::Stroke(stroke) => stroke.width > 0. && self.touches(point, stroke, slop, tolerance),
+            PaintEntry::Opaque(_) => false,
+        })
+    }
+    fn winds(&self, point: [f64; 2], tolerance: f64) -> bool {
+        let mut winding = 0i32;
+        let mut cross = |a: [f64; 2], b: [f64; 2]| {
+            if (a[1] <= point[1]) == (b[1] <= point[1]) { return; }
+            let side = (b[0] - a[0]) * (point[1] - a[1]) - (point[0] - a[0]) * (b[1] - a[1]);
+            if (side > 0.) == (b[1] > a[1]) { winding += if b[1] > a[1] { 1 } else { -1 }; }
+        };
+        for subpath in self.geometry.subpaths() {
+            let start = subpath.anchor(0).point();
+            let mut last = start;
+            for segment in subpath.segments() { segment.flatten(tolerance, |p, _| { cross(last, p); last = p; }); }
+            cross(last, start);
+        }
+        match self.fill_rule { FillRule::NonZero => winding != 0, FillRule::EvenOdd => winding % 2 != 0 }
+    }
+    fn touches(&self, point: [f64; 2], stroke: &Stroke, slop: f64, tolerance: f64) -> bool {
+        let half = stroke.width * 0.5;
+        let radius = |segment: u32, t: f64| stroke.profile.as_ref().map_or(half, |p| { let [l, r] = p.at(segment, t); l.max(r) * half });
+        let near = |a: [f64; 2], b: [f64; 2], reach: f64| {
+            let d = [b[0] - a[0], b[1] - a[1]];
+            let length = d[0] * d[0] + d[1] * d[1];
+            let t = if length > 0. { (((point[0] - a[0]) * d[0] + (point[1] - a[1]) * d[1]) / length).clamp(0., 1.) } else { 0. };
+            let q = [a[0] + d[0] * t - point[0], a[1] + d[1] * t - point[1]];
+            q[0] * q[0] + q[1] * q[1] <= reach * reach
+        };
+        let mut base = 0u32;
+        for subpath in self.geometry.subpaths() {
+            let mut last = (subpath.anchor(0).point(), radius(base, 0.));
+            if subpath.segment_count() == 0 && near(last.0, last.0, last.1 + slop) { return true; }
+            let mut found = false;
+            for (index, segment) in subpath.segments().enumerate() {
+                let global = base + index as u32;
+                segment.flatten(tolerance, |p, t| {
+                    let r = radius(global, t);
+                    found |= near(last.0, p, last.1.max(r) + slop);
+                    last = (p, r);
+                });
+                if found { return true; }
+            }
+            base += subpath.segment_count() as u32;
+        }
+        false
+    }
+    pub fn transformed(&self, affine: Affine64) -> Result<Self, &'static str> {
+        let geometry = Arc::new(self.geometry.transformed(|p| affine.map(p))?);
+        let [a, b, c, d, _, _] = affine.0;
+        let scale = (a * d - b * c).abs().sqrt();
+        let moved = self.with_geometry(geometry);
+        if scale == 1. || self.style.strokes().next().is_none() { return Ok(moved); }
+        let entries = self.style.entries.iter().map(|entry| match entry {
+            PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width: stroke.width * scale, ..stroke.clone() }),
+            other => other.clone(),
+        }).collect();
+        Ok(moved.with_style(Arc::new(Style::new(entries))))
+    }
     pub fn with_geometry(&self, geometry: Arc<PathGeometry>) -> Self {
         Self { geometry, unknown: retained(&self.unknown, true), ..self.clone() }
     }
@@ -481,6 +557,37 @@ impl VectorObject {
         let chunk = self.chunks().iter().position(|chunk| chunk.contains(id))?;
         let index = self.chunks()[chunk].records().iter().position(|record| record.id() == Some(id))?;
         Some(Position { chunk: chunk as u32, index: index as u32 })
+    }
+    pub fn hit(&self, point: [f64; 2], slop: f64) -> Option<ItemId> {
+        self.chunks().iter().filter(|chunk| chunk.summary().bounds.is_some_and(|[x0, y0, x1, y1]|
+            point[0] >= x0 - slop && point[1] >= y0 - slop && point[0] <= x1 + slop && point[1] <= y1 + slop))
+            .flat_map(|chunk| chunk.records().iter().filter_map(Record::path))
+            .find(|path| !path.locked && path.hit(point, slop)).map(|path| path.id)
+    }
+    pub fn positions(&self, ids: &HashSet<ItemId>) -> BTreeMap<usize, Vec<usize>> {
+        let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        let mut note = |chunk: usize, id: ItemId| if let Some(index) = self.chunks()[chunk].records().iter().position(|r| r.id() == Some(id)) { found.entry(chunk).or_default().push(index); };
+        if ids.len().saturating_mul(self.chunks().len()) <= self.record_count() {
+            for &id in ids { if let Some(chunk) = self.chunks().iter().position(|chunk| chunk.contains(id)) { note(chunk, id); } }
+        } else {
+            for (chunk, records) in self.chunks().iter().enumerate() { for &id in records.ids.iter().filter(|id| ids.contains(id)) { note(chunk, id); } }
+        }
+        found
+    }
+    pub fn transform_items(&self, ids: &HashSet<ItemId>, affine: Affine64) -> Result<Self, &'static str> {
+        let mut edits = BTreeMap::new();
+        for (chunk, indices) in self.positions(ids) {
+            let mut records = self.chunks()[chunk].records().to_vec();
+            for index in indices {
+                if let Record::Path(path) = &records[index] { records[index] = Record::Path(path.transformed(affine)?); }
+            }
+            edits.insert(chunk, records);
+        }
+        Ok(self.edit_chunks(edits))
+    }
+    pub fn items_bounds(&self, ids: &HashSet<ItemId>) -> Option<[f64; 4]> {
+        self.positions(ids).into_iter().flat_map(|(chunk, indices)| indices.into_iter().filter_map(move |i| self.chunks()[chunk].records()[i].path().map(PathItem::bounds)))
+            .fold(None, |a, b| Some(union(a, b)))
     }
     pub fn allocate_id(&self) -> ItemId {
         loop { let id = ItemId::random(); if !self.contains(id) { return id; } }

@@ -120,7 +120,7 @@ fn fine(item: &PathItem, level: u32) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<([f64; 2], 
         let mut ring = vec![map(subpath.anchor(0).point())];
         let mut line = vec![(map(subpath.anchor(0).point()), 0u32, 0.)];
         for (i, segment) in subpath.segments().enumerate() {
-            tiles::flatten(&segment, map, 0.002, |p, t| { ring.push(p); line.push((p, base + i as u32, t)); });
+            segment.map(map).flatten(0.002, |p, t| { ring.push(p); line.push((p, base + i as u32, t)); });
         }
         base += subpath.segment_count() as u32;
         rings.push(ring);

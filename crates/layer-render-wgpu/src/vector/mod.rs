@@ -29,7 +29,8 @@ impl Batch {
 }
 impl Batch {
     pub fn tile_count(&self) -> usize { self.tiles.len() }
-    pub fn build(&mut self, layers: &[Layer], origin: [i64; 2], size: [u32; 2]) {
+    pub fn build(&mut self, layers: &[Layer], origin: [i64; 2], size: [u32; 2]) { self.build_within(layers, origin, size, None) }
+    pub fn build_within(&mut self, layers: &[Layer], origin: [i64; 2], size: [u32; 2], mask: Option<&[bool]>) {
         self.tiles.clear(); self.commands.clear(); self.colors.clear();
         self.size = size;
         self.origin = origin;
@@ -47,6 +48,7 @@ impl Batch {
             for tile in layer.geometry.tile_range(t0[1]..t1[1], t0[0]..t1[0]) {
                 reference += 1;
                 let s = slot(tile.tile);
+                if mask.is_some_and(|mask| !mask[s]) { continue; }
                 if tile.kind == SOLID && layer.colors[tile.entry as usize][3] >= 1. { self.floors[s] = reference; self.counts[s] = 0; }
                 self.counts[s] += 1;
             }
@@ -61,7 +63,7 @@ impl Batch {
             for tile in layer.geometry.tile_range(t0[1]..t1[1], t0[0]..t1[0]) {
                 reference += 1;
                 let s = slot(tile.tile);
-                if reference < self.floors[s] { continue; }
+                if reference < self.floors[s] || mask.is_some_and(|mask| !mask[s]) { continue; }
                 let at = self.starts[s] as usize;
                 self.starts[s] += 1;
                 self.commands[at] = command(tile, layer.base, palette);
@@ -74,7 +76,7 @@ impl Batch {
             for x in t0[0]..t1[0] {
                 let s = slot([x, y]);
                 let end = self.starts[s];
-                if end > start {
+                if end > start || mask.is_some_and(|mask| mask[s]) {
                     let offset = [i64::from(x) * side - origin[0], i64::from(y) * side - origin[1]];
                     self.tiles.push([offset[0] as i32, offset[1] as i32, start as i32, end as i32]);
                 }

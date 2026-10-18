@@ -165,7 +165,9 @@ fn crowded_vector_layer_drawing_frames() {
         let start = std::time::Instant::now();
         editor.undo().unwrap();
         let undo_perform = start.elapsed().as_secs_f64() * 1e3;
+        if count == 50_000 { unsafe { std::env::set_var("VECTOR_TRACE", "1") }; }
         let undo = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        unsafe { std::env::remove_var("VECTOR_TRACE") };
         let mut small = Vec::new();
         for k in 0..5u64 {
             let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![stroke(70_000 + k, &[[1500. + k as f64 * 40., 1500.], [1510. + k as f64 * 40., 1505.]], 4., [0.2, 0.7, 0.2, 1.])]);
@@ -176,6 +178,79 @@ fn crowded_vector_layer_drawing_frames() {
         let (mut cpu, mut wall): (Vec<f64>, Vec<f64>) = frames.into_iter().unzip();
         eprintln!("{count} strokes: open {open:.0} ms; drawing frame cpu p50 {:.2} p95 {:.2} ms, wall p50 {:.2} p95 {:.2} ms; commit perform {perform:.2} ms frame cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms frame cpu {:.2} wall {:.2} ms",
             percentile(&mut cpu, 0.5), percentile(&mut cpu, 0.95), percentile(&mut wall, 0.5), percentile(&mut wall, 0.95), commit.0, commit.1, undo.0, undo.1);
+    }
+}
+
+#[test]
+fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render() {
+    use std::collections::HashSet;
+    let extent = [1200u32, 900u32];
+    for zoom in [1f32, 0.5] {
+        let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
+        let records: Vec<Record> = crate::vector::bench::scene_b([1200., 900.], 2000).into_iter().map(Record::Path).collect();
+        let (mut editor, layer) = document(extent, records);
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        let matches = |r: &WgpuRasterizer, editor: &layer_core::Editor, step: &str| {
+            let mut fresh = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+            submit_ready(&mut fresh, FramePacket { view, ..packet(editor.document().scene(), extent) });
+            let error = max_error(&display(r), &display(&fresh));
+            assert!(error < 1e-5, "{step} at zoom {zoom} must match a fresh render: {error}");
+        };
+        let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+        let moving: HashSet<ItemId> = object.paths().step_by(97).map(|(_, p)| p.id).collect();
+        let moved = object.transform_items(&moving, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.])).unwrap();
+        editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        matches(&r, &editor, "moving items");
+        let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+        let removed = object.replace(object.paths().step_by(131).map(|(position, _)| (position, None)).collect::<Vec<_>>());
+        editor.perform(editor.document().vector_object_edit(layer, removed).unwrap()).unwrap();
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        matches(&r, &editor, "removing items");
+        let object = editor.document().scene().vector_layer(layer).unwrap().insert_front(vec![stroke(9100, &[[100., 300.], [1100., 500.]], 9., [0.9, 0.2, 0.1, 0.5])]);
+        editor.perform(editor.document().vector_object_edit(layer, object).unwrap()).unwrap();
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        matches(&r, &editor, "an append followed by an unchanged frame");
+    }
+}
+
+#[test]
+#[ignore = "crowded vector layer editing benchmark"]
+fn crowded_vector_layer_edit_frames() {
+    use std::collections::HashSet;
+    let extent = [4000u32, 3000u32];
+    let zoom: f32 = std::env::var("VECTOR_ZOOM").ok().and_then(|v| v.parse().ok()).unwrap_or(0.4);
+    let view = layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [zoom, 0., 0., zoom, 160. - 1200. * (zoom - 0.4).max(0.), -1300. * (zoom - 0.4).max(0.)] };
+    let count = 50_000u64;
+    let records: Vec<Record> = crate::vector::bench::scene_b([4000., 3000.], count).into_iter().map(Record::Path).collect();
+    let (mut editor, layer) = document(extent, records);
+    let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+    submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    let start = std::time::Instant::now();
+    let probes: Vec<_> = (0..100).map(|i| object.hit([1200. + i as f64 * 13., 1400. + (i % 7) as f64 * 31.], 4.)).collect();
+    let hit = start.elapsed().as_secs_f64() * 1e3 / 100.;
+    eprintln!("hit test {hit:.3} ms per probe, {} hits of 100", probes.iter().flatten().count());
+    let ids: Vec<ItemId> = object.paths().filter(|(_, p)| { let b = p.bounds(); b[0] > 1200. && b[1] > 1300. }).map(|(_, p)| p.id).collect();
+    for k in [1usize, 100, 5000] {
+        let selected: HashSet<ItemId> = ids.iter().copied().take(k).collect();
+        let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+        let start = std::time::Instant::now();
+        let moved = object.transform_items(&selected, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.])).unwrap();
+        let transform = start.elapsed().as_secs_f64() * 1e3;
+        let start = std::time::Instant::now();
+        editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
+        let perform = start.elapsed().as_secs_f64() * 1e3;
+        let commit = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        let start = std::time::Instant::now();
+        editor.undo().unwrap();
+        let undo_perform = start.elapsed().as_secs_f64() * 1e3;
+        let undo = timed(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        eprintln!("move {k} of {count}: transform {transform:.2} ms, perform {perform:.2} ms, frame cpu {:.2} wall {:.2} ms; undo perform {undo_perform:.2} ms, frame cpu {:.2} wall {:.2} ms",
+            commit.0, commit.1, undo.0, undo.1);
     }
 }
 

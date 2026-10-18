@@ -1,4 +1,4 @@
-use layer_core::authored::vector::{Cap, FillRule, Join, PaintEntry, PathItem, Segment, Stroke, Subpath};
+use layer_core::authored::vector::{Cap, FillRule, Join, PaintEntry, PathItem, Stroke, Subpath};
 
 pub(crate) const TILE: i32 = 16;
 const UNITS: f64 = 2048.;
@@ -44,20 +44,10 @@ pub(crate) fn derive(path: &PathItem, frame: &Frame) -> LevelGeometry {
     out
 }
 
-pub(crate) fn flatten(segment: &Segment, map: impl Fn([f64; 2]) -> [f64; 2], tolerance: f64, mut emit: impl FnMut([f64; 2], f64)) {
-    let [p0, p1, p2, p3] = [segment.from, segment.control[0], segment.control[1], segment.to].map(&map);
-    let second = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| ((a[0] - 2. * b[0] + c[0]).powi(2) + (a[1] - 2. * b[1] + c[1]).powi(2)).sqrt();
-    let bend = second(p0, p1, p2).max(second(p1, p2, p3));
-    let count = if segment.is_line() { 1 } else { ((0.75 * bend / tolerance).sqrt().ceil() as usize).clamp(1, 4096) };
-    let mapped = Segment { from: p0, control: [p1, p2], to: p3 };
-    for i in 1..count { let t = i as f64 / count as f64; emit(mapped.point(t), t); }
-    emit(p3, 1.);
-}
-
 fn polylines(path: &PathItem, frame: &Frame) -> Vec<Vec<[f64; 2]>> {
     path.geometry.subpaths().iter().map(|subpath| {
         let mut points = vec![frame.map(subpath.anchor(0).point())];
-        for segment in subpath.segments() { flatten(&segment, |p| frame.map(p), TOLERANCE, |p, _| points.push(p)); }
+        for segment in subpath.segments() { segment.map(|p| frame.map(p)).flatten(TOLERANCE, |p, _| points.push(p)); }
         points
     }).collect()
 }
@@ -224,7 +214,7 @@ fn centerline(subpath: &Subpath, segment_base: u32, stroke: &Stroke, half: f64, 
     let mut points = vec![(frame.map(subpath.anchor(0).point()), width(segment_base, 0.))];
     for (index, segment) in subpath.segments().enumerate() {
         let global = segment_base + index as u32;
-        flatten(&segment, |p| frame.map(p), TOLERANCE, |p, t| points.push((p, width(global, t))));
+        segment.map(|p| frame.map(p)).flatten(TOLERANCE, |p, t| points.push((p, width(global, t))));
     }
     points
 }

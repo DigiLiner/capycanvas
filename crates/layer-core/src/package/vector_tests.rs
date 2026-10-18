@@ -2,7 +2,8 @@ use super::values::DecodeError;
 use super::vector_records::*;
 use crate::authored::vector::*;
 use crate::color::RgbColor;
-use std::sync::Arc;
+use std::{collections::{BTreeSet, HashSet}, sync::Arc};
+use crate::authored::Affine64;
 
 fn color(r: f32) -> Paint { Paint::color(RgbColor::new(Default::default(), [r, 0.25, 0.5, 1.]).unwrap()) }
 fn line(id: u64, points: &[[f64; 2]], width: f64) -> Record {
@@ -343,4 +344,46 @@ fn session_history_shares_unchanged_runs_of_vector_chunk_lists() {
     assert_eq!(vector(&loaded.editor.document().artwork), vector(&editor.document().artwork));
     for _ in 0..strokes { loaded.editor.undo().unwrap(); }
     assert_eq!(vector(&loaded.editor.document().artwork), vector(&first));
+}
+
+fn plain_line(id: u64, from: [f64; 2], to: [f64; 2], width: f64) -> PathItem {
+    let geometry = PathGeometry::new(vec![Subpath::new(&[Anchor::corner(from), Anchor::corner(to)], false)]).unwrap();
+    PathItem::new(ItemId(id), Arc::new(geometry), Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(color(0.1), width))])))
+}
+
+#[test]
+fn hits_find_the_frontmost_visible_unlocked_path_under_the_point() {
+    let Record::Path(mut badge) = shape(3) else { unreachable!() };
+    (badge.hidden, badge.locked) = (false, false);
+    let mut locked = plain_line(4, [0., 50.], [100., 50.], 6.);
+    locked.locked = true;
+    let object = VectorObject::from_records(vec![Record::Path(plain_line(1, [0., 0.], [100., 0.], 4.)), Record::Path(plain_line(2, [50., -20.], [50., 20.], 2.)), Record::Path(badge), Record::Path(locked)]);
+    assert_eq!(object.hit([50., 0.], 0.), Some(ItemId(1)), "the front path wins where paths overlap");
+    assert_eq!(object.hit([50., 10.], 0.), Some(ItemId(2)));
+    assert_eq!(object.hit([20., 1.9], 0.), Some(ItemId(1)));
+    assert_eq!(object.hit([20., 2.5], 0.), None);
+    assert_eq!(object.hit([20., 2.5], 1.), Some(ItemId(1)));
+    assert_eq!(object.hit([1.5, 5.], 0.), Some(ItemId(3)), "filled area");
+    assert_eq!(object.hit([5., 5.], 0.), None, "even-odd hole");
+    assert_eq!(object.hit([20., 50.], 0.), None, "locked paths are not picked");
+}
+
+#[test]
+fn transforming_items_rewrites_only_their_chunks_and_scales_stroke_widths() {
+    let object = VectorObject::from_records((1..=300).map(|i| Record::Path(plain_line(i, [i as f64, 0.], [i as f64, 10.], 2.))).collect());
+    let few: HashSet<ItemId> = [ItemId(5), ItemId(250)].into();
+    let many: HashSet<ItemId> = (1..=300).filter(|i| i % 3 == 0).map(ItemId).collect();
+    for ids in [&few, &many] {
+        let expected: BTreeSet<_> = ids.iter().map(|id| object.find(*id).unwrap()).collect();
+        let found: BTreeSet<_> = object.positions(ids).into_iter().flat_map(|(c, v)| v.into_iter().map(move |i| Position { chunk: c as u32, index: i as u32 })).collect();
+        assert_eq!(found, expected);
+    }
+    let moved = object.transform_items(&few, Affine64([2., 0., 0., 2., 1000., 0.])).unwrap();
+    moved.validate().unwrap();
+    let touched: BTreeSet<_> = few.iter().map(|id| object.find(*id).unwrap().chunk as usize).collect();
+    for (index, (a, b)) in object.chunks().iter().zip(moved.chunks()).enumerate() { assert_eq!(a.same_owner(b), !touched.contains(&index)); }
+    let path = moved.record(moved.find(ItemId(5)).unwrap()).unwrap().path().unwrap();
+    assert_eq!(path.geometry.subpaths()[0].anchor(1).point(), [1010., 20.]);
+    assert_eq!(path.style.strokes().next().unwrap().width, 4.);
+    assert_eq!(moved.items_bounds(&few), Some([1002., -8., 1508., 28.]));
 }

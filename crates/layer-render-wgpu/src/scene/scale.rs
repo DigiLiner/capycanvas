@@ -1493,13 +1493,16 @@ impl Evaluator<'_> {
             let texels = paint_transform::texel_rect(output.plan.doc_bounds.local(bounds), side);
             (output.view.clone(), [texels[0] as i32, texels[1] as i32])
         });
-        let appended = base.as_ref().and_then(|_| self.scene.vectors.append_batch(self.packet.scene, owner, bounds.min, plan.level, plan.size, self.packet.document_extent, palette));
-        let (batch, base) = match appended {
-            Some(batch) => (batch, base),
-            None => (self.scene.vectors.batch(self.packet.scene, owner, bounds.min, plan.level, plan.size, self.packet.document_extent, palette), None),
+        let (scene, extent) = (self.packet.scene, self.packet.document_extent);
+        let appended = base.as_ref().and_then(|_| self.scene.vectors.append_batch(scene, owner, bounds.min, plan.level, plan.size, extent, palette));
+        let (batch, base, kept) = match appended {
+            Some(batch) => (batch, base.clone(), base),
+            None => match base.as_ref().and_then(|_| self.scene.vectors.repaint_batch(scene, owner, bounds.min, plan.level, plan.size, extent, palette)) {
+                Some(batch) => (batch, None, base),
+                None => (self.scene.vectors.batch(scene, owner, bounds.min, plan.level, plan.size, extent, palette), None, None),
+            },
         };
-        if base.is_some() {
-            let texels = base.as_ref().unwrap().1;
+        if let Some((_, texels)) = &kept {
             self.encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo { texture: output.as_ref().unwrap().view.texture(), mip_level: 0, origin: wgpu::Origin3d { x: texels[0] as u32, y: texels[1] as u32, z: 0 }, aspect: wgpu::TextureAspect::All },
                 wgpu::TexelCopyTextureInfo { texture: target.view.texture(), mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
