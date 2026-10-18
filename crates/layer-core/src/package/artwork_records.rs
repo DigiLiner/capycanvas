@@ -208,6 +208,10 @@ pub(crate) fn encode_change(art:&Artwork,edit:&crate::Edit,resources:&mut Resour
             let mut data=json!({"image":encode_image(&object.image,resources)?}).as_object().unwrap().clone();
             if object.affine!=Affine64::default() {data.insert("affine".into(),json!(object.affine.0));}
             if object.interpolation==ImageInterpolation::Nearest {data.insert("interpolation".into(),"nearest".into());}
+            if let Some(vector)=&object.vector {
+                let items=vector.0.iter().map(|(descriptor,bytes)|resources.vector_bytes(bytes,descriptor.clone())).collect::<Result<Vec<_>,_>>()?;
+                return Ok(record(change.id,"capy.vector-object/1",json!({"items":items,"fallback":Value::Object(data)})));
+            }
             Ok(record(change.id,"capy.image-object/1",Value::Object(data)))
         },
         crate::Edit::Vector(change)=>{let object=change.value.as_ref().ok_or("Cannot encode removed record")?;
@@ -301,6 +305,21 @@ fn payload(record:&Value)->DecodeResult<(&str,&Value)> {
     if bool_field(data,"ancillary",false)? || bool_field(data,"copy_safe",false)? {return Err("Known artwork cannot be ancillary".into());}
     Ok((v::string(v::required(data,"type")?)?,v::required(data,"data")?))
 }
+fn preserved_vector(record:&Value,reader:&mut ResourceReader<'_>)->DecodeResult<bool> {
+    let data=&record["data"];
+    if data.get("fallback").is_none() {return Ok(false);}
+    let items=data.get("items").map(list).transpose()?.unwrap_or_default();
+    match reader.vector_object(items) {Ok(_)=>Ok(false),Err(DecodeError::Unsupported(_))=>Ok(true),Err(error)=>Err(error)}
+}
+fn decode_image_object(data:&serde_json::Map<String,Value>,reader:&mut ResourceReader<'_>)->DecodeResult<ImageObject> {
+    let affine=data.get("affine").map(decode_affine).transpose()?.unwrap_or_default();
+    let interpolation=match data.get("interpolation").map(v::string).transpose()?.unwrap_or("linear") {
+        "linear"=>ImageInterpolation::Linear,"nearest"=>ImageInterpolation::Nearest,
+        name=>return Err(DecodeError::Unsupported(format!("Unknown image interpolation {name}"))),
+    };
+    let object=ImageObject {image:image_reference(v::required(data,"image")?,reader)?,affine,interpolation,vector:None};
+    object.admit_affine().map_err(affine_error)?;object.validate()?;Ok(object)
+}
 fn reserve<T>(store:&mut Store<T>,id:PortableId,strict:bool)->DecodeResult<()> {
     if store.allocated(id).is_none() {if strict {return Err("Object is absent from runtime handle layout".into());}store.reserve(id)?;}Ok(())
 }
@@ -314,7 +333,10 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
             "capy.coverage-source/2"=>{if let Some(handle)=art.coverage.allocated(*identity) {art.coverage.remove(handle);}},
             "capy.effect/2"=>{if let Some(handle)=art.effects.allocated(*identity) {art.effects.remove(handle);}},
             "capy.image-object/1"=>{if let Some(handle)=art.objects.allocated(*identity) {art.objects.remove(handle);}},
-            "capy.vector-object/1"=>{if let Some(handle)=art.vectors.allocated(*identity) {art.vectors.remove(handle);}},
+            "capy.vector-object/1"=>{
+                if let Some(handle)=art.vectors.allocated(*identity) {art.vectors.remove(handle);}
+                if let Some(handle)=art.objects.allocated(*identity) {art.objects.remove(handle);}
+            },
             "capy.selection/1"=>{if let Some(handle)=art.selections.allocated(*identity) {art.selections.remove(handle);}},
             "capy.guides/1"=>{if let Some(handle)=art.guides.allocated(*identity) {art.guides.remove(handle);}},
             "capy.output/2"=>{if let Some(handle)=art.outputs.allocated(*identity) {art.outputs.remove(handle);}},
@@ -331,7 +353,7 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
         let context=if reader.private {super::registry::RecordContext::Private}else{super::registry::RecordContext::Portable};
         super::registry::validate_context(record,context)?;
         let (kind,data)=payload(record)?;record_fields(kind,data)?;known.push((*identity,kind,data));
-        match kind {"capy.composition/2"=>{reserve(&mut art.compositions,*identity,true)?;},"capy.stack/1"=>{reserve(&mut art.stacks,*identity,true)?;},"capy.occurrence/3"=>{reserve(&mut art.occurrences,*identity,true)?;},"capy.paint-source/2"=>{reserve(&mut art.paint,*identity,true)?;},"capy.coverage-source/2"=>{reserve(&mut art.coverage,*identity,true)?;},"capy.effect/2"=>{reserve(&mut art.effects,*identity,true)?;},"capy.image-object/1"=>{reserve(&mut art.objects,*identity,true)?;},"capy.vector-object/1"=>{reserve(&mut art.vectors,*identity,true)?;},"capy.image/1"=>{},"capy.selection/1"=>{reserve(&mut art.selections,*identity,true)?;},"capy.guides/1"=>{reserve(&mut art.guides,*identity,true)?;},"capy.output/2"=>{reserve(&mut art.outputs,*identity,true)?;},_=>unreachable!()}
+        match kind {"capy.composition/2"=>{reserve(&mut art.compositions,*identity,true)?;},"capy.stack/1"=>{reserve(&mut art.stacks,*identity,true)?;},"capy.occurrence/3"=>{reserve(&mut art.occurrences,*identity,true)?;},"capy.paint-source/2"=>{reserve(&mut art.paint,*identity,true)?;},"capy.coverage-source/2"=>{reserve(&mut art.coverage,*identity,true)?;},"capy.effect/2"=>{reserve(&mut art.effects,*identity,true)?;},"capy.image-object/1"=>{reserve(&mut art.objects,*identity,true)?;},"capy.vector-object/1"=>{if preserved_vector(record,reader)? {reserve(&mut art.objects,*identity,true)?;} else {reserve(&mut art.vectors,*identity,true)?;}},"capy.image/1"=>{},"capy.selection/1"=>{reserve(&mut art.selections,*identity,true)?;},"capy.guides/1"=>{reserve(&mut art.guides,*identity,true)?;},"capy.output/2"=>{reserve(&mut art.outputs,*identity,true)?;},_=>unreachable!()}
 
     }
     for (identity,kind,value) in &known {if *kind=="capy.composition/2" {
@@ -364,17 +386,24 @@ pub(crate) fn decode_records_into(art:&mut Artwork,objects:&BTreeMap<PortableId,
             art.paint.install(art.paint.allocated(*identity).unwrap(),PaintSource {color_mode,domain,raster,base,operations:Arc::default()})?;},
         "capy.image/1"=>{decode_image(*identity,value,reader)?;},
         "capy.image-object/1"=>{let data=record_fields(kind,value)?;
-            let affine=data.get("affine").map(decode_affine).transpose()?.unwrap_or_default();
-            let interpolation=match data.get("interpolation").map(v::string).transpose()?.unwrap_or("linear") {
-                "linear"=>ImageInterpolation::Linear,"nearest"=>ImageInterpolation::Nearest,
-                name=>return Err(DecodeError::Unsupported(format!("Unknown image interpolation {name}"))),
-            };
-            let object=ImageObject {image:image_reference(v::required(data,"image")?,reader)?,affine,interpolation};
-            object.admit_affine().map_err(affine_error)?;object.validate()?;art.objects.install(art.objects.allocated(*identity).unwrap(),object)?;},
+            let object=decode_image_object(data,reader)?;
+            art.objects.install(art.objects.allocated(*identity).unwrap(),object)?;},
         "capy.vector-object/1"=>{let data=record_fields(kind,value)?;
             let items=data.get("items").map(list).transpose()?.unwrap_or_default();
-            let object=reader.vector_object(items)?;
-            art.vectors.install(art.vectors.allocated(*identity).unwrap(),object)?;},
+            if let Some(handle)=art.objects.allocated(*identity) {
+                let fallback=v::required(data,"fallback")?.as_object().ok_or("Invalid vector fallback")?;
+                let preserved=items.iter().map(|item| {
+                    let (_,record)=reader.record(item,"capy.vector-items/1")?;
+                    let mut descriptor=record["data"].clone();
+                    if let Some(fields)=descriptor.as_object_mut() {fields.remove("decoded_bytes");}
+                    Ok((descriptor,reader.bytes(item,"capy.vector-items/1",super::vector_records::MAX_CHUNK_BYTES)?))
+                }).collect::<DecodeResult<Vec<_>>>()?;
+                let object=ImageObject {vector:Some(crate::authored::PreservedVector(preserved.into())),..decode_image_object(fallback,reader)?};
+                art.objects.install(handle,object)?;
+            } else {
+                let object=reader.vector_object(items)?;
+                art.vectors.install(art.vectors.allocated(*identity).unwrap(),object)?;
+            }},
         "capy.coverage-source/2"=> {let data=record_fields(kind,value)?;let domain=dimension(v::required(data,"domain")?,reader)?;
             let raster=decode_raster(data,domain,true,canvas.color,Default::default(),reader)?;
             let default_coverage=float_field(data,"default_coverage",1.)?;if !(0. ..=1.).contains(&default_coverage) {return Err("Invalid default coverage".into());}
@@ -452,7 +481,7 @@ pub(crate) fn decode_with_layout(manifest:&Manifest,reader:&mut ResourceReader<'
             "capy.paint-source/2"=>{reserve(&mut art.paint,*identity,layout.is_some())?;},
             "capy.coverage-source/2"=>{reserve(&mut art.coverage,*identity,layout.is_some())?;},
             "capy.image-object/1"=>{reserve(&mut art.objects,*identity,layout.is_some())?;},
-            "capy.vector-object/1"=>{reserve(&mut art.vectors,*identity,layout.is_some())?;},
+            "capy.vector-object/1"=>{if preserved_vector(record,reader)? {reserve(&mut art.objects,*identity,layout.is_some())?;} else {reserve(&mut art.vectors,*identity,layout.is_some())?;}},
             "capy.image/1"=>{},
             "capy.effect/2"=>{reserve(&mut art.effects,*identity,layout.is_some())?;},
             "capy.selection/1"=>{reserve(&mut art.selections,*identity,layout.is_some())?;},

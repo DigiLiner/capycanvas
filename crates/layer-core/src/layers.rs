@@ -649,6 +649,7 @@ impl Document {
     }
     pub fn is_locked(&self, id: OccurrenceHandle) -> bool {
         let scene = self.scene();
+        if scene.object_layer(id).is_some_and(|object| object.vector.is_some()) { return true; }
         let mut current = Some(id);
         while let Some(h) = current {
             let Some(o) = scene.occurrence(h) else {

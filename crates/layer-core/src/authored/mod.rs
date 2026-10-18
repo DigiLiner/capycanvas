@@ -25,4 +25,4 @@ pub mod vector;
 mod objects;
 mod object_edits;
 pub use object_edits::{placed_bounds};
-pub use objects::{Image, Affine64, Affine64Error, ImageInterpolation, ImageObject, PaintBase, PaintBasePolicy, MAX_NAME_BYTES, MAX_NAME_CHARS, bounded_name};
+pub use objects::{Image, Affine64, Affine64Error, ImageInterpolation, ImageObject, PreservedVector, PaintBase, PaintBasePolicy, MAX_NAME_BYTES, MAX_NAME_CHARS, bounded_name};

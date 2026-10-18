@@ -34,7 +34,7 @@ records! {
     PaintSource, "capy.paint-source/2", Object, ["domain", "tiles", "material", "base", "color_mode"], [];
     Image, "capy.image/1", Object, ["extent", "interpretation", "tiles", "resolution"], [];
     ImageObject, "capy.image-object/1", Object, ["image", "affine", "interpolation"], [];
-    VectorObject, "capy.vector-object/1", Object, ["items"], [];
+    VectorObject, "capy.vector-object/1", Object, ["items", "fallback"], [];
     CoverageSource, "capy.coverage-source/2", Object, ["domain", "tiles", "material", "default_coverage"], [];
     Effect, "capy.effect/2", Object, ["builtin", "version", "program", "values", "spatial"], [];
     Selection, "capy.selection/1", Object, ["shape", "affine", "inverted"], [];

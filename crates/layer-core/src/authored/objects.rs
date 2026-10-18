@@ -218,9 +218,13 @@ pub struct ImageObject {
     pub image:Image,
     pub affine:Affine64,
     pub interpolation:ImageInterpolation,
+    pub vector:Option<PreservedVector>,
 }
+#[derive(Clone, Debug)]
+pub struct PreservedVector(pub Arc<[(serde_json::Value, super::Resource<[u8]>)]>);
+impl PartialEq for PreservedVector { fn eq(&self, other: &Self) -> bool { Arc::ptr_eq(&self.0, &other.0) } }
 impl ImageObject {
-    pub fn new(image:Image)->Self {Self {image,affine:Default::default(),interpolation:Default::default()}}
+    pub fn new(image:Image)->Self {Self {image,affine:Default::default(),interpolation:Default::default(),vector:None}}
     pub fn admit_affine(&self)->Result<(),Affine64Error> {
         self.affine.validate()?;
         if self.affine.bounds(self.image.extent).iter().flatten().any(|v|!v.is_finite()) {return Err(Affine64Error::Unsupported("Image affine bounds exceed numerical support"));}

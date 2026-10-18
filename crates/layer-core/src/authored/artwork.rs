@@ -261,7 +261,7 @@ impl Artwork {
             insert(identity,Shape::Paint { image:paint.base.as_ref().map(|base|base.image.id()) })?;
         }
         for (_,identity,object) in self.objects.iter() { collect_image(&mut images,&object.image)?; insert(identity,Shape::ImageObject { image:object.image.id() })?; }
-        for (_,identity,_) in self.vectors.iter() { insert(identity,Shape::VectorObject)?; }
+        for (_,identity,_) in self.vectors.iter() { insert(identity,Shape::VectorObject { fallback: None })?; }
         for identity in images.keys() { insert(*identity,Shape::Image)?; }
         for (_,identity,_) in self.coverage.iter() {insert(identity,Shape::Coverage)?;}
         for (_,identity,_) in self.effects.iter() {insert(identity,Shape::Effect)?;}

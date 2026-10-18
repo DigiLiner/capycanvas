@@ -121,6 +121,12 @@ paths show, at the document grid, in one undo step. The layer keeps its opacity,
 blend, mask, clipping and attached effects, which still apply once, as for image
 layers ([Object layers](image-objects.md)).
 
+## Layers from a newer version
+
+A vector layer saved by a newer version that uses paths this version cannot
+read opens locked, showing the picture the newer version saved with it, and
+its paths are written back unchanged when the drawing is saved.
+
 ## Tests
 
 `move_tool_selects_drags_and_deletes_vector_paths`,

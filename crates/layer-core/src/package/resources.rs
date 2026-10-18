@@ -108,6 +108,9 @@ impl ResourceInventory {
         ColorProfile::Builtin(space) => json!({"builtin":values::encode_rgb_space(*space)}),
         ColorProfile::Icc(bytes) => json!({"resource":self.bytes("capy.icc/1",bytes,json!({}))?}),
     }) }
+    pub fn vector_bytes(&mut self, bytes: &Resource<[u8]>, data: Value) -> Result<Value, String> {
+        self.insert(ResourceEntry { kind:"capy.vector-items/1", data, raw_encoding:"capy.vector-records/1", payload:Payload::Bytes(bytes.clone()) })
+    }
     pub fn vector_chunk(&mut self, chunk: &Resource<VectorChunk>) -> Result<Value, String> {
         self.insert(ResourceEntry { kind:"capy.vector-items/1", data:json!({"records":chunk.records().len()}), raw_encoding:"capy.vector-records/1", payload:Payload::Vector(chunk.clone()) })
     }

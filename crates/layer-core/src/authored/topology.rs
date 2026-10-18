@@ -11,7 +11,7 @@ pub enum Shape {
     Occurrence { content: Content, mask: Option<PortableId> },
     Paint { image: Option<PortableId> },
     ImageObject { image: PortableId },
-    VectorObject,
+    VectorObject { fallback: Option<PortableId> },
     Image,
     Coverage,
     Effect,
@@ -27,6 +27,7 @@ impl Shape {
             Self::Stack { entries } => entries.len(),
             Self::Paint { image } => usize::from(image.is_some()),
             Self::ImageObject { .. } => 1,
+            Self::VectorObject { fallback } => usize::from(fallback.is_some()),
             Self::Occurrence { mask, .. } => 1 + usize::from(mask.is_some()),
             Self::Unknown { references, .. } => references.len(),
             _ => 0,
@@ -38,6 +39,7 @@ impl Shape {
             Self::Stack { entries } => entries.clone(),
             Self::Paint { image } => image.iter().copied().collect(),
             Self::ImageObject { image } => vec![*image],
+            Self::VectorObject { fallback } => fallback.iter().copied().collect(),
             Self::Occurrence { content, mask } => match content {
                 Content::Paint(id) | Content::Objects(id) | Content::Group(id) | Content::Effect(id) | Content::Selection(id) =>
                     std::iter::once(*id).chain(*mask).collect(),
@@ -133,7 +135,7 @@ impl GraphShape {
                 Shape::Occurrence { content, mask } => {
                     let target = match content {
                         Content::Paint(id) => { expect(*id, |s| matches!(s, Shape::Paint { .. })); *id },
-                        Content::Objects(id) => { expect(*id, |s| matches!(s, Shape::ImageObject { .. } | Shape::VectorObject)); *id },
+                        Content::Objects(id) => { expect(*id, |s| matches!(s, Shape::ImageObject { .. } | Shape::VectorObject { .. })); *id },
                         Content::Group(id) => { expect(*id, |s| matches!(s, Shape::Stack { .. })); *id },
                         Content::Effect(id) => { expect(*id, |s| matches!(s, Shape::Effect)); *id },
                         Content::Selection(id) => { expect(*id, |s| matches!(s, Shape::Selection)); *id },

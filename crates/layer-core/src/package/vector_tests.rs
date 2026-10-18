@@ -653,3 +653,45 @@ fn erasing_a_layer_splits_or_removes_only_touched_paths_with_fresh_ids() {
     assert_eq!(whole.path_count(), 95, "Whole Path removes every touched path");
     assert!(object.erase(&index.near(&object, [500., 500., 510., 510.]), &Eraser { from: [505., 505.], to: [505., 505.], radius: 5. }, false).is_none());
 }
+
+#[test]
+fn newer_vector_layers_open_from_their_fallback_locked_and_save_back_unchanged() {
+    let image: crate::Image = crate::color::source::rgba8_source([32, 24], |x, y| [x as u8 * 8, y as u8 * 10, 90, 255]).into();
+    let unknown = record_bytes(900 << 4, 7, &[(1 << 5, vec![1, 2, 3])]);
+    let readable = encode_chunk(&chunk(vec![line(3, &[[0., 0.], [10., 10.]], 2.)]));
+    let layer = |bytes: &[u8], records: u64| {
+        let mut object = crate::ImageObject::new(image.clone());
+        object.affine = crate::authored::Affine64([1., 0., 0., 1., 40., 30.]);
+        object.vector = Some(crate::authored::PreservedVector(Arc::from([(serde_json::json!({"records": records}), crate::authored::Resource::new(Arc::<[u8]>::from(bytes)))])));
+        let mut editor = crate::Editor::new(crate::Document::from_artwork(crate::Artwork::new([200, 150]).unwrap()).unwrap());
+        let (_, edit) = editor.document().create_object_layer_edit("Newer", object, None, 0).unwrap();
+        editor.perform(edit).unwrap();
+        editor
+    };
+    let saved = save(&layer(&unknown, 1));
+    let reopened = open(saved.clone());
+    assert!(reopened.vectors.is_empty(), "this reader cannot read the paths");
+    let (_, _, object) = reopened.objects.iter().next().expect("the layer shows its fallback image");
+    assert_eq!((object.image.extent, object.affine.0[4]), ([32, 24], 40.));
+    let preserved = object.vector.as_ref().expect("the unreadable paths are kept");
+    assert_eq!(preserved.0.len(), 1);
+    assert_eq!(&**preserved.0[0].1.storage(), &unknown[..], "item records keep their bytes");
+    let document = crate::Document::from_artwork(reopened.clone()).unwrap();
+    let occurrence = *document.scene().order().iter().find(|h| document.scene().object_layer(**h).is_some()).unwrap();
+    assert!(document.is_locked(occurrence), "a layer from a newer version cannot be edited");
+    let again = open(save(&crate::Editor::new(document)));
+    assert_eq!(&**again.objects.iter().next().unwrap().2.vector.as_ref().unwrap().0[0].1.storage(), &unknown[..], "saving keeps the paths for the newer version");
+
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let editor = crate::Editor::new(crate::Document::from_artwork(open(saved)).unwrap());
+    let capture = editor.capture_session(editor.capture(1, Default::default()).unwrap()).unwrap();
+    let session = super::session::PreparedSession::prepare(&capture, serde_json::json!({}), &cancel).unwrap();
+    let mut pack = Vec::new();
+    std::io::Read::read_to_end(&mut session.resources().reader(&cancel), &mut pack).unwrap();
+    let loaded = super::session::open_parts(session.metadata(), super::ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(pack))).unwrap(), crate::ProjectLimits::default(), &cancel).unwrap();
+    let restored = loaded.editor.document().artwork.objects.iter().next().unwrap().2;
+    assert_eq!(&**restored.vector.as_ref().unwrap().0[0].1.storage(), &unknown[..], "sessions keep the paths too");
+
+    let current = open(save(&layer(&readable, 1)));
+    assert!(current.objects.is_empty() && vector(&current).path_count() == 1, "a reader that knows every record opens the paths and drops the fallback");
+}
