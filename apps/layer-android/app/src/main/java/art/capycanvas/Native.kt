@@ -148,6 +148,12 @@ internal object Native {
     @JvmStatic external fun colorAdopt(handle: Long, task: Long)
     @JvmStatic external fun colorWriteCopy(task: Long, fd: Int)
     @JvmStatic external fun colorFree(task: Long)
+    @JvmStatic external fun paperTask(handle: Long, request: Int, directory: String): Long
+    @JvmStatic external fun paperImports(task: Long): Boolean
+    @JvmStatic external fun paperWork(task: Long, fd: Int, name: String)
+    @JvmStatic external fun paperApply(handle: Long, task: Long)
+    @JvmStatic external fun paperCancel(task: Long)
+    @JvmStatic external fun paperFree(task: Long)
     @JvmStatic external fun captureControl(): Long
     @JvmStatic external fun proofTexture(edge: Int): IntArray
     @JvmStatic external fun proofControl(handle: Long, action: String)

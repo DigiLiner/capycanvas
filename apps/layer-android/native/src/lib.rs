@@ -39,6 +39,8 @@ mod image_objects;
 mod color_preferences;
 #[cfg(target_os = "android")]
 mod proof;
+#[cfg(target_os = "android")]
+mod papers;
 
 #[cfg(target_os = "android")]
 mod hdr;

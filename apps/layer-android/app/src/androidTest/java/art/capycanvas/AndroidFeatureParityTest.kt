@@ -454,6 +454,48 @@ class AndroidFeatureParityTest {
         assertNotNull("DocumentsUI Save", save)
         assertTrue(save!!.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
     }
+    @Test fun paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing() {
+        fun texture() = state().getJSONObject("layer_properties").array("controls").objects().firstOrNull { it.getString("key") == "texture" }
+        fun picker() = texture()?.objectOrNull("paper")
+        fun library() = picker()?.array("tiles")?.objects().orEmpty().flatMap { it.array("actions").objects() }.map { it.getJSONObject("action") }
+            .filter { it.getString("op") == "rename_paper" }
+        fun idle() = state().array("requests").objects().none { it.getJSONObject("kind").getString("type") == "paper" }
+        val paper = state().array("layers").objects().map { it.getLong("id") }.first { id -> action(obj("type" to "select_layer", "id" to id)); texture() != null }
+        compose.waitUntil(30_000) { picker()?.isNull("import") == false }
+        for (entry in library()) action(obj("type" to "effect", "action" to obj("op" to "delete_paper", "id" to entry.getString("id"))))
+        compose.waitUntil(30_000) { idle() && library().isEmpty() }
+        val scan = java.io.File(compose.activity.cacheDir, "paper-scan.png")
+        val bitmap = Bitmap.createBitmap(64, 48, Bitmap.Config.ARGB_8888)
+        for (y in 0 until 48) for (x in 0 until 64) bitmap.setPixel(x, y, android.graphics.Color.rgb((x * 7 + y * 3) % 256, (x * 7 + y * 3) % 256, (x * 7 + y * 3) % 256))
+        scan.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val picked = java.util.concurrent.atomic.AtomicReference<android.content.Intent>()
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.content.Intent.ACTION_OPEN_DOCUMENT) return null
+                picked.set(android.content.Intent(intent))
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_OK, android.content.Intent().setData(android.net.Uri.fromFile(scan)))
+            }
+        }
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        instrumentation.addMonitor(monitor)
+        try {
+            action(obj("type" to "effect", "action" to obj("op" to "import_paper", "layer" to paper)))
+            compose.waitUntil(60_000) { idle() && library().size == 1 }
+            assertEquals(listOf("image/*"), picked.get().getStringArrayExtra(android.content.Intent.EXTRA_MIME_TYPES)?.toList() ?: listOf(picked.get().type))
+            assertTrue(state().getJSONObject("document_file").getBoolean("modified"))
+            val id = library().single().getString("id")
+            val imported = state().getJSONObject("document_file").getLong("revision")
+            action(obj("type" to "effect", "action" to obj("op" to "rename_paper", "id" to id, "name" to "Cotton rag")))
+            compose.waitUntil(30_000) { idle() && picker()!!.array("tiles").objects().any { it.getString("label") == "Cotton rag" } }
+            action(obj("type" to "effect", "action" to obj("op" to "delete_paper", "id" to id)))
+            compose.waitUntil(30_000) { idle() && library().isEmpty() }
+            assertEquals("Library edits leave the drawing unchanged", imported, state().getJSONObject("document_file").getLong("revision"))
+            assertNull(host.hostError)
+        } finally {
+            instrumentation.removeMonitor(monitor)
+            scan.delete()
+        }
+    }
     @Test fun newDocumentCreatesTheChosenResolution() {
         compose.waitUntil(60_000) { state().array("commands").objects().first { it.getString("id") == "new_document" }.getBoolean("enabled") }
         compose.onNodeWithTag("application-menu-file").performClick()

@@ -821,6 +821,7 @@ pub extern "system" fn Java_art_capycanvas_Native_storage(
             "clipboard": roots.clipboard(),
             "color_profiles": roots.color_profiles(),
             "export_presets": roots.export_presets(),
+            "papers": roots.papers(),
             "temp": roots.temp,
         })).map_err(error)
     })();

@@ -13,6 +13,7 @@ internal class AppStorage private constructor(stores: JSONObject) {
     val clipboard = File(stores.getString("clipboard"))
     val colorProfiles = File(stores.getString("color_profiles"))
     val exportPresets = File(stores.getString("export_presets"))
+    val papers = File(stores.getString("papers"))
     private val temp = File(stores.getString("temp"))
 
     fun temporaryFile(prefix: String, suffix: String): File = File.createTempFile(prefix, suffix, temp.apply { mkdirs() })

@@ -1,9 +1,9 @@
 use layer_core::color::source::SourceImage;
 use layer_core::package::session_store::atomic_publish;
-use layer_ui::paper_library::{PAPER_LIBRARY_BYTES, PAPER_LIBRARY_ENTRIES, PaperEntry, PaperLibraryError, paper_identity, valid_paper_id};
+use layer_ui::paper_library::{PAPER_LIBRARY_BYTES, PAPER_LIBRARY_ENTRIES, PaperEntry, PaperLibraryError, PaperRequest, paper_identity, valid_paper_id};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 static LIBRARY: Mutex<()> = Mutex::new(());
 const INDEX: &str = "index.json";
@@ -158,6 +158,85 @@ pub fn delete(directory: &Path, id: &str) -> Result<Vec<PaperEntry>, String> {
     Ok(entries(directory, &index))
 }
 
+pub enum PaperResult {
+    Entries(Vec<PaperEntry>),
+    Loaded(String, SourceImage),
+    Imported(u64, String, SourceImage, Vec<PaperEntry>),
+}
+
+/// One library request, captured on the session owner, run on a file worker
+/// and adopted back on the owner. A request of `None` lists the library.
+pub struct PaperTask {
+    request: Option<u32>,
+    action: Option<PaperRequest>,
+    directory: PathBuf,
+    epoch: u64,
+    document: layer_core::authored::PortableId,
+    image: Option<Arc<SourceImage>>,
+    retained: Vec<layer_core::Image>,
+    localization: Arc<layer_ui::Localizer>,
+}
+impl PaperTask {
+    pub fn capture<R: layer_render::CanvasRenderer>(session: &layer_ui::UiSession<R>, request: Option<u32>, directory: PathBuf) -> Result<Self, String> {
+        let action = request.map(|request| session.state().requests.iter().find_map(|item| match &item.kind {
+            layer_ui::HostRequestKind::Paper { request: action } if item.id == request => Some(action.clone()),
+            _ => None,
+        }).ok_or_else(|| PaperLibraryError::Unsupported.message(session.localization()))).transpose()?;
+        let image = match &action { Some(PaperRequest::Add { layer, .. }) => session.paper_image(*layer), _ => None };
+        let retained = if matches!(&action, Some(PaperRequest::Load { .. } | PaperRequest::Import { .. })) { session.paper_sources() } else { Vec::new() };
+        Ok(Self { request, action, directory, epoch: session.state().document_file.epoch,
+            document: session.engine().document().artwork.id, image, retained, localization: session.localization().clone() })
+    }
+    pub fn imports(&self) -> bool { matches!(self.action, Some(PaperRequest::Import { .. })) }
+    pub fn work(&self, file: Option<(impl std::io::Read + std::io::Seek, &str)>, cancelled: &std::sync::atomic::AtomicBool) -> Result<PaperResult, String> {
+        let failed = |error: PaperLibraryError| error.message(&self.localization);
+        let stopped = || cancelled.load(std::sync::atomic::Ordering::Relaxed);
+        if stopped() { return Ok(PaperResult::Entries(list(&self.directory)?)); }
+        Ok(match &self.action {
+            None => PaperResult::Entries(list(&self.directory)?),
+            Some(PaperRequest::Load { id }) => PaperResult::Loaded(id.clone(), canonical_source(id, load(&self.directory, id)?, &self.retained)?),
+            Some(PaperRequest::Import { layer }) => {
+                let (file, name) = file.ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
+                let mut images = layer_ui::ImageImportBatch::new(Default::default(), layer_core::color::RgbSpace::ProPhoto, Default::default());
+                images.read(layer_core::Cancellable { inner: file, cancelled: stopped }, name, cancelled).map_err(|e| e.to_string())?;
+                let (_, source) = images.take_sources(false)?.into_iter().next().ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
+                let (id, image, entries) = import(&self.directory, &source, name, &stopped).map_err(failed)?;
+                PaperResult::Imported(*layer, id.clone(), canonical_source(&id, image, &self.retained)?, entries)
+            }
+            Some(PaperRequest::Add { name, .. }) => {
+                let image = self.image.as_ref().ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
+                PaperResult::Entries(store(&self.directory, image, name).map_err(failed)?.1)
+            }
+            Some(PaperRequest::Rename { id, name }) => PaperResult::Entries(rename(&self.directory, id, name)?),
+            Some(PaperRequest::Delete { id }) => PaperResult::Entries(delete(&self.directory, id)?),
+        })
+    }
+    pub fn apply(&self, host: &mut crate::NativeHost, result: Result<PaperResult, String>, cancelled: bool) -> Result<(), String> {
+        let session = &mut host.session;
+        if let Some(request) = self.request && !session.state().requests.iter().any(|item| item.id == request) { return Ok(()); }
+        let current = self.epoch == session.state().document_file.epoch && self.document == session.engine().document().artwork.id;
+        let previous = session.state().revision;
+        let applied = match result {
+            Ok(PaperResult::Entries(entries)) => session.set_paper_library(entries).map(Some),
+            Ok(PaperResult::Loaded(id, image)) if !cancelled => session.paper_loaded(&id, image).map(Some),
+            Ok(PaperResult::Loaded(..)) => Ok(None),
+            Ok(PaperResult::Imported(layer, id, image, entries)) if current && !cancelled => session.paper_imported(layer, entries, &id, image).map(Some),
+            Ok(PaperResult::Imported(_, _, _, entries)) => session.set_paper_library(entries).map(Some),
+            Err(_) if cancelled => Ok(None),
+            Err(error) => Err(error),
+        };
+        let error = match applied {
+            Ok(Some(change)) => { host.apply_change(previous, change); None }
+            Ok(None) => None,
+            Err(error) => Some(error),
+        };
+        match self.request {
+            Some(id) => host.dispatch(layer_ui::UiAction::CompleteRequest { id, error }),
+            None => error.map_or(Ok(()), Err),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +247,60 @@ mod tests {
         let mut builder = SourceBuilder::new([40, 30], interpretation, 1 << 24).unwrap();
         for y in 0..30u8 { builder.push_row(&(0..40u8).flat_map(|x| [seed.wrapping_add(x * 3), y * 4, x ^ y]).collect::<Vec<_>>()).unwrap(); }
         builder.finish().unwrap()
+    }
+
+    #[test]
+    fn paper_tasks_list_import_rename_and_delete_through_the_session() {
+        use layer_ui::{EffectAction, HostRequestKind, UiAction};
+        let directory = std::env::temp_dir().join(format!("capy-paper-tasks-{}", layer_core::PortableId::random()));
+        let mut host = crate::NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let layer = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(host.session.engine().document().scene(), None).unwrap());
+        host.dispatch(UiAction::SelectLayer { id: layer }).unwrap();
+        let picker = |host: &crate::NativeHost| host.session.state().layer_properties.controls.iter().find_map(|control| control.paper.clone()).unwrap();
+        let pending = |host: &crate::NativeHost| host.session.state().requests.iter()
+            .find_map(|item| matches!(item.kind, HostRequestKind::Paper { .. }).then_some(item.id));
+        let run = |host: &mut crate::NativeHost, request: Option<u32>, file: Option<&std::fs::File>| {
+            let task = PaperTask::capture(&host.session, request, directory.clone()).unwrap();
+            assert_eq!(task.imports(), file.is_some());
+            let result = task.work(file.map(|file| (file, "Scan")), &std::sync::atomic::AtomicBool::new(false));
+            task.apply(host, result, false).unwrap();
+            assert_eq!(pending(host), None);
+        };
+        assert!(picker(&host).import.is_none());
+        run(&mut host, None, None);
+        assert!(picker(&host).import.is_some());
+        assert!(!host.session.state().document_file.modified);
+        let mut file = tempfile(&directory);
+        std::io::Write::write_all(&mut file, &layer_core::paper::encode_png(&photo_paper()).unwrap()).unwrap();
+        std::io::Seek::rewind(&mut file).unwrap();
+        host.dispatch(UiAction::Effect { action: EffectAction::ImportPaper { layer } }).unwrap();
+        let request = pending(&host);
+        run(&mut host, request, Some(&file));
+        let entries = list(&directory).unwrap();
+        assert_eq!(entries.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), ["Scan"]);
+        assert!(host.session.state().document_file.modified);
+        let id = entries[0].id.clone();
+        assert_eq!(paper_identity(&host.session.paper_image(layer).unwrap()).unwrap(), id);
+        for (action, names) in [
+            (EffectAction::RenamePaper { id: id.clone(), name: "Cotton rag".into() }, vec!["Cotton rag"]),
+            (EffectAction::DeletePaper { id: id.clone() }, vec![]),
+        ] {
+            host.dispatch(UiAction::Effect { action }).unwrap();
+            let request = pending(&host);
+            run(&mut host, request, None);
+            assert_eq!(list(&directory).unwrap().iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), names);
+        }
+        assert_eq!(paper_identity(&host.session.paper_image(layer).unwrap()).unwrap(), id, "deleting an entry keeps the drawing's paper");
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    fn photo_paper() -> SourceImage {
+        layer_core::paper::paper_image(&photo(7), &|| false).unwrap()
+    }
+
+    fn tempfile(directory: &Path) -> std::fs::File {
+        std::fs::create_dir_all(directory).unwrap();
+        std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(directory.join("scan.png")).unwrap()
     }
 
     #[test]
