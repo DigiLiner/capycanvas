@@ -1046,12 +1046,15 @@ Two optional features change only how the renderer reads and blends them:
   `sample_float(image, sampler, uv, level)`. `PipelineDevice::float_sampling_wgsl`
   supplies `textureSampleLevel` when the device can filter Float32 textures, and
   otherwise bilinear and linear-mip interpolation from four texel loads per level
-  with clamp-to-edge addressing. A12–A16 iPads, the iOS simulator and several
+  with clamp-to-edge addressing. A9–A16 iPads, the iOS simulator and several
   Android GPU families take the texel path. 8-bit tips, grain and paper keep
   hardware filtering everywhere. Renderer tests run the texel path on any GPU
   through `WgpuRasterizer::native_headless_without`.
 - **Blending.** Without Float32 blending, `portable_blend` replaces
   fixed-function attachment blending with a compute merge.
+
+Hosts request both through `layer_render_wgpu::rendering_features`, which keeps
+only the bits the adapter offers.
 
 The [GPU fallback plan](../development/gpu-fallbacks.md) lists the remaining
 feature requirements.

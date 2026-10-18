@@ -195,10 +195,8 @@ impl MetalHost {
             let (device, queue) =
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Apple"),
-                    required_features: (adapter.features()
-                        & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::PIPELINE_CACHE
-                            | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE))
-                        | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
+                    required_features: layer_render_wgpu::rendering_features(&adapter)
+                        | adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::PIPELINE_CACHE),
                     required_limits: limits,
                     ..Default::default()
                 }))

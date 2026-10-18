@@ -332,6 +332,11 @@ pub struct GpuRasterMetrics {
     pub native_effect_forced_cells:u64,
 }
 
+pub fn rendering_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    adapter.features() & (wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
+        | native_tiles::native_in_place_features(adapter)
+}
+
 pub fn memory_hints() -> wgpu::MemoryHints {
     let blocks = if cfg!(target_os = "android") { (16 << 20)..(16 << 20) } else { (64 << 20)..(128 << 20) };
     wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: blocks }
@@ -1106,13 +1111,12 @@ impl WgpuRasterizer {
             }
         };
         let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
-        let blendable = if std::env::var_os("CAPY_GPU_NO_FLOAT32_BLEND").is_some() { wgpu::Features::empty() } else { wgpu::Features::FLOAT32_BLENDABLE };
+        let omitted = omitted | if std::env::var_os("CAPY_GPU_NO_FLOAT32_BLEND").is_some() { wgpu::Features::FLOAT32_BLENDABLE } else { wgpu::Features::empty() };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("layer canvas device"),
-                required_features: (adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
-                    | wgpu::Features::FLOAT32_FILTERABLE | blendable) & !omitted)
-                    | native_tiles::native_in_place_features(&adapter),
+                required_features: (rendering_features(&adapter)
+                    | adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)) & !omitted,
                 required_limits: limits,
                 memory_hints: memory_hints(),
                 ..Default::default()

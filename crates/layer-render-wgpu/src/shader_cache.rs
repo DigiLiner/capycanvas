@@ -366,10 +366,7 @@ mod tests {
             );
         }
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_features: cache_features
-                | wgpu::Features::FLOAT32_FILTERABLE
-                | (adapter.features() & wgpu::Features::FLOAT32_BLENDABLE)
-                | crate::native_tiles::native_in_place_features(&adapter),
+            required_features: cache_features | crate::rendering_features(&adapter),
             ..Default::default()
         }))
         .unwrap();

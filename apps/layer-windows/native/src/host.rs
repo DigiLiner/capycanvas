@@ -294,16 +294,12 @@ impl CapyHost {
                 apply_limit_buckets: false,
             }))
             .map_err(err)?;
-        if adapter.get_info().device_type == wgpu::DeviceType::Cpu && !layer_render_wgpu::software_adapter_tests() {
-            return Err("Painting requires a hardware D3D12 GPU".into());
-        }
         let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        layer_host::admit_adapter(self.native.session.localization(), &adapter, &limits)?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("Capy Canvas Windows"),
-            required_features: adapter.features() & (wgpu::Features::TIMESTAMP_QUERY
-                | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
-                | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
-                | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
+            required_features: layer_render_wgpu::rendering_features(&adapter)
+                | adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
             required_limits: limits,
             memory_hints: layer_render_wgpu::memory_hints(),
             ..Default::default()

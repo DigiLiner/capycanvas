@@ -76,6 +76,10 @@ pub fn unsupported_adapter(adapter: &wgpu::Adapter, limits: &wgpu::Limits) -> Op
     (!short.is_empty()).then(|| format!("{} does not meet the canvas limits: {}", info.name, short.join(", ")))
 }
 
+pub fn admit_adapter(localization: &layer_ui::Localizer, adapter: &wgpu::Adapter, limits: &wgpu::Limits) -> Result<(), String> {
+    unsupported_adapter(adapter, limits).map_or(Ok(()), |cause| Err(layer_ui::gpu_unsupported(localization, &cause)))
+}
+
 #[derive(Clone, Default)]
 pub struct DeviceWatch {
     lost: Arc<OnceLock<String>>,
@@ -161,13 +165,18 @@ mod tests {
         let adapter = gpu.adapter();
         let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
         assert_eq!(unsupported_adapter(adapter, &limits), None);
-        let beyond = wgpu::Limits { max_bind_groups: adapter.limits().max_bind_groups + 1, ..limits };
+        let beyond = wgpu::Limits { max_bind_groups: adapter.limits().max_bind_groups + 1, ..limits.clone() };
         let cause = unsupported_adapter(adapter, &beyond).unwrap();
         assert!(cause.contains("max_bind_groups"), "{cause}");
         let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
         let message = layer_ui::gpu_unsupported(&localization, &cause);
         assert!(message.starts_with("This device’s graphics processor (GPU) can’t run Capy Canvas."), "{message}");
         assert!(message.ends_with(&cause));
+        for language in [layer_ui::UiLanguage::English, layer_ui::UiLanguage::Japanese] {
+            let localization = layer_ui::Localizer::shared(language);
+            assert_eq!(admit_adapter(&localization, adapter, &limits), Ok(()));
+            assert_eq!(admit_adapter(&localization, adapter, &beyond), Err(layer_ui::gpu_unsupported(&localization, &cause)));
+        }
     }
 
     #[test]

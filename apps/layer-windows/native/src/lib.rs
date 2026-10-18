@@ -117,10 +117,7 @@ mod test_support {
         }))
         .unwrap();
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_features: adapter.features()
-                & (wgpu::Features::FLOAT32_FILTERABLE
-                    | wgpu::Features::FLOAT32_BLENDABLE)
-                    | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
+            required_features: layer_render_wgpu::rendering_features(&adapter),
             required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
             ..Default::default()
         }))

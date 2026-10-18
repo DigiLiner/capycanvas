@@ -3,16 +3,18 @@
 [Developer guide](README.md) · [Architecture](../architecture.md) · [Performance targets](../PERFORMANCE_TARGETS.md)
 
 Capy Canvas should start and paint on every hardware GPU that meets the WebGPU
-downlevel limits. Today several optional GPU features are hard requirements, so
-whole device families fail at startup. This plan gives each missing feature a
-fallback. Capable GPUs keep their current path; the fallbacks are as cheap as the
+downlevel limits. Every host requests the optional rendering features its
+adapter offers through `layer_render_wgpu::rendering_features`; the GTK host's
+Wayland mailbox requirement is the remaining optional capability that stops
+startup. This plan gives each missing feature a fallback. Capable GPUs keep their current path; the fallbacks are as cheap as the
 feature allows and approximate only where an exact result costs too much.
 
 ## Rules for every fallback
 
 - **Decide once, in shared Rust.** `PipelineDevice` reports what the device can
   do, from the features the device was created with. Layouts, shader assembly and
-  pass planning read that report. Hosts only request the optional features their
+  pass planning read that report. Hosts request rendering features through
+  `rendering_features` and add only timestamp and pipeline-cache bits their
   adapter has.
 - **Capable GPUs compile today's shaders.** A fallback replaces a small shared
   WGSL helper or a pass, chosen when the shader source is assembled, rather than
@@ -30,10 +32,10 @@ feature allows and approximate only where an exact result costs too much.
 
 | Capability | Missing on | Current behaviour |
 | --- | --- | --- |
-| Float32 filtering (`FLOAT32_FILTERABLE`) | Apple A12–A16 iPads (Apple's Metal feature tables grant it to Apple9 and later and only some Apple7/8 devices; an iPad mini 6 reports it missing), the iOS simulator, Adreno 6xx/7xx on Qualcomm drivers older than 512.700, Adreno 4xx/5xx, PowerVR, Samsung Xclipse | Texel-load sampling; see [Float32 filtering](#float32-filtering) |
+| Float32 filtering (`FLOAT32_FILTERABLE`) | Apple A9–A16 iPads (Apple's Metal feature tables grant it to Apple9 and later and only some Apple7/8 devices; an iPad mini 6 reports it missing), the iOS simulator, Adreno 6xx/7xx on Qualcomm drivers older than 512.700, Adreno 4xx/5xx, PowerVR, Samsung Xclipse | Texel-load sampling; see [Float32 filtering](#float32-filtering) |
 | Float32 blending (`FLOAT32_BLENDABLE`) | Every Mali generation, including the low- and mid-tier reference tablets; Adreno 5xx | Works through the slow `portable_blend` path |
 | Android shared presentation (`SharedDemandRefresh`) | Probably Android 10–13, which lack the platform swapchain extension the mode needs; `minSdk` is 29 | Buffered FIFO presentation; see [Android presentation](#android-presentation) |
-| Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | Windows requests the feature without checking the format, so in-place dry-media pipelines can fail validation at startup |
+| Read-write Float32 storage (`TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`) | Unknown; possibly older D3D12 GPUs | `rendering_features` requests it only when both storage formats allow read-write access; otherwise dry media use separate candidates |
 | Wayland mailbox presentation | Unknown | The GTK host refuses to start |
 | Timestamp queries, pipeline cache | Many mobile GPUs, Metal, Web | Already optional |
 | Large textures (`max_texture_dimension_2d`) | 8192 on Web and some PowerVR | Already adaptive: the canvas size is capped |
@@ -108,11 +110,7 @@ Play Store; keep it only if the buffered path cannot meet the low tier.
 
 ## Smaller fixes
 
-- **Read-write storage:** Android requests in-place features through
-  `native_tiles::native_in_place_features`, which checks the formats; Windows
-  should too. The copy path already serves devices without them.
-- **Wayland:** fall back to FIFO when mailbox is unavailable, and drop the GTK
-  host's Float32 checks once both fallbacks exist.
+- **Wayland:** fall back to FIFO when mailbox is unavailable.
 - **Timestamps:** selection refinement sizes its chunks from GPU timestamps;
   without them, time `on_submitted_work_done` on the CPU instead of keeping the
   initial rate.
@@ -127,7 +125,10 @@ A device that lacks a hard requirement (a hardware adapter, the downlevel
 limits) should be told which one, in plain words, in shared localized text.
 Today:
 
-- startup errors are raw English strings;
+- GTK, Windows, Android and Apple explain a software adapter or short limits
+  with the shared localized message from `layer_host::admit_adapter` (Apple
+  through its own prefix), followed by the cause; other startup failures still
+  show the raw English cause under the localized heading;
 - the Web page tells every iOS user to update to iPadOS 26
   (`apps/layer-web/gpu.js`), including users already on 26;
 - Android titles a failure during painting "Could not initialize canvas";
@@ -149,7 +150,7 @@ storage range. The validator stays as the backstop.
    the low- and mid-tier tablets before and after.
 3. **Android buffered presentation.** Verify on an Android 13 tablet and
    measure the low tier.
-4. **Read-write storage, Wayland, timestamps and memory.**
+4. **Wayland, timestamps and memory.**
 5. **Numeric robustness** of working-page writes.
 6. **A-series tier qualification** of the Float32 filtering fallback.
 

@@ -20,11 +20,12 @@ impl GpuCanvas {
         let parent = area
             .native()
             .and_then(|native| native.surface())
-            .ok_or_else(|| layer_ui::bootstrap_view(self.session.localization()).canvas_init_failed.to_string())?;
+            .ok_or("The canvas window has no native surface")?;
         let renderer = RenderWorker::new(
             Parent::new(&parent)?,
             area.downgrade().into(),
             self.session.engine().document().composition().color,
+            self.session.localization().clone(),
         )?;
         let (previous, _) = self.session.replace_renderer(renderer)?;
         drop(previous);
@@ -55,7 +56,7 @@ impl GpuCanvas {
         let parent = area
             .native()
             .and_then(|native| native.surface())
-            .ok_or_else(|| layer_ui::bootstrap_view(&localization).canvas_init_failed.to_string())?;
+            .ok_or("The canvas window has no native surface")?;
         // Load once before allocating document resources so a new window uses
         // the same explicit creation defaults as File → New.
         let settings = settings.unwrap_or_else(|| match crate::preferences::load() {
@@ -71,7 +72,7 @@ impl GpuCanvas {
             None => (settings.new_document.defaults.project_on(settings.new_document.paper(), &localization)?, None),
         };
         let color = project.composition().color;
-        let renderer = RenderWorker::new(Parent::new(&parent)?, area.downgrade().into(), color)?;
+        let renderer = RenderWorker::new(Parent::new(&parent)?, area.downgrade().into(), color, localization.clone())?;
         let mut session =
             UiSession::from_project_localized(renderer, project, location, extent(area), layer_ui::Platform::Gtk, localization)?;
         if startup { session.mark_startup_drawing(); }

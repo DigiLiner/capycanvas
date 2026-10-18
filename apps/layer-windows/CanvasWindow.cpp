@@ -845,7 +845,7 @@ void CanvasWindow::Run() {
             }
             prepared=capy_prepare_gpu(host)>=0;
         }
-        if(!prepared) {OutputDebugStringA(capy_error());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed")));}
+        if(!prepared) {std::string cause=capy_error();OutputDebugStringA(cause.c_str());Fail(to_string(CapyUi::str(bootstrap,L"canvas_init_failed"))+"\n\n"+cause);}
         else {std::lock_guard lock(mutex);resize=true;}
         bool dirty=true;
         bool inputStarted=false;

@@ -142,8 +142,8 @@ tools/windows-vm/windows-vm.py --vm fixtures-b fixtures header selection editor 
 
 Only builds with the `software-adapter-tests` feature of `layer-windows` accept a
 software adapter, and only while `LAYER_TEST_SOFTWARE_GPU` is set. Shipped builds
-never enable the feature and still refuse CPU adapters with "Painting requires a
-hardware D3D12 GPU". UI traces name the adapter in `windows_adapter`, for example
+never enable the feature and still refuse CPU adapters with the shared
+unsupported-GPU message, which names the software renderer. UI traces name the adapter in `windows_adapter`, for example
 `Microsoft Basic Render Driver (Cpu)`.
 
 A WARP pass shows that the UI structure, shared state, injected mouse, pen and

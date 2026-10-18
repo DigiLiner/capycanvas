@@ -1303,8 +1303,8 @@ async fn request_device(instance: &wgpu::Instance, surface: Option<&wgpu::Surfac
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("web canvas GPU"),
-                required_features: adapter.features() & (wgpu::Features::TIMESTAMP_QUERY
-                    | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE),
+                required_features: layer_render_wgpu::rendering_features(&adapter)
+                    | adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
                 required_limits: limits,
                 ..Default::default()
             })

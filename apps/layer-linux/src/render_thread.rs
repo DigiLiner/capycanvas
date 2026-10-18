@@ -372,6 +372,7 @@ impl RenderWorker {
         parent: Parent,
         area: gtk::glib::SendWeakRef<gtk::Picture>,
         color: layer_core::color::DocumentColor,
+        localization: Arc<layer_ui::Localizer>,
     ) -> Result<Self, String> {
         #[cfg(test)]
         let startup_pause = NEXT_STARTUP_PAUSE.lock().unwrap().take();
@@ -410,7 +411,7 @@ impl RenderWorker {
                             std::thread::sleep(Duration::from_millis(1));
                         }
                     }
-                    Worker::new(parent, area, worker_clock, color)?.run(
+                    Worker::new(parent, area, worker_clock, color, &localization)?.run(
                         &receiver,
                         &reply,
                         &worker_telemetry,
@@ -589,6 +590,9 @@ impl RenderWorker {
         transform: bool,
     ) -> bool {
         self.startup.brush_ready && !self.startup_needs_update(document, brush, transform)
+    }
+    pub(super) fn started(&self) -> bool {
+        self.initialized
     }
     pub(super) fn ready(&mut self) -> Result<bool, String> {
         if let Some(error) = self.failure.get() {
@@ -1645,6 +1649,7 @@ impl Worker {
         area: gtk::glib::SendWeakRef<gtk::Picture>,
         clock: Arc<crate::wayland::FrameClock>,
         color: layer_core::color::DocumentColor,
+        localization: &layer_ui::Localizer,
     ) -> Result<Self, String> {
         let mut child = Child::new(parent, clock)?;
         // One process-lifetime loader/instance, not one per window. On the
@@ -1668,6 +1673,8 @@ impl Worker {
             ..Default::default()
         }))
         .map_err(error)?;
+        let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
+        layer_host::admit_adapter(localization, &adapter, &limits)?;
         let caps = surface.get_capabilities(&adapter);
         let mut config = surface
             .get_default_config(&adapter, 1, 1)
@@ -1697,19 +1704,11 @@ impl Worker {
         }
         config.present_mode = wgpu::PresentMode::Mailbox;
         config.desired_maximum_frame_latency = 2;
-        let working_features =
-            wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE;
-        if !adapter.features().contains(working_features) {
-            return Err("This GPU cannot sample and blend the SDR editing format".into());
-        }
-        let features = working_features
-            | layer_render_wgpu::native_tiles::native_in_place_features(&adapter)
-            | (adapter.features()
-                & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE));
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("Wayland canvas GPU"),
-            required_features: features,
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
+            required_features: layer_render_wgpu::rendering_features(&adapter) | adapter.features()
+                & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE),
+            required_limits: limits,
             memory_hints: layer_render_wgpu::memory_hints(),
             ..Default::default()
         }))

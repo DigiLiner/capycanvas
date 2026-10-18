@@ -403,16 +403,12 @@ impl App {
                 }))
                 .map_err(|e| unsupported(&e.to_string()))?;
             let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
-            if let Some(cause) = layer_host::unsupported_adapter(&adapter, &limits) {
-                return Err(unsupported(&cause));
-            }
+            layer_host::admit_adapter(self.host.session.localization(), &adapter, &limits)?;
             let (device, queue) =
                 pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Android"),
-                    required_features: adapter.features()
-                        & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE
-                            | wgpu::Features::FLOAT32_FILTERABLE | wgpu::Features::FLOAT32_BLENDABLE)
-                        | layer_render_wgpu::native_tiles::native_in_place_features(&adapter),
+                    required_features: layer_render_wgpu::rendering_features(&adapter) | adapter.features()
+                        & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE),
                     required_limits: limits,
                     memory_hints: layer_render_wgpu::memory_hints(),
                     ..Default::default()

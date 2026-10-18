@@ -2642,7 +2642,11 @@ impl Workspace {
             }
         }
         let copy = layer_ui::bootstrap_view(&self.localization());
-        self.status.set_text(if self.gpu.borrow().is_some() { &copy.canvas_stopped } else { &copy.canvas_init_failed });
+        if self.gpu.borrow().as_ref().is_some_and(|g| g.session.engine().backend().started()) {
+            self.status.set_text(&copy.canvas_stopped);
+        } else {
+            self.status.set_text(&format!("{}\n\n{error}", copy.canvas_init_failed));
+        }
         self.status.set_visible(true);
     }
     fn restart_gpu(self: &Rc<Self>) {

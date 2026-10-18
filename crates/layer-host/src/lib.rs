@@ -17,7 +17,7 @@ use layer_core::Point;
 use layer_engine::{PenEvent, PenPhase, SampleFlags, ToolKind};
 use layer_render::CanvasRenderer;
 use layer_ui::{ContactPhase, PointerButton, PointerKind, UiAction, UiInput, UiSession};
-pub use gpu::{DeviceWatch, GpuContext, RendererOptions, UiColor, unsupported_adapter};
+pub use gpu::{DeviceWatch, GpuContext, RendererOptions, UiColor, admit_adapter, unsupported_adapter};
 pub use storage::StorageRoots;
 pub use layer_render_wgpu::AttachedRenderer as Renderer;
 pub use snapshot::{SnapshotFields, extend_update};

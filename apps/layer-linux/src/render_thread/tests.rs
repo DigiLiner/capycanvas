@@ -67,6 +67,7 @@ fn native_hdr_display_hint_before_first_frame() {
                 depth: layer_core::color::SampleDepth::F16,
                 ..Default::default()
             },
+            &layer_ui::Localizer::shared(layer_ui::UiLanguage::English),
         )?;
         // Exercise the display-event path before ANY frame/geometry is sent.
         // An idle acquire here used to panic on an unconfigured swapchain.
@@ -107,7 +108,7 @@ fn native_late_shader_failure_after_startup() {
     let (reply, _replies) = mpsc::channel();
     let (prepared, ready) = mpsc::channel();
     let worker = std::thread::spawn(move || -> Result<(), String> {
-        let mut worker = Worker::new(parent, area, Arc::default(), Default::default())?;
+        let mut worker = Worker::new(parent, area, Arc::default(), Default::default(), &layer_ui::Localizer::shared(layer_ui::UiLanguage::English))?;
         let document = layer_ui::new_drawing(32, 24, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English))?;
         let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
         worker.renderer.prepare_startup(&document, &brush, false).map_err(error)?;
