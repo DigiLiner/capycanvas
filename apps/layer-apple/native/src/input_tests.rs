@@ -113,12 +113,12 @@ fn project_adoption_preserves_native_prediction_and_manual_lookahead() {
             app.action(json!({"type":"set_tool_setting","id":"smoothing_strength","value":0}));
             app.action(json!({"type":"set_color","rgba":[0,0,1,1]}));
             app.draw_until_idle();
-            let project = ProjectJob::new(&app, true);
-            assert_eq!(project.create([2048, 1536]), 0);
+            let project = ProjectJob::create(&app, [2048, 1536]);
             let adopted = unsafe {
                 capy_apple_project_adopt(app.0, project.0, c"Untitled".as_ptr(), c"".as_ptr())
             };
             assert_eq!(adopted, 0);
+            settings["new_document"] = app.state()["settings"]["new_document"].clone();
             assert_eq!(app.state()["settings"], settings);
             app.draw_until_idle();
             let baseline = app.pixels();

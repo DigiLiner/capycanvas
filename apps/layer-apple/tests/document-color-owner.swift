@@ -19,7 +19,7 @@ import QuartzCore
             try await CapyTest.wait("Metal startup", failure: { store.failure }, step: { await frame(native) }) { store.snapshot["shaders_ready"].bool }
             let master=root.appendingPathComponent("Editable.capy")
             store.projectFiles = ProjectFiles(store:store,dialogs:.init(open:{_,done in done([])},save:{_,_,done in done(master)},create:{_,done in
-                done(JSON(["extent":[128,96],"color":["space":"DisplayP3","depth":"U16"],"background":"White"]))
+                done(newSheet([128, 96], space: "DisplayP3", depth: "U16"))
             }))
             func invoke(_ command:String) async throws { try await store.apply(["type":"invoke","command":command]) }
             func idle() async throws {

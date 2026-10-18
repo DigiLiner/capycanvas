@@ -3,7 +3,7 @@
 //! exchanges compressed tiles with the worker and adopts the result.
 use super::*;
 use layer_core::{PortableId, color::source::{SourceImage, SourceInterpretation}, raster::TileBlob};
-use layer_ui::paper_library::{PaperCapture, PaperEntry, PaperLibraryError, PaperRequest, PaperResult};
+use layer_ui::paper_library::{PaperCapture, PaperEntry, PaperLibraryError, PaperMaterial, PaperRequest, PaperResult};
 use std::{rc::Rc, sync::Arc};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::{JsFuture, future_to_promise};
@@ -139,20 +139,30 @@ async fn library(request: serde_json::Value, buffers: js_sys::Array, localizatio
     })
 }
 
+async fn load(id: &str, retained: &[layer_core::Image], localization: &layer_ui::Localizer) -> Result<SourceImage, String> {
+    let buffers = js_sys::Array::new();
+    let parent = layer_ui::paper_library::paper_image_id(id).ok_or("Unknown paper")?;
+    let retained = retained.iter().find(|image| image.id() == parent);
+    let transfer = retained.map(|image| Transfer::send(image.storage(), &buffers)).transpose()?;
+    let reply = library(serde_json::json!({"operation": "load", "id": id, "retained": transfer}), buffers, localization).await?;
+    let kept = js_sys::Reflect::get(&reply, &js("metadata")).ok().and_then(|m| js_sys::Reflect::get(&m, &js("retained")).ok()).and_then(|v| v.as_bool()).unwrap_or(false);
+    match retained.filter(|_| kept) { Some(image) => Ok(image.storage().as_ref().clone()), None => paper(&reply) }
+}
+
+/// The texture New chose; a stored paper the library cannot read falls back with a warning.
+pub(super) async fn texture(material: &PaperMaterial, retained: &[layer_core::Image], localization: &layer_ui::Localizer) -> (layer_core::TextureSource, Option<String>) {
+    let PaperMaterial::Stored { id, fallback } = material else { return (material.fallback(), None) };
+    match (layer_ui::paper_library::paper_image_id(id), load(id, retained, localization).await) {
+        (Some(parent), Ok(image)) => (layer_core::TextureSource::Image(layer_core::Image::with_id(parent, Arc::new(image))), None),
+        _ => (fallback.clone(), Some(layer_ui::file_open_failure(localization, &format!("{id}.png")))),
+    }
+}
+
 async fn run(capture: &PaperCapture, file: JsValue, localization: &layer_ui::Localizer) -> Result<PaperResult, String> {
     let none = js_sys::Array::new;
     Ok(match &capture.action {
         None => PaperResult::Entries(entries(&library(serde_json::json!({"operation": "list"}), none(), localization).await?)?),
-        Some(PaperRequest::Load { id }) => {
-            let buffers = none();
-            let parent = layer_ui::paper_library::paper_image_id(id).ok_or("Unknown paper")?;
-            let retained = capture.retained.iter().find(|image| image.id() == parent);
-            let transfer = retained.map(|image| Transfer::send(image.storage(), &buffers)).transpose()?;
-            let reply = library(serde_json::json!({"operation": "load", "id": id, "retained": transfer}), buffers, localization).await?;
-            let kept = js_sys::Reflect::get(&reply, &js("metadata")).ok().and_then(|m| js_sys::Reflect::get(&m, &js("retained")).ok()).and_then(|v| v.as_bool()).unwrap_or(false);
-            let image = match retained.filter(|_| kept) { Some(image) => image.storage().as_ref().clone(), None => paper(&reply)? };
-            PaperResult::Loaded(id.clone(), image)
-        }
+        Some(PaperRequest::Load { id }) => PaperResult::Loaded(id.clone(), load(id, &capture.retained, localization).await?),
         Some(PaperRequest::Import { layer }) => {
             let failed = || PaperLibraryError::Unsupported.message(localization);
             if file.is_null() || file.is_undefined() { return Err(failed()); }
@@ -192,5 +202,9 @@ impl WebApp {
         let result = result.result.take().ok_or_else(|| js("This paper request already finished"))?;
         let change = self.session.adopt_paper(&task.capture, result, cancelled).map_err(js)?;
         change.map_or(Ok(JsValue::NULL), |change| serialize(&change))
+    }
+    /// Imports a paper into the library alone, for New drawing.
+    pub fn paper_library_import(&self) -> WebPaperTask {
+        WebPaperTask { capture: Rc::new(self.session.capture_library_import()), localization: self.session.localization().clone() }
     }
 }

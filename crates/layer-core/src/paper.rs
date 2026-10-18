@@ -9,12 +9,17 @@ pub const THROUGH_PAINT: &str = "through_paint";
 const LIGHTING: [&str; 3] = [RELIEF, LIGHT, THROUGH_PAINT];
 pub const DEFAULT_PAPER: &str = "drawing_paper";
 pub const DEFAULT_PAPER_PPI: f64 = 300.;
-const MINIMUM_PRINT_PPI: f64 = 150.;
+const MINIMUM_IMAGE_PPI: f64 = 150.;
 const MM_PER_INCH: f64 = 25.4;
 
 pub fn paper_ppi(resolution: Option<ImageResolution>) -> [f64; 2] {
     let ppi = resolution.map_or([DEFAULT_PAPER_PPI; 2], ImageResolution::pixels_per_inch);
-    if ppi.iter().all(|v| v.is_finite() && *v >= MINIMUM_PRINT_PPI) { ppi } else { [DEFAULT_PAPER_PPI; 2] }
+    if ppi.iter().all(|v| v.is_finite() && *v > 0.) { ppi } else { [DEFAULT_PAPER_PPI; 2] }
+}
+
+pub fn image_ppi(resolution: Option<ImageResolution>) -> [f64; 2] {
+    let ppi = paper_ppi(resolution);
+    if ppi.iter().all(|v| *v >= MINIMUM_IMAGE_PPI) { ppi } else { [DEFAULT_PAPER_PPI; 2] }
 }
 
 pub fn is_paper(program: &EffectProgram) -> bool {
@@ -240,6 +245,24 @@ impl crate::Document {
             if let EffectValue::Texture(current) = value { *current = texture.clone(); }
         }
     }
+    pub fn without_paper(mut self) -> Result<Self, crate::DocumentError> {
+        let Some(paper) = self.bottom_paper() else { return Ok(self) };
+        let effect = self.scene().effect_handle(paper);
+        let stack = self.composition().result;
+        self.artwork.stacks.get_mut(stack).expect("root stack").entries.retain(|entry| *entry != paper);
+        self.artwork.occurrences.remove(paper);
+        if let Some(effect) = effect { self.artwork.effects.remove(effect); }
+        let working = self.working.clone();
+        let mut document = Self::from_artwork(self.artwork)?;
+        document.working = working;
+        Ok(document)
+    }
+    pub fn set_paper_color(&mut self, color: crate::color::RgbColor) {
+        let Some(handle) = paper_occurrence(self.scene(), None).and_then(|h| self.scene().effect_handle(h)) else { return };
+        for value in &mut self.artwork.effects.get_mut(handle).expect("listed paper").values {
+            if let EffectValue::Color(current) = value { *current = crate::color::RgbColor { rgba: [color.rgba[0], color.rgba[1], color.rgba[2], 1.], ..color }; }
+        }
+    }
     pub fn fit_papers_to_resolution(&mut self) {
         let ppi = paper_ppi(self.composition().resolution);
         let papers: Vec<_> = self.artwork.effects.iter().filter(|(_, _, a)| is_paper(&a.program)).map(|(h, _, _)| h).collect();
@@ -269,14 +292,18 @@ mod tests {
         Document::new(PortableId::random(), 300, 200, DocumentNames { paint: "Ink".into(), paper: "Paper".into() })
     }
     #[test]
-    fn screen_and_missing_resolutions_count_as_print_resolution() {
+    fn drawings_map_paper_at_their_resolution_and_image_files_below_print_count_as_print() {
         assert_eq!(paper_ppi(None), [300.; 2]);
-        assert_eq!(paper_ppi(Some(ImageResolution::ppi(72))), [300.; 2]);
-        assert_eq!(paper_ppi(Some(ImageResolution::ppi(96))), [300.; 2]);
-        assert_eq!(paper_ppi(Some(ImageResolution::ppi(150))), [150.; 2]);
-        assert_eq!(paper_ppi(Some(ImageResolution::ppi(600))), [600.; 2]);
+        for ppi in [72, 96, 144, 150, 600] {
+            assert_eq!(paper_ppi(Some(ImageResolution::ppi(ppi))), [f64::from(ppi); 2]);
+        }
         let metric = ImageResolution { unit: ResolutionUnit::Centimetre, density: [[118, 1]; 2] };
         assert!((paper_ppi(Some(metric))[0] - 299.72).abs() < 1e-9);
+        assert_eq!(image_ppi(None), [300.; 2]);
+        assert_eq!(image_ppi(Some(ImageResolution::ppi(72))), [300.; 2]);
+        assert_eq!(image_ppi(Some(ImageResolution::ppi(96))), [300.; 2]);
+        assert_eq!(image_ppi(Some(ImageResolution::ppi(150))), [150.; 2]);
+        assert_eq!(image_ppi(Some(ImageResolution::ppi(600))), [600.; 2]);
     }
     #[test]
     fn scale_reads_the_mapping_against_the_paper_resolution() {

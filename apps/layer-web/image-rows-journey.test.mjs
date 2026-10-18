@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {readPackage,packageObjects} from './package-fixture.test.mjs';
 import {png} from './clone-journey.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 const openMenu='.panel-context-menu:popover-open';
 
@@ -70,8 +71,7 @@ export async function checkImageRows({call,evaluate,settle,canvasPixels}) {
     await call('Browser.grantPermissions',{origin:await evaluate('location.origin'),permissions:['clipboardReadWrite','clipboardSanitizedWrite']},null);
     await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('dialog[open]');})()`);
     await idle();await invoke('new_document');
-    await wait('document.querySelector("dialog[open] [data-document-field=width]")');
-    await evaluate(`{for(const [field,value] of [['width',2000],['height',1500]]){const input=document.querySelector('dialog[open] [data-document-field='+field+']');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('dialog[open] [data-document-action=create]').click();}`);
+    await evaluate(createDrawing({width:2000,height:1500}));
     await idle();await invoke('fit_canvas');
     await pasteImage(600,450,[0xdd,0x2a,0x1f]);
     await pasteImage(600,450,[0x1f,0x3a,0xde],[360,270]);

@@ -15,7 +15,7 @@ import SwiftUI
         var destinations: [String] = []
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, done in done([]) }, save: { _, type, done in
             destinations.append(type.identifier); done(nil)
-        }, create: { _, done in done(JSON(["extent": [64, 48], "color": ["space": "DisplayP3", "depth": "U16"], "background": "White"])) }, exportOptions: { _ in }))
+        }, create: { _, done in done(newSheet([64, 48], space: "DisplayP3", depth: "U16")) }, exportOptions: { _ in }))
         try await store.apply(["type": "invoke", "command": "new_document"])
         try await wait("New drawing") { !store.projectFiles.busy && store.state["requests"].array.isEmpty }
         let window = NSWindow(contentRect: CGRect(x: 100, y: 100, width: 600, height: 720), styleMask: [.titled, .closable], backing: .buffered, defer: false)

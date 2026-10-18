@@ -22,10 +22,6 @@ documents-unsaved-description = Perubahan akan hilang jika ditutup tanpa disimpa
 
 documents-discard = Buang Perubahan
 
-documents-width = Lebar (px)
-
-documents-height = Tinggi (px)
-
 documents-new = Gambar baru
 
 documents-open = Buka gambar atau foto
@@ -50,19 +46,9 @@ documents-png = Gambar PNG
 
 documents-capy = Gambar { common-app-name }
 
-documents-standard-preset = Gambar standar
-
-documents-wide-preset = Warna luas
-
-documents-photo-preset = Pengeditan foto
-
-documents-hdr-preset = Gambar HDR
-
 documents-white = Putih
 
 documents-transparent = Transparan
-
-documents-options-description = { $width } × { $height } px · { $space } · { $depth } · { $background }
 
 documents-blending = Pembauran
 
@@ -168,13 +154,9 @@ documents-error-canvas-operation = Selesaikan operasi kanvas saat ini terlebih d
 
 documents-unsaved-drawing = Gambar belum disimpan
 
-documents-defaults-title = Pengaturan bawaan dan prasetel gambar
-
 documents-custom-preset = Khusus
 
 documents-preset-label = Prasetel
-
-documents-background-label = Latar belakang
 
 documents-space-label = Ruang warna
 
@@ -190,19 +172,7 @@ documents-depth-f16 = HDR pecahan mengambang 16-bit
 
 documents-depth-f32 = HDR pecahan mengambang 32-bit
 
-documents-save-preset = Simpan Prasetel…
-
-documents-remove-preset = Hapus prasetel tersimpan
-
-documents-remember = Gunakan pengaturan ini untuk gambar baru
-
-documents-use-defaults = Gunakan Bawaan
-
 documents-preset-name = Nama prasetel
-
-documents-save-preset-title = Simpan Prasetel Gambar
-
-documents-color-summary = { $space } · { $depth } · { $blending }
 
 documents-prophoto-note = SDR 16-bit disarankan untuk gradasi ProPhoto dan penyesuaian foto.
 
@@ -344,3 +314,144 @@ documents-package-choose-different = Choose a different file.
 
 documents-recovered-name = { $name } (dipulihkan)
 documents-destination-changed = Gambar tersimpan berubah atau tidak tersedia. Gunakan Simpan Sebagai untuk menyimpan kedua salinan.
+
+documents-drawing-name = Nama
+documents-size-heading = Ukuran
+documents-width-short = L
+documents-height-short = T
+documents-unit-px = px
+documents-unit-in = in
+documents-unit-cm = cm
+documents-unit-mm = mm
+documents-unit-label = Satuan
+documents-link-dimensions = Tautkan lebar dan tinggi
+documents-portrait = Potret
+documents-landscape = Lanskap
+documents-square = Persegi
+documents-common-resolutions = Resolusi umum
+documents-ppi = { $value } ppi
+documents-resolution-screen = Layar
+documents-resolution-draft = Cetak draf
+documents-resolution-print = Cetak
+documents-resolution-color-comics = Komik berwarna
+documents-resolution-line-art = Gambar garis
+documents-pixel-size = { $width } × { $height } px
+documents-prints-at = Ukuran cetak { $width } × { $height } { $unit }
+documents-too-large-side = Terlalu besar untuk perangkat ini: setiap sisi maksimal { $maximum } px
+documents-too-large-memory = Terlalu besar untuk memori yang tersedia di perangkat ini
+documents-megapixels = { $megapixels } MP
+documents-capacity = { $megapixels } MP · hingga { $count } lapisan
+documents-layer-memory = { $size } per lapisan
+documents-layer-memory-available = { $size } per lapisan · { $available } tersedia
+documents-no-paper = Tanpa kertas
+documents-paper-color = Warna kertas
+documents-sheet-mode = Lembar
+documents-paper-colors = Warna Kertas
+documents-add-paper-color = Tambahkan warna ini ke Warna Kertas
+documents-last-used = Terakhir dipakai
+documents-presets = Prasetel
+documents-search-presets = Cari prasetel
+documents-no-presets-match = Tidak ada prasetel yang cocok dengan “{ $query }”.
+documents-recent-presets = Terbaru
+documents-your-presets = Prasetel Anda
+documents-group-sketch = Sketsa
+documents-group-watercolor = Cat air
+documents-group-pastel = Pastel
+documents-group-canvas = Kanvas
+documents-group-comics = Komik
+documents-group-prints = Cetakan
+documents-group-digital = Digital
+documents-save-as = Simpan Sebagai…
+documents-rename-preset = Ubah Nama…
+documents-rename-confirm = Ubah Nama
+documents-replace-preset = Ganti
+documents-select-preset = Pilih
+documents-preset-category = Kategori
+documents-preset-size = { $size } · { $resolution } ppi
+documents-preset-details = { $color } · { $paper }
+documents-preset-paper = { $texture }, { $color }
+documents-preset-tile-details = { $resolution } ppi · { $paper }
+documents-preset-hdr = HDR
+documents-paper-natural-white = Putih alami
+documents-paper-cream = Krem
+documents-paper-oyster = Tiram
+documents-paper-toned-tan = Cokelat pudar
+documents-paper-kraft = Kraft
+documents-paper-pearl-gray = Abu-abu mutiara
+documents-paper-toned-gray = Abu-abu pudar
+documents-paper-toned-blue = Biru pudar
+documents-paper-steel-gray = Abu-abu baja
+documents-paper-black = Hitam
+documents-paper-newsprint = Kertas koran
+documents-paper-chalkboard = Papan tulis
+documents-paper-blueprint = Cetak biru
+documents-preset-pocket-book = Buku saku
+documents-preset-sketchbook-a5 = Buku sketsa A5
+documents-preset-sketchbook-a4 = Buku sketsa A4
+documents-preset-sketch-pad = Blok sketsa
+documents-preset-square-book = Buku persegi
+documents-preset-toned-tan = Cokelat pudar
+documents-preset-toned-gray = Abu-abu pudar
+documents-preset-toned-blue = Biru pudar
+documents-preset-kraft-paper = Kertas kraft
+documents-preset-black-book = Buku hitam
+documents-preset-bristol-pad = Blok Bristol
+documents-preset-newsprint-pad = Blok kertas koran
+documents-preset-trading-card = Kartu koleksi
+documents-preset-postcard = Kartu pos
+documents-preset-bookmark = Pembatas buku
+documents-preset-greeting-card = Kartu ucapan
+documents-preset-paper-block = Blok cat air
+documents-preset-quarter-sheet = Seperempat lembar
+documents-preset-half-sheet = Setengah lembar
+documents-preset-full-sheet = Lembar penuh
+documents-preset-botanical = Botani
+documents-preset-journal = Jurnal
+documents-preset-washi-sheet = Lembar washi
+documents-preset-ink-scroll = Gulungan tinta
+documents-preset-pastel-pad = Blok pastel
+documents-preset-pearl-gray = Abu-abu mutiara
+documents-preset-pastel-sheet = Lembar pastel
+documents-preset-dark-gray = Abu-abu tua
+documents-preset-black-paper = Kertas hitam
+documents-preset-sanded-pastel = Amplas pastel
+documents-preset-charcoal-pad = Blok arang
+documents-preset-chalkboard = Papan tulis
+documents-preset-blueprint = Cetak biru
+documents-preset-canvas-panel = Panel kanvas
+documents-preset-plein-air = Luar ruang
+documents-preset-toned-canvas = Kanvas berwarna
+documents-preset-canvas = Kanvas
+documents-preset-gray-linen = Linen abu-abu
+documents-preset-linen = Linen
+documents-preset-manga-b5 = Manga B5
+documents-preset-manga-b4 = Manga B4
+documents-preset-us-comic = Komik AS
+documents-preset-comic-board = Kertas komik
+documents-preset-four-panel-strip = Strip 4 panel
+documents-preset-daily-strip = Strip harian
+documents-preset-zine-page = Halaman zine
+documents-preset-picture-book = Buku bergambar
+documents-preset-scroll-comic = Komik gulir
+documents-preset-art-print = Cetakan seni
+documents-preset-poster = Poster
+documents-preset-a4 = A4
+documents-preset-a3 = A3
+documents-preset-letter = Letter
+documents-preset-tabloid = Tabloid
+documents-preset-sticker = Stiker
+documents-preset-this-screen = Layar ini
+documents-preset-full-hd = Full HD
+documents-preset-uhd = 4K UHD
+documents-preset-uhd-hdr = 4K HDR
+documents-preset-cinematic = Sinematik
+documents-preset-phone = Ponsel
+documents-preset-tablet = Tablet
+documents-preset-square-post = Postingan persegi
+documents-preset-portrait-post = Postingan potret
+documents-preset-story = Cerita
+documents-megabytes = { $value } MB
+documents-gigabytes = { $value } GB
+documents-paper-none = Tidak ada
+documents-width-name = Lebar
+documents-height-name = Tinggi

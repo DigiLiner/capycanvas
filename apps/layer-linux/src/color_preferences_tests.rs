@@ -1,4 +1,4 @@
-use super::new_photo::{capture_ui, chooser, combo, finish, invoke, ready, response};
+use super::new_photo::{capture_ui, chooser, finish, invoke, ready, response};
 use super::*;
 use layer_core::color::*;
 
@@ -64,13 +64,7 @@ fn native_color_preferences_profiles_and_untagged_photo_policy() {
     std::fs::create_dir_all(&output).unwrap();
     let output = output.canonicalize().unwrap();
     preferences(&w);
-    for (name, selected) in [
-        ("new-color-space", 3),
-        ("new-bit-depth", 1),
-        ("new-background", 1),
-        ("photo-depth", 1),
-        ("missing-profile", 1),
-    ] {
+    for (name, selected) in [("photo-depth", 1), ("missing-profile", 1)] {
         let row = named::<adw::ComboRow>(w.preferences.dialog.upcast_ref(), &format!("setting-{name}"));
         row.set_selected(selected);
         pump(50);
@@ -84,34 +78,11 @@ fn native_color_preferences_profiles_and_untagged_photo_policy() {
         }
     );
     assert_eq!(
-        state(&w).settings.new_document.defaults.color.space,
-        RgbSpace::ProPhoto
-    );
-    assert_eq!(
         crate::preferences::load().unwrap().unwrap(),
         state(&w).settings
     );
     assert_eq!(super::place_source::authored_snapshot(&w), original);
     capture_ui(&w, &output, "color-settings.png");
-    click_named(w.preferences.dialog.upcast_ref(), "color-drawing-defaults");
-    dialog(&w, "drawing-defaults-dialog");
-    combo(&w, "new-document-preset").set_selected(2);
-    let row = named::<adw::SpinRow>(w.window.visible_dialog().unwrap().upcast_ref(), "new-document-width");
-    row.set_value(128.);
-    response(&w, "create");
-    finish(&w);
-    assert!(
-        created.borrow().is_none(),
-        "editing defaults never creates a drawing"
-    );
-    assert_eq!(
-        state(&w).settings.new_document.defaults.color,
-        DocumentColor {
-            space: RgbSpace::DisplayP3,
-            depth: SampleDepth::U8
-        }
-    );
-    assert_eq!(state(&w).settings.new_document.defaults.extent[0], 128);
 
     let profile_bytes =
         layer_color::profile_bytes(&ColorProfile::Builtin(RgbSpace::AdobeRgb)).unwrap();

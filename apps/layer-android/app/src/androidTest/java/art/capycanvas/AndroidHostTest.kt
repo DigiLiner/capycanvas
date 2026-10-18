@@ -139,23 +139,7 @@ class AndroidHostTest {
         }
     @Test fun nativeGradientStopContactsAndCompactControlsRetainDefinition() {
         fun <T> native(block:(Long)->T):T=runBlocking {host.withNative(block)}
-        val task = native { handle ->
-            Native.dispatch(handle, obj("type" to "invoke", "command" to "new_document").toString())
-            var published = JSONObject(Native.snapshot(handle)!!).getJSONObject("state")
-            var request = published.array("requests").objects().first { it.getJSONObject("kind").optString("type") == "document" }
-            if (request.getJSONObject("kind").getJSONObject("request").getString("type") == "confirm_close") {
-                Native.documentClose(handle, request.getInt("id"), "\"discard\"")
-                published = JSONObject(Native.snapshot(handle)!!).getJSONObject("state")
-                request = published.array("requests").objects().first { it.getJSONObject("kind").optString("type") == "document" }
-            }
-            val file = published.getJSONObject("document_file")
-            Native.projectTask(handle, request.getInt("id"), "null", file.getLong("epoch"), file.getLong("revision"))
-        }
-        try {
-            Native.projectOptions(task, obj("extent" to JSONArray(listOf(128, 128)), "color" to obj("space" to "Srgb", "depth" to "F32"), "background" to "White").toString())
-            Native.projectWork(task, -1, 128, 128)
-            native { Native.projectAdopt(it, task, "null") }
-        } finally { Native.projectFree(task) }
+        host.createDrawing(128, 128, depth = "F32")
         compose.runOnUiThread { host.documentChanged() }
         compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
         for(theme in listOf("light","dark")) {
@@ -964,23 +948,7 @@ class AndroidHostTest {
     }
     @Test fun curvesPagesNativeContactsAndExactCoordinates() {
         fun <T> native(block: (Long) -> T): T = runBlocking { host.withNative(block) }
-        val task = native { handle ->
-            Native.dispatch(handle, obj("type" to "invoke", "command" to "new_document").toString())
-            var published = JSONObject(Native.snapshot(handle)!!).getJSONObject("state")
-            var request = published.array("requests").objects().first { it.getJSONObject("kind").optString("type") == "document" }
-            if (request.getJSONObject("kind").getJSONObject("request").getString("type") == "confirm_close") {
-                Native.documentClose(handle, request.getInt("id"), "\"discard\"")
-                published = JSONObject(Native.snapshot(handle)!!).getJSONObject("state")
-                request = published.array("requests").objects().first { it.getJSONObject("kind").optString("type") == "document" }
-            }
-            val file = published.getJSONObject("document_file")
-            Native.projectTask(handle, request.getInt("id"), "null", file.getLong("epoch"), file.getLong("revision"))
-        }
-        try {
-            Native.projectOptions(task, obj("extent" to JSONArray(listOf(128, 128)), "color" to obj("space" to "Srgb", "depth" to "F32"), "background" to "White").toString())
-            Native.projectWork(task, -1, 128, 128)
-            native { Native.projectAdopt(it, task, "null") }
-        } finally { Native.projectFree(task) }
+        host.createDrawing(128, 128, depth = "F32")
         compose.runOnUiThread { host.documentChanged() }
         compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
         action(obj("type" to "invoke", "command" to "fit_canvas"))

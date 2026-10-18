@@ -2,6 +2,7 @@ import {readPackage,authoredIdentity,packageResourceIdentity,restartStoreUrl} fr
 import assert from 'node:assert/strict';
 import {tracePipelineCalls} from './pipeline-trace.test.mjs';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkDrawingTabRecovery({cdp,call,evaluate,settle}) {
   const trace=await tracePipelineCalls(cdp);
@@ -18,8 +19,7 @@ export async function checkDrawingTabRecovery({cdp,call,evaluate,settle}) {
   const select=async id=>{await ready();await evaluate(`layerApp.documents.select(BigInt(${id})).catch(error=>{throw Error(JSON.stringify({error,tabs:layerApp.app.document_tabs(0),busy:layerApp.documents.busy(),dialogs:[...document.querySelectorAll('dialog[open]')].map(dialog=>dialog.textContent)},(_,v)=>typeof v==='bigint'?String(v):v));})`);await ready();};
   const create=async()=>{
     const count=(await tabs()).tabs.length;await invoke('new_document');
-    await wait(`!![...document.querySelectorAll('dialog[open] button')].find(button=>button.textContent==='Create')`);
-    await evaluate(`(()=>{const form=document.querySelector('dialog[open]');for(const input of form.querySelectorAll('input[type=number]'))input.value=96;[...form.querySelectorAll('button')].find(button=>button.textContent==='Create').click();})()`);
+    await evaluate(createDrawing());
     await wait(`layerApp.app.document_tabs(0).tabs.length===${count+1}`);await ready();return (await tabs()).selected;
   };
   const installSave=()=>evaluate(`window.showSaveFilePicker=async options=>{const directory=await(await navigator.storage.getDirectory()).getDirectoryHandle('capy-test-session-originals',{create:true});return directory.getFileHandle(crypto.randomUUID()+'.'+options.suggestedName.split('.').at(-1),{create:true});};`);
@@ -266,8 +266,7 @@ export async function checkDrawingTabs({call,evaluate,settle}) {
     assert.equal(await evaluate(`document.querySelector('button[data-command="new_document"]')?.disabled??false`),false,'Reactivation republishes enabled native controls');};
   const create=async()=>{
     await ready();const count=(await tabs()).tabs.length;await invoke('new_document');
-    await wait(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create')`);
-    await evaluate(`(()=>{const dialog=document.querySelector('dialog[open]');for(const n of dialog.querySelectorAll('input[type=number]'))n.value=96;[...dialog.querySelectorAll('button')].find(b=>b.textContent==='Create').click();})()`);
+    await evaluate(createDrawing());
     await wait(`layerApp.app.document_tabs(0).tabs.length===${count+1}`);await ready();await assertLanguage();return (await tabs()).selected;
   };
   await ready();const first=(await tabs()).selected;
@@ -459,8 +458,7 @@ export async function checkDrawingTabs({call,evaluate,settle}) {
     await ready();failedStorageTab=await create();
     assert.ok((await tabs()).storage_error);assert.ok((await tabs()).resident_bytes>0);
     const count=(await tabs()).tabs.length;await invoke('new_document');
-    await wait(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create')`);
-    await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create').click()`);await ready();
+    await evaluate(createDrawing());await ready();
     assert.equal((await tabs()).tabs.length,count,'Cache write failure refuses another open');
     await select(copies[0].id);
     assert.equal(await evaluate('layerApp.state().layers.length'),changedLayers,'Navigation after a disk failure preserves the editor');

@@ -1,5 +1,6 @@
 import {restartStoreUrl} from './package-fixture.test.mjs';
 import assert from "node:assert/strict";
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 // Delay real WebGPU validation promises at the browser boundary. The renderer,
 // Wasm session, UI and actual GPU rendering continue to run unchanged.
@@ -351,9 +352,7 @@ async function checkRecoveryGpuLoss({call,evaluate,waitFor,settle}, suspensionTh
   await evaluate('layerApp.documents.startRecovery()');
   const count = await evaluate('layerApp.app.document_tabs(0).tabs.length');
   await evaluate("layerApp.dispatch({type:'invoke',command:'new_document'})");
-  await waitFor("!![...document.querySelectorAll('dialog[open] button')].find(button=>button.textContent==='Create')");
-  await evaluate("for(const input of document.querySelectorAll('dialog[open] input[type=number]'))input.value=96");
-  await click("[...document.querySelectorAll('dialog[open] button')].find(button=>button.textContent==='Create')");
+  await evaluate(createDrawing());
   await waitFor(`layerApp.app.document_tabs(0).tabs.length===${count+1} && layerApp.app.brush_ready() && layerApp.app.document_park_ready()`);
   for(const command of ['add_layer','select_all'])await evaluate(`layerApp.dispatch({type:'invoke',command:${JSON.stringify(command)}})`);
   await evaluate("layerApp.dispatch({type:'set_color',rgba:[.1,.3,.9,1]});layerApp.dispatch({type:'invoke',command:'fill_selection'});layerApp.dispatch({type:'invoke',command:'deselect'})");

@@ -833,18 +833,24 @@ class AndroidLanguageTest {
     @Test fun newDrawingDialogRelabelKeepsComposingNumericDraftAndSelection() {
         launchCapy(compose = compose).use { scenario ->
             val host = scenario.activity().host
-            fun input() = compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("new-document-width")), useUnmergedTree = true)
-            fun field() = findTag("new-document-width")!!.second.find { it.config.getOrNull(SemanticsProperties.EditableText) != null }!!
+            fun input() = compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("new-drawing-width")), useUnmergedTree = true)
+            fun field() = findTag("new-drawing-width")!!.second.find { it.config.getOrNull(SemanticsProperties.EditableText) != null }!!
             try {
                 for (theme in listOf("light", "dark")) {
                     host.drain(obj("type" to "set_theme", "theme" to theme))
                     for (tag in tags(host)) {
                         switch(host, "en")
                         host.drain(obj("type" to "invoke", "command" to "new_document"))
-                        host.awaitMain("new drawing dialog", 30_000, { host.snapshot.toString() }, compose) { findTag("new-document-width") != null }
+                        host.awaitMain("new drawing dialog", 30_000, { host.snapshot.toString() }, compose) { findTag("new-drawing-width") != null }
                         input().performClick()
+                        compose.runOnIdle {
+                            val manager = scenario.activity().getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                            manager.hideSoftInputFromWindow(findTag("new-drawing-width")!!.first.view.windowToken, 0)
+                        }
+                        compose.waitForIdle()
+                        android.os.SystemClock.sleep(250)
                         val draft = if (tag == "vi") "๒＋๓Tie\u0302\u0301ng Vie\u0323\u0302t" else "๒＋๓ผู้วาด"
-                        val nativeView = findTag("new-document-width")!!.first.view
+                        val nativeView = findTag("new-drawing-width")!!.first.view
                         lateinit var connection: android.view.inputmethod.InputConnection
                         compose.runOnIdle {
                             connection = nativeView.onCreateInputConnection(android.view.inputmethod.EditorInfo())!!
@@ -863,14 +869,17 @@ class AndroidLanguageTest {
                         val selection = field().config.getOrNull(SemanticsProperties.TextSelectionRange)
                         host.awaitMain("new drawing $tag after InputConnection composition", 30_000, { host.bootstrap.toString() }, compose) { host.languageTag == tag }
                         compose.runOnIdle {
-                            assertSame(nativeView, findTag("new-document-width")!!.first.view)
+                            assertSame(nativeView, findTag("new-drawing-width")!!.first.view)
                             assertEquals(draft, field().config.getOrNull(SemanticsProperties.EditableText)!!.text)
                             assertEquals(selection, field().config.getOrNull(SemanticsProperties.TextSelectionRange))
                         }
-                        val creation = host.snapshot!!.getJSONObject("document_options").getJSONObject("creation").getJSONObject("text")
+                        val copy = host.snapshot!!.getJSONObject("state").getJSONObject("new_drawing").getJSONObject("copy")
                         capture("new-drawing-draft", theme, tag)
-                        compose.onNodeWithTag("new-document-create").assertTextContains(creation.getString("create")).assertIsNotEnabled()
-                        compose.onNodeWithTag("new-document-cancel").assertTextContains(creation.getString("cancel")).performClick()
+                        compose.onNodeWithTag("new-drawing-create").assertTextContains(copy.getString("create"))
+                        compose.onNodeWithTag("new-drawing-cancel").assertTextContains(copy.getString("cancel")).performClick()
+                        host.awaitMain("new drawing $tag closes", 30_000, { host.snapshot.toString() }, compose) {
+                            host.snapshot?.objectOrNull("state")?.let { it.isNull("new_drawing") && it.array("requests").length() == 0 } == true
+                        }
                     }
                 }
             } finally { switch(host, "en") }
@@ -901,15 +910,7 @@ class AndroidLanguageTest {
             fun <T> native(block: (Long) -> T) = runBlocking { host.withNative(block) }
             for (depth in if (hdrOnly) listOf("F16") else listOf("U8", "F16")) {
             val hdr = depth == "F16"
-            val task = runBlocking { host.withNative { handle ->
-                val (id, file) = documentRequest(handle, "new_document")
-                Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision"))
-            } }
-            try {
-                Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(320, 240)), "color" to obj("space" to "DisplayP3", "depth" to depth), "background" to "White").toString())
-                Native.projectWork(task, -1, 320, 240)
-                native { Native.projectAdopt(it, task, "null") }
-            } finally { Native.projectFree(task) }
+            host.createDrawing(320, 240, "DisplayP3", depth)
             host.documentChanged()
             host.awaitMain("$depth color document adopted", 60_000, { host.snapshot.toString() }, compose) { host.snapshot?.objectOrNull("color_panel")?.optBoolean("hdr") == hdr && host.snapshot?.optBoolean("brush_ready") == true }
             fun field(tag: String) = findTag(tag)!!.second

@@ -440,7 +440,7 @@ try {
  Wait-Until {((Model).state.commands|Where-Object id -eq 'brush').selected -and @((Model).state.tool_settings).Count} 'B did not return to the brush after the image paste'
  $tabSource=(Model).windows_tabs.selected;$tabIdentity=Document-Identity;$tabCount=@((Model).windows_tabs.tabs).Count
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File';Invoke-Id 'new_document'
- Invoke 'Create' -Name -Within (Control 'document-dialog')
+ New-DrawingPixels 2048 1536;Invoke 'new-drawing-create'
  Wait-Until {@((Model).windows_tabs.tabs).Count -eq $tabCount+1 -and (Model).windows_tabs.selected -ne $tabSource -and (Requests) -eq 0 -and (Model).brush_ready} 'The tab clipboard review did not create a second drawing' 90
  Invoke 'Test stroke' -Name
  Wait-Until {(Model).state.document_file.modified} 'The tab clipboard review stroke did not reach the drawing'
@@ -458,10 +458,10 @@ try {
  Wait-Until {@((Model).windows_tabs.tabs).Count -eq $tabCount -and (Model).windows_tabs.selected -eq $tabSource -and (Model).brush_ready} 'The tab clipboard review did not return to the original drawing' 90
  if((Document-Identity) -ne $tabIdentity){throw 'Clipboard keys on a drawing tab changed the original artwork'}
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File';Invoke-Id 'new_document'
- $newDialog=Control 'document-dialog'
- Native-Clipboard-NoEffect (Control 'Cancel' -Name -Within $newDialog) 'modal_button_keeps_native_clipboard_keys'
- Invoke 'Cancel' -Name -Within $newDialog
- Wait-Until {!(Find 'document-dialog') -and (Requests) -eq 0} 'Cancel did not close the new drawing dialog'
+ $null=Control 'new-drawing-dialog'
+ Native-Clipboard-NoEffect (Control 'new-drawing-cancel') 'modal_button_keeps_native_clipboard_keys'
+ Invoke 'new-drawing-cancel'
+ Wait-Until {!(Find 'new-drawing-dialog') -and (Requests) -eq 0} 'Cancel did not close the new drawing dialog'
  Sta {[Windows.Forms.Clipboard]::SetText('clipboard sentinel')}|Out-Null
  $entry=Control ('tool-setting-'+@((Model).state.tool_settings)[0].id)
  $entry.SetFocus();Wait-Until {$entry.Current.HasKeyboardFocus} 'The brush size field did not take focus'

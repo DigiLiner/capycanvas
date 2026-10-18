@@ -1,25 +1,9 @@
 use super::*;
 use super::fixtures::tempfile;
-use layer_core::color::{DocumentColor, RgbSpace, SampleDepth};
+use layer_core::color::{RgbSpace, SampleDepth};
 use std::io::{Read, Seek};
 fn new_drawing(app: &App, depth: SampleDepth) {
-    app.invoke("new_document");
-    let job = ProjectJob::new(app, true);
-    let options = layer_ui::NewDocumentOptions {
-        extent: [96, 64],
-        color: DocumentColor {
-            space: RgbSpace::DisplayP3,
-            depth,
-        },
-        ..Default::default()
-    };
-    let text = CString::new(serde_json::to_string(&options).unwrap()).unwrap();
-    assert_eq!(
-        unsafe { capy_project_new(job.0, text.as_ptr()) },
-        0,
-        "{:?}",
-        job.error()
-    );
+    let job = ProjectJob::create_with(app, [96, 64], &[json!({"op": "space", "space": RgbSpace::DisplayP3}), json!({"op": "depth", "depth": depth})]);
     assert_eq!(
         unsafe { capy_apple_project_adopt(app.0, job.0, c"Untitled".as_ptr(), c"".as_ptr()) },
         0,
@@ -79,6 +63,26 @@ fn apple_tab_close_preparation_can_cancel_without_retiring_source() {
         assert_eq!(tabs(&app)["tabs"].as_array().unwrap().len(), 2);
         assert!(!app.state()["document_file"]["close_ready"].as_bool().unwrap());
         assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &source);
+    }
+}
+#[test]
+fn apple_new_drawing_takes_the_upcoming_untitled_name_or_the_name_it_was_given() {
+    for platform in [0, 1] {
+        let app = App::new(platform);
+        unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
+        app.draw_until_idle();
+        let title = |view: &Value| view["tabs"].as_array().unwrap().iter().find(|tab| tab["id"] == view["selected"]).unwrap()["title"].clone();
+        let upcoming = tabs(&app)["upcoming_untitled"].clone();
+        assert!(upcoming.as_str().is_some_and(|name| !name.is_empty()));
+        new_drawing(&app, SampleDepth::U8);
+        assert_eq!(title(&tabs(&app)), upcoming);
+        assert_ne!(tabs(&app)["upcoming_untitled"], upcoming);
+        let job = ProjectJob::create_with(&app, [96, 64], &[json!({"op": "name", "text": "  Harbor study "})]);
+        assert_eq!(unsafe { capy_apple_project_adopt(app.0, job.0, c"Untitled".as_ptr(), c"".as_ptr()) }, 0, "{:?}", unsafe { &*app.0 }.error);
+        app.draw_until_idle();
+        assert_eq!(title(&tabs(&app)), "Harbor study");
+        assert_eq!(app.state()["document_file"]["unsaved_name"], "Harbor study");
+        assert_eq!(tabs(&app)["tabs"].as_array().unwrap().len(), 3);
     }
 }
 #[test]

@@ -135,9 +135,8 @@ fn apple_photo_corrections_masks_and_original_samples_remain_revisable_after_wor
             let app = App::new(platform);
             unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
             app.draw_until_idle();
-            let new = ProjectJob::new(&app, true);
-            let options = CString::new(json!({"extent":[128,96],"color":{"space":space,"depth":depth},"background":"Transparent"}).to_string()).unwrap();
-            assert_eq!(unsafe { capy_project_new(new.0, options.as_ptr()) }, 0);
+            let new = ProjectJob::create_with(&app, [128, 96], &[json!({"op": "space", "space": space}), json!({"op": "depth", "depth": depth}),
+                json!({"op": "paper_color"}), json!({"op": "transparent", "transparent": true}), json!({"op": "use_paper_color"})]);
             assert_eq!(
                 unsafe {
                     capy_apple_project_adopt(app.0, new.0, c"Retained photo".as_ptr(), c"".as_ptr())

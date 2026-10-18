@@ -213,14 +213,14 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
   is zero and an absent rename owner does not start name editing.
   Enable Apple gates with the presentation and shared platform tests. Compare
   `WorkspacePreset::layout(platform)` before and after for every preset/platform.
-- **New drawings and Paper.** Present Resolution using the shared creation form's
-  bounds, unit and label, and retain it when selecting or saving presets.
-  Resolve creation appearance from the current shared options and language
-  before constructing its bound pickers.
-  On iPad, use the native numeric text adapter for dimensions and resolution so
-  every edit reaches the form before keyboard dismissal or Create.
-  `testNewDrawingAndExportCancellation` and its Dark variant check preset
-  restoration, rejected bounds and the created document's resolution.
+- **New drawings and Paper.** `NewDrawingDialog.swift` presents the shared
+  [New drawing](../ui/new-drawing.md) view as a sheet. It opens with the
+  window's screen and `upcoming_untitled`, sends `new_drawing` actions, reuses
+  Edit Color's form and the Choose Texture tiles, and continues New through
+  `capy_project_new` only after Create. On iPad, use the native numeric text
+  adapter so every edit reaches the session before keyboard dismissal or Create.
+  `testNewDrawingDialog` and its Dark variant walk the dialog;
+  `testNewDrawingAndExportCancellation` checks cancellation.
 - **Paper library.** Both Apple hosts present shared Paper texture tiles,
   selection and Scale. Use the shared installation papers directory and storage,
   import and identity APIs. Startup and Import/Add/Load/Rename/Delete use immutable
@@ -480,8 +480,8 @@ Color-entry journeys verify the complete typed value before sending Return,
 using the existing confirmed-input helper. Fill-thumbnail journeys reopen Layers
 after an outside Undo button contact before checking its texture and mask rows;
 Cancel and Use Color still independently assert that their parent drawer survives.
-New Drawing journeys dismiss text entry, reveal Use as defaults within the
-form's scroll view and verify it is on before pressing Create.
+New drawing journeys commit typed numbers by leaving the field (Tab on Mac,
+keyboard dismissal on iPad) before Create.
 Paper import uses the shared file-provider lookup for both complete filenames
 and the system's separate name and extension labels.
 Text-entry focus checks compare identifiers explicitly so unnamed native file

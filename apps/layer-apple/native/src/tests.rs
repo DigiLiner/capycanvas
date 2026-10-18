@@ -83,14 +83,15 @@ mod papers;
 mod fixtures {
     use super::*;
 
-    pub(super) fn selection_app(platform: u32) -> App {
+    pub(super) fn selection_app(platform: u32) -> App { drawing_app(platform, [64, 64]) }
+
+    pub(super) fn drawing_app(platform: u32, extent: [u32; 2]) -> App {
         let app = App::new(platform);
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
-        let project = ProjectJob::new(&app, true);
-        assert_eq!(project.create([64, 64]), 0);
+        let project = ProjectJob::create(&app, extent);
         assert_eq!(
-            unsafe { capy_apple_project_adopt(app.0, project.0, c"Selection check".as_ptr(), c"".as_ptr()) },
+            unsafe { capy_apple_project_adopt(app.0, project.0, c"Untitled".as_ptr(), c"".as_ptr()) },
             0
         );
         app.draw_until_idle();
@@ -657,11 +658,14 @@ impl Drop for ProjectJob {
     }
 }
 impl ProjectJob {
-    fn create(&self, extent: [u32; 2]) -> i32 {
-        let options = CString::new(serde_json::to_string(&layer_ui::NewDocumentOptions {
-            extent, ..Default::default()
-        }).unwrap()).unwrap();
-        unsafe { capy_project_new(self.0, options.as_ptr()) }
+    fn create(app: &App, extent: [u32; 2]) -> Self {
+        Self::create_with(app, extent, &[])
+    }
+    fn create_with(app: &App, extent: [u32; 2], edits: &[Value]) -> Self {
+        app.order_new_drawing(extent, edits);
+        let job = Self::new(app, true);
+        assert_eq!(unsafe { capy_project_new(job.0) }, 0, "{:?}", job.error());
+        job
     }
     fn new(app: &App, opening: bool) -> Self {
         if !opening {
@@ -835,8 +839,7 @@ fn project_jobs_save_specific_revisions_and_adopt_only_unchanged_editors() {
             -1,
             "Old save cannot name a replacement document"
         );
-        let new = ProjectJob::new(&app, true);
-        assert_eq!(unsafe { capy_project_read(new.0, -1, c"Drawing.capy".as_ptr()) }, 0);
+        let new = ProjectJob::create(&app, [64, 48]);
         let blank = CString::new("Untitled").unwrap();
         assert_eq!(
             unsafe { capy_apple_project_adopt(app.0, new.0, blank.as_ptr(), c"".as_ptr()) },
@@ -883,8 +886,7 @@ fn project_cancellation_and_invalid_input_preserve_live_artwork() {
             },
             -1
         );
-        let cancelled = ProjectJob::new(&app, true);
-        assert_eq!(unsafe { capy_project_read(cancelled.0, -1, c"Drawing.capy".as_ptr()) }, 0);
+        let cancelled = ProjectJob::create(&app, [64, 48]);
         unsafe { capy_project_cancel(cancelled.0) };
         assert_eq!(
             unsafe {
@@ -921,19 +923,19 @@ fn new_canvas_dimensions_and_worker_png_export_preserve_captured_pixels() {
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
             Some(native_renderer());
         app.draw_frame();
-        let invalid = ProjectJob::new(&app, true);
-        assert_eq!(invalid.create([0, 47]), -1);
-        assert_eq!(
-            unsafe { &*app.0 }.host.session.engine().document().composition().size[0],
-            2048
-        );
-        let new = ProjectJob::new(&app, true);
-        assert_eq!(
-            new.create([63, 47]),
-            0,
-            "{:?}",
-            new.error()
-        );
+        let initial = unsafe { &*app.0 }.host.session.engine().document().composition().size;
+        let unordered = ProjectJob::new(&app, true);
+        assert_eq!(unsafe { capy_project_new(unordered.0) }, -1);
+        assert!(unordered.error().is_some());
+        app.invoke("new_document");
+        app.new_drawing(json!({"op": "open", "screen": null, "untitled": "Untitled 2"}));
+        app.new_drawing(json!({"op": "unit", "unit": "px"}));
+        app.new_drawing(json!({"op": "width", "value": 1_000_000}));
+        assert_eq!(app.state()["new_drawing"]["can_create"], false);
+        assert!(app.try_request(0, &json!({"type": "new_drawing", "action": {"op": "create"}})).is_err());
+        assert!(!app.state()["new_drawing"].is_null(), "A refused Create keeps the dialog open");
+        assert_eq!(unsafe { &*app.0 }.host.session.engine().document().composition().size, initial);
+        let new = ProjectJob::create(&app, [63, 47]);
         assert_eq!(
             unsafe { capy_apple_project_adopt(app.0, new.0, c"Untitled".as_ptr(), c"".as_ptr()) },
             0
@@ -1165,6 +1167,34 @@ impl App {
     }
     fn action(&self, action: Value) {
         self.request(0, action).unwrap();
+    }
+    fn new_drawing(&self, action: Value) {
+        self.action(json!({"type": "new_drawing", "action": action}));
+    }
+    fn order_new_drawing(&self, extent: [u32; 2], edits: &[Value]) {
+        let mut pending = false;
+        for request in self.state()["requests"].as_array().unwrap().clone() {
+            if request["kind"]["type"] != "document" { continue; }
+            if request["kind"]["request"]["type"] == "new" { pending = true; continue; }
+            assert_eq!(unsafe { capy_apple_document_complete(self.0, request["id"].as_u64().unwrap() as u32, 0) }, 0);
+        }
+        if !pending { self.invoke("new_document"); }
+        self.new_drawing(json!({"op": "open", "screen": null, "untitled": "Untitled 2"}));
+        for action in [json!({"op": "unit", "unit": "px"}), json!({"op": "width", "value": extent[0]}), json!({"op": "height", "value": extent[1]}),
+            json!({"op": "paper_color"}), json!({"op": "paper_color_value", "color": {"space": "Srgb", "rgba": [1., 1., 1., 1.]}}),
+            json!({"op": "use_paper_color"})].iter().chain(edits) {
+            self.new_drawing(action.clone());
+        }
+        self.new_drawing(json!({"op": "create"}));
+        assert!(self.state()["new_drawing"].is_null());
+        self.save_settings();
+    }
+    fn save_settings(&self) {
+        for request in self.state()["requests"].as_array().unwrap().clone() {
+            if request["kind"]["type"] == "save_settings" {
+                self.action(json!({"type": "complete_request", "id": request["id"], "error": null}));
+            }
+        }
     }
     fn invoke(&self, command: &str) {
         self.action(json!({"type": "invoke", "command": command}));
@@ -1896,8 +1926,6 @@ fn stateless_native_captions_keep_the_prepared_context_and_literal_titles() {
         json!({"type":"numeric_error","reason":{"reason":"whole_number","label":{"message":"color-features-export-quality"}}}).to_string());
     assert_eq!(integer["text"], "Quality needs a whole number.");
     assert!(std::sync::Arc::ptr_eq(&localization, &layer_ui::Localizer::prepared(layer_ui::UiLanguage::English).unwrap()));
-    let appearance = localized_stateless(capy_apple_document_appearance, serde_json::to_string(&layer_ui::NewDocumentOptions::default()).unwrap());
-    assert!(appearance["summary"].as_str().is_some_and(|value| !value.is_empty()));
 }
 
 #[test]

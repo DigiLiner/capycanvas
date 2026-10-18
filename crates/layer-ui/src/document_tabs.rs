@@ -72,11 +72,15 @@ impl DocumentTabs {
     pub fn selected(&self) -> u64 {
         self.selected
     }
-    pub fn add(&mut self) -> u64 {
+    pub fn upcoming(&self) -> u64 {
         let mut id = self.next;
         while self.order.contains(&id) || self.reserved.contains(&id) {
             id = if id == crate::session_recovery::MAX_SESSION_DRAWING_ID { 1 } else { id + 1 };
         }
+        id
+    }
+    pub fn add(&mut self) -> u64 {
+        let id = self.upcoming();
         self.next = if id == crate::session_recovery::MAX_SESSION_DRAWING_ID { 1 } else { id + 1 };
         self.order.push(id);
         self.selected = id;

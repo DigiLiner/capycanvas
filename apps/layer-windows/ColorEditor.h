@@ -21,4 +21,15 @@ inline void copyText(hstring const& text){
 }
 using ColorAccepted=std::function<void(J,std::optional<double>)>;
 void EditColor(std::shared_ptr<WorkspaceData> const& data,UIElement const& owner,J const& target,bool opaque,ColorAccepted accepted);
+struct ColorForm {
+    std::shared_ptr<void> owner;
+    Grid body,head;
+    StackPanel below;
+    std::function<void(J const&)> choose;
+    std::function<void(std::optional<hstring> const&)> transparent;
+    std::function<void(bool)> arrange;
+    std::function<bool()> escape,commit;
+    std::function<void()> close;
+};
+std::optional<ColorForm> EmbedColor(std::shared_ptr<WorkspaceData> const& data,J const& color,std::function<void(J const&)> viewed,std::function<void(bool)> blocked);
 }

@@ -4515,12 +4515,14 @@ class AndroidInteractionTest {
 
         var first = 0L
         onMain { first = host.drawingTabs.selected }
+        DocumentController.nativeFileJobsForTest = true
         val task = kotlinx.coroutines.runBlocking { host.withNative { h ->
             val (id, file) = documentRequest(h, "new_document")
+            orderDrawing(h, 640, 480)
             Native.projectTask(h, id, "null", file.getLong("epoch"), file.getLong("revision"))
         } }
         try {
-            Native.projectWork(task, -1, 640, 480)
+            Native.projectWork(task, -1, "")
             val until = SystemClock.uptimeMillis() + 60_000
             while (!kotlinx.coroutines.runBlocking { host.withNative { Native.projectParkReady(it, task) } }) {
                 assertTrue("the first drawing parks", SystemClock.uptimeMillis() < until); SystemClock.sleep(16)
@@ -4529,6 +4531,7 @@ class AndroidInteractionTest {
         } finally { Native.projectFree(task) }
         onMain { host.documentChanged() }
         waitFor("a second drawing", 30_000) { !host.drawingTabs.switching && host.drawingTabs.rows.size == 2 && host.drawingTabs.selected != first }
+        DocumentController.nativeFileJobsForTest = false
         onMain { host.drawingTabs.select(first) }
         waitFor("the first drawing returns", 30_000) { !host.drawingTabs.switching && host.drawingTabs.selected == first && hasSelection() }
         waitFor("drawing tabs in the header", 10_000) { exists("drawing-tab-$first") }

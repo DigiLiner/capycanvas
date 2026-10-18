@@ -27,7 +27,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 @Composable internal fun PickerDialog(host: CanvasHost, windowed: Boolean, tag: String, keys: (AndroidKeyEvent) -> Boolean, dismiss: () -> Unit,
-    page: @Composable BoxScope.() -> Unit, footer: @Composable RowScope.() -> Unit) {
+    page: @Composable BoxScope.() -> Unit, sheet: @Composable BoxScope.() -> Unit = {}, footer: @Composable RowScope.() -> Unit) {
     val colors = LocalPalette.current
     val currentKeys by rememberUpdatedState(keys)
     val keyHandler = remember(host) { { event: AndroidKeyEvent -> currentKeys(event) } }
@@ -42,11 +42,12 @@ import androidx.compose.ui.window.DialogProperties
         Surface(Modifier.padding(16.dp).widthIn(max = 720.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp - 32).dp)
             .focusRequester(focus).onPreviewKeyEvent { keyHandler(it.nativeKeyEvent) }.focusable()
             .testTag(tag), shape = SquircleShape(20.dp), color = colors.settingsBackground) {
-            Column {
-                Box(Modifier.weight(1f, fill = false).clipToBounds(), content = page)
-                HorizontalDivider(Modifier.testTag("$tag-divider"), color = colors.divider)
-                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp), content = footer)
+            Box {
+                Column {
+                    Box(Modifier.weight(1f, fill = false).clipToBounds(), content = page)
+                    PickerFooter(tag, footer)
+                }
+                sheet()
             }
         }
     }
@@ -57,6 +58,12 @@ import androidx.compose.ui.window.DialogProperties
         }.testTag("$tag-scrim"))
         card()
     }
+}
+
+@Composable internal fun PickerFooter(tag: String, content: @Composable RowScope.() -> Unit) {
+    HorizontalDivider(Modifier.testTag("$tag-divider"), color = LocalPalette.current.divider)
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp), content = content)
 }
 
 @Composable internal fun DialogTitle(text: String, tag: String) =

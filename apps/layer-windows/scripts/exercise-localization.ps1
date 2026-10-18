@@ -281,9 +281,8 @@ try{
  Wait-Until {@(Windows).Count -eq 3} 'Text-draft window did not register' 45
  $textWindow=@(Windows|Where-Object {$_.id -ne $first.id -and $_.id -ne $second.id})[0];Ready $textWindow;Use-Window $textWindow
  Menu-Command 'file' 'new_document'
- (Control 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('64')
- (Control 'document-height').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('64')
- Invoke 'PrimaryButton';Idle
+ New-DrawingPixels 64 64
+ Invoke 'new-drawing-create';Idle
  Wait-Until {$view=Model;$view -and $view.state.tabs[-1].width -eq 64 -and $view.state.tabs[-1].height -eq 64} 'Small test drawing did not prepare' 45
  $layer=(Fresh-Model).state.layer_tools.editing_layer.id
  Invoke "layer-$layer-name";(Control "layer-$layer-name").SetFocus();Key 113
@@ -397,7 +396,7 @@ try{
  $lastChoice=Language-Choice $lastIndex
  Request-Language 1;Request-Language $lastIndex;Request-Language 1
  foreach($window in @($first,$textWindow)){Wait-Until {(Model $window).windows_active_tag -eq $seen[0].tag} 'Rapid choices left a stale context in another window' 30}
- Use-Window $first;Invoke 'CloseButton';Idle
+ Use-Window $first;Invoke 'new-drawing-cancel';Idle
  Use-Window $textWindow;Invoke 'CloseButton'
  Wait-Until {$view=Model;$view -and !(Find 'workspace-manager' -Visible) -and !$view.windows_workspace.prompt -and !$view.windows_workspace.busy} 'Dirty toolbar-name draft did not cancel' 15
  Focus-Canvas

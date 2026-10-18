@@ -121,6 +121,10 @@ impl<T> DocumentSessions<T> {
         true
     }
 
+    pub fn upcoming_untitled(&self, localization: &Localizer) -> String {
+        DocumentTabLabel::untitled(self.tabs.upcoming(), localization)
+    }
+
     pub fn parked(&self) -> impl Iterator<Item = (&u64, &ParkedDocument<T>)> {
         self.parked.iter()
     }

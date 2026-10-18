@@ -225,8 +225,7 @@ try {
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File'
     Wait-Until {$item=Find 'new_document';$item -and $item.Current.IsEnabled} 'New drawing menu item stayed disabled'
     Invoke 'new_document'
-    (Control 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('128')
-    (Control 'document-height').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('64')
+    New-DrawingPixels 128 64
     Invoke 'Create' -Name
     Wait-Until {(Model).state.tabs[0].width -eq 128 -and (Model).state.tabs[0].height -eq 64 -and !(Model).state.document_file.busy} 'Different-aspect document was not adopted' 45
     Wait-Until {(Control 'drawing-canvas').Current.IsEnabled} 'Document dialog input gate did not clear'

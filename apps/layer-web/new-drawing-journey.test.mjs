@@ -1,0 +1,276 @@
+import assert from 'node:assert/strict';
+import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
+
+const dialog='#new-drawing-dialog[open]';
+
+export async function checkNewDrawing({call,evaluate,settle}) {
+  const directory=process.env.LAYER_TEST_ARTIFACTS??'artifacts/new-drawing-dialog/web';
+  await mkdir(directory,{recursive:true});
+  const wait=(condition,timeout=30000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){try{if(${condition})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20);}catch(e){reject(e)}}poll();})`);
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const view=()=>evaluate('JSON.parse(JSON.stringify(layerApp.state().new_drawing))');
+  const drawer=async()=>(await view())?.drawer??null;
+  const node=selector=>`document.querySelector(${JSON.stringify(selector)})`;
+  const text=selector=>evaluate(`${node(selector)}?.textContent??null`);
+  const press=async(find,button='left')=>{
+    const r=await evaluate(`(()=>{const n=${find};n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    for(const type of ['mouseMoved','mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...r,button:type==='mouseMoved'?'none':button,buttons:type==='mousePressed'?(button==='right'?2:1):0,clickCount:1});
+    await settle();
+  };
+  const click=selector=>press(node(selector));
+  const doubleClick=async find=>{
+    const r=await evaluate(`(()=>{const n=${find};n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    for(const clickCount of [1,2])for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,...r,button:'left',buttons:type==='mousePressed'?1:0,clickCount});
+    await settle();
+  };
+  const key=async(key,code=key,keyCode=0)=>{for(const type of ['keyDown','keyUp'])await call('Input.dispatchKeyEvent',{type,key,code,windowsVirtualKeyCode:keyCode});await settle();};
+  const type=async(selector,value)=>{
+    await evaluate(`(()=>{const n=${node(selector)};n.focus();n.select();})()`);
+    await call('Input.insertText',{text:value});await settle();
+  };
+  const choose=async(selector,label)=>{
+    await evaluate(`(()=>{const s=${node(selector)};const o=[...s.options].find(o=>o.textContent===${JSON.stringify(label)});if(!o)throw Error('Missing option '+${JSON.stringify(label)});s.value=o.value;s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+    await settle();
+  };
+  const menuItem=label=>`[...document.querySelectorAll('${dialog} .new-drawing-menu:popover-open button')].find(n=>n.firstChild.textContent===${JSON.stringify(label)})`;
+  const capture=async name=>{
+    await settle();await pause(320);
+    await writeFile(`${directory}/${name}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png'})).data,'base64'));
+  };
+  const open=async()=>{
+    await wait("!layerApp.documents.busy()&&layerApp.state().commands.find(c=>c.id==='new_document').enabled");
+    await evaluate(`layerApp.dispatch({type:'invoke',command:'new_document'})`);
+    await wait(`!!document.querySelector('${dialog}')&&!!layerApp.state().new_drawing`);await settle();
+  };
+  const slid=async id=>{await wait(`document.querySelector('#${id}').classList.contains('open')&&!document.querySelector('#${id}').hidden`);await pause(300);};
+  const shut=id=>wait(`document.querySelector('#${id}').hidden`);
+  await wait('window.layerApp && layerApp.startupTimes.complete!==null');
+  await wait('JSON.parse(layerApp.app.workspace_view())?.ready && !JSON.parse(layerApp.app.workspace_view()).busy');
+  for(const theme of ['light','dark']) {
+    await evaluate(`layerApp.dispatch({type:'set_theme',theme:'${theme}'})`);await settle();
+    const tabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');
+    await open();
+    const opened=await view();
+    assert.equal(opened.untitled,await evaluate('layerApp.app.document_tabs(0).upcoming_untitled'),'The next untitled name opens the dialog');
+    assert.equal(await evaluate(`${node('#new-drawing-name')}.placeholder`),opened.untitled,'Name shows the next untitled name');
+    assert.equal(await text('#new-drawing-caption'),`${opened.page.preset} · ${opened.page.orientation_label}`,'The preview caption names the preset and orientation');
+    assert.equal(await text('#new-drawing-capacity'),opened.page.capacity);
+    assert.equal(await evaluate(`${node('#new-drawing-capacity')}.title`),opened.page.memory,'The capacity line explains the layer memory');
+    assert.equal(await text('#new-drawing-size'),opened.page.size);
+    const layout=await evaluate(`(()=>{const box=s=>document.querySelector(s).getBoundingClientRect(),w=box('#new-drawing-width'),h=box('#new-drawing-height'),p=box('#new-drawing-preview'),o=box('#new-drawing-orientation'),f=box('.new-drawing-form');
+      return{equal:Math.abs(w.width-h.width)<.5,height:[w.height,h.height,box('#new-drawing-name').height,box('#new-drawing-unit').height,box('#new-drawing-resolution-field').height],preview:[Math.round(p.width),Math.round(p.height)],right:Math.round(f.right-o.right)}})()`);
+    assert.deepEqual(layout,{equal:true,height:[34,34,34,34,34],preview:[232,250],right:0},`Main page geometry ${JSON.stringify(layout)}`);
+    await capture(`${theme}-1-main`);
+
+    await click('#new-drawing-resolution-choices');await wait(`!!document.querySelector('${dialog} .new-drawing-menu:popover-open')`);
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('${dialog} .new-drawing-menu button')].map(n=>[n.firstChild.textContent,n.lastChild.textContent,n.classList.contains('selected')])`),
+      opened.resolutions.map(r=>[r.label,r.purpose,r.selected]),'Common resolutions list their purposes');
+    await capture(`${theme}-1b-resolution-menu`);
+    await press(menuItem(opened.resolutions.find(r=>r.value===150).label));
+    assert.equal((await view()).setup.resolution,150,'A common resolution sets the resolution');
+    assert.equal(await evaluate(`${node('#new-drawing-resolution-field input')}.value`),'150');
+
+    await choose('#new-drawing-unit',opened.units.find(u=>u.value==='px').label);
+    assert.equal((await view()).setup.unit,'px','The unit dropdown switches to pixels');
+    await type('#new-drawing-width input','1200');
+    assert.equal((await view()).values[0],1200,'Typed width follows the typing');
+    await key('Enter','Enter',13);
+    await click('#new-drawing-link');assert.equal((await view()).linked,true,'The link toggle links width and height');
+    assert.equal(await evaluate(`${node('#new-drawing-link')}.getAttribute('aria-pressed')`),'true');
+    const ratio=(await view()).values[1]/(await view()).values[0];
+    await type('#new-drawing-width input','600');await key('Enter','Enter',13);
+    assert.equal(Math.round((await view()).values[1]),Math.round(600*ratio),'Linked sizes keep their proportions');
+    await click('#new-drawing-link');
+    await type('#new-drawing-height input','400');await key('Enter','Enter',13);
+    assert.deepEqual((await view()).values,[600,400],'Unlinked height changes alone');
+    await click('#new-drawing-portrait');
+    assert.deepEqual([(await view()).values,(await view()).page.orientation],[[400,600],'portrait'],'Portrait turns the sheet');
+    await type('#new-drawing-resolution-field input','ppi');await key('Enter','Enter',13);
+    assert.equal(await evaluate(`${node('#new-drawing-resolution-field .number-control')}.classList.contains('error')`),true,'Malformed resolution text is refused in place');
+    await key('Escape','Escape',27);
+    assert.deepEqual([!!await evaluate(`document.querySelector('${dialog}')`),await evaluate(`${node('#new-drawing-resolution-field input')}.value`)],[true,'150'],'Escape in a number restores it and keeps the dialog');
+    await choose('#new-drawing-depth',opened.depths.find(d=>d.value==='F16').label);
+    assert.equal(await evaluate(`${node('#new-drawing-blending')}.disabled`),true,'Float depths fix the blending');
+    assert.equal(await evaluate(`${node('#new-drawing-blending')}.closest('label').title`),(await view()).blending_note);
+    await choose('#new-drawing-depth',opened.depths.find(d=>d.value==='U8').label);
+    await choose('#new-drawing-space',opened.spaces.find(s=>s.value==='DisplayP3').label);
+    assert.equal((await view()).setup.color.space,'DisplayP3');
+
+    await click('#new-drawing-presets-button');await slid('new-drawing-browser');
+    assert.equal(await evaluate('document.activeElement.id'),'new-drawing-search','Presets focus the search');
+    assert.equal(await evaluate(`document.querySelector('.new-drawing-main').inert`),true,'Drawers disable the page');
+    await capture(`${theme}-2-presets`);
+    let browser=await drawer();
+    assert.equal(browser.kind,'presets');
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('#new-drawing-tabs button')].map(n=>[n.textContent,n.getAttribute('aria-selected')==='true'])`),browser.tabs.map(t=>[t.label,t.selected]));
+    await call('Input.insertText',{text:'chalk'});await settle();
+    browser=await drawer();
+    assert.equal(browser.query,'chalk','Search filters the presets');
+    assert.equal(await evaluate(`[...document.querySelectorAll('#new-drawing-tabs button')].every(n=>n.disabled)`),true,'Tabs wait while searching');
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('#new-drawing-presets .new-drawing-tile-name')].map(n=>n.textContent)`),browser.tiles.map(t=>t.name));
+    await key('Escape','Escape',27);
+    assert.equal((await drawer())?.query,'','Escape clears the search first');
+    const pastel=(await drawer()).tabs.findIndex(t=>t.label==='Pastel');
+    await click(`#new-drawing-tabs [data-new-drawing-tab="${pastel}"]`);
+    browser=await drawer();assert.equal(browser.tabs[pastel].selected,true,'A tab shows its presets');
+    const chalkboard=browser.tiles.findIndex(t=>t.name==='Chalkboard');
+    await click(`#new-drawing-presets [data-new-drawing-preset="${chalkboard}"]`);
+    browser=await drawer();
+    assert.equal(browser.tiles[chalkboard].selected,true,'Clicking a preset picks it');
+    assert.equal(await text('#new-drawing-summary-name'),'Chalkboard','The footer summarizes the pick');
+    await capture(`${theme}-3-presets-pastel`);
+    await click('#new-drawing-save-as');
+    assert.equal(await evaluate('document.activeElement.id'),'new-drawing-save-name','Save As names the preset');
+    await call('Input.insertText',{text:'Studio wall'});await settle();
+    assert.equal((await drawer()).save.name,'Studio wall');
+    await capture(`${theme}-4-save-as`);
+    await click('#new-drawing-save-confirm');
+    browser=await drawer();
+    const own=browser.tiles.findIndex(t=>t.own&&t.name==='Studio wall');
+    assert.ok(own>=0&&browser.tiles[own].selected&&browser.tabs.find(t=>t.selected).label==='Your presets','The saved preset is picked under Your presets');
+    await press(node(`#new-drawing-presets [data-new-drawing-preset="${own}"]`),'right');
+    await wait(`!!document.querySelector('${dialog} .new-drawing-menu:popover-open')`);
+    await press(menuItem((await view()).copy.rename));
+    assert.equal((await drawer()).save?.name,'Studio wall','Rename starts naming the preset');
+    await type('#new-drawing-save-name','Studio chalk');
+    await choose('#new-drawing-save-group','Pastel');
+    assert.equal(await text('#new-drawing-save-confirm'),(await drawer()).save.confirm);
+    await click('#new-drawing-save-confirm');
+    browser=await drawer();
+    const renamed=browser.tiles.findIndex(t=>t.own&&t.name==='Studio chalk');
+    assert.ok(renamed>=0&&browser.tabs.find(t=>t.selected).label==='Pastel','Renaming moves the preset to its category');
+    await press(node(`#new-drawing-presets [data-new-drawing-preset="${renamed}"]`),'right');
+    await wait(`!!document.querySelector('${dialog} .new-drawing-menu:popover-open')`);
+    await press(menuItem((await view()).copy.delete));
+    assert.equal((await evaluate('(layerApp.state().settings.new_document.setups??[]).length')),0,'Delete removes the preset');
+    browser=await drawer();
+    const sketch=browser.tabs.findIndex(t=>t.label==='Sketch');
+    await click(`#new-drawing-tabs [data-new-drawing-tab="${sketch}"]`);
+    const kraft=(await drawer()).tiles.findIndex(t=>t.name==='Kraft paper');
+    await doubleClick(node(`#new-drawing-presets [data-new-drawing-preset="${kraft}"]`));
+    await shut('new-drawing-browser');
+    assert.equal((await view()).page.preset,'Kraft paper','Double-clicking a preset selects it');
+    assert.equal(await evaluate('document.activeElement.id'),'new-drawing-presets-button','Closing Presets returns to its button');
+
+    await click('#new-drawing-preview');await slid('new-drawing-browser');
+    await click('#new-drawing-select');await shut('new-drawing-browser');
+    assert.equal((await view()).page.preset,'Kraft paper','The preview opens Presets and Select keeps the pick');
+
+    await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
+    let paper=await drawer();
+    assert.equal(paper.tiles[0].id??null,null,'No paper comes first');
+    assert.equal(await evaluate(`!!document.querySelector('#new-drawing-papers [data-new-drawing-paper="0"] svg')`),true,'No paper shows its icon');
+    await capture(`${theme}-6-paper`);
+    const cold=paper.tiles.findIndex(t=>t.id==='cold_press');
+    await click(`#new-drawing-papers [data-new-drawing-paper="${cold}"]`);
+    assert.equal(await evaluate(`${node(`#new-drawing-papers [data-new-drawing-paper="${cold}"]`)}.getAttribute('aria-checked')`),'true','Clicking a paper picks it');
+    await click('#new-drawing-paper-use');await shut('new-drawing-paper-drawer');
+    assert.equal((await view()).setup.paper.texture,'cold_press','Use Texture chooses the paper');
+    assert.equal(await text('#new-drawing-texture .new-drawing-tile-label'),(await view()).page.texture);
+    if(theme==='light') {
+      await evaluate(`(async()=>{
+        const canvas=new OffscreenCanvas(64,48),context=canvas.getContext('2d');
+        for(let y=0;y<48;y++)for(let x=0;x<64;x++){const v=(x*7+y*3)%256;context.fillStyle='rgb('+v+','+v+','+v+')';context.fillRect(x,y,1,1);}
+        const file=new File([await canvas.convertToBlob({type:'image/png'})],'Linen scan.png',{type:'image/png'});
+        const click=HTMLInputElement.prototype.click;
+        HTMLInputElement.prototype.click=function(){
+          if(this.type!=='file'||this.accept!=='image/*')return click.call(this);
+          HTMLInputElement.prototype.click=click;
+          const transfer=new DataTransfer();transfer.items.add(file);this.files=transfer.files;this.dispatchEvent(new Event('change'));
+        };
+      })()`);
+      await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
+      await click('#new-drawing-paper-import');
+      await wait(`layerApp.state().new_drawing?.drawer?.tiles?.some(t=>t.label==='Linen scan'&&t.selected)`);
+      assert.equal(await evaluate(`document.querySelector('#new-drawing-papers [aria-checked=true] .texture-caption').textContent`),'Linen scan','Import… adds the paper and picks it');
+      await key('Escape','Escape',27);await shut('new-drawing-paper-drawer');
+      assert.equal((await view()).setup.paper.texture,'cold_press','Escape leaves the paper unchanged');
+    }
+
+    await click('#new-drawing-paper-color');await slid('new-drawing-color-drawer');
+    await wait(`document.querySelector('#new-drawing-color-drawer .color-wheel').width>0`);
+    let colors=await drawer();
+    assert.equal(colors.kind,'paper_color');
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('#new-drawing-color-drawer .color-copy, #new-drawing-color-drawer .color-pick:not([hidden]), #new-drawing-color-drawer .color-current:not([hidden])')].length`),0,'Paper color hides copy, the eyedropper and the current patch');
+    assert.equal(await text('#new-drawing-color-drawer .color-editor-title'),(await view()).copy.paper_color);
+    assert.equal(await text('#new-drawing-color-drawer .new-drawing-palette-head span:last-child'),colors.count,'Paper colors shows its count');
+    const kraftColor=colors.palette.findIndex(c=>c.name==='Kraft');
+    await click(`#new-drawing-paper-color-tiles [data-new-drawing-paper-color="${kraftColor}"]`);
+    colors=await drawer();
+    assert.equal(colors.palette[kraftColor].selected,true,'A paper color tile sets the color');
+    assert.equal(await evaluate(`${node(`#new-drawing-paper-color-tiles [data-new-drawing-paper-color="${kraftColor}"]`)}.classList.contains('selected')`),true);
+    await capture(`${theme}-7-paper-color`);
+    await click('#new-drawing-color-drawer .color-hex .color-value');
+    await call('Input.insertText',{text:'#E07080'});await key('Enter','Enter',13);
+    colors=await drawer();
+    assert.equal(colors.can_add,true,'A new color can join the paper colors');
+    const count=colors.palette.length;
+    await click('#new-drawing-add-paper-color');
+    assert.equal((await drawer()).palette.length,count+1,'+ adds the color');
+    await press(node(`#new-drawing-paper-color-tiles [data-new-drawing-paper-color="${count}"]`),'right');
+    await wait(`!!document.querySelector('${dialog} .new-drawing-menu:popover-open')`);
+    await press(menuItem((await view()).copy.delete));
+    assert.equal((await drawer()).palette.length,count,'Delete removes the paper color');
+    await click('#new-drawing-color-mode-transparent');
+    colors=await drawer();
+    assert.equal(colors.transparent,true,'Transparent clears the sheet');
+    assert.deepEqual(await evaluate(`(()=>{const d=document.querySelector('#new-drawing-color-drawer');return[d.querySelector('.color-hex .color-value').textContent,d.querySelector('.color-new').classList.contains('new-drawing-clear'),getComputedStyle(d.querySelector('.color-editor-left')).opacity]})()`),
+      [(await view()).copy.transparent,true,'0.4'],'Transparent dims the editor and clears the New patch');
+    await capture(`${theme}-8-transparent`);
+    await click('#new-drawing-color-use');await shut('new-drawing-color-drawer');
+    assert.equal((await view()).page.paper_color,(await view()).copy.transparent,'Use Color keeps the transparent sheet');
+    assert.equal(await evaluate('document.activeElement.id'),'new-drawing-paper-color');
+
+    await click('#new-drawing-cancel');
+    await wait(`!document.querySelector('${dialog}')&&!layerApp.state().new_drawing&&!layerApp.state().requests.some(r=>r.kind.type==='document')`);
+    assert.equal(await evaluate('layerApp.app.document_tabs(0).tabs.length'),tabs,'Cancel creates nothing');
+
+    await open();
+    await key('Escape','Escape',27);
+    await wait(`!document.querySelector('${dialog}')&&!layerApp.state().requests.some(r=>r.kind.type==='document')`);
+    assert.equal(await evaluate('layerApp.app.document_tabs(0).tabs.length'),tabs,'Escape on the page cancels');
+
+    await open();
+    const name=`Harbor study ${theme}`;
+    await type('#new-drawing-name',name);
+    assert.equal((await view()).name,name);
+    await choose('#new-drawing-unit',(await view()).units.find(u=>u.value==='px').label);
+    await type('#new-drawing-width input','640');
+    await type('#new-drawing-height input','480');
+    await click('#new-drawing-create');
+    await wait(`!document.querySelector('${dialog}')&&!layerApp.documents.busy()&&layerApp.app.document_tabs(0).tabs.length===${tabs+1}`,60000);
+    const created=await evaluate('(t=>({title:t.tabs.find(tab=>String(tab.id)===String(t.selected)).title,size:[layerApp.state().tabs[0].width,layerApp.state().tabs[0].height]}))(layerApp.app.document_tabs(0))');
+    assert.deepEqual(created,{title:name,size:[640,480]},'Create opens a named drawing at the typed size');
+  }
+  await evaluate('layerApp.documents.autosave()');
+  const reloadedFrom=await evaluate('performance.timeOrigin');
+  await call('Page.reload',{ignoreCache:true});
+  for(;;)try{await wait(`performance.timeOrigin!==${reloadedFrom}&&window.layerApp?.startupTimes.complete!=null`,60000);break;}
+    catch(error){if(!/navigated|context|Cannot find/i.test(String(error)))throw error;}
+  await wait('JSON.parse(layerApp.app.workspace_view())?.ready&&!JSON.parse(layerApp.app.workspace_view()).busy&&!layerApp.documents.busy()',60000);
+  await open();
+  await click('#new-drawing-texture');await slid('new-drawing-paper-drawer');
+  await wait(`layerApp.state().new_drawing.drawer.tiles.some(t=>t.label==='Linen scan')`);
+  const stored=(await drawer()).tiles.findIndex(t=>t.label==='Linen scan');
+  await click(`#new-drawing-papers [data-new-drawing-paper="${stored}"]`);await click('#new-drawing-paper-use');await shut('new-drawing-paper-drawer');
+  const before=await evaluate('layerApp.app.document_tabs(0).tabs.length');
+  await evaluate(createDrawing({width:320,height:240,paper:null}));
+  await wait(`layerApp.app.document_tabs(0).tabs.length===${before+1}&&!layerApp.documents.busy()&&layerApp.app.brush_ready()`,60000);
+  await evaluate(`layerApp.dispatch({type:'select_layer',id:layerApp.state().layers.find(l=>l.label==='Paper').id})`);await settle();
+  const texture="layerApp.state().layer_properties.controls.find(c=>c.key==='texture')";
+  await wait(`!!${texture}?.paper`);
+  assert.equal(await evaluate(`${texture}.paper.tiles[${texture}.value.value].label`),'Linen scan','A drawing on a stored library paper loads that paper');
+  const width=await evaluate('innerWidth'),height=await evaluate('innerHeight');
+  await call('Emulation.setDeviceMetricsOverride',{width:640,height:860,deviceScaleFactor:1,mobile:false});await settle();
+  try {
+    await open();
+    const narrow=await evaluate(`(()=>{const p=document.querySelector('#new-drawing-preview').getBoundingClientRect(),f=document.querySelector('.new-drawing-form').getBoundingClientRect();return{stacked:p.bottom<=f.top,width:Math.round(p.width)}})()`);
+    assert.deepEqual(narrow,{stacked:true,width:348},'Narrow windows stack the preview above the form');
+    await capture('narrow');
+    await click('#new-drawing-cancel');await wait(`!document.querySelector('${dialog}')`);
+  } finally {
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await settle();
+  }
+  console.log('PASS: New drawing opens with the next untitled name, edits size, unit, link, orientation and resolution, browses, searches, saves, renames and deletes presets, picks and imports paper, creates on a stored library paper, edits, adds, deletes and clears paper colors, cancels and creates a named drawing in both themes');
+}

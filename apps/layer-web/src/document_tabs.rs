@@ -65,6 +65,7 @@ impl WebApp {
         serialize(&serde_json::json!({
             "tabs": self.documents.labels(&self.session.state().document_file, |s| &s.state().document_file, self.session.localization()),
             "selected": self.documents.selected(),
+            "upcoming_untitled": self.documents.upcoming_untitled(self.session.localization()),
             "compact": layer_ui::DocumentTabs::compact(width, self.documents.order().len()),
             "can_undo": self.documents.can_undo(),
             "can_redo": self.documents.can_redo(),

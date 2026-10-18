@@ -153,7 +153,7 @@ private final class PaperCaptureGate: @unchecked Sendable {
         let store = EditorStore(platform:platform,persistence:persistence)
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(
             open: { _, done in done(paperOnly && !cancelPaperImport ? [paperInput] : []) }, save: { _, type, done in done(type == .capyProject ? project : png) },
-            create: { _, done in done(JSON(["extent": [128, 128], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])) }, exportOptions: { $0.choose($0.recipe) }))
+            create: { _, done in done(newSheet([128, 128], space: "Srgb", depth: "U8")) }, exportOptions: { $0.choose($0.recipe) }))
         let window = NSWindow(contentRect: CGRect(x: 80, y: 80, width: 1200, height: 870),
             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false; window.animationBehavior = .none

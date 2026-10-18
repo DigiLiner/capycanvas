@@ -57,7 +57,7 @@ import ImageIO
             var saveLocation: URL? = target
             var openLocation: URL? = target
             var choices = 0
-            var creationOptions: JSON? = JSON(["extent": [63, 47], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])
+            var creationOptions: [[String: Any]]? = newSheet([63, 47], space: "Srgb", depth: "U8")
             var beforeOpen: (() -> Void)?
             store.projectFiles = ProjectFiles(store: store, dialogs: .init(
                 open: { _, done in choices += 1; beforeOpen?(); done(openLocation.map { [$0] } ?? []) },
@@ -67,8 +67,8 @@ import ImageIO
                     }
                     choices += 1; callback(saveLocation)
                 },
-                create: { spec, callback in
-                    precondition(spec["extent"][0].uint == 2048 && spec["maximum"].uint == 8192)
+                create: { dialog, callback in
+                    precondition(!dialog["untitled"].string.isEmpty && dialog["drawer"].isNull && dialog["can_create"].bool)
                     callback(creationOptions)
                 },
                 export: platform == 0 ? { staging, callback in

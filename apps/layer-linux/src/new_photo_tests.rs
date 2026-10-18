@@ -332,113 +332,43 @@ fn native_new_presets_and_profiled_photo_master() {
     }));
     w.window.present();
     ready(&w);
-    invoke(&w, CommandId::NewDocument);
-    assert_eq!(combo(&w, "new-document-space").selected(), 0);
-    assert_eq!(combo(&w, "new-document-depth").selected(), 0);
-    combo(&w, "new-document-preset").set_selected(2);
-    assert_eq!(combo(&w, "new-document-space").selected(), 1);
-    assert_eq!(combo(&w, "new-document-depth").selected(), 0);
-    combo(&w, "new-document-background").set_selected(1);
-    for name in ["new-document-width", "new-document-height"] {
-        named::<adw::SpinRow>(w.window.upcast_ref(), name)
-            .set_value(256.);
+    let action = |action| super::new_drawing_review::new_drawing_action(&w, action);
+    super::new_drawing_review::open_new_drawing(&w);
+    for edit in [NewDrawingAction::Space { space: RgbSpace::DisplayP3 }, NewDrawingAction::Unit { unit: LengthUnit::Px },
+        NewDrawingAction::Width { value: 256. }, NewDrawingAction::Height { value: 256. }, NewDrawingAction::PaperColor,
+        NewDrawingAction::Transparent { transparent: true }, NewDrawingAction::UsePaperColor, NewDrawingAction::Presets,
+        NewDrawingAction::SaveAs, NewDrawingAction::PresetName { text: "Wide sticker".into() }, NewDrawingAction::SavePreset] {
+        action(edit);
     }
-    let options = NewDocumentOptions {
-        extent: [256, 256],
-        color: DocumentColor {
-            space: RgbSpace::DisplayP3,
-            depth: SampleDepth::U8,
-        },
-        background: DocumentBackground::Transparent,
-        blend_space: layer_core::BlendSpace::Perceptual,
-        resolution: 300,
-    };
-    click(&named::<gtk::Button>(w.window.visible_dialog().unwrap().upcast_ref(), "new-document-save-preset"));
-    pump(100);
-    named::<adw::EntryRow>(w.window.visible_dialog().unwrap().upcast_ref(), "new-document-preset-name")
-    .set_text("HDR drawing");
-    response(&w, "save");
-    assert_eq!(state(&w).settings.new_document.presets[0].options, options);
-    assert_eq!(state(&w).settings.new_document.presets[0].name, "HDR drawing");
-    assert_eq!(combo(&w, "new-document-preset").selected(), 5);
-    named::<gtk::CheckButton>(w.window.upcast_ref(), "new-document-remember")
-        .set_active(true);
+    assert_eq!(state(&w).settings.new_document.setups[0].name, "Wide sticker");
+    action(NewDrawingAction::UsePreset);
     capture_ui(&w, &output, "new-p3-preset.png");
-    response(&w, "create");
+    super::new_drawing_review::close_new_drawing(&w, "new-drawing-create");
     finish(&w);
-    assert_eq!(state(&w).settings.new_document.defaults, options);
-    assert_eq!(
-        crate::preferences::load().unwrap().unwrap().new_document,
-        state(&w).settings.new_document
-    );
+    assert_eq!(crate::preferences::load().unwrap().unwrap().new_document, state(&w).settings.new_document);
     let (painting, location) = created.borrow_mut().take().unwrap();
-    assert_eq!(painting.composition().color, options.color);
+    assert_eq!(painting.composition().color, DocumentColor { space: RgbSpace::DisplayP3, depth: SampleDepth::U8 });
+    assert_eq!(painting.composition().size, [256, 256]);
     assert!(!occurrence_at(&painting, 1).visible);
     assert!(location.is_none());
-    invoke(&w, CommandId::NewDocument);
-    assert_eq!(combo(&w, "new-document-preset").selected(), 5);
-    assert!(named::<gtk::Button>(w.window.upcast_ref(), "new-document-remove-preset").is_sensitive());
-    combo(&w, "new-document-preset").set_selected(4);
-    assert_eq!(combo(&w, "new-document-depth").selected(), 2);
-    assert!(!named::<gtk::Button>(w.window.upcast_ref(), "new-document-remove-preset").is_sensitive());
-    combo(&w, "new-document-preset").set_selected(5);
-    assert_eq!(combo(&w, "new-document-space").selected(), 1);
-    assert_eq!(combo(&w, "new-document-depth").selected(), 0);
-    combo(&w, "new-document-preset").set_selected(3);
-    assert_eq!(combo(&w, "new-document-space").selected(), 3);
-    assert_eq!(combo(&w, "new-document-depth").selected(), 1);
-    capture_ui(&w, &output, "new-photo-preset.png");
-    named::<adw::ExpanderRow>(w.window.upcast_ref(), "new-document-color")
-        .set_expanded(true);
-    combo(&w, "new-document-space").set_selected(2);
-    combo(&w, "new-document-depth").set_selected(0);
-    assert_eq!(combo(&w, "new-document-preset").selected(), 0);
-    pump(220);
-    capture_ui(&w, &output, "new-adobe8-color-options.png");
-    combo(&w, "new-document-space").set_selected(3);
-    combo(&w, "new-document-depth").set_selected(1);
-    response(&w, "cancel");
+    super::new_drawing_review::open_new_drawing(&w);
+    assert_eq!(ui_session(&w).new_drawing_view().unwrap().page.preset, "Wide sticker");
+    action(NewDrawingAction::Presets);
+    let Some(NewDrawingDrawerView::Presets(browser)) = ui_session(&w).new_drawing_view().unwrap().drawer.clone() else { panic!("the presets") };
+    action(NewDrawingAction::DeletePreset { index: browser.tiles.iter().position(|tile| tile.own).unwrap() });
+    assert!(state(&w).settings.new_document.setups.is_empty());
+    super::new_drawing_review::close_new_drawing(&w, "new-drawing-cancel");
     finish(&w);
     assert!(created.borrow().is_none());
-    assert_eq!(state(&w).settings.new_document.defaults, options);
-    // A new window must allocate its renderer in the remembered native mode.
     let fresh = Workspace::new(&app);
     fresh.window.present();
     ready(&fresh);
-    assert_eq!(
-        ui_session(&fresh)
-            .engine()
-            .document().composition().color,
-        options.color
-    );
-    assert_eq!(
-        ui_session(&fresh)
-            .engine()
-            .document().composition().size[0],
-        256
-    );
+    assert_eq!(ui_session(&fresh).engine().document().composition().size, [3508, 2480]);
     native_pen_path(&fresh, &[[80., 120.], [130., 120.], [180., 120.]]);
     ready(&fresh);
-    assert!(
-        !paint_at(ui_session(&fresh)
-            .engine()
-            .document(), 0).raster
-            .wait_data()
-            .unwrap()
-            .tiles
-            .is_empty()
-    );
+    assert!(!paint_at(ui_session(&fresh).engine().document(), 0).raster.wait_data().unwrap().tiles.is_empty());
     fresh.window.destroy();
     pump(50);
-    invoke(&w, CommandId::NewDocument);
-    combo(&w, "new-document-preset").set_selected(5);
-    named::<gtk::Button>(w.window.upcast_ref(), "new-document-remove-preset")
-        .emit_clicked();
-    pump(100);
-    assert!(state(&w).settings.new_document.presets.is_empty());
-    assert_eq!(state(&w).settings.new_document.defaults, options);
-    response(&w, "cancel");
-    finish(&w);
     eprintln!("New presets and cancellation passed");
 
     let mut builder = SourceBuilder::new(

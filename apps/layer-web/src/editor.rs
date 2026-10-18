@@ -47,23 +47,11 @@ impl WebApp {
             "color_panel": state.preview_colors().view_mapped(self.session.effective_sdr_rendition(), self.session.localization()),
             "application_menus": self.application_menu_models(),
             "document_options": json!({
-                "extent": state.settings.new_document.defaults.extent,
-                "creation": state.settings.new_document.form(self.session.localization()),
-                "min_dimension": document.minimum,
-                "max_dimension": document.maximum,
-                "numeric": document.numeric,
-                "width_label": document.labels[0],
-                "height_label": document.labels[1],
-                "new_title": document.title,
                 "unsaved_description": document.unsaved_description,
                 "discard_label": document.discard,
                 "cancel_label": document.cancel,
             }),
         })).map_err(js)?)
-    }
-    pub fn new_document_appearance(&self, options: JsValue) -> Result<JsValue, JsValue> {
-        let options: layer_ui::NewDocumentOptions = serde_wasm_bindgen::from_value(options).map_err(js)?;
-        serialize(&options.appearance(self.session.localization()))
     }
     pub fn color_panel(&self) -> Result<JsValue, JsValue> {
         serialize(&self.session.state().preview_colors().view_mapped(self.session.effective_sdr_rendition(), self.session.localization()))

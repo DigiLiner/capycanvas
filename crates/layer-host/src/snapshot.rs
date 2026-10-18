@@ -318,11 +318,7 @@ impl NativeHost {
             }, self.session.localization()),
         )?;
         let document_spec = layer_ui::new_document_spec(self.session.localization());
-        map.serialize_entry("document_options", &json!({"extent": state.settings.new_document.defaults.extent,
-            "creation": state.settings.new_document.form(self.session.localization()),
-            "max_dimension": layer_ui::MAX_NEW_DOCUMENT_DIMENSION,
-            "width_label": document_spec.labels[0], "height_label": document_spec.labels[1],
-            "new_title": layer_ui::DocumentRequest::New.title(self.session.localization()),
+        map.serialize_entry("document_options", &json!({
             "unsaved_description": document_spec.unsaved_description, "discard_label": document_spec.discard,
             "cancel_label": document_spec.cancel,
             "save_label": layer_ui::DocumentRequest::ConfirmClose { title: String::new() }.accept_label(self.session.localization()),

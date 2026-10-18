@@ -126,7 +126,7 @@ pub fn paper_image(source: &SourceImage, cancelled: &dyn Fn() -> bool) -> Result
     let extent = source.extent.map(|v| ((f64::from(v) / shrink).round() as u32).max(1));
     let heights = resample(source, extent, cancelled)?;
     let (heights, size) = make_seamless(heights, extent.map(|v| v as usize));
-    let ppi = super::paper_ppi(source.resolution).map(|v| v / shrink);
+    let ppi = super::image_ppi(source.resolution).map(|v| v / shrink);
     let mut builder = SourceBuilder::new([size[0] as u32, size[1] as u32], gray_interpretation(), 1 << 26)?;
     for row in heights.chunks_exact(size[0]) {
         builder.push_row(&row.iter().map(|v| (v.clamp(0., 1.) * 255.).round() as u8).collect::<Vec<_>>())?;
@@ -138,7 +138,7 @@ pub fn paper_image(source: &SourceImage, cancelled: &dyn Fn() -> bool) -> Result
 
 pub fn image_preview(image: &SourceImage) -> Result<Vec<u8>, String> {
     let size = 2 * super::PREVIEW_SIZE;
-    let ppi = super::paper_ppi(image.resolution);
+    let ppi = super::image_ppi(image.resolution);
     let per_texel = ppi.map(|v| v / 25.4 * super::PREVIEW_MM / size as f64);
     let mut rows = image.rows();
     let mut bytes = vec![0; image.row_bytes()];
@@ -162,7 +162,7 @@ pub fn encode_png(image: &SourceImage) -> Result<Vec<u8>, String> {
         let mut encoder = png::Encoder::new(&mut bytes, image.extent[0], image.extent[1]);
         encoder.set_color(png::ColorType::Grayscale);
         encoder.set_depth(png::BitDepth::Eight);
-        let ppi = super::paper_ppi(image.resolution);
+        let ppi = super::image_ppi(image.resolution);
         encoder.set_pixel_dims(Some(png::PixelDimensions {
             xppu: (ppi[0] / 0.0254).round() as u32, yppu: (ppi[1] / 0.0254).round() as u32, unit: png::Unit::Meter,
         }));
@@ -225,7 +225,7 @@ mod tests {
         let tile = source([64, 48], Some(600), |x, y| { let v = ((x % 8) * 20 + (y % 6) * 10) as u8; [v, v, v] });
         let paper = paper_image(&tile, &|| false).unwrap();
         assert_eq!(paper.extent, [64, 48]);
-        assert_eq!(super::super::paper_ppi(paper.resolution), [600.; 2]);
+        assert_eq!(super::super::image_ppi(paper.resolution), [600.; 2]);
         assert_eq!(gray(&paper), gray(&paper_image(&tile, &|| false).unwrap()));
         assert_eq!(gray(&paper)[..8], [0, 20, 40, 60, 80, 100, 120, 140]);
     }
@@ -235,7 +235,7 @@ mod tests {
         let ramp = source([200, 100], None, |x, y| { let v = (x * 255 / 199 + (x * 7 + y * 13) % 5).min(255) as u8; [v, v, v] });
         let paper = paper_image(&ramp, &|| false).unwrap();
         assert_eq!(paper.extent, [180, 100]);
-        assert_eq!(super::super::paper_ppi(paper.resolution), [300.; 2], "screen resolutions read as print");
+        assert_eq!(super::super::image_ppi(paper.resolution), [300.; 2], "screen resolutions read as print");
         let samples: Vec<f32> = gray(&paper).iter().map(|v| f32::from(*v)).collect();
         assert!(seam_ratio(&samples, [180, 100], false) < SEAMLESS_RATIO, "the wrap is no longer a seam");
         let spread = |values: &[f32]| { let mean = values.iter().sum::<f32>() / values.len() as f32; (values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32).sqrt() };
@@ -248,7 +248,7 @@ mod tests {
         let scan = source([5000, 100], Some(1200), |x, _| { let v = if x % 2 == 0 { 40 } else { 220 }; [v, v, v] });
         let paper = paper_image(&scan, &|| false).unwrap();
         assert_eq!(paper.extent[0], 4096);
-        assert!((super::super::paper_ppi(paper.resolution)[0] - 1200. * 4096. / 5000.).abs() < 0.01);
+        assert!((super::super::image_ppi(paper.resolution)[0] - 1200. * 4096. / 5000.).abs() < 0.01);
         let samples = gray(&paper);
         assert!(samples.iter().all(|v| *v == 40 || *v == 220), "samples are picked, not averaged");
         let dark = samples.iter().filter(|v| **v == 40).count() as f64 / samples.len() as f64;
@@ -260,7 +260,7 @@ mod tests {
         let paper = paper_image(&source([30, 20], Some(450), |x, y| [(x * 8) as u8, (y * 12) as u8, 90]), &|| false).unwrap();
         let reopened = decode_png(&encode_png(&paper).unwrap()).unwrap();
         assert_eq!(gray(&reopened), gray(&paper));
-        assert!((super::super::paper_ppi(reopened.resolution)[0] - 450.).abs() < 0.02);
+        assert!((super::super::image_ppi(reopened.resolution)[0] - 450.).abs() < 0.02);
         assert_eq!(image_preview(&reopened).unwrap().len(), super::super::PREVIEW_SIZE * super::super::PREVIEW_SIZE);
     }
 }

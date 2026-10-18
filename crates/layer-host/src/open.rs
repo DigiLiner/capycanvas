@@ -18,8 +18,7 @@ pub struct OpenEnvironment {
     pub options: RendererOptions,
     pub viewport: [u32; 2],
     pub brush: layer_core::BrushSnapshot,
-    pub new_options: layer_ui::NewDocumentOptions,
-    pub new_paper: layer_ui::paper_library::PaperMaterial,
+    pub new_drawing: Option<layer_ui::NewDrawingOrder>,
     pub photo_policy: layer_ui::PhotoOpenPolicy,
 }
 
@@ -43,8 +42,7 @@ impl OpenEnvironment {
             options,
             viewport: session.state().camera.viewport,
             brush: session.engine().configured_brush().clone(),
-            new_options: session.state().settings.new_document.defaults,
-            new_paper: session.new_drawing_paper_material(),
+            new_drawing: session.new_drawing_order().cloned(),
             photo_policy: session.state().settings.photo_open,
         })
     }
@@ -81,6 +79,13 @@ impl OpenEnvironment {
             Default::default(),
             cancel,
         )
+    }
+
+    /// The drawing New chose, on its paper from `papers` when it is stored there.
+    pub fn new_drawing(&self, papers: Option<&std::path::Path>) -> Result<(Document, Option<String>), String> {
+        let order = self.new_drawing.as_ref().ok_or("Choose New drawing first")?;
+        let paper = crate::papers::resolve(&order.paper, papers, &self.localization);
+        Ok((order.project(paper.texture, &self.localization)?, paper.warning))
     }
 
     /// Returns a candidate whose canvas and configured brush are ready to draw.

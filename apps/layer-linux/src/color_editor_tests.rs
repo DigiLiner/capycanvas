@@ -83,7 +83,7 @@ fn native_color_editor_rows_sheet_and_canvas_pick() {
         assert!(!editor.draft.borrow().changed());
         editor.swatches.emit_clicked();
         pump(300);
-        assert!(editor.sheet_open.get() && !editor.body.is_sensitive() && editor.search.delegate().is_some_and(|text| text.is_focus()));
+        assert!(editor.slide.is_open() && !editor.body.is_sensitive() && editor.search.delegate().is_some_and(|text| text.is_focus()));
         editor.search.set_text("zzzz-no-color");
         pump(200);
         assert!(find_named(editor.sheet_body.upcast_ref(), "edit-color-sheet-empty").is_some());
@@ -96,7 +96,7 @@ fn native_color_editor_rows_sheet_and_canvas_pick() {
         pump(200);
         editor.sheet_close.emit_clicked();
         pump(300);
-        assert!(!editor.sheet_open.get() && editor.body.is_sensitive());
+        assert!(!editor.slide.is_open() && editor.body.is_sensitive());
         response(&w, "cancel");
         assert_eq!(state(&w).colors.definition(), RgbColor::WHITE);
         assert_eq!(ui_session(&w).engine().checkpoint(), checkpoint);

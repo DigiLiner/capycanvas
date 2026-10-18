@@ -144,13 +144,169 @@ function File-Command([string]$Id,[scriptblock]$Options) {
         Invoke-Control 'Export'
     }
 }
-function New-Dialog {
-    $script:scope=$root
-    $script:scope=Control 'New drawing' ([System.Windows.Automation.ControlType]::Window)
+function Drawing {(Model).state.new_drawing}
+function Drawer {$view=Drawing;if($view){$view.drawer}}
+function Owned([string]$Id) {$hit=@{item=$null};Wait-Until {$hit.item=Find $Id -Within $root;$null -ne $hit.item} "Missing control: $Id";$hit.item}
+function Press([string]$Id) {
+    $hit=@{item=$null}
+    Wait-Until {$hit.item=Find $Id -Within $root;$hit.item -and $hit.item.Current.IsEnabled} "Missing enabled control: $Id"
+    $hit.item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
-function Set-Size([string]$Width,[string]$Height) {
-    (Find-Id 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Width)
-    (Find-Id 'document-height').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Height)
+function Foreground {[CapyRowPointer]::SetForegroundWindow($drawing.Handle)|Out-Null;Wait-Until {[CapyRowPointer]::GetForegroundWindow() -eq $drawing.Handle} 'The review did not take foreground input'}
+function Type-Text([string]$Id,[string]$Text,[switch]$Commit) {
+    $entry=Owned $Id;$entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Text)
+    if($Commit){Foreground;[CapyRowPointer]::Key([uint32]$review.Id,0x0D)}
+}
+function Pick-Choice([string]$Id,[int]$Index) {
+    $box=Owned $Id;$box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    $hit=@{item=$null};Wait-Until {$hit.item=Find "$Id-$Index" -Within $box;$null -ne $hit.item} "Missing choice $Index in $Id"
+    $hit.item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+}
+function Item-Index($List,[scriptblock]$Match) {$items=@($List);for($i=0;$i -lt $items.Count;$i++){if(& $Match $items[$i]){return $i}};throw 'The New drawing view has no matching item'}
+function Value-Index($List,$Value) {Item-Index $List {param($item)$item.value -eq $Value}}
+function Context-Item([string]$Target,[string]$Item) {
+    (Owned $Target).SetFocus();Wait-Until {(Find $Target -Within $root).Current.HasKeyboardFocus} "Context target did not take focus: $Target"
+    Foreground;[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x10),0x79)
+    Press $Item
+}
+function New-Capture([string]$Name) {Start-Sleep -Milliseconds 800;Capture "new-drawing-$Name-$($script:newTheme)" -WithModel}
+function Open-NewDrawing {
+    File-Command 'new_document'
+    Wait-Until {(Drawing) -and (Find 'new-drawing-dialog' -Within $root) -and (Find 'document-width' -Within $root)} 'New drawing did not open' 45
+    if((Drawing).untitled -ne (Model).windows_tabs.upcoming_untitled){throw 'New drawing did not offer the next untitled name'}
+}
+function Close-NewDrawing([string]$Id) {
+    Press $Id
+    Wait-Until {!(Drawing) -and !(Find 'new-drawing-dialog' -Within $root) -and !@((Model).state.requests|Where-Object {$_.kind.type -eq 'document'}).Count} 'New drawing did not close'
+}
+function Open-Drawer([string]$Id,[string]$Kind) {
+    Press $Id;Wait-Until {(Drawer).kind -eq $Kind -and !(Find $(switch($Kind){'presets'{'new-drawing-browser'}'paper'{'new-drawing-paper-drawer'}default{'new-drawing-color-drawer'}}) -Within $root).Current.IsOffscreen} "The $Kind drawer did not open"
+}
+function New-Journey([string]$Theme,[switch]$Full) {
+    $script:newTheme=$Theme;$script:scope=$root
+    Open-NewDrawing
+    New-Capture 'main'
+    Press 'new-drawing-resolution-choices'
+    Wait-Until {Find 'new-drawing-resolution-0' -Within $root} 'Common resolutions did not open'
+    New-Capture 'resolutions'
+    $start=(Drawing).setup.resolution
+    Press "new-drawing-resolution-$(if($Full){0}else{Value-Index (Drawing).resolutions $start})"
+    Wait-Until {!(Find 'new-drawing-resolution-0' -Within $root) -and (Drawing).setup.resolution -eq $(if($Full){72}else{$start})} 'A common resolution did not apply'
+    Open-Drawer 'new-drawing-presets-button' 'presets'
+    New-Capture 'presets'
+    if($Full){
+        Type-Text 'new-drawing-search' 'chalk'
+        Wait-Until {$browser=Drawer;$browser.query -eq 'chalk' -and !$browser.tabs_enabled -and @($browser.tiles).Count -ge 1 -and $browser.tiles[0].name -eq 'Chalkboard'} 'Preset search did not find Chalkboard'
+        Type-Text 'new-drawing-search' ''
+        Wait-Until {$browser=Drawer;$browser.query -eq '' -and $browser.tabs_enabled} 'Clearing the search did not restore the tabs'
+        $tab=Item-Index (Drawer).tabs {param($item)$item.label -eq 'Pastel'}
+        Press "new-drawing-tab-$tab"
+        Wait-Until {(Drawer).tabs[$tab].selected} 'The Pastel tab did not open'
+        Press 'new-drawing-preset-1'
+        Wait-Until {$browser=Drawer;$browser.tiles[1].selected -and $browser.summary.name -eq $browser.tiles[1].name} 'Picking a preset did not update the summary'
+    }
+    Press 'new-drawing-save-as'
+    Wait-Until {(Drawer).save} 'Save As did not open the naming row'
+    New-Capture 'save'
+    if($Full){
+        Type-Text 'new-drawing-save-name' 'Studio wall'
+        Wait-Until {(Drawer).save.name -eq 'Studio wall' -and (Drawer).save.can_save} 'The preset name did not reach the draft'
+        Press 'new-drawing-save-confirm'
+        Wait-Until {$browser=Drawer;!$browser.save -and @((Model).state.settings.new_document.setups|Where-Object name -eq 'Studio wall').Count -eq 1 -and @($browser.tiles|Where-Object {$_.own -and $_.selected}).Count -eq 1} 'Save As did not store and select the preset'
+        $own=Item-Index (Drawer).tiles {param($item)$item.name -eq 'Studio wall'}
+        Context-Item "new-drawing-preset-$own" "new-drawing-preset-rename-$own"
+        Wait-Until {(Drawer).save.name -eq 'Studio wall'} 'Rename did not open the naming row'
+        Type-Text 'new-drawing-save-name' 'Studio wall 2'
+        Wait-Until {(Drawer).save.name -eq 'Studio wall 2'} 'The new preset name did not reach the draft'
+        Press 'new-drawing-save-confirm'
+        Wait-Until {!(Drawer).save -and @((Model).state.settings.new_document.setups.name) -contains 'Studio wall 2' -and @((Model).state.settings.new_document.setups.name) -notcontains 'Studio wall'} 'Rename did not rename the preset'
+        $own=Item-Index (Drawer).tiles {param($item)$item.name -eq 'Studio wall 2'}
+        Context-Item "new-drawing-preset-$own" "new-drawing-preset-delete-$own"
+        Wait-Until {!(Model).state.settings.new_document.setups} 'Delete did not remove the preset'
+        Press 'new-drawing-preset-0'
+        Wait-Until {(Drawer).tiles[0].selected -and (Drawer).can_select} 'The first preset did not select'
+        $chosen=(Drawer).tiles[0].name
+        Press 'new-drawing-select'
+        Wait-Until {!(Drawer) -and (Drawing).page.preset -eq $chosen} 'Select did not use the preset'
+        Open-Drawer 'new-drawing-presets-button' 'presets'
+        Foreground;[CapyRowPointer]::Key([uint32]$review.Id,0x1B)
+        Wait-Until {!(Drawer) -and (Drawing)} 'Escape did not close only the presets drawer'
+    }else{
+        Press 'new-drawing-save-cancel';Wait-Until {!(Drawer).save} 'Cancel did not leave the naming row'
+        Press 'new-drawing-browser-cancel';Wait-Until {!(Drawer)} 'Cancel did not close the presets'
+    }
+    Open-Drawer 'new-drawing-texture' 'paper'
+    New-Capture 'paper'
+    $paper=Item-Index (Drawer).tiles {param($item)$item.id -eq 'cold_press'}
+    Press "new-drawing-paper-tile-$paper"
+    Wait-Until {(Drawer).tiles[$paper].selected} 'The paper tile did not select'
+    Press 'new-drawing-paper-use'
+    Wait-Until {!(Drawer) -and (Drawing).setup.paper.texture -eq 'cold_press'} 'Use Texture did not choose the paper'
+    if($Full){
+        $paperFile=Join-Path $run 'Fixture paper.png'
+        $grain=[Drawing.Bitmap]::new(128,128);$random=[Random]::new(7)
+        try{for($y=0;$y -lt 128;$y++){for($x=0;$x -lt 128;$x++){$v=150+$random.Next(80);$grain.SetPixel($x,$y,[Drawing.Color]::FromArgb(255,$v,$v,$v))}};$grain.Save($paperFile,[Drawing.Imaging.ImageFormat]::Png)}finally{$grain.Dispose()}
+        Open-Drawer 'new-drawing-texture' 'paper'
+        Press 'new-drawing-paper-import';Picker 'Open';Choose-Path $paperFile;$script:scope=$root
+        Wait-Until {@((Drawer).tiles|Where-Object {$_.selected -and $_.label -eq 'Fixture paper'}).Count -eq 1} 'Import did not pick the imported paper' 45
+        $imported=@((Drawer).tiles|Where-Object selected)[0].id
+        Press 'new-drawing-paper-use'
+        Wait-Until {!(Drawer) -and (Drawing).setup.paper.texture -eq $imported -and (Drawing).page.texture -eq 'Fixture paper'} 'The imported paper was not used'
+    }
+    Open-Drawer 'new-drawing-paper-color' 'paper_color'
+    New-Capture 'paper-color'
+    if($Full){
+        Press 'new-drawing-paper-color-5'
+        Wait-Until {$colors=Drawer;$colors.palette[5].selected -and !$colors.transparent -and !$colors.can_add} 'The palette color did not reach the editor'
+        Press 'edit-color-hex';Type-Text 'edit-color-hex-entry' '#E07090' -Commit
+        Wait-Until {(Drawer).can_add} 'A new color did not offer Add'
+        $count=@((Drawer).palette).Count
+        Press 'new-drawing-add-paper-color'
+        Wait-Until {@((Drawer).palette).Count -eq $count+1} 'Add did not store the paper color'
+        Context-Item "new-drawing-paper-color-$count" 'new-drawing-paper-color-delete'
+        Wait-Until {@((Drawer).palette).Count -eq $count} 'Delete did not remove the paper color'
+    }
+    Press 'new-drawing-color-mode-transparent'
+    Wait-Until {(Drawer).transparent} 'Transparent did not apply'
+    New-Capture 'transparent'
+    if(!$Full){Press 'new-drawing-color-cancel';Wait-Until {!(Drawer)} 'Cancel did not close the paper color';Close-NewDrawing 'new-drawing-cancel';return}
+    Press 'new-drawing-color-use'
+    Wait-Until {$view=Drawing;!$view.drawer -and $view.setup.paper.transparent -and !$view.sheet.shown -and $view.page.paper_color -eq $view.copy.transparent} 'Use Color did not choose a transparent sheet'
+    New-Capture 'main-transparent'
+    Open-Drawer 'new-drawing-paper-color' 'paper_color'
+    Press 'new-drawing-color-mode-color';Press 'new-drawing-paper-color-0'
+    Wait-Until {$colors=Drawer;!$colors.transparent -and $colors.palette[0].selected} 'The sheet did not return to a color'
+    Press 'new-drawing-color-use'
+    Wait-Until {$view=Drawing;!$view.drawer -and !$view.setup.paper.transparent -and $view.sheet.shown} 'Use Color did not restore a visible sheet'
+    Type-Text 'document-resolution' '150' -Commit
+    Wait-Until {(Drawing).setup.resolution -eq 150} 'Typed resolution did not apply'
+    Pick-Choice 'new-drawing-unit' (Value-Index (Drawing).units 'px')
+    Wait-Until {$view=Drawing;$view.setup.unit -eq 'px' -and [double](((Owned 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value) -replace '[^0-9.]','') -eq $view.values[0]} 'Pixels did not apply'
+    Type-Text 'document-width' '64*2' -Commit;Wait-Until {(Drawing).values[0] -eq 128} 'The width expression did not apply'
+    Type-Text 'document-height' '96' -Commit;Wait-Until {(Drawing).values[1] -eq 96} 'The height did not apply'
+    Press 'new-drawing-link';Wait-Until {(Drawing).linked} 'Link did not apply'
+    Type-Text 'document-width' '256' -Commit;Wait-Until {$values=(Drawing).values;$values[0] -eq 256 -and $values[1] -eq 192} 'Linked sizes did not keep the proportions'
+    Press 'new-drawing-link';Wait-Until {!(Drawing).linked} 'Unlink did not apply'
+    Type-Text 'document-width' '128' -Commit;Type-Text 'document-height' '96' -Commit
+    Wait-Until {$values=(Drawing).values;$values[0] -eq 128 -and $values[1] -eq 96} 'Unlinked sizes did not apply'
+    Press 'new-drawing-portrait';Wait-Until {$view=Drawing;$view.page.orientation -eq 'portrait' -and $view.values[0] -eq 96} 'Portrait did not turn the sheet'
+    Press 'new-drawing-landscape';Wait-Until {$view=Drawing;$view.page.orientation -eq 'landscape' -and $view.values[0] -eq 128} 'Landscape did not turn the sheet'
+    $view=Drawing
+    Pick-Choice 'document-depth' (Value-Index $view.depths 'F16')
+    Wait-Until {$view=Drawing;$view.setup.blend_space -eq 'Linear' -and $view.blending_note -and !(Owned 'document-blending').Current.IsEnabled} 'Float did not force Linear blending'
+    Pick-Choice 'document-depth' (Value-Index $view.depths 'U8')
+    Wait-Until {$view=Drawing;$view.setup.blend_space -eq 'Perceptual' -and !$view.blending_note -and (Owned 'document-blending').Current.IsEnabled} 'Leaving Float lost the Perceptual blending choice'
+    Type-Text 'document-width' '2+'
+    Press 'new-drawing-create';Start-Sleep -Milliseconds 800
+    if(!(Drawing) -or [string]::IsNullOrWhiteSpace((Owned 'document-width').Current.HelpText) -or (Model).state.document_file.epoch -ne 0){throw 'An invalid size expression did not keep the dialog open with its refusal'}
+    Type-Text 'document-width' '128' -Commit;Wait-Until {[string]::IsNullOrWhiteSpace((Owned 'document-width').Current.HelpText)} 'The corrected width kept its refusal'
+    Type-Text 'new-drawing-name' 'Harbor study'
+    Wait-Until {(Drawing).name -eq 'Harbor study'} 'The drawing name did not reach the dialog'
+    $count=@((Model).windows_tabs.tabs).Count
+    Press 'new-drawing-create'
+    Wait-Until {$model=Model;!$model.state.new_drawing -and @($model.windows_tabs.tabs).Count -eq $count+1 -and !$model.state.document_file.busy} 'Create did not open the new drawing' 60
+    Wait-Until {$model=Model;@($model.windows_tabs.tabs|Where-Object id -eq $model.windows_tabs.selected)[0].title -eq 'Harbor study'} 'The new drawing did not take its name'
+    Wait-Until {(Model).state.tabs[0].width -eq 128 -and (Model).state.tabs[0].height -eq 96} 'New drawing did not use the chosen size'
 }
 function Idle {Wait-Until {$current=Model;$current -and !$current.state.document_file.busy} 'Document request did not finish' 45}
 function Confirm-Dialog {
@@ -388,7 +544,7 @@ function Draw-Below {
 Bind-ReviewWindow 'No review window'
 Wait-Until {(Model).brush_ready} 'Canvas startup did not finish' 45
 if(!(Model).windows_isolated_settings){throw 'Review must use an isolated profile'}
-File-Command 'new_document';New-Dialog
+New-Journey 'dark' -Full
 function Combo-Value($Combo){$selection=$Combo.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection();if($selection.Count){$selection[0].Current.Name}}
 function Combo-Select($Combo,[scriptblock]$Pick){
     $Combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
@@ -396,29 +552,6 @@ function Combo-Select($Combo,[scriptblock]$Pick){
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ListItem))|Where-Object $Pick)[0];$hit.item} 'Missing drop-down choice'
     $hit.item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
 }
-$blendChoices=@((Model).document_options.creation.blending.choices)
-$perceptual=($blendChoices|Where-Object id -eq 'Perceptual').label;$linear=($blendChoices|Where-Object id -eq 'Linear').label
-$blending=Find-Id 'document-blending';$depth=Find-Id 'document-depth'
-Wait-Until {(Combo-Value $blending) -eq $perceptual -and $blending.Current.IsEnabled} 'New drawings did not default to Perceptual blending'
-$startDepth=Combo-Value $depth
-Combo-Select $depth {$_.Current.Name -match 'float'}
-Wait-Until {(Combo-Value $blending) -eq $linear -and !$blending.Current.IsEnabled} 'Float did not force Linear blending'
-Combo-Select $depth {$_.Current.Name -eq $startDepth}
-Wait-Until {(Combo-Value $blending) -eq $perceptual -and $blending.Current.IsEnabled} 'Leaving Float lost the Perceptual blending choice'
-Set-Size '2+' '96';Invoke-Control 'Create'
-Wait-Until {
-    $validationError=Find-Id 'document-error'
-    if(!$validationError-or$validationError.Current.ProcessId-ne$review.Id-or$validationError.Current.IsOffscreen-or[string]::IsNullOrWhiteSpace($validationError.Current.Name)){return $false}
-    $bounds=$validationError.Current.BoundingRectangle
-    if($bounds.IsEmpty-or$bounds.Width-le0-or$bounds.Height-le0){return $false}
-    $walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$viewport=$walker.GetParent($validationError);$scroll=$null
-    while($viewport){$pattern=$null;if($viewport.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern,[ref]$pattern)-and$pattern.Current.VerticallyScrollable){$scroll=$pattern;break};if($viewport-eq$scope){break};$viewport=$walker.GetParent($viewport)}
-    $clip=if($scroll){$viewport.Current.BoundingRectangle}else{$scope.Current.BoundingRectangle}
-    $clip.Contains($bounds)
-} 'Invalid expression did not show visible validation'
-if((Model).state.document_file.epoch -ne 0){throw 'Invalid size replaced the drawing'}
-Set-Size '64*2' '96';Invoke-Control 'Create';Idle
-Wait-Until {(Model).state.tabs[0].width -eq 128 -and (Model).state.tabs[0].height -eq 96} 'New drawing did not use shared expressions'
 
 # Exercise the actual native image picker, including a focused numeric draft.
 $script:scope=$root
@@ -648,7 +781,7 @@ if((Model).state.document_file.epoch -ne $epoch -or (Model).state.document_file.
 if((Get-FileHash -LiteralPath $preserved).Hash -ne $packageHash){throw 'The package view changed its original'}
 Draw
 $drawingCount=@((Model).windows_tabs.tabs).Count
-File-Command 'new_document';New-Dialog;Invoke-Control 'Cancel';Idle
+Open-NewDrawing;Close-NewDrawing 'new-drawing-cancel';Idle
 if((Model).state.document_file.epoch -ne $epoch -or !(Model).state.document_file.modified){throw 'Cancelled New lost edits'}
 File-Command 'open_document';Picker 'Open';Picker-Button '2';Idle
 if((Model).state.document_file.epoch -ne $epoch -or !(Model).state.document_file.modified){throw 'Cancelled Open lost edits'}
@@ -700,6 +833,19 @@ File-Command 'close_document';Confirm-Dialog;Invoke-Control 'Cancel';Idle
 File-Command 'close_document';Confirm-Dialog;Invoke-Control 'Discard Changes'
 Wait-Closed 'Discarded close did not finish'
 if((Get-Item -LiteralPath $stderr).Length){throw 'Untitled native review reported stderr'}
+if(!$RecoverGpu -and !$FailGpu){
+    $env:CAPY_STORAGE_DIR=Join-Path $run 'light-profile'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme='light'}|ConvertTo-Json -Depth 4))
+    $stderr=Join-Path $run 'light.stderr.log'
+    $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
+    [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
+    Write-Output "Light New drawing review process $($review.Id)"
+    Bind-ReviewWindow 'No light review window'
+    Wait-Until {$model=Model;$model.brush_ready -and $model.state.theme -eq 'light'} 'Light review did not start' 45
+    New-Journey 'light'
+    Request-Close;Wait-Closed 'Light review close did not finish'
+    if((Get-Item -LiteralPath $stderr).Length){throw 'Light native review reported stderr'}
+}
 if($FailGpu){
     Start-RecoveryReview 'save-as'
     Draw
@@ -736,8 +882,8 @@ if($FailGpu){
 }
 [PSCustomObject]@{
     gpu_failure_save=if($FailGpu){'Save/Save As, committed raster preservation and queued contact cancellation, Cancel, Discard, durable reopen and identical exported pixels passed'}else{'not requested'}
-    shared_new_size_and_validation='passed'
-    new_document_blending_survives_float='passed'
+    new_drawing_presets_paper_color_size_name_and_cancel='passed'
+    new_drawing_captures=if(!$RecoverGpu -and !$FailGpu){'dark and light'}else{'dark'}
     image_picker_draft_cancel_and_error_recovery='passed'
     image_layer_thumbnail_undo_redo_and_embedded_reopen='passed'
     package_view_copy_export_and_close='passed'

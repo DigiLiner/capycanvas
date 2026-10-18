@@ -28,7 +28,7 @@ internal fun CanvasHost.openQueryPhoto(file: File) {
         Native.projectTask(h, id, "null", state.getLong("epoch"), state.getLong("revision"))
     } }
     try {
-        Native.projectWork(task, android.os.ParcelFileDescriptor.open(source, android.os.ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+        Native.projectWork(task, android.os.ParcelFileDescriptor.open(source, android.os.ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
         runBlocking { withNative { Native.projectAdopt(it, task, "null") } }
     } finally { Native.projectFree(task) }
     instrumentation.runOnMainSync { documentChanged() }

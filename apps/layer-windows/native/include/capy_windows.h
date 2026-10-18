@@ -85,7 +85,6 @@ __declspec(dllimport) char* capy_export_draft(CapyLocalization const* localizati
 __declspec(dllimport) bool capy_color_raster(uint32_t side, float hue, uint32_t projection, uint32_t space, bool guide, uint8_t* output, size_t length);
 __declspec(dllimport) char* capy_native_caption(CapyLocalization const* localization, char const* json);
 __declspec(dllimport) char* capy_numeric_labels(CapyLocalization const* localization, char const* json);
-__declspec(dllimport) char* capy_document_appearance(CapyLocalization const* localization, char const* json);
 __declspec(dllimport) char* capy_drawer_frame(CapyLocalization const* localization, char const* json);
 __declspec(dllimport) char* capy_color_ui(CapyLocalization const* localization, char const* json);
 __declspec(dllimport) bool capy_color_mapped_field(uint32_t side, char const* input, uint8_t* output, size_t length);

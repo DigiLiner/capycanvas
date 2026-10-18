@@ -76,6 +76,9 @@ pub use canvas_size::{CanvasAnchor, CanvasAnchorChoice, CanvasSizeAction, Canvas
 #[path = "image_size.rs"]
 mod image_size;
 pub use image_size::{ImageResample, ImageResampleChoice, ImageSizeAction, ImageSizeView};
+#[path = "new_drawing_dialog.rs"]
+mod new_drawing_dialog;
+pub use new_drawing_dialog::{NewDrawingAction, NewDrawingChoice, NewDrawingCopy, NewDrawingDialogView, NewDrawingDrawerView, NewDrawingOrder, PaperChoice, PaperColorChoice, PaperColorDrawerView, PresetBrowserView, PresetSaveView, PresetTabView, PresetTileView, ResolutionChoice, SheetView};
 #[path = "image_geometry.rs"]
 mod image_geometry;
 #[path = "selection_properties.rs"]
@@ -264,6 +267,8 @@ pub struct UiSession<R: CanvasRenderer> {
     selection_masks: selection_masks::SelectionMasks,
     canvas_size: Option<canvas_size::CanvasSizeDraft>,
     image_size: Option<image_size::ImageSizeDraft>,
+    new_drawing: Option<new_drawing_dialog::NewDrawingDialog>,
+    new_drawing_order: Option<NewDrawingOrder>,
     frequency_separation: Option<retouch_layers::SeparationDraft>,
     content_bounds: image_geometry::ContentBounds,
     conversion: Option<layer_conversions::PendingConversion>,
@@ -333,17 +338,15 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub fn blank_localized(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>) -> Result<Self, String> {
-        let mut session = Self::new_localized(renderer, NewDocumentOptions::default().project(&localization)?, viewport, platform, localization)?;
+        let mut session = Self::new_localized(renderer, crate::startup_drawing(&localization)?, viewport, platform, localization)?;
         session.mark_startup_drawing();
         Ok(session)
     }
 
     pub fn blank_with_settings(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>,
-        settings: Settings, paper: layer_core::TextureSource) -> Result<Self, String> {
-        let document = settings.new_document.defaults.project_on(paper, &localization)?;
-        let mut session = Self::new_localized(renderer, document, viewport, platform, localization)?;
+        settings: Settings) -> Result<Self, String> {
+        let mut session = Self::blank_localized(renderer, viewport, platform, localization)?;
         session.dispatch(UiAction::RestoreSettings { settings })?;
-        session.mark_startup_drawing();
         Ok(session)
     }
 
@@ -378,6 +381,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         *self.customization_copy.get_mut() = CustomizationCopy::default();
         self.refresh_document_file_localization();
         self.refresh_size_localization();
+        self.refresh_new_drawing();
         self.refresh_pressure_calibration();
         self.state.preferences.set_localization(&self.state.settings, self.state.platform, &self.state.localization);
         self.state.customization.set_localization(&self.state.localization);
@@ -469,6 +473,8 @@ impl<R: CanvasRenderer> UiSession<R> {
             selection_masks: Default::default(),
             canvas_size: None,
             image_size: None,
+            new_drawing: None,
+            new_drawing_order: None,
             frequency_separation: None,
             content_bounds: Default::default(),
             conversion: None,
@@ -537,6 +543,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 canvas_bar: None,
                 layers: Vec::new(),
                 layer_tools: LayersView::default(),
+                new_drawing: None,
                 adjustments: effects::catalog(&effect_catalog, &Default::default(), &localization),
                 filter_picker: effects::FilterPickerState::new(&localization),
                 filter_categories: effects::categories(&effect_catalog, &localization),
@@ -3063,6 +3070,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 let apply = action == CanvasSizeAction::Apply;
                 self.canvas_size_action(action)?;
                 (DOCUMENT | BRUSH | COMMANDS | if apply { CAMERA } else { 0 }, apply)
+            }
+            UiAction::NewDrawing { action } => {
+                let (changed, saved) = self.new_drawing_action(action)?;
+                save_settings = saved;
+                (changed, false)
             }
             UiAction::ImageSize { action } => {
                 if action != ImageSizeAction::Cancel {

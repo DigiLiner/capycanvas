@@ -31,12 +31,12 @@ export function sizeCheck({element,key,act}) {
 // Number fields that send each value typed so far once it reads as a number,
 // so the message and Apply follow the typing. A field is rebuilt only when its
 // numeric spec changes, which keeps the text being typed.
-export function sizeFields({element,numberField,resolve,key,names,send}) {
+export function sizeFields({element,numberField,resolve,key,names,send,inline=false}) {
   const nodes=names.map(()=>element('div')),specs=names.map(()=>null);
   function show(index,control,label,value,current) {
     const spec=JSON.stringify(control);
     if(specs[index]!==spec) {
-      const op=names[index],number=numberField(control,label,value=>send({op,value}));
+      const op=names[index],number=numberField(control,label,value=>send({op,value}),inline);
       number.dataset[key]=op;
       number.entry.addEventListener('input',()=>{
         let typed;

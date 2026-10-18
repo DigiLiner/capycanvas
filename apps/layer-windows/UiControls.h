@@ -267,12 +267,6 @@ struct WorkspaceData : std::enable_shared_from_this<WorkspaceData> {
         for(auto const& [role,brush]:glassBrushes)brush.Color(glassColor(role.c_str()));
         for(auto const& [key,brush]:tintBrushes){auto value=color(str(palette,key.first.c_str(),L"#414141"));value.A=key.second;brush.Color(value);}
     }
-    J appearance(J const& options)const{
-        auto source=to_string(options.Stringify());
-        std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_document_appearance(localization.get(),source.c_str()),capy_string_free);
-        if(!raw)throw hresult_error(E_OUTOFMEMORY);
-        return J::Parse(to_hstring(raw.get()));
-    }
     hstring caption(J const& request)const{
         auto source=to_string(request.Stringify());
         std::unique_ptr<char,decltype(&capy_string_free)> raw(capy_native_caption(localization.get(),source.c_str()),capy_string_free);

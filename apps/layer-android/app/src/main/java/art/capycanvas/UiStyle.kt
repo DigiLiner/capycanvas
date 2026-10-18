@@ -94,6 +94,7 @@ internal class Palette(val dark: Boolean, private val source: org.json.JSONObjec
     val strip = if (inGlass) glass("strip") else tabs
     val sidebar = role("sidebar")
     val input = role("input")
+    val view = role("view")
     val text = role("text")
     val secondary = text.copy(alpha = .55f)
     val accent = role("accent")
@@ -175,7 +176,7 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
     height: Dp = 36.dp, enabled: Boolean = true, focusRequest: Long = 0,
     textStyle: TextStyle = LocalTextStyle.current, shape: Shape = RoundedCornerShape(6.dp),
     keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
-    maxLength: Int = Int.MAX_VALUE, onCommit: ((String) -> Unit)? = null) {
+    maxLength: Int = Int.MAX_VALUE, background: Color? = null, onCommit: ((String) -> Unit)? = null) {
     var text by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
     var focused by remember { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
@@ -193,7 +194,7 @@ private data class ChromeFocusIndication(val color: Color) : IndicationNodeFacto
     }
     DisposableEffect(Unit) { onDispose { if (focused) host.editingText = false; host.textComposition.clear(requester) } }
     val colors = LocalPalette.current
-    Column(modifier.background(colors.input, shape)) {
+    Column(modifier.background(background ?: colors.input, shape)) {
         label?.let { Box(Modifier.padding(start = 10.dp, top = 6.dp)) { it() } }
         BasicTextField(text, { next ->
             val previous = text.text

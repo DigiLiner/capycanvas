@@ -381,23 +381,15 @@ extension XCTestCase {
         }
         func createDrawing(defaults: Bool = false) {
             editorMenu(in:app,menu:"File",id:"new_document",label:"New…")
-            let create = app.buttons["new-document-create"]
+            let create = app.buttons["new-drawing-create"]
             XCTAssertTrue(create.waitForExistence(timeout:20))
             if defaults {
-                replaceEditorText(app.textFields["new-document-width"],with:"128",in:app)
-                replaceEditorText(app.textFields["new-document-height"],with:"128",in:app)
-                #if os(macOS)
-                workspaceActivate(app.checkBoxes["new-document-defaults"])
-                #else
-                dismissEditorKeyboard(in:app)
-                let defaults = app.switches["new-document-defaults"]
-                revealEditorControl(defaults, in: app.scrollViews.containing(.switch, identifier: defaults.identifier).firstMatch)
-                workspaceActivate(defaults)
-                XCTAssertEqual(defaults.value as? String, "1", "The new drawing options become the defaults")
-                #endif
+                chooseNewDrawingOption("new-drawing-unit",3,in:app)
+                enterNewDrawingNumber("width","128",in:app)
+                enterNewDrawingNumber("height","128",in:app)
             }
-            XCTAssertEqual(app.textFields["new-document-width"].value as? String,"128")
-            XCTAssertEqual(app.textFields["new-document-height"].value as? String,"128")
+            XCTAssertEqual(newDrawingNumber("width",in:app).value as? String,"128","New reopens with the last drawing")
+            XCTAssertEqual(newDrawingNumber("height",in:app).value as? String,"128")
             #if os(iOS)
             dismissEditorKeyboard(in:app)
             #endif

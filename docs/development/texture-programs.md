@@ -374,7 +374,7 @@ slightly stretched fine tooth, partly aligned fibers and a calender plateau.
 | `finish` | % | 0–100 | 35 |
 | `seed` | count | 0–16777215 | 1 |
 
-Presets: Drawing paper (`tooth` 0.35, `finish` 35), Bristol (0.2, 55). Period
+Presets: Drawing (`tooth` 0.35, `finish` 35), Bristol (0.2, 55). Period
 64 mm.
 
 ```wgsl
@@ -436,7 +436,7 @@ of felted fibers between them.
 | `pitch` | mm | 0.5–3 | 1.1 |
 | `seed` | count | 0–16777215 | 1 |
 
-Preset: Pastel paper. Period 64 mm.
+Preset: Pastel. Period 64 mm.
 
 ```wgsl
 fn capy_honeycomb(p: vec2f, b: u32) -> f32 {

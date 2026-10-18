@@ -473,9 +473,9 @@ class AndroidTitleBarTest {
             }
             waitFor("Keyboard reaches New command") { focusedLabel() == first }
             key(KeyEvent.KEYCODE_ENTER)
-            waitFor("Keyboard invokes New Drawing") { node("workspace-menu") == null && node("new-document-create") != null }
-            tap("new-document-cancel")
-            waitFor("New Drawing closes") { node("new-document-create") == null }
+            waitFor("Keyboard invokes New Drawing") { node("workspace-menu") == null && node("new-drawing-create") != null }
+            tap("new-drawing-cancel")
+            waitFor("New Drawing closes") { node("new-drawing-create") == null }
         }
     }
 
@@ -796,12 +796,12 @@ class AndroidTitleBarTest {
             return measured("color")
         }
         val sdr = fitted("sdr")
-        val defaults = state().getJSONObject("settings").getJSONObject("new_document").getJSONObject("defaults")
-        defaults.put("extent", JSONArray(listOf(900, 1200))).getJSONObject("color").put("depth", "F16")
-        action(obj("type" to "new_document_preferences", "action" to obj("type" to "remember", "options" to defaults, "name" to "", "defaults" to true)))
         action(obj("type" to "invoke", "command" to "new_document"))
-        waitFor("new document dialog") { node("new-document-create") != null }
-        tap("new-document-create")
+        waitFor("new drawing dialog") { node("new-drawing-create") != null }
+        for (edit in listOf(obj("op" to "unit", "unit" to "px"), obj("op" to "width", "value" to 900), obj("op" to "height", "value" to 1200), obj("op" to "depth", "depth" to "F16")))
+            action(obj("type" to "new_drawing", "action" to edit))
+        waitFor("HDR portrait choice") { state().objectOrNull("new_drawing")?.getJSONObject("sheet")?.getJSONArray("extent")?.let { it.getInt(0) == 900 && it.getInt(1) == 1200 } == true }
+        tap("new-drawing-create")
         waitFor("HDR portrait document", 60_000) {
             val tab = state().getJSONArray("tabs").getJSONObject(0)
             tab.getInt("width") == 900 && tab.getInt("height") == 1200 && !state().getJSONObject("document_file").optBoolean("busy")

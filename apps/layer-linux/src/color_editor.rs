@@ -21,8 +21,9 @@ const SHAPES: [(ColorShape, &str, &str, &str); 3] = [
 ];
 
 const RECENT_TILE: i32 = 28;
-const SHEET_TILE: i32 = 34;
+pub(crate) const SHEET_TILE: i32 = 34;
 const TILE_GAP: i32 = 4;
+const TILE_PADDING: i32 = 3;
 
 type Accepted = Box<dyn FnOnce(&Rc<Workspace>, RgbColor, Option<f32>)>;
 
@@ -50,6 +51,11 @@ impl Field {
         show.add_css_class("flat");
         show.add_css_class("number-value");
         show.set_widget_name(name);
+        let widest: &[&str] = match target {
+            Target::Hex => &["#888888", "#DDDDDD", "#BBBBBB"],
+            Target::Number(ColorEditorTarget::Intensity) => &["-10.00 EV", "+10.00 EV"],
+            _ => &["100.0%", "-0.000", "360°", "888"],
+        };
         let entry = gtk::Entry::builder().has_frame(false).xalign(label.xalign()).width_chars(chars).max_width_chars(chars).build();
         entry.add_css_class("number-entry");
         entry.set_widget_name(&format!("{name}-entry"));
@@ -57,6 +63,16 @@ impl Field {
         let stack = gtk::Stack::builder().hhomogeneous(true).vhomogeneous(true).build();
         stack.add_named(&show, Some("show"));
         stack.add_named(&entry, Some("edit"));
+        for text in widest {
+            let sample = gtk::Label::new(Some(text));
+            sample.add_css_class("edit-color-number");
+            let reserve = gtk::Button::builder().child(&sample).can_focus(false).can_target(false).build();
+            reserve.add_css_class("flat");
+            reserve.add_css_class("number-value");
+            if target == Target::Hex { reserve.add_css_class("edit-color-hex"); }
+            reserve.update_state(&[gtk::accessible::State::Hidden(true)]);
+            stack.add_child(&reserve);
+        }
         if target == Target::Hex {
             for widget in [show.upcast_ref::<gtk::Widget>(), entry.upcast_ref()] { widget.add_css_class("edit-color-hex"); }
         } else {
@@ -85,21 +101,17 @@ pub(crate) struct Row {
     text: RefCell<String>,
 }
 
-pub(crate) struct Editor {
-    this: Weak<Editor>,
-    workspace: Weak<Workspace>,
+/// The wheel, color box, hex and value rows that edit one shared color draft.
+/// Edit Color and New drawing's paper color both present it.
+pub(crate) struct ColorForm {
+    this: Weak<ColorForm>,
     localization: RefCell<Arc<layer_ui::Localizer>>,
     pub(crate) draft: RefCell<ColorEditor>,
     view: Cell<ViewColor>,
     headroom: Cell<f32>,
-    epoch: u64,
-    accepted: RefCell<Option<Accepted>>,
     pub(crate) error: RefCell<Option<(Target, ColorEditorError)>>,
     pub(crate) picking: Cell<bool>,
-    finished: Cell<bool>,
     updating: Cell<bool>,
-    pub(crate) dialog: adw::Dialog,
-    pub(crate) title: gtk::Label,
     pub(crate) wheel: ColorWheel,
     pub(crate) shape_toggles: Vec<gtk::ToggleButton>,
     pub(crate) current: gtk::Button,
@@ -119,7 +131,20 @@ pub(crate) struct Editor {
     right: gtk::Box,
     pub(crate) left: gtk::Box,
     pub(crate) header: gtk::Grid,
-    values: gtk::Box,
+    pub(crate) values: gtk::Box,
+    viewed: RefCell<Option<Box<dyn Fn(&ColorEditorView)>>>,
+    blocked: RefCell<Option<Box<dyn Fn(bool)>>>,
+}
+
+pub(crate) struct Editor {
+    this: Weak<Editor>,
+    workspace: Weak<Workspace>,
+    pub(crate) form: Rc<ColorForm>,
+    epoch: u64,
+    accepted: RefCell<Option<Accepted>>,
+    finished: Cell<bool>,
+    pub(crate) dialog: adw::Dialog,
+    pub(crate) title: gtk::Label,
     recent: gtk::Box,
     bottom_stack: gtk::Stack,
     pub(crate) mini_current: ColorPatch,
@@ -130,12 +155,14 @@ pub(crate) struct Editor {
     pub(crate) apply_button: gtk::Button,
     pub(crate) sheet: gtk::Box,
     pub(crate) sheet_scroll: gtk::ScrolledWindow,
-    pub(crate) sheet_open: Cell<bool>,
-    sheet_progress: Rc<Cell<f64>>,
-    sheet_slide: adw::TimedAnimation,
+    pub(crate) slide: Rc<crate::slide_sheet::SlideSheet>,
     pub(crate) search: gtk::SearchEntry,
     pub(crate) sheet_body: gtk::Box,
     pub(crate) sheet_close: gtk::Button,
+}
+impl std::ops::Deref for Editor {
+    type Target = ColorForm;
+    fn deref(&self) -> &ColorForm { &self.form }
 }
 
 fn copy_button(name: &str) -> gtk::Button {
@@ -162,16 +189,32 @@ fn pair(width: i32, height: i32) -> (gtk::Box, ColorPatch, ColorPatch) {
     (pair, current, new)
 }
 
-impl Editor {
-    fn build(workspace: &Rc<Workspace>, draft: ColorEditor, epoch: u64, accepted: Accepted) -> Rc<Self> {
-        let localization = workspace.localization();
-        let dialog = adw::Dialog::builder().content_width(720).width_request(320).height_request(300).build();
-        dialog.set_widget_name("edit-color-dialog");
-        dialog.add_css_class("edit-color-dialog");
-        dialog.add_css_class("picker-dialog");
-        let title = gtk::Label::new(None);
-        title.add_css_class("title-4");
-        title.set_halign(gtk::Align::Center);
+pub(crate) fn add_tile(name: &str, label: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    crate::icons::set_button(&button, "layer-plus-symbolic");
+    button.add_css_class("palette-add");
+    button.set_size_request(SHEET_TILE + 2 * TILE_PADDING, SHEET_TILE + 2 * TILE_PADDING);
+    button.set_halign(gtk::Align::Center);
+    button.set_valign(gtk::Align::Center);
+    button.set_widget_name(name);
+    button.set_tooltip_text(Some(label));
+    button.update_property(&[gtk::accessible::Property::Label(label)]);
+    button
+}
+
+pub(crate) fn swatch_tiles() -> gtk::FlowBox {
+    gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::None)
+        .homogeneous(true)
+        .min_children_per_line(4)
+        .max_children_per_line(64)
+        .column_spacing(TILE_GAP as u32)
+        .row_spacing(TILE_GAP as u32)
+        .build()
+}
+
+impl ColorForm {
+    pub(crate) fn build(workspace: &Rc<Workspace>, draft: ColorEditor) -> Rc<Self> {
         let wheel = ColorWheel::bare();
         wheel.set_widget_name("edit-color-wheel");
         wheel.set_halign(gtk::Align::Center);
@@ -190,7 +233,7 @@ impl Editor {
             toggle
         }).collect();
         for toggle in &shape_toggles[1..] { toggle.set_group(Some(&shape_toggles[0])); }
-        let left = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let left = gtk::Box::new(gtk::Orientation::Vertical, 12);
         left.set_valign(gtk::Align::Start);
         left.append(&wheel);
         left.append(&shapes);
@@ -296,111 +339,17 @@ impl Editor {
         values.append(&grid);
         values.append(&validation);
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 24);
-        let page = gtk::Box::new(gtk::Orientation::Vertical, 16);
-        page.add_css_class("dialog-page");
-        page.append(&title);
-        page.append(&body);
         let right = gtk::Box::new(gtk::Orientation::Vertical, 14);
         right.set_hexpand(true);
-        let recent = gtk::Box::new(gtk::Orientation::Horizontal, TILE_GAP);
-        recent.set_widget_name("edit-color-recent");
-        let recent_scroll = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::External)
-            .vscrollbar_policy(gtk::PolicyType::Never)
-            .hexpand(true)
-            .child(&recent)
-            .build();
-        let (mini_pair, mini_current, mini_new) = pair(38, 32);
-        mini_pair.set_valign(gtk::Align::Center);
-        let mini_hex = gtk::Label::new(None);
-        mini_hex.add_css_class("edit-color-number");
-        let mini = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        mini.append(&mini_pair);
-        mini.append(&mini_hex);
-        let bottom_stack = gtk::Stack::builder().hexpand(true).transition_type(gtk::StackTransitionType::Crossfade).build();
-        bottom_stack.add_named(&recent_scroll, Some("recent"));
-        bottom_stack.add_named(&mini, Some("mini"));
-        let swatches = gtk::Button::new();
-        crate::icons::set_button(&swatches, "layer-chevron-down-symbolic");
-        swatches.add_css_class("edit-color-more");
-        swatches.set_valign(gtk::Align::Center);
-        swatches.set_widget_name("edit-color-swatches");
-        let cancel = gtk::Button::new();
-        cancel.set_widget_name("edit-color-cancel");
-        let apply_button = gtk::Button::new();
-        apply_button.add_css_class("suggested-action");
-        apply_button.set_widget_name("edit-color-apply");
-        let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        bottom.add_css_class("dialog-footer");
-        bottom.append(&bottom_stack);
-        bottom.append(&swatches);
-        bottom.append(&cancel);
-        bottom.append(&apply_button);
-        let search = gtk::SearchEntry::builder().hexpand(true).build();
-        search.set_widget_name("edit-color-search");
-        let sheet_close = gtk::Button::new();
-        crate::icons::set_button(&sheet_close, "layer-chevron-down-symbolic");
-        sheet_close.add_css_class("flat");
-        sheet_close.set_widget_name("edit-color-sheet-close");
-        let sheet_head = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        sheet_head.append(&search);
-        sheet_head.append(&sheet_close);
-        let sheet_body = gtk::Box::new(gtk::Orientation::Vertical, 14);
-        sheet_body.set_widget_name("edit-color-sheet-body");
-        sheet_body.add_css_class("edit-color-sheet-body");
-        let sheet_scroll = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .vexpand(true)
-            .child(&crate::squircle::Squircles::new(&sheet_body))
-            .build());
-        let sheet = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        sheet.add_css_class("edit-color-sheet");
-        sheet.set_widget_name("edit-color-sheet");
-        sheet.set_visible(false);
-        sheet.append(&crate::squircle::Squircles::new(&sheet_head));
-        sheet.append(&sheet_scroll);
-        let body_view = gtk::Viewport::builder().vscroll_policy(gtk::ScrollablePolicy::Natural).child(&crate::squircle::Squircles::new(&page)).build();
-        let body_scroll = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .propagate_natural_height(true)
-            .child(&body_view)
-            .build());
-        let overlay = gtk::Overlay::new();
-        overlay.set_child(Some(&body_scroll));
-        overlay.add_overlay(&sheet);
-        overlay.set_clip_overlay(&sheet, true);
-        let sheet_progress = Rc::new(Cell::new(0.));
-        overlay.connect_get_child_position(glib::clone!(#[strong] sheet_progress, move |overlay, _| {
-            let offset = ((1. - sheet_progress.get()) * f64::from(overlay.height())).round() as i32;
-            Some(gdk::Rectangle::new(0, offset, overlay.width(), overlay.height()))
-        }));
-        let sheet_slide = adw::TimedAnimation::new(&overlay, 0., 1., 250, adw::CallbackAnimationTarget::new(glib::clone!(#[strong] sheet_progress, #[weak] overlay, move |value| {
-            sheet_progress.set(value);
-            overlay.queue_allocate();
-        })));
-        sheet_slide.set_easing(adw::Easing::EaseOutCubic);
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        content.add_css_class("dialog-content");
-        content.append(&overlay);
-        content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        content.append(&crate::squircle::Squircles::new(&bottom));
-        dialog.set_child(Some(&content));
-        dialog.set_default_widget(Some(&apply_button));
-        let editor = Rc::new_cyclic(|this| Self {
+        let form = Rc::new_cyclic(|this| Self {
             this: this.clone(),
-            workspace: Rc::downgrade(workspace),
-            localization: RefCell::new(localization),
+            localization: RefCell::new(workspace.localization()),
             draft: RefCell::new(draft),
             view: Cell::new(workspace.paint_view_color()),
             headroom: Cell::new(workspace.picker_headroom()),
-            epoch,
-            accepted: RefCell::new(Some(accepted)),
             error: RefCell::new(None),
             picking: Cell::new(false),
-            finished: Cell::new(false),
             updating: Cell::new(false),
-            dialog,
-            title,
             wheel,
             shape_toggles,
             current,
@@ -421,31 +370,26 @@ impl Editor {
             left,
             header,
             values,
-            recent,
-            bottom_stack,
-            mini_current,
-            mini_new,
-            mini_hex,
-            swatches,
-            cancel,
-            apply_button,
-            sheet,
-            sheet_scroll,
-            sheet_open: Cell::new(false),
-            sheet_progress,
-            sheet_slide,
-            search,
-            sheet_body,
-            sheet_close,
+            viewed: RefCell::default(),
+            blocked: RefCell::default(),
         });
-        editor.arrange(false);
-        editor.relabel();
-        editor.fill_recent();
-        editor.refresh();
-        editor
+        form.arrange(false);
+        form
     }
 
-    fn arrange(&self, narrow: bool) {
+    pub(crate) fn show_single_color(&self) {
+        for widget in [self.current.upcast_ref::<gtk::Widget>(), self.current_caption.upcast_ref(), self.new_caption.upcast_ref()] { widget.set_visible(false); }
+    }
+
+    pub(crate) fn connect_viewed(&self, viewed: impl Fn(&ColorEditorView) + 'static) {
+        *self.viewed.borrow_mut() = Some(Box::new(viewed));
+    }
+
+    pub(crate) fn connect_blocked(&self, blocked: impl Fn(bool) + 'static) {
+        *self.blocked.borrow_mut() = Some(Box::new(blocked));
+    }
+
+    pub(crate) fn arrange(&self, narrow: bool) {
         for widget in [self.left.upcast_ref::<gtk::Widget>(), self.header.upcast_ref(), self.values.upcast_ref(), self.right.upcast_ref()] {
             if let Some(parent) = widget.parent().and_downcast::<gtk::Box>() { parent.remove(widget); }
         }
@@ -464,13 +408,10 @@ impl Editor {
         }
     }
 
-    fn relabel(&self) {
+    pub(crate) fn relabel(&self) {
         let localization = self.localization.borrow().clone();
         let copy = layer_ui::NativeCopy::new(&localization);
-        let common = layer_ui::CommonCopy::new(&localization);
         let color = &copy.color;
-        self.dialog.set_title(&color.edit);
-        self.title.set_text(&color.edit);
         self.current_caption.set_text(&color.current);
         self.new_caption.set_text(&color.new);
         self.current.set_tooltip_text(Some(&color.current));
@@ -486,19 +427,14 @@ impl Editor {
             row.menu.set_tooltip_text(Some(&color.format));
         }
         self.intensity_label.set_text(&color.intensity_ev);
-        self.cancel.set_label(&common.cancel);
-        self.apply_button.set_label(&color.use_color);
-        self.search.set_placeholder_text(Some(&color.swatch_search));
-        self.search.update_property(&[gtk::accessible::Property::Label(&color.swatch_search)]);
-        self.sheet_close.set_tooltip_text(Some(&color.close_swatches));
-        self.sheet_close.update_property(&[gtk::accessible::Property::Label(&color.close_swatches)]);
-        let swatches = if self.sheet_open.get() { &color.close_swatches } else { &color.all_swatches };
-        self.swatches.set_tooltip_text(Some(swatches));
-        self.swatches.update_property(&[gtk::accessible::Property::Label(swatches)]);
         for (toggle, name) in self.shape_toggles.iter().zip([&color.circle, &color.square, &color.triangle]) {
             toggle.set_tooltip_text(Some(name));
             toggle.update_property(&[gtk::accessible::Property::Description(name)]);
         }
+    }
+
+    pub(crate) fn set_localization(&self, localization: &Arc<layer_ui::Localizer>) {
+        *self.localization.borrow_mut() = localization.clone();
     }
 
     fn view(&self) -> Option<ColorEditorView> {
@@ -514,14 +450,11 @@ impl Editor {
         if let Some(choice) = view.shapes.iter().find(|choice| choice.selected) {
             for (toggle, (shape, ..)) in self.shape_toggles.iter().zip(SHAPES) { toggle.set_active(shape == choice.shape); }
         }
-        for (current, new) in [(&self.current_patch, &self.new_patch), (&self.mini_current, &self.mini_new)] {
-            current.set_display_color(view.current_value, display, headroom);
-            new.set_display_color(view.value, display, headroom);
-        }
+        self.current_patch.set_display_color(view.current_value, display, headroom);
+        self.new_patch.set_display_color(view.value, display, headroom);
         let localization = self.localization.borrow().clone();
         let copy = layer_ui::NativeCopy::new(&localization).color;
         self.hex.set(&view.hex, &view.hex, &copy.hex);
-        self.mini_hex.set_text(&view.hex);
         self.hex_note.set_visible(view.hex_note.is_some());
         if let Some(note) = &view.hex_note {
             self.hex_note.set_text(&note.text);
@@ -548,6 +481,7 @@ impl Editor {
         if let Some(value) = &view.intensity {
             self.intensity.set(&value.text, &value.edit, &value.name);
         }
+        if let Some(viewed) = self.viewed.borrow().as_ref() { viewed(&view); }
         self.updating.set(false);
         self.refresh_error();
     }
@@ -571,16 +505,16 @@ impl Editor {
             }
             blocked |= field.composition.active();
         }
-        self.apply_button.set_sensitive(!blocked);
+        if let Some(callback) = self.blocked.borrow().as_ref() { callback(blocked); }
     }
 
-    fn apply(&self, action: ColorEditorAction) -> Result<(), ColorEditorError> {
+    pub(crate) fn apply(&self, action: ColorEditorAction) -> Result<(), ColorEditorError> {
         let result = self.draft.borrow_mut().apply(action);
         self.refresh();
         result
     }
 
-    fn report(&self, target: Target, result: Result<(), ColorEditorError>) {
+    pub(crate) fn report(&self, target: Target, result: Result<(), ColorEditorError>) {
         let changed = match result {
             Ok(()) => self.error.borrow_mut().take_if(|(failed, _)| *failed == target || *failed == Target::Dialog).is_some(),
             Err(error) => { *self.error.borrow_mut() = Some((target, error)); true }
@@ -648,6 +582,290 @@ impl Editor {
         });
     }
 
+    pub(crate) fn tile(&self, color: RgbColor, detail: &str, name: &str, size: i32) -> gtk::Button {
+        let patch = ColorPatch::new(false);
+        patch.set_size_request(size, size);
+        patch.set_overflow(gtk::Overflow::Hidden);
+        patch.set_display_color(color, self.view.get(), self.headroom.get());
+        let tile = gtk::Button::builder().child(&patch).tooltip_text(detail).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
+        tile.add_css_class("palette-tile");
+        tile.set_widget_name(name);
+        tile.update_property(&[gtk::accessible::Property::Label(detail)]);
+        let form = self.this.clone();
+        tile.connect_clicked(move |_| {
+            if let Some(form) = form.upgrade() {
+                let result = form.apply(ColorEditorAction::Color { color });
+                form.report(Target::Dialog, result);
+            }
+        });
+        tile
+    }
+
+    pub(crate) fn bind(&self, can_pick: bool) {
+        let weak = self.this.clone();
+        self.wheel.connect_pick(glib::clone!(#[strong] weak, move |action| {
+            if let Some(form) = weak.upgrade() {
+                let result = form.apply(ColorEditorAction::Wheel { action });
+                form.report(Target::Dialog, result);
+            }
+        }));
+        if let Some(intensity) = self.wheel.intensity() {
+            intensity.connect_value_changed(glib::clone!(#[strong] weak, move |scale| {
+                let Some(form) = weak.upgrade() else { return; };
+                if scale.updating() || form.updating.get() { return; }
+                let result = form.apply(ColorEditorAction::Wheel { action: ColorAction::HdrIntensity { stops: scale.value() as f32 } });
+                form.report(Target::Number(ColorEditorTarget::Intensity), result);
+            }));
+        }
+        for (toggle, (shape, ..)) in self.shape_toggles.iter().zip(SHAPES) {
+            toggle.connect_toggled(glib::clone!(#[strong] weak, move |toggle| {
+                let Some(form) = weak.upgrade() else { return; };
+                if form.updating.get() || !toggle.is_active() { return; }
+                let result = form.apply(ColorEditorAction::Wheel { action: ColorAction::Shape { shape } });
+                form.report(Target::Dialog, result);
+            }));
+        }
+        self.current.connect_clicked(glib::clone!(#[strong] weak, move |_| {
+            if let Some(form) = weak.upgrade() {
+                let result = form.apply(ColorEditorAction::Revert);
+                form.report(Target::Dialog, result);
+            }
+        }));
+        self.pick.set_visible(can_pick);
+        self.hex_copy.connect_clicked(glib::clone!(#[strong] weak, move |button| {
+            if let Some(form) = weak.upgrade() { let hex = form.hex.label.text(); form.copy(button, &hex); }
+        }));
+        for (index, row) in self.rows.iter().enumerate() {
+            row.copy.connect_clicked(glib::clone!(#[strong] weak, move |button| {
+                if let Some(form) = weak.upgrade() { let text = form.rows[index].text.borrow().clone(); form.copy(button, &text); }
+            }));
+            for (choice, family) in row.choices.iter().zip(layer_ui::COLOR_FORM_FAMILIES[index]) {
+                let family = *family;
+                choice.connect_toggled(glib::clone!(#[strong] weak, move |choice| {
+                    let Some(form) = weak.upgrade() else { return; };
+                    if form.updating.get() || !choice.is_active() { return; }
+                    if let Some(popover) = form.rows[index].menu.popover() { popover.popdown(); }
+                    let result = form.apply(ColorEditorAction::Form { row: index, form: family });
+                    form.report(Target::Dialog, result);
+                }));
+            }
+        }
+        for field in self.fields() {
+            let target = field.target;
+            let find = glib::clone!(#[strong] weak, move || weak.upgrade().and_then(|form| {
+                let field = form.fields().find(|field| field.target == target).cloned();
+                field.map(|field| (form, field))
+            }));
+            field.show.connect_clicked(glib::clone!(#[strong] find, move |_| {
+                if let Some((form, field)) = find() { form.begin_edit(&field); }
+            }));
+            field.entry.connect_activate(glib::clone!(#[strong] find, move |_| {
+                if let Some((form, field)) = find() { form.commit(&field); }
+            }));
+            let keys = gtk::EventControllerKey::new();
+            keys.connect_key_pressed(glib::clone!(#[strong] find, move |_, key, _, _| {
+                if key != gdk::Key::Escape { return glib::Propagation::Proceed; }
+                if let Some((form, field)) = find() { form.cancel_edit(&field); }
+                glib::Propagation::Stop
+            }));
+            field.entry.add_controller(keys);
+            let focus = gtk::EventControllerFocus::new();
+            focus.connect_leave(glib::clone!(#[strong] find, move |_| {
+                if let Some((form, field)) = find() && !form.picking.get() { form.commit(&field); }
+            }));
+            field.entry.add_controller(focus);
+            if let Some(text) = field.entry.delegate().and_downcast::<gtk::Text>() {
+                text.connect_preedit_changed(glib::clone!(#[strong] weak, move |_, _| {
+                    if let Some(form) = weak.upgrade() { form.refresh_error(); }
+                }));
+            }
+            let Target::Number(target) = target else { continue; };
+            let steps = gtk::EventControllerKey::new();
+            steps.connect_key_pressed(glib::clone!(#[strong] weak, move |_, key, _, modifiers| {
+                let Some(form) = weak.upgrade() else { return glib::Propagation::Proceed; };
+                let direction = match key { gdk::Key::Up | gdk::Key::KP_Up => 1., gdk::Key::Down | gdk::Key::KP_Down => -1., _ => return glib::Propagation::Proceed };
+                form.step(target, direction, speed(modifiers));
+                glib::Propagation::Stop
+            }));
+            field.show.add_controller(steps);
+            let scrubbing = Rc::new(Cell::new(false));
+            let drag = gtk::GestureDrag::new();
+            drag.set_button(1);
+            drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+            drag.connect_drag_begin(glib::clone!(#[strong] scrubbing, move |_, _, _| scrubbing.set(false)));
+            drag.connect_drag_update(glib::clone!(#[strong] weak, #[strong] scrubbing, move |gesture, _, dy| {
+                let Some(form) = weak.upgrade() else { return; };
+                if !scrubbing.get() {
+                    if dy.abs() < 4. { return; }
+                    scrubbing.set(true);
+                    gesture.set_state(gtk::EventSequenceState::Claimed);
+                }
+                let result = form.apply(ColorEditorAction::Scrub { target, pixels: -dy as f32, speed: speed(gesture.current_event_state()) });
+                form.report(Target::Number(target), result);
+            }));
+            drag.connect_drag_end(glib::clone!(#[strong] weak, #[strong] scrubbing, move |_, _, _| {
+                if scrubbing.replace(false) && let Some(form) = weak.upgrade() {
+                    let result = form.apply(ColorEditorAction::EndScrub { cancel: false });
+                    form.report(Target::Number(target), result);
+                }
+            }));
+            drag.connect_cancel(glib::clone!(#[strong] weak, move |_, _| {
+                if scrubbing.replace(false) && let Some(form) = weak.upgrade() {
+                    let result = form.apply(ColorEditorAction::EndScrub { cancel: true });
+                    form.report(Target::Number(target), result);
+                }
+            }));
+            field.show.add_controller(drag);
+        }
+        self.relabel();
+        self.refresh();
+    }
+}
+
+impl Editor {
+    fn build(workspace: &Rc<Workspace>, draft: ColorEditor, epoch: u64, accepted: Accepted) -> Rc<Self> {
+        let form = ColorForm::build(workspace, draft);
+        let dialog = adw::Dialog::builder().content_width(720).width_request(320).height_request(300).build();
+        dialog.set_widget_name("edit-color-dialog");
+        dialog.add_css_class("edit-color-dialog");
+        dialog.add_css_class("picker-dialog");
+        let title = gtk::Label::new(None);
+        title.add_css_class("title-4");
+        title.set_halign(gtk::Align::Center);
+        let page = gtk::Box::new(gtk::Orientation::Vertical, 16);
+        page.add_css_class("dialog-page");
+        page.append(&title);
+        page.append(&form.body);
+        let recent = gtk::Box::new(gtk::Orientation::Horizontal, TILE_GAP);
+        recent.set_widget_name("edit-color-recent");
+        let recent_scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::External)
+            .vscrollbar_policy(gtk::PolicyType::Never)
+            .hexpand(true)
+            .child(&recent)
+            .build();
+        let (mini_pair, mini_current, mini_new) = pair(38, 32);
+        mini_pair.set_valign(gtk::Align::Center);
+        let mini_hex = gtk::Label::new(None);
+        mini_hex.add_css_class("edit-color-number");
+        let mini = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        mini.append(&mini_pair);
+        mini.append(&mini_hex);
+        let bottom_stack = gtk::Stack::builder().hexpand(true).transition_type(gtk::StackTransitionType::Crossfade).build();
+        bottom_stack.add_named(&recent_scroll, Some("recent"));
+        bottom_stack.add_named(&mini, Some("mini"));
+        let swatches = gtk::Button::new();
+        crate::icons::set_button(&swatches, "layer-chevron-down-symbolic");
+        swatches.add_css_class("edit-color-more");
+        swatches.set_valign(gtk::Align::Center);
+        swatches.set_widget_name("edit-color-swatches");
+        let cancel = gtk::Button::new();
+        cancel.set_widget_name("edit-color-cancel");
+        let apply_button = gtk::Button::new();
+        apply_button.add_css_class("suggested-action");
+        apply_button.set_widget_name("edit-color-apply");
+        let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        bottom.add_css_class("dialog-footer");
+        bottom.append(&bottom_stack);
+        bottom.append(&swatches);
+        bottom.append(&cancel);
+        bottom.append(&apply_button);
+        let search = gtk::SearchEntry::builder().hexpand(true).build();
+        search.set_widget_name("edit-color-search");
+        let sheet_close = gtk::Button::new();
+        crate::icons::set_button(&sheet_close, "layer-chevron-down-symbolic");
+        sheet_close.add_css_class("flat");
+        sheet_close.set_widget_name("edit-color-sheet-close");
+        let sheet_head = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        sheet_head.append(&search);
+        sheet_head.append(&sheet_close);
+        let sheet_body = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        sheet_body.set_widget_name("edit-color-sheet-body");
+        sheet_body.add_css_class("edit-color-sheet-body");
+        let sheet_scroll = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .vexpand(true)
+            .child(&crate::squircle::Squircles::new(&sheet_body))
+            .build());
+        let sheet = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        sheet.add_css_class("edit-color-sheet");
+        sheet.set_widget_name("edit-color-sheet");
+        sheet.append(&crate::squircle::Squircles::new(&sheet_head));
+        sheet.append(&sheet_scroll);
+        let body_view = gtk::Viewport::builder().vscroll_policy(gtk::ScrollablePolicy::Natural).child(&crate::squircle::Squircles::new(&page)).build();
+        let body_scroll = crate::input::pen_scroller(gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .child(&body_view)
+            .build());
+        let overlay = gtk::Overlay::new();
+        overlay.set_child(Some(&body_scroll));
+        let slide = crate::slide_sheet::SlideSheet::new(&overlay, &sheet);
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.add_css_class("dialog-content");
+        content.append(&overlay);
+        content.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        content.append(&crate::squircle::Squircles::new(&bottom));
+        dialog.set_child(Some(&content));
+        dialog.set_default_widget(Some(&apply_button));
+        let editor = Rc::new_cyclic(|this| Self {
+            this: this.clone(),
+            workspace: Rc::downgrade(workspace),
+            form,
+            epoch,
+            accepted: RefCell::new(Some(accepted)),
+            finished: Cell::new(false),
+            dialog,
+            title,
+            recent,
+            bottom_stack,
+            mini_current,
+            mini_new,
+            mini_hex,
+            swatches,
+            cancel,
+            apply_button,
+            sheet,
+            sheet_scroll,
+            slide,
+            search,
+            sheet_body,
+            sheet_close,
+        });
+        let weak = editor.this.clone();
+        editor.form.connect_viewed(glib::clone!(#[strong] weak, move |view| {
+            let Some(editor) = weak.upgrade() else { return; };
+            let (display, headroom) = (editor.view.get(), editor.headroom.get());
+            editor.mini_current.set_display_color(view.current_value, display, headroom);
+            editor.mini_new.set_display_color(view.value, display, headroom);
+            editor.mini_hex.set_text(&view.hex);
+        }));
+        editor.form.connect_blocked(move |blocked| if let Some(editor) = weak.upgrade() { editor.apply_button.set_sensitive(!blocked); });
+        editor.relabel();
+        editor.fill_recent();
+        editor.refresh();
+        editor
+    }
+
+    fn relabel(&self) {
+        self.form.relabel();
+        let localization = self.localization.borrow().clone();
+        let copy = layer_ui::NativeCopy::new(&localization);
+        let common = layer_ui::CommonCopy::new(&localization);
+        let color = &copy.color;
+        self.dialog.set_title(&color.edit);
+        self.title.set_text(&color.edit);
+        self.cancel.set_label(&common.cancel);
+        self.apply_button.set_label(&color.use_color);
+        self.search.set_placeholder_text(Some(&color.swatch_search));
+        self.search.update_property(&[gtk::accessible::Property::Label(&color.swatch_search)]);
+        self.sheet_close.set_tooltip_text(Some(&color.close_swatches));
+        self.sheet_close.update_property(&[gtk::accessible::Property::Label(&color.close_swatches)]);
+        let swatches = if self.slide.is_open() { &color.close_swatches } else { &color.all_swatches };
+        self.swatches.set_tooltip_text(Some(swatches));
+        self.swatches.update_property(&[gtk::accessible::Property::Label(swatches)]);
+    }
+
     fn fill_recent(&self) {
         while let Some(child) = self.recent.first_child() { self.recent.remove(&child); }
         let Some(workspace) = self.workspace.upgrade() else { return; };
@@ -655,25 +873,6 @@ impl Editor {
         for color in history {
             self.recent.append(&self.tile(color, &layer_ui::ColorLibrary::tile_detail("", color), "edit-color-recent-tile", RECENT_TILE));
         }
-    }
-
-    fn tile(&self, color: RgbColor, detail: &str, name: &str, size: i32) -> gtk::Button {
-        let patch = ColorPatch::new(false);
-        patch.set_size_request(size, size);
-        patch.set_overflow(gtk::Overflow::Hidden);
-        patch.set_display_color(color, self.view.get(), self.headroom.get());
-        let tile = gtk::Button::builder().child(&patch).tooltip_text(detail).build();
-        tile.add_css_class("palette-tile");
-        tile.set_widget_name(name);
-        tile.update_property(&[gtk::accessible::Property::Label(detail)]);
-        let editor = self.this.clone();
-        tile.connect_clicked(move |_| {
-            if let Some(editor) = editor.upgrade() {
-                let result = editor.apply(ColorEditorAction::Color { color });
-                editor.report(Target::Dialog, result);
-            }
-        });
-        tile
     }
 
     pub(crate) fn fill_sheet(&self) {
@@ -699,29 +898,14 @@ impl Editor {
             count.add_css_class("dim-label");
             head.append(&title);
             head.append(&count);
-            let tiles = gtk::FlowBox::builder()
-                .selection_mode(gtk::SelectionMode::None)
-                .homogeneous(true)
-                .min_children_per_line(4)
-                .max_children_per_line(64)
-                .column_spacing(TILE_GAP as u32)
-                .row_spacing(TILE_GAP as u32)
-                .build();
+            let tiles = swatch_tiles();
             for tile in &section.tiles {
                 let button = self.tile(tile.color, &tile.detail, "edit-color-sheet-tile", SHEET_TILE);
                 if tile.current { button.add_css_class("selected"); }
                 tiles.append(&button);
             }
             if let Some(palette) = section.palette.filter(|_| section.can_add) {
-                let button = gtk::Button::new();
-                crate::icons::set_button(&button, "layer-plus-symbolic");
-                button.add_css_class("palette-add");
-                button.set_size_request(SHEET_TILE, SHEET_TILE);
-                button.set_halign(gtk::Align::Center);
-                button.set_valign(gtk::Align::Center);
-                button.set_widget_name(&format!("edit-color-add-{palette}"));
-                button.set_tooltip_text(Some(&add));
-                button.update_property(&[gtk::accessible::Property::Label(&add)]);
+                let button = add_tile(&format!("edit-color-add-{palette}"), &add);
                 let editor = self.this.clone();
                 button.connect_clicked(move |_| {
                     let Some(editor) = editor.upgrade() else { return; };
@@ -742,18 +926,14 @@ impl Editor {
     }
 
     pub(crate) fn show_sheet(&self, open: bool) {
-        if self.sheet_open.replace(open) == open { return; }
-        if open {
-            self.updating.set(true);
+        if open && !self.slide.is_open() {
+            self.form.updating.set(true);
             self.search.set_text(&self.draft.borrow().memory().search);
-            self.updating.set(false);
+            self.form.updating.set(false);
             self.fill_sheet();
             self.sheet_scroll.vadjustment().set_value(0.);
-            self.sheet.set_visible(true);
         }
-        self.sheet_slide.set_value_from(self.sheet_progress.get());
-        self.sheet_slide.set_value_to(if open { 1. } else { 0. });
-        self.sheet_slide.play();
+        if !self.slide.show(open) { return; }
         self.body.set_sensitive(!open);
         self.bottom_stack.set_visible_child_name(if open { "mini" } else { "recent" });
         if open { self.swatches.add_css_class("open"); } else { self.swatches.remove_css_class("open"); }
@@ -816,133 +996,18 @@ impl Editor {
     }
 
     fn bind(&self, workspace: &Rc<Workspace>, can_pick: bool) {
+        self.form.bind(can_pick);
+        self.relabel();
         let weak = self.this.clone();
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 700sp").unwrap());
         narrow.connect_apply(glib::clone!(#[strong] weak, move |_| if let Some(editor) = weak.upgrade() { editor.arrange(true); }));
         narrow.connect_unapply(glib::clone!(#[strong] weak, move |_| if let Some(editor) = weak.upgrade() { editor.arrange(false); }));
         self.dialog.add_breakpoint(narrow);
-        self.wheel.connect_pick(glib::clone!(#[strong] weak, move |action| {
-            if let Some(editor) = weak.upgrade() {
-                let result = editor.apply(ColorEditorAction::Wheel { action });
-                editor.report(Target::Dialog, result);
-            }
-        }));
-        if let Some(intensity) = self.wheel.intensity() {
-            intensity.connect_value_changed(glib::clone!(#[strong] weak, move |scale| {
-                let Some(editor) = weak.upgrade() else { return; };
-                if scale.updating() || editor.updating.get() { return; }
-                let result = editor.apply(ColorEditorAction::Wheel { action: ColorAction::HdrIntensity { stops: scale.value() as f32 } });
-                editor.report(Target::Number(ColorEditorTarget::Intensity), result);
-            }));
-        }
-        for (toggle, (shape, ..)) in self.shape_toggles.iter().zip(SHAPES) {
-            toggle.connect_toggled(glib::clone!(#[strong] weak, move |toggle| {
-                let Some(editor) = weak.upgrade() else { return; };
-                if editor.updating.get() || !toggle.is_active() { return; }
-                let result = editor.apply(ColorEditorAction::Wheel { action: ColorAction::Shape { shape } });
-                editor.report(Target::Dialog, result);
-            }));
-        }
-        self.current.connect_clicked(glib::clone!(#[strong] weak, move |_| {
-            if let Some(editor) = weak.upgrade() {
-                let result = editor.apply(ColorEditorAction::Revert);
-                editor.report(Target::Dialog, result);
-            }
-        }));
-        self.pick.set_visible(can_pick);
         self.pick.connect_clicked(glib::clone!(#[strong] weak, move |_| if let Some(editor) = weak.upgrade() { editor.start_pick(); }));
-        self.hex_copy.connect_clicked(glib::clone!(#[strong] weak, move |button| {
-            if let Some(editor) = weak.upgrade() { let hex = editor.hex.label.text(); editor.copy(button, &hex); }
-        }));
-        for (index, row) in self.rows.iter().enumerate() {
-            row.copy.connect_clicked(glib::clone!(#[strong] weak, move |button| {
-                if let Some(editor) = weak.upgrade() { let text = editor.rows[index].text.borrow().clone(); editor.copy(button, &text); }
-            }));
-            for (choice, form) in row.choices.iter().zip(layer_ui::COLOR_FORM_FAMILIES[index]) {
-                let form = *form;
-                choice.connect_toggled(glib::clone!(#[strong] weak, move |choice| {
-                    let Some(editor) = weak.upgrade() else { return; };
-                    if editor.updating.get() || !choice.is_active() { return; }
-                    if let Some(popover) = editor.rows[index].menu.popover() { popover.popdown(); }
-                    let result = editor.apply(ColorEditorAction::Form { row: index, form });
-                    editor.report(Target::Dialog, result);
-                }));
-            }
-        }
-        for field in self.fields() {
-            let target = field.target;
-            let find = glib::clone!(#[strong] weak, move || weak.upgrade().and_then(|editor| {
-                let field = editor.fields().find(|field| field.target == target).cloned();
-                field.map(|field| (editor, field))
-            }));
-            field.show.connect_clicked(glib::clone!(#[strong] find, move |_| {
-                if let Some((editor, field)) = find() { editor.begin_edit(&field); }
-            }));
-            field.entry.connect_activate(glib::clone!(#[strong] find, move |_| {
-                if let Some((editor, field)) = find() { editor.commit(&field); }
-            }));
-            let keys = gtk::EventControllerKey::new();
-            keys.connect_key_pressed(glib::clone!(#[strong] find, move |_, key, _, _| {
-                if key != gdk::Key::Escape { return glib::Propagation::Proceed; }
-                if let Some((editor, field)) = find() { editor.cancel_edit(&field); }
-                glib::Propagation::Stop
-            }));
-            field.entry.add_controller(keys);
-            let focus = gtk::EventControllerFocus::new();
-            focus.connect_leave(glib::clone!(#[strong] find, move |_| {
-                if let Some((editor, field)) = find() && !editor.picking.get() { editor.commit(&field); }
-            }));
-            field.entry.add_controller(focus);
-            if let Some(text) = field.entry.delegate().and_downcast::<gtk::Text>() {
-                text.connect_preedit_changed(glib::clone!(#[strong] weak, move |_, _| {
-                    if let Some(editor) = weak.upgrade() { editor.refresh_error(); }
-                }));
-            }
-            let Target::Number(target) = target else { continue; };
-            let steps = gtk::EventControllerKey::new();
-            steps.connect_key_pressed(glib::clone!(#[strong] weak, move |_, key, _, modifiers| {
-                let Some(editor) = weak.upgrade() else { return glib::Propagation::Proceed; };
-                let direction = match key { gdk::Key::Up | gdk::Key::KP_Up => 1., gdk::Key::Down | gdk::Key::KP_Down => -1., _ => return glib::Propagation::Proceed };
-                editor.step(target, direction, speed(modifiers));
-                glib::Propagation::Stop
-            }));
-            field.show.add_controller(steps);
-            let scrubbing = Rc::new(Cell::new(false));
-            let drag = gtk::GestureDrag::new();
-            drag.set_button(1);
-            drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-            drag.connect_drag_begin(glib::clone!(#[strong] scrubbing, move |_, _, _| scrubbing.set(false)));
-            drag.connect_drag_update(glib::clone!(#[strong] weak, #[strong] scrubbing, move |gesture, _, dy| {
-                let Some(editor) = weak.upgrade() else { return; };
-                if !scrubbing.get() {
-                    if dy.abs() < 4. { return; }
-                    scrubbing.set(true);
-                    gesture.set_state(gtk::EventSequenceState::Claimed);
-                }
-                let result = editor.apply(ColorEditorAction::Scrub { target, pixels: -dy as f32, speed: speed(gesture.current_event_state()) });
-                editor.report(Target::Number(target), result);
-            }));
-            drag.connect_drag_end(glib::clone!(#[strong] weak, #[strong] scrubbing, move |_, _, _| {
-                if scrubbing.replace(false) && let Some(editor) = weak.upgrade() {
-                    let result = editor.apply(ColorEditorAction::EndScrub { cancel: false });
-                    editor.report(Target::Number(target), result);
-                }
-            }));
-            drag.connect_cancel(glib::clone!(#[strong] weak, move |_, _| {
-                if scrubbing.replace(false) && let Some(editor) = weak.upgrade() {
-                    let result = editor.apply(ColorEditorAction::EndScrub { cancel: true });
-                    editor.report(Target::Number(target), result);
-                }
-            }));
-            field.show.add_controller(drag);
-        }
         self.swatches.connect_clicked(glib::clone!(#[strong] weak, move |_| {
-            if let Some(editor) = weak.upgrade() { editor.show_sheet(!editor.sheet_open.get()); }
+            if let Some(editor) = weak.upgrade() { editor.show_sheet(!editor.slide.is_open()); }
         }));
         self.sheet_close.connect_clicked(glib::clone!(#[strong] weak, move |_| if let Some(editor) = weak.upgrade() { editor.show_sheet(false); }));
-        self.sheet_slide.connect_done(glib::clone!(#[strong] weak, move |_| {
-            if let Some(editor) = weak.upgrade().filter(|editor| !editor.sheet_open.get()) { editor.sheet.set_visible(false); }
-        }));
         self.search.connect_search_changed(glib::clone!(#[strong] weak, move |search| {
             let Some(editor) = weak.upgrade() else { return; };
             if editor.updating.get() { return; }
@@ -1001,10 +1066,10 @@ impl Editor {
         }));
         workspace.on_localization(glib::clone!(#[strong] weak, move |localization| {
             let Some(editor) = weak.upgrade() else { return false; };
-            *editor.localization.borrow_mut() = localization.clone();
+            editor.set_localization(localization);
             editor.relabel();
             editor.refresh();
-            if editor.sheet_open.get() { editor.fill_sheet(); }
+            if editor.slide.is_open() { editor.fill_sheet(); }
             true
         }));
         if let Some(editor) = self.this.upgrade() { workspace.color_editors.borrow_mut().push(editor); }

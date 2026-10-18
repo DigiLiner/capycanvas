@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
+import {createDrawing} from './new-drawing-fixture.mjs';
 import {promisify} from 'node:util';
 
 const bar = '.canvas-action-bar';
@@ -560,8 +561,7 @@ export async function checkCanvasBar({call,evaluate,settle,device=false}) {
     const ready=()=>wait('!layerApp.documents.busy()&&layerApp.app.brush_ready()&&!layerApp.state().document_file.busy&&layerApp.app.document_park_ready()');
     const [first]=await drawings();
     await invoke('new_document');
-    await wait(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create')`);
-    await evaluate(`(()=>{const dialog=document.querySelector('dialog[open]');for(const n of dialog.querySelectorAll('input[type=number]'))n.value=96;[...dialog.querySelectorAll('button')].find(b=>b.textContent==='Create').click();})()`);
+    await evaluate(createDrawing({width:96,height:96}));
     await wait('layerApp.app.document_tabs(0).tabs.length===2');await ready();
     const second=(await drawings()).find(id=>id!==first);
     await evaluate(`layerApp.documents.select(BigInt(${first}))`);await ready();

@@ -6,7 +6,6 @@ import android.view.Surface
 internal object Native {
     @JvmStatic external fun nativeCaption(request: String, language: String = ""): String
     @JvmStatic external fun drawerFrame(request: String): String
-    @JvmStatic external fun documentAppearance(options: String, language: String = ""): String
     @JvmStatic external fun shaderInput(handle: Long)
     init { System.loadLibrary("layer_android") }
     @JvmStatic external fun bootstrap(saved: String, locales: Array<String>): String
@@ -127,9 +126,8 @@ internal object Native {
     @JvmStatic external fun projectPackageWrite(task: Long, fd: Int, preview: Boolean)
     @JvmStatic external fun projectProfilePrompt(task: Long): String
     @JvmStatic external fun projectAssumeProfile(task: Long, profile: String)
-    @JvmStatic external fun projectOptions(task: Long, options: String)
     @JvmStatic external fun projectOpenControl(task: Long, control: Long)
-    @JvmStatic external fun projectWork(task: Long, fd: Int, width: Int, height: Int)
+    @JvmStatic external fun projectWork(task: Long, fd: Int, papers: String)
     @JvmStatic external fun projectAdopt(handle: Long, task: Long, location: String)
     @JvmStatic external fun projectFree(task: Long)
     @JvmStatic external fun documentComplete(handle: Long, request: Int, success: Boolean, error: String)
@@ -155,6 +153,7 @@ internal object Native {
     @JvmStatic external fun paperApply(handle: Long, task: Long)
     @JvmStatic external fun paperCancel(task: Long)
     @JvmStatic external fun paperFree(task: Long)
+    @JvmStatic external fun paperImportTask(handle: Long, directory: String): Long
     @JvmStatic external fun captureControl(): Long
     @JvmStatic external fun proofTexture(edge: Int): IntArray
     @JvmStatic external fun proofControl(handle: Long, action: String)

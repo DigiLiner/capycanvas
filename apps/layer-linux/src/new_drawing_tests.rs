@@ -1,0 +1,191 @@
+//! The New drawing dialog on the private display: main page, presets, saving,
+//! paper and paper color, in the light and dark themes.
+use super::new_photo::{capture_ui, invoke, ready};
+use super::*;
+
+fn dialog(w: &Workspace) -> gtk::Widget { w.window.visible_dialog().expect("New drawing").upcast() }
+pub(super) fn part<T: IsA<gtk::Widget>>(w: &Workspace, name: &str) -> T { named::<T>(&dialog(w), name) }
+pub(super) fn open_new_drawing(w: &Rc<Workspace>) {
+    invoke(w, CommandId::NewDocument);
+    until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "new-drawing-dialog" && dialog.is_mapped()), "New drawing");
+    pump(300);
+}
+pub(super) fn new_drawing_action(w: &Rc<Workspace>, action: NewDrawingAction) {
+    w.dispatch(UiAction::NewDrawing { action });
+    pump(150);
+}
+pub(super) fn close_new_drawing(w: &Rc<Workspace>, button: &str) {
+    click(&part::<gtk::Button>(w, button));
+    until(|| w.window.visible_dialog().is_none(), "New drawing closes");
+}
+fn press(w: &Workspace, name: &str) {
+    click(&part::<gtk::Button>(w, name));
+    pump(350);
+}
+fn tab(w: &Workspace, label: &str) {
+    let tabs = part::<gtk::Widget>(w, "new-drawing-tabs");
+    let toggle = widgets(tabs.upcast_ref()).filter_map(|widget| widget.downcast::<gtk::ToggleButton>().ok())
+        .find(|toggle| toggle.label().as_deref() == Some(label)).unwrap_or_else(|| panic!("{label} tab"));
+    toggle.set_active(true);
+    pump(200);
+}
+fn pick(grid: &gtk::FlowBox, index: i32) {
+    grid.select_child(&grid.child_at_index(index).expect("tile"));
+    pump(150);
+}
+fn label(w: &Workspace, name: &str) -> String { part::<gtk::Label>(w, name).text().to_string() }
+fn third_row_shows(grid: &gtk::FlowBox) -> bool {
+    let scroller = grid.ancestor(gtk::ScrolledWindow::static_type()).unwrap();
+    let last = grid.child_at_index(12).unwrap();
+    last.compute_bounds(&scroller).is_some_and(|bounds| bounds.y() >= 0. && bounds.y() + bounds.height() <= scroller.height() as f32)
+}
+
+#[test]
+#[ignore = "private Wayland display and hardware GPU"]
+fn native_new_drawing_dialog_review() {
+    let app = native_test_app("art.capycanvas.NewDrawingReview");
+    let output = std::path::Path::new("../../artifacts/new-drawing-dialog/gtk");
+    std::fs::create_dir_all(output).unwrap();
+    let output = output.canonicalize().unwrap();
+    let w = Workspace::with_project(&app, Some((new_drawing_at(256, 256, layer_core::color::SampleDepth::U8), None)));
+    let created = Rc::new(RefCell::new(None));
+    let result = created.clone();
+    *w.open_document.borrow_mut() = Some(Rc::new(move |project, location| { result.replace(Some((project, location))); }));
+    w.window.maximize();
+    w.window.present();
+    ready(&w);
+    let mut input = RemoteInput::new().settle_ms(200).timeout_secs(30);
+    input.ready();
+    let paper = layer_ui::occurrence_token(ui_session(&w).engine().document().bottom_paper().unwrap());
+    w.dispatch(UiAction::SelectLayer { id: paper });
+    ready(&w);
+    crate::paper_picker::open(&w, paper);
+    until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "texture-dialog" && dialog.is_mapped()), "Choose Texture");
+    pump(400);
+    assert!(third_row_shows(&part::<gtk::FlowBox>(&w, "texture-grid")), "Choose Texture shows three full rows");
+    w.window.visible_dialog().unwrap().close();
+    until(|| w.window.visible_dialog().is_none(), "Choose Texture closes");
+    let compositor = std::env::var_os("LAYER_NATIVE_CAPTURE_DIR").is_some();
+    for theme in [Theme::Light, Theme::Dark] {
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        pump(200);
+        let theme = format!("{theme:?}").to_lowercase();
+        let shot = |step: &str| capture_ui(&w, &output, &format!("{theme}-{step}.png"));
+        invoke(&w, CommandId::NewDocument);
+        until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "new-drawing-dialog"), "New drawing");
+        pump(500);
+        shot("1-main");
+        let height = |name: &str| {
+            let widget = part::<gtk::Widget>(&w, name);
+            (name.to_string(), widget.compute_bounds(&widget).map_or(0, |bounds| bounds.height().round() as i32))
+        };
+        let inputs: Vec<_> = ["new-drawing-name", "new-drawing-width", "new-drawing-height", "new-drawing-unit", "new-drawing-orientation",
+            "new-drawing-resolution-field", "new-drawing-space", "new-drawing-depth", "new-drawing-blending", "new-drawing-presets-button", "new-drawing-cancel", "new-drawing-create"].map(height).into();
+        assert!(inputs.iter().all(|(_, size)| *size == 34), "inputs and buttons share one height: {inputs:?}");
+        let tiles = ["new-drawing-texture", "new-drawing-paper-color"].map(height);
+        assert!(tiles.iter().all(|(_, size)| *size == 44), "paper tiles: {tiles:?}");
+        let widths = ["new-drawing-width", "new-drawing-height"].map(|name| part::<gtk::Widget>(&w, name).width());
+        assert_eq!(widths[0], widths[1], "W and H fields match");
+        let bounds = |name: &str| part::<gtk::Widget>(&w, name).compute_bounds(&dialog(&w)).unwrap();
+        let [width, link, height] = ["new-drawing-width", "new-drawing-link", "new-drawing-height"].map(bounds);
+        assert_eq!((link.x(), link.x() + link.width(), link.height()), (width.x() + width.width(), height.x(), width.height()), "the link fills the gap between W and H");
+        let field = part::<gtk::Widget>(&w, "new-drawing-resolution-field");
+        let closed = (field.width(), field.height());
+        input.click(screen_point(&part::<gtk::Widget>(&w, "new-drawing-resolution-choices"), &w.window, [0.5, 0.5]));
+        pump(300);
+        assert!(part::<gtk::Popover>(&w, "new-drawing-resolution-menu").is_visible(), "a click opens common resolutions");
+        assert_eq!((field.width(), field.height()), closed, "opening common resolutions keeps the field's size");
+        if compositor { input.perform(serde_json::json!([{ "wait_ms": 250 }, { "capture": format!("{theme}-1b-resolution-menu") }])); }
+        part::<gtk::MenuButton>(&w, "new-drawing-resolution-choices").popdown();
+        pump(200);
+
+        press(&w, "new-drawing-preview");
+        assert!(part::<gtk::Widget>(&w, "new-drawing-browser").is_visible(), "the preview opens all presets");
+        press(&w, "new-drawing-browser-cancel");
+        press(&w, "new-drawing-presets-button");
+        let tiles = part::<gtk::FlowBox>(&w, "new-drawing-presets");
+        let across = (0..8).filter_map(|index| tiles.child_at_index(index)).filter(|tile| tile.compute_bounds(&tiles).is_some_and(|bounds| bounds.y() < 1.)).count();
+        assert_eq!(across, 5, "five presets across on desktop");
+        shot("2-presets");
+        tab(&w, "Pastel");
+        let grid = part::<gtk::FlowBox>(&w, "new-drawing-presets");
+        pick(&grid, 8);
+        assert_eq!(label(&w, "new-drawing-summary-name"), "Chalkboard");
+        shot("3-presets-pastel");
+        press(&w, "new-drawing-save-as");
+        part::<gtk::Entry>(&w, "new-drawing-save-name").set_text("Studio chalk");
+        pump(150);
+        shot("4-save-as");
+        press(&w, "new-drawing-save-cancel");
+        press(&w, "new-drawing-select");
+        assert!(label(&w, "new-drawing-caption").is_empty() || part::<gtk::Label>(&w, "new-drawing-caption").label().contains("Chalkboard"));
+        shot("5-chalkboard");
+
+        press(&w, "new-drawing-texture");
+        shot("6-paper");
+        pick(&part::<gtk::FlowBox>(&w, "new-drawing-papers"), 9);
+        press(&w, "new-drawing-paper-use");
+        press(&w, "new-drawing-paper-color");
+        shot("7-paper-color");
+        let layout = |w: &Workspace| ["edit-color-wheel", "edit-color-hex", "edit-color-value-0-0", "edit-color-value-1-2", "edit-color-value-2-0", "edit-color-value-2-2", "new-drawing-color-mode"]
+            .map(|name| {
+                let bounds = part::<gtk::Widget>(w, name).compute_bounds(&dialog(w)).unwrap();
+                (name, bounds.x().round() as i32, bounds.width().round() as i32)
+            });
+        let before = layout(&w);
+        click(&part::<gtk::Button>(&w, "new-drawing-paper-color-0"));
+        pump(200);
+        assert_eq!(layout(&w), before, "values with more digits keep every field in place");
+        let visible = |widget: gtk::Widget| {
+            let bounds = widget.compute_bounds(&widget).unwrap();
+            (bounds.width().round() as i32, bounds.height().round() as i32)
+        };
+        let sizes = [visible(part::<gtk::Widget>(&w, "new-drawing-paper-color-1").first_child().unwrap()), visible(part::<gtk::Widget>(&w, "new-drawing-add-paper-color"))];
+        assert_eq!(sizes[0], sizes[1], "the add tile matches the swatches");
+        assert_eq!(sizes[0].0, sizes[0].1, "swatches are square");
+        part::<gtk::ToggleButton>(&w, "new-drawing-color-mode-transparent").set_active(true);
+        pump(200);
+        shot("8-transparent");
+        press(&w, "new-drawing-color-cancel");
+
+        part::<gtk::DropDown>(&w, "new-drawing-depth").set_selected(2);
+        pump(150);
+        assert!(!part::<gtk::DropDown>(&w, "new-drawing-blending").is_sensitive());
+        part::<gtk::DropDown>(&w, "new-drawing-unit").set_selected(3);
+        pump(150);
+        shot("9-pixels-hdr");
+        part::<gtk::DropDown>(&w, "new-drawing-depth").set_selected(0);
+        click(&part::<gtk::Button>(&w, "new-drawing-cancel"));
+        until(|| w.window.visible_dialog().is_none(), "New drawing closes");
+    }
+
+    invoke(&w, CommandId::NewDocument);
+    until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "new-drawing-dialog"), "New drawing");
+    pump(300);
+    part::<gtk::Entry>(&w, "new-drawing-name").set_text("Harbor study");
+    press(&w, "new-drawing-create");
+    until(|| created.borrow().is_some(), "the new drawing");
+    let (project, location) = created.borrow_mut().take().unwrap();
+    assert!(location.is_none());
+    assert_eq!(project.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
+    assert_eq!(state(&w).settings.new_document.recent.first(), Some(&layer_ui::PresetKey::BuiltIn("sketchbook-a4".into())));
+
+    w.window.unmaximize();
+    w.window.set_default_size(620, 860);
+    pump(300);
+    invoke(&w, CommandId::NewDocument);
+    until(|| w.window.visible_dialog().is_some(), "New drawing");
+    pump(500);
+    capture_ui(&w, &output, "narrow.png");
+    click(&part::<gtk::Button>(&w, "new-drawing-cancel"));
+    let fresh = Workspace::new(&app);
+    fresh.window.present();
+    ready(&fresh);
+    let opened = ui_session(&fresh).engine().document().clone();
+    assert_eq!(opened.composition().size, [3508, 2480], "a new window opens on a white A4 landscape sheet");
+    assert_eq!(opened.composition().resolution, Some(layer_core::ImageResolution::ppi(300)));
+    fresh.window.destroy();
+    input.finish();
+    w.window.destroy();
+    pump(100);
+}

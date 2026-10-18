@@ -4,8 +4,6 @@ settings-language-system = Gunakan bahasa sistem
 
 settings-reset-to-default = Atur Ulang ke Bawaan
 
-
-
 settings-enable-stroke-prediction = Aktifkan prediksi goresan
 
 settings-reduce-the-gap-between-your-pen-and-the-stroke = Kurangi jarak antara pena dan goresan.
@@ -72,7 +70,6 @@ settings-version = Versi
 
 settings-application-license = Lisensi aplikasi
 
-
 settings-canvas-rendering = Perenderan kanvas
 
 settings-vulkan-wayland = Vulkan · Wayland
@@ -83,7 +80,6 @@ settings-direct3d-12 = Direct3D 12
 settings-native-gpu = GPU native
 
 settings-show-capy-in-zen-mode = Tampilkan Capy dalam mode Zen
-
 
 settings-button-icon = Ikon tombol
 
@@ -170,30 +166,6 @@ settings-page-input = Pena & Masukan
 settings-page-shortcuts = Pintasan Papan Ketik
 
 settings-page-about = Tentang
-
-settings-new-drawings = Gambar baru
-
-settings-color-space = Ruang warna
-
-settings-defaults-apply-to-future-drawings = Pengaturan bawaan berlaku untuk gambar berikutnya.
-
-settings-bit-depth = Kedalaman bit
-
-settings-16-bit-improves-precision-for-subsequent-edits = 16-bit meningkatkan presisi untuk pengeditan berikutnya.
-
-settings-8-bit-sdr = SDR 8-bit
-
-settings-16-bit-sdr = SDR 16-bit
-
-settings-16-bit-float-hdr = HDR pecahan mengambang 16-bit
-
-settings-32-bit-float-hdr = HDR pecahan mengambang 32-bit
-
-settings-background = Latar belakang
-
-settings-white = Putih
-
-settings-transparent = Transparan
 
 settings-opening-photos = Membuka foto
 

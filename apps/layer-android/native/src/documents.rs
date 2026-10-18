@@ -40,6 +40,7 @@ enum Payload {
     Open {
         environment: Option<Environment>,
         candidate: Option<Box<UiSession<Renderer>>>,
+        warning: Option<String>,
     },
     Placed {
         source: Option<layer_core::color::source::SourceImage>,
@@ -117,6 +118,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectTask(
                         .unwrap_or_else(|| "Photo".into()),
                     )),
                     candidate: None,
+                    warning: None,
                 }
             }
             _ => return Err("This request does not transfer a project".into()),
@@ -144,12 +146,13 @@ pub extern "system" fn Java_art_capycanvas_Native_projectOpenControl(
 fn check_open(t: &Task) -> Result<(), String> {
     if t.open_control.is_cancelled() { Err("Opening cancelled".into()) } else { Ok(()) }
 }
-fn prepare(t: &mut Task, input: Option<File>, width: u32, height: u32) -> Result<(), String> {
+fn prepare(t: &mut Task, input: Option<File>, papers: Option<&std::path::Path>) -> Result<(), String> {
     check_open(t)?;
     let control = t.open_control.clone();
     let Payload::Open {
         environment,
         candidate,
+        warning,
     } = &mut t.payload
     else {
         return Err("Not an open request".into());
@@ -185,11 +188,9 @@ fn prepare(t: &mut Task, input: Option<File>, width: u32, height: u32) -> Result
                 }
                 imported
             } else {
-                layer_ui::ImportedDocument::new(layer_ui::NewDocumentOptions {
-                    extent: [width, height],
-                    ..e.open.new_options
-                }
-                .project_on(e.open.new_paper.fallback(), &e.open.localization)?, layer_ui::ImportSource::Master)
+                let (document, missing) = e.open.new_drawing(papers)?;
+                *warning = missing;
+                layer_ui::ImportedDocument::new(document, layer_ui::ImportSource::Master)
             }
         }
     };
@@ -307,33 +308,6 @@ pub extern "system" fn Java_art_capycanvas_Native_projectAssumeProfile(
     })
 }
 
-/// Configure a private New task before its worker runs. No live state changes.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_projectOptions(
-    mut env: JNIEnv,
-    _: JClass,
-    handle: jlong,
-    options: JString,
-) {
-    crate::jni_entry!(env, {
-    let result = (|| {
-        let options: layer_ui::NewDocumentOptions =
-            serde_json::from_str(&read(&mut env, &options)?).map_err(error)?;
-        let Payload::Open {
-            environment: Some(environment),
-            ..
-        } = &mut unsafe { crate::inspection::borrow::<Task>(handle) }.payload
-        else {
-            return Err("New drawing task is no longer configurable".into());
-        };
-        options.validate().map_err(|failure| failure.message(&environment.open.localization))?;
-        environment.open.new_options = options;
-        Ok(())
-    })();
-    fail(&mut env, result);
-    })
-}
-
 /// The worker exclusively owns the job and detached descriptor for this call.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_projectWork(
@@ -341,11 +315,11 @@ pub extern "system" fn Java_art_capycanvas_Native_projectWork(
     _: JClass,
     handle: jlong,
     fd: jint,
-    width: jint,
-    height: jint,
+    papers: JString,
 ) {
     crate::jni_entry!(env, {
     let input = (fd >= 0).then(|| unsafe { File::from_raw_fd(fd) });
+    let papers = read(&mut env, &papers).ok().filter(|folder| !folder.is_empty()).map(std::path::PathBuf::from);
     let t = unsafe { crate::inspection::borrow::<Task>(handle) };
     let result = crate::inspection::on_worker("capy-project", "Project worker failed", move || match &mut t.payload {
         Payload::Lookup {resource,name} => {
@@ -369,9 +343,7 @@ pub extern "system" fn Java_art_capycanvas_Native_projectWork(
             export.write(&out, control.clone()).map_err(|reason| reason.message(localization))?;
             out.sync_all().map_err(error)
         }
-        Payload::Open { .. } => {
-            prepare(t, input, width.max(0) as u32, height.max(0) as u32)
-        }
+        Payload::Open { .. } => prepare(t, input, papers.as_deref()),
         Payload::Retired { .. } | Payload::Placed { .. } | Payload::Package { .. } => {
             Err("Project already prepared or adopted".into())
         }
@@ -430,11 +402,12 @@ pub extern "system" fn Java_art_capycanvas_Native_projectAdopt(
         }
         // Importing a photo never grants Save permission to overwrite it.
         let location = t.source.adoption_location(location);
-        let Payload::Open { candidate, .. } = &mut t.payload else {
+        let Payload::Open { candidate, warning, .. } = &mut t.payload else {
             return Err("Not an open request".into());
         };
         let open = OpenAdoption { epoch: t.epoch, revision: t.revision, location };
         let retired = a.window.adopt(&mut a.host, candidate, open, || true, |s| s)?;
+        if let Some(warning) = warning.take() { a.host.session.notify(warning); }
         a.document_retired();
         t.payload = Payload::Retired { _renderer: retired };
         a.project_adopted();

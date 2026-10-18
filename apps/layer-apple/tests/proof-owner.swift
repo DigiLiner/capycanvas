@@ -43,7 +43,7 @@ import SwiftUI
             try await wait("Metal startup") { store.snapshot["shaders_ready"].bool }
             let master = root.appendingPathComponent("Proof.capy")
             store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, done in done([master]) }, save: { _, _, done in done(master) }, create: { _, done in
-                done(JSON(["extent": [64, 48], "color": ["space": "DisplayP3", "depth": "U16"], "background": "White"]))
+                done(newSheet([64, 48], space: "DisplayP3", depth: "U16"))
             }))
             try await invoke("new_document"); try await idle()
             try await store.apply(["type": "color", "action": ["op": "definition", "color": ["space": "DisplayP3", "rgba": [0.8, 0.2, 0.1, 1.0]]]])

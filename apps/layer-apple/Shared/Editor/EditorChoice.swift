@@ -27,6 +27,7 @@ struct EditorChoice: View {
     var ellipsis = false
     var bold = false
     var presentation: Presentation = .select
+    var height: CGFloat = 24
     var menu: ((@escaping @MainActor (AppleContextMenu) -> Void) -> Void)? = nil
     let select: (Int) -> Void
     @State private var choosing = false
@@ -40,7 +41,7 @@ struct EditorChoice: View {
             }.fontWeight(bold || presentation == .layerMenu ? .bold : .regular).clipped()
                 .modifier(ChoiceMeasurement(id: identifier + ":text"))
                 .padding(.leading, presentation == .select ? 10 : 6).padding(.trailing, presentation == .select ? 18 : 22)
-                .frame(height: 24)
+                .frame(height: height)
                 .overlay(alignment: .trailing) {
                     if presentation == .layerMenu {
                         SharedIcon(name: "chevron-down", size: 12)

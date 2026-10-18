@@ -607,13 +607,36 @@ class AndroidFeatureParityTest {
         action(obj("type" to "invoke", "command" to "undo"))
         assertEquals("A Scale drag is one Undo step", before, scale(), 1e-9)
     }
+    private fun drawing(): JSONObject? = state().objectOrNull("new_drawing")
+    private fun drawer(): JSONObject? = drawing()?.objectOrNull("drawer")
+    private fun awaitDrawing(what: String, predicate: (JSONObject) -> Boolean) {
+        try { compose.waitUntil(15_000) { drawing()?.let(predicate) == true } }
+        catch (e: Throwable) { throw AssertionError("$what: ${drawing()}", e) }
+        compose.waitForIdle()
+    }
+    private fun field(tag: String) = compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+    private fun typeNumber(tag: String, text: String) { field(tag).performTextReplacement(text); field(tag).performImeAction(); compose.waitForIdle() }
+    private fun choose(tag: String, label: String) {
+        compose.onNodeWithTag(tag).performClick()
+        val item = hasText(label) and SemanticsMatcher("$tag choice") { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)?.startsWith("$tag-") == true }
+        shown(item)
+        compose.onNode(item).performClick()
+        compose.waitForIdle()
+    }
+    private fun openNewDrawing() {
+        action(obj("type" to "invoke", "command" to "new_document"))
+        shown("new-drawing-create")
+        awaitDrawing("the dialog opens") { it.isNull("drawer") }
+    }
     @Test fun newDocumentCreatesTheChosenResolution() {
         compose.waitUntil(60_000) { state().array("commands").objects().first { it.getString("id") == "new_document" }.getBoolean("enabled") }
         compose.onNodeWithTag("application-menu-file").performClick()
         compose.onNodeWithText("New…").performClick()
-        shown("new-document-resolution")
-        compose.onNode(hasSetTextAction() and hasAnyAncestor(hasTestTag("new-document-resolution")), useUnmergedTree = true).performTextReplacement("600")
-        compose.onNodeWithTag("new-document-create").performClick()
+        shown("new-drawing-resolution")
+        choose("new-drawing-unit", "px")
+        awaitDrawing("pixels") { it.getJSONObject("setup").getString("unit") == "px" }
+        field("new-drawing-resolution").performTextReplacement("600")
+        compose.onNodeWithTag("new-drawing-create").performClick()
         awaitDocument()
         action(obj("type" to "invoke", "command" to "image_size"))
         compose.waitUntil(60_000) { state().getJSONObject("layer_tools").optJSONObject("image_size")?.optDouble("resolution") == 600.0 }
@@ -624,10 +647,12 @@ class AndroidFeatureParityTest {
         compose.waitUntil(60_000) { state().array("commands").objects().first { it.getString("id") == "new_document" }.getBoolean("enabled") }
         compose.onNodeWithTag("application-menu-file").performClick()
         compose.onNodeWithText("New…").performClick()
-        shown("new-document-width")
-        compose.onNodeWithTag("new-document-width").performTextReplacement("512")
-        compose.onNodeWithTag("new-document-height").performTextReplacement("384")
-        compose.onNodeWithTag("new-document-create").performClick()
+        shown("new-drawing-width")
+        choose("new-drawing-unit", "px")
+        awaitDrawing("pixels") { it.getJSONObject("setup").getString("unit") == "px" }
+        field("new-drawing-width").performTextReplacement("512")
+        field("new-drawing-height").performTextReplacement("384")
+        compose.onNodeWithTag("new-drawing-create").performClick()
         compose.waitUntil(60_000) { state().array("tabs").getJSONObject(0).getInt("width") == 512 }
         awaitDocument()
         action(obj("type" to "invoke", "command" to "pen"))
@@ -648,10 +673,10 @@ class AndroidFeatureParityTest {
         resolver.openInputStream(uri)!!.use { input -> copy.outputStream().use { input.copyTo(it) } }
         assertTrue(copy.length() > 100)
         // Reopen through the production candidate preparation/adoption boundary.
-        action(obj("type" to "invoke", "command" to "new_document"))
-        shown("new-document-create")
-        compose.onNodeWithTag("new-document-create").performClick()
-        compose.waitUntil(60_000) { state().array("tabs").getJSONObject(0).getInt("width") == 2048 }
+        openNewDrawing()
+        typeNumber("new-drawing-width", "640")
+        compose.onNodeWithTag("new-drawing-create").performClick()
+        compose.waitUntil(60_000) { state().array("tabs").getJSONObject(0).getInt("width") == 640 }
         awaitDocument()
         action(obj("type" to "invoke", "command" to "open_document"))
         val pickerDeadline = android.os.SystemClock.uptimeMillis() + 10_000
@@ -705,10 +730,10 @@ class AndroidFeatureParityTest {
         awaitPixel(Offset(.55f,.5f)) { android.graphics.Color.green(it) < 50 }
         val epoch = state().getJSONObject("document_file").getLong("epoch")
         val drawings = host.drawingTabs.rows.size
-        action(obj("type" to "invoke", "command" to "new_document"))
-        shown("new-document-cancel")
-        compose.onNodeWithTag("new-document-cancel").performClick()
+        openNewDrawing()
+        compose.onNodeWithTag("new-drawing-cancel").performClick()
         awaitDocument()
+        compose.waitUntil(15_000) { drawing() == null && request() == null }
         assertEquals(drawings, host.drawingTabs.rows.size)
         assertEquals(epoch, state().getJSONObject("document_file").getLong("epoch"))
         assertTrue(state().getJSONObject("document_file").getBoolean("modified"))
@@ -716,48 +741,191 @@ class AndroidFeatureParityTest {
     }
     @Test fun newDocumentBlendingAndPropertiesInBothThemes() {
         fun selected(id: String) = state().array("commands").objects().first { it.getString("id") == id }.getBoolean("selected")
-        fun blending() = compose.onNodeWithTag("color-choice-Blending").performScrollTo()
-        fun note() = compose.onNodeWithTag("new-document-blending-note").performScrollTo()
-        fun choose(field: String, choice: String) {
-            val item = hasText(choice) and hasClickAction() and !hasTestTag("color-choice-$field")
-            compose.onNodeWithTag("color-choice-$field").performScrollTo().performClick()
-            shown(item)
-            compose.onNode(item).performClick()
-            compose.waitForIdle()
-        }
+        fun blending() = compose.onNodeWithTag("new-drawing-blending").performScrollTo()
         val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
         try {
             for (theme in listOf("light", "dark")) {
                 action(obj("type" to "set_theme", "theme" to theme))
-                action(obj("type" to "invoke", "command" to "new_document"))
-                shown("color-choice-Blending")
+                openNewDrawing()
                 blending().assertIsEnabled().assert(hasText("Perceptual"))
-                note().assertTextEquals("Like Photoshop and Clip Studio Paint")
-                capture("new-document-blending-$theme")
-                choose("Bit depth", "16-bit float HDR")
+                assertTrue(drawing()!!.isNull("blending_note"))
+                capture("new-drawing-blending-$theme")
+                choose("new-drawing-depth", "16-bit float HDR")
+                awaitDrawing("float blending") { !it.isNull("blending_note") }
                 blending().assertIsNotEnabled().assert(hasText("Linear light"))
-                note().assertTextEquals("Float documents blend in linear light")
-                capture("new-document-blending-float-$theme")
-                choose("Bit depth", "8-bit SDR")
+                assertEquals("Float documents blend in linear light", drawing()!!.getString("blending_note"))
+                capture("new-drawing-blending-float-$theme")
+                choose("new-drawing-depth", "8-bit SDR")
+                awaitDrawing("integer blending") { it.isNull("blending_note") }
                 blending().assertIsEnabled().assert(hasText("Perceptual"))
-                compose.onNodeWithTag("new-document-cancel").performClick()
+                compose.onNodeWithTag("new-drawing-cancel").performClick()
                 awaitDocument()
             }
-            action(obj("type" to "invoke", "command" to "new_document"))
-            shown("color-choice-Blending")
-            choose("Blending", "Linear light")
-            note().assertTextEquals("Physically based")
-            compose.onNodeWithTag("new-document-create").performClick()
+            openNewDrawing()
+            choose("new-drawing-blending", "Linear light")
+            awaitDrawing("linear blending") { it.getJSONObject("setup").getString("blend_space") == "Linear" }
+            compose.onNodeWithTag("new-drawing-create").performClick()
             awaitDocument()
             compose.waitUntil(60_000) { selected("blend_linear") && !selected("blend_perceptual") }
             action(obj("type" to "invoke", "command" to "document_properties"))
-            shown(hasText("Blending") and !hasClickAction())
-            shown(hasText("Linear light"))
+            shown(hasText("Blending") and !hasClickAction() and hasAnyAncestor(isDialog()))
+            shown(hasText("Linear Light Blending") and hasAnyAncestor(isDialog()))
             capture("document-properties-blending")
             compose.onNodeWithText("Done").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("Document Properties").fetchSemanticsNodes().isEmpty() }
         } finally {
             action(obj("type" to "set_theme", "theme" to originalTheme))
+        }
+    }
+
+    @Test fun newDrawingDialogJourneyInBothThemes() {
+        fun shot(theme: String, name: String) = screenshot("new-drawing/$theme-$name.png")
+        fun tap(tag: String, scroll: Boolean = false) {
+            shown(tag)
+            compose.onNodeWithTag(tag).apply { if (scroll) performScrollTo() }.performClick()
+            compose.waitForIdle()
+        }
+        fun hold(tag: String) { compose.onNodeWithTag(tag).performScrollTo().performTouchInput { longClick() }; compose.waitForIdle() }
+        fun JSONObject.sheet() = getJSONObject("sheet").getJSONArray("extent").let { it.getInt(0) to it.getInt(1) }
+        fun JSONObject.panel() = objectOrNull("drawer")
+        fun JSONObject.tiles() = panel()!!.getJSONArray("tiles").objects()
+        val paperImage = compose.activity.getExternalFilesDir(null)!!.resolve("new-drawing-paper.png")
+        Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888).let { bitmap ->
+            val random = java.util.Random(7)
+            for (y in 0 until 512) for (x in 0 until 512) random.nextInt(256).let { v -> bitmap.setPixel(x, y, android.graphics.Color.rgb(v, v, v)) }
+            paperImage.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+        val originalTheme = state().getJSONObject("settings").opt("theme") ?: JSONObject.NULL
+        try {
+            for (theme in listOf("light", "dark")) {
+                action(obj("type" to "set_theme", "theme" to theme))
+                val drawings = host.drawingTabs.rows.size
+                openNewDrawing()
+                assertTrue(drawing()!!.getString("untitled").isNotEmpty())
+                shot(theme, "1-main")
+
+                choose("new-drawing-unit", "px")
+                awaitDrawing("pixels") { it.getJSONObject("setup").getString("unit") == "px" }
+                typeNumber("new-drawing-width", "1200")
+                typeNumber("new-drawing-height", "900")
+                awaitDrawing("1200 × 900") { it.sheet() == 1200 to 900 }
+                tap("new-drawing-link", true)
+                awaitDrawing("linked") { it.getBoolean("linked") }
+                typeNumber("new-drawing-width", "2400")
+                awaitDrawing("the linked height follows") { it.sheet() == 2400 to 1800 }
+                tap("new-drawing-link", true)
+                awaitDrawing("unlinked") { !it.getBoolean("linked") }
+                tap("new-drawing-portrait", true)
+                awaitDrawing("portrait") { it.getJSONObject("page").getString("orientation") == "portrait" && it.sheet() == 1800 to 2400 }
+                tap("new-drawing-resolution-choices", true)
+                shown("new-drawing-resolution-1")
+                shot(theme, "1b-resolution-menu")
+                compose.onNodeWithTag("new-drawing-resolution-1").performClick()
+                awaitDrawing("150 ppi") { it.getJSONObject("setup").getInt("resolution") == 150 }
+                typeNumber("new-drawing-resolution", "200")
+                awaitDrawing("200 ppi") { it.getJSONObject("setup").getInt("resolution") == 200 }
+                choose("new-drawing-unit", "mm")
+                awaitDrawing("millimetres keep the pixels") { it.getJSONObject("setup").getString("unit") == "mm" && it.sheet() == 1800 to 2400 }
+
+                tap("new-drawing-presets-button")
+                awaitDrawing("presets") { it.panel()?.getString("kind") == "presets" }
+                shot(theme, "2-presets")
+                field("new-drawing-search").performTextReplacement("chalk")
+                awaitDrawing("search") { d -> d.panel()!!.let { !it.getBoolean("tabs_enabled") } && d.tiles().firstOrNull()?.getString("name") == "Chalkboard" }
+                tap("new-drawing-preset-0", true)
+                awaitDrawing("Chalkboard picked") { it.panel()!!.getJSONObject("summary").getString("name") == "Chalkboard" }
+                tap("new-drawing-save-as")
+                awaitDrawing("save row") { !it.panel()!!.isNull("save") }
+                shot(theme, "4-save-as")
+                field("new-drawing-save-name").performTextReplacement("Studio wall")
+                awaitDrawing("preset name") { it.panel()!!.objectOrNull("save")?.getString("name") == "Studio wall" }
+                tap("new-drawing-save-confirm")
+                awaitDrawing("saved") { d -> d.panel()!!.isNull("save") && d.tiles().any { it.getBoolean("own") && it.getBoolean("selected") } }
+                hold("new-drawing-preset-${drawing()!!.tiles().indexOfFirst { it.getBoolean("own") }}")
+                tap("new-drawing-preset-rename")
+                awaitDrawing("renaming") { it.panel()!!.objectOrNull("save")?.getString("confirm") == "Rename" }
+                field("new-drawing-save-name").performTextReplacement("Studio wall 2")
+                choose("new-drawing-save-group", "Pastel")
+                awaitDrawing("Pastel") { it.panel()!!.objectOrNull("save")?.getString("group") == "pastel" }
+                tap("new-drawing-save-confirm")
+                awaitDrawing("renamed") { d -> d.panel()!!.isNull("save") && d.tiles().any { it.getBoolean("own") && it.getString("name") == "Studio wall 2" } }
+                shot(theme, "3-presets-pastel")
+                hold("new-drawing-preset-${drawing()!!.tiles().indexOfFirst { it.getBoolean("own") }}")
+                tap("new-drawing-preset-delete")
+                awaitDrawing("deleted") { d -> d.tiles().none { it.getBoolean("own") } && !d.panel()!!.getBoolean("can_select") }
+                field("new-drawing-search").performTextReplacement("chalk")
+                awaitDrawing("Chalkboard found") { it.tiles().firstOrNull()?.getString("name") == "Chalkboard" }
+                tap("new-drawing-preset-0", true)
+                awaitDrawing("Chalkboard picked again") { it.panel()!!.getBoolean("can_select") }
+                tap("new-drawing-select")
+                awaitDrawing("Chalkboard") { it.isNull("drawer") && it.getJSONObject("page").getString("preset") == "Chalkboard" }
+                shot(theme, "5-chalkboard")
+
+                tap("new-drawing-texture", true)
+                awaitDrawing("paper") { it.panel()?.getString("kind") == "paper" }
+                shot(theme, "6-paper")
+                val cold = drawing()!!.tiles().indexOfFirst { it.optString("id") == "cold_press" }
+                tap("new-drawing-paper-tile-$cold", true)
+                awaitDrawing("cold press picked") { it.tiles()[cold].getBoolean("selected") }
+                if (theme == "light") {
+                    tap("new-drawing-paper-import")
+                    val pickerDeadline = android.os.SystemClock.uptimeMillis() + 10_000
+                    while (systemNode { it.packageName?.toString()?.contains("documentsui") == true } == null && android.os.SystemClock.uptimeMillis() < pickerDeadline) android.os.SystemClock.sleep(100)
+                    assertNotNull("Import… opens the system picker", systemNode { it.packageName?.toString()?.contains("documentsui") == true })
+                    instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                    compose.waitUntil(10_000) { systemNode { it.packageName?.toString()?.contains("documentsui") == true } == null }
+                    awaitDrawing("paper stays open") { it.panel()?.getString("kind") == "paper" }
+                    val builtIn = drawing()!!.tiles().size
+                    kotlinx.coroutines.runBlocking { importLibraryPaper(host, android.net.Uri.fromFile(paperImage)) }
+                    awaitDrawing("imported paper picked") { d -> d.tiles().size == builtIn + 1 && d.tiles().last().getBoolean("selected") }
+                    shot(theme, "6b-imported-paper")
+                    tap("new-drawing-paper-tile-$cold", true)
+                    awaitDrawing("cold press picked again") { it.tiles()[cold].getBoolean("selected") }
+                }
+                tap("new-drawing-paper-use")
+                awaitDrawing("cold press") { it.isNull("drawer") && it.getJSONObject("setup").getJSONObject("paper").optString("texture") == "cold_press" }
+
+                tap("new-drawing-paper-color", true)
+                awaitDrawing("paper color") { it.panel()?.getString("kind") == "paper_color" }
+                shot(theme, "7-paper-color")
+                tap("new-drawing-paper-color-5", true)
+                awaitDrawing("Kraft") { it.panel()!!.getJSONArray("palette").getJSONObject(5).getBoolean("selected") }
+                tap("color-value-hex", true)
+                compose.onNodeWithTag("color-value-hex-input").performTextReplacement("#D96B7A")
+                compose.onNodeWithTag("color-value-hex-input").performImeAction()
+                awaitDrawing("a new color can be added") { it.panel()!!.getBoolean("can_add") }
+                tap("new-drawing-add-paper-color", true)
+                awaitDrawing("added") { it.panel()!!.getString("count") == "15" }
+                hold("new-drawing-paper-color-14")
+                tap("new-drawing-paper-color-delete")
+                awaitDrawing("removed") { it.panel()!!.getString("count") == "14" }
+                tap("new-drawing-color-mode-transparent", true)
+                awaitDrawing("transparent") { it.panel()!!.getBoolean("transparent") }
+                shown("color-transparent")
+                shot(theme, "8-transparent")
+                tap("new-drawing-color-use")
+                awaitDrawing("transparent paper") { it.isNull("drawer") && it.getJSONObject("setup").getJSONObject("paper").optBoolean("transparent") && !it.getJSONObject("sheet").getBoolean("shown") }
+                shot(theme, "9-main-transparent")
+
+                tap("new-drawing-cancel")
+                compose.waitUntil(15_000) { drawing() == null && request() == null }
+                awaitDocument()
+                assertEquals(drawings, host.drawingTabs.rows.size)
+
+                openNewDrawing()
+                field("new-drawing-name").performTextReplacement("Harbor study $theme")
+                awaitDrawing("named") { it.getString("name") == "Harbor study $theme" }
+                tap("new-drawing-create")
+                compose.waitUntil(60_000) { drawing() == null && request() == null && !host.documents.working }
+                awaitDocument()
+                compose.waitUntil(30_000) { host.drawingTabs.rows.any { it.getString("title") == "Harbor study $theme" } }
+                assertEquals(drawings + 1, host.drawingTabs.rows.size)
+                assertEquals("Harbor study $theme", state().getJSONObject("document_file").getString("unsaved_name"))
+            }
+        } finally {
+            action(obj("type" to "set_theme", "theme" to originalTheme))
+            paperImage.delete()
         }
     }
 

@@ -30,14 +30,6 @@ extension EnvironmentValues {
     }
 }
 @MainActor enum NativeTextContext {
-    static func appearance(_ options: JSON, language: String) -> JSON {
-        do {
-            let text = try JSON(["language": language, "request": options.raw]).encoded()
-            guard let response = text.withCString({ capy_apple_document_appearance($0) }) else { return JSON() }
-            defer { capy_apple_string_free(response) }
-            return try JSON.decode(String(cString: response))
-        } catch { return JSON(["error": error.localizedDescription]) }
-    }
     static func numericLabels(_ label: String, language: String) -> JSON {
         do {
             let text = try JSON(["language": language, "request": ["label": label]]).encoded()

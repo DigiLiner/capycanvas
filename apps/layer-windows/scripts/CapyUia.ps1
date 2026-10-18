@@ -296,6 +296,24 @@ function Invoke-Id([string]$Id){
     Wait-Until {$hit.item=Find $Id;$hit.item -and $hit.item.Current.IsEnabled} "Missing enabled control: $Id"
     Invoke $Id
 }
+function New-DrawingPixels([int]$Width,[int]$Height){
+    Wait-Until {(Model).state.new_drawing -and (Find 'document-width' -Within $root)} 'New drawing did not open' 30
+    if((Model).state.new_drawing.setup.unit -ne 'px'){
+        $index=[array]::IndexOf(@((Model).state.new_drawing.units.value),'px')
+        $unit=Find 'new-drawing-unit' -Within $root
+        $unit.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        $choice=@{item=$null};Wait-Until {$choice.item=Find "new-drawing-unit-$index" -Within $unit;$null -ne $choice.item} 'New drawing has no pixel unit'
+        $choice.item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        Wait-Until {(Model).state.new_drawing.setup.unit -eq 'px'} 'New drawing did not switch to pixels'
+    }
+    Wait-Until {
+        $view=(Model).state.new_drawing;$entry=Find 'document-width' -Within $root
+        $entry -and [double](($entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value) -replace '[^0-9.]','') -eq $view.values[0]
+    } 'New drawing did not show pixel sizes'
+    foreach($field in @(@('document-width',$Width),@('document-height',$Height))){
+        $entry=Find $field[0] -Within $root;$entry.SetFocus();$entry.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue([string]$field[1])
+    }
+}
 function Tool-Tile([string]$Command){
     $target=@{id=$null}
     Wait-Until {foreach($panel in (Model).panels){foreach($tile in $panel.tiles){

@@ -82,7 +82,7 @@ import QuartzCore
             let a = root.appendingPathComponent("First-\(platform).capy"), b = root.appendingPathComponent("Second-\(platform).capy")
             var save = a
             store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, done in done([]) }, save: { _, _, done in done(save) }, create: { _, done in
-                done(JSON(["extent": [96, 64], "color": ["space": "DisplayP3", "depth": "F32"], "background": "White"]))
+                done(newSheet([96, 64], space: "DisplayP3", depth: "F32"))
             }))
             try await invoke("add_layer")
             let firstLayers = store.state["layers"].stableKey

@@ -44,7 +44,7 @@ import UniformTypeIdentifiers
             }
             let saved=root.appendingPathComponent("Edited-\(platform).capy")
             store.projectFiles = ProjectFiles(store:store,dialogs:.init(open:{_,done in done([imageURL])},save:{_,_,done in done(saved)},create:{_,done in
-                done(JSON(["extent":[64,48],"color":["space":"Srgb","depth":"U8"],"background":"White"]))
+                done(newSheet([64, 48], space: "Srgb", depth: "U8"))
             },paste:{$0(.success([PhotoItem { $0(.success(.image(photo))) }]))}))
             var lastCommand = "startup"
             func invoke(_ command:String) async throws {

@@ -49,12 +49,8 @@ final class NativeProjectTask: @unchecked Sendable {
             }) { [self] descriptor in try self.check(previewOnly ? capy_project_export_preview(self.handle, descriptor) : capy_project_write(self.handle, descriptor)) }
         }
     }
-    func read(from url: URL?, options: JSON? = nil) throws {
-        guard let url else {
-            if let options { try check(try options.encoded().withCString { capy_project_new(handle, $0) }) }
-            else { try check(capy_project_read(handle, -1, "Untitled")) }
-            return
-        }
+    func read(from url: URL?) throws {
+        guard let url else { try check(capy_project_new(handle)); return }
         try ProjectFileIO.coordinate(url, writing: false) { source in
             let file = try FileHandle(forReadingFrom: source)
             defer { try? file.close() }

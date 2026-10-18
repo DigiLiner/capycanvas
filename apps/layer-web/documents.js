@@ -14,6 +14,7 @@ export const exportFormats={
   Webp:["webp","image/webp"],
 };
 import {createImageImport} from './image-import.js';
+import {createNewDrawing} from './new-drawing.js';
 // Browser file transport; document checkpoints, stale-edit guards and unsaved
 // decisions stay in UiSession. File handles never enter a project or localStorage.
 export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady,dispatch,applyChange,wake,element,button,icon,numberField,message,gpuOperation,rasterWorker,resumeCanvas,contentChanged,refreshInputContext}) {
@@ -75,72 +76,6 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
   });
   const cancel=(footer,finish)=>footer.append(button(()=>common.cancel,()=>finish(null)));
   const proof=createProof({app,dialog,element,button,icon,applyChange,wake,dispatch,contentChanged});
-  async function newDocument() {
-    const spec=app.editor_models(innerWidth,innerHeight).document_options;
-    let model=spec.creation;
-    return dialog(()=>model.text.new_title,(form,finish)=>{
-      const field=(id,title,node)=>{const label=element("label","document-size",title);node.dataset.documentField=id;if(typeof title==="function")bindCopy(node,title,"ariaLabel");else node.setAttribute("aria-label",title);label.append(node);form.append(label);return node;};
-      const select=(id,title,choices,value)=>{const node=element("select");for(const [key,label] of choices){const option=element("option","",label);option.value=key;node.append(option);}node.value=value;return field(id,title,node);};
-      const presetKey=id=>id?JSON.stringify(id):"custom";
-      const preset=select("preset",()=>model.text.preset,[["custom",model.text.custom],...model.presets.map(p=>[presetKey(p.id),p.name])],presetKey(model.selected));
-      const selectedPreset=()=>model.presets.find(p=>presetKey(p.id)===preset.value);
-      const remove=button(()=>model.text.remove_preset,()=>{const action=selectedPreset()?.remove;if(!action)return;
-        applyChange(app.dispatch({type:"new_document_preferences",action}));
-        model=app.editor_models(innerWidth,innerHeight).document_options.creation;
-        preset.replaceChildren(...[["custom",model.text.custom],...model.presets.map(p=>[presetKey(p.id),p.name])].map(([key,label])=>{const option=element("option","",label);option.value=key;return option;}));
-        preset.value="custom";remove.disabled=true;
-      });remove.dataset.documentAction="remove-preset";remove.disabled=!selectedPreset()?.remove;form.append(remove);
-      const dimensions=[...model.options.extent];
-      const fields=dimensions.map((value,i)=>{
-        const number=numberField(spec.numeric,()=>i?model.text.height:model.text.width,next=>{dimensions[i]=next;edited();describe();});
-        number.classList.add("document-size");number.entry.dataset.documentField=i?"height":"width";number.entry.required=true;
-        number.update(value);form.append(number);return number;
-      });
-      let resolution=model.options.resolution;
-      const ppi=numberField(model.resolution,()=>model.text.resolution,next=>{resolution=next;edited();});
-      ppi.classList.add("document-size");ppi.entry.dataset.documentField="resolution";ppi.entry.required=true;
-      ppi.update(resolution);form.append(ppi);
-      const numbers=[...fields,ppi];
-      const space=select("space",()=>model.text.space,model.spaces,model.options.color.space);
-      const depth=select("depth",()=>model.text.depth,model.depths,model.options.color.depth);
-      const blending=select("blending",()=>model.blending.label,model.blending.choices.map(c=>[c.id,c.label]),model.options.blend_space);
-      const blendingNote=element("p","document-note");form.append(blendingNote);
-      const summary=element("p","document-color-summary"),note=element("p","document-color-note");form.append(summary,note);
-      const background=select("background",()=>model.text.background,model.backgrounds,model.options.background);
-      let chosen=model.options.blend_space;
-      const read=()=>({extent:[...dimensions],color:{space:space.value,depth:depth.value},background:background.value,blend_space:chosen,resolution});
-      const describe=()=>{const appearance=app.new_document_appearance(read());
-        blending.disabled=!appearance.blending_editable;blending.value=appearance.blending;
-        blendingNote.textContent=appearance.blending_help;summary.textContent=appearance.summary;
-        note.textContent=appearance.note??"";note.hidden=appearance.note==null;
-      };
-      const edited=()=>{preset.value="custom";remove.disabled=true;};
-      for(const number of numbers)number.entry.addEventListener("input",edited);
-      for(const input of [space,depth,background])input.addEventListener("change",()=>{edited();describe();});
-      blending.onchange=()=>{chosen=blending.value;edited();describe();};
-      preset.onchange=()=>{const p=selectedPreset();remove.disabled=!p?.remove;if(!p)return;
-        fields.forEach((number,i)=>{dimensions[i]=p.options.extent[i];number.cancelEditing();number.update(dimensions[i]);});
-        resolution=p.options.resolution;ppi.cancelEditing();ppi.update(resolution);space.value=p.options.color.space;depth.value=p.options.color.depth;background.value=p.options.background;chosen=p.options.blend_space;describe();
-      };
-      describe();
-      const name=field("preset-name",()=>model.text.preset_name,element("input"));name.maxLength=64;
-      const remember=element("input");remember.type="checkbox";field("remember",()=>model.text.remember,remember);
-      form.localize=()=>{
-        model=app.editor_models(innerWidth,innerHeight).document_options.creation;
-        for(const [node,choices] of [[preset,[["custom",model.text.custom],...model.presets.map(p=>[presetKey(p.id),p.name])]],[space,model.spaces],[depth,model.depths],[background,model.backgrounds],[blending,model.blending.choices.map(c=>[c.id,c.label])]]) {
-          for(const [key,label] of choices){const option=[...node.options].find(o=>o.value===key);if(option)option.textContent=label;}
-        }
-        describe();
-      };
-      const error=element("p","error-message");form.append(error);
-      const footer=element("footer"),cancelNew=button(()=>model.text.cancel,()=>finish(null));cancelNew.dataset.documentAction="cancel";footer.append(cancelNew);
-      const create=button(()=>model.text.create,()=>{if(!numbers.every(number=>number.commit())||!form.reportValidity())return;const options=read();try{
-        applyChange(app.dispatch({type:"new_document_preferences",action:{type:"remember",options,name:name.value,defaults:remember.checked}}));
-        finish(options);
-      }catch(e){error.textContent=String(e);}},"suggested-action");create.dataset.documentAction="create";
-      footer.append(create);form.append(footer);form.onsubmit=e=>{e.preventDefault();create.click();};
-    });
-  }
   const clipMime="web application/x-capycanvas-clip",customClip=!!globalThis.ClipboardItem?.supports?.(clipMime);
   const clipboardRead=()=>{
     if(!navigator.clipboard?.read)throw deliveryFailure("clipboard_unavailable");
@@ -267,15 +202,16 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     input.onchange=()=>done(input.files[0]??null);input.oncancel=()=>done(null);
     document.body.append(input);input.click();
   });
-  async function runPaper(id) {
-    const task=app.paper_task(id);let result;
+  async function runPaper(id,task=app.paper_task(id)) {
+    let result;
     try {
       const file=task.imports()?await choosePaperImage():null;
-      if(task.imports()&&!file){dispatch({type:'complete_request',id});return;}
+      if(task.imports()&&!file){if(id!==undefined)dispatch({type:'complete_request',id});return;}
       result=await app.paper_run(task,file);
       const change=app.paper_adopt(task,result,false);if(change)applyChange(change);
     } finally {result?.free();task.free();}
   }
+  const newDrawing=createNewDrawing({app,state,applyChange,element,button,icon,numberField,importPaper:()=>runPaper(undefined,app.paper_library_import())});
   async function handle(request) {
     if(active.has(request.id))return;active.add(request.id);
     let candidate;
@@ -353,8 +289,8 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
         await images.run(id,async()=>(await chooseFile(true))?.map(c=>c.file));
       } else if(["new","open"].includes(r.type)) {
         if(r.type==='new'){
-          const options=await newDocument();if(!options){applyChange(app.finish_document(id,false));return;}
-          await openDrawing({request:id,options});
+          if(!await newDrawing.run()){if(app.state().requests.some(request=>request.id===id))applyChange(app.finish_document(id,false));return;}
+          await openDrawing({request:id});
         }else{
           const chosen=await chooseFile();if(!chosen?.length){applyChange(app.finish_document(id,false));return;}
           await openBatch(chosen,id);
@@ -485,11 +421,11 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     if(String(id)!==String(app.document_tabs(0).selected))throw transportFailure("selected_changed");
     dispatch({type:'invoke',command:'close_document'});
   }
-  async function openDrawing({request=null,file=null,options,bytes}){
+  async function openDrawing({request=null,file=null,bytes}){
     await trim();
     if(request===null){
-      const change=app.dispatch({type:'invoke',command:file?'open_document':'new_document'});
-      const pending=app.state().requests.find(r=>r.kind.type==='document'&&['new','open'].includes(r.kind.request.type));
+      const change=app.dispatch({type:'invoke',command:'open_document'});
+      const pending=app.state().requests.find(r=>r.kind.type==='document'&&r.kind.request.type==='open');
       if(!pending)throw transportFailure("open_operation");
       request=pending.id;active.add(request);
       applyChange(change);
@@ -501,7 +437,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
       const original=file?.file??(bytes instanceof Blob?bytes:new Blob([bytes]));
       if(file)bytes=new Uint8Array(await file.file.arrayBuffer());
       else if(bytes instanceof Blob)bytes=new Uint8Array(await bytes.arrayBuffer());
-      candidate=await gpuOperation(()=>app.prepare_document(id,bytes,0,0,fileState.epoch,fileState.revision,target?.name,options,()=>chooseSourceProfile({app,dialog,element,button}),()=>cancelled));
+      candidate=await gpuOperation(()=>app.prepare_document(id,bytes,fileState.epoch,fileState.revision,target?.name,()=>chooseSourceProfile({app,dialog,element,button}),()=>cancelled));
       if(cancelled)throw new DOMException('Opening cancelled','AbortError');
       if(app.package_view(candidate)){
         progress.remove();
@@ -596,8 +532,8 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     return tabs.key(event);
   },allowNativePaste,select,close,openFiles,busy:()=>changing||batching||closing||active.size>0,
     interactionBusy:()=>changing||batching||closing||active.size>0&&app.state().requests.some(request=>active.has(request.id)),showSelector:tabs.showSelector,
-    mountProof:proof.mount,localize(){for(const form of openDialogs)form.localize?.();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,loadPapers:()=>runPaper(undefined),refresh(){
-    proof.sync();tabs.refresh();
+    mountProof:proof.mount,localize(){for(const form of openDialogs)form.localize?.();newDrawing.localize();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,loadPapers:()=>runPaper(undefined),refresh(){
+    proof.sync();tabs.refresh();newDrawing.refresh();
     const requests=new Set(app.state().requests.map(request=>request.id));
     if(nativePending&&!requests.has(nativePending.id))finishNativePaste();
     for(const id of nativeDeliveries.keys())if(!requests.has(id))nativeDeliveries.delete(id);

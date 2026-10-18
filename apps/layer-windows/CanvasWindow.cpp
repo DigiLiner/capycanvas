@@ -421,7 +421,7 @@ bool CanvasWindow::StartPrepared(CapyLaunch* prepared) {
     gamepad->Active(true);
     documents=std::make_unique<DocumentView>(
         [weak=weak_from_this()](std::string json){if(auto self=weak.lock())self->Send(std::move(json),CanvasCommandKind::Document);},
-        model,localization,window,[weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyDialogs();},
+        send,model,localization,window,[weak=weak_from_this()]{if(auto self=weak.lock())self->ApplyDialogs();},
         [weak=weak_from_this()](CanvasQueryKind kind,std::string json,PreviewReply reply){if(auto self=weak.lock())return self->RequestPreviews(kind,std::move(json),std::move(reply));return false;},
         [weak=weak_from_this()](std::string error){if(auto self=weak.lock())self->Fail(std::move(error));});
     panel.AllowDrop(true);

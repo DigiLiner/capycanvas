@@ -95,7 +95,7 @@ class AndroidCanvasBarBenchmarkTest {
                     Native.projectTask(handle, id, "null", request.getLong("epoch"), request.getLong("revision"))
                 }
                 try {
-                    Native.projectWork(task, android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+                    Native.projectWork(task, android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
                     val deadline = SystemClock.uptimeMillis() + 120_000
                     while (!native { Native.projectParkReady(it, task) }) {
                         check(SystemClock.uptimeMillis() < deadline) { "Project did not become ready" }
@@ -281,7 +281,7 @@ class AndroidCanvasBarBenchmarkTest {
                 }
                 try {
                     Native.projectWork(job.first, android.os.ParcelFileDescriptor.open(project,
-                        android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_TRUNCATE or android.os.ParcelFileDescriptor.MODE_READ_WRITE).detachFd(), 0, 0)
+                        android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_TRUNCATE or android.os.ParcelFileDescriptor.MODE_READ_WRITE).detachFd(), "")
                     native { Native.documentComplete(it, job.second, true, "null") }
                 } finally { Native.projectFree(job.first) }
                 return packageManifest(project.readBytes())
@@ -724,7 +724,7 @@ class AndroidCanvasBarBenchmarkTest {
                     val file = File(output, "$label.png")
                     try {
                         Native.projectExportOptions(task, recipe.toString())
-                        Native.projectWork(task, ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(), 0, 0)
+                        Native.projectWork(task, ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(), "")
                         native { Native.documentComplete(it, id, true, "null") }
                     } catch (error: Exception) {
                         native { Native.documentComplete(it, id, false, JSONObject.quote(error.message ?: "Export failed")) }

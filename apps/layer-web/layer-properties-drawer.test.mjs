@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createDrawing} from './new-drawing-fixture.mjs';
 import {mkdir,writeFile} from 'node:fs/promises';
 
 export async function checkLayerPropertiesDrawer({call,evaluate,settle}) {
@@ -27,8 +28,7 @@ export async function checkLayerPropertiesDrawer({call,evaluate,settle}) {
   await wait('JSON.parse(layerApp.app.workspace_view()).id==="builtin:workspace:painter"&&!JSON.parse(layerApp.app.workspace_view()).busy');
   await wait('!layerApp.documents.busy()&&layerApp.app.brush_ready()');
   await send({type:'invoke',command:'new_document'});
-  await wait(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create')`);
-  await evaluate(`(()=>{const b=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create');for(const n of b.closest('dialog').querySelectorAll('input[type=number]'))n.value=256;b.click();})()`);
+  await evaluate(createDrawing());
   await wait(`!layerApp.documents.busy()&&layerApp.app.brush_ready()&&!document.querySelector('dialog[open]')`);
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});

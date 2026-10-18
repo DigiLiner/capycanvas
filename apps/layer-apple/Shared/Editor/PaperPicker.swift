@@ -62,10 +62,11 @@ struct PaperPreview: View {
     @ObservedObject var previews: PaperPreviewCache
     let id: String?
     let side: CGFloat
+    var placeholder = "layer-paper-symbolic"
     var body: some View {
         Group {
             if let id, let image = previews.images[id] { Image(decorative:image,scale:1).resizable().frame(width:side,height:side) }
-            else { SharedIcon(name:"layer-paper-symbolic",size:side / 2) }
+            else { SharedIcon(name:placeholder,size:side / 2) }
         }.frame(width:side,height:side).clipShape(SquircleShape.tile)
             .task(id:id) { if let id { await previews.load(id) } }
     }
@@ -147,6 +148,20 @@ struct PaperTexture: Identifiable {
         }
     }
 
+    func importToLibrary(_ completion: @escaping @MainActor (String?) -> Void) {
+        guard let store, let native = store.native, let directory else { completion(nil); return }
+        let finished: @MainActor (String?) -> Void = { [weak self] error in
+            if error == nil { self?.store?.paperLibraryChanged() }
+            completion(error)
+        }
+        store.projectFiles.choosePaper { url in
+            guard let url else { completion(nil); return }
+            native.paperImport(directory: directory) { job, error in
+                guard let job else { DispatchQueue.main.async { finished(error) }; return }
+                native.runPaperTask(job, url: url) { error in DispatchQueue.main.async { finished(error) } }
+            }
+        }
+    }
     private func imported(_ url: URL?) {
         guard let request = importRequest else { return }
         importRequest = nil
@@ -333,19 +348,20 @@ private struct TextureDialog: View {
     }
 }
 
-private struct TextureTile: View {
+struct TextureTile: View {
     @Environment(\.editorPopupStore) private var store
     let previews: PaperPreviewCache
     let id: String?
     let label: String
     let pending: Bool
+    var placeholder = "layer-paper-symbolic"
     let select: () -> Void
     @State private var hovering = false
     var body: some View {
         let palette = EditorPalette(source:store?.state["palette"] ?? JSON())
         Button(action:select) {
             VStack(spacing:6) {
-                PaperPreview(previews:previews,id:id,side:96)
+                PaperPreview(previews:previews,id:id,side:96,placeholder:placeholder)
                     .background(palette["text"].opacity(0.06),in:SquircleShape.tile)
                     .padding(3)
                     .background { if hovering { SquircleShape.tile.fill(palette["text"].opacity(0.1)) } }

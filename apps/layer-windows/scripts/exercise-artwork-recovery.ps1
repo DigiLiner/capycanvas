@@ -98,9 +98,7 @@ try {
     Invoke-Control 'Test pen'
     Wait-Until {((Model).state.commands|Where-Object id -eq 'undo').enabled} 'Drawing did not create Undo history'
     Command 'File' 'new_document'
-    Wait-Until {Find-Id 'document-width'} 'New drawing did not open'
-    (Control 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('96')
-    (Control 'document-height').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('72')
+    New-DrawingPixels 96 72
     Invoke-Control 'Create'
     Wait-Until {@((Model).windows_tabs.tabs).Count -eq 2 -and !(Model).state.document_file.busy} 'New drawing did not retain the first tab'
     Invoke-Control 'Test pen'
@@ -205,7 +203,7 @@ try {
     Invoke-Control 'Retry Storage'
     Wait-Until {!(Model).windows_recovery.busy -and !(Model).windows_recovery.restoring -and !(Model).windows_recovery.error -and (Signature) -eq $remaining} 'Retry did not reopen the preserved drawing' 120
     Command 'File' 'new_document'
-    Wait-Until {Find-Id 'document-width'} 'New drawing did not open'
+    New-DrawingPixels 2048 1536
     Invoke-Control 'Create'
     Wait-Until {@((Model).windows_tabs.tabs).Count -eq 2 -and !(Model).state.document_file.busy} 'New drawing did not open beside the restored one'
     Invoke-Control 'Test pen'

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {readPackage,packageOccurrences} from './package-fixture.test.mjs';
 import {scopesFixture} from './scopes-fixture.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkGradientSurfaceContracts({evaluate,settle,selectors,preparePreviewFixture}) {
   for(const key of ['toolPanel','toolbarContext','editor','preview'])assert.ok(selectors?.[key],`${key} selector must come from the approved Web port`);
@@ -289,10 +290,7 @@ export async function checkGradientDefinitions({call,evaluate,settle}) {
   }
   if(phase!=='ui'&&phase!=='motion')await checkGradientSurfaceContracts({evaluate,settle,selectors:{toolPanel:'[data-control=tool_settings]',toolbarContext:'.toolbar-editor-popover:popover-open',editor:'.gradient-editor',preview:'.toolbar-editor-popover:popover-open .gradient-preview'},preparePreviewFixture:async({depth,definition:expected})=>{
     const epoch=await evaluate('String(layerApp.state().document_file.epoch)');
-    await invoke('new_document');await wait(`!!document.querySelector('.document-dialog [data-document-field=depth]')`);
-    for(const field of ['width','height'])await typeValue(`.document-dialog [data-document-field=${field}]`,'64');
-    const index=await evaluate(`[...document.querySelector('.document-dialog [data-document-field=depth]').options].findIndex(option=>option.value===${JSON.stringify(depth)})`);assert.ok(index>=0);
-    await select('.document-dialog [data-document-field=depth]',index);await click('.document-dialog [data-document-action=create]');
+    await invoke('new_document');await evaluate(createDrawing({width:64,height:64,depth}));
     await wait(`String(layerApp.state().document_file.epoch)!==${JSON.stringify(epoch)}&&!layerApp.documents.busy()&&layerApp.app.brush_ready()&&layerApp.app.document_color().depth===${JSON.stringify(depth)}`);
     await invoke('gradient');tool=true;await toolLayout();await edit({kind:'reset'});await edit({kind:'interpolation',value:expected.interpolation});
     for(const [index,stop] of expected.stops.entries())await edit({kind:'stop',index,position:stop.position,color:stop.color,remove:false});

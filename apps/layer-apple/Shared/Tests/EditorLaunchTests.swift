@@ -294,8 +294,6 @@ final class EditorLaunchTests: XCTestCase {
         checkNativeSDRCreationAndColorEditing(in: app)
     }
 
-    @MainActor func testNewDrawingPresetRemoval() { checkNewDrawingPresetRemoval(in: ignoringSavedWindows(editorTestApplication()), theme: "light") }
-    @MainActor func testNewDrawingPresetRemovalDark() { checkNewDrawingPresetRemoval(in: ignoringSavedWindows(editorTestApplication()), theme: "dark") }
 
     @MainActor func testNewDrawingAndExportCancellation() throws {
         let app = ignoringSavedWindows(editorTestApplication())
@@ -309,6 +307,20 @@ final class EditorLaunchTests: XCTestCase {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"dark"},{"type":"invoke","command":"new_document"}]"#
         app.launch()
         checkNewDrawingAndExportCancellation(in: app)
+    }
+
+    @MainActor func testNewDrawingDialog() throws {
+        let app = ignoringSavedWindows(editorTestApplication())
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"invoke","command":"new_document"}]"#
+        app.launch()
+        checkNewDrawingDialog(in: app, theme: "light")
+    }
+
+    @MainActor func testNewDrawingDialogDark() throws {
+        let app = ignoringSavedWindows(editorTestApplication())
+        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"dark"},{"type":"invoke","command":"new_document"}]"#
+        app.launch()
+        checkNewDrawingDialog(in: app, theme: "dark")
     }
 
     @MainActor func testSettingsAndWorkspaceRestart() throws { checkSettingsAndWorkspaceRestart(in: ignoringSavedWindows(editorTestApplication())) }

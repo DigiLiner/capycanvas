@@ -256,12 +256,11 @@ fn native_document_tabs_history_storage_and_close() {
     let first = w.documents.selected();
     // The production New dialog callback must append in this window, including
     // while the previous drawing has unsaved edits.
-    new_photo::invoke(&w, CommandId::NewDocument);
-    for (name, value) in [("new-document-width", 128.), ("new-document-height", 96.)] {
-        named::<adw::SpinRow>(w.window.upcast_ref(), name)
-            .set_value(value);
+    super::new_drawing_review::open_new_drawing(&w);
+    for action in [NewDrawingAction::Unit { unit: LengthUnit::Px }, NewDrawingAction::Width { value: 128. }, NewDrawingAction::Height { value: 96. }] {
+        super::new_drawing_review::new_drawing_action(&w, action);
     }
-    new_photo::response(&w, "create");
+    click(&super::new_drawing_review::part::<gtk::Button>(&w, "new-drawing-create"));
     until(
         || w.documents.len() == 2 && !w.documents.changing.get(),
         "New creates a tab",

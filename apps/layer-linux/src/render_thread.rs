@@ -755,6 +755,9 @@ impl CanvasRenderer for RenderWorker {
     fn max_document_dimension(&self) -> u32 {
         self.snapshot_gpu.as_ref().map_or(u32::MAX, |gpu| gpu.max_document_dimension())
     }
+    fn memory_headroom(&self) -> Option<u64> {
+        self.snapshot_gpu.as_ref().and_then(|gpu| gpu.memory_headroom())
+    }
     fn preflight_image_object_affine(&self,scene:layer_core::SceneView<'_>,object:layer_core::ImageObjectHandle,
         affine:layer_core::Affine64,view:ViewState,
     )->Result<(),Self::Error> {

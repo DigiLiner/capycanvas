@@ -678,13 +678,13 @@ fn prepared_launch_restores_before_views_and_keeps_the_profile_context() {
     let literal = "HDR { $name } 🖌 日本語";
     let mut initial = edited(1.5);
     initial.language = layer_ui::LanguagePreference::Explicit(layer_ui::UiLanguage::English);
-    initial.new_document.presets.push(layer_ui::NewDocumentPreset { name: literal.into(), options: initial.new_document.defaults });
+    initial.new_document.setups.push(layer_ui::SavedSetup { name: literal.into(), group: layer_ui::PresetGroup::Yours, setup: layer_ui::default_setup() });
     let saved = serde_json::to_string(&initial).unwrap();
     fs::write(directory.path.join("settings.json"), &saved).unwrap();
     let (first, prepared) = SettingsService::launch_at(Ok(storage(&directory)), &["ja-JP", "ko", "en"]).unwrap();
     assert_eq!(first.session.localization().language(), layer_ui::UiLanguage::English);
     assert_eq!(first.session.state().settings.pan_speed, 1.5);
-    assert_eq!(first.session.state().settings.new_document.presets[0].name, literal);
+    assert_eq!(first.session.state().settings.new_document.setups[0].name, literal);
     assert_eq!(fs::read_to_string(directory.path.join("settings.json")).unwrap(), saved);
     let active = first.session.localization().clone();
     drop(first);drop(prepared);
@@ -705,7 +705,7 @@ fn prepared_launch_restores_before_views_and_keeps_the_profile_context() {
     assert!(Arc::ptr_eq(later.session.localization(), &retained));
     assert_eq!(later.session.state().settings.language, layer_ui::LanguagePreference::System);
     assert_eq!(later.session.state().settings.pan_speed, 1.5);
-    assert_eq!(later.session.state().settings.new_document.presets[0].name, literal);
+    assert_eq!(later.session.state().settings.new_document.setups[0].name, literal);
 }
 
 #[test]

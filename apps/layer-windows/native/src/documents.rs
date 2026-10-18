@@ -28,8 +28,7 @@ pub(crate) enum DocumentAction {
     Tabs { action: tabs::Action },
     Package { id:u32, action:layer_ui::PackageAction, path:Option<String> },
     Palette { action: crate::palette_files::Action },
-    PaperImport { id: u32, path: Option<String> },
-    NewPreferences { id: u32, action: layer_ui::NewDocumentAction },
+    PaperImport { id: Option<u32>, path: Option<String> },
     Recovery { action: crate::recovery::Action },
     WorkflowBegin { id: u32 },
     OpenPaths { paths: Vec<String> },
@@ -37,8 +36,7 @@ pub(crate) enum DocumentAction {
     DropImages { epoch: u64, revision: u64, active_layer: u64, paths: Vec<String>,
         screen: Option<layer_core::Point>, layer: Option<(u64, f32)> },
     Workflow { id: u32, action: crate::document_workflows::Action },
-    Create { id: u32, epoch: u64, revision: u64, options: layer_ui::NewDocumentOptions,
-        #[serde(default)] preset: String, #[serde(default)] defaults: bool },
+    Create { id: u32, epoch: u64, revision: u64 },
     Interpret { id: u32, profile: Option<crate::color_storage::ProfileChoice> },
     Close,
     RespondClose {
@@ -80,7 +78,7 @@ struct Opening { environment: OpenEnvironment, imported: layer_ui::ImportedDocum
 enum Source {
     Clip(Box<layer_ui::PixelClip>),
     Images(Vec<(String, layer_core::color::source::SourceImage)>),
-    Create(layer_ui::NewDocumentOptions),
+    Create,
     Interpret(Box<layer_ui::ImportedDocument>, crate::color_storage::ProfileChoice),
     Open(PathBuf),
 }
@@ -310,10 +308,16 @@ fn prepare(
     cancel: &AtomicBool,
 ) -> Result<Completed, String> {
     let mut opened_destination=None;
+    let mut notice=None;
     let imported = match source {
         Source::Clip(clip) => return environment.prepare(clip.document(&environment.localization)?, || cancel.load(Ordering::Acquire)).map(Completed::PhotoPrepared),
         Source::Images(sources) => return environment.prepare(layer_ui::clipboard_document(sources, environment.photo_policy, &environment.localization)?, || cancel.load(Ordering::Acquire)).map(Completed::PhotoPrepared),
-        Source::Create(options) => layer_ui::ImportOutcome::Editable(layer_ui::ImportedDocument::new(options.project_on(environment.new_paper.fallback(),&environment.localization)?,layer_ui::ImportSource::Master)),
+        Source::Create => {
+            let papers = crate::storage::roots().ok().map(|roots| roots.papers());
+            let (document, warning) = environment.new_drawing(papers.as_deref())?;
+            notice = warning;
+            layer_ui::ImportOutcome::Editable(layer_ui::ImportedDocument::new(document, layer_ui::ImportSource::Master))
+        }
         Source::Interpret(mut imported, profile) => {
             let profile=match profile.resolve(cancel, &environment.localization) { Ok(profile)=>profile,Err(reason)=>return Ok(Completed::ProfileFailure(reason)) };
             imported.interpret(profile)?; layer_ui::ImportOutcome::Editable(*imported)
@@ -346,6 +350,7 @@ fn prepare(
         },
     };
     if kind!=layer_ui::ImportSource::Photo && let Some((location,fingerprint))=opened_destination {candidate.initialize_document_location(Some(location.clone()))?;candidate.record_destination_fingerprint(&location,fingerprint)?;}
+    if let Some(notice) = notice { candidate.notify(notice); }
     Ok(if kind == layer_ui::ImportSource::Photo { Completed::PhotoPrepared(candidate) } else { Completed::Prepared(candidate) })
 }
 #[cfg(test)]
@@ -712,10 +717,6 @@ impl DocumentService {
             host.invalidate_snapshot();
             return Ok(());
         }
-        if let DocumentAction::NewPreferences { id, action } = action {
-            if !matches!(Self::request(host,id)?,DocumentRequest::New) { return Err("Drawing preset dialog expired".into()); }
-            return host.dispatch(layer_ui::UiAction::NewDocumentPreferences {action});
-        }
         if let DocumentAction::Close = action {
             self.close_window = true;
             self.quit_pending=host.session.state().document_file.busy||self.active.is_some()||self.activating||!host.session.can_park_document();
@@ -803,18 +804,12 @@ impl DocumentService {
                         Some(selected),
                     )
                 }
-                DocumentAction::Create { epoch, revision, options, preset, defaults, .. }
+                DocumentAction::Create { epoch, revision, .. }
                     if matches!(request, DocumentRequest::New) => {
                     Self::matches(host, epoch, revision)?;
-                    options.validate().map_err(|error| error.message(host.session.localization()))?;
                     let environment = OpenEnvironment::capture(&host.session,
                         self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options(None))?;
-                    if defaults || !preset.trim().is_empty() {
-                        host.dispatch(layer_ui::UiAction::NewDocumentPreferences { action: layer_ui::NewDocumentAction::Remember {
-                            options, name: preset, defaults,
-                        } })?;
-                    }
-                    (Job::Prepare { environment: Box::new(environment), source: Source::Create(options), cancelled: Arc::new(AtomicBool::new(false)) }, None)
+                    (Job::Prepare { environment: Box::new(environment), source: Source::Create, cancelled: Arc::new(AtomicBool::new(false)) }, None)
                 }
                 DocumentAction::Open {
                     epoch,
@@ -1628,16 +1623,18 @@ mod gpu_tests {
         assert!(!host.session.state().document_file.modified);
         assert_eq!(image(&mut host).bytes, expected.bytes);
         invoke(&mut host, CommandId::NewDocument);
+        crate::test_support::order_new_drawing(&mut host, [96, 72], "Harbor study");
         let (id, epoch, revision) = request(&host);
         service
             .dispatch(
                 &mut host,
-                DocumentAction::Create { id, epoch, revision, options: layer_ui::NewDocumentOptions { extent: [96, 72], ..Default::default() }, preset: String::new(), defaults: false },
+                DocumentAction::Create { id, epoch, revision },
             )
             .unwrap();
         finish(&mut service, &mut host, &done);
         assert!(host.session.state().host_error.is_none());
-        assert_eq!(host.session.engine().document().composition().size[0], 96);
+        assert_eq!(host.session.engine().document().composition().size, [96, 72]);
+        assert_eq!(host.session.state().document_file.unsaved_name.as_deref(), Some("Harbor study"));
         assert_eq!(host.session.state().document_file.epoch, epoch + 1);
         assert!(host.session.state().document_file.location.is_none());
         invoke(&mut host, CommandId::OpenDocument);
@@ -1697,9 +1694,10 @@ mod gpu_tests {
         service
             .dispatch(
                 &mut host,
-                DocumentAction::Create { id, epoch, revision, options: layer_ui::NewDocumentOptions { extent: [0, 48], ..Default::default() }, preset: String::new(), defaults: false },
+                DocumentAction::Create { id, epoch, revision },
             )
             .unwrap();
+        finish(&mut service, &mut host, &done);
         assert!(host.session.state().host_error.is_some());
         assert_eq!(host.session.engine().document(), &original);
         assert!(!host.session.state().document_file.modified);

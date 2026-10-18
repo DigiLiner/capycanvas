@@ -119,70 +119,35 @@ extension XCTestCase {
         #endif
         XCTAssertEqual(field.value as? String, value)
     }
-    @MainActor func chooseFormOption(_ id: String, _ label: String, in app: XCUIApplication) {
-        #if os(macOS)
-        workspaceActivate(app.descendants(matching: .any).matching(identifier: id).firstMatch)
-        workspaceActivate(app.menuItems[label].firstMatch)
-        #else
-        workspaceActivate(app.buttons[id].firstMatch)
-        workspaceActivate(app.buttons[label].firstMatch)
-        #endif
-    }
-    @MainActor func checkNewDrawingPresetRemoval(in app: XCUIApplication, theme: String) {
-        let options = #"{"extent":[79,53],"color":{"space":"DisplayP3","depth":"U16"},"background":"Transparent"}"#
-        app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"new_document_preferences","action":{"type":"remember","options":\#(options),"name":"Studio P3","defaults":false}},{"type":"invoke","command":"new_document"}]"#
-        app.launch()
-        let remove = app.buttons["new-document-remove-preset"]
-        XCTAssertTrue(remove.waitForExistence(timeout: 60), "The initial New Drawing form opens after canvas startup")
-        chooseFormOption("new-document-preset", "Wide color", in: app)
-        XCTAssertFalse(remove.isEnabled, "Built-in presets cannot be removed")
-        chooseFormOption("new-document-preset", "Studio P3", in: app)
-        expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: remove)
-        waitForExpectations(timeout: 10)
-        attachEditor(in: app, name: "new-drawing-saved-preset-\(theme)")
-        workspaceActivate(remove)
-        expectation(for: NSPredicate(format: "enabled == NO"), evaluatedWith: remove)
-        waitForExpectations(timeout: 10)
-        #if os(macOS)
-        workspaceActivate(app.descendants(matching: .any).matching(identifier: "new-document-preset").firstMatch)
-        XCTAssertTrue(app.menuItems["Wide color"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.menuItems["Studio P3"].exists, "The removed preset leaves the list")
-        workspaceActivate(app.menuItems["Wide color"].firstMatch)
-        #else
-        workspaceActivate(app.buttons["new-document-preset"].firstMatch)
-        XCTAssertTrue(app.buttons["Wide color"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Studio P3"].exists, "The removed preset leaves the list")
-        workspaceActivate(app.buttons["Wide color"].firstMatch)
-        #endif
-        XCTAssertFalse(app.staticTexts["new-document-error"].exists)
-        workspaceActivate(app.buttons["new-document-cancel"])
-        XCTAssertTrue(remove.waitForNonExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Canvas error"].exists)
-    }
     @MainActor func checkNativeSDRCreationAndColorEditing(in app: XCUIApplication) {
         // Initial actions run only after native GPU startup completes.
-        guard app.textFields["new-document-width"].waitForExistence(timeout: 60) else {
-            XCTFail("The initial New Drawing form did not open after canvas startup")
+        let create = app.buttons["new-drawing-create"]
+        guard create.waitForExistence(timeout: 60) else {
+            XCTFail("The initial New drawing dialog did not open after canvas startup")
             return
         }
-        func choose(_ id: String, _ label: String) { chooseFormOption(id, label, in: app) }
-        choose("new-document-preset", "Wide color")
-        choose("new-document-depth", "16-bit SDR")
-        choose("new-document-background", "Transparent")
-        let width = app.textFields["new-document-width"]
-        let create = app.buttons["new-document-create"]
-        replaceEditorText(width, with: "0", in: app); XCTAssertFalse(create.isEnabled)
-        replaceEditorText(width, with: "79", in: app); replaceEditorText(app.textFields["new-document-height"], with: "53", in: app)
-        replaceEditorText(app.textFields["new-document-preset-name"], with: "Studio P3", in: app)
-        #if os(macOS)
-        workspaceActivate(app.checkBoxes["new-document-defaults"])
-        #else
+        chooseNewDrawingOption("new-drawing-space", 1, in: app)
+        chooseNewDrawingOption("new-drawing-depth", 1, in: app)
+        let useColor = app.buttons["new-drawing-color-use"]
+        workspaceActivate(app.buttons["new-drawing-paper-color"])
+        workspaceActivate(app.buttons["new-drawing-color-mode-transparent"])
+        workspaceActivate(useColor)
+        XCTAssertTrue(useColor.waitForNonExistence(timeout: 10))
+        chooseNewDrawingOption("new-drawing-unit", 3, in: app)
+        enterNewDrawingNumber("width", "79", in: app)
+        enterNewDrawingNumber("height", "53", in: app)
+        workspaceActivate(app.buttons["new-drawing-presets-button"])
+        workspaceActivate(app.buttons["new-drawing-save-as"])
+        replaceEditorText(app.textFields["new-drawing-save-name"], with: "Studio P3", in: app)
+        #if os(iOS)
         dismissEditorKeyboard(in: app)
-        let defaults = app.switches["new-document-defaults"]
-        revealEditorControl(defaults, in: app.scrollViews.containing(.switch, identifier: defaults.identifier).firstMatch)
-        workspaceActivate(defaults)
-        XCTAssertEqual(defaults.value as? String, "1", "The new drawing options become the defaults")
         #endif
+        workspaceActivate(app.buttons["new-drawing-save-confirm"])
+        let select = app.buttons["new-drawing-select"]
+        expectation(for: NSPredicate(format: "enabled == YES"), evaluatedWith: select)
+        waitForExpectations(timeout: 10)
+        workspaceActivate(select)
+        XCTAssertTrue(select.waitForNonExistence(timeout: 10))
         attachEditor(in: app, name: "sdr-new-options")
         workspaceActivate(create)
         #if os(iOS)
@@ -190,7 +155,7 @@ extension XCTestCase {
         #endif
         XCTAssertTrue(create.waitForNonExistence(timeout: 30))
         let title = editorDocumentTitle(in: app)
-        expectation(for: NSPredicate(format: "label == %@ OR value == %@", "Untitled · 79 × 53", "Untitled · 79 × 53"), evaluatedWith: title)
+        expectation(for: NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", "79 × 53", "79 × 53"), evaluatedWith: title)
         waitForExpectations(timeout: 30)
         workspaceActivate(app.buttons["paint-edit-color"].firstMatch)
         let use = app.buttons["color-use"]
@@ -210,11 +175,11 @@ extension XCTestCase {
         #else
         editorMenu(in: app, menu: "File", id: "new_document", label: "New drawing")
         #endif
-        XCTAssertTrue(width.waitForExistence(timeout: 10))
-        XCTAssertEqual(width.value as? String, "79")
-        XCTAssertEqual(app.textFields["new-document-height"].value as? String, "53")
-        choose("new-document-preset", "Studio P3")
-        workspaceActivate(app.buttons["new-document-cancel"])
+        XCTAssertTrue(create.waitForExistence(timeout: 10))
+        XCTAssertEqual(newDrawingNumber("width", in: app).value as? String, "79")
+        XCTAssertEqual(newDrawingNumber("height", in: app).value as? String, "53")
+        expectNewDrawingText("new-drawing-caption", in: app) { $0.hasPrefix("Studio P3") }
+        workspaceActivate(app.buttons["new-drawing-cancel"])
         XCTAssertTrue(create.waitForNonExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }

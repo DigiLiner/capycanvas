@@ -141,7 +141,7 @@ Native hosts retain scroll position, focus, hover, and other
 ephemeral widget state. Canvas input uses physical viewport pixels separately
 from these logical layout units.
 
-`UiSession::blank` owns new-document defaults. `set_viewport(logical, physical)`
+`UiSession::blank` opens on the startup sheet ([New drawing](new-drawing.md)). `set_viewport(logical, physical)`
 accepts host measurements and derives physical fitting bounds from the shared
 layout. It fits the first measured viewport once; later dock changes update
 fitting bounds without moving the camera or issuing GPU work. Explicit Fit Canvas

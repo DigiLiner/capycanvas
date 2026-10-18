@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 // Runs against desktop Chrome or an explicitly selected tablet test tab.
 export async function checkZen({call, evaluate, settle, capture = async () => {}}) {
@@ -129,7 +130,7 @@ export async function checkZen({call, evaluate, settle, capture = async () => {}
     }
     await switchWorkspace('painter');
     await invoke('new_document');
-    await evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+20000;function check(){const dialog=document.querySelector('dialog[open]'),button=dialog&&[...dialog.querySelectorAll('button')].find(n=>n.textContent==='Create');if(button){for(const input of dialog.querySelectorAll('input[type=number]'))input.value=96;button.click();resolve();}else if(performance.now()>end)reject(Error('new document dialog'));else setTimeout(check,30)}check()})`);
+    await evaluate(createDrawing());
     await evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+30000;function check(){if(layerApp.app.document_tabs(0).tabs.length>1&&!layerApp.documents.busy()&&layerApp.app.brush_ready())resolve();else if(performance.now()>end)reject(Error('second document ready'));else setTimeout(check,30)}check()})`);
     const customBase=await evaluate('layerApp.state().workspace');
     const resize=async width=>{await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});await settle();};

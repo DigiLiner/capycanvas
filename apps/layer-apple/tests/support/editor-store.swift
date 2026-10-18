@@ -81,7 +81,26 @@ extension WorkspaceController {
     }
 }
 
+func newSheet(_ extent: [Int], space: String = "Srgb", depth: String = "U8", transparent: Bool = false) -> [[String: Any]] {
+    [["op": "unit", "unit": "px"], ["op": "width", "value": extent[0]], ["op": "height", "value": extent[1]],
+     ["op": "space", "space": space], ["op": "depth", "depth": depth], ["op": "paper_color"],
+     ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]],
+     ["op": "transparent", "transparent": transparent], ["op": "use_paper_color"]]
+}
+
+extension ProjectFiles {
+    func newDrawingStep(_ action: [String: Any]) async throws {
+        let error: String? = await withCheckedContinuation { done in newDrawing(action) { done.resume(returning: $0) } }
+        if let error { throw HostFailure(message: error) }
+    }
+}
+
 extension EditorStore {
+    func orderNewDrawing(_ edits: [[String: Any]]) async throws {
+        try await apply(["type": "invoke", "command": "new_document"])
+        let steps: [[String: Any]] = [["op": "open", "screen": NSNull(), "untitled": "Untitled"]] + edits + [["op": "create"]]
+        for step in steps { try await apply(["type": "new_drawing", "action": step]) }
+    }
     func apply(_ action: [String: Any]) async throws {
         try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
             edit(action) { error in

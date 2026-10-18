@@ -56,8 +56,7 @@ fn photo_drop_captures_document_point_and_reuses_shared_row_validation() {
         let app = App::new(platform);
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
-        let new = ProjectJob::new(&app, true);
-        assert_eq!(new.create([200, 150]), 0); adopt(&app, &new, false);
+        let new = ProjectJob::create(&app, [200, 150]); adopt(&app, &new, false);
         app.invoke("zoom_in"); app.invoke("rotate_right"); app.invoke("flip_horizontal");
         let point = layer_core::Point { x: 615., y: 430. };
         let expected = unsafe { &*app.0 }.host.session.state().camera.input_transform().map(point);
@@ -280,8 +279,7 @@ fn photo_open_and_place_retain_source_depth_profile_samples_and_save_safety() {
             let reopened = read_document(std::io::Cursor::new(archive));
             assert_saved_document(&reopened, &painted);
 
-            let job = ProjectJob::new(&app, true);
-            assert_eq!(job.create([67, 43]), 0); adopt(&app, &job, false);
+            let job = ProjectJob::create(&app, [67, 43]); adopt(&app, &job, false);
             let target_color = unsafe { &*app.0 }.host.session.engine().document().composition().color;
             let blank = app.pixels();
             let job = place_job(&app); read_bytes(&job, "Retained.tiff", &bytes); adopt(&app, &job, false);
@@ -377,8 +375,7 @@ fn photo_batch_placement_is_provisional_atomic_and_keeps_original_samples() {
         let app = App::new(platform);
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
-        let new = ProjectJob::new(&app, true);
-        assert_eq!(new.create([7, 5]), 0); adopt(&app, &new, false);
+        let new = ProjectJob::create(&app, [7, 5]); adopt(&app, &new, false);
         let before = unsafe { &*app.0 }.host.session.engine().document().clone();
         for apply in [false, true] {
             let job = place_job(&app);

@@ -139,10 +139,10 @@ fn native_hdr_open_edit_rendition_save_and_deliver() {
     }));
     w.window.present();
     ready(&w);
-    invoke(&w, CommandId::NewDocument);
-    combo(&w, "new-document-preset").set_selected(4);
-    assert_eq!(combo(&w, "new-document-depth").selected(), 2);
-    response(&w, "create");
+    super::new_drawing_review::open_new_drawing(&w);
+    super::new_drawing_review::new_drawing_action(&w, NewDrawingAction::Depth { depth: SampleDepth::F16 });
+    assert_eq!(super::new_drawing_review::part::<gtk::DropDown>(&w, "new-drawing-depth").selected(), 2);
+    super::new_drawing_review::close_new_drawing(&w, "new-drawing-create");
     finish(&w);
     assert_eq!(
         opened.borrow_mut().take().unwrap().0.composition().color.depth,
@@ -833,9 +833,9 @@ fn native_float32_new_open_edit_save_and_exr_export() {
     let opened = Rc::new(RefCell::new(None)); let result = opened.clone();
     *w.open_document.borrow_mut() = Some(Rc::new(move |p,l| { result.replace(Some((p,l))); }));
     w.window.present(); ready(&w);
-    invoke(&w, CommandId::NewDocument);
-    combo(&w,"new-document-depth").set_selected(3);
-    response(&w,"create"); finish(&w);
+    super::new_drawing_review::open_new_drawing(&w);
+    super::new_drawing_review::new_drawing_action(&w, NewDrawingAction::Depth { depth: SampleDepth::F32 });
+    super::new_drawing_review::close_new_drawing(&w, "new-drawing-create"); finish(&w);
     assert_eq!(opened.borrow_mut().take().unwrap().0.composition().color.depth, SampleDepth::F32);
     let path = directory.join("source.exr");
     layer_color::photo::write_exr_rows(std::fs::File::create(&path).unwrap(),[64,48],RgbSpace::DisplayP3,None,|_,row| {

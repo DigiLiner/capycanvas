@@ -1,4 +1,5 @@
 import {histogramJourney} from './histogram-journey.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 import assert from 'node:assert/strict';
 import {paintBaseImage,authoredIdentity,readPackage,packageObject,packageComposition,packageOccurrences,packageResources,packageResourceIdentity,resourceIdentity,sourceIdentity,rasterIdentity,sourceContent,sourceSamples,packageObjects,imageIdentity,imageContent} from './package-fixture.test.mjs';
 const rasterResources=m=>packageResources(m,'capy.raster-tile/1').map(resource=>resourceIdentity(m,{ref:resource.id}));
@@ -22,12 +23,8 @@ export async function checkSdrColor({call,evaluate,settle}, photoUrl='/pkg/proph
   await wait('window.layerApp && layerApp.startupTimes.complete!==null');
   await wait('JSON.parse(layerApp.app.workspace_view())?.ready && !JSON.parse(layerApp.app.workspace_view()).busy');
   await evaluate(`window.sdrFiles=new Map();window.showSaveFilePicker=async options=>({name:options.suggestedName,async createWritable(){let bytes;return{async write(value){bytes=new Uint8Array(value instanceof Blob?await value.arrayBuffer():value)},async close(){sdrFiles.set(options.suggestedName,bytes)},async abort(){}}}});`);
-  await invoke('new_document');await wait('!!document.querySelector(\"dialog[open]\")');
-  if(await evaluate('!![...document.querySelectorAll("dialog[open] button")].find(b=>b.textContent==="Discard Changes")'))await click('Discard Changes');
-  await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-  await evaluate(`(()=>{const d=document.querySelector('dialog[open]');for(const [field,value] of [['width','513'],['height','257']]){const input=d.querySelector('[data-document-field='+field+']');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}
-    d.querySelector('select[aria-label="Color space"]').value='DisplayP3';d.querySelector('select[aria-label="Bit depth"]').value='U16';})()`);
-  await click('Create');await wait('!layerApp.state().document_file.busy && layerApp.app.document_color().space==="DisplayP3" && layerApp.app.brush_ready()');
+  await invoke('new_document');await evaluate(createDrawing({width:513,height:257,space:'DisplayP3',depth:'U16'}));
+  await wait('!layerApp.state().document_file.busy && layerApp.app.document_color().space==="DisplayP3" && layerApp.app.brush_ready()');
   assert.deepEqual(await evaluate('layerApp.app.document_color()'),{space:'DisplayP3',depth:'U16'});
   await evaluate(`layerApp.dispatch({type:'color',action:{op:'set_slot',slot:'foreground',color:{space:'ProPhoto',rgba:[.85,.021,.6,.33333334]}}});window.sdrColor=JSON.stringify(layerApp.state().colors.foreground);`);
   await evaluate(`[...document.querySelectorAll('button[aria-label="Edit Color"]')].find(b=>b.getBoundingClientRect().width>0).click()`);
@@ -167,9 +164,7 @@ export async function checkSourceImports({call,evaluate}) {
   const {wait,invoke,click,idle}=helpers(evaluate);
   const save=async()=>{await invoke('save_document_as');await idle();return readPackage(evaluate,'sdrFiles.get(layerApp.state().document_file.location.name)');};
   const original=await readPackage(evaluate,'sdrPhotoMaster');
-  await invoke('new_document');await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-  await evaluate(`(()=>{const d=document.querySelector('dialog[open]');for(const [field,value] of [['width','513'],['height','257']]){const input=d.querySelector('[data-document-field='+field+']');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}d.querySelector('select[aria-label="Color space"]').value='DisplayP3';d.querySelector('select[aria-label="Bit depth"]').value='U8';})()`);
-  await click('Create');await idle();const before=await save();
+  await invoke('new_document');await evaluate(createDrawing({width:513,height:257,space:'DisplayP3',depth:'U8'}));await idle();const before=await save();
   await evaluate(`window.sdrPlaceFile=JSON.stringify(layerApp.state().document_file,(_,v)=>typeof v==='bigint'?Number(v):v);window.showOpenFilePicker=async()=>[{name:'retained-prophoto16.png',async getFile(){return new File([sdrPhotoBytes],'retained-prophoto16.png')}}];`);
   // The layer-panel button must use the retained-source path as well as the menu.
   await evaluate(`[...document.querySelectorAll('.layer-footer button')].find(button=>button.ariaLabel===layerApp.app.catalog().native_copy.layers.import_image).click()`);await idle();

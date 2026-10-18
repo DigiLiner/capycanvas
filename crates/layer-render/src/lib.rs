@@ -743,6 +743,11 @@ pub trait CanvasRenderer {
     fn max_document_dimension(&self) -> u32 {
         u32::MAX
     }
+    /// Device memory still free for this drawing's layers, when the driver
+    /// reports it.
+    fn memory_headroom(&self) -> Option<u64> {
+        None
+    }
     fn preflight_image_object_affine(
         &self, _scene:SceneView<'_>, _object:layer_core::authored::ImageObjectHandle,
         _affine:layer_core::authored::Affine64, _view:ViewState,

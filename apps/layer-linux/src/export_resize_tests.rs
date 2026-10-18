@@ -176,10 +176,11 @@ fn native_export_again_retains_recipe_and_current_pixels_per_document() {
         assert_eq!(state(&w).document_file.export_uri.as_deref(), Some(gio::File::for_path(&replacement).uri().as_str()));
         let first = w.documents.selected();
         export_menu_click(&w, &mut input, CommandId::NewDocument);
-        for (name, value) in [("new-document-width", 64.), ("new-document-height", 48.)] {
-            named::<adw::SpinRow>(w.window.upcast_ref(), name).set_value(value);
+        until(|| w.window.visible_dialog().is_some_and(|dialog| dialog.widget_name() == "new-drawing-dialog" && dialog.is_mapped()), "New drawing");
+        for action in [NewDrawingAction::Unit { unit: LengthUnit::Px }, NewDrawingAction::Width { value: 64. }, NewDrawingAction::Height { value: 48. }] {
+            super::new_drawing_review::new_drawing_action(&w, action);
         }
-        response(&w, "create");
+        click(&super::new_drawing_review::part::<gtk::Button>(&w, "new-drawing-create"));
         until(|| w.documents.len() == 2 && !w.documents.changing.get(), "second export owner"); ready(&w);
         assert!(state(&w).document_file.export_uri.is_none());
         assert!(!export_menu_item(&w, &mut input, CommandId::ExportAgain).is_sensitive());

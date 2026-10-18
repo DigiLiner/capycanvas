@@ -45,7 +45,7 @@ pub(crate) fn blend_label(blend: layer_core::LayerBlend, l: &Localizer) -> Arc<s
         layer_core::LayerBlend::PassThrough => MessageId::RESOURCES_BLEND_PASS_THROUGH,
     })
 }
-pub(super) fn resource_label(label: &ResourceLabel, l: &Localizer) -> Arc<str> {
+pub(crate) fn resource_label(label: &ResourceLabel, l: &Localizer) -> Arc<str> {
     match label {
         ResourceLabel::Literal(text) => text.clone(),
         ResourceLabel::Message { message } => l.static_message(message)
@@ -1038,6 +1038,21 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.state.settings.new_document.paper.as_deref().and_then(|id| self.papers.image(id)).cloned())
     }
     pub fn new_drawing_paper(&self) -> layer_core::TextureSource { self.new_drawing_paper_material().fallback() }
+    pub fn imported_papers(&self) -> Vec<crate::NamedPaper> {
+        self.papers.entries.iter().flatten().map(|entry| crate::NamedPaper { id: entry.id.as_str().into(), label: entry.name.as_str().into() }).collect()
+    }
+    pub fn paper_material(&self, id: &str) -> crate::paper_library::PaperMaterial {
+        use crate::paper_library::PaperMaterial;
+        if let Some(paper) = layer_core::paper::built_in_paper(id) { return PaperMaterial::Ready(paper.texture.clone()); }
+        match self.papers.image(id) {
+            Some(image) => PaperMaterial::Ready(layer_core::TextureSource::Image(image.clone())),
+            None => PaperMaterial::Stored { id: id.into(), fallback: layer_core::paper::default_texture() },
+        }
+    }
+    pub fn canvas_limits(&self) -> crate::CanvasLimits {
+        let memory = self.engine.backend().memory_headroom().or_else(layer_color::photo::PhotoMemoryBudget::available_memory);
+        crate::CanvasLimits::new(self.engine.geometry_limits().canvas_dimension(), memory)
+    }
     pub fn initialize_paper(&mut self, id: Option<String>, texture: layer_core::TextureSource, warning: Option<String>) -> UiChange {
         if let Some(id) = id {
             if let layer_core::TextureSource::Image(image) = texture { self.papers.keep_image(&id, image); }
@@ -1090,6 +1105,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             .filter(|id| entries.iter().any(|entry| entry.id == *id) && self.papers.image(id).is_none()
                 && self.papers.prepared_default.as_deref() != Some(id.as_str()));
         self.papers.set_entries(entries);
+        self.refresh_new_drawing();
         if let Some(id) = remembered {
             self.request(HostRequestKind::Paper { request: PaperRequest::Load { id } })?;
         }
@@ -1105,13 +1121,19 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.refresh_document();
         Ok(self.changed(regions::DOCUMENT | regions::SETTINGS, true))
     }
-    pub fn paper_imported(&mut self, layer: u64, entries: Vec<crate::paper_library::PaperEntry>, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
+    pub fn paper_imported(&mut self, layer: Option<u64>, entries: Vec<crate::paper_library::PaperEntry>, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
         self.papers.set_entries(entries);
         let image = self.cache_paper(id, image).ok_or("Invalid paper")?;
-        self.papers.pending = Some(crate::paper_library::PendingPaper { id: id.into(), layer, epoch: self.state.document_file.epoch, image: Some(image) });
-        self.apply_loaded_paper();
+        match layer {
+            Some(layer) => {
+                self.papers.pending = Some(crate::paper_library::PendingPaper { id: id.into(), layer, epoch: self.state.document_file.epoch, image: Some(image) });
+                self.apply_loaded_paper();
+            }
+            None => self.new_drawing_imported(id),
+        }
+        self.refresh_new_drawing();
         self.refresh_document();
-        Ok(self.changed(regions::DOCUMENT | regions::SETTINGS, true))
+        Ok(self.changed(regions::DOCUMENT | regions::SETTINGS | regions::HOST, true))
     }
     fn insert_effect(&mut self, effect: Arc<str>, destination: Option<(OccurrenceHandle, u64)>) -> Result<(), String> {
         if let Some((owner, epoch)) = destination {
@@ -1233,7 +1255,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             EffectAction::ImportPaper { layer } => {
                 self.paper_layer(layer)?;
-                return self.request(HostRequestKind::Paper { request: PaperRequest::Import { layer } });
+                return self.request(HostRequestKind::Paper { request: PaperRequest::Import { layer: Some(layer) } });
             }
             EffectAction::AddPaper { layer } => {
                 self.paper_layer(layer)?;

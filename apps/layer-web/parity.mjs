@@ -358,7 +358,7 @@ export async function checkParity({ call, evaluate, settle }) {
     await evaluate(
       `(() => { const n=document.querySelector('#document-title');const range=document.createRange();range.selectNodeContents(n);const s=getSelection();s.removeAllRanges();s.addRange(range);const text=s.toString();s.removeAllRanges();return text; })()`,
     ),
-    "Untitled · 2048 × 1536",
+    "Untitled · 3508 × 2480",
   );
   assert.equal(
     await evaluate("document.querySelector('.brush-preview').draggable"),

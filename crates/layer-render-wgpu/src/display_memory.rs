@@ -26,41 +26,50 @@ pub(super) fn composition_budget(device: &wgpu::Device, display: u64) -> u64 {
     budget
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
-pub(super) fn complete_budget(device: &wgpu::Device, retained: u64) -> u64 {
-    let headroom = vulkan_headroom(device);
-    #[cfg(target_os = "android")]
-    {
-        // Unified memory also serves the process, compositor and other apps.
-        // Use the driver budget when available. An integrated device with a
-        // host-visible local heap can otherwise use measured system headroom.
-        let system = layer_color::photo::PhotoMemoryBudget::available_memory();
-        let headroom = match (headroom, system) {
-            (Some(gpu), Some(system)) => Some(gpu.min(system)),
-            (None, Some(system)) if unified_memory(device) => Some(system),
-            _ => None,
-        };
-        allowance(headroom, 2, retained)
+/// Device memory the driver still offers this process, when it reports one.
+#[cfg(target_os = "linux")]
+pub(crate) fn device_headroom(device: &wgpu::Device) -> Option<u64> {
+    vulkan_headroom(device)
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn device_headroom(device: &wgpu::Device) -> Option<u64> {
+    // Unified memory also serves the process, compositor and other apps.
+    // Use the driver budget when available. An integrated device with a
+    // host-visible local heap can otherwise use measured system headroom.
+    let system = layer_color::photo::PhotoMemoryBudget::available_memory();
+    match (vulkan_headroom(device), system) {
+        (Some(gpu), Some(system)) => Some(gpu.min(system)),
+        (None, Some(system)) if unified_memory(device) => Some(system),
+        _ => None,
     }
-    #[cfg(not(target_os = "android"))]
-    allowance(headroom, 4, retained)
 }
 
 #[cfg(target_vendor = "apple")]
-pub(super) fn complete_budget(device: &wgpu::Device, retained: u64) -> u64 {
+pub(crate) fn device_headroom(device: &wgpu::Device) -> Option<u64> {
     // SAFETY: the guard retains wgpu's live device. These read-only Metal
     // properties neither allocate resources nor submit work.
-    let Some(hal) = (unsafe { device.as_hal::<wgpu::hal::api::Metal>() }) else {
-        return 0;
-    };
+    let hal = unsafe { device.as_hal::<wgpu::hal::api::Metal>() }?;
     use objc2_metal::MTLDevice;
     let metal = hal.raw_device();
-    let headroom = metal_headroom(
+    metal_headroom(
         metal.recommendedMaxWorkingSetSize(),
         metal.currentAllocatedSize() as u64,
         layer_color::photo::PhotoMemoryBudget::available_memory(),
-    );
-    allowance(headroom, 4, retained)
+    )
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn device_headroom(device: &wgpu::Device) -> Option<u64> {
+    dx12_headroom(device).or_else(|| {
+        remaining_headroom(vulkan_headroom(device)?, 0,
+            layer_color::photo::PhotoMemoryBudget::available_memory())
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple", target_os = "windows"))]
+pub(super) fn complete_budget(device: &wgpu::Device, retained: u64) -> u64 {
+    allowance(device_headroom(device), if cfg!(target_os = "android") { 2 } else { 4 }, retained)
 }
 
 #[cfg(target_vendor = "apple")]
@@ -165,15 +174,6 @@ fn unified_memory(device: &wgpu::Device) -> bool {
                     vk::MemoryPropertyFlags::DEVICE_LOCAL | vk::MemoryPropertyFlags::HOST_VISIBLE,
                 )
             })
-}
-
-#[cfg(target_os = "windows")]
-pub(super) fn complete_budget(device: &wgpu::Device, retained: u64) -> u64 {
-    let headroom = dx12_headroom(device).or_else(|| {
-        remaining_headroom(vulkan_headroom(device)?, 0,
-            layer_color::photo::PhotoMemoryBudget::available_memory())
-    });
-    allowance(headroom, 4, retained)
 }
 
 #[cfg(target_os = "windows")]

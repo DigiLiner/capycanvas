@@ -21,7 +21,7 @@ pub struct PaperEntry {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PaperRequest {
-    Import { layer: u64 },
+    Import { layer: Option<u64> },
     Add { layer: u64, name: String },
     Load { id: String },
     Rename { id: String, name: String },
@@ -50,7 +50,7 @@ impl PaperMaterial {
 pub fn paper_identity(image: &SourceImage) -> Result<String, String> {
     let mut hash = Sha256::new();
     for v in image.extent { hash.update(v.to_le_bytes()); }
-    for v in layer_core::paper::paper_ppi(image.resolution) { hash.update(v.to_le_bytes()); }
+    for v in layer_core::paper::image_ppi(image.resolution) { hash.update(v.to_le_bytes()); }
     let mut rows = image.rows();
     let mut row = vec![0; image.row_bytes()];
     for y in 0..image.extent[1] {
@@ -122,7 +122,7 @@ pub fn stored_paper(id: &str, png: &[u8]) -> Result<SourceImage, String> {
 pub fn canonical_source(id: &str, source: SourceImage, retained: &[Image]) -> Result<SourceImage, String> {
     let parent = paper_image_id(id).ok_or("Unknown paper")?;
     if let Some(image) = retained.iter().find(|image| image.id() == parent) {
-        if image.extent != source.extent || layer_core::paper::paper_ppi(image.resolution) != layer_core::paper::paper_ppi(source.resolution)
+        if image.extent != source.extent || layer_core::paper::image_ppi(image.resolution) != layer_core::paper::image_ppi(source.resolution)
             || image.interpretation != source.interpretation || paper_identity(image.storage())? != id { return Err("The stored paper changed".into()); }
         return Ok(image.storage().as_ref().clone());
     }
@@ -132,7 +132,7 @@ pub fn canonical_source(id: &str, source: SourceImage, retained: &[Image]) -> Re
 pub enum PaperResult {
     Entries(Vec<PaperEntry>),
     Loaded(String, SourceImage),
-    Imported(u64, String, SourceImage, Vec<PaperEntry>),
+    Imported(Option<u64>, String, SourceImage, Vec<PaperEntry>),
 }
 
 /// A library request as captured on the session owner. A request of `None`
@@ -154,6 +154,11 @@ impl<R: layer_render::CanvasRenderer> crate::UiSession<R> {
         let image = match &action { Some(PaperRequest::Add { layer, .. }) => self.paper_image(*layer), _ => None };
         let retained = if matches!(&action, Some(PaperRequest::Load { .. } | PaperRequest::Import { .. })) { self.paper_sources() } else { Vec::new() };
         Ok(PaperCapture { request, action, image, retained, epoch: self.state().document_file.epoch, document: self.engine().document().artwork.id })
+    }
+    /// An Import… that only adds a paper to the library, for New drawing.
+    pub fn capture_library_import(&self) -> PaperCapture {
+        PaperCapture { request: None, action: Some(PaperRequest::Import { layer: None }), image: None, retained: self.paper_sources(),
+            epoch: self.state().document_file.epoch, document: self.engine().document().artwork.id }
     }
     /// Applies a finished library request and completes it. A late import
     /// into a changed drawing only refreshes the library.

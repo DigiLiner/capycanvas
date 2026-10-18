@@ -3,6 +3,7 @@
 #include "UiControls.h"
 #include "ExportForm.h"
 #include "ProofForm.h"
+#include "NewDrawingDialog.h"
 #include <winrt/Microsoft.Windows.Storage.Pickers.h>
 #include <microsoft.ui.xaml.window.h>
 #include <array>
@@ -31,7 +32,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
     std::shared_ptr<CapyLocalization> localization;
     std::function<void()> presentationChanged;
     J catalog,model,proofDraft;
-    std::function<void()> creationPresetsChanged;
+    std::unique_ptr<NewDrawingDialog> newDrawing;
     hstring proofProfileId;
     uint32_t proofRequest=0;
     bool proofManaging=false;
@@ -97,6 +98,10 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         if(type==L"export"||type==L"place"||type==L"paste"||type==L"copy"||type==L"change_color"||type==L"color_history"||type==L"properties"||type==L"repair_source_profile"||type==L"rasterize_source"){
             send(to_string(O({{L"operation",S(L"workflow_begin")},{L"id",N(num(envelope,L"id"))}}).Stringify()));co_return;
         }
+        if(type==L"new"){
+            if(!newDrawing)newDrawing=std::make_unique<NewDrawingDialog>(data,send,window,changed);
+            newDrawing->Open(envelope);co_return;
+        }
         auto id=num(envelope,L"id");
         auto file=object(object(model,L"state"),L"document_file");
         // Approval applies to the document shown when this dialog opened.
@@ -115,7 +120,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                 if(IsIconic(handle))ShowWindow(handle,SW_RESTORE);
             }
             auto options=object(model,L"document_options");
-            if(type==L"new"||type==L"confirm_close") {
+            if(type==L"confirm_close") {
                 dialog=ContentDialog();dialog.XamlRoot(window.Content().XamlRoot());
                 AutomationProperties::SetAutomationId(dialog,L"document-dialog");
                 dialog.RequestedTheme(str(object(model,L"state"),L"theme")==L"dark"?ElementTheme::Dark:ElementTheme::Light);
@@ -123,139 +128,15 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                 dialog.DefaultButton(ContentDialogButton::Primary);
                 auto size=window.Content().XamlRoot().Size();
                 StackPanel body;body.Spacing(12);body.Width(std::max(180.,std::min(380.,double(size.Width)-96)));
-                std::shared_ptr<std::array<uint32_t,2>> extent=std::make_shared<std::array<uint32_t,2>>();
-                J creationDraft;TextBox presetName;CheckBox remember;
-                if(type==L"new") {
-                    auto spec=object(catalog,L"new_document");
-                    auto creation=object(options,L"creation"),text=object(creation,L"text");
-                    dialog.Title(box_value(str(text,L"new_title")));dialog.PrimaryButtonText(str(text,L"create"));
-                    creationDraft=J::Parse(object(creation,L"options").Stringify());
-                    auto labels=array(spec,L"labels"),defaults=array(creationDraft,L"extent");
-                    ComboBox preset,space,depth,background,blending;
-                    AutomationProperties::SetAutomationId(depth,L"document-depth");
-                    preset.Header(box_value(str(text,L"preset")));space.Header(box_value(str(text,L"space")));
-                    depth.Header(box_value(str(text,L"depth")));background.Header(box_value(str(text,L"background")));
-                    auto presets=array(creation,L"presets"),spaces=array(creation,L"spaces"),depths=array(creation,L"depths"),backgrounds=array(creation,L"backgrounds");
-                    for(auto item:presets)comboOption(preset,str(item.GetObject(),L"name"));
-                    for(auto item:spaces)comboOption(space,item.GetArray().GetStringAt(1));
-                    for(auto item:depths)comboOption(depth,item.GetArray().GetStringAt(1));
-                    for(auto item:backgrounds)comboOption(background,item.GetArray().GetStringAt(1));
-                    auto blendSpec=object(creation,L"blending");auto blendChoices=array(blendSpec,L"choices");
-                    blending.Header(box_value(str(blendSpec,L"label")));AutomationProperties::SetAutomationId(blending,L"document-blending");
-                    for(auto item:blendChoices)comboOption(blending,str(item.GetObject(),L"label"));
-                    for(auto control:{preset,space,depth,background,blending}){control.HorizontalAlignment(HorizontalAlignment::Stretch);body.Children().Append(control);}
-                    std::array<TextBox,2> entries;
-                    for(uint32_t i=0;i<2;++i){entries[i].Header(box_value(labels.GetStringAt(i)));entries[i].MaxLength(512);
-                        AutomationProperties::SetName(entries[i],labels.GetStringAt(i));AutomationProperties::SetAutomationId(entries[i],i==0?L"document-width":L"document-height");body.Children().Append(entries[i]);}
-                    TextBox resolution;resolution.Header(box_value(str(text,L"resolution")+L" ("+str(object(creation,L"resolution"),L"unit")+L")"));resolution.MaxLength(512);
-                    AutomationProperties::SetAutomationId(resolution,L"document-resolution");body.Children().Append(resolution);
-                    TextBlock summary,blendHelp,note,error;for(auto item:{summary,blendHelp,note,error}){item.TextWrapping(TextWrapping::Wrap);body.Children().Append(item);}
-                    error.Visibility(Visibility::Collapsed);AutomationProperties::SetAutomationId(error,L"document-error");
-                    auto errorReveal=std::make_shared<event_token>();
-                    error.Unloaded([weak=make_weak(error),errorReveal](auto&&,auto&&){
-                        if(auto error=weak.get();error&&*errorReveal){error.LayoutUpdated(*errorReveal);*errorReveal={};}
-                    });
-                    auto loading=std::make_shared<bool>(false);auto appearanceSource=std::make_shared<hstring>();auto chosen=std::make_shared<hstring>(str(creationDraft,L"blend_space"));
-                    auto appearance=[creationDraft,summary,blendHelp,note,appearanceSource,blending,blendChoices,loading,this]{
-                        try{
-                            auto source=creationDraft.Stringify()+L"/"+to_hstring(data->localizationGeneration);if(source==*appearanceSource)return;*appearanceSource=source;
-                            auto raw=to_string(creationDraft.Stringify());std::unique_ptr<char,decltype(&capy_string_free)> reply(capy_document_appearance(this->localization.get(),raw.c_str()),capy_string_free);if(!reply)throw hresult_error(E_OUTOFMEMORY);
-                            auto view=J::Parse(to_hstring(reply.get()));summary.Text(str(view,L"summary"));blendHelp.Text(str(view,L"blending_help"));note.Text(str(view,L"note"));
-                            *loading=true;for(uint32_t i=0;i<blendChoices.Size();++i)if(str(blendChoices.GetObjectAt(i),L"id")==str(view,L"blending"))blending.SelectedIndex(i);
-                            blending.IsEnabled(flag(view,L"blending_editable"));*loading=false;
-                        }catch(hresult_error const&){*loading=false;}
-                    };
-                    auto project=[creationDraft,entries,resolution,space,spaces,depth,depths,background,backgrounds,chosen,loading,spec,creation,defaults,appearance,this]{
-                        if(*loading||space.SelectedIndex()<0||depth.SelectedIndex()<0||background.SelectedIndex()<0)return;
-                        try{
-                            A dimensions;for(uint32_t i=0;i<2;++i){auto result=numeric(this->localization.get(),object(spec,L"numeric"),defaults.GetNumberAt(i),O({{L"type",S(L"expression")},{L"text",S(entries[i].Text())}}));dimensions.Append(N(num(result,L"value")));}
-                            creationDraft.Insert(L"extent",dimensions);
-                            auto ppi=numeric(this->localization.get(),object(creation,L"resolution"),num(creationDraft,L"resolution"),O({{L"type",S(L"expression")},{L"text",S(resolution.Text())}}));
-                            creationDraft.Insert(L"resolution",N(num(ppi,L"value")));
-                            creationDraft.Insert(L"color",O({{L"space",spaces.GetArrayAt(space.SelectedIndex()).GetAt(0)},{L"depth",depths.GetArrayAt(depth.SelectedIndex()).GetAt(0)}}));
-                            creationDraft.Insert(L"background",backgrounds.GetArrayAt(background.SelectedIndex()).GetAt(0));
-                            if(!chosen->empty())creationDraft.Insert(L"blend_space",S(*chosen));
-                            appearance();
-                        }catch(hresult_error const&){*loading=false;}
-                    };
-                    auto load=[creationDraft,entries,resolution,space,depth,background,blending,spaces,depths,backgrounds,blendChoices,chosen,loading,project](J value){
-                        *loading=true;*chosen=str(value,L"blend_space");creationDraft.Insert(L"blend_space",value.GetNamedValue(L"blend_space"));auto color=object(value,L"color");
-                        resolution.Text(to_hstring(uint32_t(num(value,L"resolution"))));
-                        auto dimensions=array(value,L"extent");for(uint32_t i=0;i<2;++i)entries[i].Text(to_hstring(uint32_t(dimensions.GetNumberAt(i))));
-                        for(uint32_t i=0;i<spaces.Size();++i)if(spaces.GetArrayAt(i).GetStringAt(0)==str(color,L"space"))space.SelectedIndex(i);
-                        for(uint32_t i=0;i<depths.Size();++i)if(depths.GetArrayAt(i).GetStringAt(0)==str(color,L"depth"))depth.SelectedIndex(i);
-                        for(uint32_t i=0;i<backgrounds.Size();++i)if(backgrounds.GetArrayAt(i).GetStringAt(0)==str(value,L"background"))background.SelectedIndex(i);
-                        for(uint32_t i=0;i<blendChoices.Size();++i)if(str(blendChoices.GetObjectAt(i),L"id")==str(value,L"blend_space"))blending.SelectedIndex(i);
-                        *loading=false;project();
-                    };
-                    load(creationDraft);
-                    for(auto control:{space,depth,background})control.SelectionChanged([project](auto&&,auto&&){project();});
-                    blending.SelectionChanged([blending,blendChoices,chosen,loading,project](auto&&,auto&&){
-                        if(!*loading&&blending.IsEnabled()&&blending.SelectedIndex()>=0)*chosen=str(blendChoices.GetObjectAt(blending.SelectedIndex()),L"id");project();
-                    });
-                    for(auto entry:entries)entry.TextChanged([project](auto&&,auto&&){project();});
-                    resolution.TextChanged([project](auto&&,auto&&){project();});
-                    preset.SelectionChanged([preset,presets,load,loading](auto&&,auto&&){if(!*loading&&preset.SelectedIndex()>=0)load(object(presets.GetObjectAt(preset.SelectedIndex()),L"options"));});
-                    auto selected=creation.GetNamedValue(L"selected",JsonValue::CreateNullValue());for(uint32_t i=0;i<presets.Size();++i)if(presets.GetObjectAt(i).GetNamedValue(L"id").Stringify()==selected.Stringify())preset.SelectedIndex(i);
-                    Button remove;remove.Content(box_value(str(text,L"remove_preset")));body.Children().Append(remove);
-                    auto canRemove=[preset,presets,remove]{auto i=preset.SelectedIndex();remove.IsEnabled(i>=0&&presets.GetObjectAt(i).GetNamedValue(L"remove",JsonValue::CreateNullValue()).ValueType()==JsonValueType::Object);};canRemove();
-                    preset.SelectionChanged([canRemove](auto&&,auto&&){canRemove();});
-                    auto presetSource=std::make_shared<hstring>(presets.Stringify());
-                    creationPresetsChanged=[this,presets,preset,remove,presetSource,loading]{
-                        auto next=array(object(object(model,L"document_options"),L"creation"),L"presets");auto source=next.Stringify();if(source==*presetSource)return;*presetSource=source;
-                        bool same=next.Size()==presets.Size();for(uint32_t i=0;same&&i<next.Size();++i)same=object(next.GetObjectAt(i),L"options").Stringify()==object(presets.GetObjectAt(i),L"options").Stringify();
-                        if(same){*loading=true;auto selected=preset.SelectedIndex();for(uint32_t i=0;i<next.Size();++i){presets.SetAt(i,next.GetAt(i));comboOptionText(preset,i,str(next.GetObjectAt(i),L"name"));}preset.SelectedIndex(selected);*loading=false;return;}
-                        preset.SelectedIndex(-1);presets.Clear();preset.Items().Clear();for(auto item:next){presets.Append(item);comboOption(preset,str(item.GetObject(),L"name"));}remove.IsEnabled(false);
-                    };
-                    remove.Click([this,preset,presets,remove,id](auto&&,auto&&){auto index=preset.SelectedIndex();if(index<0)return;auto action=presets.GetObjectAt(index).GetNamedValue(L"remove",JsonValue::CreateNullValue());if(action.ValueType()!=JsonValueType::Object)return;
-                        send(to_string(O({{L"operation",S(L"new_preferences")},{L"id",N(id)},{L"action",action}}).Stringify()));preset.SelectedIndex(-1);remove.IsEnabled(false);
-                    });
-                    presentationChanged=[this,preset,space,depth,background,blending,presetName,remember,entries,resolution,remove,appearance,loading]{
-                        auto creation=object(object(model,L"document_options"),L"creation"),text=object(creation,L"text");
-                        dialog.Title(box_value(str(text,L"new_title")));dialog.PrimaryButtonText(str(text,L"create"));dialog.CloseButtonText(common(L"cancel"));
-                        preset.Header(box_value(str(text,L"preset")));space.Header(box_value(str(text,L"space")));depth.Header(box_value(str(text,L"depth")));
-                        background.Header(box_value(str(text,L"background")));presetName.Header(box_value(str(text,L"preset_name")));remember.Content(box_value(str(text,L"remember")));
-                        remove.Content(box_value(str(text,L"remove_preset")));
-                        resolution.Header(box_value(str(text,L"resolution")+L" ("+str(object(creation,L"resolution"),L"unit")+L")"));
-                        *loading=true;
-                        for(auto const& [control,key]:std::initializer_list<std::pair<ComboBox,wchar_t const*>>{{space,L"spaces"},{depth,L"depths"},{background,L"backgrounds"}}){
-                            auto selected=control.SelectedIndex();auto choices=array(creation,key);for(uint32_t i=0;i<std::min(choices.Size(),control.Items().Size());++i)comboOptionText(control,i,choices.GetArrayAt(i).GetStringAt(1));control.SelectedIndex(selected);
-                        }
-                        auto blend=object(creation,L"blending");blending.Header(box_value(str(blend,L"label")));auto selected=blending.SelectedIndex();auto choices=array(blend,L"choices");for(uint32_t i=0;i<std::min(choices.Size(),blending.Items().Size());++i)comboOptionText(blending,i,str(choices.GetObjectAt(i),L"label"));blending.SelectedIndex(selected);*loading=false;
-                        auto labels=array(object(catalog,L"new_document"),L"labels");
-                        for(uint32_t i=0;i<entries.size();++i){entries[i].Language(data->language());if(i<labels.Size())entries[i].Header(box_value(labels.GetStringAt(i)));}
-                        appearance();
-                    };
-                    presetName.Header(box_value(str(text,L"preset_name")));presetName.MaxLength(64);body.Children().Append(presetName);
-                    remember.Content(box_value(str(text,L"remember")));body.Children().Append(remember);
-                    dialog.PrimaryButtonClick([entries,resolution,defaults,spec,creation,extent,error,errorReveal,creationDraft,project,this](auto&&,ContentDialogButtonClickEventArgs const& e){
-                        try{for(uint32_t i=0;i<2;++i){auto result=numeric(this->localization.get(),object(spec,L"numeric"),defaults.GetNumberAt(i),O({{L"type",S(L"expression")},{L"text",S(entries[i].Text())}}));(*extent)[i]=uint32_t(num(result,L"value"));}numeric(this->localization.get(),object(creation,L"resolution"),num(creationDraft,L"resolution"),O({{L"type",S(L"expression")},{L"text",S(resolution.Text())}}));project();}
-                        catch(hresult_error const& failure){
-                            e.Cancel(true);if(*errorReveal){error.LayoutUpdated(*errorReveal);*errorReveal={};}
-                            error.Text(failure.message());error.Visibility(Visibility::Visible);
-                            *errorReveal=error.LayoutUpdated([weak=make_weak(error),errorReveal](auto&&,auto&&){
-                                auto error=weak.get();if(!error)return;
-                                error.LayoutUpdated(*errorReveal);*errorReveal={};
-                                if(error.IsLoaded()&&error.Visibility()==Visibility::Visible&&error.ActualWidth()>0&&error.ActualHeight()>0)error.StartBringIntoView();
-                            });
-                            error.InvalidateArrange();
-                        }
-                    });
-                } else {
-                    presentationChanged=[this,id]{auto options=object(model,L"document_options");auto current=object(object(findId(array(object(model,L"state"),L"requests"),id),L"kind"),L"request");dialog.Title(box_value(str(current,L"title")));dialog.PrimaryButtonText(str(options,L"save_label"));dialog.SecondaryButtonText(str(options,L"discard_label"));dialog.CloseButtonText(str(options,L"cancel_label"));};
-                    dialog.Title(box_value(str(request,L"title")));
-                    dialog.PrimaryButtonText(str(options,L"save_label"));
-                    dialog.SecondaryButtonText(str(options,L"discard_label"));
-                    TextBlock text;text.Text(str(options,L"unsaved_description"));text.TextWrapping(TextWrapping::Wrap);
-                    body.Children().Append(text);
-                }
+                presentationChanged=[this,id]{auto options=object(model,L"document_options");auto current=object(object(findId(array(object(model,L"state"),L"requests"),id),L"kind"),L"request");dialog.Title(box_value(str(current,L"title")));dialog.PrimaryButtonText(str(options,L"save_label"));dialog.SecondaryButtonText(str(options,L"discard_label"));dialog.CloseButtonText(str(options,L"cancel_label"));};
+                dialog.Title(box_value(str(request,L"title")));
+                dialog.PrimaryButtonText(str(options,L"save_label"));
+                dialog.SecondaryButtonText(str(options,L"discard_label"));
+                TextBlock text;text.Text(str(options,L"unsaved_description"));text.TextWrapping(TextWrapping::Wrap);
+                body.Children().Append(text);
                 ScrollViewer scroll;scroll.MaxHeight(std::max(180.,double(size.Height)-220));scroll.Content(body);dialog.Content(scroll);
                 auto choice=co_await dialog.ShowAsync();
-                if(type==L"new"&&choice==ContentDialogResult::Primary)
-                    response=O({{L"operation",S(L"create")},{L"id",N(id)},
-                        {L"epoch",N(num(file,L"epoch"))},{L"revision",N(num(file,L"revision"))},
-                        {L"options",creationDraft},{L"preset",S(presetName.Text())},{L"defaults",B(remember.IsChecked().Value())}});
-                if(type==L"confirm_close")response.Insert(L"decision",S(choice==ContentDialogResult::Primary?L"save":
+                response.Insert(L"decision",S(choice==ContentDialogResult::Primary?L"save":
                     choice==ContentDialogResult::Secondary?L"discard":L"cancel"));
             } else if(type==L"save"||type==L"open") {
                 auto path=str(object(request,L"location"),L"uri");
@@ -312,7 +193,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
                     {L"error",S(recovery(L"document_dialog_failed"))}});
             }
         }
-        creationPresetsChanged={};picker=nullptr;dialog=nullptr;presentationChanged={};
+        picker=nullptr;dialog=nullptr;presentationChanged={};
         if(!stopping)send(to_string(response.Stringify()));
         if(!stopping&&queued.Size())send(to_string(O({{L"operation",S(L"open_paths")},{L"paths",queued}}).Stringify()));
         showing=false;
@@ -342,7 +223,7 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         }catch(hresult_error const& e){if(!stopping)report(to_string(e.message()));}
         dialog=nullptr;presentationChanged={};if(!stopping)send(to_string(O({{L"operation",S(L"interpret")},{L"id",N(id)},
             {L"profile",accepted?V(profile):JsonValue::CreateNullValue()}}).Stringify()));
-        creationPresetsChanged={};showing=false;changed();
+        showing=false;changed();
     }
     fire_and_forget copied(J request){
         auto lifetime=shared_from_this();auto id=num(request,L"id");auto details=object(request,L"details");
@@ -693,15 +574,15 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         data->model=snapshot;
         bool relocalize=data->adoptLocalization(snapshot);
         if(relocalize){catalog=data->catalog;localization=data->localization;}
-        model=snapshot;
+        model=snapshot;data->state=object(snapshot,L"state");data->refreshPalette();
+        if(newDrawing)newDrawing->Apply();
         if(relocalize&&presentationChanged)presentationChanged();
         if(relocalize&&dialog){
             dialog.Language(data->language());
             if(busyDialog){dialog.Title(box_value(busyTitle(object(model,L"windows_document"))));dialog.CloseButtonText(common(L"cancel"));}
         }
-        if(creationPresetsChanged)creationPresetsChanged();
         if(busyDialog&&str(object(model,L"windows_document"),L"type")!=L"workflow_busy"&&str(object(model,L"windows_document"),L"type")!=L"opening_busy"&&str(object(model,L"windows_document"),L"type")!=L"package_busy"){busyCompleted=true;if(dialog)dialog.Hide();}
-        if(stopping||blocked||showing)return;
+        if(stopping||blocked||showing||(newDrawing&&newDrawing->IsOpen()))return;
         auto recovery=object(model,L"windows_recovery");auto failure=str(recovery,L"error");
         if(failure.empty())recoveryStamp=L"";
         if(!flag(recovery,L"busy")&&!failure.empty()){
@@ -737,16 +618,18 @@ struct DocumentView::Impl : std::enable_shared_from_this<Impl> {
         }
     }
 };
-DocumentView::DocumentView(Dispatch send,Json catalog,std::shared_ptr<CapyLocalization> localization,Window window,std::function<void()> changed,PreviewTransport query,Dispatch report)
+DocumentView::DocumentView(Dispatch send,Dispatch action,Json catalog,std::shared_ptr<CapyLocalization> localization,Window window,std::function<void()> changed,PreviewTransport query,Dispatch report)
     :impl(std::make_shared<Impl>()) {
     impl->data->catalog=catalog;impl->data->localization=localization;impl->localization=localization;impl->send=std::move(send);impl->catalog=catalog;impl->window=window;
     impl->query=std::move(query);impl->changed=std::move(changed);impl->report=std::move(report);
+    impl->data->send=std::move(action);impl->data->query=impl->query;
 }
 DocumentView::~DocumentView()=default;
 void DocumentView::Apply(Json const& snapshot,bool blocked){impl->apply(snapshot,blocked);}
-bool DocumentView::IsOpen()const{return impl->showing;}
+bool DocumentView::IsOpen()const{return impl->showing||(impl->newDrawing&&impl->newDrawing->IsOpen());}
 void DocumentView::Hide(){
     impl->stopping=true;
+    if(impl->newDrawing)impl->newDrawing->Hide();
     if(impl->dialog)impl->dialog.Hide();
     if(impl->picker)impl->picker.Cancel();
     if(impl->multiplePicker)impl->multiplePicker.Cancel();

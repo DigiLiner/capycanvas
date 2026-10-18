@@ -17,9 +17,7 @@ import UIKit
     @Published var error: String?
     @Published var picker: Picker?
     @Published var cancelling = false
-    @Published var creating = false
-    @Published var creationError: String?
-    @Published var creationSaving = false
+    @Published private(set) var creating = false
     @Published var colorEditor: DocumentColorController?
     @Published var exportEditor: ExportController?
     @Published var packageSummary: JSON?
@@ -31,7 +29,6 @@ import UIKit
     @Published var copyProgress: String?
     private var copying = false
     private var profileCompletion: ((JSON?) -> Void)?
-    private var creationCompletion: ((JSON?) -> Void)?
     private var exportDelivery: (() -> Void)?
     private weak var store: EditorStore?
     private var requestID: UInt64?
@@ -64,7 +61,7 @@ import UIKit
     struct Dialogs {
         var open: (Bool, @escaping ([URL]) -> Void) -> Void
         var save: (String, UTType, @escaping (URL?) -> Void) -> Void
-        var create: ((JSON, @escaping (JSON?) -> Void) -> Void)? = nil
+        var create: ((JSON, @escaping ([[String: Any]]?) -> Void) -> Void)? = nil
         var export: ((URL, @escaping (URL?) -> Void) -> Void)? = nil
         var paste: ((@escaping (Result<[PhotoItem], Error>) -> Void) -> Void)? = nil
         var exportOptions: ((ExportController) -> Void)? = nil
@@ -107,13 +104,7 @@ import UIKit
         switch action {
         case "save":
             save(to: document["location"]["uri"].string, name: document["name"].string) { [weak self] saved in self?.finish(saved) }
-        case "new":
-            let completed: (JSON?) -> Void = { [weak self] options in
-                guard let self else { return }
-                if let options { open(nil, options: options) } else { finish() }
-            }
-            if let create = dialogs?.create { create(newDocumentSpec, completed) }
-            else { creationError = nil; creationCompletion = completed; creating = true }
+        case "new": openNewDrawing()
         case "export":
             if document["repeat"].isNull { beginExport(name: document["name"].string, owner: document["owner"]) }
             else { exportAgain(name: document["name"].string, owner: document["owner"], repeating: document["repeat"]) }
@@ -288,25 +279,51 @@ import UIKit
             }
         }
     }
-    var newDocumentSpec: JSON {
-        (store?.catalog["new_document"] ?? JSON()).replacing("creation",
-            with: store?.snapshot["document_options"]["creation"] ?? JSON())
-    }
-    func created(_ choice: NewDrawingChoice?) {
-        guard !creationSaving, creationCompletion != nil else { return }
-        func complete(_ options: JSON?) {
-            let completion = creationCompletion; creationCompletion = nil; creating = false
-            completion?(options)
-        }
-        guard let choice else { complete(nil); return }
-        guard let store else { creationError = "The canvas session is unavailable"; return }
-        creationSaving = true
-        store.edit(["type": "new_document_preferences", "action": ["type": "remember",
-            "options": choice.options.raw, "name": choice.presetName, "defaults": choice.useAsDefaults]]) { [weak self] error in
+    var discardLabel: String { store?.catalog["new_document"]["discard"].string ?? "" }
+    var documentSpaces: [JSON] { store?.catalog["document_spaces"].array ?? [] }
+    private func openNewDrawing() {
+        guard let store else { fail("The canvas session is unavailable"); return }
+        creating = true
+        store.edit(["type": "new_drawing", "action": ["op": "open", "screen": newDrawingScreen ?? NSNull(),
+            "untitled": store.snapshot["document_tabs"]["upcoming_untitled"].string]]) { [weak self] error in
             guard let self else { return }
-            creationSaving = false; creationError = error
-            if error == nil { complete(choice.options) }
+            if let error { creating = false; fail(error); return }
+            dialogs?.create?(store.state["new_drawing"]) { [weak self] edits in
+                guard let self else { return }
+                if let edits { newDrawing(steps: edits + [["op": "create"]]) } else { newDrawing(["op": "cancel"]) }
+            }
         }
+    }
+    private func newDrawing(steps: [[String: Any]]) {
+        guard let step = steps.first else { return }
+        newDrawing(step) { [weak self] error in
+            guard let self else { return }
+            if let error { report(error); newDrawing(["op": "cancel"]) } else { newDrawing(steps: Array(steps.dropFirst())) }
+        }
+    }
+    func newDrawing(_ action: [String: Any], completion: @escaping @MainActor (String?) -> Void = { _ in }) {
+        guard let store else { return }
+        store.edit(["type": "new_drawing", "action": action]) { [weak self] error in
+            completion(error)
+            guard let self, creating, store.state["new_drawing"].isNull else { return }
+            creating = false
+            if error == nil && action["op"] as? String == "create" { open(nil) } else { finish() }
+        }
+    }
+    private var newDrawingScreen: [String: Any]? {
+        #if os(macOS)
+        guard let screen = presentationWindow?.screen ?? NSScreen.main else { return nil }
+        let scale = screen.backingScaleFactor
+        let extent = [screen.frame.width, screen.frame.height].map { UInt32(max(1, ($0 * scale).rounded())) }
+        let display = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        let millimetres = display.map { CGDisplayScreenSize(CGDirectDisplayID($0)).width } ?? 0
+        let ppi: Any = millimetres > 0 ? UInt32(max(1, (CGFloat(extent[0]) * 25.4 / millimetres).rounded())) : NSNull()
+        return ["extent": extent, "ppi": ppi]
+        #else
+        let screen = UIScreen.main
+        let extent = [screen.bounds.width, screen.bounds.height].map { UInt32(max(1, ($0 * screen.nativeScale).rounded())) }
+        return ["extent": extent, "ppi": NSNull()]
+        #endif
     }
     private func save(to uri: String, name: String, completion: @escaping (Bool) -> Void) {
         if let destination, destination.absoluteString == uri { write(destination, completion: completion); return }
@@ -595,17 +612,17 @@ import UIKit
             }
         }
     }
-    private func open(_ url: URL?, options: JSON? = nil) {
+    private func open(_ url: URL?) {
         // Preserve the outgoing drawing's checkpoint before it becomes inactive.
         store?.recovery.flush { [weak self] saved in
             guard let self else { return }
             guard saved else { fail(store?.recovery.failure ?? "Could not preserve the current drawing for recovery"); return }
-            beginOpen(url, options: options)
+            beginOpen(url)
         }
     }
-    private func beginOpen(_ url: URL?, options: JSON?) {
+    private func beginOpen(_ url: URL?) {
         task(.open) { [weak self] task in
-            self?.prepare(task, url: url) { try task.read(from: url, options: options) }
+            self?.prepare(task, url: url) { try task.read(from: url) }
         }
     }
     private func prepare(_ task: NativeProjectTask, url: URL?, next: (() -> Void)? = nil, retry: (() -> Void)? = nil, work: @escaping () throws -> Void) {
@@ -826,7 +843,7 @@ struct ProjectFilesModifier: ViewModifier {
                 if files.error != nil { Button(common["ok"].string, role: .cancel) { files.error = nil } }
                 else {
                     Button(common["save"].string) { files.choose("save") }
-                    Button(files.newDocumentSpec["discard"].string, role: .destructive) { files.choose("discard") }
+                    Button(files.discardLabel, role: .destructive) { files.choose("discard") }
                     Button(common["cancel"].string, role: .cancel) { files.choose("cancel") }
                 }
             } message: { if let error = files.error { Text(error) } }
@@ -854,20 +871,15 @@ struct ProjectFilesModifier: ViewModifier {
                         .interactiveDismissDisabled(files.packageCopying).modifier(EditorPopupPresentation())
                 }
             }
-            .sheet(isPresented: $files.creating, onDismiss: { files.created(nil) }) {
-                NewDrawingForm(spec: files.newDocumentSpec, error: files.creationError, busy: files.creationSaving) {
-                    files.created($0)
-                }.interactiveDismissDisabled(files.creationSaving).modifier(EditorPopupPresentation())
-            }
             .sheet(isPresented: Binding(get: { files.pendingProfile != nil }, set: { if !$0 { files.chooseProfile(nil) } })) {
                 PhotoProfileForm(preferences: files.preferences, interpretation: files.pendingProfile ?? JSON(),
-                    spaces: files.newDocumentSpec["creation"]["spaces"].array, error: files.profileError, busy: files.interpreting) {
+                    spaces: files.documentSpaces, error: files.profileError, busy: files.interpreting) {
                     files.chooseProfile($0)
                 }.interactiveDismissDisabled(files.interpreting).modifier(EditorPopupPresentation())
             }
             .sheet(isPresented: Binding(get: { files.colorEditor != nil }, set: { if !$0 { files.colorEditor?.cancel() } })) {
                 if let editor = files.colorEditor {
-                    DocumentColorForm(editor: editor, spaces: files.newDocumentSpec["creation"]["spaces"].array)
+                    DocumentColorForm(editor: editor, spaces: files.documentSpaces)
                         .interactiveDismissDisabled(editor.publishing).modifier(EditorPopupPresentation())
                 }
             }

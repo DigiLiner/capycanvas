@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 const image='.header-menu[data-menu="image"]';
 const dialog='dialog[open]';
@@ -37,9 +38,11 @@ export async function checkBlending({call,evaluate,settle}) {
     const clip={x:Math.max(0,r.x-8),y:Math.max(0,r.y-8),width:r.width+16,height:r.height+16,scale:1};
     await writeFile(`${directory}/${file}.png`,Buffer.from((await call('Page.captureScreenshot',{format:'png',clip})).data,'base64'));
   };
-  const field=id=>`document.querySelector('${dialog} [data-document-field=${JSON.stringify(id)}]')`;
-  const note=`document.querySelector('${dialog} .document-note').textContent`;
-  const choice=async(label,value)=>{await evaluate(`(n=>{n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('change'));})(${field(label)})`);await settle();};
+  const drawing='#new-drawing-dialog[open]',opened=`!!document.querySelector('${drawing}')&&!!layerApp.state().new_drawing`;
+  const blending=`document.querySelector('${drawing} #new-drawing-blending')`;
+  const setup=()=>evaluate('layerApp.state().new_drawing.setup');
+  const choice=async(id,key,value)=>{await evaluate(`(n=>{n.value=String(layerApp.state().new_drawing.${key}.findIndex(c=>c.value===${JSON.stringify(value)}));n.dispatchEvent(new Event('change',{bubbles:true}));})(document.querySelector('${drawing} #new-drawing-${id}'))`);await settle();};
+  const cancel=async()=>{await evaluate(`document.querySelector('${drawing} #new-drawing-cancel').click()`);await wait(`!document.querySelector('${drawing}')`);};
   const theme=await evaluate('layerApp.state().settings.theme ?? null');
   await wait(`(()=>{[...document.querySelectorAll('${dialog} button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('${dialog}');})()`);
   try {
@@ -61,50 +64,42 @@ export async function checkBlending({call,evaluate,settle}) {
     for(const name of ['light','dark']) {
       await send({type:'set_theme',theme:name});
       await invoke('new_document');
-      await wait(`!!${field('blending')}`);
-      assert.equal(await evaluate(`${field('blending')}.value`),'Perceptual');
-      assert.equal(await evaluate(note),'Like Photoshop and Clip Studio Paint');
-      await capture(`new-document-${name}`,`document.querySelector('${dialog}')`);
-      await choice('depth','F16');
-      assert.deepEqual(await evaluate(`[${field('blending')}.disabled,${field('blending')}.value,${note}]`),[true,'Linear','Float documents blend in linear light']);
-      await capture(`new-document-float-${name}`,`document.querySelector('${dialog}')`);
-      await choice('depth','U8');
-      assert.deepEqual(await evaluate(`[${field('blending')}.disabled,${field('blending')}.value]`),[false,'Perceptual'],'the choice returns with an 8-bit depth');
-      await evaluate(`document.querySelector('${dialog} [data-document-action=cancel]').click()`);
-      await wait(`!document.querySelector('${dialog}')`);
+      await wait(opened);
+      assert.equal((await setup()).blend_space,'Perceptual');
+      await capture(`new-document-${name}`,`document.querySelector('${drawing}')`);
+      await choice('depth','depths','F16');
+      assert.deepEqual(await evaluate(`[${blending}.disabled,layerApp.state().new_drawing.setup.blend_space,${blending}.closest('label').title]`),[true,'Linear','Float documents blend in linear light']);
+      await capture(`new-document-float-${name}`,`document.querySelector('${drawing}')`);
+      await choice('depth','depths','U8');
+      assert.deepEqual(await evaluate(`[${blending}.disabled,layerApp.state().new_drawing.setup.blend_space]`),[false,'Perceptual'],'the choice returns with an 8-bit depth');
+      await cancel();
     }
     await invoke('new_document');
-    await wait(`!!${field('blending')}`);
-    await choice('blending','Linear');
-    assert.equal(await evaluate(note),'Physically based');
-    await evaluate(`document.querySelector('${dialog} [data-document-action=create]').click()`);
-    await wait(`!document.querySelector('${dialog}')&&${selected('blend_linear')}`);
+    await wait(opened);
+    await choice('blending','blendings','Linear');
+    await evaluate(createDrawing({}));
+    await wait(`!document.querySelector('${drawing}')&&${selected('blend_linear')}`);
 
-    const create=async(ppi,remember)=>{
+    const create=async ppi=>{
       await invoke('new_document');
-      await wait(`!!${field('resolution')}`);
-      await evaluate(`(n=>{n.value=${JSON.stringify(String(ppi))};n.dispatchEvent(new Event('input',{bubbles:true}));})(${field('resolution')})`);
-      if(remember)await evaluate(`${field('remember')}.click()`);
-      await evaluate(`document.querySelector('${dialog} [data-document-action=create]').click()`);
-      await wait(`!document.querySelector('${dialog}')`);
+      await evaluate(createDrawing({resolution:ppi}));
+      await wait(`!document.querySelector('${drawing}')&&!layerApp.documents.busy()`);
     };
     await invoke('new_document');
-    await wait(`!!${field('resolution')}`);
-    const remembered=parseFloat(await evaluate(`${field('resolution')}.value`));
-    assert.ok(remembered>0&&remembered!==600,`New Drawing shows its default resolution: ${remembered}`);
-    await evaluate(`document.querySelector('${dialog} [data-document-action=cancel]').click()`);
-    await wait(`!document.querySelector('${dialog}')`);
-    await create(600,true);
+    await wait(opened);
+    const remembered=(await setup()).resolution;
+    assert.ok(remembered>0&&remembered!==600,`New Drawing shows its last resolution: ${remembered}`);
+    await cancel();
+    await create(600);
     await invoke('image_size');
     await wait('layerApp.state().layer_tools.image_size?.resolution===600');
     await send({type:'image_size',action:{op:'cancel'}});
     await wait('!layerApp.state().layer_tools.image_size');
     await invoke('new_document');
-    await wait(`!!${field('resolution')}`);
-    assert.equal(parseFloat(await evaluate(`${field('resolution')}.value`)),600,'remembered defaults keep the chosen resolution');
-    await evaluate(`document.querySelector('${dialog} [data-document-action=cancel]').click()`);
-    await wait(`!document.querySelector('${dialog}')`);
-    await create(remembered,true);
+    await wait(opened);
+    assert.equal((await setup()).resolution,600,'New Drawing opens with the last drawing\'s resolution');
+    await cancel();
+    await create(remembered);
   } finally {
     if(theme)await send({type:'set_theme',theme});
   }

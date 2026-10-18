@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {createDrawing} from './new-drawing-fixture.mjs';
 import {mkdir,writeFile} from 'node:fs/promises';
 
 export async function checkFilterDrawer({call,evaluate,settle}) {
@@ -24,8 +25,7 @@ export async function checkFilterDrawer({call,evaluate,settle}) {
   // Runtime filter validation owns a document-operation gate during startup.
   await wait('!layerApp.documents.busy() && layerApp.app.brush_ready() && layerApp.state().commands.find(c=>c.id==="new_document").enabled');
   await send({type:'invoke',command:'new_document'});
-  await wait(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create')`);
-  await evaluate(`(()=>{const create=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create');const d=create.closest('dialog');for(const n of d.querySelectorAll('input[type=number]'))n.value=256;create.click();})()`);
+  await evaluate(createDrawing());
   await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !layerApp.state().document_file.busy && !layerApp.documents.busy() && layerApp.app.brush_ready() && !document.querySelector('dialog[open]');})()`);
   console.log("Filter drawer: opening filters");
   const entries=await evaluate('layerApp.state().workspace.layout.header.zones.flat()');
@@ -138,8 +138,7 @@ export async function checkFilterDrawer({call,evaluate,settle}) {
   await capture('pen-tools-scroll');await evaluate('filterScroll.style.maxHeight="";delete window.filterScroll');
   console.log('PASS: filter drawer replacement/reopen/cancel; paper properties; touch/pen swipe/delete; empty canvas and undo; mouse/touch/pen tool scrolling');
   await send({type:'invoke',command:'new_document'});
-  await wait(`!![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create')`);
-  await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create').click()`);
+  await evaluate(createDrawing());
   await wait(`!layerApp.state().document_file.busy && !layerApp.documents.busy() && layerApp.app.brush_ready() && !document.querySelector('dialog[open]')`);
   await send({type:'customize',action:{type:'set_panel_visible',panel:'layers',visible:true}});
   await send({type:'customize',action:{type:'set_panel_visible',panel:'properties',visible:true}});

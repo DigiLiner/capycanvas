@@ -319,9 +319,7 @@ try {
     Wait-Until {!(Find 'Preferences' -Name -Type ([System.Windows.Automation.ControlType]::Window)) -and (Control 'drawing-canvas').Current.IsEnabled} 'Preferences did not close'
     Capture 'alternate-theme'
     & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File';Invoke 'new_document'
-    $discard=@{item=$null};try{Wait-Until {$discard.item=Find 'Discard Changes' -Name;$null -ne $discard.item -or $null -ne (Find 'document-width')} 'New drawing did not open' 5}catch{}
-    if($discard.item){$discard.item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
-    Edit 'document-width' '128';Edit 'document-height' '64';Invoke 'Create' -Name
+    New-DrawingPixels 128 64;Invoke 'new-drawing-create'
     Wait-Until {(Model).state.document_file.epoch -gt 0 -and !(Model).state.document_file.busy} 'New document did not replace layer state' 45
     Wait-Until {(Control 'drawing-canvas').Current.IsEnabled} 'Document gate did not clear'
     $fresh=(Model).state.layer_tools.editing_layer.id

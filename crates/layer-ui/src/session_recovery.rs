@@ -175,7 +175,7 @@ impl<R:CanvasRenderer> UiSession<R> {
         self.state.camera.revision.checked_sub(self.automatic_camera_revision).expect("Automatic camera revision exceeds camera revision")
     }
     fn session_document_state(&self)->SessionDocumentState {
-        let UiState {pressure_calibration:_,camera,document_file,tool_slots:_,histogram:_,waveform:_,tonal_histogram:_,localization:_,command_search:_,soft_proof:_,preview_sdr:_,hdr_display_available:_,screen:_,gamut_warning:_,revision:_,fullscreen:_,workspace:_,brush:_,colors:_,color_library:_,color_picker:_,tool_settings:_,tool_extra:_,toolbar_context_generation:_,tool_actions:_,tool_set:_,tool_panels:_,canvas_bar:_,layers:_,layer_tools:_,adjustments:_,filter_picker:_,filter_categories:_,filter_catalog_revision:_,filter_load:_,layer_properties:_,tabs:_,commands:_,settings:_,theme:_,palette:_,settings_open:_,preferences:_,customization:_,platform:_,requests:_,host_error:_,notice:_}=&self.state;
+        let UiState {pressure_calibration:_,camera,document_file,tool_slots:_,histogram:_,waveform:_,tonal_histogram:_,localization:_,command_search:_,soft_proof:_,preview_sdr:_,hdr_display_available:_,screen:_,gamut_warning:_,revision:_,fullscreen:_,workspace:_,brush:_,colors:_,color_library:_,color_picker:_,tool_settings:_,tool_extra:_,toolbar_context_generation:_,tool_actions:_,tool_set:_,tool_panels:_,canvas_bar:_,layers:_,layer_tools:_,new_drawing:_,adjustments:_,filter_picker:_,filter_categories:_,filter_catalog_revision:_,filter_load:_,layer_properties:_,tabs:_,commands:_,settings:_,theme:_,palette:_,settings_open:_,preferences:_,customization:_,platform:_,requests:_,host_error:_,notice:_}=&self.state;
         self.files.session_state(document_file,SessionCamera::capture(camera))
     }
     pub fn session_stamp(&self)->SessionStamp {
@@ -195,7 +195,7 @@ impl<R:CanvasRenderer> UiSession<R> {
             workspace_drag_tabs:_,workspace_model_revision:_,workspace_content_revision:_,workspace_history:_,
             workspace_transition:_,workspace_read_only:_,workspace_preview:_,managed_workspace:_,interaction:_,
             cursor:_,next_request:_,layer_interaction:_,layer_preview_revisions:_,effect_catalog:_,pending_filters:_,
-            tools:_,tool_origin:_,pending_tool_drawer:_}=self;
+            tools:_,tool_origin:_,pending_tool_drawer:_,new_drawing:_,new_drawing_order:_}=self;
         self.require_raster_snapshot()?;
         let profiles=self.files.last_export.as_ref().and_then(|last|match &last.recipe.profile.profile {layer_core::color::ColorProfile::Icc(bytes)=>Some(layer_core::color::ColorProfile::Icc(bytes.clone())),_=>None}).into_iter().collect();
         Ok(SessionCapture {editor:engine.capture_session(state.document_file.epoch).map_err(error)?,state:self.session_document_state(),profiles})

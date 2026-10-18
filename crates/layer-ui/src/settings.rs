@@ -328,9 +328,6 @@ impl SettingsPage {
 #[serde(rename_all = "snake_case")]
 pub enum PreferenceId {
     Language,
-    NewColorSpace,
-    NewBitDepth,
-    NewBackground,
     PhotoDepth,
     MissingProfile,
     Theme,
@@ -363,9 +360,6 @@ pub enum PreferenceId {
 impl PreferenceId {
     pub fn key(self) -> &'static str {
         match self {
-            Self::NewColorSpace => "new-color-space",
-            Self::NewBitDepth => "new-bit-depth",
-            Self::NewBackground => "new-background",
             Self::PhotoDepth => "photo-depth",
             Self::MissingProfile => "missing-profile",
             Self::Language => "language",
@@ -1389,7 +1383,7 @@ impl Settings {
         }
         let n = value.number().unwrap_or(0.0);
         match id {
-            NewColorSpace | NewBitDepth | NewBackground | PhotoDepth | MissingProfile => self.edit_color(id, value.choice().unwrap()),
+            PhotoDepth | MissingProfile => self.edit_color(id, value.choice().unwrap()),
             Language => {
                 self.language = match value.choice().unwrap() {
                     0 => LanguagePreference::System,

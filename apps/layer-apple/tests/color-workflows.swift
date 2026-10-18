@@ -17,28 +17,28 @@ import QuartzCore
                 try await prepare(store.native!, "Metal startup")
                 await frame(store.native!)
             }) { store.snapshot["shaders_ready"].bool }
-            let options = JSON(["extent": [63, 47], "color": ["space": "DisplayP3", "depth": "U16"], "background": "Transparent"])
-            try await store.apply(["type": "new_document_preferences", "action": ["type": "remember", "options": options.raw, "name": "", "defaults": true]])
-            try await store.apply(["type": "invoke", "command": "new_document"])
-            try await wait("Creation choices") { store.projectFiles.creating }
-            try require(store.projectFiles.newDocumentSpec["creation"]["options"].stableKey == options.stableKey, "New must expose saved defaults")
+            let files = store.projectFiles
             let epoch = store.state["document_file"]["epoch"].uint
-            let savedOptions = options.replacing("extent", with: JSON([79, 53]))
-            store.projectFiles.created(NewDrawingChoice(options: savedOptions, presetName: "Wide color", useAsDefaults: true))
-            try await wait("Duplicate preset error") { store.projectFiles.creationError != nil }
-            try require(store.projectFiles.creating && store.state["document_file"]["epoch"].uint == epoch,
-                "Failed preset validation must retain the form and drawing")
-            try require(store.state["settings"]["new_document"]["defaults"].stableKey == options.stableKey, "Invalid presets must not change defaults")
-            store.projectFiles.created(NewDrawingChoice(options: savedOptions, presetName: " Studio P3 ", useAsDefaults: true))
-            try await wait("New drawing") { store.state["document_file"]["epoch"].uint == epoch + 1 && !store.projectFiles.busy }
-            try require(store.state["settings"]["new_document"]["defaults"].stableKey == savedOptions.stableKey, "Save full options as defaults")
-            try require(store.state["settings"]["new_document"]["presets"][0]["name"].string == "Studio P3", "Save the trimmed preset name")
+            try await store.apply(["type": "invoke", "command": "new_document"])
+            try await wait("New drawing dialog") { files.creating && !store.state["new_drawing"].isNull }
+            for step in newSheet([63, 47], space: "DisplayP3", depth: "U16", transparent: true) { try await files.newDrawingStep(step) }
+            for step: [String: Any] in [["op": "presets"], ["op": "save_as"], ["op": "preset_name", "text": " "]] { try await files.newDrawingStep(step) }
+            try require(!store.state["new_drawing"]["drawer"]["save"]["can_save"].bool, "A blank preset name cannot be saved")
+            var refused = false
+            do { try await files.newDrawingStep(["op": "save_preset"]) } catch { refused = true }
+            try require(refused && files.creating && store.state["document_file"]["epoch"].uint == epoch
+                && store.state["settings"]["new_document"]["setups"].array.isEmpty, "A refused preset must retain the dialog, drawing and presets")
+            for step: [String: Any] in [["op": "preset_name", "text": " Studio P3 "], ["op": "save_preset"]] { try await files.newDrawingStep(step) }
+            try require(store.state["settings"]["new_document"]["setups"][0]["name"].string == "Studio P3", "Save the trimmed preset name")
+            for step: [String: Any] in [["op": "use_preset"], ["op": "create"]] { try await files.newDrawingStep(step) }
+            try await wait("New drawing") { store.state["document_file"]["epoch"].uint == epoch + 1 && !files.busy }
+            try require(store.state["settings"]["new_document"]["recent"][0]["id"].string == "Studio P3", "Create remembers the preset it used")
             try require(store.state["colors"]["rgb_space"].string == "DisplayP3", "New must adopt the selected working space")
             try await store.apply(["type": "invoke", "command": "new_document"])
-            try await wait("Reopened creation") { store.projectFiles.creating }
-            try require(store.projectFiles.newDocumentSpec["creation"]["options"].stableKey == savedOptions.stableKey, "Reopen with current defaults")
-            store.projectFiles.created(nil)
-            try await wait("New cancellation") { !store.projectFiles.busy }
+            try await wait("Reopened dialog") { files.creating && !store.state["new_drawing"].isNull }
+            try require(store.state["new_drawing"]["page"]["preset"].string == "Studio P3", "Reopen with the last preset")
+            try await files.newDrawingStep(["op": "cancel"])
+            try await wait("New cancellation") { !files.busy }
             try require(store.state["document_file"]["epoch"].uint == epoch + 1, "Cancel must preserve the drawing")
 
             func color(_ action: [String: Any]) async throws { try await store.apply(["type": "color", "action": action]) }
@@ -65,10 +65,9 @@ import QuartzCore
             let savedLibrary = store.state["color_library"].stableKey
             // A new document changes wheel space but retains workspace palettes.
             try await store.apply(["type": "invoke", "command": "new_document"])
-            try await wait("Next document choices") { store.projectFiles.creating }
-            let next = JSON(["extent": [67, 43], "color": ["space": "ProPhoto", "depth": "U16"], "background": "White"])
-            store.projectFiles.created(NewDrawingChoice(options: next, presetName: "", useAsDefaults: false))
-            try await wait("Next document") { store.state["document_file"]["epoch"].uint == epoch + 2 && !store.projectFiles.busy }
+            try await wait("Next document dialog") { files.creating && !store.state["new_drawing"].isNull }
+            for step in newSheet([67, 43], space: "ProPhoto", depth: "U16") + [["op": "create"]] { try await files.newDrawingStep(step) }
+            try await wait("Next document") { store.state["document_file"]["epoch"].uint == epoch + 2 && !files.busy }
             try require(store.state["color_library"].stableKey == savedLibrary && store.state["colors"]["rgb_space"].string == "ProPhoto",
                 "Document adoption must preserve palettes while updating the wheel gamut")
             let settings = store.state["settings"]["new_document"].stableKey
@@ -78,14 +77,14 @@ import QuartzCore
             let restored = EditorStore(platform: platform, scene: scene, persistence: EditorPersistence(root: root))
             try await wait("Fresh owner restoration") { restored.workspaces?.ready == true || restored.failure != nil }
             try require(restored.state["color_library"].stableKey == savedLibrary, "Fresh owner must restore palette IDs, names, tags and samples")
-            try require(restored.state["settings"]["new_document"].stableKey == settings, "Fresh owner must restore creation presets and defaults")
+            try require(restored.state["settings"]["new_document"].stableKey == settings, "Fresh owner must restore New drawing presets")
             let removal = saved(restored)["swatches"][0]["id"].uint
             for action: [String: Any] in [["op": "remove", "id": removal], ["op": "remove_palette", "id": palette]] {
                 try await restored.apply(["type": "color", "action": ["op": "library", "action": action]])
             }
             try require(restored.state["color_library"]["palettes"].array.count == starting, "Swatch and palette removal must preserve the remaining palettes")
             try await restored.workspaces!.closed()
-            print("PASS: platform \(platform), creation defaults/preset validation/retry/Cancel, all tagged palette spaces, document adoption and fresh-owner durable restoration")
+            print("PASS: platform \(platform), New drawing presets/validation/Cancel, all tagged palette spaces, document adoption and fresh-owner durable restoration")
             withExtendedLifetime(surface) {}
         }
     }

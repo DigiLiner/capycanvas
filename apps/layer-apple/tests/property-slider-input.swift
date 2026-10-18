@@ -129,7 +129,7 @@ import QuartzCore
                         "An ordinary tool-value update must preserve its active draft")
                     store.projectFiles = ProjectFiles(store: store, dialogs: .init(
                         open: { _, done in done([]) }, save: { _, _, completed in completed(nil) },
-                        create: { _, completed in completed(JSON(["extent": [256, 256], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])) }))
+                        create: { _, completed in completed(newSheet([256, 256], space: "Srgb", depth: "U8")) }))
                     store.invoke("new_document")
                     let deadline = Date().addingTimeInterval(30)
                     while store.state["document_file"]["epoch"].uint == epoch || store.projectFiles.busy {

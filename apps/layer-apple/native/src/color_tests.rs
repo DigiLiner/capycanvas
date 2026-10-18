@@ -4,81 +4,55 @@ use layer_core::color::{DocumentColor, SampleDepth, RgbSpace};
 use std::{io::Seek, os::fd::AsRawFd};
 
 #[test]
-fn native_new_options_preserve_space_depth_background_and_captured_defaults() {
-    use layer_ui::{DocumentBackground, NewDocumentOptions};
+fn native_new_drawing_preserves_space_depth_paper_and_the_captured_order() {
     for platform in [0, 1] {
         let app = App::new(platform);
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
-        let defaults = NewDocumentOptions {
-            extent: [67, 43],
-            color: DocumentColor { space: RgbSpace::AdobeRgb, depth: SampleDepth::U16 },
-            background: DocumentBackground::Transparent,
-            ..Default::default()
-        };
-        app.action(json!({"type":"new_document_preferences","action":{"type":"remember","options":defaults,"name":"","defaults":true}}));
-        let adopt = |job: &ProjectJob, options: NewDocumentOptions| {
-            // NativeOwner durably completes settings requests before a window
-            // parks its active session; mirror that host boundary here.
-            for request in app.state()["requests"].as_array().unwrap().clone() {
-                if request["kind"]["type"] == "save_settings" {
-                    app.action(json!({"type":"complete_request","id":request["id"],"error":null}));
-                }
-            }
+        let sheet = |color: DocumentColor, transparent: bool| vec![json!({"op": "space", "space": color.space}), json!({"op": "depth", "depth": color.depth}),
+            json!({"op": "paper_color"}), json!({"op": "transparent", "transparent": transparent}), json!({"op": "use_paper_color"})];
+        let adopt = |job: &ProjectJob, extent: [u32; 2], color: DocumentColor, transparent: bool| {
             assert_eq!(unsafe {
                 capy_apple_project_adopt(app.0, job.0, c"New drawing".as_ptr(), c"".as_ptr())
-            }, 0, "{:?} / {:?}, requests={}, idle={:?}, engine_idle={}", job.error(), unsafe { &*app.0 }.error,
-                app.state()["requests"],unsafe { &*app.0 }.host.session.require_document_idle(),unsafe { &*app.0 }.host.session.engine().can_park());
+            }, 0, "{:?} / {:?}, requests={}", job.error(), unsafe { &*app.0 }.error, app.state()["requests"]);
             app.draw_until_idle();
             let document = unsafe { &*app.0 }.host.session.engine().document();
-            assert_eq!(document.composition().color, options.color);
-            assert_eq!([document.composition().size[0], document.composition().size[1]], options.extent);
-            assert_eq!(occurrence_at(document, 1).visible, options.background == DocumentBackground::White);
+            assert_eq!(document.composition().color, color);
+            assert_eq!([document.composition().size[0], document.composition().size[1]], extent);
+            assert_eq!(occurrence_at(document, 1).visible, !transparent);
             assert!(document.artwork.paint.iter().all(|(_, _, source)| raster_samples(&source.raster).0.is_empty()));
             assert!(!app.state()["document_file"]["modified"].as_bool().unwrap());
+            assert!(app.state()["new_drawing"].is_null());
             assert!(!app.pixels().is_empty());
         };
         for space in RgbSpace::ALL {
             for depth in [SampleDepth::U8, SampleDepth::U16] {
-                for background in [DocumentBackground::White, DocumentBackground::Transparent] {
-                    let options = NewDocumentOptions {
-                        extent: [63, 47], color: DocumentColor { space, depth }, background, ..Default::default()
-                    };
-                    let job = ProjectJob::new(&app, true);
-                    let text = CString::new(serde_json::to_string(&options).unwrap()).unwrap();
-                    assert_eq!(unsafe { capy_project_new(job.0, text.as_ptr()) }, 0, "{:?}", job.error());
-                    adopt(&job, options);
-                    assert_eq!(app.state()["settings"]["new_document"]["defaults"], json!(defaults));
+                for transparent in [false, true] {
+                    let color = DocumentColor { space, depth };
+                    let job = ProjectJob::create_with(&app, [63, 47], &sheet(color, transparent));
+                    adopt(&job, [63, 47], color, transparent);
                 }
             }
         }
-        // A worker consumes the settings captured by its owner, not later edits.
-        let captured = ProjectJob::new(&app, true);
-        let changed = NewDocumentOptions { extent: [73, 51], ..defaults };
-        app.action(json!({"type":"new_document_preferences","action":{"type":"remember","options":changed,"name":"","defaults":true}}));
-        assert_eq!(unsafe { capy_project_read(captured.0, -1, c"Drawing.capy".as_ptr()) }, 0, "{:?}", captured.error());
-        adopt(&captured, defaults);
-        assert_eq!(app.state()["settings"]["new_document"]["defaults"], json!(changed));
-        let fresh = ProjectJob::new(&app, true);
-        assert_eq!(unsafe { capy_project_read(fresh.0, -1, c"Drawing.capy".as_ptr()) }, 0, "{:?}", fresh.error());
-        adopt(&fresh, changed);
+        let captured = DocumentColor { space: RgbSpace::AdobeRgb, depth: SampleDepth::U16 };
+        app.order_new_drawing([67, 43], &sheet(captured, true));
+        let job = ProjectJob::new(&app, true);
+        app.order_new_drawing([73, 51], &sheet(DocumentColor::default(), false));
+        assert_eq!(unsafe { capy_project_new(job.0) }, 0, "{:?}", job.error());
+        adopt(&job, [67, 43], captured, true);
+        assert_eq!(app.state()["settings"]["new_document"]["last"]["width"], 73_000);
 
         app.stroke(); app.draw_until_idle();
         let before = unsafe { &*app.0 }.host.session.engine().document().clone();
         let pixels = app.pixels();
-        for value in [json!({}), json!({"extent":[0,47],"color":defaults.color,"background":"White"}),
-            json!({"extent":[8193,47],"color":defaults.color,"background":"White"}),
-            json!({"extent":[63,47],"color":{"space":"Unknown","depth":"U16"},"background":"White"})] {
-            let job = ProjectJob::new(&app, true);
-            let text = CString::new(value.to_string()).unwrap();
-            assert_eq!(unsafe { capy_project_new(job.0, text.as_ptr()) }, -1);
-            assert!(job.error().is_some());
-            assert_eq!(unsafe {
-                capy_apple_project_adopt(app.0, job.0, c"Invalid".as_ptr(), c"".as_ptr())
-            }, -1);
-            assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &before);
-            assert!(app.pixels() == pixels, "Rejected New must preserve the live drawing");
-        }
+        let job = ProjectJob::new(&app, true);
+        assert_eq!(unsafe { capy_project_new(job.0) }, -1);
+        assert!(job.error().is_some());
+        assert_eq!(unsafe {
+            capy_apple_project_adopt(app.0, job.0, c"Invalid".as_ptr(), c"".as_ptr())
+        }, -1);
+        assert_project_document(unsafe { &*app.0 }.host.session.engine().document(), &before);
+        assert!(app.pixels() == pixels, "Rejected New must preserve the live drawing");
     }
 }
 

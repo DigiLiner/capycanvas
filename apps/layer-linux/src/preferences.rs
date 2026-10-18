@@ -925,20 +925,6 @@ impl Preferences {
             };
             if page.id == SettingsPage::Color {
                 let group = adw::PreferencesGroup::new();
-                let copy = CommonCopy::new(&w.localization());
-                let title = w.localization().text(MessageId::DOCUMENTS_DEFAULTS_TITLE);
-                let row = text_row(title.as_ref(), "");
-                let button = gtk::Button::with_label(copy.more.as_ref());
-                button.set_widget_name("color-drawing-defaults");
-                button.set_valign(gtk::Align::Center);
-                button.connect_clicked(glib::clone!(#[weak] w, move |_| {
-                    glib::MainContext::default().spawn_local(glib::clone!(#[strong] w, async move {
-                        if let Err(error) = crate::new_document::configure(&w, true).await { w.changed(Err(error)); }
-                    }));
-                }));
-                row.add_suffix(&button);
-                row.set_activatable_widget(Some(&button));
-                group.add(&row);
                 let copy = layer_ui::color_feature_copy::ProfileCopy::new(&w.localization());
                 let row = text_row(copy.library_title.as_ref(), copy.menu_help.as_ref());
                 let button = gtk::Button::with_label(copy.manage.as_ref());

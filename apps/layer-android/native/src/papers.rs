@@ -63,3 +63,15 @@ pub extern "system" fn Java_art_capycanvas_Native_paperFree(mut env: JNIEnv, _: 
     unsafe { crate::inspection::release::<Job>(job) };
     })
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_art_capycanvas_Native_paperImportTask(mut env: JNIEnv, _: JClass, handle: jlong, directory: JString) -> jlong {
+    crate::jni_entry!(env, handle, {
+    let result = (|| {
+        let directory = read(&mut env, &directory)?;
+        let task = PaperTask::library_import(&unsafe { app(handle) }.host.session, directory.into());
+        Ok(Box::into_raw(Box::new(Job { task, cancelled: AtomicBool::new(false), result: Mutex::new(None) })) as jlong)
+    })();
+    or_throw(&mut env, result, 0)
+    })
+}

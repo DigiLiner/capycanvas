@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {existsSync} from 'node:fs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 // Production DOM, Rust color policy, and real Chrome input (including pen).
 export async function checkColorPanel({call,evaluate,settle}) {
@@ -351,13 +352,12 @@ export async function checkColorPanel({call,evaluate,settle}) {
   console.log('Paint pair: native icons, compact editors, masks and drag copies passed in both themes; opening HDR fixture');
   await send({type:'invoke',command:'new_document'});
   console.log('Paint pair: HDR creation requested');
-  await evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+30000;function poll(){if(document.querySelector('[data-document-field="depth"]'))resolve();else if(performance.now()>end)reject(Error('HDR creation dialog'));else setTimeout(poll,30);}poll();})`);
+  await evaluate(createDrawing({width:256,height:256,depth:'F16',create:false}));
   console.log('Paint pair: HDR creation dialog ready');
-  await evaluate(`(()=>{for(const name of ['width','height']){const n=document.querySelector('[data-document-field="'+name+'"]');n.value='256';n.dispatchEvent(new Event('input',{bubbles:true}));}const field=document.querySelector('[data-document-field="depth"]');field.value='F16';field.dispatchEvent(new Event('change'));})()`);
-  console.log('Paint pair: HDR Create bounds',await bounds('[data-document-action="create"]'),await evaluate('({width:innerWidth,height:innerHeight})'));
-  await evaluate(`document.querySelector('[data-document-action="create"]').scrollIntoView({block:'center'})`);await settle();
-  await gesture('mouse',await point('[data-document-action="create"]'));
-  assert.equal(await evaluate(`!!document.querySelector('.document-dialog[open] [data-document-action="create"]')`),false,'Native Create closes the drawing dialog');
+  console.log('Paint pair: HDR Create bounds',await bounds('#new-drawing-create'),await evaluate('({width:innerWidth,height:innerHeight})'));
+  await evaluate(`document.querySelector('#new-drawing-create').scrollIntoView({block:'center'})`);await settle();
+  await gesture('mouse',await point('#new-drawing-create'));
+  assert.equal(await evaluate(`!!document.querySelector('#new-drawing-dialog[open]')`),false,'Native Create closes the drawing dialog');
   console.log('Paint pair: HDR creation accepted');
   const hdrDeadline=Date.now()+60000;let hdrState;
   do {

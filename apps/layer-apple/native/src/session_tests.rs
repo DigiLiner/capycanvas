@@ -256,8 +256,7 @@ fn apple_unreadable_sessions_preserve_copies_and_allow_editing_checkpointing_and
             let painted = app.pixels();
             if peer {
                 app.invoke("new_document");
-                let project = ProjectJob::new(&app, true);
-                assert_eq!(project.create([96, 64]), 0);
+                let project = ProjectJob::create(&app, [96, 64]);
                 assert_eq!(unsafe { capy_apple_project_adopt(app.0, project.0, c"Untitled".as_ptr(), c"".as_ptr()) }, 0);
                 app.draw_until_idle();
             }
@@ -543,8 +542,7 @@ fn apple_session_failed_peer_checkpoint_keeps_closing_drawing_indexed() {
         let path = std::env::temp_dir().join(format!("capy-apple-session-close-failure-{}", layer_core::PortableId::random()));
         let app = launch(platform, &path);
         app.invoke("new_document");
-        let project = ProjectJob::new(&app, true);
-        assert_eq!(project.create([96, 64]), 0);
+        let project = ProjectJob::create(&app, [96, 64]);
         assert_eq!(unsafe { capy_apple_project_adopt(app.0, project.0, c"Untitled".as_ptr(), c"".as_ptr()) }, 0);
         app.draw_until_idle();
         checkpoint(&app, 0, false);
@@ -737,8 +735,7 @@ fn apple_restored_window_reserves_failed_ids_before_creating_another_drawing() {
         original.stage(vec![layer_ui::SessionDrawing { id: failed, key: "failed-drawing".into() }], original.active).unwrap().publish(&index).unwrap();
         let app = launch(platform, &path);
         app.invoke("new_document");
-        let project = ProjectJob::new(&app, true);
-        assert_eq!(project.create([96, 64]), 0);
+        let project = ProjectJob::create(&app, [96, 64]);
         assert_eq!(unsafe { capy_apple_project_adopt(app.0, project.0, c"Untitled".as_ptr(), c"".as_ptr()) }, 0);
         app.draw_until_idle();
         assert_ne!(unsafe { &*app.0 }.window.documents.selected(), failed);

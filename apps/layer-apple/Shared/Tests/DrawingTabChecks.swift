@@ -12,17 +12,7 @@ extension XCTestCase {
             workspaceActivate(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "toolbar-tile-commands-", label)).firstMatch)
         }
         command("New…")
-        let create = app.buttons["new-document-create"]
-        XCTAssertTrue(create.waitForExistence(timeout: 15))
-        #if os(macOS)
-        workspaceActivate(app.descendants(matching: .any)["new-document-depth"].firstMatch)
-        workspaceActivate(app.menuItems["32-bit float HDR"].firstMatch)
-        #else
-        workspaceActivate(app.buttons["new-document-depth"].firstMatch)
-        workspaceActivate(app.buttons["32-bit float HDR"].firstMatch)
-        #endif
-        workspaceActivate(create)
-        XCTAssertTrue(create.waitForNonExistence(timeout: 60))
+        createNewDrawing(width: "2048", height: "1536", depth: 3, in: app)
         func drawings() {
             command("Drawings…")
             XCTAssertTrue(app.buttons["Done"].firstMatch.waitForExistence(timeout: 15))

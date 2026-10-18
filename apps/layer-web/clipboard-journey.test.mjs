@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {readPackage,packageObject,packageObjects,packageOccurrences} from './package-fixture.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 const bar='.canvas-action-bar';
 const visible=`(()=>{const b=document.querySelector('${bar}');return !!b&&!b.hidden&&!b.classList.contains('suppressed')})()`;
@@ -206,9 +207,7 @@ export async function checkClipboard({call,evaluate,settle}) {
   }
   const retainedLayer=await active(),retainedNonce=await nonce();await key('c');await copied(retainedNonce);
   await invoke('new_document');
-  await wait(`!!document.querySelector('dialog[open] [data-document-field="width"]')`);
-  await evaluate(`(()=>{const dialog=document.querySelector('dialog[open]');for(const [field,value] of [['width','64'],['height','48']]){const input=dialog.querySelector('[data-document-field='+field+']');input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}
-    dialog.querySelector('[data-document-field="space"]').value='DisplayP3';dialog.querySelector('[data-document-field="depth"]').value='U16';dialog.querySelector('[data-document-action="create"]').click();})()`);
+  await evaluate(createDrawing({width:64,height:48,space:'DisplayP3',depth:'U16'}));
   await wait(`!layerApp.documents.busy()&&layerApp.app.brush_ready()&&layerApp.app.document_color().space==='DisplayP3'&&layerApp.app.document_color().depth==='U16'`);
   const targetCount=await layers();await key('v');await wait(`layerApp.state().layers.length===${targetCount+1}`);await idle();
   const converted=await active();

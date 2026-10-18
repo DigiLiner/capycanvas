@@ -211,6 +211,8 @@ class AndroidRasterTest {
         }
         compose.waitForIdle(); tick()
     }
+    private fun newRequest(handle: Long, width: Int, height: Int, space: String = "Srgb", depth: String = "U8") =
+        request(handle, "new_document").also { orderDrawing(handle, width, height, space, depth) }
     private fun request(handle: Long, command: String): Pair<Int,JSONObject> {
         try { Native.dispatch(handle,obj("type" to "invoke","command" to command).toString()) }
         catch(e: Exception) { throw AssertionError("$command: ${state(handle).getJSONObject("document_file")}; ${host.workspaceManager}",e) }
@@ -297,7 +299,7 @@ class AndroidRasterTest {
     private fun finishSave(job: Pair<Long,Int>, name: String): ByteArray {
         val file=File(files,name)
         try {
-            Native.projectWork(job.first,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),0,0)
+            Native.projectWork(job.first,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),"")
             val fingerprint = Native.sessionFingerprint(ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY).detachFd())
             val location = obj("uri" to android.net.Uri.fromFile(file).toString(),"name" to name)
             native {Native.sessionCompleteSave(it,job.second,location.toString(),fingerprint)}
@@ -318,7 +320,7 @@ class AndroidRasterTest {
         val incumbent=native {state(it).getJSONObject("document_file")}
         try {
             val prepared=try {
-                Native.projectWork(job.first,(input?.invoke() ?: ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY)).detachFd(),0,0)
+                Native.projectWork(job.first,(input?.invoke() ?: ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY)).detachFd(),"")
                 true
             } catch(e: Exception) {
                 if(!corrupt)throw e
@@ -361,7 +363,7 @@ class AndroidRasterTest {
         val file=File(files,name)
         try {
             if (recipe != null) Native.projectExportOptions(task, recipe.toString())
-            Native.projectWork(task,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),0,0)
+            Native.projectWork(task,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),"")
             native {Native.documentComplete(it,id,true,"null")}
             return file.readBytes()
         } catch(e:Exception){native{Native.documentComplete(it,id,false,"null")};throw e} finally {Native.projectFree(task)}
@@ -380,8 +382,8 @@ class AndroidRasterTest {
         }
         fun fresh() {
             DocumentController.nativeFileJobsForTest=true
-            val task=native {h->val(id,file)=request(h,"new_document");Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
-            try {Native.projectWork(task,-1,128,128);compose.waitUntil(60_000) {tick();native {Native.projectParkReady(it,task)}};native {Native.projectAdopt(it,task,"null")}} finally {Native.projectFree(task)}
+            val task=native {h->val(id,file)=newRequest(h,128,128);Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
+            try {Native.projectWork(task,-1,"");compose.waitUntil(60_000) {tick();native {Native.projectParkReady(it,task)}};native {Native.projectAdopt(it,task,"null")}} finally {Native.projectFree(task)}
             refresh();idle();invoke("fit_canvas");invoke("pen")
         }
         fun paint(y:Double) {
@@ -887,10 +889,9 @@ class AndroidRasterTest {
     }
 
     @Test fun tonalHdrCoverageAndSamplingOnDevice() {
-        val job=native { h -> val(id,f)=request(h,"new_document"); Native.projectTask(h,id,"null",f.getLong("epoch"),f.getLong("revision")) }
+        val job=native { h -> val(id,f)=newRequest(h,500,200,"Srgb","F16"); Native.projectTask(h,id,"null",f.getLong("epoch"),f.getLong("revision")) }
         try {
-            Native.projectOptions(job,obj("extent" to org.json.JSONArray(listOf(500,200)),"color" to obj("space" to "Srgb","depth" to "F16"),"background" to "White").toString())
-            Native.projectWork(job,-1,500,200);native { Native.projectAdopt(it,job,"null") }
+            Native.projectWork(job,-1,"");native { Native.projectAdopt(it,job,"null") }
         } finally { Native.projectFree(job) }
         compose.runOnUiThread { host.documentChanged() }
         fun tone(index:Int)=send(obj("type" to "tonal","action" to obj("kind" to "preset","index" to index)))
@@ -1170,7 +1171,7 @@ class AndroidRasterTest {
             val entered=java.util.concurrent.CountDownLatch(1)
             val result=pool.submit<String> {
                 entered.countDown()
-                try {Native.projectWork(task,ParcelFileDescriptor.open(output,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),0,0);"completed"}
+                try {Native.projectWork(task,ParcelFileDescriptor.open(output,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),"");"completed"}
                 catch(e:Exception){e.message.orEmpty()}
             }
             assertTrue(entered.await(10,java.util.concurrent.TimeUnit.SECONDS));SystemClock.sleep(50)
@@ -1482,10 +1483,9 @@ class AndroidRasterTest {
                 "color" to obj("space" to space,"rgba" to org.json.JSONArray(rgba)))))
             invoke("select_all");invoke("fill_selection");invoke("deselect")
         }
-        val task=native{h->val(id,file)=request(h,"new_document");Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
+        val task=native{h->val(id,file)=newRequest(h,512,384,"ProPhoto","U8");Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
         try {
-            Native.projectOptions(task,obj("extent" to org.json.JSONArray(listOf(512,384)),"color" to obj("space" to "ProPhoto","depth" to "U8"),"background" to "White").toString())
-            Native.projectWork(task,-1,512,384);native{Native.projectAdopt(it,task,"null")}
+            Native.projectWork(task,-1,"");native{Native.projectAdopt(it,task,"null")}
         } finally {Native.projectFree(task)}
         invoke("fit_canvas")
         compose.waitUntil(10_000){screen().getJSONObject("assessment").getString("basis")=="System"}
@@ -1938,8 +1938,8 @@ class AndroidRasterTest {
             catch (error: Exception) { throw IllegalStateException("Invoke $command failed", error) }
         }
         native { Native.dispatch(it,obj("type" to "preferences","action" to obj("type" to "edit","id" to "missing_profile","value" to 0)).toString()) }
-        val newTask = native { h -> val (id, f) = request(h,"new_document"); Native.projectTask(h,id,"null",f.getLong("epoch"),f.getLong("revision")) }
-        try { Native.projectWork(newTask,-1,2000,1500); native { Native.projectAdopt(it,newTask,"null") } } finally { Native.projectFree(newTask) }
+        val newTask = native { h -> val (id, f) = newRequest(h,2000,1500); Native.projectTask(h,id,"null",f.getLong("epoch"),f.getLong("revision")) }
+        try { Native.projectWork(newTask,-1,""); native { Native.projectAdopt(it,newTask,"null") } } finally { Native.projectFree(newTask) }
         scenario.onActivity { host.documentChanged() }
         compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
         val configured = InstrumentationRegistry.getArguments().getString("imagePlacementPhotos")
@@ -2323,8 +2323,8 @@ class AndroidRasterTest {
             return generateSequence(item) { it.parent }.take(3).any { it.isSelected || it.isChecked }
         }
         action(obj("type" to "preferences", "action" to obj("type" to "edit", "id" to "missing_profile", "value" to 0)))
-        val newTask = native { h -> val (id, file) = request(h, "new_document"); Native.projectTask(h, id, "null", file.getLong("epoch"), file.getLong("revision")) }
-        try { Native.projectWork(newTask, -1, 2000, 1500); native { Native.projectAdopt(it, newTask, "null") } } finally { Native.projectFree(newTask) }
+        val newTask = native { h -> val (id, file) = newRequest(h, 2000, 1500); Native.projectTask(h, id, "null", file.getLong("epoch"), file.getLong("revision")) }
+        try { Native.projectWork(newTask, -1, ""); native { Native.projectAdopt(it, newTask, "null") } } finally { Native.projectFree(newTask) }
         scenario.onActivity { host.documentChanged() }
         compose.waitUntil(60_000) { host.snapshot?.optBoolean("brush_ready") == true }
         invoke("fit_canvas")
@@ -2865,13 +2865,11 @@ class AndroidRasterTest {
 
     @Test fun sixteenBitWideColorSurvivesSaveAndGpuReplacement() {
         val job = native { handle ->
-            val (id, file) = request(handle, "new_document")
+            val (id, file) = newRequest(handle, 513, 257, "ProPhoto", "U16")
             Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision"))
         }
         try {
-            Native.projectOptions(job, obj("extent" to org.json.JSONArray(listOf(513, 257)),
-                "color" to obj("space" to "ProPhoto", "depth" to "U16"), "background" to "White").toString())
-            Native.projectWork(job, -1, 513, 257)
+            Native.projectWork(job, -1, "")
             native { Native.projectAdopt(it, job, "null") }
         } finally { Native.projectFree(job) }
         native { Native.dispatch(it, obj("type" to "invoke", "command" to "fit_canvas").toString()) }; tick()
@@ -2924,11 +2922,11 @@ class AndroidRasterTest {
         val pending = native { handle -> val (id, state) = request(handle, "open_document")
             Native.projectTask(handle, id, "null", state.getLong("epoch"), state.getLong("revision")) }
         try {
-            Native.projectWork(pending, ParcelFileDescriptor.open(untaggedFile, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+            Native.projectWork(pending, ParcelFileDescriptor.open(untaggedFile, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
             assertNotEquals("null", Native.projectProfilePrompt(pending))
             assertEquals(epoch, native { state(it).getJSONObject("document_file").getLong("epoch") })
             Native.projectAssumeProfile(pending, obj("Builtin" to "AdobeRgb").toString())
-            Native.projectWork(pending, -1, 0, 0)
+            Native.projectWork(pending, -1, "")
             compose.waitUntil(120_000) { tick(); native { Native.projectParkReady(it, pending) } }
             native { Native.projectAdopt(it, pending, "null") }
         } finally { Native.projectFree(pending) }
@@ -3013,13 +3011,13 @@ class AndroidRasterTest {
         compose.waitUntil(120_000) {tick();native {Native.sessionSettle(it,System.nanoTime());JSONObject(Native.documentTabs(it,obj("op" to "ready").toString())).getBoolean("park")}}
         compose.waitUntil(120_000) {host.recovery.ready && !host.recovery.working}
         assertNull(host.failure);assertNull(host.actionError)
-        val task=native { handle -> val(id,file)=request(handle,"new_document")
+        val task=native { handle -> val(id,file)=newRequest(handle,128,128)
             Native.projectTask(handle,id,"null",file.getLong("epoch"),file.getLong("revision")) }
         val entered=java.util.concurrent.CountDownLatch(1)
         val release=java.util.concurrent.CountDownLatch(1)
         var blocker:Job?=null;var transition:Job?=null
         try {
-            Native.projectWork(task,-1,128,128)
+            Native.projectWork(task,-1,"")
             blocker=runBlocking { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 host.viewModelScope.launch {host.withNative {entered.countDown();check(release.await(60,java.util.concurrent.TimeUnit.SECONDS))}}
             } }
@@ -3047,9 +3045,9 @@ class AndroidRasterTest {
     }
 
     @Test fun countFilterControlsStepAndPersistWholeValues() {
-        val task = native { handle -> val (id,file)=request(handle,"new_document")
+        val task = native { handle -> val (id,file)=newRequest(handle,128,128)
             Native.projectTask(handle,id,"null",file.getLong("epoch"),file.getLong("revision")) }
-        try { Native.projectWork(task,-1,128,128); adoptProject(task) } finally { Native.projectFree(task) }
+        try { Native.projectWork(task,-1,""); adoptProject(task) } finally { Native.projectFree(task) }
         refresh()
         action(obj("type" to "customize", "action" to obj("type" to "set_panel_visible", "panel" to "properties", "visible" to true)))
         val group=host.panelGroup("properties")
@@ -3080,12 +3078,11 @@ class AndroidRasterTest {
     @Test fun pointwiseColorEffectsPersistAllParametersAndOriginalSource() {
         for ((space, depth) in listOf("Srgb" to "U8", "DisplayP3" to "U16", "ProPhoto" to "F16", "Srgb" to "F32")) {
             val task = native { handle ->
-                val (id, file) = request(handle, "new_document")
+                val (id, file) = newRequest(handle, 128, 128, space, depth)
                 Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision"))
             }
             try {
-                Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(128, 128)), "color" to obj("space" to space, "depth" to depth), "background" to "White").toString())
-                Native.projectWork(task, -1, 128, 128); adoptProject(task)
+                Native.projectWork(task, -1, ""); adoptProject(task)
             } finally { Native.projectFree(task) }
             refresh(); invoke("fit_canvas"); stroke(0.0)
             png("p21-source.png", builtinRecipe(2).put("format", "Png").put("depth", "U8"))
@@ -3094,7 +3091,7 @@ class AndroidRasterTest {
                 Native.projectTask(handle, id, obj("uri" to "test:p21-source.png", "name" to "p21-source.png").toString(), file.getLong("epoch"), file.getLong("revision"))
             }
             try {
-                Native.projectWork(imported, ParcelFileDescriptor.open(File(files, "p21-source.png"), ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+                Native.projectWork(imported, ParcelFileDescriptor.open(File(files, "p21-source.png"), ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
                 native { Native.projectAdopt(it, imported, "null") }
             } finally { Native.projectFree(imported) }
             refresh(); invoke("apply_transform")
@@ -3206,13 +3203,11 @@ class AndroidRasterTest {
         for (blend in listOf("perceptual", "linear")) for (id in listOf("brightness_to_opacity", "threshold")) {
             val prefix = "illustration-$blend-$id"
             val task = native { handle ->
-                val (request, file) = request(handle, "new_document")
+                val (request, file) = newRequest(handle, 513, 259, "ProPhoto", "U16")
                 Native.projectTask(handle, request, "null", file.getLong("epoch"), file.getLong("revision"))
             }
             try {
-                Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(513, 259)),
-                    "color" to obj("space" to "ProPhoto", "depth" to "U16"), "background" to "White").toString())
-                Native.projectWork(task, -1, 513, 259); adoptProject(task)
+                Native.projectWork(task, -1, ""); adoptProject(task)
             } finally { Native.projectFree(task) }
             ready(); invoke("fit_canvas"); invoke("blend_$blend")
             send(obj("type" to "select_brush", "id" to 1))
@@ -3313,11 +3308,10 @@ class AndroidRasterTest {
         fun pixels(name: String) = hash(png(name, recipe))
         for (portrait in listOf(false, true)) for (theme in listOf("light", "dark")) for (effect in listOf("gaussian_blur", "unsharp_mask")) {
             if (portrait) device.portrait(scenario) else device.landscape(scenario)
-            val task = native { handle -> val (id, file) = request(handle, "new_document")
+            val task = native { handle -> val (id, file) = newRequest(handle, 256, 256)
                 Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision")) }
             try {
-                Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(256,256)), "color" to obj("space" to "Srgb", "depth" to "U8"), "background" to "White").toString())
-                Native.projectWork(task,-1,256,256); native { Native.projectAdopt(it,task,"null") }
+                Native.projectWork(task, -1, ""); native { Native.projectAdopt(it,task,"null") }
             } finally { Native.projectFree(task) }
             refresh(); action(obj("type" to "set_theme", "theme" to theme)); invoke("fit_canvas"); ready()
             action(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(.08,.1,.15,1))))
@@ -3384,11 +3378,10 @@ class AndroidRasterTest {
             contact(3, 152.0)
         }
         for (theme in listOf("light", "dark")) {
-            val task = native { handle -> val (id, file) = request(handle, "new_document")
+            val task = native { handle -> val (id, file) = newRequest(handle, 256, 256)
                 Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision")) }
             try {
-                Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(256, 256)), "color" to obj("space" to "Srgb", "depth" to "U8"), "background" to "White").toString())
-                Native.projectWork(task, -1, 256, 256); native { Native.projectAdopt(it, task, "null") }
+                Native.projectWork(task, -1, ""); native { Native.projectAdopt(it, task, "null") }
             } finally { Native.projectFree(task) }
             refresh(); invoke("fit_canvas"); action(obj("type" to "set_theme", "theme" to theme))
             val sourceLayer = native { state(it).getJSONObject("layer_properties").getLong("layer") }
@@ -3598,7 +3591,7 @@ class AndroidRasterTest {
                 }
                 try {
                     if (stale) {
-                        Native.projectWork(lookupTask, ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+                        Native.projectWork(lookupTask, ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
                         val other = native { handle ->
                             val current = state(handle).getJSONObject("layer_properties").getLong("layer")
                             state(handle).array("layers").objects().first { it.getLong("id") != current }.getLong("id")
@@ -3609,7 +3602,7 @@ class AndroidRasterTest {
                         assertEquals(unchanged, native { state(it).getJSONObject("document_file").getLong("revision") })
                         selectLookup()
                     } else {
-                        assertNotNull("Incomplete cube must reject", runCatching { Native.projectWork(lookupTask, ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0) }.exceptionOrNull())
+                        assertNotNull("Incomplete cube must reject", runCatching { Native.projectWork(lookupTask, ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "") }.exceptionOrNull())
                         native { Native.documentComplete(it, requestId, false, "null") }
                     }
                 } finally { Native.projectFree(lookupTask) }
@@ -3677,12 +3670,11 @@ class AndroidRasterTest {
     @Test fun selectiveColorAndMixerPersistHiddenParametersAndOriginalSource() {
         for ((space, depth) in listOf("Srgb" to "U8", "DisplayP3" to "U16", "ProPhoto" to "F16", "Srgb" to "F32")) {
             val task = native { handle ->
-                val (id, file) = request(handle, "new_document")
+                val (id, file) = newRequest(handle, 128, 128, space, depth)
                 Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision"))
             }
             try {
-                Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(128, 128)), "color" to obj("space" to space, "depth" to depth), "background" to "White").toString())
-                Native.projectWork(task, -1, 128, 128); native { Native.projectAdopt(it, task, "null") }
+                Native.projectWork(task, -1, ""); native { Native.projectAdopt(it, task, "null") }
             } finally { Native.projectFree(task) }
             refresh(); invoke("fit_canvas"); stroke(0.0)
             png("p22-source.png", builtinRecipe(2).put("format", "Png").put("depth", "U8"))
@@ -3691,7 +3683,7 @@ class AndroidRasterTest {
                 Native.projectTask(handle, id, obj("uri" to "test:p22-source.png", "name" to "p22-source.png").toString(), file.getLong("epoch"), file.getLong("revision"))
             }
             try {
-                Native.projectWork(imported, ParcelFileDescriptor.open(File(files, "p22-source.png"), ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+                Native.projectWork(imported, ParcelFileDescriptor.open(File(files, "p22-source.png"), ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
                 native { Native.projectAdopt(it, imported, "null") }
             } finally { Native.projectFree(imported) }
             refresh(); invoke("apply_transform")
@@ -3737,11 +3729,10 @@ class AndroidRasterTest {
 
     @Test fun retainedPlacePasteAndDocumentDetails() {
         fun fresh(space:String, depth:String) {
-            val task=native { h -> val(id,f)=request(h,"new_document")
+            val task=native { h -> val(id,f)=newRequest(h,513,257,space,depth)
                 Native.projectTask(h,id,"null",f.getLong("epoch"),f.getLong("revision")) }
             try {
-                Native.projectOptions(task,obj("extent" to org.json.JSONArray(listOf(513,257)),"color" to obj("space" to space,"depth" to depth),"background" to "White").toString())
-                Native.projectWork(task,-1,513,257); native {Native.projectAdopt(it,task,"null")}
+                Native.projectWork(task,-1,""); native {Native.projectAdopt(it,task,"null")}
             } finally {Native.projectFree(task)}
             native {Native.dispatch(it,obj("type" to "invoke","command" to "fit_canvas").toString())};tick()
         }
@@ -3756,7 +3747,7 @@ class AndroidRasterTest {
         val task=native { h -> val(id,f)=request(h,"import_image")
             Native.projectTask(h,id,obj("uri" to "test:placement-original.png","name" to "placement-original.png").toString(),f.getLong("epoch"),f.getLong("revision")) }
         try {
-            Native.projectWork(task,ParcelFileDescriptor.open(File(files,"placement-original.png"),ParcelFileDescriptor.MODE_READ_ONLY).detachFd(),0,0)
+            Native.projectWork(task,ParcelFileDescriptor.open(File(files,"placement-original.png"),ParcelFileDescriptor.MODE_READ_ONLY).detachFd(),"")
             native {Native.projectAdopt(it,task,"null")}
         } finally {Native.projectFree(task)}
         tick()
@@ -3927,9 +3918,8 @@ class AndroidRasterTest {
         val red = image("objects-red.png", android.graphics.Color.RED, 240, 160)
         val green = image("objects-green.png", android.graphics.Color.rgb(20, 200, 60), 200, 120)
         for (theme in listOf("light", "dark")) {
-            val created = native { h -> val (id, f) = request(h, "new_document"); Native.projectTask(h, id, "null", f.getLong("epoch"), f.getLong("revision")) }
-            try { Native.projectOptions(created, obj("extent" to org.json.JSONArray(listOf(640, 480)), "color" to obj("space" to "Srgb", "depth" to "U8"), "background" to "White").toString())
-                Native.projectWork(created, -1, 640, 480); native { Native.projectAdopt(it, created, "null") } } finally { Native.projectFree(created) }
+            val created = native { h -> val (id, f) = newRequest(h, 640, 480); Native.projectTask(h, id, "null", f.getLong("epoch"), f.getLong("revision")) }
+            try { Native.projectWork(created, -1, ""); native { Native.projectAdopt(it, created, "null") } } finally { Native.projectFree(created) }
             action(obj("type" to "set_theme", "theme" to theme)); invoke("fit_canvas")
             val undoable = canUndo(); val layers = rows().size
             importImage(red)
@@ -4079,9 +4069,8 @@ class AndroidRasterTest {
             assertNull(host.actionError)
         }
         fun newDocument(width: Int, height: Int) {
-            val task = native { h -> val (id, f) = request(h, "new_document"); Native.projectTask(h, id, "null", f.getLong("epoch"), f.getLong("revision")) }
-            try { Native.projectOptions(task, obj("extent" to org.json.JSONArray(listOf(width, height)), "color" to obj("space" to "Srgb", "depth" to "U8"), "background" to "White").toString())
-                Native.projectWork(task, -1, width, height); native { Native.projectAdopt(it, task, "null") } } finally { Native.projectFree(task) }
+            val task = native { h -> val (id, f) = newRequest(h, width, height); Native.projectTask(h, id, "null", f.getLong("epoch"), f.getLong("revision")) }
+            try { Native.projectWork(task, -1, ""); native { Native.projectAdopt(it, task, "null") } } finally { Native.projectFree(task) }
             refresh()
         }
         fun place(file: File) {
@@ -4162,11 +4151,10 @@ class AndroidRasterTest {
     }
 
     @Test fun documentColorChangesPreserveExactHistoryAndCancel() {
-        val fresh = native { handle -> val (id, f) = request(handle, "new_document")
+        val fresh = native { handle -> val (id, f) = newRequest(handle, 513, 257, "DisplayP3", "U16")
             Native.projectTask(handle, id, "null", f.getLong("epoch"), f.getLong("revision")) }
         try {
-            Native.projectOptions(fresh, obj("extent" to org.json.JSONArray(listOf(513,257)), "color" to obj("space" to "DisplayP3", "depth" to "U16"), "background" to "White").toString())
-            Native.projectWork(fresh,-1,513,257); native { Native.projectAdopt(it,fresh,"null") }
+            Native.projectWork(fresh, -1, ""); native { Native.projectAdopt(it,fresh,"null") }
         } finally { Native.projectFree(fresh) }
         native { Native.dispatch(it,obj("type" to "invoke","command" to "fit_canvas").toString())
             Native.dispatch(it,obj("type" to "color","action" to obj("op" to "set_slot", "slot" to "foreground", "color" to obj("space" to "DisplayP3","rgba" to org.json.JSONArray(listOf(.8,.2,.1,1.0))))).toString()) }
@@ -4379,7 +4367,7 @@ class AndroidRasterTest {
         try {
             val file = File(files, "cancelled-output.png")
             try {
-                Native.projectWork(outputTask, ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(), 0, 0)
+                Native.projectWork(outputTask, ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(), "")
                 fail("Cancelled output completed")
             } catch (e: IllegalStateException) { assertTrue(e.message.orEmpty().contains("cancel", ignoreCase=true)) }
             native { Native.documentComplete(it, id, false, "null") }
@@ -4662,7 +4650,7 @@ class AndroidRasterTest {
         val failedSave = saveTask("failed-save.capy")
         try {
             assertNotNull("Read-only JNI output rejects the save", runCatching {
-                Native.projectWork(failedSave.first,ParcelFileDescriptor.open(previousFile,ParcelFileDescriptor.MODE_READ_ONLY).detachFd(),0,0)
+                Native.projectWork(failedSave.first,ParcelFileDescriptor.open(previousFile,ParcelFileDescriptor.MODE_READ_ONLY).detachFd(),"")
             }.exceptionOrNull())
             assertArrayEquals("Failed write preserves the previous file",first,previousFile.readBytes())
             native { Native.documentComplete(it,failedSave.second,false,"null") }
@@ -4781,8 +4769,8 @@ class AndroidRasterTest {
         }}}
         fun action(command:String){native{Native.dispatch(it,obj("type" to "invoke","command" to command).toString())};tick()}
         fun fresh():Long {
-            val task=native{h->val(id,file)=request(h,"new_document");Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
-            try{Native.projectWork(task,-1,640,480);compose.waitUntil(60_000){tick();native{Native.projectParkReady(it,task)}};native{Native.projectAdopt(it,task,"null")}}
+            val task=native{h->val(id,file)=newRequest(h,640,480);Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
+            try{Native.projectWork(task,-1,"");compose.waitUntil(60_000){tick();native{Native.projectParkReady(it,task)}};native{Native.projectAdopt(it,task,"null")}}
             finally{Native.projectFree(task)}
             tick();ready();return tabs().getLong("selected")
         }
@@ -4842,8 +4830,8 @@ class AndroidRasterTest {
         val firstLayers=native{state(it).array("layers").length()}
         save("restart-saved.capy")
         val firstFile=native {state(it).getJSONObject("document_file")}
-        val task=native{h->val(id,file)=request(h,"new_document");Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
-        try{Native.projectWork(task,-1,640,480);compose.waitUntil(60_000){tick();native{Native.projectParkReady(it,task)}};native{Native.projectAdopt(it,task,"null")}}finally{Native.projectFree(task)}
+        val task=native{h->val(id,file)=newRequest(h,640,480);Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
+        try{Native.projectWork(task,-1,"");compose.waitUntil(60_000){tick();native{Native.projectParkReady(it,task)}};native{Native.projectAdopt(it,task,"null")}}finally{Native.projectFree(task)}
         tick();compose.waitUntil(120_000){native{JSONObject(Native.documentTabs(it,obj("op" to "ready").toString())).getBoolean("park")}}
         val second = tabs().getLong("selected")
         action("add_layer");action("add_layer")
@@ -5068,8 +5056,8 @@ class AndroidRasterTest {
 
     @Test fun drawingTabsNativePointerReorder() {
         fun settled(){compose.waitUntil(60_000){!host.drawingTabs.switching&&native{JSONObject(Native.documentTabs(it,obj("op" to "ready").toString())).getBoolean("park")}};compose.runOnUiThread{host.documentChanged()};compose.waitForIdle();assertNull(host.failure);assertNull(host.actionError)}
-        val task=native{h->val(id,file)=request(h,"new_document");Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
-        try{Native.projectWork(task,-1,640,480);compose.waitUntil(60_000){tick();native{Native.projectParkReady(it,task)}};native{Native.projectAdopt(it,task,"null")}}finally{Native.projectFree(task)}
+        val task=native{h->val(id,file)=newRequest(h,640,480);Native.projectTask(h,id,"null",file.getLong("epoch"),file.getLong("revision"))}
+        try{Native.projectWork(task,-1,"");compose.waitUntil(60_000){tick();native{Native.projectParkReady(it,task)}};native{Native.projectAdopt(it,task,"null")}}finally{Native.projectFree(task)}
         val order=ids();val selected=tabs().getLong("selected")
         val workspace=native{state(it).getJSONObject("workspace")}
         workspace.getJSONObject("layout").put("header",obj("size" to "large","next_id" to 2,"zones" to org.json.JSONArray(listOf(org.json.JSONArray(),org.json.JSONArray(listOf(obj("id" to 1,"item" to obj("kind" to "document_title")))),org.json.JSONArray()))))

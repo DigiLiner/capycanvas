@@ -5,6 +5,7 @@ import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {measurePlacedPhotos,placementSave} from './image-placement-motion.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 const map=([a,b,c,d,e,f],x,y)=>[a*x+c*y+e,b*x+d*y+f];
 const unmap=([a,b,c,d,e,f],[x,y])=>{const det=a*d-b*c;return[(d*(x-e)-c*(y-f))/det,(-b*(x-e)+a*(y-f))/det];};
@@ -98,9 +99,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     }
     const bad=join(root,'malformed.png');await writeFile(bad,'not an image');
     await invoke('new_document');
-    await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===layerApp.app.editor_models(innerWidth,innerHeight).document_options.discard_label)?.click()`);
-    await wait('document.querySelector("dialog[open] [data-document-field=width]")');
-    await evaluate(`{for(const [id,value] of [['width',2000],['height',1500]]){const entry=document.querySelector('dialog[open] [data-document-field='+id+']');entry.value=value;entry.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('dialog[open] [data-document-action=create]').click();}`);
+    await evaluate(createDrawing({width:2000,height:1500}));
     await idle();await wait('layerApp.app.brush_ready()');
     for(const theme of ['light','dark']){
       await evaluate(`layerApp.dispatch({type:'set_theme',theme:${JSON.stringify(theme)}})`);await settle();
@@ -344,8 +343,7 @@ export async function checkImagePlacement({call,evaluate,settle}) {
     await click('.canvas-action-bar [data-command=cancel_transform]');
     await call('Emulation.clearDeviceMetricsOverride');await invoke('zen_mode');
     if(process.env.LAYER_IMAGE_MOTION==='1') {
-      await invoke('new_document');await wait('document.querySelector("dialog[open] [data-document-field=width]")');
-      await evaluate(`{for(const [id,value] of [['width',2000],['height',1500]]){const entry=document.querySelector('dialog[open] [data-document-field='+id+']');entry.value=value;entry.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('dialog[open] [data-document-action=create]').click();}`);
+      await invoke('new_document');await evaluate(createDrawing({width:2000,height:1500}));
       await idle();await wait('layerApp.app.brush_ready()');
       const started=Date.now();await importFiles(files);await click('.canvas-action-bar [data-command=apply_transform]');
       const loadingMs=Date.now()-started,baseline=await save();

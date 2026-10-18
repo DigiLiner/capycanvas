@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {mkdir,writeFile} from "node:fs/promises";
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkPaintColumns({call,evaluate,settle}) {
   const output=process.env.LAYER_TEST_ARTIFACTS;
@@ -59,8 +60,7 @@ export async function checkPaintColumns({call,evaluate,settle}) {
   const sdrTall=await tall(()=>check("sdr-tall"));
   assert.ok(!sdr.hdr&&sdrTall.color>=sdr.color);
   await evaluate(`layerApp.dispatch({type:'invoke',command:'new_document'})`);
-  await wait(`!!document.querySelector('dialog[open] select[aria-label="Bit depth"]')`);
-  await evaluate(`(()=>{const d=document.querySelector('dialog[open] select[aria-label="Bit depth"]').closest('dialog');const [w,h]=d.querySelectorAll('input[type=number]');w.value=900;h.value=1200;d.querySelector('select[aria-label="Bit depth"]').value='F16';[...d.querySelectorAll('button')].find(b=>b.textContent==='Create').click();})()`);
+  await evaluate(createDrawing({width:900,height:1200,depth:'F16'}));
   await wait(`layerApp.app.document_color().depth==='F16'&&layerApp.app.color_panel().hdr&&!layerApp.state().document_file.busy`,60000);
   const hdr=await check("hdr-native");
   const hdrTall=await tall(()=>check("hdr-tall"));

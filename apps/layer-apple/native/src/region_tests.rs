@@ -6,8 +6,7 @@ fn region_app(platform: u32, gap: bool) -> App {
     unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
         Some(native_renderer());
     app.draw_until_idle();
-    let project = ProjectJob::new(&app, true);
-    assert_eq!(project.create([64, 64]), 0);
+    let project = ProjectJob::create(&app, [64, 64]);
     assert_eq!(
         unsafe {
             capy_apple_project_adopt(app.0, project.0, c"Region check".as_ptr(), c"".as_ptr())

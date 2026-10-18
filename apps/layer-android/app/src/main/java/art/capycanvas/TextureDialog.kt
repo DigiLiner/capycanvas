@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -53,30 +54,40 @@ import kotlin.math.sqrt
 
 internal class TextureDialogRequest(val layer: Long, val windowed: Boolean)
 
+/** Gray paper previews, and the grain they lay over a sheet's color. */
 internal class PaperPreviews(private val host: CanvasHost) {
     private val images = mutableStateMapOf<String, ImageBitmap>()
+    private val grains = mutableStateMapOf<String, ImageBitmap>()
     private val loading = mutableSetOf<String>()
     operator fun get(id: String) = images[id]
+    fun grain(id: String) = grains[id]
     suspend fun load(id: String) {
         if (id in images || !loading.add(id)) return
         try {
             val gray = runCatching { host.withNative { Native.paperPreview(it, id) } }.getOrNull() ?: return
-            images[id] = withContext(Dispatchers.Default) {
+            val (image, grain) = withContext(Dispatchers.Default) {
                 val side = sqrt(gray.size.toDouble()).toInt()
-                Bitmap.createBitmap(IntArray(gray.size) { (gray[it].toInt() and 255) * 0x010101 or (0xFF shl 24) }, side, side, Bitmap.Config.ARGB_8888).asImageBitmap()
+                val bitmap = { pixel: (Int) -> Int -> Bitmap.createBitmap(IntArray(gray.size) { pixel(gray[it].toInt() and 255) }, side, side, Bitmap.Config.ARGB_8888).asImageBitmap() }
+                bitmap { it * 0x010101 or (0xFF shl 24) } to bitmap {
+                    val shade = it / 255f - .5f
+                    val alpha = ((if (shade < 0f) -shade * .7f else shade * .25f) * 255).roundToInt()
+                    (alpha shl 24) or (if (shade < 0f) 0 else 0xFFFFFF)
+                }
             }
+            images[id] = image
+            grains[id] = grain
         } finally { loading.remove(id) }
     }
 }
 
 internal fun JSONObject.paperId(): String? = if (isNull("id")) null else getString("id")
 
-@Composable internal fun PaperPreview(host: CanvasHost, id: String?, size: Dp, background: Color = Color.Transparent) {
+@Composable internal fun PaperPreview(host: CanvasHost, id: String?, size: Dp, background: Color = Color.Transparent, empty: String = "paper") {
     if (id != null) LaunchedEffect(host, id) { host.paperPreviews.load(id) }
     val image = id?.let { host.paperPreviews[it] }
     Box(Modifier.size(size).clip(TileShape).background(background), contentAlignment = Alignment.Center) {
         if (image != null) Image(image, null, Modifier.fillMaxSize())
-        else SharedIcon("paper", null, Modifier.size(size / 2))
+        else SharedIcon(empty, null, Modifier.size(size / 2))
     }
 }
 
@@ -212,11 +223,26 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
             enabled = error.isEmpty(), modifier = Modifier.testTag("paper-rename-save")) { Text(copy.getString("rename")) } })
 }
 
-private val TextureFrame = 102.dp
+internal val TextureFrame = 102.dp
 private val TexturePageEnd = 20.dp
-private val TextureGap = 12.dp
+internal val TextureGap = 12.dp
 
-@Composable private fun TextureTile(host: CanvasHost, tile: JSONObject, index: Int, chosen: Boolean, modifier: Modifier, act: (JSONObject) -> Unit, choose: () -> Unit) {
+/** A click chooses; a second click within the double-tap time uses the choice. */
+@Composable internal fun rememberActivation(choose: () -> Unit, use: (() -> Unit)?): () -> Unit {
+    val timeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
+    val last = remember { longArrayOf(0L) }
+    val chosen by rememberUpdatedState(choose)
+    val used by rememberUpdatedState(use)
+    return remember(timeout) { {
+        val now = android.os.SystemClock.uptimeMillis()
+        val second = used?.takeIf { last[0] != 0L && now - last[0] <= timeout }
+        last[0] = if (second == null) now else 0L
+        second?.invoke() ?: chosen()
+    } }
+}
+
+@Composable internal fun TextureTile(host: CanvasHost, tile: JSONObject, index: Int, chosen: Boolean, modifier: Modifier, act: (JSONObject) -> Unit,
+    empty: String = "paper", tag: String = "texture-tile", use: (() -> Unit)? = null, choose: () -> Unit) {
     val colors = LocalPalette.current
     val label = tile.getString("label")
     val actions = tile.array("actions").objects()
@@ -225,7 +251,7 @@ private val TextureGap = 12.dp
     var menu by remember { mutableStateOf(false) }
     Box(modifier) {
         HoverTip(label, Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { selected = chosen }.testTag("texture-tile-$index")
+            Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { selected = chosen }.testTag("$tag-$index")
                 .onFocusChanged { if (it.isFocused) choose() }
                 .pointerInput(actions.isNotEmpty()) {
                     if (actions.isEmpty()) return@pointerInput
@@ -236,11 +262,11 @@ private val TextureGap = 12.dp
                 }
                 .onKeyEvent { event -> if (actions.isNotEmpty() && event.type == KeyEventType.KeyDown && event.key == Key.Menu) { menu = true; true } else false }
                 .hoverable(interactions)
-                .combinedClickable(interactions, null, role = Role.RadioButton, onLongClick = if (actions.isEmpty()) null else ({ menu = true }), onClick = choose),
+                .combinedClickable(interactions, null, role = Role.RadioButton, onLongClick = if (actions.isEmpty()) null else ({ menu = true }), onClick = rememberActivation(choose, use)),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(TextureFrame).clip(TileShape).background(if (hovered) colors.text.copy(alpha = .10f) else Color.Transparent)
                     .then(if (chosen) Modifier.border(2.dp, colors.accent, TileShape) else Modifier).padding(3.dp)) {
-                    PaperPreview(host, tile.paperId(), 96.dp, colors.text.copy(alpha = .06f))
+                    PaperPreview(host, tile.paperId(), 96.dp, colors.text.copy(alpha = .06f), empty)
                 }
                 Text(label, Modifier.fillMaxWidth(), fontSize = LocalTextStyle.current.fontSize * .83333f, lineHeight = LocalTextStyle.current.lineHeight * .83333f,
                     textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)

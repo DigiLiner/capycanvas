@@ -82,6 +82,7 @@ import { checkScreenStatus } from "./screen-status-journey.test.mjs";
 import { checkPipelineReadiness, checkPaperTextureReadiness, checkTipResizeReadiness } from "./pipeline-readiness.test.mjs";
 import { checkPhotoEdit } from "./photo-edit-journey.test.mjs";
 import { checkCanvasSize } from "./canvas-size-journey.test.mjs";
+import { checkNewDrawing } from "./new-drawing-journey.test.mjs";
 import { checkCrop } from "./crop-journey.test.mjs";
 import { checkImageCommands } from "./image-commands-journey.test.mjs";
 import { checkMoveSelection } from "./move-selection-journey.test.mjs";
@@ -125,7 +126,7 @@ const cdp = await launchChrome(
     "--window-size=1440,1000",
   ],
   {
-    timeout: process.argv.some(x=>['--layer-properties-drawer','--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--selection-tools","--color-mixing","--contact-brushes","--layer-properties-drawer","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--paper-texture-readiness","--pipeline-readiness","--tip-resize-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending","--editor"].includes(x)) ? 180000 : 30000,
+    timeout: process.argv.some(x=>['--layer-properties-drawer','--drawing-tabs-recovery','--scopes','--tonal-controls','--gradients','--panel-controls'].includes(x))?300000:process.argv.some(x=>["--enclose-fill","--selection-tools","--color-mixing","--contact-brushes","--layer-properties-drawer","--filter-drawer","--filter-previews","--spatial-filter-windows","--lookup-transport","--local-adjustments","--drawing-tabs","--shared-workflows","--live-language-color","--live-language-proof","--live-language-delivery","--live-language-surfaces","--live-language-toolbar","--live-language-effects","--hdr","--hdr-performance","--proof","--portable-photo","--image-object-fixture","--image-rows","--image-layers","--package-view","--export-metadata","--filter-investigation","--paper-texture-readiness","--pipeline-readiness","--tip-resize-readiness","--gpu-failure-lifecycle","--callback-boundaries","--blending","--editor","--new-drawing"].includes(x)) ? 180000 : 30000,
     onEvent: (event) => {
       if (
         event.method === "Runtime.consoleAPICalled" &&
@@ -255,6 +256,7 @@ try {
     [process.argv.includes("--photo-edit"), () => checkPhotoEdit({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--clipboard"), () => checkClipboard({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--canvas-size"), () => checkCanvasSize({call,evaluate,settle}), checkErrors],
+    [process.argv.includes("--new-drawing"), () => checkNewDrawing({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--crop"), () => checkCrop({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--image-commands"), () => checkImageCommands({call,evaluate,settle}), checkErrors],
     [process.argv.includes("--merges"), () => checkMerges({call,evaluate,settle}), checkErrors],

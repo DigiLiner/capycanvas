@@ -212,6 +212,7 @@ impl<P: Parked> DocumentWindow<P> {
         json!({
             "tabs": documents.labels(&host.session.state().document_file, |p| &p.session().state().document_file, host.session.localization()),
             "selected": documents.selected(),
+            "upcoming_untitled": documents.upcoming_untitled(host.session.localization()),
             "compact": layer_ui::DocumentTabs::compact(width, documents.order().len()),
             "can_undo": documents.can_undo(),
             "can_redo": documents.can_redo(),
@@ -696,6 +697,7 @@ impl<P: Parked> DocumentWindow<P> {
         next.inherit_window_state(&host.session)?;
         if !restored {
             next.inherit_initial_drawing_tools(&host.session)?;
+            next.inherit_new_drawing_name(&host.session);
         }
         if !begin_commit() {
             return Err("Document operation cancelled".into());

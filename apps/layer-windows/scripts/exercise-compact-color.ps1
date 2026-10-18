@@ -317,7 +317,7 @@ function Pair-Journey{
     Wait-Until {!(Model).state.layer_tools.mask_editing} 'Quick Mask did not leave'
     if(((Model).state.colors|ConvertTo-Json -Depth 12 -Compress) -ne $artwork){throw 'Mask paint selection changed artwork paints'}
     Assert-Pair 'pair-artwork-restored'
-    Pair-Command 'new_document' 'File';Pair-Text 'document-width' '128';Pair-Text 'document-height' '96'
+    Pair-Command 'new_document' 'File';New-DrawingPixels 128 96
     Pair-Choice 'document-depth' '16-bit float HDR';Invoke 'Create' -Name
     Wait-Until {(Model).color_panel.hdr -and (Model).brush_ready -and !(Model).state.document_file.busy} 'Float drawing did not open' 60
     Pair-SetPaint @('1','0.5','0.25') '2'

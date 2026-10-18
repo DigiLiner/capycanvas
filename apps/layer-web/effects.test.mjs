@@ -1,4 +1,5 @@
 import {histogramJourney} from './histogram-journey.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 
@@ -372,9 +373,7 @@ export async function checkCurves({call,evaluate,settle}) {
     }
     await call('Emulation.setDeviceMetricsOverride',{width:1100,height:800,deviceScaleFactor:1,mobile:false});
     await invoke('new_document');
-    await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===layerApp.app.editor_models(innerWidth,innerHeight).document_options.discard_label)?.click()`);
-    await wait('document.querySelector("[data-document-field=depth]")');
-    await evaluate(`(()=>{const n=document.querySelector('[data-document-field=depth]');n.value='F32';n.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-document-action=create]').click()})()`);
+    await evaluate(createDrawing({depth:'F32'}));
     await wait('!layerApp.state().document_file.busy&&layerApp.app.document_color().depth==="F32"&&layerApp.app.brush_ready()');
     await send({type:'effect',action:{op:'insert',effect:'curves'}});
     let hdr=await properties();const hdrControl=hdr.controls.find(c=>c.curve);

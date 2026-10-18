@@ -61,7 +61,7 @@ import UniformTypeIdentifiers
             }, save: { _, type, done in
                 precondition(type == .capyProject); savePanels += 1; done(saved)
             }, create: { _, done in
-                done(JSON(["extent": [64, 48], "color": ["space": "Srgb", "depth": "U8"], "background": "White"]))
+                done(newSheet([64, 48], space: "Srgb", depth: "U8"))
             }, paste: { done in done(.success(clipboardItems ?? clipboard.map { bytes in
                 PhotoItem { loaded in clipboardLoads += 1; loaded(.success(.image(bytes))) }
             })) }))

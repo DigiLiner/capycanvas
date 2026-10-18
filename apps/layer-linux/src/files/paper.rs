@@ -55,7 +55,7 @@ fn import(directory: PathBuf, path: PathBuf) -> Result<(String, layer_core::colo
     layer_host::papers::import(&directory, &source, &name, &|| false)
 }
 
-pub(super) async fn run(w: &Rc<Workspace>, request: PaperRequest) -> Result<(), String> {
+pub(crate) async fn run(w: &Rc<Workspace>, request: PaperRequest) -> Result<(), String> {
     let directory = directory(w)?;
     let failed = |w: &Rc<Workspace>, error: PaperLibraryError| error.message(&w.localization());
     let worker = || "Paper library worker failed".to_string();

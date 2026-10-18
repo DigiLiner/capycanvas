@@ -129,7 +129,7 @@ import QuartzCore
         }
         try require(attached && store.failure == nil, store.failure ?? "The document owner did not attach")
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(
-            open: { _, done in done([]) }, save: { _, _, completed in completed(nil) }, create: { _, completed in completed(JSON(["extent": [256, 256], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])) }))
+            open: { _, done in done([]) }, save: { _, _, completed in completed(nil) }, create: { _, completed in completed(newSheet([256, 256], space: "Srgb", depth: "U8")) }))
         store.invoke("new_document")
         try await wait("Document reset did not complete") {
             store.state["document_file"]["epoch"].uint != epoch || store.projectFiles.error != nil

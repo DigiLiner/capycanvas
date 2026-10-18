@@ -19,7 +19,7 @@ import SwiftUI
         }
         try await wait("Metal startup") { store.snapshot["shaders_ready"].bool }
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, done in done([]) }, save: { _, _, done in done(nil) }, create: { _, done in
-            done(JSON(["extent": [128, 96], "color": ["space": "DisplayP3", "depth": "F16"], "background": "White"]))
+            done(newSheet([128, 96], space: "DisplayP3", depth: "F16"))
         }))
         try await invoke("new_document")
         try await wait("HDR document") { store.snapshot["color_panel"]["hdr"].bool && !store.projectFiles.busy }

@@ -504,15 +504,7 @@ class AndroidColorPanelTest {
     @Test fun retainedPaintIconsUseMappedRenditionAndIgnorePickerHover() {
         paintPairFixture()
         fun <T> native(block: (Long) -> T): T = runBlocking { host.withNative(block) }
-        val task = native { handle ->
-            val (id, file) = documentRequest(handle, "new_document")
-            Native.projectTask(handle, id, "null", file.getLong("epoch"), file.getLong("revision"))
-        }
-        try {
-            Native.projectOptions(task, obj("extent" to JSONArray(listOf(320, 240)), "color" to obj("space" to "Srgb", "depth" to "F16"), "background" to "White").toString())
-            Native.projectWork(task, -1, 320, 240)
-            native { Native.projectAdopt(it, task, "null") }
-        } finally { Native.projectFree(task) }
+        host.createDrawing(320, 240, depth = "F16")
         instrumentation.runOnMainSync { host.documentChanged() }
         waitFor("HDR document ready", 60_000) { view().optBoolean("hdr") && host.snapshot?.optBoolean("brush_ready") == true }
         val ids = paintIconTags.map { node(it).id }

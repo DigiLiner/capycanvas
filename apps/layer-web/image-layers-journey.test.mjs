@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {readPackage,imageIdentity} from './package-fixture.test.mjs';
 import {png} from './clone-journey.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 const openMenu='.panel-context-menu:popover-open';
 const map=([a,b,c,d,e,f],x,y)=>[a*x+c*y+e,b*x+d*y+f];
@@ -100,9 +101,7 @@ export async function checkImageLayers({call,evaluate,settle}) {
     await evaluate(`window.imageLayers={save:window.showSaveFilePicker};window.showSaveFilePicker=async o=>{const directory=await(await navigator.storage.getDirectory()).getDirectoryHandle('capy-image-layers',{create:true});return imageLayers.handle=await directory.getFileHandle(crypto.randomUUID()+'.capy',{create:true});};`);
     await wait(`(()=>{[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click();return !document.querySelector('dialog[open]');})()`);
     await invoke('new_document');
-    await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===layerApp.app.editor_models(innerWidth,innerHeight).document_options.discard_label)?.click()`);
-    await wait('document.querySelector("dialog[open] [data-document-field=width]")');
-    await evaluate(`{for(const [id,value] of [['width',640],['height',480]]){const entry=document.querySelector('dialog[open] [data-document-field='+id+']');entry.value=value;entry.dispatchEvent(new Event('input',{bubbles:true}));}document.querySelector('dialog[open] [data-document-action=create]').click();}`);
+    await evaluate(createDrawing({width:640,height:480}));
     await idle();await invoke('fit_canvas');
     const ink=(await state()).layers.find(l=>l.editing).id;
     await invoke('pen');await send(`{type:'select_brush',id:1}`);await send(`{type:'set_brush_size',value:30}`);

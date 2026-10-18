@@ -2,16 +2,13 @@
 //! Blending with its undo, and the Document Properties row, in the light and
 //! dark themes.
 use super::crop::fill_rect;
-use super::new_photo::{capture_ui, combo, finish, response};
+use super::new_drawing_review::{close_new_drawing, new_drawing_action, open_new_drawing, part};
+use super::new_photo::{capture_ui, finish, response};
 use super::photo_edit::{choose, document, labelled, shown, start};
 use super::*;
 use layer_core::BlendSpace;
 
-fn blending_row(w: &Workspace) -> adw::ComboRow {
-    find_named(w.window.upcast_ref(), "new-document-blending")
-        .and_downcast::<adw::ComboRow>()
-        .expect("the Blending row")
-}
+fn blending(w: &Workspace) -> gtk::DropDown { part(w, "new-drawing-blending") }
 
 #[test]
 #[ignore = "isolated compositor, GPU and native mouse delivery"]
@@ -48,26 +45,19 @@ fn native_blending_new_drawing_image_menu_and_properties() {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         pump(200);
         let name = format!("{theme:?}").to_lowercase();
-        w.dispatch(UiAction::Invoke { command: CommandId::NewDocument });
-        until(|| w.window.visible_dialog().is_some(), "New drawing");
-        find_named(w.window.upcast_ref(), "new-document-color")
-            .and_downcast::<adw::ExpanderRow>()
-            .unwrap()
-            .set_expanded(true);
-        assert_eq!(blending_row(&w).selected(), 0, "Perceptual by default");
-        assert!(blending_row(&w).is_sensitive());
-        assert_eq!(blending_row(&w).subtitle().as_deref(), Some("Like Photoshop and Clip Studio Paint"));
-        pump(250);
+        open_new_drawing(&w);
+        assert_eq!(blending(&w).selected(), 0, "Perceptual by default");
+        assert!(blending(&w).is_sensitive());
         capture_ui(&w, &directory, &format!("new-drawing-{name}.png"));
-        combo(&w, "new-document-depth").set_selected(2);
-        assert!(!blending_row(&w).is_sensitive(), "float documents blend in linear light");
-        assert_eq!(blending_row(&w).selected(), 1);
-        assert_eq!(blending_row(&w).subtitle().as_deref(), Some("Float documents blend in linear light"));
+        new_drawing_action(&w, NewDrawingAction::Depth { depth: layer_core::color::SampleDepth::F16 });
+        assert!(!blending(&w).is_sensitive(), "float documents blend in linear light");
+        assert_eq!(blending(&w).selected(), 1);
+        assert_eq!(blending(&w).tooltip_text().as_deref(), Some("Float documents blend in linear light"));
         pump(250);
         capture_ui(&w, &directory, &format!("new-drawing-float-{name}.png"));
-        combo(&w, "new-document-depth").set_selected(0);
-        assert_eq!(blending_row(&w).selected(), 0, "the choice returns with an 8-bit depth");
-        response(&w, "cancel");
+        new_drawing_action(&w, NewDrawingAction::Depth { depth: layer_core::color::SampleDepth::U8 });
+        assert_eq!(blending(&w).selected(), 0, "the choice returns with an 8-bit depth");
+        close_new_drawing(&w, "new-drawing-cancel");
         finish(&w);
     }
 
@@ -76,11 +66,10 @@ fn native_blending_new_drawing_image_menu_and_properties() {
     *w.open_document.borrow_mut() = Some(Rc::new(move |project, _| {
         result.replace(Some(project));
     }));
-    w.dispatch(UiAction::Invoke { command: CommandId::NewDocument });
-    until(|| w.window.visible_dialog().is_some(), "New drawing");
-    blending_row(&w).set_selected(1);
-    assert_eq!(blending_row(&w).subtitle().as_deref(), Some("Physically based"));
-    response(&w, "create");
+    open_new_drawing(&w);
+    blending(&w).set_selected(1);
+    pump(150);
+    close_new_drawing(&w, "new-drawing-create");
     finish(&w);
     let project = created.borrow_mut().take().expect("a new drawing");
     assert_eq!(project.composition().blend, BlendSpace::Linear);

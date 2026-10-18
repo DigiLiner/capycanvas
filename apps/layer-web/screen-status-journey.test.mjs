@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 const chip=`document.querySelector('#screen-status')`,popup=`document.querySelector('.screen-details')`;
 
@@ -18,11 +19,7 @@ export async function checkScreenStatus({call,evaluate,settle}) {
   await call('Emulation.setEmulatedMedia',{features:[{name:'color-gamut',value:'srgb'},{name:'dynamic-range',value:'standard'}]});
   await wait('window.layerApp&&layerApp.startupTimes.complete!==null&&layerApp.app.brush_ready()',60000);
   await wait('JSON.parse(layerApp.app.workspace_view())?.ready&&!JSON.parse(layerApp.app.workspace_view()).busy',60000);
-  await invoke('new_document');await wait('!!document.querySelector("dialog[open]")');
-  if(await evaluate('!![...document.querySelectorAll("dialog[open] button")].find(b=>b.textContent==="Discard Changes")'))await click('Discard Changes');
-  await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-  await evaluate(`(()=>{const d=document.querySelector('dialog[open]');d.querySelector('select[aria-label="Color space"]').value='DisplayP3';d.querySelector('select[aria-label="Bit depth"]').value='U8';})()`);
-  await click('Create');
+  await invoke('new_document');await evaluate(createDrawing({space:'DisplayP3',depth:'U8'}));
   await wait('!layerApp.state().document_file.busy&&layerApp.app.document_color().space==="DisplayP3"&&layerApp.app.brush_ready()',60000);
   await wait(`layerApp.state().screen.assessment.basis==='System'`);
   await fill([0,1,0,1]);

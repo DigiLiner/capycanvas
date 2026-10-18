@@ -154,21 +154,12 @@ fn d3d12_retained_drawing_tabs_spill_history_save_close_and_cancel() {
     assert_eq!(service.window.documents.order(), [1]);
     assert_eq!(host.session.engine().checkpoint(), first);
     command(&mut host, CommandId::NewDocument);
+    order_new_drawing(&mut host, [40, 30], "");
     let (id, epoch, revision) = request(&host);
     service
         .dispatch(
             &mut host,
-            DocumentAction::Create {
-                id,
-                epoch,
-                revision,
-                options: layer_ui::NewDocumentOptions {
-                    extent: [40, 30],
-                    ..Default::default()
-                },
-                preset: String::new(),
-                defaults: false,
-            },
+            DocumentAction::Create { id, epoch, revision },
         )
         .unwrap();
     settle(&mut service, &mut host);

@@ -132,7 +132,7 @@ import UniformTypeIdentifiers
                 deliveries += 1
                 deliveredWhileAttached = deliveredWhileAttached || deliveryWindow?.attachedSheet != nil
                 chosenType = type; done(destination)
-            }, create: { _,done in done(JSON(["extent": [64,48], "color": ["space": "DisplayP3", "depth": "U16"], "background": "Transparent"])) },
+            }, create: { _,done in done(newSheet([64, 48], space: "DisplayP3", depth: "U16", transparent: true)) },
                 export: platform == 0 ? { url,done in
                     deliveries += 1
                     deliveredWhileAttached = deliveredWhileAttached || deliveryWindow?.attachedSheet != nil

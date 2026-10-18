@@ -277,7 +277,7 @@ mod tests {
             let published = read(&mut host);
             assert!(published.get("state").is_some());
             assert!(published.get("model_update").is_none());
-            assert_ne!(published["document_options"]["new_title"], initial["document_options"]["new_title"]);
+            assert_ne!(published["document_options"]["unsaved_description"], initial["document_options"]["unsaved_description"]);
             assert_eq!(host.localization_generation(), generation);
             assert_eq!(host.bootstrap_view().active_tag, language.tag());
             assert_eq!(host.query(json!({"type": "catalog"})).unwrap(), json!(layer_ui::ui_catalog_localized(&localization)));

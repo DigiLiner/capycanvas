@@ -478,7 +478,7 @@ function Navigation-Drawings {
  Navigation-Command 'pen';Wait-Until {Navigation-Selected 'pen'} 'Pen did not select before drawing cycle'
  $source=(Model).windows_tabs.selected;$sourceDrawing=Navigation-PaintState;$count=@((Model).windows_tabs.tabs).Count
  & (Join-Path $PSScriptRoot 'open-application-menu.ps1') -Root $root -Name 'File'
- Invoke-Id 'new_document';Invoke 'Create' -Name -Within (Control 'document-dialog')
+ Invoke-Id 'new_document';New-DrawingPixels 2048 1536;Invoke 'new-drawing-create'
  Wait-Until {@((Model).windows_tabs.tabs).Count -eq $count+1 -and (Model).windows_tabs.selected -ne $source -and (Model).brush_ready -and !(Find 'canvas-status' -Visible)} 'Navigation second drawing did not become ready' 90
  $peer=(Model).windows_tabs.selected;$peerDrawing=Navigation-PaintState;$tabIds=@((Model).windows_tabs.tabs.id)|ConvertTo-Json -Compress
  foreach($pair in @(@{mods=@(0x11,0x10);key=0x09;target=$source},@{mods=@(0x11);key=0x22;target=$peer},@{mods=@(0x11);key=0x21;target=$source},@{mods=@(0x11);key=0x09;target=$peer})){

@@ -259,31 +259,12 @@ pub const MAX_NEW_DOCUMENT_DIMENSION: u32 = 8192;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct NewDocumentSpec {
-    pub title: std::sync::Arc<str>,
-    pub labels: [std::sync::Arc<str>; 2],
-    pub extent: [u32; 2],
-    pub numeric: NumericControl,
-    pub resolution_numeric: NumericControl,
-    pub minimum: u32,
-    pub maximum: u32,
-    pub accept: std::sync::Arc<str>,
     pub cancel: std::sync::Arc<str>,
     pub discard: std::sync::Arc<str>,
     pub unsaved_description: std::sync::Arc<str>,
 }
 pub fn new_document_spec(localization: &Localizer) -> NewDocumentSpec {
     NewDocumentSpec {
-        title: localization.text(MessageId::DOCUMENTS_NEW),
-        labels: [localization.text(MessageId::DOCUMENTS_WIDTH), localization.text(MessageId::DOCUMENTS_HEIGHT)],
-        extent: DEFAULT_DOCUMENT_EXTENT,
-        numeric: NumericControl {
-            kind: NumericKind::Number,
-            ..NumericControl::number(1., f64::from(MAX_NEW_DOCUMENT_DIMENSION), 1., 0)
-        },
-        resolution_numeric: NumericControl::number(1., f64::from(crate::MAX_NEW_DOCUMENT_RESOLUTION), 1., 0),
-        minimum: 1,
-        maximum: MAX_NEW_DOCUMENT_DIMENSION,
-        accept: localization.text(MessageId::DOCUMENTS_CREATE),
         cancel: localization.text(MessageId::COMMON_CANCEL),
         discard: localization.text(MessageId::DOCUMENTS_DISCARD),
         unsaved_description: localization.text(MessageId::DOCUMENTS_UNSAVED_DESCRIPTION),
@@ -446,6 +427,13 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         session.refresh_document();
         Ok(session)
+    }
+
+    pub fn name_new_drawing(&mut self, name: &str) {
+        let name = name.trim();
+        if self.state.document_file.location.is_some() || name.is_empty() { return; }
+        self.state.document_file.unsaved_name = Some(name.into());
+        self.refresh_document();
     }
 
     /// A prepared, unpublished session receives its destination before joining
@@ -670,6 +658,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let export = matches!(request, DocumentRequest::Export { .. });
         let lookup = matches!(request, DocumentRequest::ImportLookup { .. });
         let cutting = matches!(request, DocumentRequest::Copy { cut: true, .. });
+        let creating = matches!(request, DocumentRequest::New);
         if save && result == Ok(true) && self.files.pending.as_ref().unwrap().1.is_none() {
             return Err(FileFailure::NoSavedSnapshot.message(self.localization()));
         }
@@ -692,6 +681,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.files.last_export = Some(last);
         }
         let cut = self.files.cut.take().filter(|_| cutting && success);
+        if creating { self.close_new_drawing(); }
         if let Err(diagnostic) = result {
             if lookup {
                 eprintln!("Lookup import: {diagnostic}");

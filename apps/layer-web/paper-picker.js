@@ -33,7 +33,7 @@ export function paperThumbnail({app, element, icon, size}) {
     } else if (!shown || shown.found) node.replaceChildren(icon('paper'));
     shown = {id: id ?? null, found: !!source};
   };
-  return {node, show};
+  return {node, show, none() { node.replaceChildren(icon('none')); shown = null; }};
 }
 
 const paperId = tile => tile?.id ?? null;

@@ -417,6 +417,14 @@ final class NativeOwner: @unchecked Sendable {
             completion(NativePaperTask(pointer),nil)
         }
     }
+    func paperImport(directory: URL, completion: @escaping @Sendable (NativePaperTask?, String?) -> Void) {
+        queue.async { [self] in
+            guard let pointer = directory.path.withCString({ capy_apple_paper_import(handle, $0) }) else {
+                completion(nil, capy_apple_error(handle).map(String.init(cString:)) ?? documentDeliveryCopy["change_in_progress"].string); return
+            }
+            completion(NativePaperTask(pointer), nil)
+        }
+    }
     func runPaperTask(_ job: NativePaperTask, url: URL?, completion: @escaping @Sendable (String?) -> Void) {
         NativeProjectTask.io.async { [self] in
             job.work(url)

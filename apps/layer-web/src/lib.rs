@@ -622,6 +622,7 @@ impl WebApp {
             canvas_bar,
             layers,
             layer_tools,
+            new_drawing,
             adjustments,
             filter_picker,
             filter_categories,
@@ -678,6 +679,7 @@ impl WebApp {
         field!(canvas_bar);
         field!(layers);
         field!(layer_tools);
+        field!(new_drawing);
         field!(adjustments);
         field!(filter_picker);
         field!(filter_categories);

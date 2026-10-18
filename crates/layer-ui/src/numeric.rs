@@ -178,13 +178,16 @@ pub struct NumericControl {
     /// Optional words for exact slider endpoints. Editing still uses numbers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint_labels: Option<[String; 2]>,
+    /// Increment a drag without Shift lands on when typed values keep finer precision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scrub_snap: Option<f64>,
 }
 impl NumericControl {
     pub fn same_rules(&self, other: &Self) -> bool {
         (self.kind, &self.mapping, self.min, self.max, self.soft_min, self.soft_max, self.step, self.log_offset)
             == (other.kind, &other.mapping, other.min, other.max, other.soft_min, other.soft_max, other.step, other.log_offset)
-            && (self.resolution, self.slider_snap, self.digits, self.scale, &self.unit, self.default_value)
-                == (other.resolution, other.slider_snap, other.digits, other.scale, &other.unit, other.default_value)
+            && (self.resolution, self.slider_snap, self.digits, self.scale, &self.unit, self.default_value, self.scrub_snap)
+                == (other.resolution, other.slider_snap, other.digits, other.scale, &other.unit, other.default_value, other.scrub_snap)
     }
 
     pub fn number(min: f64, max: f64, step: f64, digits: u32) -> Self {
@@ -208,6 +211,7 @@ impl NumericControl {
             unit: String::new(),
             default_value: None,
             endpoint_labels: None,
+            scrub_snap: None,
         }
     }
     pub fn unit(mut self, unit: &str) -> Self {
@@ -435,7 +439,8 @@ impl NumericControl {
         // Formatting an externally supplied value must never change it.
         if same_position { resolved = value; }
         else if !formatting && !unmoved_scrub {
-            let resolution = if slider || coarse_scrub { self.slider_resolution(resolved) }
+            let resolution = if coarse_scrub && let Some(snap) = self.scrub_snap { snap.max(self.fine_resolution()) }
+                else if slider || coarse_scrub { self.slider_resolution(resolved) }
                 else if fine_scrub { self.scrub_resolution(resolved) } else { self.fine_resolution() };
             resolved = self.quantized(resolved, resolution);
         }
@@ -455,7 +460,7 @@ impl NumericControl {
         } else {
             format!("{edit} {}", self.unit)
         };
-        let scrub_text = if self.unit == "px" && shown.abs() >= FRACTIONAL_PIXEL_SCRUB_LIMIT && shown.fract() == 0. {
+        let scrub_text = if self.scrub_snap.is_some() || self.unit == "px" && shown.abs() >= FRACTIONAL_PIXEL_SCRUB_LIMIT && shown.fract() == 0. {
             edit.clone()
         } else { fixed };
         let scrub_text = if self.unit.is_empty() { scrub_text } else { format!("{scrub_text} {}", self.unit) };

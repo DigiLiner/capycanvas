@@ -1022,6 +1022,7 @@ impl Documents {
             }
         };
         replace_initial&=startup.as_ref().is_some_and(|stamp|previous.session.can_replace_startup_session(stamp));
+        next.session.inherit_new_drawing_name(&previous.session);
         let error = next.session.inherit_window_state(&previous.session).err()
             .or_else(|| next.session.inherit_initial_drawing_tools(&previous.session).err());
         let recovery = if let Some((restored,recovery,observed))=restored {

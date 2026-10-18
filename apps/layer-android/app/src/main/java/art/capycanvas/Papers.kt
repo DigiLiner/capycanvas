@@ -32,9 +32,9 @@ import org.json.JSONObject
     }
 }
 
-private suspend fun runPaper(host: CanvasHost, id: Int, uri: Uri?) {
+private suspend fun runPaper(host: CanvasHost, id: Int, uri: Uri?, capture: (Long) -> Long = { Native.paperTask(it, id, host.storage.papers.path) }) {
     val failed = { e: Exception -> e.message ?: host.bootstrap!!.getString("action_failed") }
-    val task = try { host.withNative { Native.paperTask(it, id, host.storage.papers.path) } }
+    val task = try { host.withNative(capture) }
         catch (e: Exception) { if (id >= 0) host.dispatch(obj("type" to "complete_request", "id" to id, "error" to failed(e))); return }
     try {
         withContext(Dispatchers.IO) {
@@ -53,3 +53,6 @@ private suspend fun runPaper(host: CanvasHost, id: Int, uri: Uri?) {
         withContext(NonCancellable + Dispatchers.IO) { Native.paperFree(task) }
     }
 }
+
+/** Adds an image to the paper library without changing the drawing. */
+internal suspend fun importLibraryPaper(host: CanvasHost, uri: Uri) = runPaper(host, -1, uri) { Native.paperImportTask(it, host.storage.papers.path) }

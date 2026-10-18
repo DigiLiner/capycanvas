@@ -249,8 +249,8 @@ mod tests {
         assert_eq!((numeric.kind, numeric.min, numeric.max), (NumericKind::Dial, 0., 360.));
         assert_eq!(view.controls[4].value, EffectValue::Number(225.));
         let PropertyKind::Choice { options } = &view.controls[1].kind else { panic!("texture is a choice") };
-        assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["Hot press", "Cold press", "Rough", "Drawing paper", "Bristol", "Ingres",
-            "Pastel paper", "Sanded pastel", "Washi", "Unryu", "Handmade paper", "Canvas", "Linen"]);
+        assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["Hot press", "Cold press", "Rough", "Drawing", "Bristol", "Ingres",
+            "Pastel", "Sanded", "Washi", "Unryu", "Handmade", "Canvas", "Linen"]);
         assert_eq!(view.controls[1].value, EffectValue::Choice(3));
         assert!(!view.controls[1].modified);
         let EffectValue::Number(scale) = view.controls[2].value else { panic!("scale is a number") };

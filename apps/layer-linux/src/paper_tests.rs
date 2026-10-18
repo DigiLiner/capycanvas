@@ -87,9 +87,9 @@ fn native_paper_picker_relief_and_scale() {
     save_snapshot(&w, 200, || path("texture-dialog"));
     assert_eq!(dialog.title(), "Choose Texture");
     assert_eq!(grid.observe_children().n_items(), 13);
-    assert_eq!(pending(&grid), Some(3), "Drawing paper is selected");
+    assert_eq!(pending(&grid), Some(3), "Drawing is selected");
     let size = content_size(&dialog);
-    assert_eq!(size, (720, 455), "Choose Texture matches Edit Color");
+    assert_eq!(size, (720, 560), "Choose Texture is Edit Color's width and shows three full rows");
     let tile = grid.child_at_index(0).unwrap();
     let preview = named::<gtk::Image>(tile.upcast_ref(), "texture-preview");
     assert_eq!((preview.width(), preview.height()), (96, 96), "previews show at their own size");
@@ -203,7 +203,7 @@ fn native_paper_picker_relief_and_scale() {
     assert_eq!(texture(&w), layer_core::paper::default_texture());
 
     let row = || state(&w).layers.into_iter().find(|row| row.id == paper).unwrap();
-    assert_eq!(row().paper.unwrap().label.as_ref(), "Drawing paper");
+    assert_eq!(row().paper.unwrap().label.as_ref(), "Drawing");
     let thumbnails = || {
         let row: gtk::Box = named(w.window.upcast_ref(), &format!("art-layer-{paper}"));
         let buttons: Vec<gtk::Button> = descendants::<gtk::Button>(row.upcast_ref()).into_iter().filter(|b| b.has_css_class("layer-thumbnail") && b.is_visible()).collect();

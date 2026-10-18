@@ -22,8 +22,9 @@ function Same-Camera($a,$b,[double]$Pixels=.1){
 # pixel for OS contact coordinates and accumulated float camera arithmetic.
 function Matches-Gesture($actual,$expected){
  if(!$actual -or !$expected){return $false}
- $extent=(Model).document_options.extent
- if(!$extent){return $false}
+ $tab=@((Model).state.tabs|Where-Object active)[0]
+ if(!$tab){return $false}
+ $extent=@($tab.width,$tab.height)
  foreach($x in @(0,$extent[0])){foreach($y in @(0,$extent[1])){
   $ax=$actual.translation[0]+$actual.zoom*([Math]::Cos($actual.rotation)*$x-[Math]::Sin($actual.rotation)*$y)
   $ay=$actual.translation[1]+$actual.zoom*([Math]::Sin($actual.rotation)*$x+[Math]::Cos($actual.rotation)*$y)

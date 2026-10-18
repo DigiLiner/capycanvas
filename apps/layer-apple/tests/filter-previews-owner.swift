@@ -26,7 +26,7 @@ import SwiftUI
             let saved = root.appendingPathComponent("Preview Check.capy")
             store.projectFiles = ProjectFiles(store: store, dialogs: .init(
                 open: { _, done in done([saved]) }, save: { _, _, done in done(saved) }, create: { _, done in
-                    done(JSON(["extent": [512, 512], "color": ["space": "DisplayP3", "depth": "U16"], "background": "White"]))
+                    done(newSheet([512, 512], space: "DisplayP3", depth: "U16"))
                 }))
             try await invoke("new_document"); try await idle()
             try await invoke("select_all")

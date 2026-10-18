@@ -44,6 +44,9 @@ impl CanvasRenderer for AttachedRenderer {
     fn max_document_dimension(&self) -> u32 {
         self.0.as_deref().map_or(u32::MAX, CanvasRenderer::max_document_dimension)
     }
+    fn memory_headroom(&self) -> Option<u64> {
+        self.0.as_deref().and_then(CanvasRenderer::memory_headroom)
+    }
     fn paint_ready(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.0.as_ref().is_none_or(|gpu| gpu.paint_ready(document, brush, transform))
     }

@@ -191,12 +191,9 @@ impl WebApp {
         &self,
         id: u32,
         bytes: Option<js_sys::Uint8Array>,
-        width: u32,
-        height: u32,
         epoch: u64,
         revision: u64,
         source_name: Option<String>,
-        options: JsValue,
         interpret: Option<js_sys::Function>,
         cancelled: Option<js_sys::Function>,
     ) -> Result<js_sys::Promise, JsValue> {
@@ -250,16 +247,13 @@ impl WebApp {
         let brush = self.session.engine().configured_brush().clone();
         let photo_policy = self.session.state().settings.photo_open;
         let admission = self.documents.admission(&self.session.retained_document_tiles());
-        let new_paper = self.session.new_drawing_paper();
-        let new_options: layer_ui::NewDocumentOptions =
-            if options.is_undefined() || options.is_null() {
-                layer_ui::NewDocumentOptions {
-                    extent: [width, height],
-                    ..self.session.state().settings.new_document.defaults
-                }
-            } else {
-                serde_wasm_bindgen::from_value(options).map_err(js)?
-            };
+        let order = match &request {
+            DocumentRequest::New => Some((
+                self.session.new_drawing_order().cloned().ok_or_else(|| js("Choose New drawing first"))?,
+                self.session.paper_sources(),
+            )),
+            _ => None,
+        };
         Ok(future_to_promise(async move {
             let check_cancelled=||->Result<(),JsValue>{
                 if let Some(check)=&cancelled {if check.call0(&JsValue::NULL)?.as_bool()==Some(true){let error=js_sys::Error::new("Opening cancelled");error.set_name("AbortError");return Err(error.into());}}
@@ -276,6 +270,7 @@ impl WebApp {
                 ..Default::default()
             };
             let source_name = source_name.unwrap_or_default();
+            let mut warning = None;
             let imported = match bytes {
                 Some(bytes) => {
                     artwork_transfer::open(
@@ -290,7 +285,13 @@ impl WebApp {
                     )
                     .await?
                 }
-                None => artwork_transfer::Opened::Editable {document:layer_ui::ImportedDocument::new(new_options.project_on(new_paper,&localization).map_err(js)?,layer_ui::ImportSource::Master),fallback:None},
+                None => {
+                    let (order, retained) = order.ok_or_else(|| js("Choose New drawing first"))?;
+                    let (texture, missing) = papers::texture(&order.paper, &retained, &localization).await;
+                    let document = order.project(texture, &localization).map_err(js)?;
+                    warning = missing;
+                    artwork_transfer::Opened::Editable {document:layer_ui::ImportedDocument::new(document,layer_ui::ImportSource::Master),fallback:None}
+                }
             };
             check_cancelled()?;
             let (mut imported,fallback)=match imported {
@@ -334,7 +335,7 @@ impl WebApp {
             }
             admission.admit(&project).map_err(|reason|js(reason.message(&localization)))?;
             let prepared=prepare_session(project,adapter,device,queue,&brush,viewport,localization,cancelled.as_ref()).await;
-            let candidate=match prepared {
+            let mut candidate=match prepared {
                 Ok(candidate)=>candidate,
                 Err(error)=>{
                     check_cancelled()?;
@@ -346,6 +347,7 @@ impl WebApp {
                     return Err(error);
                 }
             };
+            if let Some(warning) = warning { candidate.notify(warning); }
             Ok(WebProject {
                 session: Some(Box::new(candidate)),
                 request: id,
@@ -416,6 +418,7 @@ impl WebApp {
         candidate.initialize_document_location(location).map_err(js)?;
         candidate.set_document_replacement(false);
         candidate.inherit_window_state(&self.session).map_err(js)?;
+        candidate.inherit_new_drawing_name(&self.session);
         candidate.inherit_initial_drawing_tools(&self.session).map_err(js)?;
         let active = self.session.retained_document_tiles();
         self.documents.admit(&active, candidate.engine().document()).map_err(|reason| js(reason.message(self.session.localization())))?;

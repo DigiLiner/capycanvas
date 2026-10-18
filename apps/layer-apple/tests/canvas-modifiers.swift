@@ -224,6 +224,8 @@ private final class NativeRotation: UIRotationGestureRecognizer {
         let native = store.native!, png = root.appendingPathComponent("artwork.png")
         store.projectFiles = ProjectFiles(store: store, dialogs: .init(
             open: { _, done in done([]) }, save: { _, _, done in done(nil) },
+            create: { _, done in done([["op": "unit", "unit": "px"], ["op": "width", "value": 128], ["op": "height", "value": 128], ["op": "paper_color"],
+                ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]], ["op": "use_paper_color"]]) },
             export: { staging, done in
                 do { try FileManager.default.copyItem(at: staging, to: png); done(png) }
                 catch { store.failure = error.localizedDescription; done(nil) }
@@ -257,22 +259,10 @@ private final class NativeRotation: UIRotationGestureRecognizer {
             try await action(["type":"layer", "action":["op":"tool", "tool":value]])
         }
         func newDocument() async throws {
-            let task = try await withCheckedThrowingContinuation { (done: CheckedContinuation<NativeProjectTask, Error>) in
-                native.projectTask(kind: .open) { task, error in
-                    if let task { done.resume(returning: task) }
-                    else { done.resume(throwing: HostFailure(message: error ?? "Prepare drawing")) }
-                }
-            }
-            try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
-                NativeProjectTask.io.async {
-                    do { try task.read(from: nil, options: JSON(["extent": [128, 128], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])); done.resume() }
-                    catch { done.resume(throwing: error) }
-                }
-            }
-            let error = await withCheckedContinuation { done in
-                native.finishProject(task, opening: true, title: "Canvas input check", url: nil) { done.resume(returning: $0) }
-            }
-            try require(error == nil, error ?? "")
+            let epoch = store.state["document_file"]["epoch"].uint
+            try await invoke("new_document")
+            try await wait("Create replacement drawing") { store.state["document_file"]["epoch"].uint != epoch && !store.projectFiles.busy }
+            try require(store.projectFiles.error == nil, store.projectFiles.error ?? "")
             try await invoke("fit_canvas")
             try await wait("Prepare replacement drawing") { store.snapshot["brush_ready"].bool }
         }

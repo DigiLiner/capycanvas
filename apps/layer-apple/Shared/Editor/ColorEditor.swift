@@ -56,12 +56,10 @@ struct ColorEditor: View {
     @Environment(\.capyInterfaceLanguage) private var interfaceLanguage
     @Environment(\.capyNativeCopy) private var nativeCopy
     @Environment(\.editorPopupStore) private var store
-    @Environment(\.displayScale) private var displayScale
     @ObservedObject var session: ColorEditorSession
     @State private var drafts: [String: String] = [:]
     @State private var sheetOpen = false
     @State private var search = ""
-    @State private var copied: String?
     @FocusState private var focused: String?
     private var view: JSON { session.view }
     private var copy: JSON { nativeCopy["color"] }
@@ -72,18 +70,14 @@ struct ColorEditor: View {
                 EditorScrollView {
                     VStack(spacing: 16) {
                         EditorDialogTitle(text: copy["edit"].string)
-                        ColorEditorLayout {
-                            head
-                            VStack(spacing: 12) { ColorEditorWheel(session: session, side: 236); shapes }
-                            VStack(alignment: .leading, spacing: 18) { rows; status }
-                        }
+                        ColorEditorForm(session: session, drafts: $drafts, focus: $focused)
                     }.padding(20).frame(maxWidth: .infinity).disabled(sheetOpen)
                 }
                 if sheetOpen { swatchSheet.transition(.move(edge: .bottom)) }
             }.clipped()
             footer
         }.onChange(of: interfaceLanguage) { _, _ in session.relocalize(); session.refreshSwatches(sheetOpen: sheetOpen) }
-            .onChange(of: focused) { previous, _ in if let previous { commit(previous) } }
+            .onChange(of: focused) { previous, _ in if let previous { ColorEditorForm.commit(previous, drafts: $drafts, session: session) } }
             #if os(macOS)
             .onPasteCommand(of: [.utf8PlainText]) { providers in
                 _ = providers.first?.loadObject(ofClass: NSString.self) { text, _ in
@@ -97,113 +91,6 @@ struct ColorEditor: View {
                 copy: { Self.copy(view["hex"].string) },
                 paste: { if let text = UIPasteboard.general.string { session.act(["op": "text", "text": text]) } }).frame(width: 0, height: 0))
             #endif
-    }
-    private var shapes: some View {
-        HStack(spacing: 2) {
-            ForEach(view["shapes"].array.indices, id: \.self) { index in
-                let choice = view["shapes"][index]
-                Button { session.act(["op": "wheel", "action": ["op": "shape", "shape": choice["shape"].raw]]) } label: {
-                    HStack(spacing: 4) { SharedIcon(name: "color-" + choice["shape"].string, size: 16); Text(choice["label"].string) }
-                        .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
-                        .background { if choice["selected"].bool { Capsule().fill(palette.accent.opacity(0.22)) } }
-                }.buttonStyle(.plain).help(choice["name"].string).accessibilityLabel(choice["name"].string)
-                    .accessibilityAddTraits(choice["selected"].bool ? .isSelected : [])
-                    .accessibilityIdentifier("color-editor-shape-" + choice["shape"].string)
-            }
-        }.padding(2).background(Capsule().fill(palette["input"])).fixedSize()
-    }
-    private var head: some View {
-        HStack(alignment: .center, spacing: 12) {
-            HStack(spacing: 0) {
-                pairCell(session.viewing["hdr"].bool ? view["current_value"] : JSON(), rgba: view["current"]["rgba"])
-                    .contentShape(Rectangle()).onTapGesture { session.act(["op": "revert"]) }
-                    .accessibilityLabel(copy["current"].string).accessibilityAddTraits(.isButton).accessibilityIdentifier("color-current")
-                pairCell(session.viewing["hdr"].bool ? view["value"] : JSON(), rgba: view["new"]["rgba"])
-                    .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-new")
-            }.clipShape(SquircleShape.control)
-                .overlay(alignment: .bottom) {
-                    HStack(spacing: 0) {
-                        Text(copy["current"].string).frame(width: 54)
-                        Text(copy["new"].string).frame(width: 54)
-                    }.font(.caption).foregroundStyle(.secondary).lineLimit(1).offset(y: 18)
-                }
-            Button { session.startPicking(touchOffset: 44 * displayScale) } label: {
-                SharedIcon(name: "eyedropper").frame(width: 48, height: 48).contentShape(Rectangle())
-            }.buttonStyle(EditorControlButtonStyle()).help(copy["pick_canvas"].string)
-                .accessibilityLabel(copy["pick_canvas"].string).accessibilityIdentifier("color-pick")
-            VStack(alignment: .leading, spacing: 2) {
-                if !view["hex_note"].isNull {
-                    Text(view["hex_note"]["text"].string).font(.caption).foregroundStyle(.secondary).help(view["hex_note"]["tip"].string)
-                }
-                HStack(spacing: 4) {
-                    ColorValueField(name: "hex", shown: JSON(["text": view["hex"].raw, "edit": view["hex"].raw, "name": copy["hex"].raw]),
-                        width: 120, large: true, draft: draft("hex"), focus: $focused, session: session)
-                    copyButton("hex", text: view["hex"].string)
-                }
-            }
-        }.padding(.bottom, 18)
-    }
-    private func pairCell(_ hdr: JSON, rgba: JSON) -> some View {
-        Group { if hdr.isNull { ColorSwatch(rgba: rgba) } else { HDRColorSwatch(color: hdr, viewing: session.viewing) } }.frame(width: 54, height: 48)
-    }
-    private var rows: some View {
-        Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 8) {
-            ForEach(0..<3, id: \.self) { row in
-                let shown = view["rows"][row]
-                GridRow {
-                    HStack(spacing: 6) {
-                        formatMenu(row, shown: shown)
-                        if !shown["space"].isNull {
-                            Text(shown["space"].string).font(.caption).lineLimit(1).fixedSize().padding(.horizontal, 5)
-                                .background(palette["text"].opacity(0.08), in: SquircleShape.control)
-                        }
-                    }.gridColumnAlignment(.leading)
-                    ForEach(0..<3, id: \.self) { index in
-                        ColorValueField(name: "\(row)-\(index)", shown: shown["values"][index], width: 64,
-                            scrub: ["kind": "value", "row": row, "index": index], draft: draft("\(row)-\(index)"), focus: $focused, session: session)
-                    }
-                    copyButton("\(row)", text: shown["copy"].string)
-                }
-            }
-            if !view["intensity"].isNull {
-                GridRow {
-                    Text(copy["intensity_ev"].string).gridColumnAlignment(.leading)
-                    ColorValueField(name: "ev", shown: view["intensity"], width: 80, scrub: ["kind": "intensity"],
-                        draft: draft("ev"), focus: $focused, session: session).gridCellColumns(3)
-                    Color.clear.frame(width: 1, height: 1)
-                }
-            }
-        }
-    }
-    private func formatMenu(_ row: Int, shown: JSON) -> some View {
-        let forms = shown["forms"].array, current = forms.first { $0["form"].string == shown["form"].string }?["label"].string ?? ""
-        return EditorMenuButton(menu: { [forms, shown] in
-            AppleContextMenu(JSON(["sections": [forms.map { form -> [String: Any] in
-                ["label": form["label"].raw, "enabled": true, "selected": form["form"].string == shown["form"].string,
-                 "identifier": "color-format-\(row)-\(form["form"].string)", "action": ["form": form["form"].raw]]
-            }]])) { session.act(["op": "form", "row": row, "form": $0["form"].raw]) }
-        }, identifier: "color-format-menu-\(row)") {
-            HStack(spacing: 2) {
-                ZStack(alignment: .leading) {
-                    ForEach(forms.indices, id: \.self) { Text(forms[$0]["label"].string).hidden() }
-                    Text(current)
-                }
-                SharedIcon(name: "chevron-down", size: 12)
-            }.fontWeight(.medium).fixedSize().padding(.horizontal, 6).frame(height: 28).contentShape(Rectangle())
-        }.buttonStyle(.plain).help(copy["format"].string).accessibilityLabel(shown["label"].string)
-            .accessibilityValue(current).accessibilityIdentifier("color-format-\(row)")
-    }
-    private func copyButton(_ name: String, text: String) -> some View {
-        Button {
-            ColorEditor.copy(text); copied = name
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if copied == name { copied = nil } }
-        } label: { SharedIcon(name: copied == name ? "check" : "copy").frame(width: 28, height: 28).contentShape(Rectangle()) }
-            .buttonStyle(EditorControlButtonStyle()).help(copied == name ? copy["copied"].string : copy["copy"].string)
-            .accessibilityLabel(copied == name ? copy["copied"].string : copy["copy"].string).accessibilityIdentifier("color-copy-\(name)")
-    }
-    @ViewBuilder private var status: some View {
-        Text(session.error ?? " ").font(.caption).foregroundStyle(.red).opacity(session.error == nil ? 0 : 1)
-            .frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("color-editor-error")
     }
     private var footer: some View {
         EditorDialogFooter(label: copy["use_color"].string, identifiers: (cancel: "color-cancel", apply: "color-use"),
@@ -277,8 +164,165 @@ struct ColorEditor: View {
         if open { search = session.search; session.refreshSwatches(sheetOpen: true) }
         withAnimation(.easeOut(duration: 0.22)) { sheetOpen = open }
     }
+    private func commitFocused() { if let focused { ColorEditorForm.commit(focused, drafts: $drafts, session: session) } }
+    static func copy(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+        #else
+        UIPasteboard.general.string = text
+        #endif
+    }
+}
+
+struct ColorEditorForm: View {
+    @Environment(\.capyNativeCopy) private var nativeCopy
+    @Environment(\.editorPopupStore) private var store
+    @Environment(\.displayScale) private var displayScale
+    @ObservedObject var session: ColorEditorSession
+    @Binding var drafts: [String: String]
+    let focus: FocusState<String?>.Binding
+    var tools = true
+    var transparent: String?
+    var accessory: AnyView?
+    var below: AnyView?
+    @State private var copied: String?
+    private var view: JSON { session.view }
+    private var copy: JSON { nativeCopy["color"] }
+    private var palette: EditorPalette { EditorPalette(source: store?.state["palette"] ?? JSON()) }
+    private var shade: Double { transparent == nil ? 1 : 0.4 }
+    var body: some View {
+        ColorEditorLayout {
+            head
+            VStack(spacing: 12) { ColorEditorWheel(session: session, side: 236); shapes }.opacity(shade)
+            VStack(alignment: .leading, spacing: 18) {
+                rows.opacity(shade)
+                if let below { below.opacity(shade) }
+                status
+            }
+        }
+    }
+    private var shapes: some View {
+        HStack(spacing: 2) {
+            ForEach(view["shapes"].array.indices, id: \.self) { index in
+                let choice = view["shapes"][index]
+                Button { session.act(["op": "wheel", "action": ["op": "shape", "shape": choice["shape"].raw]]) } label: {
+                    HStack(spacing: 4) { SharedIcon(name: "color-" + choice["shape"].string, size: 16); Text(choice["label"].string) }
+                        .padding(.horizontal, 10).frame(height: 28).contentShape(Rectangle())
+                        .background { if choice["selected"].bool { Capsule().fill(palette.accent.opacity(0.22)) } }
+                }.buttonStyle(.plain).help(choice["name"].string).accessibilityLabel(choice["name"].string)
+                    .accessibilityAddTraits(choice["selected"].bool ? .isSelected : [])
+                    .accessibilityIdentifier("color-editor-shape-" + choice["shape"].string)
+            }
+        }.padding(2).background(Capsule().fill(palette["input"])).fixedSize()
+    }
+    private var head: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if tools {
+                HStack(spacing: 0) {
+                    pairCell(session.viewing["hdr"].bool ? view["current_value"] : JSON(), rgba: view["current"]["rgba"])
+                        .contentShape(Rectangle()).onTapGesture { session.act(["op": "revert"]) }
+                        .accessibilityLabel(copy["current"].string).accessibilityAddTraits(.isButton).accessibilityIdentifier("color-current")
+                    pairCell(session.viewing["hdr"].bool ? view["value"] : JSON(), rgba: view["new"]["rgba"])
+                        .accessibilityLabel(copy["new"].string).accessibilityIdentifier("color-new")
+                }.clipShape(SquircleShape.control)
+                    .overlay(alignment: .bottom) {
+                        HStack(spacing: 0) {
+                            Text(copy["current"].string).frame(width: 54)
+                            Text(copy["new"].string).frame(width: 54)
+                        }.font(.caption).foregroundStyle(.secondary).lineLimit(1).offset(y: 18)
+                    }
+                Button { session.startPicking(touchOffset: 44 * displayScale) } label: {
+                    SharedIcon(name: "eyedropper").frame(width: 48, height: 48).contentShape(Rectangle())
+                }.buttonStyle(EditorControlButtonStyle()).help(copy["pick_canvas"].string)
+                    .accessibilityLabel(copy["pick_canvas"].string).accessibilityIdentifier("color-pick")
+            } else {
+                pairCell(JSON(), rgba: transparent == nil ? view["new"]["rgba"] : JSON([0, 0, 0, 0])).clipShape(SquircleShape.control)
+                    .accessibilityElement().accessibilityLabel(copy["new"].string)
+                    .accessibilityValue(transparent ?? view["hex"].string).accessibilityIdentifier("color-new")
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                if !view["hex_note"].isNull {
+                    Text(view["hex_note"]["text"].string).font(.caption).foregroundStyle(.secondary).help(view["hex_note"]["tip"].string)
+                }
+                HStack(spacing: 4) {
+                    if let transparent {
+                        Text(transparent).font(.title2.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
+                            .frame(width: 120, height: 34, alignment: .leading).padding(.horizontal, 6)
+                            .accessibilityIdentifier("color-transparent")
+                    } else {
+                        ColorValueField(name: "hex", shown: JSON(["text": view["hex"].raw, "edit": view["hex"].raw, "name": copy["hex"].raw]),
+                            width: 120, large: true, draft: draft("hex"), focus: focus, session: session)
+                    }
+                    if tools { copyButton("hex", text: view["hex"].string) }
+                }
+            }
+            if let accessory { Spacer(minLength: 8); accessory }
+        }.padding(.bottom, 18)
+    }
+    private func pairCell(_ hdr: JSON, rgba: JSON) -> some View {
+        Group { if hdr.isNull { ColorSwatch(rgba: rgba) } else { HDRColorSwatch(color: hdr, viewing: session.viewing) } }.frame(width: 54, height: 48)
+    }
+    private var rows: some View {
+        Grid(alignment: .trailing, horizontalSpacing: 8, verticalSpacing: 8) {
+            ForEach(0..<3, id: \.self) { row in
+                let shown = view["rows"][row]
+                GridRow {
+                    HStack(spacing: 6) {
+                        formatMenu(row, shown: shown)
+                        if !shown["space"].isNull {
+                            Text(shown["space"].string).font(.caption).lineLimit(1).fixedSize().padding(.horizontal, 5)
+                                .background(palette["text"].opacity(0.08), in: SquircleShape.control)
+                        }
+                    }.gridColumnAlignment(.leading)
+                    ForEach(0..<3, id: \.self) { index in
+                        ColorValueField(name: "\(row)-\(index)", shown: shown["values"][index], width: 64,
+                            scrub: ["kind": "value", "row": row, "index": index], draft: draft("\(row)-\(index)"), focus: focus, session: session)
+                    }
+                    if tools { copyButton("\(row)", text: shown["copy"].string) }
+                }
+            }
+            if !view["intensity"].isNull {
+                GridRow {
+                    Text(copy["intensity_ev"].string).gridColumnAlignment(.leading)
+                    ColorValueField(name: "ev", shown: view["intensity"], width: 80, scrub: ["kind": "intensity"],
+                        draft: draft("ev"), focus: focus, session: session).gridCellColumns(3)
+                    if tools { Color.clear.frame(width: 1, height: 1) }
+                }
+            }
+        }
+    }
+    private func formatMenu(_ row: Int, shown: JSON) -> some View {
+        let forms = shown["forms"].array, current = forms.first { $0["form"].string == shown["form"].string }?["label"].string ?? ""
+        return EditorMenuButton(menu: { [forms, shown] in
+            AppleContextMenu(JSON(["sections": [forms.map { form -> [String: Any] in
+                ["label": form["label"].raw, "enabled": true, "selected": form["form"].string == shown["form"].string,
+                 "identifier": "color-format-\(row)-\(form["form"].string)", "action": ["form": form["form"].raw]]
+            }]])) { session.act(["op": "form", "row": row, "form": $0["form"].raw]) }
+        }, identifier: "color-format-menu-\(row)") {
+            HStack(spacing: 2) {
+                ZStack(alignment: .leading) {
+                    ForEach(forms.indices, id: \.self) { Text(forms[$0]["label"].string).hidden() }
+                    Text(current)
+                }
+                SharedIcon(name: "chevron-down", size: 12)
+            }.fontWeight(.medium).fixedSize().padding(.horizontal, 6).frame(height: 28).contentShape(Rectangle())
+        }.buttonStyle(.plain).help(copy["format"].string).accessibilityLabel(shown["label"].string)
+            .accessibilityValue(current).accessibilityIdentifier("color-format-\(row)")
+    }
+    private func copyButton(_ name: String, text: String) -> some View {
+        Button {
+            ColorEditor.copy(text); copied = name
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if copied == name { copied = nil } }
+        } label: { SharedIcon(name: copied == name ? "check" : "copy").frame(width: 28, height: 28).contentShape(Rectangle()) }
+            .buttonStyle(EditorControlButtonStyle()).help(copied == name ? copy["copied"].string : copy["copy"].string)
+            .accessibilityLabel(copied == name ? copy["copied"].string : copy["copy"].string).accessibilityIdentifier("color-copy-\(name)")
+    }
+    @ViewBuilder private var status: some View {
+        Text(session.error ?? " ").font(.caption).foregroundStyle(.red).opacity(session.error == nil ? 0 : 1)
+            .frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("color-editor-error")
+    }
     private func draft(_ name: String) -> Binding<String?> { Binding(get: { drafts[name] }, set: { drafts[name] = $0 }) }
-    private func action(_ name: String, text: String) -> [String: Any] {
+    private static func action(_ name: String, text: String) -> [String: Any] {
         switch name {
         case "hex": return ["op": "text", "text": text]
         case "ev": return ["op": "intensity", "text": text]
@@ -287,17 +331,9 @@ struct ColorEditor: View {
             return ["op": "value", "row": parts[0], "index": parts[1], "text": text]
         }
     }
-    private func commit(_ name: String) {
-        guard let text = drafts[name] else { return }
-        if session.act(action(name, text: text), target: name) { drafts[name] = nil }
-    }
-    private func commitFocused() { if let focused { commit(focused) } }
-    static func copy(_ text: String) {
-        #if os(macOS)
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
-        #else
-        UIPasteboard.general.string = text
-        #endif
+    static func commit(_ name: String, drafts: Binding<[String: String]>, session: ColorEditorSession) {
+        guard let text = drafts.wrappedValue[name] else { return }
+        if session.act(action(name, text: text), target: name) { drafts.wrappedValue[name] = nil }
     }
 }
 

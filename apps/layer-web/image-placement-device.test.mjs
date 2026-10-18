@@ -3,6 +3,7 @@ import {packageObject,packageObjects} from './package-fixture.test.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {measurePlacedPhotos,placementSave,imageIdentity} from './image-placement-motion.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 // Tablet Chrome cannot select desktop paths. Fetch the original encoded files
 // from the test server, then use the normal picker/document request controller.
@@ -30,9 +31,7 @@ export async function checkDeviceImagePlacement({call,evaluate,settle}) {
     layerApp.dispatch({type:'preferences',action:{type:'edit',id:'missing_profile',value:0}});`);
   try {
     for(const url of urls)await evaluate(`(async()=>{const response=await fetch(${JSON.stringify(url)});if(!response.ok)throw Error('Missing original');placementTest.files.push(new File([await response.blob()],${JSON.stringify(url.split('/').at(-1))},{type:'image/jpeg'}))})()`);
-    await invoke('new_document');await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Discard Changes')?.click()`);
-    await wait('document.querySelector("dialog[open] input[type=number]")');
-    await evaluate(`{const f=document.querySelectorAll('dialog[open] input[type=number]');f[0].value=2000;f[1].value=1500;[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Create').click();}`);await idle();
+    await invoke('new_document');await evaluate(createDrawing({width:2000,height:1500}));await idle();
     const base=await evaluate('layerApp.state().layers.length');
     await invoke('import_image');await idle();await placed();await press('cancel_transform');
     assert.equal(await evaluate('layerApp.state().layers.length'),base);

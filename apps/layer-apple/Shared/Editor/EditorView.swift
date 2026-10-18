@@ -100,6 +100,7 @@ struct EditorView<Canvas: View>: View {
         .modifier(StorageAlert(store: store, active: store.snapshot["preferences"].isNull))
         .modifier(OptionalWorkspaceManager(store: store))
         .modifier(ProjectFilesModifier(files: store.projectFiles))
+        .modifier(NewDrawingPresentation(store: store))
         .modifier(DrawingTabsPresentation(store: store, tabs: store.drawingTabs))
         .modifier(ProofPresentation(model: store.proof))
         .modifier(RecoveryPresentation(store: store, recovery: store.recovery))

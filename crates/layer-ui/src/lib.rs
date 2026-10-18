@@ -37,7 +37,9 @@ pub use document_tabs::{DocumentTabDrag, DocumentTabHit, DocumentTabSlide, Docum
 mod document_sessions;
 pub use document_sessions::{DocumentSessionError, DocumentTransportRefusal, document_storage_retained, document_recovery_unavailable, DocumentAdmission, DocumentBudget, DocumentSessions, DocumentTabLabel, ParkedDocument, RetainedClipboard};
 mod document_creation;
-pub use document_creation::{BlendingChoice, DocumentBackground, MAX_NEW_DOCUMENT_RESOLUTION, NewDocumentAction, NewDocumentBlending, NewDocumentOptions, NewDocumentPreset, NewDocumentPresetId, NewDocumentPresetView, NewDocumentSettings, NewDocumentError, NewDocumentForm, NewDocumentText, NewDocumentAppearance};
+mod new_drawing;
+pub use new_drawing::*;
+pub use document_creation::{BlendingChoice, DocumentBackground, MAX_NEW_DOCUMENT_RESOLUTION, NewDocumentAction, NewDocumentBlending, NewDocumentOptions, NewDocumentSettings, NewDocumentError};
 mod document_workflow;
 pub use document_workflow::{CandidateIdentity, ColorWorkflow, ColorPreparation, SourceWorkflow};
 
@@ -179,6 +181,7 @@ pub use session::{Notice, NoticeAction, NoticeActionId};
 pub use session::{ScreenChip, ScreenDetails, ScreenState};
 pub use session::{CanvasAnchor, CanvasAnchorChoice, CanvasSizeAction, CanvasSizeUnit, CanvasSizeView, CanvasUnitChoice};
 pub use session::{ImageResample, ImageResampleChoice, ImageSizeAction, ImageSizeView};
+pub use session::{NewDrawingAction, NewDrawingChoice, NewDrawingCopy, NewDrawingDialogView, NewDrawingDrawerView, NewDrawingOrder, PaperChoice, PaperColorChoice, PaperColorDrawerView, PresetBrowserView, PresetSaveView, PresetTabView, PresetTileView, ResolutionChoice, SheetView};
 pub use session::{FrequencySeparationAction, FrequencySeparationView};
 pub use session::{LayerControls, PreparedWorkspace, ProofMode, UiSession, SelectionBrushOptions, SelectionMenu, SelectionAction, RefineKind, SelectionRefineView, SelectionDisplayOptions, MaskEditingView, SelectionTool, SelectionConstraint, SelectionOptions, SelectionMode};
 pub use settings::{
@@ -369,6 +372,7 @@ pub struct UiCatalog {
     /// Primary drawing tools for hosts that also expose a compact tool chooser.
     pub tool_commands: &'static [CommandId],
     pub new_document: session::NewDocumentSpec,
+    pub document_spaces: Vec<(layer_core::color::RgbSpace, &'static str)>,
     pub layer_commands: &'static [CommandId],
     pub brush_categories: Vec<BrushCategory>,
     pub brush_sizes: Vec<BrushSizePreset>,
@@ -410,6 +414,7 @@ pub fn ui_catalog_localized(localization: &Localizer) -> UiCatalog {
             })
             .collect(),
         new_document: session::new_document_spec(localization),
+        document_spaces: layer_core::color::RgbSpace::ALL.map(|space| (space, space.name())).into(),
         layer_commands: &CommandId::LAYERS,
         tool_commands: &CommandId::TOOLS,
         brush_categories: tools::brush_categories_localized(localization).collect(),
@@ -1386,6 +1391,7 @@ pub struct UiState {
     pub canvas_bar: Option<CanvasBarView>,
     pub layers: Vec<LayerState>,
     pub layer_tools: LayersView,
+    pub new_drawing: Option<NewDrawingDialogView>,
     pub adjustments: Vec<AdjustmentChoice>,
     pub filter_picker: FilterPickerState,
     pub filter_categories: Vec<FilterCategoryChoice>,
@@ -1426,6 +1432,7 @@ pub enum UiAction {
     Selection { action: SelectionAction },
     CanvasSize { action: CanvasSizeAction },
     ImageSize { action: ImageSizeAction },
+    NewDrawing { action: NewDrawingAction },
     FrequencySeparation { action: FrequencySeparationAction },
     Tonal { action: TonalAction },
     TransformReference { reference: CanvasAnchor },

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkPreferences({ call, evaluate, settle, errors }) {
   const dir = "artifacts/ui/preferences";
@@ -651,7 +652,7 @@ export async function checkLiveLanguage({call,evaluate,settle}) {
   }
   const choice=async(index,tag)=>{await evaluate(`document.querySelector('[data-preference=language] summary').click();document.querySelector('[data-preference=language] [data-choice="${index}"]').click()`);await ready(tag);await settle();};
   await send({type:'invoke',command:'new_document'});
-  await evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+30000;function poll(){const create=document.querySelector('[data-document-action=create]');if(create){for(const entry of document.querySelectorAll('[data-document-field=width],[data-document-field=height]')){entry.value='96';entry.dispatchEvent(new Event('input',{bubbles:true}));}create.click();resolve();}else if(performance.now()>end)reject(Error('New drawing'));else setTimeout(poll,20);}poll();})`);
+  await evaluate(createDrawing({width:96,height:96}));
   await evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+30000;function poll(){if(layerApp.app.document_tabs(0).tabs.length===2&&!layerApp.documents.busy()&&layerApp.app.brush_ready())resolve();else if(performance.now()>end)reject(Error('Second drawing'));else setTimeout(poll,20);}poll();})`);
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});

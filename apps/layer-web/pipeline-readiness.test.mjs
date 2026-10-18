@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {tracePipelineCalls} from './pipeline-trace.test.mjs';
 import {installPipelineWait} from './pipeline-wait.mjs';
 import {readPackage,packageComposition,packageObjects,rasterIdentity} from './package-fixture.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 async function reloadPreparedDrawing({cdp,call,evaluate}) {
   for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,x:1,y:1,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
@@ -23,11 +24,7 @@ export async function checkPipelineReadiness({cdp,call,evaluate,settle}) {
   console.log('Pipeline regression: startup uses only asynchronous page and worker pipelines');
   await evaluate(`(()=>{const hold=Object.assign(document.createElement('div'),{id:'hold-optional-compiles',popover:'manual'});document.body.append(hold);hold.showPopover();})()`);
   await evaluate(`layerApp.dispatch({type:'invoke',command:'new_document'})`);
-  await wait('!!document.querySelector("dialog[open]")');
-  if(await evaluate('!![...document.querySelectorAll("dialog[open] button")].find(b=>b.textContent==="Discard Changes")'))await click('Discard Changes');
-  await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-  await evaluate(`(()=>{const d=document.querySelector('dialog[open]');d.querySelector('select[aria-label="Color space"]').value='DisplayP3';d.querySelector('select[aria-label="Bit depth"]').value='U8';})()`);
-  await click('Create');
+  await evaluate(createDrawing({space:'DisplayP3',depth:'U8'}));
   await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready()&&layerApp.app.document_color().space==="DisplayP3"',120000);
   await settle();
   const output=async()=>{
@@ -192,11 +189,7 @@ export async function checkPaperTextureReadiness({cdp,call,evaluate,settle}) {
   };
     for(const [theme,texture] of [['light',2],['dark',11]]) {
       await send({type:'set_theme',theme});await invoke('new_document');
-      await wait(`!!document.querySelector('dialog[open]')`);
-      if(await evaluate(`!![...document.querySelectorAll('dialog[open] button')].find(n=>n.textContent==='Discard Changes')`))await click('Discard Changes');
-      await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-      await evaluate(`(()=>{for(const [field,value] of [['width',512],['height',384]]){const n=document.querySelector('dialog[open] [data-document-field='+field+']');n.value=value;n.dispatchEvent(new Event('input',{bubbles:true}))}})()`);
-      await click('Create');await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready()');
+      await evaluate(createDrawing({width:512,height:384}));await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready()');
       await invoke('pencil');await send({type:'select_brush',id:2});await send({type:'set_brush_size',value:32});
       await send({type:'set_color',rgba:[.08,.08,.08,1]});await invoke('fit_canvas');
       const paper=await evaluate("Number(layerApp.state().layers.find(l=>l.label==='Paper').id)");

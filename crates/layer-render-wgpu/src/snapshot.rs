@@ -139,6 +139,10 @@ impl SnapshotGpu {
     pub fn max_document_dimension(&self) -> u32 {
         self.device.limits().max_texture_dimension_2d
     }
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple"))]
+    pub fn memory_headroom(&self) -> Option<u64> {
+        crate::display_memory::device_headroom(&self.device)
+    }
     pub fn preflight_image_object_affine(&self,scene:SceneView<'_>,object:layer_core::ImageObjectHandle,
         affine:layer_core::Affine64,view:layer_render::ViewState,
     )->Result<(),GpuRasterError> {

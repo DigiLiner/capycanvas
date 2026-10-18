@@ -1,6 +1,6 @@
 use super::*;
 use layer_host::papers::PaperTask;
-use layer_ui::paper_library::PaperResult;
+use layer_ui::paper_library::{PaperLibraryError, PaperResult};
 use std::{fs::File, mem::ManuallyDrop, os::fd::FromRawFd, path::PathBuf,
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}};
 
@@ -10,13 +10,15 @@ pub struct CapyPaperTask {
     result: Mutex<Option<Result<PaperResult, String>>>,
 }
 impl CapyPaperTask {
+    fn new(task: PaperTask) -> Self {
+        Self { task, cancelled: AtomicBool::new(false), result: Mutex::new(None) }
+    }
     fn capture(app: &CapyApple, request: u32, expected_epoch: u64, directory: PathBuf) -> Result<Self, String> {
         let session = &app.host.session;
         if request != 0 && expected_epoch != session.state().document_file.epoch {
             return Err(layer_ui::DocumentDeliveryCopy::new(session.localization()).change_in_progress.to_string());
         }
-        Ok(Self { task: PaperTask::capture(session, (request != 0).then_some(request), directory)?,
-            cancelled: AtomicBool::new(false), result: Mutex::new(None) })
+        Ok(Self::new(PaperTask::capture(session, (request != 0).then_some(request), directory)?))
     }
     fn work(&self, fd: i32, name: &str) -> Result<PaperResult, String> {
         let file = (fd >= 0).then(|| ManuallyDrop::new(unsafe { File::from_raw_fd(fd) }));
@@ -24,7 +26,7 @@ impl CapyPaperTask {
     }
     fn apply(&self, app: &mut CapyApple) -> Result<(), String> {
         let result = self.result.lock().unwrap_or_else(|e| e.into_inner()).take()
-            .ok_or_else(|| layer_ui::paper_library::PaperLibraryError::Unsupported.message(app.host.session.localization()))?;
+            .ok_or_else(|| PaperLibraryError::Unsupported.message(app.host.session.localization()))?;
         self.task.apply(&mut app.host, result, self.cancelled.load(Ordering::Relaxed))
     }
 }
@@ -36,6 +38,14 @@ pub unsafe extern "C" fn capy_apple_paper_task(app: *mut CapyApple, request: u32
     let Some(app) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut() };
     app.perform(|app| CapyPaperTask::capture(app, request, epoch, PathBuf::from(unsafe { project::read_title(directory) }?))
         .map(|task| Box::into_raw(Box::new(task)))).unwrap_or(std::ptr::null_mut())
+}
+/// # Safety
+/// app is exclusive on its serial owner; directory is readable NUL-terminated UTF-8. Return/free one independent job.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn capy_apple_paper_import(app: *mut CapyApple, directory: *const c_char) -> *mut CapyPaperTask {
+    let Some(app) = (unsafe { app.as_mut() }) else { return std::ptr::null_mut() };
+    app.perform(|app| Ok(Box::into_raw(Box::new(CapyPaperTask::new(PaperTask::library_import(&app.host.session, PathBuf::from(unsafe { project::read_title(directory) }?)))))))
+        .unwrap_or(std::ptr::null_mut())
 }
 /// # Safety
 /// task is live on one file worker; fd and NUL-terminated name remain readable through this call. Do not run twice.

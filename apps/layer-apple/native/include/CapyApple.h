@@ -52,6 +52,7 @@ void capy_document_free(CapyDocumentTask *task);
 typedef struct CapyPaperTask CapyPaperTask;
 /* Capture/apply on serial owner; work/free on file worker; error after work. Request0 lists the library. */
 CapyPaperTask *capy_apple_paper_task(CapyApple *app, uint32_t request, uint64_t epoch, const char *directory);
+CapyPaperTask *capy_apple_paper_import(CapyApple *app, const char *directory); /* library only; the drawing is unchanged */
 void capy_paper_work(const CapyPaperTask *task, int32_t fd, const char *name);
 void capy_paper_failed(const CapyPaperTask *task, const char *message);
 char *capy_paper_error(const CapyPaperTask *task);
@@ -90,8 +91,8 @@ int32_t capy_project_proof_preservation(const CapyProjectTask *task, const uint8
 int32_t capy_apple_proof_check(CapyApple *app, const CapyProjectTask *task);
 int32_t capy_apple_proof_apply(CapyApple *app, const CapyProjectTask *task, bool preserved);
 int32_t capy_apple_proof_failed(CapyApple *app, const CapyProjectTask *task, const char *message);
-int32_t capy_project_new(const CapyProjectTask *task, const char *options_json);
-int32_t capy_project_read(const CapyProjectTask *task, int32_t fd, const char *name); /* -1: new */
+int32_t capy_project_new(const CapyProjectTask *task); /* worker; the order New drawing's Create left */
+int32_t capy_project_read(const CapyProjectTask *task, int32_t fd, const char *name);
 int32_t capy_project_finish_images(const CapyProjectTask *task);
 int32_t capy_project_read_bytes(const CapyProjectTask *task, const uint8_t *bytes, size_t count, const char *name);
 char *capy_photo_formats(void);
@@ -134,7 +135,6 @@ void capy_project_free(CapyProjectTask *task);
 char *capy_apple_numeric(const char *json);
 char *capy_apple_native_caption(const char *json);
 char *capy_apple_numeric_labels(const char *json);
-char *capy_apple_document_appearance(const char *json);
 /* Stateless shared tagged-color forms, previews in the requested display space and gradient
    samples. Owned JSON result; same error and lifetime rules as numeric. */
 char *capy_apple_color_ui(const char *json);

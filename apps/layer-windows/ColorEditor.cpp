@@ -45,6 +45,11 @@ std::vector<std::shared_ptr<Editor>>& openEditors(){thread_local std::vector<std
 struct Editor:std::enable_shared_from_this<Editor>{
     std::shared_ptr<WorkspaceData> data;
     ColorAccepted accepted;
+    std::function<void(J const&)> viewed;
+    std::function<void(bool)> blockedChanged;
+    std::optional<hstring> clearLabel;
+    hstring viewedKey;
+    double hexWidth=0;
     J editor,view,errorTarget;
     V rendition{nullptr};
     hstring memory;
@@ -91,7 +96,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
 
     hstring copy(wchar_t const* key)const{return data->caption(L"color",key);}
     J panelView()const{return object(view,L"panel");}
-    double scale()const{return root.XamlRoot()?root.XamlRoot().RasterizationScale():1.;}
+    double scale()const{return body.XamlRoot()?body.XamlRoot().RasterizationScale():1.;}
 
     std::optional<hstring> request(std::optional<J> action){
         auto value=O({{L"type",S(L"editor")},{L"editor",editor},{L"display_space",S(L"Srgb")},{L"rendition",rendition}});
@@ -135,6 +140,22 @@ struct Editor:std::enable_shared_from_this<Editor>{
         relabel();fit();render();fillRecent();
     }
 
+    void embed(){
+        auto weak=weak_from_this();
+        buildBody(false);
+        title.Visibility(Visibility::Collapsed);current.Visibility(Visibility::Collapsed);captions.Visibility(Visibility::Collapsed);
+        pair.ColumnDefinitions().GetAt(0).Width({0,GridUnitType::Pixel});
+        hexCopy.Visibility(Visibility::Collapsed);for(auto const& row:formRows)row.copy.Visibility(Visibility::Collapsed);
+        Grid::SetColumn(hexBlock,1);hexBlock.HorizontalAlignment(HorizontalAlignment::Left);
+        body.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock())self->key(e);});
+        drawing.worker=std::make_shared<FieldWorker>();drawing.ringWorker=std::make_shared<FieldWorker>();
+        drawing.worker->deliver=[weak](FieldResult result){if(auto self=weak.lock()){self->drawing.ready=std::move(result);self->paintKey=L"";self->queueDraw();}};
+        drawing.ringWorker->deliver=[weak](FieldResult result){if(auto self=weak.lock()){self->drawing.ringReady=std::move(result);self->paintKey=L"";self->queueDraw();}};
+        data->copyView([weak]{if(auto self=weak.lock();self&&!self->finished){self->relocalize();return true;}return false;});
+        viewedKey=object(view,L"value").Stringify();
+        relabel();render();
+    }
+
     void buildBody(bool canPick){
         auto weak=weak_from_this();
         pickerTitle(data,title,L"edit-color-title");
@@ -169,7 +190,8 @@ struct Editor:std::enable_shared_from_this<Editor>{
         pick.Width(48);pick.Height(48);pick.Background(buttonBackground(data));pick.Content(icon(L"eyedropper",data->theme(),24));
         pick.Visibility(canPick?Visibility::Visible:Visibility::Collapsed);AutomationProperties::SetAutomationId(pick,L"edit-color-pick");
         auto hexSize=data->textSize()*1.6;
-        hex=field(O({{L"kind",S(L"hex")}}),L"edit-color-hex",textWidth(L"#DDDDDD",hexSize,winrt::Windows::UI::Text::FontWeights::Medium())+12);
+        hexWidth=textWidth(L"#DDDDDD",hexSize,winrt::Windows::UI::Text::FontWeights::Medium())+12;
+        hex=field(O({{L"kind",S(L"hex")}}),L"edit-color-hex",hexWidth);
         hex->text.FontSize(hexSize);hex->text.FontWeight(winrt::Windows::UI::Text::FontWeights::Medium());hex->text.TextAlignment(TextAlignment::Left);hex->text.HorizontalAlignment(HorizontalAlignment::Left);
         hex->entry.FontSize(hexSize);hex->entry.FontWeight(winrt::Windows::UI::Text::FontWeights::Medium());hex->entry.TextAlignment(TextAlignment::Left);hex->show.MinHeight(40);hex->entry.MinHeight(40);
         hexNote.FontSize(data->textSize()*.8);hexNote.Foreground(data->brush(L"text"));hexNoteFrame.Child(hexNote);hexNoteFrame.Padding({5,1,5,1});hexNoteFrame.CornerRadius({4,4,4,4});
@@ -309,13 +331,13 @@ struct Editor:std::enable_shared_from_this<Editor>{
         });
         f->show.AddHandler(UIElement::PointerPressedEvent(),box_value(PointerEventHandler([weak,owner](auto&&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();auto f=owner.lock();if(!self||!f||self->scrub)return;
-            auto p=e.GetCurrentPoint(self->root);
+            auto p=e.GetCurrentPoint(self->body);
             if(!f->clicks->Owns(p.PointerId()))return;
             self->scrub=Scrub{f,p.PointerId(),PointerScrub{p.Position().Y}};
         })),true);
         f->show.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();if(!self||!self->scrub||self->scrub->pointer!=e.Pointer().PointerId())return;
-            auto pixels=self->scrub->motion.Move(e.GetCurrentPoint(self->root).Position().Y,e.IsGenerated());
+            auto pixels=self->scrub->motion.Move(e.GetCurrentPoint(self->body).Position().Y,e.IsGenerated());
             if(!pixels||(!self->scrub->active&&std::abs(*pixels)<ScrubSlop))return;
             self->scrub->active=true;self->scrub->field->clicks->Suppress(e.Pointer().PointerId());e.Handled(true);
             using Mod=winrt::Windows::System::VirtualKeyModifiers;auto modifiers=e.KeyModifiers();
@@ -396,7 +418,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
         auto palette=object(data->state,L"palette");
         auto next=str(palette,L"checker_light")+str(palette,L"checker_dark")+to_hstring(scale());
         if(checker&&next==checkerKey)return;checkerKey=next;
-        checker=checkerBitmap(size,scale(),color(str(palette,L"checker_light")),color(str(palette,L"checker_dark")));
+        checker=checkerBitmap(std::max(size,64.),scale(),color(str(palette,L"checker_light")),color(str(palette,L"checker_dark")));
     }
     Button tile(J const& entry,hstring const& id,double size){
         auto weak=weak_from_this();auto detail=str(entry,L"detail");auto value=object(entry,L"color");
@@ -505,7 +527,8 @@ struct Editor:std::enable_shared_from_this<Editor>{
     }
 
     void relabel(){
-        auto edit=copy(L"edit");title.Text(edit);AutomationProperties::SetName(dialog,edit);AutomationProperties::SetName(root,edit);AutomationProperties::SetName(miniPair,edit);
+        auto edit=copy(L"edit");
+        if(dialog){title.Text(edit);AutomationProperties::SetName(dialog,edit);AutomationProperties::SetName(root,edit);AutomationProperties::SetName(miniPair,edit);}
         currentCaption.Text(copy(L"current"));newCaption.Text(copy(L"new"));
         AutomationProperties::SetName(current,copy(L"current"));tooltip(current,copy(L"current"));AutomationProperties::SetName(fresh,copy(L"new"));
         AutomationProperties::SetName(miniCurrent,copy(L"current"));AutomationProperties::SetName(miniNew,copy(L"new"));
@@ -513,16 +536,17 @@ struct Editor:std::enable_shared_from_this<Editor>{
         for(auto const& node:{hexCopy,formRows[0].copy,formRows[1].copy,formRows[2].copy}){AutomationProperties::SetName(node,copy(L"copy"));tooltip(node,copy(L"copy"));}
         for(auto const& row:formRows)tooltip(row.format,copy(L"format"));
         intensityName.Text(copy(L"intensity_ev"));
+        AutomationProperties::SetName(image,copy(L"wheel"));AutomationProperties::SetName(arcTrack,copy(L"intensity"));
+        if(!dialog)return;
         pickerLabel(cancel,data->common(L"cancel"));pickerLabel(apply,copy(L"use_color"));
         search.PlaceholderText(copy(L"swatch_search"));AutomationProperties::SetName(search,copy(L"swatch_search"));
         AutomationProperties::SetName(sheetClose,copy(L"close_swatches"));tooltip(sheetClose,copy(L"close_swatches"));
         auto swatches=sheetOpen?copy(L"close_swatches"):copy(L"all_swatches");AutomationProperties::SetName(more,swatches);tooltip(more,swatches);
-        AutomationProperties::SetName(image,copy(L"wheel"));AutomationProperties::SetName(arcTrack,copy(L"intensity"));
     }
     void relocalize(){
         relabel();
         try{request(std::nullopt);if(refused){if(auto failure=request(*refused))error=failure;}}catch(hresult_error const& e){error=e.message();}
-        render();fillRecent();if(sheetOpen)fillSheet();
+        render();if(dialog)fillRecent();if(sheetOpen)fillSheet();
     }
 
     static void setField(Field& f,hstring const& text,hstring const& edit,hstring const& name){
@@ -547,7 +571,10 @@ struct Editor:std::enable_shared_from_this<Editor>{
         }
         auto currentColor=displayColor(object(view,L"current")),newColor=displayColor(object(view,L"new"));
         current.Background(fill(currentColor));fresh.Background(fill(newColor));miniCurrent.Background(fill(currentColor));miniNew.Background(fill(newColor));
-        setField(*hex,str(view,L"hex"),str(view,L"hex"),copy(L"hex"));miniHex.Text(str(view,L"hex"));
+        setField(*hex,clearLabel.value_or(str(view,L"hex")),str(view,L"hex"),copy(L"hex"));miniHex.Text(str(view,L"hex"));
+        hex->text.Opacity(clearLabel?.6:1);left.Opacity(clearLabel?.4:1);values.Opacity(clearLabel?.4:1);
+        hex->show.Width(clearLabel?std::max(hexWidth,textWidth(*clearLabel,hex->text.FontSize(),winrt::Windows::UI::Text::FontWeights::Medium())+12):hexWidth);
+        if(clearLabel){ensureChecker(SheetTile);ImageBrush pixels;pixels.ImageSource(checker);pixels.Stretch(Stretch::None);pixels.AlignmentX(AlignmentX::Left);pixels.AlignmentY(AlignmentY::Top);fresh.Background(pixels);}
         auto note=object(view,L"hex_note");hexNoteFrame.Visibility(note.Size()?Visibility::Visible:Visibility::Collapsed);
         if(note.Size()){hexNote.Text(str(note,L"text"));auto tip=str(note,L"tip");if(!tip.empty())tooltip(hexNoteFrame,tip);AutomationProperties::SetName(hexNoteFrame,tip.empty()?str(note,L"text"):tip);}
         auto shownRows=array(view,L"rows");
@@ -586,8 +613,10 @@ struct Editor:std::enable_shared_from_this<Editor>{
             f->entry.BorderBrush(invalid?fill(Invalid):accent(data));
             blocked|=invalid&&f->editing();blocked|=f->editing()&&textComposing(f->entry);
         }
-        apply.IsEnabled(!blocked);apply.Opacity(blocked?.5:1);
+        if(apply){apply.IsEnabled(!blocked);apply.Opacity(blocked?.5:1);}
+        if(blockedChanged)blockedChanged(blocked);
         updating=false;
+        if(auto value=object(view,L"value");viewed&&value.Stringify()!=viewedKey){viewedKey=value.Stringify();viewed(value);}
         queueDraw();
     }
 
@@ -613,17 +642,18 @@ struct Editor:std::enable_shared_from_this<Editor>{
         else f->entry.Focus(FocusState::Programmatic);
     }
     std::shared_ptr<Field> editingField()const{for(auto const& f:fields())if(f->editing())return f;return nullptr;}
+    bool escape(){if(auto f=editingField()){end(f,true);return true;}return false;}
 
     void key(KeyRoutedEventArgs const& e){
         auto control=held(VK_CONTROL);
         if(!control||(e.Key()!=VirtualKey::C&&e.Key()!=VirtualKey::V))return;
-        if(auto focused=FocusManager::GetFocusedElement(root.XamlRoot());focused&&focused.try_as<TextBox>())return;
+        if(auto focused=FocusManager::GetFocusedElement(body.XamlRoot());focused&&focused.try_as<TextBox>())return;
         e.Handled(true);
         if(e.Key()==VirtualKey::C){copyText(str(view,L"hex"));return;}
         auto content=winrt::Windows::ApplicationModel::DataTransfer::Clipboard::GetContent();
         if(!content.Contains(winrt::Windows::ApplicationModel::DataTransfer::StandardDataFormats::Text()))return;
         auto weak=weak_from_this();
-        content.GetTextAsync().Completed([weak,dispatcher=root.DispatcherQueue()](auto const& operation,auto status){
+        content.GetTextAsync().Completed([weak,dispatcher=body.DispatcherQueue()](auto const& operation,auto status){
             if(status!=winrt::Windows::Foundation::AsyncStatus::Completed)return;
             auto text=operation.GetResults();
             dispatcher.TryEnqueue([weak,text]{if(auto self=weak.lock();self&&!self->finished)self->act(O({{L"op",S(L"text")},{L"text",S(text)}}));});
@@ -641,7 +671,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
 
     void queueDraw(){
         if(std::exchange(drawQueued,true))return;
-        root.DispatcherQueue().TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock()){self->drawQueued=false;self->draw();}});
+        body.DispatcherQueue().TryEnqueue([weak=weak_from_this()]{if(auto self=weak.lock()){self->drawQueued=false;self->draw();}});
     }
     void draw(){
         if(finished||!view.Size())return;
@@ -770,4 +800,27 @@ void CapyUi::EditColor(std::shared_ptr<WorkspaceData> const& data,UIElement cons
     editor->init(xaml,data->colorStrip!=nullptr);
     openEditors().push_back(editor);
     editor->present();
+}
+std::optional<CapyUi::ColorForm> CapyUi::EmbedColor(std::shared_ptr<WorkspaceData> const& data,J const& color,std::function<void(J const&)> viewed,std::function<void(bool)> blocked){
+    auto rendition=object(data->model,L"color_panel").GetNamedValue(L"rendition",JsonValue::CreateNullValue());
+    J opened;
+    try{opened=colorUi(data->localization.get(),O({{L"type",S(L"editor_open")},{L"colors",displayColors(data->state)},{L"color",color},{L"opaque",B(true)},{L"display_space",S(L"Srgb")},{L"rendition",rendition}})).GetObject();}
+    catch(hresult_error const&){return std::nullopt;}
+    if(!opened.HasKey(L"editor"))return std::nullopt;
+    auto editor=std::make_shared<Editor>();editor->data=data;editor->rendition=rendition;
+    editor->editor=object(opened,L"editor");editor->view=object(opened,L"view");
+    editor->memory=object(object(editor->editor,L"picker"),L"editor").Stringify();
+    editor->viewed=std::move(viewed);editor->blockedChanged=std::move(blocked);
+    editor->embed();
+    std::weak_ptr<Editor> weak=editor;
+    ColorForm form{editor,editor->body,editor->head,{}};
+    RowDefinition row;row.Height(GridLength{1,GridUnitType::Auto});editor->values.RowDefinitions().Append(row);
+    form.below.Margin({0,8,0,0});Grid::SetRow(form.below,2);editor->values.Children().Append(form.below);
+    form.choose=[weak](J const& value){if(auto self=weak.lock())self->act(O({{L"op",S(L"color")},{L"color",value}}));};
+    form.transparent=[weak](std::optional<hstring> const& label){if(auto self=weak.lock();self&&self->clearLabel!=label){self->clearLabel=label;self->render();}};
+    form.arrange=[weak](bool narrow){if(auto self=weak.lock();self&&self->narrow!=narrow)self->arrange(narrow);};
+    form.escape=[weak]{auto self=weak.lock();return self&&self->escape();};
+    form.commit=[weak]{auto self=weak.lock();if(!self)return false;if(auto f=self->editingField())self->commit(f);return !self->editingField();};
+    form.close=[weak]{if(auto self=weak.lock())self->finish();};
+    return form;
 }

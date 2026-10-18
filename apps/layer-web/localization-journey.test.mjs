@@ -1,6 +1,7 @@
 import {histogramJourney} from './histogram-journey.mjs';
 import assert from "node:assert/strict";
 import {mkdir,readFile,writeFile} from "node:fs/promises";
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function checkLiveHistogramLanguage({call,evaluate,settle}) {
   const dir=process.env.LAYER_TEST_ARTIFACTS||'artifacts/localization-expansion/web';await mkdir(dir,{recursive:true});
@@ -106,8 +107,8 @@ export async function checkLiveColorFormLanguage({call,evaluate,settle}) {
   await wait('layerApp.startupTimes.complete!==null');await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Keep for Later')?.click()`);
   const results=[];
   for(const theme of ['light','dark'])for(const hdr of [false,true]){
-    await restore('en');await send({type:'set_theme',theme});const previousTabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');await send({type:'invoke',command:'new_document'});await wait('!!document.querySelector("dialog[open]")');await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Discard Changes')?.click()`);await wait('!!document.querySelector("dialog[open] [data-document-field=width]")');
-    await evaluate(`(()=>{const d=document.querySelector('dialog[open]');for(const[field,value]of[['width','96'],['height','96']]){const n=d.querySelector('[data-document-field='+field+']');n.value=value;n.dispatchEvent(new Event('input',{bubbles:true}));}const depth=d.querySelector('select[aria-label="Bit depth"]');depth.value=${JSON.stringify(hdr?'F32':'U8')};depth.dispatchEvent(new Event('change'));[...d.querySelectorAll('button')].find(b=>b.textContent==='Create').click()})()`);await wait(`layerApp.app.document_tabs(0).tabs.length===${previousTabs+1}&&!layerApp.documents.busy()&&layerApp.app.brush_ready()&&layerApp.app.document_color().depth===${JSON.stringify(hdr?'F32':'U8')}`);assert.equal(await evaluate('layerApp.app.document_color().depth'),hdr?'F32':'U8');
+    await restore('en');await send({type:'set_theme',theme});const previousTabs=await evaluate('layerApp.app.document_tabs(0).tabs.length');await send({type:'invoke',command:'new_document'});
+    await evaluate(createDrawing({width:96,height:96,depth:hdr?'F32':'U8'}));await wait(`layerApp.app.document_tabs(0).tabs.length===${previousTabs+1}&&!layerApp.documents.busy()&&layerApp.app.brush_ready()&&layerApp.app.document_color().depth===${JSON.stringify(hdr?'F32':'U8')}`);assert.equal(await evaluate('layerApp.app.document_color().depth'),hdr?'F32':'U8');
     await evaluate(`[...document.querySelectorAll('button[aria-label="Edit Color"]')].find(b=>b.getBoundingClientRect().width>0).click()`);await wait('!!document.querySelector(".color-dialog[open]")');
     const phases=hdr?['field','intensity']:['field'];
     for(const phase of phases){

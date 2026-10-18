@@ -12,12 +12,7 @@ extension XCTestCase {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"light"},{"type":"set_color","rgba":[0,0,1,1]}]"#
         app.launch(); capturePaintEditor(in: app)
         editorMenu(in: app, menu: "File", id: "new_document", label: "New…")
-        for id in ["width", "height"] {
-            let field = app.textFields["new-document-" + id]
-            workspaceActivate(field); field.typeKey("a", modifierFlags: .command); field.typeText("64")
-        }
-        workspaceActivate(app.buttons["new-document-create"])
-        XCTAssertTrue(app.buttons["new-document-create"].waitForNonExistence(timeout: 15))
+        createNewDrawing(width: "64", height: "64", in: app)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
         let viewport = workspaceViewport(in: app), originalFrame = viewport.frame
         let title = editorDocumentTitle(in: app)

@@ -90,6 +90,7 @@ impl Fixture {
                 CommandId::NewDocument
             },
         );
+        if open.is_none() { crate::test_support::order_new_drawing(&mut self.host, [96, 72], ""); }
         let (id, epoch, revision) = request(&self.host);
         self.dispatch(match open {
             Some(path) => DocumentAction::Open {
@@ -98,7 +99,7 @@ impl Fixture {
                 revision,
                 path: path.into(),
             },
-            None => DocumentAction::Create { id, epoch, revision, options: layer_ui::NewDocumentOptions { extent: [96, 72], ..Default::default() }, preset: String::new(), defaults: false },
+            None => DocumentAction::Create { id, epoch, revision },
         });
     }
 }

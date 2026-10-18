@@ -103,6 +103,16 @@ mod test_support {
         use layer_core::authored::*;let application=document.artwork.effects.insert(PortableId::random(),EffectApplication::new(effect.program,effect.values,document.composition().size)).unwrap();let h=document.artwork.occurrences.insert(PortableId::random(),Occurrence::new(OccurrenceContent::Effect(application),name)).unwrap();let stack=document.composition().result;document.artwork.stacks.get_mut(stack).unwrap().entries.insert(0,h);document.apply(layer_core::Edit::Stack(RecordChange::replace(&document.artwork.stacks,stack,document.artwork.stacks.get(stack).cloned()).unwrap())).unwrap();document.working.occurrence=Some(h);document.working.target=None;h
     }
     pub(crate) fn editable(outcome:layer_ui::ImportOutcome)->layer_ui::ImportedDocument {let layer_ui::ImportOutcome::Editable(document)=outcome else{panic!("Expected editable photo")};document}
+    #[cfg(target_os="windows")]
+    pub(crate) fn order_new_drawing(host:&mut layer_host::NativeHost,extent:[u32;2],name:&str) {
+        use layer_ui::NewDrawingAction as A;
+        for action in [A::Open{screen:None,untitled:"Untitled 2".into()},A::Name{text:name.into()},A::Unit{unit:layer_ui::LengthUnit::Px},A::Width{value:extent[0].into()},A::Height{value:extent[1].into()},A::Create] {
+            host.dispatch(layer_ui::UiAction::NewDrawing{action}).unwrap();
+        }
+        assert!(host.session.new_drawing_view().is_none()&&host.session.new_drawing_order().is_some());
+        let saves:Vec<u32>=host.session.state().requests.iter().filter(|request|matches!(request.kind,layer_ui::HostRequestKind::SaveSettings{..})).map(|request|request.id).collect();
+        for id in saves{host.dispatch(layer_ui::UiAction::CompleteRequest{id,error:None}).unwrap();}
+    }
 
     #[cfg(target_os = "windows")]
     pub(crate) fn d3d12_renderer() -> layer_render_wgpu::WgpuRasterizer {

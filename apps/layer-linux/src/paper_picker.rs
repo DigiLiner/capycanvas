@@ -43,6 +43,11 @@ impl PaperThumbnail {
         }
         *self.settled.borrow_mut() = (preview.is_some() || id.is_none()).then(|| id.cloned());
     }
+    pub fn show_none(&self) {
+        crate::icons::set(&self.image, Some("layer-none-symbolic"));
+        self.image.set_pixel_size(self.size / 2);
+        *self.settled.borrow_mut() = None;
+    }
 }
 
 fn picker(state: &UiState, layer: u64) -> Option<(PaperPickerView, usize)> {
@@ -137,23 +142,48 @@ pub(crate) fn refresh(workspace: &Workspace, state: &UiState) {
     }
 }
 
+pub(crate) fn texture_grid() -> gtk::FlowBox {
+    let grid = gtk::FlowBox::builder()
+        .selection_mode(gtk::SelectionMode::Single)
+        .min_children_per_line(2)
+        .max_children_per_line(6)
+        .row_spacing(14)
+        .column_spacing(12)
+        .valign(gtk::Align::Start)
+        .build();
+    grid.add_css_class("texture-grid");
+    grid
+}
+
+pub(crate) fn texture_tile(thumbnail: &PaperThumbnail, workspace: &Workspace, id: Option<&Arc<str>>, label: &str) -> gtk::FlowBoxChild {
+    thumbnail.image.set_widget_name("texture-preview");
+    thumbnail.show(workspace, id);
+    let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    frame.add_css_class("texture-tile");
+    frame.set_halign(gtk::Align::Center);
+    frame.append(&thumbnail.image);
+    let caption = gtk::Label::builder().label(label).wrap(true).lines(2).justify(gtk::Justification::Center)
+        .ellipsize(gtk::pango::EllipsizeMode::End).width_chars(1).max_width_chars(1).build();
+    caption.add_css_class("caption");
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    content.set_size_request(TILE + 6, -1);
+    content.set_valign(gtk::Align::Start);
+    content.append(&frame);
+    content.append(&caption);
+    let child = gtk::FlowBoxChild::builder().child(&content).tooltip_text(label).build();
+    child.update_property(&[gtk::accessible::Property::Label(label)]);
+    child
+}
+
 impl TextureDialog {
     fn build(workspace: &Rc<Workspace>, layer: u64, epoch: u64) -> Rc<Self> {
-        let dialog = adw::Dialog::builder().content_width(720).content_height(455).width_request(320).height_request(300).build();
+        let dialog = adw::Dialog::builder().content_width(720).content_height(560).width_request(320).height_request(300).build();
         dialog.set_widget_name("texture-dialog");
         dialog.add_css_class("picker-dialog");
         let title = gtk::Label::new(None);
         title.add_css_class("title-4");
         title.set_halign(gtk::Align::Center);
-        let grid = gtk::FlowBox::builder()
-            .selection_mode(gtk::SelectionMode::Single)
-            .min_children_per_line(2)
-            .max_children_per_line(6)
-            .row_spacing(14)
-            .column_spacing(12)
-            .valign(gtk::Align::Start)
-            .build();
-        grid.add_css_class("texture-grid");
+        let grid = texture_grid();
         grid.set_widget_name("texture-grid");
         let page = gtk::Box::new(gtk::Orientation::Vertical, 16);
         page.add_css_class("dialog-page");
@@ -278,24 +308,8 @@ impl TextureDialog {
     }
 
     fn append_tile(&self, workspace: &Workspace, index: usize, tile: &layer_ui::PaperTileView) {
-        let thumbnail = PaperThumbnail::new(TILE);
-        thumbnail.image.set_widget_name("texture-preview");
-        thumbnail.show(workspace, tile.id.as_ref());
-        let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        frame.add_css_class("texture-tile");
-        frame.set_halign(gtk::Align::Center);
-        frame.append(&thumbnail.image);
-        let caption = gtk::Label::builder().label(tile.label.as_ref()).wrap(true).lines(2).justify(gtk::Justification::Center)
-            .ellipsize(gtk::pango::EllipsizeMode::End).width_chars(1).max_width_chars(1).build();
-        caption.add_css_class("caption");
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        content.set_size_request(TILE + 6, -1);
-        content.set_valign(gtk::Align::Start);
-        content.append(&frame);
-        content.append(&caption);
-        let child = gtk::FlowBoxChild::builder().child(&content).tooltip_text(tile.label.as_ref()).build();
+        let child = texture_tile(&PaperThumbnail::new(TILE), workspace, tile.id.as_ref(), &tile.label);
         child.set_widget_name(&format!("texture-tile-{index}"));
-        child.update_property(&[gtk::accessible::Property::Label(&tile.label)]);
         if !tile.actions.is_empty() {
             let click = gtk::GestureClick::builder().button(3).build();
             click.connect_pressed(glib::clone!(#[strong(rename_to = weak)] self.this, move |_, _, _, _| if let Some(dialog) = weak.upgrade() { dialog.open_menu(index); }));

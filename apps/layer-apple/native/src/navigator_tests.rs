@@ -107,9 +107,7 @@ fn overview(app: &App) -> Vec<layer_render_wgpu::OverviewPlacement> {
 #[test]
 fn live_navigator_uses_current_document_camera_and_display_scale_without_bitmaps() {
     for platform in [0, 1] {
-        let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
-            Some(native_renderer());
+        let app = super::fixtures::drawing_app(platform, [2048, 1536]);
         show_stats(&app);
         assert_eq!(unsafe { capy_apple_resize(app.0, 2400, 1800, 2.) }, 0);
         app.draw_frame();
@@ -131,8 +129,7 @@ fn live_navigator_uses_current_document_camera_and_display_scale_without_bitmaps
         );
         app.stroke();
         app.draw_frame();
-        let project = ProjectJob::new(&app, true);
-        assert_eq!(project.create([600, 300]), 0);
+        let project = ProjectJob::create(&app, [600, 300]);
         assert_eq!(
             unsafe {
                 capy_apple_project_adopt(app.0, project.0, c"Untitled".as_ptr(), c"".as_ptr())
@@ -201,10 +198,7 @@ fn native_gesture_recalls_one_beginning_and_invalid_beginnings_preserve_it() {
 #[test]
 fn navigator_geometry_and_gestures_preserve_document_pixels_and_history() {
     for platform in [0, 1] {
-        let app = App::new(platform);
-        unsafe { &mut *app.0 }.host.session.renderer_mut().0 =
-            Some(native_renderer());
-        app.draw_until_idle();
+        let app = super::fixtures::drawing_app(platform, [2048, 1536]);
         app.stroke();
         app.draw_until_idle();
         let pixels = app.pixels();

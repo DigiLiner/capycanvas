@@ -12,6 +12,7 @@ struct NumberControl: View {
     var inline = false
     var panel = true
     var entryWidth: CGFloat = 48
+    var affixes: (prefix: String, suffix: String)? = nil
     var toolbar: Toolbar? = nil
     var registerAdmission: ((String, ((Bool) -> Bool)?) -> Void)? = nil
     var gestureChange: ((String, Double, @escaping @MainActor (String?) -> Void) -> Void)? = nil
@@ -65,6 +66,13 @@ struct NumberControl: View {
                     else { valueButton }
                 }
             }
+            else if let affixes {
+                HStack(spacing: 0) {
+                    if !affixes.prefix.isEmpty { Text(affixes.prefix).foregroundStyle(palette["text"].opacity(0.55)).padding(.leading, 10) }
+                    numericEntry
+                    if !affixes.suffix.isEmpty { Text(affixes.suffix).foregroundStyle(palette["text"].opacity(0.55)) }
+                }.modifier(NumberControlMeasurement(id: key + ":header"))
+            }
             else if compactPanel {
                 ZStack {
                     Text(label).lineLimit(1).truncationMode(.tail)
@@ -111,7 +119,7 @@ struct NumberControl: View {
                     stepButton(1)
                 }
             }
-            if let error = field.error, !inline && !valueOnly {
+            if let error = field.error, !inline && !valueOnly && affixes == nil {
                 Text(error).font(.caption).foregroundStyle(.red).padding(.leading, 6)
                     .accessibilityIdentifier("number-error-" + key)
             }
@@ -238,7 +246,7 @@ struct NumberControl: View {
             color: palette["text"], identifier: "number-entry-" + key,
             submit: finish, cancel: cancel, step: step)
             .focusedValue(\.editorTextCommit, { _ = commit() })
-            .frame(width: valueOnly || inline || toolbar != nil ? nil : compactPanel ? 56 : slider ? 80 : spinWidth)
+            .frame(width: valueOnly || inline || toolbar != nil || affixes != nil ? nil : compactPanel ? 56 : slider ? 80 : spinWidth)
             .padding(.horizontal, 6).frame(height: compact ? store.panelMetrics.height : valueOnly || slider || compactPanel ? 24 : 32)
             .background(palette["input"], in: SquircleShape.control)
             .modifier(NumberControlMeasurement(id: key + ":entry"))

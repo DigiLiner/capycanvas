@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {png} from './clone-journey.test.mjs';
 import {checkProofKeys,checkProofPattern} from './proof-parity.test.mjs';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 export async function chooseToolActionGroup({call,evaluate,settle},group,command) {
   const selector=`[data-tool-action-group="${group}"]`;
@@ -224,10 +225,7 @@ export async function checkPanelControls({call,evaluate,settle}) {
       }
     }
     await invoke('new_document');
-    await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Discard Changes')?.click()`);
-    await wait(`!!document.querySelector('dialog[open] select[aria-label="Bit depth"]')`);
-    await evaluate(`(()=>{const n=document.querySelector('dialog[open] select[aria-label="Bit depth"]');n.value='F16';n.dispatchEvent(new Event('change'));const d=n.closest('dialog');for(const[label,value]of[['Width',256],['Height',256]])d.querySelector('input[aria-label^="'+label+'"]').value=value;})()`);
-    await click('dialog[open] .suggested-action');
+    await evaluate(createDrawing({width:256,height:256,depth:'F16'}));
     await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.proof_form().hdr&&layerApp.app.brush_ready()');
     for(const width of [242,320])for(const current of ['light','dark']){
       await send({type:'set_theme',theme:current});await float('proof',width);await invoke('soft_proof_setup');

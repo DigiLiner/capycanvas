@@ -31,6 +31,8 @@ mod paper;
 mod export_resize;
 #[path = "new_photo_tests.rs"]
 pub(crate) mod new_photo;
+#[path = "new_drawing_tests.rs"]
+mod new_drawing_review;
 #[path = "store_capture.rs"]
 mod store_capture;
 #[path = "hdr_tests.rs"]
@@ -1103,19 +1105,16 @@ fn native_document_files() {
     );
     for theme in [Theme::Dark, Theme::Light] {
         w.dispatch(UiAction::SetTheme { theme: Some(theme) });
-        w.dispatch(UiAction::Invoke {
-            command: CommandId::NewDocument,
-        });
-        pump(220);
+        new_drawing_review::open_new_drawing(&w);
         assert!(state(&w).document_file.busy);
-        let width = named::<adw::SpinRow>(w.window.upcast_ref(), "new-document-width");
-        width.set_value(512.);
+        new_drawing_review::new_drawing_action(&w, NewDrawingAction::Unit { unit: LengthUnit::Px });
+        new_drawing_review::new_drawing_action(&w, NewDrawingAction::Width { value: 512. });
         capture_reference(
             &w,
             output.join(format!("new-{theme:?}.png")).to_str().unwrap(),
             1.,
         );
-        click(&find_button(w.window.upcast_ref(), "Create").unwrap());
+        new_drawing_review::close_new_drawing(&w, "new-drawing-create");
         pump(220);
         let (project, location) = created.borrow_mut().take().unwrap();
         assert_eq!(project.composition().size[0], 512);
@@ -1123,14 +1122,8 @@ fn native_document_files() {
         assert!(!state(&w).document_file.busy);
         assert_eq!(state(&w).tabs[0].width, 384);
     }
-    w.dispatch(UiAction::Invoke {
-        command: CommandId::NewDocument,
-    });
-    pump(200);
-    // The title-bar customization bank also owns a hidden Cancel button.
-    // Target the current native dialog rather than the first label in the window.
-    let dialog = w.window.visible_dialog().unwrap();
-    click(&find_button(dialog.upcast_ref(), &layer_ui::new_document_spec(&w.localization()).cancel).unwrap());
+    new_drawing_review::open_new_drawing(&w);
+    new_drawing_review::close_new_drawing(&w, "new-drawing-cancel");
     finish();
     assert!(created.borrow().is_none());
     let reopened = Workspace::with_project(&app, Some((project, Some(location))));
@@ -14331,23 +14324,26 @@ fn native_live_language_switching() {
             assert_eq!(row.subtitle().as_deref(), Some(view.toolbars[0].subtitle.as_str()));
         }
         w.dispatch(UiAction::Customize { action: CustomizationAction::CloseToolbarManager });
-        new_photo::invoke(&w, CommandId::NewDocument);
-        let dialog = w.window.visible_dialog().unwrap().downcast::<adw::AlertDialog>().unwrap();
-        let width = named::<adw::SpinRow>(dialog.upcast_ref(), "new-document-width");
-        width.grab_focus();
+        new_drawing_review::open_new_drawing(&w);
+        let dialog = w.window.visible_dialog().unwrap();
+        let slot = named::<gtk::Widget>(dialog.upcast_ref(), "new-drawing-width");
+        let width = descendant::<crate::number_control::NumberControl>(&slot).unwrap();
+        let entry = descendant::<gtk::Entry>(&width).unwrap();
+        descendant::<gtk::Stack>(&width).unwrap().set_visible_child_name("entry");
+        entry.grab_focus();
         pump(350);
-        width.set_text("0034");
-        width.select_region(1, 3);
-        assert_eq!(width.text(), "0034");
-        let selection = width.selection_bounds();
+        entry.set_text("0034");
+        entry.select_region(1, 3);
+        assert_eq!(entry.text(), "0034");
+        let selection = entry.selection_bounds();
         for &language in layer_ui::localization::SHIPPED_LANGUAGES {
             switch(language);
-            assert_eq!(named::<adw::SpinRow>(dialog.upcast_ref(), "new-document-width"), width);
-            assert_eq!(width.text(), "0034");
-            assert_eq!(width.selection_bounds(), selection);
-            assert_eq!(dialog.heading().as_deref(), Some(layer_ui::new_document_spec(&w.localization()).title.as_ref()));
+            assert_eq!(descendant::<crate::number_control::NumberControl>(&slot).unwrap(), width);
+            assert_eq!(entry.text(), "0034");
+            assert_eq!(entry.selection_bounds(), selection);
+            assert_eq!(dialog.title().as_str(), ui_session(&w).new_drawing_view().unwrap().copy.title.as_ref());
         }
-        new_photo::response(&w, "cancel");
+        new_drawing_review::close_new_drawing(&w, "new-drawing-cancel");
         new_photo::finish(&w);
         new_photo::invoke(&w, CommandId::ExportDocument);
         let export = w.window.visible_dialog().unwrap();

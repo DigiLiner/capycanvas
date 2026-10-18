@@ -3620,6 +3620,10 @@ impl CanvasRenderer for WgpuRasterizer {
     fn max_document_dimension(&self) -> u32 {
         self.device.limits().max_texture_dimension_2d
     }
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "windows", target_vendor = "apple"))]
+    fn memory_headroom(&self) -> Option<u64> {
+        crate::display_memory::device_headroom(&self.device)
+    }
     fn paint_ready(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.startup.as_ref().is_none_or(|startup| startup.brush_ready) && !self.startup_needs_update(document, brush, transform)
     }

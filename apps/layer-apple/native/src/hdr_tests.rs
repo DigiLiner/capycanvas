@@ -16,22 +16,8 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
         let app = App::new(platform);
         unsafe { &mut *app.0 }.host.session.renderer_mut().0 = Some(native_renderer());
         app.draw_until_idle();
-        let options = layer_ui::NewDocumentOptions {
-            extent: [128, 96],
-            color: DocumentColor {
-                space: RgbSpace::DisplayP3,
-                depth: SampleDepth::F16,
-            },
-            ..Default::default()
-        };
-        let job = ProjectJob::new(&app, true);
-        let text = CString::new(serde_json::to_string(&options).unwrap()).unwrap();
-        assert_eq!(
-            unsafe { capy_project_new(job.0, text.as_ptr()) },
-            0,
-            "{:?}",
-            job.error()
-        );
+        let color = DocumentColor { space: RgbSpace::DisplayP3, depth: SampleDepth::F16 };
+        let job = ProjectJob::create_with(&app, [128, 96], &[json!({"op": "space", "space": color.space}), json!({"op": "depth", "depth": color.depth})]);
         assert_eq!(
             unsafe { capy_apple_project_adopt(app.0, job.0, c"HDR".as_ptr(), c"".as_ptr()) },
             0
@@ -50,7 +36,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
             raster
                 .0
                 .values()
-                .all(|(d, _)| *d == options.color.paint_descriptor())
+                .all(|(d, _)| *d == color.paint_descriptor())
         );
         assert!(
             raster
@@ -254,7 +240,7 @@ fn apple_hdr_edit_proof_export_and_analysis_reuse() {
             &original,
         );
         assert_eq!(unsafe { capy_apple_suspend_renderer(restored.0) }, 0);
-        let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(options.color).unwrap();
+        let gpu = layer_render_wgpu::WgpuRasterizer::new_native_headless(color).unwrap();
         let a = unsafe { &mut *restored.0 };
         a.metal.install_renderer(&mut a.host, gpu.into()).unwrap();
         restored.draw_until_idle();

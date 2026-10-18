@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 // Dedicated origin only. Uses the actual WebGPU masks and native browser input.
 export async function checkTonalSelections({call,evaluate,settle}) {
@@ -105,8 +106,7 @@ export async function checkTonalSelections({call,evaluate,settle}) {
     const before=await values(),thumb=await rect(`${inline} .interval-thumb.lower`),p={x:thumb.x+3,y:thumb.y+7};
     await gesture(p,{x:p.x-10,y:p.y},'mouse',true);assert.deepEqual(await values(),before,'Escape restores the endpoint');
     // A float document adds Bright HDR and still keeps Custom last.
-    await evaluate('layerApp.dispatch({type:"invoke",command:"new_document"});null');await wait(`!!document.querySelector('.document-dialog [aria-label="Bit depth"]')`);
-    await evaluate(`(()=>{const d=document.querySelector('.document-dialog');d.querySelector('[aria-label="Bit depth"]').value='F16';d.querySelectorAll('input[type=number]').forEach((n,i)=>n.value=i?200:500);[...d.querySelectorAll('button')].find(b=>b.textContent==='Create').click()})()`);
+    await evaluate('layerApp.dispatch({type:"invoke",command:"new_document"});null');await evaluate(createDrawing({depth:'F16'}));
     await wait('layerApp.app.document_color().depth==="F16"&&!layerApp.state().document_file.busy');
     await invoke('select_all');await send({type:'set_color',rgba:[1,1,1,1]});await send({type:'color',action:{op:'hdr_intensity',stops:2}});await invoke('fill_selection');await invoke('deselect');
     await invoke('tonal_select');

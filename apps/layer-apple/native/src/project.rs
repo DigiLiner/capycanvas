@@ -52,7 +52,7 @@ enum Payload {
         source: layer_ui::ImportSource,
         imported: Option<layer_ui::ImportedDocument>,
         paper_directory: Option<std::path::PathBuf>,
-        paper: Option<layer_host::papers::PreparedPaper>,
+        notice: Option<String>,
     },
     Placed {
         images: layer_ui::ImageImportBatch,
@@ -237,7 +237,7 @@ pub unsafe extern "C" fn capy_apple_project_task(
                 source: layer_ui::ImportSource::Master,
                 imported: None,
                 paper_directory: app.paper_directory.clone(),
-                paper: None,
+                notice: None,
             }
         } else {
             return Err("Unknown project task kind".into());
@@ -391,7 +391,7 @@ pub unsafe extern "C" fn capy_project_export_preview(task: *const CapyProjectTas
 }
 
 enum Input<'a> {
-    New(Option<layer_ui::NewDocumentOptions>),
+    New,
     File(i32),
     Bytes(&'a [u8]),
     Assume(layer_core::color::ColorProfile),
@@ -416,7 +416,7 @@ pub unsafe extern "C" fn capy_project_finish_images(task: *const CapyProjectTask
         };
         let candidate = environment.prepare(document, || task.check_cancelled().is_err())?;
         *payload = Payload::Open { environment: None, candidate: Some(candidate), source: layer_ui::ImportSource::Photo, imported: None,
-            paper_directory: None, paper: None };
+            paper_directory: None, notice: None };
         Ok(())
     })
 }
@@ -451,23 +451,21 @@ pub unsafe extern "C" fn capy_apple_file_drop(json: *const c_char) -> *mut c_cha
     }) }
 }
 /// # Safety
-/// Worker only. Read/validate/prepare before adoption. fd == -1 uses captured
-/// New defaults. Other fds remain caller-owned; name is NUL-terminated UTF-8.
+/// Worker only. Read/validate/prepare before adoption. The fd remains
+/// caller-owned; name is NUL-terminated UTF-8.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_read(task: *const CapyProjectTask, fd: i32, name: *const c_char) -> i32 {
     let fingerprint = if fd >= 0 {
         let file = host_file(fd);
         layer_ui::DestinationFingerprint::read(&*file).and_then(|fingerprint| {
             (&*file).seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-            Ok(Some(fingerprint))
+            Ok(fingerprint)
         })
-    } else { Ok(None) };
-    let input = fingerprint.as_ref().map_err(Clone::clone).and_then(|_| match fd {
-        -1 => Ok(Input::New(None)), n if n >= 0 => Ok(Input::File(n)), _ => Err("Missing project input".into()),
-    });
+    } else { Err("Missing project input".into()) };
+    let input = fingerprint.as_ref().map(|_| Input::File(fd)).map_err(Clone::clone);
     let result = unsafe { prepare_project(task, input, read_title(name)) };
     if result == 0 && let Some(task) = (unsafe { task.as_ref() }) {
-        task.state.lock().unwrap_or_else(|e| e.into_inner()).fingerprint = fingerprint.ok().flatten();
+        task.state.lock().unwrap_or_else(|e| e.into_inner()).fingerprint = fingerprint.ok();
     }
     result
 }
@@ -481,13 +479,10 @@ pub unsafe extern "C" fn capy_project_read_bytes(task: *const CapyProjectTask, b
     unsafe { prepare_project(task, input, read_title(name)) }
 }
 /// # Safety
-/// Worker only; options is NUL-terminated NewDocumentOptions JSON.
+/// Worker only; the task was captured after New drawing's Create.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_project_new(task: *const CapyProjectTask, options: *const c_char) -> i32 {
-    let options = unsafe { read_title(options) }.and_then(|text| {
-        serde_json::from_str(text).map(|value| Input::New(Some(value))).map_err(|e| e.to_string())
-    });
-    unsafe { prepare_project(task, options, Ok("Untitled")) }
+pub unsafe extern "C" fn capy_project_new(task: *const CapyProjectTask) -> i32 {
+    unsafe { prepare_project(task, Ok(Input::New), Ok("Untitled")) }
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_project_package_summary(task:*const CapyProjectTask)->*mut c_char {
@@ -562,7 +557,7 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
                     }
                     Input::Bytes(bytes) => images.read_candidate(Cursor::new(bytes), stem, task.control.cancellation_flag()),
                     Input::Assume(profile) => images.interpret(profile, task.control.is_cancelled()),
-                    Input::New(_) => Err("Choose images to place".into()),
+                    Input::New => Err("Choose images to place".into()),
                 }
             })();
             if result.is_err() && !interpreting && mode.is_none() { images.invalidate(); }
@@ -570,18 +565,15 @@ unsafe fn prepare_project(task: *const CapyProjectTask, input: Result<Input<'_>,
         }
         let input = input?;
         let name = name?;
-        let Payload::Open { environment, candidate, source, imported, paper_directory, paper } = payload else {
+        let Payload::Open { environment, candidate, source, imported, paper_directory, notice } = payload else {
             return Err("Not an open task".into());
         };
         let context = environment.as_ref().ok_or("This open task has already run")?;
         match input {
-            Input::New(options) => {
-                let prepared = layer_host::papers::resolve(&context.new_paper, paper_directory.as_deref(), &context.localization);
-                *imported = Some(layer_ui::ImportedDocument::new(
-                    options.unwrap_or(context.new_options).project_on(prepared.texture.clone(), &context.localization)?,
-                    layer_ui::ImportSource::Master,
-                ));
-                *paper = Some(prepared);
+            Input::New => {
+                let (document, warning) = context.new_drawing(paper_directory.as_deref())?;
+                *imported = Some(layer_ui::ImportedDocument::new(document, layer_ui::ImportSource::Master));
+                *notice = warning;
             }
             Input::File(fd) => {
                 let file = host_file(fd);
@@ -695,7 +687,7 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
             app.host.apply_change(previous, change);
             return Ok(());
         }
-        let Payload::Open { candidate, source, paper, .. } = &mut state.payload else {
+        let Payload::Open { candidate, source, notice, .. } = &mut state.payload else {
             return Err("Not an open task".into());
         };
         let location = source.adoption_location(location);
@@ -703,10 +695,11 @@ pub unsafe extern "C" fn capy_apple_project_adopt(
         let open = OpenAdoption { epoch: task.epoch, revision: task.revision, location };
         let retired = app.window.adopt(&mut app.host, candidate, open,
             || unsafe { capy_project_begin_commit(task) } >= 0, |session| session)?;
-        if let Some(paper) = paper.take() {
-            let previous = app.host.session.state().revision;
-            let change = paper.apply(&mut app.host.session);
-            app.host.apply_change(previous, change);
+        if let Some(notice) = notice.take() {
+            let session = &mut app.host.session;
+            session.notify(notice);
+            let revision = session.state().revision;
+            app.host.apply_change(revision, layer_ui::UiChange { revision, regions: layer_ui::regions::HOST, canvas_wake: false });
         }
         app.document_retired();
         if let (Some(location), Some(fingerprint)) = (fingerprint_location, state.fingerprint.clone()) {

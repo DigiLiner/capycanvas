@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {createDrawing} from './new-drawing-fixture.mjs';
 const exec=promisify(execFile);
 const summary=values=>{const a=values.toSorted((a,b)=>a-b),p=q=>a[Math.floor((a.length-1)*q)];return a.length?{count:a.length,p50:p(.5),p95:p(.95),p99:p(.99),max:a.at(-1)}:null;};
 
@@ -57,8 +58,7 @@ export async function measureHdr({call,evaluate,settle}) {
       try {
         await reset();if(process.env.LAYER_HDR_PROFILE){await call("Profiler.enable");await call("Profiler.start");}const start=performance.now();
         if(['sparse4k','sdr4k'].includes(name)){
-          await invoke('new_document');await wait(`!!document.querySelector('dialog[open] [aria-label="Bit depth"]')`);
-          await evaluate(`(()=>{const d=document.querySelector('dialog[open]'),depth=d.querySelector('[aria-label="Bit depth"]');depth.value=${JSON.stringify(name==='sdr4k'?'U8':'F16')};depth.dispatchEvent(new Event('change'));for(const[label,v]of[['Width',3840],['Height',2160]])[...d.querySelectorAll('input')].find(n=>n.getAttribute('aria-label')?.startsWith(label)).value=v;[...d.querySelectorAll('button')].find(b=>b.textContent==='Create').click()})()`);
+          await invoke('new_document');await evaluate(createDrawing({width:3840,height:2160,depth:name==='sdr4k'?'U8':'F16'}));
         }else{await evaluate(`hdrPerf.name=${JSON.stringify(name)}`);await invoke('open_document');}
         await wait('!layerApp.state().document_file.busy&&layerApp.app.brush_ready()');entry.open_ms=performance.now()-start;
         await wait('!layerApp.app.tone_status().hdr||layerApp.app.tone_status().ready||layerApp.app.tone_status().error');entry.ready_ms=performance.now()-start;entry.tone=await evaluate(`JSON.parse(JSON.stringify(layerApp.app.tone_status(),(_,v)=>typeof v==='bigint'?Number(v):v))`);assert.equal(entry.tone.error??null,null);entry.cold=await read();if(process.env.LAYER_HDR_PROFILE){const {profile}=await call("Profiler.stop");await writeFile(`${directory}/open-${name}.cpuprofile`,JSON.stringify(profile));await call("Profiler.disable");}

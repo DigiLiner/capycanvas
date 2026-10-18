@@ -46,7 +46,7 @@ class AndroidSessionRestartTest {
                 val task = native {h ->val(id,owner)=documentRequest(h,"save_document_as");
                     Native.projectTask(h,id,location.toString(),owner.getLong("epoch"),owner.getLong("revision")) to id}
                 try {
-                    Native.projectWork(task.first,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),0,0)
+                    Native.projectWork(task.first,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),"")
                     val fingerprint = Native.sessionFingerprint(ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_READ_ONLY).detachFd())
                     native {Native.sessionCompleteSave(it,task.second,location.toString(),fingerprint)}
                 } finally {Native.projectFree(task.first)}

@@ -225,7 +225,7 @@ impl Launcher {
                 target.as_ref(),
                 file,
                 settings.photo_open,
-                settings.new_document.defaults.color.space,
+                target.as_ref().and_then(|w| w.gpu.borrow().as_ref().map(|g| g.session.engine().document().composition().color.space)).unwrap_or_default(),
                 layer_ui::photo_document_names(&name, &localization),
                 &localization,
             )

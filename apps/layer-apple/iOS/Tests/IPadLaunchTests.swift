@@ -212,7 +212,7 @@ extension EditorLaunchTests {
         waitForExpectations(timeout: 60)
         XCTAssertTrue(later.isHittable)
         editorMenu(in: app, menu: "File", id: "new_document", label: "New drawing")
-        let create = app.buttons["new-document-create"]
+        let create = app.buttons["new-drawing-create"]
         XCTAssertTrue(create.waitForExistence(timeout: 10)); workspaceActivate(create)
         XCTAssertTrue(create.waitForNonExistence(timeout: 20)); waitForStartupCanvas(app)
         let rows = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-row-"))

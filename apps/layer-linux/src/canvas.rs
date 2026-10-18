@@ -69,7 +69,7 @@ impl GpuCanvas {
         let startup = project.is_none();
         let (project, location) = match project {
             Some(project) => project,
-            None => (settings.new_document.defaults.project_on(settings.new_document.paper(), &localization)?, None),
+            None => (layer_ui::startup_drawing(&localization)?, None),
         };
         let color = project.composition().color;
         let renderer = RenderWorker::new(Parent::new(&parent)?, area.downgrade().into(), color, localization.clone())?;

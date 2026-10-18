@@ -318,7 +318,7 @@ try {
   Button 'Test pen';Wait-Until {(Model).state.document_file.modified} 'Initial drawing did not become dirty' 60
   Wait-Until {$review.Refresh();$review.MainWindowTitle.StartsWith('• ')} 'Window title lacks the unsaved marker'
  }
- Command 'new_document' 'File';Set-Text 'document-width' '128';Set-Text 'document-height' '96'
+ Command 'new_document' 'File';New-DrawingPixels 128 96
  if(!$DrawingTabsOnly){Select-Choice 'document-depth' $(if($Depth -eq 'F32'){'32-bit float HDR'}else{'16-bit float HDR'})}
  Button 'Create';Idle
  Wait-Until {(Model).brush_ready -and ($DrawingTabsOnly -or ((Model).color_panel.hdr -and (Model).color_panel.document_depth -eq $Depth -and (Model).windows_display.analysis.ready))} 'Drawing creation did not settle' 60
@@ -530,7 +530,7 @@ try {
  if((Model).windows_tabs.parked_renderers -ne 0){throw 'Inactive drawing retained a renderer'}
 
  # Three drawings force a compact selector at this DPI; two still fit the strip.
- Command 'new_document' 'File';Set-Text 'document-width' '32';Set-Text 'document-height' '24';Button 'Create';Idle
+ Command 'new_document' 'File';New-DrawingPixels 32 24;Button 'Create';Idle
  Wait-Until {@((Model).windows_tabs.tabs).Count -eq 3 -and (Model).windows_tabs.available} 'Third drawing did not become available' 60
  & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Resize -Width 900 -Height 1100
  Wait-Until {(Find 'drawing-selector')} 'Compact drawing selector did not appear'

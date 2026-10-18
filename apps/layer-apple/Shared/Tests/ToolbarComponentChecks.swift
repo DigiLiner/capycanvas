@@ -182,7 +182,7 @@ extension XCTestCase {
         tap(strength, CGVector(dx: 0.5, dy: 0.5))
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
         editorMenu(in: app, menu: "File", id: "new_document", label: "New…")
-        let create = app.buttons["new-document-create"]
+        let create = app.buttons["new-drawing-create"]
         XCTAssertTrue(create.waitForExistence(timeout: 15)); workspaceActivate(create)
         XCTAssertTrue(create.waitForNonExistence(timeout: 60))
         XCTAssertTrue(preview.waitForNonExistence(timeout: 10), "A new drawing retires the old preview")

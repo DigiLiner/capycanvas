@@ -122,15 +122,6 @@ pub unsafe extern "C" fn capy_numeric_labels(context: *const CapyLocalization, i
 /// # Safety
 /// Both pointers remain readable for this call; the context remains immutable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_document_appearance(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
-    unsafe { localized_json(context, input, |source, localization| {
-        let options: layer_ui::NewDocumentOptions = serde_json::from_str(source).map_err(|e| e.to_string())?;
-        serde_json::to_value(options.appearance(localization)).map_err(|e| e.to_string())
-    }) }
-}
-/// # Safety
-/// Both pointers remain readable for this call; the context remains immutable.
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_drawer_frame(context: *const CapyLocalization, input: *const c_char) -> *mut c_char {
     unsafe { localized_json(context, input, |source, _| layer_ui::drawer_frame(source)) }
 }
@@ -235,7 +226,7 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&context.localizer, &localization));
     }
     #[test]
-    fn caption_and_appearance_ffi_retain_context_and_literal_user_text() {
+    fn caption_ffi_retains_context_and_literal_user_text() {
         let l = layer_ui::Localizer::shared(layer_ui::UiLanguage::Japanese);
         let context = CapyLocalization { localizer: l.clone() };
         let invoke = |f: unsafe extern "C" fn(*const CapyLocalization, *const c_char) -> *mut c_char, request: serde_json::Value| {
@@ -265,8 +256,6 @@ mod tests {
         }
         assert_ne!(labels["decrease"], format!("Decrease {title}"));
         assert!(invoke(capy_numeric_labels, serde_json::json!({"label":title,"unknown":true}))["error"].is_string());
-        let appearance = invoke(capy_document_appearance, serde_json::to_value(layer_ui::NewDocumentOptions::default()).unwrap());
-        assert_eq!(appearance["summary"], layer_ui::NewDocumentOptions::default().appearance(&l).summary);
         assert!(std::sync::Arc::ptr_eq(&context.localizer, &l));
     }
     #[test]

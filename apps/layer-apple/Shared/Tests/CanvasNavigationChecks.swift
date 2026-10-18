@@ -409,7 +409,7 @@ extension XCTestCase {
             workspaceActivate(button)
         }
         command("New…")
-        let create = app.buttons["new-document-create"]
+        let create = app.buttons["new-drawing-create"]
         XCTAssertTrue(create.waitForExistence(timeout: 15)); workspaceActivate(create)
         XCTAssertTrue(create.waitForNonExistence(timeout: 60))
         func expectDrawing(_ id: Int) {

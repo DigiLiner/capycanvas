@@ -458,6 +458,10 @@ also save images under `Pictures/` through MediaStore.
   acquired. Debug and benchmark builds give the swapchain copy usage, so tests
   read the retained image directly or take a compositor screenshot. Release
   builds cannot be read back.
+- `CanvasHost.createDrawing` in `CapyDeviceTest.kt` (with `orderDrawing`) makes a
+  pixel-sized drawing through the shared [New drawing](../ui/new-drawing.md)
+  actions and waits for its New request to finish. Use it when a journey only
+  needs a canvas; `newDrawingDialogJourneyInBothThemes` walks the dialog itself.
 - `awaitMain` defaults to a 10 s timeout. A cold shader cache on a slow tablet
   can take longer to start; see [Devices](devices.md).
 
@@ -649,7 +653,7 @@ APK calls, so test-APK benchmarks use the unminified build.
   canvas; `-e canvasSize` supplies both dimensions when they are omitted.
   `-e photo /data/local/tmp/FILE.jpg` places that photo before drawing and navigation;
   `-e openQueryPhoto true` opens its original dimensions directly for photos
-  wider than the new-document limit of 8192 px.
+  larger than New drawing accepts on the device.
   `-e passThrough true` adds a Pass Through group with a Black & White adjustment
   above a Solid Color fill. Warmup waits for the active brush and canvas, primes
   painting and a matching navigation gesture, then restores the camera.

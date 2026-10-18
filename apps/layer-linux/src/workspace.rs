@@ -926,6 +926,7 @@ pub struct Workspace {
     pub(crate) histogram: Rc<crate::histogram::Inspector>,
     pub(crate) waveform: Rc<crate::histogram::Inspector>,
     pub(crate) open_document: RefCell<Option<crate::files::OpenDocument>>,
+    pub(crate) new_drawing: RefCell<std::rc::Weak<crate::new_drawing::NewDrawing>>,
     pub(crate) image_drop: RefCell<Option<crate::files::drop::Incoming>>,
     pub(crate) image_drop_label: gtk::Label,
     initial_project: RefCell<Option<(layer_core::Document, Option<DocumentLocation>)>>,
@@ -1292,6 +1293,7 @@ impl Workspace {
             servicing: Cell::new(false),
             histogram, waveform,
             open_document: RefCell::new(None),
+            new_drawing: RefCell::default(),
             initial_project: RefCell::new(project),
             initial_settings: RefCell::new(None),
             customization: customization::Customization::new(),
@@ -2818,6 +2820,7 @@ impl Workspace {
         }
         if regions & regions::HOST != 0 {
             self.notice.publish(self, state.notice.as_ref(), self.notice_clearance());
+            if let Some(dialog) = self.new_drawing.borrow().upgrade() { glib::idle_add_local_once(move || dialog.render()); }
         }
         if regions & regions::LAYOUT != 0 && !self.workspaces.loading() {
             self.reconcile_layout(&state.workspace.layout);

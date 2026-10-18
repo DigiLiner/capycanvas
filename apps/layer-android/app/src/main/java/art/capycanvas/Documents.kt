@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -173,7 +174,9 @@ internal class DocumentController(private val host: CanvasHost, private val appl
         return openUris(uris,release={permission?.release()})
     }
     private var approval = 0L to 0L
-    fun observe(request: JSONObject?, file: JSONObject) {
+    private var newDrawing: JSONObject? = null
+    private var newDrawingShown = false
+    fun observe(request: JSONObject?, file: JSONObject, screen: JSONObject?) {
         if ((BuildConfig.DEBUG || BuildConfig.WORKSPACE_BENCHMARK) && nativeFileJobsForTest) return
         val id = request?.getInt("id")
         val key = id?.let { file.optLong("epoch") to it }
@@ -188,6 +191,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
             "place" -> images.start(request, false)
             "paste" -> host.viewModelScope.launch { if (!clipboard.paste(request)) images.start(request, true) }
             "copy" -> clipboard.copy(request)
+            "new" -> openNewDrawing(request, screen)
             "export" -> { exportRecipe = null;host.viewModelScope.launch {
                 try {
                     if(host.proof.hasPending()) {
@@ -237,7 +241,35 @@ internal class DocumentController(private val host: CanvasHost, private val appl
         val id = picker?.request?.getInt("id") ?: return
         picker = null; complete(id, false, error.message ?: actionFailed)
     }
-    fun create(request: JSONObject, options: JSONObject) = transfer(request, null, approval, options.getJSONArray("extent").getInt(0), options.getJSONArray("extent").getInt(1), options)
+    private fun openNewDrawing(request: JSONObject, screen: JSONObject?) {
+        newDrawing = request; newDrawingShown = false
+        host.viewModelScope.launch {
+            try {
+                host.withNative {
+                    val untitled = JSONObject(Native.documentTabs(it, obj("op" to "view").toString())).getString("upcoming_untitled")
+                    Native.dispatch(it, obj("type" to "new_drawing", "action" to obj("op" to "open", "screen" to screen, "untitled" to untitled)).toString())
+                }
+                host.documentChanged()
+            } catch (e: Exception) { newDrawing = null; finish(request.getInt("id"), false, e.message ?: actionFailed) }
+        }
+    }
+    fun newDrawing(action: JSONObject) = host.viewModelScope.launch {
+        try { host.withNative { Native.dispatch(it, obj("type" to "new_drawing", "action" to action).toString()) } }
+        catch (e: Exception) { host.reportActionError(e.message ?: actionFailed) }
+        host.documentChanged()
+    }
+    fun createNewDrawing() = host.viewModelScope.launch {
+        val request = newDrawing ?: return@launch
+        try { host.withNative { Native.dispatch(it, obj("type" to "new_drawing", "action" to obj("op" to "create")).toString()) } }
+        catch (e: Exception) { host.reportActionError(e.message ?: actionFailed); host.documentChanged(); return@launch }
+        newDrawing = null; newDrawingShown = false
+        transfer(request, null, approval)
+    }
+    fun newDrawingShown(shown: Boolean) {
+        val request = newDrawing ?: return
+        if (shown) newDrawingShown = true
+        else if (newDrawingShown) { newDrawing = null; newDrawingShown = false; complete(request.getInt("id"), false) }
+    }
     fun chooseExport(recipe: JSONObject, destination: Int) {
         val request = exportRequest ?: return
         exportRecipe = recipe; exportDestination = destination; exportRequest = null
@@ -263,7 +295,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
         try { host.withNative { Native.documentComplete(it, id, success, message?.let(JSONObject::quote) ?: "null") }; host.documentChanged() }
         catch (e: Exception) { host.reportActionError(message ?: e.message ?: actionFailed) }
     }
-    private fun transfer(request: JSONObject, uri: Uri?, approved: Pair<Long, Long>, width: Int = 0, height: Int = 0, options: JSONObject? = null) {
+    private fun transfer(request: JSONObject, uri: Uri?, approved: Pair<Long, Long>) {
         if (working) return
         working = true
         host.viewModelScope.launch {
@@ -304,7 +336,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
                     withContext(Dispatchers.IO) {
                         val fd = ParcelFileDescriptor.open(temporary, ParcelFileDescriptor.MODE_READ_WRITE).detachFd()
                         if (kind == "export") exportRecipe?.let { Native.projectExportOptions(task, it.toString()) }
-                        Native.projectWork(task, fd, 0, 0)
+                        Native.projectWork(task, fd, "")
                     }
                     if (kind == "export" && exportCancelled) { finish(id, false); return@launch }
                     if (kind == "export") publishing = true
@@ -336,8 +368,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
                     } else null
                     withContext(Dispatchers.IO) {
                         val fd = if (uri == null) -1 else application.contentResolver.openFileDescriptor(uri, "r")?.detachFd() ?: error(actionFailed)
-                        if (options != null) Native.projectOptions(task, options.toString())
-                        Native.projectWork(task, fd, width, height)
+                        Native.projectWork(task, fd, host.storage.papers.path)
                     }
                     if (exportCancelled) { finish(id, false); return@launch }
                     if (showPackage(task, uri)) { finish(id, false); return@launch }
@@ -346,7 +377,7 @@ internal class DocumentController(private val host: CanvasHost, private val appl
                         val decision = CompletableDeferred<JSONObject?>(); profileDecision = decision; profilePrompt = JSONObject(prompt)
                         val profile = try { decision.await() } finally { profileDecision = null; profilePrompt = null }
                         if (profile == null) { queuedOpen.clear(); finish(id, false); return@launch }
-                        withContext(Dispatchers.IO) { Native.projectAssumeProfile(task, profile.toString()); Native.projectWork(task, -1, 0, 0) }
+                        withContext(Dispatchers.IO) { Native.projectAssumeProfile(task, profile.toString()); Native.projectWork(task, -1, "") }
                     }
                     if (exportCancelled) { finish(id, false); return@launch }
                     if(kind=="new"||kind=="open") { host.drawingTabs.beforeAdopt(task); transitioning=true }
@@ -450,7 +481,9 @@ internal class DocumentController(private val host: CanvasHost, private val appl
             }) } catch (e: Exception) { controller.images.cancel(); host.reportActionError(e.message ?: host.bootstrap!!.getString("action_failed")) }
         }
     }
-    LaunchedEffect(request?.getInt("id"), file.optLong("epoch")) { controller.observe(request, file) }
+    val view = LocalView.current
+    LaunchedEffect(request?.getInt("id"), file.optLong("epoch")) { controller.observe(request, file, screenInfo(view)) }
+    LaunchedEffect(state.objectOrNull("new_drawing") != null) { controller.newDrawingShown(state.objectOrNull("new_drawing") != null) }
     val link = state.array("requests").objects().firstOrNull { it.getJSONObject("kind").getString("type") == "open_link" }
     LaunchedEffect(link?.getInt("id")) {
         if (link != null) {
@@ -504,9 +537,6 @@ internal class DocumentController(private val host: CanvasHost, private val appl
             "repair_source_profile", "rasterize_source" -> if (!DocumentController.nativeFileJobsForTest) key(id) { SourceEditDialog(host, request) }
             "properties" -> key(id) { DocumentPropertiesDialog(host) { controller.cancel(id) } }
             "change_color", "color_history" -> if (!DocumentController.nativeFileJobsForTest) key(id) { DocumentColorDialog(host, request) }
-            "new" -> key(id) {
-                NewDrawingDialog(host, options, { controller.cancel(id) }) { choices -> controller.create(request, choices) }
-            }
             "confirm_close" -> AlertDialog(onDismissRequest = { controller.close(id, "cancel") }, title = { Text(document.getString("title")) },
                 text = { Text(options.getString("unsaved_description")) }, confirmButton = {
                     TextButton({ controller.close(id, "save") }, Modifier.testTag("document-close-save")) { Text(common.getString("save")) }

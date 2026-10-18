@@ -121,14 +121,14 @@ extension XCTestCase {
         app.launchEnvironment["CAPY_INITIAL_ACTIONS"] = #"[{"type":"set_theme","theme":"\#(theme)"},{"type":"set_color","rgba":[0.2,0.45,0.8,1]}]"#
         app.launch(); capturePaintEditor(in: app)
         editorMenu(in: app, menu: "File", id: "new_document", label: "New…")
-        for (id, label) in [("new-document-space", "ProPhoto RGB"), ("new-document-depth", "16-bit SDR")] {
-            let picker = app.descendants(matching: .any).matching(identifier: id).firstMatch
-            XCTAssertTrue(picker.waitForExistence(timeout: 10)); workspaceActivate(picker)
-            workspaceActivate(app.menuItems[label].firstMatch)
+        for (id, index, label) in [("new-drawing-space", 3, "ProPhoto RGB"), ("new-drawing-depth", 1, "16-bit SDR")] {
+            let picker = app.buttons[id].firstMatch
+            XCTAssertTrue(picker.waitForExistence(timeout: 10))
+            chooseNewDrawingOption(id, index, in: app)
             expectation(for: NSPredicate(format: "value == %@", label), evaluatedWith: picker)
             waitForExpectations(timeout: 10)
         }
-        let create = app.buttons["new-document-create"]
+        let create = app.buttons["new-drawing-create"]
         workspaceActivate(create); XCTAssertTrue(create.waitForNonExistence(timeout: 30))
         let window = app.windows.firstMatch, originalFrame = window.frame
         let canvas = app.descendants(matching: .any)["canvas"].firstMatch

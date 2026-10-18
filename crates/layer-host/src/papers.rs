@@ -153,6 +153,9 @@ impl PaperTask {
     pub fn capture<R: layer_render::CanvasRenderer>(session: &layer_ui::UiSession<R>, request: Option<u32>, directory: PathBuf) -> Result<Self, String> {
         Ok(Self { capture: session.capture_paper(request)?, directory, localization: session.localization().clone() })
     }
+    pub fn library_import<R: layer_render::CanvasRenderer>(session: &layer_ui::UiSession<R>, directory: PathBuf) -> Self {
+        Self { capture: session.capture_library_import(), directory, localization: session.localization().clone() }
+    }
     pub fn imports(&self) -> bool { matches!(self.capture.action, Some(PaperRequest::Import { .. })) }
     pub fn work(&self, file: Option<(impl std::io::Read + std::io::Seek, &str)>, cancelled: &std::sync::atomic::AtomicBool) -> Result<PaperResult, String> {
         let failed = |error: PaperLibraryError| error.message(&self.localization);
@@ -293,7 +296,6 @@ mod tests {
         let directory=std::env::temp_dir().join(format!("capy-paper-launch-{}",layer_core::PortableId::random()));
         let (id,image,_)=import(&directory,&photo(37),"Cotton",&||false).unwrap();
         let mut settings=layer_ui::Settings::default();settings.new_document.paper=Some(id.clone());
-        settings.new_document.defaults.extent=[513,257];settings.new_document.defaults.resolution=150;
         let material=layer_ui::paper_library::PaperMaterial::capture(&settings.new_document,None);
         assert!(matches!(material,layer_ui::paper_library::PaperMaterial::Stored {..}));
         let localization=layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
@@ -304,8 +306,9 @@ mod tests {
         for platform in [layer_ui::Platform::Mac,layer_ui::Platform::Ios] {
             let host=crate::NativeHost::launch_prepared(platform,settings.clone(),localization.clone(),prepared.clone()).unwrap();
             let document=host.session.engine().document();
-            let layer_core::TextureSource::Image(source)=document.paper(None).texture else {panic!("prepared image paper")};
-            assert_eq!(document.paper(None).texture,prepared.texture);
+            assert_eq!(document.paper(None).texture,layer_core::paper::default_texture());
+            let layer_core::TextureSource::Image(source)=host.session.new_drawing_paper() else {panic!("prepared image paper")};
+            assert_eq!(layer_core::TextureSource::Image(source.clone()),prepared.texture);
             let actual=source.storage();
             assert_eq!((actual.extent,actual.resolution,actual.interpretation.channels,actual.interpretation.depth,actual.interpretation.profile_assumed),
                 (image.extent,image.resolution,image.interpretation.channels,image.interpretation.depth,image.interpretation.profile_assumed));
@@ -316,13 +319,12 @@ mod tests {
                 assert_eq!(found.descriptor,tile.descriptor);
                 assert_eq!(found.decode().unwrap(),tile.decode().unwrap());
             }
-            assert_eq!(document.composition().size,[513,257]);
-            assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(150)));
+            assert_eq!(document.composition().size,[3508,2480]);
+            assert_eq!(document.composition().resolution,Some(layer_core::ImageResolution::ppi(300)));
             assert!(!host.session.state().document_file.modified);
             assert!(!host.session.engine().can_undo());assert!(!host.session.engine().can_redo());
             assert_eq!(host.session.state().settings.new_document.paper.as_deref(),Some(id.as_str()));
             assert!(!host.session.state().requests.iter().any(|request|matches!(request.kind,layer_ui::HostRequestKind::SaveSettings {..})));
-            assert_eq!(host.session.new_drawing_paper(),layer_core::TextureSource::Image(source));
         }
         std::fs::remove_dir_all(directory).unwrap();
     }

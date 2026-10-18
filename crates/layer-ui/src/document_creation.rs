@@ -1,10 +1,11 @@
-//! Portable creation choices and reusable presets. Display state is never a
-//! document color default; precision and working RGB remain independent.
+//! Portable creation choices and the saved New drawing setups. Display state
+//! is never a document color default; precision and working RGB remain
+//! independent.
 use crate::{DEFAULT_DOCUMENT_EXTENT, MAX_NEW_DOCUMENT_DIMENSION, Localizer, MessageId, FluentArgs};
 use std::sync::Arc;
 use layer_core::{
     BlendSpace, Document,
-    color::{DocumentColor, SampleDepth, RgbSpace},
+    color::{DocumentColor, SampleDepth},
 };
 use serde::{Deserialize, Serialize};
 
@@ -97,7 +98,10 @@ impl NewDocumentOptions {
     }
     pub fn project_on(self, paper: layer_core::TextureSource, localization: &Localizer) -> Result<Document, String> {
         self.validate().map_err(|error| error.message(localization))?;
-        let mut document = Document::new(layer_core::authored::PortableId::random(), self.extent[0], self.extent[1], layer_core::DocumentNames {
+        Ok(self.document_on(layer_core::authored::PortableId::random(), paper, localization))
+    }
+    pub(crate) fn document_on(self, id: layer_core::authored::PortableId, paper: layer_core::TextureSource, localization: &Localizer) -> Document {
+        let mut document = Document::new(id, self.extent[0], self.extent[1], layer_core::DocumentNames {
             paint: localization.text(MessageId::DOCUMENTS_CURRENT_INK),
             paper: localization.text(MessageId::DOCUMENTS_PAPER),
         });
@@ -109,20 +113,7 @@ impl NewDocumentOptions {
         document.set_paper_texture(paper);
         let paper = layer_core::paper::paper_occurrence(document.scene(), None).expect("new drawings have paper");
         document.artwork.occurrences.get_mut(paper).unwrap().visible = self.background == DocumentBackground::White;
-        Ok(document)
-    }
-    pub fn description(self, localization: &Localizer) -> String {
-        let mut args = FluentArgs::new();
-        args.set("width", self.extent[0]);
-        args.set("height", self.extent[1]);
-        args.set("space", self.color.space.name());
-        let depth = depth_label(self.color.depth, localization);
-        args.set("depth", depth.as_ref());
-        let background = localization.text(if self.background == DocumentBackground::White {
-            MessageId::DOCUMENTS_WHITE
-        } else { MessageId::DOCUMENTS_TRANSPARENT });
-        args.set("background", background.as_ref());
-        localization.format(MessageId::DOCUMENTS_OPTIONS_DESCRIPTION, &args)
+        document
     }
 }
 
@@ -134,89 +125,65 @@ pub(crate) fn depth_label(depth: SampleDepth, localization: &Localizer) -> Arc<s
         SampleDepth::F32 => MessageId::DOCUMENTS_DEPTH_F32,
     })
 }
-#[derive(Serialize)]
-pub struct NewDocumentAppearance {
-    pub summary: String,
-    pub blending: BlendSpace,
-    pub blending_editable: bool,
-    pub blending_help: Arc<str>,
-    pub note: Option<Arc<str>>,
-}
-impl NewDocumentOptions {
-    pub fn appearance(self, localization: &Localizer) -> NewDocumentAppearance {
-        let blending = self.blend_space.for_depth(self.color.depth);
-        let choice = blending_choice(blending, localization);
-        let depth = depth_label(self.color.depth, localization);
-        let mut args = FluentArgs::new();
-        args.set("space", self.color.space.name());
-        args.set("depth", depth.as_ref());
-        args.set("blending", choice.label.as_ref());
-        NewDocumentAppearance {
-            summary: localization.format(MessageId::DOCUMENTS_COLOR_SUMMARY, &args),
-            blending,
-            blending_editable: !self.color.depth.is_float(),
-            blending_help: if self.color.depth.is_float() { localization.text(MessageId::DOCUMENTS_BLENDING_FLOAT_REASON) } else { choice.description },
-            note: (self.color.space == RgbSpace::ProPhoto && self.color.depth == SampleDepth::U8)
-                .then(|| localization.text(MessageId::DOCUMENTS_PROPHOTO_NOTE)),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NewDocumentPreset {
-    pub name: String,
-    pub options: NewDocumentOptions,
-}
-impl NewDocumentPreset {
-    pub fn builtins(localization: &Localizer) -> [NewDocumentPresetView; 4] {
-        [
-            (NewDocumentPresetId::Standard, MessageId::DOCUMENTS_STANDARD_PRESET, RgbSpace::Srgb, SampleDepth::U8),
-            (NewDocumentPresetId::WideColor, MessageId::DOCUMENTS_WIDE_PRESET, RgbSpace::DisplayP3, SampleDepth::U8),
-            (NewDocumentPresetId::PhotoEditing, MessageId::DOCUMENTS_PHOTO_PRESET, RgbSpace::ProPhoto, SampleDepth::U16),
-            (NewDocumentPresetId::HdrDrawing, MessageId::DOCUMENTS_HDR_PRESET, RgbSpace::Srgb, SampleDepth::F16),
-        ]
-        .map(|(id, name, space, depth)| NewDocumentPresetView {
-            id,
-            remove: None,
-            name: localization.text(name).to_string(),
-            options: NewDocumentOptions {
-                color: DocumentColor { space, depth },
-                blend_space: BlendSpace::Perceptual.for_depth(depth),
-                ..Default::default()
-            },
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewDocumentSettings {
-    pub defaults: NewDocumentOptions,
-    pub presets: Vec<NewDocumentPreset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paper: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub setups: Vec<crate::SavedSetup>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<crate::PresetKey>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<crate::DrawingSetup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paper_colors: Option<Vec<layer_core::color::RgbColor>>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NewDocumentAction {
-    Remember { options: NewDocumentOptions, name: String, defaults: bool },
-    Remove { index: usize },
+    SaveSetup { name: String, group: crate::PresetGroup, setup: crate::DrawingSetup },
+    RenameSetup { from: String, to: String, group: crate::PresetGroup },
+    DeleteSetup { name: String },
+    Created { setup: crate::DrawingSetup, preset: Option<crate::PresetKey> },
+    PaperColors { colors: Vec<layer_core::color::RgbColor> },
 }
 impl NewDocumentSettings {
     pub fn apply(&mut self, action: NewDocumentAction) -> Result<(), NewDocumentError> {
         let mut next = self.clone();
         match action {
-            NewDocumentAction::Remember { options, name, defaults } => {
-                options.validate()?;
-                if !name.trim().is_empty() {
-                    next.presets.push(NewDocumentPreset { name: name.trim().into(), options });
-                }
-                if defaults { next.defaults = options; }
+            NewDocumentAction::SaveSetup { name, group, setup } => {
+                let name = name.trim().to_string();
+                next.setups.retain(|saved| saved.name.to_lowercase() != name.to_lowercase());
+                next.recent.retain(|key| !matches!(key, crate::PresetKey::Saved(saved) if saved.to_lowercase() == name.to_lowercase()));
+                next.setups.push(crate::SavedSetup { name, group, setup });
             }
-            NewDocumentAction::Remove { index } => {
-                if index >= next.presets.len() { return Err(NewDocumentError::PresetUnavailable); }
-                next.presets.remove(index);
+            NewDocumentAction::RenameSetup { from, to, group } => {
+                let to = to.trim().to_string();
+                let saved = next.setups.iter_mut().find(|saved| saved.name == from).ok_or(NewDocumentError::PresetUnavailable)?;
+                saved.name.clone_from(&to);
+                saved.group = group;
+                for key in &mut next.recent {
+                    if *key == crate::PresetKey::Saved(from.clone()) { *key = crate::PresetKey::Saved(to.clone()); }
+                }
+            }
+            NewDocumentAction::DeleteSetup { name } => {
+                if !next.setups.iter().any(|saved| saved.name == name) { return Err(NewDocumentError::PresetUnavailable); }
+                next.setups.retain(|saved| saved.name != name);
+                next.recent.retain(|key| *key != crate::PresetKey::Saved(name.clone()));
+            }
+            NewDocumentAction::Created { setup, preset } => {
+                let key = preset.unwrap_or_else(|| {
+                    next.last = Some(setup);
+                    crate::PresetKey::Last
+                });
+                next.recent.retain(|recent| *recent != key);
+                next.recent.insert(0, key);
+                next.recent.truncate(crate::MAX_RECENT);
+            }
+            NewDocumentAction::PaperColors { colors } => {
+                if colors.len() > crate::MAX_PAPER_COLORS || colors.iter().any(|color| color.validate().is_err()) { return Err(NewDocumentError::PresetLimit); }
+                next.paper_colors = Some(colors);
             }
         }
         next.validate()?;
@@ -224,19 +191,13 @@ impl NewDocumentSettings {
         Ok(())
     }
     pub fn validate(&self) -> Result<(), NewDocumentError> {
-        self.defaults.validate()?;
-        if self.presets.len() > 64 {
+        if self.setups.len() > 64 {
             return Err(NewDocumentError::PresetLimit);
         }
         let mut names = Vec::new();
-        for preset in &self.presets {
-            preset.options.validate()?;
-            let name = preset.name.trim();
-            if name != preset.name
-                || name.is_empty()
-                || name.chars().count() > 64
-                || name.chars().any(char::is_control)
-            {
+        for saved in &self.setups {
+            let name = saved.name.trim();
+            if name != saved.name || name.is_empty() || name.chars().count() > 64 || name.chars().any(char::is_control) {
                 return Err(NewDocumentError::PresetName);
             }
             if names.contains(&name.to_lowercase()) {
@@ -250,92 +211,8 @@ impl NewDocumentSettings {
         self.paper.as_deref().and_then(layer_core::paper::built_in_paper)
             .map_or_else(layer_core::paper::default_texture, |paper| paper.texture.clone())
     }
-    pub fn save(&mut self, name: &str, options: NewDocumentOptions) -> Result<(), NewDocumentError> {
-        let mut next = self.clone();
-        next.presets.push(NewDocumentPreset {
-            name: name.trim().into(),
-            options,
-        });
-        next.validate()?;
-        *self = next;
-        Ok(())
-    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum NewDocumentPresetId { Standard, WideColor, PhotoEditing, HdrDrawing, Saved { index: usize } }
-
-#[derive(Clone, Debug, Serialize)]
-pub struct NewDocumentPresetView {
-    pub id: NewDocumentPresetId,
-    pub remove: Option<NewDocumentAction>,
-    pub name: String,
-    pub options: NewDocumentOptions,
-}
-
-/// Native and browser creation sheets use the same independent options.
-#[derive(Serialize)]
-pub struct NewDocumentForm {
-    pub options: NewDocumentOptions,
-    pub resolution: crate::NumericControl,
-    pub text: NewDocumentText,
-    pub selected: Option<NewDocumentPresetId>,
-    pub backgrounds: Vec<(DocumentBackground, Arc<str>)>,
-    pub depths: Vec<(SampleDepth, Arc<str>)>,
-    pub presets: Vec<NewDocumentPresetView>,
-    pub spaces: Vec<(RgbSpace, &'static str)>,
-    pub blending: NewDocumentBlending,
-}
-#[derive(Serialize)]
-pub struct NewDocumentText {
-    pub new_title: Arc<str>,
-    pub defaults_title: Arc<str>,
-    pub width: Arc<str>,
-    pub height: Arc<str>,
-    pub resolution: Arc<str>,
-    pub preset: Arc<str>,
-    pub custom: Arc<str>,
-    pub background: Arc<str>,
-    pub space: Arc<str>,
-    pub depth: Arc<str>,
-    pub color: Arc<str>,
-    pub save_preset: Arc<str>,
-    pub remove_preset: Arc<str>,
-    pub remember: Arc<str>,
-    pub use_defaults: Arc<str>,
-    pub create: Arc<str>,
-    pub cancel: Arc<str>,
-    pub preset_name: Arc<str>,
-    pub save_preset_title: Arc<str>,
-    pub save: Arc<str>,
-}
-impl NewDocumentText {
-    fn new(localization: &Localizer) -> Self {
-        Self {
-            new_title: localization.text(MessageId::DOCUMENTS_NEW),
-            defaults_title: localization.text(MessageId::DOCUMENTS_DEFAULTS_TITLE),
-            width: localization.text(MessageId::DOCUMENTS_WIDTH),
-            height: localization.text(MessageId::DOCUMENTS_HEIGHT),
-            resolution: localization.text(MessageId::RESOURCES_SIZE_RESOLUTION),
-            preset: localization.text(MessageId::DOCUMENTS_PRESET_LABEL),
-            custom: localization.text(MessageId::DOCUMENTS_CUSTOM_PRESET),
-            background: localization.text(MessageId::DOCUMENTS_BACKGROUND_LABEL),
-            space: localization.text(MessageId::DOCUMENTS_SPACE_LABEL),
-            depth: localization.text(MessageId::DOCUMENTS_DEPTH_LABEL),
-            color: localization.text(MessageId::DOCUMENTS_COLOR_LABEL),
-            save_preset: localization.text(MessageId::DOCUMENTS_SAVE_PRESET),
-            remove_preset: localization.text(MessageId::DOCUMENTS_REMOVE_PRESET),
-            remember: localization.text(MessageId::DOCUMENTS_REMEMBER),
-            use_defaults: localization.text(MessageId::DOCUMENTS_USE_DEFAULTS),
-            create: localization.text(MessageId::DOCUMENTS_CREATE),
-            cancel: localization.text(MessageId::COMMON_CANCEL),
-            preset_name: localization.text(MessageId::DOCUMENTS_PRESET_NAME),
-            save_preset_title: localization.text(MessageId::DOCUMENTS_SAVE_PRESET_TITLE),
-            save: localization.text(MessageId::COMMON_SAVE),
-        }
-    }
-}
 /// The Blending field: its choices, the depths that blend only in linear
 /// light, and why.
 #[derive(Serialize)]
@@ -374,32 +251,10 @@ impl NewDocumentBlending {
         }
     }
 }
-impl NewDocumentSettings {
-    pub fn form(&self, localization: &Localizer) -> NewDocumentForm {
-        let presets: Vec<_> = NewDocumentPreset::builtins(localization).into_iter().chain(self.presets.iter().enumerate().map(|(index, preset)| NewDocumentPresetView {
-            id: NewDocumentPresetId::Saved { index }, remove: Some(NewDocumentAction::Remove { index }),
-            name: preset.name.clone(), options: preset.options,
-        })).collect();
-        let selected = presets.iter().find(|preset| preset.options == self.defaults).map(|preset| preset.id);
-        NewDocumentForm {
-            options: self.defaults,
-            resolution: crate::NumericControl { unit: "ppi".into(), kind: crate::NumericKind::Number,
-                ..crate::NumericControl::number(1., f64::from(MAX_NEW_DOCUMENT_RESOLUTION), 1., 0) },
-            text: NewDocumentText::new(localization), selected,
-            backgrounds: vec![(DocumentBackground::White, localization.text(MessageId::DOCUMENTS_WHITE)),
-                (DocumentBackground::Transparent, localization.text(MessageId::DOCUMENTS_TRANSPARENT))],
-            depths: [SampleDepth::U8, SampleDepth::U16, SampleDepth::F16, SampleDepth::F32]
-                .into_iter().map(|depth| (depth, depth_label(depth, localization))).collect(),
-            presets,
-            spaces: RgbSpace::ALL.into_iter().map(|space| (space, space.name())).collect(),
-            blending: NewDocumentBlending::new(localization),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use layer_core::color::RgbSpace;
     use crate::session::test_support::reopen_capture as reopen;
     fn english() -> Arc<Localizer> { Localizer::shared(crate::UiLanguage::English) }
     #[test]
@@ -455,54 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_presets_have_identity_and_default_looking_user_names_stay_literal() {
-        let hdr = NewDocumentSettings::default().form(&english()).presets.into_iter().find(|p| p.name == "HDR drawing").unwrap();
-        assert_eq!(hdr.options.color, DocumentColor { space: RgbSpace::Srgb, depth: SampleDepth::F16 });
-        let mut settings = NewDocumentSettings::default();
-        settings.apply(NewDocumentAction::Remember { options: Default::default(), name: "HDR drawing".into(), defaults: false }).unwrap();
-        let form = settings.form(&Localizer::shared(crate::UiLanguage::Japanese));
-        assert_eq!(form.presets[3].id, NewDocumentPresetId::HdrDrawing);
-        assert_eq!(form.presets[4].id, NewDocumentPresetId::Saved { index: 0 });
-        assert_eq!(form.presets[4].name, "HDR drawing");
-        assert_eq!(form.presets[3].remove, None);
-        assert_eq!(form.presets[4].remove, Some(NewDocumentAction::Remove { index: 0 }));
-        settings.defaults = NewDocumentOptions { extent: [513, 257], ..Default::default() };
-        settings.apply(NewDocumentAction::Remember { options: settings.defaults, name: "{ $name }「絵」🖌️".into(), defaults: false }).unwrap();
-        let form = settings.form(&english());
-        assert_eq!(form.selected, Some(NewDocumentPresetId::Saved { index: 1 }));
-        assert_eq!(form.presets[5].name, "{ $name }「絵」🖌️");
-    }
-    #[test]
-    fn creation_appearance_projects_depth_policy_and_whole_color_summary() {
-        let options = NewDocumentOptions { color: DocumentColor { space: RgbSpace::ProPhoto, depth: SampleDepth::U8 }, ..Default::default() };
-        let view = options.appearance(&english());
-        assert!(view.note.is_some());
-        assert!(view.blending_editable);
-        assert_eq!(view.blending, BlendSpace::Perceptual);
-        assert_eq!(view.summary, "ProPhoto RGB · 8-bit SDR · Perceptual");
-        let view = NewDocumentOptions { color: DocumentColor { depth: SampleDepth::F32, ..options.color }, ..options }.appearance(&english());
-        assert!(view.note.is_none());
-        assert!(!view.blending_editable);
-        assert_eq!(view.blending, BlendSpace::Linear);
-        assert_eq!(view.blending_help.as_ref(), "Float documents blend in linear light");
-    }
-
-    #[test]
-    fn preference_actions_validate_before_changing_defaults_or_presets() {
-        let mut settings = NewDocumentSettings::default();
-        let options = NewDocumentOptions { extent: [513, 257], ..Default::default() };
-        settings.apply(NewDocumentAction::Remember { options, name: " Photo ".into(), defaults: true }).unwrap();
-        let saved = settings.clone();
-        assert!(settings.apply(NewDocumentAction::Remember { options: Default::default(), name: "photo".into(), defaults: true }).is_err());
-        assert_eq!(settings, saved);
-        assert!(settings.apply(NewDocumentAction::Remove { index: 1 }).is_err());
-        assert_eq!(settings, saved);
-        settings.apply(NewDocumentAction::Remove { index: 0 }).unwrap();
-        assert!(settings.presets.is_empty());
-        assert_eq!(settings.defaults, options);
-    }
-    #[test]
-    fn new_documents_blend_perceptually_except_at_float_and_presets_keep_the_choice() {
+    fn new_documents_blend_perceptually_except_at_float() {
         let project = NewDocumentOptions::default().project(&english()).unwrap();
         assert_eq!(project.composition().blend, BlendSpace::Perceptual);
         for depth in [SampleDepth::U8, SampleDepth::U16, SampleDepth::F16, SampleDepth::F32] {
@@ -511,23 +319,6 @@ mod tests {
                 assert_eq!(options.project(&english()).unwrap().composition().blend, if depth.is_float() { BlendSpace::Linear } else { blend_space });
             }
         }
-        let options = NewDocumentOptions { blend_space: BlendSpace::Linear, ..Default::default() };
-        let mut settings = NewDocumentSettings::default();
-        settings.apply(NewDocumentAction::Remember { options, name: "Linear".into(), defaults: true }).unwrap();
-        let read: NewDocumentSettings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert_eq!((read.defaults.blend_space, read.presets[0].options.blend_space), (BlendSpace::Linear, BlendSpace::Linear));
-        let mut older = serde_json::to_value(&settings).unwrap();
-        older["defaults"].as_object_mut().unwrap().remove("blend_space");
-        older["presets"][0]["options"].as_object_mut().unwrap().remove("blend_space");
-        let older: NewDocumentSettings = serde_json::from_value(older).unwrap();
-        assert_eq!((older.defaults.blend_space, older.presets[0].options.blend_space), (BlendSpace::Perceptual, BlendSpace::Perceptual));
-        let form = serde_json::to_value(NewDocumentSettings::default().form(&english())).unwrap();
-        assert_eq!(form["blending"]["choices"][0]["description"], "Like Photoshop and Clip Studio Paint");
-        assert_eq!(form["blending"]["float_reason"], "Float documents blend in linear light");
-        assert_eq!(form["blending"]["linear_only"], serde_json::json!(["F16", "F32"]));
-        assert_eq!(form["resolution"]["min"], 1.);
-        assert_eq!(form["resolution"]["max"], f64::from(MAX_NEW_DOCUMENT_RESOLUTION));
-        assert_eq!(form["resolution"]["unit"], "ppi");
         for resolution in [1, MAX_NEW_DOCUMENT_RESOLUTION] {
             assert_eq!(NewDocumentOptions { resolution, ..Default::default() }.validate(), Ok(()));
         }
@@ -580,36 +371,5 @@ mod tests {
                 }
             }
         }
-        assert_eq!(
-            NewDocumentPreset::builtins(&english())[0].options,
-            NewDocumentOptions::default()
-        );
-    }
-    #[test]
-    fn saved_presets_validate_atomically_and_roundtrip() {
-        let mut settings = NewDocumentSettings::default();
-        let options = NewDocumentPreset::builtins(&english())[2].options;
-        settings.save(" My photo ", options).unwrap();
-        settings.defaults = options;
-        let before = settings.clone();
-        assert!(settings.save("my PHOTO", options).is_err());
-        assert!(settings.save("MY photo", options).is_err());
-        assert!(
-            settings
-                .save(
-                    "Bad size",
-                    NewDocumentOptions {
-                        extent: [0, 8193],
-                        ..options
-                    }
-                )
-                .is_err()
-        );
-        assert_eq!(settings, before);
-        assert_eq!(
-            serde_json::from_str::<NewDocumentSettings>(&serde_json::to_string(&settings).unwrap())
-                .unwrap(),
-            settings
-        );
     }
 }

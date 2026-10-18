@@ -19,6 +19,7 @@ mod imp {
         pub error: RefCell<Option<layer_ui::NumericError>>,
         pub editing: Cell<bool>,
         pub scrubbing: Cell<bool>,
+        pub mouse_scrub: Cell<bool>,
         pub entry: OnceCell<gtk::Entry>,
         pub display: OnceCell<gtk::Button>,
         pub stack: OnceCell<gtk::Stack>,
@@ -387,6 +388,25 @@ impl NumberControl {
         }
         if let Some(slider) = control.imp().slider.get() {
             slider.set_visible(false);
+        }
+        control
+    }
+    /// A right-aligned value field that also scrubs with a mouse drag, like panel rows.
+    pub fn field(spec: NumericControl, title: &str, chars: i32, localization: std::sync::Arc<layer_ui::Localizer>) -> Self {
+        let control = Self::value_only(spec, title, localization);
+        control.set_vexpand(false);
+        let imp = control.imp();
+        imp.mouse_scrub.set(true);
+        if let Some(display) = imp.display.get() { display.set_cursor_from_name(Some("ns-resize")); }
+        if let Some(label) = imp.value_label.get() {
+            label.set_xalign(1.);
+            label.set_width_chars(chars);
+            label.set_max_width_chars(chars);
+        }
+        if let Some(entry) = imp.entry.get() {
+            gtk::prelude::EditableExt::set_alignment(entry, 1.);
+            entry.set_width_chars(chars);
+            entry.set_max_width_chars(chars);
         }
         control
     }
@@ -978,8 +998,9 @@ impl NumberControl {
         let _ = cr.fill();
     }
     fn install_value_gestures(&self, display: &gtk::Button) {
-        let panel = self.has_css_class("number-panel");
-        if panel { display.set_cursor_from_name(Some("ns-resize")); }
+        let panel_row = self.has_css_class("number-panel");
+        if panel_row { display.set_cursor_from_name(Some("ns-resize")); }
+        let scrubs = move |control: &Self| panel_row || control.imp().mouse_scrub.get();
         let drag = gtk::GestureDrag::new();
         drag.set_button(1);
         drag.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -987,7 +1008,7 @@ impl NumberControl {
         let origin_y = std::rc::Rc::new(Cell::new(None));
         let active = std::rc::Rc::new(Cell::new(false));
         let offset = std::rc::Rc::new(glib::clone!(#[strong] origin_y, move |gesture: &gtk::GestureDrag, dy: f64| {
-            if panel { gesture.current_event().and_then(|event| event.position()).zip(origin_y.get()).map_or(dy, |((_, y), origin)| y - origin) }
+            if panel_row { gesture.current_event().and_then(|event| event.position()).zip(origin_y.get()).map_or(dy, |((_, y), origin)| y - origin) }
             else { dy }
         }));
         let precision = std::rc::Rc::new(Cell::new((false, 0., 0., 0.)));
@@ -1008,6 +1029,7 @@ impl NumberControl {
             #[strong] active,
             #[strong] precision,
             move |g, _, _| {
+                let panel = scrubs(&control);
                 active.set(false);
                 precision.set((shifted(g), 0., 0., control.value()));
                 origin_y.set(g.current_event().and_then(|event| event.position()).map(|(_, y)| y));
@@ -1036,6 +1058,7 @@ impl NumberControl {
             #[strong] offset,
             #[strong] scrub,
             move |g, dx, dy| {
+                let panel = scrubs(&control);
                 let dy = offset(g, dy);
                 if !control.input_valid() || (!active.get() && !control.drag_check_threshold(0, 0, if panel { 0 } else { dx as i32 }, dy as i32)) {
                     return;
@@ -1047,16 +1070,16 @@ impl NumberControl {
             }
         ));
         drag.connect_drag_end(glib::clone!(#[weak(rename_to=control)] self, #[strong] active, #[strong] offset, #[strong] scrub, move |gesture, _, dy| {
-            if active.replace(false) && panel { control.apply(scrub(&control, gesture, offset(gesture, dy))); }
+            if active.replace(false) && scrubs(&control) { control.apply(scrub(&control, gesture, offset(gesture, dy))); }
             control.set_scrubbing(false);
         }));
         drag.connect_cancel(glib::clone!(#[weak(rename_to=control)] self, #[strong] origin, #[strong] active, move |_, _| {
-            if panel && active.replace(false) {
+            if scrubs(&control) && active.replace(false) {
                 control.set_scrubbing(false);
                 if control.is_mapped() { control.cancel_value_drag(origin.get()); }
             }
         }));
-        if panel {
+        if panel_row {
             let keys = gtk::EventControllerKey::new();
             keys.set_propagation_phase(gtk::PropagationPhase::Capture);
             keys.connect_key_pressed(glib::clone!(#[weak(rename_to=control)] self, #[weak] drag, #[strong] origin, #[strong] active, #[upgrade_or] glib::Propagation::Proceed, move |_, key, _, _| {

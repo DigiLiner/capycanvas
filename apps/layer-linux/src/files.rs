@@ -272,7 +272,9 @@ async fn document_request(
         return properties::show(w).await;
     }
     if matches!(request, DocumentRequest::New) {
-        let Some(project) = crate::new_document::run(w).await? else { return Ok(false); };
+        let Some(order) = crate::new_drawing::run(w).await? else { return Ok(false); };
+        let texture = crate::new_drawing::paper_texture(w, &order.paper).await?;
+        let project = order.project(texture, &w.localization())?;
         w.open_document
             .borrow()
             .as_ref()

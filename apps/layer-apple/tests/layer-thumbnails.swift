@@ -23,6 +23,9 @@ import SwiftUI
             try await wait("initial canvas and previews") {
                 store.snapshot["shaders_ready"].bool && store.layerThumbnails.images.count == 2
             }
+            store.projectFiles = ProjectFiles(store: store, dialogs: .init(open: { _, done in done([]) }, save: { _, _, done in done(nil) },
+                create: { _, _ in }))
+            try await store.orderNewDrawing(newSheet([64, 64]))
             let task = try await withCheckedThrowingContinuation { (done: CheckedContinuation<NativeProjectTask, Error>) in
                 native.projectTask(kind: .open) { task, error in
                     if let task { done.resume(returning: task) }
@@ -31,7 +34,7 @@ import SwiftUI
             }
             try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
                 NativeProjectTask.io.async {
-                    do { try task.read(from: nil, options: JSON(["extent": [64, 64], "color": ["space": "Srgb", "depth": "U8"], "background": "White"])); done.resume() }
+                    do { try task.read(from: nil); done.resume() }
                     catch { done.resume(throwing: error) }
                 }
             }

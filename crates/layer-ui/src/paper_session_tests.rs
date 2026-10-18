@@ -353,11 +353,11 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
     assert_eq!(paper_requests(&s).last(), Some(&PaperRequest::Rename { id: id.clone(), name: "Cotton rag".into() }));
     assert!(s.dispatch(UiAction::Effect { action: EffectAction::RenamePaper { id: id.clone(), name: " ".into() } }).is_err());
     s.dispatch(UiAction::Effect { action: EffectAction::ImportPaper { layer } }).unwrap();
-    assert_eq!(paper_requests(&s).last(), Some(&PaperRequest::Import { layer }));
+    assert_eq!(paper_requests(&s).last(), Some(&PaperRequest::Import { layer: Some(layer) }));
     let imported = gray_paper(90);
     let imported_id = paper_identity(&imported).unwrap();
     let entries = vec![entry, PaperEntry { id: imported_id.clone(), name: "linen scan".into(), bytes: 64, preview: vec![90; 96 * 96].into() }];
-    s.paper_imported(layer, entries.clone(), &imported_id, imported).unwrap();
+    s.paper_imported(Some(layer), entries.clone(), &imported_id, imported).unwrap();
     assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(14));
     assert_eq!(s.state.settings.new_document.paper.as_deref(), Some(imported_id.as_str()));
     assert!(matches!(s.new_drawing_paper(), layer_core::TextureSource::Image(_)));
@@ -385,7 +385,7 @@ fn paper_rows_name_their_texture_and_previews_resolve_by_identity() {
     let mut s = session(Platform::Gtk);
     let layer = paper_layer(&s);
     let row = |s: &UiSession<Recorder>| s.state.layers.iter().find(|row| row.id == layer).unwrap().paper.clone().unwrap();
-    assert_eq!(row(&s), crate::LayerPaper { id: Some("drawing_paper".into()), label: "Drawing paper".into(), editable: true });
+    assert_eq!(row(&s), crate::LayerPaper { id: Some("drawing_paper".into()), label: "Drawing".into(), editable: true });
     assert!(s.state.layers.iter().filter(|row| row.id != layer).all(|row| row.paper.is_none()));
     assert_eq!(s.paper_preview("drawing_paper"), Some(layer_core::paper::built_in_paper("drawing_paper").unwrap().preview.clone()));
     s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
@@ -465,7 +465,7 @@ fn imported_and_loaded_papers_save_the_remembered_paper_through_host_requests() 
         s.dispatch(UiAction::SelectLayer {id:layer}).unwrap();
         let image=gray_paper(90);let id=paper_identity(&image).unwrap();
         let entry=PaperEntry {id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into()};
-        if imported { s.paper_imported(layer,vec![entry],&id,image).unwrap(); }
+        if imported { s.paper_imported(Some(layer),vec![entry],&id,image).unwrap(); }
         else {
             s.set_paper_library(vec![entry]).unwrap();
             s.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}}).unwrap();
@@ -510,7 +510,7 @@ fn recovery_keeps_its_authored_paper_when_the_initial_default_was_prepared_from_
     use std::sync::{Arc,atomic::AtomicBool};
     let mut source=session(Platform::Mac);let source_layer=paper_layer(&source);
     let authored=gray_paper(90);let authored_id=paper_identity(&authored).unwrap();
-    source.paper_imported(source_layer,vec![],&authored_id,authored.clone()).unwrap();
+    source.paper_imported(Some(source_layer),vec![],&authored_id,authored.clone()).unwrap();
     source.frame(1,1).unwrap();
     let expected=source.engine.document().clone();let mark=source.engine.checkpoint();
     let cancelled=AtomicBool::new(false);let mut bytes=Vec::new();
@@ -518,9 +518,9 @@ fn recovery_keeps_its_authored_paper_when_the_initial_default_was_prepared_from_
     let remembered=gray_paper(10);let id=paper_identity(&remembered).unwrap();
     let texture=layer_core::TextureSource::Image(layer_core::authored::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(remembered.clone())));
     let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
-    let mut initial=UiSession::blank_with_settings(Recorder::default(),[1000,1000],Platform::Mac,source.localization().clone(),settings,texture.clone()).unwrap();
+    let mut initial=UiSession::blank_with_settings(Recorder::default(),[1000,1000],Platform::Mac,source.localization().clone(),settings).unwrap();
     initial.initialize_paper(Some(id.clone()),texture.clone(),None);initial.frame(0,0).unwrap();
-    assert_eq!(initial.engine.document().paper(None).texture,texture);
+    assert_eq!(initial.new_drawing_paper(),texture);
     assert!(!initial.engine.can_undo());assert!(!initial.engine.can_redo());assert!(!initial.state.document_file.modified);
     let backing=ImmutableBacking::new(Arc::new(Arc::<[u8]>::from(bytes))).unwrap();
     let recovery=crate::session_recovery::SessionRestore::open(backing,layer_core::ProjectLimits::default(),&cancelled).unwrap();
@@ -544,7 +544,7 @@ fn deleted_and_readded_paper_reuses_retained_history_source_after_reload() {
         let initial = s.engine.document().clone(); let initial_checkpoint = s.engine.checkpoint();
         let source = gray_paper(37); let id = paper_identity(&source).unwrap();
         let entry = PaperEntry { id:id.clone(),name:"Cotton".into(),bytes:64,preview:vec![128;96 * 96].into() };
-        s.paper_imported(layer,vec![entry.clone()],&id,source.clone()).unwrap();
+        s.paper_imported(Some(layer),vec![entry.clone()],&id,source.clone()).unwrap();
         let imported = s.engine.document().clone(); let imported_checkpoint = s.engine.checkpoint();
         s.set_paper_library(Vec::new()).unwrap();
         s.dispatch(UiAction::Effect { action:EffectAction::AddPaper { layer } }).unwrap();
@@ -590,7 +590,7 @@ fn evicted_library_paper_reuses_retained_history_source_after_reload() {
         let images = (0..4).map(|n|gray_paper(20 + n * 30)).collect::<Vec<_>>();
         let ids = images.iter().map(|image|paper_identity(image).unwrap()).collect::<Vec<_>>();
         let entries = ids.iter().enumerate().map(|(n,id)|PaperEntry { id:id.clone(),name:format!("Paper {n}"),bytes:64,preview:vec![128;96 * 96].into() }).collect::<Vec<_>>();
-        s.paper_imported(layer,entries,&ids[0],images[0].clone()).unwrap();
+        s.paper_imported(Some(layer),entries,&ids[0],images[0].clone()).unwrap();
         let original = s.engine.document().clone(); let checkpoint = s.engine.checkpoint();
         for (id,image) in ids.iter().zip(&images).skip(1) { s.paper_loaded(id,image.clone()).unwrap(); }
         assert!(s.papers.image(&ids[0]).is_none(),"the original three-entry strong cache still evicts");
@@ -622,7 +622,7 @@ fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
             let entry=PaperEntry {id:id.clone(),name:"Cotton".into(),bytes:64,preview:vec![128;96 * 96].into()};
             let mut authored=session(platform);let layer=paper_layer(&authored);
             authored.dispatch(UiAction::SelectLayer {id:layer}).unwrap();
-            authored.paper_imported(layer,vec![entry.clone()],&id,source.clone()).unwrap();
+            authored.paper_imported(Some(layer),vec![entry.clone()],&id,source.clone()).unwrap();
             let imported=authored.engine.document().clone();
             if mode==2 {authored.dispatch(UiAction::Effect {action:EffectAction::Reset {layer,key:"texture".into()}}).unwrap();}
             authored.frame(1,1).unwrap();
@@ -640,7 +640,7 @@ fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
             let decoded=layer_core::paper::decode_png(&layer_core::paper::encode_png(&source).unwrap()).unwrap();
             let texture=layer_core::TextureSource::Image(layer_core::Image::with_id(paper_image_id(&id).unwrap(),Arc::new(decoded)));
             let mut settings=Settings::default();settings.new_document.paper=Some(id.clone());
-            let mut previous=UiSession::blank_with_settings(Recorder::default(),[1000,1000],platform,authored.localization().clone(),settings,texture.clone()).unwrap();
+            let mut previous=UiSession::blank_with_settings(Recorder::default(),[1000,1000],platform,authored.localization().clone(),settings).unwrap();
             previous.initialize_paper(Some(id.clone()),texture,None);previous.frame(0,0).unwrap();
             if mode==0 {opened.frame(0,0).unwrap();}opened.inherit_window_state(&previous).unwrap();
             opened.set_paper_library(vec![entry]).unwrap();
@@ -661,4 +661,26 @@ fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
             } else {assert_eq!(opened.engine.checkpoint(),checkpoint,"same authored Paper adds no history");assert_live_artwork_eq(opened.engine.document(),&baseline);}
         }
     }
+}
+
+#[test]
+fn a_library_import_from_new_drawing_becomes_its_paper_without_changing_the_drawing() {
+    use crate::paper_library::{PaperEntry, PaperRequest, paper_identity};
+    let mut s = session(Platform::Gtk);
+    invoke(&mut s, CommandId::NewDocument);
+    let new_drawing = |s: &mut UiSession<Recorder>, action| { s.dispatch(UiAction::NewDrawing { action }).unwrap(); };
+    new_drawing(&mut s, NewDrawingAction::Open { screen: None, untitled: "Untitled 2".into() });
+    new_drawing(&mut s, NewDrawingAction::Paper);
+    let checkpoint = s.engine.checkpoint();
+    assert!(matches!(s.capture_library_import().action, Some(PaperRequest::Import { layer: None })));
+    let image = gray_paper(70);
+    let id = paper_identity(&image).unwrap();
+    let entry = PaperEntry { id: id.clone(), name: "Cotton".into(), bytes: 64, preview: vec![70; 96 * 96].into() };
+    s.paper_imported(None, vec![entry], &id, image).unwrap();
+    let Some(NewDrawingDrawerView::Paper { tiles }) = s.state.new_drawing.clone().unwrap().drawer else { panic!("the paper drawer") };
+    assert!(tiles.iter().any(|tile| tile.selected && tile.id.as_deref() == Some(id.as_str()) && tile.label.as_ref() == "Cotton"));
+    assert_eq!(s.engine.checkpoint(), checkpoint);
+    new_drawing(&mut s, NewDrawingAction::UsePaper);
+    new_drawing(&mut s, NewDrawingAction::Create);
+    assert!(matches!(s.new_drawing_order().unwrap().paper, crate::paper_library::PaperMaterial::Ready(layer_core::TextureSource::Image(_))));
 }

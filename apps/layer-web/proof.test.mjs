@@ -2,6 +2,7 @@ import {histogramJourney} from './histogram-journey.mjs';
 import {packageManifest,packageOutput,packageResources,readPackage,resourceIdentity} from './package-fixture.test.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
+import {createDrawing} from './new-drawing-fixture.mjs';
 
 // Real DOM, Wasm workers, storage and WebGPU. ICC fixtures are supplied locally,
 // never redistributed. May run through test.mjs or an existing tablet CDP tab.
@@ -36,12 +37,8 @@ export async function checkProof({call,evaluate,settle}, {profileUrl='/pkg/proof
     proofTest.manifest=${packageManifest.toString()};
     window.showSaveFilePicker=async o=>({name:o.suggestedName,async createWritable(){let bytes;return{async write(v){bytes=new Uint8Array(v instanceof Blob?await v.arrayBuffer():v)},async close(){proofTest.files.set(o.suggestedName,bytes)},async abort(){}}}});`);
   try {
-    await invoke('new_document');await wait(`!!document.querySelector('dialog[open]')`);
-    await evaluate(`[...document.querySelectorAll(':is(dialog[open],.proof-panel) button')].find(b=>b.textContent==='Discard Changes')?.click()`);
-    await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
-    await set('Color space','DisplayP3');await set('Bit depth','U16');
-    await evaluate(`(()=>{const d=document.querySelector('dialog[open]:has(select[aria-label="Color space"])');for(const[label,value]of[['Width',513],['Height',257]]){const n=[...d.querySelectorAll('input')].find(n=>n.getAttribute('aria-label')?.startsWith(label));n.value=value;}})()`);
-    await click('Create');await wait('!layerApp.state().document_file.busy && layerApp.app.brush_ready()');
+    await invoke('new_document');await evaluate(createDrawing({width:513,height:257,space:'DisplayP3',depth:'U16'}));
+    await wait('!layerApp.state().document_file.busy && layerApp.app.brush_ready()');
     await invoke('soft_proof');await wait(`!!document.querySelector('.proof-panel select[aria-label="Proof profile"]')`);
     await evaluate('new Promise(r=>setTimeout(r,400))');
     assert.equal(await evaluate('layerApp.state().soft_proof'),false);

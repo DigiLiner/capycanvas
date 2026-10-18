@@ -427,11 +427,10 @@ function Property-Surfaces{
   Invoke-Id 'edit-color-cancel';Wait-Until {!(Find 'edit-color-apply')} 'Cancel did not close Edit Color'
  }
  Menu-Command 'file' 'new_document'
- (Control 'document-width').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('64')
- (Control 'document-height').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('64')
- $creation=(Fresh-Model).document_options.creation;$floatDepth=@($creation.depths|Where-Object {$_[0] -eq 'F16'})[0]
+ New-DrawingPixels 64 64
+ $floatDepth=@((Fresh-Model).state.new_drawing.depths|Where-Object value -eq 'F16')[0]
  if(!$floatDepth){throw 'Shared creation inventory has no F16 semantic depth'}
- Choose-Option 'document-depth' $floatDepth[1];Invoke 'PrimaryButton'
+ Choose-Option 'document-depth' $floatDepth.label;Invoke 'new-drawing-create'
  Wait-Until {$view=Model;$view -and $view.color_panel.hdr -and $view.color_panel.document_depth -eq 'F16' -and $view.state.tabs[-1].width -eq 64} 'Floating test document did not prepare its HDR color controls' 45
  Property-Filter 'gradient_map';$colorId='property-gradient-color';Invoke-Id $colorId
  Wait-Until {(Find 'edit-color-intensity')} 'Floating document Edit Color did not expose intensity' 20

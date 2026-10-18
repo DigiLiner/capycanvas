@@ -1604,21 +1604,6 @@ pub extern "system" fn Java_art_capycanvas_Native_drawerFrame(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_documentAppearance(
-    mut env: JNIEnv, _: JClass, options: JString,
-    language: JString,
-) -> jstring {
-    crate::jni_entry!(env, {
-    let context = localized_context(&mut env, &language);
-    let result = read(&mut env, &options).and_then(|source| {
-        let options: layer_ui::NewDocumentOptions = serde_json::from_str(&source).map_err(error)?;
-        serde_json::to_string(&options.appearance(context.as_ref().map_err(|reason| reason.clone())?)).map_err(error)
-    });
-    string(&mut env, result)
-    })
-}
-
-#[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_colorHueStops(
     mut env: JNIEnv,
     _: JClass,

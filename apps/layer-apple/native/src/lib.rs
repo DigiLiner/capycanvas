@@ -347,15 +347,6 @@ pub unsafe extern "C" fn capy_apple_numeric_labels(json: *const c_char) -> *mut 
         serde_json::to_value(layer_ui::NumericLabels::new(&request.label, &localization)).map_err(|e| e.to_string())
     }) }
 }
-/// # Safety
-/// `json` is readable NUL-terminated UTF-8 for this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn capy_apple_document_appearance(json: *const c_char) -> *mut c_char {
-    unsafe { stateless_json(json, "Missing document options", |source| {
-        let (localization, options) = control_request::<layer_ui::NewDocumentOptions>(source)?;
-        serde_json::to_value(options.appearance(&localization)).map_err(|e| e.to_string())
-    }) }
-}
 unsafe fn stateless_json(json: *const c_char, missing: &str,
     resolve: impl FnOnce(&str) -> Result<serde_json::Value, String> + std::panic::UnwindSafe) -> *mut c_char {
     catch_unwind(|| {

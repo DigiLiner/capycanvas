@@ -182,22 +182,51 @@ fun documentRequest(handle: Long, command: String): Pair<Int, JSONObject> {
     return request(state).getInt("id") to state.getJSONObject("document_file")
 }
 
-fun CanvasHost.newDocument(width: Int, height: Int) {
-    val task = runBlocking { withNative { h ->
-        val (id, file) = documentRequest(h, "new_document")
-        Native.projectTask(h, id, "null", file.getLong("epoch"), file.getLong("revision"))
-    } }
+/** Chooses a [width] × [height] px sheet of white paper in the pending New request's dialog, then creates it. */
+fun orderDrawing(handle: Long, width: Int, height: Int, space: String = "Srgb", depth: String = "U8") {
+    fun act(op: String, vararg fields: Pair<String, Any?>) = Native.dispatch(handle, obj("type" to "new_drawing", "action" to obj("op" to op, *fields)).toString())
+    act("open", "screen" to null, "untitled" to "")
+    act("unit", "unit" to "px")
+    act("resolution", "value" to 300)
+    act("width", "value" to width)
+    act("height", "value" to height)
+    act("space", "space" to space)
+    act("depth", "depth" to depth)
+    act("blending", "blending" to "Perceptual")
+    act("paper_color")
+    act("paper_color_value", "color" to obj("space" to "Srgb", "rgba" to JSONArray(listOf(1, 1, 1, 1))))
+    act("use_paper_color")
+    act("create")
+}
+
+/** Creates a [width] × [height] px drawing through the project worker while the host's own document jobs stand aside. */
+fun CanvasHost.createDrawing(width: Int, height: Int, space: String = "Srgb", depth: String = "U8") {
+    val hostFileJobs = DocumentController.nativeFileJobsForTest
+    DocumentController.nativeFileJobsForTest = true
     try {
-        Native.projectOptions(task, obj("extent" to JSONArray(listOf(width, height)), "color" to obj("space" to "Srgb", "depth" to "U8"), "background" to "White").toString())
-        Native.projectWork(task, -1, width, height)
-        val until = SystemClock.uptimeMillis() + 60_000
-        while (true) {
-            try { runBlocking { withNative { Native.projectAdopt(it, task, "null") } }; break }
-            catch (e: IllegalStateException) { if (e.message?.contains("Wait for drawing capture") != true || SystemClock.uptimeMillis() > until) throw e }
-            documentChanged(); SystemClock.sleep(16)
+        val task = runBlocking { withNative { h ->
+            val (id, file) = documentRequest(h, "new_document")
+            orderDrawing(h, width, height, space, depth)
+            Native.projectTask(h, id, "null", file.getLong("epoch"), file.getLong("revision"))
+        } }
+        try {
+            Native.projectWork(task, -1, "")
+            val until = SystemClock.uptimeMillis() + 60_000
+            while (true) {
+                try { runBlocking { withNative { Native.projectAdopt(it, task, "null") } }; break }
+                catch (e: IllegalStateException) { if (e.message?.contains("Wait for drawing capture") != true || SystemClock.uptimeMillis() > until) throw e }
+                documentChanged(); SystemClock.sleep(16)
+            }
+        } finally { Native.projectFree(task) }
+        documentChanged()
+        awaitMain("the New request completes", 30_000) {
+            snapshot?.objectOrNull("state")?.array("requests")?.objects()?.none { it.getJSONObject("kind").optString("type") == "document" } == true
         }
-    } finally { Native.projectFree(task) }
-    documentChanged()
+    } finally { DocumentController.nativeFileJobsForTest = hostFileJobs }
+}
+
+fun CanvasHost.newDocument(width: Int, height: Int) {
+    createDrawing(width, height)
     awaitMain("the new ${width}x$height drawing", 120_000) {
         snapshot?.optJSONObject("state")?.array("tabs")?.optJSONObject(0)?.optInt("width") == width && snapshot?.optBoolean("brush_ready") == true
     }
@@ -212,7 +241,7 @@ fun CanvasHost.openDocument(file: File) {
             Native.projectTask(handle, id, "null", document.getLong("epoch"), document.getLong("revision"))
         } }
         val epoch = try {
-            Native.projectWork(task, ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+            Native.projectWork(task, ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
             runBlocking { withNative { handle ->
                 Native.projectAdopt(handle, task, "null")
                 val now = System.nanoTime(); Native.frame(handle, now, now + 16_666_667)
@@ -344,7 +373,7 @@ internal fun CanvasHost.writeDrawingCopy(file: File, compose: ComposeTestRule? =
             task = Native.projectTask(handle,request,obj("uri" to android.net.Uri.fromFile(file).toString(),"name" to file.name).toString(),owner.getLong("epoch"),owner.getLong("revision"))
         }
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            Native.projectWork(task,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),0,0)
+            Native.projectWork(task,ParcelFileDescriptor.open(file,ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE).detachFd(),"")
         }
     } finally {
         try {
