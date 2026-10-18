@@ -152,6 +152,35 @@ fn malformed_framing_is_invalid() {
 }
 
 #[test]
+fn seeded_byte_mutations_never_panic_and_decode_to_stable_records() {
+    let records = vec![line(1, &[[0., 0.], [3., 1.], [9., -4.]], 2.), shape(2), Record::Path(live(3, ShapeKind::Rectangle { radii: [4.; 4] })), Record::Path(live(4, ShapeKind::Ellipse))];
+    let good = encode_chunk(&chunk(records.clone()));
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
+    let mut decoded = 0;
+    for _ in 0..20_000 {
+        let mut bytes = good.clone();
+        for _ in 0..1 + next() % 4 {
+            let at = (next() as usize) % bytes.len().max(1);
+            match next() % 5 {
+                0 => bytes[at] ^= 1 << (next() % 8),
+                1 => bytes[at] = 0xff,
+                2 => { let end = (at + 1 + (next() as usize) % 12).min(bytes.len()); bytes.drain(at..end); }
+                3 => { let end = (at + 1 + (next() as usize) % 12).min(bytes.len()); let copy = bytes[at..end].to_vec(); bytes.splice(at..at, copy); }
+                _ => bytes.splice(at..at, [0xff, 0xff, 0xff, 0xff, 0x0f]).for_each(drop),
+            }
+            if bytes.is_empty() { break; }
+        }
+        let Ok(chunk) = decode_chunk(&bytes, records.len(), &mut 0) else { continue };
+        decoded += 1;
+        let again = encode_chunk(&chunk);
+        assert_eq!(decode_chunk(&again, chunk.records().len(), &mut 0).as_ref(), Ok(&chunk));
+        assert_eq!(encode_chunk(&decode_chunk(&again, chunk.records().len(), &mut 0).unwrap()), again);
+    }
+    assert!(decoded > 0, "some mutations land in values that stay valid");
+}
+
+#[test]
 fn registry_numbers_are_unique_and_listed() {
     let listed: Vec<String> = include_str!("vector_numbers.tsv").lines().filter(|l| !l.starts_with('#')).map(str::to_owned).collect();
     let mut generated = Vec::new();
