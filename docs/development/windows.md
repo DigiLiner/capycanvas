@@ -43,12 +43,13 @@ Windows PowerShell 5.1, included with Windows, is sufficient. From the repositor
 root, build and run:
 
 ```powershell
-.\run.cmd
+.\apps\layer-windows\run.cmd
 ```
 
 The launcher builds Debug and opens the app after a successful build. Use
-`.\run.cmd -Configuration Release` for an optimized build. It sets the script
-execution policy for its child PowerShell process, leaving your settings intact.
+`.\apps\layer-windows\run.cmd -Configuration Release` for an optimized build.
+It sets the script execution policy for its child PowerShell process, leaving
+your settings intact.
 
 To build without launching, allow local scripts in this terminal and call the
 build script directly:

@@ -33,7 +33,7 @@ stable Rust toolchain; the workspace uses Rust 2024. Pass `--locked` and keep
 | Web | [WebAssembly, DOM and WebGPU](web.md), with [static/PWA packaging](web-packaging.md). |
 | Android | [Kotlin/Compose, Android SDK/NDK and Rust JNI](android.md). |
 | macOS and iPadOS | [Xcode, AppKit/UIKit, Swift and the Rust Metal bridge](apple.md). |
-| Windows | `.\run.cmd` builds and runs the client. See [Windows setup](windows.md), or [a VM from Linux](windows-vm.md). |
+| Windows | `.\apps\layer-windows\run.cmd` builds and runs the client. See [Windows setup](windows.md), or [a VM from Linux](windows-vm.md). |
 
 Painting requires a hardware GPU. Building code or running model tests does not
 show that a machine can run the canvas, and a workspace-wide build is not a
