@@ -15,11 +15,11 @@ pub(super) fn generated(extent: [u32; 2], color: DocumentColor, pixels: &[[f32; 
     program.kind = layer_core::EffectKind::Generator;
     program.alpha = layer_core::EffectAlpha::Filter;
     program.entry = "statistics_fixture".into();
-    let cases: String = pixels.iter().enumerate().map(|(i, pixel)| {
-        let bits = pixel.map(f32::to_bits);
-        format!("case {i}u:{{return bitcast<vec4<f32>>(vec4<u32>({}u,{}u,{}u,{}u));}}", bits[0], bits[1], bits[2], bits[3])
+    let values: Vec<_> = pixels.iter().map(|pixel| {
+        let [r, g, b, a] = pixel.map(f32::to_bits);
+        format!("vec4<u32>({r}u,{g}u,{b}u,{a}u)")
     }).collect();
-    program.wgsl = format!("fn statistics_fixture(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{let i=(u32(floor(p.x))+3u*u32(floor(p.y)))%{}u;switch i{{{cases}default:{{return vec4<f32>(0.);}}}}}}", pixels.len()).into();
+    program.wgsl = format!("const STATISTICS_PIXELS=array<vec4<u32>,{0}>({1});fn statistics_fixture(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{{let x=u32(floor(p.x));let opaque_zero=vec4(x>>24u);return bitcast<vec4<f32>>(opaque_zero|STATISTICS_PIXELS[(x+3u*u32(floor(p.y)))%{0}u]);}}", pixels.len(), values.join(",")).into();
     insert_effect(&mut doc,effect,0);
     doc
 }

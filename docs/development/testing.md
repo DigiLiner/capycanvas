@@ -288,7 +288,9 @@ point's errors and independent color precision checks.
 
 Precision adjustment checks use `artwork_statistics_tests`,
 `levels_statistics_tests` and `curves_calibration_tests` in `layer-render-wgpu`,
-with independent scalar references and real source codecs. GTK journeys are
+with independent scalar references and real source codecs. Their generator
+fixtures load exact pixel bits at run time: compilers may flush subnormal shader
+literals that also feed Float32 arithmetic. GTK journeys are
 `native_composite_histogram_updates_without_changing_the_drawing`,
 `native_curves_histogram_preserves_numeric_focus`,
 `native_levels_auto_and_calibration_atomic_history`,
@@ -512,13 +514,6 @@ are your task, and remove an entry when you fix it.
   changes an interior blue channel from 123 to 124 because the crop shield
   disables presentation quantization. Keep this assertion when checking
   renderer changes.
-- Renderer failures reproduced on unmodified `0eb2b6720` on Linux:
-  `statistics_extreme_finite_rgb_uses_f64_classification_without_unassociation_overflow`,
-  `statistics_rgb_exact_correction_matches_f64_at_boundary_neighbors` and
-  `waveform_reuses_exact_rgb_and_luminance_classification_for_hdr_and_tiny_alpha`
-  report different classification counts, and
-  `levels_statistics_constant_empty_hdr_tiny_alpha_and_cancellation_are_explicit`
-  finds no usable pixels for Auto.
 - Intel Iris Xe D3D12 renderer failures reproduced on unmodified `8f7a9c77`:
   `saved_artwork_render_contracts` reports
   `domain_warp/F32` maximum drift 0.000232696533203125 against 0.0002.
