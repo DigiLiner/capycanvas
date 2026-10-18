@@ -160,6 +160,45 @@ import SwiftUI
             try require(layout() == narrow, "Cancel restores every hidden item")
         }
         note("PASS platform \(platform): actual narrow overflow popup, immediate mouse/pen row removal and parent cancellation")
+        window.setContentSize(CGSize(width: 1200, height: 870))
+        store.native?.resize(width: 1200, height: 870, scale: 1)
+        let editor = NSHostingView(rootView: EditorView(store: store) { MacMetalCanvas(store: store) })
+        window.contentView = editor
+        try await wait("Presented editor restores header interaction") {
+            store.canvasSubmitted && store.snapshot["canvas_ready"].bool && !store.recovery.restoring
+        }
+        try await edit(["type":"move", "id":header.geometry["capy_item"].uint, "zone":"center"])
+        for theme in ["light", "dark"] {
+            try await action(["type":"set_theme", "theme":theme])
+            for size in ["small", "medium", "large"] {
+                try await edit(["type":"set_size", "size":size])
+                try await drain(0.3)
+                let bounds = header.geometry["zen_button"].rect
+                let point = CGPoint(x: bounds.midX, y: bounds.midY)
+                for pen in [false, true] {
+                    try event(.leftMouseDown, at: point, marker: editor, number: 2001, tablet: pen)
+                    try await wait("The ordinary header owns the native Capy press") { store.workspace.headerHeld }
+                    try event(.leftMouseUp, at: point, marker: editor, number: 2002, tablet: pen)
+                    try await wait("Capy activation and contact retirement") {
+                        store.state["workspace"]["zen_mode"].bool && !store.workspace.headerHeld
+                    }
+                    try require(header.geometry["zen_button"].rect == bounds, "Zen preserves the retained Capy allocation")
+                    try event(.leftMouseDown, at: point, marker: editor, number: 2003, tablet: pen)
+                    try event(.leftMouseUp, at: point, marker: editor, number: 2004, tablet: pen)
+                    try await wait("Retained Capy restores chrome") {
+                        !store.state["workspace"]["zen_mode"].bool && !store.snapshot["chrome_hidden"].bool && !store.workspace.headerHeld
+                    }
+                }
+                let empty = CGPoint(x: 610, y: header.size["height"].number - 2)
+                try event(.leftMouseDown, at: empty, marker: editor, number: 2005)
+                try await wait("Native header focus contact") { store.workspace.headerHeld }
+                window.resignKey()
+                try await wait("Header focus-loss cleanup") { !store.workspace.headerHeld }
+                try event(.leftMouseUp, at: empty, marker: editor, number: 2006)
+                window.makeKeyAndOrderFront(nil)
+                note("PASS platform \(platform), \(theme), \(size): normal/Zen native mouse/pen Capy activation, stable bounds and focus-loss retirement")
+            }
+        }
         try require(store.failure == nil, store.failure ?? "")
     }
     @MainActor static func main() {

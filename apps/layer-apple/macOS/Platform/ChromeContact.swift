@@ -35,7 +35,7 @@ private final class EditorContactView: NSView {
                 self.retire(self.held.filter { NSEvent.pressedMouseButtons & (1 << $0.key) == 0 })
                 if [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type), event.window === window {
                     let point = self.convert(event.locationInWindow, from: nil)
-                    let target = window.contentView.flatMap { $0.hitTest($0.convert(event.locationInWindow, from: nil)) }
+                    let target = window.contentView.flatMap { $0.hitTest($0.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow) }
                     if self.bounds.contains(point), !(target is MacCanvasView),
                        self.action(point, true) { self.held[event.buttonNumber] = event }
                 }

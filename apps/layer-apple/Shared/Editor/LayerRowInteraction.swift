@@ -123,13 +123,15 @@ enum LayerMenuSource: Equatable { case row(UInt64), footer }
         let mask = row["has_mask"].bool && frame.mask.contains(point)
         let resting = store?.layerSwipe.atRest(owner: swipeOwner, layer: id) == true
         let grip = resting && frame.grip.contains(point)
+        let canDrag = resting && row["can_drop_below"].bool && !row["locked"].bool
+            && (grip || ThumbnailSelectionLoad.current() == nil)
         return ReorderTarget(id: identity(id), surface: grip ? .handle : .row,
-            canDrag: resting && row["can_drop_below"].bool && (grip || ThumbnailSelectionLoad.current() == nil),
+            canDrag: canDrag,
             dragDevices: grip ? [.mouse, .touch, .pen] : row["drag_from_body"].array.compactMap { ReorderDevice(rawValue: $0.string) },
             valid: { [weak self] _ in
                 guard let self else { return false }
                 return enabled && epoch == currentEpoch && renaming != id && layers.contains {
-                    $0["id"].uint == id && (!row["can_drop_below"].bool || $0["can_drop_below"].bool)
+                    $0["id"].uint == id && (!row["can_drop_below"].bool || $0["can_drop_below"].bool) && (!canDrag || !$0["locked"].bool)
                 }
             }, openContext: { [weak self] in self?.openMenu(id: id, mask: mask) },
             closeContext: { [weak self] in self?.closeMenu() },

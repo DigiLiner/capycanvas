@@ -516,6 +516,16 @@ Dismiss the iPad keyboard before activating controls it covers.
 `testLayerPropertiesDrawer` and `testLayerPropertiesDrawerDark` exercise the
 Layers header drawer, growth, compact Properties, All layers and Group properties
 in the native editor. They require an Apple SDK and a rendering-capable device.
+AppKit chrome and pen-scroll hit tests use the target view's superview
+coordinates. Workspace scrollers restore overlay style after native reconfiguration
+so indicators do not consume shared panel width. `tests/layer-row-input.swift`
+checks offset pen admission, reconfiguration and mouse/pen hover without moving
+the viewport. `tests/header-native-input.swift` checks ordinary/Zen Capy press
+ownership and focus-loss retirement in both themes.
+Layer pickup consumes the shared effective lock, including inherited group locks.
+A locked row retains context input; unlocking cannot promote its existing capture.
+Locking an admitted contact retires it and any drag preview before another move.
+The same layer-row fixture checks body and handle contacts for every input device.
 Platform-only journeys extend that class in `iOS/Tests` or `macOS/Tests`.
 
 XCTest journeys run through `xcodebuild test` with `-only-testing`. Use a fresh

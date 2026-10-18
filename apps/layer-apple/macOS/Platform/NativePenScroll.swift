@@ -48,10 +48,16 @@ private final class PenScrollController: NSObject, NSGestureRecognizerDelegate {
     private var pan: NSPanGestureRecognizer!
     var showsIndicators = true
     var axes: Axis.Set = .vertical
+    private var style: NSKeyValueObservation?
     init(scroll: NSScrollView) {
         self.scroll = scroll
         super.init()
-        scroll.scrollerStyle = .overlay
+        style = scroll.observe(\.scrollerStyle, options: [.initial, .new]) { [weak scroll] _, _ in
+            DispatchQueue.main.async {
+                guard let scroll, scroll.scrollerStyle != .overlay else { return }
+                scroll.scrollerStyle = .overlay
+            }
+        }
         ScrollPointerInput.shared.controllers.add(self)
         pan = NSPanGestureRecognizer(target: self, action: #selector(panned)); pan.delegate = self
         pan.delaysPrimaryMouseButtonEvents = true
@@ -66,7 +72,7 @@ private final class PenScrollController: NSObject, NSGestureRecognizerDelegate {
     }
     func gestureRecognizer(_ recognizer: NSGestureRecognizer, shouldAttemptToRecognizeWith event: NSEvent) -> Bool {
         guard event.type == .leftMouseDown, event.subtype == .tabletPoint, let scroll,
-              let hit = scroll.hitTest(scroll.convert(event.locationInWindow, from: nil)),
+              let hit = scroll.hitTest(scroll.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow),
               hit.enclosingScrollView === scroll, !(hit is NSTextView), !(hit is NSControl) else { return false }
         origin = scroll.contentView.bounds.origin
         return true
