@@ -263,6 +263,9 @@ selects offscreen Vulkan; other hosts keep their native GPU backend. Without
 `--headless` Chrome opens on the current Wayland display. `LAYER_TEST_VERBOSE=1`
 prints browser diagnostics, `LAYER_TEST_THEME=light` or `dark` selects the initial
 theme, and journeys that save captures write them to `LAYER_TEST_ARTIFACTS`.
+`--hdr`, `--proof` and `--shared-workflows` read owned fixtures from
+`apps/layer-web/pkg/` that `build.sh` does not create: `hdr-pq.png`,
+`proof-cmyk.icc`, `proof-p3.icc` and `prophoto16.png`.
 
 Worker tracing uses `prepareWorkers` in `tools/cdp.mjs`. Register each observer
 before starting attachment or reloading the page. The helper installs observers
@@ -533,8 +536,12 @@ Frame calls measure CPU submissions, not fresh GPU updates or presented frames.
 
 - **Blank or black canvas in headless Chrome.** Some NVIDIA drivers lose Chrome's
   headless Dawn instance (`A valid external Instance reference no longer
-  exists.`), and headless screenshots can omit WebGPU pixels. Run the journey
-  headed through `workspace-motion.sh web`, which has hardware presentation.
+  exists.`), and headless Chrome that composites in software omits WebGPU pixels
+  from screenshots; `test.mjs` prints a warning when it does. Journeys that
+  compare presented canvas pixels, such as `--contact-brushes`, `--editor`,
+  `--proof`, `--selection-tools` and `--tonal-selection`, then fail headless.
+  Run them headed through `workspace-motion.sh web`, which has hardware
+  presentation.
 - **Original Size placement check fails.** The headed `--image-placement`
   journey also fails on the untouched `5c76e202f` product: after Original Size
   and Apply, the saved scale is `0.625` instead of `1`. Keep its unit-scale

@@ -65,15 +65,16 @@ export async function checkHdr({call,evaluate,settle}) {
     await capture('color-panel');
     await evaluate(`[...document.querySelectorAll('button[aria-label="Edit Color"]')].find(b=>b.getBoundingClientRect().width>0).click()`);
     await wait(`!!document.querySelector('dialog[aria-label="Edit Color"][open]')`);
-    assert.equal(await evaluate(`document.querySelector('[aria-label="Color model"]').value`),'linear_rgb');
+    assert.equal(await evaluate(`document.querySelector('dialog[open] .color-intensity-cell').hidden`),false,'HDR drawings offer an intensity row');
+    const intensity=text=>evaluate(`(()=>{const n=document.querySelector('dialog[open] input[aria-label="Intensity (EV)"]');if(n.hidden)n.previousElementSibling.click();n.value=${JSON.stringify(text)};n.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));return{value:n.value,editing:!n.hidden}})()`);
+    const useColorDisabled=()=>evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Use Color').disabled`);
     for(const text of ['','-','.','17','1e999']) {
-      await evaluate(`(()=>{const n=document.querySelector('[aria-label="Intensity (EV)"]');n.focus();n.value=${JSON.stringify(text)};n.dispatchEvent(new Event('input'));})()`);
-      assert.equal(await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Use Color').disabled`),true);
-      assert.equal(await evaluate(`document.querySelector('[aria-label="Intensity (EV)"]').value`),text);
+      assert.deepEqual(await intensity(text),{value:text,editing:true},`Invalid intensity ${JSON.stringify(text)} stays in its field`);
+      assert.equal(await useColorDisabled(),true);
     }
-    await evaluate(`(()=>{const n=document.querySelector('[aria-label="Intensity (EV)"]');n.value='-0.5';n.dispatchEvent(new Event('input'));})()`);
-    assert.equal(await evaluate(`[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Use Color').disabled`),false);
-    await evaluate(`(()=>{const n=document.querySelector('[aria-label="Intensity (EV)"]');n.value=3;n.dispatchEvent(new Event('input'));})()`);
+    assert.deepEqual(await intensity('-0.5'),{value:'-0.5',editing:false});
+    assert.equal(await useColorDisabled(),false);
+    await intensity('3');
     await capture('edit-color');
     await click('Use Color');await wait('layerApp.app.color_panel().intensity===3');
     assert.equal(await evaluate('layerApp.app.color_panel().intensity'),3);
@@ -99,7 +100,7 @@ export async function checkHdr({call,evaluate,settle}) {
     assert.equal(await ev(),retained,'Actual EV cancellation restores the starting value');
     mark('EV arc retains touch, mouse and pen drags; explicit touch cancellation restores the starting value');
     await wait(`!document.querySelector('dialog[open]')`);
-    await evaluate(`layerApp.dispatch({type:'select_brush',id:1});const form=layerApp.app.color_ui({type:'form',request:{color:{space:'Srgb',rgba:[0,0,0,1]},document_space:'Srgb',model:'linear_rgb',intensity:0,fields:['-4','4','1','100']}});layerApp.dispatch({type:'color',action:{op:'set_slot',slot:'foreground',color:form.value}});`);
+    await evaluate(`(()=>{layerApp.dispatch({type:'select_brush',id:1});const rendition=layerApp.app.color_panel().rendition??null;const open=layerApp.app.color_ui({type:'editor_open',colors:layerApp.state().colors,color:{space:'Srgb',rgba:[0,0,0,1]},opaque:false,display_space:'Srgb',rendition});const next=layerApp.app.color_ui({type:'editor',editor:open.editor,action:{op:'text',text:'color(srgb-linear -4 4 1)'},display_space:'Srgb',rendition});if(next.error)throw Error(JSON.stringify(next.error));layerApp.dispatch({type:'color',action:{op:'set_slot',slot:'foreground',color:next.view.value}});})()`);
     await wait('layerApp.app.brush_ready()');await settle();
     const center=await evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect(),a=c.work_area;return{x:r.x+(a[0]+a[2]/2)*r.width/c.viewport[0],y:r.y+(a[1]+a[3]/2)*r.height/c.viewport[1]}})()`);
     assert.ok(await evaluate(`[-50,0,50].every(dx=>document.elementFromPoint(${center.x}+dx,${center.y})===layerApp.canvas)`),'The complete pen stroke must start and finish on the canvas');

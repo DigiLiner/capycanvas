@@ -12,7 +12,7 @@ const helpers=(evaluate,{timeout=60000,enabled=false}={})=>{
   const wait=condition=>evaluate(`new Promise((resolve,reject)=>{const start=performance.now();function poll(){try{if(${condition})resolve(true);else if(performance.now()-start>${timeout})reject(Error(${JSON.stringify(condition)}+': '+document.body.innerText.slice(-1400)));else setTimeout(poll,30);}catch(e){reject(e)}}poll();})`);
   const click=label=>evaluate(`(()=>{const b=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===${JSON.stringify(label)});if(!b||${enabled}&&b.disabled)throw Error('Missing button '+${JSON.stringify(label)});b.click()})()`);
   const invoke=async command=>{await wait(`!layerApp.documents.busy()&&layerApp.state().commands.find(c=>c.id===${JSON.stringify(command)})?.enabled`);return evaluate(`layerApp.dispatch({type:'invoke',command:${JSON.stringify(command)}})`);};
-  const idle=()=>wait('!layerApp.state().document_file.busy && !layerApp.documents.busy() && layerApp.app.brush_ready()');
+  const idle=()=>wait('!layerApp.state().document_file.busy && !layerApp.documents.busy() && layerApp.app.brush_ready() && Number(layerApp.app.gpu_diagnostics().session.deferred_edits)===0');
   return {wait,click,invoke,idle};
 };
 

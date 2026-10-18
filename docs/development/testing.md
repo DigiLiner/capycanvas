@@ -641,14 +641,8 @@ are your task, and remove an entry when you fix it.
   choosing sRGB in Proof Setup after the drawing is saved and reopened).
 - iPad XCTest `testCompactMenuShortcutAcrossPages` and
   `testSettingsTextSelectionShortcut`: XCTest keys don't reach UIKit key commands.
-- Headless Web `--toolbar-components`, `--tonal-selection`, `--editor`, `--hdr`,
-  `--proof`, `--raster`, `--selection-tools` and `--shared-workflows`.
 - Tablet Chrome `--workspace-manager` cannot find its new-workspace name input
   on MovinkPad 11.
-- Headless Web `--contact-brushes` with `LAYER_BRUSH_PRESETS=20,21` differs from
-  the committed watercolor pixels after Redo.
-- Headless Web `--zoom-readout` reaches export with an empty stroke image
-  and fails its ink assertion.
 - GTK `native_workspace_unavailable_close_recovery` waits for a startup error
   that never comes: a file at the workspaces path no longer blocks storage, so
   the workspace opens and the close recovery prompt is not reached. Reproduced
