@@ -37,28 +37,30 @@ pub const JOIN: u64 = tag_word(10, 0, ValueClass::Data);
 pub const MITER_LIMIT: u64 = tag_word(11, 0, ValueClass::Data);
 pub const PROFILE: u64 = tag_word(12, 0, ValueClass::Data);
 pub const COLOR_VALUE: u64 = tag_word(13, 0, ValueClass::Data);
+pub const LIVE_SHAPE: u64 = tag_word(14, IGNORABLE, ValueClass::Data);
 
-pub struct Number { pub word: u64, pub name: &'static str, pub on: &'static [u64] }
+pub struct Number { pub word: u64, pub name: &'static str, pub on: &'static [u64], pub since: u32 }
 pub const KINDS: &[Number] = &[
-    Number { word: PATH, name: "path", on: &[] },
-    Number { word: FILL, name: "fill", on: &[STYLE] },
-    Number { word: STROKE, name: "stroke", on: &[STYLE] },
-    Number { word: COLOR, name: "color", on: &[PAINT] },
+    Number { word: PATH, name: "path", on: &[], since: 1 },
+    Number { word: FILL, name: "fill", on: &[STYLE], since: 1 },
+    Number { word: STROKE, name: "stroke", on: &[STYLE], since: 1 },
+    Number { word: COLOR, name: "color", on: &[PAINT], since: 1 },
 ];
 pub const TAGS: &[Number] = &[
-    Number { word: GEOMETRY, name: "geometry", on: &[PATH] },
-    Number { word: FILL_RULE, name: "fill_rule", on: &[PATH] },
-    Number { word: STYLE, name: "style", on: &[PATH] },
-    Number { word: HIDDEN, name: "hidden", on: &[PATH] },
-    Number { word: NAME, name: "name", on: &[PATH] },
-    Number { word: LOCKED, name: "locked", on: &[PATH] },
-    Number { word: PAINT, name: "paint", on: &[FILL, STROKE] },
-    Number { word: WIDTH, name: "width", on: &[STROKE] },
-    Number { word: CAP, name: "cap", on: &[STROKE] },
-    Number { word: JOIN, name: "join", on: &[STROKE] },
-    Number { word: MITER_LIMIT, name: "miter_limit", on: &[STROKE] },
-    Number { word: PROFILE, name: "width_profile", on: &[STROKE] },
-    Number { word: COLOR_VALUE, name: "color", on: &[COLOR] },
+    Number { word: GEOMETRY, name: "geometry", on: &[PATH], since: 1 },
+    Number { word: FILL_RULE, name: "fill_rule", on: &[PATH], since: 1 },
+    Number { word: STYLE, name: "style", on: &[PATH], since: 1 },
+    Number { word: HIDDEN, name: "hidden", on: &[PATH], since: 1 },
+    Number { word: NAME, name: "name", on: &[PATH], since: 1 },
+    Number { word: LOCKED, name: "locked", on: &[PATH], since: 1 },
+    Number { word: PAINT, name: "paint", on: &[FILL, STROKE], since: 1 },
+    Number { word: WIDTH, name: "width", on: &[STROKE], since: 1 },
+    Number { word: CAP, name: "cap", on: &[STROKE], since: 1 },
+    Number { word: JOIN, name: "join", on: &[STROKE], since: 1 },
+    Number { word: MITER_LIMIT, name: "miter_limit", on: &[STROKE], since: 1 },
+    Number { word: PROFILE, name: "width_profile", on: &[STROKE], since: 1 },
+    Number { word: COLOR_VALUE, name: "color", on: &[COLOR], since: 1 },
+    Number { word: LIVE_SHAPE, name: "live_shape", on: &[PATH], since: 1 },
 ];
 
 pub const MAX_RECORDS: usize = 1 << 20;
@@ -311,6 +313,7 @@ fn decode_path(record: &Framed) -> DecodeResult<PathItem> {
     let mut geometry = None;
     let mut path = PathItem::new(ItemId(record.id), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0.; 2])], false)]).unwrap()), Arc::default());
     let mut unknown = Vec::new();
+    let mut shape = None;
     for (tag, value) in properties(record.properties)? {
         match tag {
             GEOMETRY => geometry = Some(decode_geometry(value)?),
@@ -322,10 +325,12 @@ fn decode_path(record: &Framed) -> DecodeResult<PathItem> {
                 _ => unknown.push(UnknownProperty { tag, value: value.into() }),
             },
             LOCKED => match flag(value) { Some(locked) => path.locked = locked, None => unknown.push(UnknownProperty { tag, value: value.into() }) },
+            LIVE_SHAPE => match decode_shape(value) { Some(recipe) => shape = Some(recipe), None => unknown.push(UnknownProperty { tag, value: value.into() }) },
             _ => unknown_property(tag, value, PATH, 1, &mut unknown)?,
         }
     }
     path.geometry = Arc::new(geometry.ok_or_else(|| invalid("path requires geometry"))?);
+    path.shape = shape.filter(|(_, print)| *print == fingerprint(&path)).map(|(shape, _)| Arc::new(shape));
     path.unknown = finish(unknown);
     path.validate().map_err(invalid)?;
     Ok(path)
@@ -436,7 +441,7 @@ fn encode_paint(paint: &Paint) -> Vec<u8> {
     }
     out
 }
-fn encode_style(style: &Style) -> Vec<u8> {
+pub(super) fn encode_style(style: &Style) -> Vec<u8> {
     let mut out = Vec::new();
     for entry in style.entries.iter() {
         match entry {
@@ -462,12 +467,40 @@ fn encode_style(style: &Style) -> Vec<u8> {
     }
     out
 }
-fn encode_path(out: &mut Vec<u8>, path: &PathItem) {
+fn required(path: &PathItem) -> Properties {
     let mut p = Properties::new();
     p.put(GEOMETRY, encode_geometry(&path.geometry));
     if path.fill_rule != FillRule::NonZero { p.put(FILL_RULE, vec![1]); }
     if !path.style.entries.is_empty() { p.put(STYLE, encode_style(&path.style)); }
     if path.hidden { p.put(HIDDEN, vec![1]); }
+    p
+}
+pub(super) fn fingerprint(path: &PathItem) -> [u8; 16] {
+    use sha2::Digest;
+    let mut bytes = Vec::new();
+    put_varuint(&mut bytes, PATH);
+    bytes.extend(required(path).bytes());
+    sha2::Sha256::digest(&bytes)[..16].try_into().unwrap()
+}
+pub(super) fn encode_shape(shape: &LiveShape, print: [u8; 16]) -> Vec<u8> {
+    let (kind, radii) = match shape.kind { ShapeKind::Rectangle { radii } => (1, Some(radii)), ShapeKind::Ellipse => (2, None) };
+    let mut out = vec![kind];
+    for v in [shape.center[0], shape.center[1], shape.size[0], shape.size[1], shape.rotation].into_iter().chain(radii.into_iter().flatten()) { out.extend_from_slice(&v.to_le_bytes()); }
+    out.extend_from_slice(&print);
+    out
+}
+fn decode_shape(value: &[u8]) -> Option<(LiveShape, [u8; 16])> {
+    let (&kind, rest) = value.split_first()?;
+    let numbers = match kind { 1 => 9, 2 => 5, _ => return None };
+    if rest.len() != numbers * 8 + 16 { return None; }
+    let v: Vec<f64> = rest[..numbers * 8].as_chunks::<8>().0.iter().map(|b| f64::from_le_bytes(*b)).collect();
+    if !v.iter().all(|n| n.is_finite()) || v[2] < 0. || v[3] < 0. || v[5..].iter().any(|r| *r < 0.) { return None; }
+    let kind = if kind == 1 { ShapeKind::Rectangle { radii: [v[5], v[6], v[7], v[8]] } } else { ShapeKind::Ellipse };
+    Some((LiveShape { kind, center: [v[0], v[1]], size: [v[2], v[3]], rotation: v[4] }, rest[numbers * 8..].try_into().unwrap()))
+}
+fn encode_path(out: &mut Vec<u8>, path: &PathItem) {
+    let mut p = required(path);
+    if let Some(shape) = &path.shape { p.put(LIVE_SHAPE, encode_shape(shape, fingerprint(path))); }
     if let Some(name) = path.name.as_deref().filter(|n| !n.is_empty()) { p.put(NAME, name.as_bytes().to_vec()); }
     if path.locked { p.put(LOCKED, vec![1]); }
     p.unknown(&path.unknown);

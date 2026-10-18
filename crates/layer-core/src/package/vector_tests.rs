@@ -158,7 +158,7 @@ fn registry_numbers_are_unique_and_listed() {
     for (space, table, shift) in [("kind", KINDS, 4), ("tag", TAGS, 5)] {
         for (index, number) in table.iter().enumerate() {
             assert_eq!(number.word >> shift, index as u64 + 1, "{space} numbers are dense and ordered");
-            generated.push(format!("{space}\t{}\t{}\t{}", number.word >> shift, number.word & ((1 << shift) - 1), number.name));
+            generated.push(format!("{space}\t{}\t{}\t{}\t{}", number.word >> shift, number.word & ((1 << shift) - 1), number.name, number.since));
         }
     }
     assert_eq!(generated, listed, "update vector_numbers.tsv by appending; never renumber");
@@ -404,4 +404,143 @@ fn path_selections_keep_only_paths_that_still_exist() {
     let removed = object.replace([(object.find(ItemId(3)).unwrap(), None)]);
     editor.perform(editor.document().vector_object_edit(layer, removed).unwrap()).unwrap();
     assert_eq!(selected(&editor), None, "an empty path selection clears");
+}
+
+fn live(id: u64, kind: ShapeKind) -> PathItem { rotated(id, kind, 0.3) }
+fn rotated(id: u64, kind: ShapeKind, rotation: f64) -> PathItem {
+    let shape = LiveShape { kind, center: [120., 80.], size: [90., 40.], rotation };
+    let base = PathItem::new(ItemId(id), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0.; 2])], false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Fill(Fill { paint: color(0.4), unknown: None })])));
+    base.with_shape(shape).unwrap()
+}
+fn near(a: &PathGeometry, b: &PathGeometry) -> bool {
+    a.anchor_count() == b.anchor_count() && a.subpaths().iter().zip(b.subpaths()).all(|(a, b)| a.anchors().zip(b.anchors()).all(|(a, b)|
+        a.bits().iter().zip(b.bits()).all(|(x, y)| (x - y).abs() < 2e-3)))
+}
+
+#[test]
+fn live_shapes_round_trip_and_detach_when_a_foreign_writer_changed_their_geometry() {
+    let shapes = vec![Record::Path(live(1, ShapeKind::Rectangle { radii: [0., 6., 12., 3.] })), Record::Path(live(2, ShapeKind::Ellipse))];
+    let (bytes, decoded) = round_trip(shapes.clone());
+    for (record, original) in decoded.records().iter().zip(&shapes) {
+        let (path, original) = (record.path().unwrap(), original.path().unwrap());
+        assert_eq!(path.shape, original.shape);
+        assert!(near(&path.geometry, &path.shape.as_ref().unwrap().geometry().unwrap()));
+    }
+    assert!(!bytes.is_empty());
+    let Record::Path(edited) = &shapes[0] else { unreachable!() };
+    let recipe = encode_shape(edited.shape.as_ref().unwrap(), fingerprint(edited));
+    let moved = PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.]), Anchor::corner([5., 5.])], false)]).unwrap();
+    let stale = record_bytes(PATH, 1, &[(GEOMETRY, encode_geometry(&moved)), (STYLE, encode_style(&edited.style)), (LIVE_SHAPE, recipe)]);
+    let reopened = decode_chunk(&stale, 1, &mut 0).unwrap();
+    let path = reopened.records()[0].path().unwrap();
+    assert_eq!(path.shape, None, "a recipe whose fingerprint no longer matches detaches");
+    assert_eq!(*path.geometry, moved, "and leaves the geometry unchanged");
+}
+
+#[test]
+fn transforms_keep_live_shapes_they_can_express_and_drop_the_rest() {
+    let rounded = live(1, ShapeKind::Rectangle { radii: [4., 0., 8., 2.] });
+    for affine in [Affine64([1., 0., 0., 1., 30., -12.]), Affine64([0.8, 0.6, -0.6, 0.8, 5., 9.]), Affine64([-1.5, 0., 0., 1.5, 400., 0.])] {
+        let moved = rounded.transformed(affine).unwrap();
+        let shape = moved.shape.as_ref().expect("similarities keep the recipe");
+        assert!(near(&normalized(&moved.geometry), &normalized(&shape.geometry().unwrap())), "{affine:?}");
+    }
+    let stretched = rounded.transformed(Affine64([2., 0., 0., 1., 0., 0.])).unwrap();
+    assert_eq!(stretched.shape, None, "uneven scale cannot keep rounded corners");
+    let plain = rotated(2, ShapeKind::Rectangle { radii: [0.; 4] }, 0.).transformed(Affine64([2., 0., 0., 1., 0., 0.])).unwrap();
+    assert!(plain.shape.is_some(), "a square-cornered rectangle stretches along its own axes");
+    assert!(live(3, ShapeKind::Ellipse).transformed(Affine64([2., 0., 0., 1., 0., 0.])).unwrap().shape.is_none(), "stretching across a rotated frame shears it");
+    assert!(rounded.with_style(Arc::new(Style::default())).shape.is_some(), "restyling keeps the recipe");
+    assert!(rounded.with_geometry(rounded.geometry.clone()).shape.is_none(), "editing geometry detaches it");
+}
+fn normalized(geometry: &PathGeometry) -> PathGeometry {
+    let mut points: Vec<[f64; 2]> = geometry.subpaths()[0].anchors().map(|a| a.point()).collect();
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    PathGeometry::new(vec![Subpath::new(&points.into_iter().map(Anchor::corner).collect::<Vec<_>>(), true)]).unwrap()
+}
+
+#[test]
+fn vector_fixture_reopens_every_feature_and_saves_byte_for_byte() {
+    let bytes = include_bytes!("codec/fixtures/vector-objects.capy").to_vec();
+    let editor = crate::Editor::new(crate::Document::from_artwork(open(bytes.clone())).unwrap());
+    let scene = editor.document().scene();
+    let layer = |name: &str| scene.order().iter().find(|h| scene.occurrence(**h).unwrap().name.as_ref() == name).and_then(|h| scene.vector_layer(*h)).unwrap().clone();
+    let shapes = layer("Shapes");
+    let paths: Vec<PathItem> = shapes.paths().map(|(_, p)| p.clone()).collect();
+    assert_eq!(paths.len(), 11);
+    assert!(matches!(paths[0].shape.as_deref(), Some(LiveShape { kind: ShapeKind::Rectangle { .. }, .. })) && paths[0].name.as_deref() == Some("Badge"));
+    assert!(matches!(paths[0].style.entries[..], [PaintEntry::Stroke(_), PaintEntry::Fill(_)]), "a stroke below a fill");
+    assert!(matches!(paths[1].shape.as_deref(), Some(LiveShape { kind: ShapeKind::Ellipse, .. })));
+    assert_eq!(paths[2].fill_rule, FillRule::EvenOdd);
+    assert_eq!(paths[2].geometry.subpaths().len(), 2);
+    let strokes: Vec<&Stroke> = paths.iter().flat_map(|p| p.style.strokes()).collect();
+    for cap in [Cap::Butt, Cap::Round, Cap::Square] { assert!(strokes.iter().any(|s| s.cap == cap)); }
+    for join in [Join::Miter, Join::Round, Join::Bevel] { assert!(strokes.iter().any(|s| s.join == join)); }
+    assert!(strokes.iter().filter_map(|s| s.profile.as_ref()).any(|p| p.knots().iter().any(|k| k.left() != k.right())), "a one-sided width profile");
+    assert!(paths.iter().any(|p| p.geometry.anchor_count() == 1), "a dot");
+    assert!(paths.iter().any(|p| p.hidden) && paths.iter().any(|p| p.locked));
+    let hatching = layer("Hatching");
+    assert_eq!((hatching.path_count(), hatching.chunks().len()), (65, 2), "a full chunk and one more");
+    assert_eq!(layer("Empty").path_count(), 0);
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let capture = editor.capture(0, Default::default()).unwrap();
+    let mut saved = Vec::new();
+    super::codec::PreparedPackage::prepare(&capture, None, &cancel).unwrap().write(&mut saved, &cancel).unwrap();
+    assert!(saved == bytes, "a save without edits reproduces the fixture byte for byte");
+}
+
+#[test]
+fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || { state ^= state << 13; state ^= state >> 7; state ^= state << 17; state };
+    let unknown = |number: u64, flags: u64| UnknownProperty { tag: tag_word(number, flags, ValueClass::Data), value: Arc::from(&number.to_le_bytes()[..]) };
+    let decorated = |id: u64| {
+        let Record::Path(mut path) = line(id, &[[id as f64, 0.], [id as f64 + 9., 20.]], 2.) else { unreachable!() };
+        path.unknown = Some(Arc::from(vec![unknown(900, IGNORABLE | COPY_SAFE), unknown(901, IGNORABLE)]));
+        if let PaintEntry::Stroke(stroke) = &mut Arc::make_mut(&mut path.style).entries[0] { stroke.unknown = Some(Arc::from(vec![unknown(902, IGNORABLE | COPY_SAFE)])); }
+        Record::Path(path)
+    };
+    let mut object = VectorObject::from_records((1..=150).map(decorated).collect());
+    let mut issued: BTreeSet<ItemId> = object.paths().map(|(_, p)| p.id).collect();
+    let mut history = vec![object.clone()];
+    let pick = |object: &VectorObject, at: u64| object.paths().nth(at as usize % object.path_count().max(1)).map(|(_, p)| p.id);
+    for _ in 0..400 {
+        let before = object.clone();
+        let step = next() % 7;
+        object = match step {
+            0 => {
+                let ids: BTreeSet<ItemId> = (0..1 + next() % 5).filter_map(|_| pick(&object, next())).collect();
+                let moved = object.transform_items(&ids, Affine64([1., 0., 0., 1., (next() % 40) as f64, 3.])).unwrap();
+                for id in &ids {
+                    let path = moved.record(moved.find(*id).unwrap()).unwrap().path().unwrap();
+                    assert!(path.unknown.iter().flat_map(|u| u.iter()).all(|p| p.tag & COPY_SAFE != 0), "moving drops data that is not copy-safe");
+                    assert!(path.unknown.iter().flat_map(|u| u.iter()).any(|p| p.tag & COPY_SAFE != 0), "and keeps copy-safe data");
+                }
+                moved
+            }
+            1 | 2 => {
+                let Some(id) = pick(&object, next()) else { continue };
+                let at = object.find(id).unwrap();
+                let path = object.record(at).unwrap().path().unwrap().clone();
+                let edited = if step == 1 { PathItem { name: Some(format!("n{}", next() % 100).into()), ..path.clone() } } else { path.with_style(Arc::new(Style::new(vec![PaintEntry::Fill(Fill { paint: color(0.7), unknown: None })]))) };
+                let copy_safe: Vec<_> = path.unknown.iter().flat_map(|u| u.iter()).filter(|p| p.tag & COPY_SAFE != 0).cloned().collect();
+                let kept: Vec<_> = edited.unknown.iter().flat_map(|u| u.iter()).cloned().collect();
+                if step == 1 { assert_eq!(edited.unknown, path.unknown, "renaming keeps every property"); } else { assert_eq!(kept, copy_safe, "restyling keeps copy-safe properties"); }
+                object.replace([(at, Some(Record::Path(edited)))])
+            }
+            3 => match pick(&object, next()) { Some(id) => object.replace([(object.find(id).unwrap(), None)]), None => continue },
+            4 => {
+                let id = object.allocate_id();
+                assert!(issued.insert(id), "a new path never reuses an issued identity");
+                object.insert_front(vec![decorated(id.0)])
+            }
+            5 if history.len() > 1 => { history.pop(); history.last().unwrap().clone() }
+            _ => continue,
+        };
+        if step != 5 { history.push(before); history.push(object.clone()); history.swap_remove(history.len() - 2); }
+        object.validate().unwrap();
+        let encoded: Vec<(Vec<u8>, usize)> = object.chunks().iter().map(|c| (encode_chunk(c), c.records().len())).collect();
+        let decoded = decode_object(&encoded.iter().map(|(b, n)| (&b[..], *n)).collect::<Vec<_>>()).unwrap();
+        assert!(decoded.iter().zip(object.chunks()).all(|(a, b)| a.records() == b.records()) && decoded.len() == object.chunks().len(), "every state round-trips exactly");
+    }
 }

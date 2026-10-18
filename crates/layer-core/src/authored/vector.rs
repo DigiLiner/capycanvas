@@ -284,6 +284,57 @@ impl Style {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ShapeKind { Rectangle { radii: [f64; 4] }, Ellipse }
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LiveShape { pub kind: ShapeKind, pub center: [f64; 2], pub size: [f64; 2], pub rotation: f64 }
+const ARC: f64 = 0.552_284_749_830_793_4;
+impl LiveShape {
+    pub fn geometry(&self) -> Result<PathGeometry, &'static str> {
+        let [w, h] = self.size.map(|v| v * 0.5);
+        let (sin, cos) = self.rotation.sin_cos();
+        let place = |p: [f64; 2]| [self.center[0] + p[0] * cos - p[1] * sin, self.center[1] + p[0] * sin + p[1] * cos];
+        let turn = |v: [f64; 2]| [v[0] * cos - v[1] * sin, v[0] * sin + v[1] * cos];
+        let anchors: Vec<Anchor> = match self.kind {
+            ShapeKind::Ellipse => [([0., -h], [w, 0.]), ([w, 0.], [0., h]), ([0., h], [-w, 0.]), ([-w, 0.], [0., -h])].into_iter()
+                .map(|(p, t)| Anchor::new(place(p), turn([-t[0] * ARC, -t[1] * ARC]), turn([t[0] * ARC, t[1] * ARC]), AnchorKind::SYMMETRIC)).collect(),
+            ShapeKind::Rectangle { radii } => {
+                let limit = w.min(h).max(0.);
+                let corners = [[-w, -h], [w, -h], [w, h], [-w, h]];
+                let mut anchors = Vec::with_capacity(8);
+                for (i, corner) in corners.into_iter().enumerate() {
+                    let r = radii[i].clamp(0., limit);
+                    if r == 0. { anchors.push(Anchor::corner(place(corner))); continue; }
+                    let (previous, next) = (corners[(i + 3) % 4], corners[(i + 1) % 4]);
+                    let toward = |from: [f64; 2]| { let d = [from[0] - corner[0], from[1] - corner[1]]; let l = d[0].hypot(d[1]); [corner[0] + d[0] / l * r, corner[1] + d[1] / l * r] };
+                    let (start, end) = (toward(previous), toward(next));
+                    let handle = |from: [f64; 2]| turn([(corner[0] - from[0]) * ARC, (corner[1] - from[1]) * ARC]);
+                    anchors.push(Anchor::new(place(start), [0.; 2], handle(start), AnchorKind::SMOOTH));
+                    anchors.push(Anchor::new(place(end), handle(end), [0.; 2], AnchorKind::SMOOTH));
+                }
+                anchors
+            }
+        };
+        PathGeometry::new(vec![Subpath::new(&anchors, true)])
+    }
+    pub fn transformed(&self, affine: Affine64) -> Option<Self> {
+        let [a, b, c, d, _, _] = affine.0;
+        let (sin, cos) = self.rotation.sin_cos();
+        let map = |v: [f64; 2]| [a * v[0] + c * v[1], b * v[0] + d * v[1]];
+        let (u, v) = (map([cos, sin]), map([-sin, cos]));
+        let (su, sv) = (u[0].hypot(u[1]), v[0].hypot(v[1]));
+        if su == 0. || sv == 0. || (u[0] * v[0] + u[1] * v[1]).abs() > 1e-9 * su * sv { return None; }
+        let flipped = u[0] * v[1] - u[1] * v[0] < 0.;
+        let kind = match self.kind {
+            ShapeKind::Rectangle { radii } if radii.iter().any(|r| *r > 0.) && (su - sv).abs() > 1e-9 * su.max(sv) => return None,
+            ShapeKind::Rectangle { radii: [r0, r1, r2, r3] } => ShapeKind::Rectangle { radii: if flipped { [r3, r2, r1, r0] } else { [r0, r1, r2, r3] }.map(|r| r * su) },
+            ShapeKind::Ellipse => ShapeKind::Ellipse,
+        };
+        Some(Self { kind, center: affine.map(self.center), size: [self.size[0] * su, self.size[1] * sv], rotation: u[1].atan2(u[0]) })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathItem {
     pub id: ItemId,
@@ -293,11 +344,12 @@ pub struct PathItem {
     pub hidden: bool,
     pub locked: bool,
     pub name: Option<Arc<str>>,
+    pub shape: Option<Arc<LiveShape>>,
     pub unknown: Unknown,
 }
 impl PathItem {
     pub fn new(id: ItemId, geometry: Arc<PathGeometry>, style: Arc<Style>) -> Self {
-        Self { id, geometry, style, fill_rule: FillRule::NonZero, hidden: false, locked: false, name: None, unknown: None }
+        Self { id, geometry, style, fill_rule: FillRule::NonZero, hidden: false, locked: false, name: None, shape: None, unknown: None }
     }
     pub fn bounds(&self) -> [f64; 4] {
         let [x0, y0, x1, y1] = self.geometry.hull();
@@ -369,7 +421,7 @@ impl PathItem {
         let geometry = Arc::new(self.geometry.transformed(|p| affine.map(p))?);
         let [a, b, c, d, _, _] = affine.0;
         let scale = (a * d - b * c).abs().sqrt();
-        let moved = self.with_geometry(geometry);
+        let moved = Self { shape: self.shape.as_ref().and_then(|shape| shape.transformed(affine)).map(Arc::new), ..self.with_geometry(geometry) };
         if scale == 1. || self.style.strokes().next().is_none() { return Ok(moved); }
         let entries = self.style.entries.iter().map(|entry| match entry {
             PaintEntry::Stroke(stroke) => PaintEntry::Stroke(Stroke { width: stroke.width * scale, ..stroke.clone() }),
@@ -378,7 +430,10 @@ impl PathItem {
         Ok(moved.with_style(Arc::new(Style::new(entries))))
     }
     pub fn with_geometry(&self, geometry: Arc<PathGeometry>) -> Self {
-        Self { geometry, unknown: retained(&self.unknown, true), ..self.clone() }
+        Self { geometry, shape: None, unknown: retained(&self.unknown, true), ..self.clone() }
+    }
+    pub fn with_shape(&self, shape: LiveShape) -> Result<Self, &'static str> {
+        Ok(Self { shape: Some(Arc::new(shape)), ..self.with_geometry(Arc::new(shape.geometry()?)) })
     }
     pub fn with_style(&self, style: Arc<Style>) -> Self {
         Self { style, unknown: retained(&self.unknown, true), ..self.clone() }
