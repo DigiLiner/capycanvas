@@ -563,15 +563,11 @@ impl WgpuRasterizer {
         startup.finished = brush_ready
             && !startup.host_catalog_pending
             && startup.compiler.pending() == 0;
-        #[cfg(not(target_arch = "wasm32"))]
         if startup.finished {
             let generation = startup.preparation.load(std::sync::atomic::Ordering::Relaxed);
             for pipeline in std::mem::take(&mut startup.resized.compute).into_iter().filter(|p| !p.ready()) {
                 let preparation = startup.preparation.clone();
-                startup.compiler.enqueue_untracked(BACKGROUND, pipeline.async_pipeline(), move || {
-                    if preparation.load(std::sync::atomic::Ordering::Relaxed) == generation { pipeline.compile(); }
-                    Ok(())
-                });
+                startup.compiler.background(&pipeline, BACKGROUND, move || preparation.load(std::sync::atomic::Ordering::Relaxed) == generation);
             }
         }
         #[cfg(not(target_arch = "wasm32"))]

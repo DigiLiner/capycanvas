@@ -243,3 +243,25 @@ export async function checkPaperTextureReadiness({cdp,call,evaluate,settle}) {
     await trace.close();
   }
 }
+
+export async function checkTipResizeReadiness({evaluate,settle}) {
+  const wait=(condition,timeout=120000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};function poll(){if(${condition})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(condition)}));else setTimeout(poll,20)}poll()})`);
+  const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
+  await wait('layerApp.app.brush_ready()&&!layerApp.state().document_file.busy&&layerApp.app.startup_progress().every(Boolean)&&!layerApp.app.shader_work_pending(false)',600000);
+  const pencil=await evaluate(`(()=>{const all=layerApp.app.catalog().brush_categories.flatMap(c=>c.brushes.map(b=>({...b,category:c.label})));return (all.find(b=>b.label==='Pencil'&&/pencil/i.test(b.category))??all.find(b=>b.label==='Pencil')).id})()`);
+  await send({type:'select_brush',id:pencil});
+  await send({type:'set_brush_size',value:4});
+  await wait('layerApp.app.brush_ready()&&!layerApp.app.shader_work_pending(false)');
+  await new Promise(resolve=>setTimeout(resolve,5000));
+  await wait('!layerApp.app.shader_work_pending(true)');
+  const resized=await evaluate(`new Promise(resolve=>{
+    const start=performance.now();let compiled=false;
+    layerApp.dispatch({type:'set_brush_size',value:300});
+    const poll=()=>{compiled||=layerApp.app.shader_work_pending(false);
+      if(performance.now()-start>1500)resolve({compiled});else requestAnimationFrame(poll);};
+    poll();
+  })`);
+  assert.equal(resized.compiled,false,'Idle background preparation compiled the other Pencil tip size');
+  await send({type:'set_brush_size',value:4});
+  console.log('PASS: the other dry tip size is prepared in the background');
+}

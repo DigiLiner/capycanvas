@@ -45,9 +45,12 @@ document's selection and alpha lock rule out single-pigment batches. Changing
 size, opacity, selection or alpha lock prepares again before the next contact,
 never during one, and debug builds assert that once a brush is ready, every
 kernel its strokes select was prepared. Kernels without fine-tip filtering omit
-its shader code. Once the brush is ready and speculative work is admitted, native
-hosts prepare the other tip size in the background so a later size change is
-usually ready; selecting another brush discards that queued work.
+its shader code. Once the brush is ready and speculative work is admitted, every
+host prepares the other tip size in the background so a later size change is
+usually ready; selecting another brush discards that queued work. This
+background work does not hold startup completion. Web's
+`--tip-resize-readiness` checks that a Pencil resized from 4 to 300 px after an
+idle pause needs no compilation.
 
 One evaluator per variant serves every destination, so a brush compiles one
 heavy kernel per variant. Where read-write storage exists, the evaluator reads

@@ -101,6 +101,15 @@ impl Compiler {
         self.0.queue.lock().unwrap().jobs.push_back(job);
         self.0.wake.notify_one();
     }
+    /// Optional preparation that startup completion does not wait for; it is
+    /// skipped once `current` reports a newer preparation.
+    pub fn background<T: Send + Sync + 'static>(&self, pipeline: &Deferred<T>, priority: u8, current: impl Fn() -> bool + Send + 'static) {
+        let pipeline = pipeline.clone();
+        self.enqueue_untracked(priority, pipeline.async_pipeline(), move || {
+            if current() { pipeline.compile(); }
+            Ok(())
+        });
+    }
     pub fn pipeline<T: Send + Sync + 'static>(&self, pipeline: &Deferred<T>, priority: u8) {
         if pipeline.promote(priority) {
             let pipeline = pipeline.clone();

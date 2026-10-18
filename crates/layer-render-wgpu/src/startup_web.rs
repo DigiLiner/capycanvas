@@ -11,13 +11,14 @@ struct Job {
     work: Work,
     complete: Option<Box<dyn FnOnce()>>,
     batchable: bool,
+    tracked: bool,
 }
 #[derive(Default)]
 struct Queue {
     jobs: VecDeque<Job>,
     admission: admission::Admission,
     started: bool,
-    busy: Option<u8>,
+    busy: Option<(u8, bool)>,
     error: Option<String>,
 }
 pub(crate) struct Compiler {
@@ -50,6 +51,7 @@ impl Compiler {
             work: Box::new(work),
             complete: None,
             batchable: false,
+            tracked: true,
         });
     }
     pub fn pipeline<T: 'static>(&self, pipeline: &Deferred<T>, priority: u8) {
@@ -64,6 +66,26 @@ impl Compiler {
                 }),
                 complete: Some(Box::new(move || done.validating(false))),
                 batchable: pipeline.async_pipeline(),
+                tracked: true,
+            });
+        }
+    }
+    /// Optional preparation that startup completion does not wait for; it is
+    /// skipped once `current` reports a newer preparation.
+    pub fn background<T: 'static>(&self, pipeline: &Deferred<T>, priority: u8, current: impl Fn() -> bool + Send + 'static) {
+        if pipeline.promote(priority) {
+            let work = pipeline.clone();
+            let done = pipeline.clone();
+            self.queue.borrow_mut().jobs.push_back(Job {
+                priority,
+                work: Box::new(move || {
+                    if !current() { return Box::pin(std::future::ready(Ok(()))); }
+                    work.validating(true);
+                    work.compile_async()
+                }),
+                complete: Some(Box::new(move || done.validating(false))),
+                batchable: false,
+                tracked: false,
             });
         }
     }
@@ -75,7 +97,7 @@ impl Compiler {
     }
     pub fn pending(&self) -> usize {
         let queue = self.queue.borrow();
-        queue.jobs.len() + usize::from(queue.busy.is_some())
+        queue.jobs.iter().filter(|job| job.tracked).count() + usize::from(queue.busy.is_some_and(|(_, tracked)| tracked))
     }
     pub fn has_work(&self, allow_optional: bool) -> bool {
         let queue = self.queue.borrow();
@@ -83,7 +105,7 @@ impl Compiler {
     }
     pub fn ready_through(&self, priority: u8) -> bool {
         let queue = self.queue.borrow();
-        !queue.busy.is_some_and(|p| p <= priority)
+        !queue.busy.is_some_and(|(p, _)| p <= priority)
             && !queue.jobs.iter().any(|j| j.priority <= priority)
     }
     pub fn check(&self) -> Result<(), GpuRasterError> {
@@ -110,7 +132,7 @@ impl Compiler {
                     .min_by_key(|(_, j)| j.priority)
                     .map(|(index, _)| index) else { return Ok(()); };
                 let job = queue.jobs.remove(index).unwrap();
-                queue.busy = Some(job.priority);
+                queue.busy = Some((job.priority, job.tracked));
                 let mut jobs = vec![job];
                 if jobs[0].batchable && jobs[0].priority < OTHER {
                     while jobs.len() < 4 {
@@ -154,7 +176,7 @@ impl Compiler {
                 done();
             }
             let mut queue = shared.borrow_mut();
-            let priority = queue.busy.unwrap();
+            let (priority, _) = queue.busy.unwrap();
             queue.admission.finished(priority);
             queue.busy = None;
             if let Err(error) = &result {
