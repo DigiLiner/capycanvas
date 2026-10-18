@@ -1,6 +1,6 @@
 use super::*;
 use layer_core::{TextureSource, paper::{PaperBinding, PaperSurface}};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 const PROBE_SIZE: u32 = 256;
 const PAGE_SIZE: u32 = 256;
@@ -125,6 +125,7 @@ pub(super) struct Papers {
     programs: Vec<Programs>,
     bakes: Vec<Bake>,
     clock: u64,
+    submitted: Arc<AtomicBool>,
 }
 
 impl Papers {
@@ -149,7 +150,7 @@ impl Papers {
             ..Default::default()
         });
         let empty_image = Self::image_texture(device, [1, 1]).create_view(&Default::default());
-        Self { layout, pipeline_layout, sampler, empty_image, programs: Vec::new(), bakes: Vec::new(), clock: 0 }
+        Self { layout, pipeline_layout, sampler, empty_image, programs: Vec::new(), bakes: Vec::new(), clock: 0, submitted: Arc::new(AtomicBool::new(true)) }
     }
 
     fn image_texture(device: &PipelineDevice, extent: [u32; 2]) -> wgpu::Texture {
@@ -218,6 +219,7 @@ impl Papers {
             contents: &parameters.iter().flatten().flat_map(|v| v.to_ne_bytes()).collect::<Vec<_>>(),
             usage: wgpu::BufferUsages::STORAGE,
         })?;
+        self.bakes.retain(|b| !(matches!(b.stage, Stage::Waiting) && b.priority == priority && b.surface.texture == binding.surface.texture));
         self.bakes.push(Bake { id: id.clone(), program, surface: binding.surface.clone(), tile, data, priority, used: clock, stage: Stage::Waiting });
         while self.bakes.len() > CACHED_BAKES {
             let Some(oldest) = self.bakes.iter().enumerate().filter(|(_, b)| matches!(b.stage, Stage::Ready { .. } | Stage::Waiting))
@@ -239,17 +241,43 @@ impl Papers {
         self.bakes.iter().find_map(|b| match &b.stage { Stage::Ready { view, .. } if b.id == *id => Some(view), _ => None })
     }
 
+    pub fn nearest(&self, surface: &PaperSurface, tile: &PaperTile) -> Option<&wgpu::TextureView> {
+        let orientation = |surface: &PaperSurface| surface.mapping.0[..4].iter().map(|v| v.partial_cmp(&0.)).collect::<Vec<_>>();
+        let area = tile.pixels[0] * tile.pixels[1];
+        self.bakes.iter()
+            .filter_map(|b| match &b.stage {
+                Stage::Ready { view, .. } if b.surface.texture == surface.texture && orientation(&b.surface) == orientation(surface) =>
+                    Some(((b.tile.pixels[0] * b.tile.pixels[1] / area).ln().abs(), view)),
+                _ => None,
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, view)| view)
+    }
+
     pub fn relief(&self, id: &AssetId) -> Option<f32> {
         self.bakes.iter().find_map(|b| match &b.stage { Stage::Ready { relief, .. } if b.id == *id => Some(*relief), _ => None })
     }
 
-    pub fn advance(&mut self, device: &PipelineDevice, queue: &wgpu::Queue, wait: bool) -> Result<(), GpuRasterError> {
-        loop {
-            let mut progressed = false;
-            for index in 0..self.bakes.len() {
-                progressed |= self.step(index, device, queue, wait)?;
+    pub fn advance(&mut self, device: &PipelineDevice, queue: &wgpu::Queue, wait: bool, held: Option<&TextureSource>) -> Result<(), GpuRasterError> {
+        if !wait && !self.submitted.load(Ordering::Acquire) {
+            let _ = device.poll(wgpu::PollType::Poll);
+            if !self.submitted.load(Ordering::Acquire) {
+                return Ok(());
             }
-            if !wait || self.bakes.iter().all(|b| matches!(b.stage, Stage::Ready { .. })) {
+        }
+        loop {
+            let Some(index) = self.bakes.iter().enumerate().filter(|(_, b)| !matches!(b.stage, Stage::Ready { .. }) && held != Some(&b.surface.texture))
+                .min_by_key(|(_, b)| (b.priority, matches!(b.stage, Stage::Waiting), std::cmp::Reverse(b.used))).map(|(i, _)| i) else {
+                return Ok(());
+            };
+            let progressed = self.step(index, device, queue, wait)?;
+            if !wait {
+                if progressed {
+                    let submitted = Arc::new(AtomicBool::new(false));
+                    let signal = submitted.clone();
+                    queue.on_submitted_work_done(move || signal.store(true, Ordering::Release));
+                    self.submitted = submitted;
+                }
                 return Ok(());
             }
             if !progressed {
@@ -457,7 +485,7 @@ mod tests {
 
     fn bake_binding(renderer: &mut WgpuRasterizer, binding: PaperBinding) -> (Vec<u8>, [u32; 2], f32) {
         let id = renderer.papers.require(&renderer.device, None, &binding, startup::BRUSH).unwrap();
-        renderer.papers.advance(&renderer.device, &renderer.queue, true).unwrap();
+        renderer.papers.advance(&renderer.device, &renderer.queue, true, None).unwrap();
         let bake = renderer.papers.bakes.iter().find(|b| b.id == id).unwrap();
         let Stage::Ready { view, relief } = &bake.stage else { panic!("unfinished bake") };
         let texture = view.texture();
@@ -475,6 +503,70 @@ mod tests {
         let data = readback.slice(..).get_mapped_range().unwrap();
         let pixels = data.chunks(row as usize).flat_map(|r| r[..width as usize].to_vec()).collect();
         (pixels, [width, height], *relief)
+    }
+
+    fn scaled(texture: &TextureSource, scale: f64, flip: bool) -> PaperBinding {
+        let mut mapping = layer_core::paper::with_scale(&reference([64, 64], [300.; 2]), scale, [300.; 2]).mapping;
+        if flip { mapping.0[0] = -mapping.0[0]; }
+        PaperBinding { surface: Arc::new(PaperSurface { texture: texture.clone(), mapping }), target_offset: [0; 2] }
+    }
+
+    #[test]
+    fn newer_scales_replace_unstarted_bakes_and_bakes_advance_one_at_a_time() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone());
+        for texture in [&rough, &hot] { bake_binding(&mut renderer, scaled(texture, 1., false)); }
+        for scale in [1.5, 2., 2.5] {
+            renderer.papers.require(&renderer.device, None, &scaled(&rough, scale, false), startup::OTHER).unwrap();
+        }
+        let waiting = |papers: &Papers| papers.bakes.iter().filter(|b| matches!(b.stage, Stage::Waiting)).map(|b| b.tile.pixels[0]).collect::<Vec<_>>();
+        assert_eq!(waiting(&renderer.papers), [PaperTile::new(&scaled(&rough, 2.5, false).surface).unwrap().pixels[0]], "only the latest unstarted scale stays queued");
+        renderer.papers.require(&renderer.device, None, &scaled(&hot, 2., false), startup::OTHER).unwrap();
+        let started = |papers: &Papers| papers.bakes.iter().filter(|b| matches!(b.stage, Stage::Probing { .. } | Stage::Baking { .. })).map(|b| b.surface.texture.clone()).collect::<Vec<_>>();
+        renderer.papers.advance(&renderer.device, &renderer.queue, false, Some(&hot)).unwrap();
+        assert_eq!(started(&renderer.papers), [rough.clone()], "a held paper waits while another advances");
+        renderer.papers.advance(&renderer.device, &renderer.queue, true, None).unwrap();
+        renderer.papers.require(&renderer.device, None, &scaled(&rough, 3., false), startup::OTHER).unwrap();
+        renderer.papers.require(&renderer.device, None, &scaled(&hot, 3., false), startup::OTHER).unwrap();
+        renderer.papers.advance(&renderer.device, &renderer.queue, false, None).unwrap();
+        assert_eq!(started(&renderer.papers), [hot], "one bake advances, the most recently requested first");
+        renderer.papers.advance(&renderer.device, &renderer.queue, true, None).unwrap();
+        assert!(renderer.papers.bakes.iter().all(|b| matches!(b.stage, Stage::Ready { .. })));
+    }
+
+    #[test]
+    fn a_bake_step_waits_until_the_previous_submission_completes() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let rough = layer_core::paper::built_in_paper("rough").unwrap().texture.clone();
+        bake_binding(&mut renderer, scaled(&rough, 1., false));
+        let id = renderer.papers.require(&renderer.device, None, &scaled(&rough, 3., false), startup::OTHER).unwrap();
+        let stage = |papers: &Papers| papers.bakes.iter().find(|b| b.id == id).map(|b| match b.stage { Stage::Waiting => 0, Stage::Probing { .. } => 1, Stage::Baking { next, .. } => 2 + next, Stage::Ready { .. } => u32::MAX }).unwrap();
+        renderer.papers.advance(&renderer.device, &renderer.queue, false, None).unwrap();
+        assert_eq!(stage(&renderer.papers), 1);
+        assert!(!renderer.papers.submitted.load(Ordering::Acquire), "the probe is still in flight");
+        renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(renderer.papers.submitted.load(Ordering::Acquire));
+        while stage(&renderer.papers) < 2 + PAGES_PER_STEP {
+            renderer.papers.advance(&renderer.device, &renderer.queue, false, None).unwrap();
+            renderer.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        }
+        assert_eq!(stage(&renderer.papers), 2 + PAGES_PER_STEP, "one step of pages per completed submission");
+    }
+
+    #[test]
+    fn a_new_scale_borrows_the_nearest_bake_of_the_same_paper_and_orientation() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let [rough, hot] = ["rough", "hot_press"].map(|id| layer_core::paper::built_in_paper(id).unwrap().texture.clone());
+        let baked = [1., 3.].map(|scale| {
+            let binding = scaled(&rough, scale, false);
+            bake_binding(&mut renderer, binding.clone());
+            renderer.papers.view(&PaperTile::id_for(&binding).unwrap()).unwrap().clone()
+        });
+        let nearest = |binding: PaperBinding| renderer.papers.nearest(&binding.surface, &PaperTile::new(&binding.surface).unwrap()).cloned();
+        assert_eq!(nearest(scaled(&rough, 1.2, false)).as_ref(), Some(&baked[0]));
+        assert_eq!(nearest(scaled(&rough, 2.5, false)).as_ref(), Some(&baked[1]));
+        assert_eq!(nearest(scaled(&hot, 1., false)), None, "another paper is never borrowed");
+        assert_eq!(nearest(scaled(&rough, 1., true)), None, "nor a flipped tile");
     }
 
     fn preview(renderer: &mut WgpuRasterizer, texture: &TextureSource) -> Vec<u8> {

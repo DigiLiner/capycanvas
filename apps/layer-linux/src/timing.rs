@@ -48,6 +48,8 @@ pub struct Stats {
     pub backdrop_frames: [u64; 2],
     pub overview_frames: usize,
     pub overview_presented: bool,
+    /// Monotonic ns when the worker applied each paper relief.
+    pub paper_overlays: Vec<u64>,
 }
 struct Slot {
     query: wgpu::QuerySet,
@@ -108,6 +110,9 @@ impl Timing {
         stats.material_phases.push((self.id, metrics.material_cpu_ms));
         stats.source_transfers.push([self.id, metrics.source_upload_submissions,
             metrics.source_upload_peak_bytes]);
+    }
+    pub fn paper_overlay(&self) {
+        self.stats.lock().unwrap().paper_overlays.push(gtk::glib::monotonic_time() as u64 * 1000);
     }
     pub fn raster_commit(&self) {
         self.stats.lock().unwrap().raster_commits.push([self.id, self.queued_ns]);

@@ -33,9 +33,9 @@ the library, rendering, saved data and what each host has.
    its texture. Tapping the texture, or the Texture tile in Properties, opens
    Choose Texture; Use Texture applies the chosen paper.
 3. **Scale the paper.** Dragging Scale shades the paper's relief over the
-   canvas so its scale can be judged against the drawing. The same shading
-   shows for a moment after a paper is chosen. It never appears in the artwork
-   or export.
+   canvas, following the slider at once, so its scale can be judged against
+   the drawing. The same shading shows for a moment after a paper is chosen.
+   It never appears in the artwork or export.
 4. **Draw.** Pencils, charcoal, pastels and textured paint brushes catch the
    tooth. Texture strength in Tool Settings still sets how much a brush reacts.
    Bristol and hot press break a pencil line only lightly; rough breaks it
@@ -276,7 +276,12 @@ with Add to Library; adding it reuses an equal stored image.
   startup, composition and its cost are those of Solid Color.
 - **Bakes run off the frame path.** The [bake](texture-programs.md#the-bake)
   is GPU work in 256 × 256 pages, scheduled at brush priority by the compiler
-  path, never on the CPU or in a browser task.
+  path, never on the CPU or in a browser task. One bake advances at a time,
+  the most urgent and then the most recently requested first, and a new
+  request drops unstarted bakes of the same paper at its priority, so a Scale
+  drag never queues a bake for every step. A step is submitted only after the
+  previous one has completed, so a slow GPU never queues bake work ahead of
+  frames.
 - **Bakes are cached in memory** by program, version, values and tile size,
   shared between drawings and released when unused. A rebake follows a change
   of texture, Size, Image Size or orientation, not a crop or a resolution-only
@@ -294,10 +299,17 @@ with Add to Library; adding it reuses an equal stored image.
   own bind group, so the canvas shader and camera are unchanged. It shades the
   Paper's baked tile by its slope, white facing the light and black away from
   it, while Scale changes and for 1.2 s after a paper is chosen, then fades out
-  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)). The visible interval
-  starts after the viewport has encoded the relief; waiting for the paper bake
-  or its presentation pipeline does not consume that interval. Replacing the
-  renderer resends the relief and preserves its remaining visible interval.
+  ([`paper.rs`](../../crates/layer-ui/src/effects/paper.rs)). While Scale moves,
+  it stretches the finished bake of the same paper and orientation nearest in
+  size, so every slider step shows at once, and holds bakes of that paper so
+  the drag spends no GPU time on them; only a paper without any bake is baked
+  during the drag. On release the paper's own bake replaces the stretched one.
+  The presenter prepares its pipeline after startup and promotes it when
+  relief is wanted. The visible interval starts after the
+  viewport has encoded the paper's own relief; waiting for the paper bake or
+  its presentation pipeline does not consume that interval, and GTK's render
+  thread reports that moment to the session. Replacing the renderer resends
+  the relief and preserves its remaining visible interval.
 - **Memory** is one byte per texel: 2.3 MB for a 128 mm watercolor tile at
   300 ppi, 4.3 MB for a 175 mm laid or washi tile, and at most 16 MB.
 
@@ -325,11 +337,11 @@ keep their Solid Color.
 | Area | State |
 | --- | --- |
 | Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, library policy, import |
-| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. |
-| Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows and Choose Texture in both themes. |
+| GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, relief preview and the Add paper row. `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. `native_paper_scale_drag` drags Scale with real input on a 12 MP drawing in both themes and records how soon each step reaches the canvas. |
+| Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows, Choose Texture and the Scale relief in both themes. |
 | Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, Resolution in New drawing, shared relief preview and the Add paper row. Native workers run image decoding and library files through the shared `layer_host::papers::PaperTask`. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
-| Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the texture dialog, missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it. |
-| Web | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lives in the raster worker's IndexedDB store, which decodes, converts and encodes papers off the page thread; the page lists it after the canvas starts and runs every Paper request through the shared session capture and adoption. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `--paper-library`, `--paper-rows` and `--blending` cover the library, Choose Texture, layer controls and Resolution. |
+| Android | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lists at startup and runs Import, Load, Add to Library, Rename and Delete through the shared `layer_host::papers::PaperTask` on IO. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `paperLibraryImportsRenamesAndDeletesWithoutChangingTheDrawing`, the texture dialog, missing-Paper and fill-row journeys and `newDocumentCreatesTheChosenResolution` cover it; `paperScaleShadesTheCanvasWhileDragging` checks the relief while Scale is held and after release. |
+| Web | Builds and paints on Paper, offers the Add paper row and shows Resolution in New drawing. The paper library lives in the raster worker's IndexedDB store, which decodes, converts and encodes papers off the page thread; the page lists it after the canvas starts and runs every Paper request through the shared session capture and adoption. Choose Texture opens from Properties and the Paper row, with Import, Rename, Delete and Add to Library. `--paper-library`, `--paper-rows` and `--blending` cover the library, Choose Texture, the Scale relief, layer controls and Resolution. |
 
 ## Measurements
 

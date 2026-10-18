@@ -107,16 +107,18 @@ struct PaperRelief {
     layout: wgpu::BindGroupLayout,
     pipeline: crate::Deferred<wgpu::RenderPipeline>,
     uniform: wgpu::Buffer,
-    drawn: Option<(wgpu::TextureView, [f32; 8], wgpu::BindGroup)>,
+    sampler: wgpu::Sampler,
+    drawn: Option<(wgpu::TextureView, [f32; 8], bool, wgpu::BindGroup)>,
 }
 impl PaperRelief {
-    fn wanted(&self, renderer: &WgpuRasterizer) -> Option<(wgpu::TextureView, [f32; 8])> {
-        let (view, grain, opacity) = renderer.paper_overlay_tile()?;
-        (self.pipeline.ready() || renderer.startup.is_none())
-            .then(|| (view.clone(), [grain[0], grain[1], grain[2], grain[3], opacity * PAPER_RELIEF_OPACITY, PAPER_RELIEF_GAIN, 0., 0.]))
+    fn wanted(&self, renderer: &WgpuRasterizer) -> Option<(wgpu::TextureView, [f32; 8], bool)> {
+        let priority = if renderer.paper_overlay.is_some() { crate::startup::VALIDATION } else { crate::startup::OTHER };
+        let ready = renderer.startup.as_ref().is_none_or(|startup| startup.compiler.require([&self.pipeline], priority));
+        let (view, grain, opacity, exact) = renderer.paper_overlay_tile()?;
+        ready.then(|| (view.clone(), [grain[0], grain[1], grain[2], grain[3], opacity * PAPER_RELIEF_OPACITY, PAPER_RELIEF_GAIN, 0., 0.], exact))
     }
     fn changed(&self, renderer: &WgpuRasterizer) -> bool {
-        self.wanted(renderer).as_ref().map(|(view, data)| (view, data)) != self.drawn.as_ref().map(|(view, data, _)| (view, data))
+        self.wanted(renderer).as_ref().map(|(view, data, _)| (view, data)) != self.drawn.as_ref().map(|(view, data, _, _)| (view, data))
     }
 }
 
@@ -383,7 +385,6 @@ impl ViewportPresenter {
         let Some(startup) = &renderer.startup else { return true; };
         let mut ready = startup.compiler.require(self.pipeline.iter().chain([&self.cursor_pipeline]), crate::startup::DOCUMENT);
         ready &= startup.compiler.require(self.overview_pipeline.iter().chain(self.picker.pipeline.iter()), crate::startup::BRUSH);
-        startup.compiler.require([&self.paper.pipeline], crate::startup::OTHER);
         if let Some(backdrop) = &self.backdrop { ready &= startup.compiler.require(backdrop.pipelines(), crate::startup::DOCUMENT); }
         startup.compiler.start();
         ready
@@ -565,6 +566,7 @@ impl ViewportPresenter {
         let paper_layout = crate::bindings::layout(device, "paper relief", &[
             crate::bindings::buffer(1, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, None),
             crate::bindings::texture(2, wgpu::ShaderStages::FRAGMENT, true),
+            crate::bindings::sampler(3, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
         ]);
         let paper_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("paper relief"), bind_group_layouts: &[Some(&layout), Some(&paper_layout)], immediate_size: 0,
@@ -574,6 +576,14 @@ impl ViewportPresenter {
                 format, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
             uniform: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("paper relief"), size: 32, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
+            }),
+            sampler: device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("paper relief"),
+                address_mode_u: wgpu::AddressMode::Repeat,
+                address_mode_v: wgpu::AddressMode::Repeat,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
             }),
             layout: paper_layout,
             drawn: None,
@@ -968,17 +978,18 @@ impl ViewportPresenter {
         if self.paper.changed(renderer) {
             self.history.valid = false;
             self.paper.drawn = match self.paper.wanted(renderer) {
-                Some((tile, data)) => {
+                Some((tile, data, exact)) => {
                     let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_ne_bytes()).collect();
                     self.uploads.write(encoder, &self.paper.uniform, &bytes)?;
                     let group = match &self.paper.drawn {
-                        Some((drawn, _, group)) if *drawn == tile => group.clone(),
+                        Some((drawn, _, _, group)) if *drawn == tile => group.clone(),
                         _ => device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("paper relief"), layout: &self.paper.layout, entries: &[
                             wgpu::BindGroupEntry { binding: 1, resource: self.paper.uniform.as_entire_binding() },
                             wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&tile) },
+                            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.paper.sampler) },
                         ] }),
                     };
-                    Some((tile, data, group))
+                    Some((tile, data, exact, group))
                 }
                 None => None,
             };
@@ -1307,11 +1318,11 @@ impl ViewportPresenter {
                     pass.draw(0..3, 0..1);
                 }
                 pass.set_scissor_rect(repaint.min_x(), repaint.min_y(), repaint.width(), repaint.height());
-                if let Some((_, _, group)) = &self.paper.drawn {
+                if let Some((_, _, exact, group)) = &self.paper.drawn {
                     pass.set_pipeline(&self.paper.pipeline);
                     pass.set_bind_group(1, group, &[]);
                     pass.draw(0..3, 0..1);
-                    renderer.paper_overlay_drawn.set(true);
+                    renderer.paper_overlay_drawn.set(*exact);
                 }
                 self.picker.draw(&mut pass);
                 if !self.cursor_vertices.is_empty() {

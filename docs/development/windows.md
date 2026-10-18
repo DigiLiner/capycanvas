@@ -275,7 +275,9 @@ light-theme scrolling, history and empty-stack cases. Both variants also walk
 Choose Texture from the Paper row and from Properties: its size against Edit
 Color, keyboard choice, Cancel, Use Texture with one Undo, Rename and Delete
 in the open dialog, a seeded library paper scrolled into view and a refused
-Use Texture after the drawing changes.
+Use Texture after the drawing changes. They then drag Properties' Scale slider
+and require relief over the page while it is held, a flat page after release
+and one Undo.
 The Paper fixtures maximize their owned window and wait for two full rows in
 the Layers viewport before comparing row heights; UIA bounds are clipped to
 that viewport. Reacquire the current Layers list with bounded polling after

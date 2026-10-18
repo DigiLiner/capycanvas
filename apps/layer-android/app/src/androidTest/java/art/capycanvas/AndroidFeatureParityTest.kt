@@ -555,6 +555,52 @@ class AndroidFeatureParityTest {
             scan.delete()
         }
     }
+    @Test fun paperScaleShadesTheCanvasWhileDragging() {
+        fun scale() = state().getJSONObject("layer_properties").array("controls").objects().first { it.getString("key") == "scale" }.getJSONObject("value").getDouble("value")
+        val theme = androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("theme") ?: "light"
+        action(obj("type" to "set_theme", "theme" to theme))
+        action(obj("type" to "effect", "action" to obj("op" to "insert", "effect" to "paper")))
+        fun find(view: android.view.View): CanvasSurfaceView? = when (view) {
+            is CanvasSurfaceView -> view
+            is android.view.ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { find(view.getChildAt(it)) }
+            else -> null
+        }
+        lateinit var canvas: CanvasSurfaceView
+        val location = IntArray(2)
+        compose.runOnIdle { canvas = find(compose.activity.window.decorView)!!; canvas.getLocationOnScreen(location) }
+        fun spread(name: String): Double {
+            android.os.SystemClock.sleep(300)
+            var spread = 0.0
+            screenshot("paper-scale/$name-$theme.png") { bitmap ->
+                val samples = (location[1] + canvas.height * 3 / 10 until location[1] + canvas.height * 7 / 10 step 2).flatMap { y ->
+                    (location[0] + canvas.width * 3 / 10 until location[0] + canvas.width * 7 / 10 step 2).map { x ->
+                        bitmap.getPixel(x, y).let { (android.graphics.Color.red(it) + android.graphics.Color.green(it) + android.graphics.Color.blue(it)) / 3.0 }
+                    }
+                }
+                val mean = samples.average()
+                spread = kotlin.math.sqrt(samples.sumOf { (it - mean) * (it - mean) } / samples.size)
+            }
+            return spread
+        }
+        val slider = compose.onNodeWithTag("number-slider-Scale").performScrollTo()
+        val flat = spread("flat")
+        val before = scale()
+        slider.performTouchInput { down(center) }
+        slider.performTouchInput { repeat(20) { moveBy(Offset(width * .02f, 0f), 16) } }
+        val shown = android.os.SystemClock.uptimeMillis() + 10_000
+        var dragging = flat
+        while (android.os.SystemClock.uptimeMillis() < shown && spread("dragging").also { dragging = it } <= flat + 4) Unit
+        val dragged = scale()
+        slider.performTouchInput { up() }
+        assertTrue("Dragging Scale enlarges the paper: $before -> $dragged", dragged > before * 1.5)
+        assertTrue("The relief shades the canvas while Scale is held: $flat -> $dragging", dragging > flat + 4)
+        val hidden = android.os.SystemClock.uptimeMillis() + 10_000
+        var settled = dragging
+        while (android.os.SystemClock.uptimeMillis() < hidden && spread("released").also { settled = it } > flat + 1) Unit
+        assertTrue("The relief hides after release: $settled", settled <= flat + 1)
+        action(obj("type" to "invoke", "command" to "undo"))
+        assertEquals("A Scale drag is one Undo step", before, scale(), 1e-9)
+    }
     @Test fun newDocumentCreatesTheChosenResolution() {
         compose.waitUntil(60_000) { state().array("commands").objects().first { it.getString("id") == "new_document" }.getBoolean("enabled") }
         compose.onNodeWithTag("application-menu-file").performClick()

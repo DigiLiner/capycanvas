@@ -321,19 +321,19 @@ fn surface_color(vertex:Vertex,source:u32)->vec4<f32> {
 struct PaperRelief { tile: vec4<f32>, shade: vec4<f32> };
 @group(1) @binding(1) var<uniform> paper_relief: PaperRelief;
 @group(1) @binding(2) var paper_tile: texture_2d<f32>;
+@group(1) @binding(3) var paper_sampler: sampler;
 fn paper_relief_height(p: vec2<f32>) -> f32 {
-    let size = vec2<i32>(paper_relief.tile.xy);
-    let q = vec2<i32>(floor(p + paper_relief.tile.zw));
-    return textureLoad(paper_tile, ((q % size) + size) % size, 0).r;
+    return textureSampleLevel(paper_tile, paper_sampler, (p + paper_relief.tile.zw) / paper_relief.tile.xy, 0.).r;
 }
 @fragment fn paper_fragment(vertex: Vertex) -> @location(0) vec4<f32> {
     let surface = logical_surface(vertex.position.xy * camera.rotation.w);
     let p = vec2<f32>(dot(camera.inverse.xz, surface), dot(camera.inverse.yw, surface)) + camera.offset_document.xy;
     if any(p < vec2<f32>(0.)) || any(p >= camera.offset_document.zw) { return vec4<f32>(0.); }
-    let step = max(1., length(camera.inverse.xy) * camera.rotation.w);
+    let pixel = max(1., length(camera.inverse.xy) * camera.rotation.w);
+    let step = max(vec2<f32>(pixel), paper_relief.tile.xy / vec2<f32>(textureDimensions(paper_tile)));
     let slope = vec2<f32>(
-        paper_relief_height(p + vec2<f32>(step, 0.)) - paper_relief_height(p - vec2<f32>(step, 0.)),
-        paper_relief_height(p + vec2<f32>(0., step)) - paper_relief_height(p - vec2<f32>(0., step)));
+        paper_relief_height(p + vec2<f32>(step.x, 0.)) - paper_relief_height(p - vec2<f32>(step.x, 0.)),
+        paper_relief_height(p + vec2<f32>(0., step.y)) - paper_relief_height(p - vec2<f32>(0., step.y))) * pixel / step;
     let light = clamp(dot(slope, vec2<f32>(0.8, 0.6)) * paper_relief.shade.y, -1., 1.);
     let alpha = abs(light) * paper_relief.shade.x * window_coverage(surface);
     return view_store(vec4<f32>(view_ui_rgb(vec3<f32>(select(0., 1., light > 0.))) * alpha, alpha));

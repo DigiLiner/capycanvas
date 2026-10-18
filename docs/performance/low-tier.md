@@ -122,6 +122,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Enclose and Fill: loop drag and navigation during completion | 60 | Unmeasured on the reference tablet | Shared lasso overlay; GPU region discovery starts on release. Desktop checks do not qualify this tier |
 | Selection Brush or Quick Mask, 1024 px | 60 | | |
 | Grow, Shrink or Feather drag, full canvas | 60, soft | | |
+| Paper Scale drag with relief preview | 60 | Unmeasured on the reference tablet | Canvas-bar `paper-scale-drag`; [Paper rendering](../development/paper.md#rendering-and-performance) |
 | Pointwise adjustment slider: Exposure | 60, soft | **Not met.** Current M3 12.131–32.686 completed updates/s; completion gap p99 63.347–281.970 ms; presentation unmeasured | [BUILD20 selected canvas comparison](#build20-selected-canvas-comparison) |
 | Pointwise chain: Levels, Vibrance, Exposure slider | 60, soft | **Not met.** Screen 57.3 presents/s, p99 33.3 ms; renderer 25.1 completed updates/s, with a 13.9–31.7 range | Pointwise graph comparison below |
 | Threshold slider | 60, soft | **Not met.** Current M3 3.362–3.789 completed updates/s; completion gap p99 260.867–338.872 ms; presentation unmeasured | [BUILD20 selected canvas comparison](#build20-selected-canvas-comparison) |

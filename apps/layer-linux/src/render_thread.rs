@@ -161,7 +161,7 @@ enum Command {
     CancelSelectionPaint(u64),
     SelectionOverlay(Option<layer_render::SelectionOverlay>),
     CropOverlay(Option<layer_render::CropOverlay>),
-    PaperOverlay(Option<layer_render::PaperOverlay>),
+    PaperOverlay(u64, Option<layer_render::PaperOverlay>),
     ClippingPreview(bool,bool),
     QuickMaskThumbnail(Option<layer_core::Selection>),
     Region(u64, layer_render::RegionRequest),
@@ -196,6 +196,7 @@ struct FrameReport {
     pending_work: AtomicBool,
     retouch_miss: std::sync::atomic::AtomicU64,
     retouch_waiting: std::sync::atomic::AtomicU64,
+    paper_drawn: std::sync::atomic::AtomicU64,
 }
 enum Reply {
     ColorAdopted(u64, HashMap<AssetId, BrushSource>, layer_render_wgpu::snapshot::SnapshotGpu, Option<layer_render_wgpu::ShaderActivity>),
@@ -287,6 +288,7 @@ pub struct RenderWorker {
     selection_overlay: Option<layer_render::SelectionOverlay>,
     crop_overlay: Option<layer_render::CropOverlay>,
     paper_overlay: Option<layer_render::PaperOverlay>,
+    paper_generation: u64,
     clipping_preview:[bool;2],
     quick_thumbnail: Option<layer_core::Selection>,
     pub(super) clock: Arc<crate::wayland::FrameClock>,
@@ -505,6 +507,7 @@ impl RenderWorker {
             selection_overlay: None,
             crop_overlay: None,
             paper_overlay: None,
+            paper_generation: 0,
             clipping_preview:[false;2],
             quick_thumbnail: None,
             clock,
@@ -860,9 +863,16 @@ impl CanvasRenderer for RenderWorker {
     }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if self.paper_overlay != overlay {
-            let _ = self.send(Command::PaperOverlay(overlay.clone()));
+            if self.paper_overlay.as_ref().map(|o| &o.paper) != overlay.as_ref().map(|o| &o.paper) {
+                self.paper_generation += 1;
+            }
+            let _ = self.send(Command::PaperOverlay(self.paper_generation, overlay.clone()));
             self.paper_overlay = overlay;
         }
+    }
+    fn paper_overlay_ready(&self, paper: &layer_core::paper::PaperBinding) -> bool {
+        self.paper_overlay.as_ref().is_some_and(|o| o.paper == *paper)
+            && self.report.paper_drawn.load(Ordering::Acquire) == self.paper_generation
     }
     fn request_region(
         &mut self,
@@ -1114,6 +1124,7 @@ struct Worker {
     watch: layer_host::DeviceWatch,
     backdrop_submitted: bool,
     paper_ready: Arc<AtomicBool>,
+    paper_overlay: Option<(u64, layer_core::paper::PaperBinding)>,
     // Drop Vulkan's surface before the wl_surface (field declaration order).
     surface: wgpu::Surface<'static>,
     instance: wgpu::Instance,
@@ -1525,7 +1536,12 @@ impl Worker {
                     self.renderer.cancel_region();
                 }
                 Command::CropOverlay(overlay) => self.renderer.set_crop_overlay(overlay),
-                Command::PaperOverlay(overlay) => self.renderer.set_paper_overlay(overlay),
+                Command::PaperOverlay(generation, overlay) => {
+                    self.paper_overlay = overlay.as_ref().map(|o| (generation, o.paper.clone()));
+                    self.renderer.set_paper_overlay(overlay);
+                    #[cfg(test)]
+                    timing.paper_overlay();
+                }
                 Command::ClippingPreview(shadows,highlights) => self.renderer.set_clipping_preview(shadows,highlights),
                 Command::Region(generation, request) => {
                     region_generation = generation;
@@ -1769,6 +1785,7 @@ impl Worker {
             view_color,
             backdrop_submitted: false,
             paper_ready: Arc::new(AtomicBool::new(false)),
+            paper_overlay: None,
             surface,
             instance,
             child,
@@ -1809,6 +1826,9 @@ impl Worker {
             report.retouch_miss.store(stroke.0, Ordering::Release);
         }
         report.retouch_waiting.store(self.renderer.retouch_waiting().map_or(0, |stroke| stroke.0), Ordering::Release);
+        if let Some((generation, paper)) = &self.paper_overlay && self.renderer.paper_overlay_ready(paper) {
+            report.paper_drawn.store(*generation, Ordering::Release);
+        }
         let pending = self.renderer.has_pending_work();
         if pending && !report.pending_work.swap(pending, Ordering::AcqRel) {
             wake_canvas(&self.area);

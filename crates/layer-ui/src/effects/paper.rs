@@ -110,7 +110,7 @@ impl PaperPreview {
             self.remaining = self.remaining.saturating_sub(now.saturating_sub(previous));
         }
         let opacity = (self.remaining as f32 / FADE_NS as f32).min(1.);
-        let overlay = paper.filter(|_| opacity > 0.).map(|paper| layer_render::PaperOverlay { paper, opacity });
+        let overlay = paper.filter(|_| opacity > 0.).map(|paper| layer_render::PaperOverlay { paper, opacity, moving: dragging.is_some() });
         if overlay.is_none() { self.layer = None; self.last_frame = None; }
         (overlay != self.shown).then(|| { self.shown = overlay.clone(); overlay })
     }

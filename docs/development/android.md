@@ -585,7 +585,8 @@ APK calls, so test-APK benchmarks use the unminified build.
   logs a `CapyBarPerf` line and writes
   `canvas-bar-benchmark/<label>.json` in external files; `ui_hz` and
   `ui_interval_ms` count the distinct vsyncs the UI drew until the gestures end.
-  `effects` scrubs Exposure alone and after Levels/Vibrance; `spatial-effects`
+  `effects` scrubs Exposure alone and after Levels/Vibrance, and
+  `-e labels paper-scale-drag` scrubs Paper Scale with its relief preview; `spatial-effects`
   scrubs Gaussian Blur at small and large radii. Both prime the actual slider,
   wait for shader readiness and verify changing parameter values during motion.
   `curves` with `-e labels effect-curves-drag` drags the native Curves graph over

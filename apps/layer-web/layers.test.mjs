@@ -298,6 +298,40 @@ export async function checkLayerRelationships({call,evaluate,settle}) {
   console.log('PASS: contextual attachment, neutral adjacent FX links, darker accent rail, inherited eye, backgroundless FX, saved Selection normalized drops, collapsed owner, themes, custom/neutral accents, narrow/wide, scroll');
 }
 
+async function checkScaleRelief({call,evaluate,settle,theme,directory}) {
+  const paper=(await evaluate("layerApp.state().layers.map(l=>({id:Number(l.id),label:l.label}))")).find(l=>l.label==='Paper').id;
+  await evaluate(`layerApp.dispatch({type:'layer',action:{op:'select',id:${paper},mask:false}})`);await settle();
+  const scale=()=>evaluate("layerApp.state().layer_properties.controls.find(c=>c.key==='scale').value.value");
+  const slider=await evaluate("(()=>{const c=[...document.querySelectorAll('.number-control')].find(n=>n.querySelector('.number-title')?.textContent==='Scale'&&n.offsetParent);c.scrollIntoView({block:'nearest'});const r=c.querySelector('.number-slider').getBoundingClientRect();return{x:r.x,y:r.y+r.height/2,width:r.width}})()");
+  const spread=async()=>{
+    const {data}=await call('Page.captureScreenshot',{format:'png'});
+    return evaluate(`(async()=>{const image=new Image();image.src='data:image/png;base64,${data}';await image.decode();
+      const r=document.getElementById('canvas').getBoundingClientRect(),s=image.width/innerWidth,canvas=document.createElement('canvas');
+      canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(image,0,0);
+      const x=Math.round((r.x+r.width*.35)*s),y=Math.round((r.y+r.height*.35)*s),w=Math.round(r.width*.3*s),h=Math.round(r.height*.3*s);
+      const d=ctx.getImageData(x,y,w,h).data;let sum=0,squares=0;for(let i=0;i<d.length;i+=4){const v=(d[i]+d[i+1]+d[i+2])/3;sum+=v;squares+=v*v;}
+      const n=d.length/4;return Math.sqrt(Math.max(0,squares/n-(sum/n)**2));})()`);
+  };
+  await new Promise(resolve=>setTimeout(resolve,2500));
+  const flat=await spread();
+  const before=await scale();
+  const mouse=(type,f)=>call('Input.dispatchMouseEvent',{type,x:slider.x+slider.width*f,y:slider.y,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1});
+  await mouse('mousePressed',.5);
+  for(let i=1;i<=30;i++){await mouse('mouseMoved',.5+.4*i/30);await new Promise(resolve=>setTimeout(resolve,16));}
+  const shown=Date.now()+8000;let dragging=flat;
+  while(Date.now()<shown&&(dragging=await spread())<=flat+4)await new Promise(resolve=>setTimeout(resolve,100));
+  const capture=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${directory}/scale-relief-${theme}.png`,Buffer.from(capture.data,'base64'));
+  const dragged=await scale();
+  await mouse('mouseReleased',.9);await settle();
+  assert.ok(dragged>before*1.5,`Dragging Scale enlarges the paper: ${before} -> ${dragged}`);
+  assert.ok(dragging>flat+4,`The relief shades the canvas while Scale is held: spread ${flat.toFixed(2)} -> ${dragging.toFixed(2)}`);
+  const end=Date.now()+8000;let settled=dragging;
+  while(Date.now()<end&&(settled=await spread())>flat+1)await new Promise(resolve=>setTimeout(resolve,200));
+  assert.ok(settled<=flat+1,`The relief hides after release: spread ${settled.toFixed(2)}`);
+  await evaluate("layerApp.dispatch({type:'invoke',command:'undo'})");await settle();
+  assert.equal(await scale(),before,'A Scale drag is one Undo step');
+}
+
 async function checkTextureChoice({call,evaluate,settle,theme,directory,device}) {
   const send=async value=>{await evaluate(`layerApp.dispatch(${JSON.stringify(value)})`);await settle();};
   const invoke=command=>send({type:'invoke',command});
@@ -446,6 +480,7 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
   for(const theme of ['light','dark']) {
     await send({type:'set_theme',theme});
     await checkTextureChoice({call,evaluate,settle,theme,directory,device});
+    await checkScaleRelief({call,evaluate,settle,theme,directory});
     assert.equal(await missing(),false,'Paper suppresses Add paper');
     const initialCount=(await rows()).length;
     await evaluate(`document.querySelector('.layer-footer [aria-label="New layer"]').focus()`);
@@ -572,5 +607,5 @@ export async function checkPaperRows({call,evaluate,settle,device=false}) {
     for(const row of (await rows()).filter(l=>l.label!=='Paper'))await layer({op:'delete',id:row.id});
     await layer({op:'new',group:false,clipped:false});
   }
-  console.log('PASS: Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, no Paper mask, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
+  console.log('PASS: Scale relief while dragging and hidden after release; Choose Texture from Paper rows and Properties (tiles, pending choice, keyboard, Cancel/Escape, Use Texture with one Undo step, live language, no Paper mask, locked Paper, Edit Color size); Add paper layout, mouse/touch/pen activation and cancellation, keyboard, Undo/Redo, empty and scrolling lists, bottom Paper and fill mask/group drawing policy in both themes');
 }

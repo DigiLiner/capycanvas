@@ -1669,7 +1669,7 @@ impl WgpuRasterizer {
         let compiler = self.startup.as_ref().map(|startup| &startup.compiler);
         self.papers.require(&self.device, compiler, binding, priority)?;
         if self.startup.is_none() {
-            self.papers.advance(&self.device, &self.queue, true)?;
+            self.papers.advance(&self.device, &self.queue, true, None)?;
         }
         Ok(())
     }
@@ -1687,10 +1687,12 @@ impl WgpuRasterizer {
         }).unwrap_or(([1., 1., 0., 0.], 1.))
     }
 
-    fn paper_overlay_tile(&self) -> Option<(&wgpu::TextureView, [f32; 4], f32)> {
+    fn paper_overlay_tile(&self) -> Option<(&wgpu::TextureView, [f32; 4], f32, bool)> {
         let overlay = self.paper_overlay.as_ref()?;
         let tile = paper::PaperTile::new(&overlay.paper.surface).ok()?;
-        Some((self.papers.view(&tile.id(&overlay.paper.surface))?, tile.grain(&overlay.paper), overlay.opacity))
+        let exact = self.papers.view(&tile.id(&overlay.paper.surface));
+        let view = exact.or_else(|| self.papers.nearest(&overlay.paper.surface, &tile))?;
+        Some((view, tile.grain(&overlay.paper), overlay.opacity, exact.is_some()))
     }
 
     fn texture_view(&self, id: &AssetId) -> Result<&wgpu::TextureView, GpuRasterError> {
@@ -3737,8 +3739,8 @@ impl CanvasRenderer for WgpuRasterizer {
     fn set_crop_overlay(&mut self, overlay: Option<layer_render::CropOverlay>) { self.crop_overlay = overlay; }
     fn set_paper_overlay(&mut self, overlay: Option<layer_render::PaperOverlay>) {
         if self.startup.is_none() && let Some(overlay) = &overlay
-            && self.papers.require(&self.device, None, &overlay.paper, startup::OTHER)
-                .and_then(|_| self.papers.advance(&self.device, &self.queue, true)).is_err() {
+            && self.papers.require(&self.device, None, &overlay.paper, startup::VALIDATION)
+                .and_then(|_| self.papers.advance(&self.device, &self.queue, true, None)).is_err() {
             return;
         }
         if self.paper_overlay.as_ref().map(|o| &o.paper) != overlay.as_ref().map(|o| &o.paper) {

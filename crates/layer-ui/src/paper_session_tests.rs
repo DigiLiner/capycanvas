@@ -212,12 +212,14 @@ fn paper_relief_shows_while_scaling_and_briefly_after_a_choice() {
         s.dispatch(gesture(ContactPhase::Move, 1.5 + step as f64 * 0.1)).unwrap();
         s.frame(now, now).unwrap();
         assert_eq!(opacity(&mut s), Some(1.), "shown for the whole drag");
+        assert!(s.renderer_mut().paper_overlay.as_ref().unwrap().moving);
         let mapping = s.renderer_mut().paper_overlay.as_ref().unwrap().paper.surface.mapping;
         assert!((mapping.0[0] - (1.5 + step as f64 * 0.1) * 300. / 25.4).abs() < 1e-3, "shows the scale being set");
     }
     s.dispatch(gesture(ContactPhase::Up, 2.)).unwrap();
     s.frame(9_400_000_000, 9_400_000_000).unwrap();
     assert!(opacity(&mut s).is_some());
+    assert!(!s.renderer_mut().paper_overlay.as_ref().unwrap().moving, "release refines the relief");
     s.frame(9_700_000_000, 9_700_000_000).unwrap();
     assert_eq!(opacity(&mut s), None, "hidden shortly after release");
 }

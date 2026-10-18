@@ -839,6 +839,7 @@ class AndroidCanvasBarBenchmarkTest {
                     Scrub("selection_overlay", "mask_opacity", "Overlay opacity", "selection-overlay-opacity-drag", .3, span = .4),
                 ) else listOf(
                     Scrub("solid_color", "opacity", "Opacity", "fill-opacity-drag", .35, span = .4),
+                    Scrub("paper", "scale", "Scale", "paper-scale-drag", .45, span = .4),
                     Scrub("levels", "black", "Black", "effect-levels-black-drag", .15, span = .4, primeSpan = .4),
                     Scrub("exposure", "exposure", "Exposure", "effect-exposure-drag", .45),
                     Scrub("hue_saturation", "hue", "Hue", "effect-master-hue-drag", .55),

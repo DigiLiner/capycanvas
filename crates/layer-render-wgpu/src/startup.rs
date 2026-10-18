@@ -532,10 +532,12 @@ impl WgpuRasterizer {
             for (id, (width, height, pixels)) in masks {
                 self.upload_mask(&id, width, height, width, &pixels)?;
             }
-            self.papers.advance(&self.device, &self.queue, false)?;
+            let held = self.paper_overlay.as_ref().filter(|overlay| overlay.moving && paper::PaperTile::new(&overlay.paper.surface)
+                .is_ok_and(|tile| self.papers.nearest(&overlay.paper.surface, &tile).is_some())).map(|overlay| &overlay.paper.surface.texture);
+            self.papers.advance(&self.device, &self.queue, false, held)?;
         }
         if let (Some(startup), Some(overlay)) = (&self.startup, &self.paper_overlay) {
-            self.papers.require(&self.device, Some(&startup.compiler), &overlay.paper, OTHER)?;
+            self.papers.require(&self.device, Some(&startup.compiler), &overlay.paper, VALIDATION)?;
         }
         let Some(startup) = &mut self.startup else {
             return Ok(StartupProgress::COMPLETE);

@@ -428,3 +428,96 @@ fn native_fill_drawing_targets_and_paper_order() {
     let bounds = add().unwrap().compute_bounds(&w.layer_panel.list).unwrap();
     assert!(bounds.y().abs() <= 2., "Add paper starts the empty layer list");
 }
+
+fn distribution(mut values: Vec<f64>) -> serde_json::Value {
+    values.sort_by(f64::total_cmp);
+    let at = |q: f64| values.get(((values.len() as f64 * q).ceil() as usize).saturating_sub(1)).copied();
+    serde_json::json!({ "count": values.len(), "p50": at(0.5), "p95": at(0.95), "p99": at(0.99), "max": values.last() })
+}
+
+#[test]
+#[ignore = "private Wayland display, hardware GPU and injected input"]
+fn native_paper_scale_drag() {
+    glib::set_prgname(Some("capy-canvas-test"));
+    let mut input = RemoteInput::new().settle_ms(0).timeout_secs(60);
+    let app = native_test_app("art.capycanvas.PaperScaleDrag");
+    let localization = layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
+    let project = layer_ui::NewDocumentOptions { extent: [4248, 2832], ..Default::default() }.project(&localization).unwrap();
+    let w = Workspace::with_project(&app, Some((project, None)));
+    apply_fixture_theme(&w);
+    w.window.maximize();
+    w.window.present();
+    ready(&w);
+    let theme = std::env::var("CAPY_NATIVE_TEST_THEME").unwrap_or_else(|_| "default".into());
+    let directory = std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap_or_else(|_| "../../artifacts/paper-scale".into()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let paper = layer_ui::occurrence_token(layer_core::paper::paper_occurrence(ui_session(&w).engine().document().scene(), None).unwrap());
+    w.dispatch(UiAction::SelectLayer { id: paper });
+    ready(&w);
+    let control: crate::number_control::NumberControl = named(w.window.upcast_ref(), "property-scale");
+    let slider = widgets(control.upcast_ref()).find_map(|widget| widget.downcast::<gtk::Scale>().ok()).expect("Scale has a slider");
+    assert!(slider.is_mapped(), "the Scale slider is visible in Properties");
+    let trough = widgets(slider.upcast_ref()).find(|widget| widget.css_name() == "trough").unwrap();
+    let at = |position: f32| screen_point(&trough, &w.window, [position, 0.5]);
+    let sweep = |from: f32, to: f32, events: usize| (1..=events).map(|i| serde_json::json!({ "point": at(from + (to - from) * i as f32 / events as f32) })).collect::<Vec<_>>();
+    input.ready();
+    pump(1500);
+    let stats = ui_session(&w).engine().backend().stats.clone();
+    let before = ui_session(&w).engine().checkpoint();
+    let changes = Rc::new(std::cell::RefCell::new(Vec::<u64>::new()));
+    let changed = slider.connect_value_changed(glib::clone!(#[strong] changes, move |_| changes.borrow_mut().push(glib::monotonic_time() as u64 * 1000)));
+    let mut events = vec![serde_json::json!({ "point": at(0.5) }), serde_json::json!({ "down": true })];
+    events.extend(sweep(0.5, 0.95, 120));
+    events.extend(sweep(0.95, 0.05, 240));
+    events.extend(sweep(0.05, 0.7, 160));
+    events.push(serde_json::json!({ "down": false }));
+    *stats.lock().unwrap() = Default::default();
+    let start = glib::monotonic_time() as u64 * 1000;
+    input.perform(serde_json::Value::Array(events));
+    let end = glib::monotonic_time() as u64 * 1000;
+    slider.disconnect(changed);
+    assert!(ui_session(&w).engine().backend().has_paper_overlay(), "the relief shows while Scale moves");
+    pump(2500);
+    assert!(!ui_session(&w).engine().backend().has_paper_overlay(), "the relief hides after its own bake has shown");
+    let report = {
+        let stats = stats.lock().unwrap();
+        let shown: Vec<_> = stats.presented.iter().filter(|p| p[3] == 1 && p[1] >= start).map(|p| p[1]).collect();
+        let presented: Vec<_> = shown.iter().copied().filter(|p| *p <= end).collect();
+        let latency: Vec<f64> = changes.borrow().iter().filter_map(|changed| {
+            let applied = stats.paper_overlays.iter().copied().filter(|at| at >= changed).min()?;
+            shown.iter().find(|p| **p >= applied).map(|p| (p - changed) as f64 / 1e6)
+        }).collect();
+        assert_eq!(latency.len(), changes.borrow().len(), "every Scale change reaches the canvas");
+        serde_json::json!({
+            "drag_ms": (end - start) as f64 / 1e6,
+            "scale_changes": changes.borrow().len(),
+            "slider_to_relief_ms": distribution(latency),
+            "presented_fps": presented.len() as f64 / ((end - start) as f64 / 1e9),
+            "presentation_gap_ms": distribution(presented.windows(2).map(|p| (p[1] - p[0]) as f64 / 1e6).collect()),
+            "gpu_ms": distribution(stats.gpu.iter().map(|g| g[1]).collect()),
+            "render_cpu_ms": distribution(stats.cpu.iter().map(|c| c[3]).collect()),
+        })
+    };
+    std::fs::write(directory.join(format!("scale-drag-{theme}.json")), serde_json::to_string_pretty(&report).unwrap()).unwrap();
+    println!("paper scale drag: {report}");
+    assert_ne!(ui_session(&w).engine().checkpoint(), before);
+    w.dispatch(UiAction::Invoke { command: CommandId::Undo });
+    ready(&w);
+    assert_eq!(ui_session(&w).engine().checkpoint(), before, "a Scale drag is one undo step");
+
+    let capture = |name: &str| match std::env::var_os("LAYER_NATIVE_CAPTURE_DIR") {
+        Some(_) => serde_json::json!({ "capture": format!("{name}-{theme}") }),
+        None => serde_json::json!({ "wait_ms": 50 }),
+    };
+    input.perform(serde_json::json!([{ "point": at(0.5) }, { "down": true }]));
+    let mut small = sweep(0.5, 0.05, 60);
+    small.push(capture("scale-dragging-small"));
+    input.perform(serde_json::Value::Array(small));
+    let mut large = sweep(0.05, 0.95, 90);
+    large.push(capture("scale-dragging-large"));
+    input.perform(serde_json::Value::Array(large));
+    input.perform(serde_json::json!([{ "down": false }, { "wait_ms": 100 }, capture("scale-released-large")]));
+    pump(2500);
+    assert!(!ui_session(&w).engine().backend().has_paper_overlay());
+    input.finish();
+}

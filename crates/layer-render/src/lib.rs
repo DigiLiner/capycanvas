@@ -89,6 +89,7 @@ pub struct CropOverlay {
 pub struct PaperOverlay {
     pub paper: layer_core::paper::PaperBinding,
     pub opacity: f32,
+    pub moving: bool,
 }
 
 /// Fully resolved brush contact consumed directly by a GPU renderer.
