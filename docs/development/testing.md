@@ -204,6 +204,15 @@ pending texture reads. Run `a_late_library_read_cannot_replace_a_newer_paper_cho
 and `scaling_paper_preserves_the_pending_library_choice` in `layer-ui`; late
 completion must preserve authored data, dirty state and history while its host
 request retires.
+Paper preparation also runs
+`changing_paper_texture_holds_early_strokes_until_the_new_binding_is_ready` in
+`layer-host` on a hardware GPU. A whole stroke sent before the changed paper is
+ready must wait, commit once and be removed by one Undo. Android's
+`AndroidRasterTest#paperTextureChangesRetainImmediatePencilContacts` checks that
+boundary through Vulkan/JNI in both themes.
+Web's `--paper-texture-readiness` holds genuine new Paper pipeline completion
+while a whole Pencil contact arrives, then checks intact pixels and exact
+Undo/Redo in both themes on desktop and Android Chrome.
 Presentation tests use the renderer's `create_target` for their surfaces; preserve
 each test's format and extent, and validate its usage flags on the test GPU.
 Renderer source fixtures use `test_support::depth_source` with their original

@@ -1306,6 +1306,44 @@ mod tests {
         }
     }
     #[test]
+    fn changing_paper_texture_holds_early_strokes_until_the_new_binding_is_ready() {
+        let (_reference, mut host) = gpu_host(layer_ui::Platform::Android, [640, 480]);
+        let clock = std::cell::Cell::new(0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+        host.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::Pencil as u32 }).unwrap();
+        while !host.paint_ready() { frame_step(&mut host, &clock, deadline); }
+        let paper = layer_ui::occurrence_token(host.session.engine().document().bottom_paper().unwrap());
+        for choice in [2, 1] {
+            host.dispatch(UiAction::SelectLayer { id: paper }).unwrap();
+            host.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: "texture".into(), value: layer_core::EffectValue::Choice(choice) } }).unwrap();
+            assert!(!host.paint_ready(), "the changed paper binding must prepare before painting");
+            let checkpoint = host.session.engine().checkpoint();
+            let committed = host.session.engine().metrics().committed_strokes;
+            let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
+            let records: Vec<f64> = [100., 160., 220.].into_iter().enumerate().flat_map(|(step, x)| {
+                let at = surface.map(Point { x, y: 200. });
+                [f64::from(at.x), f64::from(at.y), 0.7, 0., 0., 0., 0., (clock.get() + step as u64 * 1_000_000) as f64, step as f64 + 1.]
+            }).collect();
+            pointer(&mut host, 7, 0, 0, &records, false).unwrap();
+            assert!(!host.deferred_contacts.is_empty(), "the complete early Down/Move/Up waits for the new paper");
+            assert_eq!(host.session.engine().metrics().committed_strokes, committed);
+            assert!(!host.session.engine().has_active_stroke());
+            while !host.deferred_contacts.is_empty() || host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() {
+                frame_step(&mut host, &clock, deadline);
+            }
+            assert!(host.paint_ready());
+            assert!(!host.session.engine().has_active_stroke());
+            assert_eq!(host.session.engine().metrics().committed_strokes, committed + 1);
+            let doc = host.session.engine().document();
+            let Some(layer_core::SourceTarget::Paint(paint)) = doc.drawing_target() else { panic!("paint target") };
+            assert!(doc.artwork.paint.get(paint).unwrap().raster.try_data().is_some_and(|data| data.is_ok_and(|data| !data.tiles.is_empty())), "the deferred stroke stores paint");
+            assert_ne!(host.session.engine().checkpoint(), checkpoint);
+            host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
+            assert_eq!(host.session.engine().checkpoint(), checkpoint, "one Undo removes exactly the deferred stroke");
+        }
+    }
+
+    #[test]
     fn the_first_eraser_stroke_on_a_new_image_layer_mask_waits_for_its_shaders_and_is_stored() {
         let mut document = layer_ui::new_drawing(640, 480, &layer_ui::Localizer::shared(layer_ui::UiLanguage::English)).unwrap();
         let image = layer_core::color::source::rgba8_source([960, 720], |x, y| [(x % 256) as u8, (y % 256) as u8, 40, 255]);

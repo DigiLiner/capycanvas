@@ -306,7 +306,7 @@ reloading its corrupted workspace and preference fixtures.
 | Canvas bar, notices, footer zoom | `--canvas-bar`, `--notices`, `--zoom-controls`, `--zoom-readout`, `--zoom-tool-settings`, `--move-selection` |
 | Retouching | `--clone`, `--heal` |
 | Color | `--color-panel`, `--color-wheel-resize`, `--color-picker`, `--palettes`, `--scopes-smoke`, `--scopes`, `--tonal-controls` |
-| Layers and filters | `--paper-rows`, `--layers`, `--layer-relationships`, `--blend-menu`, `--pass-through`, `--blending`, `--adjustments`, `--curves`, `--gradients`, `--pointwise-effects`, `--filter-drawer`, `--filter-previews`, `--spatial-filter-windows`, `--photo-edit`, `--merges`, `--retouch-layers` |
+| Layers and filters | `--paper-texture-readiness`, `--paper-rows`, `--layers`, `--layer-relationships`, `--blend-menu`, `--pass-through`, `--blending`, `--adjustments`, `--curves`, `--gradients`, `--pointwise-effects`, `--filter-drawer`, `--filter-previews`, `--spatial-filter-windows`, `--photo-edit`, `--merges`, `--retouch-layers` |
 | Canvas size, crop and image commands | `--canvas-size`, `--crop`, `--image-commands` |
 | Photo files, packages and export | `--portable-photo`, `--package-view`, `--image-object-fixture`, `--export-metadata`, `--document-errors` |
 | Title bar | `--title-bar`, `--title-bar-state`, `--title-bar-feedback`, `--title-bar-overflow`, `--menu-labels`, `--compact-workspaces`, `--header-controls` |
@@ -461,6 +461,11 @@ LAYER_TEST_ARTIFACTS=artifacts/web-android \
 - The tab runs in the device's real Chrome profile, and many journeys change
   documents, workspaces or storage. Use your own origin and port, never an
   artist's tab.
+- `--paper-texture-readiness` holds a genuine new Paper texture pipeline while
+  a complete Pencil contact arrives, then checks intact pixels and exact Undo/Redo
+  in both themes. Use a fresh private test origin and let its initial recovery
+  setup and autosave finish before the runner reloads it. Every pen point must
+  reach the canvas without a recovery dialog covering it.
 - `--paper-rows` runs the same Add paper layout, input, history and fill-mask
   checks as the desktop journey, in both themes.
 - Check the journey table in `device.test.mjs` before choosing a flag. With

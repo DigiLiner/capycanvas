@@ -110,6 +110,58 @@ class AndroidRasterTest {
         }
         finally { Native.captureFree(control) }
     }
+    @Test fun paperTextureChangesRetainImmediatePencilContacts() {
+        val evidence = org.json.JSONArray()
+        val output = File(activity.getExternalFilesDir(null), "validation/paper-texture-race/events.json").apply { parentFile!!.mkdirs() }
+        send(obj("type" to "invoke", "command" to "pencil"))
+        send(obj("type" to "set_brush_size", "value" to 64))
+        send(obj("type" to "set_color", "rgba" to org.json.JSONArray(listOf(0.0, 0.0, 0.0, 1.0))))
+        val paper = native { state(it).array("layers").objects().last().getLong("id") }
+        val ink = native { state(it).array("layers").objects().first { row -> row.getBoolean("drawing") }.getLong("id") }
+        send(obj("type" to "layer", "action" to obj("op" to "select", "id" to paper, "mask" to false)))
+        assertTrue("Selecting Paper keeps ink above it drawable", native { state(it).array("layers").objects().first { row -> row.getLong("id") == ink }.getBoolean("drawing") })
+        fun revision() = native { state(it).array("layers").objects().first { row -> row.getLong("id") == ink }.getLong("paint_revision") }
+        try {
+            for ((theme, choices) in listOf("light" to (1..6), "dark" to (7..12))) {
+                send(obj("type" to "set_theme", "theme" to theme))
+                var pendingContacts = 0
+                for (choice in choices) {
+                    val before = revision()
+                    native { handle ->
+                        Native.dispatch(handle, obj("type" to "effect", "action" to obj("op" to "set", "layer" to paper,
+                            "key" to "texture", "value" to obj("kind" to "choice", "value" to choice))).toString())
+                        val now = System.nanoTime()
+                        Native.frame(handle, now, now + 16_666_667)
+                        val snapshot = JSONObject(Native.snapshot(handle)!!)
+                        val pending = !snapshot.getBoolean("brush_ready")
+                        if (pending) pendingContacts++
+                        evidence.put(obj("theme" to theme, "choice" to choice, "pending_at_down" to pending,
+                            "brush" to snapshot.getJSONObject("state").getJSONObject("brush")))
+                        val viewport = snapshot.getJSONObject("state").getJSONObject("camera").getJSONArray("viewport")
+                        val samples = (0..7).flatMap { step -> listOf(viewport.getDouble(0) * .5 + step * 15.0,
+                            viewport.getDouble(1) * .5, if (step == 7) 0.0 else .7, 0.0, 0.0, 0.0, 0.0,
+                            (now + step * 10_000_000L).toDouble(), when (step) { 0 -> 1.0; 7 -> 3.0; else -> 2.0 }) }.toDoubleArray()
+                        Native.pointer(handle, 71, 0, 0, samples, samples.size, false, false)
+                    }
+                    output.writeText(evidence.toString(2))
+                    compose.waitUntil(120_000) { drawingSettled() }
+                    assertNull(host.failure)
+                    assertEquals("Texture changes and drawing keep Paper selected", paper, native { state(it).getJSONObject("layer_tools").getJSONObject("editing_layer").getLong("id") })
+                    assertNotEquals("$theme Paper $choice retains the immediate Pencil stroke", before, revision())
+                    val painted = histogram().toString()
+                    screenshot("validation/paper-texture-race/$theme-$choice.png")
+                    invoke("undo")
+                    assertEquals("$theme Paper $choice undoes only the stroke", before, revision())
+                    assertNotEquals("$theme Paper $choice stroke changes actual pixels", painted, histogram().toString())
+                    invoke("redo")
+                    assertEquals("$theme Paper $choice restores exact painted pixels", painted, histogram().toString())
+                    invoke("undo")
+                }
+                assertTrue("$theme must witness a contact while the selected Paper is still preparing: $evidence", pendingContacts > 0)
+            }
+        } finally { output.writeText(evidence.toString(2)) }
+    }
+
     @Test fun diagnosticsSampleInOpenColumns() {
         fun action(value: JSONObject) {
             val done = java.util.concurrent.CountDownLatch(1)

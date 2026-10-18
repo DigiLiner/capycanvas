@@ -73,12 +73,14 @@ struct DocumentKey {
 impl DocumentKey {
     fn new(document: &Document) -> Self {
         let scene = document.scene();
+        let target = document.drawing_target().or(document.working.target);
+        let mask = target.is_some_and(SourceTarget::is_coverage);
         let operations = || scene.targets().filter_map(|t| scene.operations(t)).flatten();
         let objects=scene.order().iter().any(|&h|scene.object_layer(h).is_some());
         Self {
             extent: document.composition().size, color: document.composition().color,
-            selection: document.working.selection.is_some(), mask: document.working.target.is_some_and(SourceTarget::is_coverage),
-            locked: document.working.occurrence.and_then(|h| scene.occurrence(h)).is_some_and(|o| o.alpha_locked),
+            selection: document.working.selection.is_some(), mask,
+            locked: !mask && target.and_then(|t| document.target_owner(t)).and_then(|h| scene.occurrence(h)).is_some_and(|o| o.alpha_locked),
             source: objects || scene.targets().any(|t| scene.original(t).is_some()),
             objects,
             operations: scene.order().iter().any(|&h| scene.mask(h).is_some()) || operations().next().is_some(),
@@ -230,12 +232,17 @@ struct ShaderBrushKey {
     execution: BrushExecution,
     paint: BrushPassPlan,
     erase: BrushPassPlan,
+    material_compute: bool,
     dry_material: u32,
     reach: dry_material::Reach,
 }
 fn brush_style(document: &Document, brush: &BrushSnapshot, tool: StrokeTool) -> layer_render::DabStyle {
     let mut style = layer_render::DabStyle::for_brush(brush, tool);
-    style.paper = style.grain.and(document.working.target).map(|target| document.paper_binding(target));
+    let target = document.drawing_target().or(document.working.target);
+    let mask = target.is_some_and(SourceTarget::is_coverage);
+    style.alpha_locked = !mask && target.and_then(|t| document.target_owner(t)).and_then(|h| document.scene().occurrence(h)).is_some_and(|o| o.alpha_locked);
+    style.blend_space = if mask { layer_core::BlendSpace::Linear } else { document.composition().blend };
+    style.paper = style.grain.and(target).map(|target| document.paper_binding(target));
     style
 }
 impl ShaderBrushKey {
@@ -250,6 +257,7 @@ impl ShaderBrushKey {
             execution: style.execution,
             paint,
             erase,
+            material_compute: dry_material::dry_material_compute_eligible(&style),
             dry_material: dry_material::contact_flags(style.contact) | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 },
             reach: dry_material::Reach::of(brush),
         }
@@ -466,20 +474,17 @@ impl WgpuRasterizer {
         if let Some(native) = &self.native_edit {
             current.compute.extend(native.required_pipelines(document.composition().color.depth,startup.document_key.as_ref().unwrap().key.gray).cloned());
         }
-        let locked = startup.document_key.as_ref().unwrap().key.locked;
         // A physical eraser can select the erase variant without a UI change.
         for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
             let style = layer_render::DabStyle {
-                alpha_locked: locked,
                 selection: document.working.selection.clone().map(Arc::new),
-                blend_space: if document.working.target.is_some_and(SourceTarget::is_coverage) { layer_core::BlendSpace::Linear } else { document.composition().blend },
                 ..brush_style(document, brush, tool)
             };
             startup.masks.style(&startup.compiler, &style, BRUSH);
             if let Some(binding) = style.grain.and(style.paper.as_ref()) {
                 self.papers.require(&self.device, Some(&startup.compiler), binding, BRUSH)?;
             }
-            let mask = document.working.target.is_some_and(SourceTarget::is_coverage);
+            let mask = startup.document_key.as_ref().unwrap().key.mask;
             current.style(self, &style, dry_material::Reach::of(brush), mask, true);
             resized.style(self, &style, dry_material::Reach::of(brush).any_size(), mask, true);
         }
@@ -648,6 +653,40 @@ mod tests {
         assert!(key != ShaderBrushKey::new(&document, &brush));
     }
     #[test]
+    fn fill_selection_prepares_the_resolved_paint_target() {
+        use layer_core::authored::*;
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        for program in ["paper", "solid_color", "gradient_fill"] {
+            let mut document = Document::new(PortableId::random(), 64, 64, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+            let ink = document.scene().children(None)[0];
+            let selected = if program == "paper" { document.bottom_paper().unwrap() } else {
+                crate::artwork_sample_tests::insert_effect(&mut document, layer_core::EffectInstance::new(crate::tests::fixture(program).program()), 1)
+            };
+            document.apply(document.select_occurrence_edit(selected).unwrap()).unwrap();
+            assert!(document.working.target.is_none());
+            let target = document.drawing_target().unwrap();
+            let style = brush_style(&document, &brush, StrokeTool::Brush);
+            assert_eq!(style.paper, Some(document.paper_binding(target)), "{program}");
+            let key = ShaderBrushKey::new(&document, &brush);
+            document.set_paper_texture(layer_core::paper::built_in_paper("rough").unwrap().texture.clone());
+            assert!(key != ShaderBrushKey::new(&document, &brush), "{program} tracks the paper used by its drawing target");
+            document.artwork.occurrences.get_mut(ink).unwrap().alpha_locked = true;
+            assert!(DocumentKey::new(&document).locked);
+            assert!(brush_style(&document, &brush, StrokeTool::Brush).alpha_locked);
+            let coverage = document.artwork.coverage.next_handle();
+            let mask = layer_core::CoverageSnapshot::reveal_all(coverage, [64; 2], [0; 2]);
+            document.artwork.coverage.insert(PortableId::random(), mask.source).unwrap();
+            document.artwork.occurrences.get_mut(selected).unwrap().mask = Some(mask.use_);
+            crate::artwork_sample_tests::refresh(&mut document);
+            assert_eq!(document.drawing_target(), Some(SourceTarget::Coverage(coverage)));
+            assert!(DocumentKey::new(&document).mask);
+            assert!(!DocumentKey::new(&document).locked);
+            let style = brush_style(&document, &brush, StrokeTool::Brush);
+            assert!(!style.alpha_locked);
+            assert_eq!(style.blend_space, layer_core::BlendSpace::Linear);
+        }
+    }
+    #[test]
     fn shader_document_reuses_raster_and_parameter_edits_but_tracks_new_dependencies() {
         let mut doc = Document::new(layer_core::authored::PortableId::random(), 128, 128, layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
         let key = ShaderDocument::new(&doc);
@@ -676,14 +715,20 @@ mod tests {
         crate::artwork_sample_tests::refresh(&mut doc);
         doc.revision += 1;
         let key = ShaderDocument::new(&doc);
-        doc.artwork.effects.get_mut(effect).unwrap().values[0] = layer_core::EffectValue::Number(0.5);
+        doc.artwork.effects.get_mut(effect).unwrap().values[0] = layer_core::EffectValue::Curve(vec![[0., 0.], [0.5, 0.6], [1., 1.]]);
         doc.revision += 1;
         assert!(key.matches(&doc), "a parameter edit uses the same pipeline");
         doc.artwork.occurrences.get_mut(occurrence).unwrap().visible = false;
         doc.revision += 1;
         assert!(!key.matches(&doc), "visibility changes the fused chains");
+        let coverage = doc.artwork.coverage.next_handle();
+        let mask = layer_core::CoverageSnapshot::reveal_all(coverage, doc.composition().size, [0; 2]);
+        doc.artwork.coverage.insert(PortableId::random(), mask.source).unwrap();
+        doc.artwork.occurrences.get_mut(paint).unwrap().mask = Some(mask.use_);
+        crate::artwork_sample_tests::refresh(&mut doc);
+        doc.revision += 1;
         let key = ShaderDocument::new(&doc);
-        doc.working.target = Some(SourceTarget::Coverage(CoverageHandle::from_index(0)));
+        doc.working.target = Some(SourceTarget::Coverage(coverage));
         doc.revision += 1;
         assert!(!key.matches(&doc));
     }

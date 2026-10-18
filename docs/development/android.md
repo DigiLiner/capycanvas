@@ -321,6 +321,10 @@ manual save checkpoints and undo/redo after an actual process death.
   history, scrolling and an empty stack in both themes.
   `#selectingFillRowsKeepsPropertiesAndDrawingTargets` checks fill selection,
   painting on the layer above and existing mask selection.
+- `AndroidRasterTest#paperTextureChangesRetainImmediatePencilContacts` changes
+  built-in Paper textures and immediately sends whole Pencil contacts while
+  preparation is pending. It checks painted pixels and exact Undo/Redo in both
+  themes through the native Vulkan/JNI path.
 - [`AndroidWorkspaceManagerTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidWorkspaceManagerTest.kt)
   and [`AndroidWorkspaceSwitcherTest`](../../apps/layer-android/app/src/androidTest/java/art/capycanvas/AndroidWorkspaceSwitcherTest.kt):
   persistence, menus and window lifecycle. `AndroidWorkspaceOwnershipTest`

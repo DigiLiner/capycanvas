@@ -3,14 +3,17 @@ import {tracePipelineCalls} from './pipeline-trace.test.mjs';
 import {installPipelineWait} from './pipeline-wait.mjs';
 import {readPackage,packageComposition,packageObjects,rasterIdentity} from './package-fixture.test.mjs';
 
-export async function checkPipelineReadiness({cdp,call,evaluate,settle}) {
-  const trace=await tracePipelineCalls(cdp);
-  try{
+async function reloadPreparedDrawing({cdp,call,evaluate}) {
   for(const type of ['mousePressed','mouseReleased'])await call('Input.dispatchMouseEvent',{type,x:1,y:1,button:'left',buttons:type==='mousePressed'?1:0,clickCount:1});
   await evaluate('layerApp.documents.startRecovery().then(()=>layerApp.documents.autosave())');
   const loaded=cdp.once('Page.loadEventFired',120000);
-  await call('Page.reload',{ignoreCache:true});
-  await loaded;
+  await call('Page.reload',{ignoreCache:true});await loaded;
+}
+
+export async function checkPipelineReadiness({cdp,call,evaluate,settle}) {
+  const trace=await tracePipelineCalls(cdp);
+  try{
+  await reloadPreparedDrawing({cdp,call,evaluate});
   const wait=(expression,timeout=60000)=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+${timeout};(function check(){try{if(${expression})resolve(true);else if(performance.now()>end)reject(Error(${JSON.stringify(expression)}+' '+JSON.stringify({times:window.layerApp?.startupTimes,notice:document.querySelector('#gpu-notice')?.textContent,visibility:document.visibilityState})));else setTimeout(check,30);}catch(e){reject(e)}})();})`);
   const click=label=>evaluate(`(()=>{const b=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===${JSON.stringify(label)});if(!b)throw Error('Missing '+${JSON.stringify(label)});b.click()})()`);
   await wait('window.layerApp?.app.brush_ready()&&!layerApp.app.shader_work_pending(false)',120000);
@@ -161,4 +164,82 @@ export async function checkPipelineReadiness({cdp,call,evaluate,settle}) {
     console.log('Pipeline regression: cold authored linked-mask Apply, shared Wasm Module, worker panic cause/retry and exact Undo/Redo pass without generic composition or blocking pipelines');
   }finally{await evaluate(`window.showSaveFilePicker=pipelineArchive.picker;if(pipelineArchive.post)Worker.prototype.postMessage=pipelineArchive.post;delete window.pipelineArchive`);}
   }finally{await trace.close().catch(error=>console.error('Pipeline trace cleanup:',error));}
+}
+
+export async function checkPaperTextureReadiness({cdp,call,evaluate,settle}) {
+  const trace=await tracePipelineCalls(cdp);
+  const wait=expression=>evaluate(`new Promise((resolve,reject)=>{const end=performance.now()+120000;function poll(){if(${expression})resolve();else if(performance.now()>end)reject(Error(${JSON.stringify(expression)}));else setTimeout(poll,20)}poll()})`);
+  const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();};
+  const invoke=command=>send({type:'invoke',command});
+  const click=label=>evaluate(`(()=>{const b=[...document.querySelectorAll('dialog[open] button')].find(n=>n.textContent===${JSON.stringify(label)});if(!b)throw Error('Missing '+${JSON.stringify(label)});b.click()})()`);
+  try {
+  await reloadPreparedDrawing({cdp,call,evaluate});
+  await wait('window.layerApp?.app.brush_ready()&&!layerApp.app.shader_work_pending(false)');
+  await evaluate('layerApp.documents.startRecovery()');
+  await evaluate(`window.paperRace={picker:window.showSaveFilePicker};window.showSaveFilePicker=async options=>{const directory=await(await navigator.storage.getDirectory()).getDirectoryHandle('capy-test-paper-race',{create:true});return paperRace.handle=await directory.getFileHandle(crypto.randomUUID()+'.capy',{create:true})}`);
+  const save=async()=>{
+    await evaluate(`paperRace.handle=null;layerApp.dispatch({type:'invoke',command:'save_document_as'})`);
+    await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&!!paperRace.handle');
+    return readPackage(evaluate,'new Uint8Array(await(await paperRace.handle.getFile()).arrayBuffer())');
+  };
+  const output=async()=>{
+    console.log('Paper race: output preview begins');
+    await invoke('export_document');await wait(`!!document.querySelector('dialog[open] [aria-label="Dynamic range"]')`);
+    await click('Preview Output');
+    await wait(`!!document.querySelector('canvas[aria-label="Output preview"]')&&![...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Preview Output').disabled`);
+    const samples=await evaluate(`(()=>{const c=document.querySelector('canvas[aria-label="Output preview"]'),ctx=c.getContext('2d');return [.3,.5,.7].map(x=>{const w=Math.max(3,Math.round(c.width*.025)),h=Math.max(3,Math.round(c.height*.04)),p=ctx.getImageData(Math.round(c.width*x-w/2),Math.round(c.height*.5-h/2),w,h).data;let dark=0;for(let i=0;i<p.length;i+=4)if(Math.min(p[i],p[i+1],p[i+2])<220)dark++;return dark})})()`);
+    await click('Cancel');await settle();console.log('Paper race: output preview complete',samples);return samples;
+  };
+    for(const [theme,texture] of [['light',2],['dark',11]]) {
+      await send({type:'set_theme',theme});await invoke('new_document');
+      await wait(`!!document.querySelector('dialog[open]')`);
+      if(await evaluate(`!![...document.querySelectorAll('dialog[open] button')].find(n=>n.textContent==='Discard Changes')`))await click('Discard Changes');
+      await wait(`!!document.querySelector('dialog[open] select[aria-label="Color space"]')`);
+      await evaluate(`(()=>{for(const [field,value] of [['width',512],['height',384]]){const n=document.querySelector('dialog[open] [data-document-field='+field+']');n.value=value;n.dispatchEvent(new Event('input',{bubbles:true}))}})()`);
+      await click('Create');await wait('!layerApp.documents.busy()&&!layerApp.state().document_file.busy&&layerApp.app.brush_ready()');
+      await invoke('pencil');await send({type:'select_brush',id:2});await send({type:'set_brush_size',value:32});
+      await send({type:'set_color',rgba:[.08,.08,.08,1]});await invoke('fit_canvas');
+      const paper=await evaluate("Number(layerApp.state().layers.find(l=>l.label==='Paper').id)");
+      await send({type:'layer',action:{op:'select',id:paper,mask:false}});
+      await wait('layerApp.app.brush_ready()&&!layerApp.app.shader_work_pending(false)');
+      console.log(`Paper race: ${theme} baseline save begins`);
+      const baseline=rasterIdentity(await save());
+      console.log(`Paper race: ${theme} baseline save complete; change texture ${texture}`);
+      await evaluate(`paperRace.methods=Object.fromEntries(['createComputePipelineAsync','createRenderPipelineAsync'].map(method=>[method,GPUDevice.prototype[method]]));(${installPipelineWait.toString()})();for(const method of Object.keys(paperRace.methods)){const held=GPUDevice.prototype[method],original=paperRace.methods[method];GPUDevice.prototype[method]=function(descriptor){return (descriptor.label==='paper texture'?held:original).call(this,descriptor)}}`);
+      await evaluate(`layerApp.dispatch({type:'effect',action:{op:'set',layer:${paper},key:'texture',value:{kind:'choice',value:${texture}}}})`);
+      await wait("pipelineWait.held.length>0&&pipelineWait.calls.some(c=>c.label==='paper texture')");
+      console.log(`Paper race: ${theme} actual Paper pipeline held`);
+      assert.equal(await evaluate('layerApp.app.brush_ready()'),false,'New Paper pipeline genuinely gates drawing');
+      const revision=await evaluate('String(layerApp.state().document_file.revision)');
+      const points=await evaluate(`(()=>{const c=layerApp.app.camera(),r=layerApp.canvas.getBoundingClientRect();return [.3,.4,.5,.6,.7].map(f=>({x:r.x+(512*f*c.zoom+c.translation[0])*r.width/c.viewport[0],y:r.y+(192*c.zoom+c.translation[1])*r.height/c.viewport[1]}))})()`);
+      assert.deepEqual(await evaluate(`(${JSON.stringify(points)}).map(p=>document.elementFromPoint(p.x,p.y)===layerApp.canvas)`),points.map(()=>true),'Every immediate pen contact point reaches the real canvas');
+      console.log(`Paper race: ${theme} all points reach canvas; send complete contact`);
+      for(let i=0;i<points.length;i++)await call('Input.dispatchMouseEvent',{type:i===0?'mousePressed':i===points.length-1?'mouseReleased':'mouseMoved',...points[i],button:'left',buttons:i===points.length-1?0:1,clickCount:1,pointerType:'pen',force:i===points.length-1?0:.8});
+      await settle();
+      assert.equal(await evaluate('String(layerApp.state().document_file.revision)'),revision,'Complete Down/Move/Up waits behind the new Paper texture');
+      assert.equal(await evaluate('document.body.dataset.gpu'),'ready','Held Paper pipeline keeps the GPU usable');
+      const held=await evaluate('pipelineWait.calls');
+      assert.ok(held.length&&held.every(c=>c.label==='paper texture'),'Only actual Paper texture pipeline completions are held');
+      console.log(`Paper race: ${theme} complete contact queued; release Paper pipelines`);
+      await evaluate('pipelineWait.restore();pipelineWait.release()');
+      await wait(`layerApp.app.brush_ready()&&layerApp.app.document_park_ready()&&String(layerApp.state().document_file.revision)!==${JSON.stringify(revision)}`);
+      console.log(`Paper race: ${theme} contact completed; painted save begins`);
+      const painted=rasterIdentity(await save());
+      console.log(`Paper race: ${theme} painted save complete`);
+      const pixels=await output();
+      assert.notDeepEqual(painted,baseline,'Deferred Pencil contact deposits authored raster pixels');
+      assert.ok(pixels.every(count=>count>0),`Deferred contact retains its beginning, middle and end: ${pixels}`);
+      await invoke('undo');await wait('layerApp.app.brush_ready()');
+      assert.deepEqual(rasterIdentity(await save()),baseline,'One Undo removes the entire deferred contact');
+      assert.deepEqual(await output(),[0,0,0],'One Undo removes all three stroke regions');
+      await invoke('redo');await wait('layerApp.app.brush_ready()');
+      assert.deepEqual(rasterIdentity(await save()),painted,'One Redo restores the exact deferred stroke');
+      assert.deepEqual(await output(),pixels,'Redo retains all three stroke regions');
+      console.log(`PASS: ${theme} Pencil Down/Move/Up during held Paper texture ${texture}, intact three-region pixels and exact one-step Undo/Redo; pixels=${JSON.stringify(pixels)}; held=${JSON.stringify(held)}`);
+    }
+    await trace.check('Paper texture change and immediately completed Pencil contact');
+  } finally {
+    await evaluate('if(window.pipelineWait){pipelineWait.restore();pipelineWait.release()}if(window.paperRace){window.showSaveFilePicker=paperRace.picker;delete window.paperRace}').catch(()=>{});
+    await trace.close();
+  }
 }

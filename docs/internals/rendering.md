@@ -1065,6 +1065,11 @@ eraser; unused brushes and filters compile on first use
 dependencies are ready before drawing uses them, so pipeline creation never lands
 in a small stroke update. A contact that begins before its brush is ready follows
 the shared input admission policy.
+Preparation follows the resolved drawing target, including its paper binding,
+mask, alpha lock and blend space when a fill remains selected. A paper texture
+change holds early contacts until the new texture is ready, then replays each
+contact once. Switching between compute and fragment material routes also
+invalidates brush readiness.
 Changing paint color or HDR intensity leaves brush readiness intact when the
 tip, texture assets and shader pass requirements stay the same.
 
