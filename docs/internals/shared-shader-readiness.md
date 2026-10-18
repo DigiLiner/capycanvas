@@ -120,13 +120,22 @@ drawing's first frame.
 Readiness continues after initial startup. Shared `UiSession` wakes the host
 when a UI-only brush change needs preparation. Native readiness snapshots use
 the current dependencies, so a previous tool's ready flag cannot authorize the
-new tool. A contact begun before readiness is held whole and delivered once its
-shaders are ready; every host, the browser included, admits paint samples through
-`layer_engine::DeferredContacts`, which discards only a contact held longer than
-5 s or beyond 4096 samples. Hosts report whether samples are held with
-`UiSession::set_input_held`; until they are delivered or the contact is cancelled,
-document snapshots such as Save wait, so a save never misses a stroke or drag
-already drawn. Other commands are not held back.
+new tool. Hosts pass every sample to `UiSession::pen`. A contact begun before
+`CanvasRenderer::paint_ready` holds whole in the session's ordered edit queue,
+with its drawing and camera, and is delivered once the current document and
+brush are prepared. The queue discards only a contact held longer than 5 s or
+beyond 4096 samples, and a Cancel discards its held contact. Tool and brush
+changes made after the contact began queue behind it, so the stroke keeps the
+brush it began with. While samples are held, document snapshots such as Save
+wait, and parking, suspension and renderer replacement retire them with the
+queue, so they never reach another drawing.
+
+Frame readiness covers each batch's actual dependencies. For every distinct
+batch style, `raster_dependencies_ready` requests the style's Paper bake and tip
+mask, and its pipelines when the startup brush does not cover it; encoding
+selects the same texture set. A frame whose dependencies are missing waits with
+its input instead of failing. A texture set keeps the Paper relief it was built
+with, so evicting a bake does not change the pixels of an existing set.
 `ShaderDocument` memoizes the dependency-relevant document state: ordinary
 raster/parameter edits do not invalidate readiness or trigger effect preparation.
 Changing effect blend mode or crossing between identity and transformed reference

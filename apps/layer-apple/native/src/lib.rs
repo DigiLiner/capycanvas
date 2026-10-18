@@ -28,12 +28,6 @@ use layer_host::{NativeHost, PointerBatch};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-fn panic_diagnostic(payload: Box<dyn std::any::Any + Send>) -> String {
-    let detail = payload.downcast_ref::<String>().map(String::as_str)
-        .or_else(|| payload.downcast_ref::<&str>().copied()).unwrap_or("Unknown panic payload");
-    format!("Native operation panicked: {detail}")
-}
-
 pub struct CapyApple {
     metal: metal::MetalHost,
     host: NativeHost,
@@ -49,13 +43,16 @@ pub struct CapyApple {
     published_language: Option<u64>,
     scopes: scopes::Cache,
 }
+impl AsMut<NativeHost> for CapyApple {
+    fn as_mut(&mut self) -> &mut NativeHost { &mut self.host }
+}
 impl CapyApple {
     fn perform<T>(&mut self, work: impl FnOnce(&mut Self) -> Result<T, String>) -> Option<T> {
         self.error = None;
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            self.metal.observe_failure(&mut self.host, false);
-            work(self)
-        })).unwrap_or_else(|payload| Err(panic_diagnostic(payload)));
+        let result = layer_host::contain(self, |a| {
+            a.metal.observe_failure(&mut a.host, false);
+            work(a)
+        });
         match result {
             Ok(value) => Some(value),
             Err(message) => {
@@ -65,8 +62,7 @@ impl CapyApple {
         }
     }
     fn gpu_operation<T>(&mut self, work: impl FnOnce(&mut Self) -> Result<T, String>) -> Result<T, String> {
-        let result = catch_unwind(AssertUnwindSafe(|| work(self)))
-            .unwrap_or_else(|payload| Err(panic_diagnostic(payload)));
+        let result = work(self);
         if let Err(message) = &result {
             self.metal.stop(&mut self.host, message.clone());
             self.dismissed_contacts.clear();
@@ -128,7 +124,7 @@ pub unsafe extern "C" fn capy_apple_prepare_launch(json: *const c_char, error: *
         let localization = layer_ui::launch_localization(&launch.saved, &tags);
         layer_ui::Localizer::shared(layer_ui::UiLanguage::English);
         Ok(Box::into_raw(Box::new(CapyAppleLaunch::prepare(&launch.saved, localization, launch.paper_directory))))
-    }).unwrap_or_else(|payload| Err(panic_diagnostic(payload)));
+    }).unwrap_or_else(|payload| Err(layer_host::panic_diagnostic(&*payload)));
     result.unwrap_or_else(|message: String| {
         if !error.is_null() { unsafe { *error = CString::new(format!("Session launch: {message}").replace('\0', " ")).unwrap().into_raw() }; }
         std::ptr::null_mut()
@@ -148,7 +144,7 @@ pub unsafe extern "C" fn capy_apple_launch(platform: u32, prepared: *const CapyA
             unsafe { *bootstrap = view.into_raw() };
         }
         apple_launch_prepared(platform, prepared)
-    })).unwrap_or_else(|payload| Err(panic_diagnostic(payload)));
+    })).unwrap_or_else(|payload| Err(layer_host::panic_diagnostic(&*payload)));
     match result {
         Ok(app) => app,
         Err(message) => {
@@ -172,7 +168,7 @@ pub(crate) fn on_large_stack<T: Send>(name: &str, work: impl FnOnce() -> T + Sen
             .spawn_scoped(scope, work)
             .map_err(|e| e.to_string())?
             .join()
-            .map_err(panic_diagnostic)
+            .map_err(|payload| layer_host::panic_diagnostic(&*payload))
     })
 }
 #[cfg(test)]

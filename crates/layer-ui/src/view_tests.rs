@@ -48,7 +48,7 @@ fn set_zoom_clamps_to_the_camera_limits_and_waits_for_idle() {
     assert!(s.dispatch(UiAction::SetZoom { zoom: f32::NAN }).is_err());
     assert!(s.dispatch(UiAction::SetZoom { zoom: f32::INFINITY }).is_err());
     assert_eq!(s.state.camera, camera);
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
     assert!(s.dispatch(UiAction::SetZoom { zoom: 1.0 }).is_err(), "no zoom jumps under a contact");
     assert!(!s.command(CommandId::ActualPixels).enabled);
     assert_eq!(s.state.camera.zoom, 2.0);
@@ -90,7 +90,7 @@ fn zoom_menu_groups_zoom_and_rotation_controls() {
         assert_eq!(s.state.camera.zoom, zoom);
         assert!(device_pixels(&s));
     }
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
     let busy = s.zoom_menu();
     assert!(busy.menu.sections.iter().flatten().all(|i| !i.enabled), "no zoom item runs under a contact");
     assert_eq!(serde_json::to_value(NumericControl::zoom()).unwrap()["mapping"], serde_json::json!({"type": "log"}));
@@ -179,7 +179,7 @@ fn rotation_field_preserves_the_center_and_refuses_invalid_or_busy_edits() {
         assert!(s.dispatch(UiAction::SetRotation { rotation }).is_err());
         assert_eq!(s.state.camera, camera);
     }
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
     for action in [UiAction::SetRotation { rotation: 0.0 }, UiAction::SetZoomLocked { locked: true }, UiAction::SetRotationLocked { locked: true }] {
         assert!(s.dispatch(action).is_err());
         assert_eq!(s.state.camera, camera);

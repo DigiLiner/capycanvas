@@ -129,7 +129,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let changed = pending.epoch != epoch || pending.revision != revision
             || matches!(pending.publish, Publish::ClipboardCut { .. }) && pending.working != self.engine.document().working;
         let result = if changed {
-            self.engine.backend_mut().cancel_snapshot();
+            if pending.submitted { self.engine.backend_mut().cancel_snapshot(); }
             Err(l.text(MessageId::COMMANDS_REFUSAL_CONVERSIONS_LAYER_CHANGED).to_string())
         } else if !pending.submitted {
             match self.engine.backend_mut().request_snapshot(layer_render::SnapshotRequest::Image(pending.capture.clone())).map_err(error) {

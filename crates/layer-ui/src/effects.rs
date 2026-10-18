@@ -1050,7 +1050,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         if document.is_locked(handle) { return Err(self.state.localization.text(MessageId::RESOURCES_ERROR_LAYER_LOCKED).to_string()); }
         Ok((handle, application.clone()))
     }
-    fn apply_paper_texture(&mut self, layer: u64, texture: layer_core::TextureSource) -> Result<(), String> {
+    pub(super) fn apply_paper_texture(&mut self, layer: u64, texture: layer_core::TextureSource) -> Result<(), String> {
         let (handle, application) = self.paper_layer(layer)?;
         let edited = paper::with_texture(&application, texture)?;
         if edited == application { return Ok(()); }
@@ -1093,18 +1093,18 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub fn paper_loaded(&mut self, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
         let image = self.cache_paper(id, image).ok_or("Invalid paper")?;
-        if let Some(pending) = self.papers.pending.take_if(|pending| pending.id == id) && pending.epoch == self.state.document_file.epoch {
-            self.require_idle()?;
-            self.apply_paper_texture(pending.layer, layer_core::TextureSource::Image(image))?;
+        if let Some(pending) = self.papers.pending.as_mut().filter(|pending| pending.id == id) {
+            pending.image = Some(image);
         }
+        self.apply_loaded_paper();
         self.refresh_document();
         Ok(self.changed(regions::DOCUMENT | regions::SETTINGS, true))
     }
     pub fn paper_imported(&mut self, layer: u64, entries: Vec<crate::paper_library::PaperEntry>, id: &str, image: layer_core::color::source::SourceImage) -> Result<UiChange, String> {
         self.papers.set_entries(entries);
         let image = self.cache_paper(id, image).ok_or("Invalid paper")?;
-        self.require_idle()?;
-        self.apply_paper_texture(layer, layer_core::TextureSource::Image(image))?;
+        self.papers.pending = Some(crate::paper_library::PendingPaper { id: id.into(), layer, epoch: self.state.document_file.epoch, image: Some(image) });
+        self.apply_loaded_paper();
         self.refresh_document();
         Ok(self.changed(regions::DOCUMENT | regions::SETTINGS, true))
     }
@@ -1438,7 +1438,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     let edited = match edited? {
                         paper::PaperEdit::Applied(edited) => edited,
                         paper::PaperEdit::Load(paper) => {
-                            self.papers.pending = Some(crate::paper_library::PendingPaper { id: paper.clone(), layer: id, epoch: self.state.document_file.epoch });
+                            self.papers.pending = Some(crate::paper_library::PendingPaper { id: paper.clone(), layer: id, epoch: self.state.document_file.epoch, image: None });
                             return self.request(HostRequestKind::Paper { request: PaperRequest::Load { id: paper } });
                         }
                     };

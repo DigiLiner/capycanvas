@@ -168,6 +168,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.source_edit_candidates(&edit, Default::default())
     }
     pub fn repair_layer_source(&mut self, target: SourceUse, original: &Arc<SourceImage>, corrected: SourceImage) -> Result<SourceUse, String> {
+        self.require_painting()?;
         let corrected=Arc::unwrap_or_clone(self.engine.document().artwork.intern_source_image(Arc::new(corrected))?);
         self.validate_source_repair(target, original, &corrected)?;
         if corrected == **original { return Ok(target); }

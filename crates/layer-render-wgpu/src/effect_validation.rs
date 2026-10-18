@@ -15,6 +15,7 @@ type ValidationFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
 type ValidationFuture = Pin<Box<dyn Future<Output = Option<String>>>>;
 
 pub(super) struct Pending {
+    request_id: u64,
     value: Option<Validation>,
     background: Option<mpsc::Receiver<Validation>>,
 }
@@ -111,6 +112,7 @@ impl WgpuRasterizer {
                 startup.compiler.enqueue_async(startup::VALIDATION, work);
             }
             let (tx, rx) = mpsc::channel();
+            let request_id = request.request_id;
             startup.compiler.enqueue(startup::VALIDATION, move || {
                 let mut state = state.lock().unwrap();
                 let errors = std::mem::take(&mut state.errors);
@@ -134,12 +136,14 @@ impl WgpuRasterizer {
                 Ok(())
             });
             self.effect_validation = Some(Pending {
+                request_id,
                 value: None,
                 background: Some(rx),
             });
             return Ok(true);
         }
         self.effect_validation = Some(Pending {
+            request_id: request.request_id,
             value: Some(compile_candidate(self, candidate, request)),
             background: None,
         });
@@ -153,7 +157,12 @@ impl WgpuRasterizer {
                     pending.value = Some(value);
                     pending.background = None;
                 }
-                Err(_) => return None,
+                Err(mpsc::TryRecvError::Empty) => return None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    let request_id = pending.request_id;
+                    self.effect_validation = None;
+                    return Some(EffectValidationResult { request_id, result: Err("Effect validation stopped".into()) });
+                }
             }
         }
         let pending = pending.value.as_mut()?;
@@ -237,5 +246,21 @@ fn compile_candidate(
             compilation_error.or_else(|| a.or(b).or(c).map(|e| e.to_string()))
         }),
         retained_programs: request.retained_programs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stopped_background_validation_rejects_its_candidate() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let (_, background) = mpsc::channel();
+        renderer.effect_validation = Some(Pending { request_id: 7, value: None, background: Some(background) });
+        let result = renderer.poll_effect_validation().unwrap();
+        assert_eq!(result.request_id, 7);
+        assert!(result.result.is_err());
+        assert!(!renderer.effect_validation_pending());
     }
 }

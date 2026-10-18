@@ -6,6 +6,7 @@ use layer_core::authored::{Affine64, PortableId};
 pub extern "system" fn Java_art_capycanvas_Native_imageObjects(
     mut env: JNIEnv, _: JClass, handle: jlong,
 ) -> jstring {
+    crate::jni_entry!(env, handle, {
     let a = unsafe { app(handle) };
     let document = a.host.session.engine().document();
     let mut sources = Vec::new();
@@ -23,6 +24,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageObjects(
             "owner":document.scene().object_owner(object).map(|owner|owner.index())})
     }).collect();
     string(&mut env, serde_json::to_string(&rows).map_err(error))
+    })
 }
 
 fn motion_change(handle: jlong, update: impl FnOnce(&mut layer_host::NativeHost) -> Result<layer_ui::UiChange, String>) -> Result<jlong, String> {
@@ -37,6 +39,7 @@ fn motion_change(handle: jlong, update: impl FnOnce(&mut layer_host::NativeHost)
 pub extern "system" fn Java_art_capycanvas_Native_beginObjectMotion(
     mut env: JNIEnv, _: JClass, handle: jlong, objects: JString,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let ids: Vec<PortableId> = serde_json::from_str(&read(&mut env, &objects)?).map_err(error)?;
         let a = unsafe { app(handle) };
@@ -45,23 +48,28 @@ pub extern "system" fn Java_art_capycanvas_Native_beginObjectMotion(
         motion_change(handle, |host| host.session.begin_object_motion(&objects)).map(|_| ())
     })();
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_previewObjectMotion(
     mut env: JNIEnv, _: JClass, handle: jlong, delta: JString,
 ) -> jlong {
+    crate::jni_entry!(env, {
     let result = (|| {
         let delta: Affine64 = serde_json::from_str(&read(&mut env, &delta)?).map_err(error)?;
         motion_change(handle, |host| host.session.preview_object_motion(delta))
     })();
     or_throw(&mut env, result, -1)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_finishObjectMotion(
     mut env: JNIEnv, _: JClass, handle: jlong, commit: jboolean,
 ) -> jlong {
+    crate::jni_entry!(env, {
     let result = motion_change(handle, |host| if commit != 0 { host.session.commit_object_motion() } else { host.session.cancel_object_motion() });
     or_throw(&mut env, result, -1)
+    })
 }

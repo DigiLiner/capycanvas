@@ -342,6 +342,12 @@ pub fn memory_hints() -> wgpu::MemoryHints {
     wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: blocks }
 }
 
+pub fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload.downcast_ref::<String>().cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_owned()))
+        .unwrap_or_else(|| "Panicked without a message".into())
+}
+
 /// Unit tests and `software-adapter-tests` builds admit a CPU adapter while
 /// `LAYER_TEST_SOFTWARE_GPU` is set. Production hosts always require hardware.
 pub fn software_adapter_tests() -> bool {
@@ -854,6 +860,7 @@ struct TextureSet {
     key: TextureSetKey,
     bind_group: wgpu::BindGroup,
     transport_bind_group: wgpu::BindGroup,
+    relief: f32,
 }
 
 struct Pipelines {
@@ -1664,9 +1671,10 @@ impl WgpuRasterizer {
     }
 
     fn paper_style(&self, style: &layer_render::DabStyle) -> ([f32; 4], f32) {
+        let key = Self::texture_set_key(style);
         style.grain.and(style.paper.as_ref()).and_then(|binding| {
             let tile = paper::PaperTile::new(&binding.surface).ok()?;
-            Some((tile.grain(binding), self.papers.relief(&tile.id(&binding.surface))?))
+            Some((tile.grain(binding), self.texture_sets.iter().find(|set| set.key == key)?.relief))
         }).unwrap_or(([1., 1., 0., 0.], 1.))
     }
 
@@ -1702,12 +1710,44 @@ impl WgpuRasterizer {
             &self.brush_sampler,
             "layer conductance texture binding",
         );
+        let relief = self.papers.relief(&key.grain).unwrap_or(1.);
         self.texture_sets.push(TextureSet {
             key: key.clone(),
             bind_group,
             transport_bind_group,
+            relief,
         });
         Ok(key)
+    }
+
+    fn brush_textures_ready(&mut self, style: &layer_render::DabStyle) -> bool {
+        let key = Self::texture_set_key(style);
+        if self.texture_sets.iter().any(|set| set.key == key) {
+            return true;
+        }
+        if let Some(startup) = &mut self.startup {
+            startup.masks.style(&startup.compiler, style, startup::BRUSH);
+        }
+        if self.prepare_paper(style, startup::BRUSH).is_err() {
+            return true;
+        }
+        [&key.primary, &key.grain, &key.transport].into_iter().all(|id| self.texture_view(id).is_ok()
+            || !self.papers.requested(id) && !self.startup.as_ref().is_some_and(|startup| startup.masks.generates(id)))
+    }
+
+    fn brush_batches_ready(&mut self, packet: FramePacket<'_>) -> bool {
+        let mut ready = true;
+        for batch in packet.dab_batches {
+            ready &= self.brush_textures_ready(&batch.style);
+            if let Some(startup) = &self.startup && !startup.current.covers(&batch.style) {
+                let dabs = packet.dabs.get(batch.first_dab as usize..(batch.first_dab + batch.dab_count) as usize).unwrap_or_default();
+                let mask = layer_masks::MaskRenderer::is_mask(packet.scene, batch.target);
+                let mut required = startup::Requirements::default();
+                required.style(self, &batch.style, dry_material::Reach::of_dabs(dabs), mask, batch.kind == DabBatchKind::Preview);
+                ready &= required.require(&startup.compiler, startup::BRUSH);
+            }
+        }
+        ready
     }
 
     /// Whether warp meshes draw without compiling on this thread, asking the
@@ -3485,6 +3525,9 @@ impl CanvasRenderer for WgpuRasterizer {
     fn max_document_dimension(&self) -> u32 {
         self.device.limits().max_texture_dimension_2d
     }
+    fn paint_ready(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
+        self.startup.as_ref().is_none_or(|startup| startup.brush_ready) && !self.startup_needs_update(document, brush, transform)
+    }
     fn raster_dependencies_ready(&mut self, packet: FramePacket<'_>, preview: Option<&layer_render::TransformPreview>) -> bool {
         let mut required = startup::Requirements::default();
         self.transforms.as_ref().unwrap().require_frame(self, packet, preview, &mut required);
@@ -3494,6 +3537,7 @@ impl CanvasRenderer for WgpuRasterizer {
             ready
         });
         transforms_ready && self.startup.as_ref().is_none_or(|s| s.document.ready() && s.current.ready())
+            && self.brush_batches_ready(packet)
             && self.raster_restore_ready(packet) && self.bake_analyses_ready(packet) && self.retouch_analyses_ready(packet)
     }
     fn has_pending_submission(&self) -> bool { self.settling.is_some() }

@@ -109,6 +109,7 @@ fn check_gpu_failure_recovery(app: &adw::Application, color: layer_core::color::
         "renderer statistics",
     );
     w.dispatch(UiAction::SetBrushSize { value: 70. });
+    until(|| ui_session(&w).paint_ready(), "the resized brush is ready to paint");
     let stroke = |fail: bool| {
         let mut gpu = w.gpu.borrow_mut();
         let g = gpu.as_mut().unwrap();
@@ -127,8 +128,7 @@ fn check_gpu_failure_recovery(app: &adw::Application, color: layer_core::color::
                     timestamp_ns: now + i as u64,
                     pressure: 0.7,
                     ..pen_event(&camera, [x, 120.], phase, now + i as u64)
-                })
-                .unwrap();
+                });
         }
         g.session.frame(now + 2, now + 2).unwrap();
         active_raster(g.session.engine().document()).clone()

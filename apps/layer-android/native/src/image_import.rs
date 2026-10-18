@@ -47,10 +47,12 @@ pub extern "system" fn Java_art_capycanvas_Native_photoFormats(
     mut env: JNIEnv,
     _: JClass,
 ) -> jstring {
+    crate::jni_entry!(env, {
     string(
         &mut env,
         serde_json::to_string(&layer_color::photo::formats().collect::<Vec<_>>()).map_err(error),
     )
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportContext(
@@ -60,6 +62,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportContext(
     screen: JString,
     destination: JString,
 ) -> jstring {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let screen = serde_json::from_str(&read(&mut env, &screen)?).map_err(error)?;
@@ -74,6 +77,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportContext(
         .map_err(error)
     })();
     string(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
@@ -85,6 +89,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
     cancel: jlong,
     nonce: JString,
 ) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         active(a, id as u32)?;
@@ -117,9 +122,11 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportTask(
         })) as jlong)
     })();
     or_throw(&mut env, result, 0)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportPrepare(mut env: JNIEnv, _: JClass, handle: jlong) {
+    crate::jni_entry!(env, {
     let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
     let result = (|| {
         if b.open.is_none() && b.mode != Some(layer_ui::PasteMode::Into) && let Some(clip) = &mut b.clip {
@@ -135,9 +142,11 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportPrepare(mut env: JN
         Ok(())
     })();
     fail(&mut env, result);
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportParkReady(mut env: JNIEnv, _: JClass, handle: jlong, task: jlong) -> jboolean {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let b = unsafe { crate::inspection::borrow::<Batch>(task) };
@@ -149,6 +158,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportParkReady(mut env: 
         a.window.adoption_ready(&a.host)
     })();
     or_throw(&mut env, result.map(u8::from), 0)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportRead(
@@ -158,6 +168,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportRead(
     fd: jint,
     name: JString,
 ) {
+    crate::jni_entry!(env, {
     if fd < 0 {
         unsafe { crate::inspection::borrow::<Batch>(handle) }.images.invalidate();
         fail(&mut env, Err("Missing image descriptor".into()));
@@ -180,6 +191,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportRead(
         b.images.invalidate();
     }
     fail(&mut env, result);
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportProfilePrompt(
@@ -187,11 +199,13 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportProfilePrompt(
     _: JClass,
     handle: jlong,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
     string(
         &mut env,
         serde_json::to_string(&b.images.pending_source().map(|s| &s.interpretation)).map_err(error),
     )
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportAssumeProfile(
@@ -200,6 +214,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportAssumeProfile(
     handle: jlong,
     profile: JString,
 ) {
+    crate::jni_entry!(env, {
     let b = unsafe { crate::inspection::borrow::<Batch>(handle) };
     let result = (|| {
         let profile = serde_json::from_str(&read(&mut env, &profile)?).map_err(error)?;
@@ -209,6 +224,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportAssumeProfile(
         b.images.invalidate();
     }
     fail(&mut env, result);
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportAdopt(
@@ -217,6 +233,7 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportAdopt(
     handle: jlong,
     task: jlong,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let b = unsafe { crate::inspection::borrow::<Batch>(task) };
@@ -258,14 +275,17 @@ pub extern "system" fn Java_art_capycanvas_Native_imageImportAdopt(
         Ok(())
     })();
     fail(&mut env, result);
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_imageImportFree(
-    _: JNIEnv,
+    mut env: JNIEnv,
     _: JClass,
     handle: jlong,
 ) {
+    crate::jni_entry!(env, {
     if handle != 0 {
         drop(unsafe { Box::from_raw(handle as *mut Batch) });
     }
+    })
 }

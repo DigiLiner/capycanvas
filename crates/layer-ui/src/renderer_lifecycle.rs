@@ -1,6 +1,8 @@
 //! Renderer replacement keeps CPU document/session ownership in place.
 use super::*;
 
+pub(super) const PAINTING_UNAVAILABLE: &str = "Painting is unavailable. Save the drawing and reopen it.";
+
 /// Accepted layer-preview requests of one drawing. After a renderer
 /// replacement, unfinished requests are submitted again under their original
 /// ids before new ones.
@@ -322,6 +324,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         ))
     }
 
+    pub(super) fn require_painting(&self) -> Result<(), String> {
+        (!self.rendering_suspended).then_some(()).ok_or_else(|| PAINTING_UNAVAILABLE.into())
+    }
     /// Retain document history, tool settings, camera and workspace. GPU-only
     /// readbacks are cancelled; pending filter validation resumes from retained
     /// source bytes before it can publish a catalog or edit.
@@ -344,7 +349,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             self.engine.recover_failed_rasters().map_err(error)?;
         }
         self.discard_render_requests();
-        self.cancel_effect_analyses();
+        self.cancel_auto_levels();self.cancel_histogram();self.cancel_effect_analyses();
         let previous = self.engine.replace_backend(renderer).map_err(error)?;
         self.paper_preview.invalidate();
         self.renderer_generation = self.renderer_generation.wrapping_add(1);

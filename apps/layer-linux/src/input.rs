@@ -10,9 +10,8 @@ use layer_engine::{PenEvent, PenPhase, SampleFlags, ToolKind};
 use layer_ui::{ContactPhase, Modifiers, PenButton, PointerButton, PointerKind, TouchPolicy, UiInput};
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap},
     rc::Rc,
-    time::Instant,
 };
 #[path = "tablet_input.rs"]
 mod tablet;
@@ -231,8 +230,6 @@ const TOUCH_DEVICES: u64 = 1 << 40;
 pub struct Input {
     sequence: Cell<u64>,
     last: Cell<Option<PenEvent>>,
-    pending: RefCell<VecDeque<PenEvent>>,
-    deferred_contacts: RefCell<layer_engine::DeferredContacts>,
     touches: RefCell<HashMap<gdk::EventSequence, u64>>,
     touch_points: RefCell<HashMap<u64, [f32; 2]>>,
     next_touch: Cell<u64>,
@@ -889,36 +886,7 @@ impl Input {
         {
             return;
         }
-        // A contact begun during compilation is held whole until its shaders
-        // are ready. Navigation and native controls remain active.
-        let ready = Self::paint_ready(workspace);
-        let events = self.deferred_contacts.borrow_mut().admit(event, ready, Instant::now());
-        self.sync_held(workspace);
-        #[cfg(test)]
-        if events.is_empty()
-            && let Some(gpu) = workspace.gpu.borrow().as_ref()
-        {
-            gpu.session.engine().backend().stats.lock().unwrap().pen_routes.push((
-                event.timestamp_ns, format!("{:?}", event.phase), "deferred"));
-        }
-        for event in events {
-            self.deliver(workspace, event);
-        }
-    }
-    fn sync_held(&self, workspace: &Rc<Workspace>) {
-        if let Some(gpu) = workspace.gpu.borrow_mut().as_mut() {
-            gpu.session.set_input_held(self.deferred_contacts.borrow().holding());
-        }
-    }
-    fn paint_ready(workspace: &Rc<Workspace>) -> bool {
-        workspace.gpu.borrow().as_ref().is_some_and(|g| {
-            let engine = g.session.engine();
-            engine.backend().paint_ready(
-                engine.document(),
-                engine.brush(),
-                engine.transform_preview().is_some(),
-            )
-        })
+        self.deliver(workspace, event);
     }
     fn deliver(&self, workspace: &Rc<Workspace>, mut event: PenEvent) {
         #[cfg(test)]
@@ -941,13 +909,7 @@ impl Input {
             let Some(gpu) = gpu.as_mut() else {
                 return;
             };
-            if self.pending.borrow().is_empty() {
-                if let Err(event) = gpu.session.pen(event) {
-                    self.pending.borrow_mut().push_back(event);
-                }
-            } else {
-                self.pending.borrow_mut().push_back(event);
-            }
+            gpu.session.pen(event);
             #[cfg(test)]
             if event.flags.contains(SampleFlags::PRIMARY)
                 && event.phase == PenPhase::Move
@@ -970,31 +932,8 @@ impl Input {
             workspace.wake();
         }
     }
-    pub fn has_pending(&self) -> bool {
-        !self.pending.borrow().is_empty() || !self.deferred_contacts.borrow().is_empty()
-    }
     pub fn discard(&self) {
-        self.pending.borrow_mut().clear();
-        self.deferred_contacts.borrow_mut().clear();
         self.last.set(None);
-    }
-    pub fn flush(&self, workspace: &Rc<Workspace>) {
-        let ready = Self::paint_ready(workspace);
-        let released = self.deferred_contacts.borrow_mut().release(ready, Instant::now());
-        self.sync_held(workspace);
-        for event in released {
-            self.deliver(workspace, event);
-        }
-        let mut gpu = workspace.gpu.borrow_mut();
-        if let Some(gpu) = gpu.as_mut() {
-            let mut pending = self.pending.borrow_mut();
-            while let Some(event) = pending.pop_front() {
-                if let Err(event) = gpu.session.pen(event) {
-                    pending.push_front(event);
-                    break;
-                }
-            }
-        }
     }
     fn window_focus_changed(
         self: &Rc<Self>,
@@ -1020,10 +959,6 @@ impl Input {
     fn cancel(&self, workspace: &Rc<Workspace>) {
         self.picker_hold.cancel();
         let reply = workspace.interact(UiInput::Blur);
-        if reply.cancel_paint {
-            self.deferred_contacts.borrow_mut().clear();
-            self.sync_held(workspace);
-        }
         if reply.cancel_paint
             && let Some(event) = self.last.get()
         {

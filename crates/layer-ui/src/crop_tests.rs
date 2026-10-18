@@ -29,7 +29,7 @@ fn crop_contact(s: &mut UiSession<Recorder>, sequence: u64, phase: PenPhase, at:
     let mut e = event(s, sequence, phase, 1.);
     e.surface_position = on_surface(s, at);
     e.tool = tool;
-    s.pen(e).unwrap();
+    s.pen(e);
     s.frame(sequence, sequence).unwrap();
 }
 

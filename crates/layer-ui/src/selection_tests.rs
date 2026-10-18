@@ -145,7 +145,7 @@ mod selection_tools_checks {
         click(&mut s, [120., 140.]);
         let mut predicted = event(&s, 5, PenPhase::Move, 1.);
         predicted.flags = SampleFlags::PREDICTED;
-        s.pen(predicted).unwrap();
+        s.pen(predicted);
         assert_eq!(s.layer_interaction.path.len(), 3);
         s.selection_key("enter").unwrap();
         s.frame(2, 2).unwrap();
@@ -297,18 +297,18 @@ mod selection_tools_checks {
             let mut s = session(Platform::Gtk);
             invoke(&mut s, command);
             s.frame(1, 1).unwrap();
-            s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+            s.pen(event(&s, 1, PenPhase::Down, 1.));
             s.frame(2, 2).unwrap();
             for sequence in 2..6 {
                 let mut sample = event(&s, sequence, PenPhase::Move, 1.);
                 sample.surface_position.y += sequence as f32 * 20.;
-                s.pen(sample).unwrap();
+                s.pen(sample);
                 let change = s.frame(sequence * 10, sequence * 10).unwrap();
                 assert_eq!(change.regions & regions::DOCUMENT, 0, "{command:?} sample {sequence}");
             }
             let mut up = event(&s, 6, PenPhase::Up, 1.);
             up.surface_position.y += 120.;
-            s.pen(up).unwrap();
+            s.pen(up);
             let change = s.frame(100, 100).unwrap();
             assert_ne!(change.regions & regions::DOCUMENT, 0, "{command:?} publishes its selection");
             assert!(s.engine.document().working.selection.is_some(), "{command:?}");
@@ -542,7 +542,7 @@ mod selection_tools_checks {
         let mut up = event(&s, 1, PenPhase::Up, 1.);
         let m = s.state.camera.document_to_surface();
         up.surface_position = Point { x: m[0] * 48. + m[2] * 72. + m[4], y: m[1] * 48. + m[3] * 72. + m[5] };
-        s.pen(up).unwrap();
+        s.pen(up);
         let change = s.frame(2, 2).unwrap();
         assert!(s.renderer_mut().region_requests.is_empty());
         let notice = s.state.notice.clone().expect("a notice instead of a failed frame");

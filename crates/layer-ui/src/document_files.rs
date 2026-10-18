@@ -633,6 +633,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
 
     pub fn apply_lookup(&mut self, request:u32, resource: std::sync::Arc<layer_core::Lut3d>) -> Result<bool,String> {
+        self.require_painting()?;
         let DocumentRequest::ImportLookup {target} = self.document_request(request)?.clone() else {return Err("Invalid lookup request".into());};
         if self.engine.document().artwork.id != target.document || self.state.document_file.epoch != target.activation || !self.property_editor.accepts(target.layer,target.epoch)
             || self.state.layer_properties.layer != Some(target.layer) {return Ok(false);}
@@ -808,7 +809,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub(crate) fn require_raster_snapshot(&self) -> Result<(), String> {
         if self.painted_selections.busy() { return Err(FileFailure::SelectionCapture.message(self.localization())); }
-        if self.input_held || self.sdr_gesture.is_some() || self.object_motion.is_some()
+        if self.holding_input() || self.sdr_gesture.is_some() || self.object_motion.is_some()
             || self.targeted_curve_busy() || self.auto_levels.is_some()
             || self.eyedropper.calibration.as_ref().is_some_and(|calibration| calibration.request.is_some())
             || self.operation.active()

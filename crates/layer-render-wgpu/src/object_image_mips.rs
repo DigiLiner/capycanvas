@@ -271,15 +271,19 @@ pub(crate) struct MipDecodeQueue {
     capacity:usize,
 }
 #[cfg(not(target_arch="wasm32"))]
+fn contained<T>(work:impl FnOnce()->Result<T,String>)->Result<T,String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|payload| Err(crate::panic_message(&*payload)))
+}
+#[cfg(not(target_arch="wasm32"))]
 fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_core::raster::DecodedTileCache,decoders:&mut std::collections::VecDeque<(Weak<SourceImage>,layer_color::WorkingDecoder)>)->PreparedImageWork {
     match request {
         MipDecodeRequest::Coordinates(request) => {
-            let pixels=if request.destination.strong_count()==0 {Err("Coordinate request cancelled".into())}
-                else {crate::object_sampling::prepare_nearest_coordinates(request.inverse,request.size,request.first,request.count)};
+            let pixels=contained(|| if request.destination.strong_count()==0 {Err("Coordinate request cancelled".into())}
+                else {crate::object_sampling::prepare_nearest_coordinates(request.inverse,request.size,request.first,request.count)});
             PreparedImageWork::Coordinates {destination:request.destination,pixels}
         },
         MipDecodeRequest::Image(request) => {
-            let pixels=(|| {
+            let pixels=contained(|| {
                 if matches!(request.source.interpretation.profile,layer_core::color::ColorProfile::Builtin(_)) {
                     return prepare_image_tile(&request.source,request.coordinate,destination,cache,None);
                 }
@@ -293,7 +297,7 @@ fn prepare_request(request:MipDecodeRequest,destination:RgbSpace,cache:&layer_co
                 let decoded=prepare_image_tile(&request.source,request.coordinate,destination,cache,Some(&decoder.1));
                 decoders.push_back(decoder);
                 decoded
-            })();
+            });
             PreparedImageWork::Image(PreparedMipTile {id:request.id,source:request.source,coordinate:request.coordinate,pixels})
         },
     }

@@ -21,20 +21,13 @@ fn guard(host: *mut CapyHost, f: impl FnOnce(&mut CapyHost) -> Result<i32, Strin
         fail("Null canvas");
         return -1;
     };
-    if host.poisoned {
-        fail("Canvas stopped after a native panic");
-        return -1;
-    }
-    match catch_unwind(AssertUnwindSafe(|| f(host))) {
-        Ok(Ok(value)) => value,
-        Ok(Err(error)) => {
-            host.native.error = Some(error.clone());
+    match layer_host::contain(host, f) {
+        Ok(value) => value,
+        Err(error) => {
+            if host.native.poisoned().is_none() {
+                host.native.error = Some(error.clone());
+            }
             fail(error);
-            -1
-        }
-        Err(_) => {
-            host.poisoned = true;
-            fail("Native canvas panic; this host is stopped");
             -1
         }
     }
@@ -52,7 +45,6 @@ pub struct CapyLaunch {
 pub struct CapyHost {
     // An acquired image drops before its surface; the panel is detached on the
     // UI thread before destruction. The surface retains its native COM reference.
-    poisoned: bool,
     gpu: layer_host::DeviceWatch,
     gpu_generation: u64,
     localization_generation: Option<u64>,
@@ -98,6 +90,9 @@ fn take_prepared_target<T>(presenter: &ViewportPresenter, renderer: &layer_rende
     presenter.pipelines_ready(renderer).then(|| target.take()).flatten()
 }
 
+impl AsMut<NativeHost> for CapyHost {
+    fn as_mut(&mut self) -> &mut NativeHost { &mut self.native }
+}
 impl CapyHost {
     fn cancel_contacts(&mut self) -> Result<(), String> {
         for (id, mut sample) in std::mem::take(&mut self.live_contacts) {
@@ -142,7 +137,6 @@ impl CapyHost {
         // GPU allocation and shader work happen after ownership moves to the
         // render worker. No swap chain is attached during CPU/UI initialization.
         Ok(Self {
-            poisoned: false,
             gpu: Default::default(),
             gpu_generation: 0,
             localization_generation: None,
@@ -296,7 +290,7 @@ impl CapyHost {
             .map_err(err)?;
         let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
         layer_host::admit_adapter(self.native.session.localization(), &adapter, &limits)?;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        let (device, queue, gpu_state) = pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
             label: Some("Capy Canvas Windows"),
             required_features: layer_render_wgpu::rendering_features(&adapter)
                 | adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS),
@@ -305,7 +299,6 @@ impl CapyHost {
             ..Default::default()
         }))
         .map_err(err)?;
-        let gpu_state = layer_host::DeviceWatch::observe(&device);
         let [width, height] = self.native.session.state().camera.viewport;
         let mut config = self
             .surface
@@ -336,12 +329,7 @@ impl CapyHost {
         presenter.prepare_overviews(&renderer);
         presenter.pipelines_ready(&renderer);
         gpu_state.check()?;
-        let revision = self.native.session.state().revision;
-        let (retired, change) = self
-            .native
-            .session
-            .replace_renderer(layer_host::Renderer(Some(renderer)))?;
-        self.native.apply_change(revision, change);
+        let retired = self.native.replace_renderer(layer_host::Renderer(Some(renderer)))?;
         if let Some(service) = self.documents.as_mut().and_then(|d| d.recovery.as_mut()) { service.retire_renderer(retired); } else { drop(retired); }
         if self.device_is_lost() {
             self.native.error = None;
@@ -629,7 +617,7 @@ pub unsafe extern "C" fn capy_finish_services(host: *mut CapyHost) -> i32 {
     .unwrap_or_else(|_| Err("Document shutdown failed".into()));
     match catch_unwind(AssertUnwindSafe(|| {
         let settings = if let Some(service) = host.services.as_mut() {
-            if host.poisoned {
+            if host.native.poisoned().is_some() {
                 service.stop_worker()
             } else {
                 service.finish(&mut host.native)
@@ -1302,7 +1290,7 @@ fn bundled_shader_compiler() -> wgpu::Dx12Compiler {
 /// Poisoned hosts cannot resume after an ABI panic.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn capy_device_lost(host: *const CapyHost) -> bool {
-    unsafe { host.as_ref() }.is_some_and(|host| !host.poisoned && host.device_is_lost())
+    unsafe { host.as_ref() }.is_some_and(|host| host.native.poisoned().is_none() && host.device_is_lost())
 }
 
 /// # Safety

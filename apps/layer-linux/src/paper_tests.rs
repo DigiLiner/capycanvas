@@ -1,5 +1,6 @@
 use super::new_photo::{chooser, ready, response};
 use super::*;
+use layer_render::CanvasRenderer;
 use layer_core::{DefaultBrushPreset, EffectValue};
 
 fn shade(w: &Rc<Workspace>, origin: [f32; 2], pressure: f32) {

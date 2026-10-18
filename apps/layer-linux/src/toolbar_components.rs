@@ -88,7 +88,10 @@ impl TileWidget {
                     label.set_text(&tile.choice.label);
                 }
                 if matches!(tile.choice.control, ToolbarControl::ColorPicker | ToolbarControl::Command { command: CommandId::Eyedropper }) {
-                    button.set_tooltip_text(Some(&w.gpu.borrow().as_ref().unwrap().session.color_picker_button_label(tile.choice.control)));
+                    let label = w.gpu.borrow().as_ref().map(|g| g.session.color_picker_button_label(tile.choice.control));
+                    if let Some(label) = label {
+                        button.set_tooltip_text(Some(&label));
+                    }
                 } else {
                     button.set_tooltip_text(Some(&tile.tooltip));
                 }

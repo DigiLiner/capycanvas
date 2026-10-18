@@ -764,6 +764,9 @@ pub trait CanvasRenderer {
     fn raster_dependencies_ready(&mut self, _packet: FramePacket<'_>, _preview: Option<&TransformPreview>) -> bool {
         true
     }
+    fn paint_ready(&self, _document: &layer_core::Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool {
+        true
+    }
     /// Work that later frames finish without new input, such as the
     /// full-resolution result of a preview first drawn at display resolution.
     fn has_pending_work(&self) -> bool {

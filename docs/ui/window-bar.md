@@ -171,6 +171,7 @@ bash tools/performance/workspace-motion.sh gtk --native-test=native_header_catal
 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_managed_input --native-storage
 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_spacing_visual --native-storage
 LAYER_MOTION_VIEWPORT=640x600 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_overflow_input
+LAYER_MOTION_VIEWPORT=640x600 bash tools/performance/workspace-motion.sh gtk --native-test=native_header_overflow_opens_while_a_photo_import_prepares
 bash tools/performance/workspace-motion.sh web --tool-picker
 ```
 

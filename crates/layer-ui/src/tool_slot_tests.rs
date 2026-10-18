@@ -148,7 +148,7 @@ fn tool_group_temporary_brushes_preserve_memory_from_a_nonpainting_tool() {
         let name = if modifier { "Alt_L" } else { "p" };
         key(&mut s, name, true, false, false);
         assert!(s.command(CommandId::Pen).selected);
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
         let pen = ToolVariant::BrushGroup { group: ToolGroup::Pen };
         assert_eq!(selected_slot_variant(&s, brush), watercolor);
         for anchor in [drawing, header] { assert_eq!(selected_slot_variant(&s, anchor), pen); }
@@ -166,7 +166,7 @@ fn tool_group_temporary_brushes_preserve_memory_from_a_nonpainting_tool() {
         assert_eq!(queued.canvas_tool, permanent.canvas_tool);
         assert_eq!(queued.preset, permanent.preset);
         assert_eq!(queued.tools, permanent.tools);
-        s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 1.));
         s.frame(3, 3).unwrap();
         assert!(s.command(CommandId::Hand).selected);
         assert_eq!(s.state().brush.preset, permanent.preset);
@@ -634,8 +634,8 @@ fn family_shortcuts_cycle_full_membership_and_held_use_preserves_slot_memory() {
     s.dispatch(slot_choice(&s, anchor, airbrush)).unwrap();
     key(&mut s, "b", true, false, false);
     assert!(s.command(CommandId::Decoration).selected);
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Up, 1.));
     key(&mut s, "b", false, false, false);
     s.frame(3, 3).unwrap();
     assert!(s.command(CommandId::Airbrush).selected);
@@ -659,8 +659,8 @@ fn tapping_family_keys_remembers_choices_and_blurring_held_use_restores_them() {
         activate_slot(&mut s, anchor);
         key(&mut s, "b", true, false, false);
         assert!(s.command(CommandId::Airbrush).selected);
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-        s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
+        s.pen(event(&s, 2, PenPhase::Up, 1.));
         if blur { s.input(UiInput::Blur).unwrap(); }
         else { key(&mut s, "b", false, false, false); }
         s.frame(3, 3).unwrap();
@@ -693,7 +693,7 @@ fn workspace_capture_during_spring_and_modifier_holds_keeps_the_permanent_tool()
             key(&mut s, "b", true, false, false);
             assert!(s.command(CommandId::Decoration).selected);
         }
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
         let during = s.editing_state();
         assert_eq!(during.preset, permanent.preset);
         assert_eq!(during.canvas_tool, permanent.canvas_tool);
@@ -709,7 +709,7 @@ fn workspace_capture_during_spring_and_modifier_holds_keeps_the_permanent_tool()
         assert_eq!(pending.preset, permanent.preset);
         assert_eq!(pending.canvas_tool, permanent.canvas_tool);
         assert_eq!(pending.tool_slots, permanent.tool_slots);
-        s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 1.));
         s.frame(3, 3).unwrap();
         assert!(s.command(CommandId::Airbrush).selected);
     }

@@ -240,7 +240,7 @@ pub struct UiSession<R: CanvasRenderer> {
     input_pending: bool,
     host_requests_changed: bool,
     pen_contact: bool,
-    input_held: bool,
+    discarded_contacts: Vec<u64>,
     rendering_suspended: bool,
     touch: TouchGesture,
     navigation: navigation::Navigation,
@@ -445,7 +445,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             input_pending: false,
             host_requests_changed: false,
             pen_contact: false,
-            input_held: false,
+            discarded_contacts: Vec::new(),
             rendering_suspended: false,
             touch: TouchGesture::default(),
             navigation: Default::default(),
@@ -2718,7 +2718,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             || matches!(&action,UiAction::Effect{action:EffectAction::CurveKey{key_event,..}}
                 if key_event=="Escape" || self.property_editor.key().is_some());
         if self.rendering_suspended && !continuing_effect_gesture && !Self::action_without_renderer(&action) {
-            return Err("Painting is unavailable. Save the drawing and reopen it.".into());
+            return Err(renderer_lifecycle::PAINTING_UNAVAILABLE.into());
         }
         if self.workspace_read_only
             && !continuing_effect_gesture
@@ -4025,12 +4025,8 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     /// Raw records retain platform timestamp/history/prediction metadata. A
     /// full queue returns the untouched record; hosts must retry after a frame.
-    pub fn pen(&mut self, event: PenEvent) -> Result<(), PenEvent> {
-        if !self.deferred_edits.is_empty() {
-            self.defer_pen(event);
-            return Ok(());
-        }
-        self.pen_ready(event)
+    pub fn pen(&mut self, event: PenEvent) {
+        self.admit_pen(event)
     }
 
     fn pen_ready(&mut self, mut event: PenEvent) -> Result<(), PenEvent> {
@@ -4177,7 +4173,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Err("Invalid scroll".into());
         }
         if self.interaction.pointer.is_some_and(|p| p.paint || p.kind != PointerKind::Mouse)
-            || self.retouch.drag.is_some() || self.touch.is_active() || self.input_held
+            || self.retouch.drag.is_some() || self.touch.is_active() || self.holding_input()
             || !self.navigation_idle() || delta == [0.; 2]
         {
             return Ok(self.changed(0, false));
@@ -4488,7 +4484,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let pending_edits = self.engine.has_pending_document_edits();
         let command_activity = (self.canvas_idle(), self.engine.can_undo(), self.engine.can_redo());
         self.update_shader_idle();
-        let mut changed = self.poll_filter_installation();
+        let mut changed = self.poll_filter_installation() | self.poll_deferred_edits() | self.apply_loaded_paper();
         if std::mem::take(&mut self.pressure_meter_changed) { changed |= regions::PRESSURE_CALIBRATION; }
         let revision = self.engine.document().revision;
         let working_generation = self.engine.document().working.generation;
@@ -5629,11 +5625,6 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub(super) fn object_touch_hit(&self, position: [f32; 2]) -> bool {
         self.transform_touch_hit(position) || self.clone_disc_hit(position) || self.object_touch_target(position)
     }
-    /// Whether the host holds canvas samples until painting is ready. A
-    /// document snapshot such as Save waits for them.
-    pub fn set_input_held(&mut self, held: bool) {
-        if std::mem::replace(&mut self.input_held, held) != held { self.refresh_commands(); }
-    }
     fn paint_contact_busy(&self) -> bool {
         self.pen_contact || (!self.engine.backend().has_pending_submission() && (self.input_pending || self.engine.has_active_stroke()))
     }
@@ -6251,9 +6242,9 @@ mod tests {
             assert_eq!(toolbar.tiles[1].choice.selected, size == 8.);
             assert!(Arc::ptr_eq(&labels, s.customization_copy.borrow().workspace_labels.as_ref().unwrap()));
         }
-        s.pen(event(&s, 1, PenPhase::Down, 0.5)).unwrap();
-        s.pen(event(&s, 2, PenPhase::Move, 0.7)).unwrap();
-        s.pen(event(&s, 3, PenPhase::Up, 0.7)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 0.5));
+        s.pen(event(&s, 2, PenPhase::Move, 0.7));
+        s.pen(event(&s, 3, PenPhase::Up, 0.7));
         s.frame(4, 4).unwrap();
         s.header_view();
         for (panel, before) in &copies { assert!(Arc::ptr_eq(before, &s.panel_copy.iter().find(|(id, _)| id == panel).unwrap().1)); }
@@ -6500,11 +6491,11 @@ mod tests {
             surface_position: Point { x: 300., y: 200. }, pressure: 1., tilt_radians: [0.; 2], twist_radians: 0., distance: 0.,
             phase: PenPhase::Down, tool: ToolKind::Pen, flags: SampleFlags::PRIMARY,
         };
-        s.pen(event).unwrap();
+        s.pen(event);
         assert!(!s.canvas_idle());
         event.sequence = 2;
         event.phase = PenPhase::Up;
-        s.pen(event).unwrap();
+        s.pen(event);
         s.frame(3, 3).unwrap();
         assert!(s.engine.has_pending_input());
         assert!(s.canvas_idle());
@@ -6523,7 +6514,7 @@ mod tests {
     #[test]
     fn failed_renderer_discards_the_physical_contact_before_replacement() {
         let mut s = session(Platform::Gtk);
-        s.pen(event(&s, 1, PenPhase::Down, 0.5)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 0.5));
         assert!(s.pen_contact);
         s.suspend_renderer().unwrap();
         s.replace_renderer(Recorder::default()).unwrap();
@@ -7210,9 +7201,9 @@ mod tests {
         let mut s = session(Platform::Gtk);
         let before = s.engine.document().clone();
         s.set_workspace_read_only(true);
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-        s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
-        s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
+        s.pen(event(&s, 2, PenPhase::Move, 1.));
+        s.pen(event(&s, 3, PenPhase::Up, 1.));
         s.frame(4, 4).unwrap();
         assert_eq!(s.engine.document(), &before);
         let reply = s
@@ -7227,10 +7218,10 @@ mod tests {
             .unwrap();
         assert!(reply.handled && s.interaction.keys.is_empty());
         s.set_workspace_read_only(false);
-        s.pen(event(&s, 5, PenPhase::Down, 1.)).unwrap();
+        s.pen(event(&s, 5, PenPhase::Down, 1.));
         s.frame(6, 6).unwrap();
         s.set_workspace_read_only(true);
-        s.pen(event(&s, 7, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 7, PenPhase::Up, 1.));
         s.frame(8, 8).unwrap();
         assert_ne!(s.engine.document(), &before);
         s.require_workspace_idle().unwrap();
@@ -7264,8 +7255,8 @@ mod tests {
         s.begin_workspace_transition().unwrap();
         assert!(s.begin_workspace_transition().is_err());
         assert!(s.dispatch(UiAction::SetBrushSize { value: 50. }).is_err());
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-        s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
+        s.pen(event(&s, 2, PenPhase::Up, 1.));
         s.frame(3, 3).unwrap();
         assert_eq!(s.engine.document(), &before);
         s.adopt_workspace(PreparedWorkspace::new(capture).unwrap())
@@ -7601,13 +7592,13 @@ mod tests {
         assert!(s.restore_editing(invalid).is_err());
         assert_eq!(s.editing_state(), before);
         let prepared = PreparedWorkspace::new(captured.clone()).unwrap();
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
         let document = s.engine.document().clone();
         let working = s.workspace_working_state();
         assert!(s.adopt_workspace(prepared).is_err());
         assert_eq!(s.engine.document(), &document);
         assert_eq!(s.workspace_working_state(), working);
-        s.pen(event(&s, 2, PenPhase::Cancel, 0.)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Cancel, 0.));
         s.frame(3, 3).unwrap();
         s.workspace_history.begin(&s.state.workspace);
         assert!(s.capture_workspace().is_err());
@@ -7701,13 +7692,13 @@ mod tests {
     fn normal_parking_keeps_unsubmitted_ink_and_restores_the_same_editor() {
         let mut s = session(Platform::Gtk);
         s.frame(0, 0).unwrap();
-        s.pen(event(&s, 1, PenPhase::Down, 0.5)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 0.5));
         assert!(s.park_document().is_err());
         assert!(!s.rendering_suspended());
         s.frame(10_000_000, 18_000_000).unwrap();
         assert!(s.engine.has_active_stroke());
         assert!(s.park_document().is_err());
-        s.pen(event(&s, 2, PenPhase::Up, 0.7)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 0.7));
         assert!(s.park_document().is_err());
         s.frame(30_000_000, 38_000_000).unwrap();
         let document = s.engine.document().clone();
@@ -7731,7 +7722,7 @@ mod tests {
         let layer = s.engine.document().working.occurrence.unwrap();
         let target = s.engine.document().scene().source_target(layer).unwrap();
         let root = s.engine.document().target_raster(target).unwrap().clone();
-        s.pen(event(&s, 1, PenPhase::Down, 0.5)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 0.5));
         s.frame(10_000_000, 18_000_000).unwrap();
         assert!(s.engine.has_active_stroke());
         s.replace_renderer(Recorder::default()).unwrap();
@@ -7742,7 +7733,7 @@ mod tests {
         assert!(s.state.document_file.modified);
         s.frame(20_000_000, 28_000_000).unwrap();
         assert!(s.renderer_mut().dabs > 0);
-        s.pen(event(&s, 2, PenPhase::Up, 0.7)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 0.7));
         s.frame(30_000_000, 38_000_000).unwrap();
         assert!(!s.engine.has_active_stroke());
         let committed = s.engine.document().target_raster(target).unwrap().clone();
@@ -7764,13 +7755,13 @@ mod tests {
         let mut s = session(Platform::Android);
         s.frame(0, 0).unwrap();
         let revision = s.state.revision;
-        s.pen(event(&s, 1, PenPhase::Down, 0.3)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 0.3));
         let change = s.frame(10_000_000, 18_000_000).unwrap();
         assert!(s.engine.has_active_stroke());
         assert!(s.state.document_file.modified);
         assert_eq!(change.regions & regions::DOCUMENT, 0);
         assert_eq!(s.state.revision, revision, "pen-down must not republish the editor model");
-        s.pen(event(&s, 1, PenPhase::Up, 0.3)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Up, 0.3));
         let change = s.frame(20_000_000, 28_000_000).unwrap();
         assert!(!s.engine.has_active_stroke());
         assert!(s.state.document_file.modified);
@@ -7785,7 +7776,7 @@ mod tests {
         let SourceTarget::Paint(paint) = target else { unreachable!() };
         let identity = s.engine.document().artwork.paint.id(paint).unwrap();
         let initial = s.engine.document().target_raster(target).unwrap().identity();
-        s.pen(event(&s, 1, PenPhase::Down, 0.3)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 0.3));
         s.frame(10_000_000, 18_000_000).unwrap();
         assert!(s.state.document_file.modified);
         assert!(s.command(CommandId::SaveDocument).enabled);
@@ -7811,7 +7802,7 @@ mod tests {
             s.state.document_file.modified,
             "save must not acknowledge active samples"
         );
-        s.pen(event(&s, 2, PenPhase::Up, 0.7)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 0.7));
         s.frame(20_000_000, 28_000_000).unwrap();
         assert!(s.state.document_file.modified);
         let recovered = worker.join().unwrap();
@@ -8018,12 +8009,12 @@ mod tests {
         )
         .unwrap();
         s.request_document_close().unwrap();
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
         s.frame(10_000_000, 18_000_000).unwrap();
         s.complete_document_request(id, Ok(true)).unwrap();
         assert!(!s.state.document_file.close_ready);
         assert!(s.state.requests.is_empty());
-        s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 1.));
         s.frame(20_000_000, 28_000_000).unwrap();
         assert!(s.state.document_file.modified);
         assert!(matches!(
@@ -9093,7 +9084,7 @@ mod tests {
         ] {
             let mut e = event(&s, 1, phase, 1.);
             e.surface_position = Affine(s.state.camera.document_to_surface()).map(point);
-            s.pen(e).unwrap();
+            s.pen(e);
             s.frame(7, 7).unwrap();
         }
         assert!(
@@ -9327,7 +9318,7 @@ mod tests {
         let [a, b, ..] = s.state.camera.document_to_surface();
         active.stabilization.input_scale = a.hypot(b);
         let enabled: Vec<_> = s.state.commands.iter().map(|c| c.enabled).collect();
-        s.pen(event(&s, 1, PenPhase::Down, 1.0)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.0));
         s.frame(10_000_000, 18_000_000).unwrap();
         invoke(&mut s, CommandId::Liquify);
         assert_eq!(
@@ -9356,7 +9347,7 @@ mod tests {
             s.engine.configured_brush().execution_class(),
             layer_core::BrushExecution::Liquify
         );
-        s.pen(event(&s, 2, PenPhase::Up, 1.0)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 1.0));
         s.frame(20_000_000, 28_000_000).unwrap();
         assert_eq!(
             s.engine.backend().last_style.as_ref().unwrap().execution,
@@ -9442,7 +9433,7 @@ mod tests {
         let mut active = original.clone();
         let [a, b, ..] = s.state.camera.document_to_surface();
         active.stabilization.input_scale = a.hypot(b);
-        s.pen(event(&s, 1, PenPhase::Down, 1.0)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.0));
         s.frame(10_000_000, 18_000_000).unwrap();
         for (id, value) in [("flow", 0.35), ("spacing", 0.2), ("size_jitter", 0.3)] {
             s.dispatch(UiAction::SetToolSetting {
@@ -9461,14 +9452,14 @@ mod tests {
         assert_eq!(s.engine.configured_brush().shape.size_jitter, 0.3);
         assert_eq!(s.engine.configured_brush().diameter, 40.0);
         assert_eq!(s.engine.brush(), &active);
-        s.pen(event(&s, 2, PenPhase::Up, 1.0)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 1.0));
         s.frame(20_000_000, 28_000_000).unwrap();
         assert_eq!(
             s.engine.backend().last_style.as_ref().unwrap().execution,
             original.execution_class()
         );
-        s.pen(event(&s, 3, PenPhase::Down, 1.0)).unwrap();
-        s.pen(event(&s, 4, PenPhase::Up, 1.0)).unwrap();
+        s.pen(event(&s, 3, PenPhase::Down, 1.0));
+        s.pen(event(&s, 4, PenPhase::Up, 1.0));
         s.frame(40_000_000, 48_000_000).unwrap();
         s.frame(41_000_000, 49_000_000).unwrap();
         s.frame(73_000_000, 81_000_000).unwrap();
@@ -9498,8 +9489,8 @@ mod tests {
             },
         })
         .unwrap();
-        s.pen(event(&s, 1, PenPhase::Down, 1.0)).unwrap();
-        s.pen(event(&s, 2, PenPhase::Up, 1.0)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.0));
+        s.pen(event(&s, 2, PenPhase::Up, 1.0));
         s.frame(20_000_000, 28_000_000).unwrap();
         assert_eq!(
             s.engine.backend().last_style.as_ref().unwrap().mode,
@@ -9517,8 +9508,8 @@ mod tests {
         })
         .unwrap();
         assert_eq!(s.state.colors.slot, ColorSlot::Background);
-        s.pen(event(&s, 3, PenPhase::Down, 1.0)).unwrap();
-        s.pen(event(&s, 4, PenPhase::Up, 1.0)).unwrap();
+        s.pen(event(&s, 3, PenPhase::Down, 1.0));
+        s.pen(event(&s, 4, PenPhase::Up, 1.0));
         s.frame(40_000_000, 48_000_000).unwrap();
         assert_eq!(
             s.engine.backend().last_style.as_ref().unwrap().mode,
@@ -9550,9 +9541,9 @@ mod tests {
         use layer_core::{EffectInstallMode};
         let mut s = session(Platform::Gtk);
         s.frame(0, 0).unwrap();
-        s.pen(event(&s, 1, PenPhase::Down, 1.0)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.0));
         assert!(!s.background_readback_idle());
-        s.pen(event(&s, 2, PenPhase::Up, 1.0)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 1.0));
         s.frame(1, 1).unwrap();
         assert!(s.background_readback_idle());
         let package = package_json(s.effect_catalog.categories().to_vec(), vec![custom_filter("unsharp_mask")]);
@@ -10593,7 +10584,7 @@ mod tests {
             },
         );
         for (seq, phase) in [(1, PenPhase::Down), (2, PenPhase::Move), (3, PenPhase::Up)] {
-            s.pen(event(&s, seq, phase, 1.)).unwrap();
+            s.pen(event(&s, seq, phase, 1.));
         }
         s.frame(30_000_000, 38_000_000).unwrap();
         let mut source = s.engine.document().scene().occurrence(occurrence_handle(1).unwrap()).unwrap().clone();
@@ -11458,8 +11449,7 @@ mod tests {
         .enumerate()
         {
             assert!(pointer(&mut s, 1, phase, [500.0; 2], PointerButton::Primary).paint);
-            s.pen(event(&s, index as u64 + 1, pen_phase(phase), 1.0))
-                .unwrap();
+            s.pen(event(&s, index as u64 + 1, pen_phase(phase), 1.0));
         }
         s.frame(50_000_000, 58_000_000).unwrap();
         assert!(s.engine.has_pending_input());
@@ -15002,11 +14992,12 @@ mod tests {
             }
         }
         let mut s = session(Platform::Web);
-        s.set_input_held(true);
+        s.renderer_mut().painting_unready = true;
+        s.pen(event(&s, 1, PenPhase::Down, 1.0));
         let before = s.state.camera.clone();
         assert!(!s.scroll([400., 400.], [0., -40.], 1., true, false).unwrap().canvas_wake);
         assert_eq!(s.state.camera, before);
-        s.set_input_held(false);
+        s.pen(event(&s, 2, PenPhase::Cancel, 1.0));
         assert!(s.scroll([400., 400.], [0., -40.], 1., true, false).unwrap().canvas_wake);
     }
     #[test]
@@ -15040,11 +15031,11 @@ mod tests {
     fn camera_gestures_wait_for_paint_to_finish_without_reporting_an_error() {
         let mut s = session(Platform::Gtk);
         let before = s.state.camera.clone();
-        s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+        s.pen(event(&s, 1, PenPhase::Down, 1.));
         let change = s.gesture([500., 500.], [500., 500.], 1.25, 0.2).unwrap();
         assert!(!change.canvas_wake);
         assert_eq!(s.state.camera, before);
-        s.pen(event(&s, 2, PenPhase::Up, 0.)).unwrap();
+        s.pen(event(&s, 2, PenPhase::Up, 0.));
         s.frame(1, 1).unwrap();
         let change = s.gesture([500., 500.], [500., 500.], 1.25, 0.2).unwrap();
         assert!(change.canvas_wake);
@@ -15488,7 +15479,7 @@ mod tests {
         s.dispatch(UiAction::RestoreSettings{settings}).unwrap();
         s.dispatch(UiAction::SetBrushSize { value: 200.0 }).unwrap();
         let low = event(&s, 1, PenPhase::Down, 0.2);
-        s.pen(low).unwrap();
+        s.pen(low);
         s.frame(low.timestamp_ns, low.timestamp_ns).unwrap();
         let dabs = s.engine.backend().dabs;
         s.cursor_input(Some(low));
@@ -16917,7 +16908,7 @@ mod tests {
                     sequence += 1;
                     let mut sample = event(&s, sequence, phase, 1.);
                     sample.surface_position = Point { x: 300., y: 300. };
-                    s.pen(sample).unwrap();
+                    s.pen(sample);
                 }
                 assert!(
                     s.state.host_error.is_none(),
@@ -16945,7 +16936,7 @@ mod tests {
                 sequence += 1;
                 let mut sample = event(&s, sequence, phase, 1.);
                 sample.surface_position = Point { x, y };
-                s.pen(sample).unwrap();
+                s.pen(sample);
             }
             assert!(s.state.host_error.is_none());
             s.frame(sequence * 10_000_000, (sequence + 1) * 10_000_000)
@@ -16974,7 +16965,7 @@ mod tests {
             s.input_pending = false;
             let mut predicted = event(&s, 1, PenPhase::Move, 0.5);
             predicted.flags = SampleFlags::PREDICTED;
-            s.pen(predicted).unwrap();
+            s.pen(predicted);
             assert!(!s.input_pending);
             assert!(s.layer_interaction.path.is_empty());
             assert!(!s.eyedropper.busy());
@@ -17026,7 +17017,7 @@ mod tests {
                             } else {
                                 PenPhase::Move
                             };
-                            s.pen(last).unwrap();
+                            s.pen(last);
                             // Native prediction bends upward, making source
                             // selection distinguishable from extrapolation.
                             let predicted = PenEvent {
@@ -17039,7 +17030,7 @@ mod tests {
                                 flags: SampleFlags::PREDICTED,
                                 ..last
                             };
-                            s.pen(predicted).unwrap();
+                            s.pen(predicted);
                             s.renderer_mut().recorded_dabs.clear();
                             s.frame(last.timestamp_ns, predicted.timestamp_ns).unwrap();
                         }
@@ -17808,7 +17799,7 @@ mod tests {
                 .unwrap()
                 .enabled
         );
-        app.pen(event(&app, 1, PenPhase::Down, 0.2)).unwrap();
+        app.pen(event(&app, 1, PenPhase::Down, 0.2));
         assert!(!app.command(CommandId::AddLayer).enabled);
         assert!(app.dispatch(UiAction::SelectLayer { id: 1 }).is_err());
         let change = app.frame(10_000_000, 18_000_000).unwrap();
@@ -17851,12 +17842,12 @@ mod tests {
             app.engine.has_active_stroke(),
             "blocked actions preserve the stroke"
         );
-        app.pen(event(&app, 2, PenPhase::Move, 0.8)).unwrap();
+        app.pen(event(&app, 2, PenPhase::Move, 0.8));
         let change = app.frame(20_000_000, 28_000_000).unwrap();
         assert_eq!(change.regions, 0);
         assert!(change.canvas_wake);
         assert_eq!(app.state.commands, commands);
-        app.pen(event(&app, 3, PenPhase::Up, 0.5)).unwrap();
+        app.pen(event(&app, 3, PenPhase::Up, 0.5));
         let change = app.frame(30_000_000, 38_000_000).unwrap();
         assert_eq!(change.regions & regions::DOCUMENT, 0);
         let change = app.frame(62_000_000, 70_000_000).unwrap();
@@ -17894,10 +17885,10 @@ mod tests {
         invoke(&mut app, CommandId::Undo);
         assert!(app.command(CommandId::Redo).enabled);
         let commands = app.state.commands.clone();
-        app.pen(event(&app, 1, PenPhase::Down, 0.5)).unwrap();
+        app.pen(event(&app, 1, PenPhase::Down, 0.5));
         app.frame(10_000_000, 18_000_000).unwrap();
         assert_eq!(app.state.commands, commands);
-        app.pen(event(&app, 2, PenPhase::Cancel, 0.0)).unwrap();
+        app.pen(event(&app, 2, PenPhase::Cancel, 0.0));
         app.frame(20_000_000, 28_000_000).unwrap();
         assert!(
             app.engine

@@ -26,6 +26,7 @@ pub extern "system" fn Java_art_capycanvas_Native_exportPresets(
     request: JString,
     color: JString,
 ) -> jobjectArray {
+    crate::jni_entry!(env, {
     let result = (|| -> Result<_, ColorCallError> {
         let bytes = env.convert_byte_array(bytes).map_err(error)?;
         let mut library = layer_ui::ExportPresets::restore(&bytes);
@@ -51,18 +52,21 @@ pub extern "system" fn Java_art_capycanvas_Native_exportPresets(
         Ok(result.into_raw())
     })();
     color_or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_profileLibrary(
     mut env: JNIEnv, _: JClass, request: JString, bytes: JByteArray,
 ) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let result = (|| -> Result<_, ColorCallError> {
         let action: layer_ui::profile_library::ProfileLibraryAction = serde_json::from_str(&read(&mut env, &request)?).map_err(error)?;
         let bytes = env.convert_byte_array(bytes).map_err(error)?;
         Ok(env.new_string(serde_json::to_string(&action.execute(&bytes)?).map_err(error)?).map_err(error)?.into_raw())
     })();
     color_or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -72,6 +76,7 @@ pub extern "system" fn Java_art_capycanvas_Native_paletteFile(
     request: JString,
     bytes: JByteArray,
 ) -> jobjectArray {
+    crate::jni_entry!(env, {
     let result = (|| {
         let request = serde_json::from_str(&read(&mut env, &request)?).map_err(error)?;
         let bytes = env.convert_byte_array(bytes).map_err(error)?;
@@ -90,4 +95,5 @@ pub extern "system" fn Java_art_capycanvas_Native_paletteFile(
         Ok(result.into_raw())
     })();
     or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }

@@ -351,8 +351,7 @@ mod tests {
                 phase: PenPhase::Down,
                 tool: ToolKind::Mouse,
                 flags: SampleFlags::PRIMARY,
-            })
-            .unwrap();
+            });
         host.input(UiInput::CursorLeave).unwrap();
         let patch = read(&mut host);
         let changes = notice_paths(&patch);

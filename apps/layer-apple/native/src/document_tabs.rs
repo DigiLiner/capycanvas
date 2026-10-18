@@ -114,7 +114,7 @@ pub unsafe extern "C" fn capy_apple_document_close_commit(app: *mut CapyApple, t
         let mut job = task.0.lock().unwrap_or_else(|e| e.into_inner());
         let close = job.close.take().ok_or("The drawing close is unavailable")?;
         if accept {
-            let (activation, retired) = a.window.commit_close(&mut a.host, close, |_| {});
+            let (activation, retired) = a.window.commit_close(&mut a.host, close, |_| {})?;
             job.activation = Some(activation);
             job.retired = retired;
             a.document_retired();

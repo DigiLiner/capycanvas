@@ -1,5 +1,6 @@
 //! Hardware comparison of native commit presentation and concurrent backing.
 use super::*;
+use layer_render::CanvasRenderer;
 
 #[test]
 #[ignore = "private 120 Hz Wayland display and release hardware GPU benchmark"]

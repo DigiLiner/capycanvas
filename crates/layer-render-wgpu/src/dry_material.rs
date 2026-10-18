@@ -569,6 +569,13 @@ impl Reach {
         }
     }
 
+    pub fn of_dabs(dabs: &[layer_render::Dab]) -> Self {
+        Self {
+            coarse_tip: !dabs.is_empty() && !dabs.iter().any(|dab| (0..2).any(|i| 0.5 * (dab.radii[i] + dab.previous[i]) < FINE_TIP_RADIUS)),
+            varying_color: dabs.iter().any(|dab| dab.color_rgba_linear[..3] != dabs[0].color_rgba_linear[..3]),
+        }
+    }
+
     pub fn any_size(self) -> Self {
         Self { coarse_tip: true, ..self }
     }

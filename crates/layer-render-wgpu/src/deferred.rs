@@ -116,8 +116,12 @@ impl<T> Deferred<T> {
             let mode = CompileMode::Async;
             #[cfg(not(target_arch = "wasm32"))]
             let mode = CompileMode::Immediate;
-            self.0.factory.lock().unwrap().take().expect("resource recipe")(mode).immediate()
+            self.take_factory()(mode).immediate()
         })
+    }
+    fn take_factory(&self) -> Factory<T> {
+        let factory = self.0.factory.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        factory.expect("resource recipe")
     }
     /// Start inside the caller's error scopes, then await without borrowing the
     /// renderer. Only successful compilation publishes a typed pipeline handle.
@@ -133,7 +137,7 @@ impl<T> Deferred<T> {
         }
         use futures_util::FutureExt;
         Box::pin(self.0.preparation.get_or_init(|| {
-            let compilation = self.0.factory.lock().unwrap().take().expect("resource recipe")(CompileMode::Async);
+            let compilation = self.take_factory()(CompileMode::Async);
             let owner = Arc::downgrade(&self.0);
             async move {
                 let value = match compilation {

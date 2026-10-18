@@ -8,7 +8,7 @@ mod move_pixels_checks {
     }
     fn send(s: &mut UiSession<Recorder>, sequence: u64, phase: PenPhase, p: [f32; 2]) {
         let [x, y] = surface(s, p);
-        s.pen(PenEvent { surface_position: Point { x, y }, ..event(s, sequence, phase, 1.) }).unwrap();
+        s.pen(PenEvent { surface_position: Point { x, y }, ..event(s, sequence, phase, 1.) });
     }
     fn drag(s: &mut UiSession<Recorder>, from: [f32; 2], to: [f32; 2]) {
         send(s, 1, PenPhase::Down, from);

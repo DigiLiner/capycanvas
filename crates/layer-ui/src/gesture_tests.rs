@@ -19,9 +19,9 @@ fn tap(s: &mut UiSession<Recorder>, fingers: u64, start: u64, hold: u64) -> Inpu
 
 fn painted_session() -> UiSession<Recorder> {
     let mut s = session(Platform::Android);
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(4, 4).unwrap();
     assert!(s.command(CommandId::Undo).enabled);
     s
@@ -88,9 +88,9 @@ fn taps_yield_to_pens_strokes_and_the_picker() {
     finger(&mut s, 10, ContactPhase::Up, [300., 400.], 50);
     finger(&mut s, 11, ContactPhase::Up, [400., 400.], 60);
     assert_live_artwork_eq(s.engine.document(), &painted);
-    s.pen(event(&s, 10, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 10, PenPhase::Down, 1.));
     tap(&mut s, 2, 1000, 100);
-    s.pen(event(&s, 11, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 11, PenPhase::Up, 1.));
     s.frame(12, 12).unwrap();
     let stroked = s.engine.document().clone();
     assert_ne!(stroked.artwork.paint, painted.artwork.paint, "a stroke owns the canvas");
@@ -187,11 +187,11 @@ fn pen_buttons_are_opt_in_and_use_the_hold_lifecycle() {
     press(&mut s, PenButton::Secondary, false);
     assert!(s.pointer_contact_paints(PointerKind::Pen, PointerButton::Primary, [500., 500.]));
 
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
     press(&mut s, PenButton::Primary, true);
     assert!(painting_with(&s, preset), "a button change never splits the stroke");
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(4, 4).unwrap();
     assert!(sampling(&s));
     s.input(UiInput::Blur).unwrap();
@@ -239,11 +239,11 @@ fn stylus_actions_switch_to_the_eraser_or_the_previous_tool() {
     stylus(&mut s, StylusAction::SwitchPrevious);
     assert!(painting_with(&s, pen), "a held tool is not the previous tool");
 
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
     stylus(&mut s, StylusAction::SwitchEraser);
     assert!(painting_with(&s, pen), "a stroke keeps its tool");
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(4, 4).unwrap();
     assert!(s.command(CommandId::Eraser).selected, "the switch follows the stroke");
 
@@ -285,8 +285,8 @@ fn remote_and_gamepad_keys_share_canonical_names() {
     preference(&mut s, PreferenceAction::ConfirmShortcut { replace: false });
     key(&mut s, "gamepad_r1", false, false, false);
     s.dispatch(UiAction::CloseSettings).unwrap();
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Up, 1.));
     s.frame(3, 3).unwrap();
     let size = s.state.brush.diameter;
     let press = |s: &mut UiSession<Recorder>, name: &str, repeat: bool| {
@@ -341,16 +341,16 @@ fn stick_axes_navigate_with_dead_zones_and_stop_on_blur() {
     assert_eq!(s.state.camera, stopped);
     assert!(s.input(UiInput::Axes { pan: [2., 0.], zoom: 0. }).is_err());
     axes(&mut s, [1., 0.], 0.);
-    s.pen(event(&s, 5, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 5, PenPhase::Down, 1.));
     s.frame(3_000_000_000, 3_000_000_000).unwrap();
     s.frame(3_050_000_000, 3_050_000_000).unwrap();
     assert_eq!(s.state.camera.translation, stopped.translation, "a stroke keeps the view still");
 }
 
 fn stroke(s: &mut UiSession<Recorder>, first: u64) {
-    s.pen(event(s, first, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(s, first + 1, PenPhase::Move, 1.)).unwrap();
-    s.pen(event(s, first + 2, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(s, first, PenPhase::Down, 1.));
+    s.pen(event(s, first + 1, PenPhase::Move, 1.));
+    s.pen(event(s, first + 2, PenPhase::Up, 1.));
     s.frame(first + 3, first + 3).unwrap();
 }
 
@@ -388,9 +388,9 @@ fn erasing_under_alpha_lock_is_refused_with_a_notice() {
     invoke(&mut s, CommandId::Pen);
     let mut down = event(&s, 10, PenPhase::Down, 1.);
     down.tool = ToolKind::Eraser;
-    s.pen(down).unwrap();
+    s.pen(down);
     assert_eq!(s.engine.stroke_refusal(&down), Some(layer_engine::StrokeRefusal::AlphaLocked));
-    s.pen(PenEvent { phase: PenPhase::Up, ..down }).unwrap();
+    s.pen(PenEvent { phase: PenPhase::Up, ..down });
     s.frame(11, 11).unwrap();
     assert_eq!(s.engine.document().revision, revision, "a pen's eraser end is refused too");
     stroke(&mut s, 20);
@@ -496,16 +496,16 @@ fn a_fill_click_without_content_raises_a_notice_at_release_but_not_outside_the_c
     let mut s = session(Platform::Gtk);
     invoke(&mut s, CommandId::Fill);
     layer(&mut s, LayerAction::New { group: true, clipped: false });
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
     assert_eq!(s.state.notice, None);
-    s.pen(event(&s, 1, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Up, 1.));
     let change = s.frame(2, 2).unwrap();
     assert_ne!(change.regions & regions::HOST, 0);
     assert_eq!(notice_text(&s), Some("A group has no pixels of its own. Select a layer inside it."));
     assert!(s.renderer_mut().region_requests.is_empty());
     let outside = PenEvent { surface_position: Point { x: -500., y: -500. }, ..event(&s, 3, PenPhase::Down, 1.) };
-    s.pen(outside).unwrap();
-    s.pen(PenEvent { phase: PenPhase::Up, ..outside }).unwrap();
+    s.pen(outside);
+    s.pen(PenEvent { phase: PenPhase::Up, ..outside });
     s.frame(4, 4).unwrap();
     assert_eq!(s.state.notice, None, "a click outside the canvas stays silent");
 }

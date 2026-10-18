@@ -230,10 +230,10 @@ mod tonal_checks {
         s.interaction.modifiers.shift = true;
         let mut e = event(&s, 1, PenPhase::Down, 1.);
         e.surface_position = on_surface(&s, Point { x: 80., y: 80. });
-        s.pen(e).unwrap();
+        s.pen(e);
         s.interaction.modifiers = Default::default();
         e.phase = PenPhase::Up;
-        s.pen(e).unwrap();
+        s.pen(e);
         reply(
             &mut s,
             Some(TonalSample {

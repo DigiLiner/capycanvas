@@ -55,7 +55,7 @@ fn native_stroke_recording() {
                 tool: ToolKind::Pen,
                 flags: SampleFlags::PRIMARY,
             };
-            g.session.pen(event).unwrap();
+            g.session.pen(event);
         }
         w.wake();
         pump(12);

@@ -84,3 +84,37 @@ fn native_localization_callback_registration() {
     }
     driver.finish();
 }
+
+#[test]
+#[ignore = "640px isolated compositor, --native-test=native_header_overflow_opens_while_a_photo_import_prepares"]
+fn native_header_overflow_opens_while_a_photo_import_prepares() {
+    let d = Driver::new("art.capycanvas.HeaderOverflowImport");
+    assert!(d.w.surface.width() <= 800, "use LAYER_MOTION_VIEWPORT=640x600");
+    let zone = HeaderSize::ALL.into_iter().find_map(|size| {
+        d.w.dispatch(HeaderAction::SetSize { size }.action());
+        pump(240);
+        (0..3).find(|i| d.named(&format!("header-overflow-{i}")).is_mapped())
+    }).expect("a mapped header overflow button");
+    let button = d.named(&format!("header-overflow-{zone}")).downcast::<gtk::MenuButton>().unwrap();
+    let mut bytes = Vec::new();
+    let mut encoder = png::Encoder::new(&mut bytes, 640, 480);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.write_header().unwrap().write_image_data(&vec![180; 640 * 480 * 4]).unwrap();
+    let layer_ui::ImportOutcome::Editable(imported) = layer_ui::read_import(
+        std::io::Cursor::new(bytes), layer_ui::ImportIntent::Open, Default::default(),
+        layer_ui::photo_document_names("Overflow.png", &d.w.localization()), Default::default(), Default::default(),
+        &std::sync::atomic::AtomicBool::new(false),
+    ).unwrap() else { panic!("editable photo") };
+    let completed = Rc::new(RefCell::new(None));
+    glib::spawn_future_local(glib::clone!(#[strong(rename_to = w)] d.w, #[strong] completed, async move {
+        *completed.borrow_mut() = Some(w.documents.open_imported(&w, imported, None).await);
+    }));
+    until(|| d.w.gpu.borrow().is_none(), "the open parks the canvas while the photo prepares");
+    button.popup();
+    assert!(button.popover().is_some());
+    button.popdown();
+    until(|| completed.borrow().is_some(), "the photo opens");
+    assert_eq!(completed.borrow_mut().take().unwrap(), Ok(()));
+    assert!(d.w.gpu.borrow().is_some());
+    d.finish();
+}

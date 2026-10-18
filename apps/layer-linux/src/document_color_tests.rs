@@ -361,8 +361,7 @@ fn native_document_color_assignment_conversion_depth_history_and_copy() {
                     device_id: 94,
                     timestamp_ns: now + i as u64,
                     ..pen_event(&camera, [x, 110.], phase, now + i as u64)
-                })
-                .unwrap();
+                });
         }
         session.frame(now + 2, now + 2).unwrap();
     }

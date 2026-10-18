@@ -603,7 +603,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     /// the host captured it.
     pub(super) fn finish_cut(&mut self, cut: PendingCut) {
         let document = self.engine.document();
-        if cut.epoch != self.state.document_file.epoch
+        if self.rendering_suspended
+            || cut.epoch != self.state.document_file.epoch
             || cut.revision != document.revision
             || Some(cut.layer) != document.working.occurrence
             || cut.target != document.working.target
@@ -712,6 +713,7 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub fn paste_clip(&mut self, clip: &PixelClip, mode: PasteMode) -> Result<(), String> {
         if mode == PasteMode::NewImage { return Err("Open the clipboard as a new drawing".into()); }
+        self.require_painting()?;
         refused(self.paste_refusal())?;
         let position = self.clip_position(clip, mode);
         if matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_))) {
@@ -743,6 +745,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         context: &ImagePlacementContext,
     ) -> Result<(), String> {
         self.validate_image_placement(context)?;
+        self.require_painting()?;
         refused(self.paste_refusal())?;
         if mode != PasteMode::NewImage && matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_))) {
             let sources = sources.into_iter().map(|(_, source)| {

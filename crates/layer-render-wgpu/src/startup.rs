@@ -138,7 +138,12 @@ impl Requirements {
         compiler.require(&self.render, priority);
         compiler.require(&self.compute, priority);
     }
-    fn style(
+    pub(super) fn require(&self, compiler: &Compiler, priority: u8) -> bool {
+        let ready = compiler.require(&self.render, priority) & compiler.require(&self.compute, priority);
+        if !ready { compiler.start(); }
+        ready
+    }
+    pub(super) fn style(
         &mut self,
         r: &WgpuRasterizer,
         style: &layer_render::DabStyle,
@@ -208,7 +213,7 @@ impl Requirements {
 }
 pub(super) struct Startup {
     pub compiler: Compiler,
-    masks: builtin_masks::Masks,
+    pub(super) masks: builtin_masks::Masks,
     document_key: Option<ShaderDocument>,
     brush: Option<ShaderBrushKey>,
     transform: bool,
@@ -220,6 +225,7 @@ pub(super) struct Startup {
     effects_ready: bool,
     pub(super) host_catalog_pending: bool,
     pub(super) finished: bool,
+    pub(super) brush_ready: bool,
 }
 #[derive(PartialEq, Eq)]
 struct ShaderBrushKey {
@@ -282,6 +288,7 @@ impl Startup {
             effects_ready: false,
             host_catalog_pending: false,
             finished: false,
+            brush_ready: false,
         })
     }
     /// Pipelines a selected tool draws with, compiled before pen-down.
@@ -365,7 +372,19 @@ impl WgpuRasterizer {
         let Some(mut startup) = self.startup.take() else {
             return Ok(());
         };
+        let prepared = self.prepare_startup_into(&mut startup, document, brush, transform);
+        self.startup = Some(startup);
+        prepared
+    }
+    fn prepare_startup_into(
+        &mut self,
+        startup: &mut Startup,
+        document: &Document,
+        brush: &BrushSnapshot,
+        transform: bool,
+    ) -> Result<(), GpuRasterError> {
         startup.finished = false;
+        startup.brush_ready = false;
         if startup.document_key.as_ref().is_none_or(|key| !key.matches(document)) {
             let shader = ShaderDocument::new(document);
             let mut required = Requirements::default();
@@ -504,7 +523,6 @@ impl WgpuRasterizer {
         startup.brush = Some(ShaderBrushKey::new(document, brush));
         startup.transform = transform;
         startup.compiler.start();
-        self.startup = Some(startup);
         Ok(())
     }
     pub fn poll_startup(&mut self) -> Result<StartupProgress, GpuRasterError> {
@@ -556,6 +574,7 @@ impl WgpuRasterizer {
             canvas_ready && startup.current.ready() && startup.masks.ready_through(BRUSH) && self.papers.ready_through(BRUSH);
         #[cfg(target_arch = "wasm32")]
         let brush_ready = brush_ready && startup.compiler.ready_through(BRUSH);
+        startup.brush_ready = brush_ready;
         startup.finished = brush_ready
             && !startup.host_catalog_pending
             && startup.compiler.pending() == 0;
@@ -643,6 +662,64 @@ mod tests {
             BrushAccumulation::Uniform
         };
         assert!(key != ShaderBrushKey::new(&document, &brush));
+    }
+    #[test]
+    fn readiness_waits_for_every_batch_texture_and_pipeline() {
+        let color = layer_core::color::DocumentColor::default();
+        let reference = WgpuRasterizer::new_native_headless(color).unwrap();
+        let mut renderer = crate::test_support::staged_renderer(&reference, color);
+        let mut document = Document::new(layer_core::authored::PortableId::random(), 128, 128, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+        renderer.prepare_startup(&document, &layer_core::default_brush(layer_core::DefaultBrushPreset::GPen), false).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("G-Pen"));
+        document.set_paper_texture(layer_core::paper::built_in_paper("rough").unwrap().texture.clone());
+        let style = brush_style(&document, &layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil), StrokeTool::Brush);
+        let damage = layer_core::Rect { min: layer_core::Point { x: 1., y: 1. }, max: layer_core::Point { x: 12., y: 12. } };
+        let batches = [crate::test_support::dab_batch(document.drawing_target().unwrap(), style, damage)];
+        let packet = layer_render::FramePacket { dab_batches: &batches, ..crate::test_support::packet(document.scene(), [128; 2]) };
+        assert!(!renderer.raster_dependencies_ready(packet, None));
+        while !renderer.raster_dependencies_ready(packet, None) {
+            renderer.poll_startup().unwrap();
+            assert!(std::time::Instant::now() < deadline, "the new paper and Pencil pipelines prepare");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        renderer.validate_and_prepare_brush_resources(&batches).unwrap();
+    }
+    #[test]
+    fn a_style_change_the_brush_key_ignores_needs_no_new_preparation() {
+        let color = layer_core::color::DocumentColor::default();
+        let reference = WgpuRasterizer::new_native_headless(color).unwrap();
+        let mut renderer = crate::test_support::staged_renderer(&reference, color);
+        let document = Document::new(layer_core::authored::PortableId::random(), 128, 128, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+        let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        renderer.prepare_startup(&document, &brush, false).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("Pencil"));
+        brush.opacity *= 0.5;
+        assert!(!renderer.startup_needs_update(&document, &brush, false));
+        let style = brush_style(&document, &brush, StrokeTool::Brush);
+        assert!(!renderer.startup.as_ref().unwrap().current.covers(&style));
+        let damage = layer_core::Rect { min: layer_core::Point { x: 1., y: 1. }, max: layer_core::Point { x: 12., y: 12. } };
+        let batches = [crate::test_support::dab_batch(document.drawing_target().unwrap(), style, damage)];
+        let packet = layer_render::FramePacket { dab_batches: &batches, ..crate::test_support::packet(document.scene(), [128; 2]) };
+        assert!(renderer.raster_dependencies_ready(packet, None), "the prepared brush pipelines and paper serve the changed opacity");
+    }
+    #[test]
+    fn a_failed_paper_preparation_keeps_the_staged_startup() {
+        use layer_core::color::source::{SourceBuilder, SourceChannels, SourceInterpretation};
+        let color = layer_core::color::DocumentColor::default();
+        let reference = WgpuRasterizer::new_native_headless(color).unwrap();
+        let mut renderer = crate::test_support::staged_renderer(&reference, color);
+        let mut document = Document::new(layer_core::authored::PortableId::random(), 64, 64, layer_core::DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
+        let interpretation = SourceInterpretation { channels: SourceChannels::Gray, depth: layer_core::color::SampleDepth::U8,
+            profile: Default::default(), profile_assumed: false };
+        let mut builder = SourceBuilder::new([4, 4], interpretation, 1 << 20).unwrap();
+        for _ in 0..4 { builder.push_row(&[128; 4]).unwrap(); }
+        document.set_paper_texture(layer_core::TextureSource::Image(layer_core::Image::new(Arc::new(builder.finish().unwrap()))));
+        let brush = layer_core::default_brush(layer_core::DefaultBrushPreset::Pencil);
+        assert!(renderer.prepare_startup(&document, &brush, false).is_err());
+        assert!(renderer.startup.is_some());
+        assert!(!renderer.poll_startup().unwrap().complete);
     }
     #[test]
     fn fill_selection_prepares_the_resolved_paint_target() {

@@ -26,17 +26,17 @@ fn palette_history_tracks_completed_paint_not_selection_preview_cancel_or_erase(
     })
     .unwrap();
     assert!(s.state.color_library.history.is_empty());
-    s.pen(event(&s, 1, PenPhase::Down, 0.8)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 0.8));
     s.frame(10_000_000, 18_000_000).unwrap();
     assert!(
         s.state.color_library.history.is_empty(),
         "live preview is not history"
     );
-    s.pen(event(&s, 2, PenPhase::Cancel, 0.)).unwrap();
+    s.pen(event(&s, 2, PenPhase::Cancel, 0.));
     s.frame(20_000_000, 28_000_000).unwrap();
     assert!(s.state.color_library.history.is_empty());
-    s.pen(event(&s, 3, PenPhase::Down, 0.8)).unwrap();
-    s.pen(event(&s, 4, PenPhase::Up, 0.)).unwrap();
+    s.pen(event(&s, 3, PenPhase::Down, 0.8));
+    s.pen(event(&s, 4, PenPhase::Up, 0.));
     s.frame(40_000_000, 48_000_000).unwrap();
     assert_eq!(s.state.color_library.history, [color]);
     invoke(&mut s, CommandId::Undo);
@@ -52,8 +52,8 @@ fn palette_history_tracks_completed_paint_not_selection_preview_cancel_or_erase(
     })
     .unwrap();
     invoke(&mut s, CommandId::Eraser);
-    s.pen(event(&s, 5, PenPhase::Down, 0.8)).unwrap();
-    s.pen(event(&s, 6, PenPhase::Up, 0.)).unwrap();
+    s.pen(event(&s, 5, PenPhase::Down, 0.8));
+    s.pen(event(&s, 6, PenPhase::Up, 0.));
     s.frame(60_000_000, 68_000_000).unwrap();
     assert_eq!(s.state.color_library.history, [color]);
 }

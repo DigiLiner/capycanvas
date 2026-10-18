@@ -32,6 +32,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentTabs(
     handle: jlong,
     request: JString,
 ) -> jstring {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let request: TabRequest =
             serde_json::from_str(&read(&mut env, &request)?).map_err(error)?;
@@ -39,6 +40,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentTabs(
         Ok(a.window.request(&mut a.host, request)?.to_string())
     })();
     string(&mut env, result)
+    })
 }
 /// Render owner: select atomically, then transfer retired resources to one job.
 #[unsafe(no_mangle)]
@@ -49,6 +51,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSwitch(
     id: jlong,
     close: jni::sys::jboolean,
 ) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let options = a
@@ -65,32 +68,41 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSwitch(
         Ok(Box::into_raw(Box::new(activation)) as jlong)
     })();
     or_throw(&mut env, result, 0)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentPrepareClose(mut env: JNIEnv, _: JClass, handle: jlong) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe {app(handle)};
         let options = a.host.renderer_options(Some(a.cache_directory.clone().into()));
         a.window.prepare_close(&mut a.host, options).map(|job|Box::into_raw(Box::new(job)) as jlong)
     })();
     or_throw(&mut env,result,0)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_documentCommitClose(_: JNIEnv, _: JClass, handle: jlong, job: jlong) -> jlong {
+pub extern "system" fn Java_art_capycanvas_Native_documentCommitClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) -> jlong {
+    crate::jni_entry!(env, handle, {
     let a = unsafe {app(handle)};
     let prepared = *unsafe {Box::from_raw(job as *mut PreparedClose)};
-    let (activation,_) = a.window.commit_close(&mut a.host,prepared,|_|{});
-    a.document_retired();a.blank_presented=false;
-    Box::into_raw(Box::new(activation)) as jlong
+    let result = a.window.commit_close(&mut a.host,prepared,|_|{}).map(|(activation,_)| {
+        a.document_retired();a.blank_presented=false;
+        Box::into_raw(Box::new(activation)) as jlong
+    });
+    or_throw(&mut env,result,0)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentCancelPreparedClose(mut env: JNIEnv, _: JClass, handle: jlong, job: jlong) {
+    crate::jni_entry!(env, handle, {
     let a = unsafe {app(handle)};
     let prepared = *unsafe {Box::from_raw(job as *mut PreparedClose)};
     fail(&mut env,a.window.cancel_close(&mut a.host,prepared))
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentResumeWork(
@@ -98,8 +110,10 @@ pub extern "system" fn Java_art_capycanvas_Native_documentResumeWork(
     _: JClass,
     handle: jlong,
 ) {
+    crate::jni_entry!(env, {
     let job = unsafe { &mut *(handle as *mut Activation) };
     fail(&mut env, job.work());
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentResume(
@@ -108,13 +122,12 @@ pub extern "system" fn Java_art_capycanvas_Native_documentResume(
     handle: jlong,
     task: jlong,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let job = unsafe { &mut *(task as *mut Activation) };
         if let Some(gpu) = a.window.resume(&a.host, job)? {
-            let previous = a.host.session.state().revision;
-            let (_, change) = a.host.session.replace_renderer(Renderer(Some(gpu)))?;
-            a.host.apply_change(previous, change);
+            a.host.replace_renderer(Renderer(Some(gpu)))?;
             a.project_adopted();
             a.host.startup = Default::default();
             a.host.error = None;
@@ -123,29 +136,34 @@ pub extern "system" fn Java_art_capycanvas_Native_documentResume(
         Ok(())
     })();
     fail(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentResumeFree(
-    _: JNIEnv,
+    mut env: JNIEnv,
     _: JClass,
     handle: jlong,
 ) {
+    crate::jni_entry!(env, {
     if handle != 0 {
         drop(unsafe { Box::from_raw(handle as *mut Activation) })
     }
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentSpillTask(
-    _: JNIEnv,
+    mut env: JNIEnv,
     _: JClass,
     handle: jlong,
 ) -> jlong {
+    crate::jni_entry!(env, handle, {
     let a = unsafe { app(handle) };
     a.window
         .documents
         .spill_candidate()
         .map(|tiles| Box::into_raw(Box::new(tiles)) as jlong)
         .unwrap_or(0)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentSpillWork(
@@ -153,10 +171,12 @@ pub extern "system" fn Java_art_capycanvas_Native_documentSpillWork(
     _: JClass,
     handle: jlong,
 ) {
+    crate::jni_entry!(env, {
     let tiles = unsafe { Box::from_raw(handle as *mut layer_core::raster_storage::RetainedTiles) };
     fail(
         &mut env,
         layer_core::temp_files::directory()
             .and_then(|directory| layer_core::raster_storage::spill_to_directory(&tiles, directory)),
     );
+    })
 }

@@ -447,7 +447,7 @@ fn refresh_commands_preserves_unchanged_availability_in_each_edit_state() {
     invoke(&mut s, CommandId::ScaleRotate);
     unchanged(&mut s);
     invoke(&mut s, CommandId::CancelTransform);
-    s.pen(event(&s, 1, PenPhase::Down, 0.5)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 0.5));
     s.frame(2, 2).unwrap();
     assert!(s.require_idle().is_err());
     unchanged(&mut s);
@@ -496,8 +496,8 @@ fn disabled_reasons_stay_steady_during_a_canvas_contact() {
     let before = s.state.commands.clone();
     let undo = CommandId::ALL.iter().position(|c| *c == CommandId::Undo).unwrap();
     assert_eq!(before[undo].disabled_reason.as_deref(), Some("Nothing to undo"));
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
     s.frame(2, 2).unwrap();
     assert!(s.require_idle().is_err());
     assert_eq!(
@@ -509,7 +509,7 @@ fn disabled_reasons_stay_steady_during_a_canvas_contact() {
         assert_eq!(published.enabled, previous.enabled, "{id:?}");
         assert_eq!(published.disabled_reason, previous.disabled_reason, "{id:?}");
     }
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(3, 3).unwrap();
     assert!(!s.state.commands[undo].enabled);
     s.frame(62_000_000, 62_000_000).unwrap();

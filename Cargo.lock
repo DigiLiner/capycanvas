@@ -1525,6 +1525,7 @@ dependencies = [
  "sha2 0.10.9",
  "unic-langid",
  "unicode-normalization",
+ "web-time",
 ]
 
 [[package]]

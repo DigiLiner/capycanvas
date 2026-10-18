@@ -388,7 +388,7 @@ impl Header {
         w.window.add_controller(keys);
     }
     pub fn refresh(&self, w: &Rc<Workspace>, state: &UiState) {
-        let view = w.gpu.borrow().as_ref().unwrap().session.header_view_with(false);
+        let Some(view) = w.gpu.borrow().as_ref().map(|g| g.session.header_view_with(false)) else { return; };
         let projected = state.workspace.layout.header.projected_for(Platform::Gtk);
         let model = &projected;
         let editing = state.customization.header_editing;
@@ -503,7 +503,7 @@ impl Header {
         for item in self.items.borrow().iter() {
             let projected = view.items.iter().find(|view| view.id == item.entry.id);
             let label = projected.map(|view| view.label.clone())
-                .unwrap_or_else(|| w.gpu.borrow().as_ref().unwrap().session.header_item_label(item.entry.item));
+                .unwrap_or_else(|| w.gpu.borrow().as_ref().map(|g| g.session.header_item_label(item.entry.item)).unwrap_or_default());
             item.root.update_property(&[gtk::accessible::Property::Label(&label)]);
             if let Some(placeholder) = &item.placeholder { placeholder.set_label(&label); }
             if let Some(grip) = &item.grip {
@@ -530,7 +530,10 @@ impl Header {
                     } else { gtk::AccessibleTristate::False })]);
                 }
                 if let HeaderItem::Tool { control: control @ (ToolbarControl::ColorPicker | ToolbarControl::Command { command: CommandId::Eyedropper }) } = item.entry.item {
-                    button.set_tooltip_text(Some(&w.gpu.borrow().as_ref().unwrap().session.color_picker_button_label(control)));
+                    let label = w.gpu.borrow().as_ref().map(|g| g.session.color_picker_button_label(control));
+                    if let Some(label) = label {
+                        button.set_tooltip_text(Some(&label));
+                    }
                 }
                 if let HeaderItem::Tool { control } = item.entry.item
                     && let Some(image) = customization::tool_button_content(button).and_downcast::<gtk::Image>()
@@ -620,7 +623,8 @@ impl Header {
         root.set_widget_name(&format!("header-item-{}", entry.id));
         root.add_css_class("header-item");
         root.set_focusable(editing);
-        root.update_property(&[gtk::accessible::Property::Label(&w.gpu.borrow().as_ref().unwrap().session.header_item_label(entry.item))]);
+        let label = w.gpu.borrow().as_ref().map(|g| g.session.header_item_label(entry.item)).unwrap_or_default();
+        root.update_property(&[gtk::accessible::Property::Label(&label)]);
         let mut button = None;
         let mut compact = None;
         let mut placeholder_label = None;
@@ -639,7 +643,7 @@ impl Header {
                 let b = gtk::Button::new();
                 b.add_css_class("flat");
                 b.add_css_class("header-tool");
-                b.set_tooltip_text(Some(&w.gpu.borrow().as_ref().unwrap().session.header_item_label(entry.item)));
+                b.set_tooltip_text(Some(&label));
                 let icon = match entry.item {
                     HeaderItem::Tool { control } => control.icon(),
                     HeaderItem::Settings => "settings",
@@ -775,7 +779,7 @@ impl Header {
             stack.set_hhomogeneous(false);
             stack.set_vhomogeneous(false);
             stack.add_named(&content, Some("value"));
-            let placeholder = gtk::Label::new(Some(&w.gpu.borrow().as_ref().unwrap().session.header_item_label(entry.item)));
+            let placeholder = gtk::Label::new(Some(&label));
             stack.add_named(&placeholder, Some("placeholder"));
             placeholder_label = Some(placeholder);
             stack.set_visible_child_name(if content.is_visible() {
@@ -1153,7 +1157,7 @@ impl Header {
         let popover = gtk::Popover::new();
         popover.set_widget_name("header-overflow-popup");
         let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        let view = w.gpu.borrow().as_ref().unwrap().session.header_view_with(false);
+        let Some(view) = w.gpu.borrow().as_ref().map(|g| g.session.header_view_with(false)) else { return popover; };
         if let Some(model) = self.model.borrow().as_ref() {
             for id in &self.geometry.borrow().hidden[zone] {
                 let Ok(entry) = model.entry(*id) else {
@@ -1161,7 +1165,7 @@ impl Header {
                 };
                 let projected = view.items.iter().find(|view| view.id == entry.id);
                 let label = projected.map(|view| view.label.clone())
-                    .unwrap_or_else(|| w.gpu.borrow().as_ref().unwrap().session.header_item_label(entry.item));
+                    .unwrap_or_else(|| w.gpu.borrow().as_ref().map(|g| g.session.header_item_label(entry.item)).unwrap_or_default());
                 let button = gtk::Button::with_label(&label);
                 button.set_widget_name(&format!("header-overflow-item-{id}"));
                 if let HeaderItem::Tool { control } = entry.item

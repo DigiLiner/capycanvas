@@ -937,8 +937,7 @@ fn native_document_tabs_immediate_stroke_and_undo() {
                         timestamp_ns: now + i as u64,
                         pressure: 0.7,
                         ..pen_event(&camera, [x, 120.], phase, now + i as u64)
-                    })
-                    .unwrap();
+                    });
             }
             if undo {
                 // Submit, then immediately move its still-pending capture to redo.

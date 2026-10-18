@@ -83,8 +83,8 @@ fn krita_keymap_samples_with_ctrl_without_breaking_ctrl_chords() {
     s.dispatch(UiAction::Invoke { command: CommandId::KeyboardShortcuts }).unwrap();
     preference(&mut s, PreferenceAction::SelectKeymap { id: "krita".into() });
     s.dispatch(UiAction::CloseSettings).unwrap();
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Up, 1.));
     s.frame(3, 3).unwrap();
     let preset = s.state.brush.preset;
     held_key(&mut s, "Control_L", true, Modifiers::default());

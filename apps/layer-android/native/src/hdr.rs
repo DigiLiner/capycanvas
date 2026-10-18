@@ -14,6 +14,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofControl(
     handle: jlong,
     action: JString,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| -> Result<_, ColorCallError> {
         let action = serde_json::from_str(&read(&mut env, &action)?).map_err(error)?;
         let a = unsafe { app(handle) };
@@ -23,6 +24,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofControl(
         Ok(())
     })();
     color_or_throw(&mut env, result, ())
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_toneStatus(
@@ -30,6 +32,7 @@ pub extern "system" fn Java_art_capycanvas_Native_toneStatus(
     _: JClass,
     handle: jlong,
 ) -> jstring {
+    crate::jni_entry!(env, handle, {
     let a = unsafe { app(handle) };
     let changed = a.tick_tone() | a.screen_tick();
     let s = &a.host.session;
@@ -45,6 +48,7 @@ pub extern "system" fn Java_art_capycanvas_Native_toneStatus(
         status[key] = value;
     }
     string(&mut env, Ok(status.to_string()))
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -53,9 +57,11 @@ pub extern "system" fn Java_art_capycanvas_Native_proofTexture(
     _: JClass,
     edge: jint,
 ) -> jni::sys::jintArray {
+    crate::jni_entry!(env, {
     let bytes = layer_ui::proof_panel::sdr_direction_texture(edge.clamp(1, 512) as u32);
     let result = argb_array(&mut env, &bytes);
     or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -66,6 +72,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorFieldMapped(
     state: JString,
     rendition: JString,
 ) -> jni::sys::jintArray {
+    crate::jni_entry!(env, {
     let result = (|| {
         if !(1..=2048).contains(&size) {
             return Err("Invalid picker size".into());
@@ -80,4 +87,5 @@ pub extern "system" fn Java_art_capycanvas_Native_colorFieldMapped(
         argb_array(&mut env, &bytes)
     })();
     or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }

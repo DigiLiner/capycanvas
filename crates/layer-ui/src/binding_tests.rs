@@ -67,8 +67,8 @@ fn mode_keys_toggle_on_tap_and_last_only_while_held_in_use() {
     held_key(&mut s, "t", false, Modifiers::default());
     assert!(!s.state.colors.transparent(), "and another turns it off");
     held_key(&mut s, "t", true, Modifiers::default());
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Up, 1.));
     held_key(&mut s, "t", false, Modifiers::default());
     s.frame(3, 3).unwrap();
     assert!(!s.state.colors.transparent(), "held while drawing, it returns on release");
@@ -237,9 +237,9 @@ fn the_eraser_end_uses_its_own_tool_while_near_the_tablet() {
     s.cursor_input(None);
     s.frame(2, 2).unwrap();
     assert!(painting_with(&s, preset), "and returns when it leaves");
-    s.pen(eraser(&s, 3, PenPhase::Down)).unwrap();
+    s.pen(eraser(&s, 3, PenPhase::Down));
     assert_eq!(Some(s.state.brush.tool), CommandId::Airbrush.paint_tool(), "a direct touch-down switches before painting");
-    s.pen(eraser(&s, 4, PenPhase::Up)).unwrap();
+    s.pen(eraser(&s, 4, PenPhase::Up));
     s.cursor_input(Some(event(&s, 5, PenPhase::Hover, 1.)));
     s.frame(5, 5).unwrap();
     assert!(painting_with(&s, preset), "the pen tip brings back the previous tool");
@@ -277,9 +277,9 @@ fn pen_buttons_choose_hold_or_one_shot_actions_per_kind_of_tool() {
     assert!(sampling(&s), "a tool lasts while the button is held");
     press(&mut s, false);
     assert!(painting_with(&s, preset));
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(4, 4).unwrap();
     let painted = s.engine.document().clone();
     invoke(&mut s, CommandId::Lasso);

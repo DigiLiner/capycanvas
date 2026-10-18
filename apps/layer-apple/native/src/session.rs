@@ -357,7 +357,7 @@ pub unsafe extern "C" fn capy_session_work(task: *mut CapySessionTask, observe: 
         match result {
             Ok(Ok(())) => 0,
             error => {
-                let message = match error { Ok(Err(e)) => e, Err(payload) => panic_diagnostic(payload), Ok(Ok(())) => unreachable!() };
+                let message = match error { Ok(Err(e)) => e, Err(payload) => layer_host::panic_diagnostic(&*payload), Ok(Ok(())) => unreachable!() };
                 job.error = CString::new(message.replace('\0', " ")).ok(); -1
             }
         }

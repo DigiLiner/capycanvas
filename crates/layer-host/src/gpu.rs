@@ -80,6 +80,13 @@ pub fn admit_adapter(localization: &layer_ui::Localizer, adapter: &wgpu::Adapter
     unsupported_adapter(adapter, limits).map_or(Ok(()), |cause| Err(layer_ui::gpu_unsupported(localization, &cause)))
 }
 
+pub async fn request_device(adapter: &wgpu::Adapter, descriptor: &wgpu::DeviceDescriptor<'_>)
+    -> Result<(wgpu::Device, wgpu::Queue, DeviceWatch), wgpu::RequestDeviceError> {
+    let (device, queue) = adapter.request_device(descriptor).await?;
+    let watch = DeviceWatch::observe(&device);
+    Ok((device, queue, watch))
+}
+
 #[derive(Clone, Default)]
 pub struct DeviceWatch {
     lost: Arc<OnceLock<String>>,

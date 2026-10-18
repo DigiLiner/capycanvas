@@ -121,10 +121,11 @@ enum Completed {
 #[derive(Default)]
 struct Mailbox {
     pending: Option<Job>,
+    running: bool,
     completed: Option<Result<Completed, String>>,
     retired: Vec<Box<UiSession<Renderer>>>,
     retired_renderer: Vec<Renderer>,
-    retired_workflow: Option<Box<crate::document_workflows::Task>>,
+    retired_workflows: Vec<crate::document_workflows::Task>,
 }
 #[derive(Default)]
 struct Shared {
@@ -151,16 +152,18 @@ impl Worker {
                         while mailbox.pending.is_none()
                             && mailbox.retired.is_empty()
                             && mailbox.retired_renderer.is_empty()
-                            && mailbox.retired_workflow.is_none()
+                            && mailbox.retired_workflows.is_empty()
                             && !state.stopping.load(Ordering::Acquire)
                         {
                             mailbox = state.ready.wait(mailbox).unwrap();
                         }
                         let stopping = state.stopping.load(Ordering::Acquire);
+                        let job = mailbox.pending.take();
+                        mailbox.running = job.is_some() && !stopping;
                         (
-                            mailbox.pending.take(),
+                            job,
                             std::mem::take(&mut mailbox.retired),
-                            mailbox.retired_workflow.take(),
+                            std::mem::take(&mut mailbox.retired_workflows),
                             std::mem::take(&mut mailbox.retired_renderer),
                             stopping,
                             if stopping {
@@ -182,7 +185,10 @@ impl Worker {
                     let Some(job) = job else { continue };
                     let result = catch_unwind(AssertUnwindSafe(|| execute(job, &state.stopping)))
                         .unwrap_or_else(|_| Err("Document worker failed".into()));
-                    state.mailbox.lock().unwrap().completed = Some(result);
+                    let mut mailbox = state.mailbox.lock().unwrap();
+                    mailbox.completed = Some(result);
+                    mailbox.running = false;
+                    drop(mailbox);
                     wake();
                 }
             })
@@ -192,11 +198,14 @@ impl Worker {
             thread: Some(thread),
         })
     }
-    fn submit(&self, job: Job) {
+    fn submit(&self, job: Job) -> Result<(), String> {
         let mut mailbox = self.shared.mailbox.lock().unwrap();
-        assert!(mailbox.pending.is_none() && mailbox.completed.is_none());
+        if mailbox.pending.is_some() || mailbox.running || mailbox.completed.is_some() {
+            return Err("The document worker is busy".into());
+        }
         mailbox.pending = Some(job);
         self.shared.ready.notify_one();
+        Ok(())
     }
     fn take(&self) -> Option<Result<Completed, String>> {
         self.shared.mailbox.lock().unwrap().completed.take()
@@ -214,8 +223,7 @@ impl Worker {
     }
     fn retire_workflow(&self, task: Box<crate::document_workflows::Task>) {
         let mut mailbox = self.shared.mailbox.lock().unwrap();
-        assert!(mailbox.retired_workflow.is_none());
-        mailbox.retired_workflow = Some(task);
+        mailbox.retired_workflows.push(*task);
         self.shared.ready.notify_one();
     }
     fn stop(&mut self) -> Result<(), String> {
@@ -510,7 +518,7 @@ impl DocumentService {
         let environment = OpenEnvironment::capture(&host.session, self.window.documents.admission(&host.session.retained_document_tiles()), host.renderer_options(None))?;
         let cancelled = Arc::new(AtomicBool::new(false));
         self.active = Some(Active { id, epoch: host.session.state().document_file.epoch, revision: host.session.engine().document().revision, location: None, cancelled: Some(cancelled.clone()) });
-        self.worker.submit(Job::Prepare { environment: Box::new(environment), source, cancelled });
+        self.worker.submit(Job::Prepare { environment: Box::new(environment), source, cancelled })?;
         Ok(())
     }
     const MAX_QUEUED_OPENS: usize = 64;
@@ -587,7 +595,7 @@ impl DocumentService {
                     let path=path.ok_or("Choose a destination for the package file")?;location(&path)?;
                     package.serial=package.serial.wrapping_add(1);package.writing=Some(action);package.cancelled=Arc::new(AtomicBool::new(false));
                     let refusal=package.view.summary(host.session.localization()).destination_error;
-                    self.worker.submit(Job::WritePackage {view:package.view.clone(),action,original:package.original.clone(),path:PathBuf::from(path),refusal,cancelled:package.cancelled.clone()});
+                    self.worker.submit(Job::WritePackage {view:package.view.clone(),action,original:package.original.clone(),path:PathBuf::from(path),refusal,cancelled:package.cancelled.clone()})?;
                 },
             }
             host.invalidate_snapshot();return Ok(());
@@ -640,7 +648,7 @@ impl DocumentService {
             let task = match prepared { Ok(task) => task, Err(error) => return Self::complete(host, id, Err(error)) };
             self.workflow_quiet = false;self.workflow_title = None;
             self.workflow_control = Some((id, task.control.clone()));self.workflow_running = true;
-            self.worker.submit(Job::Workflow { task, action: crate::document_workflows::Action::ReadImages { paths, alternatives: Vec::new() } });
+            self.worker.submit(Job::Workflow { task, action: crate::document_workflows::Action::ReadImages { paths, alternatives: Vec::new() } })?;
             return Ok(());
         }
         if let DocumentAction::WorkflowBegin { id } = action {
@@ -651,7 +659,7 @@ impl DocumentService {
             self.workflow_title = task.progress_title(host);
             self.workflow_control = Some((id, task.control.clone()));
             self.workflow_running = true;
-            self.worker.submit(Job::Workflow { task, action: crate::document_workflows::Action::Describe });
+            self.worker.submit(Job::Workflow { task, action: crate::document_workflows::Action::Describe })?;
             return Ok(());
         }
         if let DocumentAction::Workflow { id, action } = action {
@@ -673,7 +681,7 @@ impl DocumentService {
                         task.fail(error);self.workflow=Some(task);host.invalidate_snapshot();return Ok(());
                     }
                     self.workflow_running = true;
-                    self.worker.submit(Job::Workflow { task, action: other });
+                    self.worker.submit(Job::Workflow { task, action: other })?;
                     host.invalidate_snapshot();
                     return Ok(());
                 }
@@ -699,8 +707,8 @@ impl DocumentService {
             let opening = self.opening.take().ok_or("No image interpretation is pending")?;
             if let Some(profile) = profile {
                 let Opening { environment, imported, .. } = *opening;
-                self.worker.submit(Job::Prepare { environment: Box::new(environment), source: Source::Interpret(Box::new(imported), profile), cancelled: self.active.as_ref().and_then(|a| a.cancelled.clone()).ok_or("Opening control missing")? });
-            } else { self.worker.submit(Job::DiscardOpening(opening)); }
+                self.worker.submit(Job::Prepare { environment: Box::new(environment), source: Source::Interpret(Box::new(imported), profile), cancelled: self.active.as_ref().and_then(|a| a.cancelled.clone()).ok_or("Opening control missing")? })?;
+            } else { self.worker.submit(Job::DiscardOpening(opening))?; }
             host.invalidate_snapshot();
             return Ok(());
         }
@@ -842,7 +850,7 @@ impl DocumentService {
                     location,
                     cancelled: match &job { Job::Prepare { cancelled, .. } => Some(cancelled.clone()), _ => None },
                 });
-                self.worker.submit(job);
+                self.worker.submit(job)?;
                 Ok(())
             }
             Ok(None) => Ok(()),
@@ -901,7 +909,7 @@ impl DocumentService {
                 self.worker.retire_workflow(task);
             } else {
                 match task.prepare_owner(host) {
-                    Ok(Some(action)) => { self.workflow_running = true; self.worker.submit(Job::Workflow { task, action }); return Ok(()); }
+                    Ok(Some(action)) => { self.workflow_running = true; self.worker.submit(Job::Workflow { task, action })?; return Ok(()); }
                     Err(error) => { task.fail(error); }
                     Ok(None) => {}
                 }
@@ -921,7 +929,7 @@ impl DocumentService {
         let completed = if self.active.as_ref().and_then(|a| a.cancelled.as_ref()).is_some_and(|c| c.load(Ordering::Acquire)) {
             match completed {
                 Ok(Completed::Prepared(candidate) | Completed::PhotoPrepared(candidate)) => { self.worker.retire(candidate); Ok(Completed::Cancelled) }
-                Ok(Completed::Interpretation(opening)) => { self.worker.submit(Job::DiscardOpening(opening)); return Ok(()); }
+                Ok(Completed::Interpretation(opening)) => { self.worker.submit(Job::DiscardOpening(opening))?; return Ok(()); }
                 _ => Ok(Completed::Cancelled),
             }
         } else { completed };
@@ -1008,6 +1016,21 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(host.session.localization(), &localization));
         assert_eq!(service.window.view(&host, 900.)["tabs"][0]["title"], "無題 1");
         service.stop_worker().unwrap();
+    }
+    #[test]
+    fn the_document_worker_refuses_a_second_job_until_the_first_is_taken() {
+        let (notify, done) = mpsc::channel();
+        let mut worker = Worker::start(move || { let _ = notify.send(()); }).unwrap();
+        let lookup = || Job::Lookup { path: PathBuf::from("missing.cube") };
+        worker.submit(lookup()).unwrap();
+        assert!(worker.submit(lookup()).is_err());
+        done.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(worker.submit(lookup()).is_err());
+        assert!(worker.take().unwrap().is_err());
+        worker.submit(lookup()).unwrap();
+        done.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(worker.take().is_some());
+        worker.stop().unwrap();
     }
     pub(super) fn finish(service: &mut DocumentService, host: &mut NativeHost, done: &mpsc::Receiver<()>) {
         let deadline = Instant::now() + Duration::from_secs(60);

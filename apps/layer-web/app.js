@@ -1428,8 +1428,12 @@ function queuePen(e, stage, predictionsOnly = false) {
   };
   // Capture the transform when input arrives, even across later viewport resize.
   if (!pending.length) {
-    const count = app.pen(batch.records, batch.revision);
-    batch.records = batch.records.subarray(count * 11);
+    try {
+      batch.records = batch.records.subarray(app.pen(batch.records, batch.revision) * 11);
+    } catch (error) {
+      message(error);
+      return;
+    }
   }
   if (batch.records.length) pending.push(batch);
   wake();
@@ -1450,7 +1454,8 @@ function pickerTouch(e,stage){
     if(canvasFingers.size===1){
       pickerHold={id:e.pointerId,x:e.clientX,y:e.clientY,timer:setTimeout(()=>{
         pickerHold=null;
-        applyChange(app.input({type:'color_picker_hold',id:corePointerId(e),position:position(e),offset:44*(devicePixelRatio||1)}).change);
+        try{applyChange(app.input({type:'color_picker_hold',id:corePointerId(e),position:position(e),offset:44*(devicePixelRatio||1)}).change);}
+        catch(error){message(error);}
       },500)};
     }
   } else if(stage===2&&pickerHold?.id===e.pointerId&&Math.hypot(e.clientX-pickerHold.x,e.clientY-pickerHold.y)>8)cancelPickerHold();

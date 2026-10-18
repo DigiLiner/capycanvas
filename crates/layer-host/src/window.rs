@@ -327,7 +327,7 @@ impl<P: Parked> DocumentWindow<P> {
         host.require_document_owner()?;
         if closing {
             let prepared = self.prepare_close(host, options)?;
-            return Ok(Some(self.commit_close(host, prepared, exchange)));
+            return self.commit_close(host, prepared, exchange).map(Some);
         }
         let target = id;
         if target == self.documents.selected() {
@@ -423,8 +423,8 @@ impl<P: Parked> DocumentWindow<P> {
         Ok(())
     }
 
-    pub fn commit_close(&mut self, host: &mut NativeHost, prepared: PreparedClose, exchange: impl FnOnce(&mut P)) -> (Activation, Option<P>) {
-        assert!(self.close_is_current(host, &prepared), "Prepared close no longer targets this window");
+    pub fn commit_close(&mut self, host: &mut NativeHost, prepared: PreparedClose, exchange: impl FnOnce(&mut P)) -> Result<(Activation, Option<P>), String> {
+        self.validate_close(host, &prepared)?;
         let retired = self.retire_gpu(host);
         let closed = self.documents.close_selected().map(|mut next| {
             next.session_mut().inherit_parked_viewport(&host.session);
@@ -435,9 +435,9 @@ impl<P: Parked> DocumentWindow<P> {
         host.document_close_prepared = false;
         self.changed(host);
         host.startup = Default::default();
-        (Activation {selected:self.documents.selected(),epoch:host.session.state().document_file.epoch,
+        Ok((Activation {selected:self.documents.selected(),epoch:host.session.state().document_file.epoch,
             gpu:self.gpu.clone(),color:host.session.engine().document().composition().color,
-            options:prepared.options,retired,renderer:None}, closed)
+            options:prepared.options,retired,renderer:None}, closed))
     }
 
     /// Checks that the activation still targets the selected drawing, its
@@ -1111,7 +1111,7 @@ mod tests {
             device_id:1,sequence:1,timestamp_ns:1,view_revision:host.session.state().camera.revision,
             surface_position:layer_core::Point {x:16.,y:16.},pressure:1.,tilt_radians:[0.;2],twist_radians:0.,distance:0.,
             phase:layer_engine::PenPhase::Down,tool:layer_engine::ToolKind::Pen,flags:layer_engine::SampleFlags::NONE,
-        }).unwrap();
+        });
         assert!(host.session.engine().has_pending_input());
         let (id, retired) = window.hydrate_restored(&mut host, &mut next, 1, |s| s).unwrap();
         assert_eq!(id, 2);
@@ -1121,6 +1121,18 @@ mod tests {
         assert_eq!(window.documents.order(), [1, 2]);
         assert!(host.session.engine().has_pending_input());
         finish(host, window);
+    }
+
+    #[test]
+    fn a_stale_prepared_close_is_refused_instead_of_committed() {
+        let mut host = host();
+        let mut window = Window::default();
+        open(&mut window, &mut host);
+        invoke(&mut host, CommandId::CloseDocument);
+        let prepared = window.prepare_close(&mut host, Default::default()).unwrap();
+        host.session.replace_renderer(Renderer::default()).unwrap();
+        assert!(window.commit_close(&mut host, prepared, |_| {}).is_err());
+        assert_eq!(window.documents.order(), [1, 2]);
     }
 
     #[test]
@@ -1140,6 +1152,7 @@ mod tests {
         assert!(host.document_close_prepared());
         assert!(host.dispatch(UiAction::Invoke {command:CommandId::AddLayer}).is_err());
         assert!(window.switch(&mut host, 1, false, Default::default(), |_| {}).is_err());
+        assert!(host.replace_renderer(Renderer::default()).is_err());
         window.cancel_close(&mut host, prepared).unwrap();
         assert!(!host.document_close_prepared());
         assert!(!host.session.rendering_suspended());
@@ -1147,7 +1160,7 @@ mod tests {
         assert_eq!(host.session.engine().document(), &before);
         invoke(&mut host, CommandId::CloseDocument);
         let prepared = window.prepare_close(&mut host, Default::default()).unwrap();
-        let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {});
+        let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {}).unwrap();
         assert_eq!(window.documents.order(), [1]);
         assert_eq!(window.documents.selected(), 1);
         assert!(!host.document_close_prepared());
@@ -1194,7 +1207,7 @@ mod tests {
         host.resize(1200, 800, 2.).unwrap();
         let source_view = host.session.state().camera.revision;
         window.validate_close(&host, &prepared).unwrap();
-        let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {});
+        let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {}).unwrap();
         assert!(host.session.session_stamp().same_editor(&target));
         assert_eq!(host.session.state().camera.viewport, [1200, 800]);
         assert_eq!(host.session.state().camera.zoom, 1.5);
@@ -1259,7 +1272,7 @@ mod tests {
         invoke(&mut host, CommandId::CloseDocument);
         let prepared = window.prepare_close(&mut host, Default::default()).unwrap();
         host.input(UiInput::Chrome {event:layer_ui::ChromeEvent::Refresh,facts:Default::default(),viewport:[64.,48.]}).unwrap();
-        let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {});
+        let (mut activation, closed) = window.commit_close(&mut host, prepared, |_| {}).unwrap();
         assert!(closed.is_some());
         drop(closed);
         activation.work().unwrap();

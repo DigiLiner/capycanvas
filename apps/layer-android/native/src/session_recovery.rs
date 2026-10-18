@@ -15,21 +15,26 @@ struct Task { generation: u64, work: Work }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionSettle(mut env: JNIEnv, _: JClass, handle: jlong, now: jlong) {
+    crate::jni_entry!(env, handle, {
     let result = unsafe {app(handle)}.host.prepare_canvas_frame(now.max(0) as u64,now.max(0) as u64,true);
     fail(&mut env,result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStamp(mut env: JNIEnv, _: JClass, handle: jlong, id: jlong) -> jni::sys::jstring {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         serde_json::to_string(&a.window.session(&a.host, id as u64)?.session_stamp()).map_err(error)
     })();
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCapture(mut env: JNIEnv, _: JClass, handle: jlong, id: jlong) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let session = a.window.session(&a.host, id as u64)?;
@@ -40,32 +45,42 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionCapture(mut env: JNIEnv
         })) as jlong)
     })();
     or_throw(&mut env, result, 0)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStoreOpen(mut env: JNIEnv, _: JClass, directory: JString) -> jlong {
+    crate::jni_entry!(env, {
     let result = read(&mut env, &directory).and_then(|path| layer_core::package::session_store::SessionStore::open(Path::new(&path)))
         .map(|store| Box::into_raw(Box::new(store)) as jlong);
     or_throw(&mut env, result, 0)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_sessionStoreFree(_: JNIEnv, _: JClass, store: jlong) {
+pub extern "system" fn Java_art_capycanvas_Native_sessionStoreFree(mut env: JNIEnv, _: JClass, store: jlong) {
+    crate::jni_entry!(env, {
     if store != 0 { drop(unsafe { Box::from_raw(store as *mut layer_core::package::session_store::SessionStore) }); }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStoreRetire(mut env: JNIEnv, _: JClass, store: jlong) {
+    crate::jni_entry!(env, {
     fail(&mut env, unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) }.retire())
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionStorePrepareRetirement(mut env: JNIEnv, _: JClass, store: jlong) {
+    crate::jni_entry!(env, {
     fail(&mut env, unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) }.prepare_retirement())
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCommit(mut env: JNIEnv, _: JClass, task: jlong, store: jlong) {
+    crate::jni_entry!(env, {
     let task = unsafe { crate::inspection::borrow::<Task>(task) };
     let store = unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) };
     let result = crate::inspection::on_worker("capy-session-save", "Session worker failed", move || {
@@ -76,39 +91,47 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionCommit(mut env: JNIEnv,
         Ok(())
     });
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionFailure(mut env: JNIEnv, _: JClass, handle: jlong, detail: JString, recovery: jboolean) -> jni::sys::jstring {
+    crate::jni_entry!(env, handle, {
     let result = read(&mut env,&detail).map(|detail| {
         let localization = unsafe {app(handle)}.host.session.localization();
         if recovery != 0 {layer_ui::document_recovery_unavailable(localization,&detail)}
         else {layer_ui::document_storage_retained(localization,&detail)}
     });
     crate::android::string(&mut env,result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRequireEmptyRetry(mut env: JNIEnv, _: JClass, handle: jlong) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe {app(handle)};
         if a.window.documents.order().len() == 1 && a.host.session.can_replace_startup_session(&a.host.session.session_stamp()) {Ok(())}
         else {Err(layer_ui::DocumentSessionError::DrawingsStillOpen.message(a.host.session.localization()))}
     })();
     fail(&mut env,result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionReserveIdentities(mut env: JNIEnv, _: JClass, handle: jlong, identities: JString) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let identities: Vec<u64> = serde_json::from_str(&read(&mut env,&identities)?).map_err(error)?;
         unsafe {app(handle)}.window.documents.reserve_identities(&identities)
     })();
     fail(&mut env,result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRestoreTask(mut env: JNIEnv, _: JClass, handle: jlong, stamp: JString) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let stamp: Option<layer_ui::SessionStamp> = serde_json::from_str(&read(&mut env, &stamp)?).map_err(error)?;
         let a = unsafe { app(handle) };
@@ -123,10 +146,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionRestoreTask(mut env: JN
         })) as jlong)
     })();
     or_throw(&mut env, result, 0)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRead(mut env: JNIEnv, _: JClass, task: jlong, store: jlong, recovered: jboolean) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let task = unsafe { crate::inspection::borrow::<Task>(task) };
     let store = unsafe { crate::inspection::borrow::<layer_core::package::session_store::SessionStore>(store) };
     let result = crate::inspection::on_worker("capy-session-read", "Session worker failed", move || {
@@ -139,10 +164,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionRead(mut env: JNIEnv, _
         Ok(location)
     });
     crate::android::string(&mut env,result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionObserve(mut env: JNIEnv, _: JClass, task: jlong, fd: jni::sys::jint) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let file = unsafe {File::from_raw_fd(fd)};
     let result = (|| {
         let task = unsafe {crate::inspection::borrow::<Task>(task)};
@@ -151,10 +178,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionObserve(mut env: JNIEnv
         serde_json::to_string(&observed).map_err(error)
     })();
     crate::android::string(&mut env,result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionPrepare(mut env: JNIEnv, _: JClass, task: jlong, id: jlong, observed: JString) {
+    crate::jni_entry!(env, {
     let result = (|| {
         let observed: Option<layer_ui::DestinationFingerprint> = serde_json::from_str(&read(&mut env,&observed)?).map_err(error)?;
         let task = unsafe { crate::inspection::borrow::<Task>(task) };
@@ -176,10 +205,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionPrepare(mut env: JNIEnv
         })
     })();
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionAdopt(mut env: JNIEnv, _: JClass, handle: jlong, task: jlong, active: jlong, reserved: JString) -> jni::sys::jstring {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let reserved: Vec<u64> = serde_json::from_str(&read(&mut env,&reserved)?).map_err(error)?;
         let a = unsafe { app(handle) };
@@ -202,10 +233,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionAdopt(mut env: JNIEnv, 
         serde_json::to_string(&serde_json::json!({"ids":ids,"preserved":!replace})).map_err(error)
     })();
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionHydrate(mut env: JNIEnv, _: JClass, handle: jlong, task: jlong, id: jlong) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let task = unsafe { crate::inspection::borrow::<Task>(task) };
@@ -219,22 +252,28 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionHydrate(mut env: JNIEnv
         Ok(restored as jlong)
     })();
     or_throw(&mut env,result,0)
+    })
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_sessionFree(_: JNIEnv, _: JClass, task: jlong) {
+pub extern "system" fn Java_art_capycanvas_Native_sessionFree(mut env: JNIEnv, _: JClass, task: jlong) {
+    crate::jni_entry!(env, {
     if task != 0 { drop(unsafe { Box::from_raw(task as *mut Task) }); }
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionManifestRead(mut env: JNIEnv, _: JClass, path: JString) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let result = read(&mut env, &path).and_then(|path| SessionManifest::read(Path::new(&path)).map_err(error))
         .and_then(|manifest| serde_json::to_string(&manifest).map_err(error));
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionManifestWrite(mut env: JNIEnv, _: JClass, path: JString, value: JString) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let result = (|| {
         let path = read(&mut env, &path)?;
         let manifest: SessionManifest = serde_json::from_str(&read(&mut env, &value)?).map_err(error)?;
@@ -244,16 +283,20 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionManifestWrite(mut env: 
         serde_json::to_string(&serde_json::json!({"published":published,"error":diagnostic})).map_err(error)
     })();
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionPrepareRetirement(mut env: JNIEnv, _: JClass, directory: JString) {
+    crate::jni_entry!(env, {
     let result = read(&mut env, &directory).and_then(|path| layer_core::package::session_store::prepare_store_retirement(Path::new(&path)));
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCollect(mut env: JNIEnv, _: JClass, directory: JString, keys: JString) {
+    crate::jni_entry!(env, {
     let result = (|| {
         let path = read(&mut env, &directory)?;
         let reachable = serde_json::from_str(&read(&mut env, &keys)?).map_err(error)?;
@@ -261,10 +304,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionCollect(mut env: JNIEnv
         Ok(())
     })();
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionManifestUpdate(mut env: JNIEnv, _: JClass, state: JString, event: JString) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let result = (|| {
         let state = read(&mut env, &state)?;
         let event = serde_json::from_str(&read(&mut env, &event)?).map_err(error)?;
@@ -272,10 +317,12 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionManifestUpdate(mut env:
         serde_json::to_string(&next).map_err(error)
     })();
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionClose(mut env: JNIEnv, _: JClass, handle: jlong) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let previous = a.host.session.state().revision;
@@ -284,43 +331,53 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionClose(mut env: JNIEnv, 
         Ok(())
     })();
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionFingerprint(mut env: JNIEnv, _: JClass, fd: jni::sys::jint) -> jni::sys::jstring {
+    crate::jni_entry!(env, {
     let result = layer_ui::DestinationFingerprint::read(unsafe { File::from_raw_fd(fd) })
         .and_then(|fingerprint| serde_json::to_string(&fingerprint).map_err(error));
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionDestination(mut env: JNIEnv, _: JClass, handle: jlong) -> jni::sys::jstring {
+    crate::jni_entry!(env, handle, {
     let result = serde_json::to_string(&unsafe { app(handle) }.host.session.save_destination_expectation()).map_err(error);
     crate::android::string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionDestinationMatches(mut env: JNIEnv, _: JClass, expectation: JString, observed: JString) -> jboolean {
+    crate::jni_entry!(env, {
     let result = (|| {
         let expected: layer_ui::DestinationExpectation = serde_json::from_str(&read(&mut env, &expectation)?).map_err(error)?;
         let actual: Option<layer_ui::DestinationFingerprint> = serde_json::from_str(&read(&mut env, &observed)?).map_err(error)?;
         Ok(u8::from(expected.matches(actual.as_ref())))
     })();
     or_throw(&mut env, result, 0)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionRecordDestination(mut env: JNIEnv, _: JClass, handle: jlong, location: JString, fingerprint: JString) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let location = serde_json::from_str(&read(&mut env, &location)?).map_err(error)?;
         let fingerprint = serde_json::from_str(&read(&mut env, &fingerprint)?).map_err(error)?;
         unsafe { app(handle) }.host.session.record_destination_fingerprint(&location, fingerprint)
     })();
     fail(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sessionCompleteSave(mut env: JNIEnv, _: JClass, handle: jlong, request: jni::sys::jint, location: JString, fingerprint: JString) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let location = serde_json::from_str(&read(&mut env, &location)?).map_err(error)?;
         let fingerprint = serde_json::from_str(&read(&mut env, &fingerprint)?).map_err(error)?;
@@ -332,4 +389,5 @@ pub extern "system" fn Java_art_capycanvas_Native_sessionCompleteSave(mut env: J
         Ok(())
     })();
     fail(&mut env, result)
+    })
 }

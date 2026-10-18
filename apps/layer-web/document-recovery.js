@@ -87,9 +87,11 @@ export function createDocumentRecovery({app,call,message,restore,settled=()=>{},
     job=(async()=>{
       await lease(windowKey,false,'window');
       for(const id of [...pending.keys()])await move(owners.get(id));
-      for(const tab of tabs().tabs)await captureOne(tab.id);
+      let failure=null;
+      for(const tab of tabs().tabs){try{await captureOne(tab.id);}catch(error){failure??=error;}}
       await publish(clean_exit);
       await settled();
+      if(failure)throw failure;
     })().finally(()=>job=null);
     return job;
   }

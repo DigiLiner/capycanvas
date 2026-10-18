@@ -17,7 +17,7 @@ use layer_core::Point;
 use layer_engine::{PenEvent, PenPhase, SampleFlags, ToolKind};
 use layer_render::CanvasRenderer;
 use layer_ui::{ContactPhase, PointerButton, PointerKind, UiAction, UiInput, UiSession};
-pub use gpu::{DeviceWatch, GpuContext, RendererOptions, UiColor, admit_adapter, unsupported_adapter};
+pub use gpu::{DeviceWatch, GpuContext, RendererOptions, UiColor, admit_adapter, request_device, unsupported_adapter};
 pub use storage::StorageRoots;
 pub use layer_render_wgpu::AttachedRenderer as Renderer;
 pub use snapshot::{SnapshotFields, extend_update};
@@ -68,8 +68,8 @@ pub struct NativeHost {
     pub sequence: u64,
     pub startup: layer_render_wgpu::StartupProgress,
     pub(crate) document_close_prepared: bool,
+    poisoned: Option<String>,
     pub proof: layer_ui::proof_workflow::ProofView,
-    deferred_contacts: layer_engine::DeferredContacts,
     last_pen: Option<PenEvent>,
     paint_start_sequence: u64,
     last_snapshot: Option<SnapshotKey>,
@@ -88,7 +88,27 @@ pub struct NativeHost {
     thumbnails: layer_ui::ThumbnailRequests,
 }
 
+pub fn contain<O: AsMut<NativeHost>, T>(owner: &mut O, work: impl FnOnce(&mut O) -> Result<T, String>) -> Result<T, String> {
+    if let Some(cause) = owner.as_mut().poisoned() {
+        return Err(cause.to_owned());
+    }
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&mut *owner)))
+        .unwrap_or_else(|payload| Err(owner.as_mut().poison(&*payload)))
+}
+
+pub fn panic_diagnostic(payload: &(dyn std::any::Any + Send)) -> String {
+    format!("Native operation panicked: {}", layer_render_wgpu::panic_message(payload))
+}
+
+impl AsMut<NativeHost> for NativeHost {
+    fn as_mut(&mut self) -> &mut NativeHost { self }
+}
+
 impl NativeHost {
+    pub fn poisoned(&self) -> Option<&str> { self.poisoned.as_deref() }
+    pub fn poison(&mut self, payload: &(dyn std::any::Any + Send)) -> String {
+        self.poisoned.get_or_insert_with(|| panic_diagnostic(payload)).clone()
+    }
     fn require_document_owner(&self) -> Result<(), String> {
         if self.document_close_prepared {
             return Err(layer_ui::DocumentTransportRefusal::ChangeInProgress.message(self.session.localization()).to_string());
@@ -96,6 +116,13 @@ impl NativeHost {
         Ok(())
     }
     pub fn document_close_prepared(&self) -> bool { self.document_close_prepared }
+    pub fn replace_renderer(&mut self, renderer: Renderer) -> Result<Renderer, String> {
+        self.require_document_owner()?;
+        let previous = self.session.state().revision;
+        let (retired, change) = self.session.replace_renderer(renderer)?;
+        self.apply_change(previous, change);
+        Ok(retired)
+    }
 
     fn prepare_ui_previews(&mut self) -> Result<(), String> {
         let rendition = self.session.engine().document().composition().color.depth.is_float()
@@ -181,7 +208,7 @@ impl NativeHost {
             // Eager hosts are ready on GPU attachment; staged hosts reset this.
             startup: layer_render_wgpu::StartupProgress::COMPLETE,
             document_close_prepared: false,
-            deferred_contacts: Default::default(),
+            poisoned: None,
             last_pen: None,
             paint_start_sequence: 0,
             last_snapshot: None,
@@ -220,8 +247,6 @@ impl NativeHost {
     /// Invalidate host input and snapshot caches after shared document adoption.
     pub fn document_adopted(&mut self) {
         self.header_drag = None;
-        self.deferred_contacts.clear();
-        self.session.set_input_held(false);
         self.last_pen = None;
         self.last_snapshot = None;
         self.last_camera_revision = None;
@@ -277,11 +302,6 @@ impl NativeHost {
                 .unwrap()
                 .poll_startup()
                 .map_err(|e| e.to_string())?;
-            let released = self.deferred_contacts.release(self.paint_ready(), std::time::Instant::now());
-            self.session.set_input_held(self.deferred_contacts.holding());
-            for event in released {
-                self.deliver(event)?;
-            }
             if self.startup.canvas_ready {
                 let previous = self.session.state().revision;
                 let change = self.session.frame(now, presentation)?;
@@ -291,7 +311,7 @@ impl NativeHost {
         } else {
             self.session.submit_backdrop_frame()?;
         }
-        self.dirty |= !self.startup.complete || !self.deferred_contacts.is_empty();
+        self.dirty |= !self.startup.complete || self.session.holding_input();
         Ok(())
     }
     pub fn dispatch(&mut self, action: UiAction) -> Result<(), String> {
@@ -423,29 +443,17 @@ impl NativeHost {
         Ok(())
     }
     fn cancel_pen(&mut self) -> Result<(), String> {
-        self.deferred_contacts.clear();
-        self.session.set_input_held(false);
         if let Some(mut event) = self.last_pen.take() {
             event.phase = PenPhase::Cancel;
             self.sequence += 1;
             event.sequence = self.sequence;
-            self.enqueue(event)?;
+            self.enqueue(event);
         }
         Ok(())
     }
-    fn enqueue(&mut self, event: PenEvent) -> Result<(), String> {
-        if let Err(event) = self.session.pen(event) {
-            // Relieve queue pressure through an actual frame boundary. Raster
-            // commits require GPU submission; CPU-only draining cannot save them.
-            let previous = self.session.state().revision;
-            let change = self.session.frame(event.timestamp_ns, event.timestamp_ns)?;
-            self.apply_change(previous, change);
-            self.session
-                .pen(event)
-                .map_err(|_| "Pen queue remained full")?;
-        }
+    fn enqueue(&mut self, event: PenEvent) {
+        self.session.pen(event);
         self.dirty = true;
-        Ok(())
     }
 
     pub fn accepts_pointer_input(&self, view_revision: u64) -> bool {
@@ -568,7 +576,7 @@ impl NativeHost {
                 // Corrections refer to previously admitted sample tokens and never
                 // enter UI pointer ownership or replace the current cursor.
                 self.sequence += 1;
-                self.admit(event)?;
+                self.deliver(event);
                 continue;
             }
             self.pointer_event_inner(
@@ -594,8 +602,6 @@ impl NativeHost {
     }
     pub fn suspend_renderer(&mut self) -> Result<(), String> {
         self.last_pen = None;
-        self.deferred_contacts.clear();
-        self.session.set_input_held(false);
         let previous = self.session.state().revision;
         let change = self.session.suspend_renderer()?;
         self.apply_change(previous, change);
@@ -653,24 +659,14 @@ impl NativeHost {
         }
         if paint && self.session.engine().backend().0.is_some() {
             self.sequence += 1;
-            self.admit(event)?;
+            self.deliver(event);
         }
         Ok(())
     }
-    /// Deliver a paint sample to the engine, or hold its contact until
-    /// painting is ready and then deliver every sample it held.
-    fn admit(&mut self, event: PenEvent) -> Result<(), String> {
-        let admitted = self.deferred_contacts.admit(event, self.paint_ready(), std::time::Instant::now());
-        self.session.set_input_held(self.deferred_contacts.holding());
-        for event in admitted {
-            self.deliver(event)?;
-        }
-        Ok(())
-    }
-    fn deliver(&mut self, event: PenEvent) -> Result<(), String> {
-        self.enqueue(event)?;
+    fn deliver(&mut self, event: PenEvent) {
+        self.enqueue(event);
         if event.flags.contains(SampleFlags::PREDICTED) || event.flags.contains(SampleFlags::CORRECTION) {
-            return Ok(());
+            return;
         }
         if event.phase == PenPhase::Down {
             self.paint_start_sequence = event.sequence;
@@ -680,18 +676,6 @@ impl NativeHost {
         } else {
             Some(event)
         };
-        Ok(())
-    }
-    fn paint_ready(&self) -> bool {
-        let engine = self.session.engine();
-        engine.backend().0.as_ref().is_some_and(|gpu| {
-            self.startup.brush_ready
-                && !gpu.startup_needs_update(
-                    engine.document(),
-                    engine.brush(),
-                    engine.transform_preview().is_some(),
-                )
-        })
     }
     fn export_validation(&self, recipe: &layer_ui::ExportRecipe) -> Result<(), layer_ui::ColorFeatureError> {
         recipe.validate()?;
@@ -1173,6 +1157,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_panicking_native_call_stops_the_host() {
+        let mut host = NativeHost::new(layer_ui::Platform::Android).unwrap();
+        let stopped = Err("Native operation panicked: torn state".to_owned());
+        assert_eq!(contain(&mut host, |_| -> Result<(), String> { panic!("torn state") }), stopped);
+        assert_eq!(contain(&mut host, |_| Ok(())), stopped);
+        assert_eq!(host.poisoned(), Some("Native operation panicked: torn state"));
+    }
+
+    #[test]
     fn launch_restores_settings_before_gpu_or_view_publication() {
         let saved = r#"{"language":{"Explicit":"ja"},"theme":"dark"}"#;
         let mut host = NativeHost::launch(layer_ui::Platform::Android, saved, &["ko-KR", "en-GB"]).unwrap();
@@ -1351,12 +1344,12 @@ mod tests {
         let clock = std::cell::Cell::new(0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
         host.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::Pencil as u32 }).unwrap();
-        while !host.paint_ready() { frame_step(&mut host, &clock, deadline); }
+        while !host.session.paint_ready() { frame_step(&mut host, &clock, deadline); }
         let paper = layer_ui::occurrence_token(host.session.engine().document().bottom_paper().unwrap());
         for choice in [2, 1] {
             host.dispatch(UiAction::SelectLayer { id: paper }).unwrap();
             host.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: "texture".into(), value: layer_core::EffectValue::Choice(choice) } }).unwrap();
-            assert!(!host.paint_ready(), "the changed paper binding must prepare before painting");
+            assert!(!host.session.paint_ready(), "the changed paper binding must prepare before painting");
             let checkpoint = host.session.engine().checkpoint();
             let committed = host.session.engine().metrics().committed_strokes;
             let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
@@ -1365,13 +1358,13 @@ mod tests {
                 [f64::from(at.x), f64::from(at.y), 0.7, 0., 0., 0., 0., (clock.get() + step as u64 * 1_000_000) as f64, step as f64 + 1.]
             }).collect();
             pointer(&mut host, 7, 0, 0, &records, false).unwrap();
-            assert!(!host.deferred_contacts.is_empty(), "the complete early Down/Move/Up waits for the new paper");
+            assert!(host.session.holding_input(), "the complete early Down/Move/Up waits for the new paper");
             assert_eq!(host.session.engine().metrics().committed_strokes, committed);
             assert!(!host.session.engine().has_active_stroke());
-            while !host.deferred_contacts.is_empty() || host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() {
+            while host.session.holding_input() || host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() {
                 frame_step(&mut host, &clock, deadline);
             }
-            assert!(host.paint_ready());
+            assert!(host.session.paint_ready());
             assert!(!host.session.engine().has_active_stroke());
             assert_eq!(host.session.engine().metrics().committed_strokes, committed + 1);
             let doc = host.session.engine().document();
@@ -1381,6 +1374,42 @@ mod tests {
             host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
             assert_eq!(host.session.engine().checkpoint(), checkpoint, "one Undo removes exactly the deferred stroke");
         }
+    }
+
+    #[test]
+    fn a_paper_choice_queued_behind_a_finishing_stroke_prepares_before_the_next_stroke() {
+        let (_reference, mut host) = gpu_host(layer_ui::Platform::Android, [640, 480]);
+        let clock = std::cell::Cell::new(0);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+        host.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::Pencil as u32 }).unwrap();
+        while !host.startup.brush_ready { frame_step(&mut host, &clock, deadline); }
+        for _ in 0..4 { frame_step(&mut host, &clock, deadline); }
+        let paper = layer_ui::occurrence_token(host.session.engine().document().bottom_paper().unwrap());
+        let start = host.session.engine().checkpoint();
+        let committed = host.session.engine().metrics().committed_strokes;
+        let contact = |host: &mut NativeHost, y: f32| {
+            let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
+            let records: Vec<f64> = [100., 160., 220.].into_iter().enumerate().flat_map(|(step, x)| {
+                let at = surface.map(Point { x, y });
+                [f64::from(at.x), f64::from(at.y), 0.7, 0., 0., 0., 0., (clock.get() + step as u64 * 1_000_000) as f64, step as f64 + 1.]
+            }).collect();
+            clock.set(clock.get() + 4_000_000);
+            pointer(host, 7, 0, 0, &records, false).unwrap();
+        };
+        contact(&mut host, 200.);
+        host.dispatch(UiAction::Effect { action: layer_ui::EffectAction::Set { layer: paper, key: "texture".into(), value: layer_core::EffectValue::Choice(2) } }).unwrap();
+        assert_eq!(host.session.engine().checkpoint(), start, "the paper choice waits behind the stroke");
+        contact(&mut host, 260.);
+        while host.session.engine().metrics().committed_strokes < committed + 2 || host.session.engine().has_active_stroke()
+            || host.session.engine().has_pending_document_edits() || host.session.engine().wants_continuous_frames() {
+            frame_step(&mut host, &clock, deadline);
+        }
+        assert_eq!(host.session.engine().metrics().committed_strokes, committed + 2);
+        let doc = host.session.engine().document();
+        let Some(layer_core::SourceTarget::Paint(paint)) = doc.drawing_target() else { panic!("paint target") };
+        assert!(doc.artwork.paint.get(paint).unwrap().raster.try_data().is_some_and(|data| data.is_ok_and(|data| !data.tiles.is_empty())));
+        for _ in 0..3 { host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap(); }
+        assert_eq!(host.session.engine().checkpoint(), start, "stroke, paper choice and stroke undo one step each");
     }
 
     #[test]
@@ -1397,7 +1426,7 @@ mod tests {
         while !host.startup.brush_ready { frame_step(&mut host, &clock, deadline); }
         host.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: layer_ui::occurrence_token(layer), replace: false } }).unwrap();
         host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Eraser }).unwrap();
-        assert!(!host.paint_ready(), "the first mask needs shaders the drawing did not use before");
+        assert!(!host.session.paint_ready(), "the first mask needs shaders the drawing did not use before");
         let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
         let mut records = Vec::new();
         for (step, x) in [100., 160., 220.].into_iter().enumerate() {
@@ -1405,8 +1434,8 @@ mod tests {
             records.extend([f64::from(at.x), f64::from(at.y), 1., 0., 0., 0., 0., (clock.get() + step as u64 * 1_000_000) as f64, step as f64 + 1.]);
         }
         pointer(&mut host, 7, 0, 0, &records, false).unwrap();
-        assert!(!host.deferred_contacts.is_empty(), "the stroke waits instead of being dropped");
-        while !host.deferred_contacts.is_empty() || host.session.engine().has_active_stroke() { frame_step(&mut host, &clock, deadline); }
+        assert!(host.session.holding_input(), "the stroke waits instead of being dropped");
+        while host.session.holding_input() || host.session.engine().has_active_stroke() { frame_step(&mut host, &clock, deadline); }
         for _ in 0..4 { frame_step(&mut host, &clock, deadline); }
         let doc = host.session.engine().document();
         let mask = doc.scene().occurrence(layer).unwrap().mask.clone().unwrap().source;
@@ -1427,16 +1456,16 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !host.startup.brush_ready { frame_step(&mut host, &clock, deadline); }
         host.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: layer_ui::occurrence_token(layer), replace: false } }).unwrap();
-        assert!(!host.paint_ready());
+        assert!(!host.session.paint_ready());
         let checkpoint = host.session.engine().checkpoint();
         let at = layer_core::Affine(host.session.state().camera.document_to_surface()).map(Point { x: 140., y: 140. });
         pointer(&mut host, 7, 1, 0, &[f64::from(at.x), f64::from(at.y), 0.5, 0., 0., 0., 0., clock.get() as f64, 1.], false).unwrap();
-        assert!(host.deferred_contacts.holding() && host.last_pen.is_none());
+        assert!(host.session.holding_input());
         assert!(host.session.command_disabled_reason(layer_ui::CommandId::SaveDocumentAs).is_some());
         assert!(host.input(UiInput::Blur).unwrap().cancel_paint);
-        assert!(host.deferred_contacts.is_empty());
+        assert!(!host.session.holding_input());
         assert!(host.session.command_disabled_reason(layer_ui::CommandId::SaveDocumentAs).is_none());
-        while !host.paint_ready() { frame_step(&mut host, &clock, deadline); }
+        while !host.session.paint_ready() { frame_step(&mut host, &clock, deadline); }
         for _ in 0..4 { frame_step(&mut host, &clock, deadline); }
         assert!(!host.session.engine().has_active_stroke());
         assert_eq!(host.session.engine().metrics().committed_strokes, 0);
@@ -1461,7 +1490,7 @@ mod tests {
         host.dispatch(UiAction::Layer { action: layer_ui::LayerAction::AddMask { id: layer_ui::occurrence_token(layer), replace: false } }).unwrap();
         host.dispatch(choose).unwrap();
         host.dispatch(UiAction::Layer { action: layer_ui::LayerAction::Tool { tool: layer_ui::LayerCanvasTool::Move } }).unwrap();
-        assert!(!host.paint_ready(), "the first mask needs shaders the drawing did not use before");
+        assert!(!host.session.paint_ready(), "the first mask needs shaders the drawing did not use before");
         host.dispatch(UiAction::SetZoom { zoom: 1. }).unwrap();
         let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
         let contact = |host: &mut NativeHost, id: u64, path: &[([f64; 2], f64)]| {
@@ -1473,21 +1502,21 @@ mod tests {
         };
         let saving = |host: &NativeHost| host.session.command_disabled_reason(layer_ui::CommandId::SaveDocumentAs).is_none();
         contact(&mut host, 6, &[([140., 140.], 1.)]);
-        assert!(host.deferred_contacts.holding() && !saving(&host), "a held contact keeps saving waiting");
+        assert!(host.session.holding_input() && !saving(&host), "a held contact keeps saving waiting");
         contact(&mut host, 6, &[([140., 140.], 4.)]);
-        assert!(!host.deferred_contacts.holding() && saving(&host), "a cancelled held contact releases saving");
+        assert!(!host.session.holding_input() && saving(&host), "a cancelled held contact releases saving");
         contact(&mut host, 7, &[([140., 140.], 1.), ([155., 150.], 2.), ([170., 160.], 3.)]);
-        assert!(host.deferred_contacts.holding() && !saving(&host), "a later save waits for the held drag");
-        while host.deferred_contacts.holding() { frame_step(&mut host, &clock, deadline); }
+        assert!(host.session.holding_input() && !saving(&host), "a later save waits for the held drag");
+        while host.session.holding_input() { frame_step(&mut host, &clock, deadline); }
         assert!(saving(&host), "delivering the drag releases saving");
         for _ in 0..4 { frame_step(&mut host, &clock, deadline); }
         let affine = host.session.engine().document().scene().object(image).unwrap().affine.0;
         assert_eq!(affine[..4], [1., 0., 0., 1.]);
         let [.., x, y] = affine;
         assert!((x - 130.).abs() < 0.5 && (y - 120.).abs() < 0.5, "the held drag moved the image: {x}, {y}");
-        assert!(host.paint_ready());
+        assert!(host.session.paint_ready());
         contact(&mut host, 8, &[([500., 400.], 1.), ([500., 400.], 3.)]);
-        assert!(!host.deferred_contacts.holding() && saving(&host), "a contact while painting is ready is never held");
+        assert!(!host.session.holding_input() && saving(&host), "a contact while painting is ready is never held");
     }
     #[test]
     fn thumbnails_in_flight_during_a_renderer_replacement_still_arrive() {
@@ -1556,7 +1585,7 @@ mod tests {
     fn thumbnail(host: &mut NativeHost, clock: &std::cell::Cell<u64>, request: u64, target: u64) -> Vec<u8> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         loop {
-            while host.deferred_contacts.holding() || host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() { frame_step(host, clock, deadline); }
+            while host.session.holding_input() || host.session.engine().wants_continuous_frames() || host.session.engine().has_pending_document_edits() { frame_step(host, clock, deadline); }
             let (_, images) = host.layer_thumbnails([(request, target)]).unwrap();
             if let Some(image) = images.into_iter().find(|image| image.request_id == request) { return image.bytes; }
             frame_step(host, clock, deadline);
@@ -1577,7 +1606,7 @@ mod tests {
             let painted = thumbnail(&mut host, &clock, 10 + attempt * 2, layer);
             assert_eq!(host.session.engine().metrics().committed_strokes, committed + 1);
             assert_ne!(host.session.engine().checkpoint(), checkpoint);
-            assert!(host.deferred_contacts.is_empty() && !host.session.engine().has_active_stroke());
+            assert!(!host.session.holding_input() && !host.session.engine().has_active_stroke());
             assert_ne!(painted, original, "the stroke changes the thumbnail");
             host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();
             let undone = thumbnail(&mut host, &clock, 11 + attempt * 2, layer);
@@ -1596,7 +1625,7 @@ mod tests {
             for preset in [D::Pencil, D::PointyPencil, D::ShadingPencil, D::Charcoal, D::Chalk, D::PastelBlock, D::Crayon] {
                 host.dispatch(UiAction::SelectBrush { id: preset as u32 }).unwrap();
                 if let Some(value) = size { host.dispatch(UiAction::SetBrushSize { value }).unwrap(); }
-                while !host.paint_ready() { frame_step(&mut host, &clock, deadline); }
+                while !host.session.paint_ready() { frame_step(&mut host, &clock, deadline); }
                 for tool in [0, 2] {
                     let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
                     for i in 0..48u64 {
@@ -1606,7 +1635,7 @@ mod tests {
                         let record = [f64::from(at.x), f64::from(at.y), 0.02 + 0.98 * f64::from(t), 1.4 * f64::from(t), 0., 0., 0., clock.get() as f64, phase];
                         pointer(&mut host, 80 + u64::from(tool), tool, 0, &record, false).unwrap();
                         frame_step(&mut host, &clock, deadline);
-                        assert!(host.paint_ready(), "{preset:?} size={size:?} tool={tool} stays prepared while painting");
+                        assert!(host.session.paint_ready(), "{preset:?} size={size:?} tool={tool} stays prepared while painting");
                     }
                     while host.session.engine().has_active_stroke() { frame_step(&mut host, &clock, deadline); }
                 }
@@ -1645,11 +1674,11 @@ mod tests {
             tilt_radians: [0.; 2], twist_radians: 0., distance: 0.,
             phase: PenPhase::Down, tool: ToolKind::Pen, flags: SampleFlags::PRIMARY,
         };
-        host.session.pen(event).unwrap();
+        host.session.pen(event);
         assert_eq!(host.session.state().commands, commands);
         assert_eq!(host.query(query.clone()).unwrap(), json!("Finish the canvas interaction first"));
         event.phase = PenPhase::Up; event.sequence = 2; event.timestamp_ns = 2; event.pressure = 0.;
-        host.session.pen(event).unwrap();
+        host.session.pen(event);
         assert_eq!(host.query(query.clone()).unwrap(), json!("Finish the canvas interaction first"));
         host.session.frame(3, 3).unwrap();
         assert!(host.query(query).unwrap().is_null());
@@ -2427,7 +2456,7 @@ mod tests {
         let surface = layer_core::Affine(host.session.state().camera.document_to_surface());
         let view_revision = host.session.state().camera.revision;
         let [corner, target] = [Point { x: 256., y: 0. }, Point { x: 216., y: 30. }].map(|p| surface.map(p));
-        assert!(!host.paint_ready(), "the transform is not prepared before its first frame");
+        assert!(!host.session.paint_ready(), "the transform is not prepared before its first frame");
         for (step, (phase, at)) in
             [(PenPhase::Down, corner), (PenPhase::Move, target), (PenPhase::Up, target)].into_iter().enumerate()
         {
@@ -2447,8 +2476,8 @@ mod tests {
             };
             host.pointer_event(event, PointerButton::Primary).unwrap();
         }
-        assert!(!host.deferred_contacts.is_empty(), "the contact waits instead of being dropped");
-        while !host.deferred_contacts.is_empty() {
+        assert!(host.session.holding_input(), "the contact waits instead of being dropped");
+        while host.session.holding_input() {
             frame(&mut host);
         }
         frame(&mut host);
@@ -2481,7 +2510,7 @@ mod tests {
         let mut brush_frames = 0;
         while !published(&mut host).0 {
             frame(&mut host, true);
-            brush_frames += usize::from(host.paint_ready());
+            brush_frames += usize::from(host.session.paint_ready());
             if brush_frames == 3 {
                 host.session.set_workspace_read_only(false);
             }
@@ -2563,13 +2592,13 @@ mod tests {
             flags: SampleFlags::PRIMARY,
         };
         host.pointer_event(event, PointerButton::Primary).unwrap();
-        assert!(host.deferred_contacts.is_empty());
+        assert!(!host.session.holding_input());
         host.session.require_document_idle().unwrap();
         host.session.request_document_close().unwrap();
         assert!(host.session.state().document_file.close_ready);
         event.view_revision = host.session.state().camera.revision;
         host.pointer_event(event, PointerButton::Primary).unwrap();
-        assert!(host.deferred_contacts.is_empty());
+        assert!(!host.session.holding_input());
         host.session.require_document_idle().unwrap();
     }
 
@@ -2588,7 +2617,7 @@ mod tests {
         )
         .unwrap();
         host.session.frame(0, 0).unwrap();
-        assert!(host.paint_ready());
+        assert!(host.session.paint_ready());
         assert!(host.session.engine().brush().stabilization.strength > 0.);
         assert_eq!(host.paint_start_sequence(), 0);
         let revision = host.session.state().camera.revision;
@@ -2685,7 +2714,7 @@ mod tests {
             "corrected pressure/position changes pixels"
         );
         assert!(host.last_pen.is_none());
-        assert!(host.deferred_contacts.is_empty());
+        assert!(!host.session.holding_input());
         assert_eq!(json!(host.session.state().camera), camera);
         host.session.require_document_idle().unwrap();
         host.dispatch(UiAction::Invoke { command: layer_ui::CommandId::Undo }).unwrap();

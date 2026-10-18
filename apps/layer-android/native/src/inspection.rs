@@ -41,22 +41,28 @@ pub(crate) fn control(handle: jlong) -> CaptureControl {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_captureControl(_: JNIEnv, _: JClass) -> jlong {
+pub extern "system" fn Java_art_capycanvas_Native_captureControl(mut env: JNIEnv, _: JClass) -> jlong {
+    crate::jni_entry!(env, {
     Box::into_raw(Box::new(CaptureControl::default())) as jlong
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_captureCancel(
-    _: JNIEnv,
+    mut env: JNIEnv,
     _: JClass,
     handle: jlong,
 ) {
+    crate::jni_entry!(env, {
     control(handle).cancel();
+    })
 }
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_captureFree(_: JNIEnv, _: JClass, handle: jlong) {
+pub extern "system" fn Java_art_capycanvas_Native_captureFree(mut env: JNIEnv, _: JClass, handle: jlong) {
+    crate::jni_entry!(env, {
     if handle != 0 {
         drop(unsafe { Box::from_raw(handle as *mut CaptureControl) });
     }
+    })
 }
 
 struct Inspection {
@@ -73,6 +79,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionSample(
     mut env: JNIEnv, _: JClass, handle: jlong, source: jni::objects::JString,
     x: jni::sys::jfloat, y: jni::sys::jfloat, width: jni::sys::jint,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let job = unsafe { Box::from_raw(handle as *mut Inspection) };
     let result = (|| {
         let source = serde_json::from_str::<layer_core::SnapshotSource>(&crate::android::read(&mut env, &source)?).map_err(error)?.artwork_source();
@@ -86,6 +93,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionSample(
         })
     })();
     string(&mut env, result)
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -93,6 +101,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionStatistics(
     mut env: JNIEnv, _: JClass, handle: jlong, source: jni::objects::JString,
     preview: jni::sys::jboolean, selection: jni::sys::jboolean, waveform: jni::sys::jboolean,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let job = unsafe { Box::from_raw(handle as *mut Inspection) };
     let result = (|| {
         let source = serde_json::from_str::<layer_core::SnapshotSource>(&crate::android::read(&mut env, &source)?).map_err(error)?.artwork_source();
@@ -104,11 +113,13 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionStatistics(
         })
     })();
     string(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_inspectionLevelsStatistics(
     mut env: JNIEnv, _: JClass, handle: jlong, source: jni::objects::JString,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let job = unsafe { Box::from_raw(handle as *mut Inspection) };
     let result = (|| {
         let source = serde_json::from_str::<layer_core::SnapshotSource>(&crate::android::read(&mut env, &source)?).map_err(error)?.artwork_source();
@@ -119,6 +130,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionLevelsStatistics(
         })
     })();
     string(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_inspectionTask(
@@ -127,6 +139,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionTask(
     handle: jlong,
     cancel: jlong,
 ) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let session = &a.host.session;
@@ -151,18 +164,21 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionTask(
         })) as jlong)
     })();
     or_throw(&mut env, result, 0)
+    })
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_documentInfoTask(
-    _: JNIEnv,
+    mut env: JNIEnv,
     _: JClass,
     handle: jlong,
 ) -> jlong {
+    crate::jni_entry!(env, handle, {
     let a = unsafe { app(handle) };
     Box::into_raw(Box::new(layer_color::DocumentInfo::capture(
         a.host.session.engine().document(),
     ))) as jlong
+    })
 }
 /// Consumes the small metadata job on IO, including profile parsing.
 #[unsafe(no_mangle)]
@@ -171,6 +187,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentInfo(
     _: JClass,
     handle: jlong,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let info = unsafe { Box::from_raw(handle as *mut layer_color::DocumentInfo) };
     string(
         &mut env,
@@ -178,6 +195,7 @@ pub extern "system" fn Java_art_capycanvas_Native_documentInfo(
             let rows = layer_ui::document_properties(&inspected, &*crate::launch::active_localization()?);
             serde_json::to_string(&rows).map_err(error) })(),
     )
+    })
 }
 
 /// Consumes one immutable inspection job on IO, like histogram capture.
@@ -188,6 +206,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionOutput(
     handle: jlong,
     recipe: jni::objects::JString,
 ) -> jni::sys::jobjectArray {
+    crate::jni_entry!(env, {
     let job = unsafe { Box::from_raw(handle as *mut Inspection) };
     let result = (|| -> Result<_, crate::color_preferences::ColorCallError> {
         let recipe: layer_ui::ExportRecipe =
@@ -215,6 +234,7 @@ pub extern "system" fn Java_art_capycanvas_Native_inspectionOutput(
         Ok(result.into_raw())
     })();
     crate::color_preferences::color_or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }
 pub(crate) fn preview_bytes(
     preview: &layer_render_wgpu::snapshot::SnapshotPreview,

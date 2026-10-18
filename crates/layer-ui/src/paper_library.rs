@@ -183,6 +183,7 @@ pub(crate) struct PendingPaper {
     pub id: String,
     pub layer: u64,
     pub epoch: u64,
+    pub image: Option<Image>,
 }
 
 #[derive(Default)]

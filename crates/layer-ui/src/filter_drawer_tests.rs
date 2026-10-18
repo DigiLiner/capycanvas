@@ -156,7 +156,7 @@ fn strokes_through_a_selected_filter_keep_selection_and_undo_on_the_drawing_targ
     let base=effect_test_paint(s.engine.document());
     let stroke = |s: &mut UiSession<Recorder>| {
         for (sequence, phase) in [(1, PenPhase::Down), (2, PenPhase::Move), (3, PenPhase::Up)] {
-            s.pen(event(s, sequence, phase, 1.)).unwrap();
+            s.pen(event(s, sequence, phase, 1.));
         }
         s.frame(30_000_000, 38_000_000).unwrap();
     };

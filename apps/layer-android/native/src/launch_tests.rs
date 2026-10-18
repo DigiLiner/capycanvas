@@ -19,3 +19,22 @@ fn android_launch_uses_supplied_preferences_before_first_view_without_gpu() {
         assert!(host.session.engine().backend().0.is_none());
     }
 }
+#[test]
+fn every_jni_function_runs_inside_jni_entry() {
+    let sources = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src")).unwrap()
+        .map(|entry| entry.unwrap().path()).filter(|path| path.extension().is_some_and(|extension| extension == "rs"));
+    let mut unguarded = Vec::new();
+    let mut functions = 0;
+    for path in sources {
+        let source = std::fs::read_to_string(&path).unwrap();
+        for function in source.split("extern \"system\" fn ").skip(1) {
+            functions += 1;
+            let (signature, body) = function.split_once('{').unwrap();
+            if !body.trim_start().starts_with("crate::jni_entry!(") {
+                unguarded.push(signature.split('(').next().unwrap().to_owned());
+            }
+        }
+    }
+    assert!(functions > 100);
+    assert!(unguarded.is_empty(), "{unguarded:?}");
+}

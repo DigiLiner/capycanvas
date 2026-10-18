@@ -634,6 +634,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         name: &str,
         source: layer_core::color::source::SourceImage,
     ) -> Result<(), String> {
+        self.require_painting()?;
         self.import_sources(vec![(name.into(), source)], Default::default())
     }
     /// Prepared photo placement. The supplied center is captured in document
@@ -652,6 +653,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         center: Option<Point>,
         destination: Option<ImageLayerDestination>,
     ) -> Result<(), String> {
+        self.require_painting()?;
         self.place_image_objects(sources, center, destination, true, true)
     }
     pub(super) fn import_sources(

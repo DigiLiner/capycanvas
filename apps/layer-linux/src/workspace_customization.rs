@@ -914,7 +914,7 @@ impl Customization {
             if toolbar.tiles == config.tiles() && toolbar.style == style {
                 continue;
             }
-            let Ok(view) = w.gpu.borrow().as_ref().unwrap().session.panel_view(config.id) else { continue; };
+            let Some(Ok(view)) = w.gpu.borrow().as_ref().map(|g| g.session.panel_view(config.id)) else { continue; };
             toolbar.strip.clear();
             toolbar.strip.set_style(style);
             toolbar.style = style;
@@ -1034,15 +1034,10 @@ impl Customization {
             }
         }
         self.refresh_expansion(w, &views);
-        let brush = w
-            .gpu
-            .borrow()
-            .as_ref()
-            .unwrap()
-            .session
-            .state()
-            .brush
-            .clone();
+        let Some(brush) = w.gpu.borrow().as_ref().map(|g| g.session.state().brush.clone()) else {
+            self.updating.set(false);
+            return;
+        };
         for field in self.controls.borrow().iter() {
             let localization = w.localization();
             let caption = field.control.localized_label(&localization);
@@ -1061,8 +1056,10 @@ impl Customization {
                 Some(FieldValue::SizePresets(buttons)) => { for (value, button) in buttons { selected(button, *value == brush.diameter); } },
                 Some(FieldValue::Opacity(input)) => input.set_value(brush.opacity as f64),
                 Some(FieldValue::Color(input)) => {
-                    let definition = w.gpu.borrow().as_ref().unwrap().session.state().display_colors().definition();
-                    input.set_display_color(definition, w.paint_view_color(), w.picker_headroom());
+                    let definition = w.gpu.borrow().as_ref().map(|g| g.session.state().display_colors().definition());
+                    if let Some(definition) = definition {
+                        input.set_display_color(definition, w.paint_view_color(), w.picker_headroom());
+                    }
                 }
                 None => (),
                 Some(FieldValue::Brush(input)) => {

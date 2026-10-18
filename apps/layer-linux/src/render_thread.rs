@@ -60,7 +60,11 @@ impl RenderWorker {
     pub(super) fn take_cancelled_thumbnail(&mut self) -> Option<u64> { self.cancelled_thumbnails.pop_front() }
     pub(crate) fn capture_context(&self) -> Result<ContextCapture, String> {
         let value = Arc::new(std::sync::OnceLock::new());
-        self.send(Command::CaptureContext(ContextRequest {value: value.clone()})).map_err(error)?;
+        if self.failure.get().is_some() {
+            let _ = value.set(Ok(self.evaluation_context()));
+        } else {
+            self.send(Command::CaptureContext(ContextRequest {value: value.clone()})).map_err(error)?;
+        }
         Ok(ContextCapture(value))
     }
 }
@@ -583,14 +587,6 @@ impl RenderWorker {
     pub(super) fn has_paper_overlay(&self) -> bool {
         self.paper_overlay.is_some()
     }
-    pub(super) fn paint_ready(
-        &self,
-        document: &layer_core::Document,
-        brush: &layer_core::BrushSnapshot,
-        transform: bool,
-    ) -> bool {
-        self.startup.brush_ready && !self.startup_needs_update(document, brush, transform)
-    }
     pub(super) fn started(&self) -> bool {
         self.initialized
     }
@@ -724,6 +720,9 @@ impl CanvasRenderer for RenderWorker {
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { if let Some(activity) = &self.shader_activity { activity.idle(idle, speculative_idle); } }
     fn shaders_need_update(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
         self.startup_needs_update(document, brush, transform)
+    }
+    fn paint_ready(&self, document: &layer_core::Document, brush: &layer_core::BrushSnapshot, transform: bool) -> bool {
+        self.startup.brush_ready && !self.startup_needs_update(document, brush, transform)
     }
     fn document_color(&self) -> layer_core::color::DocumentColor { self.color }
     fn adopt_prepared_color(&mut self, color: layer_core::color::DocumentColor) -> Result<bool, Self::Error> { self.adopt_color(color) }
@@ -1089,6 +1088,7 @@ impl CanvasRenderer for RenderWorker {
 }
 
 struct Worker {
+    watch: layer_host::DeviceWatch,
     backdrop_submitted: bool,
     paper_ready: Arc<AtomicBool>,
     // Drop Vulkan's surface before the wl_surface (field declaration order).
@@ -1157,7 +1157,7 @@ impl Worker {
             });
             pass.set_scissor_rect(257, 0, 1, 1);
         }
-        // Exercise wgpu's real validation panic, without resetting the driver
+        // Exercise a real wgpu validation failure, without resetting the driver
         // or touching any other application's GPU device.
         self.renderer.queue().submit([encoder.finish()]);
     }
@@ -1193,6 +1193,9 @@ impl Worker {
         #[cfg(test)]
         let mut fail_next_frame = false;
         loop {
+            if let Some(failure) = self.watch.failure() {
+                return Err(failure);
+            }
             self.renderer
                 .device()
                 .poll(wgpu::PollType::Poll)
@@ -1704,7 +1707,7 @@ impl Worker {
         }
         config.present_mode = wgpu::PresentMode::Mailbox;
         config.desired_maximum_frame_latency = 2;
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        let (device, queue, watch) = pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
             label: Some("Wayland canvas GPU"),
             required_features: layer_render_wgpu::rendering_features(&adapter) | adapter.features()
                 & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::PIPELINE_CACHE),
@@ -1729,6 +1732,7 @@ impl Worker {
             .map_err(error)?;
         presenter.prepare_overviews(&renderer);
         Ok(Self {
+            watch,
             view_color,
             backdrop_submitted: false,
             paper_ready: Arc::new(AtomicBool::new(false)),
@@ -1832,6 +1836,9 @@ impl Worker {
         backdrop: bool,
         #[cfg(test)] timing: &mut crate::timing::Timing,
     ) -> Result<(), String> {
+        if let Some(failure) = self.watch.failure() {
+            return Err(failure);
+        }
         let draw_start = std::time::Instant::now();
         while frame.scene.view().targets().any(|t| frame.scene.view().raster(t).is_some_and(|r| r.try_data().is_none())) && !self.renderer.raster_ready()
         {

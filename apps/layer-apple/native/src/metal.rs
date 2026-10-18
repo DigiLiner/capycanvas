@@ -103,9 +103,7 @@ impl MetalHost {
     /// its replacement. All session changes still happen on the serial owner.
     pub(crate) fn install_renderer(&mut self, host: &mut NativeHost, renderer: Box<WgpuRasterizer>) -> Result<(), String> {
         let watch = layer_host::DeviceWatch::observe(renderer.device());
-        let previous = host.session.state().revision;
-        let (retired, change) = host.session.replace_renderer(layer_host::Renderer(Some(renderer)))?;
-        host.apply_change(previous, change);
+        let retired = host.replace_renderer(layer_host::Renderer(Some(renderer)))?;
         self.local_tone.clear();
         self.watch = watch;
         self.timing = None;
@@ -192,8 +190,8 @@ impl MetalHost {
                 .map_err(|e| layer_ui::gpu_unsupported(host.session.localization(), &format!("Metal adapter selection: {e}")))?;
             let limits = wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits());
             check_adapter(host, &adapter, &limits)?;
-            let (device, queue) =
-                pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            let (device, queue, watch) =
+                pollster::block_on(layer_host::request_device(&adapter, &wgpu::DeviceDescriptor {
                     label: Some("Capy Canvas Apple"),
                     required_features: layer_render_wgpu::rendering_features(&adapter)
                         | adapter.features() & (wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::PIPELINE_CACHE),
@@ -210,8 +208,11 @@ impl MetalHost {
                     .spawn_scoped(scope, || context.rasterizer(color, &options, false))
                     .map_err(|e| e.to_string())?
                     .join()
-                    .map_err(super::panic_diagnostic)?
+                    .map_err(|payload| layer_host::panic_diagnostic(&*payload))?
             }).map_err(|e| format!("Metal renderer creation ({:?}): {e}", context.adapter.get_info()))?;
+            if let Some(failure) = watch.failure() {
+                return Err(format!("Metal renderer creation ({:?}): {failure}", context.adapter.get_info()));
+            }
             self.install_renderer(host, renderer)?;
         }
         let [width, height] = host.session.state().camera.viewport;

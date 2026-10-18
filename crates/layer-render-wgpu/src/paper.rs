@@ -227,6 +227,10 @@ impl Papers {
         Ok(id)
     }
 
+    pub fn requested(&self, id: &AssetId) -> bool {
+        self.bakes.iter().any(|bake| bake.id == *id)
+    }
+
     pub fn ready_through(&self, priority: u8) -> bool {
         self.bakes.iter().all(|b| b.priority > priority || matches!(b.stage, Stage::Ready { .. }))
     }

@@ -1031,9 +1031,9 @@ impl Workspace {
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => return glib::ControlFlow::Break,
                 }
             }
-            let busy = this.input.has_pending() || crate::input::localization_input_busy(&this.window)
+            let busy = crate::input::localization_input_busy(&this.window)
                 || this.command_bar.composition_busy()
-                || this.gpu.borrow().as_ref().is_some_and(|g| g.session.localization_input_busy());
+                || this.gpu.borrow().as_ref().is_some_and(|g| g.session.localization_input_busy() || g.session.holding_input());
             let localization = this.language_transition.borrow_mut().publish(busy);
             if let Some(localization) = localization {
                 this.adopt_language(localization);
@@ -2455,7 +2455,6 @@ impl Workspace {
                         previous + ((now.saturating_sub(previous) / period) + 1) * period
                     };
                     this.frame_deadline.set(next);
-                    this.input.flush(&this);
                     let result = this.gpu.borrow_mut().as_mut().map(|g| {
                         let overviews = this
                             .navigator_overviews
@@ -2492,9 +2491,9 @@ impl Workspace {
                     let last_navigation = this.navigation_input.get();
                     let navigating = last_navigation != 0
                         && now.saturating_sub(last_navigation) < period * 2;
-                    let active = navigating || this.input.has_pending()
+                    let active = navigating
                         || this.gpu.borrow().as_ref().is_some_and(|g| {
-                            g.session.wants_continuous_frames() || g.needs_present
+                            g.session.wants_continuous_frames() || g.needs_present || g.session.holding_input()
                         });
                     #[cfg(test)]
                     if let Some(gpu) = this.gpu.borrow().as_ref() {

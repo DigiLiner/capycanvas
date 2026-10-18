@@ -1,6 +1,7 @@
 //! Native catalog activation, host pen events, presentation and history for all
 //! shared contact presets. Runs on an isolated Wayland/Vulkan desktop.
 use super::*;
+use layer_render::CanvasRenderer;
 
 #[test]
 #[ignore = "requires a private Wayland display and GPU"]

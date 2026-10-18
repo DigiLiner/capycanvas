@@ -40,6 +40,9 @@ impl Masks {
             }
         }
     }
+    pub fn generates(&self, id: &AssetId) -> bool {
+        self.0.iter().any(|mask| mask.id == *id)
+    }
     pub fn ready_through(&self, priority: u8) -> bool {
         self.0.iter().all(|m| m.priority > priority || m.uploaded)
     }

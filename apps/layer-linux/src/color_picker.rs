@@ -136,7 +136,10 @@ pub fn bind_button(
     anchor: DrawerAnchor,
     control: ToolbarControl,
 ) {
-    button.set_tooltip_text(Some(&w.gpu.borrow().as_ref().unwrap().session.color_picker_button_label(control)));
+    let label = w.gpu.borrow().as_ref().map(|g| g.session.color_picker_button_label(control));
+    if let Some(label) = label {
+        button.set_tooltip_text(Some(&label));
+    }
     let pressed = Rc::new(Cell::new(None));
     let last = Rc::new(Cell::new(None::<(u32, Option<gtk::gdk::InputSource>)>));
     let click = gtk::GestureClick::new();

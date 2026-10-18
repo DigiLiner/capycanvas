@@ -248,7 +248,6 @@ impl WebApp {
     }
     pub(super) fn reset_document_views(&mut self) {
         self.startup = Default::default();
-        self.deferred_contacts.clear();
         for slot in self.overviews.values_mut() {
             slot.gpu = None;
         }

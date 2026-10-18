@@ -85,6 +85,7 @@ impl DocumentService {
             && !self.activating
             && !self.spilling
             && self.deferred_action.is_none()
+            && self.package.as_ref().is_none_or(|package| package.writing.is_none())
             && self.recovery.as_ref().is_none_or(|r| !r.restoring())
     }
     fn document_retired(&mut self, host: &mut NativeHost) -> Result<(), String> {
@@ -93,14 +94,15 @@ impl DocumentService {
         host.proof = Default::default();
         Ok(())
     }
-    fn activate(&mut self, host: &mut NativeHost, activation: Activation) {
+    fn activate(&mut self, host: &mut NativeHost, activation: Activation) -> Result<(), String> {
         if self.window.gpu.is_none() {
             host.error =
                 Some(layer_ui::DocumentTransportRefusal::PaintingUnavailable.message(host.session.localization()).to_string());
-            return;
+            return Ok(());
         }
+        self.worker.submit(Job::Activate(Box::new(activation)))?;
         self.activating = true;
-        self.worker.submit(Job::Activate(Box::new(activation)));
+        Ok(())
     }
     fn switch(&mut self, host: &mut NativeHost, id: u64, closing: bool) -> Result<(), String> {
         let options = host.renderer_options(None);
@@ -113,7 +115,7 @@ impl DocumentService {
         if let Some(closed) = closed {
             self.worker.retire(closed.session);
         }
-        self.activate(host, activation);
+        self.activate(host, activation)?;
         Ok(())
     }
     fn select(&mut self, host: &mut NativeHost, id: u64) -> Result<(), String> {
@@ -214,11 +216,8 @@ impl DocumentService {
                             host.invalidate_snapshot();
                             return Ok(());
                         }
-                        let previous = host.session.state().revision;
-                        let (retired, change) =
-                            host.session.replace_renderer(Renderer(Some(gpu)))?;
+                        let retired = host.replace_renderer(Renderer(Some(gpu)))?;
                         self.worker.retire_renderer(retired);
-                        host.apply_change(previous, change);
                         host.startup = Default::default();
                     }
                     Ok(None) => {}
@@ -357,8 +356,8 @@ impl DocumentService {
             && self.recovery.as_ref().is_none_or(|r| r.close_ready())
         {
             let prepared=self.prepared_close.take().ok_or("The drawing close is not prepared")?;
-            let (activation,closed)=self.window.commit_close(host,prepared,|_|{});
-            self.document_retired(host)?;if let Some(closed)=closed{self.worker.retire(closed.session);}self.activate(host,activation);
+            let (activation,closed)=self.window.commit_close(host,prepared,|_|{})?;
+            self.document_retired(host)?;if let Some(closed)=closed{self.worker.retire(closed.session);}self.activate(host,activation)?;
             self.close_next = false;
         }
         if self.idle()
@@ -367,7 +366,7 @@ impl DocumentService {
             && let Some(tiles) = self.window.documents.spill_candidate()
         {
             self.spilling = true;
-            self.worker.submit(Job::Spill { tiles });
+            self.worker.submit(Job::Spill { tiles })?;
             host.invalidate_snapshot();
         }
         Ok(())

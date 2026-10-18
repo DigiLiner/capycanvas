@@ -10,6 +10,7 @@ pub(crate) struct Cache {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_takeScopes(mut env: JNIEnv, _: JClass, handle: jlong) -> jobjectArray {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let state = a.host.session.state();
@@ -40,4 +41,5 @@ pub extern "system" fn Java_art_capycanvas_Native_takeScopes(mut env: JNIEnv, _:
         Ok(result.into_raw())
     })();
     or_throw(&mut env, result, std::ptr::null_mut())
+    })
 }

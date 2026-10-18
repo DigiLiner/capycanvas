@@ -31,11 +31,11 @@ fn live_pressure_preview_is_independent_of_artwork_settings_and_workspace_histor
     let mut settings = s.state.settings.clone(); settings.pan_speed = 2.;
     s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
     assert_eq!(source(&s), draft);
-    s.pen(event(&s, 1, PenPhase::Down, 0.2)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 0.2));
     s.frame(10_000_000,18_000_000).unwrap();
     calibration(&mut s, PressureCalibrationAction::Cancel);
-    s.pen(event(&s, 2, PenPhase::Move, 0.2)).unwrap();
-    s.pen(event(&s, 3, PenPhase::Up, 0.2)).unwrap();
+    s.pen(event(&s, 2, PenPhase::Move, 0.2));
+    s.pen(event(&s, 3, PenPhase::Up, 0.2));
     s.frame(30_000_000,38_000_000).unwrap();
     assert!(s.state.pressure_calibration.is_none());
     assert_eq!(s.state.settings.pressure_curve, original);

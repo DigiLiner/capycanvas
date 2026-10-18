@@ -1,4 +1,5 @@
 use super::*;
+use layer_render::CanvasRenderer;
 use layer_ui::{PreferenceAction, PreferenceId, UiAction};
 
 #[test]

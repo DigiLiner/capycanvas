@@ -174,7 +174,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let l = self.localization().clone();
         let Some(remap) = self.content_bounds.remap.as_mut() else { return 0; };
         let result = if remap.epoch != self.state.document_file.epoch || remap.revision != self.engine.document().revision {
-            self.engine.backend_mut().cancel_snapshot();
+            if remap.submitted { self.engine.backend_mut().cancel_snapshot(); }
             Err(l.text(MessageId::COMMANDS_CANVAS_CHANGE_DRAWING_CHANGED).to_string())
         } else if !remap.submitted {
             match self.engine.backend_mut().request_snapshot(layer_render::SnapshotRequest::Remap(remap.plan.clone())).map_err(error) {
@@ -419,7 +419,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let changed = bake.epoch != self.state.document_file.epoch || bake.revision != self.engine.document().revision
             || self.engine.document().active_target() != Some(bake.plan.target);
         let result = if changed {
-            self.engine.backend_mut().cancel_snapshot();
+            if bake.submitted { self.engine.backend_mut().cancel_snapshot(); }
             Err(l.text(MessageId::COMMANDS_TRANSFORM_PIXELS_DRAWING_CHANGED).to_string())
         } else if !bake.submitted {
             match self.engine.backend_mut().request_snapshot(layer_render::SnapshotRequest::TransformPixels(bake.plan.clone())).map_err(error) {

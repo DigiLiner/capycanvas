@@ -117,6 +117,7 @@ mod screen_view;
 use super::*;
 use layer_core::Point;
 use layer_engine::{PenEvent, PenPhase, SampleFlags, ToolKind};
+use layer_render::CanvasRenderer;
 use layer_ui::FloatingToolbarLayout;
 use std::time::{Duration, Instant};
 
@@ -3207,8 +3208,7 @@ fn native_navigator() {
                 .pen(PenEvent {
                     device_id: 91,
                     ..event
-                })
-                .unwrap();
+                });
         }
         w.wake();
         pump(250);
@@ -4176,8 +4176,7 @@ fn native_layer_panel_review() {
                 .pen(PenEvent {
                     device_id: 91,
                     ..event
-                })
-                .unwrap();
+                });
         }
         w.wake();
         pump(180);
@@ -12058,8 +12057,7 @@ fn native_workspace_controls_docking_and_ink() {
         };
         stroke_points.push(view.input_transform().map(event.surface_position));
         ui_session_mut(&w)
-            .pen(event)
-            .unwrap();
+            .pen(event);
         w.wake();
         pump(15);
     }

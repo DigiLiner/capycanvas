@@ -1,4 +1,12 @@
 use super::*;
+use web_time::{Duration, Instant};
+
+#[cfg(test)]
+#[path = "held_contact_tests.rs"]
+mod tests;
+
+const HOLD: Duration = Duration::from_secs(5);
+const HELD_SAMPLES: usize = 4096;
 
 enum EditInput {
     Action(UiAction),
@@ -6,7 +14,15 @@ enum EditInput {
 }
 pub(super) struct DeferredEdit {
     drawing: (u64, u64),
+    held_since: Option<Instant>,
     input: EditInput,
+}
+
+fn real(event: &PenEvent) -> bool {
+    !event.flags.contains(layer_engine::SampleFlags::PREDICTED) && !event.flags.contains(layer_engine::SampleFlags::CORRECTION)
+}
+fn starts_contact(event: &PenEvent) -> bool {
+    event.phase == PenPhase::Down && real(event)
 }
 
 fn configures_brush(action: &UiAction) -> bool {
@@ -22,13 +38,99 @@ fn configures_brush(action: &UiAction) -> bool {
 
 impl<R: CanvasRenderer> UiSession<R> {
     fn defer_edit(&mut self, input: EditInput) {
+        self.queue_edit(input, None);
+    }
+    fn queue_edit(&mut self, input: EditInput, held_since: Option<Instant>) {
         self.deferred_edits.push_back(DeferredEdit {
             drawing: (self.engine.document().owner, self.state.document_file.epoch),
+            held_since,
             input,
         });
     }
-    pub(super) fn defer_pen(&mut self, event: PenEvent) {
-        self.defer_edit(EditInput::Pen { event, camera: self.state.camera.clone() });
+    fn defer_pen(&mut self, event: PenEvent, held: bool) {
+        if event.flags.contains(layer_engine::SampleFlags::PREDICTED) { return; }
+        if event.phase == PenPhase::Cancel && real(&event)
+            && let Some(index) = self.held_contact(event.device_id) {
+            self.discard_held(index);
+            return;
+        }
+        let holding = self.holding_input();
+        let contact_end = self.held_contact(event.device_id).filter(|_| !starts_contact(&event)).map(|start| {
+            start + 1 + self.deferred_edits.iter().skip(start + 1)
+                .rposition(|edit| matches!(&edit.input, EditInput::Pen { event: queued, .. } if queued.device_id == event.device_id))
+                .map_or(0, |last| last + 1)
+        });
+        self.queue_edit(EditInput::Pen { event, camera: self.state.camera.clone() }, (held && starts_contact(&event)).then(Instant::now));
+        if let Some(position) = contact_end.filter(|position| *position + 1 < self.deferred_edits.len()) {
+            let edit = self.deferred_edits.pop_back().unwrap();
+            self.deferred_edits.insert(position, edit);
+        }
+        let samples = self.deferred_edits.iter().filter(|edit| matches!(edit.input, EditInput::Pen { .. })).count();
+        if samples > HELD_SAMPLES && let Some(index) = self.deferred_edits.iter().position(|edit| edit.held_since.is_some()) {
+            self.discard_held_contact(index);
+        }
+        if holding != self.holding_input() { self.refresh_commands(); }
+    }
+    pub(super) fn admit_pen(&mut self, event: PenEvent) {
+        if let Some(index) = self.discarded_contacts.iter().position(|id| *id == event.device_id) {
+            if real(&event) && matches!(event.phase, PenPhase::Down | PenPhase::Up | PenPhase::Cancel) {
+                self.discarded_contacts.swap_remove(index);
+            }
+            if event.phase != PenPhase::Down || !real(&event) { return; }
+        }
+        let held = starts_contact(&event) && !self.paint_ready();
+        if self.deferred_edits.is_empty() && !held {
+            if let Err(event) = self.pen_ready(event) { self.defer_pen(event, false); }
+            return;
+        }
+        self.defer_pen(event, held);
+    }
+    pub(super) fn apply_loaded_paper(&mut self) -> u32 {
+        if self.rendering_suspended || !self.deferred_edits.is_empty() || !self.canvas_idle() || self.engine.raster_backing_pending() { return 0; }
+        let Some(crate::paper_library::PendingPaper { layer, epoch, image: Some(image), .. }) = self.papers.pending.take_if(|pending| pending.image.is_some()) else { return 0 };
+        if epoch != self.state.document_file.epoch { return 0; }
+        if let Err(error) = self.apply_paper_texture(layer, layer_core::TextureSource::Image(image)) {
+            self.notify(error);
+        }
+        regions::DOCUMENT
+    }
+    pub fn holding_input(&self) -> bool {
+        self.deferred_edits.iter().any(|edit| matches!(edit.input, EditInput::Pen { .. }))
+    }
+    pub fn paint_ready(&self) -> bool {
+        let engine = &self.engine;
+        engine.backend().paint_ready(engine.document(), engine.brush(), engine.transform_preview().is_some())
+    }
+    fn held_contact(&self, id: u64) -> Option<usize> {
+        let index = self.deferred_edits.iter().rposition(|edit| matches!(&edit.input, EditInput::Pen { event, .. } if starts_contact(event) && event.device_id == id))?;
+        let ended = self.deferred_edits.iter().skip(index + 1).any(|edit| matches!(&edit.input, EditInput::Pen { event, .. }
+            if event.device_id == id && real(event) && matches!(event.phase, PenPhase::Up | PenPhase::Cancel)));
+        (!ended).then_some(index)
+    }
+    fn discard_held(&mut self, index: usize) -> bool {
+        let EditInput::Pen { event, .. } = &self.deferred_edits[index].input else { return true };
+        let id = event.device_id;
+        let (mut position, mut ended) = (0, false);
+        self.deferred_edits.retain(|edit| {
+            let discarded = position >= index && !ended && matches!(&edit.input, EditInput::Pen { event, .. } if event.device_id == id);
+            if discarded && let EditInput::Pen { event, .. } = &edit.input {
+                ended = real(event) && matches!(event.phase, PenPhase::Up | PenPhase::Cancel);
+            }
+            position += 1;
+            !discarded
+        });
+        self.refresh_commands();
+        ended
+    }
+    fn discard_held_contact(&mut self, index: usize) {
+        let EditInput::Pen { event, .. } = &self.deferred_edits[index].input else { return };
+        let id = event.device_id;
+        if !self.discard_held(index) { self.discarded_contacts.push(id); }
+    }
+    fn expire_held(&mut self) {
+        while let Some(index) = self.deferred_edits.iter().position(|edit| edit.held_since.is_some_and(|since| since.elapsed() > HOLD)) {
+            self.discard_held_contact(index);
+        }
     }
     pub(super) fn deferred_contact(&self) -> Option<bool> {
         self.deferred_edits.iter().rev().find_map(|edit| match edit.input {
@@ -52,7 +154,8 @@ impl<R: CanvasRenderer> UiSession<R> {
     fn deferrable(&self, action: &UiAction) -> bool {
         let configures_brush = configures_brush(action);
         !(self.rendering_suspended || self.workspace_read_only || self.workspace_transition
-            || (self.deferred_contact().unwrap_or(self.pen_contact) && !configures_brush)
+            || (self.deferred_contact().unwrap_or(self.pen_contact) && !configures_brush
+                && !(self.deferred_contact() == Some(true) && held_actions::selects_tool(action)))
             || self.state.document_file.close_ready
             || matches!(action, UiAction::Invoke { command } if Self::command_without_document(*command) || NAVIGATOR_COMMANDS.contains(command) || matches!(command, CommandId::FitCanvas | CommandId::ActualPixels))
             || !(configures_brush || held_actions::selects_tool(action) || matches!(action, UiAction::Invoke { .. } | UiAction::Selection { .. }
@@ -85,6 +188,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub(super) fn poll_deferred_edits(&mut self) -> u32 {
         let mut changed = 0;
+        self.expire_held();
         let mut deferred = std::mem::take(&mut self.deferred_edits);
         while let Some(edit) = deferred.front() {
             if self.state.document_file.close_ready || self.rendering_suspended
@@ -93,6 +197,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 continue;
             }
             if self.engine.raster_backing_pending() || self.files.pending.is_some()
+                || matches!(&edit.input, EditInput::Pen { event, .. } if starts_contact(event) && !self.paint_ready())
                 || (matches!(&edit.input, EditInput::Action(action) if !configures_brush(action))
                     && (self.painted_selections.busy() || self.region_tools.publishing_edit()
                         || self.engine.has_pending_input() || self.engine.has_active_stroke()))
@@ -115,7 +220,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                     let camera = std::mem::replace(&mut self.state.camera, current);
                     self.sync_camera();
                     if let Err(event) = result {
-                        deferred.push_front(DeferredEdit { input: EditInput::Pen { event, camera }, ..edit });
+                        deferred.push_front(DeferredEdit { input: EditInput::Pen { event, camera }, held_since: None, ..edit });
                         break;
                     }
                 }

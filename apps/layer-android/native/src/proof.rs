@@ -19,7 +19,9 @@ struct Task {
 pub extern "system" fn Java_art_capycanvas_Native_presentationTimings(
     mut env: JNIEnv, _: JClass, handle: jlong, enabled: jboolean,
 ) -> jstring {
+    crate::jni_entry!(env, handle, {
     string(&mut env, Ok(unsafe { app(handle) }.presentation_timings(enabled != 0).to_string()))
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofTask(
@@ -30,6 +32,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofTask(
     recipe: JString,
     control: jlong,
 ) -> jlong {
+    crate::jni_entry!(env, handle, {
     let result = (|| -> Result<_, ColorCallError> {
         let recipe: Option<layer_core::color::ProofRecipe> = serde_json::from_str(&read(&mut env, &recipe)?).map_err(error)?;
         let job = if id < 0 { ProofPreparation::panel(&unsafe { app(handle) }.host.session, recipe.ok_or(layer_ui::ColorFeatureError::ProofChooseProfile)?)? } else { ProofPreparation::begin(
@@ -44,15 +47,18 @@ pub extern "system" fn Java_art_capycanvas_Native_proofTask(
         })) as jlong)
     })();
     color_or_throw(&mut env, result, 0)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofWork(mut env: JNIEnv, _: JClass, id: jlong) {
+    crate::jni_entry!(env, {
     let t = unsafe { crate::inspection::borrow::<Task>(id) };
     let result = t
         .job
         .build(|| t.control.is_cancelled())
         .map(|lut| t.lut = Some(lut));
     color_or_throw(&mut env, result.map_err(Into::into), ());
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofCheck(
@@ -61,6 +67,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofCheck(
     handle: jlong,
     id: jlong,
 ) {
+    crate::jni_entry!(env, handle, {
     let t = unsafe { crate::inspection::borrow::<Task>(id) };
     color_or_throw(
         &mut env,
@@ -70,6 +77,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofCheck(
             t.job.validate(&unsafe { app(handle) }.host.session)
         }.map_err(Into::into), (),
     );
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofPreservation(
@@ -77,6 +85,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofPreservation(
     _: JClass,
     id: jlong,
 ) -> jbyteArray {
+    crate::jni_entry!(env, {
     match unsafe { crate::inspection::borrow::<Task>(id) }.job.preservation() {
         None => std::ptr::null_mut(),
         Some(bytes) => match env.byte_array_from_slice(bytes) {
@@ -87,6 +96,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofPreservation(
             }
         },
     }
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofApply(
@@ -96,6 +106,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofApply(
     id: jlong,
     preserved: jboolean,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| -> Result<_, ColorCallError> {
         let (a, t) = unsafe { (app(handle), crate::inspection::borrow::<Task>(id)) };
         if t.control.is_cancelled() {
@@ -110,6 +121,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofApply(
         Ok(())
     })();
     color_or_throw(&mut env, result, ());
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofFailed(
@@ -119,6 +131,7 @@ pub extern "system" fn Java_art_capycanvas_Native_proofFailed(
     id: jlong,
     message: JString,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let message = read(&mut env, &message)?;
         let (a, t) = unsafe { (app(handle), crate::inspection::borrow::<Task>(id)) };
@@ -126,11 +139,13 @@ pub extern "system" fn Java_art_capycanvas_Native_proofFailed(
         Ok(())
     })();
     fail(&mut env, result);
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_proofFailedReason(
     mut env: JNIEnv, _: JClass, handle: jlong, id: jlong, reason: JString,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let reason = serde_json::from_str(&read(&mut env, &reason)?).map_err(error)?;
         let (a, t) = unsafe { (app(handle), crate::inspection::borrow::<Task>(id)) };
@@ -138,10 +153,13 @@ pub extern "system" fn Java_art_capycanvas_Native_proofFailedReason(
         Ok(())
     })();
     fail(&mut env, result);
+    })
 }
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_proofRelease(_: JNIEnv, _: JClass, id: jlong) {
+pub extern "system" fn Java_art_capycanvas_Native_proofRelease(mut env: JNIEnv, _: JClass, id: jlong) {
+    crate::jni_entry!(env, {
     if id != 0 {
         drop(unsafe { Box::from_raw(id as *mut Task) });
     }
+    })
 }

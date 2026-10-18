@@ -67,6 +67,7 @@ pub(crate) struct Recorder {
     pub(crate) frame_scene: Option<SceneSnapshot>,
     pub(crate) evaluation: EvaluationContext,
     pub(crate) rebuilds: usize,
+    pub(crate) painting_unready: bool,
 }
 impl CanvasRenderer for Recorder {
     type Error = BackendError;
@@ -74,6 +75,7 @@ impl CanvasRenderer for Recorder {
     fn seed_evaluation_context(&mut self, context: EvaluationContext) { self.evaluation = context; }
     fn set_clipping_preview(&mut self, shadows:bool, highlights:bool) {self.clipping_previews.push((shadows,highlights));}
     fn has_pending_submission(&self) -> bool { self.settling }
+    fn paint_ready(&self, _document: &Document, _brush: &layer_core::BrushSnapshot, _transform: bool) -> bool { !self.painting_unready }
     fn has_pending_work(&self) -> bool { self.refining }
     fn shader_idle(&mut self, idle: bool, speculative_idle: bool) { self.shader_idle = (idle, speculative_idle); }
     fn can_submit(&self) -> bool { !self.settling }
@@ -418,7 +420,7 @@ pub(crate) fn on_surface(s: &UiSession<Recorder>, p: Point) -> Point {
 pub(crate) fn pen_at(s: &mut UiSession<Recorder>, sequence: u64, phase: PenPhase, p: [f32; 2]) {
     let mut e = event(s, sequence, phase, 1.);
     e.surface_position = on_surface(s, Point { x: p[0], y: p[1] });
-    s.pen(e).unwrap();
+    s.pen(e);
 }
 
 pub(crate) fn tile_ids(layout: &DockLayout, panel: Panel) -> Vec<u32> {

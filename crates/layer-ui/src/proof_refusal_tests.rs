@@ -80,10 +80,10 @@ fn proof_refusals_retain_real_producer_meanings_across_languages() {
     s.set_proof_recipe(Some(recipe())).unwrap();
     let result = job.validate(&s);
     refusal(&mut s, result, json!("ProofDrawingChanged"));
-    s.pen(event(&s, 1, PenPhase::Down, 0.5)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 0.5));
     let result = s.set_proof_mode(crate::ProofMode::Off);
     refusal(&mut s, result, json!({"ProofAdmission":"canvas_interaction"}));
-    s.pen(event(&s, 2, PenPhase::Cancel, 0.)).unwrap();
+    s.pen(event(&s, 2, PenPhase::Cancel, 0.));
 
     let mut document = layer_core::Document::new(layer_core::PortableId::random(), 32, 32, layer_core::DocumentNames {paint:"Current ink".into(), paper:"Paper".into()});
     let mut composition = document.composition().clone();

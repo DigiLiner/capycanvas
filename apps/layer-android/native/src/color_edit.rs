@@ -17,7 +17,9 @@ pub extern "system" fn Java_art_capycanvas_Native_colorTask(
     id: jint,
     cancel: jlong,
 ) -> jlong {
+    crate::jni_entry!(env, {
     crate::inspection::capture_task(&mut env, handle, id, cancel, ColorTask::capture)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_colorWork(
@@ -27,6 +29,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorWork(
     choice: JString,
     copy: jboolean,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let result = (|| {
         let choice = serde_json::from_str(&read(&mut env, &choice)?).map_err(error)?;
         let t = unsafe { crate::inspection::borrow::<Task>(handle) };
@@ -36,6 +39,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorWork(
         })
     })();
     string(&mut env, result)
+    })
 }
 pub(crate) fn preview_bytes(env: &mut JNIEnv, previews: &[Preview], after: jboolean) -> jbyteArray {
     let result = (|| {
@@ -60,7 +64,9 @@ pub extern "system" fn Java_art_capycanvas_Native_colorPreview(
     handle: jlong,
     after: jboolean,
 ) -> jbyteArray {
+    crate::jni_entry!(env, {
     preview_bytes(&mut env, unsafe { crate::inspection::borrow::<Task>(handle) }.task.previews(), after)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_colorAdopt(
@@ -69,6 +75,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorAdopt(
     handle: jlong,
     job: jlong,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let t = unsafe { crate::inspection::borrow::<Task>(job) };
@@ -78,10 +85,13 @@ pub extern "system" fn Java_art_capycanvas_Native_colorAdopt(
         Ok(())
     })();
     fail(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_colorFree(_: JNIEnv, _: JClass, handle: jlong) {
+pub extern "system" fn Java_art_capycanvas_Native_colorFree(mut env: JNIEnv, _: JClass, handle: jlong) {
+    crate::jni_entry!(env, {
     unsafe { crate::inspection::release::<Task>(handle) };
+    })
 }
 
 #[unsafe(no_mangle)]
@@ -91,6 +101,7 @@ pub extern "system" fn Java_art_capycanvas_Native_colorWriteCopy(
     handle: jlong,
     fd: jint,
 ) {
+    crate::jni_entry!(env, {
     use std::io::Write;
     use std::os::fd::FromRawFd;
     let file = unsafe { std::fs::File::from_raw_fd(fd) };
@@ -105,4 +116,5 @@ pub extern "system" fn Java_art_capycanvas_Native_colorWriteCopy(
         Ok(())
     })();
     fail(&mut env, result)
+    })
 }

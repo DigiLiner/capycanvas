@@ -1,5 +1,6 @@
 //! New/Open/Save/Export through GTK dialogs and the production SDR worker.
 use super::*;
+use layer_render::CanvasRenderer;
 use layer_core::color::{ColorProfile, DocumentColor, SampleDepth, RgbSpace, source::*};
 
 fn readiness_facts(w: &Rc<Workspace>) -> String {

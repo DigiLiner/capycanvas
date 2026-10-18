@@ -155,7 +155,7 @@ mod painted_selection_checks {
     fn send(s: &mut UiSession<Recorder>, phase: PenPhase, x: f32) {
         let mut e = event(s, 1, phase, 1.);
         e.surface_position = Point { x, y: 100. };
-        s.pen(e).unwrap();
+        s.pen(e);
     }
     fn reply(s: &mut UiSession<Recorder>, value: u32) {
         let id = s.engine.backend().selection_updates.last().unwrap().id;

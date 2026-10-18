@@ -1,5 +1,6 @@
 //! Side-button transitions through Wayland, GDK and the real canvas gestures.
 use super::*;
+use layer_render::CanvasRenderer;
 
 #[test]
 #[ignore = "isolated native-input.js --native-test=native_canvas_pen_buttons --tablet"]

@@ -78,8 +78,8 @@ fn tool_keys_switch_on_tap_and_return_after_a_held_use() {
     s.dispatch(UiAction::SelectBrush { id: preset }).unwrap();
     held_key(&mut s, "e", true, Modifiers::default());
     assert_eq!(s.state.brush.tool, Tool::Eraser);
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Up, 1.));
     held_key(&mut s, "e", false, Modifiers::default());
     s.frame(3, 3).unwrap();
     assert!(painting_with(&s, preset), "holding the key and drawing returns on release");
@@ -142,16 +142,16 @@ fn blur_ends_holds_idempotently() {
 fn holds_wait_for_an_active_stroke_to_finish() {
     let mut s = session(Platform::Gtk);
     let preset = s.state.brush.preset;
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
     held_key(&mut s, "Alt_L", true, Modifiers::default());
     assert!(painting_with(&s, preset), "a stroke keeps its tool");
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(4, 4).unwrap();
     assert!(sampling(&s), "the pending hold applies once idle");
-    s.pen(event(&s, 5, PenPhase::Down, 1.)).unwrap();
+    s.pen(event(&s, 5, PenPhase::Down, 1.));
     held_key(&mut s, "Alt_L", false, alt());
-    s.pen(event(&s, 6, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 6, PenPhase::Up, 1.));
     s.frame(7, 7).unwrap();
     assert!(painting_with(&s, preset));
 }

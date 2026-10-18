@@ -569,6 +569,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     };
     let candidate=await app.prepare_session_restart(checkpoint,buffers,recovered,observe);
     try {
+      while(closing||changing)await new Promise(resolve=>setTimeout(resolve,50));
       const replace=activate&&app.session_can_replace_startup(initial);
       let adopted;
       const publish=()=>{const prepared=candidate;candidate=null;adopted=app.adopt_session_restart(prepared,initial,BigInt(identity),activate);applyChange(adopted.change);};

@@ -94,7 +94,7 @@ impl NativeHost {
     /// is prepared and the workspace accepts canvas input, as a loading one
     /// does not.
     fn shader_progress(&self) -> layer_render_wgpu::StartupProgress {
-        let brush_ready = self.paint_ready() && !self.session.workspace_read_only();
+        let brush_ready = self.session.engine().backend().0.is_some() && self.session.paint_ready() && !self.session.workspace_read_only();
         layer_render_wgpu::StartupProgress {
             brush_ready,
             complete: self.startup.complete && brush_ready,

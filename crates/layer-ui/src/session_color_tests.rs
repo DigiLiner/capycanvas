@@ -383,10 +383,10 @@ fn figures_and_gradients_convert_both_portable_paints() {
     layer(&mut s, LayerAction::Tool { tool: LayerCanvasTool::Gradient {shape:layer_core::GradientShape::Linear}, });
     let mut down = event(&s, 1, PenPhase::Down, 1.);
     down.surface_position = Point { x: 50., y: 50. };
-    s.pen(down).unwrap();
+    s.pen(down);
     let mut up = event(&s, 2, PenPhase::Up, 1.);
     up.surface_position = Point { x: 250., y: 250. };
-    s.pen(up).unwrap();
+    s.pen(up);
     s.frame(10, 10).unwrap();
     let color_space_for_gradient=s.engine.document().composition().color.space;
     let operations = &s.renderer_mut().pending_operations;

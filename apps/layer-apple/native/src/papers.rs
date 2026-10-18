@@ -43,7 +43,7 @@ pub unsafe extern "C" fn capy_apple_paper_task(app: *mut CapyApple, request: u32
 pub unsafe extern "C" fn capy_paper_work(task: *const CapyPaperTask, fd: i32, name: *const c_char) {
     let Some(task) = (unsafe { task.as_ref() }) else { return };
     let result = catch_unwind(AssertUnwindSafe(|| task.work(fd, unsafe { project::read_title(name) }?)))
-        .unwrap_or_else(|error| Err(panic_diagnostic(error)));
+        .unwrap_or_else(|error| Err(layer_host::panic_diagnostic(&*error)));
     *task.result.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
 }
 /// # Safety

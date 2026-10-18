@@ -230,7 +230,7 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
     w.on_localization(glib::clone!(#[weak] w, #[weak] save, #[weak] remember, #[upgrade_or] false, move |localization| {
         let Some(form) = weak_form.upgrade() else { return false; };
         *form.localization.borrow_mut() = localization.clone();
-        let settings = w.gpu.borrow().as_ref().unwrap().session.state().settings.new_document.clone();
+        let Some(settings) = w.gpu.borrow().as_ref().map(|g| g.session.state().settings.new_document.clone()) else { return true; };
         let selected = form.selected_preset().map(|preset| preset.id);
         form.presets(&settings, selected);
         let view = form.view.borrow();
@@ -330,7 +330,7 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
                         dialog.set_response_label("cancel", &view.text.cancel);
                         dialog.set_response_label("save", &view.text.save);
                         name.set_title(&view.text.preset_name);
-                        let mut settings = w.gpu.borrow().as_ref().unwrap().session.state().settings.new_document.clone();
+                        let Some(mut settings) = w.gpu.borrow().as_ref().map(|g| g.session.state().settings.new_document.clone()) else { return true; };
                         note.set_text(&settings.save(&name.text(), options).err().map(|error| error.message(&form.localization.borrow())).unwrap_or_default());
                         true
                     }));
@@ -344,32 +344,15 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
                         #[weak]
                         note,
                         move |name| {
-                            let mut settings = w
-                                .gpu
-                                .borrow()
-                                .as_ref()
-                                .unwrap()
-                                .session
-                                .state()
-                                .settings
-                                .new_document
-                                .clone();
+                            let Some(mut settings) = w.gpu.borrow().as_ref().map(|g| g.session.state().settings.new_document.clone()) else { return; };
                             let result = settings.save(&name.text(), options);
                             dialog.set_response_enabled("save", result.is_ok());
                             note.set_text(&result.err().map(|error| error.message(&form.localization.borrow())).unwrap_or_default());
                         }
                     ));
-                    if crate::alert::choose(dialog, &w.window).await == "save" {
-                        let mut settings = w
-                            .gpu
-                            .borrow()
-                            .as_ref()
-                            .unwrap()
-                            .session
-                            .state()
-                            .settings
-                            .new_document
-                            .clone();
+                    let save = crate::alert::choose(dialog, &w.window).await == "save";
+                    let settings = w.gpu.borrow().as_ref().map(|g| g.session.state().settings.new_document.clone());
+                    if save && let Some(mut settings) = settings {
                         if settings.save(&name.text(), options).is_ok() {
                             let selected = settings.form(&form.localization.borrow()).presets.last().map(|preset| preset.id);
                             w.dispatch(UiAction::NewDocumentPreferences {
@@ -395,16 +378,7 @@ pub(crate) async fn configure(w: &Rc<Workspace>, defaults_only: bool) -> Result<
                 #[strong]
                 w,
                 move || {
-                    let mut settings = w
-                        .gpu
-                        .borrow()
-                        .as_ref()
-                        .unwrap()
-                        .session
-                        .state()
-                        .settings
-                        .new_document
-                        .clone();
+                    let Some(mut settings) = w.gpu.borrow().as_ref().map(|g| g.session.state().settings.new_document.clone()) else { return; };
                     if let Some(action) = form.selected_preset().and_then(|preset| preset.remove) {
                         settings.apply(action.clone()).unwrap();
                         w.dispatch(UiAction::NewDocumentPreferences { action });

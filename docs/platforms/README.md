@@ -68,6 +68,14 @@ Browser GPU availability and event delivery depend on the browser and device.
 The shared renderer has no software-painting fallback. Use the [performance guide](../development/testing.md#performance) to check frame
 pacing on the target hardware.
 
+Native canvas devices come from `layer_host::request_device`, which installs a
+`DeviceWatch` before any renderer object exists, so a wgpu validation, memory or
+device-loss error is recorded for the host's existing GPU failure path instead
+of panicking on whichever thread raised it. Android, Apple and Windows enter
+shared Rust through `layer_host::contain`: a panic becomes an error, and the
+host refuses further calls with that cause rather than continuing on torn state
+or aborting the process. Android wraps every JNI function with `jni_entry!`.
+
 ## Storage and feature coverage
 
 The shared session defines preferences, workspace serialization, project requests

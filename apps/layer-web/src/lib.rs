@@ -51,7 +51,6 @@ pub struct WebApp {
     cursor: layer_ui::CanvasCursor,
     sequence: u64,
     startup: StartupProgress,
-    deferred_contacts: layer_engine::DeferredContacts,
     overviews: std::collections::BTreeMap<u32, editor::NavigatorSurface>,
     header_drag: Option<layer_ui::HeaderDrag>,
     glass: Vec<layer_render_wgpu::BackdropRegion>,
@@ -371,7 +370,6 @@ impl WebApp {
             scopes: Default::default(),
             state_cache: Default::default(),
             preferences_cache: None,
-            deferred_contacts: Default::default(),
             overviews: Default::default(),
             header_drag: None,
             glass: Vec::new(),
@@ -383,20 +381,7 @@ impl WebApp {
         self.session.engine().backend().0.is_some()
     }
     pub fn brush_ready(&self) -> bool {
-        self.startup.brush_ready
-            && self
-                .session
-                .engine()
-                .backend()
-                .0
-                .as_ref()
-                .is_some_and(|gpu| {
-                    !gpu.startup_needs_update(
-                        self.session.engine().document(),
-                        self.session.engine().brush(),
-                        self.session.engine().transform_preview().is_some(),
-                    )
-                })
+        self.gpu_ready() && self.session.paint_ready()
     }
     pub fn canvas_presented(&self) -> bool {
         self.gpu_ready() && self.surface.as_ref().is_some_and(|s| s.blank_presented)
@@ -473,7 +458,6 @@ impl WebApp {
             gpu.device().destroy();
         }
         self.surface = None;
-        self.deferred_contacts.clear();
         // Retained DOM navigators keep their registration and geometry through
         // device replacement; only resources owned by the retired GPU expire.
         for slot in self.overviews.values_mut() { slot.gpu = None; }
@@ -564,13 +548,6 @@ impl WebGpu {
 }
 
 impl WebApp {
-    fn deliver(&mut self, event: PenEvent) -> Result<(), JsValue> {
-        if let Err(event) = self.session.pen(event) {
-            self.session.frame(event.timestamp_ns, event.timestamp_ns).map_err(js)?;
-            self.session.pen(event).map_err(|_| js("Pen queue remained full"))?;
-        }
-        Ok(())
-    }
     fn rasterizer(&mut self) -> Result<&mut WgpuRasterizer, JsValue> {
         self.session
             .renderer_mut()
@@ -1098,11 +1075,7 @@ impl WebApp {
             if event.phase == PenPhase::Down {
                 if let Some(control) = self.tone.pending.take() { control.cancel(); }
             }
-            let admitted = self.deferred_contacts.admit(event, self.brush_ready(), web_time::Instant::now());
-            self.session.set_input_held(self.deferred_contacts.holding());
-            for event in admitted {
-                self.deliver(event)?;
-            }
+            self.session.pen(event);
             self.sequence += 1;
         }
         Ok((records.len() / 11) as u32)
@@ -1125,7 +1098,6 @@ impl WebApp {
         )
     }
     pub fn frame(&mut self, now_ms: f64, presentation_ms: f64) -> Result<JsValue, JsValue> {
-        self.session.set_input_held(self.deferred_contacts.holding());
         if !self.gpu_ready() {
             return serialize(&layer_ui::UiChange::default());
         }
@@ -1136,11 +1108,6 @@ impl WebApp {
         } else {
             self.prepare_startup()?;
             self.startup = self.rasterizer()?.poll_startup().map_err(js)?;
-            let released = self.deferred_contacts.release(self.brush_ready(), web_time::Instant::now());
-            self.session.set_input_held(self.deferred_contacts.holding());
-            for event in released {
-                self.deliver(event)?;
-            }
             if self.startup.canvas_ready {
                 change = self
                     .session
@@ -1153,7 +1120,7 @@ impl WebApp {
         }
         // Compiler completions wake the browser explicitly. Once the brush is
         // usable, optional compilation does not require continuous redraws.
-        change.canvas_wake |= !self.startup.brush_ready || !self.deferred_contacts.is_empty();
+        change.canvas_wake |= !self.startup.brush_ready || self.session.holding_input();
         let rendition = self.session.engine().document().composition().color.depth.is_float().then(|| self.session.effective_sdr_rendition());
         let hdr_output = self.hdr_output();
         let lut = self.proof.lut(&self.session);

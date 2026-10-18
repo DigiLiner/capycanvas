@@ -5,6 +5,7 @@
 use super::clone_stamp::{fill, finish, stroke};
 use super::photo_edit::{choose, document, labelled, shown, start, window_point};
 use super::*;
+use layer_render::CanvasRenderer;
 use serde_json::json;
 
 fn near(a: [u8; 4], b: [u8; 4], within: u8) -> bool {

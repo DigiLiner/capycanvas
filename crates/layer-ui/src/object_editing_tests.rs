@@ -866,10 +866,13 @@ fn input_held_for_painting_readiness_keeps_saving_waiting() {
     let (mut s, layer, [front, _]) = fixture();
     s.select_objects(layer, [front].into()).unwrap();
     invoke(&mut s, CommandId::TransformFlipHorizontal);
-    s.set_input_held(true);
+    s.renderer_mut().painting_unready = true;
+    s.pen(event(&s, 1, PenPhase::Down, 0.5));
+    s.pen(event(&s, 2, PenPhase::Up, 0.5));
     for command in [CommandId::SaveDocument, CommandId::SaveDocumentAs] { assert!(!s.command(command).enabled, "{command:?} waits for the held input"); }
     for command in [CommandId::Undo, CommandId::TransformFlipVertical] { assert!(s.command(command).enabled, "{command:?} is not a document snapshot"); }
-    s.set_input_held(false);
+    s.renderer_mut().painting_unready = false;
+    for frame in 1..20 { s.frame(frame * 10_000_000, frame * 10_000_000).unwrap(); }
     assert!(s.command(CommandId::SaveDocumentAs).enabled);
 }
 
@@ -970,7 +973,7 @@ fn move_layer_moves_image_layers_and_their_groups_by_whole_pixels_with_mask_link
 fn surface_pen(s: &mut UiSession<Recorder>, sequence: u64, phase: PenPhase, at: [f32; 2]) {
     let mut e = event(s, sequence, phase, 1.);
     e.surface_position = Point { x: at[0], y: at[1] };
-    s.pen(e).unwrap();
+    s.pen(e);
     s.frame(sequence, sequence).unwrap();
 }
 

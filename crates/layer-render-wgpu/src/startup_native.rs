@@ -166,9 +166,7 @@ fn compile(worker: &Shared) {
             _ => c"capy.compile.other",
         });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job.work))
-            .unwrap_or_else(|payload| Err(payload.downcast_ref::<String>().cloned()
-                .or_else(|| payload.downcast_ref::<&str>().map(|message| (*message).to_owned()))
-                .unwrap_or_else(|| "Shader compilation panicked without a message".into())));
+            .unwrap_or_else(|payload| Err(crate::panic_message(&*payload)));
         if let Err(error) = result {
             worker.error.lock().unwrap().get_or_insert(error);
         }

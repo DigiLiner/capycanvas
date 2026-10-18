@@ -1515,19 +1515,15 @@ fn staged_paper_preserves_pending_ink_and_reaches_brush_readiness() {
             let host = &mut unsafe { &mut *app.0 }.host;
             host.prepare_canvas_frame(2_100_000_000, 2_100_000_000, true)
                 .unwrap();
-            if host.startup.brush_ready {
+            if host.startup.brush_ready && app.pixels() != paper {
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "Staged brush readiness timed out"
+                "The initial paper frame must retain pending stroke work"
             );
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert!(
-            app.pixels() != paper,
-            "The initial paper frame must retain pending stroke work"
-        );
         app.invoke("undo");
         app.draw_frame();
         assert!(
@@ -1863,11 +1859,11 @@ fn apple_native_boundaries_preserve_panic_diagnostics() {
     assert_eq!(result.unwrap_err(), "Native operation panicked: worker detail");
     let app = App::new(0);
     let native = unsafe { &mut *app.0 };
-    assert!(native.perform::<()>(|_| panic!("owner detail")).is_none());
-    assert_eq!(native.error.as_ref().unwrap().to_str().unwrap(), "Native operation panicked: owner detail");
-    let error = native.gpu_operation::<()>(|_| panic!("renderer detail")).unwrap_err();
-    assert_eq!(error, "Native operation panicked: renderer detail");
-    assert!(native.host.error.as_ref().unwrap().contains("renderer detail"));
+    assert!(native.perform::<()>(|a| a.gpu_operation(|_| panic!("renderer detail"))).is_none());
+    assert_eq!(native.error.as_ref().unwrap().to_str().unwrap(), "Native operation panicked: renderer detail");
+    assert!(native.perform(|_| Ok(())).is_none());
+    assert_eq!(native.error.as_ref().unwrap().to_str().unwrap(), "Native operation panicked: renderer detail");
+    assert_eq!(native.host.poisoned(), Some("Native operation panicked: renderer detail"));
 }
 
 #[test]

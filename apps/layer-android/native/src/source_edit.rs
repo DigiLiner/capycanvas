@@ -16,7 +16,9 @@ pub extern "system" fn Java_art_capycanvas_Native_sourceTask(
     id: jint,
     cancel: jlong,
 ) -> jlong {
+    crate::jni_entry!(env, {
     crate::inspection::capture_task(&mut env, handle, id, cancel, SourceTask::capture)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sourceWork(
@@ -25,6 +27,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sourceWork(
     handle: jlong,
     profile: JString,
 ) {
+    crate::jni_entry!(env, {
     let result = (|| {
         let profile: Option<ColorProfile> =
             serde_json::from_str(&read(&mut env, &profile)?).map_err(error)?;
@@ -32,6 +35,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sourceWork(
         t.task.work(profile, || t.control.is_cancelled())
     })();
     fail(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sourcePrepareComparison(
@@ -40,12 +44,14 @@ pub extern "system" fn Java_art_capycanvas_Native_sourcePrepareComparison(
     handle: jlong,
     job: jlong,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let t = unsafe { crate::inspection::borrow::<Task>(job) };
         t.task.prepare(&a.host, t.control.is_cancelled())
     })();
     fail(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sourceCompare(
@@ -53,6 +59,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sourceCompare(
     _: JClass,
     handle: jlong,
 ) -> jstring {
+    crate::jni_entry!(env, {
     let result = (|| {
         let t = unsafe { crate::inspection::borrow::<Task>(handle) };
         crate::inspection::on_worker("capy-source", "Source comparison worker failed", move || {
@@ -61,6 +68,7 @@ pub extern "system" fn Java_art_capycanvas_Native_sourceCompare(
         })
     })();
     string(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sourcePreview(
@@ -69,7 +77,9 @@ pub extern "system" fn Java_art_capycanvas_Native_sourcePreview(
     handle: jlong,
     after: jboolean,
 ) -> jbyteArray {
+    crate::jni_entry!(env, {
     crate::color_edit::preview_bytes(&mut env, unsafe { crate::inspection::borrow::<Task>(handle) }.task.previews(), after)
+    })
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_art_capycanvas_Native_sourceAdopt(
@@ -78,14 +88,18 @@ pub extern "system" fn Java_art_capycanvas_Native_sourceAdopt(
     handle: jlong,
     job: jlong,
 ) {
+    crate::jni_entry!(env, handle, {
     let result = (|| {
         let a = unsafe { app(handle) };
         let t = unsafe { crate::inspection::borrow::<Task>(job) };
         t.task.adopt(&mut a.host, t.control.is_cancelled(), || true)
     })();
     fail(&mut env, result)
+    })
 }
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_art_capycanvas_Native_sourceFree(_: JNIEnv, _: JClass, handle: jlong) {
+pub extern "system" fn Java_art_capycanvas_Native_sourceFree(mut env: JNIEnv, _: JClass, handle: jlong) {
+    crate::jni_entry!(env, {
     unsafe { crate::inspection::release::<Task>(handle) };
+    })
 }

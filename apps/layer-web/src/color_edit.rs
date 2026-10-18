@@ -171,7 +171,6 @@ impl WebApp {
         s.commit_document_color_candidate(prepared, |live| {
             std::mem::swap(live.0.as_deref_mut().unwrap(), &mut renderer);
         }).map_err(js)?;
-        self.deferred_contacts.clear();
         self.prepare_startup()?;
         serialize(
             &self

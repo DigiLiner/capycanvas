@@ -1308,13 +1308,13 @@ fn escape_leaves_selection_layers_and_masks_after_cancelling_a_gesture() {
     invoke(&mut s, CommandId::SaveSelectionLayer);
     assert!(s.selection_masks.target().is_some());
     invoke(&mut s, CommandId::Gradient);
-    s.pen(event(&s, 1, PenPhase::Down, 1.)).unwrap();
-    s.pen(event(&s, 2, PenPhase::Move, 1.)).unwrap();
+    s.pen(event(&s, 1, PenPhase::Down, 1.));
+    s.pen(event(&s, 2, PenPhase::Move, 1.));
     assert!(key(&mut s, "Escape", true, false, false).handled);
     key(&mut s, "Escape", false, false, false);
     assert!(s.layer_interaction.path.is_empty(), "Escape cancels the gradient");
     assert!(s.selection_masks.target().is_some(), "and only the gradient");
-    s.pen(event(&s, 3, PenPhase::Up, 1.)).unwrap();
+    s.pen(event(&s, 3, PenPhase::Up, 1.));
     s.frame(3, 3).unwrap();
     assert!(key(&mut s, "Escape", true, false, false).handled);
     key(&mut s, "Escape", false, false, false);
@@ -1344,7 +1344,7 @@ fn guide_pen(s: &mut UiSession<Recorder>, sequence: u64, phase: PenPhase, [x, y]
     let m = s.state.camera.document_to_surface();
     let mut e = event(s, sequence, phase, 1.);
     e.surface_position = Point { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
-    s.pen(e).unwrap();
+    s.pen(e);
     s.frame(sequence, sequence).unwrap();
 }
 
