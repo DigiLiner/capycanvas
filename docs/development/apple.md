@@ -473,6 +473,10 @@ and panel-grip tap, hold and double tap in both themes.
 and checks control bounds and button targets in both themes.
 `testColorEntryKeepsDraftFocus` pauses while typing a partial hex value, then
 finishes the same draft and checks the committed color in both themes.
+Color-entry journeys verify the complete typed value before sending Return,
+using the existing confirmed-input helper. Fill-thumbnail journeys reopen Layers
+after an outside Undo button contact before checking its texture and mask rows;
+Cancel and Use Color still independently assert that their parent drawer survives.
 
 `tests/canvas-readiness.swift` runs both Apple policies without windows or input.
 It checks that a submitted backdrop stays preparing, then pumps the real renderer

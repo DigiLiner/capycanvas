@@ -10,10 +10,17 @@ extension XCTestCase {
         let field = app.textFields["color-entry-" + name]
         guard field.waitForExistence(timeout: 5) else { XCTFail("Tapping a value opens it for typing"); return }
         #if os(macOS)
-        field.typeKey("a", modifierFlags: .command); field.typeText(text + "\r")
+        field.typeKey("a", modifierFlags: .command)
         #else
         let current = field.value as? String ?? ""
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + text + "\n")
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count))
+        #endif
+        typeConfirmed(field, text)
+        XCTAssertEqual(field.value as? String, text, "The complete color value arrives before Return")
+        #if os(macOS)
+        field.typeText("\r")
+        #else
+        field.typeText("\n")
         #endif
         XCTAssertTrue(field.waitForNonExistence(timeout: 5), "Color entry closes after committing the value")
     }
@@ -215,9 +222,12 @@ extension XCTestCase {
             }
         }
         pixels({ r, g, b in min(r, g, b) >= 250 }, "A new drawing shows white Paper")
-        workspaceActivate(app.buttons["Layers panel"])
         let footer = app.buttons["layer-properties-disclosure"]
-        XCTAssertTrue(footer.waitForExistence(timeout: 10))
+        func showLayers() {
+            if !footer.exists { workspaceActivate(app.buttons["Layers panel"]) }
+            XCTAssertTrue(footer.waitForExistence(timeout: 10))
+        }
+        showLayers()
         let paper = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paper layer row")).firstMatch
         XCTAssertTrue(paper.waitForExistence(timeout: 10))
         let thumbnail = paper.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "-content")).firstMatch
@@ -244,6 +254,7 @@ extension XCTestCase {
         pixels({ r, g, b in r >= 250 && g <= 5 && b <= 5 }, "Use Color sets the fill")
         editorHistory("Undo", in: app)
         pixels({ r, g, b in min(r, g, b) >= 250 }, "Undo restores the fill")
+        showLayers()
 
         let texture = paper.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "layer-texture-")).firstMatch
         XCTAssertTrue(texture.waitForExistence(timeout: 10), "Paper rows show their texture")
@@ -280,6 +291,7 @@ extension XCTestCase {
         XCTAssertTrue(dialog.waitForNonExistence(timeout: 10))
         expectTexture("Rough")
         editorHistory("Undo", in: app)
+        showLayers()
         expectTexture("Drawing paper"); expectPixels(white, in: app)
 
         layerContext("Add mask", on: thumbnail, in: app)
@@ -288,6 +300,7 @@ extension XCTestCase {
         XCTAssertGreaterThan(texture.frame.minX, mask.frame.maxX, "The texture follows the Paper mask")
         attachEditor(in: app, name: "texture-row-mask-\(theme)")
         editorHistory("Undo", in: app)
+        showLayers()
         XCTAssertTrue(mask.waitForNonExistence(timeout: 10))
         layerContext("Lock editing", on: thumbnail, in: app)
         workspaceActivate(texture)
