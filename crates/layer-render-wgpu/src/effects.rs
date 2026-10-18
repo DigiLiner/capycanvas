@@ -813,6 +813,11 @@ fn fx_from_document(point:vec2<f32>)->vec2<f32> {
     return vec2(m.x*q.x+m.z*q.y,m.y*q.x+m.w*q.y);
 }
 fn fx_extent()->vec2<f32> { return fx_reference_frame.zw; }
+fn fx_footprint()->f32 {
+    let side=max(settings.operation_linear.z,1.);
+    if FX_REFERENCE_IDENTITY {return side;}
+    let m=fx_reference_inverse;return max(side*sqrt(abs(m.x*m.w-m.y*m.z)),1.);
+}
 fn fx_in_frame(point:vec2<f32>)->bool {
     return all(point>=fx_composition_frame.xy)&&all(point<fx_composition_frame.xy+fx_composition_frame.zw);
 }

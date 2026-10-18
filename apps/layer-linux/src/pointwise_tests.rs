@@ -555,6 +555,9 @@ fn native_animated_filter_moves() {
         capture(&w,output,&format!("ripple-{theme:?}"));
         flip(&w,&mut input,false);ready(&w);assert_eq!(changes(&w),0,"a still Ripple holds its pixels");
         flip(&w,&mut input,true);assert!(changes(&w)>=4,"Ripple moves again when Animate is turned on");
+        w.dispatch(UiAction::SetZoom {zoom:0.25});ready(&w);assert!(changes(&w)>=4,"Ripple moves on the reduced display grid");
+        capture(&w,output,&format!("ripple-zoomed-out-{theme:?}"));
+        w.dispatch(UiAction::Invoke {command:CommandId::FitCanvas});
         w.dispatch(UiAction::Invoke {command:CommandId::DeleteLayer});ready(&w);
     }
     input.finish();w.window.destroy();pump(100);

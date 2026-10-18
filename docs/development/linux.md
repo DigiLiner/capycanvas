@@ -398,7 +398,7 @@ Threshold controls and rendered artwork pixels in both themes. Run it at 1100
 pixels wide after renderer changes; it does not measure motion.
 `native_animated_filter_moves` checks at 1100 pixels wide, in both themes, that
 Ripple's canvas pixels keep changing, hold still with Animate off and move again
-when it is turned back on.
+when it is turned back on, including at 25% zoom on the reduced display grid.
 
 [`workspace-motion.sh`](../../tools/performance/workspace-motion.sh) builds the
 release tests, starts a private D-Bus session, headless Mutter and PipeWire, and

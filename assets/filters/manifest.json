@@ -1028,6 +1028,7 @@
         "abi": 5,
         "entry": "capy_film_grain",
         "id": "film_grain",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-film-grain"},
         "parameters": [
@@ -1603,6 +1604,7 @@
         "alpha": "filter",
         "entry": "capy_ripple",
         "id": "ripple",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-ripple"},
         "parameters": [
@@ -1715,6 +1717,7 @@
         "alpha": "filter",
         "entry": "capy_rainy_glass",
         "id": "rainy_glass",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-rainy-glass"},
         "parameters": [
@@ -1779,6 +1782,7 @@
         "alpha": "filter",
         "entry": "capy_vhs",
         "id": "vhs",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-vhs"},
         "parameters": [
@@ -1842,6 +1846,7 @@
         "alpha": "filter",
         "entry": "capy_crt",
         "id": "crt",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-crt"},
         "parameters": [
@@ -1900,6 +1905,7 @@
         "alpha": "filter",
         "entry": "capy_heat_haze",
         "id": "heat_haze",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-heat-haze"},
         "parameters": [
@@ -1963,6 +1969,7 @@
         "abi": 5,
         "entry": "capy_iridescence",
         "id": "iridescence",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-iridescence"},
         "parameters": [
@@ -2014,6 +2021,7 @@
         "alpha": "filter",
         "entry": "capy_domain_warp",
         "id": "domain_warp",
+        "resolution": "display",
         "kind": "adjustment",
         "label": {"message":"resources-filter-domain-warp"},
         "parameters": [

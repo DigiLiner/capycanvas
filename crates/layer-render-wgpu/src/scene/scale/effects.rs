@@ -41,7 +41,7 @@ impl Evaluator<'_> {
         if native_alpha_capture(self.packet.scene, &handles, self.cache.plan.level) {
             return self.native_effect(&handles, output);
         }
-        let boundary = effect.program.image_boundary();
+        let boundary = !effect.program.passes.is_empty();
         let plan = self.working_plan();
         let region = self.region;
         let input_node_support = input.support(self.packet.scene, self.packet.document_extent,self.input.level);

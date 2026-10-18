@@ -155,7 +155,7 @@ fn capy_vignette(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
 fn capy_film_grain(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let size=fx_period(fx_parameter(b,1u).x);let frame=u32(floor(fx_time(b)*24.));
     var grain=vec3<f32>(fx_random(p/size,frame));if fx_parameter(b,2u).x>.5{grain=vec3<f32>(grain.x,fx_random(p/size,frame+13u),fx_random(p/size,frame+37u));}
-    let rgb=fx_rgb(c);let l=fx_luma(rgb);let amplitude=(.15+.85*sqrt(max(0.,l*(1.-l))*4.))*fx_parameter(b,0u).x/250.;
+    let rgb=fx_rgb(c);let l=fx_luma(rgb);let amplitude=(.15+.85*sqrt(max(0.,l*(1.-l))*4.))*fx_parameter(b,0u).x/250.*min(1.,max(size,1.)/fx_footprint());
     return fx_rgba(rgb+(grain-.5)*amplitude,c.a);
 }
 fn capy_halftone(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
@@ -239,8 +239,8 @@ fn capy_vhs(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     let jitter=(fx_random(vec2<f32>(floor(p.y/7.),0.),frame)*2.-1.)*distance;
     let q=p+vec2<f32>(jitter,0.);let red=fx_sample(q+vec2<f32>(distance*.3,0.));let green=fx_sample(q);let blue=fx_sample(q-vec2<f32>(distance*.3,0.));
     let alpha=max(red.a,max(green.a,blue.a));var rgb=vec3<f32>(red.r,green.g,blue.b);
-    rgb*=1.-fx_parameter(b,2u).x/100.*(.5+.5*sin(p.y*FX_PI));
-    rgb+=(fx_random(p,frame+91u)-.5)*fx_parameter(b,1u).x/300.*alpha;
+    let footprint=fx_footprint();rgb*=1.-fx_parameter(b,2u).x/100.*(.5+.5*sin(p.y*FX_PI)*max(0.,2.-footprint));
+    rgb+=(fx_random(p,frame+91u)-.5)*fx_parameter(b,1u).x/(300.*footprint)*alpha;
     if !FX_HDR {rgb=clamp(rgb,vec3<f32>(0.),vec3<f32>(alpha));}
     return vec4<f32>(rgb,alpha);
 }
@@ -249,8 +249,9 @@ fn capy_crt(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{
     if any(q<vec2<f32>(0.)) || any(q>fx_extent()){return vec4<f32>(0.);}
     let separation=fx_parameter(b,3u).x;let red=fx_sample(q+vec2<f32>(separation,0.));let green=fx_sample(q);let blue=fx_sample(q-vec2<f32>(separation,0.));
     let alpha=max(red.a,max(green.a,blue.a));var rgb=vec3<f32>(red.r,green.g,blue.b);
-    let stripe=u32(floor(p.x))%3u;let phosphor=select(vec3<f32>(1.-fx_parameter(b,2u).x/100.),vec3<f32>(1.),vec3<u32>(0u,1u,2u)==vec3<u32>(stripe));
-    rgb*=phosphor*(1.-fx_parameter(b,1u).x/100.*(.5+.5*cos(p.y*FX_PI)));
+    let fade=min(fx_footprint()-1.,1.);let mask=fx_parameter(b,2u).x/100.;let stripe=u32(floor(p.x))%3u;
+    let phosphor=mix(select(vec3<f32>(1.-mask),vec3<f32>(1.),vec3<u32>(0u,1u,2u)==vec3<u32>(stripe)),vec3<f32>(1.-mask*2./3.),fade);
+    rgb*=phosphor*(1.-fx_parameter(b,1u).x/100.*(.5+.5*cos(p.y*FX_PI)*(1.-fade)));
     rgb*=.98+.02*sin(p.y/fx_extent().y*2.*FX_PI-fx_time(b)*1.4);
     return vec4<f32>(rgb,alpha);
 }

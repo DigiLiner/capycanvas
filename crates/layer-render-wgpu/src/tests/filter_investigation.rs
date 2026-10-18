@@ -277,15 +277,20 @@ fn photo_filter_frame_time() {
     let project = std::env::var("CAPY_FILTER_PROJECT").ok().map(|path| {
         super::super::native_effects::read_document(std::fs::File::open(path).unwrap())
     });
-    let extent = project.as_ref().map_or([5184, 3456], |p| p.composition().size);
+    let size = |name| std::env::var(name).ok().map(|size: String| {
+        let (width, height) = size.split_once('x').unwrap();
+        [width.parse::<u32>().unwrap(), height.parse::<u32>().unwrap()]
+    });
+    let extent = project.as_ref().map(|p| p.composition().size).or(size("CAPY_FILTER_EXTENT")).unwrap_or([5184, 3456]);
     let mut view = ViewState { width_px: extent[0], height_px: extent[1],
         ..test_view() };
-    if project.is_some() {
+    let surface = size("CAPY_FILTER_VIEW").or(project.is_some().then_some([1600, 1000]));
+    if let Some([width, height]) = surface {
         // A 61 MP document is not a 61 MP monitor. Keep the real filter extent,
         // but fit its presentation within the ordinary bounded display cache.
-        let scale = (1600. / extent[0] as f32).min(1000. / extent[1] as f32);
-        view.width_px = 1600;
-        view.height_px = 1000;
+        let scale = (width as f32 / extent[0] as f32).min(height as f32 / extent[1] as f32);
+        view.width_px = width;
+        view.height_px = height;
         view.document_to_surface = [scale, 0., 0., scale, 0., 0.];
     }
     let submit_frame = |r: &mut WgpuRasterizer, document: &Document, time, reset, all| {
@@ -370,13 +375,14 @@ fn photo_filter_frame_time() {
         .map(|s| s.parse::<usize>().unwrap())
         .unwrap_or(8);
     eprintln!(
-        "frame,case,cpu_ms,complete_ms,gpu_ms,window_submissions,display_submissions,source_misses,pass_pixels,image_bytes,cpu_phases"
+        "frame,case,cpu_ms,complete_ms,gpu_ms,window_submissions,display_submissions,source_misses,pass_pixels,image_bytes,composited_pixels,command_passes,cpu_phases"
     );
+    let animated = target.is_some_and(|target| document.scene().effect(target).unwrap().program.time);
     for case in ["cold", "parameter", "cached", "animation"] {
-        if case == "animation" && name != "domain_warp" {
+        if case == "animation" && !animated {
             continue;
         }
-        if name == "domain_warp" {
+        if animated {
             set_effect(&mut document,target.unwrap(),"animate",EffectValue::Toggle(case=="animation"));
         }
         for i in 0..if case == "cold" { 1 } else { count } {
@@ -400,7 +406,7 @@ fn photo_filter_frame_time() {
             let gpu = telemetry.gpu.ordered().last().copied().unwrap_or(f32::NAN);
             let m = r.metrics();
             eprintln!(
-                "{i},{case},{cpu:.3},{complete:.3},{gpu:.3},{},{},{},{},{},{:?}",
+                "{i},{case},{cpu:.3},{complete:.3},{gpu:.3},{},{},{},{},{},{},{},{:?}",
                 m.image_window_submissions - before.image_window_submissions,
                 m.display_composition_submissions - before.display_composition_submissions,
                 m.source_tile_misses - before.source_tile_misses,
@@ -409,6 +415,8 @@ fn photo_filter_frame_time() {
                     .map_or(0, |s| s.image_pass_pixels())
                     .saturating_sub(pixels),
                 r.scene.as_ref().map_or(0, |s| s.image_cache_bytes()),
+                m.composited_pixels - before.composited_pixels,
+                m.command_passes - before.command_passes,
                 m.frame_cpu_ms
             );
         }

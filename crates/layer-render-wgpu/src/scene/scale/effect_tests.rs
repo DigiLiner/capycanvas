@@ -1424,3 +1424,36 @@ fn every_gaussian_consumer_matches_discrete_step_reference_across_the_admitted_r
 }
 
 }
+
+#[test]
+fn animated_filters_move_on_the_reduced_grid_and_match_native_reduction() {
+    let extent = [1024, 768];
+    let detail = |v: &[[f32; 4]], width: usize| (width + 1..v.len() - width - 1).flat_map(|i| (0..3).map(move |c|
+        (4. * v[i][c] - v[i - 1][c] - v[i + 1][c] - v[i - width][c] - v[i + width][c]).powi(2))).sum::<f32>().sqrt();
+    for id in ["film_grain", "ripple", "rainy_glass", "vhs", "crt", "heat_haze", "iridescence", "domain_warp"] {
+        let mut doc = document_at(extent);
+        paint_mut(&mut doc, 0).base = Some(layer_core::authored::PaintBase::new((rgba8_source(extent, |x, y| {
+            let check = ((x / 24 + y / 24) % 2) as u8;
+            [(x / 4) as u8 / (1 + check), (y / 3) as u8, 200 - 120 * check, 255]
+        })).into()));
+        let current = effect(&mut doc, id); insert_occurrence(&mut doc, current, 0);
+        let mut reduced = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        let mut native = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+        native.test.exact_display = true;
+        let mut frames = Vec::new();
+        for time in [1.25, 1.6] {
+            let mut frame = packet(doc.scene(), extent);
+            frame.time_seconds = time;
+            frame.view.document_to_surface = [0.25, 0., 0., 0.25, 0., 0.];
+            reduced.submit(frame).unwrap(); native.submit(frame).unwrap();
+            let plan = reduced.scale_display.as_ref().unwrap().plan;
+            assert_eq!(plan.level, 2, "{id}");
+            let (a, b) = (display_pixels(&reduced), display_pixels(&native));
+            let error = a.iter().zip(&b).map(|(x, y)| (0..3).map(|c| (x[c] - y[c]).abs()).sum::<f32>()).sum::<f32>() / (3 * a.len()) as f32;
+            let ratio = detail(&a, plan.size[0] as usize) / detail(&b, plan.size[0] as usize);
+            assert!(error < 0.01 && (0.8..1.25).contains(&ratio), "{id} on the reduced grid: error {error}, detail ratio {ratio}");
+            frames.push(a);
+        }
+        assert_ne!(frames[0], frames[1], "{id} moves on the reduced grid");
+    }
+}

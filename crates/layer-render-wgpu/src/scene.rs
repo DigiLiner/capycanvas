@@ -2395,6 +2395,9 @@ pub(super) fn startup_effect_chains(scene: SceneView<'_>) -> Vec<(Vec<Occurrence
         if let Some(effect) = scene.effect(handle).filter(|effect| effect.constant_color().is_none() || stack::support(scene,0)!=Some(0)) {
             if effect.program.image_boundary() {
                 for pass in 0..effect.program.passes.len().max(1) { result.push((vec![handle], effects::Execution::Image(pass))); }
+                if effect.program.passes.is_empty() && effect.program.resolution==layer_core::EffectResolution::Display {
+                    result.push((vec![handle], effects::Execution::Fused));
+                }
             } else {
                 result.push((vec![handle], effects::Execution::Fused));
                 if effect.program.resolution==layer_core::EffectResolution::Native

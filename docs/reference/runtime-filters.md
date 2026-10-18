@@ -314,7 +314,12 @@ reference extents and values. Explicit distances and implicit periods therefore
 transform together. Evaluation density never changes their document appearance,
 saved artwork, or exact queries and export. Nonlinear adjustments evaluated after
 reduction can differ from a reduced exact result, so display eligibility requires
-visual and numerical qualification. Reduced composition accepts pointwise and
+visual and numerical qualification. `fx_footprint()` returns the width, in
+reference units, of the cell each evaluated sample stands for, never less than
+1: 1 at document resolution and larger on the reduced grid. Patterns finer than
+that cell scale their contrast by it, so Film Grain, VHS noise and scanlines and
+CRT phosphor stripes keep the reduced document result's look. The animated
+filters declare `"display"`. Reduced composition accepts pointwise and
 image-pass programs with this declaration. Each pass expands its input request
 by its declared footprint, including reduced-grid interpolation support;
 document-wide sampling requests the complete input. Reduced input grids use
@@ -346,6 +351,8 @@ the dependency union itself need not fit a texture.
 Static pointwise alpha conversions use the same tile execution and fusion as
 color adjustments. Changing coverage alone does not require a full-image stage.
 Image stages are reserved for declared image passes and time-dependent programs.
+On the reduced grid, time-dependent pointwise programs share the fused pointwise
+pass instead.
 Native adjustment programs that change alpha, have no image passes or time use,
 and need no auxiliary input evaluate their complete input scope at native
 resolution. Fusible programs combine pixel evaluation and area reduction in
