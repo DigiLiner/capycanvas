@@ -3,8 +3,8 @@
 use crate::{BackdropBlurStyle, BackdropRegion, GpuRasterError, SdrSurfaceColor, Uploads, WgpuRasterizer};
 use layer_render::{CanvasRenderer, CursorSegment, ViewState};
 
-const CAMERA_SIZE: u64 = 512;
-const SOURCE_CAMERA: u32 = 512;
+const CAMERA_SIZE: u64 = 544;
+const SOURCE_CAMERA: u32 = 768;
 
 /// A native UI's document overview, sampled from the existing GPU image.
 /// Bounds and work-area corners use physical target-surface pixels. Hosts can
@@ -78,15 +78,17 @@ pub struct ViewportPresenter {
     cursor_buffer: wgpu::Buffer,
     cursor_vertices: Vec<CursorSegment>,
     uploads: Uploads,
-    camera_data: Option<[f32; 128]>,
+    camera_data: Option<[f32; 136]>,
     quarter_turns: u32,
     retained: bool,
     history: crate::present_damage::Retained,
     presented_view: Option<(ViewState, [f32; 4], u32, f32)>,
     presented_selection_overlay: Option<layer_render::SelectionOverlay>,
+    presented_motion: Option<([f32; 8], crate::pixel_rect::DocRect)>,
+    motion_view: Option<wgpu::TextureView>,
     overlays_changed: bool,
     backdrop: Option<crate::backdrop_blur::BackdropBlur>,
-    source_camera: Option<[f32; 128]>,
+    source_camera: Option<[f32; 136]>,
     presented_area: u64,
     shader: wgpu::ShaderModule,
     pipeline_layout: wgpu::PipelineLayout,
@@ -523,6 +525,7 @@ impl ViewportPresenter {
             crate::bindings::buffer(14, wgpu::ShaderStages::FRAGMENT, wgpu::BufferBindingType::Uniform, false, wgpu::BufferSize::new(PAPER_SHADE_SIZE)),
             crate::bindings::texture(15, wgpu::ShaderStages::FRAGMENT, true),
             crate::bindings::sampler(16, wgpu::ShaderStages::FRAGMENT, wgpu::SamplerBindingType::Filtering),
+            crate::bindings::float_texture(17, wgpu::ShaderStages::FRAGMENT, device),
         ]);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("viewport layout"),
@@ -671,6 +674,8 @@ impl ViewportPresenter {
             history: Default::default(),
             presented_view: None,
             presented_selection_overlay: None,
+            presented_motion: None,
+            motion_view: None,
             overlays_changed: false,
             backdrop: None,
             source_camera: None,
@@ -818,6 +823,7 @@ impl ViewportPresenter {
         !previous.valid
             || self.presented_view != Some((view, surround_linear, self.quarter_turns, self.corner_radius))
             || self.presented_selection_overlay != renderer.selection_overlay
+            || self.presented_motion != renderer.display_motion().map(|(_, values, moved)| (values, moved))
             || (previous.revision != renderer.composite_revision
                 && (previous.artwork_revision != renderer.artwork_revision || renderer.scale_display.as_ref().is_none_or(|cache|!cache.has_pending_work(renderer))))
             || previous.selection_revision != renderer.selection_paint_revision
@@ -927,6 +933,8 @@ impl ViewportPresenter {
     ) -> Result<(), GpuRasterError> {
         let Some([composite,coarse,next]) = renderer.display_views() else { return Ok(()); };
         let navigator = renderer.navigator.view().unwrap_or(&renderer.empty_view);
+        let motion = renderer.display_motion();
+        let motion_view = motion.map_or(&renderer.empty_view, |(view, ..)| view);
         let geometry = renderer.display_geometry().unwrap();
         let device = &renderer.device;
         let selection = renderer.display_selection.as_ref();
@@ -938,6 +946,7 @@ impl ViewportPresenter {
         let bindings_changed = self.shade.view.as_ref() != Some(slope)
             || self.bind_group.is_none()
             || self.navigator_view.as_ref() != Some(navigator)
+            || self.motion_view.as_ref() != Some(motion_view)
             || self.saved_selection_buffer.as_ref() != Some(saved)
             || self.document_extent != renderer.document_extent
             || self.composite_view.as_ref() != Some(composite)
@@ -967,9 +976,11 @@ impl ViewportPresenter {
                 self.shade.uniform.as_entire_binding(),
                 wgpu::BindingResource::TextureView(slope),
                 wgpu::BindingResource::Sampler(&self.shade.sampler),
+                wgpu::BindingResource::TextureView(motion_view),
             ]));
             self.shade.view = Some(slope.clone());
             self.navigator_view = Some(navigator.clone());
+            self.motion_view = Some(motion_view.clone());
             self.document_extent = renderer.document_extent;
             self.selection_buffer = Some(coverage.clone());
             self.saved_selection_buffer = Some(saved.clone());
@@ -1001,7 +1012,7 @@ impl ViewportPresenter {
         let overlay_color = overlay.map_or([0.;4],|o| o.color);
         let crop = renderer.crop_overlay.filter(|c| c.to_crop.inverse().is_some());
         let [ca, cb, cc, cd, cx, cy] = crop.map_or([0.; 6], |c| c.to_crop.0);
-        let mut data = [0.; 128];
+        let mut data = [0.; 136];
         data[..40].copy_from_slice(&[
             d / det,
             -b / det,
@@ -1039,6 +1050,7 @@ impl ViewportPresenter {
         data[60] = f32::from(renderer.blend_space == layer_core::BlendSpace::Perceptual);
         data[61] = renderer.navigator.scale();
         data[62..64].copy_from_slice(&renderer.clipping_preview.map(f32::from));
+        data[128..136].copy_from_slice(&motion.map_or([0.; 8], |(_, values, _)| values));
         // A fixed f32 array has no padding or uninitialized bytes.
         let bytes = unsafe {
             std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(&data))
@@ -1142,6 +1154,13 @@ impl ViewportPresenter {
                 crate::present_damage::add_region(&mut regions, crate::present_damage::surface_bounds(bounds, view, self.quarter_turns));
             }
             crate::present_damage::add_region(&mut regions, repaint);
+            let motion_now = motion.map(|(_, values, moved)| (values, moved));
+            if !full && self.presented_motion != motion_now {
+                for (_, moved) in self.presented_motion.iter().chain(&motion_now) {
+                    crate::present_damage::add_region(&mut regions, crate::present_damage::damage(moved.in_frame(renderer.document_extent), view, self.quarter_turns));
+                }
+            }
+            self.presented_motion = motion_now;
             if !full && previous.selection_revision != renderer.selection_paint_revision {
                 crate::present_damage::add_region(&mut regions,
                     crate::present_damage::damage(renderer.selection_paint_damage, view, self.quarter_turns));

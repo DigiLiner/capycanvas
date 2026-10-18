@@ -1,14 +1,15 @@
 use super::*;
 use crate::vector::{Batch, Layer, Pool, tiles::{self, Frame, LevelGeometry, TILE}};
 use layer_core::authored::{VectorHandle, vector::{ItemId, PaintEntry, PathItem, Record, VectorObject}};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 const CELL: f64 = 256.;
 const POOL_BYTES: u64 = 128 << 20;
 const DERIVED_BYTES: usize = 256 << 20;
+const MOTION_PIXELS: u64 = 4 << 20;
 
 struct Derived { level: u32, offset: [i64; 2], geometry: Arc<LevelGeometry>, base: Option<u32>, used: u64 }
-struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Arc<[[f32; 4]]>, derived: Vec<Derived>, seen: u64 }
+struct Item { path: PathItem, chunk: usize, index: u32, bounds: [f64; 4], cells: [i32; 4], colors: Arc<[[f32; 4]]>, derived: Vec<Derived>, seen: u64, hidden: bool }
 impl Item {
     fn derived_at(&mut self, level: u32, offset: [i64; 2], frame: &Frame, bytes: &mut usize) -> usize {
         if let Some(at) = self.derived.iter().position(|d| d.level == level && d.offset == offset) { return at; }
@@ -31,6 +32,7 @@ struct LayerCache {
     pending: Change,
     change: Change,
     derived_bytes: usize,
+    excluded: Option<Arc<BTreeSet<ItemId>>>,
 }
 #[derive(Default)]
 struct Change { damage: Vec<[f64; 4]>, appended: Vec<u32>, touched: Vec<u32>, removed: Vec<Item>, mixed: bool, full: bool }
@@ -56,7 +58,8 @@ fn colors(path: &PathItem, palette: (layer_core::color::RgbSpace, layer_core::Bl
 impl LayerCache {
     fn insert(&mut self, path: PathItem, chunk: usize, index: u32, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> [f64; 4] {
         let bounds = path.bounds();
-        let item = Item { colors: colors(&path, palette), cells: cells(bounds), bounds, chunk, index, derived: Vec::new(), seen: 0, path };
+        let hidden = self.excluded.as_ref().is_some_and(|excluded| excluded.contains(&path.id));
+        let item = Item { colors: colors(&path, palette), cells: cells(bounds), bounds, chunk, index, derived: Vec::new(), seen: 0, hidden, path };
         let slot = self.free.pop().unwrap_or_else(|| { self.items.push(None); self.items.len() as u32 - 1 });
         let [x0, y0, x1, y1] = item.cells;
         for y in y0..y1 { for x in x0..x1 { self.grid.entry([x, y]).or_default().push(slot); } }
@@ -147,6 +150,21 @@ impl LayerCache {
         pending.damage.extend(damage);
         self.root = object.clone();
     }
+    fn exclude(&mut self, items: Option<&Arc<BTreeSet<ItemId>>>) {
+        if self.excluded.as_ref().zip(items).map_or(self.excluded.is_none() && items.is_none(), |(a, b)| Arc::ptr_eq(a, b)) { return; }
+        let empty = BTreeSet::new();
+        let before = self.excluded.take();
+        let (old, new) = (before.as_deref().unwrap_or(&empty), items.map_or(&empty, |items| &**items));
+        for id in old.symmetric_difference(new) {
+            let Some(slot) = self.ids.get(id).copied() else { continue };
+            let item = self.items[slot as usize].as_mut().unwrap();
+            item.hidden = new.contains(id);
+            self.pending.touched.push(slot);
+            self.pending.damage.push(item.bounds);
+            self.pending.mixed = true;
+        }
+        self.excluded = items.cloned();
+    }
     fn order(&self, item: &Item) -> u64 { u64::from(self.chunks.get(&item.chunk).copied().unwrap_or(0)) << 32 | u64::from(item.index) }
 }
 
@@ -230,8 +248,10 @@ pub(super) struct Vectors {
     frame: u64,
     stamp: u64,
     preview: Option<((usize, u32, [u64; 2]), u32, Arc<LevelGeometry>, Arc<[[f32; 4]]>)>,
+    pub(super) motion: Option<MotionImage>,
     buffers: [Option<wgpu::Buffer>; 4],
 }
+pub(super) struct MotionImage { pub key: (OccurrenceHandle, usize, u32, [i64; 2]), pub window: DocRect, pub image: super::Image }
 #[derive(Clone)]
 pub(super) struct VectorJob { pub batch: Batch, pub output: wgpu::TextureView, pub base: Option<(wgpu::TextureView, [i32; 2])> }
 
@@ -258,11 +278,14 @@ impl Scene {
     pub(super) fn vector_damage(&mut self, r: &WgpuRasterizer, packet: FramePacket<'_>) {
         self.scale_sources.vector_preview = r.vector_preview.as_ref().zip(r.vector_preview_shown).map(|(p, (_, _, bounds))| (p.owner, p.path.clone(), bounds));
         self.scale_sources.preview_damage = r.vector_preview_damage.clone();
+        self.scale_sources.vector_motion = r.vector_motion_drawn.clone().filter(|_| !r.vector_motion_presented);
+        self.scale_sources.motion_damage = r.vector_motion_damage.clone();
         self.vectors.begin_frame();
         self.vectors.retain(packet.scene);
         let palette = Self::vector_palette(r, packet);
         for &owner in packet.scene.order() {
-            let rects = self.vectors.damage(packet.scene, owner, palette);
+            let excluded = r.vector_motion_drawn.as_ref().filter(|(motion, _)| motion.owner == owner).map(|(motion, _)| &motion.items);
+            let rects = self.vectors.damage(packet.scene, owner, palette, excluded);
             if rects.is_empty() { continue; }
             let extent = packet.document_extent;
             let rects = coalesce(rects.into_iter().map(|rect| rect.in_frame(extent)).filter(|rect| !rect.is_empty()).collect());
@@ -270,6 +293,26 @@ impl Scene {
             damage.regions.extend(rects.into_iter().map(|rect| rect.intersect(PixelRect::full(extent))));
         }
         self.vectors.trim();
+    }
+    pub(crate) fn presented_motion(&self, motion: &layer_render::VectorMotion) -> Option<(&wgpu::TextureView, DocRect, u32, [u32; 2])> {
+        let image = self.vectors.motion.as_ref().filter(|m| m.key.0 == motion.owner && m.key.1 == Arc::as_ptr(&motion.items) as usize)?;
+        Some((&image.image.view, image.window, image.image.plan.level, image.image.plan.size))
+    }
+    pub(super) fn prepare_presented_motion(&mut self, r: &mut WgpuRasterizer, packet: FramePacket<'_>, encoder: &mut crate::submission::CommandEncoder) -> Result<(), GpuRasterError> {
+        let Some((motion, bounds)) = r.vector_motion_drawn.clone().filter(|_| r.vector_motion_presented) else { return Ok(()) };
+        let extent = packet.document_extent;
+        let area = bounds.in_frame(extent);
+        let display = r.scale_display.as_ref().map_or(0, |cache| cache.plan.level);
+        let level = (display..display_mips::MAX_LEVEL).find(|level| area.area() >> (2 * level) <= MOTION_PIXELS).unwrap_or(display_mips::MAX_LEVEL);
+        let key = (motion.owner, Arc::as_ptr(&motion.items) as usize, level, packet.scene.occurrence_offset64(motion.owner).map(|v| v as i64));
+        if self.vectors.motion.as_ref().is_some_and(|m| m.key == key) || area.is_empty() { return Ok(()); }
+        let plan = display_mips::Plan::window(extent, level, DocRect::from(area).aligned(1 << level).in_frame(extent));
+        let image = super::Image::new(r, plan, "vector motion");
+        let batch = self.vectors.motion_batch(packet.scene, motion.owner, &motion.items, plan.doc_bounds.min, level, plan.size, extent, Self::vector_palette(r, packet));
+        r.encode_clear(encoder, &image.view, "vector motion");
+        if batch.tile_count() > 0 { self.vectors.encode(r, encoder, &VectorJob { batch, output: image.view.clone(), base: None })?; }
+        self.vectors.motion = Some(MotionImage { key, window: plan.doc_bounds, image });
+        Ok(())
     }
 }
 
@@ -284,13 +327,14 @@ impl Vectors {
             keep
         });
     }
-    pub fn damage(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Vec<DocRect> {
+    pub fn damage(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, palette: (layer_core::color::RgbSpace, layer_core::BlendSpace), excluded: Option<&Arc<BTreeSet<ItemId>>>) -> Vec<DocRect> {
         let Some(handle) = scene.vector_handle(owner) else { return Vec::new() };
         let Some(object) = scene.vector(handle) else { return Vec::new() };
         let offset = scene.occurrence_offset64(owner);
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let layer = self.layers.entry(handle).or_default();
         layer.update(object, palette, pool);
+        layer.exclude(excluded);
         layer.change = std::mem::take(&mut layer.pending);
         layer.change.damage.iter().map(|[x0, y0, x1, y1]| DocRect {
             min: [(x0 + offset[0]).floor() as i64 - 16, (y0 + offset[1]).floor() as i64 - 16],
@@ -316,7 +360,7 @@ impl Vectors {
         let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
         let layer = self.layers.get_mut(&handle)?;
         layer.update(object, palette, pool);
-        let slots = layer.change.appended()?.to_vec();
+        let slots: Vec<u32> = layer.change.appended()?.iter().copied().filter(|slot| layer.items[*slot as usize].as_ref().is_some_and(|item| !item.hidden)).collect();
         let entries = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent);
         let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
         let mut batch = Batch::default();
@@ -374,7 +418,7 @@ impl Vectors {
                 let item = layer.items[*slot as usize].as_mut().unwrap();
                 if item.seen == stamp { continue; }
                 item.seen = stamp;
-                if masked(item.bounds) { slots.push(*slot); }
+                if !item.hidden && masked(item.bounds) { slots.push(*slot); }
             }
         }}
         let entries = self.entries(handle, slots, offset, level, extent);
@@ -382,6 +426,20 @@ impl Vectors {
         let mut batch = Batch::default();
         batch.build_within(&layers, level_origin, size, Some(&mask));
         Some(batch)
+    }
+    #[expect(clippy::too_many_arguments, reason = "A window names its layer, items, placement, level, extent and color domain")]
+    pub fn motion_batch(&mut self, scene: SceneView<'_>, owner: OccurrenceHandle, items: &BTreeSet<ItemId>, origin: [i64; 2], level: u32, size: [u32; 2], extent: [u32; 2], palette: (layer_core::color::RgbSpace, layer_core::BlendSpace)) -> Batch {
+        let mut batch = Batch::default();
+        let (Some(handle), Some(object)) = (scene.vector_handle(owner), scene.vector_layer(owner)) else { return batch };
+        let pool = self.pool.get_or_insert_with(|| Pool::new(POOL_BYTES));
+        let layer = self.layers.entry(handle).or_default();
+        layer.update(object, palette, pool);
+        let slots = items.iter().filter_map(|id| layer.ids.get(id).copied()).collect();
+        let entries = self.entries(handle, slots, scene.occurrence_offset64(owner), level, extent);
+        let layers: Vec<Layer> = entries.iter().map(|(geometry, base, colors)| Layer { geometry, base: *base, colors }).collect();
+        let side = 1i64 << level;
+        batch.build(&layers, origin.map(|v| v.div_euclid(side)), size);
+        batch
     }
     fn entries(&mut self, handle: VectorHandle, slots: Vec<u32>, offset: [f64; 2], level: u32, extent: [u32; 2]) -> Vec<(Arc<LevelGeometry>, u32, Arc<[[f32; 4]]>)> {
         let frame = level_frame(offset, level, extent);
@@ -436,7 +494,7 @@ impl Vectors {
                 if item.seen == stamp { continue; }
                 item.seen = stamp;
                 let b = item.bounds;
-                if b[2] < window[0] - 16. || b[0] > window[0] + span[0] + 16. || b[3] < window[1] - 16. || b[1] > window[1] + span[1] + 16. { continue; }
+                if item.hidden || b[2] < window[0] - 16. || b[0] > window[0] + span[0] + 16. || b[3] < window[1] - 16. || b[1] > window[1] + span[1] + 16. { continue; }
                 slots.push(*slot);
             }
         }}
@@ -500,3 +558,20 @@ impl Vectors {
 #[cfg(test)]
 #[path = "vector_tests.rs"]
 mod tests;
+
+pub(crate) fn motion_shift(motion: &layer_render::VectorMotion, level: u32) -> [i64; 2] {
+    let side = 1i64 << level;
+    motion.offset.map(|v| (v / side as f64).round() as i64 * side)
+}
+pub(crate) fn motion_presentable(scene: SceneView<'_>, owner: OccurrenceHandle) -> bool {
+    scene.parent(owner).is_none() && scene.children(None).iter().copied().find(|h| scene.visible(*h)) == Some(owner)
+        && scene.occurrence(owner).is_some_and(|o| o.blend == layer_core::LayerBlend::Normal && o.opacity == 1. && !o.attachment.is_clip() && !o.mask.as_ref().is_some_and(|m| m.enabled))
+}
+pub(crate) fn motion_bounds(scene: SceneView<'_>, motion: &layer_render::VectorMotion) -> DocRect {
+    let Some(object) = scene.vector_layer(motion.owner) else { return DocRect::default() };
+    let offset = scene.occurrence_offset64(motion.owner);
+    object.items_bounds(&motion.items).map_or(DocRect::default(), |[x0, y0, x1, y1]| DocRect {
+        min: [(x0 + offset[0]).floor() as i64 - 16, (y0 + offset[1]).floor() as i64 - 16],
+        max: [(x1 + offset[0]).ceil() as i64 + 16, (y1 + offset[1]).ceil() as i64 + 16],
+    })
+}

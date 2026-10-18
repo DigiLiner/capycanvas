@@ -175,7 +175,10 @@ pub struct WorkingState {
     pub target: Option<SourceTarget>,
     pub inspect_mask: Option<OccurrenceHandle>,
     pub view_origin: [i64; 2],
+    pub vector_items: Option<VectorItemSelection>,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorItemSelection { pub layer: OccurrenceHandle, pub items: Arc<BTreeSet<super::vector::ItemId>> }
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SelectionOverlays {

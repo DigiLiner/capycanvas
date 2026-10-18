@@ -1289,7 +1289,7 @@ pub use authored::{
     EvaluationContext, Guides, Handle, MaskUse, Occurrence, OccurrenceContent, OccurrenceDropPlan, OccurrenceDropPosition, OccurrenceHandle,
     Output, OutputHandle, PaintHandle, PaintSource, PortableId, RecordChange, SavedSelection,
     SceneIndex, SceneScope, SceneSnapshot, SceneView, SelectionHandle, SourceTarget, Stack,
-    StackHandle, Store, WorkingState,
+    StackHandle, Store, VectorItemSelection, WorkingState,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1476,6 +1476,7 @@ impl Document {
             let mut candidate = self.clone();
             let inverse = candidate.apply_records(edit.clone())?;
             edit.validate_presentation(&candidate)?;
+            candidate.prune_vector_items();
             candidate.revision = next_revision;
             *self = candidate;
             return Ok(inverse);
@@ -1571,6 +1572,15 @@ impl Document {
             self.working.selection_overlays.visibility.get(&id).copied().unwrap_or(occurrence.visible)
         }else{occurrence.visible}
     }
+    fn prune_vector_items(&mut self) {
+        let Some(selection) = &self.working.vector_items else { return };
+        let present = self.scene().vector_layer(selection.layer).map(|object| object.present(&selection.items));
+        self.working.vector_items = match present {
+            Some(items) if items.len() == selection.items.len() => return,
+            Some(items) if !items.is_empty() => Some(authored::VectorItemSelection { layer: selection.layer, items: Arc::new(items) }),
+            _ => None,
+        };
+    }
     fn repair_working(&mut self) -> Result<(), DocumentError> {
         if let Some(selection) = &self.working.selection {
             selection.validate()?;
@@ -1610,6 +1620,7 @@ impl Document {
         self.working.target = target;
         self.working.inspect_mask = inspect;
         self.working.layer_selection.retain(|h| self.artwork.occurrences.get(*h).is_some());
+        self.prune_vector_items();
         self.working.layer_anchor = self.working.layer_anchor.filter(|h| self.artwork.occurrences.get(*h).is_some());
         if let Some(visibility) = &mut self.working.solo_visibility {
             visibility.retain(|h, _| self.artwork.occurrences.get(*h).is_some());

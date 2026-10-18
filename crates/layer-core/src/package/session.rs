@@ -74,13 +74,13 @@ pub(crate) struct WorkingRecord {
 }
 impl WorkingRecord {
     pub(crate) fn capture(working:&WorkingState,resources:&mut ResourceInventory)->Result<Self,String> {
-        let WorkingState {generation,selection,selection_overlays,layer_selection,layer_anchor,solo_visibility,occurrence,target,inspect_mask,view_origin}=working;
+        let WorkingState {generation,selection,selection_overlays,layer_selection,layer_anchor,solo_visibility,occurrence,target,inspect_mask,view_origin,vector_items:_}=working;
         Ok(Self {generation:*generation,selection:selection.as_ref().map(|s|selection_records::encode_selection(s,resources)).transpose()?,
             selection_overlays:selection_overlays.clone(),layer_selection:layer_selection.clone(),layer_anchor:*layer_anchor,solo_visibility:solo_visibility.clone(),occurrence:*occurrence,target:*target,inspect_mask:*inspect_mask,view_origin:*view_origin})
     }
     pub(crate) fn decode(&self,reader:&mut ResourceReader<'_>)->Result<WorkingState,String> {
         Ok(WorkingState {generation:self.generation,selection:self.selection.as_ref().map(|s|selection_records::decode_selection(s,reader)).transpose().map_err(|e|e.to_string())?,
-            selection_overlays:self.selection_overlays.clone(),layer_selection:self.layer_selection.clone(),layer_anchor:self.layer_anchor,solo_visibility:self.solo_visibility.clone(),occurrence:self.occurrence,target:self.target,inspect_mask:self.inspect_mask,view_origin:self.view_origin})
+            selection_overlays:self.selection_overlays.clone(),layer_selection:self.layer_selection.clone(),layer_anchor:self.layer_anchor,solo_visibility:self.solo_visibility.clone(),occurrence:self.occurrence,target:self.target,inspect_mask:self.inspect_mask,view_origin:self.view_origin,vector_items:None})
     }
 }
 const INDEX_CHUNK:usize=64;

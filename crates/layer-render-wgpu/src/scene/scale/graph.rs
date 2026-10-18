@@ -9,6 +9,7 @@ pub(super) enum Expression {
     Objects {content:object_spatial::Content,preview:bool},
     Vector { owner: OccurrenceHandle, offset: [u64; 2] },
     VectorPreview { owner: OccurrenceHandle },
+    VectorMotion { owner: OccurrenceHandle },
     Source { id: SourceTarget, frame: SourceFrame, extent: [u32; 2], outside: u32 },
     Opacity { input: Node, opacity: u32 },
     Combine { front: Node, back: Node, blend: u32, flags: u32 },
@@ -39,7 +40,7 @@ impl Expression {
             Self::Source { frame, extent, .. } => DocRect::from(PixelRect::full(*extent)).translated(frame.origin()),
             Self::Objects {content,..} => content.bounds_at(level),
             Self::Vector { owner, .. } => super::super::vectors::Vectors::bounds(scene, *owner),
-            Self::VectorPreview { .. } => DocRect::from(PixelRect::full(extent)),
+            Self::VectorPreview { .. } | Self::VectorMotion { .. } => DocRect::from(PixelRect::full(extent)),
             Self::Opacity { input, .. } => input.support(scene, extent,level),
             Self::Combine { front, back, flags, .. } => {
                 if flags & 32 != 0 { front.support(scene, extent,level) }
@@ -57,7 +58,7 @@ impl Expression {
         match self {
             Self::Color(_) => (0, 0),
             Self::Objects {content,..} => (content.len() as u32*2, 3),
-            Self::Vector { .. } | Self::VectorPreview { .. } => (2, 3),
+            Self::Vector { .. } | Self::VectorPreview { .. } | Self::VectorMotion { .. } => (2, 3),
             Self::Source { frame, .. } => {
                 let work = u32::from(!frame.aligned());
                 (work, work)
@@ -89,6 +90,7 @@ impl Expression {
             Self::Vector { owner, .. } => [None, Some(*owner)].into_iter().flat_map(|owner| sources.object_damage.get(&owner).into_iter())
                 .flat_map(|damage| damage.regions.iter()).copied().map(DocRect::from).collect(),
             Self::VectorPreview { .. } => sources.preview_damage.clone(),
+            Self::VectorMotion { .. } => sources.motion_damage.clone(),
             Self::Source { id, frame, .. } => sources.entries.get(id).map_or_else(|| vec![plan.doc_bounds], |source| {
                 let local = if frame.aligned() { source.damage.clone() } else {
                     source.damage.expand(1 << source_level(plan.level, *frame), frame.extent(source.extent))
@@ -109,7 +111,7 @@ impl Expression {
     pub(super) fn required(&self, region: Damage, plan: display_mips::Plan) -> Damage {
         match self {
             Self::Color(_) => Damage::EMPTY,
-            Self::Objects {..} | Self::Vector { .. } | Self::VectorPreview { .. } => region,
+            Self::Objects {..} | Self::Vector { .. } | Self::VectorPreview { .. } | Self::VectorMotion { .. } => region,
             Self::Source { .. } => region,
             Self::Opacity { input, .. } => input.required(region, plan),
             Self::Combine { front, back, .. } => front.required(region.clone(), plan).union(back.required(region, plan)),
@@ -128,7 +130,7 @@ impl Expression {
                     visit(input, scene, native, domains);
                     for mask in masks.iter().flatten() { visit(mask, scene, native, domains); }
                 }
-                Expression::Color(_) | Expression::Objects {..} | Expression::Vector { .. } | Expression::VectorPreview { .. } => {}
+                Expression::Color(_) | Expression::Objects {..} | Expression::Vector { .. } | Expression::VectorPreview { .. } | Expression::VectorMotion { .. } => {}
             }
         }
         let mut domains = Default::default();
@@ -210,7 +212,7 @@ impl Graph {
         Expression::visit(&root, &mut all);
         let mut eligible: Vec<_> = all.into_iter().filter(|n| !Arc::ptr_eq(n, &root)
             && matches!(n.as_ref(), Expression::Objects {..} | Expression::Vector { .. } | Expression::Combine { .. } | Expression::Effect { .. })
-            && !matches!(n.as_ref(), Expression::Combine { front, .. } if matches!(front.as_ref(), Expression::VectorPreview { .. }))).collect();
+            && !matches!(n.as_ref(), Expression::Combine { front, .. } if matches!(front.as_ref(), Expression::VectorPreview { .. } | Expression::VectorMotion { .. }))).collect();
         eligible.sort_by_cached_key(|n| (n.damage(sources, plan).area(), std::cmp::Reverse(n.cost().0), n.clone()));
         eligible.truncate((budget / plan.level_bytes(plan.level)) as usize);
         let wanted: HashSet<_> = eligible.into_iter().collect();
@@ -306,7 +308,8 @@ impl stack::Compositor for Builder<'_> {
             vec![Arc::new(Expression::Objects {content,preview:self.sources.is_some_and(|sources|sources.object_moving==Some(index))})]
         } else if self.packet.scene.vector_layer(index).is_some() {
             let vector = Arc::new(Expression::Vector { owner: index, offset: self.packet.scene.occurrence_offset64(index).map(f64::to_bits) });
-            vec![Expression::combine(Arc::new(Expression::VectorPreview { owner: index }), vector, layer_core::LayerBlend::Normal, 0)]
+            let moving = Expression::combine(Arc::new(Expression::VectorMotion { owner: index }), vector, layer_core::LayerBlend::Normal, 0);
+            vec![Expression::combine(Arc::new(Expression::VectorPreview { owner: index }), moving, layer_core::LayerBlend::Normal, 0)]
         } else { vec![self.source(index, false)] };
         if layer.mask.as_ref().is_some_and(|m| m.enabled) {
             Ok(vec![Expression::combine(Expression::over(&output), self.source(index, true), layer_core::LayerBlend::Normal, 32)])
@@ -363,6 +366,17 @@ impl Evaluator<'_> {
         let value = match deferred { Some(value) => value, None => self.evaluate_into(node, Some(output.clone()))? };
         self.materialize(value, Some(output))
     }
+    fn combine(&mut self, front: &Node, back: &Node, blend: u32, flags: u32, output: Option<Target>) -> Result<Value, GpuRasterError> {
+        let (front, back) = if front.cost().1 >= back.cost().1 {
+            let front = self.evaluate(front)?;
+            (front, self.evaluate(back)?)
+        } else {
+            let back = self.evaluate(back)?;
+            (self.evaluate(front)?, back)
+        };
+        if blend == 0 && flags == 0 && matches!(front, Value::Color(c) if c == [0.; 4]) { self.materialize(back, output) }
+        else { self.draw(front, back, layer_core::LayerBlend::ALL[blend as usize], flags, output) }
+    }
     pub(super) fn evaluate(&mut self, node: &Node) -> Result<Value, GpuRasterError> {
         self.evaluate_into(node, None)
     }
@@ -386,26 +400,17 @@ impl Evaluator<'_> {
             if self.cache.plan.level>0 && chain.iter().any(|(h,..)|native_pointwise_alpha(self.packet.scene.effect(*h).unwrap().program))))
             .map_or(self.region,|branch|page_coordinates(region).filter(|c|!branch.initialized.contains(c))
                 .fold(region,|bounds,c|bounds.union(page_rect(c).intersect(branch.image.as_ref().unwrap().plan.bounds))).into());
-        let result = self.with_region(evaluation,|compositor|Ok(match node.as_ref() {
-            Expression::Color(c) => Value::Color(c.map(f32::from_bits)),
-            Expression::Objects {content,preview} => compositor.objects(content,*preview,output)?,
-            Expression::Vector { owner, .. } => compositor.vector(*owner, output, append)?,
-            Expression::VectorPreview { owner } => compositor.vector_preview(*owner, output)?,
-            Expression::Source { id, frame, extent, outside } => compositor.source(*id, *frame, *extent, f32::from_bits(*outside))?,
-            Expression::Opacity { input, opacity } => compositor.evaluate(input)?.with_opacity(f32::from_bits(*opacity)),
-            Expression::Combine { front, back, blend, flags } => {
-                let (front, back) = if front.cost().1 >= back.cost().1 {
-                    let front = compositor.evaluate(front)?;
-                    (front, compositor.evaluate(back)?)
-                } else {
-                    let back = compositor.evaluate(back)?;
-                    (compositor.evaluate(front)?, back)
-                };
-                if *blend == 0 && *flags == 0 && matches!(front, Value::Color(c) if c == [0.; 4]) { compositor.materialize(back, output)? }
-                else { compositor.draw(front, back, layer_core::LayerBlend::ALL[*blend as usize], *flags, output)? }
-            }
-            Expression::Effect { input, chain, masks, .. } => compositor.effect(input, chain, masks, output)?,
-        }))?;
+        let result = self.with_region(evaluation,|compositor| match node.as_ref() {
+            Expression::Color(c) => Ok(Value::Color(c.map(f32::from_bits))),
+            Expression::Objects {content,preview} => compositor.objects(content,*preview,output),
+            Expression::Vector { owner, .. } => compositor.vector(*owner, output, append),
+            Expression::VectorPreview { owner } => compositor.vector_preview(*owner, output),
+            Expression::VectorMotion { owner } => compositor.vector_motion(*owner, output),
+            Expression::Source { id, frame, extent, outside } => compositor.source(*id, *frame, *extent, f32::from_bits(*outside)),
+            Expression::Opacity { input, opacity } => compositor.evaluate(input).map(|value| value.with_opacity(f32::from_bits(*opacity))),
+            Expression::Combine { front, back, blend, flags } => compositor.combine(front, back, *blend, *flags, output),
+            Expression::Effect { input, chain, masks, .. } => compositor.effect(input, chain, masks, output),
+        })?;
         if let Some(branch) = self.cache.graph.branches.get_mut(node) {
             let bounds = branch.image.as_ref().unwrap().plan.doc_bounds.in_frame(self.cache.plan.extent);
             let complete:Vec<_>=page_coordinates(evaluation.in_frame(self.cache.plan.extent)).filter(|c|page_rect(*c).intersect(bounds).intersect(evaluation.in_frame(self.cache.plan.extent))==page_rect(*c).intersect(bounds)).collect();

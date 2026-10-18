@@ -100,6 +100,8 @@ pub(crate) struct Sources {
     pub(in crate::scene) object_refinements: BTreeMap<super::super::object_cache::DamageKey, Damage>,
     pub(in crate::scene) vector_preview: Option<(OccurrenceHandle, Arc<layer_core::authored::vector::PathItem>, DocRect)>,
     pub(in crate::scene) preview_damage: Vec<DocRect>,
+    pub(in crate::scene) vector_motion: Option<(layer_render::VectorMotion, DocRect)>,
+    pub(in crate::scene) motion_damage: Vec<DocRect>,
 }
 impl Sources {
     pub(crate) fn published(&mut self, id: SourceTarget, data: Arc<RasterData>) {

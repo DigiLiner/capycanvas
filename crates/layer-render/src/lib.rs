@@ -346,6 +346,8 @@ pub struct BrushStampRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VectorPreview { pub owner: OccurrenceHandle, pub path: std::sync::Arc<layer_core::authored::vector::PathItem>, pub revision: u64 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorMotion { pub owner: OccurrenceHandle, pub items: std::sync::Arc<std::collections::BTreeSet<layer_core::authored::vector::ItemId>>, pub offset: [f64; 2] }
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum ThumbnailTarget {Occurrence(OccurrenceHandle),Source(SourceTarget),QuickMask}
@@ -832,6 +834,7 @@ pub trait CanvasRenderer {
     fn set_paper_overlay(&mut self, _overlay: Option<PaperOverlay>) {}
     fn paper_overlay_ready(&self, _paper: &layer_core::paper::PaperBinding) -> bool { true }
     fn set_vector_preview(&mut self, _preview: Option<VectorPreview>) {}
+    fn set_vector_motion(&mut self, _motion: Option<VectorMotion>) {}
     fn set_clipping_preview(&mut self, _shadows: bool, _highlights: bool) {}
     fn set_telemetry_enabled(&mut self, _enabled: bool) {}
     fn telemetry(&self) -> RendererTelemetry {

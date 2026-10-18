@@ -2,7 +2,7 @@ use super::values::DecodeError;
 use super::vector_records::*;
 use crate::authored::vector::*;
 use crate::color::RgbColor;
-use std::{collections::{BTreeSet, HashSet}, sync::Arc};
+use std::{collections::BTreeSet, sync::Arc};
 use crate::authored::Affine64;
 
 fn color(r: f32) -> Paint { Paint::color(RgbColor::new(Default::default(), [r, 0.25, 0.5, 1.]).unwrap()) }
@@ -371,8 +371,8 @@ fn hits_find_the_frontmost_visible_unlocked_path_under_the_point() {
 #[test]
 fn transforming_items_rewrites_only_their_chunks_and_scales_stroke_widths() {
     let object = VectorObject::from_records((1..=300).map(|i| Record::Path(plain_line(i, [i as f64, 0.], [i as f64, 10.], 2.))).collect());
-    let few: HashSet<ItemId> = [ItemId(5), ItemId(250)].into();
-    let many: HashSet<ItemId> = (1..=300).filter(|i| i % 3 == 0).map(ItemId).collect();
+    let few: BTreeSet<ItemId> = [ItemId(5), ItemId(250)].into();
+    let many: BTreeSet<ItemId> = (1..=300).filter(|i| i % 3 == 0).map(ItemId).collect();
     for ids in [&few, &many] {
         let expected: BTreeSet<_> = ids.iter().map(|id| object.find(*id).unwrap()).collect();
         let found: BTreeSet<_> = object.positions(ids).into_iter().flat_map(|(c, v)| v.into_iter().map(move |i| Position { chunk: c as u32, index: i as u32 })).collect();
@@ -386,4 +386,22 @@ fn transforming_items_rewrites_only_their_chunks_and_scales_stroke_widths() {
     assert_eq!(path.geometry.subpaths()[0].anchor(1).point(), [1010., 20.]);
     assert_eq!(path.style.strokes().next().unwrap().width, 4.);
     assert_eq!(moved.items_bounds(&few), Some([1002., -8., 1508., 28.]));
+}
+
+#[test]
+fn path_selections_keep_only_paths_that_still_exist() {
+    let (mut editor, layer) = document_with_paths(200);
+    let mut working = editor.document().working.clone();
+    working.vector_items = Some(crate::VectorItemSelection { layer, items: Arc::new([ItemId(3), ItemId(150), ItemId(9999)].into()) });
+    editor.perform(crate::Edit::Working(working)).unwrap();
+    let selected = |editor: &crate::Editor| editor.document().working.vector_items.as_ref().map(|s| s.items.iter().copied().collect::<Vec<_>>());
+    assert_eq!(selected(&editor), Some(vec![ItemId(3), ItemId(150)]), "missing paths drop out of the selection");
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    let removed = object.replace([(object.find(ItemId(150)).unwrap(), None)]);
+    editor.perform(editor.document().vector_object_edit(layer, removed).unwrap()).unwrap();
+    assert_eq!(selected(&editor), Some(vec![ItemId(3)]));
+    let object = editor.document().scene().vector_layer(layer).unwrap().clone();
+    let removed = object.replace([(object.find(ItemId(3)).unwrap(), None)]);
+    editor.perform(editor.document().vector_object_edit(layer, removed).unwrap()).unwrap();
+    assert_eq!(selected(&editor), None, "an empty path selection clears");
 }

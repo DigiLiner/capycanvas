@@ -217,10 +217,13 @@ layer's item records in immutable chunks of at most 64, each a resource that
 history, saves and duplicates share. Paths keep their geometry and style behind
 `Arc`, and a path longer than 256 anchors keeps them in runs of 256, so an edit
 copies only the chunk, path and run it changes. Item IDs are random nonzero
-`u64` values local to the layer, kept through edits and never reused. A vector
-edit that replaces an existing object validates only its new chunks and skips
-resource-closure admission. The wire form is in
-[vector records](capy-package.md#vector-records).
+`u64` values local to the layer, kept through edits and never reused. Each
+chunk keeps its sorted item IDs and container nesting, and an object remembers
+that it validated, so a vector edit that replaces an existing object checks only
+its new chunks and the identities they introduce, and skips resource-closure
+admission. The working state's `vector_items` names selected paths of one
+vector layer; edits drop paths that no longer exist, and sessions do not save
+it. The wire form is in [vector records](capy-package.md#vector-records).
 
 Shared `Document` planners create one layer per imported source and replace
 placements through atomic reversible record edits. Ordinary layer planners own

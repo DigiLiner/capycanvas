@@ -1514,6 +1514,51 @@ impl Evaluator<'_> {
         }
         self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)
     }
+    fn vector_motion(&mut self, owner: OccurrenceHandle, output: Option<Target>) -> Result<Value, GpuRasterError> {
+        let Some((motion, moving)) = self.scene.scale_sources.vector_motion.clone().filter(|(m, _)| m.owner == owner) else { return self.materialize(Value::Color([0.; 4]), output) };
+        let working = self.working_plan();
+        let level = working.level;
+        let side = 1u32 << level;
+        let shift = super::motion_shift(&motion, level);
+        let moving = moving.aligned(side);
+        let window = self.region.intersect(working.doc_bounds).aligned(side);
+        let needed = window.translated(shift.map(|v| -v)).intersect(moving).in_frame(self.packet.document_extent);
+        if needed.is_empty() { return self.materialize(Value::Color([0.; 4]), output); }
+        let needed = DocRect::from(needed).aligned(side);
+        self.commands.flush(self.r, self.encoder)?;
+        let key = (owner, Arc::as_ptr(&motion.items) as usize, level, self.packet.scene.occurrence_offset64(owner).map(|v| v as i64));
+        let covered = self.scene.vectors.motion.as_ref().is_some_and(|m| m.key == key && m.window.intersect(needed) == needed);
+        if !covered {
+            let budget = DocRect { min: needed.min.map(|v| v - 512 * i64::from(side)), max: needed.max.map(|v| v + 512 * i64::from(side)) };
+            let area = moving.intersect(budget).in_frame(self.packet.document_extent);
+            let plan = display_mips::Plan::window(self.packet.document_extent, level, area);
+            let image = super::Image::new(self.r, plan, "vector motion");
+            let palette = Scene::vector_palette(self.r, self.packet);
+            let batch = self.scene.vectors.motion_batch(self.packet.scene, owner, &motion.items, plan.doc_bounds.min, level, plan.size, self.packet.document_extent, palette);
+            self.r.encode_clear(self.encoder, &image.view, "vector motion");
+            if batch.tile_count() > 0 {
+                self.scene.jobs.push(super::Job::Vector(Box::new(super::vectors::VectorJob { batch, output: image.view.clone(), base: None })));
+                self.encode_scene_jobs()?;
+            }
+            self.scene.vectors.motion = Some(super::vectors::MotionImage { key, window: plan.doc_bounds, image });
+        }
+        let mut target = self.target();
+        let size = window.size().map_err(|_| GpuRasterError::ExtentUnsupported)?;
+        target.plan.doc_bounds = window; target.plan.size = size.map(|v| v.div_ceil(side)); target.plan.bounds = PixelRect::full(size);
+        self.r.encode_clear(self.encoder, &target.view, "vector motion");
+        let source = self.scene.vectors.motion.as_ref().unwrap();
+        let from = [0, 1].map(|i| ((needed.min[i] - source.window.min[i]) / i64::from(side)) as u32);
+        let to = [0, 1].map(|i| ((needed.min[i] + shift[i] - window.min[i]) / i64::from(side)) as u32);
+        let extent = [0, 1].map(|i| (((needed.max[i] - needed.min[i]) / i64::from(side)) as u32).min(target.plan.size[i] - to[i]).min(source.image.plan.size[i] - from[i]));
+        if extent.iter().all(|v| *v > 0) {
+            self.encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo { texture: &source.image.texture, mip_level: 0, origin: wgpu::Origin3d { x: from[0], y: from[1], z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::TexelCopyTextureInfo { texture: target.view.texture(), mip_level: 0, origin: wgpu::Origin3d { x: to[0], y: to[1], z: 0 }, aspect: wgpu::TextureAspect::All },
+                wgpu::Extent3d { width: extent[0], height: extent[1], depth_or_array_layers: 1 });
+        }
+        let plan = target.plan;
+        self.materialize(Value::Image { view: target.view, slot: target.slot, opacity: 1., plan, preview: None, encode: false }, output)
+    }
     fn vector_preview(&mut self, owner: OccurrenceHandle, output: Option<Target>) -> Result<Value, GpuRasterError> {
         let Some((_, path, bounds)) = self.scene.scale_sources.vector_preview.clone().filter(|(o, ..)| *o == owner) else { return self.materialize(Value::Color([0.; 4]), output) };
         if bounds.intersect(self.region).is_empty() { return self.materialize(Value::Color([0.; 4]), output); }

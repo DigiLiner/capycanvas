@@ -30,7 +30,7 @@ mod objects;
 mod object_cache;
 mod object_spatial;
 mod vectors;
-pub(crate) use vectors::{preview_bounds, preview_damage};
+pub(crate) use vectors::{motion_bounds, motion_presentable, motion_shift, preview_bounds, preview_damage};
 mod bake;
 pub(crate) mod resample;
 pub(crate) mod scale;
@@ -1789,6 +1789,7 @@ impl Scene {
         self.scale_sources.object_refinements = refinements;
         self.scale_sources.object_damage = damage;
         self.vector_damage(r, packet);
+        self.prepare_presented_motion(r, packet, encoder)?;
         self.object_results = objects;
         advanced?;
         let dirty = self.scale_sources.object_damage.values().fold(dirty, |dirty, damage| dirty.union(damage.bounds()));

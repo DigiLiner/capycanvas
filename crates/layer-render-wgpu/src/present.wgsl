@@ -13,6 +13,8 @@ struct Camera {
     placed_options: vec4<f32>, placed_backdrop: vec4<f32>,
     composite: vec4<f32>,
     mapped: Resample,
+    motion: vec4<f32>,
+    motion_offset: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var moved: texture_2d<f32>;
@@ -29,6 +31,7 @@ struct PaperShade { tile: vec4<f32>, light: vec4<f32>, paper: vec4<f32>, state: 
 @group(0) @binding(14) var<uniform> paper_shade: PaperShade;
 @group(0) @binding(15) var paper_slope: texture_2d<f32>;
 @group(0) @binding(16) var paper_sampler: sampler;
+@group(0) @binding(17) var moving_paths: texture_2d<f32>;
 
 // The backing buffer follows the display's native orientation. All artwork,
 // cursor and UI geometry continues to use the host's logical viewport.
@@ -139,7 +142,7 @@ fn paper_composite(composite: vec4<f32>, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f
 fn source_at(source: u32, p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, linear: bool) -> vec4<f32> {
     if source == 2u { return mapped_at(p, dx, dy, linear); }
     if source == 1u { return placed_at(p, dx, dy, linear); }
-    let grid = grid_artwork_at(p, dx, dy);
+    let grid = moving_over(p, grid_artwork_at(p, dx, dy));
     if linear { return canvas_linear(grid); }
     return grid;
 }
@@ -147,6 +150,14 @@ fn artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     if camera.placed_options.y==2. {return mapped_at(p,dx,dy,false);}
     if camera.placed_options.y!=0. { return placed_at(p,dx,dy,false); }
     return grid_artwork_at(p,dx,dy);
+}
+fn moving_over(p: vec2<f32>, below: vec4<f32>) -> vec4<f32> {
+    if camera.motion.w == 0. { return below; }
+    let q = (p - camera.motion_offset.xy - camera.motion.xy) / camera.motion.z;
+    let size = camera.motion_offset.zw;
+    if any(q < vec2<f32>(-1.)) || any(q > size + 1.) { return below; }
+    let above = sample_float(moving_paths, linear_sampler, q / size, 0.);
+    return above + below * (1. - above.a);
 }
 fn grid_artwork_at(p: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> vec4<f32> {
     let scale = f32(cache.scale);

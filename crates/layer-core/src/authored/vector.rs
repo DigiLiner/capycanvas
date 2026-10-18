@@ -1,6 +1,6 @@
 use super::{Affine64, PortableId, Resource};
 use crate::color::RgbColor;
-use std::{collections::{BTreeMap, HashSet}, sync::{Arc, OnceLock}};
+use std::{collections::{BTreeMap, BTreeSet, HashSet}, sync::{Arc, OnceLock}};
 
 pub const ANCHOR_RUN: usize = 256;
 pub const CHUNK_RECORDS: usize = 64;
@@ -564,7 +564,7 @@ impl VectorObject {
             .flat_map(|chunk| chunk.records().iter().filter_map(Record::path))
             .find(|path| !path.locked && path.hit(point, slop)).map(|path| path.id)
     }
-    pub fn positions(&self, ids: &HashSet<ItemId>) -> BTreeMap<usize, Vec<usize>> {
+    pub fn positions(&self, ids: &BTreeSet<ItemId>) -> BTreeMap<usize, Vec<usize>> {
         let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         let mut note = |chunk: usize, id: ItemId| if let Some(index) = self.chunks()[chunk].records().iter().position(|r| r.id() == Some(id)) { found.entry(chunk).or_default().push(index); };
         if ids.len().saturating_mul(self.chunks().len()) <= self.record_count() {
@@ -574,7 +574,7 @@ impl VectorObject {
         }
         found
     }
-    pub fn transform_items(&self, ids: &HashSet<ItemId>, affine: Affine64) -> Result<Self, &'static str> {
+    pub fn transform_items(&self, ids: &BTreeSet<ItemId>, affine: Affine64) -> Result<Self, &'static str> {
         let mut edits = BTreeMap::new();
         for (chunk, indices) in self.positions(ids) {
             let mut records = self.chunks()[chunk].records().to_vec();
@@ -585,7 +585,10 @@ impl VectorObject {
         }
         Ok(self.edit_chunks(edits))
     }
-    pub fn items_bounds(&self, ids: &HashSet<ItemId>) -> Option<[f64; 4]> {
+    pub fn present(&self, ids: &BTreeSet<ItemId>) -> BTreeSet<ItemId> {
+        self.positions(ids).into_iter().flat_map(|(chunk, indices)| indices.into_iter().filter_map(move |i| self.chunks()[chunk].records()[i].id())).collect()
+    }
+    pub fn items_bounds(&self, ids: &BTreeSet<ItemId>) -> Option<[f64; 4]> {
         self.positions(ids).into_iter().flat_map(|(chunk, indices)| indices.into_iter().filter_map(move |i| self.chunks()[chunk].records()[i].path().map(PathItem::bounds)))
             .fold(None, |a, b| Some(union(a, b)))
     }

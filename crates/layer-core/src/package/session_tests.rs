@@ -51,7 +51,7 @@ fn fixture()->Editor {
         visibility:[(selection,false)].into(),properties:[(saved,SelectionMaskProperties {
             color:RgbColor {space:RgbSpace::DisplayP3,rgba:[0.25,0.5,0.75,1.],linear_rgb:None},opacity:0.75})].into()},
         layer_selection:[ink,selection].into(),layer_anchor:Some(ink),solo_visibility:Some([(ink,true),(selection,false)].into()),
-        occurrence:Some(ink),target:Some(SourceTarget::Coverage(coverage)),inspect_mask:Some(ink),view_origin:[-300,17]};
+        occurrence:Some(ink),target:Some(SourceTarget::Coverage(coverage)),inspect_mask:Some(ink),view_origin:[-300,17],vector_items:None};
     Editor::new(document)
 }
 fn edit_family(edit:&Edit)->&'static str {

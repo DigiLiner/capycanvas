@@ -183,7 +183,7 @@ fn crowded_vector_layer_drawing_frames() {
 
 #[test]
 fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render() {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
     let extent = [1200u32, 900u32];
     for zoom in [1f32, 0.5] {
         let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
@@ -198,7 +198,7 @@ fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render()
             assert!(error < 1e-5, "{step} at zoom {zoom} must match a fresh render: {error}");
         };
         let object = editor.document().scene().vector_layer(layer).unwrap().clone();
-        let moving: HashSet<ItemId> = object.paths().step_by(97).map(|(_, p)| p.id).collect();
+        let moving: BTreeSet<ItemId> = object.paths().step_by(97).map(|(_, p)| p.id).collect();
         let moved = object.transform_items(&moving, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.])).unwrap();
         editor.perform(editor.document().vector_object_edit(layer, moved).unwrap()).unwrap();
         submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
@@ -216,10 +216,61 @@ fn moved_and_removed_items_repaint_only_damaged_tiles_and_match_a_fresh_render()
     }
 }
 
+fn presented(r: &WgpuRasterizer, view: layer_render::ViewState) -> Vec<u8> {
+    let (texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
+    let mut presenter = crate::present::ViewportPresenter::for_surface(r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    presenter.present(r, &target, view, [1.; 4]).unwrap();
+    crate::layer_tests::page_bytes(r, &texture)
+}
+#[test]
+fn moving_paths_show_at_their_offset_and_hand_off_to_the_committed_move() {
+    use std::collections::BTreeSet;
+    let extent = [1200u32, 900u32];
+    for (zoom, opacity) in [(1f32, 1f32), (0.5, 1.), (1., 0.99), (0.5, 0.99)] {
+        let view = layer_render::ViewState { width_px: 600, height_px: 450, document_to_surface: [zoom, 0., 0., zoom, 0., 0.] };
+        let mut records: Vec<Record> = (0..6).map(|i| stroke(9000 + i, &[[200. + i as f64 * 60., 300.], [400. + i as f64 * 50., 500.]], 9., [0.9, 0.2, 0.1, 0.6])).collect();
+        records.extend(crate::vector::bench::scene_b([1200., 900.], 1500).into_iter().map(Record::Path));
+        let (mut editor, layer) = document(extent, records);
+        let mut occurrence = editor.document().scene().occurrence(layer).unwrap().clone();
+        occurrence.opacity = opacity;
+        editor.perform(layer_core::Edit::Occurrence(layer_core::RecordChange::replace(&editor.document().artwork.occurrences, layer, Some(occurrence)).unwrap())).unwrap();
+        let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
+        submit_ready(&mut r, FramePacket { view, ..packet(editor.document().scene(), extent) });
+        let shown = |r: &WgpuRasterizer| if opacity == 1. { presented(r, view).into_iter().map(f32::from).collect::<Vec<_>>() } else { display(r).into_iter().flatten().collect() };
+        let tolerance = if opacity == 1. { 1.5 } else { 1e-5 };
+        let close = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0., f32::max);
+        let original = shown(&r);
+        let items: Arc<BTreeSet<ItemId>> = Arc::new((9000..9006).map(ItemId).collect());
+        let moved_object = editor.document().scene().vector_layer(layer).unwrap().transform_items(&items, layer_core::authored::Affine64([1., 0., 0., 1., 38., -22.])).unwrap();
+        let mut moved = layer_core::Editor::new(editor.document().clone());
+        moved.perform(moved.document().vector_object_edit(layer, moved_object.clone()).unwrap()).unwrap();
+        let mut fresh = WgpuRasterizer::new_native_headless(moved.document().composition().color).unwrap();
+        submit_ready(&mut fresh, FramePacket { view, ..packet(moved.document().scene(), extent) });
+        let expected = shown(&fresh);
+        for offset in [[10., 6.], [24., -12.], [38., -22.]] {
+            r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset }));
+            submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        }
+        let error = close(&shown(&r), &expected);
+        assert!(error < tolerance, "moving paths at zoom {zoom}, opacity {opacity} must show where the move puts them: {error}");
+        assert_eq!(max_error(&display(&r), &display(&fresh)) > 0.1, opacity == 1., "only a top layer presents moving paths without recompositing them");
+        r.set_vector_motion(None);
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        assert!(close(&shown(&r), &original) < tolerance, "cancelling a move restores the layer at zoom {zoom}, opacity {opacity}");
+        r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [38., -22.] }));
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
+        editor.perform(editor.document().vector_object_edit(layer, moved_object).unwrap()).unwrap();
+        r.set_vector_motion(None);
+        submit_ready(&mut r, FramePacket { view, composite_all: true, ..packet(editor.document().scene(), extent) });
+        let error = close(&shown(&r), &expected);
+        assert!(error < tolerance, "committing the move looks like its preview at zoom {zoom}, opacity {opacity}: {error}");
+    }
+}
+
 #[test]
 #[ignore = "crowded vector layer editing benchmark"]
 fn crowded_vector_layer_edit_frames() {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
     let extent = [4000u32, 3000u32];
     let zoom: f32 = std::env::var("VECTOR_ZOOM").ok().and_then(|v| v.parse().ok()).unwrap_or(0.4);
     let view = layer_render::ViewState { width_px: 1920, height_px: 1200, document_to_surface: [zoom, 0., 0., zoom, 160. - 1200. * (zoom - 0.4).max(0.), -1300. * (zoom - 0.4).max(0.)] };
@@ -234,8 +285,28 @@ fn crowded_vector_layer_edit_frames() {
     let hit = start.elapsed().as_secs_f64() * 1e3 / 100.;
     eprintln!("hit test {hit:.3} ms per probe, {} hits of 100", probes.iter().flatten().count());
     let ids: Vec<ItemId> = object.paths().filter(|(_, p)| { let b = p.bounds(); b[0] > 1200. && b[1] > 1300. }).map(|(_, p)| p.id).collect();
+    let (_texture, target) = crate::create_target(r.device(), [view.width_px, view.height_px], wgpu::TextureFormat::Rgba8UnormSrgb, "vector motion presentation");
+    let mut presenter = crate::present::ViewportPresenter::for_surface(&r, wgpu::TextureFormat::Rgba8UnormSrgb, crate::SdrSurfaceColor::Srgb).unwrap();
+    presenter.set_target_retention(true);
     for k in [1usize, 100, 5000] {
-        let selected: HashSet<ItemId> = ids.iter().copied().take(k).collect();
+        let selected: BTreeSet<ItemId> = ids.iter().copied().take(k).collect();
+        let items = Arc::new(selected.clone());
+        let mut drags = Vec::new();
+        for i in 0..60 {
+            r.set_vector_motion(Some(layer_render::VectorMotion { owner: layer, items: items.clone(), offset: [i as f64 * 0.7, i as f64 * -0.4] }));
+            let start = std::time::Instant::now();
+            r.submit(FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) }).unwrap();
+            presenter.present(&r, &target, view, [1.; 4]).unwrap();
+            let cpu = start.elapsed().as_secs_f64() * 1e3;
+            r.wait_idle().unwrap();
+            drags.push((cpu, start.elapsed().as_secs_f64() * 1e3));
+        }
+        let first = drags[0];
+        let (mut cpu, mut wall): (Vec<f64>, Vec<f64>) = drags[1..].iter().copied().unzip();
+        eprintln!("drag {k} of {count}: first frame wall {:.2} ms; frame cpu p50 {:.2} p95 {:.2} ms, wall p50 {:.2} p95 {:.2} ms", first.1,
+            percentile(&mut cpu, 0.5), percentile(&mut cpu, 0.95), percentile(&mut wall, 0.5), percentile(&mut wall, 0.95));
+        r.set_vector_motion(None);
+        submit_ready(&mut r, FramePacket { view, composite_all: false, ..packet(editor.document().scene(), extent) });
         let object = editor.document().scene().vector_layer(layer).unwrap().clone();
         let start = std::time::Instant::now();
         let moved = object.transform_items(&selected, layer_core::authored::Affine64([1., 0., 0., 1., 37., -21.])).unwrap();

@@ -327,6 +327,32 @@ thread. Work submitted on its own while a frame is recording, such as native
 raster restoration, uses a separate belt: finishing the shared belt for it would
 recall chunks the frame still references and remap them before the frame submits.
 
+### Vector layers
+
+Vector layers render on the GPU with the tiled coverage kernel in
+[`vector/`](../../crates/layer-render-wgpu/src/vector/). For each path and
+display level the CPU derives the 16-pixel tiles it covers and their fill
+segments or stroke capsules; the per-layer cache in
+[`scene/vectors.rs`](../../crates/layer-render-wgpu/src/scene/vectors.rs) keeps
+this geometry in a shared GPU pool, a 256-pixel grid of paths and the layer's
+last rendered root. Each frame compares the root's chunks with that root and
+records which paths were added, removed, changed or reordered. A stale page
+then either draws appended front paths over its previous pixels or copies them
+and redraws only the tiles the changed paths cover, gathering just the paths
+that reach those tiles; a page where most tiles change renders whole.
+
+The provisional line of a pen stroke arrives through `set_vector_preview` and
+draws above the cached layer, damaging only the part of the line that changed.
+A drag arrives through `set_vector_motion` with the moving item IDs and an
+offset. The cached layer leaves those paths out, repainting their tiles once,
+and the moving paths render once into a texture at the display level. When the
+vector layer is the top visible root layer with normal blending, full opacity
+and no mask, the viewport presenter draws that texture over the composite at
+the sub-pixel offset, so drag frames recomposite no pages. Otherwise the
+composition graph copies the texture at the offset rounded to the level's
+pixels above the cached layer. Moving paths draw above the rest of their layer
+until the move commits.
+
 ## Native SDR working color
 
 The headless native-document factory is currently a qualification route. GTK's
