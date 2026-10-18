@@ -65,6 +65,9 @@ including older gaps; a port does not require an unrestricted historical audit.
 - When changing menus, settings, publications or layers, read the
   [Apple integration rules](development/apple.md#editor-integration). Preserve
   intentional OS differences and native keyboard and accessibility conventions.
+- The iPad app supports iPadOS 17.5 and later. Gate SwiftUI and UIKit APIs newer
+  than 17.5 with an `if #available` fallback that keeps the feature, as the
+  [Apple guide](development/apple.md) describes for scrolling and sheets.
 
 ## 4. Validate the gaps
 

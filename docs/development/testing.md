@@ -634,3 +634,9 @@ are your task, and remove an entry when you fix it.
   the committed watercolor pixels after Redo.
 - Headless Web `--zoom-readout` reaches export with an empty stroke image
   and fails its ink assertion.
+- GTK `native_diagnostics_and_gpu_failure_recovery` times out at "canvas
+  restart" on unmodified `21ea1684e`: the restarted worker starts but its
+  startup never completes within 30 seconds after Restart Canvas.
+- Web `--layers` fails "one Undo restores the effect owner" (`1 !== 4`) in
+  `checkLayerRelationships` on unmodified `d0b6c3bd2`, after the detaching drop
+  itself passes.
