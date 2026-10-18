@@ -370,7 +370,6 @@ commands-not-available-on-this-platform = ใช้ไม่ได้บนแ�
 commands-this-drawing-is-closing = ภาพวาดนี้กำลังปิด
 commands-the-workspace-is-still-loading = พื้นที่ทำงานยังโหลดอยู่
 commands-workspace-ownership-needs-recovery = ต้องกู้คืนสิทธิ์ครอบครองพื้นที่ทำงาน
-commands-a-workspace-change-is-in-progress = กำลังเปลี่ยนพื้นที่ทำงาน
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = ระบายสีไม่ได้ บันทึกภาพวาดแล้วเปิดอีกครั้ง
 commands-nothing-to-undo = ไม่มีสิ่งให้เลิกทำ
 commands-apply-or-cancel-the-crop-first = ใช้หรือยกเลิกครอบตัดก่อน

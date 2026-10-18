@@ -375,7 +375,6 @@ commands-not-available-on-this-platform = Недоступно на этой п�
 commands-this-drawing-is-closing = Этот рисунок закрывается
 commands-the-workspace-is-still-loading = Рабочее пространство ещё загружается
 commands-workspace-ownership-needs-recovery = Владение рабочим пространством требует восстановления
-commands-a-workspace-change-is-in-progress = Рабочее пространство изменяется
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = Рисование недоступно. Сохраните рисунок и откройте его снова.
 commands-nothing-to-undo = Нечего отменять
 commands-apply-or-cancel-the-crop-first = Сначала примените или отмените обрезку

@@ -735,7 +735,6 @@ commands-the-workspace-is-still-loading = Ruang kerja masih dimuat
 
 commands-workspace-ownership-needs-recovery = Kepemilikan ruang kerja memerlukan pemulihan
 
-commands-a-workspace-change-is-in-progress = Perubahan ruang kerja sedang berlangsung
 
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = Melukis tidak tersedia. Simpan gambar dan buka kembali.
 

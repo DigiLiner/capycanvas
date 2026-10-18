@@ -370,7 +370,6 @@ commands-not-available-on-this-platform = Bu platformda kullanılamıyor
 commands-this-drawing-is-closing = Bu çizim kapanıyor
 commands-the-workspace-is-still-loading = Çalışma alanı hâlâ yükleniyor
 commands-workspace-ownership-needs-recovery = Çalışma alanı sahipliği kurtarılmalı
-commands-a-workspace-change-is-in-progress = Bir çalışma alanı değişikliği sürüyor
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = Boyama kullanılamıyor. Çizimi kaydedip yeniden açın.
 commands-nothing-to-undo = Geri alınacak bir şey yok
 commands-apply-or-cancel-the-crop-first = Önce kırpmayı uygulayın veya iptal edin

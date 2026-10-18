@@ -373,7 +373,6 @@ commands-not-available-on-this-platform = Not available on this platform
 commands-this-drawing-is-closing = This drawing is closing
 commands-the-workspace-is-still-loading = The workspace is still loading
 commands-workspace-ownership-needs-recovery = Workspace ownership needs recovery
-commands-a-workspace-change-is-in-progress = A workspace change is in progress
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = Painting is unavailable. Save the drawing and reopen it.
 commands-nothing-to-undo = Nothing to undo
 commands-apply-or-cancel-the-crop-first = Apply or cancel the crop first

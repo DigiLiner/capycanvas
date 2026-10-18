@@ -370,7 +370,6 @@ commands-not-available-on-this-platform = Không khả dụng trên nền tảng
 commands-this-drawing-is-closing = Bản vẽ này đang đóng
 commands-the-workspace-is-still-loading = Không gian làm việc vẫn đang nạp
 commands-workspace-ownership-needs-recovery = Cần khôi phục quyền sở hữu không gian làm việc
-commands-a-workspace-change-is-in-progress = Đang thay đổi không gian làm việc
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = Không thể vẽ. Lưu bản vẽ rồi mở lại.
 commands-nothing-to-undo = Không có gì để hoàn tác
 commands-apply-or-cancel-the-crop-first = Trước tiên hãy áp dụng hoặc hủy vùng cắt

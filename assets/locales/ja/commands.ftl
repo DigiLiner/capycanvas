@@ -370,7 +370,6 @@ commands-not-available-on-this-platform = このプラットフォームでは�
 commands-this-drawing-is-closing = この作品は閉じる処理中です。
 commands-the-workspace-is-still-loading = ワークスペースを読み込み中です。
 commands-workspace-ownership-needs-recovery = ワークスペースの使用権を復旧する必要があります。
-commands-a-workspace-change-is-in-progress = ワークスペースを変更中です。
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = 描画できません。作品を保存して、開き直してください。
 commands-nothing-to-undo = 元に戻せる操作がありません。
 commands-apply-or-cancel-the-crop-first = 先に切り抜きを適用またはキャンセルしてください。

@@ -2319,8 +2319,8 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .any(|b| self.binding_enabled(&b.action))
     }
     fn command_flags(&self, id: CommandId) -> (bool, bool) {
-        if self.workspace_transition || (self.workspace_read_only
-            && !matches!(id, CommandId::ApplyTransform | CommandId::CancelTransform))
+        if self.workspace_read_only
+            && !matches!(id, CommandId::ApplyTransform | CommandId::CancelTransform)
         {
             return (false, false);
         }
@@ -11333,7 +11333,7 @@ mod tests {
                     let canvas = matches!(input, UiInput::Chrome { event: ChromeEvent::Contact { canvas: true, .. }, .. });
                     assert_eq!(reply.dismiss_popups, !blocked && canvas && facts.popup_open);
                     assert_eq!(reply.handled, blocked || (canvas && (popup_open || (until_contact && hidden))));
-                    assert_eq!(s.command(CommandId::ZenMode).selected, zen && !read_only && !transitioning);
+                    assert_eq!(s.command(CommandId::ZenMode).selected, zen && !read_only);
                     let view = s.header_view();
                     assert_eq!(view.capy.enabled, s.command(CommandId::ZenMode).enabled);
                     assert!(!view.capy.selected);

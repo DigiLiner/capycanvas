@@ -163,8 +163,6 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Err(self.localization().text(MessageId::WORKSPACE_REFUSAL_SESSION_A_WORKSPACE_CHANGE_IS_ALREADY_IN_PROGRESS).to_string());
         }
         self.workspace_transition = true;
-        self.refresh_commands();
-        self.changed(regions::COMMANDS, false);
         Ok(())
     }
     pub fn set_workspace_read_only(&mut self, read_only: bool) {
@@ -180,8 +178,6 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     pub fn end_workspace_transition(&mut self) {
         self.workspace_transition = false;
-        self.refresh_commands();
-        self.changed(regions::COMMANDS, false);
     }
     pub fn require_workspace_idle(&self) -> Result<(), String> {
         self.require_document_snapshot_idle()?;

@@ -373,7 +373,6 @@ commands-not-available-on-this-platform = Non disponibile su questa piattaforma
 commands-this-drawing-is-closing = Questo disegno si sta chiudendo
 commands-the-workspace-is-still-loading = L'area di lavoro si sta ancora caricando
 commands-workspace-ownership-needs-recovery = La proprietà dell'area di lavoro richiede recupero
-commands-a-workspace-change-is-in-progress = È in corso una modifica dell'area di lavoro
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = La pittura non è disponibile. Salva il disegno e riaprilo.
 commands-nothing-to-undo = Niente da annullare
 commands-apply-or-cancel-the-crop-first = Applica o annulla prima il ritaglio

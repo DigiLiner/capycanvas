@@ -370,7 +370,6 @@ commands-not-available-on-this-platform = 此平台不支持
 commands-this-drawing-is-closing = 此绘画正在关闭
 commands-the-workspace-is-still-loading = 工作区仍在载入
 commands-workspace-ownership-needs-recovery = 需要恢复工作区的使用权
-commands-a-workspace-change-is-in-progress = 正在更改工作区
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = 无法绘画。请保存绘画并重新打开。
 commands-nothing-to-undo = 没有可撤销的操作
 commands-apply-or-cancel-the-crop-first = 请先应用或取消裁剪

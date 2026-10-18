@@ -988,9 +988,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                 l.text(MessageId::COMMANDS_WORKSPACE_OWNERSHIP_NEEDS_RECOVERY)
             };
         }
-        if self.workspace_transition {
-            return l.text(MessageId::COMMANDS_A_WORKSPACE_CHANGE_IS_IN_PROGRESS);
-        }
         if self.rendering_suspended && !Self::command_without_renderer(command) {
             return l.text(MessageId::COMMANDS_PAINTING_IS_UNAVAILABLE_SAVE_THE_DRAWING_AND_REOPEN_IT);
         }

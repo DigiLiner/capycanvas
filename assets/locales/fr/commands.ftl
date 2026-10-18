@@ -373,7 +373,6 @@ commands-not-available-on-this-platform = Indisponible sur cette plateforme
 commands-this-drawing-is-closing = Ce dessin est en cours de fermeture
 commands-the-workspace-is-still-loading = L’espace de travail est encore en cours de chargement
 commands-workspace-ownership-needs-recovery = La propriété de l’espace de travail nécessite une récupération
-commands-a-workspace-change-is-in-progress = Un changement d’espace de travail est en cours
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = La peinture est indisponible. Enregistrer le dessin et le rouvrir.
 commands-nothing-to-undo = Rien à annuler
 commands-apply-or-cancel-the-crop-first = Appliquer ou annuler d’abord le recadrage

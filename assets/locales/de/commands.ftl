@@ -373,7 +373,6 @@ commands-not-available-on-this-platform = Auf dieser Plattform nicht verfügbar
 commands-this-drawing-is-closing = Diese Zeichnung wird geschlossen
 commands-the-workspace-is-still-loading = Der Arbeitsbereich wird noch geladen
 commands-workspace-ownership-needs-recovery = Arbeitsbereichszuordnung muss wiederhergestellt werden
-commands-a-workspace-change-is-in-progress = Ein Arbeitsbereichswechsel läuft
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = Malen ist nicht verfügbar. Die Zeichnung speichern und erneut öffnen.
 commands-nothing-to-undo = Nichts zum Rückgängigmachen
 commands-apply-or-cancel-the-crop-first = Zuerst den Zuschnitt anwenden oder abbrechen

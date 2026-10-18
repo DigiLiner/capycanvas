@@ -370,7 +370,6 @@ commands-not-available-on-this-platform = 이 플랫폼에서는 사용할 수 �
 commands-this-drawing-is-closing = 이 그림을 닫는 중입니다.
 commands-the-workspace-is-still-loading = 작업 영역을 불러오는 중입니다.
 commands-workspace-ownership-needs-recovery = 작업 영역의 소유권을 복구해야 합니다.
-commands-a-workspace-change-is-in-progress = 작업 영역을 변경하는 중입니다.
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = 그릴 수 없습니다. 그림을 저장한 뒤 다시 여세요.
 commands-nothing-to-undo = 실행 취소할 내용이 없습니다.
 commands-apply-or-cancel-the-crop-first = 먼저 자르기를 적용하거나 취소하세요.

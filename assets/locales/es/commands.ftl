@@ -373,7 +373,6 @@ commands-not-available-on-this-platform = No disponible en esta plataforma
 commands-this-drawing-is-closing = Este dibujo se está cerrando
 commands-the-workspace-is-still-loading = El espacio de trabajo aún se está cargando
 commands-workspace-ownership-needs-recovery = Hay que recuperar la propiedad del espacio de trabajo
-commands-a-workspace-change-is-in-progress = Hay un cambio de espacio de trabajo en curso
 commands-painting-is-unavailable-save-the-drawing-and-reopen-it = No se puede pintar. Guarda el dibujo y vuelve a abrirlo.
 commands-nothing-to-undo = No hay nada que deshacer
 commands-apply-or-cancel-the-crop-first = Aplica o cancela primero el recorte
