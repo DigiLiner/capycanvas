@@ -396,6 +396,9 @@ checks that opening another document cannot carry a pending number into it.
 `native_colorize_threshold_visible_artwork` is a focused check of Colorize and
 Threshold controls and rendered artwork pixels in both themes. Run it at 1100
 pixels wide after renderer changes; it does not measure motion.
+`native_animated_filter_moves` checks at 1100 pixels wide, in both themes, that
+Ripple's canvas pixels keep changing, hold still with Animate off and move again
+when it is turned back on.
 
 [`workspace-motion.sh`](../../tools/performance/workspace-motion.sh) builds the
 release tests, starts a private D-Bus session, headless Mutter and PipeWire, and

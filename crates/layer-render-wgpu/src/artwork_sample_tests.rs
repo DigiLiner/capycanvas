@@ -225,18 +225,24 @@ fn artwork_sample_reads_frozen_backing_after_live_document_pixels_change() {
     close(sample(&doc, ArtworkSource::Visible, [8.; 2], 5).unwrap(), [0.75, 0.5, 0.25, 1.]);
 }
 
-#[test]
-fn artwork_sample_uses_captured_animation_clock_and_explicit_batch_phase() {
+fn phase_document(speed: f32) -> (Document, OccurrenceHandle, EffectHandle, EffectHandle) {
     let mut doc = document([16, 16], |_, _| [0.125, 0.25, 0.5, 1.]);
     let fill = doc.scene().effect_handle(doc.scene().children(None)[1]).unwrap();
     let mut program = (*crate::tests::fixture("domain_warp").program()).clone();
     program.wgsl = "fn query_phase(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{return vec4<f32>(fx_time(b),.25,.5,1.);}".into();
     program.entry = "query_phase".into();
-    program.passes = std::sync::Arc::new([]);
-    let mut effect = layer_core::EffectInstance::new(std::sync::Arc::new(program));
+    program.passes = Arc::new([]);
+    let mut effect = layer_core::EffectInstance::new(Arc::new(program));
     effect.set("animate", layer_core::EffectValue::Toggle(true)).unwrap();
-    effect.set("speed", layer_core::EffectValue::Number(1.)).unwrap();
-    let occurrence=insert_effect(&mut doc,effect,0);let handle=doc.scene().effect_handle(occurrence).unwrap();
+    effect.set("speed", layer_core::EffectValue::Number(speed)).unwrap();
+    let occurrence = insert_effect(&mut doc, effect, 0);
+    let handle = doc.scene().effect_handle(occurrence).unwrap();
+    (doc, occurrence, handle, fill)
+}
+
+#[test]
+fn artwork_sample_uses_captured_animation_clock_and_explicit_batch_phase() {
+    let (mut doc, occurrence, handle, fill) = phase_document(1.);
     let mut live=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     live.submit(layer_render::FramePacket {time_seconds:2.,reset_layers:true,..crate::test_support::packet(doc.scene(),[16,16])}).unwrap();
     let frozen_gpu=live.snapshot_gpu();let mut request=ArtworkSampleRequest::new(&doc,ArtworkSource::Visible,[8.;2],1);
@@ -256,18 +262,23 @@ fn artwork_sample_uses_captured_animation_clock_and_explicit_batch_phase() {
 }
 
 #[test]
+fn live_scenes_forwarded_as_snapshots_keep_animating() {
+    let (doc, _, handle, fill) = phase_document(0.25);
+    let mut live = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let mut reds = Vec::new();
+    for (elapsed, phase) in [(2., 0.5), (3., 0.75), (4., 1.)] {
+        let forwarded = doc.scene().snapshot();
+        live.submit(layer_render::FramePacket { time_seconds:elapsed, reset_layers:reds.is_empty(),
+            ..crate::test_support::packet(forwarded.view(), [16; 2]) }).unwrap();
+        assert_eq!(live.evaluation_context().phases.as_slice(), &[(handle, phase), (fill, 0.)]);
+        reds.push(live.readback_srgb_rgba8().unwrap()[0]);
+    }
+    assert!(reds.windows(2).all(|pair| pair[0] < pair[1]), "displayed phase advances: {reds:?}");
+}
+
+#[test]
 fn failed_frame_keeps_clock_rate_and_frozen_phase_ownership() {
-    let mut doc = document([16, 16], |_, _| [0.125, 0.25, 0.5, 1.]);
-    let fill = doc.scene().effect_handle(doc.scene().children(None)[1]).unwrap();
-    let mut program = (*crate::tests::fixture("domain_warp").program()).clone();
-    program.wgsl = "fn query_phase(c:vec4<f32>,p:vec2<f32>,b:u32)->vec4<f32>{return vec4<f32>(fx_time(b),.25,.5,1.);}".into();
-    program.entry = "query_phase".into();
-    program.passes = Arc::new([]);
-    let mut effect = layer_core::EffectInstance::new(Arc::new(program));
-    effect.set("animate", layer_core::EffectValue::Toggle(true)).unwrap();
-    effect.set("speed", layer_core::EffectValue::Number(1.)).unwrap();
-    let occurrence = insert_effect(&mut doc, effect, 0);
-    let handle = doc.scene().effect_handle(occurrence).unwrap();
+    let (mut doc, occurrence, handle, fill) = phase_document(1.);
     let mut live = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
     live.submit(layer_render::FramePacket { time_seconds:2., reset_layers:true,
         ..crate::test_support::packet(doc.scene(), [16; 2]) }).unwrap();

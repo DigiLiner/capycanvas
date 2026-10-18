@@ -116,7 +116,7 @@ fn object_damage_excludes_unchanged_children() {
     let shared = image([8; 2], [255; 4]);
     let mut distant = ImageObject::new(shared.clone()); distant.affine.0[4] = 600.;
     let (mut doc, _, children) = document([768, 256], vec![ImageObject::new(shared), distant]);
-    let before = doc.scene().snapshot(layer_core::EvaluationContext::default());
+    let before = doc.scene().snapshot();
     doc.artwork.objects.get_mut(children[0]).unwrap().affine.0[4] = 32.;
     let damage = edited_damage(before.view(), doc.scene(), [768, 256]).unwrap();
     assert!(!damage.is_empty());

@@ -142,7 +142,7 @@ impl<'a> SceneView<'a> {
     pub fn with_owner(mut self,owner:u64,revision:u64)->Self{self.owner=owner;self.revision=revision;self}
     #[inline]
     pub fn with_scope(mut self,scope:&'a SceneScope)->Self{self.scope=Some(scope);self}
-    pub fn snapshot(self,context:EvaluationContext)->SceneSnapshot{SceneSnapshot {artwork:self.artwork.clone(),index:self.index.clone(),owner:self.owner,revision:self.revision,context,scope:self.scope.cloned().unwrap_or_default(),offset:self.offset}}
+    pub fn snapshot(self)->SceneSnapshot{SceneSnapshot {artwork:self.artwork.clone(),index:self.index.clone(),owner:self.owner,revision:self.revision,context:self.context.cloned().unwrap_or_default(),scope:self.scope.cloned().unwrap_or_default(),offset:self.offset}}
     #[inline]
     pub fn owner(self)->u64{self.owner}
     #[inline]

@@ -73,7 +73,7 @@ fn separation_preview(engine: &Engine, above: OccurrenceHandle, effect: &EffectI
     let mut preview = doc.clone();
     preview.apply(edit).unwrap();
     preview.revision = doc.revision;
-    layer_engine::ScenePreview { above, scene: preview.snapshot_with_context(engine.scene_snapshot().context.clone()) }
+    layer_engine::ScenePreview { above, scene: std::sync::Arc::new(preview.scene().snapshot()) }
 }
 
 /// The exported composite as encoded codes at the document's depth.

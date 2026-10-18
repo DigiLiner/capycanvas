@@ -9,7 +9,7 @@ fn retained_paint_base_without_live_pages_matches_identity_and_translated_querie
         pixel);
     let mut document = crate::tests::native_effects::empty_document([64, 32], color);
     crate::tests::native_effects::insert_source(&mut document, "Retained paint base", source);
-    let snapshot = document.scene().snapshot(Default::default());
+    let snapshot = document.scene().snapshot();
     let mut r = WgpuRasterizer::new_native_headless(color).unwrap();
     assert!(r.paint_layers.is_empty());
     let extent = [32, 16];

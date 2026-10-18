@@ -536,3 +536,26 @@ fn native_local_adjustments_analysis_history_and_recreation() {
     }
     std::fs::write(output.join(format!("local-pixels-{width}.json")),serde_json::to_vec_pretty(&samples).unwrap()).unwrap();input.finish();w.window.destroy();pump(100);
 }
+
+#[test]
+#[ignore = "private display, native input and hardware GPU"]
+fn native_animated_filter_moves() {
+    let app=native_test_app("art.capycanvas.AnimatedFilter");let w=start(&app);
+    let output=std::path::Path::new(artifact_dir("../../artifacts/photo-editing-color/animated-filter-gtk"));
+    let mut input=RemoteInput::new().timeout_secs(30);input.ready();
+    let changes=|w:&Rc<Workspace>|{let samples:Vec<_>=(0..6).map(|_|{pump(120);canvas_pixel(w)}).collect();samples.windows(2).filter(|pair|pair[0]!=pair[1]).count()};
+    let flip=|w:&Rc<Workspace>,input:&mut RemoteInput,animate:bool|{
+        let switch=switch(w,"animate");scroll_to(switch.upcast_ref());input.click(screen_point(switch.upcast_ref(),&w.window,[0.5,0.5]));
+        until(||value(w,"animate")==EffectValue::Toggle(animate),"Animate follows its switch");
+    };
+    for theme in [Theme::Light,Theme::Dark] {
+        w.dispatch(UiAction::SetTheme {theme:Some(theme)});ready(&w);
+        insert(&w,"ripple");assert_eq!(value(&w,"animate"),EffectValue::Toggle(true));
+        assert!(changes(&w)>=4,"a new Ripple moves");
+        capture(&w,output,&format!("ripple-{theme:?}"));
+        flip(&w,&mut input,false);ready(&w);assert_eq!(changes(&w),0,"a still Ripple holds its pixels");
+        flip(&w,&mut input,true);assert!(changes(&w)>=4,"Ripple moves again when Animate is turned on");
+        w.dispatch(UiAction::Invoke {command:CommandId::DeleteLayer});ready(&w);
+    }
+    input.finish();w.window.destroy();pump(100);
+}

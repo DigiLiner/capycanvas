@@ -54,7 +54,7 @@ impl Frame {
                 retained
             }).collect();
         Self {
-            scene: Arc::new(packet.scene.snapshot(context)),
+            scene: Arc::new(layer_core::SceneSnapshot { context, ..packet.scene.snapshot() }),
             scope: packet.scene.scope().cloned().unwrap_or_default(),
             view: packet.view,
             blend_space: packet.blend_space,

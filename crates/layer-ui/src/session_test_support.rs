@@ -223,7 +223,7 @@ impl CanvasRenderer for Recorder {
     fn submit(&mut self, packet: FramePacket<'_>) -> Result<(), Self::Error> {
         self.evaluation.elapsed = packet.time_seconds;
         self.rebuilds += usize::from(packet.reset_layers);
-        self.frame_scene = Some(packet.scene.snapshot(self.evaluation.clone()));
+        self.frame_scene = Some(packet.scene.snapshot());
         self.pending_operations.clear();
         for batch in packet.dab_batches {
             if let layer_render::DabBatchKind::RasterOperation(index) = batch.kind {

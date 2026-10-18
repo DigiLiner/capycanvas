@@ -1050,7 +1050,7 @@ impl CanvasRenderer for RenderWorker {
             time_seconds: packet.time_seconds,
             view: packet.view,
             extent: packet.document_extent,
-            scene: Arc::new(packet.scene.snapshot(self.evaluation_context())),
+            scene: Arc::new(packet.scene.snapshot()),
             inspect_mask: packet.inspect_mask,
             transform_preview: self.transform_preview.clone(),
             selection_overlays: self.selection_overlays.clone(),

@@ -70,7 +70,7 @@ impl SnapshotGpu {
         control.check().map_err(|e| e.to_string())?;
         #[cfg(target_arch = "wasm32")]
         if let Some(waiter) = &self.analysis_backing_waiter {
-            let scene = input.scene.view().with_scope(&input.scope).with_offset(input.offset).snapshot(input.scene.context.clone());
+            let scene = input.scene.view().with_scope(&input.scope).with_offset(input.offset).snapshot();
             waiter(Arc::new(scene), control.clone()).await?;
         }
         let mut snapshot = SnapshotRenderer::construct(input.scene, input.scope, control.clone(), self).map_err(|e| e.to_string())?;

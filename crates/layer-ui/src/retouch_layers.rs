@@ -115,8 +115,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let mut preview = Document::from_artwork(artwork).map_err(error)?;
             preview.owner = doc.owner;
             preview.revision = doc.revision;
-            let context = self.engine.scene_snapshot().context.clone();
-            self.engine.set_scene_preview(Some(ScenePreview { above: draft.target, scene: preview.snapshot_with_context(context) }));
+            self.engine.set_scene_preview(Some(ScenePreview { above: draft.target, scene: std::sync::Arc::new(preview.scene().snapshot()) }));
         }
         self.state.layer_tools.frequency_separation = self.frequency_separation_view();
         Ok(())
