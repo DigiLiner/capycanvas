@@ -1418,8 +1418,6 @@ mod tests {
                     color_mode: Default::default(), domain: extent, raster: layer_core::raster::RasterRevision::pending(), base: None,
                     operations: std::sync::Arc::new(vec![operation]),
                 });
-                let root = document.composition().result;
-                document.artwork.stacks.get_mut(root).unwrap().entries.rotate_right(1);
                 assert_eq!(crate::source_access::pending_bakes(document.scene()).count(), 1);
                 Some(layer_render::DabBatch { kind: layer_render::DabBatchKind::RasterOperation(0), dab_count: 0,
                     ..crate::test_support::dab_batch(target, crate::tests::test_style(layer_core::BrushExecution::Dry), damage) })

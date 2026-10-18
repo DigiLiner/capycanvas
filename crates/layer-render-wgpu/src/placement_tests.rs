@@ -42,7 +42,7 @@ pub(crate) fn append_paint(doc: &mut Document, name: &str, source: PaintSource) 
     let owner = RecordChange::insert(&doc.artwork.occurrences, Occurrence::new(OccurrenceContent::Paint(source.handle), name));
     let id = owner.handle;
     let root = doc.composition().result;
-    let mut stack = doc.artwork.stacks.get(root).unwrap().clone(); stack.entries.push(id);
+    let mut stack = doc.artwork.stacks.get(root).unwrap().clone(); stack.entries.insert(crate::test_support::above_bottom_paper(&doc.artwork), id);
     let stack = RecordChange::replace(&doc.artwork.stacks, root, Some(stack)).unwrap();
     doc.apply(layer_core::Edit::Batch(vec![layer_core::Edit::Paint(source), layer_core::Edit::Occurrence(owner), layer_core::Edit::Stack(stack)])).unwrap();
     (id, target)

@@ -8,8 +8,16 @@ pub(crate) fn add_paint(artwork: &mut layer_core::authored::Artwork, name: impl 
     }).unwrap();
     let occurrence = artwork.occurrences.insert(PortableId::random(), Occurrence::new(OccurrenceContent::Paint(source), name)).unwrap();
     let stack = artwork.compositions.get(artwork.root).unwrap().result;
-    artwork.stacks.get_mut(stack).unwrap().entries.push(occurrence);
+    let at = above_bottom_paper(artwork);
+    artwork.stacks.get_mut(stack).unwrap().entries.insert(at, occurrence);
     (occurrence, SourceTarget::Paint(source))
+}
+pub(crate) fn above_bottom_paper(artwork: &layer_core::authored::Artwork) -> usize {
+    let entries = &artwork.stacks.get(artwork.compositions.get(artwork.root).unwrap().result).unwrap().entries;
+    let paper = entries.last().and_then(|h| match artwork.occurrences.get(*h)?.content {
+        layer_core::authored::OccurrenceContent::Effect(effect) => artwork.effects.get(effect), _ => None,
+    }).is_some_and(|effect| layer_core::paper::is_paper(&effect.program));
+    entries.len() - usize::from(paper)
 }
 
 pub(crate) fn corrupt_tile(blob: layer_core::raster::TileBlob) -> layer_core::raster::RasterTile {

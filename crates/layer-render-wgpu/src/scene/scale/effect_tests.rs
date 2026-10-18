@@ -736,7 +736,8 @@ fn qualified_pointwise_catalog_uses_display_graph_and_keeps_native_output() {
         f.program().resolution == EffectResolution::Display && !f.program().image_boundary()
     }) {
         set_root_entries(&mut doc,base_entries.clone());
-        let current=effect(&mut doc,&fixture.program().id);insert_occurrence(&mut doc,current,0);
+        let current=effect(&mut doc,&fixture.program().id);
+        if layer_core::paper::is_paper(&fixture.program()) {set_root_entries(&mut doc,vec![current]);} else {insert_occurrence(&mut doc,current,0);}
         let mut frame = packet(doc.scene(), extent);
         frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
         r.submit(frame).unwrap(); exact.submit(frame).unwrap();
