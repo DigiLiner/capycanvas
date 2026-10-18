@@ -145,7 +145,7 @@ impl Document {
             Some(mask) => (!mask.enabled).then_some(ConversionRefusal::MaskDisabled),
         }
     }
-    /// Rasterize Layer: the object layer's own content, at the document grid,
+    /// Rasterize Layer: the image or vector layer's own content, at the document grid,
     /// becomes its paint. Its mask, attached effects, clipping, opacity and
     /// blend stay on the layer and apply once; `apply_mask` bakes the enabled
     /// mask into the pixels and removes it.
@@ -153,7 +153,11 @@ impl Document {
         let scene = self.scene();
         let occurrence = scene.occurrence(h).ok_or(ConversionRefusal::NoLayer)?;
         if let Some(refusal) = self.rasterize_refusal(h, apply_mask) { return Err(refusal); }
-        let OccurrenceContent::Objects(layer) = occurrence.content else { return Err(ConversionRefusal::NotObjects); };
+        let removal = match occurrence.content {
+            OccurrenceContent::Objects(layer) => Edit::ImageObject(RecordChange::remove(&self.artwork.objects, layer).map_err(|_| ConversionRefusal::NoLayer)?),
+            OccurrenceContent::Vector(layer) => Edit::Vector(RecordChange::remove(&self.artwork.vectors, layer).map_err(|_| ConversionRefusal::NoLayer)?),
+            _ => return Err(ConversionRefusal::NotObjects),
+        };
         let scope = if apply_mask { SceneScope::Members(vec![h].into()) } else { SceneScope::RawObjects(h) };
         let (origin, extent) = self.bake_window(scene.with_scope(&SceneScope::RawObjects(h)))?;
         let parent_origin = scene.layer_origin(scene.parent(h));
@@ -183,7 +187,7 @@ impl Document {
             mask.offset = offsets::checked_sub(previous, offset).and_then(|shift| offsets::checked_add(mask.offset, shift)).ok_or(ConversionRefusal::TooLarge)?;
         }
         edits.push(Edit::Occurrence(RecordChange::replace(&self.artwork.occurrences, h, Some(result)).map_err(|_| ConversionRefusal::NoLayer)?));
-        edits.push(Edit::ImageObject(RecordChange::remove(&self.artwork.objects, layer).map_err(|_| ConversionRefusal::NoLayer)?));
+        edits.push(removal);
         let mut working = self.working.clone();
         working.occurrence = Some(h);
         working.target = Some(target);

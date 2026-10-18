@@ -288,6 +288,21 @@ fn properties_restyle_every_selected_path_in_one_undo_step() {
 }
 
 #[test]
+fn rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step() {
+    let (mut s, layer) = vector_session();
+    draw_line(&mut s, 1, 30);
+    assert!(s.command(CommandId::RasterizeLayer).enabled);
+    invoke(&mut s, CommandId::RasterizeLayer);
+    for t in 0..20 { s.frame(1_000_000_000 + t * 16_000_000, 1_000_000_000 + t * 16_000_000).unwrap(); }
+    let document = s.engine.document();
+    assert!(document.scene().paint_source(layer).is_some() && document.scene().vector_layer(layer).is_none(), "the layer holds paint");
+    assert!(document.artwork.vectors.is_empty());
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(3_000_000_000, 3_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(layer).map(|o| o.path_count()), Some(1), "undo restores the paths");
+}
+
+#[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {
     use layer_core::authored::vector::*;

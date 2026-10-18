@@ -65,6 +65,24 @@ fn vector_layers_render_the_same_through_display_and_native_paths() {
 }
 
 #[test]
+fn raw_object_captures_of_vector_layers_match_their_render() {
+    let (editor, layer) = document([300, 200], records());
+    let doc = editor.document();
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let exact = native(&mut r, doc);
+    let (texture, _) = create_color_target(&r.device, [300, 200], "vector raw capture");
+    let mut scene = r.scene.take().unwrap_or_else(|| Scene::new(&r).unwrap());
+    let scope = layer_core::SceneScope::RawObjects(layer);
+    let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+    scene.capture_region_prepared(&mut r, FramePacket { scene: doc.scene().with_scope(&scope), ..packet(doc.scene(), [300, 200]) }, &texture, PixelRect::full([300, 200]), Output::Objects(layer), &mut encoder).unwrap();
+    r.uploads.finish(&encoder); encoder.submit(&r.queue);
+    r.scene = Some(scene);
+    let raw = float_pixels(&r, &texture);
+    assert!(raw.iter().filter(|p| p[3] > 0.5).count() > 5000);
+    assert!(max_error(&raw, &exact) < 1e-5, "Rasterize Layer bakes what the layer shows: {}", max_error(&raw, &exact));
+}
+
+#[test]
 fn vector_edits_damage_only_changed_items_and_match_a_fresh_render() {
     let (mut editor, layer) = document([300, 200], records());
     let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();

@@ -75,13 +75,21 @@ draw above the rest of their layer; they return to their place in the layer's
 order when the move commits. Path selections are not undo steps and are not
 restored with a session.
 
+## Rasterize Layer
+
+**Rasterize Layer** turns a vector layer into a paint layer holding what its
+paths show, at the document grid, in one undo step. The layer keeps its opacity,
+blend, mask, clipping and attached effects, which still apply once, as for image
+layers ([Object layers](image-objects.md)).
+
 ## Tests
 
 `move_tool_selects_drags_and_deletes_vector_paths`,
 `arrange_commands_restack_selected_paths_one_step_at_a_time`,
 `figure_shapes_on_vector_layers_become_selected_editable_paths`,
 `move_tool_nudges_duplicates_and_copies_paths`,
-`properties_restyle_every_selected_path_in_one_undo_step` and
+`properties_restyle_every_selected_path_in_one_undo_step`,
+`rasterize_layer_turns_a_vector_layer_into_paint_in_one_undo_step` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

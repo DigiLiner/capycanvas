@@ -256,3 +256,29 @@ fn sibling_objects_merge_both_off_frame_sources_and_restore_identity_on_undo() {
     let source=changed(&plan.edits,|edit|match edit {Edit::Paint(c) if c.handle==paint=>c.value.clone(),_=>None});assert_eq!((occurrence.offset,source.domain),([-512,0],[1112,410]));
     let undo=doc.apply(Edit::Batch(plan.edits)).unwrap();doc.apply(undo).unwrap();restored(&before,&doc);
 }
+
+#[test]
+fn rasterize_bakes_a_vector_layer_into_paint_and_removes_its_paths_undoably() {
+    use crate::authored::vector::*;
+    let mut doc = fixture::document([600, 400], &["Ink"]);
+    let stroke = Stroke::new(Paint::color(crate::color::RgbColor::BLACK), 4.);
+    let path = PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([20., 30.]), Anchor::corner([300., 90.])], false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])));
+    let (layer, edit) = doc.create_vector_layer_edit("Lines", VectorObject::from_records(vec![Record::Path(path)]), None, 0).unwrap();
+    doc.apply(edit).unwrap();
+    doc.working.occurrence = Some(layer);
+    doc.working.target = None;
+    let before = doc.clone();
+    assert_eq!(doc.rasterize_refusal(layer, false), None);
+    let plan = doc.rasterize_plan(layer, false).unwrap();
+    let occurrence = occurrence_after(&plan.edits, layer);
+    let OccurrenceContent::Paint(paint) = occurrence.content else { panic!("paint") };
+    let source = changed(&plan.edits, |e| match e { Edit::Paint(c) if c.handle == paint => c.value.clone(), _ => None });
+    assert!(source.domain[0] >= 300 && source.domain[1] >= 90, "the bake window covers the paths: {:?}", source.domain);
+    assert!(matches!(&plan.operation.kind, RasterOperationKind::Bake { scope: SceneScope::RawObjects(h), .. } if *h == layer));
+    let undo = doc.apply(Edit::Batch(plan.edits.clone())).unwrap();
+    assert!(doc.artwork.vectors.is_empty(), "the vector object goes with its last use");
+    assert_eq!(doc.working.target, Some(plan.target));
+    doc.apply(undo).unwrap();
+    restored(&before, &doc);
+    assert_eq!(doc.artwork.vectors.len(), 1);
+}
