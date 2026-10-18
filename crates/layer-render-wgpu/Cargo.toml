@@ -6,7 +6,7 @@ description = "GPU-resident wgpu raster backend for Layer"
 license.workspace = true
 
 [features]
-software-adapter-tests = []
+software-adapter-tests = ["layer-core/software-adapter-tests"]
 test-support = []
 
 [dependencies]

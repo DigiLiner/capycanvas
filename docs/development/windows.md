@@ -508,10 +508,10 @@ D3D12-specific fixtures construct an instance with `Backends::DX12`; a generic
 `PRIMARY` headless instance can select Vulkan. The software-adapter gate permits
 CPU adapters but does not force every ordinary test onto WARP.
 
-The `software-adapter-tests` feature gives WARP readbacks a 60-second budget;
-normal hardware builds retain 30 seconds. The large-canvas fixture keeps its
-60-second overall deadline and exact pose and pixel checks. Hardware qualification
-uses normal builds.
+The `software-adapter-tests` feature gives GPU readbacks and their raster
+consumers one shared 60-second budget; normal hardware builds retain 30 seconds.
+The large-canvas fixture keeps its 60-second overall deadline and exact pose and
+pixel checks. Hardware qualification uses normal builds.
 
 `scripts/test-input.ps1` compiles the C++ input queue and composition-key tests
 with `cl` and needs a Visual Studio developer shell. `TextInput.cpp` observes the

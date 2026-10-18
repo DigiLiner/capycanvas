@@ -351,6 +351,10 @@ eventually exhausts static TLS.
 The Windows software-adapter runner uses one test thread for both Rust phases
 so independent rendering tests do not submit to software devices concurrently.
 
+The CPU-only `raster_capture_waits_share_the_selected_gpu_budget` regression in
+`layer-render-wgpu` checks both sides of the raster capture deadline. Run it with
+and without `--features software-adapter-tests` to check feature forwarding.
+
 `layer-render-wgpu` unit tests and `software-adapter-tests` builds accept a CPU
 adapter when `LAYER_TEST_SOFTWARE_GPU=1` is set. Those runs check numbers only;
 they are never performance evidence, and production hosts always require a

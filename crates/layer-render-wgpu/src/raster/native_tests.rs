@@ -2,6 +2,13 @@ use super::*;
 use crate::test_support::{page_texture as texture, upload_page as upload};
 use layer_core::color::SampleDepth;
 
+#[test]
+fn raster_capture_waits_share_the_selected_gpu_budget() {
+    let expected = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 60 } else { 30 });
+    assert_eq!(layer_core::raster::CAPTURE_TIMEOUT, expected);
+    assert_eq!(READBACK_TIMEOUT, expected);
+}
+
 fn descriptor(depth: SampleDepth) -> PixelDescriptor {
     PixelDescriptor {
             sample: layer_core::color::SampleType::Unsigned,

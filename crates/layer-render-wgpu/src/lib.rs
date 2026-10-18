@@ -132,7 +132,7 @@ const EXPORT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const INITIAL_DAB_BYTES: u64 = 4 * 1024 * 1024;
 const INITIAL_STYLE_RECORDS: usize = 128;
 const INITIAL_TARGET_RECORDS: usize = 257;
-const READBACK_TIMEOUT: Duration = Duration::from_secs(if cfg!(feature = "software-adapter-tests") { 60 } else { 30 });
+const READBACK_TIMEOUT: Duration = layer_core::raster::CAPTURE_TIMEOUT;
 const WHITE_MASK_ASSET: &str = "builtin:brush-tip/solid-white-v1";
 const PAGE_SIZE: u32 = 256;
 const MOVING_IMAGE_IDLE_STEPS: usize = 32;
