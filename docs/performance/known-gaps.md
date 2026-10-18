@@ -88,27 +88,34 @@
   measurements on the three reference canvases. Existing object and placed-photo
   results in the tier tables describe earlier builds. Desktop browser callbacks
   and renderer timings do not establish presented-frame rates or qualify a tier.
-- **Vector layers have no reference-tablet measurements.** The headless renderer
-  benchmarks `scene::vectors::tests::crowded_vector_layer_drawing_frames` and
-  `crowded_vector_layer_edit_frames` (`VECTOR_ZOOM` sets the zoom) ran only on the
-  Huion KP1202, whose Mali-G57 MC2 matches the mid tier's GPU but is not a
-  reference device. On its 4000 × 3000 canvas with 50,000 hatching paths
-  (2026-10-17):
-  - Drawing frames p50 3.7–3.9 ms at 0.4× and 1.0×, independent of crowd size.
-  - Drag frames, including a 1920 × 1200 present, p50 0.7–4.9 ms for 1 to 5,000
-    moving paths; preparing a drag of 100–5,000 scattered paths takes
-    125–230 ms.
-  - Committing a stroke takes 11–37 ms. Undoing one takes 21.5–46 ms, and
-    committing a move of 100 scattered paths 87–165 ms. Each repaints the
-    crowded tiles it changes.
-  - Tier canvases, presented-frame rates and the session cost on device remain
-    unmeasured.
-  - These Huion rows predate the split drag preview, which draws above, moving
-    paths and below in the presenter wherever the stack allows, and the 6 ms
-    per-frame derivation budget that spreads opening and zooming a crowded layer
-    over several frames. On the desktop RTX PRO 6000 the split brings drag frames
-    under another layer to 0.05–0.08 ms p50 and opening 50,000 paths to 24 frames,
-    the longest 44.7 ms; neither is measured on a tablet.
+- **Vector layers are measured only by headless renderer benchmarks.**
+  `scene::vectors::tests::crowded_vector_layer_drawing_frames` and
+  `crowded_vector_layer_edit_frames` (`VECTOR_ZOOM` sets the zoom) ran on the
+  three reference tablets at `62c9c4c61` (2026-10-18), on a 4000 × 3000 canvas
+  of hatching paths with a 1920 × 1200 view. They time renderer frames, not
+  presented frames or a session, and the canvas is not each tier's canvas. At
+  1.0×:
+
+  | | Low (TCL) | Mid (MovinkPad 11) | Top (MovinkPad Pro 14) |
+  | --- | --- | --- | --- |
+  | Open 10,000 / 50,000 paths | 2.2 / 4.9 s | 1.1 / 2.6 s | 0.5 / 1.3 s |
+  | Drawing frame p50 / p95, 50,000 paths | 10.9 / 16.8 ms | 8.0 / 12.0 ms | 4.1 / 17.0 ms |
+  | Drag start, 1 / 100 / 5,000 paths | 67 / 110 / 453 ms | 63 / 116 / 249 ms | 36 / 55 / 160 ms |
+  | Drag frame p50, 1 / 100 / 5,000 paths | 2.8 / 4.4 / 18.4 ms | 1.9 / 2.3 / 10.8 ms | 0.6 / 1.3 / 2.8 ms |
+  | Stroke commit / undo, 50,000 paths | 96 / 93 ms | 51 / 60 ms | 22 / 30 ms |
+
+  - Gaps against the targets: a 5,000-path drag on the low tier runs slower
+    than 60 fps, drag starts of 100 or more paths exceed the 100 ms press response
+    on the low and mid tiers, and committing or undoing a long stroke across a
+    crowded layer repaints its tiles for 50–100 ms on the low tier.
+  - Drawing on the top tier spends about 14 ms of CPU on every eighth frame;
+    the desktop and the Mali tablets do not. The cause is not yet traced.
+  - At 0.4× the low tier opens in 1.9 / 3.7 s and drags 5,000 paths at 7.0 ms
+    p50.
+  - The present shader's motion branch costs nothing measurable while
+    painting: against a control without it, canvas updates per second changed
+    by −0.67% (Pencil 1024 px) and +0.09% (G-Pen 1024 px) on the TCL and
+    +0.39% (G-Pen 1024 px) on the MovinkPad 11, in 4 ABBA sets each.
   - Scale and rotate drags with the Move frame, Edit Points drags, Properties
     scrubs and eraser strokes preview by re-deriving the edited paths each frame;
     none is measured on a tablet.
