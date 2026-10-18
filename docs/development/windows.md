@@ -68,6 +68,14 @@ The build script restores the NuGet packages pinned in
 [`packages.config`](../../apps/layer-windows/packages.config) into ignored
 `artifacts/windows/packages`, builds the Rust DLL and then the WinUI app into
 `artifacts/windows/Release`, and prints the path of `CapyCanvas.exe`.
+
+The self-contained runtime uses Windows App SDK 2.5.1. Keep its component packages
+and the project imports at the versions required by the SDK package. This includes
+Microsoft's ScrollView hide-indicators timer lifetime fix and later popup and
+shutdown fixes. After updating the runtime, run `exercise-selection.ps1` and
+`exercise-color-editor.ps1` in both themes, retaining their close assertions.
+See the [WinUI release notes](https://github.com/microsoft/microsoft-ui-xaml/releases).
+
 For a Debug build, pass `-Configuration Debug`; the output is `artifacts/windows/Debug`.
 `-OutputDirectory` builds elsewhere, `-PackagesDirectory` reuses another restore
 and `-SkipRestore` skips it. `-ControlFixture` and `-SoftwareAdapterTests` build
