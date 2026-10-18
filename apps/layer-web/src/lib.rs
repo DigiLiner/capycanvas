@@ -9,6 +9,7 @@ mod image_import;
 mod color_edit;
 mod source_edit;
 mod color_preferences;
+mod papers;
 mod proof;
 mod hdr;
 mod screen;

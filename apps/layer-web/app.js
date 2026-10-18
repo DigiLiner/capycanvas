@@ -1833,6 +1833,7 @@ try {
   documents.startRecovery().catch(error => {const detail=String(error);message(()=>app.document_recovery_unavailable(detail));});
   performance.mark("capy.startup.gpu");
   await startGpu();
+  documents.loadPapers().catch(error => message(String(error)));
   if (window.launchQueue?.setConsumer) {
     let launches=Promise.resolve();
     window.launchQueue.setConsumer(params=>{

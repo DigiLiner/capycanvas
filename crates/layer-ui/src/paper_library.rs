@@ -94,6 +94,91 @@ impl From<String> for PaperLibraryError {
     fn from(detail: String) -> Self { Self::Failed(detail) }
 }
 
+pub fn library_paper(source: &SourceImage, cancelled: &dyn Fn() -> bool) -> Result<SourceImage, PaperLibraryError> {
+    layer_core::paper::paper_image(source, cancelled).map_err(|error|
+        if error == layer_core::paper::CMYK { PaperLibraryError::Unsupported } else { PaperLibraryError::Failed(error) })
+}
+
+pub struct StoredPaper {
+    pub name: String,
+    pub png: Vec<u8>,
+    pub preview: Vec<u8>,
+}
+/// Encodes a paper that is not yet in `stored`, within the library limits.
+pub fn prepare_paper(id: &str, paper: &SourceImage, name: &str, stored: &[PaperEntry]) -> Result<StoredPaper, PaperLibraryError> {
+    let png = layer_core::paper::encode_png(paper)?;
+    let total = stored.iter().map(|entry| entry.bytes).sum::<u64>() + png.len() as u64;
+    if stored.len() >= PAPER_LIBRARY_ENTRIES || total > PAPER_LIBRARY_BYTES { return Err(PaperLibraryError::Full); }
+    Ok(StoredPaper { name: paper_name(name).unwrap_or_else(|| id[..8].into()), preview: layer_core::paper::image_preview(paper)?, png })
+}
+
+pub fn stored_paper(id: &str, png: &[u8]) -> Result<SourceImage, String> {
+    if !valid_paper_id(id) { return Err("Unknown paper".into()); }
+    let paper = layer_core::paper::decode_png(png)?;
+    if paper_identity(&paper)? != id { return Err("The stored paper changed".into()); }
+    Ok(paper)
+}
+
+pub fn canonical_source(id: &str, source: SourceImage, retained: &[Image]) -> Result<SourceImage, String> {
+    let parent = paper_image_id(id).ok_or("Unknown paper")?;
+    if let Some(image) = retained.iter().find(|image| image.id() == parent) {
+        if image.extent != source.extent || layer_core::paper::paper_ppi(image.resolution) != layer_core::paper::paper_ppi(source.resolution)
+            || image.interpretation != source.interpretation || paper_identity(image.storage())? != id { return Err("The stored paper changed".into()); }
+        return Ok(image.storage().as_ref().clone());
+    }
+    Ok(source)
+}
+
+pub enum PaperResult {
+    Entries(Vec<PaperEntry>),
+    Loaded(String, SourceImage),
+    Imported(u64, String, SourceImage, Vec<PaperEntry>),
+}
+
+/// A library request as captured on the session owner. A request of `None`
+/// lists the library.
+pub struct PaperCapture {
+    pub request: Option<u32>,
+    pub action: Option<PaperRequest>,
+    pub image: Option<Arc<SourceImage>>,
+    pub retained: Vec<Image>,
+    epoch: u64,
+    document: PortableId,
+}
+impl<R: layer_render::CanvasRenderer> crate::UiSession<R> {
+    pub fn capture_paper(&self, request: Option<u32>) -> Result<PaperCapture, String> {
+        let action = request.map(|request| self.state().requests.iter().find_map(|item| match &item.kind {
+            crate::HostRequestKind::Paper { request: action } if item.id == request => Some(action.clone()),
+            _ => None,
+        }).ok_or_else(|| PaperLibraryError::Unsupported.message(self.localization()))).transpose()?;
+        let image = match &action { Some(PaperRequest::Add { layer, .. }) => self.paper_image(*layer), _ => None };
+        let retained = if matches!(&action, Some(PaperRequest::Load { .. } | PaperRequest::Import { .. })) { self.paper_sources() } else { Vec::new() };
+        Ok(PaperCapture { request, action, image, retained, epoch: self.state().document_file.epoch, document: self.engine().document().artwork.id })
+    }
+    /// Applies a finished library request and completes it. A late import
+    /// into a changed drawing only refreshes the library.
+    pub fn adopt_paper(&mut self, capture: &PaperCapture, result: Result<PaperResult, String>, cancelled: bool) -> Result<Option<crate::UiChange>, String> {
+        if let Some(request) = capture.request && !self.state().requests.iter().any(|item| item.id == request) { return Ok(None); }
+        let current = capture.epoch == self.state().document_file.epoch && capture.document == self.engine().document().artwork.id;
+        let applied = match result {
+            Ok(PaperResult::Entries(entries)) => self.set_paper_library(entries).map(Some),
+            Ok(PaperResult::Loaded(id, image)) if !cancelled => self.paper_loaded(&id, image).map(Some),
+            Ok(PaperResult::Loaded(..)) => Ok(None),
+            Ok(PaperResult::Imported(layer, id, image, entries)) if current && !cancelled => self.paper_imported(layer, entries, &id, image).map(Some),
+            Ok(PaperResult::Imported(_, _, _, entries)) => self.set_paper_library(entries).map(Some),
+            Err(_) if cancelled => Ok(None),
+            Err(error) => Err(error),
+        };
+        let Some(id) = capture.request else { return applied };
+        let (change, error) = match applied { Ok(change) => (change, None), Err(error) => (None, Some(error)) };
+        let done = self.dispatch(crate::UiAction::CompleteRequest { id, error })?;
+        Ok(Some(match change {
+            Some(mut change) => { change.regions |= done.regions; change.revision = done.revision; change.canvas_wake |= done.canvas_wake; change }
+            None => done,
+        }))
+    }
+}
+
 pub(crate) struct PendingPaper {
     pub id: String,
     pub layer: u64,

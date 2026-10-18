@@ -261,6 +261,21 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     const extension=recipe?exportFormats[recipe.format][0]:null;
     return {location:location(extension?request.name.replace(/\.[^.]+$/,"")+"."+extension:request.name)};
   }
+  const choosePaperImage=()=>new Promise(resolve=>{
+    const input=element("input");input.type="file";input.accept="image/*";input.hidden=true;
+    const done=file=>{resolve(file);input.remove();};
+    input.onchange=()=>done(input.files[0]??null);input.oncancel=()=>done(null);
+    document.body.append(input);input.click();
+  });
+  async function runPaper(id) {
+    const task=app.paper_task(id);let result;
+    try {
+      const file=task.imports()?await choosePaperImage():null;
+      if(task.imports()&&!file){dispatch({type:'complete_request',id});return;}
+      result=await app.paper_run(task,file);
+      const change=app.paper_adopt(task,result,false);if(change)applyChange(change);
+    } finally {result?.free();task.free();}
+  }
   async function handle(request) {
     if(active.has(request.id))return;active.add(request.id);
     let candidate;
@@ -268,6 +283,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
       if(request.kind.type==='adjacent_drawing'){dispatch({type:'complete_request',id:request.id});active.delete(request.id);await select(app.adjacent_document(request.kind.forward));return;}
       if(request.kind.type==='drawings'){dispatch({type:'complete_request',id:request.id});tabs.showSelector();return;}
       if(["soft_proof_setup","sdr_rendition"].includes(request.kind.type)){await proof.run(request.id,request.kind.type==="sdr_rendition");if(app.state().requests.some(r=>r.id===request.id))dispatch({type:"complete_request",id:request.id});return;}
+      if(request.kind.type==="paper"){await runPaper(request.id);return;}
       if(request.kind.type!=="document")throw new Error(`Unsupported host request: ${request.kind.type}`);
       const r=request.kind.request,id=request.id;
       if(r.type==="confirm_close") {
@@ -579,7 +595,7 @@ export function createDocuments({app,bootstrap,delivery,state,canvas,canvasReady
     return tabs.key(event);
   },allowNativePaste,select,close,openFiles,busy:()=>changing||batching||closing||active.size>0,
     interactionBusy:()=>changing||batching||closing||active.size>0&&app.state().requests.some(request=>active.has(request.id)),showSelector:tabs.showSelector,
-    mountProof:proof.mount,localize(){for(const form of openDialogs)form.localize?.();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,refresh(){
+    mountProof:proof.mount,localize(){for(const form of openDialogs)form.localize?.();proof.sync();tabs.refresh(true);},handle,autosave:recovery.autosave,startRecovery:recovery.start,loadPapers:()=>runPaper(undefined),refresh(){
     proof.sync();tabs.refresh();
     const requests=new Set(app.state().requests.map(request=>request.id));
     if(nativePending&&!requests.has(nativePending.id))finishNativePaste();

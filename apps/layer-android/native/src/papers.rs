@@ -2,7 +2,8 @@
 //! IO, then adopted by the owner.
 use crate::android::{app, fail, or_throw, read};
 use jni::{JNIEnv, objects::{JClass, JString}, sys::{jboolean, jint, jlong}};
-use layer_host::papers::{PaperResult, PaperTask};
+use layer_host::papers::PaperTask;
+use layer_ui::paper_library::PaperResult;
 use std::{os::fd::FromRawFd, sync::{Mutex, atomic::{AtomicBool, Ordering}}};
 
 struct Job {

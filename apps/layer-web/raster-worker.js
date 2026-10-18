@@ -60,6 +60,7 @@ async function execute({id,request}) {
       case "nearest-coordinates": result = wasm.raster_worker_nearest_coordinates(request.metadata); break;
       case "lookup": result = wasm.raster_worker_lookup(request.metadata,request.buffers[0]); break;
       case "profile-library": result=await navigator.locks.request("capy-profile-library",()=>profileLibrary(JSON.parse(request.metadata),request.buffers[0]));break;
+      case "paper-library": result=await navigator.locks.request("capy-paper-library",()=>paperLibrary(JSON.parse(request.metadata),request.buffers));break;
       case "export-presets": result=await navigator.locks.request("capy-export-presets",async()=>{
         const bytes=await colorPreferences("readonly",store=>store.get("export-presets"));
         const prepared=wasm.raster_worker_export_presets(request.metadata,bytes instanceof Uint8Array?bytes:new Uint8Array());
@@ -163,6 +164,45 @@ async function colorPreferences(mode,operation,storeName="values") {
     const transaction=database.transaction(storeName,mode,{durability:"strict"}),request=operation(transaction.objectStore(storeName));
     transaction.oncomplete=()=>resolve(request.result);transaction.onabort=()=>reject(transaction.error||request.error||new Error("Color preferences were not saved"));transaction.onerror=()=>{};
   });}finally{database.close();}
+}
+
+async function paperStore(mode,operation) {
+  const database=await new Promise((resolve,reject)=>{
+    const request=indexedDB.open("capy-paper-library",1);
+    request.onupgradeneeded=()=>request.result.createObjectStore("papers");
+    request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+  });
+  try{return await new Promise((resolve,reject)=>{
+    const transaction=database.transaction("papers",mode,{durability:"strict"}),request=operation(transaction.objectStore("papers"));
+    transaction.oncomplete=()=>resolve(request.result);transaction.onabort=()=>reject(transaction.error||request.error||new Error("The paper library was not saved"));transaction.onerror=()=>{};
+  });}finally{database.close();}
+}
+
+async function paperLibrary(request,buffers) {
+  const policy=(action,data=[])=>wasm.raster_worker_paper(JSON.stringify(action),data);
+  const listed=async()=>{
+    const ids=await paperStore("readonly",store=>store.getAllKeys()),records=await paperStore("readonly",store=>store.getAll());
+    return {entries:records.map((record,i)=>({id:ids[i],name:record.name,bytes:record.png.length})),previews:records.map(record=>record.preview)};
+  };
+  const record=async id=>{const found=await paperStore("readonly",store=>store.get(id));if(!found)throw new Error("Unknown paper");return found;};
+  if(request.operation==="list")return await listed();
+  if(request.operation==="rename"){
+    const {name}=policy({operation:"name",name:request.name}).metadata,found=await record(request.id);
+    await paperStore("readwrite",store=>store.put({...found,name},request.id));return await listed();
+  }
+  if(request.operation==="delete"){await paperStore("readwrite",store=>store.delete(request.id));return await listed();}
+  if(request.operation==="load"){
+    const prepared=policy({operation:"load",id:request.id,retained:request.retained},[(await record(request.id)).png,...buffers]);
+    return {metadata:prepared.metadata,tiles:prepared.buffers};
+  }
+  if(request.operation!=="import"&&request.operation!=="store")throw new Error("Unknown paper library action");
+  const prepared=policy({...request,stored:(await listed()).entries},buffers);
+  let tiles=prepared.buffers;
+  if(!prepared.metadata.exists){
+    const [png,preview,...rest]=tiles;tiles=rest;
+    await paperStore("readwrite",store=>store.put({name:prepared.metadata.name,png,preview},prepared.metadata.id));
+  }
+  return {...await listed(),metadata:prepared.metadata,tiles};
 }
 
 async function profileLibrary({operation,id},bytes) {

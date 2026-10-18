@@ -1,6 +1,7 @@
 use layer_core::color::source::SourceImage;
 use layer_core::package::session_store::atomic_publish;
-use layer_ui::paper_library::{PAPER_LIBRARY_BYTES, PAPER_LIBRARY_ENTRIES, PaperEntry, PaperLibraryError, PaperRequest, paper_identity, valid_paper_id};
+use layer_ui::paper_library::{PaperCapture, PaperEntry, PaperLibraryError, PaperRequest, PaperResult, paper_identity, valid_paper_id};
+pub use layer_ui::paper_library::canonical_source;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -71,23 +72,18 @@ pub fn store(directory: &Path, paper: &SourceImage, name: &str) -> Result<(Strin
     let _guard = LIBRARY.lock().map_err(|_| "Paper library is unavailable".to_string())?;
     let mut index = read_index(directory)?;
     if !index.papers.iter().any(|named| named.id == id) {
-        let encoded = layer_core::paper::encode_png(paper)?;
-        let stored = entries(directory, &index);
-        let total = stored.iter().map(|entry| entry.bytes).sum::<u64>() + encoded.len() as u64;
-        if stored.len() >= PAPER_LIBRARY_ENTRIES || total > PAPER_LIBRARY_BYTES { return Err(PaperLibraryError::Full); }
+        let prepared = layer_ui::paper_library::prepare_paper(&id, paper, name, &entries(directory, &index))?;
         std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-        atomic_publish(&image(directory, &id), |file| std::io::Write::write_all(file, &encoded).map_err(|e| e.to_string()), || Ok(()))?;
-        std::fs::write(preview(directory, &id), layer_core::paper::image_preview(paper)?).map_err(|e| e.to_string())?;
-        let name = layer_ui::paper_library::paper_name(name).unwrap_or_else(|| id[..8].into());
-        index.papers.push(Named { id: id.clone(), name });
+        atomic_publish(&image(directory, &id), |file| std::io::Write::write_all(file, &prepared.png).map_err(|e| e.to_string()), || Ok(()))?;
+        std::fs::write(preview(directory, &id), &prepared.preview).map_err(|e| e.to_string())?;
+        index.papers.push(Named { id: id.clone(), name: prepared.name });
         write_index(directory, &index)?;
     }
     Ok((id, entries(directory, &index)))
 }
 
 pub fn import(directory: &Path, source: &SourceImage, name: &str, cancelled: &dyn Fn() -> bool) -> Result<(String, SourceImage, Vec<PaperEntry>), PaperLibraryError> {
-    let paper = layer_core::paper::paper_image(source, cancelled).map_err(|error|
-        if error == layer_core::paper::CMYK { PaperLibraryError::Unsupported } else { PaperLibraryError::Failed(error) })?;
+    let paper = layer_ui::paper_library::library_paper(source, cancelled)?;
     let (id, entries) = store(directory, &paper, name)?;
     Ok((id, paper, entries))
 }
@@ -119,19 +115,7 @@ pub fn resolve(material: &layer_ui::paper_library::PaperMaterial, directory: Opt
 
 pub fn load(directory: &Path, id: &str) -> Result<SourceImage, String> {
     if !valid_paper_id(id) { return Err("Unknown paper".into()); }
-    let paper = layer_core::paper::decode_png(&read_bounded(&image(directory, id), MAX_PAPER_BYTES)?)?;
-    if paper_identity(&paper)? != id { return Err("The stored paper changed".into()); }
-    Ok(paper)
-}
-
-pub fn canonical_source(id: &str, source: SourceImage, retained: &[layer_core::Image]) -> Result<SourceImage, String> {
-    let parent=layer_ui::paper_library::paper_image_id(id).ok_or("Unknown paper")?;
-    if let Some(image)=retained.iter().find(|image|image.id()==parent) {
-        if image.extent != source.extent || layer_core::paper::paper_ppi(image.resolution) != layer_core::paper::paper_ppi(source.resolution)
-            || image.interpretation != source.interpretation || paper_identity(image.storage())? != id {return Err("The stored paper changed".into());}
-        return Ok(image.storage().as_ref().clone());
-    }
-    Ok(source)
+    layer_ui::paper_library::stored_paper(id, &read_bounded(&image(directory, id), MAX_PAPER_BYTES)?)
 }
 
 pub fn rename(directory: &Path, id: &str, name: &str) -> Result<Vec<PaperEntry>, String> {
@@ -158,53 +142,36 @@ pub fn delete(directory: &Path, id: &str) -> Result<Vec<PaperEntry>, String> {
     Ok(entries(directory, &index))
 }
 
-pub enum PaperResult {
-    Entries(Vec<PaperEntry>),
-    Loaded(String, SourceImage),
-    Imported(u64, String, SourceImage, Vec<PaperEntry>),
-}
-
 /// One library request, captured on the session owner, run on a file worker
-/// and adopted back on the owner. A request of `None` lists the library.
+/// and adopted back on the owner.
 pub struct PaperTask {
-    request: Option<u32>,
-    action: Option<PaperRequest>,
+    capture: PaperCapture,
     directory: PathBuf,
-    epoch: u64,
-    document: layer_core::authored::PortableId,
-    image: Option<Arc<SourceImage>>,
-    retained: Vec<layer_core::Image>,
     localization: Arc<layer_ui::Localizer>,
 }
 impl PaperTask {
     pub fn capture<R: layer_render::CanvasRenderer>(session: &layer_ui::UiSession<R>, request: Option<u32>, directory: PathBuf) -> Result<Self, String> {
-        let action = request.map(|request| session.state().requests.iter().find_map(|item| match &item.kind {
-            layer_ui::HostRequestKind::Paper { request: action } if item.id == request => Some(action.clone()),
-            _ => None,
-        }).ok_or_else(|| PaperLibraryError::Unsupported.message(session.localization()))).transpose()?;
-        let image = match &action { Some(PaperRequest::Add { layer, .. }) => session.paper_image(*layer), _ => None };
-        let retained = if matches!(&action, Some(PaperRequest::Load { .. } | PaperRequest::Import { .. })) { session.paper_sources() } else { Vec::new() };
-        Ok(Self { request, action, directory, epoch: session.state().document_file.epoch,
-            document: session.engine().document().artwork.id, image, retained, localization: session.localization().clone() })
+        Ok(Self { capture: session.capture_paper(request)?, directory, localization: session.localization().clone() })
     }
-    pub fn imports(&self) -> bool { matches!(self.action, Some(PaperRequest::Import { .. })) }
+    pub fn imports(&self) -> bool { matches!(self.capture.action, Some(PaperRequest::Import { .. })) }
     pub fn work(&self, file: Option<(impl std::io::Read + std::io::Seek, &str)>, cancelled: &std::sync::atomic::AtomicBool) -> Result<PaperResult, String> {
         let failed = |error: PaperLibraryError| error.message(&self.localization);
         let stopped = || cancelled.load(std::sync::atomic::Ordering::Relaxed);
         if stopped() { return Ok(PaperResult::Entries(list(&self.directory)?)); }
-        Ok(match &self.action {
+        let retained = &self.capture.retained;
+        Ok(match &self.capture.action {
             None => PaperResult::Entries(list(&self.directory)?),
-            Some(PaperRequest::Load { id }) => PaperResult::Loaded(id.clone(), canonical_source(id, load(&self.directory, id)?, &self.retained)?),
+            Some(PaperRequest::Load { id }) => PaperResult::Loaded(id.clone(), canonical_source(id, load(&self.directory, id)?, retained)?),
             Some(PaperRequest::Import { layer }) => {
                 let (file, name) = file.ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
                 let mut images = layer_ui::ImageImportBatch::new(Default::default(), layer_core::color::RgbSpace::ProPhoto, Default::default());
                 images.read(layer_core::Cancellable { inner: file, cancelled: stopped }, name, cancelled).map_err(|e| e.to_string())?;
                 let (_, source) = images.take_sources(false)?.into_iter().next().ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
                 let (id, image, entries) = import(&self.directory, &source, name, &stopped).map_err(failed)?;
-                PaperResult::Imported(*layer, id.clone(), canonical_source(&id, image, &self.retained)?, entries)
+                PaperResult::Imported(*layer, id.clone(), canonical_source(&id, image, retained)?, entries)
             }
             Some(PaperRequest::Add { name, .. }) => {
-                let image = self.image.as_ref().ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
+                let image = self.capture.image.as_ref().ok_or_else(|| failed(PaperLibraryError::Unsupported))?;
                 PaperResult::Entries(store(&self.directory, image, name).map_err(failed)?.1)
             }
             Some(PaperRequest::Rename { id, name }) => PaperResult::Entries(rename(&self.directory, id, name)?),
@@ -212,28 +179,9 @@ impl PaperTask {
         })
     }
     pub fn apply(&self, host: &mut crate::NativeHost, result: Result<PaperResult, String>, cancelled: bool) -> Result<(), String> {
-        let session = &mut host.session;
-        if let Some(request) = self.request && !session.state().requests.iter().any(|item| item.id == request) { return Ok(()); }
-        let current = self.epoch == session.state().document_file.epoch && self.document == session.engine().document().artwork.id;
-        let previous = session.state().revision;
-        let applied = match result {
-            Ok(PaperResult::Entries(entries)) => session.set_paper_library(entries).map(Some),
-            Ok(PaperResult::Loaded(id, image)) if !cancelled => session.paper_loaded(&id, image).map(Some),
-            Ok(PaperResult::Loaded(..)) => Ok(None),
-            Ok(PaperResult::Imported(layer, id, image, entries)) if current && !cancelled => session.paper_imported(layer, entries, &id, image).map(Some),
-            Ok(PaperResult::Imported(_, _, _, entries)) => session.set_paper_library(entries).map(Some),
-            Err(_) if cancelled => Ok(None),
-            Err(error) => Err(error),
-        };
-        let error = match applied {
-            Ok(Some(change)) => { host.apply_change(previous, change); None }
-            Ok(None) => None,
-            Err(error) => Some(error),
-        };
-        match self.request {
-            Some(id) => host.dispatch(layer_ui::UiAction::CompleteRequest { id, error }),
-            None => error.map_or(Ok(()), Err),
-        }
+        let previous = host.session.state().revision;
+        if let Some(change) = host.session.adopt_paper(&self.capture, result, cancelled)? { host.apply_change(previous, change); }
+        Ok(())
     }
 }
 
