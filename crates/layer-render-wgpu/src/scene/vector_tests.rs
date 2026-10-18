@@ -41,7 +41,7 @@ fn submit_ready(r: &mut WgpuRasterizer, frame: FramePacket<'_>) {
 fn native(r: &mut WgpuRasterizer, doc: &layer_core::Document) -> Vec<[f32; 4]> {
     let extent = doc.composition().size;
     let (texture, _) = create_color_target(&r.device, extent, "vector native reference");
-    let mut scene = r.scene.take().unwrap_or_else(|| Scene::new(r));
+    let mut scene = r.scene.take().unwrap_or_else(|| Scene::new(r).unwrap());
     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
     scene.capture_region_prepared(r, packet(doc.scene(), extent), &texture, PixelRect::full(extent), Output::Artwork(None), &mut encoder).unwrap();
     r.uploads.finish(&encoder); encoder.submit(&r.queue);
@@ -245,7 +245,7 @@ fn vector_layer_thumbnails_show_their_paths() {
     let (editor, layer) = document([2048, 1536], vec![stroke(1, &[[200., 700.], [1800., 760.]], 24., [0.2, 0.6, 0.2, 1.])]);
     let mut r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
     submit_ready(&mut r, packet(editor.document().scene(), [2048, 1536]));
-    let mut inked = |r: &mut WgpuRasterizer| {
+    let inked = |r: &mut WgpuRasterizer| {
         for _ in 0..50 { if r.prepare_thumbnail_batch(layer_render::ThumbnailTarget::Occurrence(layer)).unwrap() { break; } crate::test_support::complete(r); }
         r.request_thumbnail(1, layer_render::ThumbnailTarget::Occurrence(layer)).unwrap();
         crate::test_support::complete(r);
