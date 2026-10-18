@@ -40,6 +40,7 @@ struct PreparedFrame {
 
 const TRANSFORM_HISTORY: usize = 16;
 const INPUT_BATCH: usize = 4096;
+const MATERIAL_PAGE_PASSES_PER_FRAME: u32 = 512;
 const STROKE_POINT_CAPACITY: usize = 65_536;
 const DAB_CAPACITY: usize = 32_768;
 const BATCH_CAPACITY: usize = 64;
@@ -1713,6 +1714,12 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             if matches!(event.phase, PenPhase::Up | PenPhase::Cancel) {
                 break;
             }
+            if self.active_stroke.as_ref().is_some_and(|stroke| sequential_material(stroke.style.execution)) {
+                self.advance_finalized_prefix();
+                if persistent_material_page_passes(&self.batches) >= MATERIAL_PAGE_PASSES_PER_FRAME {
+                    break;
+                }
+            }
         }
         Ok(())
     }
@@ -2508,6 +2515,27 @@ fn clone_mapping(document: &Document, layer: SourceTarget, retouch: Retouch, off
     retouch.cloning(offset, flip, layer_core::offsets::point(document.target_offset(layer)))
 }
 
+fn persistent_material_page_passes(batches: &[DabBatch]) -> u32 {
+    batches
+        .iter()
+        .filter(|batch| batch.kind == DabBatchKind::Persistent && sequential_material(batch.style.execution))
+        .map(|batch| covered_tiles(batch.damage))
+        .sum()
+}
+
+fn sequential_material(execution: BrushExecution) -> bool {
+    execution != BrushExecution::Dry && !execution.retouches()
+}
+
+fn covered_tiles(rect: Rect) -> u32 {
+    if rect.is_empty() {
+        return 0;
+    }
+    let tile = layer_core::raster::TILE_SIZE as f32;
+    let span = |min: f32, max: f32| ((max / tile).ceil() - (min.max(0.) / tile).floor()).max(0.) as u32;
+    span(rect.min.x, rect.max.x) * span(rect.min.y, rect.max.y)
+}
+
 fn push_batches(batches: &mut Vec<DabBatch>, dabs: &[Dab], batch: DabBatch) {
     if batch.style.execution == BrushExecution::Smudge {
         let original_first = batch.first_dab;
@@ -2900,6 +2928,7 @@ mod tests {
         persistent_dabs: usize,
         persistent: Vec<Dab>,
         persistent_batches: Vec<(StrokeId, bool, bool, u32)>,
+        material_page_passes: u32,
         material_batches: Vec<(u32, u32)>,
         operation_batches: Vec<(SourceTarget, u32, layer_core::Rect, bool)>,
         restored_rasters: Vec<(SourceTarget, u64)>,
@@ -3031,6 +3060,7 @@ mod tests {
             }
             self.preview.clear();
             self.styles.clear();
+            self.material_page_passes = persistent_material_page_passes(packet.dab_batches);
             for batch in packet.dab_batches {
                 self.styles.push(batch.style.clone());
                 let start = batch.first_dab as usize;
@@ -6337,6 +6367,38 @@ mod tests {
         producer.push(predicted).unwrap();
         engine.render_frame().unwrap();
         assert!(engine.backend().preview.is_empty());
+    }
+
+    #[test]
+    fn material_input_backlog_is_consumed_in_bounded_frames() {
+        for preset in [DefaultBrushPreset::OpaqueGouache, DefaultBrushPreset::NaturalBlender, DefaultBrushPreset::WatercolorWash, DefaultBrushPreset::LiquifyPush] {
+            let mut brush = default_brush(preset);
+            brush.diameter = 512.;
+            let (mut producer, mut engine) = engine("material backlog", 4096, 4096);
+            engine.set_brush(brush).unwrap();
+            engine.set_instant_feedback(InstantFeedbackConfig { enabled: true, ..Default::default() }).unwrap();
+            let count = 3000;
+            for index in 0..count {
+                let t = index as f32 / (count - 1) as f32;
+                let phase = if index == 0 { PenPhase::Down } else if index + 1 == count { PenPhase::Up } else { PenPhase::Move };
+                let mut sample = event(index as u64 + 1, phase, 256. + 3584. * (t * 3.).fract());
+                sample.surface_position.y = 256. + 3584. * t;
+                producer.push(sample).unwrap();
+            }
+            let mut frames = 0;
+            while engine.completed_stroke.is_none() {
+                assert!(frames < 1000, "{preset:?} backlog did not drain");
+                engine.render_frame_at((count as u64 + frames) * 1_000_000).unwrap();
+                let passes = engine.backend().material_page_passes;
+                assert!(engine.completed_stroke.is_some() || passes <= MATERIAL_PAGE_PASSES_PER_FRAME * 5 / 4, "{preset:?} frame {frames}: {passes}");
+                frames += 1;
+            }
+            assert!(frames > 3, "{preset:?} drained in {frames} frames");
+            let stroke = engine.completed_stroke.as_ref().unwrap();
+            let mut replay = Vec::new();
+            DabGenerator::generate(stroke, engine.document().composition().color.space, &mut replay);
+            assert_eq!(engine.backend().persistent, replay, "{preset:?}");
+        }
     }
 
     #[test]

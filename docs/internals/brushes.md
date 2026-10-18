@@ -297,6 +297,14 @@ runs pixel work in parallel while retaining the ordering that each brush require
 Sparse pages and changed-region bounds limit the affected area. Specialized paths
 avoid allocating or updating material state that a brush does not use.
 
+Smudge, wet, watercolor and Liquify contacts run one page pass per page their
+contact batch touches, and a frame's commands and bindings stay allocated until
+the GPU finishes it. A frame therefore consumes input only until its committed
+contacts reach 512 such passes; a slower device keeps the rest of the input queued
+for the next frame instead of building one frame from its whole backlog. Watercolor
+transport runs once per frame, so a device that falls behind now runs it as often
+as one that keeps up.
+
 These choices target both performance and energy use. On mobile hardware, memory
 traffic and CPU/driver overhead contribute to power consumption alongside GPU
 computation. Reducing those costs can improve efficiency even when frame rate is

@@ -2,33 +2,30 @@
 
 [Performance targets](../PERFORMANCE_TARGETS.md)
 
-- **Wet, smudge and blending brushes run out of memory on the lower tiers at 512 px.**
-  - On the TCL (12 MP), Android's low-memory killer stops Opaque Gouache, Loaded
-    Oil and Natural Blender at about 4.4 GB resident, and stopped Watercolor
-    Wash in two of four runs. The rest complete only 0.3–0.6 updates/s.
-  - On the MovinkPad 11 (24 MP), Opaque Gouache, Watercolor Wash, Wet Watercolor
-    and Natural Blender abort in the native allocator (a Scudo map failure), and
-    Loaded Oil stops with a canvas GPU out-of-memory error. Smudge, Wet Round
-    and Palette Knife complete 0.4–0.6 updates/s.
-  - On the MovinkPad Pro 14 (61 MP), all of them complete, at 0.8–3.2
-    updates/s. Before each destination operation compiled its own shader,
-    most crashed inside the Adreno Vulkan driver.
-  - On the TCL the process runs out of RAM.
-  - On the MovinkPads the likely cause is exhausting the process's memory
-    mappings instead. This is not yet verified.
-    - Successful Smudge and Liquify Push strokes on the MovinkPad Pro 14 reach
-      41,000–51,000 mappings. The G-Pen reaches about 11,000.
-    - Android's default `vm.max_map_count` is 65,530.
-- **Material brushes slowed after 2026-09-27.** It has not been bisected.
-  - At 512 px the MovinkPad Pro 14 completes Smudge at 3.2 updates/s (20.1
-    then), Liquify Push at 1.1 (28.5), Liquify Twirl at 18–19 (73–74) and Wet
-    Round at 1.8 (16.0), with 270–390 dabs per update for Smudge and Liquify
-    Push. Builds without the per-operation shaders measure Smudge, Liquify Push
-    and Wet Round the same or lower, so the slowdown predates them.
-  - Multiply Glaze at 1024 px completes 10.0, 11.2 and 36.7 updates/s on Low,
-    Mid and Top (12.9, 11.5 and 76.1 then). Without the per-operation shaders it
-    completes 0.3 on the TCL and fails with a Vulkan surface validation error on
-    the MovinkPad Pro 14.
+- **Wet, smudge and blending brushes fall behind the pen at 512 px.**
+  - A frame consumes input only until its material contacts reach 512 page
+    passes ([brushes](../internals/brushes.md)), so these brushes no longer
+    run out of memory; a slower device keeps the rest of the input queued and
+    the stroke trails the pen.
+  - On the TCL (12 MP) Opaque Gouache, Loaded Oil, Natural Blender, Palette
+    Knife, Watercolor Wash, Wet Watercolor, Wet Round, Smudge and Liquify Push
+    complete 0.6–2.1 updates/s, at most 2.1 GB resident and 9,000 mappings.
+  - On the MovinkPad 11 (24 MP) they complete 1.0–3.4 updates/s, at most
+    3.1 GB resident and 7,100 mappings.
+- **Material brushes on the MovinkPad Pro 14 are limited by command storage.**
+  - wgpu records each pass in its own command buffers, and a material brush
+    runs one pass per page its contacts touch. The Android command-pool policy
+    destroys pools above 128 buffers at every completed reset, because keeping
+    their storage exhausts Adreno host mappings (`vm.max_map_count` is 65,530).
+  - At 512 px it completes Smudge at 4.2 updates/s, Liquify Push at 4.1, Wet
+    Round at 3.7, Opaque Gouache at 3.4 and Watercolor Wash at 3.4, with about
+    22,000 mappings.
+  - Keeping pools for 16 cycles restores the 2026-09-27 rates (Smudge 22,
+    Liquify Push 16, Wet Round 13, Watercolor Wash 19 updates/s) but reaches
+    61,000–66,000 mappings and crashes most runs. Rebuilding large pools every
+    four cycles reaches 41,000–47,000 mappings for about 25% more updates.
+    Recovering the rest needs fewer command buffers per material page.
+  - Multiply Glaze at 1024 px completes 34.2 updates/s (76.1 on 2026-09-27).
 - **The simple-brush class remains unqualified.**
   - On the current contained 60 × 10 path, 1536 px G-Pen reaches only
     75.36–75.54 fresh updates/s on Mid (target 90), although its gap passes.
