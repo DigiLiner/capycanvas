@@ -580,7 +580,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = Đang có 
 workspace-refusal-session-choose-a-toolbar = Chọn thanh công cụ
 workspace-refusal-session-choose-a-toolbar-to-replace = Chọn thanh công cụ để thay
 workspace-refusal-session-finish-arranging-the-workspace-first = Trước tiên hãy hoàn tất sắp xếp không gian làm việc
-workspace-refusal-session-finish-previewing-the-layout-first = Trước tiên hãy hoàn tất xem trước bố cục
 workspace-refusal-session-finish-previewing-the-workspace-first = Trước tiên hãy hoàn tất xem trước không gian làm việc
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = Hoàn tất tương tác hiện tại trước khi chuyển không gian làm việc
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = Xem trước bố cục đã mở hoặc chưa sẵn sàng

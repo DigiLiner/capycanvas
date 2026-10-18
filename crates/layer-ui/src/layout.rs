@@ -3330,6 +3330,20 @@ impl DockLayout {
         result
     }
 
+    pub(crate) fn adopt_runtime(&mut self, from: &DockLayout) {
+        self.measurements.clone_from(&from.measurements);
+        self.titlebar_insets = from.titlebar_insets;
+        self.bottom_inset = from.bottom_inset;
+        self.header_presentation = crate::HeaderPresentation {
+            height: if from.header_presentation.height > 0. && self.header.size != from.header.size {
+                self.header.size.height()
+            } else {
+                from.header_presentation.height
+            },
+            items: if self.header == from.header { from.header_presentation.items.clone() } else { Vec::new() },
+        };
+    }
+
     pub(crate) fn workspace_height(&self, height: f32) -> f32 {
         (height - self.bottom_inset).max(1.0)
     }

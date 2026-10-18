@@ -583,7 +583,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = A workspac
 workspace-refusal-session-choose-a-toolbar = Choose a toolbar
 workspace-refusal-session-choose-a-toolbar-to-replace = Choose a toolbar to replace
 workspace-refusal-session-finish-arranging-the-workspace-first = Finish arranging the workspace first
-workspace-refusal-session-finish-previewing-the-layout-first = Finish previewing the layout first
 workspace-refusal-session-finish-previewing-the-workspace-first = Finish previewing the workspace first
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = Finish the current interaction before switching workspaces
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = Layout preview is already open or not ready

@@ -230,9 +230,11 @@ Restore Starting Layout…; and Reset All Brushes…. Captions come from
   by another window offers Switch to Window.
 - Selecting a row, double-clicking or pressing Enter in the manager or Layout
   History only previews the arrangement in the editor behind the dialog. The
-  confirming button commits. Cancel, Escape, back navigation and native
-  dismissal restore the original arrangement. Dialogs are opaque, over a light
-  enough backdrop to see the preview.
+  confirming button commits; the preview stays presented until the adopted
+  workspace replaces it, and a failed load restores the original. Cancel,
+  Escape, back navigation and native dismissal restore the original
+  arrangement. Dialogs are opaque, over a light enough backdrop to see the
+  preview. Previewing the arrangement already shown changes nothing.
 - **Layout History — name** lists versions with the affected panels, action and
   date. The current version starts selected with Restore disabled.
 - **New Workspace** asks only for a name, copies the current

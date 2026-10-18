@@ -550,10 +550,13 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         Ok(())
     }
     fn stop_preview<R: CanvasRenderer>(&mut self, session: &mut UiSession<R>) -> UiChange {
+        self.hold_preview();
+        session.cancel_workspace_layout_preview()
+    }
+    fn hold_preview(&mut self) {
         self.selection_generation = self.selection_generation.wrapping_add(1);
         self.preview = None;
         self.preview_open = false;
-        session.cancel_workspace_layout_preview()
     }
     fn end_transition<R: CanvasRenderer>(&mut self, session: &mut UiSession<R>) {
         self.transition = false;
@@ -1087,7 +1090,12 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         if !prompt.choices.is_empty() && !prompt.choices.iter().any(|c| c.id == choice) {
             return Err(StoreError::known(ErrorKind::InvalidData, WorkspaceRefusal::ChooseOneOfTheListedOptions));
         }
-        let mut change = self.stop_preview(session);
+        let mut change = if matches!(action, ManagerAction::Reset(_)) {
+            self.hold_preview();
+            UiChange::default()
+        } else {
+            self.stop_preview(session)
+        };
         self.start_transition(session)?;
         let m = self.manager.clone();
         if action == ManagerAction::ResetBrushes {
@@ -1248,7 +1256,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         if self.manager.active_id().as_deref() == Some(&id) {
             return Ok(UiChange::default());
         }
-        let change = self.stop_preview(session);
+        self.hold_preview();
         self.start_transition(session)?;
         let m = self.manager.clone();
         self.run(async move {
@@ -1267,7 +1275,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
             }
             Ok(Outcome::adopt(m.prepare_switch(&id, now).await?))
         });
-        Ok(change)
+        Ok(UiChange::default())
     }
     fn import<R: CanvasRenderer>(
         &mut self,
@@ -1304,7 +1312,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
         };
         match self.view.page {
             Some(ManagerPage::History) => {
-                let change = self.stop_preview(session);
+                self.hold_preview();
                 self.start_transition(session)?;
                 let m = self.manager.clone();
                 self.run(async move {
@@ -1315,7 +1323,7 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                         m.change_layout(&active, Some(&id), now).await?,
                     ))
                 });
-                Ok(change)
+                Ok(UiChange::default())
             }
             Some(ManagerPage::Workspaces) => self.switch(session, id, now),
             _ => {
@@ -1568,6 +1576,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                         }
                         Outcome::Done => {}
                     }
+                    if self.incoming.is_none() && !self.preview_open {
+                        merge(&mut change, session.cancel_workspace_layout_preview());
+                    }
                     if !keep_prompt {
                         self.close_prompt();
                         if self.view.page.is_some() && !self.suspended {
@@ -1584,6 +1595,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     self.pending_binding = self.manager.binding();
                 }
                 Err(e) => {
+                    if !self.preview_open {
+                        merge(&mut change, session.cancel_workspace_layout_preview());
+                    }
                     if !self.restart(e.clone(), now) {
                         self.set_error(e);
                         if self.view.page.is_none() && self.view.prompt.is_none() {
@@ -1724,6 +1738,9 @@ impl<S: WorkspaceStore + 'static> WorkspaceController<S> {
                     self.pending_binding = self.manager.binding();
                 }
                 Err(e) => {
+                    if !self.preview_open {
+                        merge(&mut change, session.cancel_workspace_layout_preview());
+                    }
                     if !self.restart(e.clone(), now) {
                         self.incoming = Some(incoming);
                         self.set_error(e);

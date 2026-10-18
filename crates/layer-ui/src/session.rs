@@ -3279,10 +3279,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             UiAction::RestoreWorkspace { mut workspace } => {
                 workspace.validate()?;
                 workspace.layout.open_default_columns(self.state.platform);
-                workspace.layout.titlebar_insets = self.state.workspace.layout.titlebar_insets;
-                workspace.layout.bottom_inset = self.state.workspace.layout.bottom_inset;
-                workspace.layout.header_presentation =
-                    self.state.workspace.layout.header_presentation.clone();
+                workspace.layout.adopt_runtime(&self.state.workspace.layout);
                 self.state.workspace = *workspace;
                 self.tool_origin = None;
                 self.workspace_history = workspace::WorkspaceHistory::default();
@@ -4403,16 +4400,10 @@ impl<R: CanvasRenderer> UiSession<R> {
                             .layout
                             .clone();
                         // Keep host measurements and strip scrolling, as workspace undo does.
-                        restored
-                            .measurements
-                            .clone_from(&self.state.workspace.layout.measurements);
+                        restored.adopt_runtime(&self.state.workspace.layout);
                         restored
                             .column_scroll
                             .clone_from(&self.state.workspace.layout.column_scroll);
-                        restored.titlebar_insets = self.state.workspace.layout.titlebar_insets;
-                        restored.bottom_inset = self.state.workspace.layout.bottom_inset;
-                        restored.header_presentation =
-                            self.state.workspace.layout.header_presentation.clone();
                         self.state.workspace.layout = restored;
                         drag.phase = ResizeDragPhase::Expand {
                             columns,
@@ -7043,15 +7034,18 @@ mod tests {
             );
         }
         assert!(s.dispatch(UiAction::SetBrushSize { value: 99. }).is_err());
-        assert!(
-            s.adopt_workspace(PreparedWorkspace::new(starting.clone()).unwrap())
-                .is_err()
-        );
         s.cancel_workspace_layout_preview();
         s.end_workspace_transition();
         assert_eq!(s.capture_workspace().unwrap(), original);
         assert!(s.state.workspace.zen_mode);
         assert_eq!(s.engine.document(), &document);
+        s.begin_workspace_transition().unwrap();
+        s.begin_workspace_layout_preview().unwrap();
+        s.preview_workspace_layout(starting.history.layout()).unwrap();
+        s.adopt_workspace(PreparedWorkspace::new(starting.clone()).unwrap()).unwrap();
+        assert_eq!(s.cancel_workspace_layout_preview().regions, 0, "adoption replaces the preview and its baseline");
+        s.end_workspace_transition();
+        assert_eq!(s.capture_workspace().unwrap().history, starting.history);
     }
 
     #[test]

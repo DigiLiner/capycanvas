@@ -609,7 +609,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = 工作区�
 workspace-refusal-session-choose-a-toolbar = 请选择工具栏
 workspace-refusal-session-choose-a-toolbar-to-replace = 请选择要替换的工具栏
 workspace-refusal-session-finish-arranging-the-workspace-first = 请先完成工作区布局调整
-workspace-refusal-session-finish-previewing-the-layout-first = 请先结束布局预览
 workspace-refusal-session-finish-previewing-the-workspace-first = 请先结束工作区预览
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = 切换工作区前，请完成当前交互
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = 布局预览已打开或尚未就绪

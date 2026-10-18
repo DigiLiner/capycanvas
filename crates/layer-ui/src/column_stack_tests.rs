@@ -584,6 +584,52 @@ fn check_paint_default_stack(platform: Platform) {
     );
 }
 
+#[test]
+fn replacing_the_workspace_keeps_host_measurements_and_follows_the_header_size() {
+    let mut s = session(Platform::Gtk);
+    let preset = |preset: crate::WorkspacePreset| preset.layout(Platform::Gtk);
+    let adopt = |s: &mut UiSession<Recorder>, layout: &DockLayout| {
+        s.adopt_workspace(crate::PreparedWorkspace::new(crate::WorkspaceCapture {
+            history: crate::LayoutHistory::new(layout),
+            working: crate::WorkspaceWorkingState::default(),
+        }).unwrap()).unwrap();
+    };
+    let paint = preset(crate::WorkspacePreset::Illustrator);
+    adopt(&mut s, &paint);
+    let measurements = [(Panel::Color, 300.), (Panel::Navigator, 180.)]
+        .map(|(panel, content_height)| PanelMeasurement { panel, tab_width: 0., content_height, scroll: None })
+        .to_vec();
+    s.dispatch(UiAction::MeasurePanels { measurements }).unwrap();
+    s.dispatch(UiAction::MeasureHeader { height: paint.header.size.height(), items: Vec::new() }).unwrap();
+    let fitted = |s: &UiSession<Recorder>| {
+        let resolved = s.layout(STACK_VIEW);
+        [Panel::Color, Panel::Navigator].map(|panel| {
+            resolved.groups.iter().find(|g| g.panels.contains(&panel)).unwrap().bounds.height
+        })
+    };
+    let expected = [300. + TAB_BAR_HEIGHT, 180. + TAB_BAR_HEIGHT];
+    assert_eq!(fitted(&s), expected);
+    let sketch = preset(crate::WorkspacePreset::Painter);
+    assert_ne!(sketch.header.size, paint.header.size);
+    adopt(&mut s, &sketch);
+    assert_eq!(s.state.workspace.layout.header_presentation.height, sketch.header.size.height());
+    assert_eq!(s.layout(STACK_VIEW).work_area.y, sketch.header.size.height());
+    adopt(&mut s, &preset(crate::WorkspacePreset::Photographer));
+    adopt(&mut s, &paint);
+    assert_eq!(s.state.workspace.layout.header_presentation.height, paint.header.size.height());
+    assert_eq!(fitted(&s), expected);
+    s.begin_workspace_transition().unwrap();
+    s.begin_workspace_layout_preview().unwrap();
+    s.preview_workspace_layout(&sketch).unwrap();
+    s.preview_workspace_layout(&paint).unwrap();
+    assert_eq!(fitted(&s), expected);
+    s.cancel_workspace_layout_preview();
+    s.end_workspace_transition();
+    assert_eq!(fitted(&s), expected);
+    s.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(crate::WorkspaceState { layout: paint, ..Default::default() }) }).unwrap();
+    assert_eq!(fitted(&s), expected);
+}
+
 fn stack_fixture() -> (UiSession<Recorder>, u32, u32) {
     let mut s = session(Platform::Gtk);
     let mut columns = Vec::new();

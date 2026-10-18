@@ -583,7 +583,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = Bir çalı
 workspace-refusal-session-choose-a-toolbar = Bir araç çubuğu seçin
 workspace-refusal-session-choose-a-toolbar-to-replace = Değiştirilecek bir araç çubuğu seçin
 workspace-refusal-session-finish-arranging-the-workspace-first = Önce çalışma alanını düzenlemeyi bitirin
-workspace-refusal-session-finish-previewing-the-layout-first = Önce düzen önizlemesini bitirin
 workspace-refusal-session-finish-previewing-the-workspace-first = Önce çalışma alanı önizlemesini bitirin
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = Çalışma alanı değiştirmeden önce geçerli etkileşimi bitirin
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = Düzen önizlemesi zaten açık veya hazır değil

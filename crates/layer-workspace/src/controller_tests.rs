@@ -455,11 +455,19 @@ fn starting_layout_dialog_previews_without_saving_and_restore_is_undoable() {
             } else {
                 assert!(prompt.message.contains("saved starting layout"));
             }
-            f.input(if confirm {
-                serde_json::json!({"type":"submit","name":""})
+            if confirm {
+                f.controller
+                    .input(&mut f.host.session, serde_json::from_value(serde_json::json!({"type":"submit","name":""})).unwrap(), f.backend.now.get())
+                    .unwrap();
+                assert_eq!(
+                    layer_ui::durable_layout(&f.host.session.state().workspace.layout),
+                    baseline,
+                    "the outgoing layout is never presented between confirmation and adoption"
+                );
+                f.pump();
             } else {
-                serde_json::json!({"type":"cancel"})
-            });
+                f.input(serde_json::json!({"type":"cancel"}));
+            }
             if !confirm {
                 assert_eq!(f.host.session.capture_workspace().unwrap(), before);
                 assert_eq!(

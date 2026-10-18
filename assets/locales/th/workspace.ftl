@@ -571,7 +571,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = กำล�
 workspace-refusal-session-choose-a-toolbar = เลือกแถบเครื่องมือ
 workspace-refusal-session-choose-a-toolbar-to-replace = เลือกแถบเครื่องมือที่จะแทนที่
 workspace-refusal-session-finish-arranging-the-workspace-first = จัดพื้นที่ทำงานให้เสร็จก่อน
-workspace-refusal-session-finish-previewing-the-layout-first = ดูตัวอย่างผังให้เสร็จก่อน
 workspace-refusal-session-finish-previewing-the-workspace-first = ดูตัวอย่างพื้นที่ทำงานให้เสร็จก่อน
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = ทำการโต้ตอบปัจจุบันให้เสร็จก่อนสลับพื้นที่ทำงาน
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = ตัวอย่างผังเปิดอยู่แล้วหรือยังไม่พร้อม

@@ -216,14 +216,11 @@ impl WorkspaceHistory {
         self.durable.as_ref().map(|h| h.generation)
     }
     fn adopt_layout(state: &mut WorkspaceState, mut layout: DockLayout) {
-        layout.measurements.clone_from(&state.layout.measurements);
+        layout.adopt_runtime(&state.layout);
         layout.column_scroll.clone_from(&state.layout.column_scroll);
-        layout.titlebar_insets = state.layout.titlebar_insets;
         for s in &mut layout.column_stacks {
             s.open_column = s.open_column.or_else(|| state.layout.column_stack(s.column).open_column);
         }
-        layout.bottom_inset = state.layout.bottom_inset;
-        layout.header_presentation = state.layout.header_presentation.clone();
         state.layout = layout;
     }
     pub fn capture(&mut self, state: &WorkspaceState) -> LayoutHistory {

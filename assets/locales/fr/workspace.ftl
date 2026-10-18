@@ -583,7 +583,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = Un changem
 workspace-refusal-session-choose-a-toolbar = Choisir une barre d’outils
 workspace-refusal-session-choose-a-toolbar-to-replace = Choisir une barre d’outils à remplacer
 workspace-refusal-session-finish-arranging-the-workspace-first = Terminer d’abord l’organisation de l’espace de travail
-workspace-refusal-session-finish-previewing-the-layout-first = Terminer d’abord l’aperçu de la disposition
 workspace-refusal-session-finish-previewing-the-workspace-first = Terminer d’abord l’aperçu de l’espace de travail
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = Terminer l’interaction actuelle avant de changer d’espace de travail
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = L’aperçu de disposition est déjà ouvert ou n’est pas prêt

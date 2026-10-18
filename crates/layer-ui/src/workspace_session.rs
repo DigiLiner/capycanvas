@@ -333,15 +333,14 @@ impl<R: CanvasRenderer> UiSession<R> {
             return Err(self.localization().text(MessageId::WORKSPACE_REFUSAL_SESSION_OPEN_A_LAYOUT_PREVIEW_FIRST).to_string());
         }
         layout.validate()?;
-        let insets = self.state.workspace.layout.titlebar_insets;
-        let bottom_inset = self.state.workspace.layout.bottom_inset;
-        let header_presentation = self.state.workspace.layout.header_presentation.clone();
-        self.state.workspace.layout = durable_layout(layout);
-        self.state.workspace.layout.open_default_columns(self.state.platform);
+        if durable_layout(&self.state.workspace.layout) == durable_layout(layout) {
+            return Ok(UiChange::default());
+        }
+        let mut next = durable_layout(layout);
+        next.open_default_columns(self.state.platform);
+        next.adopt_runtime(&self.state.workspace.layout);
+        self.state.workspace.layout = next;
         self.state.workspace.zen_mode = false;
-        self.state.workspace.layout.titlebar_insets = insets;
-        self.state.workspace.layout.bottom_inset = bottom_inset;
-        self.state.workspace.layout.header_presentation = header_presentation;
         self.state.customization = CustomizationState::default();
         self.sync_work_area();
         self.refresh_commands();
@@ -351,14 +350,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         ))
     }
     pub fn cancel_workspace_layout_preview(&mut self) -> UiChange {
-        if let Some(original) = self.workspace_preview.take() {
-            let insets = self.state.workspace.layout.titlebar_insets;
-            let bottom_inset = self.state.workspace.layout.bottom_inset;
-            let header_presentation = self.state.workspace.layout.header_presentation.clone();
+        if let Some(mut original) = self.workspace_preview.take() {
+            original.layout.adopt_runtime(&self.state.workspace.layout);
             self.state.workspace = original;
-            self.state.workspace.layout.titlebar_insets = insets;
-            self.state.workspace.layout.bottom_inset = bottom_inset;
-            self.state.workspace.layout.header_presentation = header_presentation;
             self.state.customization = CustomizationState::default();
             self.sync_work_area();
             self.refresh_commands();
@@ -372,24 +366,18 @@ impl<R: CanvasRenderer> UiSession<R> {
 
     pub fn adopt_workspace(&mut self, prepared: PreparedWorkspace) -> Result<UiChange, String> {
         self.require_workspace_idle()?;
-        if self.workspace_preview.is_some() {
-            return Err(self.localization().text(MessageId::WORKSPACE_REFUSAL_SESSION_FINISH_PREVIEWING_THE_LAYOUT_FIRST).to_string());
-        }
+        self.workspace_preview = None;
         let PreparedWorkspace { capture } = prepared;
         let working = capture.working;
-        let titlebar_insets = self.state.workspace.layout.titlebar_insets;
-        let bottom_inset = self.state.workspace.layout.bottom_inset;
-        let header_presentation = self.state.workspace.layout.header_presentation.clone();
         self.state.toolbar_context_generation += 1;
+        let mut layout = capture.history.layout().clone();
+        layout.open_default_columns(self.state.platform);
+        layout.adopt_runtime(&self.state.workspace.layout);
         self.state.workspace = WorkspaceState {
             version: 2,
-            layout: capture.history.layout().clone(),
+            layout,
             zen_mode: working.zen_mode,
         };
-        self.state.workspace.layout.open_default_columns(self.state.platform);
-        self.state.workspace.layout.titlebar_insets = titlebar_insets;
-        self.state.workspace.layout.bottom_inset = bottom_inset;
-        self.state.workspace.layout.header_presentation = header_presentation;
         self.workspace_history = workspace::WorkspaceHistory::restore(capture.history);
         self.tool_origin = None;
         self.state.customization = CustomizationState::default();

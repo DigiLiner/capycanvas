@@ -609,7 +609,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = ワーク�
 workspace-refusal-session-choose-a-toolbar = ツールバーを選んでください
 workspace-refusal-session-choose-a-toolbar-to-replace = 置き換えるツールバーを選んでください
 workspace-refusal-session-finish-arranging-the-workspace-first = 先にワークスペースの配置を終えてください
-workspace-refusal-session-finish-previewing-the-layout-first = 先にレイアウトのプレビューを終えてください
 workspace-refusal-session-finish-previewing-the-workspace-first = 先にワークスペースのプレビューを終えてください
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = ワークスペースを切り替える前に、現在の操作を終えてください
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = レイアウトのプレビューはすでに開いているか、準備ができていません

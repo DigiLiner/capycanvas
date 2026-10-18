@@ -580,7 +580,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = È già in
 workspace-refusal-session-choose-a-toolbar = Scegli una barra strumenti
 workspace-refusal-session-choose-a-toolbar-to-replace = Scegli una barra strumenti da sostituire
 workspace-refusal-session-finish-arranging-the-workspace-first = Termina prima la disposizione dell'area di lavoro
-workspace-refusal-session-finish-previewing-the-layout-first = Termina prima l'anteprima della disposizione
 workspace-refusal-session-finish-previewing-the-workspace-first = Termina prima l'anteprima dell'area di lavoro
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = Termina l'interazione corrente prima di cambiare area di lavoro
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = L'anteprima della disposizione è già aperta o non è pronta

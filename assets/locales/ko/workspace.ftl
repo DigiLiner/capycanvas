@@ -609,7 +609,6 @@ workspace-refusal-session-a-workspace-change-is-already-in-progress = 작업 영
 workspace-refusal-session-choose-a-toolbar = 도구 모음을 선택하세요
 workspace-refusal-session-choose-a-toolbar-to-replace = 교체할 도구 모음을 선택하세요
 workspace-refusal-session-finish-arranging-the-workspace-first = 먼저 작업 영역 배치를 마치세요
-workspace-refusal-session-finish-previewing-the-layout-first = 먼저 레이아웃 미리 보기를 마치세요
 workspace-refusal-session-finish-previewing-the-workspace-first = 먼저 작업 영역 미리 보기를 마치세요
 workspace-refusal-session-finish-the-current-interaction-before-switching-workspaces = 작업 영역을 전환하기 전에 현재 조작을 마치세요
 workspace-refusal-session-layout-preview-is-already-open-or-not-ready = 레이아웃 미리 보기가 이미 열려 있거나 준비되지 않았습니다

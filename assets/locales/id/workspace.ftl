@@ -1147,7 +1147,6 @@ workspace-refusal-session-choose-a-toolbar-to-replace = Pilih bilah alat untuk d
 
 workspace-refusal-session-finish-arranging-the-workspace-first = Selesaikan pengaturan ruang kerja terlebih dahulu
 
-workspace-refusal-session-finish-previewing-the-layout-first = Selesaikan pratinjau tata letak terlebih dahulu
 
 workspace-refusal-session-finish-previewing-the-workspace-first = Selesaikan pratinjau ruang kerja terlebih dahulu
 
