@@ -2595,6 +2595,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             CommandId::DeleteLayer => idle && self.can_delete_layer_rows(self.selected_layers()),
             CommandId::RaiseLayer | CommandId::LowerLayer => idle && self.layer_step_edit(id == CommandId::RaiseLayer).is_ok(),
+            CommandId::BringToFront | CommandId::BringForward | CommandId::SendBackward | CommandId::SendToBack => idle && self.vector_paths_editable(),
             CommandId::EncloseFill => idle && !matches!(document.working.target, Some(SourceTarget::Coverage(_))),
             CommandId::LassoFill
             | CommandId::Hand | CommandId::Zoom | CommandId::RotateView
@@ -5209,6 +5210,11 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.layer_edit(self.layer_step_edit(command == CommandId::RaiseLayer).map_err(error)?)?;
                 Ok((0, true))
             }
+            CommandId::BringToFront | CommandId::BringForward | CommandId::SendBackward | CommandId::SendToBack => {
+                use layer_core::authored::vector::Arrange;
+                self.arrange_vector_items(match command { CommandId::BringToFront => Arrange::Front, CommandId::BringForward => Arrange::Forward, CommandId::SendBackward => Arrange::Backward, _ => Arrange::Back })?;
+                Ok((0, true))
+            }
             CommandId::FitCanvas | CommandId::FitWidth | CommandId::FillView | CommandId::ZoomSelection
             | CommandId::ActualPixels | CommandId::ZoomIn | CommandId::ZoomOut
             | CommandId::RotateLeft | CommandId::RotateRight | CommandId::ResetRotation | CommandId::ResetView
@@ -5528,6 +5534,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             let guides = matches!(tool, LayerCanvasTool::Ruler { .. }) || (moving && self.selected_ruler().is_some());
             let mixing = tool == LayerCanvasTool::Paint && tool_settings::mixes_color(self.engine.configured_brush());
             let erasing_paths = tool == LayerCanvasTool::Paint && self.vector_erasing_layer(false).is_some();
+            let arranging = moving && self.selected_vector_items().is_some();
             moving
                 .then_some(CommandId::MoveLeaveCopy)
                 .into_iter()
@@ -5535,6 +5542,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 .chain(guides.then_some([CommandId::ShowRulers, CommandId::SnapRulers, CommandId::DeleteRuler]).into_iter().flatten())
                 .chain(mixing.then_some(tool_settings::COLOR_MIXING_COMMANDS).into_iter().flatten())
                 .chain(erasing_paths.then_some(CommandId::EraseWholePaths))
+                .chain(arranging.then_some([CommandId::BringToFront, CommandId::BringForward, CommandId::SendBackward, CommandId::SendToBack]).into_iter().flatten())
                 .map(|command| ToolSettingAction {
                     command,
                     checkable: command.is_toggle(),
@@ -5725,6 +5733,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         let mut regions = regions | if std::mem::take(&mut self.host_requests_changed) { regions::HOST } else { 0 };
         if regions & (regions::COMMANDS | regions::LAYOUT) != 0 && self.refresh_tool_set() {
             regions |= regions::BRUSH;
+        }
+        if regions & (regions::DOCUMENT | regions::BRUSH) != 0 && self.vector_tool_context_changed() {
+            self.refresh_tools();
+            regions |= regions::BRUSH | regions::COMMANDS;
         }
         let canvas_wake=canvas_wake || (regions & (regions::LAYOUT|regions::CUSTOMIZATION)!=0 && self.histogram_visibility_changed());
         if regions & regions::COMMAND_SEARCH != 0 {

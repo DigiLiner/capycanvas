@@ -228,6 +228,12 @@ command-add-layer = Lapisan baru
 command-delete-layer = Hapus lapisan
 
 command-raise-layer = Naikkan lapisan
+command-bring-to-front = Bawa ke depan
+command-bring-forward = Majukan
+command-send-backward = Mundurkan
+command-send-to-back = Kirim ke belakang
+commands-select-paths-on-a-vector-layer = Pilih jalur pada lapisan vektor
+menu-arrange = Atur
 
 command-lower-layer = Turunkan lapisan
 

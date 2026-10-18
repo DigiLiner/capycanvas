@@ -691,7 +691,7 @@ fn command_section(command: CommandId) -> ShortcutSection {
         | C::Deselect | C::InvertSelection | C::RemoveSelectionPoint | C::MaskSelection | C::LoadSelectionLayer
         | C::InvertSelectionLayer | C::GrowSelection | C::ShrinkSelection | C::FeatherSelection | C::BorderSelection
         | C::SmoothSelection | C::TransformSelectionOutline => ShortcutSection::Select,
-        C::AddLayer | C::DeleteLayer | C::RaiseLayer | C::LowerLayer | C::RasterizeSource | C::RasterizeLayer | C::ConvertToObject | C::RepairSourceProfile
+        C::AddLayer | C::DeleteLayer | C::RaiseLayer | C::LowerLayer | C::BringToFront | C::BringForward | C::SendBackward | C::SendToBack | C::RasterizeSource | C::RasterizeLayer | C::ConvertToObject | C::RepairSourceProfile
         | C::UseReferenceBelow | C::CopySelectionToLayer | C::CutSelectionToLayer | C::DiscardPaintEdits | C::InvertLayerMask
         | C::LayerMaskEnabled | C::ApplyLayerMask | C::EditLayerMask | C::EditLayerContent | C::MergeDown | C::MergeGroup
         | C::MergeVisible | C::FlattenImage | C::StampVisible | C::NewDodgeBurnLayer | C::FrequencySeparation => ShortcutSection::Layer,

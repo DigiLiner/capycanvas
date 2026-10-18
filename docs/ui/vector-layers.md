@@ -34,6 +34,11 @@ With **Move** on a vector layer and no pixel selection:
   fully encloses; Shift adds them. A click on empty canvas clears the selection.
 - A dashed box marks the selection's bounds.
 - **Clear Selected** (Delete) removes the selected paths.
+- **Edit > Arrange** and the Move tool options restack the selected paths within
+  their layer: Bring to front, Bring forward, Send backward and Send to back.
+  Forward and backward step a run of selected paths past one neighboring path;
+  unknown content from a newer app version is never stepped over. These commands
+  have no default keys.
 
 A drag commits one translation edit at pen-up. During the drag the moving paths
 draw above the rest of their layer; they return to their place in the layer's
@@ -42,7 +47,8 @@ restored with a session.
 
 ## Tests
 
-`move_tool_selects_drags_and_deletes_vector_paths` and
+`move_tool_selects_drags_and_deletes_vector_paths`,
+`arrange_commands_restack_selected_paths_one_step_at_a_time` and
 `the_eraser_cuts_or_removes_vector_paths_in_one_undo_step` in
 [`vector_line_tests.rs`](../../crates/layer-ui/src/vector_line_tests.rs) cover
 the session rules. The GTK journey `native_vector_draw_move_and_delete` draws two

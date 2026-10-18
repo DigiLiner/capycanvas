@@ -128,6 +128,33 @@ fn move_tool_selects_drags_and_deletes_vector_paths() {
 }
 
 #[test]
+fn arrange_commands_restack_selected_paths_one_step_at_a_time() {
+    let (mut s, layer) = vector_session();
+    for first in [1, 100, 200] { draw_line(&mut s, first, 30); }
+    let order = |s: &UiSession<Recorder>| s.engine.document().scene().vector_layer(layer).unwrap().paths().map(|(_, p)| p.id).collect::<Vec<_>>();
+    let drawn = order(&s);
+    invoke(&mut s, CommandId::Move);
+    assert!(!s.command(CommandId::BringToFront).enabled, "arranging needs selected paths");
+    let object = s.engine.document().scene().vector_layer(layer).unwrap().clone();
+    let at = surface_at(&s, object.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point());
+    press(&mut s, 300, &[at, at]);
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|selection| (*selection.items).clone()), Some([drawn[0]].into()), "a click picks the front path");
+    assert!(s.command(CommandId::BringToFront).enabled);
+    assert!(s.state.tool_actions.iter().any(|action| action.command == CommandId::SendToBack), "the Move tool offers arranging");
+    invoke(&mut s, CommandId::SendBackward);
+    assert_eq!(order(&s), [drawn[1], drawn[0], drawn[2]]);
+    invoke(&mut s, CommandId::SendToBack);
+    assert_eq!(order(&s), [drawn[1], drawn[2], drawn[0]]);
+    invoke(&mut s, CommandId::BringToFront);
+    assert_eq!(order(&s), drawn);
+    invoke(&mut s, CommandId::BringForward);
+    assert_eq!(order(&s), drawn, "the front path stays in front");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(2_000_000_000, 2_000_000_000).unwrap();
+    assert_eq!(order(&s), [drawn[1], drawn[2], drawn[0]], "each arrange is one undo step");
+}
+
+#[test]
 #[ignore = "crowded vector layer session costs"]
 fn crowded_vector_layer_session_costs() {
     use layer_core::authored::vector::*;

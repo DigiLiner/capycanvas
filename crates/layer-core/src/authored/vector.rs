@@ -12,6 +12,9 @@ pub const CHUNK_RECORDS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ItemId(pub u64);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arrange { Front, Forward, Backward, Back }
 impl ItemId {
     pub fn random() -> Self {
         loop {
@@ -650,6 +653,7 @@ impl VectorObject {
         loop { let id = ItemId::random(); if !self.contains(id) { return id; } }
     }
     pub fn insert_front(&self, records: Vec<Record>) -> Self { self.insert(records, true) }
+    pub fn insert_back(&self, records: Vec<Record>) -> Self { self.insert(records, false) }
     fn insert(&self, records: Vec<Record>, front: bool) -> Self {
         if records.is_empty() { return self.clone(); }
         if self.chunks().is_empty() { return Self::from_records(records); }
@@ -662,6 +666,46 @@ impl VectorObject {
         let mut chunks = self.chunks().to_vec();
         if front { chunks.splice(0..0, pack(records)); } else { chunks.extend(pack(records)); }
         Self::from_chunks(chunks)
+    }
+    fn step(&self, position: Position, forward: bool) -> Option<Position> {
+        let (chunk, index) = (position.chunk as usize, position.index as usize);
+        if forward {
+            if index > 0 { return Some(Position { chunk: position.chunk, index: position.index - 1 }); }
+            (0..chunk).rev().find(|c| !self.chunks()[*c].records().is_empty()).map(|c| Position { chunk: c as u32, index: self.chunks()[c].records().len() as u32 - 1 })
+        } else {
+            if index + 1 < self.chunks()[chunk].records().len() { return Some(Position { chunk: position.chunk, index: position.index + 1 }); }
+            (chunk + 1..self.chunks().len()).find(|c| !self.chunks()[*c].records().is_empty()).map(|c| Position { chunk: c as u32, index: 0 })
+        }
+    }
+    pub fn arrange(&self, ids: &BTreeSet<ItemId>, arrange: Arrange) -> Self {
+        let mut selected: Vec<Position> = self.positions(ids).into_iter()
+            .flat_map(|(chunk, indices)| indices.into_iter().map(move |index| Position { chunk: chunk as u32, index: index as u32 })).collect();
+        selected.sort_unstable();
+        let record = |p: Position| self.record(p).cloned().unwrap();
+        let forward = matches!(arrange, Arrange::Front | Arrange::Forward);
+        if matches!(arrange, Arrange::Front | Arrange::Back) {
+            let edge = if forward { self.records().next() } else { self.records().next_back() }.map(|(p, _)| p);
+            let mut packed = edge;
+            let ordered: Vec<Position> = if forward { selected.clone() } else { selected.iter().rev().copied().collect() };
+            if ordered.iter().all(|p| { let at = packed == Some(*p); packed = packed.and_then(|q| self.step(q, !forward)); at }) { return self.clone(); }
+            let moved = selected.iter().map(|p| record(*p)).collect();
+            let removed = self.replace(selected.iter().map(|p| (*p, None)));
+            return if forward { removed.insert_front(moved) } else { removed.insert_back(moved) };
+        }
+        let ordered: Vec<Position> = if forward { selected } else { selected.into_iter().rev().collect() };
+        let mut changes = BTreeMap::new();
+        let mut run: Vec<Position> = Vec::new();
+        for (i, &p) in ordered.iter().enumerate() {
+            run.push(p);
+            if ordered.get(i + 1).is_some_and(|next| self.step(p, !forward) == Some(*next)) { continue; }
+            let block = std::mem::take(&mut run);
+            let Some(jumped) = self.step(block[0], forward).filter(|q| self.record(*q).is_some_and(|r| r.path().is_some())) else { continue };
+            let slots: Vec<Position> = std::iter::once(jumped).chain(block.iter().copied()).collect();
+            let records = block.iter().map(|q| record(*q)).chain([record(jumped)]);
+            changes.extend(slots.into_iter().zip(records));
+        }
+        if changes.is_empty() { return self.clone(); }
+        self.replace(changes.into_iter().map(|(p, r)| (p, Some(r))))
     }
     pub fn replace(&self, changes: impl IntoIterator<Item = (Position, Option<Record>)>) -> Self {
         self.splice(changes.into_iter().map(|(position, record)| (position, record.into_iter().collect())).collect())

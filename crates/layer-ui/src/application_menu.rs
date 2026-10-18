@@ -178,7 +178,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                         [CommandId::PasteInto, CommandId::PasteAsNewImage].map(command).into(),
                     ])]).collect(),
                 [CommandId::FillSelection, CommandId::ClearSelected, CommandId::ClearOutside].map(command).into(),
-                vec![command(CommandId::ScaleRotate), command(CommandId::TransformAgain)],
+                vec![command(CommandId::ScaleRotate), command(CommandId::TransformAgain), ContextMenuItem::submenu(&self.localization().text(MessageId::MENU_ARRANGE), vec![
+                    [CommandId::BringToFront, CommandId::BringForward, CommandId::SendBackward, CommandId::SendToBack].map(command).into(),
+                ])],
                 vec![command(CommandId::SearchCommands), command(CommandId::Settings)],
             ] },
             M::Image => ContextMenu { title: menu.localized_label(self.localization()).to_string(), sections: vec![
@@ -326,7 +328,7 @@ mod tests {
         for platform in [Platform::Gtk, Platform::Web, Platform::Android, Platform::Ios, Platform::Mac, Platform::Windows] {
             let session = session(platform);
             let edit = session.application_menu(ApplicationMenu::Edit);
-            assert_eq!(edit.sections.iter().map(Vec::len).sum::<usize>(), 15);
+            assert_eq!(edit.sections.iter().map(Vec::len).sum::<usize>(), 16);
             assert_eq!(edit.sections[0].iter().map(|item| item.action.clone()).collect::<Vec<_>>(),
                 [CommandId::Undo, CommandId::Redo].map(|command| Some(UiAction::Invoke { command })));
             let mut commands = Vec::new();
@@ -335,7 +337,7 @@ mod tests {
                 assert!(!commands.contains(&command), "{platform:?}: {command:?} belongs outside Edit");
             }
             check(&session, &session.application_menu(ApplicationMenu::Image).sections, &mut commands);
-            assert_eq!(commands.len(), 35, "{platform:?}: all remaining Edit/Image commands survive exactly once");
+            assert_eq!(commands.len(), 39, "{platform:?}: all remaining Edit/Image commands survive exactly once");
         }
     }
 

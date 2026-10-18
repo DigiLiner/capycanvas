@@ -18,6 +18,7 @@ pub(super) struct VectorMoves {
     gesture: Option<Gesture>,
     bounds: RefCell<Option<SelectionBounds>>,
     pub(super) index: VectorIndex,
+    context: (bool, bool),
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
@@ -126,6 +127,22 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.engine.backend_mut().set_vector_motion(None);
         self.layer_interaction.changed = true;
         result
+    }
+    pub(super) fn vector_tool_context_changed(&mut self) -> bool {
+        let context = (self.layer_interaction.tool == LayerCanvasTool::Move && self.selected_vector_items().is_some(), self.vector_erasing_layer(false).is_some());
+        std::mem::replace(&mut self.vector_moves.context, context) != context
+    }
+    pub(super) fn vector_paths_editable(&self) -> bool {
+        self.selected_vector_items().is_some_and(|selection| !self.engine.document().is_locked(selection.layer))
+    }
+    pub(super) fn arrange_vector_items(&mut self, arrange: layer_core::authored::vector::Arrange) -> Result<(), String> {
+        let Some(selection) = self.selected_vector_items().cloned() else { return Ok(()) };
+        let doc = self.engine.document();
+        let object = doc.scene().vector_layer(selection.layer).ok_or("The vector layer was removed")?;
+        let arranged = object.arrange(&selection.items, arrange);
+        if arranged.same_root(object) { return Ok(()); }
+        let edit = doc.vector_object_edit(selection.layer, arranged).map_err(|e| e.to_string())?;
+        self.layer_edit(edit)
     }
     pub(super) fn delete_selected_vector_items(&mut self) -> Result<bool, String> {
         let Some(selection) = self.selected_vector_items().cloned() else { return Ok(false) };

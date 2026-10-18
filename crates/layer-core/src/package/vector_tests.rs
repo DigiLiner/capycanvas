@@ -546,6 +546,37 @@ fn seeded_edit_scripts_keep_unknown_data_by_its_rules_and_never_reissue_ids() {
     }
 }
 
+#[test]
+fn arranging_paths_moves_them_in_stacking_order_and_rewrites_only_their_chunks() {
+    let object = VectorObject::from_records((1..=200).map(|i| Record::Path(plain_line(i, [i as f64, 0.], [i as f64, 9.], 1.))).collect());
+    let order = |object: &VectorObject| object.paths().map(|(_, p)| p.id.0).collect::<Vec<_>>();
+    let ids = |list: &[u64]| list.iter().copied().map(ItemId).collect::<BTreeSet<_>>();
+    let same = |a: &VectorObject, b: &VectorObject| a.chunks().iter().zip(b.chunks()).filter(|(x, y)| Arc::ptr_eq(x.storage(), y.storage())).count();
+
+    let front = object.arrange(&ids(&[150, 5]), Arrange::Front);
+    assert_eq!(order(&front)[..3], [5, 150, 1], "selected paths keep their relative order at the front");
+    assert_eq!(order(&front).len(), 200);
+    assert!(front.arrange(&ids(&[150, 5]), Arrange::Front).same_root(&front), "already in front is unchanged");
+    let back = object.arrange(&ids(&[150, 5]), Arrange::Back);
+    assert_eq!(order(&back)[197..], [200, 5, 150]);
+    assert!(back.arrange(&ids(&[150, 5]), Arrange::Back).same_root(&back));
+
+    let forward = object.arrange(&ids(&[10, 11, 70]), Arrange::Forward);
+    assert_eq!(order(&forward)[7..12], [8, 10, 11, 9, 12], "a run moves past one path");
+    assert_eq!(order(&forward)[67..71], [68, 70, 69, 71]);
+    assert!(same(&object, &forward) >= object.chunks().len() - 3, "only the touched chunks change");
+    let backward = object.arrange(&ids(&[64, 65, 200]), Arrange::Backward);
+    assert_eq!(order(&backward)[62..67], [63, 66, 64, 65, 67], "a run crossing a chunk boundary moves together");
+    assert_eq!(order(&backward)[199], 200, "the last path cannot move further back");
+    assert!(object.arrange(&ids(&[1]), Arrange::Forward).same_root(&object), "the front path cannot move further forward");
+
+    let opaque = Record::Opaque(OpaqueRecord { kind: 999 << 4 | IGNORABLE, id: 900, properties: Arc::from([]) });
+    let walled = VectorObject::from_records(vec![Record::Path(plain_line(1, [0., 0.], [1., 1.], 1.)), opaque, Record::Path(plain_line(2, [0., 0.], [1., 1.], 1.))]);
+    assert!(walled.arrange(&ids(&[2]), Arrange::Forward).same_root(&walled), "unknown records are not stepped over");
+    assert_eq!(order(&walled.arrange(&ids(&[2]), Arrange::Front)), [2, 1]);
+    walled.arrange(&ids(&[2]), Arrange::Front).validate().unwrap();
+}
+
 fn ink(id: u64, anchors: Vec<Anchor>, closed: bool, profile: Option<WidthProfile>) -> PathItem {
     let mut stroke = Stroke::new(color(0.2), 8.);
     (stroke.cap, stroke.join, stroke.profile) = (Cap::Round, Join::Round, profile.map(Arc::new));
