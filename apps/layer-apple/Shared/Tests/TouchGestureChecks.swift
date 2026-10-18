@@ -28,9 +28,9 @@ extension XCTestCase {
             XCTAssertTrue(app.buttons["settings-done"].waitForNonExistence(timeout: 10))
         }
         #if os(iOS)
-        canvas.twoFingerTap()
+        withHiddenChrome(in: app) { canvas.twoFingerTap() }
         expectPixels(paper, in: app)
-        canvas.tap(withNumberOfTaps: 1, numberOfTouches: 3)
+        withHiddenChrome(in: app) { canvas.tap(withNumberOfTaps: 1, numberOfTouches: 3) }
         expectPixels(painted, in: app)
         attachEditor(in: app, name: "touch-taps")
 
@@ -44,7 +44,7 @@ extension XCTestCase {
         XCTAssertTrue(nothing.waitForNonExistence(timeout: 10))
         attachEditor(in: app, name: "touch-tap-nothing")
         closeSettings()
-        canvas.twoFingerTap()
+        withHiddenChrome(in: app) { canvas.twoFingerTap() }
         Thread.sleep(forTimeInterval: 1)
         expectPixels(painted, in: app)
 
@@ -55,7 +55,7 @@ extension XCTestCase {
         workspaceActivate(reset)
         XCTAssertTrue(reset.waitForNonExistence(timeout: 10))
         closeSettings()
-        canvas.twoFingerTap()
+        withHiddenChrome(in: app) { canvas.twoFingerTap() }
         expectPixels(paper, in: app)
         #else
         openInputSettings()

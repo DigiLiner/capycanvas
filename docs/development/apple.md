@@ -759,9 +759,10 @@ cancellation and exact Undo/Redo pixels in both themes.
 - **Accessible geometry.** iOS container frames are the union of their children;
   do not reuse macOS width expectations. Open editor menus hide their buttons
   from queries: close using the recorded button frame and reveal scrolled rows.
-- **Two-finger input.** Whole-canvas XCTest pinches can begin in the header.
-  Use the visible Capy control to enter Zen during each gesture, then return to
-  read the camera and check artwork history. Diagnose delivery from actual UIKit
+- **Two-finger input.** Whole-canvas XCTest pinches and multi-finger taps can
+  place a finger on the header or panels. Run each one in `withHiddenChrome`,
+  which enters Zen through the visible Capy control, then return to read the
+  camera and check artwork history. Diagnose delivery from actual UIKit
   touch locations in the scene's orientation. Supplied pinch contacts must move
   beyond native tap slop; smaller movements can correctly restore the starting
   view and run the configured multi-finger tap action.

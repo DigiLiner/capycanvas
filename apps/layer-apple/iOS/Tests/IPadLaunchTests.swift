@@ -130,16 +130,6 @@ extension EditorLaunchTests {
         XCTAssertFalse(app.staticTexts["Canvas error"].exists)
     }
 
-    @MainActor private func navigateCanvas(in app: XCUIApplication, _ action: () -> Void) {
-        let capy = app.descendants(matching: .any)["zen-button"].firstMatch
-        let status = app.buttons["camera-status"]
-        workspaceActivate(capy)
-        XCTAssertTrue(status.waitForNonExistence(timeout: 5))
-        action()
-        workspaceActivate(capy)
-        XCTAssertTrue(status.waitForExistence(timeout: 5))
-    }
-
     @MainActor private func checkNativeDrawingLifecycleStress(theme: String) throws {
         guard let storage = ProcessInfo.processInfo.environment["CAPY_UI_DRAWING_STORAGE_" + theme.uppercased()] else {
             throw XCTSkip("Seed an owned Release G-Pen session into private app storage before this test")
@@ -153,7 +143,7 @@ extension EditorLaunchTests {
         let camera = app.buttons["camera-status"]
         XCTAssertTrue(camera.waitForExistence(timeout: 10))
         let originalCamera = camera.label
-        navigateCanvas(in: app) { canvas.pinch(withScale: 1.4, velocity: 1) }
+        withHiddenChrome(in: app) { canvas.pinch(withScale: 1.4, velocity: 1) }
         expectation(for: NSPredicate { _, _ in camera.label != originalCamera }, evaluatedWith: camera)
         waitForExpectations(timeout: 15)
         editorMenu(in: app, menu: "View", id: "fit_canvas", label: "Fit canvas")
@@ -286,11 +276,11 @@ extension EditorLaunchTests {
 
         // XCTest injects two actual UIKit contacts into the editor canvas.
         // These are native delivery checks, not physical finger/sensor evidence.
-        navigateCanvas(in: app) { canvas.pinch(withScale: 1.6, velocity: 1) }
+        withHiddenChrome(in: app) { canvas.pinch(withScale: 1.6, velocity: 1) }
         expectation(for: NSPredicate { _, _ in camera().zoom > original.zoom * 5 / 4 }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         let enlarged = camera()
-        navigateCanvas(in: app) { canvas.rotate(.pi / 6, withVelocity: .pi / 2) }
+        withHiddenChrome(in: app) { canvas.rotate(.pi / 6, withVelocity: .pi / 2) }
         expectation(for: NSPredicate { _, _ in abs(camera().rotation - enlarged.rotation) >= 20 }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         XCTAssertLessThanOrEqual(abs(camera().rotation - enlarged.rotation), 40)
@@ -298,7 +288,7 @@ extension EditorLaunchTests {
 
         // A fresh pair must work after the preceding contacts have ended.
         let rotated = camera()
-        navigateCanvas(in: app) { canvas.pinch(withScale: 0.7, velocity: -1) }
+        withHiddenChrome(in: app) { canvas.pinch(withScale: 0.7, velocity: -1) }
         expectation(for: NSPredicate { _, _ in camera().zoom < rotated.zoom * 4 / 5 }, evaluatedWith: status)
         waitForExpectations(timeout: 10)
         XCTAssertEqual(viewport.frame, originalFrame, "Navigation must leave the OS window fixed")
@@ -622,5 +612,17 @@ extension EditorLaunchTests {
         cell.press(forDuration: 0.8)
         workspaceActivate(files.buttons["Delete"].firstMatch)
         XCTAssertTrue(cell.waitForNonExistence(timeout: 10))
+    }
+}
+
+extension XCTestCase {
+    @MainActor func withHiddenChrome(in app: XCUIApplication, _ action: () -> Void) {
+        let capy = app.descendants(matching: .any)["zen-button"].firstMatch
+        let status = app.buttons["camera-status"]
+        workspaceActivate(capy)
+        XCTAssertTrue(status.waitForNonExistence(timeout: 5))
+        action()
+        workspaceActivate(capy)
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
     }
 }
