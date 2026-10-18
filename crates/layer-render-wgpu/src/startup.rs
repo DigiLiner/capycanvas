@@ -155,34 +155,16 @@ impl Requirements {
         }
         let plan = BrushPassPlan::for_device(style, &r.device);
         if dry_material::dry_material_compute_eligible(style) && plan.direct.is_none() {
-            let pipelines = &r.pipelines;
-            let committed = pipelines.dry_in_place.as_ref().filter(|_| plan.requires_destination());
-            let contribution = preview && dry_material::contribution_possible(style);
-            if plan.material == MaterialOperation::Deposit && dry_material::dry_flow(style) {
-                if preview || (committed.is_none() && !plan.state.coverage) {
-                    self.compute.push(pipelines.dry_material.copy_kernel(false).clone());
-                }
-                if contribution {
-                    for display in std::iter::once(&pipelines.dry_display).chain(&pipelines.dry_display_tracked) {
-                        self.compute.push(display.copy_kernel(true).clone());
-                    }
-                }
+            let pipelines = &r.pipelines.dry_material;
+            if plan.material == MaterialOperation::Deposit && dry_material::dry_flow(style)
+                && (preview || (!pipelines.in_place() && !plan.state.coverage)) {
+                self.compute.push(pipelines.copy_kernel().clone());
             }
+            if preview { self.compute.push(pipelines.gather_kernel().clone()); }
             for extra in reach.batch_variants(style) {
-                let kernel = |kernels: &dry_material::Pipelines, coverage, extra| kernels.selected_kernel(style, plan.material, coverage, extra).clone();
-                self.compute.push(kernel(committed.unwrap_or(&pipelines.dry_material), plan.state.coverage, extra));
-                if let Some(tracked) = pipelines.dry_tracked.as_ref().filter(|_| committed.is_some()) {
-                    self.compute.push(kernel(tracked, plan.state.coverage, extra));
-                }
-                if preview {
-                    self.compute.extend([kernel(&pipelines.dry_material, plan.state.coverage, extra), kernel(&pipelines.dry_material, false, extra)]);
-                    if dry_material::display_preview_eligible(style) { self.compute.push(kernel(&pipelines.dry_display, false, extra)); }
-                    if contribution {
-                        for display in std::iter::once(&pipelines.dry_display).chain(&pipelines.dry_display_tracked) {
-                            self.compute.push(kernel(display, false, dry_material::CONTRIBUTION | extra));
-                        }
-                    }
-                }
+                let kernel = |coverage| pipelines.selected_kernel(style, plan.material, coverage, extra).clone();
+                self.compute.push(kernel(plan.state.coverage));
+                if preview { self.compute.push(kernel(false)); }
             }
         }
         if let Some(kind) = plan.direct {
@@ -250,7 +232,6 @@ struct ShaderBrushKey {
     erase: BrushPassPlan,
     dry_material: u32,
     reach: dry_material::Reach,
-    contribution: bool,
 }
 fn brush_style(document: &Document, brush: &BrushSnapshot, tool: StrokeTool) -> layer_render::DabStyle {
     let mut style = layer_render::DabStyle::for_brush(brush, tool);
@@ -272,7 +253,6 @@ impl ShaderBrushKey {
             dry_material: dry_material::contact_flags(style.contact)
                 | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 },
             reach: dry_material::Reach::of(brush),
-            contribution: dry_material::contribution_possible(&brush_style(document, brush, StrokeTool::Brush)),
         }
     }
 }
@@ -970,23 +950,21 @@ mod gpu_tests {
             let style=layer_render::DabStyle {blend_space:document.composition().blend,..layer_render::DabStyle::for_brush(&brush,StrokeTool::Brush)};
             let plan=BrushPassPlan::for_device(&style,&renderer.device);
             assert!(plan.direct.is_none() && plan.material==MaterialOperation::Deposit);
-            let p=&renderer.pipelines;
-            let committed=p.dry_in_place.as_ref().filter(|_|plan.requires_destination()).unwrap_or(&p.dry_material);
+            let p=&renderer.pipelines.dry_material;
             for extra in dry_material::Reach::of(&brush).batch_variants(&style) {
-                assert!(committed.selected_kernel(&style,plan.material,plan.state.coverage,extra).ready(),"{preset:?} commit variant {extra:#x} is ready");
-                assert!(p.dry_material.selected_kernel(&style,plan.material,false,extra).ready(),"{preset:?} prediction variant {extra:#x} is ready");
-                assert!(p.dry_display.selected_kernel(&style,plan.material,false,dry_material::CONTRIBUTION | extra).ready(),
-                    "{preset:?} display contribution {extra:#x} is ready");
+                assert!(p.selected_kernel(&style,plan.material,plan.state.coverage,extra).ready(),"{preset:?} commit variant {extra:#x} is ready");
+                assert!(p.selected_kernel(&style,plan.material,false,extra).ready(),"{preset:?} prediction variant {extra:#x} is ready");
             }
+            assert!(p.gather_kernel().ready(),"{preset:?} display input gather is ready");
             if brush.contact.is_some_and(|c|c.dry.is_some()) {
-                assert!(p.dry_material.copy_kernel(false).ready() && p.dry_display.copy_kernel(true).ready());
+                assert!(p.copy_kernel().ready());
             }
         }
     }
 
     #[test]
     fn dry_brushes_prepare_only_the_variants_their_strokes_can_select() {
-        use dry_material::{AGGREGATE, CONTRIBUTION, FINE_TIP};
+        use dry_material::{AGGREGATE, FINE_TIP};
         let color = layer_core::color::DocumentColor::default();
         let reference = WgpuRasterizer::new_native_headless(color).unwrap();
         let mut renderer = crate::test_support::staged_renderer(&reference, color);
@@ -996,20 +974,16 @@ mod gpu_tests {
         let style = layer_render::DabStyle { blend_space: document.composition().blend, ..layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush) };
         let plan = BrushPassPlan::for_device(&style, &renderer.device);
         let ready = |renderer: &WgpuRasterizer, extra: u32| {
-            let p = &renderer.pipelines;
-            let committed = p.dry_in_place.as_ref().unwrap_or(&p.dry_material);
-            [committed.selected_kernel(&style, plan.material, plan.state.coverage, extra),
-                p.dry_material.selected_kernel(&style, plan.material, false, extra)].iter().all(|k| k.ready())
+            let p = &renderer.pipelines.dry_material;
+            [p.selected_kernel(&style, plan.material, plan.state.coverage, extra),
+                p.selected_kernel(&style, plan.material, false, extra)].iter().all(|k| k.ready())
         };
         renderer.shader_idle(false, false);
         renderer.prepare_startup(&document, &brush, false).unwrap();
         crate::test_support::wait_startup(&mut renderer, deadline, |p| p.brush_ready, format_args!("small Pencil"));
         assert!(ready(&renderer, AGGREGATE | FINE_TIP));
-        assert!(renderer.pipelines.dry_display.selected_kernel(&style, plan.material, false, CONTRIBUTION | AGGREGATE | FINE_TIP).ready());
         assert!(!ready(&renderer, AGGREGATE), "a small tip never selects the coarse kernel");
         assert!(!ready(&renderer, FINE_TIP), "single-pigment strokes never select the mixed-pigment kernel");
-        assert!(!renderer.pipelines.dry_display.selected_kernel(&style, plan.material, false, AGGREGATE | FINE_TIP).ready(),
-            "dry previews reach the display only as contributions");
         let mut any_size = Requirements::default();
         for tool in [StrokeTool::Brush, StrokeTool::Eraser] {
             let style = layer_render::DabStyle { blend_space: document.composition().blend, ..brush_style(&document, &brush, tool) };
@@ -1031,7 +1005,7 @@ mod gpu_tests {
         renderer.prepare_startup(&document, &brush, false).unwrap();
         crate::test_support::wait_startup(&mut renderer, deadline, |p| p.brush_ready, format_args!("selected Pencil"));
         let selected = layer_render::DabStyle { selection: document.working.selection.clone().map(Arc::new), ..style.clone() };
-        let committed = renderer.pipelines.dry_in_place.as_ref().unwrap_or(&renderer.pipelines.dry_material);
+        let committed = &renderer.pipelines.dry_material;
         assert!([FINE_TIP, 0].into_iter().all(|extra| committed.selected_kernel(&selected, plan.material, plan.state.coverage, extra).ready()),
             "a selection clips each dab, so its strokes use the mixed-pigment kernels");
         drop(renderer);
@@ -1053,7 +1027,7 @@ mod gpu_tests {
             let style = layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush);
             let pipelines = &renderer.pipelines;
             let prediction = pipelines.dry_material.selected_kernel(&style, MaterialOperation::Clone, false,0);
-            let commit = pipelines.dry_in_place.as_ref().unwrap_or(&pipelines.dry_material).selected_kernel(&style, MaterialOperation::Clone, true,0);
+            let commit = pipelines.dry_material.selected_kernel(&style, MaterialOperation::Clone, true,0);
             assert!(prediction.ready() && commit.ready(), "{preset:?} commit and prediction kernels are ready before input");
         }
     }

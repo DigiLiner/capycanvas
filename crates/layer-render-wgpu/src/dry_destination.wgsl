@@ -1,6 +1,23 @@
 // Prediction evaluates the existing contact/coverage model at display texel
 // centres. Its starting paint and stroke coverage average the same footprint.
 // This is a presentation approximation; exact queries replay the retained tail.
+@group(0) @binding(4) var display_original: texture_storage_2d<rgba32float, write>;
+@group(0) @binding(5) var display_coverage: texture_storage_2d<r32float, write>;
+@group(0) @binding(6) var display_start: texture_storage_2d<rgba32float, write>;
+
+fn dry_texel(p: vec2<i32>) -> vec2<i32> {
+    return p >> vec2<u32>(countTrailingZeros(style.operation.z));
+}
+fn sampled_original(p: vec2<i32>) -> vec4<f32> {
+    if style.flags.w > 1.5 { return vec4<f32>(0.); }
+    return textureLoad(source_11, dry_texel(p), 0);
+}
+fn dry_coverage(p: vec2<i32>) -> f32 {
+    return textureLoad(stroke_coverage_texture, dry_texel(p), 0).r;
+}
+fn dry_stroke_start(p: vec2<i32>) -> vec4<f32> {
+    return textureLoad(reservoir_texture, dry_texel(p), 0);
+}
 
 fn preview_origin(p: vec2<i32>) -> vec2<i32> {
     let side = i32(style.operation.z);
@@ -25,13 +42,13 @@ fn preview_average(source: texture_2d<f32>, p: vec2<i32>) -> vec4<f32> {
     }
     return sum / f32(max(size.x * size.y, 1));
 }
-fn dry_original(p: vec2<i32>) -> vec4<f32> {
-    if MATERIAL_PREVIEW_CONTRIBUTION {return vec4(0.);}
-    return preview_average(source_11, p);
-}
-fn dry_coverage(p: vec2<i32>) -> f32 {
-    return preview_average(stroke_coverage_texture, p).r;
-}
-fn dry_stroke_start(p: vec2<i32>) -> vec4<f32> {
-    return preview_average(reservoir_texture,p);
+
+@compute @workgroup_size(32, 2)
+fn gather_display(@builtin(global_invocation_id) id: vec3<u32>) {
+    if any(id.xy >= vec2<u32>(256u / style.operation.z)) { return; }
+    let p = vec2<i32>(id.xy * style.operation.z);
+    let texel = vec2<i32>(id.xy);
+    if style.flags.w < 1.5 { textureStore(display_original, texel, preview_average(source_11, p)); }
+    textureStore(display_coverage, texel, vec4<f32>(preview_average(stroke_coverage_texture, p).r, 0., 0., 1.));
+    textureStore(display_start, texel, preview_average(reservoir_texture, p));
 }

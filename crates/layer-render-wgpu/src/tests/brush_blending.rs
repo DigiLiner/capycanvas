@@ -177,7 +177,7 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                         dab.radii = [200.; 2]; dab.contact = [0.7, 0., 0., 0.]; dab.previous_contact = dab.contact;
                         dab
                     }).collect();
-                let batch = DabBatch { dab_count: dabs.len() as u32,
+                let batch = DabBatch { dab_count: dabs.len() as u32, kind: DabBatchKind::Preview,
                     ..crate::test_support::dab_batch(canvas.base, style, Rect::from_extent(EXTENT)) };
                 let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
                 r.prepare_uploads(FramePacket { dabs: &dabs, dab_batches: std::slice::from_ref(&batch),
@@ -196,12 +196,13 @@ fn dry_flow_batch_dose_matches_ordered_contacts_and_closed_form() {
                 let sources = create_material_bind_group(&r.device, &r.material_layout, &[&base.view; 9],
                     &r.dab_buffer, &r.empty_scalar_view, &r.empty_view,
                     wgpu::BindingResource::Buffer(r.dry_records.binding()));
-                let binding = r.pipelines.dry_material.output(r, &output, None, canvas.base, [0; 2]);
+                let binding = r.pipelines.dry_material.output(r, &output, None, None);
                 let mut rendered = Vec::new();
                 for reference in [false, true] {
                     if reference { record[marker..marker+4].copy_from_slice(&0f32.to_ne_bytes()); }
                     r.queue.write_buffer(&r.style_buffer, 0, &record);
                     let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+                    base.copy_to(&output, &mut encoder);
                     { let mut pass = encoder.begin_compute_pass(&Default::default());
                         pass.set_pipeline(r.pipelines.dry_material.selected_kernel(&batch.style, MaterialOperation::Deposit, false, if enabled && !reference {8192} else {0}));
                         pass.set_bind_group(0, &binding, &[0]);
@@ -356,27 +357,26 @@ fn cropped_dry_dispatch_preserves_every_untouched_hdr_pixel() {
         }),..Default::default()});
         let mut dab=test_dab([64.5;2],source_color,0.2);
         dab.radii=[200.;2];dab.contact=[0.7,0.,0.,0.];dab.previous_contact=dab.contact;
-        let batch=crate::test_support::dab_batch(canvas.base,style,dirty.to_rect());
-        let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        r.prepare_uploads(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),
-            ..packet(canvas.document.scene(),EXTENT)},&mut [Vec::new()],&mut encoder).unwrap();
-        r.prepare_dry_records(&batch,std::iter::once((dirty,0..1,[0;16])),&mut encoder).unwrap();
-        r.ensure_texture_set(&batch.style).unwrap();
-        r.uploads.finish(&encoder);encoder.submit(&r.queue);
-        r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],EXTENT,EXTENT)));
         for inplace in [false,true] {
+            let mut batch=crate::test_support::dab_batch(canvas.base,style.clone(),dirty.to_rect());
+            if !inplace {batch.kind=DabBatchKind::Preview;}
+            let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            r.prepare_uploads(FramePacket {dabs:std::slice::from_ref(&dab),dab_batches:std::slice::from_ref(&batch),
+                ..packet(canvas.document.scene(),EXTENT)},&mut [Vec::new()],&mut encoder).unwrap();
+            r.prepare_dry_records(&batch,std::iter::once((dirty,0..1,[0;16])),&mut encoder).unwrap();
+            r.ensure_texture_set(&batch.style).unwrap();
+            r.uploads.finish(&encoder);encoder.submit(&r.queue);
+            r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],EXTENT,EXTENT)));
+            assert_eq!(r.in_place_dry_material(&batch),inplace,"reference hardware supports in-place storage");
             let stale:Vec<_>=(0..PAGE_SIZE*PAGE_SIZE).flat_map(|_|[9f32,-7.,3.,0.9].into_iter().flat_map(f32::to_le_bytes)).collect();
             crate::test_support::upload_page(r,&output.texture,if inplace {&bytes} else {&stale});
             let source=if underpaint==[0.;4] {&r.empty_view} else {&base.view};
             let sources=create_material_bind_group(&r.device,&r.material_layout,&[source;9],&r.dab_buffer,
                 &r.empty_scalar_view,&r.empty_view,wgpu::BindingResource::Buffer(r.dry_records.binding()));
-            let kernels=if inplace {r.pipelines.dry_in_place.as_ref().expect("reference hardware supports in-place storage")}
-                else {&r.pipelines.dry_material};
-            let binding=kernels.output(r,&output,None,canvas.base,[0;2]);
+            let job=crate::dry_material::Job {output:r.pipelines.dry_material.output(r,&output,None,None),source:sources,display:None,
+                coordinate:[0;2],coverage:false,record_offset:0,dirty};
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-            let in_place_pipelines=if inplace {None} else {r.pipelines.dry_in_place.take()};
-            r.encode_dry_material_jobs(&mut encoder,0,&batch,&[(binding,sources,[0;2],false,0,false,dirty)]);
-            if let Some(pipelines)=in_place_pipelines {r.pipelines.dry_in_place=Some(pipelines);}
+            r.encode_dry_material_jobs(&mut encoder,0,&batch,&[job]);
             encoder.submit(&r.queue);
             let actual=crate::test_support::float_pixels(r,&output.texture);
             let remaining=(-6f64*f64::from(dab.flow)*f64::from(source_color[3])).exp();
@@ -433,9 +433,11 @@ fn cropped_display_restores_hdr_blocks_at_partial_document_edges() {
         },output.texture.size());
         let sources=create_material_bind_group(&r.device,&r.material_layout,&[&base.view;9],&r.dab_buffer,
             &r.empty_scalar_view,&r.empty_view,wgpu::BindingResource::Buffer(r.dry_records.binding()));
-        let binding=r.pipelines.dry_display.output(r,&output,None,canvas.base,[0;2]);
+        let output_binding=r.pipelines.dry_material.output(r,&output,None,None);
+        let display=crate::test_support::dry_display(r,&batch,[&base.view;9],&output);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-        r.encode_dry_material_jobs(&mut encoder,0,&batch,&[(binding,sources,[0;2],false,0,false,dirty)]);
+        r.encode_dry_material_jobs(&mut encoder,0,&batch,&[crate::dry_material::Job {output:output_binding,source:sources,display,coordinate:[0;2],
+            coverage:false,record_offset:0,dirty}]);
         encoder.submit(&r.queue);
         let actual=crate::test_support::float_pixels(r,&output.texture);
         let remaining=(-6f64*f64::from(dab.flow)*f64::from(color[3])).exp();
@@ -487,7 +489,7 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
         if let Some(d)=style.contact.unwrap().dry {let v=d.pose(0.2).relief;let old=d.pose(0.7).relief;
             dab.contact=[0.73,v[0],v[1],v[2]];dab.previous_contact=[0.41,old[0],old[1],old[2]];}
         canvas.paint(canvas.base,style.clone(),dab);
-        let batch=crate::test_support::dab_batch(canvas.base,style.clone(),Rect {min:Point{x:0.,y:0.},max:Point{x:extent[0] as f32,y:512.}});
+        let batch=DabBatch {kind:DabBatchKind::Preview,..crate::test_support::dab_batch(canvas.base,style.clone(),Rect {min:Point{x:0.,y:0.},max:Point{x:extent[0] as f32,y:512.}})};
         let r=&mut canvas.r;let base=r.create_page_surface("independent zero source");let output=r.create_page_surface("uncropped oracle");
         crate::test_support::upload_page(r,&base.texture,&vec![0;256*256*16]);
         let coordinates:Vec<_>=if large {(62..64).flat_map(|x|(0..2).map(move|y|[x,y])).collect()}
@@ -506,8 +508,9 @@ fn independent_full_page_dispatch_preserves_contact_hull_pixels() {
         for (i,coord) in coordinates.iter().enumerate() {
             r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([coord[0]*256,coord[1]*256],extent,extent)));
             let sources=create_material_bind_group(&r.device,&r.material_layout,&[&base.view;9],&r.dab_buffer,&r.empty_scalar_view,&r.empty_view,wgpu::BindingResource::Buffer(r.dry_records.binding()));
-            let kernels=&r.pipelines.dry_material;let binding=kernels.output(r,&output,None,canvas.base,*coord);
+            let kernels=&r.pipelines.dry_material;let binding=kernels.output(r,&output,None,None);
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+            base.copy_to(&output,&mut encoder);
             {let mut pass=encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {label:Some("full independent page"),timestamp_writes:None});
                 pass.set_pipeline(kernels.selected_kernel(&style,MaterialOperation::Deposit,false,if aggregate {8192}else{0}|if fine{16384}else{0}));
                 pass.set_bind_group(0,&binding,&[0]);pass.set_bind_group(1,r.paint_target_binding(&style),&[0]);pass.set_bind_group(2,&sources,&[0]);
@@ -919,9 +922,11 @@ fn partial_analytic_display_averages_current_and_stroke_start_over_the_same_foot
                 r.queue.write_buffer(&r.target_buffer,0,target_bytes(&TargetGpu::new([0;2],extent,extent)));
                 let size=[PAGE_SIZE/block;2];let output=create_page_surface(&r.device,&r.float_texture_layout,&r.sampler,size,r.device.working_format(),"partial display reference output");
                 let sources=create_material_bind_group(&r.device,&r.material_layout,&[&current.view;9],&r.dab_buffer,&r.empty_scalar_view,&background.view,wgpu::BindingResource::Buffer(r.dry_records.binding()));
-                let binding=if block==1 {r.pipelines.dry_material.output(r,&output,None,canvas.base,[0;2])} else {r.pipelines.dry_display.output(r,&output,None,canvas.base,[0;2])};
+                let binding=r.pipelines.dry_material.output(r,&output,None,None);
+                let display=crate::test_support::dry_display(r,&batch,[&current.view;9],&output);
                 let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-                r.encode_dry_material_jobs(&mut encoder,0,&batch,&[(binding,sources,[0;2],false,0,false,PixelRect::full(extent))]);encoder.submit(&r.queue);
+                r.encode_dry_material_jobs(&mut encoder,0,&batch,&[crate::dry_material::Job {output:binding,source:sources,display,coordinate:[0;2],
+                    coverage:false,record_offset:0,dirty:PixelRect::full(extent)}]);encoder.submit(&r.queue);
                 let actual=crate::test_support::float_pixels(r,&output.texture);
                 for y in 0..size[1] {for x in 0..size[0] {
                     let start=[x*block,y*block];let end=[(start[0]+block).min(extent[0]),(start[1]+block).min(extent[1])];

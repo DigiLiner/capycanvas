@@ -2,55 +2,69 @@
 //! evaluator together instead of opening a render pass for every page.
 use super::*;
 
-pub(super) type Job = (wgpu::BindGroup, wgpu::BindGroup, [u32; 2], bool, u32, bool, PixelRect);
+pub(super) struct Job {
+    pub output: wgpu::BindGroup,
+    pub source: wgpu::BindGroup,
+    pub display: Option<DisplayJob>,
+    pub coordinate: [u32; 2],
+    pub coverage: bool,
+    pub record_offset: u32,
+    pub dirty: PixelRect,
+}
+
+impl Job {
+    fn inputs(&self) -> &wgpu::BindGroup {
+        self.display.as_ref().map_or(&self.source, |display| &display.inputs)
+    }
+}
+
+/// A reduced-resolution prediction first averages its page inputs into a
+/// display-input set, then evaluates against those averages.
+pub(super) struct DisplayJob {
+    pub gather: wgpu::BindGroup,
+    pub inputs: wgpu::BindGroup,
+}
 
 pub(super) const FINE_TIP_RADIUS: f32 = 8.;
-pub(super) const CONTRIBUTION: u32 = 1024;
+pub(super) const DISPLAY_INPUT_SETS: usize = 8;
 pub(super) const AGGREGATE: u32 = 8192;
 pub(super) const FINE_TIP: u32 = 16384;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Target { Exact, InPlace, Tracked, Display, DisplayTracked }
-
-fn shader_destination(target: Target) -> String {
-    if matches!(target,Target::Display|Target::DisplayTracked) {
-        let access=if target==Target::DisplayTracked {"read_write"} else {"write"};
-        let compare=if target==Target::DisplayTracked {
-            "if any(bitcast<vec4<u32>>(textureLoad(material_color_output,vec2<i32>(pixel)))!=bitcast<vec4<u32>>(color)) {mark_changed_cell(pixel*style.operation.z);}"
-        } else {""};
-        return format!("@group(0) @binding(1) var material_color_output:texture_storage_2d<rgba32float,{access}>;\n{}\nfn store_display_color(pixel:vec2<u32>,color:vec4<f32>) {{ {compare} textureStore(material_color_output,vec2<i32>(pixel),color); }}",include_str!("dry_preview.wgsl"));
-    }
-    let in_place = matches!(target, Target::InPlace | Target::Tracked);
-    let access = if in_place { "read_write" } else { "write" };
-    let original = if in_place { "material_color_output, p" } else { "source_11, p, 0" };
-    format!("
-        @group(0) @binding(1) var material_color_output: texture_storage_2d<rgba32float, {access}>;
-        fn dry_original(p: vec2<i32>) -> vec4<f32> {{ return textureLoad({original}); }}
-        fn dry_coverage(p: vec2<i32>) -> f32 {{ return textureLoad(stroke_coverage_texture, p, 0).r; }}
-        fn dry_stroke_start(p: vec2<i32>) -> vec4<f32> {{ return textureLoad(reservoir_texture,p,0); }}
-        fn store_display_color(pixel:vec2<u32>,color:vec4<f32>) {{textureStore(material_color_output,vec2<i32>(pixel),color);}}")
-}
-
-pub(super) fn shader(device: &PipelineDevice, target: Target) -> Deferred<wgpu::ShaderModule> {
+pub(super) fn shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule> {
     let device = device.clone();
     Deferred::new(move || {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("layer destination brush shader"),
-            source: wgpu::ShaderSource::Wgsl(shader_source(device.working_space(), device.float_sampling_wgsl(), target, include_str!("material_brush.wgsl"))),
+            source: wgpu::ShaderSource::Wgsl(shader_source(device.working_space(), device.float_sampling_wgsl(), include_str!("material_brush.wgsl"))),
         })
     })
 }
 
-pub(super) fn shader_source(space: layer_core::color::RgbSpace, float_sampling: &str, target: Target, material: &str) -> Cow<'static, str> {
-    let tracking = if matches!(target,Target::Tracked|Target::DisplayTracked) {
-        concat!(include_str!("changed_cells.wgsl"), "\n@group(0) @binding(3) var<storage,read_write> changed_cells:ChangedCells;")
-    } else { "fn mark_changed_cell(pixel:vec2<u32>) {}" };
+/// Where a dry kernel finds each texel's starting paint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Start {
+    /// In the output texel, which the kernel reads and updates in place, or
+    /// zero for a display contribution. A prediction first stores its
+    /// starting paint in its output.
+    Stored,
+    /// In a sampled page, for devices without read-write storage.
+    Sampled,
+}
+
+fn destination(start: Start) -> Cow<'static, str> {
+    match start {
+        Start::Stored => compose_wgsl(&[include_str!("dry_destination.wgsl"), include_str!("changed_cells.wgsl"), include_str!("dry_read_write.wgsl")]),
+        Start::Sampled => compose_wgsl(&[include_str!("dry_destination.wgsl"), include_str!("dry_write.wgsl")]),
+    }
+}
+
+pub(super) fn shader_source(space: layer_core::color::RgbSpace, float_sampling: &str, material: &str) -> Cow<'static, str> {
     compose_wgsl(&[
-        &working_color::source(space), include_str!("blend_modes.wgsl"), float_sampling, &shader_destination(target), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"),
+        &working_color::source(space), include_str!("blend_modes.wgsl"), float_sampling, &destination(Start::Sampled), include_str!("brush_types.wgsl"), include_str!("brush_textures.wgsl"), include_str!("retouch_sample.wgsl"),
         include_str!("material_common.wgsl"), include_str!("material_clone.wgsl"),
         include_str!("material_pointwise.wgsl"), include_str!("material_transport.wgsl"),
         include_str!("material_contact.wgsl"), material, include_str!("material_compute.wgsl"),
-        tracking, &coverage_source(u32::MAX), include_str!("selection_clip.wgsl"),
+        &coverage_source(u32::MAX), include_str!("selection_clip.wgsl"),
     ])
 }
 
@@ -73,19 +87,68 @@ pub(super) fn specialize_contact(source: Cow<'static,str>, flags:u32)->Cow<'stat
         &format!("const CONTACT_FLAGS: u32 = {flags}u;")).into()
 }
 
-fn kernel_source(space:layer_core::color::RgbSpace,float_sampling:&str,target:Target,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
-    let tracking=if matches!(target,Target::Tracked|Target::DisplayTracked) {
-        concat!(include_str!("changed_cells.wgsl"),"\n@group(0) @binding(3) var<storage,read_write> changed_cells:ChangedCells;")
-    } else {"fn mark_changed_cell(pixel:vec2<u32>) {}"};
+pub(super) fn kernel_source(space:layer_core::color::RgbSpace,float_sampling:&str,start:Start,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
     let leaf=if flags!=u32::MAX && flags&64!=0 {include_str!("dry_material_contact.wgsl")} else {include_str!("material_contact.wgsl")};
     let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_modes.wgsl"),float_sampling,
-        &shader_destination(target),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),
+        &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),
         include_str!("retouch_sample.wgsl"),include_str!("material_common.wgsl"),include_str!("material_clone.wgsl"),
         include_str!("material_pointwise.wgsl"),leaf,
         "fn material_result(p:vec4<f32>)->MaterialOutput {return pointwise_material_result(p);}",
-        include_str!("material_compute.wgsl"),tracking,&coverage_source(flags),include_str!("selection_clip.wgsl")]);
+        include_str!("material_compute.wgsl"),&coverage_source(flags),include_str!("selection_clip.wgsl")]);
     specialize_contact(source,flags)
         .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32)).into()
+}
+
+/// One reduced-resolution page of averaged original paint, stroke coverage
+/// and starting paint.
+pub(super) struct DisplayInputs {
+    views: [wgpu::TextureView; 3],
+    gather: bindings::CachedBinding<(wgpu::Buffer, wgpu::TextureView)>,
+}
+
+impl DisplayInputs {
+    const FORMATS: [wgpu::TextureFormat; 3] = [wgpu::TextureFormat::Rgba32Float, wgpu::TextureFormat::R32Float, wgpu::TextureFormat::Rgba32Float];
+
+    pub fn new(device: &wgpu::Device) -> Self {
+        Self {
+            views: Self::FORMATS.map(|format| create_target(device, [PAGE_SIZE / 2; 2], format, "dry display inputs").1),
+            gather: Default::default(),
+        }
+    }
+
+    pub fn storage_bytes() -> u64 {
+        Self::FORMATS.iter().map(|f| u64::from(f.block_copy_size(None).unwrap())).sum::<u64>() * u64::from(PAGE_SIZE / 2).pow(2)
+    }
+
+    /// The evaluator's inputs: the job's own neighborhood around the averaged
+    /// page, coverage and starting paint.
+    pub fn inputs(&self, r: &WgpuRasterizer, neighborhood: [&wgpu::TextureView; 9]) -> wgpu::BindGroup {
+        let mut views = neighborhood;
+        views[4] = &self.views[0];
+        create_material_bind_group(&r.device, &r.material_layout, &views, &r.dab_buffer,
+            &self.views[1], &self.views[2], wgpu::BindingResource::Buffer(r.dry_records.binding()))
+    }
+
+    /// The gather pass's outputs. Where the start is stored, the averaged
+    /// starting paint goes straight to the prediction's output.
+    pub fn gather(&self, r: &WgpuRasterizer, output: &PageSurface) -> wgpu::BindGroup {
+        let original = if r.pipelines.dry_material.in_place { &output.view } else { &self.views[0] };
+        self.gather.get((r.style_buffer.clone(), original.clone()), || {
+            let entries = [wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &r.style_buffer, offset: 0, size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
+                }),
+            }].into_iter().chain([original, &self.views[1], &self.views[2]].into_iter().zip(4..).map(|(view, binding)| wgpu::BindGroupEntry {
+                binding, resource: wgpu::BindingResource::TextureView(view),
+            })).collect::<Vec<_>>();
+            r.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("dry display input gather"),
+                layout: &r.pipelines.dry_material.gather_layout,
+                entries: &entries,
+            })
+        })
+    }
 }
 
 /// Dry dabs carry their color in the space they lay over paint in: the
@@ -138,28 +201,13 @@ pub(super) fn prepare_geometry(style: &layer_render::DabStyle, dabs: &mut [DabGp
 const OPERATIONS: [MaterialOperation; 3] = [MaterialOperation::Deposit, MaterialOperation::Coverage, MaterialOperation::Clone];
 type Kernels = [Deferred<wgpu::ComputePipeline>; 2 * OPERATIONS.len()];
 
-fn kernel_constants(target: Target, flags: u32) -> [(&'static str, f64); 1] {
-    [
-        if matches!(target, Target::Display | Target::DisplayTracked) {
-            ("MATERIAL_PREVIEW_CONTRIBUTION", f64::from(flags != u32::MAX && flags & CONTRIBUTION != 0))
-        } else {
-            ("MATERIAL_IN_PLACE", f64::from(matches!(target, Target::InPlace | Target::Tracked)))
-        },
-    ]
-}
-
-fn copy_constants(target:Target,contribution:bool)->Vec<(&'static str,f64)> {
-    if matches!(target,Target::Display|Target::DisplayTracked) {
-        vec![("MATERIAL_PREVIEW_CONTRIBUTION",f64::from(contribution))]
-    } else {Vec::new()}
-}
-
 pub(super) struct Pipelines {
     in_place: bool,
-    tracked: bool,
     layouts: [wgpu::BindGroupLayout; 2],
+    gather_layout: wgpu::BindGroupLayout,
     pub kernels: Kernels,
-    copy: [Deferred<wgpu::ComputePipeline>; 2],
+    copy: Deferred<wgpu::ComputePipeline>,
+    gather: Deferred<wgpu::ComputePipeline>,
     variants: std::collections::BTreeMap<u32, Kernels>,
 }
 
@@ -181,62 +229,42 @@ pub(super) fn contact_flags(contact: Option<layer_core::BrushContact>) -> u32 {
 }
 
 impl Pipelines {
-    pub fn new(
-        device: &PipelineDevice,
-        shared: &PipelineLayouts<'_>,
-        shader: &Deferred<wgpu::ShaderModule>,
-        target: Target,
-    ) -> Self {
-        let in_place = matches!(target, Target::InPlace | Target::Tracked);
-        let tracked = matches!(target,Target::Tracked|Target::DisplayTracked);
-        let writable = in_place || target==Target::DisplayTracked;
+    /// `shared` holds the target, material source and texture layouts.
+    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], in_place: bool) -> Self {
+        let style = || crate::bindings::buffer(0, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Uniform, true,
+            NonZeroU64::new(mem::size_of::<StyleGpu>() as u64));
+        let storage = |binding, format| crate::bindings::storage_texture(binding, wgpu::ShaderStages::COMPUTE, format,
+            if in_place && binding == 1 { wgpu::StorageTextureAccess::ReadWrite } else { wgpu::StorageTextureAccess::WriteOnly });
         let layouts = std::array::from_fn(|coverage| {
-            let mut entries = vec![crate::bindings::buffer(
-                0,
-                wgpu::ShaderStages::COMPUTE,
-                wgpu::BufferBindingType::Uniform,
-                true,
-                NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
-            )];
-            for binding in 1..=1 + coverage as u32 {
-                entries.push(crate::bindings::storage_texture(
-                    binding,
-                    wgpu::ShaderStages::COMPUTE,
-                    if binding == 1 { wgpu::TextureFormat::Rgba32Float } else { wgpu::TextureFormat::R32Float },
-                    if writable && binding == 1 { wgpu::StorageTextureAccess::ReadWrite } else { wgpu::StorageTextureAccess::WriteOnly },
-                ));
-            }
-            if tracked {
+            let mut entries = vec![style(), storage(1, wgpu::TextureFormat::Rgba32Float)];
+            if coverage == 1 { entries.push(storage(2, wgpu::TextureFormat::R32Float)); }
+            if in_place {
                 entries.push(crate::bindings::buffer(3, wgpu::ShaderStages::COMPUTE,
                     wgpu::BufferBindingType::Storage { read_only: false }, false, NonZeroU64::new(20)));
             }
             crate::bindings::layout(device, "dry material outputs", &entries)
         });
-        let pipeline_layouts: [_; 2] = std::array::from_fn(|coverage| {
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("dry material pages"),
-                    bind_group_layouts: &[
-                        Some(&layouts[coverage]),
-                        Some(shared.target),
-                        Some(shared.material),
-                        Some(shared.advanced_texture),
-                    ],
-                    immediate_size: 0,
-                })
+        let gather_layout = crate::bindings::layout(device, "dry display inputs", &[style(),
+            storage(4, wgpu::TextureFormat::Rgba32Float), storage(5, wgpu::TextureFormat::R32Float), storage(6, wgpu::TextureFormat::Rgba32Float)]);
+        let pipeline_layout = |group: &wgpu::BindGroupLayout| device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("dry material pages"),
+            bind_group_layouts: &[Some(group), Some(shared[0]), Some(shared[1]), Some(shared[2])],
+            immediate_size: 0,
         });
-        let make_kernels = |flags: u32| {
+        let pipeline_layouts: [_; 2] = std::array::from_fn(|coverage| pipeline_layout(&layouts[coverage]));
+        let start = if in_place { Start::Stored } else { Start::Sampled };
+        let make_kernels = |flags: u32| -> Kernels {
             let shaders=OPERATIONS.map(|operation| {
                 let device=device.for_recipe();
                 Deferred::new(move||device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label:Some("layer specialized contact shader"),
-                    source:wgpu::ShaderSource::Wgsl(kernel_source(device.working_space(),device.float_sampling_wgsl(),target,flags,operation)),
+                    source:wgpu::ShaderSource::Wgsl(kernel_source(device.working_space(),device.float_sampling_wgsl(),start,flags,operation)),
                 }))
             });
             std::array::from_fn(|index| {
                 let layout = pipeline_layouts[index % 2].clone();
-                let entry = if matches!(target, Target::Display | Target::DisplayTracked) { "compute_display_color" }
-                    else if index % 2 == 0 { "compute_color" } else { "compute_coverage" };
-                let label = format!("dry material {target:?} {entry} operation={} contact={flags:#x}", OPERATIONS[index / 2] as u32);
+                let entry = if index % 2 == 0 { "compute_color" } else { "compute_coverage" };
+                let label = format!("dry material {entry} operation={} contact={flags:#x}", OPERATIONS[index / 2] as u32);
                 let (device, shader) = (device.for_recipe(), shaders[index/2].clone());
                 Deferred::pipeline(move |mode| {
                     mode.compute(
@@ -246,26 +274,17 @@ impl Pipelines {
                             layout: Some(&layout),
                             module: &shader,
                             entry_point: Some(entry),
-                            compilation_options: wgpu::PipelineCompilationOptions {
-                                constants: &kernel_constants(target, flags),
-                                ..Default::default()
-                            },
+                            compilation_options: Default::default(),
                             cache: None,
                         },
                     )
                 })
             })
         };
-        let copy = std::array::from_fn(|contribution| {
-            let (device, shader, layout) = (device.for_recipe(), shader.clone(), pipeline_layouts[0].clone());
-            Deferred::pipeline(move |mode| {
-                let constants=copy_constants(target,contribution!=0);
-                mode.compute(&device,&wgpu::ComputePipelineDescriptor {
-                    label:Some("dry unchanged pixels"),layout:Some(&layout),module:&shader,entry_point:Some("copy_color"),
-                    compilation_options:wgpu::PipelineCompilationOptions {constants:&constants,..Default::default()},cache:None,
-                })
-            })
-        });
+        let pages = Deferred::wgsl(device, "dry material pages",
+            kernel_source(device.working_space(), device.float_sampling_wgsl(), start, u32::MAX, MaterialOperation::Deposit));
+        let copy = Deferred::compute(device, "dry unchanged pixels", &pipeline_layouts[0], &pages, "copy_color");
+        let gather = Deferred::compute(device, "dry display inputs", &pipeline_layout(&gather_layout), &pages, "gather_display");
         let kernels = make_kernels(u32::MAX);
         let retouching = [
             layer_core::DefaultBrushPreset::CloneStamp,
@@ -283,24 +302,22 @@ impl Pipelines {
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|32768));
         flags.insert(0);
         flags.extend(flags.clone().into_iter().map(|flags| flags | 128));
-        if matches!(target,Target::Display|Target::DisplayTracked) {
-            flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&!(67|2048|4096|32768)==0).chain([0,1,128,129]).map(|f|f|CONTRIBUTION));
-        }
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|AGGREGATE));
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|FINE_TIP));
         let variants = flags.into_iter().map(|f| (f, make_kernels(f))).collect();
-        Self {
-            in_place,
-            tracked,
-            layouts,
-            kernels,
-            copy,
-            variants,
-        }
+        Self { in_place, layouts, gather_layout, kernels, copy, gather, variants }
     }
 
-    pub(super) fn copy_kernel(&self, contribution:bool)->&Deferred<wgpu::ComputePipeline> {
-        &self.copy[usize::from(contribution)]
+    pub(super) fn in_place(&self) -> bool {
+        self.in_place
+    }
+
+    pub(super) fn copy_kernel(&self) -> &Deferred<wgpu::ComputePipeline> {
+        &self.copy
+    }
+
+    pub(super) fn gather_kernel(&self) -> &Deferred<wgpu::ComputePipeline> {
+        &self.gather
     }
 
     pub(super) fn selected_kernel(&self,style:&layer_render::DabStyle,operation:MaterialOperation,coverage:bool,extra:u32)->&Deferred<wgpu::ComputePipeline> {
@@ -314,16 +331,13 @@ impl Pipelines {
         &kernels[slot * 2 + usize::from(coverage)]
     }
 
-    pub fn output(
-        &self,
-        r: &WgpuRasterizer,
-        color: &PageSurface,
-        coverage: Option<&PageSurface>,
-        target: SourceTarget, coordinate: [u32;2],
-    ) -> wgpu::BindGroup {
-        let changed = self.tracked.then(|| {
+    /// Changed cells are marked only for a tracked page; every other in-place
+    /// destination binds the disabled set.
+    pub fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>,
+        tracked: Option<(SourceTarget, [u32; 2])>) -> wgpu::BindGroup {
+        let changed = self.in_place.then(|| {
             let cells = r.changed_cells.as_ref().unwrap();
-            cells.buffer(target, coordinate).unwrap_or(&cells.disabled)
+            tracked.and_then(|(target, coordinate)| cells.buffer(target, coordinate)).unwrap_or(&cells.disabled)
         });
         let mut entries = vec![
             wgpu::BindGroupEntry {
@@ -338,20 +352,15 @@ impl Pipelines {
                 binding: 1,
                 resource: wgpu::BindingResource::TextureView(&color.view),
             },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(&coverage.unwrap_or(color).view),
-            },
         ];
-        if coverage.is_none() { entries.pop(); }
-        if let Some(changed) = changed {entries.push(wgpu::BindGroupEntry {binding:3, resource:changed.as_entire_binding()});}
+        if let Some(coverage) = coverage {
+            entries.push(wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&coverage.view) });
+        }
+        if let Some(changed) = changed {
+            entries.push(wgpu::BindGroupEntry { binding: 3, resource: changed.as_entire_binding() });
+        }
         coverage.unwrap_or(color).material_output.get(
-            (
-                r.style_buffer.clone(),
-                color.view.clone(),
-                coverage.map(|p| p.view.clone()),
-                self.in_place, changed.cloned(),
-            ),
+            (r.style_buffer.clone(), color.view.clone(), coverage.map(|p| p.view.clone()), changed.cloned()),
             || {
                 r.device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("dry material page output"),
@@ -364,24 +373,21 @@ impl Pipelines {
 }
 
 impl WgpuRasterizer {
-    pub(super) fn dry_material_pipeline(&self, batch: &DabBatch) -> &Pipelines {
-        if batch.kind == DabBatchKind::Preview && (self.preview_level > 0 || self.compact_preview_contribution(batch)) {
-            return &self.pipelines.dry_display;
-        }
-        match &self.pipelines.dry_in_place {
-            Some(in_place) if self.in_place_dry_material(batch) => {
-                if self.changed_cells.as_ref().is_some_and(|cells|cells.has_source(batch.target)) {
-                    self.pipelines.dry_tracked.as_ref().unwrap()
-                } else {in_place}
-            },
-            _ => &self.pipelines.dry_material,
-        }
+    pub(super) fn dry_display(&self, batch: &DabBatch) -> bool {
+        batch.kind == DabBatchKind::Preview && (self.preview_level > 0 || self.compact_preview_contribution(batch))
     }
 
     pub(super) fn in_place_dry_material(&self, batch: &DabBatch) -> bool {
         batch.kind == DabBatchKind::Persistent && self.compute_dry_material(batch)
             && BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
-            && self.pipelines.dry_in_place.is_some()
+            && self.pipelines.dry_material.in_place()
+    }
+
+    /// Display blocks average their inputs in a separate pass. A contribution
+    /// with no stroke coverage has only zero inputs and skips it.
+    pub(super) fn dry_display_gathers(&self, batch: &DabBatch) -> bool {
+        self.dry_display(batch) && self.dry_material_block(batch) > 1
+            && (!self.compact_preview_contribution(batch) || BrushPassPlan::for_device(&batch.style, &self.device).state.coverage)
     }
 
     pub(super) fn compute_dry_material(&self, batch: &DabBatch) -> bool {
@@ -413,32 +419,46 @@ impl WgpuRasterizer {
             return;
         }
         let operation = BrushPassPlan::for_device(&batch.style, &self.device).material;
-        let pipelines = self.dry_material_pipeline(batch);
-        crate::performance_trace::counter(c"Capy dry material in place", u64::from(pipelines.in_place));
+        let pipelines = &self.pipelines.dry_material;
+        let in_place = self.in_place_dry_material(batch);
+        crate::performance_trace::counter(c"Capy dry material in place", u64::from(in_place));
         let texture_key = Self::texture_set_key(&batch.style);
         let textures = self
             .texture_sets
             .iter()
             .find(|set| set.key == texture_key)
             .unwrap();
-        let contribution=self.compact_preview_contribution(batch);
+        let style_offset = batch_index as u32 * self.style_stride as u32;
+        let block = self.dry_material_block(batch);
+        let display_size = [PAGE_SIZE.div_ceil(block).div_ceil(32), PAGE_SIZE.div_ceil(block).div_ceil(2), 1];
+        if jobs.iter().any(|job| job.display.is_some()) {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("dry material display inputs"), timestamp_writes: None,
+            });
+            pass.set_bind_group(3, &textures.bind_group, &[]);
+            pass.set_pipeline(pipelines.gather_kernel());
+            for job in jobs {
+                let Some(display) = &job.display else { continue };
+                pass.set_bind_group(0, &display.gather, &[style_offset]);
+                pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, job.coordinate)]);
+                pass.set_bind_group(2, &job.source, &[job.record_offset]);
+                pass.dispatch_workgroups(display_size[0], display_size[1], display_size[2]);
+            }
+        }
         let cropped = operation == MaterialOperation::Deposit && dry_flow(&batch.style);
-        if cropped && jobs.iter().any(|job| !job.3 && !if job.5 {
-            self.pipelines.dry_display_tracked.as_ref().unwrap().in_place
-        } else { pipelines.in_place }) {
+        let stored_start = pipelines.in_place() && !self.compact_preview_contribution(batch);
+        let copied = |job: &&Job| !job.coverage && !in_place && if stored_start { job.display.is_none() } else { cropped };
+        if jobs.iter().any(|job| copied(&job)) {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("dry material copy pages"), timestamp_writes: None,
             });
             pass.set_bind_group(3, &textures.bind_group, &[]);
-            for (output, source, coordinate, coverage, record_offset, tracked_display, _) in jobs {
-                let pipelines = if *tracked_display { self.pipelines.dry_display_tracked.as_ref().unwrap() } else { pipelines };
-                if *coverage || pipelines.in_place { continue; }
-                pass.set_bind_group(0, output, &[batch_index as u32 * self.style_stride as u32]);
-                pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, *coordinate)]);
-                pass.set_bind_group(2, source, &[*record_offset]);
-                pass.set_pipeline(pipelines.copy_kernel(contribution));
-                let block = self.dry_material_block(batch);
-                pass.dispatch_workgroups(PAGE_SIZE.div_ceil(block).div_ceil(32),PAGE_SIZE.div_ceil(block).div_ceil(2),1);
+            pass.set_pipeline(pipelines.copy_kernel());
+            for job in jobs.iter().filter(copied) {
+                pass.set_bind_group(0, &job.output, &[style_offset]);
+                pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, job.coordinate)]);
+                pass.set_bind_group(2, job.inputs(), &[job.record_offset]);
+                pass.dispatch_workgroups(display_size[0], display_size[1], display_size[2]);
             }
         }
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -452,21 +472,20 @@ impl WgpuRasterizer {
         let fine=fine_tip_capable(&batch.style)
             && self.dab_upload[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize]
                 .iter().any(|d|(0..2).any(|i|0.5*(d.dab.radii[i]+d.dab.previous[i])<FINE_TIP_RADIUS));
-        let extra=if contribution {CONTRIBUTION} else {0} | if aggregate {AGGREGATE} else {0} | if fine {FINE_TIP} else {0};
-        for (output, source, coordinate, coverage, record_offset, tracked_display, dirty) in jobs {
-            let pipelines=if *tracked_display {self.pipelines.dry_display_tracked.as_ref().unwrap()} else {pipelines};
-            pass.set_bind_group(0, output, &[batch_index as u32 * self.style_stride as u32]);
+        let extra=if aggregate {AGGREGATE} else {0} | if fine {FINE_TIP} else {0};
+        for job in jobs {
+            pass.set_bind_group(0, &job.output, &[style_offset]);
             pass.set_bind_group(
                 1,
                 self.paint_target_binding(&batch.style),
-                &[self.layer_target_offset(batch.target, *coordinate)],
+                &[self.layer_target_offset(batch.target, job.coordinate)],
             );
-            pass.set_bind_group(2, source, &[*record_offset]);
-            let block=self.dry_material_block(batch);
-            let cropped=!coverage && cropped;
-            let kernel=pipelines.selected_kernel(&batch.style,operation,*coverage,extra);
+            pass.set_bind_group(2, job.inputs(), &[job.record_offset]);
+            let cropped=!job.coverage && cropped;
+            let kernel=pipelines.selected_kernel(&batch.style,operation,job.coverage,extra);
             debug_assert!(kernel.ready() || !self.startup.as_ref().is_some_and(|s| s.current.covers(&batch.style)), "dry kernel {extra:#x} was not prepared for its brush");
             pass.set_pipeline(kernel);
+            let dirty=job.dirty;
             let size=if cropped {[dirty.max_x().div_ceil(block)-dirty.min_x()/block,
                 dirty.max_y().div_ceil(block)-dirty.min_y()/block]} else {[PAGE_SIZE.div_ceil(block);2]};
             pass.dispatch_workgroups(size[0].div_ceil(32),size[1].div_ceil(2),1);
@@ -524,11 +543,6 @@ impl Reach {
     }
 }
 
-pub(super) fn contribution_possible(style: &layer_render::DabStyle) -> bool {
-    style.mode == DabMode::Paint && style.opacity == 1.
-        && (display_preview_eligible(style) || native_dry_preview_eligible(style))
-}
-
 /// Basic analytic contacts (including G-Pen, eraser and airbrush) have no
 /// unresolved paper, fiber, bristle or texture frequencies at display scale.
 pub(super) fn display_preview_eligible(style: &layer_render::DabStyle) -> bool {
@@ -549,40 +563,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipeline_overrides_are_used_by_the_entry_point() {
+    fn every_kernel_entry_resolves_its_overrides() {
+        let validate = |module: &naga::Module| {
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+                .validate(module).unwrap();
+        };
         let mut families=std::collections::BTreeSet::from([0,u32::MAX]);
         for preset in layer_core::CONTACT_BRUSH_PRESETS {
             let flags=contact_flags(layer_core::default_brush(preset).contact);
             families.extend([flags,flags|128,flags|8192,flags|16384,flags|8192|16384]);
         }
-        for target in [Target::Exact, Target::InPlace, Target::Tracked, Target::Display, Target::DisplayTracked] {for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
-            let source = kernel_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),target,flags,operation);
+        for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
+            for start in [Start::Stored, Start::Sampled] {
+            let source = kernel_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),start,flags,operation);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
             if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
             assert!(!module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("MATERIAL_OPERATION")));
             assert!(source.contains(&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32)));
-            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-                .validate(&module).unwrap();
-            let entries: &[&str] = if matches!(target, Target::Display | Target::DisplayTracked) {
-                &["compute_display_color"]
-            } else { &["compute_color", "compute_coverage"] };
-            let mut copy=module.clone();
-            copy.entry_points.retain(|e|e.name=="copy_color");
-            assert_eq!(copy.entry_points.len(),1);
-            naga::compact::compact(&mut copy,naga::compact::KeepUnused::No);
-            for (name,_) in copy_constants(target,false) {
-                assert!(copy.overrides.iter().any(|(_,v)|v.name.as_deref()==Some(name)),"{target:?}/copy supplies unused {name}");
-            }
-            for &entry in entries {
+            validate(&module);
+            for entry in ["compute_color", "compute_coverage", "copy_color", "gather_display"] {
                 let mut used = module.clone();
                 used.entry_points.retain(|e| e.name == entry);
                 assert_eq!(used.entry_points.len(), 1);
                 naga::compact::compact(&mut used, naga::compact::KeepUnused::No);
-                for (name, _) in kernel_constants(target, flags) {
-                    assert!(used.overrides.iter().any(|(_, value)| value.name.as_deref() == Some(name)),
-                        "{target:?}/{entry}/{operation:?} supplies unused override {name}");
-                }
+                assert!(used.overrides.iter().all(|(_, value)| value.init.is_some()),
+                    "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}}}
     }

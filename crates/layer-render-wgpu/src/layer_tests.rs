@@ -418,6 +418,84 @@ fn small_swept_contact_preview_matches_commit_and_preserves_distant_pixels() {
 }
 
 #[test]
+fn in_place_dry_strokes_match_ping_pong_pages() {
+    let extent = [1280; 2];
+    let render = |in_place: bool| {
+        let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        if !in_place { crate::test_support::write_only_dry_material(&mut r); }
+        let document = paint_document(extent, "wide dry stroke");
+        let style = preset_style(layer_core::DefaultBrushPreset::Pencil);
+        let relief = style.contact.unwrap().dry.unwrap().pose(0.5).relief;
+        let mut ink = dab([0.2, 0.3, 0.4, 0.9]);
+        ink.center = Point { x: 640., y: 640. };
+        ink.radii = [600.; 2];
+        ink.previous = [600., 600., 1., 0.];
+        ink.contact = [0.7, relief[0], relief[1], relief[2]];
+        ink.previous_contact = ink.contact;
+        let mut stroke = batch(target(&document));
+        stroke.style = style;
+        stroke.damage = ink.bounds();
+        r.submit(FramePacket { dabs: &[ink], dab_batches: &[stroke], ..packet(document.scene(), extent) }).unwrap();
+        let mut pages: Vec<_> = r.paint_layers.iter().find(|l| l.id == target(&document)).unwrap().pages.iter()
+            .map(|p| (p.coordinate, page_bytes(&r, &p.active().texture))).collect();
+        pages.sort_by_key(|(coordinate, _)| *coordinate);
+        pages
+    };
+    let in_place = render(true);
+    assert!(in_place.iter().any(|(_, bytes)| bytes.as_chunks::<16>().0.iter().any(|p| p[12..] != [0; 4])), "the stroke paints");
+    assert!(in_place == render(false), "in-place pages match the ping-pong pages exactly");
+}
+
+#[test]
+fn display_predictions_wider_than_the_input_sets_match_single_page_predictions() {
+    let extent = [1024; 2];
+    let document = paint_document(extent, "wide display prediction");
+    let pages: Vec<[u32; 2]> = (0..4).flat_map(|y| (0..4).map(move |x| [x, y])).collect();
+    let at = |page: [u32; 2], offset: f32| Point { x: page[0] as f32 * 256. + 128. + offset, y: page[1] as f32 * 256. + 128. + offset };
+    let predict = |predicted: &[[u32; 2]]| {
+        let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let mut frame = packet(document.scene(), extent);
+        frame.view.document_to_surface = [0.125, 0., 0., 0.125, 0., 0.];
+        frame.view.width_px = 128;
+        frame.view.height_px = 128;
+        let base: Vec<_> = pages.iter().enumerate().map(|(i, &page)| {
+            let mut paint = dab([0.25 * (i % 4) as f32, 0.125 * (i / 4) as f32, 0.5, 1.]);
+            paint.center = at(page, 0.);
+            paint.radii = [100.; 2];
+            paint
+        }).collect();
+        let mut committed = batch(target(&document));
+        committed.dab_count = base.len() as u32;
+        committed.damage = Rect::from_extent(extent);
+        r.submit(FramePacket { dabs: &base, dab_batches: &[committed], ..frame }).unwrap();
+        let ink: Vec<_> = predicted.iter().map(|&page| {
+            let mut ink = dab([0.9, 0.2, 0.1, 1.]);
+            ink.center = at(page, 40.);
+            ink.radii = [24.; 2];
+            ink
+        }).collect();
+        let mut stroke = batch(target(&document));
+        stroke.style = preset_style(layer_core::DefaultBrushPreset::GPen);
+        stroke.style.opacity = 0.5;
+        stroke.dab_count = ink.len() as u32;
+        stroke.damage = Rect::from_extent(extent);
+        stroke.kind = DabBatchKind::Preview;
+        stroke.stroke_end = false;
+        r.submit(FramePacket { dabs: &ink, dab_batches: std::slice::from_ref(&stroke), composite_all: false, ..frame }).unwrap();
+        assert!(r.dry_display_gathers(&stroke), "the prediction averages its inputs at display resolution");
+        let predicted: Vec<_> = predicted.iter().map(|&page| page_bytes(&r, &r.preview_page(page).unwrap().active().texture)).collect();
+        (r.dry_display_inputs.len(), predicted)
+    };
+    let (sets, together) = predict(&pages);
+    assert!(pages.len() > dry_material::DISPLAY_INPUT_SETS, "the prediction covers more pages than the input sets");
+    assert_eq!(sets, dry_material::DISPLAY_INPUT_SETS, "input sets stay bounded by the set, not the prediction");
+    for index in [0, 7, 8, 15] {
+        let (_, alone) = predict(&[pages[index]]);
+        assert!(together[index] == alone[0], "page {:?} matches its prediction alone", pages[index]);
+    }
+}
+
+#[test]
 fn reduced_color_contact_previews_match_committed_pixels() {
     for mode in [layer_core::color::LayerColorMode::Grayscale, layer_core::color::LayerColorMode::TwoTone] {
         swept_contact_preview(mode);

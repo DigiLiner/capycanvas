@@ -832,10 +832,6 @@ struct TextureSet {
 
 struct Pipelines {
     dry_material: dry_material::Pipelines,
-    dry_display: dry_material::Pipelines,
-    dry_display_tracked: Option<dry_material::Pipelines>,
-    dry_in_place: Option<dry_material::Pipelines>,
-    dry_tracked: Option<dry_material::Pipelines>,
     direct: [Deferred<wgpu::RenderPipeline>; DirectPipelineKind::COUNT],
     material: [Deferred<wgpu::RenderPipeline>;
         MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT],
@@ -996,6 +992,7 @@ pub struct WgpuRasterizer {
     dry_records: material_sources::DryRecords,
     material_jobs: Vec<MaterialJob>,
     dry_jobs: Vec<dry_material::Job>,
+    dry_display_inputs: Vec<dry_material::DisplayInputs>,
     material_gather: Option<material_sources::Gather>,
     retouch: Option<Box<retouch_sources::RetouchSources>>,
     retouch_pipelines: Option<Arc<retouch_sources::Pipelines>>,
@@ -1362,6 +1359,7 @@ impl WgpuRasterizer {
             dry_records: Default::default(),
             material_jobs: Vec::new(),
             dry_jobs: Vec::with_capacity(SOURCE_SLOTS),
+            dry_display_inputs: Vec::new(),
             material_gather: None,
             retouch: None,
             retouch_pipelines: None,
@@ -1837,8 +1835,9 @@ impl WgpuRasterizer {
         coordinate: [u32; 2],
         preview: bool,
         inputs: MaterialInputs<'_>,
+        display: Option<usize>,
         encoder: &mut crate::submission::CommandEncoder,
-    ) -> Result<wgpu::BindGroup, GpuRasterError> {
+    ) -> Result<(wgpu::BindGroup, Option<wgpu::BindGroup>), GpuRasterError> {
         let in_place = self.in_place_dry_material(batch);
         let gathered = match inputs {
             MaterialInputs::Gathered(field, meta) => Some((field, meta)),
@@ -1933,6 +1932,7 @@ impl WgpuRasterizer {
                 wgpu::BindingResource::Buffer(self.dry_records.binding())
             } else { gathered.map_or(&self.material_source_meta, |g| g.1).as_entire_binding() },
         );
+        let display = display.map(|slot| self.dry_display_inputs[slot].inputs(self, views));
         if pointwise(&batch.style) {
             // Coverage owns state-dependent bindings, so ending a stroke can
             // release both coverage textures even while color pages survive.
@@ -1942,8 +1942,8 @@ impl WgpuRasterizer {
                 .map(|p| if in_place { &p.material_in_place_input } else { &p.material_input })
                 .unwrap_or(&self.empty_material_input);
             let bound = std::array::from_fn(|i| match i { 9 => coverage, 10 => auxiliary, _ => views[i] }.clone());
-            Ok(cache.get(([self.dab_buffer.clone(), self.dry_records.binding().buffer.clone()], bound), create))
-        } else { Ok(create()) }
+            Ok((cache.get(([self.dab_buffer.clone(), self.dry_records.binding().buffer.clone()], bound), create), display))
+        } else { Ok((create(), display)) }
     }
 
     fn ensure_preview_destination_companions(&mut self, batches: &[DabBatch]) {
@@ -2331,6 +2331,9 @@ impl WgpuRasterizer {
             let batch = &packet.dab_batches[index];
             let block = if self.compute_dry_material(batch) { self.dry_material_block(batch) } else { 1 };
             let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device, self.paper_style(&batch.style));
+            if self.compute_dry_material(batch) && self.compact_preview_contribution(batch) {
+                record.flags[3] = 2.;
+            }
             if dry_material::single_pigment_marked(&batch.style) && batch.dab_count>0 {
                 let source=&packet.dabs[batch.first_dab as usize..(batch.first_dab+batch.dab_count) as usize];
                 record.material_a[3]=f32::from(batch.style.mode==DabMode::Erase
@@ -3592,6 +3595,7 @@ impl CanvasRenderer for WgpuRasterizer {
             + self.thumbnails.storage_bytes()
             + self.portable_blend.byte_len()
             + 160 + self.dry_records.storage_bytes()
+            + self.dry_display_inputs.len() as u64 * dry_material::DisplayInputs::storage_bytes()
             + self.material_gather.as_ref().map_or(0, material_sources::Gather::storage_bytes)
             + self.device.effect_resources.lock().unwrap().bytes()
             + *self.device.analysis_memory.lock().unwrap()
@@ -5433,18 +5437,11 @@ fn advanced_brush_shader(device: &PipelineDevice) -> Deferred<wgpu::ShaderModule
 
 fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pipelines {
     let advanced_brush = advanced_brush_shader(device);
-    let material_shader = dry_material::shader(device, dry_material::Target::Exact);
-    let dry_material = dry_material::Pipelines::new(device, &layouts, &material_shader, dry_material::Target::Exact);
-    let dry_display = dry_material::Pipelines::new(device, &layouts,
-        &dry_material::shader(device, dry_material::Target::Display), dry_material::Target::Display);
     // Native hosts request this feature only after checking Float32 read/write
     // storage support. Each dry invocation owns exactly one destination texel.
-    let dry_in_place = device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
-        .then(|| dry_material::Pipelines::new(device, &layouts, &dry_material::shader(device, dry_material::Target::InPlace), dry_material::Target::InPlace));
-    let dry_display_tracked = dry_in_place.as_ref().map(|_| dry_material::Pipelines::new(device, &layouts,
-        &dry_material::shader(device, dry_material::Target::DisplayTracked), dry_material::Target::DisplayTracked));
-    let dry_tracked = dry_in_place.as_ref().map(|_| dry_material::Pipelines::new(device, &layouts,
-        &dry_material::shader(device, dry_material::Target::Tracked), dry_material::Target::Tracked));
+    let material_shader = dry_material::shader(device);
+    let dry_material = dry_material::Pipelines::new(device, [layouts.target, layouts.material, layouts.advanced_texture],
+        device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES));
     let stroke_edge_shader = {
         let device = device.clone();
         Deferred::new(move || {
@@ -5790,10 +5787,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     };
     Pipelines {
         dry_material,
-        dry_display,
-        dry_display_tracked,
-        dry_in_place,
-        dry_tracked,
         direct,
         material,
         material_gather,

@@ -1276,7 +1276,7 @@ mod tests {
         let (_reference, mut host) = gpu_host(layer_ui::Platform::Android, [64; 2]);
         let clock = std::cell::Cell::new(0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while !host.startup.brush_ready { frame_step(&mut host, &clock, deadline); }
+        while !host.startup.complete { frame_step(&mut host, &clock, deadline); }
         let fill = layer_ui::occurrence_token(*host.session.engine().document().scene().constant_backdrop().first().unwrap());
         for action in [
             json!({"type":"select_layer","id":fill}),

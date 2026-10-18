@@ -49,9 +49,6 @@ impl ChangedCells {
         }}
         self.retired.extend(self.pages.extract_if(..,|key,_|retired.contains(key)).map(|(_,buffer)|buffer));
     }
-    pub fn has_source(&self,id:SourceTarget)->bool {
-        self.pages.range((id,[0,0])..=(id,[u32::MAX;2])).next().is_some()
-    }
     pub fn buffer(&self,id:SourceTarget,coordinate:[u32;2])->Option<&wgpu::Buffer> {
         self.pages.get(&(id,coordinate))
     }
@@ -120,7 +117,7 @@ impl ChangedCells {
                 && old.id.is_some_and(|id|page.primary.preview.get()==Some((id,page.coordinate)))
                 && page.primary.texture.width()==PAGE_SIZE>>new.level && page.primary.texture.height()==PAGE_SIZE>>new.level
                 && page.primary.texture.format()==r.device.working_format() && (1<<new.level)<=self.side
-                && r.pipelines.dry_display_tracked.is_some();
+                && r.pipelines.dry_material.in_place();
             if !warm {page.primary.preview.set(None);}
             if let Some(secondary)=&page.secondary {secondary.preview.set(None);}
         }

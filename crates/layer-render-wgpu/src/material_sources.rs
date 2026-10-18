@@ -252,6 +252,7 @@ impl WgpuRasterizer {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn material_source_binding(
         &mut self,
         batch_index: usize,
@@ -259,8 +260,9 @@ impl WgpuRasterizer {
         dabs: &[Dab],
         coordinate: [u32; 2],
         preview: bool,
+        display: Option<usize>,
         encoder: &mut crate::submission::CommandEncoder,
-    ) -> Result<wgpu::BindGroup, GpuRasterError> {
+    ) -> Result<(wgpu::BindGroup, Option<wgpu::BindGroup>), GpuRasterError> {
         let timing = self.telemetry.enabled;
         let started = timing.then(web_time::Instant::now);
         let operation = match batch.style.execution {
@@ -285,7 +287,7 @@ impl WgpuRasterizer {
         self.metrics.material_cpu_ms[0] += elapsed(started);
         if !distant {
             let started = timing.then(web_time::Instant::now);
-            let result = self.material_bind_group(batch, coordinate, preview, MaterialInputs::Neighborhood, encoder);
+            let result = self.material_bind_group(batch, coordinate, preview, MaterialInputs::Neighborhood, display, encoder);
             self.metrics.material_cpu_ms[4] += elapsed(started);
             return result;
         }
@@ -378,6 +380,7 @@ impl WgpuRasterizer {
             coordinate,
             preview,
             MaterialInputs::Gathered(&samples, &meta),
+            display,
             encoder,
         );
         self.metrics.material_cpu_ms[4] += elapsed(started);
@@ -400,10 +403,11 @@ impl WgpuRasterizer {
         coordinate: [u32; 2],
         mapping: &crate::retouch_sources::Mapping,
         preview: bool,
+        display: Option<usize>,
         encoder: &mut crate::submission::CommandEncoder,
-    ) -> Result<wgpu::BindGroup, GpuRasterError> {
+    ) -> Result<(wgpu::BindGroup, Option<wgpu::BindGroup>), GpuRasterError> {
         let pages = self.retouch_pages(mapping, encoder)?;
-        self.material_bind_group(batch, coordinate, preview, MaterialInputs::Retouch(&pages), encoder)
+        self.material_bind_group(batch, coordinate, preview, MaterialInputs::Retouch(&pages), display, encoder)
     }
 }
 

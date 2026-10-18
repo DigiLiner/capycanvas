@@ -1,5 +1,4 @@
 override MATERIAL_OPERATION: u32;
-override MATERIAL_PREVIEW_CONTRIBUTION: bool = false;
 
 const OP_DEPOSIT: u32 = 0u;
 const OP_COVERAGE: u32 = 1u;

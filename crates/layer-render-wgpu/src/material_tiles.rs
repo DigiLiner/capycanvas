@@ -146,6 +146,13 @@ impl WgpuRasterizer {
             encoder,
         )?;
         let texture_key = Self::texture_set_key(&batch.style);
+        let gathers = self.compute_dry_material(batch) && self.dry_display_gathers(batch);
+        if gathers {
+            while self.dry_display_inputs.len() < jobs.len().min(dry_material::DISPLAY_INPUT_SETS) {
+                let inputs = dry_material::DisplayInputs::new(&self.device);
+                self.dry_display_inputs.push(inputs);
+            }
+        }
         let mut compute_jobs = mem::take(&mut self.dry_jobs);
         for (record_index, job) in jobs.iter().enumerate() {
             // A decoded original slot may be overwritten by the next source
@@ -159,16 +166,14 @@ impl WgpuRasterizer {
                     || self
                         .native_color_tile(batch.target, job.coordinate)?
                         .is_some());
-            if borrowed {
+            if borrowed || (retouches && !self.retouch_resident(&mappings[record_index]))
+                || (gathers && compute_jobs.len() == dry_material::DISPLAY_INPUT_SETS) {
                 self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
                 compute_jobs.clear();
             }
-            let source_bind_group = if retouches {
-                if !self.retouch_resident(&mappings[record_index]) {
-                    self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
-                    compute_jobs.clear();
-                }
-                self.clone_source_binding(batch, job.coordinate, &mappings[record_index], preview && !from_persistent, encoder)?
+            let display_slot = gathers.then_some(compute_jobs.len());
+            let (source_bind_group, display) = if retouches {
+                self.clone_source_binding(batch, job.coordinate, &mappings[record_index], preview && !from_persistent, display_slot, encoder)?
             } else {
                 self.material_source_binding(
                     batch_index,
@@ -176,6 +181,7 @@ impl WgpuRasterizer {
                     batch_dabs,
                     job.coordinate,
                     preview && !from_persistent,
+                    display_slot,
                     encoder,
                 )?
             };
@@ -214,25 +220,20 @@ impl WgpuRasterizer {
                 continue;
             }
             if self.compute_dry_material(batch) && local == PixelRect::full([PAGE_SIZE; 2]) {
-                let tracked_display=self.compact_preview_contribution(batch)
-                    && self.pipelines.dry_display_tracked.is_some()
-                    && self.changed_cells.as_ref().unwrap().preview_reusable(self,batch.target,job.coordinate,destination);
-                let pipeline=if tracked_display {self.pipelines.dry_display_tracked.as_ref().unwrap()} else {self.dry_material_pipeline(batch)};
-                let output = pipeline.output(
-                    self,
-                    destination,
-                    coverage_surface,
-                    batch.target, job.coordinate,
-                );
-                compute_jobs.push((
-                    output,
-                    source_bind_group,
-                    job.coordinate,
-                    coverage_view.is_some(),
+                let pipelines = &self.pipelines.dry_material;
+                let tracked = in_place || (self.compact_preview_contribution(batch) && pipelines.in_place()
+                    && self.changed_cells.as_ref().unwrap().preview_reusable(self,batch.target,job.coordinate,destination));
+                compute_jobs.push(dry_material::Job {
+                    output: pipelines.output(self, destination, coverage_surface, tracked.then_some((batch.target, job.coordinate))),
+                    source: source_bind_group,
+                    display: display_slot.zip(display).map(|(slot, inputs)| dry_material::DisplayJob {
+                        gather: self.dry_display_inputs[slot].gather(self, destination), inputs,
+                    }),
+                    coordinate: job.coordinate,
+                    coverage: coverage_view.is_some(),
                     record_offset,
-                    tracked_display,
-                    job.local,
-                ));
+                    dirty: job.local,
+                });
                 destination.preview.set(None);
                 if borrowed {
                     self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
@@ -358,8 +359,8 @@ impl WgpuRasterizer {
                             self.target_extent(batch.target)[1].saturating_sub(1) / PAGE_SIZE,
                         ),
                     ];
-                    self.material_bind_group(batch, coordinate, false, MaterialInputs::Neighborhood, encoder)
-                        .map(|bind_group| (coordinate, bind_group))
+                    self.material_bind_group(batch, coordinate, false, MaterialInputs::Neighborhood, None, encoder)
+                        .map(|(bind_group, _)| (coordinate, bind_group))
                 })
                 .transpose()?
         } else {

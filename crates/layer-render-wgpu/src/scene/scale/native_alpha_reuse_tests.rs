@@ -125,12 +125,18 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
         input().material_input.get(key,||panic!("{preset:?} {name} {blend:?}: actual contribution must bind empty paint"));
         let actual=crate::layer_tests::page_bytes(&r,&r.preview_page([0,0]).unwrap().active().texture);
         let reference=create_page_surface(&r.device,&r.float_texture_layout,&r.sampler,[PAGE_SIZE>>r.preview_level;2],r.device.working_format(),"bound paint contribution oracle");
-        let output=r.pipelines.dry_display.output(&r,&reference,None,target,[0,0]);
+        let output=r.pipelines.dry_material.output(&r,&reference,None,None);
         let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
+        let display=r.dry_display_gathers(&preview).then_some(0);
+        if display.is_some() && r.dry_display_inputs.is_empty() {
+            let inputs=crate::dry_material::DisplayInputs::new(&r.device);r.dry_display_inputs.push(inputs);
+        }
         r.preview_contribution=false;
-        let source=r.material_source_binding(0,&preview,std::slice::from_ref(&dab),[0,0],false,&mut encoder).unwrap();
+        let (source,display)=r.material_source_binding(0,&preview,std::slice::from_ref(&dab),[0,0],false,display,&mut encoder).unwrap();
         r.preview_contribution=true;
-        r.encode_dry_material_jobs(&mut encoder,0,&preview,&[(output,source,[0,0],false,0,false,PixelRect::full([PAGE_SIZE;2]))]);
+        let display=display.map(|inputs|crate::dry_material::DisplayJob {gather:r.dry_display_inputs[0].gather(&r,&reference),inputs});
+        r.encode_dry_material_jobs(&mut encoder,0,&preview,&[crate::dry_material::Job {output,source,display,coordinate:[0,0],coverage:false,
+            record_offset:0,dirty:PixelRect::full([PAGE_SIZE;2])}]);
         r.uploads.finish(&encoder);encoder.submit(&r.queue);r.wait_idle().unwrap();
         assert_eq!(actual,crate::layer_tests::page_bytes(&r,&reference.texture),"{name} {blend:?}: omitted original must preserve every prediction bit");
         if preset==DefaultBrushPreset::GPen {for (level,contribution,preset) in [(1,false,DefaultBrushPreset::GPen),(0,true,DefaultBrushPreset::GPen),(1,true,DefaultBrushPreset::CloneStamp)] {
@@ -138,7 +144,7 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
             let mut fallback=preview.clone();fallback.style=crate::layer_tests::preset_style(preset);fallback.style.blend_space=blend;
             assert!(!r.compact_preview_contribution(&fallback));
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-            r.material_source_binding(0,&fallback,std::slice::from_ref(&dab),[0,0],false,&mut encoder).unwrap();
+            r.material_source_binding(0,&fallback,std::slice::from_ref(&dab),[0,0],false,None,&mut encoder).unwrap();
             let layer=r.paint_layers.iter().find(|p|p.id==target).unwrap();
             let color=layer.pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active();
             let coverage=layer.coverage_pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active();
@@ -393,7 +399,8 @@ fn native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear() {
                 let flags = r.changed_cells.as_ref().unwrap().reusable(target, [0, 0]).expect("warm real Engine prediction must be eligible for reuse");
                 let page=r.preview_page([0,0]).expect("real enabled prediction must remain live");
                 assert_eq!(page.primary.preview.get(),Some((target,[0,0])));assert!(!page.active_secondary);
-                page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,false,Some(flags.clone())),||panic!("real warm Engine prediction must execute actual tracked Display output"));
+                page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,Some(flags.clone())),
+                    ||panic!("real warm Engine prediction must execute actual tracked display output"));
                 let bytes = pollster::block_on(crate::local_tone::read_buffer_async(&r.device, &r.queue, flags)).unwrap();
                 let changed = bytes[16..].chunks_exact(4).filter(|cell| u32::from_le_bytes((*cell).try_into().unwrap()) != 0).count();
                 assert_eq!(changed, 0, "{name} unchanged warm real stores must leave every GPU dirty-cell flag clear: candidates={}, forced={}",
@@ -498,39 +505,33 @@ fn native_alpha_reuse_captured_phase_change_forces_same_elapsed_recomposition() 
 }
 
 #[test]
-fn native_alpha_reuse_untracked_materials_have_no_writable_cell_binding() {
-    use crate::dry_material::Target;
+fn native_alpha_reuse_only_read_write_dry_kernels_bind_writable_cells() {
+    use crate::dry_material::Start;
     let r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let (_texture, output) = create_color_target(&r.device, [PAGE_SIZE; 2], "material binding output");
-    for (target, name, pipelines) in [
-        (Target::Exact, "exact", &r.pipelines.dry_material),
-        (Target::InPlace, "in place", r.pipelines.dry_in_place.as_ref().unwrap()),
-        (Target::Display, "display", &r.pipelines.dry_display),
-        (Target::DisplayTracked,"tracked display",r.pipelines.dry_display_tracked.as_ref().unwrap()),
-        (Target::Tracked, "tracked", r.pipelines.dry_tracked.as_ref().unwrap()),
-    ] {
-        let source = crate::dry_material::shader_source(r.device.working_space(), r.device.float_sampling_wgsl(), target, include_str!("../../material_brush.wgsl"));
-        let module = naga::front::wgsl::parse_str(&source).unwrap();
+    let writable = |source: &str| {
+        let module = naga::front::wgsl::parse_str(source).unwrap();
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&module).unwrap();
-        let writable: Vec<_> = module.global_variables.iter().filter_map(|(_, variable)| {
+        module.global_variables.iter().filter_map(|(_, variable)| {
             matches!(variable.space, naga::AddressSpace::Storage { access } if access.contains(naga::StorageAccess::STORE))
-                .then_some((variable.name.as_deref(), variable.binding.as_ref().map(|binding| (binding.group, binding.binding))))
-        }).collect();
-        let expected = if matches!(target,Target::Tracked|Target::DisplayTracked) { vec![(Some("changed_cells"), Some((0, 3)))] } else { vec![] };
-        assert_eq!(writable, expected, "{name} writable buffers");
-        let pipeline = pipelines.kernels[0].compile();
-        let layout = pipeline.get_bind_group_layout(0);
-        let mut entries = vec![
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: &r.style_buffer, offset: 0, size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
-            }) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&output) },
-        ];
-        if matches!(target,Target::Tracked|Target::DisplayTracked) { entries.push(wgpu::BindGroupEntry {
-            binding: 3, resource: r.changed_cells.as_ref().unwrap().disabled.as_entire_binding(),
-        }); }
-        r.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("material cell binding contract"), layout: &layout, entries: &entries });
+                .then_some((variable.name.clone(), variable.binding.as_ref().map(|binding| (binding.group, binding.binding))))
+        }).collect::<Vec<_>>()
+    };
+    let fragment = crate::dry_material::shader_source(r.device.working_space(), r.device.float_sampling_wgsl(), include_str!("../../material_brush.wgsl"));
+    assert_eq!(writable(&fragment), vec![], "fragment dry evaluation writes no cell flags");
+    for start in [Start::Stored, Start::Sampled] {
+        let kernel = crate::dry_material::kernel_source(r.device.working_space(), r.device.float_sampling_wgsl(), start, u32::MAX, MaterialOperation::Deposit);
+        let expected = if start == Start::Stored { vec![(Some("changed_cells".into()), Some((0, 3)))] } else { vec![] };
+        assert_eq!(writable(&kernel), expected, "{start:?} dry kernel cell flags");
     }
+    let pipeline = r.pipelines.dry_material.kernels[0].compile();
+    r.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("material cell binding contract"), layout: &pipeline.get_bind_group_layout(0), entries: &[
+        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+            buffer: &r.style_buffer, offset: 0, size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
+        }) },
+        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&output) },
+        wgpu::BindGroupEntry { binding: 3, resource: r.changed_cells.as_ref().unwrap().disabled.as_entire_binding() },
+    ] });
 }
 
 #[test]
@@ -748,8 +749,9 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
             let cells=r.changed_cells.as_ref().unwrap();
             let flags=cells.buffer(target,coordinate).unwrap();
             let tracked=step==1 || step==2 || step==3;
-            let expected=tracked.then(||flags.clone());
-            page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,false,expected),||panic!("{name} {blend:?} level{level} step{step}: actual kernel/output binding must have expected tracking"));
+            let expected=if tracked {flags.clone()} else {cells.disabled.clone()};
+            page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,Some(expected)),
+                ||panic!("{name} {blend:?} level{level} step{step}: actual kernel/output binding must have expected tracking"));
             let data=pollster::block_on(crate::local_tone::read_buffer_async(&r.device,&r.queue,flags)).unwrap();
             let dirty=data[16..].chunks_exact(4).filter(|v|u32::from_le_bytes((*v).try_into().unwrap())!=0).count();
             if step==1 {assert_eq!(dirty,0,"identical retained prediction must leave every cell clear");assert_eq!(Some(page.primary.view.clone()),previous);}
@@ -783,9 +785,10 @@ fn fused_prediction_one_pixel_compares_signed_zero_and_tiny_alpha_bits() {
         let bytes:Vec<_>=old.into_iter().flat_map(f32::to_le_bytes).collect();
         r.queue.write_texture(texture.as_image_copy(),&bytes,wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(16),rows_per_image:Some(1)},texture.size());
         let components=new.map(|v|format!("bitcast<f32>({}u)",v.to_bits())).join(",");
-        let material=format!("{}\n@compute @workgroup_size(1) fn comparison_test() {{store_display_color(vec2<u32>(0u),vec4<f32>({components}));}}",include_str!("../../material_brush.wgsl"));
-        let shader=r.device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("actual tracked display compare helper"),
-            source:wgpu::ShaderSource::Wgsl(crate::dry_material::shader_source(r.device.working_space(),r.device.float_sampling_wgsl(),crate::dry_material::Target::DisplayTracked,&material))});
+        let source=format!("{}\n@compute @workgroup_size(1) fn comparison_test() {{load_dry_destination(vec2<u32>(0u));store_dry_color(vec2<u32>(0u),vec4<f32>({components}));}}",
+            crate::dry_material::kernel_source(r.device.working_space(),r.device.float_sampling_wgsl(),crate::dry_material::Start::Stored,u32::MAX,MaterialOperation::Deposit));
+        let shader=r.device.create_shader_module(wgpu::ShaderModuleDescriptor {label:Some("actual in-place store compare helper"),
+            source:wgpu::ShaderSource::Wgsl(source.into())});
         let pipeline=r.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {label:Some("tracked one-pixel bit compare"),layout:None,module:&shader,entry_point:Some("comparison_test"),compilation_options:Default::default(),cache:None});
         let binding=r.device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("tracked one-pixel actual output"),layout:&pipeline.get_bind_group_layout(0),entries:&[
             wgpu::BindGroupEntry {binding:0,resource:wgpu::BindingResource::Buffer(wgpu::BufferBinding {buffer:&r.style_buffer,offset:0,size:NonZeroU64::new(mem::size_of::<StyleGpu>() as u64)})},
@@ -812,7 +815,7 @@ fn source_only_dry_updates_reach_the_next_prediction_and_display() {
         let frame=FramePacket {view,blend_space:layer_core::BlendSpace::Perceptual,composite_all:false,..packet(doc.scene(),extent)};
         let mut r=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
         let mut reference=WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
-        if readonly {r.pipelines.dry_in_place=None;r.pipelines.dry_tracked=None;reference.pipelines.dry_in_place=None;reference.pipelines.dry_tracked=None;}
+        if readonly {crate::test_support::write_only_dry_material(&mut r);crate::test_support::write_only_dry_material(&mut reference);}
         for backend in [&mut r,&mut reference] {backend.submit(frame).unwrap();}
         let mut style=crate::layer_tests::preset_style(preset);style.mode=mode;style.blend_space=frame.blend_space;
         let dry=style.contact.unwrap().dry.unwrap();let relief=dry.pose(0.85).relief;

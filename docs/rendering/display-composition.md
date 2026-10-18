@@ -405,9 +405,9 @@ root composition. Preparation leaves gaps between islands untouched. Native tile
 pages; fusion boundaries and branches without retained output keep their existing evaluator. Attached native pointwise effects can reuse initialized reduced output cells when the GPU observes no input changes.
 Admission checks each retained output page independently; a cold neighboring
 page receives full evaluation while initialized pages can still reuse cells.
-Tracked in-place dry painting and native color canonicalization mark changed
-cells; untracked dry kernels bind no writable flags. A retained compact prediction
-compares old and new RGBA32F bits while writing its complete page. Its surface
+Dry painting and native color canonicalization mark changed cells; untracked dry
+destinations bind a disabled flag set. A retained compact prediction compares old
+and new RGBA32F bits while writing its complete page. Its surface
 records the source and coordinate of that write. Native-only submissions retain
 the last rendered prediction; visible removal retires prediction-only flags. Cold, rebound, removed and
 unsupported contributions force their affected cells. Unchanged idle refinement

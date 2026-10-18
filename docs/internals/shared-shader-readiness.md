@@ -25,19 +25,28 @@ Native paint requires tile decoding before document readiness, including drawing
 without imported images: restoration and Undo consume that same decoder.
 
 A dry brush prepares only the kernels its next stroke can select. Each batch
-chooses fine-tip filtering when a dab semi-axis is under 8 px, a single-pigment
-kernel when all its dabs share one color, and a display contribution while the
-reduced display is painted directly. `dry_material::Reach` bounds the tip size
+chooses fine-tip filtering when a dab semi-axis is under 8 px and a single-pigment
+kernel when all its dabs share one color. `dry_material::Reach` bounds the tip size
 and color variation from the brush's size range, poses, mappings and jitter; the
 document's selection and alpha lock rule out single-pigment batches. Changing
 size, opacity, selection or alpha lock prepares again before the next contact,
 never during one, and debug builds assert that once a brush is ready, every
-kernel its strokes select was prepared. The reduced display's changed-cell tracking can start or stop
-during a stroke, so both the tracked and untracked in-place and display kernels
-are prepared. Kernels without fine-tip filtering omit its shader code. Once the
-brush is ready and speculative work is admitted, native hosts prepare the other
-tip size in the background so a later size change is usually ready; selecting
-another brush discards that queued work.
+kernel its strokes select was prepared. Kernels without fine-tip filtering omit
+its shader code. Once the brush is ready and speculative work is admitted, native
+hosts prepare the other tip size in the background so a later size change is
+usually ready; selecting another brush discards that queued work.
+
+One evaluator per variant serves every destination, so a brush compiles one
+heavy kernel per variant. Where read-write storage exists, the evaluator reads
+each texel's starting paint from its own output and stores only texels whose
+bits changed, marking their cells when the reduced display tracks the page.
+Commits update their page in place and display contributions start from zero;
+any other prediction first stores its starting paint in its output, by copying
+the page or, on the reduced display, by averaging it in a small shared pass that
+also averages stroke coverage and stroke-start paint. Without read-write storage
+the evaluator samples the starting paint and commits write the other half of a
+ping-pong pair. Sampling a page inside the evaluator, even on a branch commits
+never take, costs Adreno and Mali tablets up to a third of their painting rate.
 
 The native compiler workers and browser task runner share `shader_admission.rs`.
 Native hosts run one worker per eight CPUs, up to four, so eight-core tablets

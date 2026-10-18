@@ -108,6 +108,25 @@ pub(crate) fn dab_batch(target: SourceTarget, style: DabStyle, damage: layer_cor
     }
 }
 
+/// The averaged inputs a reduced-resolution dry prediction evaluates against,
+/// gathered from `neighborhood` as encoding does.
+pub(crate) fn dry_display(r: &mut WgpuRasterizer, batch: &DabBatch, neighborhood: [&wgpu::TextureView; 9], output: &PageSurface)
+    -> Option<crate::dry_material::DisplayJob> {
+    if !r.dry_display_gathers(batch) { return None; }
+    if r.dry_display_inputs.is_empty() {
+        let inputs = crate::dry_material::DisplayInputs::new(&r.device);
+        r.dry_display_inputs.push(inputs);
+    }
+    let inputs = &r.dry_display_inputs[0];
+    Some(crate::dry_material::DisplayJob { gather: inputs.gather(r, output), inputs: inputs.inputs(r, neighborhood) })
+}
+
+/// Dry kernels as a device without read-write storage builds them.
+pub(crate) fn write_only_dry_material(r: &mut WgpuRasterizer) {
+    r.pipelines.dry_material = crate::dry_material::Pipelines::new(&r.device,
+        [&r.target_layout, &r.material_layout, &r.advanced_texture_layout], false);
+}
+
 pub(crate) fn complete(r: &WgpuRasterizer) {
     r.device
         .poll(wgpu::PollType::Wait { submission_index: None, timeout: Some(READBACK_TIMEOUT) })
