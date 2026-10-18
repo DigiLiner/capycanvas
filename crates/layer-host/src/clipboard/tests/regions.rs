@@ -423,6 +423,11 @@ fn selected_group_generator_copies_and_cuts_only_selected_pixels() {
     let group = document.working.occurrence.unwrap();
     let working = document.working.clone();
     let generator = *document.scene().order().iter().find(|id| document.scene().occurrence(**id).unwrap().name.as_ref() == "Paper").unwrap();
+    let effect = document.scene().effect_handle(generator).unwrap();
+    let application = document.artwork.effects.get_mut(effect).unwrap();
+    application.program = layer_core::bundled_effect_catalog().get("solid_color").unwrap().program();
+    application.values.truncate(1);
+    application.spatial = None;
     let occurrence = document.artwork.occurrences.get_mut(generator).unwrap();
     occurrence.visible = true;
     occurrence.name = "Generated white".into();
