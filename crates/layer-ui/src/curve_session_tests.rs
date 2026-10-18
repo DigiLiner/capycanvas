@@ -333,3 +333,26 @@ fn curve_and_numeric_contacts_are_busy_until_their_native_release() {
         assert_eq!(app.localization_input_busy(),phase==ContactPhase::Down);
     }
 }
+
+#[test]
+fn queued_curve_removal_after_the_hosts_own_cancel_uses_the_same_published_epoch() {
+    for escape in [false,true] {
+        let mut app=session(Platform::Ios);
+        app.dispatch(UiAction::Effect{action:EffectAction::Insert{effect:"curves".into()}}).unwrap();
+        let layer=occurrence_token(app.engine.document().working.occurrence.unwrap());
+        let key=app.state.layer_properties.controls.iter().find(|c|c.curve.is_some()).unwrap().key.clone();
+        let original=vec![[0.,0.],[0.5,0.5],[1.,1.]];
+        app.dispatch(UiAction::Effect{action:EffectAction::Set{layer,key:key.clone(),value:layer_core::EffectValue::Curve(original.clone())}}).unwrap();
+        let epoch=app.state.layer_properties.epoch;
+        let checkpoint=app.engine.checkpoint();
+        let contact=|phase|UiAction::Effect{action:EffectAction::CurveContact{layer,key:key.clone(),epoch,phase,point:[127.5,127.5],extent:[255.,255.]}};
+        for phase in [ContactPhase::Down,ContactPhase::Up,ContactPhase::Down] {app.dispatch(contact(phase)).unwrap();}
+        app.dispatch(if escape {UiAction::Effect{action:EffectAction::CurveKey{layer,key:key.clone(),epoch,key_event:"Escape".into(),pressed:true,repeat:false,modifiers:Modifiers::default()}}} else {contact(ContactPhase::Cancel)}).unwrap();
+        assert_eq!(app.engine.checkpoint(),checkpoint,"unchanged contacts add no history (escape={escape})");
+        app.dispatch(UiAction::Effect{action:EffectAction::CurveRemoveAt{layer,key:key.clone(),epoch,point:[127.5,127.5],extent:[255.,255.],point_count:Some(3)}}).unwrap();
+        assert_eq!(app.engine.document().scene().effect(occurrence_handle(layer).unwrap()).unwrap().value(&key),Some(&layer_core::EffectValue::Curve(vec![[0.,0.],[1.,1.]])),
+            "a double-tap removal queued after the host cancels its own contact is not stale (escape={escape})");
+        invoke(&mut app,CommandId::Undo);
+        assert_eq!(app.engine.document().scene().effect(occurrence_handle(layer).unwrap()).unwrap().value(&key),Some(&layer_core::EffectValue::Curve(original)));
+    }
+}

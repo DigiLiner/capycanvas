@@ -159,7 +159,9 @@ Arrow keys move a selected point by 1/255 of the graph range; Shift moves it by
 10/255. A held key is one edit. Delete removes an interior point, and Escape
 cancels its live edit. Point selection and the active channel belong to the
 session and do not add undo entries. Stale contacts from a previous page, layer
-or document are ignored.
+or document are ignored. Cancelling a contact or live edit does not make the
+graph's queued input stale, so a double-tap whose second contact is cancelled
+still removes its point.
 
 GTK, Web, Android, Windows, macOS and iPadOS present the same shared page
 selector, graph axes and point fields. Native controls retain unfinished text while the model refreshes; page,

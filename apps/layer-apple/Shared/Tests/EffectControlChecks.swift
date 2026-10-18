@@ -187,11 +187,14 @@ extension XCTestCase {
         workspaceActivate(app.buttons["properties-page-option-1"])
         expectValue(app.buttons["properties-page"], "Red")
         let curve = app.descendants(matching: .any)["effect-curve"].firstMatch
-        // The plot can be taller than the panel. Its insertion point must be
-        // visible; requiring the entire plot to fit cannot be met by scrolling.
-        let insertion = CGPoint(x: curve.frame.midX, y: curve.frame.minY + curve.frame.height * 0.25)
-        XCTAssertTrue(app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch.frame.contains(insertion))
-        let point = curve.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+        let properties = app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch
+        func visible(_ dx: CGFloat, _ dy: CGFloat, offset: CGVector = .zero) -> XCUICoordinate {
+            let plot = curve.frame
+            XCTAssertTrue(properties.frame.contains(CGPoint(x: plot.minX + plot.width * dx + offset.dx, y: plot.minY + plot.height * dy + offset.dy)),
+                "A curve contact must start inside the visible Properties panel")
+            return curve.coordinate(withNormalizedOffset: CGVector(dx: dx, dy: dy)).withOffset(offset)
+        }
+        let point = visible(0.5, 0.25)
         point.clickOrTap()
         expectation(for: NSPredicate(format: "label == %@ AND value == %@", "Red", "3"), evaluatedWith: curve)
         waitForExpectations(timeout: 10)
@@ -204,10 +207,7 @@ extension XCTestCase {
         expectPixels(curved, in: app)
         history(before: blue, after: curved)
         attachEditor(in: app, name: "filter-red-curve-selection")
-        let destination = curve.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.4))
-        let destinationPoint = CGPoint(x: curve.frame.minX + curve.frame.width * 0.65,
-            y: curve.frame.minY + curve.frame.height * 0.4)
-        XCTAssertTrue(app.scrollViews.containing(.any, identifier: "layer-properties").firstMatch.frame.contains(destinationPoint))
+        let destination = visible(0.65, 0.4)
         nearPoint.press(forDuration: 0.05, thenDragTo: destination.withOffset(CGVector(dx: 5, dy: 5)),
             withVelocity: .slow, thenHoldForDuration: 0.1)
         let moved = changed(from: curved)
@@ -230,10 +230,13 @@ extension XCTestCase {
         #if os(iOS)
         // A touch on the plot edits its curve. Scroll from the noninteractive
         // heading instead of starting the gesture inside that editing surface.
-        let heading = app.descendants(matching: .any)["layer-properties"].firstMatch.staticTexts["properties-layer-name"]
-        let scrollStart = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        scrollStart.press(forDuration: 0.05, thenDragTo: scrollStart.withOffset(CGVector(dx: 0, dy: -160)),
-            withVelocity: .slow, thenHoldForDuration: 0.1)
+        let overflow = app.buttons["curve-reset"].frame.maxY - properties.frame.maxY
+        if overflow > 0 {
+            let heading = app.descendants(matching: .any)["layer-properties"].firstMatch.staticTexts["properties-layer-name"]
+            let scrollStart = heading.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            scrollStart.press(forDuration: 0.05, thenDragTo: scrollStart.withOffset(CGVector(dx: 0, dy: -overflow - 12)),
+                withVelocity: .slow, thenHoldForDuration: 0.1)
+        }
         #else
         reveal(app.buttons["curve-reset"])
         #endif
@@ -243,8 +246,8 @@ extension XCTestCase {
             expectation(for: NSPredicate(format: "label == %@ AND value == %@", "Red", String(count)), evaluatedWith: curve)
             waitForExpectations(timeout: 10)
         }
-        let press = curve.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.35))
-        let pressed = press.withOffset(CGVector(dx: 12, dy: -30))
+        let press = visible(0.3, 0.35)
+        let pressed = visible(0.3, 0.35, offset: CGVector(dx: 12, dy: -30))
         press.press(forDuration: 0.05, thenDragTo: pressed, withVelocity: .slow, thenHoldForDuration: 0.1)
         expectPoints(3)
         let inserted = changed(from: blue)

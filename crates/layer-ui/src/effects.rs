@@ -908,6 +908,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         self.engine
             .preview_edit(gesture.original.edit(self.engine.document())?)
             .map_err(error)?;
+        self.property_editor.commit_revision(self.engine.document().revision);
         self.refresh_document();
         Ok(true)
     }
