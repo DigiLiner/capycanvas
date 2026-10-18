@@ -461,6 +461,11 @@ pub(crate) fn converted(node: &gsk::RenderNode, scale: f64) -> gsk::RenderNode {
     Converter::default().frame(node, scale)
 }
 
+fn surface_extent(widget: &gtk::Widget) -> gsk::RenderNode {
+    let bounds = graphene::Rect::new(0., 0., widget.width() as f32, widget.height() as f32);
+    gsk::ColorNode::new(&gdk::RGBA::TRANSPARENT, &bounds).upcast()
+}
+
 fn append_converted(widget: &gtk::Widget, converter: &RefCell<Converter>, content: gtk::Snapshot, snapshot: &gtk::Snapshot) {
     let Some(node) = content.to_node() else {
         return;
@@ -507,6 +512,7 @@ mod imp {
             };
             let content = gtk::Snapshot::new();
             obj.snapshot_child(&child, &content);
+            snapshot.append_node(surface_extent(obj.upcast_ref()));
             append_converted(obj.upcast_ref(), &self.converter, content, snapshot);
         }
     }

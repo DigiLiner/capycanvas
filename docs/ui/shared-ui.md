@@ -206,7 +206,11 @@ GTK uses an `AdwHeaderBar` with native window controls and drag region; the dock
 widget allocates the full-window GPU picture, transparent header, HUD and panels.
 On Wayland, an app-owned Vulkan subsurface presents the full viewport below
 transparent GTK chrome. The viewport shader rounds the outer corners; no crop
-or theme-colored strips hide any canvas area. DOM elements do the equivalent
+or theme-colored strips hide any canvas area. GTK's window content always spans
+the whole surface, with a transparent node where nothing is drawn. With
+color management on, GTK 4.22's GPU renderers convert each damaged rectangle
+separately and skip any that lie outside the root node, so a panel that moved
+away over bare canvas stayed on screen. DOM elements do the equivalent
 in the browser, without fake operating-system window buttons. No custom chrome
 compositor or full-window drag gesture is required. The optional
 [panel transparency](panel-transparency.md) blurs behind panels inside the

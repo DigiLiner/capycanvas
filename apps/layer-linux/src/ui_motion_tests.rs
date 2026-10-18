@@ -116,3 +116,53 @@ fn native_active_tab_matches_panel() {
     input.finish();
     assert!(mismatches.is_empty(), "active tabs differ from their panels:\n{}", mismatches.join("\n"));
 }
+
+#[test]
+#[ignore = "isolated Mutter captures; LAYER_NATIVE_CAPTURE_DIR=<dir> workspace-motion.sh gtk --native-test=native_workspace_switch_repaints_vacated_regions --native-storage"]
+fn native_workspace_switch_repaints_vacated_regions() {
+    let captures = std::path::PathBuf::from(std::env::var("LAYER_NATIVE_CAPTURE_DIR").expect("compositor captures"));
+    let mut input = RemoteInput::new().settle_ms(1200).timeout_secs(30);
+    let app = native_test_app("art.capycanvas.VacatedRegions");
+    let w = Workspace::new(&app);
+    apply_fixture_theme(&w);
+    w.window.maximize();
+    w.window.present();
+    wait_workspaces(&w);
+    pump(1500);
+    stripes(&w);
+    input.ready();
+    pump(500);
+    let mut switch = |name: &str| {
+        let button = find_named(w.header.root.upcast_ref(), &format!("workspace-switch-{name}")).unwrap();
+        let point = screen_point(&button, &w.window, [0.5, 0.5]);
+        input.perform(serde_json::json!([{"point": point}, {"wait_ms": 300}, {"down": true}, {"down": false}, {"wait_ms": 1200}]));
+        until(|| !w.workspaces.busy(), "workspace settled");
+    };
+    switch("photographer");
+    switch("painter");
+    input.perform(serde_json::json!([{"wait_ms": 300}, {"capture": "switched"}]));
+    w.window.unmaximize();
+    pump(800);
+    w.window.maximize();
+    pump(1500);
+    input.perform(serde_json::json!([{"wait_ms": 300}, {"capture": "repainted"}]));
+    input.finish();
+    let pixels = |name: &str| {
+        let texture = gdk::Texture::from_filename(captures.join(format!("{name}.png"))).unwrap();
+        let stride = texture.width() as usize * 4;
+        let mut bytes = vec![0; stride * texture.height() as usize];
+        texture.download(&mut bytes, stride);
+        (bytes, stride)
+    };
+    let ((switched, stride), (repainted, _)) = (pixels("switched"), pixels("repainted"));
+    let below_header = (w.header.height() as usize + 8) * stride;
+    let stale: Vec<_> = (below_header..switched.len())
+        .step_by(4)
+        .filter(|&i| (0..3).any(|c| switched[i + c].abs_diff(repainted[i + c]) > 2))
+        .map(|i| [(i % stride) / 4, i / stride])
+        .collect();
+    let extent = stale.iter().fold(None, |e: Option<[usize; 4]>, &[x, y]| {
+        Some(e.map_or([x, y, x, y], |[x0, y0, x1, y1]| [x0.min(x), y0.min(y), x1.max(x), y1.max(y)]))
+    });
+    assert!(stale.is_empty(), "{} pixels kept the previous workspace after the switch, within {extent:?}", stale.len());
+}
