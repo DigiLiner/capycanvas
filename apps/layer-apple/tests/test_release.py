@@ -16,7 +16,7 @@ class ReleaseTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory(prefix="capy release ")
         self.addCleanup(directory.cleanup)
-        self.root = Path(directory.name)
+        self.root = Path(directory.name).resolve()
         self.script = self.root / "apps/layer-apple/scripts/release.sh"
         self.script.parent.mkdir(parents=True)
         shutil.copyfile(ROOT / "apps/layer-apple/scripts/release.sh", self.script)

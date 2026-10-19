@@ -305,8 +305,18 @@ open -n --env CAPY_STORAGE_DIR=capy-try-tool-panel \
 
 ## Tests
 
-On Linux only the Rust bridge tests run; everything else needs the Mac.
+Rust bridge and Python script tests run on Linux. Swift fixtures and native
+builds need a Mac.
 [Testing](testing.md) lists which checks a change needs.
+
+The Python script tests run without Xcode:
+
+```sh
+python3 -m unittest discover -s apps/layer-apple/tests -p 'test_*.py'
+```
+
+The release-script fixtures use temporary directories and stubbed build tools to
+check archive reuse and upload requirements without signing or publishing.
 
 ### Rust bridge
 
