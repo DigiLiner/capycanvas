@@ -398,11 +398,12 @@ The Android package job also builds its debug app and instrumentation APK and
 runs debug/release lint. The instrumentation APK is retained but not executed:
 those tests require hardware Vulkan.
 
-The renderer job selects tests that do not create GPU devices. Windows runs the
-existing native host and document suites on WARP. Renderer pixel/reference
-suites, GPU telemetry and timing, pipeline-cache qualification, native canvas
-journeys, physical pen/touch, HDR, device loss and performance still need the
-[checks for your change](testing.md) on appropriate hardware. WARP results do not
+The renderer job selects tests that do not create GPU devices. Shader contract
+checks select individual CPU tests from modules that also contain GPU tests.
+Windows runs the existing native host and document suites on WARP. Renderer
+pixel/reference suites, GPU telemetry and timing, pipeline-cache qualification,
+native canvas journeys, physical pen/touch, HDR, device loss and performance still
+need the [checks for your change](testing.md) on appropriate hardware. WARP results do not
 qualify hardware rendering or performance.
 
 Run `node --test tools/build/release-workflow.test.mjs` when changing release
