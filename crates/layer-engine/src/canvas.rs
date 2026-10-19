@@ -2184,7 +2184,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             // limiting needs no retained input window or endpoint prediction.
             self.dab_generator
                 .preview()
-                .finish_preview(&active.brush, &mut self.dabs);
+                .flush_contact(&active.brush, &mut self.dabs);
             self.push_active_preview(start);
             return;
         }
@@ -2256,7 +2256,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             if let Some(point) = active.curve_preview.endpoint(latest) {
                 generator.append_continuation(point, &active.brush, &active.curve_preview, &mut self.dabs);
             }
-            generator.finish_preview(&active.brush, &mut self.dabs);
+            generator.flush_contact(&active.brush, &mut self.dabs);
             if let Some(endpoint) = generator.modeled_position() {
                 generator.reach_endpoint(endpoint, start, active.preview_taper, &active.brush, &mut self.dabs);
             }
@@ -2275,7 +2275,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             return;
         }
         if !active.feedback.enabled || estimate.is_none() {
-            generator.finish_preview(&active.brush, &mut self.dabs);
+            generator.flush_contact(&active.brush, &mut self.dabs);
             self.push_active_preview(start);
             return;
         }
@@ -2288,7 +2288,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
         }
         // Flush the actual swept endpoint just as finalization does. Coverage
         // by an earlier, wider contact is not the final pressure/pose.
-        generator.finish_preview(&active.brush, &mut self.dabs);
+        generator.flush_contact(&active.brush, &mut self.dabs);
 
         let modeled_endpoint = generator.modeled_position().unwrap_or(latest.position);
         let endpoint = estimate.point.position;

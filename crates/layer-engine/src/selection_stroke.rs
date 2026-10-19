@@ -25,11 +25,13 @@ impl SelectionStroke {
         curve: PressureCurve,
         close_distance: Option<f32>,
     ) -> Self {
+        let [a, b, c, d, _, _] = transform.surface_to_document;
+        let scale = a.hypot(b).max(c.hypot(d));
         brush.stabilization.strength = 0.;
+        brush.stabilization.input_scale = scale.max(f32::EPSILON).recip();
         let mut generator = DabGenerator::new(layer_core::color::RgbSpace::Srgb);
         generator.reset_for_stroke(StrokeId(id), &brush);
-        let [a, b, c, d, _, _] = transform.surface_to_document;
-        let snap = close_distance.unwrap_or(0.) * a.hypot(b).max(c.hypot(d));
+        let snap = close_distance.unwrap_or(0.) * scale;
         Self {
             id,
             replay_points: Vec::new(),
@@ -71,7 +73,8 @@ impl SelectionStroke {
         // Masks accumulate real contacts without artwork's disposable tail
         // preview. Publish the swept endpoint on every sample so large nibs
         // do not wait half a diameter before their coverage refreshes.
-        self.generator.finish(&self.brush, dabs);
+        if event.phase == PenPhase::Up { self.generator.finish(&self.brush, dabs); }
+        else { self.generator.flush_contact(&self.brush, dabs); }
         self.loops
             .as_mut()
             .map_or_else(Vec::new, |loops| loops.push(point.position))
@@ -93,9 +96,10 @@ impl SelectionStroke {
         let mut dabs = Vec::new();
         let mut generator = DabGenerator::new(layer_core::color::RgbSpace::Srgb);
         generator.reset_for_replay(&stroke);
-        for point in stroke.points.iter().copied() {
+        for (index, point) in stroke.points.iter().copied().enumerate() {
             generator.append(point, &stroke.brush, &mut dabs);
-            generator.finish(&stroke.brush, &mut dabs);
+            if index + 1 == stroke.points.len() { generator.finish(&stroke.brush, &mut dabs); }
+            else { generator.flush_contact(&stroke.brush, &mut dabs); }
         }
         Some(dabs)
     }
@@ -276,6 +280,48 @@ fn polygon_selection(points: Vec<Point>) -> Option<Selection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dry_selection_resolves_taps_only_on_release() {
+        use layer_core::{default_brush, DefaultBrushPreset::*};
+        for preset in [Pencil, PointyPencil, ShadingPencil, Charcoal, Chalk, PastelBlock, Crayon] {
+            for scale in [0.1_f32, 1., 10.] { for drag in [false, true] {
+                let transform = ViewTransform { surface_to_document: [scale.recip(), 0., 0., scale.recip(), 0., 0.], ..ViewTransform::IDENTITY };
+                let mut brush = default_brush(preset);
+                brush.taper.end_distance_diameters = 0.5;
+                let mut stroke = SelectionStroke::new(1, brush.clone(), transform, PressureCurve::default(), None);
+                let mut live = Vec::new();
+                let mut pen = crate::test_support::event(1, PenPhase::Down, 32.);
+                pen.pressure = 0.2;
+                stroke.push(pen, &mut live);
+                assert!(live.is_empty(), "{preset:?}: down must remain undecided");
+                pen.sequence += 1; pen.timestamp_ns += 16_000_000; pen.phase = PenPhase::Move; pen.pressure = 0.8;
+                pen.surface_position.x += 0.5;
+                stroke.push(pen, &mut live);
+                assert!(live.is_empty(), "{preset:?}: held pressure must remain undecided");
+                if drag {
+                    pen.sequence += 1; pen.timestamp_ns += 16_000_000; pen.surface_position.x += 64.;
+                    stroke.push(pen, &mut live);
+                    assert!(!live.is_empty());
+                }
+                pen.sequence += 1; pen.timestamp_ns += 16_000_000; pen.phase = PenPhase::Up; pen.pressure = 0.;
+                stroke.push(pen, &mut live);
+                let replay = stroke.finished_replay().unwrap();
+                if drag {
+                    assert!(live.iter().chain(&replay).all(|dab| dab.motion != [0., 0.]), "{preset:?}");
+                } else {
+                    assert_eq!(live.len(), 1, "{preset:?}");
+                    assert_eq!(replay.len(), 1, "{preset:?}");
+                    let mut reference = SelectionStroke::new(1, brush, transform, PressureCurve::default(), None);
+                    let mut peak = Vec::new();
+                    reference.push(crate::PenEvent {phase: PenPhase::Down, pressure: 0.8, ..pen}, &mut peak);
+                    reference.push(pen, &mut peak);
+                    assert_eq!(live[0].radii, peak[0].radii, "{preset:?}: real peak pressure");
+                    assert_eq!(live[0].flow, peak[0].flow);
+                    assert_eq!(live[0].motion, [0., 0.]);
+                }
+            }}
+        }
+    }
     #[test]
     fn large_gpen_publishes_every_real_endpoint_and_replays_the_same_path() {
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);

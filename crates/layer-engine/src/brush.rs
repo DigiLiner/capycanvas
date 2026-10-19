@@ -447,10 +447,10 @@ impl DabGenerator {
             self.emit_contacts(evaluated, brush, output, &mut damage);
             return damage;
         }
-        damage.union(self.finish_preview(brush, output))
+        damage.union(self.flush_contact(brush, output))
     }
 
-    pub(crate) fn finish_preview(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
+    pub(crate) fn flush_contact(&mut self, brush: &BrushSnapshot, output: &mut Vec<Dab>) -> Rect {
         let Some(contact) = brush.contact else {
             return Rect::EMPTY;
         };
@@ -1756,7 +1756,7 @@ mod tests {
             if i == 20 {
                 assert!(dabs.is_empty(), "a pressed fan may still be a tap");
                 let mut preview = Vec::new();
-                generator.clone().finish_preview(&brush, &mut preview);
+                generator.clone().flush_contact(&brush, &mut preview);
                 assert!(preview.len() > 1, "the preview shows it meanwhile");
             }
         }

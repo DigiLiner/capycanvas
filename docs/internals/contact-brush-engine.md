@@ -88,6 +88,11 @@ pose. Prediction cannot commit either choice; real-input preview remains
 available with prediction off. Wet stamps, bristle contact and time-based
 spraying keep their own contact behavior.
 
+Selection-mask painting flushes swept endpoints after each real sample and
+resolves taps only on pen-up, using the same captured screen tolerance. Its
+completed replay makes the same distinction. Endpoint flushing does not end a
+stroke or turn pending contact into an imprint.
+
 For each pixel, the dry evaluator integrates `contact*loading` over the current
 segment and divides by the full geometric contact chord. Subdividing a fixed-pose
 sweep therefore preserves exposure. Ellipse relief gives a quartic engagement
