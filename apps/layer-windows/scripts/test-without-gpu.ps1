@@ -2,6 +2,7 @@ param([ValidateSet('Debug','Release')][string]$Configuration = 'Release', [Valid
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 . (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
+. (Join-Path $PSScriptRoot 'WindowsTestRuntime.ps1')
 $build = Resolve-WindowsArchitecture $Architecture
 $packages = 'layer-core','layer-engine','layer-ui','layer-workspace','layer-host','layer-windows' | ForEach-Object { '-p', $_ }
 $cargoProfileArgs = @(if ($Configuration -eq 'Release') { '--release' })
@@ -10,6 +11,13 @@ $cargoProfileArgs = @(if ($Configuration -eq 'Release') { '--release' })
 & (Join-Path $PSScriptRoot '../tests/architecture.ps1')
 & (Join-Path $PSScriptRoot '../tests/application-menu-query.ps1')
 & (Join-Path $PSScriptRoot '../tests/pen-capture.ps1')
+& (Join-Path $PSScriptRoot '../tests/software-test-runtime.ps1')
+$testPackages=Join-Path $repo 'artifacts/windows/test-packages'
+$nuget=Get-Command nuget -ErrorAction SilentlyContinue
+$nugetPath=if($nuget){$nuget.Source}else{Join-Path $env:USERPROFILE '.local/tools/nuget/nuget.exe'}
+& $nugetPath restore (Join-Path $PSScriptRoot '../tests/packages.config') -PackagesDirectory $testPackages -NonInteractive
+if($LASTEXITCODE -ne 0){throw 'Software test runtime restore failed.'}
+$testRuntime=$null
 Push-Location $repo
 $previousSoftwareGpu = $env:LAYER_TEST_SOFTWARE_GPU
 $previousAdapter = $env:WGPU_ADAPTER_NAME
@@ -17,6 +25,11 @@ $previousGpuIndex = $env:LAYER_GPU_INDEX
 $previousStorage = $env:CAPY_STORAGE_DIR
 $previousPath = $env:PATH
 try {
+    $metadata=& cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+    if($LASTEXITCODE -ne 0){throw 'Cannot resolve the Cargo test directory.'}
+    $rustProfile=if($Configuration -eq 'Release'){'release'}else{'debug'}
+    $testDirectory=Join-Path $metadata.target_directory "$($build.target)/$rustProfile/deps"
+    $testRuntime=Install-WindowsSoftwareTestRuntime $testPackages $testDirectory $build.architecture
     $env:PATH = (Get-WindowsBuildDirectory $repo $build $Configuration)+';'+$previousPath
     $env:LAYER_TEST_SOFTWARE_GPU = '1'
     $env:WGPU_ADAPTER_NAME = 'Microsoft Basic Render Driver'
@@ -34,4 +47,5 @@ try {
     $env:CAPY_STORAGE_DIR = $previousStorage
     $env:PATH = $previousPath
     Pop-Location
+    Remove-WindowsSoftwareTestRuntime $testRuntime
 }

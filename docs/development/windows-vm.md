@@ -51,7 +51,8 @@ and untracked files, to `C:\capycanvas`, and runs
 the optimized Release build (`--debug` for Debug), the native input tests, and the
 shared and Windows Rust unit tests, with the `layer-host` GPU tests and the
 ignored `d3d12_` document tests on WARP. Builds and tests use the selected
-configuration. Each check uses a fresh
+configuration and the [pinned test-only WARP runtime](windows.md#test).
+Each check uses a fresh
 `CAPY_STORAGE_DIR` under `artifacts/windows/test-storage`; keep it isolated across runs.
 Build outputs persist between syncs;
 each sync sends only files that changed since that VM's last sync, stamped with

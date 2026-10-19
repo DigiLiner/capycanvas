@@ -3,6 +3,7 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 . (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
+. (Join-Path $PSScriptRoot 'PortablePackage.ps1')
 $buildArchitecture=Resolve-WindowsArchitecture $Architecture
 $Architecture=$buildArchitecture.architecture
 if(!$OutputRoot){$OutputRoot=Join-Path $repo 'artifacts/windows/distribution'}
@@ -58,7 +59,7 @@ try {
         if(!(Test-Path -LiteralPath (Join-Path $payload $name) -PathType Leaf)){throw "Incomplete runtime payload: $name"}
     }
     $signed=[bool]$SignArguments
-    Assert-WindowsBinaryArchitecture $payload $Architecture
+    Assert-WindowsDistributionRuntime $payload $Architecture
     if($signed){
         & signtool sign @SignArguments (Join-Path $payload 'CapyCanvas.exe') (Join-Path $payload 'layer_windows.dll')
         if($LASTEXITCODE -ne 0){throw 'Signing the application executables failed.'}

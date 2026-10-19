@@ -448,6 +448,7 @@ emulation on Arm. Validation requires its matching x64 DLL and ARM64X relocation
 metadata; plain ARM64 binaries and unpaired companions remain errors.
 CRT collection selects compatible binaries from the redistributable directory,
 which can also contain ARM64EC companions that native ARM64 cannot load.
+Portable packaging and both converters reject the development-only WARP runtime.
 It assembles the archive twice and requires identical hashes. Output stays under
 ignored `artifacts/windows/distribution`. `-SkipRestore` reuses restored packages;
 uncommitted changes need `-AllowDirty`, which marks the package as a development
@@ -588,6 +589,16 @@ The `software-adapter-tests` feature gives GPU readbacks and their raster
 consumers one shared 60-second budget; normal hardware builds retain 30 seconds.
 The large-canvas fixture keeps its 60-second overall deadline and exact pose and
 pixel checks. Hardware qualification uses normal builds.
+
+The test script restores `Microsoft.Direct3D.WARP` 1.0.21 from the separate
+[`tests/packages.config`](../../apps/layer-windows/tests/packages.config) into
+`artifacts/windows/test-packages`. It stages only the selected architecture's
+`d3d10warp.dll` beside Cargo test executables, using Cargo's resolved target
+directory, and removes its own copy on exit. System ARM64 WARP 10.0.26100.8972
+can fail fast in its pixel JIT during clipboard readbacks; the pinned runtime
+passes that case. Microsoft's [WARP package license](https://www.nuget.org/packages/Microsoft.Direct3D.WARP/1.0.21)
+permits internal Windows development and testing only. Keep its DLL and symbols
+out of application builds, distribution packages and public crash dumps.
 
 Failed rendering waits report pending bounds, capture and edit jobs alongside the
 shared notice, so completed work can be distinguished from a stalled operation.

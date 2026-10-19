@@ -33,6 +33,11 @@ function Get-ShippedLanguages([string]$Repo) {
     if(!$languages.Count -or $languages -contains $null){throw 'The shared shipping language inventory could not be read.'}
     $languages
 }
+function Assert-WindowsDistributionRuntime([string]$Directory,[ValidateSet('x64','arm64')][string]$Architecture) {
+    if(Get-ChildItem -LiteralPath $Directory -File -Recurse -Filter 'd3d10warp.*'){throw 'The development-only WARP runtime cannot be redistributed.'}
+    Assert-WindowsBinaryArchitecture $Directory $Architecture
+}
+
 # The payload of a portable release build, after checking every file against its manifest.
 function Read-PortablePackage([string]$ResultFile) {
     . (Join-Path $PSScriptRoot 'WindowsArchitecture.ps1')
@@ -51,7 +56,7 @@ function Read-PortablePackage([string]$ResultFile) {
         if((Get-Item -LiteralPath $path).Length -ne $file.bytes -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256){throw "Portable payload hash mismatch: $($file.path)"}
     }
     if(@($entries|Where-Object {!$_.PSIsContainer}).Count -ne $declared.Count+1){throw 'Portable payload contains files absent from its manifest.'}
-    Assert-WindowsBinaryArchitecture $source $manifest.architecture
+    Assert-WindowsDistributionRuntime $source $manifest.architecture
     [pscustomobject]@{source=$source;manifest=$manifest}
 }
 
