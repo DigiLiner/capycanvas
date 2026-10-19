@@ -30,7 +30,7 @@ function Preference([int]$Index,[string]$Theme){
     Invoke 'settings-button'
     $dialog=Control 'Preferences' -Name -Type $ControlType::Window
     if($Theme){
-        $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+        $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
         $choice=Control 'preference-choice-theme' -Within $dialog;$choice.SetFocus()
         Wait-Until {$choice.Current.HasKeyboardFocus} 'Color theme did not take focus'
         [CapyRowPointer]::Key([uint32]$review.Id,[uint16]0x73)
@@ -51,12 +51,12 @@ function Preference([int]$Index,[string]$Theme){
 }
 function Sample([string]$Name,$Points){
     Start-Sleep -Milliseconds 900;Capture $Name -Composed
-    $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
+    $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$origin)
     $image=[System.Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
     try{@($Points|ForEach-Object {$image.GetPixel($_.x-$origin[0],$_.y-$origin[1]).G})}finally{$image.Dispose()}
 }
 function Tab-Shades([string]$Name){
-    $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
+    $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$origin)
     $image=[System.Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
     try{
         foreach($group in @((Model).layout.groups|Where-Object {$_.tabs_visible})){
@@ -79,7 +79,7 @@ function Tab-Feedback([string]$Name){
         Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $active} 'Tab feedback setup did not select its tab'
         $park=Center (Control 'drawing-canvas');[CapyRowPointer]::Hover($park.x,$park.y)
         $tab=Control ('panel-tab-'+$next) -Arranged;$bounds=$tab.Current.BoundingRectangle
-        $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
+        $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$origin)
         $retained=$tab.GetRuntimeId() -join ':'
         $selectedBounds=(Control ('panel-tab-'+$active) -Arranged).Current.BoundingRectangle
         $foot=@(foreach($x in @(($selectedBounds.Left+3*$scale),($selectedBounds.Right-3*$scale))){
@@ -133,11 +133,10 @@ try {
     $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
     $null=$review.Handle
     Write-Output "Transparency review $($review.Id): $run"
-    Wait-Until {$review.Refresh();$review.MainWindowHandle -ne [IntPtr]::Zero -and (Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Transparency review did not start' 90
-    $root=[System.Windows.Automation.AutomationElement]::FromHandle($review.MainWindowHandle)
+    Wait-Until {$review.Refresh();$native=Owned-DrawingWindow $review;if(!$native){return $false};$script:drawingWindow=$native.Handle;$script:root=$native.Root;(Model).brush_ready -and (Model).windows_workspace.ready -and !(Model).windows_workspace.busy} 'Transparency review did not start' 90
     $root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
     Start-Sleep -Milliseconds 600
-    $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+    $null=[CapyRowPointer]::SetForegroundWindow($drawingWindow)
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     Switch-Workspace 'Paint' 'builtin:workspace:illustrator'
     if((Model).state.palette.glass.transparency -ne 'low'){throw 'Low is not the default transparency'}
@@ -145,7 +144,7 @@ try {
     Wait-Until {@((Model).layout.groups|Where-Object active -eq 'stats').Count -eq 1} 'Diagnostics did not become the active tab'
     Wait-Until {(Model).windows_glass.regions -ge 4} 'Paint did not publish its glass surfaces'
     $group=@((Model).layout.groups|Where-Object {$_.panels -contains 'layers'})[0]
-    $scale=[Capy.GlassWindow]::GetDpiForWindow($review.MainWindowHandle)/96.;$client=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$client)
+    $scale=[Capy.GlassWindow]::GetDpiForWindow($drawingWindow)/96.;$client=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$client)
     $bounds=$group.bounds
     $point=@{x=[int]($client[0]+($bounds.x+$bounds.width-24)*$scale);y=[int]($client[1]+($bounds.y+$bounds.height-72)*$scale)}
     $panel=[Convert]::ToInt32((Model).state.palette.panel.Substring(3,2),16)

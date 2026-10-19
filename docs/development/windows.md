@@ -303,6 +303,8 @@ and one Undo. With Texture visibility at 0 they require Light and Shows through
 paint to be disabled, then check the Light dial's size and alignment with the
 slider rows, its dot, mouse, pen and touch drags with one Undo each, Escape,
 arrow steps and double-click reset.
+The Layers fixture includes popup windows owned by its review process when
+locating Choose Texture and its Rename prompt.
 The Paper fixtures maximize their owned window and wait for two full rows in
 the Layers viewport before comparing row heights; UIA bounds are clipped to
 that viewport. Reacquire the current Layers list with bounded polling after

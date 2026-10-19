@@ -1,6 +1,7 @@
 param([Parameter(Mandatory)][string]$Executable,[switch]$Relationships,[switch]$Paper,[switch]$PaperLight)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
+$CapyPopups=$true
 $CapyCaptureDelay=250
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'

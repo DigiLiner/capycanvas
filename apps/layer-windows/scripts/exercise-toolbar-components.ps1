@@ -126,9 +126,18 @@ try {
     $from=@{x=[int]($grip.X+$grip.Width/2);y=[int]($grip.Y+$grip.Height/2)};$to=@{x=[int]($hostBox.Left+8*$scale);y=[int]($hostBox.Top+$hostBox.Height/2)}
     $workspace=Workspace-Root
     if(!$workspace){throw 'Compact face setup has no native workspace trace'}
-    Press 'mouse' $from;Drag $from $to
-    Wait-Until {$contact=$workspace.Current.HelpText|ConvertFrom-Json;$contact.phase -eq 'dragging' -and $contact.captured -and $contact.source.panel -eq 'commands'} 'Compact face setup did not admit the native grip drag'
-    @{from=$from;to=$to;contact=($workspace.Current.HelpText|ConvertFrom-Json)}|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'compact-face-setup.json')
+    Focus-Review;[CapyRowPointer]::Verify()
+    $foreground=[CapyRowPointer]::GetForegroundWindow();[uint32]$foregroundProcess=0
+    $null=[CapyRowPointer]::GetWindowThreadProcessId($foreground,[ref]$foregroundProcess)
+    $gripEvidence=@{from=$from;to=$to;foreground_window=$foreground.ToInt64();foreground_process=$foregroundProcess;before=$workspace.Current.HelpText}
+    $gripEvidence|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'compact-face-setup.json')
+    try{
+        Press 'mouse' $from;Drag $from $to
+        Wait-Until {$contact=$workspace.Current.HelpText|ConvertFrom-Json;$contact.phase -eq 'dragging' -and $contact.captured -and $contact.source.panel -eq 'commands'} 'Compact face setup did not admit the native grip drag'
+    }finally{
+        $gripEvidence.after=$workspace.Current.HelpText
+        $gripEvidence|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'compact-face-setup.json')
+    }
     Release
     $null=Box 'toolbar-face-size'
     $faceCases=@()
@@ -151,7 +160,7 @@ try {
             $case.passed=$true
         }catch{$case.error=$_.Exception.Message;throw}finally{$faceCases+=@($case);$faceCases|ConvertTo-Json -Depth 10|Set-Content (Join-Path $run 'compact-face-cases.json')}
     }}
-    (Control 'toolbar-face-size').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11),0x5A)
+    (Control 'toolbar-face-size').SetFocus();[CapyRowPointer]::Chord([uint32]$review.Id,[uint16[]]@(0x11,0x12),0x5A)
     Wait-Until {((Model).state.workspace.layout|ConvertTo-Json -Depth 40 -Compress) -eq $beforeFaceLayout} 'Compact face setup did not restore the original toolbar layout'
     Invoke "toolbar-more-$($options.id)"
     Wait-Until {$null -ne (Model).state.customization.drawer} 'More did not open the Tool Options drawer'
