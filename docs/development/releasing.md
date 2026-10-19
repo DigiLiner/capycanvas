@@ -392,7 +392,7 @@ creation require successful validation and every platform package.
 | Prediction | Prediction benchmark tests, optimized replay tools and the complete recorded stroke bank's analysis checks |
 | Arch | Fresh package dependencies, native packaging and Wayland protocol tests, patched GTK/GLib/Pango runtime, codec and Wayland callback regressions, GTK model tests and offline launcher build |
 | Windows x64 and ARM64 | Native Release build, C++ input and script tests, serial Rust/document tests on WARP, model snapshot reader and native bridge lint |
-| Apple | Simulator app and XCTest bundle build; Swift state, input, persistence and sandbox fixtures that do not attach Metal surfaces |
+| Apple | Simulator app and XCTest bundle build; Swift state/input/persistence, offscreen SwiftUI workspace and header geometry, appearance, window state and sandbox fixtures that do not attach Metal surfaces |
 
 The Android package job also builds its debug app and instrumentation APK and
 runs debug/release lint. The instrumentation APK is retained but not executed:

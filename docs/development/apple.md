@@ -599,7 +599,7 @@ Other runners in `scripts/` and `tests/`:
 
 | Runner | Checks |
 | --- | --- |
-| `scripts/test-without-gpu.sh` | Direct Swift state/input fixtures, owner and workspace persistence, color input and sandbox file grants without attaching Metal surfaces; logs under `artifacts/release-tests/apple` |
+| `scripts/test-without-gpu.sh` | Direct Swift state/input fixtures, owner/workspace persistence, SwiftUI publication, workspace layout/dragging, appearance and window state, header geometry in both themes, color input and sandbox file grants without attaching Metal surfaces; logs and header captures under `artifacts/release-tests/apple` |
 | `scripts/test-persistence.sh` | Atomic settings files, backup exclusion and the settings owner |
 | `scripts/test-color-input.sh` | AppKit color text entry in all RGB spaces |
 | `scripts/test-project-access.py` | Project writes through a file-only App Sandbox grant |

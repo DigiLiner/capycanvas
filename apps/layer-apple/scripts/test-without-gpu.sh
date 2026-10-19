@@ -36,9 +36,16 @@ numeric-edit Shared/Editor/NumericEditState.swift
 native-menu-titles macOS/Platform/NativeMenuTitles.swift
 system-status Shared/Bridge/SystemStatus.swift macOS/Platform/BatterySource.swift
 FIXTURES
-for fixture in application-links settings-links owner-autorelease persistence persistence-owner snapshot-projection header-persistence column-stack-persistence workspace-manager workspace-coordinator color-field-cache native-context-menu squircle-geometry; do
+for fixture in application-links settings-links owner-autorelease persistence persistence-owner snapshot-projection snapshot-views header-persistence column-stack-persistence workspace-manager workspace-coordinator workspace-tabs workspace-motion workspace-drawers workspace-menu-actions window-presentation panel-measurements reorder-lifecycle-publication editor-appearance color-field-cache native-context-menu squircle-geometry; do
   check "$fixture" bash "$CAPY_APP/scripts/test-project-files.sh" "$CAPY_APP/tests/$fixture.swift"
 done
+CAPY_ASSETS_APP="$TMPDIR/HeaderAssets.app"
+mkdir -p "$CAPY_ASSETS_APP/Contents/Resources"
+check prepare-assets python3 "$CAPY_APP/scripts/prepare.py"
+check header-assets xcrun actool --compile "$CAPY_ASSETS_APP/Contents/Resources" \
+  --platform macosx --minimum-deployment-target 15.0 --target-device mac "$CAPY_APP/Generated/SharedAssets.xcassets"
+check header-controls env CAPY_TEST_ASSETS_APP="$CAPY_ASSETS_APP" CAPY_HEADER_CAPTURES="$CAPY_REPORTS/header-controls" \
+  bash "$CAPY_APP/scripts/test-project-files.sh" "$CAPY_APP/tests/header-controls.swift"
 check background-expiration python3 "$CAPY_APP/tests/background-expiration.py"
 check project-access python3 "$CAPY_APP/scripts/test-project-access.py"
 check color-input bash "$CAPY_APP/scripts/test-color-input.sh"
