@@ -1,9 +1,13 @@
-param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailGpu)
+param([Parameter(Mandatory)][string]$Executable,[switch]$RecoverGpu,[switch]$FailGpu,[ValidateSet('full','new-drawing')][string]$Journey='full')
 if($RecoverGpu -and $FailGpu){throw "Choose successful recovery or exhausted recovery, not both"}
+if($Journey -ne 'full' -and ($RecoverGpu -or $FailGpu)){throw 'GPU recovery requires the full document journey'}
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
-Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs') -ReferencedAssemblies @(
+    'System.IO.Compression.dll','System.IO.Compression.FileSystem.dll'
+    if($PSVersionTable.PSEdition -eq 'Core'){'System.Collections.dll';'System.IO.Compression.ZipFile.dll'}
+)
 $CapyCacheModel=$true
 $CapyPopups=$true
 $drawIndex=0
@@ -64,6 +68,7 @@ $env:CAPY_TEST_DISPLAY='1'
 $env:CAPY_TEST_PRIMARY='1'
 $stderr=Join-Path $run 'stderr.log'
 $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
+$null=$review.Handle
 [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
 Write-Output "Document review process $($review.Id)"
 function Bind-ReviewWindow([string]$Message) {
@@ -433,7 +438,7 @@ function Choose-Path([string]$Path) {
 }
 function Write-PreservedPackage([string]$Destination,[byte[]]$Preview) {
     $members=[CapyPackageFixture]::Read((Join-Path $repo 'crates/layer-core/src/package/codec/fixtures/authored-filters.capy'))
-    $manifest=[Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json -Depth 100
+    $manifest=[Text.Encoding]::UTF8.GetString(@($members|Where-Object Key -eq 'manifest.json')[0].Value)|ConvertFrom-Json
     @($manifest.objects|Where-Object type -eq 'capy.occurrence/3')[0].data|Add-Member -Force blend 'future-package-blend'
     foreach($record in @($manifest.objects|Where-Object type -eq 'capy.output/2')){
         $record.data|Add-Member -Force name 'Package preview output'
@@ -612,10 +617,31 @@ function Draw-Below {
     }finally{[CapyDocumentControls]::SetThreadDpiAwarenessContext($context)|Out-Null}
     Wait-Until {(Model).state.document_file.revision -gt $revision} 'The stroke below the controlled stroke did not modify the drawing'
 }
+function Test-LightNewDrawing {
+    $env:CAPY_STORAGE_DIR=Join-Path $run 'light-profile'
+    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme='light'}|ConvertTo-Json -Depth 4))
+    $script:stderr=Join-Path $run 'light.stderr.log'
+    $script:review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
+    $null=$review.Handle
+    [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
+    Write-Output "Light New drawing review process $($review.Id)"
+    Bind-ReviewWindow 'No light review window'
+    Wait-Until {$model=Model;$model.brush_ready -and $model.state.theme -eq 'light'} 'Light review did not start' 45
+    New-Journey 'light'
+    Request-Close;Wait-Closed 'Light review close did not finish'
+    if((Get-Item -LiteralPath $stderr).Length){throw 'Light native review reported stderr'}
+}
 Bind-ReviewWindow 'No review window'
 Wait-Until {(Model).brush_ready} 'Canvas startup did not finish' 45
 if(!(Model).windows_isolated_settings){throw 'Review must use an isolated profile'}
 New-Journey 'dark' -Full
+if($Journey -eq 'new-drawing'){
+    Request-Close;Wait-Closed 'New drawing review close did not finish'
+    if((Get-Item -LiteralPath $stderr).Length){throw 'New drawing native review reported stderr'}
+    Test-LightNewDrawing
+    @{journey=$Journey;new_drawing_captures='dark and light';evidence=$run;scope='New drawing presets, paper and color drawers, texture visibility, sheet creation and owned close'}|ConvertTo-Json
+    return
+}
 function Combo-Value($Combo){$selection=$Combo.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection();if($selection.Count){$selection[0].Current.Name}}
 function Combo-Select($Combo,[scriptblock]$Pick){
     $Combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
@@ -905,17 +931,7 @@ File-Command 'close_document';Confirm-Dialog;Invoke-Control 'Discard Changes'
 Wait-Closed 'Discarded close did not finish'
 if((Get-Item -LiteralPath $stderr).Length){throw 'Untitled native review reported stderr'}
 if(!$RecoverGpu -and !$FailGpu){
-    $env:CAPY_STORAGE_DIR=Join-Path $run 'light-profile'
-    [IO.File]::WriteAllText((Settings-File),(@{language=@{Explicit='en'};theme='light'}|ConvertTo-Json -Depth 4))
-    $stderr=Join-Path $run 'light.stderr.log'
-    $review=Start-Process -FilePath $Executable -WorkingDirectory $directory -WindowStyle Hidden -PassThru -RedirectStandardError $stderr
-    [IO.File]::WriteAllText((Join-Path $repo 'artifacts/windows/document-ui-review.pid'),[string]$review.Id)
-    Write-Output "Light New drawing review process $($review.Id)"
-    Bind-ReviewWindow 'No light review window'
-    Wait-Until {$model=Model;$model.brush_ready -and $model.state.theme -eq 'light'} 'Light review did not start' 45
-    New-Journey 'light'
-    Request-Close;Wait-Closed 'Light review close did not finish'
-    if((Get-Item -LiteralPath $stderr).Length){throw 'Light native review reported stderr'}
+    Test-LightNewDrawing
 }
 if($FailGpu){
     Start-RecoveryReview 'save-as'

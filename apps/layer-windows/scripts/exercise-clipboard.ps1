@@ -4,7 +4,10 @@ $ErrorActionPreference='Stop'
 $CapyWaitSeconds=30;$CapyFind='prefer-visible';$CapyPopups=$true
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
 Add-Type -AssemblyName System.Drawing
-Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs') -ReferencedAssemblies @(
+    'System.IO.Compression.dll','System.IO.Compression.FileSystem.dll'
+    if($PSVersionTable.PSEdition -eq 'Core'){'System.Collections.dll';'System.IO.Compression.ZipFile.dll'}
+)
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $run=Join-Path $repo ('artifacts/windows/clipboard/'+[Guid]::NewGuid().ToString('N'))

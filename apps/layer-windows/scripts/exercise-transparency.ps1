@@ -120,7 +120,7 @@ function Tab-Feedback([string]$Name){
 function Four-TabGroup {
     $group=@((Model).layout.groups|Where-Object {$_.panels -contains 'brushes'})[0]
     foreach($panel in 'navigator','proof'){
-        [CapyRowPointer]::RightClick((Center (Control ('group-grip-'+$group.id))).x,(Center (Control ('group-grip-'+$group.id))).y)
+        $at=Center (Control ('group-grip-'+$group.id) -Arranged);[CapyRowPointer]::RightClick($at.x,$at.y)
         (Control 'Add built-in panel' -Name).GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
         $title=@((Model).panels|Where-Object id -eq $panel)[0].configuration_title -replace '^Configure ',''
         (Control $title -Name -Type $ControlType::MenuItem).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
@@ -129,7 +129,7 @@ function Four-TabGroup {
     @((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0]
 }
 function Tab-Style($Group,[string]$Name){
-    $at=Center (Control ('group-grip-'+$Group));[CapyRowPointer]::RightClick($at.x,$at.y)
+    $at=Center (Control ('group-grip-'+$Group) -Arranged);[CapyRowPointer]::RightClick($at.x,$at.y)
     (Control $Name -Name -Type $ControlType::MenuItem).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
     Wait-Until {!(Find $Name -Name -Type $ControlType::MenuItem)} 'Tab style menu did not close'
 }

@@ -3,7 +3,10 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'CapyUia.ps1')
 $CapyFind='prefer-visible';$CapyPopups=$true;$CapyWaitSeconds=30
 Add-Type -Path (Join-Path $PSScriptRoot 'RowPointerDriver.cs')
-Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs')
+Add-Type -Path (Join-Path $PSScriptRoot 'PackageFixture.cs') -ReferencedAssemblies @(
+    'System.IO.Compression.dll','System.IO.Compression.FileSystem.dll'
+    if($PSVersionTable.PSEdition -eq 'Core'){'System.Collections.dll';'System.IO.Compression.ZipFile.dll'}
+)
 Add-Type -AssemblyName System.Drawing
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $Executable=(Resolve-Path -LiteralPath $Executable).Path

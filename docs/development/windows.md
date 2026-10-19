@@ -216,6 +216,12 @@ proof and export captions preserve raw names, selections and prepared candidates
 view: it relabels from the view's copy, keeps a numeric draft that is still being
 typed, and embeds Edit Color's form and the Choose Texture grid in its drawers.
 Fixtures create drawings with `New-DrawingPixels` from `CapyUia.ps1`.
+Run `exercise-documents.ps1 -Executable <path> -Journey new-drawing` through
+`test-desktop.ps1` for the existing dark and light New drawing journeys: presets,
+paper and color drawers, typed Texture visibility with Use Texture and Cancel, narrow
+footer layout and sheet creation. The default `full` journey also exercises the
+document import, export, save, reopen and close workflows; GPU recovery switches
+require that full journey.
 Preferences reserves the measured titlebar height when fitting its centered
 dialog; its narrow-window check dismisses it with an actual pointer click.
 
