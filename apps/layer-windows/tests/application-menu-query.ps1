@@ -45,4 +45,30 @@ $delayed|Add-Member ScriptMethod FindAll {
 }
 & $path -Root $delayed -Name File
 if($invoke.Calls -ne 1 -or $delayed.Queries -ne 2){throw 'Menu routes did not share one snapshot before retrying the primary button.'}
+if(!('CapyMenuQueryRoot' -as [type])){
+    Add-Type -ReferencedAssemblies ([System.Windows.Automation.ElementNotAvailableException].Assembly.Location) -TypeDefinition @'
+public sealed class CapyMenuQueryRoot {
+    public int Queries;
+    public object Target;
+    public object[] FindAll(object scope,object condition) {
+        if(++Queries==1)throw new System.Windows.Automation.ElementNotAvailableException();
+        return new object[]{Target};
+    }
+}
+public sealed class CapyMenuQueryExpired {
+    public object Current {get{throw new System.Windows.Automation.ElementNotAvailableException();}}
+}
+'@
+}
+$revoked=[CapyMenuQueryRoot]::new();$revoked.Target=$target
+& $path -Root $revoked -Name File
+if($invoke.Calls -ne 2 -or $revoked.Queries -ne 2){throw 'A revoked UIA traversal did not retry exactly once before invoking.'}
+$expired=[CapyMenuQueryExpired]::new()
+$menuNodes=@($expired,$expected)
+if(![object]::ReferenceEquals((Visible-Control 'application-menu-file' $button),$expected)){throw 'A revoked child hid the current menu.'}
+$broken=[pscustomobject]@{}
+$broken|Add-Member ScriptMethod FindAll {throw 'fixture-provider-failure'}
+$failed=$false
+try {& $path -Root $broken -Name File} catch {if($_.Exception.Message -notmatch 'fixture-provider-failure'){throw};$failed=$true}
+if(!$failed -or $invoke.Calls -ne 2){throw 'An unexpected provider failure was suppressed.'}
 Write-Output 'Application menu current-property query regression checks passed.'

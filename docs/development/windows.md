@@ -845,6 +845,8 @@ The menu automation helper matches current UIA properties after walking the
 owned window; WinUI can omit visible controls from property-filtered queries.
 Each polling attempt shares one tree snapshot across the visible and compact
 menu routes, so an expensive traversal cannot consume the wait on fallback IDs.
+Expired UIA elements are skipped; invalidated tree reads retry within the same
+deadline.
 The input suite checks delayed publication, disappearing submenu routes and
 current-property discovery through this complete helper.
 Workspace setup uses Undo Layout Change (Ctrl+Alt+Z in the default keymap).
