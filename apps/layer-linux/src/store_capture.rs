@@ -126,9 +126,9 @@ fn native_store_capture() {
     let app = native_test_app("art.capycanvas.StoreCapture");
     gtk::Settings::default().unwrap().set_gtk_enable_animations(false);
     let w = Workspace::new_localized(&app, layer_ui::Localizer::shared(language));
-    w.dispatch(UiAction::RestoreSettings { settings: layer_ui::Settings {
+    w.dispatch(UiAction::RestoreSettings { settings: Box::new(layer_ui::Settings {
         theme: Some(theme), language: layer_ui::LanguagePreference::Explicit(language), ..Default::default()
-    }});
+    })});
     w.window.set_default_size(job.width, job.height);
     let windows = Rc::new(std::cell::RefCell::new(vec![w.clone()]));
     crate::files::launch::install(&app, &windows);

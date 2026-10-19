@@ -30,7 +30,7 @@ impl App {
         if let Some(language) = crate::launch::current_preference() {
             let mut settings = host.session.state().settings.clone();
             settings.language = language;
-            host.dispatch(layer_ui::UiAction::RestoreSettings { settings })?;
+            host.dispatch(layer_ui::UiAction::RestoreSettings { settings: Box::new(settings) })?;
         }
         host.startup = Default::default();
         host.session.set_document_replacement(false);

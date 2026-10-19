@@ -1685,7 +1685,7 @@ pub enum UiAction {
         action: PreferenceAction,
     },
     RestoreSettings {
-        settings: Settings,
+        settings: Box<Settings>,
     },
     /// Settings as a host saved them, possibly by another build.
     RestoreSavedSettings {

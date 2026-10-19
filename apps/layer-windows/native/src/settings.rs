@@ -249,7 +249,7 @@ impl SettingsService {
             load_error = hub.load_error();
             let mut client = shared::Subscription::new(hub.clone(), wake);
             if let Some(settings) = client.adopt(&native.session.state().settings) {
-                native.dispatch(UiAction::RestoreSettings { settings })?;
+                native.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;
             }
             let result = Worker::start(move |bytes| hub.write(bytes), client.notifier());
             subscription = Some(client);
@@ -268,7 +268,7 @@ impl SettingsService {
         if let Some(client) = &mut self.subscription
             && let Some(settings) = client.adopt(&native.session.state().settings)
         {
-            native.dispatch(UiAction::RestoreSettings { settings })?;
+            native.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;
         }
         if !self.localization_input_busy && !native.session.localization_input_busy() && let Some(client) = &self.subscription {
             native.set_localization(client.localization());

@@ -50,7 +50,7 @@ impl Hub {
         Self::with_launch(file, &["en"], |saved| {
             let mut native = NativeHost::new_localized(layer_ui::Platform::Windows, layer_ui::Localizer::shared(layer_ui::UiLanguage::English))?;
             let settings = saved.map(|saved| Settings::restore_localized(saved, native.session.localization())).unwrap_or(defaults);
-            native.dispatch(UiAction::RestoreSettings { settings })?;
+            native.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;
             Ok(native)
         }).map(|(_, hub)| hub)
     }

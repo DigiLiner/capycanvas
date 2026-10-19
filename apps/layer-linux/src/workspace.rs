@@ -2104,7 +2104,7 @@ impl Workspace {
         }
         if self.gpu.borrow().is_none() {
             if let UiAction::RestoreSettings { settings } = &action {
-                *self.initial_settings.borrow_mut() = Some(settings.clone());
+                *self.initial_settings.borrow_mut() = Some((**settings).clone());
                 return;
             }
         }

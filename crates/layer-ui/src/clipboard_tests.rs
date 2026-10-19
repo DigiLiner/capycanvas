@@ -1536,7 +1536,7 @@ mod clipboard_checks {
                 let mut s = clip_session();
                 let mut settings = Settings::default();
                 crate::keymaps::select(&mut settings, preset.id).unwrap();
-                s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+                s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
                 let before = s.engine.document().clone();
                 let input = |pressed, editing| UiInput::Key { key: name.into(), pressed, repeat: false,
                     modifiers: Modifiers { command, shift, alt: false }, editing, divider: None };

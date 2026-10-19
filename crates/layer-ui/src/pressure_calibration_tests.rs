@@ -29,7 +29,7 @@ fn live_pressure_preview_is_independent_of_artwork_settings_and_workspace_histor
     assert_eq!(s.state.settings.pressure_curve, original);
     assert_eq!(s.engine.document().revision, revision);
     let mut settings = s.state.settings.clone(); settings.pan_speed = 2.;
-    s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+    s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
     assert_eq!(source(&s), draft);
     s.pen(event(&s, 1, PenPhase::Down, 0.2));
     s.frame(10_000_000,18_000_000).unwrap();

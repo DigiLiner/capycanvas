@@ -288,7 +288,7 @@ fn install_actions(app: &adw::Application, active: &Rc<RefCell<Vec<Rc<workspace:
                     .is_some_and(|g| g.session.state().settings != settings)
                 {
                     w.dispatch(layer_ui::UiAction::RestoreSettings {
-                        settings: settings.clone(),
+                        settings: Box::new(settings.clone()),
                     });
                 }
             }
@@ -371,7 +371,7 @@ fn open_workspace_ready(
     active.borrow_mut().push(workspace.clone());
     workspace.window.present();
     if let Some(settings) = settings {
-        workspace.dispatch(layer_ui::UiAction::RestoreSettings { settings });
+        workspace.dispatch(layer_ui::UiAction::RestoreSettings { settings: Box::new(settings) });
     }
     // Capture the prepared document for both ordinary activation and file
     // launches. Starting here also excludes photo decoding from the delay.

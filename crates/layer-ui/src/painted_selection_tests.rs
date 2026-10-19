@@ -147,7 +147,7 @@ mod painted_selection_checks {
         s.dispatch(set(crate::session::occurrence_token(second), "mask_mode", EffectValue::Choice(1))).unwrap();
         let saved = serde_json::to_string(&s.state.settings).unwrap();
         let mut restored = session(Platform::Gtk);
-        restored.dispatch(UiAction::RestoreSettings { settings: serde_json::from_str(&saved).unwrap() }).unwrap();
+        restored.dispatch(UiAction::RestoreSettings { settings: Box::new(serde_json::from_str(&saved).unwrap()) }).unwrap();
         invoke(&mut restored, CommandId::QuickMask);
         assert_eq!(restored.state.layer_properties.controls[0].value, EffectValue::Choice(1));
     }

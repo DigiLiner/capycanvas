@@ -313,9 +313,9 @@ fn apply_fixture_theme(w: &Rc<Workspace>) {
             _ => panic!("CAPY_NATIVE_TEST_THEME must be light or dark"),
         };
         if w.gpu.borrow().is_none() {
-            w.dispatch(UiAction::RestoreSettings { settings: layer_ui::Settings {
+            w.dispatch(UiAction::RestoreSettings { settings: Box::new(layer_ui::Settings {
                 theme: Some(theme), ..Default::default()
-            }});
+            })});
         } else {
             w.dispatch(UiAction::SetTheme { theme: Some(theme) });
         }
@@ -1130,7 +1130,7 @@ fn native_document_files() {
     reopened.window.present();
     // Match the application factory's settings inheritance for a new window.
     reopened.dispatch(UiAction::RestoreSettings {
-        settings: state(&w).settings,
+        settings: Box::new(state(&w).settings),
     });
     ready(&reopened);
     let after = glib::MainContext::default()
@@ -3289,10 +3289,10 @@ fn native_navigator() {
         ui_session(&w).engine().document().scene(), None).unwrap());
     for theme in [Theme::Dark, Theme::Light] {
         w.dispatch(UiAction::RestoreSettings {
-            settings: Settings {
+            settings: Box::new(Settings {
                 theme: Some(theme),
                 ..Settings::default()
-            },
+            }),
         });
         for visible in [true, false] {
             w.dispatch(UiAction::SetLayerVisibility { id: paper, visible });
@@ -7245,7 +7245,7 @@ fn native_menu_sections() {
     settings
         .shortcuts
         .insert(CommandId::Settings.shortcut_id(), vec![]);
-    w.dispatch(UiAction::RestoreSettings { settings });
+    w.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) });
     for id in [ApplicationMenu::Primary, ApplicationMenu::Edit] {
         let menu = open(id);
         let expected = ui_session(&w)
@@ -8201,7 +8201,7 @@ fn native_preferences_and_shortcuts() {
     let mut defaults = state(&w).settings;
     defaults.dark_base = Theme::Dark.default_base();
     defaults.light_base = Theme::Light.default_base();
-    w.dispatch(UiAction::RestoreSettings { settings: defaults });
+    w.dispatch(UiAction::RestoreSettings { settings: Box::new(defaults) });
     w.dispatch(UiAction::Invoke { command: CommandId::KeyboardShortcuts });
     let search: gtk::SearchEntry = find_named(w.preferences.dialog.upcast_ref(), "settings-search")
         .unwrap()

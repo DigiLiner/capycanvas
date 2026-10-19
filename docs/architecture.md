@@ -46,6 +46,8 @@ properties such as size or opacity.
 owns the active tools, camera, workspace, command availability, preferences and
 file-operation state. A frontend sends typed actions and renders the resulting
 views. It keeps native widget objects, focus and accessibility outside the session.
+Settings restoration owns its full payload separately, keeping shared input
+actions small as preferences grow.
 
 History availability is independent of GPU completion. Brush settings update
 without waiting for unrelated raster backing. Settings queued behind earlier

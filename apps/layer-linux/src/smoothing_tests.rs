@@ -13,7 +13,7 @@ fn native_smoothing_strokes() {
     };
     let mut settings = state(&w).settings;
     settings.feedback = feedback_enabled;
-    w.dispatch(UiAction::RestoreSettings { settings });
+    w.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) });
     assert_eq!(state(&w).settings.feedback, feedback_enabled);
     eprintln!("native_smoothing_strokes feedback_enabled={feedback_enabled}");
     let output = std::path::PathBuf::from(std::env::var("LAYER_TEST_ARTIFACTS").unwrap());

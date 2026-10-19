@@ -142,7 +142,7 @@ fn tool_group_temporary_brushes_preserve_memory_from_a_nonpainting_tool() {
                 hold.key == KeyChord::new("alt", Modifiers::default())).unwrap();
             hold.actions.insert(ToolCategory::Navigation, CommandId::Pen.shortcut_id());
             settings.hold_keys = Some(holds);
-            s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+            s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
         }
         let permanent = s.editing_state();
         let name = if modifier { "Alt_L" } else { "p" };
@@ -686,7 +686,7 @@ fn workspace_capture_during_spring_and_modifier_holds_keeps_the_permanent_tool()
                 hold.key == KeyChord::new("alt", Modifiers::default())).unwrap();
             hold.actions.insert(ToolCategory::Drawing, CommandId::Eraser.shortcut_id());
             settings.hold_keys = Some(holds);
-            s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+            s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
             key(&mut s, "Alt_L", true, false, false);
             assert!(s.command(CommandId::Eraser).selected);
         } else {

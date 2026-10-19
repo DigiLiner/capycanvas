@@ -879,7 +879,7 @@ pub extern "system" fn Java_art_capycanvas_Native_languageRequest(
             && preference != a.language_preference {
             let mut settings = a.host.session.state().settings.clone();
             settings.language = preference;
-            a.host.dispatch(layer_ui::UiAction::RestoreSettings { settings })?;
+            a.host.dispatch(layer_ui::UiAction::RestoreSettings { settings: Box::new(settings) })?;
         }
         a.language_preference = a.host.session.state().settings.language;
         let tags = locales.iter().map(String::as_str).collect::<Vec<_>>();

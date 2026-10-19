@@ -498,9 +498,9 @@ fn native_localized_photo_histogram_bounds() {
     for theme in [Theme::Light, Theme::Dark] {
         for &language in reported.iter().chain(layer_ui::localization::SHIPPED_LANGUAGES.iter().filter(|language| !reported.contains(language))) {
             let w = Workspace::with_project_localized(&app, Some((fixture(), None)), layer_ui::Localizer::shared(language));
-            w.dispatch(UiAction::RestoreSettings {settings:layer_ui::Settings {
+            w.dispatch(UiAction::RestoreSettings {settings:Box::new(layer_ui::Settings {
                 theme:Some(theme), language:layer_ui::LanguagePreference::Explicit(language), ..Default::default()
-            }});
+            })});
             w.window.maximize();w.window.present();ready(&w);
             assert_eq!(w.localization().language(), language);
             assert!(matches!(w.window.width(), 640 | 1100), "private Histogram viewport");

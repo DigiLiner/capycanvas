@@ -736,7 +736,7 @@ fn profile_language_publication_survives_write_failure_and_defers_an_input_owner
     let generation = first.localization_generation();
     let mut settings = first.session.state().settings.clone();
     settings.language = layer_ui::LanguagePreference::Explicit(layer_ui::UiLanguage::TraditionalChinese);
-    first.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+    first.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
     let bytes = service.subscription.as_mut().unwrap().edit(&first.session.state().settings).unwrap();
     assert!(service.subscription.as_ref().unwrap().hub.write(&bytes).is_err());
     service.sync(&mut first).unwrap();other.sync(&mut second).unwrap();

@@ -678,9 +678,9 @@ fn native_color_picker_settings_follow_shared_copy_and_sizes() {
     let caption = |dropdown: &gtk::DropDown| dropdown.parent().and_then(|row| row.first_child()).and_downcast::<gtk::Label>().unwrap().text().to_string();
     for language in [UiLanguage::English, UiLanguage::Japanese] {
         let w = Workspace::new_localized(&app, Localizer::shared(language));
-        w.dispatch(UiAction::RestoreSettings { settings: layer_ui::Settings {
+        w.dispatch(UiAction::RestoreSettings { settings: Box::new(layer_ui::Settings {
             language: layer_ui::LanguagePreference::Explicit(language), ..Default::default()
-        }});
+        })});
         w.window.present();
         crate::workspace::tests::new_photo::ready(&w);
         until(|| w.localization().language() == language, "explicit language");

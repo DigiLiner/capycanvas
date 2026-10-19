@@ -346,7 +346,7 @@ impl<R: CanvasRenderer> UiSession<R> {
     pub fn blank_with_settings(renderer: R, viewport: [u32; 2], platform: Platform, localization: std::sync::Arc<Localizer>,
         settings: Settings) -> Result<Self, String> {
         let mut session = Self::blank_localized(renderer, viewport, platform, localization)?;
-        session.dispatch(UiAction::RestoreSettings { settings })?;
+        session.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) })?;
         Ok(session)
     }
 
@@ -3833,7 +3833,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::RestoreSettings { settings } => {
                 settings.validate_localized(self.localization())?;
-                self.apply_settings(settings)?;
+                self.apply_settings(*settings)?;
                 (SETTINGS | COMMANDS, true)
             }
             UiAction::RestoreSavedSettings { saved } => {
@@ -6167,7 +6167,7 @@ mod tests {
             assert_panels(&s);
             let mut settings = s.state.settings.clone();
             settings.shortcuts.insert("size.60".into(), vec![KeyChord::new("k", Modifiers::default())]);
-            s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+            s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
             assert_panels(&s);
             assert!(s.panel_view(Panel::Toolbar).unwrap().tiles.last().unwrap().tooltip.contains("K"));
         }
@@ -6211,7 +6211,7 @@ mod tests {
         assert_eq!(s.engine.document().artwork.id, document_identity);
         let mut settings = s.state.settings.clone();
         settings.shortcuts.insert(CommandId::Eyedropper.shortcut_id(), vec![KeyChord::new("k", Modifiers::default())]);
-        s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+        s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
         let changed = s.color_picker_button_label(picker_control);
         assert!(!std::sync::Arc::ptr_eq(&picker_caption, &changed));
         assert!(changed.contains("（K）"));
@@ -6268,7 +6268,7 @@ mod tests {
         let before = s.panel_copy.iter().find(|(id, _)| *id == Panel::Toolbar).unwrap().1.clone();
         let mut settings = s.state.settings.clone();
         settings.shortcuts.insert("size.8".into(), vec![KeyChord::new("k", Modifiers::default())]);
-        s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+        s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
         assert!(!Arc::ptr_eq(&before, &s.panel_copy.iter().find(|(id, _)| *id == Panel::Toolbar).unwrap().1));
         assert!(s.panel_view(Panel::Toolbar).unwrap().tiles[1].tooltip.contains("K"));
     }
@@ -7398,7 +7398,7 @@ mod tests {
             let workspace = s.capture_workspace().unwrap();
             let mut settings = s.state.settings.clone();
             settings.theme = Some(Theme::Light);
-            s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+            s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
             assert_eq!(s.state.settings.theme, Some(Theme::Light));
             assert_eq!(s.capture_workspace().unwrap(), workspace);
             assert!(s.dispatch(UiAction::SetBrushSize { value: 79. }).is_err());
@@ -9424,7 +9424,7 @@ mod tests {
             CommandId::Airbrush.shortcut_id(),
             vec![KeyChord::new("k", Modifiers::default())],
         );
-        s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+        s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
         for _ in 0..3 {
             key(&mut s, "k", true, false, false);
             assert!(s.command(CommandId::Airbrush).selected);
@@ -15141,7 +15141,7 @@ mod tests {
             cursor: CursorMode::Cross,
             ..Settings::default()
         };
-        s.dispatch(UiAction::RestoreSettings { settings }).unwrap();
+        s.dispatch(UiAction::RestoreSettings { settings: Box::new(settings) }).unwrap();
         s.dispatch(UiAction::CloseSettings).unwrap();
         let cross = s.canvas_cursor().unwrap();
         assert_eq!(cross.segments.len(), 1);
@@ -15505,7 +15505,7 @@ mod tests {
     fn contact_cursor_uses_live_pressure_without_depositing_another_dab() {
         let mut s = session(Platform::Gtk);
         let mut settings=s.state.settings.clone();settings.pressure_curve=layer_core::PressureResponse::linear();
-        s.dispatch(UiAction::RestoreSettings{settings}).unwrap();
+        s.dispatch(UiAction::RestoreSettings{settings: Box::new(settings)}).unwrap();
         s.dispatch(UiAction::SetBrushSize { value: 200.0 }).unwrap();
         let low = event(&s, 1, PenPhase::Down, 0.2);
         s.pen(low);
@@ -16437,7 +16437,7 @@ mod tests {
         check_menu(&app.state);
         invoke(&mut app, CommandId::Settings);
         app.dispatch(UiAction::RestoreSettings {
-            settings: Settings::default(),
+            settings: Box::new(Settings::default()),
         })
         .unwrap();
         assert_eq!(app.state.theme, Theme::Dark);
@@ -16483,7 +16483,7 @@ mod tests {
         let mut next = session(Platform::Gtk);
         next.inherit_window_state(&s).unwrap();
         next.dispatch(UiAction::RestoreSettings {
-            settings: s.state.settings.clone(),
+            settings: Box::new(s.state.settings.clone()),
         })
         .unwrap();
         assert_eq!(next.state.palette.accent, crate::ACCENTS[2].1);
@@ -17110,7 +17110,7 @@ mod tests {
                 ..Settings::default()
             };
             s.dispatch(UiAction::RestoreSettings {
-                settings: settings.clone(),
+                settings: Box::new(settings.clone()),
             })
             .unwrap();
             invoke(&mut s, CommandId::Settings);
@@ -17272,10 +17272,11 @@ mod tests {
                 .unwrap();
         assert_eq!(old.pan_speed, 1.5);
         let mut s = session(Platform::Gtk);
-        s.dispatch(UiAction::RestoreSettings {
-            settings: old.clone(),
-        })
-        .unwrap();
+        let saved = serde_json::json!({"type": "restore_settings", "settings": &old});
+        let restore: UiAction = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&restore).unwrap(), saved);
+        s.dispatch(restore).unwrap();
+        assert_eq!(s.state.settings, old);
         assert!(s.state.requests.is_empty(), "restore must not echo a save");
         for invalid in [
             Settings {
@@ -17287,10 +17288,8 @@ mod tests {
                 ..old.clone()
             },
         ] {
-            assert!(
-                s.dispatch(UiAction::RestoreSettings { settings: invalid })
-                    .is_err()
-            );
+            let restore = serde_json::from_value(serde_json::json!({"type": "restore_settings", "settings": invalid})).unwrap();
+            assert!(s.dispatch(restore).is_err());
             assert_eq!(s.state.settings, old);
         }
         assert!(serde_json::from_str::<Settings>(r#"{"unknown_setting":true}"#).is_err());
