@@ -223,7 +223,7 @@ class BrushBenchmarkInstrumentation : Instrumentation() {
                 Native.projectTask(h, request.getInt("id"), "null", f.getLong("epoch"), f.getLong("revision"))
             }
             try {
-                Native.projectWork(task, ParcelFileDescriptor.open(photo, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), 0, 0)
+                Native.projectWork(task, ParcelFileDescriptor.open(photo, ParcelFileDescriptor.MODE_READ_ONLY).detachFd(), "")
                 native { Native.projectAdopt(it, task, "null") }
             } finally { Native.projectFree(task) }
             stage("photo-adopted")
