@@ -17,12 +17,11 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 public sealed class CapyAtomicPublisher : IDisposable {
- [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool ReplaceFileW(string replaced,string replacement,string backup,uint flags,IntPtr exclude,IntPtr reserved);
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool MoveFileExW(string existing,string target,uint flags);
  readonly string path; readonly byte[] data; readonly Thread thread; volatile bool stop;
  public long Published; public long Errors; public int LastError; public string LastException;
  public CapyAtomicPublisher(string path,string payload){this.path=path;data=new UTF8Encoding(false).GetBytes(payload);thread=new Thread(Run);thread.IsBackground=true;thread.Start();}
- void Run(){while(!stop){string pending=path+".pending";try{File.WriteAllBytes(pending,data);bool ok=ReplaceFileW(path,pending,null,0,IntPtr.Zero,IntPtr.Zero);int error=Marshal.GetLastWin32Error();if(!ok&&error==2){ok=MoveFileExW(pending,path,0);error=Marshal.GetLastWin32Error();}if(ok)Interlocked.Increment(ref Published);else{LastError=error;Interlocked.Increment(ref Errors);File.Delete(pending);}}catch(IOException error){LastError=error.HResult;LastException=error.ToString();Interlocked.Increment(ref Errors);}}}
+ void Run(){while(!stop){string pending=path+".pending";try{File.WriteAllBytes(pending,data);bool ok=MoveFileExW(pending,path,1);int error=Marshal.GetLastWin32Error();if(ok)Interlocked.Increment(ref Published);else{LastError=error;Interlocked.Increment(ref Errors);File.Delete(pending);}}catch(IOException error){LastError=error.HResult;LastException=error.ToString();Interlocked.Increment(ref Errors);}}}
  public void Dispose(){stop=true;thread.Join();}
 }
 '@

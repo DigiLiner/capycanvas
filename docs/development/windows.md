@@ -552,6 +552,9 @@ It validates 100 reads during concurrent publication without a throughput target
 Reports retain read durations and exception details; the reader closes each file
 before parsing its JSON. Release checks run script regressions before compiling
 the native client and retain their failure reports.
+Trace publication uses a replace-existing rename so readers can share both the
+old snapshot and the pending file. The native input regression holds both handles
+open while publishing the replacement.
 
 Fluent catalogs and shared cursor SVGs use LF checkouts through `.gitattributes`.
 Their parser structure and byte hashes must stay identical across hosts.

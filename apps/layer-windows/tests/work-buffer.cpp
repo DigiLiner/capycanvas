@@ -30,11 +30,15 @@ int main() {
     WriteTraceFile(trace,"old");
     auto reader=CreateFileW(trace.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     assert(reader!=INVALID_HANDLE_VALUE);
+    auto pending=trace.wstring()+L".pending";
+    {std::ofstream replacement(pending);replacement<<"pending";}
+    auto replacementReader=CreateFileW(pending.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    assert(replacementReader!=INVALID_HANDLE_VALUE);
     WriteTraceFile(trace,"current");
     std::ifstream currentTrace(trace);std::string currentValue;currentTrace>>currentValue;
     assert(currentValue=="current");assert(!std::filesystem::exists(trace.wstring()+L".pending"));
     char retained[3];DWORD read=0;assert(ReadFile(reader,retained,3,&read,nullptr)&&read==3);assert(std::string(retained,3)=="old");
-    currentTrace.close();assert(CloseHandle(reader));
+    currentTrace.close();assert(CloseHandle(reader));assert(CloseHandle(replacementReader));
     auto latencyFolder=traceFolder/L"latency";assert(std::filesystem::create_directory(latencyFolder));
     auto latencyPrefix=(latencyFolder/L"capture").string();
     {CanvasLatencyTrace latency(true);uint64_t stats[6]{7,6,5,4,3,2};
