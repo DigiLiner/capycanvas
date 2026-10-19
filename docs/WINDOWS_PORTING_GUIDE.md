@@ -89,8 +89,10 @@ including older gaps; a port does not require an unrestricted historical audit.
   [VMs](development/devices.md#windows) check builds and fixtures, not hardware
   performance or physical pen behavior. Record unavailable checks explicitly.
 - Reuse passing evidence while its code and build remain applicable. Rerun
-  invalidated checks after changes or rebasing. Investigate failures with evidence
-  and a specific hypothesis before retrying; reuse existing automation.
+  checks invalidated by your changes, conflicts or upstream changes to the same
+  code; unrelated upstream commits don't invalidate them. Investigate failures
+  with evidence and a specific hypothesis before retrying; reuse existing
+  automation.
 
 ## 5. Close and commit
 
@@ -101,8 +103,12 @@ action, and report unfinished verification. Documented unavailable hardware
 checks need not block an otherwise passing implementation milestone, but remain
 unverified and cannot support a claim of fully verified parity.
 
-Commit complete feature milestones. Fetch and rebase before pushing, inspect
-new upstream commits, update the target and ledger, and rerun affected checks.
+Commit complete feature milestones and push each as soon as its relevant checks
+pass; `origin/main` changes faster than heavy suites run. Fetch and rebase before
+pushing, inspect new upstream commits, update the target and ledger, and rerun
+only the checks that conflicts or upstream changes to the same code affect, never
+heavy validation because unrelated commits landed. When in doubt, push first,
+then validate further and fix what you find in a separate commit.
 Finish against the final fetched target SHA; later commits belong to the next
 batch. Advance the watermark only through a contiguous range with all required
 work closed, using `Ported Windows origin/main through <sha>` in the commit body.
