@@ -112,6 +112,9 @@ copied beside the executable, so development builds run unpackaged.
 DXC is pinned to 1.9.2609.5, whose ARM64 DLL loads in a native ARM64 process.
 The earlier 1.9.2607.13 package's `arm64` DLL contains ARM64EC/x64 code and
 cannot load there. Build and packaging checks reject incompatible PE machines.
+ARM64X runtime DLLs are identified by their dynamic relocation metadata and
+remain valid in both package architectures, including the Windows App SDK
+companion DLLs.
 
 Ordinary restarts reopen saved and untitled drawings automatically, retaining tab
 order, the active drawing, camera, selection and bounded Undo/Redo. The first

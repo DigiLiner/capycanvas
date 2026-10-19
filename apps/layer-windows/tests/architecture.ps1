@@ -7,6 +7,27 @@ $payload=Join-Path $run 'payload'
 [IO.Directory]::CreateDirectory($payload)|Out-Null
 $previousNative=$env:PROCESSOR_ARCHITECTURE
 $previousEmulated=$env:PROCESSOR_ARCHITEW6432
+function Write-Arm64XFixture([string]$Path,[uint64]$Symbol=6,[uint16]$RelocationSection=1,[uint32]$PayloadSize=16,[switch]$Truncated) {
+    $writer=[IO.BinaryWriter]::new([IO.File]::Create($Path))
+    try {
+        $writer.BaseStream.SetLength(0x600)
+        $writer.Write([uint16]0x5A4D);$writer.BaseStream.Position=0x3C;$writer.Write([uint32]0x80)
+        $writer.BaseStream.Position=0x80;$writer.Write([uint32]0x4550);$writer.Write([uint16]0xAA64);$writer.Write([uint16]1)
+        $writer.BaseStream.Position=0x94;$writer.Write([uint16]0xF0)
+        $writer.BaseStream.Position=0x98;$writer.Write([uint16]0x20B)
+        $writer.BaseStream.Position=0x9C;$writer.Write([uint32]0x200)
+        $writer.BaseStream.Position=0xA8;$writer.Write([uint32]0x1000)
+        $writer.BaseStream.Position=0x104;$writer.Write([uint32]16)
+        $writer.BaseStream.Position=0x158;$writer.Write([uint32]0x1000);$writer.Write([uint32]0x100)
+        $writer.BaseStream.Position=0x188;$writer.Write([Text.Encoding]::ASCII.GetBytes(".rdata`0`0"))
+        $writer.Write([uint32]0x400);$writer.Write([uint32]0x1000);$writer.Write([uint32]0x400);$writer.Write([uint32]0x200)
+        $writer.BaseStream.Position=0x200;$writer.Write([uint32]0x100)
+        $writer.BaseStream.Position=0x2E0;$writer.Write([uint32]0x180);$writer.Write($RelocationSection)
+        $writer.BaseStream.Position=0x380;$writer.Write([uint32]1);$writer.Write($PayloadSize)
+        $writer.Write($Symbol);$writer.Write([uint32]4);$writer.Write([uint32]0)
+        if($Truncated){$writer.BaseStream.SetLength(0x38A)}
+    } finally {$writer.Dispose()}
+}
 try {
     foreach($native in @('ARM64','AMD64')) {
         foreach($emulated in @($null,'ARM64')) {
@@ -44,6 +65,18 @@ try {
         $rejected=$false
         try {Read-PortablePackage $resultPath|Out-Null} catch {$rejected=$true}
         if(!$rejected){throw 'Mixed-architecture runtime payload was accepted.'}
+    }
+    $path=Join-Path $payload 'fixture.dll'
+    Write-Arm64XFixture $path
+    foreach($architecture in @('x64','arm64')) {
+        if(!(Test-WindowsBinaryArchitecture $path $architecture)){throw "ARM64X executable code was rejected for $architecture."}
+    }
+    Write-Arm64XFixture $path -Symbol 5
+    if(Test-WindowsBinaryArchitecture $path x64){throw 'An ARM64 relocation symbol was accepted as ARM64X.'}
+    if(!(Test-WindowsBinaryArchitecture $path arm64)){throw 'Pure ARM64 was rejected for ARM64.'}
+    foreach($malformed in @(@{RelocationSection=2},@{PayloadSize=[uint32]::MaxValue},@{Truncated=$true})) {
+        Write-Arm64XFixture $path @malformed
+        if(Test-WindowsBinaryArchitecture $path x64){throw 'Malformed ARM64X metadata was accepted for x64.'}
     }
     Write-Output 'Windows architecture selection and mixed-payload regression checks passed.'
 } finally {
