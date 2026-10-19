@@ -425,6 +425,8 @@ prerequisites. Useful settings:
 | `--native-storage` | Gives the test the run's SQLite workspace directory instead of in-memory workspaces. |
 | `--native-recovery` | Gives the test the run's session directory, so drawings are checkpointed and restored. |
 | `LAYER_NATIVE_TEST_EXECUTABLE` | Absolute path of an already built test executable; skips the rebuild. |
+| `LAYER_NATIVE_EVENT_MS` | Interval between injected events; scoped motion tests need `4`. |
+| `LAYER_MOTION_MIN_HZ` | Presentation floor for scoped motion tests; use `114` on the 120 Hz monitor. |
 | `CAPY_NATIVE_TEST_THEME` | Sets fixture windows to `light` or `dark`; run affected journeys once with each. |
 | `LAYER_MOTION_VIEWPORT`, `LAYER_MOTION_SCALE` | Private monitor size (default `1600x1000`) and scale, for example `3200x2000` and `2`. |
 | `LAYER_TEST_ARTIFACTS` | Absolute directory for captures and reports, where a test writes them. |
@@ -433,6 +435,12 @@ Named modes such as `--drag-pickup`, `--workspace-motion`, `--color-panel` or
 `--icons` select a fixed test; the mode list is in
 [`native-input.js`](../../apps/layer-linux/bench/native-input.js). Test-specific
 instructions live with the feature's guide under [`docs/ui/`](../ui/README.md).
+For a tab-only motion diagnostic, preserve the motion mode's input pacing:
+
+```sh
+LAYER_NATIVE_EVENT_MS=4 LAYER_MOTION_MIN_HZ=114 bash tools/performance/workspace-motion.sh gtk --native-test=native_workspace_tab_motion_input
+```
+
 [`tools/performance/gtk-raster.sh`](../../tools/performance/gtk-raster.sh) runs an
 already built test executable on the same kind of private display, for tests
 that need no injected input, such as `native_application_file_launch`.

@@ -127,7 +127,7 @@ optimized APK SHA-256 `e74cd6b9b8f0dc15e1beb2f5e6ff6348bae20025ebc6e1f6adbd9dca7
 | Attached filter drag inside a clipping run | 120 | **Not met.** 93.24–102.71 native UI fps; moving-frame gap p99 25.00–33.33 ms | [Filter attachment feedback](#filter-attachment-feedback), 2026-10-04 |
 | Navigation with 32 visible paint layers | 120 | | |
 | Drawing with 32 visible paint layers, G-Pen 1024 px | 120 | | |
-| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. Current GTK desktop group probe fails its 114 Hz rate floor; reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic), 2026-10-19 UTC |
+| Panel, tab, column or toolbar drag and docking | 120 | **Not met.** Toolbar or component drag 103–119 fps. GTK desktop group probe fails its 114 Hz floor; scoped tab probe reaches 120 Hz. Reference tablet unmeasured | `dc27e04d`, 2026-09-23; [GTK panel-tab input diagnostic](#gtk-panel-tab-input-diagnostic) and [tab-hover diagnostic](#gtk-tab-hover-diagnostic), 2026-10-19 UTC |
 | Panel or column resize | 120 | **Unqualified.** Current GTK desktop 1× SDR Color column 59.62–65.40, floating panel 118.29–118.96 presents/s; reference tablet unmeasured | [GTK Color resize](#gtk-color-panel-resize), 2026-10-10 |
 | Pen pressure utility and curve drag | 120 | **Unqualified.** Current GTK desktop panel 119.20–119.40 presents/s, p99 up to 9.207 ms; curve 120.00, p99 up to 8.470 ms; reference tablet unmeasured | [GTK pen pressure utility](#gtk-pen-pressure-utility), 2026-10-10 UTC |
 | Drawer open and close | 120 | **Unqualified.** GTK Properties at scales 1/2 misses desktop criteria: pooled 73.10–119.86 presents/s, p99 up to 20.198 ms; current Apple measurements pending; reference tablet unmeasured | [GTK Sketch Layers diagnostic](#gtk-sketch-layers-diagnostic), 2026-10-10; [Apple native measurements](#apple-native-measurements) |
@@ -3935,7 +3935,7 @@ The single corrected-fixture invocation observes 237 native input samples in the
 first 2.2 s group/mouse motion, passing the required more than 200. It presents at
 103.530/s, below the 114 Hz desktop floor, with a 9.410 ms presentation-gap p99.
 GPU time is 0.127 ms median and 0.364 ms p95. The run stops at this first rate failure;
-no retry runs. Tab, touch, column and toolbar motion remain unmeasured. The
+no retry runs. That invocation leaves tab, touch, column and toolbar motion unmeasured. The
 failed rate gate, short duration and non-reference hardware prevent tier
 qualification.
 
@@ -3944,3 +3944,38 @@ and [build metadata](../../artifacts/panel-tab-press/gtk-preview/workspace-motio
 identify the measured source. The [run log](../../artifacts/panel-tab-press/gtk-preview/workspace-motion-corrected.log)
 records the unchanged input and rate gates. The earlier lifecycle-assertion run
 is preserved separately in the same artifact directory.
+
+## GTK tab-hover diagnostic
+
+The 2026-10-19 UTC release build uses `f35817f4d` plus the tab-hover changes in
+`753d5c012`. Its executable SHA-256 is
+`6a6310d5d71ad00e39ab952e81e525ff72d499e4eb20eba47fed9c583f83466e`.
+The blank startup drawing is 3508 × 2480 pixels. The desktop has a Ryzen
+Threadripper PRO 9995WX and RTX PRO 6000 Blackwell Max-Q, NVIDIA 615.71.09 Vulkan.
+Private Mutter 50.5 runs at 1600 × 1000, 120 Hz and scale 1. Other tests from this
+task are idle, and its Windows VM is paused with no active fixture.
+
+The scoped `native_workspace_tab_motion_input` invocation uses
+`LAYER_NATIVE_EVENT_MS=4`, preserving the full motion mode's input pacing.
+One gesture of 2.2 seconds for each input type passes the unchanged gate of more
+than 200 native samples and the 114 Hz presentation floor:
+
+| Input | Native samples | Presents/s | Presentation gap p99, ms | Pickup command to first present, ms |
+| --- | ---: | ---: | ---: | ---: |
+| Mouse | 268 | 120.001 | 9.007 | 9.102 |
+| Touch | 550 | 120.011 | 8.662 | 12.310 |
+
+Mouse/touch dispatch p95 is 0.213/0.139 ms and native placement p95 is
+0.005688/0.007011 ms. Both gestures retain the UI models with zero refreshes.
+No canvas or backdrop frames are produced during the sampled motion, so there
+is no canvas GPU timing. Pickup timing includes native input-driver command
+overhead and does not measure physical input latency.
+
+This short desktop diagnostic does not qualify the tier: it lacks the reference
+tablet, tier photo and three sustained gestures of 5–10 seconds. It is a different
+scenario from the earlier group probe and does not establish a before/after
+comparison.
+[Raw metrics](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected.json),
+[build metadata](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected-build.json)
+and the [run log](../../artifacts/panel-tab-press/hover-contours/tab-motion-corrected.log)
+identify the frozen executable, source hashes and successful gates.

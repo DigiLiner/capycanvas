@@ -137,7 +137,7 @@ function Hover-Contours {
     $group=Four-TabGroup;$panels=@($group.panels)
     if($panels.Count -ne 4){throw 'Hover contours need exactly four tabs'}
     $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$origin)
-    $park=Center (Control 'drawing-canvas');$observations=[Collections.Generic.List[object]]::new();$selectedArgb=$null
+    $park=Center (Control 'drawing-canvas');$observations=[Collections.Generic.List[object]]::new();$selectedArgb=$null;$inactiveArgb=$null
     Tab-Style $group.id 'Icons only'
     foreach($active in 0..3){
         Invoke ('panel-tab-'+$panels[$active])
@@ -147,17 +147,33 @@ function Hover-Contours {
         Wait-Until {
             Capture ("contour-$active-rest") -Composed
             $sample=[Drawing.Bitmap]::new((Join-Path $run ("contour-$active-rest.png")))
-            try{$color=$sample.GetPixel([int](($selected.Left+$selected.Right)/2-$origin[0]),[int]($selected.Bottom-3*$scale-$origin[1])).ToArgb()}finally{$sample.Dispose()}
-            if($null -eq $selectedArgb){$script:CapySelectedTabArgb=$color;return $true}
-            $color -eq $selectedArgb
+            try{
+                $color=$sample.GetPixel([int](($selected.Left+$selected.Right)/2-$origin[0]),[int]($selected.Bottom-3*$scale-$origin[1])).ToArgb()
+                $inactive=@(foreach($index in 0..3|Where-Object {$_ -ne $active}){
+                    $b=(Control ('panel-tab-'+$panels[$index]) -Arranged).Current.BoundingRectangle
+                    $sample.GetPixel([int](($b.Left+$b.Right)/2-$origin[0]),[int]($b.Bottom-8*$scale-$origin[1])).ToArgb()
+                })
+            }finally{$sample.Dispose()}
+            if($null -eq $selectedArgb){if(@($inactive|Where-Object {$_ -ne $inactive[0]}).Count -ne 0 -or $color -eq $inactive[0]){return $false};$script:CapySelectedTabArgb=$color;$script:CapyInactiveTabArgb=$inactive[0];return $true}
+            $color -eq $selectedArgb -and @($inactive|Where-Object {$_ -ne $inactiveArgb}).Count -eq 0
         } 'Selected tab surface was not presented'
-        if($null -eq $selectedArgb){$selectedArgb=$script:CapySelectedTabArgb}
+        if($null -eq $selectedArgb){$selectedArgb=$script:CapySelectedTabArgb;$inactiveArgb=$script:CapyInactiveTabArgb}
         $rest=[Drawing.Bitmap]::new((Join-Path $run ("contour-$active-rest.png")))
         try{
             $selected=(Control ('panel-tab-'+$panels[$active]) -Arranged).Current.BoundingRectangle
             foreach($hovered in 0..3){
                 $tab=Control ('panel-tab-'+$panels[$hovered]) -Arranged;$bounds=$tab.Current.BoundingRectangle;$at=Center $tab
-                [CapyRowPointer]::Hover($at.x,$at.y);Start-Sleep -Milliseconds 200;$name="contour-$active-hover-$hovered";Capture $name -Composed
+                [CapyRowPointer]::Hover($at.x,$at.y);Start-Sleep -Milliseconds 200;$name="contour-$active-hover-$hovered"
+                Wait-Until {
+                    Capture $name -Composed
+                    if($hovered -eq $active){return $true}
+                    $sample=[Drawing.Bitmap]::new((Join-Path $run ($name+'.png')))
+                    try{
+                        $px=[int](($bounds.Left+$bounds.Right)/2-$origin[0]);$py=[int]($bounds.Bottom-8*$scale-$origin[1])
+                        $before=$rest.GetPixel($px,$py);$after=$sample.GetPixel($px,$py)
+                        [Math]::Max([Math]::Max([Math]::Abs($before.R-$after.R),[Math]::Abs($before.G-$after.G)),[Math]::Abs($before.B-$after.B)) -ge 4
+                    }finally{$sample.Dispose()}
+                } "$name has no visible hover interior"
                 @{bounds=@($bounds.Left,$bounds.Top,$bounds.Right,$bounds.Bottom);injected=@($at.x,$at.y);cursor=[CapyRowPointer]::Cursor();origin=$origin;selected=@($selected.Left,$selected.Top,$selected.Right,$selected.Bottom)}|ConvertTo-Json -Depth 8|Set-Content (Join-Path $run ($name+'-pointer.json'))
                 $image=[Drawing.Bitmap]::new((Join-Path $run ($name+'.png')))
                 try{
@@ -170,12 +186,6 @@ function Hover-Contours {
                         if($image.GetPixel($px,$py).ToArgb() -ne $rest.GetPixel($px,$py).ToArgb()){throw "$name changed the selected outer foot"}
                     }
                     if($hovered -eq $active){continue}
-                    $visible=$false
-                    foreach($fraction in .2,.5,.8){
-                        $px=[int]($bounds.Left+$bounds.Width*$fraction-$origin[0]);$py=[int]($bounds.Top+4*$scale-$origin[1])
-                        $visible=$visible -or $image.GetPixel($px,$py).ToArgb() -ne $rest.GetPixel($px,$py).ToArgb()
-                    }
-                    if(!$visible){throw "$name has no visible hover interior"}
                     foreach($side in 0,1){
                         $neighbor=if($side -eq 0){$hovered-1}else{$hovered+1}
                         $kind=if($neighbor -lt 0 -or $neighbor -gt 3){'square'}elseif($neighbor -eq $active){'inset'}else{'reverse'}
