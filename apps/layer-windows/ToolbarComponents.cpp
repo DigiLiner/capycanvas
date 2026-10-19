@@ -135,7 +135,7 @@ struct ToolbarComponent::Impl:std::enable_shared_from_this<Impl>{
         editHost=root.XamlRoot().Content();
         editOutside=box_value(PointerEventHandler([weak=weak_from_this(),view=make_weak(owner)](auto&&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();auto field=view.get();
-            if(self&&field&&!inside(e.OriginalSource(),field)&&self->more)self->more.Focus(FocusState::Programmatic);
+            if(self&&field&&!inside(e.OriginalSource(),field)&&self->more&&inside(FocusManager::GetFocusedElement(field.XamlRoot()),field))self->more.Focus(FocusState::Programmatic);
         }));
         if(editHost)editHost.AddHandler(UIElement::PointerPressedEvent(),editOutside,true);
     }
