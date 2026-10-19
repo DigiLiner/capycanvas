@@ -58,7 +58,6 @@ struct DrawingWorkloadPlan {
         if name == "photo" && (environment["CAPY_WORKLOAD_SPACE"] != nil || environment["CAPY_WORKLOAD_DEPTH"] != nil) {
             throw PlanError(errorDescription: "The photo workload uses the package document color")
         }
-        // The shared document reader validates these ordinary creation options.
         return try DrawingWorkloadPlan(name: name, seconds: seconds, color: [
             "space": environment["CAPY_WORKLOAD_SPACE"] ?? "Srgb",
             "depth": environment["CAPY_WORKLOAD_DEPTH"] ?? "U8"],

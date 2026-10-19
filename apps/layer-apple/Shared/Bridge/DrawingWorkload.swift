@@ -77,19 +77,30 @@ import Foundation
     }
     private func prepare() async throws {
         guard let native = store?.native else { throw CancellationError() }
+        let extent = plan.documentExtent
+        let source = plan.document.map { URL(fileURLWithPath: $0) }
+        if source == nil {
+            try await action(["type": "invoke", "command": "new_document"])
+            let steps: [[String: Any]] = [
+                ["op": "open", "screen": NSNull(), "untitled": "Performance workload"],
+                ["op": "unit", "unit": "px"], ["op": "linked", "linked": false],
+                ["op": "width", "value": extent[0]], ["op": "height", "value": extent[1]],
+                ["op": "space", "space": plan.color["space"] ?? "Srgb"],
+                ["op": "depth", "depth": plan.color["depth"] ?? "U8"],
+                ["op": "paper"], ["op": "pick_paper", "id": "drawing_paper"], ["op": "use_paper"],
+                ["op": "paper_color"], ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]],
+                ["op": "transparent", "transparent": false], ["op": "use_paper_color"], ["op": "create"]]
+            for step in steps { try await action(["type": "new_drawing", "action": step]) }
+        }
         let job: NativeProjectTask = try await withCheckedThrowingContinuation { continuation in
             native.projectTask(kind: .open) { task, error in
                 if let task { continuation.resume(returning: task) }
                 else { continuation.resume(throwing: HostFailure(message: error ?? "Workload document preparation failed")) }
             }
         }
-        let extent = plan.documentExtent
-        let color = plan.color
-        let source = plan.document.map { URL(fileURLWithPath: $0) }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             NativeProjectTask.io.async {
-                do { try job.read(from: source, options: JSON(["extent": extent,
-                    "color": color, "background": "White"])); continuation.resume() }
+                do { try job.read(from: source); continuation.resume() }
                 catch { continuation.resume(throwing: error) }
             }
         }
