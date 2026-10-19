@@ -142,6 +142,8 @@ try {
     if((Model).state.palette.glass.transparency -ne 'low'){throw 'Low is not the default transparency'}
     Invoke 'panel-tab-stats'
     Wait-Until {@((Model).layout.groups|Where-Object active -eq 'stats').Count -eq 1} 'Diagnostics did not become the active tab'
+    $settings=Control 'settings-button' -Arranged;$settings.SetFocus()
+    Wait-Until {$settings.Current.HasKeyboardFocus} 'Settings button did not take keyboard focus before tab sampling'
     Wait-Until {(Model).windows_glass.regions -ge 4} 'Paint did not publish its glass surfaces'
     $group=@((Model).layout.groups|Where-Object {$_.panels -contains 'layers'})[0]
     $scale=[Capy.GlassWindow]::GetDpiForWindow($drawingWindow)/96.;$client=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($drawingWindow,$client)

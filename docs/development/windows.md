@@ -1144,7 +1144,9 @@ taps on drawing tabs before reordering and Undo/Redo.
 `exercise-transparency.ps1` compares panel-tab lower corners at rest, on hover
 and during a held mouse press in both themes and every transparency level. It
 checks both neighboring directions, visible inactive hover, selection before
-release and retained native tab buttons. `tab-pickup` checks the regular mouse
+release and retained native tab buttons. Baseline shade samples move keyboard
+focus to Settings so native focus borders are not mistaken for the tab fill.
+`tab-pickup` checks the regular mouse
 cursor, selection before mouse release, and short mouse, pen and touch taps.
 `tab-drag` presses an inactive tab before pickup and compares its selected
 shoulder pixels with the drag preview. Preview geometry is captured at pickup,
