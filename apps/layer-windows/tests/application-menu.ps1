@@ -5,7 +5,7 @@ function Menu-Root([string]$Mode){
     $result=[pscustomobject]@{reads=0;mode=$Mode}
     $result|Add-Member ScriptMethod FindAll {
         param($scope,$condition)
-        if($condition.Value -ne 'application-menu-file'){return}
+        if($condition -ne [System.Windows.Automation.Condition]::TrueCondition){return}
         $this.reads++
         if($this.mode -eq 'changing-route' -and $this.reads -gt 2){return}
         $type=if($this.mode -eq 'inspect' -and $this.reads -ge 3){[System.Windows.Automation.ControlType]::Button}else{[System.Windows.Automation.ControlType]::MenuItem}
@@ -31,6 +31,8 @@ foreach($mode in @('inspect','expanded','changing-route')){
             $entry=& $Helper -Root $window -Name File -PassThru
             if($entry.Current.ControlType -ne [System.Windows.Automation.ControlType]::MenuItem){throw 'The existing submenu route was not retained'}
         }
+        $expected=if($mode -eq 'inspect'){3}else{1}
+        if($window.reads -ne $expected){throw 'Menu discovery did not retain one tree snapshot per attempt'}
         Write-Output ('Application menu '+$mode+': passed')
     }catch{
         $failures.Add($mode+': '+$_.Exception.Message)

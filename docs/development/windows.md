@@ -821,6 +821,8 @@ The menu automation helper matches current UIA properties after walking the
 owned window; WinUI can omit visible controls from property-filtered queries.
 Each polling attempt shares one tree snapshot across the visible and compact
 menu routes, so an expensive traversal cannot consume the wait on fallback IDs.
+The input suite checks delayed publication, disappearing submenu routes and
+current-property discovery through this complete helper.
 
 Each `apps/layer-windows/scripts/exercise-*.ps1` drives the real app through UI
 Automation and guarded OS mouse, pen and touch input. Fixtures that take
