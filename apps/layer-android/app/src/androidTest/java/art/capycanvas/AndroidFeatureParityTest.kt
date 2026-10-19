@@ -945,11 +945,12 @@ class AndroidFeatureParityTest {
                 compose.onNodeWithTag("color-value-hex-input").performTextReplacement("#D96B7A")
                 compose.onNodeWithTag("color-value-hex-input").performImeAction()
                 awaitDrawing("a new color can be added") { it.panel()!!.getBoolean("can_add") }
+                val colors = drawing()!!.panel()!!.getJSONArray("palette").length()
                 tap("new-drawing-add-paper-color", true)
-                awaitDrawing("added") { it.panel()!!.getString("count") == "15" }
-                hold("new-drawing-paper-color-14")
+                awaitDrawing("added") { it.panel()!!.getString("count") == "${colors + 1}" }
+                hold("new-drawing-paper-color-$colors")
                 tap("new-drawing-paper-color-delete")
-                awaitDrawing("removed") { it.panel()!!.getString("count") == "14" }
+                awaitDrawing("removed") { it.panel()!!.getString("count") == "$colors" }
                 tap("new-drawing-color-mode-transparent", true)
                 awaitDrawing("transparent") { it.panel()!!.getBoolean("transparent") }
                 shown("color-transparent")
