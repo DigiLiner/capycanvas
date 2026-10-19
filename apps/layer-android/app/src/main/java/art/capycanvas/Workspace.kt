@@ -530,7 +530,7 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
     Surface(modifier, color = if (tabsVisible) Color.Transparent else colors.panelFill) {
         Column {
             if (tabsVisible) PanelHeaderFeedback {
-                Row(Modifier.fillMaxWidth().height(36.dp).testTag("group-header-${group.getInt("id")}").dragSource(dock, groupItem)
+                Row(Modifier.fillMaxWidth().height(36.dp).testTag("group-header-${group.getInt("id")}").dragSource(dock, groupItem, cursor = AndroidPointerIcon.TYPE_ARROW)
                     .combinedClickable(onClick = { if (panel.optBoolean("expanded")) host.customize(obj("type" to "close_expanded")) },
                         onLongClick = { dock.holdContext(groupItem) }), verticalAlignment = Alignment.CenterVertically) {
                     var strip by remember { mutableFloatStateOf(0f) }
@@ -540,7 +540,7 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                         .tabStrip(cutout, colors.strip).horizontalScroll(rememberScrollState()).clickable(enabled = panel.optBoolean("expanded")) { host.customize(obj("type" to "close_expanded")) }) {
                         group.array("panels").values().forEachIndexed { index, id ->
                             val p = panels[id.toString()] ?: return@forEachIndexed
-                            val tab = Modifier.testTag("tab-$id").dragSource(dock, obj("kind" to "panel", "panel" to id))
+                            val tab = Modifier.testTag("tab-$id").dragSource(dock, obj("kind" to "panel", "panel" to id), cursor = AndroidPointerIcon.TYPE_ARROW)
                                 .onGloballyPositioned { coords ->
                                     val r = coords.boundsInRoot(); val pos = (r.topLeft - dock.origin) / dock.density
                                     // Contact handling needs the panel ID as well as the drop-target geometry.
@@ -554,6 +554,7 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                         }
                     }
                     Box(Modifier.width(20.dp).height(36.dp).background(colors.strip).testTag("group-grip-${group.getInt("id")}")
+                        .workspacePointerIcon(AndroidPointerIcon.TYPE_GRAB)
                         .combinedClickable(onClick = { if (panel.optBoolean("expanded")) host.customize(obj("type" to "close_expanded")) },
                             onLongClick = { dock.holdContext(obj("kind" to "group", "group" to group.getInt("id"))) }), contentAlignment = Alignment.Center) { PanelGrip(host.catalog.getJSONObject("document_delivery_copy").getString("move_group")) }
                 }

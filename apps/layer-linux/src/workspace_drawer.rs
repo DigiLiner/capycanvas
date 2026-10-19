@@ -341,11 +341,11 @@ struct View {
     tab_clip: Option<gtk::ScrolledWindow>,
 }
 impl View {
-    fn new(w: &Rc<Workspace>, drawer: &ContentDrawer) -> Self {
-        let connection = gtk::DrawingArea::new();
+    fn new(w: &Rc<Workspace>, drawer: &ContentDrawer, previous: Option<&Self>) -> Self {
+        let connection = previous.map(|view| view.connection.clone()).unwrap_or_default();
         connection.set_widget_name("drawer-connection");
         connection.add_css_class("drawer-connection");
-        let connection_geometry = Rc::new(Cell::new(None::<DrawerConnection>));
+        let connection_geometry = previous.map(|view| view.connection_geometry.clone()).unwrap_or_default();
         let geometry = connection_geometry.clone();
         connection.set_draw_func(move |area, cr, _, _| {
             let Some(c) = geometry.get() else {
@@ -365,7 +365,7 @@ impl View {
             concave_foot(cr, c.length.into(), c.depth.into(), c.radii[1].into(), 1.0);
             let _ = cr.fill();
         });
-        let root: Columns = glib::Object::new();
+        let root: Columns = previous.map(|view| view.root.clone()).unwrap_or_else(glib::Object::new);
         root.set_widget_name(&match drawer.anchor {
             DrawerAnchor::Header { .. } => "tool-drawer".into(),
             DrawerAnchor::Tile { .. } => "tool-drawer".into(),
@@ -378,7 +378,7 @@ impl View {
         }
 
         root.set_overflow(gtk::Overflow::Hidden);
-        let shadow = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        let shadow = previous.map(|view| view.shadow.clone()).unwrap_or_else(|| gtk::Box::new(gtk::Orientation::Vertical, 0));
         shadow.add_css_class("drawer-shadow");
         shadow.set_widget_name("drawer-shadow");
         shadow.set_can_target(false);
@@ -386,8 +386,8 @@ impl View {
         let mut clips = Vec::new();
         let mut bodies = Vec::new();
         let mut effects = None;
-        let mut tab_buttons = Vec::new();
-        let mut tab_clip = None;
+        let mut tab_buttons = previous.map(|view| view.tabs.clone()).unwrap_or_default();
+        let mut tab_clip = previous.and_then(|view| view.tab_clip.clone());
         for panels in &drawer.columns {
             let column = gtk::Box::new(gtk::Orientation::Vertical, WORKSPACE_SPACING as i32);
             for panel in panels {
@@ -457,7 +457,15 @@ impl View {
                 scroller
             };
             clips.push(scroller.clone());
-            let child = if let Some(tabs) = &drawer.tabs {
+            let child = if let Some(previous) = previous {
+                let child = previous.root.imp().children.borrow()[columns.len()].clone();
+                let container = child.downcast_ref::<gtk::Box>().unwrap();
+                container.remove(&container.last_child().unwrap());
+                scroller.add_css_class("panel-body");
+                scroller.set_vexpand(true);
+                container.append(&scroller);
+                child
+            } else if let Some(tabs) = &drawer.tabs {
                 let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 let header = gtk::Box::new(gtk::Orientation::Horizontal, 0);
                 header.add_css_class("dock-tabs");
@@ -479,13 +487,7 @@ impl View {
                 for panel in &tabs.panels {
                     let config = layout.panel(*panel).unwrap();
                     let presentation = layout.tab_presentation(*panel);
-                    let button = w.action_button(
-                        &config.title_localized(&w.localization()),
-                        UiAction::SelectPanelTab {
-                            group: tabs.group,
-                            panel: *panel,
-                        },
-                    );
+                    let button = w.panel_tab_button(&config.title_localized(&w.localization()), tabs.group, *panel);
                     button.add_css_class("flat");
                     button.set_widget_name(&format!("column-drawer-tab-{panel:?}"));
                     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -534,8 +536,10 @@ impl View {
             } else {
                 scroller
             };
-            child.set_parent(&root);
-            root.imp().children.borrow_mut().push(child);
+            if previous.is_none() {
+                child.set_parent(&root);
+                root.imp().children.borrow_mut().push(child);
+            }
             columns.push(column);
         }
 
@@ -1035,13 +1039,22 @@ impl Drawer {
             .as_ref()
             .is_none_or(|old| old.columns != next.columns || old.tabs != next.tabs || old.layer_properties.is_some() != next.layer_properties.is_some());
         if rebuild {
-            w.surface
+            let previous = self.view.borrow().clone();
+            let retain = previous.as_ref().filter(|view| {
+                view.root.imp().children.borrow().len() == next.columns.len()
+                    && self.state.borrow().as_ref().is_some_and(|old| old.tabs.as_ref().zip(next.tabs.as_ref())
+                        .is_some_and(|(old, next)| old.group == next.group && old.panels == next.panels))
+            });
+            if retain.is_none() { w.surface
                 .remove_slots(|slot| matches!(slot, Slot::Drawer(id) | Slot::DrawerConnection(id) | Slot::DrawerShadow(id) if id == self.id));
-            let view = Rc::new(View::new(w, next));
+            }
+            let view = Rc::new(View::new(w, next, retain.map(|view| view.as_ref())));
+            if retain.is_none() {
             w.surface.add(Slot::DrawerShadow(self.id), &view.shadow);
             w.surface.add(Slot::Drawer(self.id), &view.root);
             w.surface
                 .add(Slot::DrawerConnection(self.id), &view.connection);
+            }
             *self.view.borrow_mut() = Some(view);
         }
         *self.state.borrow_mut() = Some(next.clone());
@@ -1049,6 +1062,26 @@ impl Drawer {
         let mut refreshed = false;
         let mut rows_changed = false;
         if let Some(view) = self.view.borrow().as_ref() {
+            if let Some(tabs) = &next.tabs {
+                let layout = w.surface.imp().layout.borrow();
+                let style = layout.group_tab_style(tabs.group).unwrap();
+                for (panel, button) in tabs.panels.iter().zip(&view.tabs) {
+                    selected(button, *panel == tabs.active);
+                    if style != TabStyle::Automatic {
+                        let presentation = layout.tab_presentation(*panel);
+                        if presentation.show_name { button.remove_css_class("icon-only-tab"); }
+                        else { button.add_css_class("icon-only-tab"); }
+                        if let Some(content) = button.child().and_downcast::<gtk::Box>() {
+                            if let Some(icon) = content.first_child() { icon.set_visible(presentation.show_icon); }
+                            if let Some(label) = content.last_child() { label.set_visible(presentation.show_name); }
+                        }
+                    }
+                }
+                if let Some(labels) = view.tab_clip.as_ref().and_then(|clip| clip.child()).and_downcast::<crate::panel_tabs::PanelTabs>() {
+                    labels.set_style(style);
+                    if changed { labels.queue_resize(); labels.queue_draw(); }
+                }
+            }
             for body in &view.bodies {
                 if let Body::LayerInspector(inspector) = body {
                     rows_changed |= !rebuild && inspector.rows.get() != state.layers.len();

@@ -573,7 +573,13 @@ menus, unrelated titles, ambiguous roles and retained native actions.
 The same pattern pairs `json-lookup`, `reorder-contact`, `estimated-input`,
 `frame-trace`, `drawing-workload-plan` and `native-input-gate` with their `Shared/Bridge` sources
 (`JSON.swift`, `ReorderContact.swift`, `EstimatedInput.swift`, `FrameTrace.swift`,
-`DrawingWorkloadPlan.swift` and `NativeInputGate.swift`). Other runners in `scripts/` and `tests/`:
+`DrawingWorkloadPlan.swift` and `NativeInputGate.swift`).
+
+`reorder-contact` checks selection at native press before release or drag pickup.
+`tests/workspace-native-input.swift` checks immediate drawer-tab selection and
+retained source identity through native mouse and pen reordering.
+
+Other runners in `scripts/` and `tests/`:
 
 | Runner | Checks |
 | --- | --- |

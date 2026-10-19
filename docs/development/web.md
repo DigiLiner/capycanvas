@@ -444,6 +444,8 @@ shared writer; it needs no external archive fixture.
 
 Setup that some journeys need:
 
+- `--tab-styles` checks light/dark docked and drawer tabs for visible hover,
+  selection before release, retained tab elements and the regular pointer.
 - `--workspace-rendering` checks Navigator GPU pixels at 1x and 2x, including
   live pen strokes, brush-up convergence and artwork undo/redo in both themes.
   It compares active tabs with their panel bodies at every transparency level.

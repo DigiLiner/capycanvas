@@ -193,9 +193,15 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
         // A new opener must move the body and connector together. Interpolating
         // from the old body leaves the new anchor disconnected during the move.
         const switching=record&&JSON.stringify(record.drawer.anchor)!==JSON.stringify(drawer.anchor);
-        const from=record?.placement;if(record)dispose(record);
-        const shadow=element("div","drawer-shadow");shadow.setAttribute("aria-hidden","true");workspace.append(shadow);
-        const root=element("section","content-drawer");root.dataset.drawer=String(id);root.classList.toggle("picker-drawer",!!drawer.compact);root.setAttribute("aria-label","Panel drawer");workspace.append(root);
+        const from=record?.placement;
+        if(record)for(const body of record.bodies){customization.discardFields(body);for(const child of body.children)child.disposePanel?.();body.remove();}
+        const shadow=record?.shadow??element("div","drawer-shadow");shadow.setAttribute("aria-hidden","true");
+        const root=record?.root??element("section","content-drawer");
+        if(!record){workspace.append(shadow,root);root.dataset.drawer=String(id);root.setAttribute("aria-label","Panel drawer");}
+        root.classList.toggle("picker-drawer",!!drawer.compact);
+        const tabs=root.querySelector(":scope > .drawer-tabs");
+        const tabKey=t=>JSON.stringify(t&&[t.group,t.panels]);
+        if(tabs&&tabKey(record.drawer.tabs)!==tabKey(drawer.tabs)){releaseTabs(tabs);tabs.remove();}
         let inspector;
         const bodies=drawer.columns.map(ids=>{
           const body=element("div","drawer-column");
@@ -209,9 +215,12 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
           }
           root.append(body);return body;
         });
-        record={key,root,shadow,bodies,column,drawer,inspector,from,started:performance.now()-(switching?160:0),placement:from};drawers.set(id,record);
+        record=Object.assign(record??{},{key,root,shadow,bodies,column,drawer,inspector,from,started:performance.now()-(switching?160:0),placement:from});drawers.set(id,record);
       }
       record.drawer=drawer;
+      record.tabStyle=drawer.tabs?app.group_tab_style(drawer.tabs.group):null;
+      const header=record.root.querySelector(':scope > .drawer-tabs');
+      if(header&&drawer.tabs&&header.dataset.tabStyle!==record.tabStyle){releaseTabs(header);header.remove();}
       record.closing=false;
       record.root.inert=false;
       record.inspector?.refresh(layer_properties);
@@ -265,22 +274,30 @@ export function createWorkspaceChrome({app,state,workspace,element,button,icon,p
       r.inspector?.layout();
       if(r.drawer.tabs) {
         let tabs=r.root.querySelector(":scope > .drawer-tabs");
-        if(!tabs){
+        if(!tabs&&!r.closing){
           const item={kind:"group",group:r.drawer.tabs.group};
           tabs=draggable(element("nav","drawer-tabs"),item);customization.target(tabs,item);r.root.append(tabs);
-          const strip=element("div","drawer-tab-strip"),automatic=app.group_tab_style(r.drawer.tabs.group)==="automatic";tabs.append(strip);
+          tabs.dataset.tabStyle=r.tabStyle;
+          const strip=element("div","drawer-tab-strip"),automatic=tabs.dataset.tabStyle==="automatic";tabs.append(strip);
           for(const panel of r.drawer.tabs.panels){
             const v=customization.view(panel),b=button("",()=>dispatch({type:"select_panel_tab",group:r.drawer.tabs.group,panel}),"dock-tab");
-            if(automatic)tabLabel(b,v,true);else{if(v.tab.show_icon)b.append(icon(v.icon,true));if(v.tab.show_name)b.append(document.createTextNode(v.title));}
-            b.dataset.panel=panel;b.setAttribute("aria-label",v.title);b.setAttribute("aria-selected",String(panel===r.drawer.tabs.active));
+            b.dataset.panel=panel;b.dataset.group=r.drawer.tabs.group;b.setAttribute("aria-label",v.title);
             customization.target(b,{kind:"panel",panel});strip.append(draggable(b,{kind:"panel",panel}));
           }
           if(automatic)automaticTabs(strip);
           const handle=grip(item);handle.classList.add("column-drawer-grip");tabs.append(handle);
         }
+        if(tabs) {
+        const automatic=tabs.dataset.tabStyle==="automatic";
+        if(!r.closing)for(const b of tabs.querySelectorAll('.dock-tab')) {
+          const v=customization.view(b.dataset.panel),key=JSON.stringify([v.title,v.icon,automatic?null:v.tab]);
+          b.setAttribute('aria-selected',String(b.dataset.panel===r.drawer.tabs.active));
+          if(b.dataset.labelKey!==key){b.dataset.labelKey=key;b.replaceChildren();tabLabel(b,v,automatic);b.title=v.title;b.setAttribute('aria-label',v.title);if(automatic)automaticTabs(b.parentElement);}
+        }
         // Shared placement includes tabs in the first column body.
         const body=r.bodies[0],b=r.placement.columns[0];place(tabs,{...b,height:resolved.tab_bar_height});
         place(body,{...b,y:b.y+resolved.tab_bar_height,height:Math.max(0,b.height-resolved.tab_bar_height)});
+        }
       }
       if(r.column!=null)for(const tile of r.root.querySelectorAll(".toolbar-controls > [data-tile]")) {
         const b=tile.getBoundingClientRect(),p=r.root.getBoundingClientRect();

@@ -2744,8 +2744,6 @@ class AndroidRasterTest {
             if (visible) {
                 val current = host.snapshot!!.getJSONObject("layout").array("groups").objects().first { it.getInt("id") == group }
                 if (current.optString("active") != "adjustments") action(obj("type" to "select_panel_tab", "group" to group, "panel" to "adjustments"))
-                // Selecting an already-active tab expands its controls. That
-                // consumes the next canvas contact as dismissal, not painting.
                 action(obj("type" to "customize", "action" to obj("type" to "close_expanded")))
             }
         }

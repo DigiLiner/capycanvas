@@ -126,7 +126,7 @@ export async function checkDragPickup({call,evaluate,settle}) {
         await send({type:"restore_workspace",workspace:fixture});
         if(source==="column-grip")await send({type:"customize",action:{type:"set_column_collapsed",group:43,collapsed:true}});
         const selector={tab:'.dock-tab[data-panel=properties]',"toolbar-grip":'.toolbar-controls > .panel-grip',"column-grip":'.collapsed-column .panel-grip'}[source];
-        const before=await snapshot();await input("down",center(await rect(selector)));
+        await input("down",center(await rect(selector)));const before=await snapshot();
         await input("move",{x:source==="column-grip"?10:700,y:460});await settle();
         assert.equal(await evaluate("document.querySelector('#workspace').dataset.workspaceCursor"),"grabbing",`${device} ${source}: immediate`);
         await input("up");await wait(350);assert.notDeepEqual(await snapshot(),before);

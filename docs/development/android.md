@@ -288,6 +288,10 @@ It preserves only that named test directory between invocations and removes it
 after verification. It checks saved and dirty tabs, camera, recovered labels,
 manual save checkpoints and undo/redo after an actual process death.
 
+- `AndroidHostTest#panelTabsHighlightOnHoverAndSelectOnPress` and its
+  `InDarkTheme` variant check docked, floating and drawer tabs: visible inactive
+  hover, preserved
+  active shoulders, selection before release and unchanged configuration.
 - `AndroidHostTest#compactPanelSpacingAndAlignmentAcrossContexts` captures Tools
   and Properties at 242/320 dp in both themes. It checks 24 dp controls, 36 dp
   slider rows, 8 dp content edges, common caption columns and 4 dp gaps on both

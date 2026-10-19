@@ -290,6 +290,7 @@ struct WorkspaceGestures::Impl:std::enable_shared_from_this<Impl>{
             scrollObservers.emplace_back(make_weak(scroll),token);
         }
         auto kind=str(action,L"type");
+        if(tab.Size())data->dispatch(O({{L"type",S(L"select_panel_tab")},{L"group",N(num(tab,L"group"))},{L"panel",S(str(tab,L"panel"))}}));
         if(!contextOnly&&kind!=L"drag_workspace"&&kind!=L"tile_drag"){begin();e.Handled(true);}
     }
     void move(PointerRoutedEventArgs const& e){

@@ -71,7 +71,7 @@ private struct WorkspacePanelTabs: View {
                 if !store.workspace.input.contact.consumeClick() { store.dispatch(["type": "select_panel_tab", "group": group["id"].raw, "panel": tab["id"].raw]) }
             } label: {
                 WorkspaceTabLabel(tab: tab, selected: selected, palette: palette, fill: fill).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel(tab["title"].string)
+            }.buttonStyle(WorkspaceTabButtonStyle(selected: selected, ink: palette["text"])).accessibilityLabel(tab["title"].string)
                 .accessibilityIdentifier((drawer ? "drawer-tab-" : "panel-tab-") + tab["id"].string)
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: JSON(["kind": "panel", "panel": tab["id"].raw]),
@@ -79,6 +79,27 @@ private struct WorkspacePanelTabs: View {
                 .modifier(WorkspaceTabMeasurement(group: group["id"].uint, index: index, cutsStrip: cutsStrip && selected && !hidden))
                 .zIndex(selected ? 1 : 0)
                 .opacity(hidden ? 0 : 1)
+        }
+    }
+}
+
+private struct WorkspaceTabButtonStyle: ButtonStyle {
+    let selected: Bool
+    let ink: Color
+    func makeBody(configuration: Configuration) -> some View {
+        Feedback(label: configuration.label, selected: selected, ink: ink)
+    }
+    private struct Feedback: View {
+        let label: ButtonStyleConfiguration.Label
+        let selected: Bool
+        let ink: Color
+        @State private var hovered = false
+        var body: some View {
+            label.background {
+                if hovered && !selected {
+                    SquircleShape(topLeading: 18, topTrailing: 18, bottomTrailing: 6, bottomLeading: 6).fill(ink.opacity(0.08))
+                }
+            }.onHover { hovered = $0 }
         }
     }
 }

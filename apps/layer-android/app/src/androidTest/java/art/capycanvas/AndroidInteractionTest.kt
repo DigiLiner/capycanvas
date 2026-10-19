@@ -769,6 +769,12 @@ class AndroidInteractionTest {
     }
 
     @Test fun tabsAndGripsStillPickUpImmediately() {
+        fun selected(value: Any? = state().getJSONObject("workspace").getJSONObject("layout")): Boolean = when (value) {
+            is JSONObject -> (value.optString("kind") == "tabs" && value.optInt("id") == 41 && value.optString("active") == "sizes") ||
+                value.keys().asSequence().any { selected(value.opt(it)) }
+            is JSONArray -> (0 until value.length()).any { selected(value.opt(it)) }
+            else -> false
+        }
         for(pointer in pointerTools) for(kind in listOf("tab","ribbon","group","drawer-tab","drawer-grip","column")) {
             tool=pointer; restore()
             if(kind.startsWith("drawer") || kind=="column") {
@@ -778,8 +784,12 @@ class AndroidInteractionTest {
             }
             val tag=when(kind) { "tab"->"tab-sizes"; "ribbon"->"ribbon-grip-toolbar"; "group"->"group-grip-41"
                 "drawer-tab"->"drawer-tab-sizes"; "drawer-grip"->"column-drawer-grip-41"; else->"column-grip-41" }
+            event(MotionEvent.ACTION_DOWN,bounds(tag).center)
+            if(kind == "tab" || kind == "drawer-tab") waitFor("$pointer/$kind selects on press") {
+                selected()
+            }
             val before=workspace()
-            event(MotionEvent.ACTION_DOWN,bounds(tag).center); event(MotionEvent.ACTION_MOVE,bounds("workspace").center)
+            event(MotionEvent.ACTION_MOVE,bounds("workspace").center)
             waitFor("$pointer/$kind immediate pickup",400) { workspaceDragging() }
             assertEquals(0,popupCount()); event(MotionEvent.ACTION_CANCEL); settle(); assertEquals(before,workspace())
         }

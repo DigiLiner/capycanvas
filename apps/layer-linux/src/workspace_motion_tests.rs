@@ -247,7 +247,6 @@ fn native_workspace_motion_input() {
             }
             let mut cpu = w.publication.inputs.borrow().clone();
             cpu.sort_by(f64::total_cmp);
-            assert!(cpu.len() > 200, "receive high-rate native input");
             let frames = w.publication.frames.borrow().clone();
             let mut presented: Vec<_> = timings
                 .borrow()
@@ -257,6 +256,9 @@ fn native_workspace_motion_input() {
                 .collect();
             presented.sort_unstable();
             presented.dedup();
+            let mut presentation_gaps: Vec<_> = presented.windows(2).map(|pair| (pair[1] - pair[0]) as f64 / 1000.).collect();
+            presentation_gaps.sort_by(f64::total_cmp);
+            let presentation_gap_p99_ms = presentation_gaps.get(presentation_gaps.len() * 99 / 100).copied();
             let hz = |times: &[i64]| {
                 if times.len() > 1 {
                     (times.len() - 1) as f64 * 1_000_000.
@@ -267,7 +269,11 @@ fn native_workspace_motion_input() {
             };
             let mut placement_cpu: Vec<_> = frames.iter().map(|f| f.1).collect();
             placement_cpu.sort_by(f64::total_cmp);
+            let report = serde_json::json!({"touch":touch,"scenario":scenario,"native_input_samples":cpu.len(),"native_input_gate_passed":cpu.len()>200,"native_input_minimum_exclusive":200,"model_refreshes":0,"dispatch_ms":{"p50":cpu.get(cpu.len()/2),"p95":cpu.get(cpu.len()*95/100)},"placement_ms":{"p50":placement_cpu.get(placement_cpu.len()/2),"p95":placement_cpu.get(placement_cpu.len()*95/100)},"placement_hz":hz(&frames.iter().map(|f|f.0).collect::<Vec<_>>()),"presentation_hz":hz(&presented),"presented_frames":presented.len(),"presentation_gap_p99_ms":presentation_gap_p99_ms,"refresh_intervals_us":timings.borrow().iter().map(|t|t.refresh_interval()).collect::<std::collections::BTreeSet<_>>(),"canvas":canvas});
+            eprintln!("{report}");
+            reports.push(report);
             assert!(!placement_cpu.is_empty(), "publish native placement");
+            assert!(cpu.len() > 200, "receive high-rate native input: {} samples", cpu.len());
             if let Ok(minimum) = std::env::var("LAYER_MOTION_MIN_HZ") {
                 assert!(
                     hz(&presented) >= minimum.parse::<f64>().unwrap(),
@@ -275,9 +281,6 @@ fn native_workspace_motion_input() {
                     hz(&presented)
                 );
             }
-            let report = serde_json::json!({"touch":touch,"scenario":scenario,"inputs":cpu.len(),"model_refreshes":0,"dispatch_ms":{"p50":cpu[cpu.len()/2],"p95":cpu[cpu.len()*95/100]},"placement_ms":{"p50":placement_cpu[placement_cpu.len()/2],"p95":placement_cpu[placement_cpu.len()*95/100]},"placement_hz":hz(&frames.iter().map(|f|f.0).collect::<Vec<_>>()),"presentation_hz":hz(&presented),"presented_frames":presented.len(),"refresh_intervals_us":timings.borrow().iter().map(|t|t.refresh_interval()).collect::<std::collections::BTreeSet<_>>(),"canvas":canvas});
-            eprintln!("{report}");
-            reports.push(report);
             if scenario == "tab" {
                 let first = w
                     .tab_hits()

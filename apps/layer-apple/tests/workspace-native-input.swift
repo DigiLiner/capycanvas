@@ -177,7 +177,9 @@ import SwiftUI
         try await wait("Open drawer tab and retained column icon") { source(.handle) != nil && source(.tile) != nil }
         try await checkTiles("drawer")
         for pen in [false, true] {
-            let before = store.state["workspace"].stableKey
+            try await action(["type": "select_panel_tab", "group": 6, "panel": "brushes"])
+            try await wait("Inactive toolbar tab") { source(.handle) != nil }
+            let tabID = source(.handle)!.key
             let tab = source(.handle)!.value.bounds
             let brushes = JSON(["kind": "panel", "panel": "brushes"])
             let neighbor = workspace.sourceInstances.values.first {
@@ -186,6 +188,11 @@ import SwiftUI
             let origin = CGPoint(x: tab.midX, y: tab.midY)
             let end = CGPoint(x: neighbor.minX + neighbor.width * 0.05, y: neighbor.midY)
             try await send(.leftMouseDown, origin, pen: pen)
+            try await wait("Tab selects before native release") {
+                store.state["customization"]["column_drawers"][0]["tabs"]["active"].string == "toolbar"
+            }
+            let before = store.state["workspace"].stableKey
+            try require(source(.handle)?.key == tabID, "Press selection retains the native tab source")
             try require(input.contact.target != nil && !input.contact.requiresHold,
                 "A drawer tab must admit an immediate native contact")
             for step in 1...6 {

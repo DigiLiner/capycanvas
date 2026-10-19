@@ -1548,6 +1548,16 @@ impl Workspace {
         ));
         button
     }
+    fn panel_tab_button(self: &Rc<Self>, label: &str, group: u32, panel: Panel) -> gtk::Button {
+        let action = UiAction::SelectPanelTab { group, panel };
+        let button = self.action_button(label, action.clone());
+        let press = gtk::GestureClick::new();
+        press.set_button(1);
+        press.set_propagation_phase(gtk::PropagationPhase::Capture);
+        press.connect_pressed(glib::clone!(#[weak(rename_to = w)] self, move |_, _, _, _| w.dispatch(action.clone())));
+        button.add_controller(press);
+        button
+    }
     pub fn bind_action_tooltip(self: &Rc<Self>, button: &gtk::Button, action: UiAction) {
         self.bind_dynamic_action_tooltip(button, move |_| Some(action.clone()));
     }
@@ -3163,13 +3173,7 @@ impl Workspace {
                     for &panel in &group.panels {
                         let title = layout.panel(panel).expect("validated panel")
                             .title_localized(&self.localization());
-                        let tab = self.action_button(
-                            &title,
-                            UiAction::SelectPanelTab {
-                                group: group.id,
-                                panel,
-                            },
-                        );
+                        let tab = self.panel_tab_button(&title, group.id, panel);
                         tab.add_css_class("flat");
                         tab.set_valign(gtk::Align::Center);
                         let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -3577,7 +3581,7 @@ impl Workspace {
     fn register_drag(&self, widget: &impl IsA<gtk::Widget>, target: DragTarget) {
         if !widget.has_css_class("drag-hold") && !widget.has_css_class("drag-row") { widget.add_css_class("drag-immediate"); }
         if matches!(target, DragTarget::Dock(_) | DragTarget::Header(_)) {
-            widget.set_cursor_from_name(Some(if widget.has_css_class("drag-hold") {
+            widget.set_cursor_from_name(Some(if widget.has_css_class("drag-hold") || widget.has_css_class("dock-tabs") {
                 "default"
             } else {
                 "grab"

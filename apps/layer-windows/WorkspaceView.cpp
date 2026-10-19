@@ -90,12 +90,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         std::array<float,4> corners{SurfaceRadius,SurfaceRadius,SurfaceRadius,SurfaceRadius};
         Border footer{nullptr};
         std::wstring key;
+        hstring tabKey;
         J geometry,presented;
         Windows::Foundation::Point offset{};
         TranslateTransform translation;
         hstring backgroundKey;
         std::unique_ptr<PanelBody> body;
-        std::map<std::wstring,Button> tabs;
+        std::map<std::wstring,Grid> tabs;
         std::unique_ptr<PanelConfiguration> configuration;
         bool hidden=false;
         int order=0;
@@ -152,7 +153,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         root.LayoutUpdated([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
     }
     void build(Group& group,J const& geometry,J const& panel){
-        group.body.reset();group.footer=nullptr;group.tabs.clear();group.activeTab=nullptr;group.automatic.clear();group.paintIcons.clear();group.backgroundKey=L"";
+        group.body.reset();group.footer=nullptr;group.backgroundKey=L"";
         auto groupItem=O({{L"kind",S(L"group")},{L"group",N(num(geometry,L"id"))}});
         float fit=groupRadius(geometry)*CornerFit;group.border.Background(clear());group.border.CornerRadius(CornerRadius{fit,fit,fit,fit});
         if(!group.layout){
@@ -166,7 +167,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         auto frame=group.layout;
         frame.RowDefinitions().GetAt(0).Height({flag(geometry,L"tabs_visible")?36.:0.,GridUnitType::Pixel});
         while(frame.Children().Size()>1)frame.Children().RemoveAtEnd();
-        {
+        A members;for(auto value:array(geometry,L"panels")){
+            auto model=find(array(data->model,L"panels"),L"id",value.GetString());
+            members.Append(O({{L"id",value},{L"icon",S(str(model,L"icon"))}}));
+        }
+        auto tabKey=O({{L"members",members},{L"style",S(str(object(data->model,L"windows_tab_styles"),to_hstring(uint32_t(num(geometry,L"id"))).c_str()))}}).Stringify();
+        if(group.tabKey!=tabKey){
+            group.tabKey=tabKey;group.tabs.clear();group.activeTab=nullptr;group.automatic.clear();group.paintIcons.clear();
             auto tabs=group.tabLabels;tabs.Children().Clear();
             uint32_t index=0;bool fitted=automaticTabs(data,num(geometry,L"id"));
             for(auto value:array(geometry,L"panels")){
@@ -176,8 +183,8 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 });tab.UseLayoutRounding(false);tab.Height(36);tab.MinWidth(36);tab.Padding(Thickness{8,4,8,4});tab.CornerRadius(CornerRadius{6,6,0,0});
                 StackPanel content;content.Orientation(Orientation::Horizontal);content.Spacing(6);
                 auto tabStyle=object(model,L"tab");
-                if(flag(tabStyle,L"show_icon")||fitted)content.Children().Append(panelIcon(data,str(model,L"icon"),group.paintIcons));
-                if(flag(tabStyle,L"show_name")||fitted){
+                content.Children().Append(panelIcon(data,str(model,L"icon"),group.paintIcons));
+                {
                     auto name=label(data,str(model,L"title"),true);name.Visibility(flag(tabStyle,L"show_name")?Visibility::Visible:Visibility::Collapsed);content.Children().Append(name);
                     if(fitted)group.automatic.push_back({tab,name,std::wstring(id)+L"\n"+std::wstring(str(model,L"title"))+L"\n"+std::to_wstring(data->textSize())});
                 }
@@ -186,13 +193,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 gestures->Source(tab,O({{L"type",S(L"drag_workspace")},{L"item",item}}),item,false,
                     O({{L"group",N(num(geometry,L"id"))},{L"index",N(index++)},{L"panel",S(id)}}));
                 AutomationProperties::SetAutomationId(tab,L"panel-tab-"+id);
-                auto shell=panelTabShell(tab,active?Brush(data->glass(L"panel")):Brush(nullptr));
-                if(active){
-                    group.activeTab=shell;auto cut=[weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))]{if(auto self=weak.lock())self->cutStrip(id);};
+                auto shell=panelTabShell(tab,active?Brush(data->glass(L"panel")):Brush(nullptr),data->tint(L"text",20));
+                {
+                    auto cut=[weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))]{if(auto self=weak.lock())self->cutStrip(id);};
                     shell.SizeChanged([cut](auto&&,auto&&){cut();});
                     shell.RegisterPropertyChangedCallback(UIElement::OpacityProperty(),[cut](auto&&,auto&&){cut();});
                 }
-                group.tabs.emplace(std::wstring(id),tab);tabs.Children().Append(shell);
+                group.tabs.emplace(std::wstring(id),shell);tabs.Children().Append(shell);
             }
             if(!group.tabScroll){
                 group.tabScroll=ScrollView();auto tabScroll=group.tabScroll;tabScroll.Content(tabs);tabScroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
@@ -219,7 +226,19 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 data->copyView([weak=make_weak(handle),resolve=help.current]{if(auto view=weak.get()){AutomationProperties::SetHelpText(view,resolve());return true;}return false;});
                 Grid::SetColumn(handle,1);header.Children().Append(handle);frame.Children().Append(header);
             }
-            group.header.Visibility(flag(geometry,L"tabs_visible")?Visibility::Visible:Visibility::Collapsed);
+        }
+        group.header.Visibility(flag(geometry,L"tabs_visible")?Visibility::Visible:Visibility::Collapsed);
+        group.activeTab=nullptr;
+        bool fitted=automaticTabs(data,num(geometry,L"id"));
+        for(auto const& [id,shell]:group.tabs){
+            auto tab=shell.Children().GetAt(1).as<Button>();
+            auto model=find(array(data->model,L"panels"),L"id",hstring(id));auto presentation=object(model,L"tab");
+            auto label=tab.Content().as<StackPanel>();
+            label.Children().GetAt(0).Visibility(fitted||flag(presentation,L"show_icon")?Visibility::Visible:Visibility::Collapsed);
+            if(!fitted)label.Children().GetAt(1).Visibility(flag(presentation,L"show_name")?Visibility::Visible:Visibility::Collapsed);
+            bool selected=hstring(id)==str(geometry,L"active");
+            selectPanelTabShell(shell,selected,selected?Brush(data->glass(L"panel")):Brush(nullptr));
+            if(selected)group.activeTab=shell;
         }
         if(group.tabScroll&&group.tabScroll.ActualWidth()>0)fitAutomaticTabs(data,group.automatic,group.tabScroll.ActualWidth(),tabWidths);
         group.body=std::make_unique<PanelBody>(data,panel,geometry,
@@ -363,7 +382,8 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             }signature.Insert(L"headers",headers);signature.Insert(L"tab_style",S(str(object(snapshot,L"windows_tab_styles"),to_hstring(id).c_str())));
             std::wstring key=signature.Stringify().c_str();
             if(group.key!=key){group.key=std::move(key);build(group,geometry,panel);}
-            for(auto const& [panelId,tab]:group.tabs){
+            for(auto const& [panelId,shell]:group.tabs){
+                auto tab=shell.Children().GetAt(1).as<Button>();
                 auto model=find(array(snapshot,L"panels"),L"id",hstring(panelId));auto title=str(model,L"title");
                 AutomationProperties::SetName(tab,title);tooltip(tab,title);
                 if(auto content=tab.Content().try_as<Panel>())for(auto child:content.Children())if(auto label=child.try_as<TextBlock>())label.Text(title);
@@ -559,7 +579,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         auto stable=[](double value){return std::round(std::clamp(value,0.,999999.)*64.)/64.;};
         for(auto const& [id,group]:groups){
             if(group.hidden||group.presented.Size()||!group.frame.IsLoaded())continue;
-            for(auto const& [panel,tab]:group.tabs)if(tab.IsLoaded()&&tab.DesiredSize().Width>0){
+            for(auto const& [panel,shell]:group.tabs)if(auto tab=shell.Children().GetAt(1).as<Button>();tab.IsLoaded()&&tab.DesiredSize().Width>0){
                 double width=tab.DesiredSize().Width;
                 for(auto const& automatic:group.automatic)if(automatic.tab==tab)
                     if(auto cached=tabWidths.find(automatic.key);cached!=tabWidths.end()){width=cached->second;break;}

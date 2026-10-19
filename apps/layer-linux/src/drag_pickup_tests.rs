@@ -13,7 +13,7 @@ fn native_drag_pickup_input() {
     let saved = || serde_json::to_value(state(&w).workspace).unwrap();
     let native = w.window.surface().unwrap();
     let pointer = native.display().default_seat().unwrap().pointer().unwrap();
-    let cursor = || native.device_cursor(&pointer).and_then(|cursor| cursor.name());
+    let cursor = || native.device_cursor(&pointer).and_then(|cursor| cursor.name()).or_else(|| Some("default".into()));
     let menu = w
         .popovers
         .borrow()
@@ -116,7 +116,7 @@ fn native_drag_pickup_input() {
                     let tile = source.ends_with("tile") || source == "column";
                     if !touch {
                         input.perform(serde_json::json!([{"point":start}]));
-                        assert_eq!(cursor().as_deref(), Some(if tile { "default" } else { "grab" }), "{source}: hover cursor");
+                        assert_eq!(cursor().as_deref(), Some(if tile || source == "tab" { "default" } else { "grab" }), "{source}: hover cursor");
                     }
                     if !touch && !held && !cancel && source != "column-grip" {
                         input.perform(serde_json::json!([
@@ -125,13 +125,16 @@ fn native_drag_pickup_input() {
                         assert!(menu.is_visible(), "{source}: right-click opens menu");
                         input.perform(serde_json::json!([{"key":65307,"down":true},{"key":65307,"down":false}]));
                     }
-                    let before = saved();
+                    let mut before = saved();
                     let press = if touch {
                         serde_json::json!([{"touch":"down","point":start}])
                     } else {
                         serde_json::json!([{"point":start},{"down":true}])
                     };
                     input.perform(press.clone());
+                    if source == "tab" {
+                        before = saved();
+                    }
                     if !touch && tile {
                         assert_eq!(cursor().as_deref(), Some("default"), "press alone keeps the pointer");
                     }

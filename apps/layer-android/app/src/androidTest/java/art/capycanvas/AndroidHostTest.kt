@@ -467,6 +467,7 @@ class AndroidHostTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("column-drawer-grip-41").fetchSemanticsNodes().isNotEmpty() }
                 SystemClock.sleep(300); compose.waitForIdle()
             }
+            if (attached) action(obj("type" to "select_panel_tab", "group" to 41, "panel" to "tool_settings"))
             val before = state().getJSONObject("workspace").toString()
             val tabPrefix = if (drawer) "drawer-tab" else "tab"
             val source = bounds(if (attached) "$tabPrefix-tool_settings" else "tab-layers").center
@@ -612,8 +613,16 @@ class AndroidHostTest {
                 try { instrumentation.runOnMainSync { icon = native.onResolvePointerIcon(event, 0) } } finally { event.recycle() }
                 return icon
             }
-            runCatching { compose.waitUntil(5_000) { resolved() == expected } }
-            assertEquals("Native cursor at $point for tool $tool", expected, resolved())
+            runCatching { compose.waitUntil(5_000) {
+                val actual = resolved()
+                actual == expected || (type == null && tool == MotionEvent.TOOL_TYPE_STYLUS &&
+                    (actual == PointerIcon.getSystemIcon(native.context, PointerIcon.TYPE_ARROW) || actual == PointerIcon.getSystemIcon(native.context, PointerIcon.TYPE_NULL)))
+            } }
+            val actual = resolved()
+            val actualType = listOf(PointerIcon.TYPE_ARROW, PointerIcon.TYPE_HAND, PointerIcon.TYPE_GRAB, PointerIcon.TYPE_GRABBING, PointerIcon.TYPE_NULL).firstOrNull { PointerIcon.getSystemIcon(native.context, it) == actual }
+            if (type == null && tool == MotionEvent.TOOL_TYPE_STYLUS)
+                assertTrue("Native default pen cursor at $point (resolved type=$actualType)", actual == null || actualType == PointerIcon.TYPE_ARROW || actualType == PointerIcon.TYPE_NULL)
+            else assertEquals("Native cursor at $point for tool $tool (expected type=$type, resolved type=$actualType)", expected, actual)
         }
         fun hover(point: androidx.compose.ui.geometry.Offset, type: Int, penType: Int? = if (type == PointerIcon.TYPE_GRAB || type == PointerIcon.TYPE_GRABBING) null else type) {
             root.performMouseInput { moveTo(point) }; settle(); icon(point, type)
@@ -632,9 +641,11 @@ class AndroidHostTest {
             finally { exit.recycle() }
         }
         val away = root.fetchSemanticsNode().boundsInRoot.let { androidx.compose.ui.geometry.Offset(it.width * .6f, it.height * .6f) }
-        for (tag in listOf("tab-brushes", "tab-sizes", "group-grip-41", "ribbon-grip-toolbar")) hover(bounds(tag).center, PointerIcon.TYPE_GRAB)
+        for (tag in listOf("tab-brushes", "tab-sizes")) hover(bounds(tag).center, PointerIcon.TYPE_ARROW)
+        hover(bounds("group-grip-41").center, PointerIcon.TYPE_GRAB)
+        hover(bounds("ribbon-grip-toolbar").center, PointerIcon.TYPE_GRAB)
         val grip = bounds("group-grip-41")
-        hover(androidx.compose.ui.geometry.Offset(grip.left - 8f, grip.center.y), PointerIcon.TYPE_GRAB)
+        hover(androidx.compose.ui.geometry.Offset(grip.left - 8f, grip.center.y), PointerIcon.TYPE_ARROW)
         // Bare canvas hides the mouse and leaves the native pen icon unspecified.
         hover(away, PointerIcon.TYPE_NULL, null)
         val dividers = host.snapshot!!.getJSONObject("layout").array("dividers").objects()
@@ -648,16 +659,18 @@ class AndroidHostTest {
             root.performMouseInput { moveTo(start); press(); moveTo(end, 200) }; settle(); icon(end, type)
             root.performMouseInput { cancel() }; settle(); assertEquals(before, saved())
         }
-        val before = saved()
         val start = bounds("tab-sizes").center
-        root.performMouseInput { moveTo(start); press(); moveTo(away, 300) }; settle()
+        root.performMouseInput { moveTo(start); press() }; settle()
+        assertEquals("sizes", group("sizes").getString("active"))
+        val before = saved()
+        root.performMouseInput { moveTo(away, 300) }; settle()
         compose.waitUntil(10_000) { group("sizes").getBoolean("floating") }
         icon(away, PointerIcon.TYPE_GRABBING)
-        icon(away, null, MotionEvent.TOOL_TYPE_STYLUS)
+        icon(away, PointerIcon.TYPE_GRABBING, MotionEvent.TOOL_TYPE_STYLUS)
         // The native SurfaceView must also keep the active cursor across canvas.
         compose.runOnIdle { assertEquals(PointerIcon.getSystemIcon(native.context, PointerIcon.TYPE_GRABBING), findCanvas(compose.activity.window.decorView)!!.pointerIcon) }
         root.performMouseInput { release() }; settle()
-        icon(away, PointerIcon.TYPE_GRAB)
+        icon(away, PointerIcon.TYPE_ARROW)
         compose.runOnIdle { assertEquals(PointerIcon.getSystemIcon(native.context, PointerIcon.TYPE_NULL), findCanvas(compose.activity.window.decorView)!!.pointerIcon) }
         val floated = saved()
         val floatingId = group("sizes").getInt("id")
@@ -667,7 +680,8 @@ class AndroidHostTest {
             "top_right" to PointerIcon.TYPE_TOP_RIGHT_DIAGONAL_DOUBLE_ARROW, "bottom_left" to PointerIcon.TYPE_TOP_RIGHT_DIAGONAL_DOUBLE_ARROW)) {
             val resize = bounds("resize-$floatingId-$edge").center
             hover(resize, type)
-            val end = resize + androidx.compose.ui.geometry.Offset(40f, 40f)
+            val extent = root.fetchSemanticsNode().boundsInRoot
+            val end = androidx.compose.ui.geometry.Offset((resize.x + 40f).coerceIn(2f, extent.width - 2f), (resize.y + 40f).coerceIn(2f, extent.height - 2f))
             root.performMouseInput { moveTo(resize); press(); moveTo(end, 200) }; settle(); icon(end, type)
             root.performMouseInput { cancel() }; settle(); assertEquals(floated, saved())
         }
@@ -680,9 +694,10 @@ class AndroidHostTest {
         compose.onNodeWithTag("column-icon-brushes").performTouchInput { click() }
         compose.waitUntil(10_000) { compose.onAllNodesWithTag("column-drawer-header-41").fetchSemanticsNodes().isNotEmpty() }
         settle()
-        for (tag in listOf("drawer-tab-brushes", "drawer-tab-sizes", "column-drawer-grip-41")) hover(bounds(tag).center, PointerIcon.TYPE_GRAB)
+        for (tag in listOf("drawer-tab-brushes", "drawer-tab-sizes")) hover(bounds(tag).center, PointerIcon.TYPE_ARROW)
+        hover(bounds("column-drawer-grip-41").center, PointerIcon.TYPE_GRAB)
         val drawerGrip = bounds("column-drawer-grip-41")
-        hover(androidx.compose.ui.geometry.Offset(drawerGrip.left - 8f, drawerGrip.center.y), PointerIcon.TYPE_GRAB)
+        hover(androidx.compose.ui.geometry.Offset(drawerGrip.left - 8f, drawerGrip.center.y), PointerIcon.TYPE_ARROW)
         val collapsed = saved()
         root.performMouseInput { moveTo(bounds("column-grip-41").center); press(); moveTo(away, 250) }; settle()
         icon(away, PointerIcon.TYPE_GRABBING)
@@ -695,7 +710,10 @@ class AndroidHostTest {
         assertNull(host.actionError)
     }
 
-    @Test fun panelHeadersDoNotHighlightOnMouseOrStylusHoverOrPress() {
+    @Test fun panelTabsHighlightOnHoverAndSelectOnPress() = panelTabsHighlightOnHoverAndSelectOnPress("light")
+    @Test fun panelTabsHighlightOnHoverAndSelectOnPressInDarkTheme() = panelTabsHighlightOnHoverAndSelectOnPress("dark")
+
+    private fun panelTabsHighlightOnHoverAndSelectOnPress(theme: String) {
         val fixture = JSONObject(defaultWorkspace)
         fixture.getJSONObject("layout").apply {
             put("bands", JSONArray(listOf(
@@ -705,37 +723,34 @@ class AndroidHostTest {
             put("next_id", maxOf(44, getInt("next_id")))
         }
         fixture.put("zen_mode", false)
+        fun selectedPanel(value: Any? = state().getJSONObject("workspace").getJSONObject("layout")): String? = when (value) {
+            is JSONObject -> if (value.optString("kind") == "tabs" && value.optInt("id") == 41) value.getString("active")
+                else value.keys().asSequence().mapNotNull { selectedPanel(value.opt(it)) }.firstOrNull()
+            is JSONArray -> (0 until value.length()).firstNotNullOfOrNull { selectedPanel(value.opt(it)) }
+            else -> null
+        }
         val root = compose.onNodeWithTag("workspace")
         fun bounds(tag: String) = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.translate(-root.fetchSemanticsNode().boundsInRoot.topLeft)
         fun settle() { compose.waitForIdle(); SystemClock.sleep(180); compose.waitForIdle() }
         fun hover(point: androidx.compose.ui.geometry.Offset, tool: Int, eventAction: Int = MotionEvent.ACTION_HOVER_MOVE) {
-            if (tool == MotionEvent.TOOL_TYPE_MOUSE) {
-                root.performMouseInput {
-                    when (eventAction) {
-                        MotionEvent.ACTION_HOVER_EXIT -> exit()
-                        MotionEvent.ACTION_DOWN -> press()
-                        MotionEvent.ACTION_CANCEL -> { cancel(); moveTo(point) }
-                        else -> moveTo(point)
-                    }
-                }
-            } else {
-                val window = root.fetchSemanticsNode().positionInWindow + point
-                instrumentation.runOnMainSync {
-                    val coords = MotionEvent.PointerCoords().apply { x = window.x; y = window.y }
-                    val props = MotionEvent.PointerProperties().apply { id = 0; toolType = tool }
-                    val time = SystemClock.uptimeMillis()
-                    val event = MotionEvent.obtain(time, time, eventAction, 1, arrayOf(props), arrayOf(coords), 0, 0, 1f, 1f, 1, 0, InputDevice.SOURCE_STYLUS, 0)
-                    try {
-                        if (eventAction == MotionEvent.ACTION_DOWN || eventAction == MotionEvent.ACTION_CANCEL)
-                            compose.activity.window.decorView.dispatchTouchEvent(event)
-                        else compose.activity.window.decorView.dispatchGenericMotionEvent(event)
-                    }
-                    finally { event.recycle() }
-                }
+            val window = root.fetchSemanticsNode().positionInWindow + point
+            instrumentation.runOnMainSync {
+                val coords = MotionEvent.PointerCoords().apply { x = window.x; y = window.y; pressure = if (eventAction == MotionEvent.ACTION_DOWN) 1f else 0f }
+                val props = MotionEvent.PointerProperties().apply { id = 0; toolType = tool }
+                val time = SystemClock.uptimeMillis()
+                val mouse = tool == MotionEvent.TOOL_TYPE_MOUSE
+                val event = MotionEvent.obtain(time, time, eventAction, 1, arrayOf(props), arrayOf(coords), 0,
+                    if (mouse && eventAction == MotionEvent.ACTION_DOWN) MotionEvent.BUTTON_PRIMARY else 0, 1f, 1f, 1, 0,
+                    if (mouse) InputDevice.SOURCE_MOUSE else InputDevice.SOURCE_STYLUS, 0)
+                try {
+                    if (eventAction == MotionEvent.ACTION_DOWN || eventAction == MotionEvent.ACTION_UP || eventAction == MotionEvent.ACTION_CANCEL)
+                        compose.activity.window.decorView.dispatchTouchEvent(event)
+                    else compose.activity.window.decorView.dispatchGenericMotionEvent(event)
+                } finally { event.recycle() }
             }
             settle()
         }
-        for (theme in listOf("light", "dark")) for (placement in listOf("docked", "floating", "drawer")) {
+        for (placement in listOf("docked", "floating", "drawer")) {
             action(obj("type" to "set_theme", "theme" to theme))
             action(obj("type" to "restore_workspace", "workspace" to fixture))
             if (placement == "floating") {
@@ -752,12 +767,11 @@ class AndroidHostTest {
             val tab = if (placement == "drawer") "drawer-tab-" else "tab-"
             val grip = bounds(if (placement == "drawer") "column-drawer-grip-41" else "group-grip-41")
             val away = root.fetchSemanticsNode().boundsInRoot.let { androidx.compose.ui.geometry.Offset(it.width * .7f, it.height * .8f) }
-            val points = listOf("active" to bounds("${tab}brushes").center, "inactive" to bounds("${tab}sizes").center,
-                "empty" to androidx.compose.ui.geometry.Offset(grip.left - 8f, grip.center.y), "grip" to grip.center)
+            val points = mutableListOf("active" to bounds("${tab}brushes").center, "inactive" to bounds("${tab}sizes").center, "grip" to grip.center)
+            val tabsRight = bounds("${tab}tool_settings").right
+            if (grip.left - tabsRight > 2f) points.add("empty" to androidx.compose.ui.geometry.Offset((tabsRight + grip.left) / 2f, grip.center.y))
             for (tool in listOf(MotionEvent.TOOL_TYPE_MOUSE, MotionEvent.TOOL_TYPE_STYLUS)) {
                 hover(away, tool, MotionEvent.ACTION_HOVER_ENTER)
-                // Prove each native hover stream reaches Compose, and that the
-                // suppression stays scoped to panel headers, not other controls.
                 val menu = compose.onNodeWithTag("application-menu-file")
                 val menuBefore = menu.captureToImage().toPixelMap()
                 hover(bounds("application-menu-file").center, tool)
@@ -766,28 +780,47 @@ class AndroidHostTest {
                     (0 until menuBefore.width).any { x -> menuBefore[x, y] != menuHovered[x, y] }
                 })
                 hover(away, tool)
-                val baseline = compose.onNodeWithTag(header).captureToImage().toPixelMap()
                 for ((part, point) in points) {
+                    action(obj("type" to "select_panel_tab", "group" to 41, "panel" to "brushes"))
+                    hover(away, tool)
+                    val baseline = compose.onNodeWithTag(header).captureToImage().toPixelMap()
+                    if (part == "grip") capture("panel-header-grip-baseline-$theme-$placement-$tool")
                     hover(point, tool)
                     val actual = compose.onNodeWithTag(header).captureToImage().toPixelMap()
+                    if (part == "grip") capture("panel-header-grip-hover-$theme-$placement-$tool")
                     var changed = 0
                     for (y in 0 until baseline.height) for (x in 0 until baseline.width) {
                         if (baseline[x, y] != actual[x, y]) changed++
                     }
-                    if (changed > 0 || (tool == MotionEvent.TOOL_TYPE_MOUSE && part == "active")) {
-                        capture("panel-header-hover-$theme-$placement-$tool-$part")
-                    }
-                    assertEquals("$theme $placement $tool $part hover must leave header pixels unchanged", 0, changed)
-                    hover(point, tool, MotionEvent.ACTION_DOWN)
-                    try {
-                        val pressed = compose.onNodeWithTag(header).captureToImage().toPixelMap()
-                        var pressChanges = 0
+                    if (part == "inactive") {
+                        assertTrue("$theme $placement $tool inactive tab has visible hover", changed > 0)
+                        val active = bounds("${tab}brushes")
+                        val headerOrigin = bounds(header).topLeft
                         for (y in 0 until baseline.height) for (x in 0 until baseline.width) {
-                            if (baseline[x, y] != pressed[x, y]) pressChanges++
+                            val position = headerOrigin + androidx.compose.ui.geometry.Offset(x.toFloat(), y.toFloat())
+                            if (position.x < active.left || position.x >= active.right) continue
+                            assertEquals("Hover preserves the active tab", baseline[x, y], actual[x, y])
                         }
-                        if (pressChanges > 0) capture("panel-header-press-$theme-$placement-$tool-$part")
-                        assertEquals("$theme $placement $tool $part press must leave header pixels unchanged", 0, pressChanges)
-                    } finally { hover(point, tool, MotionEvent.ACTION_CANCEL) }
+                        val footY = baseline.height - 1
+                        for (edge in listOf(active.left - 1f, active.right + 1f)) {
+                            val footX = (edge - headerOrigin.x).toInt()
+                            if (footX in 0 until baseline.width)
+                                assertEquals("Hover preserves the active tab shoulder", baseline[footX, footY], actual[footX, footY])
+                        }
+                    }
+                    else assertEquals("$theme $placement $tool $part hover leaves header unchanged", 0, changed)
+                    val expanded = state().getJSONObject("customization").optString("expanded")
+                    hover(point, tool, MotionEvent.ACTION_DOWN)
+                    var pressed = true
+                    try {
+                        val selected = if (part == "inactive") "sizes" else "brushes"
+                        assertEquals("Tab selects before release", selected, selectedPanel())
+                        hover(point, tool, MotionEvent.ACTION_UP)
+                        pressed = false
+                        assertEquals("Release keeps tab selected", selected, selectedPanel())
+                        assertEquals("Release keeps customization unchanged", expanded, state().getJSONObject("customization").optString("expanded"))
+                        capture("panel-header-press-$theme-$placement-$tool-$part")
+                    } finally { if (pressed) hover(point, tool, MotionEvent.ACTION_CANCEL) }
                 }
                 hover(away, tool, MotionEvent.ACTION_HOVER_EXIT)
             }

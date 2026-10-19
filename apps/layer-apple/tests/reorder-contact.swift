@@ -43,6 +43,19 @@ import Foundation
             }
         }
         for device: ReorderDevice in [.mouse, .touch, .pen] {
+            var selections = 0
+            let tab = ReorderContact()
+            let target = ReorderTarget(id: "tab", surface: .handle, valid: { _ in true },
+                press: { selections += 1 }, begin: { _ in }, move: { _ in }, finish: { _ in }, cancel: {})
+            tab.prepare(target, device: device, origin: origin)
+            precondition(selections == 1 && !tab.dragging, "A tab selects when its native contact starts")
+            tab.release(at: origin)
+            precondition(selections == 1, "Releasing a tab must not select twice")
+            tab.prepare(target, device: device, origin: origin)
+            precondition(selections == 2 && tab.move(to: destination), "Press selection preserves immediate tab dragging")
+            tab.cancel()
+        }
+        for device: ReorderDevice in [.mouse, .touch, .pen] {
             var menus = 0, starts = 0, finishes = 0
             let contact = ReorderContact()
             let target = ReorderTarget(id: "layer", surface: .row, dragDevices: [.mouse], valid: { _ in true },

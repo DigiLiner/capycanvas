@@ -31,11 +31,11 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
     std::function<void()> changed,closed;
     std::wstring id;
     J model,geometry,from;
-    hstring modelKey,layoutKey,columnsKey,backgroundKey;
+    hstring modelKey,layoutKey,columnsKey,backgroundKey,tabsKey;
     std::map<std::wstring,J> panels;
     struct Body {hstring key;bool splitFilters=false;std::unique_ptr<PanelBody> view;};
     std::map<std::wstring,Body> bodies;
-    struct Column {Grid frame;ScrollView scroll;StackPanel stack;std::vector<std::wstring> panels;std::vector<AutomaticTab> automatic;Bindings paintIcons;};
+    struct Column {Grid frame;Grid header{nullptr};std::map<std::wstring,Grid> tabs;ScrollView scroll;StackPanel stack;std::vector<std::wstring> panels;std::vector<AutomaticTab> automatic;Bindings paintIcons;};
     std::map<std::wstring,double> tabWidths;
     std::vector<Column> columns;
     std::map<std::wstring,J> toolbarLayouts;
@@ -229,15 +229,22 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
         columnsKey=key;
         if(inspector)inspector->pages.Children().Clear();
         if(!model.HasKey(L"layer_properties"))inspector.reset();
-        for(auto& column:columns){column.stack.Children().Clear();column.scroll.Content(nullptr);column.frame.Children().Clear();remove(content,column.frame);}
-        columns.clear();
-        std::set<std::wstring> keep;
-        auto tabs=object(model,L"tabs");auto weak=weak_from_this();
+        auto tabs=object(model,L"tabs"),tabStructure=J::Parse(tabs.Stringify());if(tabStructure.HasKey(L"active"))tabStructure.Remove(L"active");
+        auto nextTabsKey=O({{L"tabs",tabStructure},{L"headers",headers},{L"style",S(str(object(data->model,L"windows_tab_styles"),to_hstring(uint32_t(num(tabs,L"group"))).c_str()))}}).Stringify();
+        auto previous=std::move(columns);columns.clear();
+        for(auto& column:previous){
+            column.stack.Children().Clear();column.scroll.Content(nullptr);column.panels.clear();
+            if(tabsKey!=nextTabsKey){column.frame.Children().Clear();column.header=nullptr;column.tabs.clear();column.automatic.clear();column.paintIcons.clear();}
+            else while(column.frame.Children().Size()>(column.header?1u:0u))column.frame.Children().RemoveAtEnd();
+        }
+        tabsKey=nextTabsKey;std::set<std::wstring> keep;auto weak=weak_from_this();
         for(uint32_t i=0;i<models.Size();++i){
-            Column column;double width=num(placements.GetObjectAt(i),L"width");
-            RowDefinition tabRow;tabRow.Height({tabs.Size()?36.:0.,GridUnitType::Pixel});column.frame.RowDefinitions().Append(tabRow);
-            RowDefinition bodyRow;bodyRow.Height({1,GridUnitType::Star});column.frame.RowDefinitions().Append(bodyRow);
-            if(tabs.Size()){
+            bool retained=i<previous.size();Column column=retained?std::move(previous[i]):Column{};double width=num(placements.GetObjectAt(i),L"width");
+            if(!retained){
+                RowDefinition tabRow;tabRow.Height({tabs.Size()?36.:0.,GridUnitType::Pixel});column.frame.RowDefinitions().Append(tabRow);
+                RowDefinition bodyRow;bodyRow.Height({1,GridUnitType::Star});column.frame.RowDefinitions().Append(bodyRow);
+            }else column.frame.RowDefinitions().GetAt(0).Height({tabs.Size()?36.:0.,GridUnitType::Pixel});
+            if(tabs.Size()&&!column.header){
                 auto group=num(tabs,L"group");
                 auto groupItem=O({{L"kind",S(L"group")},{L"group",N(group)}});
                 Grid header;header.Background(clear());
@@ -254,8 +261,8 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                     pick.Height(36);pick.MinWidth(36);pick.Padding({8,4,8,4});pick.CornerRadius({6,6,0,0});
                     StackPanel labelRow;labelRow.Orientation(Orientation::Horizontal);labelRow.Spacing(6);
                     auto presentation=object(panel,L"tab");bool fitted=automaticTabs(data,group);
-                    if(flag(presentation,L"show_icon")||fitted)labelRow.Children().Append(panelIcon(data,str(panel,L"icon"),column.paintIcons));
-                    if(flag(presentation,L"show_name")||fitted){
+                    labelRow.Children().Append(panelIcon(data,str(panel,L"icon"),column.paintIcons));
+                    {
                         auto name=label(data,str(panel,L"title"),true);name.Visibility(flag(presentation,L"show_name")?Visibility::Visible:Visibility::Collapsed);labelRow.Children().Append(name);
                         if(fitted)column.automatic.push_back({pick,name,std::wstring(panelId)+L"\n"+std::wstring(str(panel,L"title"))+L"\n"+std::to_wstring(data->textSize())});
                     }
@@ -264,7 +271,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                     auto item=O({{L"kind",S(L"panel")},{L"panel",S(panelId)}});
                     gestures->Source(pick,O({{L"type",S(L"drag_workspace")},{L"item",item}}),item,false,
                         O({{L"group",N(group)},{L"index",N(index++)},{L"panel",S(panelId)}}));
-                    row.Children().Append(panelTabShell(pick,nullptr));
+                    auto shell=panelTabShell(pick,nullptr,data->tint(L"text",20));column.tabs.emplace(std::wstring(panelId),shell);row.Children().Append(shell);
                 }
                 ScrollViewer strip;strip.Content(row);strip.Background(clear());
                 strip.SizeChanged([weak,index=columns.size()](auto&& sender,auto&&){if(auto self=weak.lock();self&&index<self->columns.size())fitAutomaticTabs(self->data,self->columns[index].automatic,sender.template as<ScrollViewer>().ActualWidth(),self->tabWidths);});
@@ -278,7 +285,7 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 AutomationProperties::SetName(grip,data->delivery(L"move_group"));
                 AutomationProperties::SetHelpText(grip,data->delivery(L"drag_panel"));
                 Grid::SetColumn(grip,1);header.Children().Append(grip);
-                column.frame.Children().Append(header);
+                column.header=header;column.frame.Children().Append(header);
             }
             column.stack.Spacing(6);column.stack.VerticalAlignment(VerticalAlignment::Top);
             for(auto value:models.GetArrayAt(i)){
@@ -313,13 +320,22 @@ struct Drawer:std::enable_shared_from_this<Drawer>{
                 column.scroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Auto);mouseScrollbars(column.scroll);
                 Grid::SetRow(column.scroll,1);column.frame.Children().Append(column.scroll);
             }
-            content.Children().Append(column.frame);columns.push_back(std::move(column));
+            if(!retained)content.Children().Append(column.frame);columns.push_back(std::move(column));
         }
+        for(uint32_t i=models.Size();i<previous.size();++i)remove(content,previous[i].frame);
         // Retain inactive tab bodies, including their native control state.
         for(auto& [panel,body]:bodies)if(body.view&&!keep.contains(panel))body.view->Apply(false);
         placeColumns();wake();
     }
     void placeColumns(){
+        auto tabs=object(model,L"tabs");bool fitted=automaticTabs(data,num(tabs,L"group"));
+        for(auto& column:columns)for(auto const& [id,shell]:column.tabs){
+            auto tab=shell.Children().GetAt(1).as<Button>();
+            auto panel=panels.find(id);if(panel==panels.end())continue;auto presentation=object(panel->second,L"tab");
+            auto labels=tab.Content().as<StackPanel>();labels.Children().GetAt(0).Visibility(fitted||flag(presentation,L"show_icon")?Visibility::Visible:Visibility::Collapsed);
+            if(!fitted)labels.Children().GetAt(1).Visibility(flag(presentation,L"show_name")?Visibility::Visible:Visibility::Collapsed);
+            selectPanelTabShell(shell,hstring(id)==str(tabs,L"active"));
+        }
         auto placements=array(object(geometry,L"placement"),L"columns");
         for(uint32_t i=0;i<std::min(uint32_t(columns.size()),placements.Size());++i){
             auto placement=placements.GetObjectAt(i);auto& column=columns[i];place(column.frame,placement);

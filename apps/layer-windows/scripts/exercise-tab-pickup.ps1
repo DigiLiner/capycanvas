@@ -47,8 +47,14 @@ function Drifting-TabTaps([string]$Prefix,[string[]]$Panels,[switch]$Drawer) {
         $x=[int]($at.x+$drifts[$i][0]*$scale);$y=[int]($at.y+$drifts[$i][1]*$scale)
         if($x -le $bounds.Left -or $x -ge $bounds.Right -or $y -le $bounds.Top -or $y -ge $bounds.Bottom){throw "$case left its tab bounds"}
         if($Device -eq 'pen'){[CapyRowPointer]::PenHover($at.x,$at.y);Start-Sleep -Milliseconds 35}
+        if($Device -eq 'mouse'){
+            [CapyRowPointer]::Hover($at.x,$at.y)
+            Wait-Until {$cursor=[CapyRowPointer]::Cursor();($cursor.flags -band 1) -ne 0 -and $cursor.cursor -eq [CapyRowPointer]::StockCursor(32512)} "$case did not use the arrow cursor"
+        }
+        $retained=(Control $id).GetRuntimeId() -join ':'
         [CapyRowPointer]::Down($Device,$at.x,$at.y)
-        Start-Sleep -Milliseconds 35
+        Wait-Until {& $selected} "$case did not select before release"
+        if(((Control $id).GetRuntimeId() -join ':') -ne $retained){throw "$case replaced the pressed tab"}
         [CapyRowPointer]::Move($x,$y)
         Start-Sleep -Milliseconds 35
         [CapyRowPointer]::Up($Device -eq 'pen')

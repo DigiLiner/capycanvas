@@ -1,5 +1,6 @@
 package art.capycanvas
 
+import android.view.PointerIcon as AndroidPointerIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -260,7 +261,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                         var tabClip by remember { mutableStateOf(Rect.Zero) }
                         PanelHeaderFeedback {
                             Row(Modifier.fillMaxWidth().height(tabHeight.dp).testTag("column-drawer-header-$id")
-                                .then(if (current != null) Modifier.dragSource(dock, item) else Modifier),
+                                .then(if (current != null) Modifier.dragSource(dock, item, cursor = AndroidPointerIcon.TYPE_ARROW) else Modifier),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 var strip by remember { mutableFloatStateOf(0f) }
                                 val names = automaticTabNames(host, group, tabs.array("panels").values().map { bodies[it.toString()] }, strip)
@@ -276,7 +277,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                                                 WorkspaceTab(host, dock, panel, group, tabIndex,
                                                     panelId == tabs.getString("active"), cutout,
                                                     Modifier.testTag("drawer-tab-$panelId")
-                                                        .then(if (current != null) Modifier.dragSource(dock, obj("kind" to "panel", "panel" to panelId)) else Modifier)
+                                                        .then(if (current != null) Modifier.dragSource(dock, obj("kind" to "panel", "panel" to panelId), cursor = AndroidPointerIcon.TYPE_ARROW) else Modifier)
                                                         .drawerTabHit(dock, columnId, group, tabIndex, panelId.toString(), tabClip, current != null),
                                                     enabled = current != null, fittedName = names?.getOrNull(tabIndex))
                                             }

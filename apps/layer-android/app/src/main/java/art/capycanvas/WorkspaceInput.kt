@@ -298,7 +298,7 @@ internal class DockInteraction(val host: CanvasHost) {
     } }
     // Held tiles use the normal mouse pointer until pickup is armed. Keep
     // Android's existing default pen hover; grips retain their immediate hand.
-    val feedback = if (holdToDrag) pointerHoverIcon(PointerIcon(AndroidPointerIcon.TYPE_ARROW))
+    val feedback = if (holdToDrag || cursor == AndroidPointerIcon.TYPE_ARROW) pointerHoverIcon(PointerIcon(AndroidPointerIcon.TYPE_ARROW))
         else workspacePointerIcon(if (dock.enabled) cursor else null)
     return feedback.onGloballyPositioned {
         val bounds = it.boundsInRoot().translate(-dock.origin)
@@ -308,10 +308,10 @@ internal class DockInteraction(val host: CanvasHost) {
 }
 
 @Composable internal fun Modifier.dragSource(dock: DockInteraction, item: JSONObject, context: JSONObject = item,
-    holdToDrag: Boolean = false): Modifier {
+    holdToDrag: Boolean = false, cursor: Int = AndroidPointerIcon.TYPE_GRAB): Modifier {
     val kind = item.getString("kind")
     return workspaceSource(dock, obj("type" to if (kind == "tile") "tile_drag" else "drag_workspace", "item" to item),
-        priority = when (kind) { "tile" -> 3; "panel" -> 2; else -> 1 }, anchor = context, holdToDrag = holdToDrag)
+        priority = when (kind) { "tile" -> 3; "panel" -> 2; else -> 1 }, anchor = context, holdToDrag = holdToDrag, cursor = cursor)
 }
 
 /** Capture belongs to the stable workspace, not a tab or ribbon that Rust may
@@ -333,15 +333,15 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
             val previousTap = chromeTap
             chromeTap = null
             val chrome = dock.chromeRegions.values.filter { it.bounds.contains(down.position) }.maxByOrNull { it.z }
+            val source = dock.hit(down.position)
+            val tab = dock.tabs.values.firstOrNull { it.optString("panel") == source?.action?.objectOrNull("item")?.optString("panel") && it.getJSONObject("bounds").let { b ->
+                Rect(b.number("x"), b.number("y"), b.number("x") + b.number("width"), b.number("y") + b.number("height")).contains(down.position / dock.density)
+            } }
             dock.headerHeld = chrome?.header == true
             if (chrome != null) {
-                val tab = dock.tabs.values.firstOrNull { it.getJSONObject("bounds").let { b ->
-                    Rect(b.number("x"), b.number("y"), b.number("x") + b.number("width"), b.number("y") + b.number("height")).contains(down.position / dock.density)
-                } }?.optString("panel")
                 dock.host.chrome(obj("kind" to "contact", "canvas" to false,
-                    "position" to JSONArray(listOf(down.position.x / dock.density, down.position.y / dock.density))), dock.facts().put("contact_tab", tab))
+                    "position" to JSONArray(listOf(down.position.x / dock.density, down.position.y / dock.density))), dock.facts().put("contact_tab", tab?.optString("panel")))
             }
-            val source = dock.hit(down.position)
             if (source != null) {
                 // Invisible resize strips have no child button to consume their
                 // press. Do not let the underlying SurfaceView begin a stroke/pan.
@@ -369,6 +369,7 @@ private fun Modifier.workspaceGestureCapture(dock: DockInteraction, focused: Boo
                 dock.contactHeld = true
                 dock.contactSource = source.token
                 dock.retiredContext = null
+                if (tab != null) dock.host.dispatch(obj("type" to "select_panel_tab", "group" to tab.getInt("group"), "panel" to tab.getString("panel")))
                 fun sourceExists() = dock.regions[source.token]?.action?.toString() == source.action.toString()
                 fun retire() {
                     retired = true

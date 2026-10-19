@@ -1,6 +1,9 @@
 package art.capycanvas
 
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
@@ -142,6 +145,8 @@ internal class HoleNode(private var strip: TabStrip, var slide: () -> Float) : M
         measurer.measure(AnnotatedString(panel.getString("title")), style).size.width / dock.density
     SideEffect { if (enabled) dock.measure(id, tabWidth = width) }
     val dragged = dock.isDraggedTab(id)
+    val interactions = remember { MutableInteractionSource() }
+    val hovered by interactions.collectIsHoveredAsState()
     val slide = tabSlide(host, group, id, index, dock.density)
     Row(modifier.height(36.dp).then(if (!showName) Modifier.width(36.dp) else Modifier)
         .zIndex(if (dragged) 2f else if (selected) 1f else 0f)
@@ -149,12 +154,16 @@ internal class HoleNode(private var strip: TabStrip, var slide: () -> Float) : M
         .graphicsLayer { translationX = slide() }
         .drawWithCache {
             val face = if (selected) Path().apply { tabFace(size.width, size.height, SurfaceRadius.toPx(), TabFoot.toPx()) } else null
+            val hover = if (!selected && hovered) Path().apply {
+                addSquircle(Rect(Offset.Zero, size), SurfaceRadius.toPx(), SurfaceRadius.toPx(), TabFoot.toPx(), TabFoot.toPx())
+            } else null
             onDrawBehind {
                 if (dragged && !selected) drawRect(colors.tabs)
                 face?.let { drawPath(it, colors.panelFill) }
+                hover?.let { drawPath(it, colors.text.copy(alpha = .08f)) }
             }
         }
-        .combinedClickable(enabled = enabled,
+        .combinedClickable(enabled = enabled, interactionSource = interactions, indication = LocalIndication.current,
             onClick = { host.dispatch(obj("type" to "select_panel_tab", "group" to group, "panel" to id)) },
             onLongClick = { dock.holdContext(obj("kind" to "panel", "panel" to id)) })
         .padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,

@@ -111,8 +111,8 @@ picker's availability rules.
   **Hide Tool Set panel** (using its actual
   name). A toolbar tab/body has **Configure Tools toolbar…** and
   **Hide Tools toolbar**, likewise using its actual name; display and management
-  options are in its configuration column. A single tap on the selected tab toggles
-  configuration; an inactive tab selects it. Inputs retain native behavior.
+  options are in its configuration column. Pressing a tab selects it immediately;
+  configuration opens through its context menu. Inputs retain native behavior.
 - Empty tab-header space and the group grip target the whole tab group:
   **Automatic** (default), **Icons and active tab name**, **Icons and names**, **Names only**, **Icons only**,
   **Add built-in panel** / **Add Toolbar** submenus,
@@ -164,7 +164,7 @@ picker's availability rules.
   Its controls edit the same Rust state, and visibility checkboxes immediately
   show/hide controls in the preview. Existing preview widgets stay parented;
   there is no popover, duplicate tab bar, scaled text or second settings model.
-  Outside tap, a tap on the active tab or empty header space, or Escape reverses
+  Outside tap, a tap on empty header space, or Escape reverses
   the animation without changing saved docking. Tapping another tab switches
   the preview and configuration without closing the drawer, animating any size
   change from the currently displayed bounds. Dismissal consumes

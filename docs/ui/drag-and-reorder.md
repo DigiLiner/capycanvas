@@ -93,7 +93,10 @@ GTK and Web mouse/pen feedback on hold-to-reorder tiles (including toolbar/drawe
 tiles and collapsed-column panel icons) is the regular pointer before pickup,
 `grab` after the hold arms pickup, and `grabbing` during dragging. Release, cancellation,
 focus loss, or source invalidation restores the cursor. This feedback does not
-change the immediate pickup rule for handles and title/tab bars.
+change the immediate pickup rule for handles and title/tab bars. Panel tabs and
+unused tab-header space use the regular pointer before dragging. Primary contact
+selects a tab immediately; retain its native button and ancestors through that
+selection so the same contact can become a drag.
 
 ## Scrolling, menus, and cancellation
 

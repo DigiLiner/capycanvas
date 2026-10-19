@@ -10659,6 +10659,7 @@ fn native_tab_slide_input() {
         let before_hits = w.tab_hits();
         input.perform(serde_json::json!([{ "point": start }, { "down": true },
             { "point": [start[0] + 2., start[1]] }]));
+        let selected = state(&w).workspace;
         assert!(w.workspace_drag.borrow().as_ref().unwrap().tab.is_none());
         assert_eq!(tab.opacity(), 1.);
         for dx in [24., -16.] {
@@ -10672,7 +10673,7 @@ fn native_tab_slide_input() {
             );
             assert_eq!(
                 serde_json::to_value(state(&w).workspace).unwrap(),
-                serde_json::to_value(&original).unwrap()
+                serde_json::to_value(&selected).unwrap()
             );
             let drag = w.workspace_drag.borrow();
             let drag = drag.as_ref().unwrap();
@@ -10812,7 +10813,7 @@ fn native_tab_slide_input() {
         }
         assert_eq!(
             serde_json::to_value(state(&w).workspace).unwrap(),
-            serde_json::to_value(&original).unwrap()
+            serde_json::to_value(&selected).unwrap()
         );
     }
     input.finish();

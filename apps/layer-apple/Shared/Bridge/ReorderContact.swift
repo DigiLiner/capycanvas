@@ -24,6 +24,7 @@ enum ReorderSurface: Equatable {
     let valid: (_ dragging: Bool) -> Bool
     var openContext: (() -> Void)?
     var closeContext: (() -> Void)?
+    var press: (() -> Void)?
     let begin: (CGPoint) -> Void
     let move: (CGPoint) -> Void
     let finish: (CGPoint) -> Void
@@ -50,6 +51,7 @@ enum ReorderSurface: Equatable {
         cancel(); suppressClick = false
         generation &+= 1
         self.target = target; self.device = device; self.origin = origin
+        target.press?()
     }
     @discardableResult func validate() -> Bool {
         guard let target, target.valid(dragging) else { cancel(); return false }

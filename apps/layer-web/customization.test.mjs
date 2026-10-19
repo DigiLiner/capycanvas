@@ -134,6 +134,7 @@ export async function checkToolbarManager({ call, evaluate, settle }) {
 }
 
 export async function checkTabStyles({ call, evaluate, settle }) {
+  await checkTabPress({call,evaluate,settle});
   const dir = 'artifacts/ui/group-tab-styles'; await mkdir(dir, { recursive: true });
   await call('Emulation.setDeviceMetricsOverride', { width: 1280, height: 960, deviceScaleFactor: 1, mobile: false });
   const send = async action => { await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`); await settle(); };
@@ -150,7 +151,7 @@ export async function checkTabStyles({ call, evaluate, settle }) {
       for (const active of ['brushes','sizes','layers']) {
         await evaluate(`document.querySelector('.dock-tab[data-panel="${active}"]').click()`); await settle();
         await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-        const tabs = await evaluate(`[...document.querySelectorAll('[data-group="${group}"] .dock-tab')].map(n=>({panel:n.dataset.panel,icon:!!n.querySelector('svg'),name:[...n.childNodes].some(c=>c.nodeType===3?c.textContent.trim():c.tagName==='SPAN'&&!c.hidden&&c.textContent.trim()),title:n.title,height:n.getBoundingClientRect().height}))`);
+        const tabs = await evaluate(`[...document.querySelectorAll('[data-group="${group}"] .dock-tab')].map(n=>({panel:n.dataset.panel,icon:!!n.querySelector('svg'),name:[...n.childNodes].some(c=>c.nodeType===3?c.textContent.trim():c.tagName==='SPAN'&&!c.hidden&&c.textContent.trim()),title:n.getAttribute('aria-label'),height:n.getBoundingClientRect().height}))`);
         assert.equal(tabs.length, 3);
         if (style === 'automatic') { measured ??= tabs.map(t => t.name); assert.deepEqual(tabs.map(t => t.name), measured); assert.equal(measured[0], true); }
         for (const tab of tabs) {
@@ -602,22 +603,22 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
       assert.ok(Math.abs(actual - value) < .001, `${control}: ${actual} expected ${value}`);
       assert.equal(await evaluate(`document.querySelector('.sizes-panel [data-control=${control}] .number-entry').value`), Number(text).toFixed(1));
     }
-    await click(tab("sizes")); assert.equal(await expanded(), null);
+    await send({type:"customize",action:{type:"close_expanded"}}); assert.equal(await expanded(), null);
     assert.equal(await evaluate("originalPanel.parentElement===originalParent"), true);
     await send({ type: "move_panel", panel: "sizes", target: { kind: "tab", group: 8, index: null } }); await wait();
-    await click(tab("sizes")); assert.equal(await expanded(), "sizes");
+    await send({type:"customize",action:{type:"show_all_controls",panel:"sizes"}}); assert.equal(await expanded(), "sizes");
     await shot(`expanded-left-second-${theme}`);
     await click(tab("layers")); assert.equal(await expanded(), "layers");
     await shot(`expanded-left-first-${theme}`);
     assert.equal(await evaluate("document.querySelector('.expanded-panel .panel-column-join').hidden"), false);
-    await click(tab("layers")); assert.equal(await expanded(), null);
+    await send({type:"customize",action:{type:"close_expanded"}}); assert.equal(await expanded(), null);
     // Both side and top/bottom bounds use the same Rust allocator.
     for (const edge of ["left", "right"]) {
       await send({ type: "move_panel", panel: "sizes", target: { kind: "edge", edge, outer: false } }); await wait();
-      await click(tab("sizes")); assert.equal(await expanded(), "sizes");
+      await send({type:"customize",action:{type:"show_all_controls",panel:"sizes"}}); assert.equal(await expanded(), "sizes");
       const bounds = await evaluate(`(()=>{const root=document.querySelector('.expanded-panel'),p=root.querySelector('.panel-preview').getBoundingClientRect(),c=root.querySelector('.panel-configuration').getBoundingClientRect();return{p:{top:p.top,bottom:p.bottom},c:{top:c.top,bottom:c.bottom},count:root.querySelectorAll('.panel-preview').length};})()`);
       assert.equal(bounds.c.top - bounds.p.top, 36); assert.equal(bounds.c.bottom, bounds.p.bottom); assert.equal(bounds.count, 1);
-      await shot(`expanded-${edge}-${theme}`); await click(tab("sizes"));
+      await shot(`expanded-${edge}-${theme}`); await send({type:"customize",action:{type:"close_expanded"}});
     }
     await send({ type: "restore_workspace", workspace: initial }); await wait();
     assert.deepEqual(await context('[data-panel="layers"] .dock-tabs > .panel-grip'), ["Automatic", "Icons and active tab name", "Icons and names", "Names only", "Icons only", "Collapse column", "Add built-in panel", "Add Toolbar", "New Toolbar…"]);
@@ -706,7 +707,7 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
   await send({ type: "move_panel", panel: "sizes", target: { kind: "float", position: [450, 180] } });
   const group = await evaluate("layerApp.app.layout(innerWidth,innerHeight).groups.find(g=>g.active==='sizes').id");
   await send({ type: "move_panel", panel: "layers", target: { kind: "tab", group, index: null } });
-  await click(tab("layers"));
+  await send({type:"customize",action:{type:"show_all_controls",panel:"layers"}});
   const animationHeights = await evaluate(`new Promise(resolve=>{
     const root=document.querySelector('.expanded-panel'), heights=[root.getBoundingClientRect().height];
     layerApp.dispatch({type:'select_panel_tab',group:${group},panel:'sizes'});
@@ -718,7 +719,7 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
   await send({ type: "restore_workspace", workspace: initial });
   await wait();
   const settings = await evaluate("layerApp.state().settings");
-  await click(tab("sizes"));
+  await send({type:"customize",action:{type:"show_all_controls",panel:"sizes"}});
   await send({ type: "invoke", command: "zen_mode" });
   assert.equal(await expanded(), "sizes");
   await clickAt({ x: 850, y: 450 }); assert.equal(await expanded(), null);
@@ -728,4 +729,34 @@ export async function checkCustomization({ call, evaluate, settle, canvasPixels 
   await send({ type: "restore_settings", settings });
   await send({ type: "restore_workspace", workspace: original }); await wait();
   console.log("Web customization: native pointer menus/tabs, dynamic toolbars, picker validation, live controls, side drawers and restore passed.");
+}
+
+async function checkTabPress({call,evaluate,settle}) {
+  const dir='artifacts/panel-tab-press/web';await mkdir(dir,{recursive:true});
+  const send=async action=>{await evaluate(`layerApp.dispatch(${JSON.stringify(action)})`);await settle();await evaluate('new Promise(r=>setTimeout(r,260))');};
+  const saved=await evaluate('layerApp.state().workspace');
+  const fixture=structuredClone(saved);
+  Object.assign(fixture.layout,{bands:[{id:40,edge:'left',extent:300,root:{kind:'tabs',id:41,panels:['brushes','sizes'],active:'brushes',tab_style:'name'}}],floating:[],collapsed:[],column_scroll:[],fit_tab_groups:[],fit_height_groups:[],column_stacks:[],next_id:Math.max(42,fixture.layout.next_id)});fixture.zen_mode=false;
+  try {
+    for(const theme of ['light','dark'])for(const drawer of [false,true]) {
+      await send({type:'restore_workspace',workspace:fixture});await send({type:'set_theme',theme});
+      if(drawer){
+        await send({type:'customize',action:{type:'set_column_collapsed',group:41,collapsed:true}});
+        await send({type:'customize',action:{type:'set_column_drawers',column:41,drawers:true}});
+        await evaluate(`document.querySelector('.collapsed-column [data-panel="brushes"]').click()`);await settle();await evaluate('new Promise(r=>setTimeout(r,300))');
+      }
+      const selector=(drawer?'.drawer-tabs':'.dock-group[data-group="41"] .tab-list')+' .dock-tab[data-panel="sizes"]';
+      const point=await evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),r=n.getBoundingClientRect();window.__pressedTab=n;window.__pressedParent=n.parentElement;window.__pressedHeader=n.closest('nav');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+      await call('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await settle();
+      const hover=await evaluate(`(()=>{const n=window.__pressedTab,s=getComputedStyle(n);return{cursor:s.cursor,background:s.backgroundColor,header:getComputedStyle(n.parentElement).cursor,hover:n.matches(':hover'),lowerCorners:[s.borderBottomLeftRadius,s.borderBottomRightRadius]}})()`);
+      assert.equal(hover.cursor,'default');assert.ok(['auto','default'].includes(hover.header));assert.equal(hover.hover,true);assert.notEqual(hover.background,'rgba(0, 0, 0, 0)');assert.ok(hover.lowerCorners.every(r=>parseFloat(r)>=6),'hover clears the active tab curved foot');
+      const shot=await call('Page.captureScreenshot',{format:'png'});await writeFile(`${dir}/${theme}-${drawer?'drawer':'docked'}-hover.png`,Buffer.from(shot.data,'base64'));
+      await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});await settle();
+      const selected=()=>evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return{selected:n.getAttribute('aria-selected'),retained:n===window.__pressedTab,parent:n.parentElement===window.__pressedParent,configuration:layerApp.state().customization.expanded??null}})()`);
+      assert.deepEqual(await selected(),{selected:'true',retained:true,parent:true,configuration:null},`${theme} ${drawer?'drawer':'docked'} before release`);
+      await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',buttons:0,clickCount:1});await settle();
+      assert.deepEqual(await selected(),{selected:'true',retained:true,parent:true,configuration:null},'release preserves selection and native tab identity');
+      console.log(JSON.stringify({theme,drawer,primaryPressSelection:true,retainedTab:true,releaseSelection:true,arrowCursor:true,inactiveHover:true}));
+    }
+  }finally{await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:800,y:500});await send({type:'restore_workspace',workspace:saved});await evaluate('delete window.__pressedTab;delete window.__pressedParent;delete window.__pressedHeader');}
 }

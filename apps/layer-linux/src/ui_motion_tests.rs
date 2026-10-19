@@ -104,20 +104,75 @@ fn native_panel_tab_feedback_preserves_join() {
                     until(|| w.chrome_released.get() == w.chrome.revision(), "panel chrome published");
                     let expected = bottom();
                     let next = &tabs[1 - active];
+                    let edge = tabs[active].1.compute_bounds(&strip).unwrap();
+                    let x = if active == 0 { edge.x() + edge.width() } else { edge.x() - 1. };
+                    let join = |pixels: &[u8]| {
+                        let scale = strip.scale_factor() as usize;
+                        let stride = strip.width() as usize * scale * 4;
+                        let i = (6 * scale - 1) * stride + x.round() as usize * scale * 4;
+                        pixels[i..i + 4].to_vec()
+                    };
                     let point = screen_point(next.1.upcast_ref(), &w.window, [0.5, 0.5]);
                     if device == "mouse" {
                         input.perform(serde_json::json!([{"point": point}]));
                         assert!(next.1.state_flags().contains(gtk::StateFlags::PRELIGHT));
-                        assert!(bottom() == expected, "{theme:?}/{level:?}/{active}: hover preserves the join");
+                        let hovered = bottom();
+                        assert!(hovered != expected, "{theme:?}/{level:?}/{active}: inactive tab has hover feedback");
+                        assert_eq!(join(&hovered), join(&expected), "{theme:?}/{level:?}/{active}: hover stays behind the active shoulder");
                     }
                     input.perform(serde_json::json!([contact(device, "down", point)]));
-                    assert!(tabs[active].1.has_css_class("selected-tool"), "selection waits for release");
-                    let pressed = bottom();
+                    assert!(next.1.has_css_class("selected-tool"), "{device} press selects before release");
+                    assert_eq!(next.1.cursor().and_then(|cursor| cursor.name()).as_deref(), Some("default"));
+                    assert!(state(&w).customization.expanded.is_none());
                     input.perform(serde_json::json!([contact(device, "up", point)]));
                     pump(200);
                     assert!(next.1.has_css_class("selected-tool"), "{device} click selects the inactive tab");
-                    assert!(pressed == expected, "{theme:?}/{level:?}/{active}/{device}: press preserves the join");
+                    assert!(state(&w).customization.expanded.is_none(), "release does not configure the selected tab");
+                    assert_eq!(next.1.parent().as_ref(), Some(&strip), "pressed tab retains its native parent");
                 }
+            }
+        }
+    }
+    let original = layer_ui::WorkspaceState::default();
+    let viewport = [w.surface.width() as f32, w.surface.height() as f32];
+    for theme in [Theme::Dark, Theme::Light] {
+        w.dispatch(UiAction::SetTheme { theme: Some(theme) });
+        for level in [layer_ui::Transparency::Off, layer_ui::Transparency::Low, layer_ui::Transparency::Medium, layer_ui::Transparency::High] {
+            use_transparency(&w, level);
+            for device in ["mouse", "touch"] {
+                w.dispatch(UiAction::RestoreWorkspace { workspace: Box::new(original.clone()) });
+                let group = original.layout.panel_group(Panel::Layers).unwrap();
+                w.dispatch(UiAction::DoubleClickPanelHandle { group, viewport });
+                enable_individual_column_panels(&w, group);
+                w.dispatch(UiAction::Customize { action: CustomizationAction::ToggleColumnDrawer { group, panel: Panel::Layers } });
+                pump(300);
+                let tab = named::<gtk::Button>(w.window.upcast_ref(), "column-drawer-tab-Adjustments");
+                let parent = tab.parent().unwrap();
+                until(|| {
+                    let point = screen_point(tab.upcast_ref(), &w.window, [0.5, 0.5]);
+                    tab.is_mapped() && point[0] > 0. && point[0] < viewport[0]
+                        && point[1] > 0. && point[1] < viewport[1]
+                }, "drawer tab reveal settles inside viewport");
+                let point = screen_point(tab.upcast_ref(), &w.window, [0.5, 0.5]);
+                if device == "mouse" {
+                    input.perform(serde_json::json!([{"point": point}]));
+                    until(|| tab.state_flags().contains(gtk::StateFlags::PRELIGHT), "drawer tab receives pointer hover");
+                }
+                input.perform(serde_json::json!([contact(device, "down", point)]));
+                assert!(tab.has_css_class("selected-tool"), "{theme:?}/{level:?}/{device}: drawer selects on press at {point:?}; drawers={:?}; bounds={:?}", state(&w).customization.column_drawers, tab.compute_bounds(&w.window));
+                assert_eq!(named::<gtk::Button>(w.window.upcast_ref(), "column-drawer-tab-Adjustments"), tab, "drawer retains selected button");
+                assert_eq!(tab.parent().as_ref(), Some(&parent), "drawer retains header parent");
+                assert_eq!(tab.cursor().and_then(|cursor| cursor.name()).as_deref(), Some("default"));
+                assert!(state(&w).customization.expanded.is_none());
+                let moved = [point[0] + 24., point[1]];
+                input.perform(serde_json::json!([contact(device, "move", moved)]));
+                assert!(w.workspace_drag.borrow().as_ref().is_some_and(|drag| drag.started && drag.tab.is_some()), "{theme:?}/{level:?}/{device}: selecting drawer tab retains same-contact drag");
+                input.perform(serde_json::json!([
+                    {"key":65307,"down":true}, {"key":65307,"down":false},
+                    contact(device, "up", moved),
+                ]));
+                assert!(w.workspace_drag.borrow().is_none());
+                assert!(state(&w).customization.expanded.is_none(), "drawer release does not configure");
             }
         }
     }

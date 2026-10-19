@@ -222,6 +222,8 @@ button.flat.status-bubble:active { background-image: image(alpha(var(--window-fg
 .toolbar-controls.vertical > .panel-grip, .panel-footer > .panel-grip { -gtk-icon-transform: translateY(-2px) rotate(90deg); }
 .dock-panel .caption { font-size: 1em; }
 .dock-tabs button { background: transparent; border-radius: var(--surface-radius) var(--surface-radius) 0 0; min-height: 28px; padding: 4px 8px; }
+.dock-tabs button:not(.selected-tool) { border-bottom-left-radius: calc(6px * var(--corner-fit)); border-bottom-right-radius: calc(6px * var(--corner-fit)); }
+.dock-tabs button:not(.selected-tool):hover { background: alpha(var(--window-fg-color), .08); }
 .dock-tabs button.icon-only-tab { min-width: 20px; }
 .dock-tabs button.selected-tool { background: var(--panel-bg); }
 .dock-panel entry, .dock-panel dropdown > button, .dock-panel menubutton.panel-choice > button { background: var(--input-bg); }

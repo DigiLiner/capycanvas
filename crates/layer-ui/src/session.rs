@@ -1273,8 +1273,6 @@ impl<R: CanvasRenderer> UiSession<R> {
                     && self.state.customization.expanded.is_some()
                     && !facts.popup_open
                     && !facts.expanded_panel.is_some_and(|e| {
-                        // Tabs activate on release. Leave the press available
-                        // for native drag/hold recognition, even on the active tab.
                         let tab = facts.contact_tab.is_some_and(|tab| {
                             self.state.workspace.layout.panel_group(tab) == Some(e.group)
                         });
@@ -3640,29 +3638,10 @@ impl<R: CanvasRenderer> UiSession<R> {
             }
             UiAction::SelectPanelTab { group, panel } => {
                 let changed = self.state.workspace.layout.select_tab(group, panel)?;
-                if !changed
-                    && self
-                        .state
-                        .workspace
-                        .layout
-                        .collapsed_column_for_group(group)
-                        .is_none()
-                {
-                    let action = if self.state.customization.expanded == Some(panel) {
-                        CustomizationAction::CloseExpanded
-                    } else {
-                        CustomizationAction::ShowAllControls { panel }
-                    };
-                    self.state.customization.edit_localized(
-                        &mut self.state.workspace.layout,
-                        action,
-                        self.state.platform,
-                        self.logical_viewport
-                            .or(self.interaction.viewport)
-                            .unwrap_or(self.state.camera.viewport.map(|v| v as f32)),
-                    &self.state.localization,
-                )?;
-                } else if let Some(previous) = self.state.customization.expanded {
+                if !changed {
+                    return Ok(UiChange::default());
+                }
+                if let Some(previous) = self.state.customization.expanded {
                     self.state.customization.expanded =
                         (self.state.workspace.layout.panel_group(previous) == Some(group))
                             .then_some(panel);
@@ -15846,91 +15825,92 @@ mod tests {
         assert!(app.state.customization.expanded.is_none());
     }
     #[test]
-    fn selected_tab_toggles_drawer_and_other_tabs_preserve_its_open_state() {
-        let mut app = session(Platform::Gtk);
-        app.dispatch(UiAction::MovePanel {
-            panel: Panel::Sizes,
-            target: DockTarget::Tab {
-                group: 8,
-                index: None,
-            },
-            viewport: [1200.0, 900.0],
-        })
-        .unwrap();
-        // Moving Sizes into the group selected it. One activation opens it.
-        let activate = |app: &mut UiSession<Recorder>, panel| {
-            app.dispatch(UiAction::SelectPanelTab { group: 8, panel })
-                .unwrap();
-        };
-        app.dispatch(UiAction::SelectPanelTab {
-            group: 8,
-            panel: Panel::Sizes,
-        })
-        .unwrap();
-        assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
-        let expanded = app
-            .state
-            .workspace
-            .layout
-            .expanded_panel([1200.0, 900.0], Panel::Sizes, [400.0; 2], 1.0)
-            .unwrap();
-        let event = ChromeEvent::Contact {
-            position: [
-                expanded.bounds.x + expanded.preview.x + 10.0,
-                expanded.bounds.y + 10.0,
-            ],
-            canvas: false,
-        };
-        let facts = ChromeFacts {
-            expanded_panel: Some(expanded),
-            contact_tab: Some(Panel::Layers),
-            ..ChromeFacts::default()
-        };
-        assert!(!chrome(&mut app, event, facts).handled);
-        assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
-        activate(&mut app, Panel::Layers);
-        assert_eq!(app.state.customization.expanded, Some(Panel::Layers));
-        // Press alone never toggles: it must remain available for a drag/hold.
-        assert!(!chrome(&mut app, event, facts).handled);
-        assert_eq!(app.state.customization.expanded, Some(Panel::Layers));
-        activate(&mut app, Panel::Layers);
-        assert!(app.state.customization.expanded.is_none());
-        activate(&mut app, Panel::Sizes);
-        assert!(app.state.customization.expanded.is_none());
-        activate(&mut app, Panel::Sizes);
-        assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
-        assert!(
-            chrome(
-                &mut app,
-                event,
-                ChromeFacts {
-                    contact_tab: None,
-                    ..facts
-                }
-            )
-            .handled
-        );
-        assert!(app.state.customization.expanded.is_none());
-        let saved = app.state.workspace.clone();
-        assert!(
-            app.dispatch(UiAction::SelectPanelTab {
-                group: 8,
-                panel: Panel::Brushes,
+    fn panel_tab_selection_is_idempotent_and_preserves_open_configuration() {
+        for platform in Platform::ALL {
+            let mut app = session(platform);
+            let group = app.state.workspace.layout.panel_group(Panel::Layers).unwrap();
+            app.dispatch(UiAction::MovePanel {
+                panel: Panel::Sizes,
+                target: DockTarget::Tab {
+                    group,
+                    index: None,
+                },
+                viewport: [1200.0, 900.0],
             })
-            .is_err()
-        );
-        assert_eq!(app.state.workspace, saved);
-        assert!(app.state.customization.expanded.is_none());
+            .unwrap();
+            let activate = |app: &mut UiSession<Recorder>, panel| {
+                app.dispatch(UiAction::SelectPanelTab { group, panel })
+                    .unwrap();
+            };
+            app.dispatch(UiAction::SelectPanelTab {
+                group,
+                panel: Panel::Sizes,
+            })
+            .unwrap();
+            assert!(app.state.customization.expanded.is_none());
+            let revision = app.state.revision;
+            activate(&mut app, Panel::Sizes);
+            assert_eq!(app.state.revision, revision);
+            customize(&mut app, CustomizationAction::ShowAllControls { panel: Panel::Sizes });
+            assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
+            let expanded = app
+                .state
+                .workspace
+                .layout
+                .expanded_panel([1200.0, 900.0], Panel::Sizes, [400.0; 2], 1.0)
+                .unwrap();
+            let event = ChromeEvent::Contact {
+                position: [
+                    expanded.bounds.x + expanded.preview.x + 10.0,
+                    expanded.bounds.y + 10.0,
+                ],
+                canvas: false,
+            };
+            let facts = ChromeFacts {
+                expanded_panel: Some(expanded),
+                contact_tab: Some(Panel::Layers),
+                ..ChromeFacts::default()
+            };
+            assert!(!chrome(&mut app, event, facts).handled);
+            assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
+            activate(&mut app, Panel::Layers);
+            assert_eq!(app.state.customization.expanded, Some(Panel::Layers));
+            assert!(!chrome(&mut app, event, facts).handled);
+            assert_eq!(app.state.customization.expanded, Some(Panel::Layers));
+            activate(&mut app, Panel::Layers);
+            assert_eq!(app.state.customization.expanded, Some(Panel::Layers));
+            activate(&mut app, Panel::Sizes);
+            activate(&mut app, Panel::Sizes);
+            assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
+            assert!(
+                chrome(
+                    &mut app,
+                    event,
+                    ChromeFacts {
+                        contact_tab: None,
+                        ..facts
+                    }
+                )
+                .handled
+            );
+            assert!(app.state.customization.expanded.is_none());
+            let saved = app.state.workspace.clone();
+            assert!(
+                app.dispatch(UiAction::SelectPanelTab {
+                    group,
+                    panel: Panel::Brushes,
+                })
+                .is_err()
+            );
+            assert_eq!(app.state.workspace, saved);
+            assert!(app.state.customization.expanded.is_none());
+        }
     }
 
     #[test]
     fn expanded_configuration_tracks_the_selected_tab_after_docking() {
         let mut app = session(Platform::Gtk);
-        app.dispatch(UiAction::SelectPanelTab {
-            group: 6,
-            panel: Panel::Sizes,
-        })
-        .unwrap();
+        customize(&mut app, CustomizationAction::ShowAllControls { panel: Panel::Sizes });
         assert_eq!(app.state.customization.expanded, Some(Panel::Sizes));
         app.dispatch(UiAction::MovePanel {
             panel: Panel::Layers,

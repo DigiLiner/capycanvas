@@ -309,8 +309,8 @@ export async function checkDrawerDragging({call,evaluate,settle}) {
         assert.ok(Math.abs(g.x+g.width-b.x-b.width)<1,"Grip stays at the right edge");
         const tab=["active","inactive"].includes(source)?await rect(`${drawer} .drawer-tabs .dock-tab[data-panel="${source==="active"?"brushes":"sizes"}"]`):null;
         const start=source==="grip"?center(g):source==="empty"?{x:g.x-12,y:g.y+g.height/2}:center(tab);
-        const before=await snap(),away=await evaluate("({x:innerWidth*.5,y:innerHeight*.55})");
-        await press(start);await move({x:start.x+10,y:start.y});assert.deepEqual(await snap(),before,`${pointer} ${source}: Moving inside drawer keeps source docked`);
+        const away=await evaluate("({x:innerWidth*.5,y:innerHeight*.55})");
+        await press(start);const before=await snap();await move({x:start.x+10,y:start.y});assert.deepEqual(await snap(),before,`${pointer} ${source}: Moving inside drawer keeps source docked`);
         assert.equal(await evaluate("document.querySelectorAll('.dragged-tab-preview').length"),["active","inactive"].includes(source)?1:0);
         if(["active","inactive"].includes(source)) {
           const preview=await rect('.dragged-tab-preview');
@@ -334,8 +334,8 @@ export async function checkDrawerDragging({call,evaluate,settle}) {
         await history(before);
       }
       await send({type:"restore_workspace",workspace:fixture});await open();
-      let before=await snap();
       await press(center(await rect(`${drawer} .drawer-tabs .dock-tab[data-panel="tool_settings"]`)));
+      let before=await snap();
       let b=await rect(drawer);await move({x:b.x+3,y:b.y+18});await release();
       assert.deepEqual((await group("brushes")).panels,["tool_settings","brushes","sizes"]);
       assert.equal((await snap()).layout.floating.length,0);await history(before);

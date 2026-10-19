@@ -171,21 +171,34 @@ inline std::vector<Point> panelTabOutline(float width,float height){
     std::vector<Point> outline(points.Size());points.GetMany(0,outline);return outline;
 }
 inline PathGeometry panelTabShape(float width,float height){return polygon(panelTabOutline(width,height));}
-inline Grid panelTabShell(FrameworkElement const& content,Brush const& fill){
+inline void selectPanelTabShell(Grid const& shell,bool selected,Brush const& fill=nullptr){
+    shell.Tag(box_value(selected?L"active-panel-tab-shell":L"panel-tab-shell"));Canvas::SetZIndex(shell,selected?1:0);
+    auto background=shell.Children().GetAt(0).as<Canvas>();auto shape=background.Children().GetAt(0).as<Microsoft::UI::Xaml::Shapes::Path>();
+    shape.Fill(selected?fill:unbox_value_or<bool>(background.Tag(),false)?shape.Tag().try_as<Brush>():Brush(nullptr));
+    Canvas::SetLeft(shape,selected?-6:0);
+    auto content=shell.Children().GetAt(1).as<FrameworkElement>();float width=float(content.ActualWidth()),height=float(content.ActualHeight());
+    if(width>0&&height>0){shape.Width(width+(selected?12:0));shape.Height(height);shape.Data(selected?panelTabShape(width,height):squircleRectangle(width,height,{SurfaceRadius,SurfaceRadius,6,6}));}
+}
+inline Grid panelTabShell(FrameworkElement const& content,Brush const& fill,Brush const& hover=nullptr){
     if(auto tab=content.try_as<Button>())for(auto state:{L"ButtonBackgroundPointerOver",L"ButtonBackgroundPressed"})
         tab.Resources().Insert(box_value(hstring(state)),clear());
     Grid shell;shell.Tag(box_value(fill?L"active-panel-tab-shell":L"panel-tab-shell"));
     Canvas background;shell.Children().Append(background);
-    if(fill){
-        Microsoft::UI::Xaml::Shapes::Path shape;shape.Fill(fill);shape.IsHitTestVisible(false);
-        shape.Stretch(Stretch::Fill);Canvas::SetLeft(shape,-6);background.Children().Append(shape);
-        content.SizeChanged([weak=make_weak(shape)](auto&&,SizeChangedEventArgs const& event){
-            auto size=event.NewSize();if(auto shape=weak.get();shape&&size.Width>0&&size.Height>0){
-                shape.Width(size.Width+12);shape.Height(size.Height);shape.Data(panelTabShape(size.Width,size.Height));
-            }
-        });
-    }
-    shell.Children().Append(content);return shell;
+    Microsoft::UI::Xaml::Shapes::Path shape;shape.Tag(hover);shape.Fill(fill);shape.IsHitTestVisible(false);
+    shape.Stretch(Stretch::Fill);background.Children().Append(shape);shell.Children().Append(content);
+    content.SizeChanged([weak=make_weak(shell)](auto&&,auto&&){if(auto shell=weak.get()){
+        auto shape=shell.Children().GetAt(0).as<Canvas>().Children().GetAt(0).as<Microsoft::UI::Xaml::Shapes::Path>();
+        selectPanelTabShell(shell,unbox_value_or<hstring>(shell.Tag(),L"")==L"active-panel-tab-shell",shape.Fill());
+    }});
+    shell.PointerEntered([weak=make_weak(shell),hover](auto&&,auto&&){if(auto shell=weak.get()){
+        auto background=shell.Children().GetAt(0).as<Canvas>();background.Tag(box_value(true));
+        if(unbox_value_or<hstring>(shell.Tag(),L"")!=L"active-panel-tab-shell")background.Children().GetAt(0).as<Microsoft::UI::Xaml::Shapes::Path>().Fill(hover);
+    }});
+    shell.PointerExited([weak=make_weak(shell)](auto&&,auto&&){if(auto shell=weak.get()){
+        auto background=shell.Children().GetAt(0).as<Canvas>();background.Tag(box_value(false));
+        if(unbox_value_or<hstring>(shell.Tag(),L"")!=L"active-panel-tab-shell")background.Children().GetAt(0).as<Microsoft::UI::Xaml::Shapes::Path>().Fill(nullptr);
+    }});
+    return shell;
 }
 // Same joined outline as the shared-layout Android expansion. The two
 // native child frames clip their own content; this path paints the join.

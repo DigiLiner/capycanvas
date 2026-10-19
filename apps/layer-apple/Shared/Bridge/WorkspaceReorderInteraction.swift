@@ -48,6 +48,17 @@ import SwiftUI
             },
             openContext: { [weak self] in self?.showMenu(source.context, source: id, at: point) },
             closeContext: { [weak self] in self?.closeMenu() },
+            press: { [weak workspace, weak store] in
+                guard item["kind"].string == "panel", let workspace, let store else { return }
+                let groups = store.snapshot["layout"]["groups"].array
+                    + store.state["customization"]["column_drawers"].array.map { $0["tabs"].replacing("id", with: $0["tabs"]["group"]) }
+                guard let tab = workspace.tabs.first(where: { tab in
+                    tab["bounds"].rect.contains(point) && groups.contains {
+                        $0["id"].uint == tab["group"].uint && $0["panels"][Int(tab["index"].uint)].string == item["panel"].string
+                    }
+                }) else { return }
+                store.dispatch(["type": "select_panel_tab", "group": tab["group"].raw, "panel": item["panel"].raw])
+            },
             begin: { [weak workspace] in workspace?.start(item, point: $0) },
             move: { [weak workspace] in workspace?.move(item, point: $0) },
             finish: { [weak workspace] in workspace?.move(item, point: $0, released: true) },

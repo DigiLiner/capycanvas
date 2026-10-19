@@ -1113,7 +1113,9 @@ taps on drawing tabs before reordering and Undo/Redo.
 
 `exercise-transparency.ps1` compares panel-tab lower corners at rest, on hover
 and during a held mouse press in both themes and every transparency level. It
-checks both neighboring directions and native click selection on release.
+checks both neighboring directions, visible inactive hover, selection before
+release and retained native tab buttons. `tab-pickup` checks the regular mouse
+cursor on the tab and selection before mouse, pen and touch release.
 
 `exercise-illustration-filters.ps1 -Executable <path> -Theme dark` checks
 Brightness to Opacity and Threshold through the native Filters and Properties

@@ -217,6 +217,7 @@ async function checkActiveTabShade({call,evaluate,send,fixture,dir,dpr}) {
  for(const theme of ['dark','light']){
   for(const level of levels){
    await send({type:'set_theme',theme});await send({type:'preferences',action:{type:'edit',id:'transparency',value:levels.indexOf(level)}});
+   await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:800,y:500});
    await inspect(`web-active-tab-${theme}-${level}-${dpr}x`,level!=='off');
   }
   await slide(`web-active-tab-${theme}-dragged-${dpr}x`,'brushes',30);

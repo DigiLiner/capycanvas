@@ -94,8 +94,8 @@ mod imp {
             let buttons = self.buttons.borrow();
             let bounds = gtk::graphene::Rect::new(0., 0., obj.width() as f32, obj.height() as f32);
             let Some([strip, foot]) = self.tints.borrow().clone() else { return };
-            let active = buttons.iter().find(|b| b.has_css_class("selected-tool") && b.opacity() > 0.)
-                .and_then(|tab| tab.compute_bounds(&*obj));
+            let selected = buttons.iter().find(|b| b.has_css_class("selected-tool") && b.opacity() > 0.);
+            let active = selected.and_then(|tab| tab.compute_bounds(&*obj));
             let feet = active.filter(|_| self.feet.get());
             let draw_feet = |color: &gtk::gdk::RGBA| {
                 if let Some(tab) = feet {
@@ -116,9 +116,12 @@ mod imp {
             draw_feet(&gtk::gdk::RGBA::BLACK);
             snapshot.pop();
             snapshot.append_color(&strip.color(), &bounds);
+            for button in buttons.iter().filter(|button| Some(*button) != selected) {
+                obj.snapshot_child(button, snapshot);
+            }
             snapshot.pop();
             draw_feet(&foot.color());
-            for button in buttons.iter() {
+            if let Some(button) = selected {
                 obj.snapshot_child(button, snapshot);
             }
         }
@@ -153,6 +156,7 @@ impl PanelTabs {
         }
     }
     pub fn append(&self, button: &gtk::Button) {
+        button.set_cursor_from_name(Some("default"));
         button.set_parent(self);
         self.imp().buttons.borrow_mut().push(button.clone());
         self.queue_resize();

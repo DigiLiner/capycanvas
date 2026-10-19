@@ -283,11 +283,13 @@ svg { width: 16px; height: 16px; flex: none; display: block; }
 .tool-choice > span { flex: 1; min-width: 0; }
 .tool-choice small { display: block; opacity: .55; margin-top: 4px; }
 .tool-count { opacity: .6; }
-.dock-tabs { display: flex; gap: 0; padding: 0; height: var(--tab-bar-height); flex-shrink: 0; align-items: center; background: var(--glass-strip); font-size: var(--ui-text-size); cursor: grab; touch-action: none; }
+.dock-tabs { display: flex; gap: 0; padding: 0; height: var(--tab-bar-height); flex-shrink: 0; align-items: center; background: var(--glass-strip); font-size: var(--ui-text-size); cursor: default; touch-action: none; }
 .dock-tabs:has(> .tab-list) { background: linear-gradient(var(--glass-strip) 0 0) right / 20px 100% no-repeat; }
 .tab-list { display: flex; align-items: center; flex: 1; min-width: 0; height: var(--tab-bar-height); overflow: auto hidden; scrollbar-width: none; isolation: isolate; }
 .tab-list > .dock-tab { flex: none; }
-.dock-tab { position: relative; white-space: nowrap; cursor: grab; height: 36px; min-height: 36px; padding: 4px 8px; border-radius: var(--surface-radius) var(--surface-radius) 0 0; display: flex; align-items: center; gap: 6px; touch-action: none; }
+.dock-tab { position: relative; white-space: nowrap; cursor: default; height: 36px; min-height: 36px; padding: 4px 8px; border-radius: var(--surface-radius) var(--surface-radius) 0 0; display: flex; align-items: center; gap: 6px; touch-action: none; }
+.dock-tab:not(.column-tab)[aria-selected="false"] { border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
+:where(:root:not([data-touch])) .dock-tab:not(.column-tab)[aria-selected="false"]:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
 [data-drag-pickup="hold"] { cursor: default; }
 .panel-grip { touch-action: none; }
 .dock-tab.icon-only-tab { width: 36px; justify-content: center; }

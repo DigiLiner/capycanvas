@@ -31,7 +31,7 @@ export async function checkDragCursors({ call, evaluate, settle }) {
     for (const end of ["release", "cancel", "capture", "blur"]) {
       await send({ type: "restore_workspace", workspace: fixture });
       const selector = '.dock-tab[data-panel="layers"]';
-      assert.equal(await cursor(selector), "grab");
+      assert.equal(await cursor(selector), "default");
       const original = await rect(selector), start = center(original);
       const neighbor = await rect('.dock-tab[data-panel="properties"]');
       await press(start); await move({ x: start.x + 2, y: start.y }); await clean();
@@ -71,9 +71,9 @@ export async function checkDragCursors({ call, evaluate, settle }) {
       await send({ type: "restore_workspace", workspace: fixture });
       const selector = '.dock-tab[data-panel="properties"]';
       const source = await rect(selector);
+      const first = await rect('.dock-tab[data-panel="layers"]');
       const start = center(source);
       await press(start);
-      const first = await rect('.dock-tab[data-panel="layers"]');
       // Release just past halfway, before the pointer reaches the old midpoint.
       const target = { x: start.x - first.width / 2 - 1, y: start.y };
       await move(target);

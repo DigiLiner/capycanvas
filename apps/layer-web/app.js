@@ -496,7 +496,7 @@ const tabFit = new ResizeObserver(entries => {
   for (const { target } of entries) pendingTabFits.add(target);
   tabFitFrame ||= requestAnimationFrame(fitTabs);
 });
-function automaticTabs(list) { list.dataset.automatic = "true"; tabFit.observe(list); }
+function automaticTabs(list) { list.dataset.automatic = "true"; tabFit.observe(list); pendingTabFits.add(list); tabFitFrame ||= requestAnimationFrame(fitTabs); }
 function releaseTabs(root) { for (const list of root.querySelectorAll("[data-automatic]")) tabFit.unobserve(list); }
 function fitTabs() {
   tabFitFrame = 0;
@@ -531,8 +531,8 @@ function arrange(nextLayout, layoutOnly = false) {
     }
     const tabStyle = app.group_tab_style(group.id);
     const key = JSON.stringify([group.panels.map((id) => {
-      const view = customization.view(id); return [id, view.tab, view.icon];
-    }), group.active, group.tabs_visible, tabStyle]);
+      const view = customization.view(id); return [id, view.icon];
+    }), group.tabs_visible, !!group.footer_grip, tabStyle]);
     if (node.dataset.key !== key) {
       node.dataset.key = key;
       node.dataset.panel = group.active;
@@ -555,9 +555,9 @@ function arrange(nextLayout, layoutOnly = false) {
           );
           tab.dataset.index = index;
           tab.dataset.panel = panel;
+          tab.dataset.group = group.id;
           const view = customization.view(panel);
           tab.title = view.title; tab.setAttribute("aria-label", view.title);
-          tabLabel(tab, view, tabStyle === "automatic");
           customization.target(tab, { kind: "panel", panel });
           tab.setAttribute("aria-selected", String(panel === group.active));
           labels.append(draggable(tab, { kind: "panel", panel }));
@@ -576,14 +576,23 @@ function arrange(nextLayout, layoutOnly = false) {
         }
       }
     }
+    const preview = node.querySelector(".panel-preview");
+    const body = panels.get(group.active).parentElement;
+    const previous = preview.querySelector(":scope > .panel-frame");
+    if (previous !== body) previous ? previous.replaceWith(body) : preview.append(body);
+    node.dataset.panel = group.active;
+    node.classList.toggle("toolbar", !!group.tiles);
     node.setAttribute("aria-label", customization.view(group.active).title);
     for(const tab of node.querySelectorAll('.dock-tab')) {
-      const title=customization.view(tab.dataset.panel).title;
-      if(tab.title===title)continue;
+      const view=customization.view(tab.dataset.panel),title=view.title;
+      tab.setAttribute('aria-selected',String(tab.dataset.panel===group.active));
+      const labelKey=JSON.stringify([view.title,view.icon,tabStyle==='automatic'?null:view.tab]);
+      if(tab.dataset.labelKey===labelKey)continue;
+      tab.dataset.labelKey=labelKey;tab.replaceChildren();tabLabel(tab,view,tabStyle==='automatic');
       tab.title=title;tab.setAttribute('aria-label',title);
       const label=tab.querySelector('span');if(label)label.textContent=title;
       const list=tab.parentElement;
-      if(list.dataset.automatic){pendingTabFits.add(list);tabFitFrame ||= requestAnimationFrame(fitTabs);}
+      if(list.dataset.automatic)automaticTabs(list);
     }
     node.classList.toggle("floating-panel", group.floating);
     node.classList.toggle("tool-strip", !!group.tiles && !group.tabs_visible);
@@ -1141,6 +1150,8 @@ workspace.addEventListener("pointerdown", e => {
   workspaceGesture.tile = workspaceGesture.action.item?.kind === "tile";
   if (workspaceGesture.waitForHold)
     workspaceGestureSourceObserver.observe(workspace, { childList: true, subtree: true });
+  if (node.matches('.dock-tab[data-group]'))
+    dispatch({type:"select_panel_tab",group:Number(node.dataset.group),panel:node.dataset.panel});
   grabTabSlide(workspaceGesture);
   // External resize strips are outside the unselectable panel. Prevent a
   // native text-selection drag from stealing their pointer sequence.

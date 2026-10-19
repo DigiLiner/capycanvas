@@ -80,24 +80,39 @@ function Tab-Feedback([string]$Name){
         $park=Center (Control 'drawing-canvas');[CapyRowPointer]::Hover($park.x,$park.y)
         $tab=Control ('panel-tab-'+$next) -Arranged;$bounds=$tab.Current.BoundingRectangle
         $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
-        $points=@(foreach($x in @(($bounds.Left+1*$scale),($bounds.Left+3*$scale),($bounds.Left+5*$scale),($bounds.Right-5*$scale),($bounds.Right-3*$scale),($bounds.Right-1*$scale))){
-            foreach($y in @(($bounds.Bottom-1*$scale),($bounds.Bottom-3*$scale),($bounds.Bottom-5*$scale))){
-                @{x=[int]($x-$origin[0]);y=[int]($y-$origin[1])}
-            }
+        $retained=$tab.GetRuntimeId() -join ':'
+        $selectedBounds=(Control ('panel-tab-'+$active) -Arranged).Current.BoundingRectangle
+        $foot=@(foreach($x in @(($selectedBounds.Left+3*$scale),($selectedBounds.Right-3*$scale))){
+            foreach($y in @(($selectedBounds.Bottom-2*$scale),($selectedBounds.Bottom+2*$scale))){@{x=[int]($x-$origin[0]);y=[int]($y-$origin[1])}}
         })
-        $expected=$null
-        foreach($state in 'rest','hover','press'){
+        $interior=@(foreach($fraction in .2,.5,.8){@{x=[int]($bounds.Left+$bounds.Width*$fraction-$origin[0]);y=[int]($bounds.Top+4*$scale-$origin[1])}})
+        $expectedFoot=$null;$expectedInterior=$null
+        foreach($state in 'rest','hover','press','release'){
             if($state -eq 'hover'){$at=Center $tab;[CapyRowPointer]::Hover($at.x,$at.y)}
-            if($state -eq 'press'){[CapyRowPointer]::Down('mouse',$at.x,$at.y)}
+            if($state -eq 'press'){
+                [CapyRowPointer]::Down('mouse',$at.x,$at.y)
+                Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $next} 'Primary down did not select the inactive tab before release'
+            }
+            if($state -eq 'release'){[CapyRowPointer]::Up()}
             Start-Sleep -Milliseconds 200
             $capture="$Name-feedback-$index-$state";Capture $capture -Composed
             $image=[System.Drawing.Bitmap]::new((Join-Path $run ($capture+'.png')))
-            try{$pixels=(@($points|ForEach-Object {$image.GetPixel($_.x,$_.y).ToArgb()}) -join ',')}finally{$image.Dispose()}
-            if($state -eq 'rest'){$expected=$pixels}
-            elseif($pixels -ne $expected){throw "$capture changed the inactive tab's lower corners or the active tab's shoulders"}
+            try{
+                $pixels=(@($foot|ForEach-Object {$image.GetPixel($_.x,$_.y).ToArgb()}) -join ',')
+                $fill=(@($interior|ForEach-Object {$image.GetPixel($_.x,$_.y).ToArgb()}) -join ',')
+            }finally{$image.Dispose()}
+            if($state -eq 'rest'){$expectedFoot=$pixels;$expectedInterior=$fill}
+            if($state -eq 'hover'){
+                if($pixels -ne $expectedFoot){throw "$capture changed the active tab's foot"}
+                if($fill -eq $expectedInterior){throw "$capture has no visible inactive-tab hover"}
+            }
+            if($state -in 'press','release'){
+                if(((Control ('panel-tab-'+$next) -Arranged).GetRuntimeId() -join ':') -ne $retained){throw "$capture replaced the native tab button"}
+                if(@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -ne $next){throw "$capture lost the selected tab"}
+                if($null -ne (Model).state.customization.expanded){throw "$capture opened panel configuration"}
+                Tab-Shades $capture
+            }
         }
-        [CapyRowPointer]::Up()
-        Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $next} 'Native click did not select the inactive tab'
     }
     if(@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -ne $restore){Invoke ('panel-tab-'+$restore)}
     Wait-Until {@((Model).layout.groups|Where-Object {$_.id -eq $group.id})[0].active -eq $restore} 'Tab feedback did not restore selection'
