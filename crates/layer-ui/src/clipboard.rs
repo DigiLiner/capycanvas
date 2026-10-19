@@ -478,8 +478,9 @@ impl<R: CanvasRenderer> UiSession<R> {
         let (scope, name, original, policy) = if merged {
             (SceneScope::All, "Merged copy".to_string(), None, PaintBasePolicy::WorkingPixels)
         } else {
-            let active = active.ok_or("Select a layer first")?;
-            let occurrence = document.scene().occurrence(active).ok_or("Select a layer first")?;
+            let no_layer = || self.localization().text(MessageId::RESOURCES_ERROR_SELECT_LAYER).to_string();
+            let active = active.ok_or_else(no_layer)?;
+            let occurrence = document.scene().occurrence(active).ok_or_else(no_layer)?;
             if let Some(target @ SourceTarget::Coverage(_)) = document.working.target {
                 self.files.cut = cut.then(|| PendingCut {
                     epoch: self.state.document_file.epoch, revision: document.revision, layer: active,
@@ -493,11 +494,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 return Ok(self.pixel_capture(Arc::new(mask_scene), SceneScope::Raw(target), crop, coverage, None,
                     PaintBasePolicy::WorkingPixels, occurrence.name.to_string()));
             }
-            if document.scene().object_layer(active).is_some() {
+            if document.scene().holds_objects(active) {
                 return Ok(self.pixel_capture(scene, SceneScope::RawObjects(active), crop, coverage, None, PaintBasePolicy::WorkingPixels, occurrence.name.to_string()));
             }
-            let paint = document.scene().paint_source(active).ok_or("Select a paint layer first")?;
-            let target = document.scene().source_target(active).ok_or("Select a paint layer first")?;
+            let no_paint = || self.localization().text(MessageId::COMMANDS_SELECT_A_PAINT_LAYER).to_string();
+            let paint = document.scene().paint_source(active).ok_or_else(no_paint)?;
+            let target = document.scene().source_target(active).ok_or_else(no_paint)?;
             let offset = document.layer_offset(active);
             let base = paint.base.as_ref().filter(|base| coverage.is_none() && base.offset == [0; 2]
                 && !source_edit::baked(paint) && occurrence.mask.is_none()

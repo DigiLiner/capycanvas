@@ -25,10 +25,7 @@ pub(super) struct VectorMoves {
 
 impl<R: CanvasRenderer> UiSession<R> {
     fn vector_move_layer(&self) -> Option<OccurrenceHandle> {
-        let doc = self.engine.document();
-        let layer = doc.working.occurrence?;
-        (self.layer_interaction.tool == LayerCanvasTool::Move && doc.working.selection.is_none() && self.selection_masks.target().is_none()
-            && doc.scene().vector_layer(layer).is_some()).then_some(layer)
+        self.editing_vector_layer().filter(|_| self.layer_interaction.tool == LayerCanvasTool::Move)
     }
     pub(super) fn selected_vector_items(&self) -> Option<&VectorItemSelection> {
         let doc = self.engine.document();

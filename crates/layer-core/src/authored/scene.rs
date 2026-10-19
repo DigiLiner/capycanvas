@@ -166,6 +166,7 @@ impl<'a> SceneView<'a> {
     pub fn vector_layer(self,h:OccurrenceHandle)->Option<&'a vector::VectorObject>{self.vector(self.vector_handle(h)?)}
     pub fn vector_owner(self,h:VectorHandle)->Option<OccurrenceHandle>{self.index.vector_uses.get(h.index() as usize).copied().flatten()}
     pub fn vector(self,h:VectorHandle)->Option<&'a vector::VectorObject>{self.artwork.vectors.get(h)}
+    pub fn holds_objects(self,h:OccurrenceHandle)->bool{matches!(self.occurrence(h).map(|o|&o.content),Some(OccurrenceContent::Objects(_)|OccurrenceContent::Vector(_)))}
     pub fn artwork(self)->&'a Artwork{self.artwork}
     #[inline]
     pub fn composition(self)->&'a Composition{self.artwork.compositions.get(self.artwork.root).expect("Admitted composition")}

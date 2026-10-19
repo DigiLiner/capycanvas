@@ -2591,11 +2591,12 @@ impl<R: CanvasRenderer> UiSession<R> {
                 self.require_document_idle().is_ok() && self.outline_refusal().is_none()
             }
             CommandId::ClearLayer | CommandId::FillSelection => {
+                let vector = active.is_some_and(|handle| scene.vector_layer(handle).is_some());
                 self.require_document_idle().is_ok()
-                    && (editable || self.image_content())
+                    && (editable || vector || self.image_content())
                     && !matches!(document.working.target, Some(SourceTarget::Coverage(_)))
                     && !document.is_locked(active.unwrap_or_default())
-                    && (id == CommandId::ClearLayer || document.working.selection.is_some())
+                    && (id == CommandId::ClearLayer || (document.working.selection.is_some() && !vector))
             }
             CommandId::UndoWorkspace => {
                 !self.state.customization.header_editing && self.workspace_history.can_undo()

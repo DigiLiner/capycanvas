@@ -1175,6 +1175,9 @@ impl<R: CanvasRenderer> UiSession<R> {
                         if name.trim().is_empty() || name.chars().count() > 128 { return Err("Use a name of 1–128 characters".into()); }
                         layer.name = name.into(); self.state.layer_tools.rename_layer = None;
                     }
+                    LayerAction::Clear { .. } if let OccurrenceContent::Vector(handle) = layer.content => {
+                        edits.push(Edit::Vector(RecordChange::replace(&self.engine.document().artwork.vectors, handle, Some(layer_core::authored::vector::VectorObject::from_records(Vec::new())))?));
+                    }
                     LayerAction::Clear { .. } => {
                         let OccurrenceContent::Paint(handle) = layer.content else {
                             if self.engine.document().working.occurrence == Some(id) && self.refuse_image_content() { return Ok(()); }
@@ -1669,7 +1672,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         }
         if event.phase == PenPhase::Down && self.layer_interaction.tool == LayerCanvasTool::Move {
             if let Some(reason) = self.move_refusal() {
-                self.notify(reason);
+                self.notify(self.localization().text(reason).to_string());
                 return Ok(());
             }
             if self.moves_selected_pixels() || !matches!(self.engine.document().working.target, Some(SourceTarget::Coverage(_))) {

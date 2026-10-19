@@ -41,10 +41,7 @@ pub(crate) fn modes(shape: FigureShape, paint: FigurePaint, localizer: &crate::l
 
 impl<B: CanvasRenderer> UiSession<B> {
     pub(super) fn vector_figure_layer(&self) -> Option<layer_core::authored::OccurrenceHandle> {
-        let doc = self.engine.document();
-        let layer = doc.working.occurrence?;
-        doc.scene().vector_layer(layer)?;
-        (!self.state.colors.transparent() && self.selection_masks.target().is_none()).then_some(layer)
+        self.editing_vector_layer().filter(|_| !self.state.colors.transparent())
     }
     fn figure_colors(&self, paint: FigurePaint) -> Option<[[f32; 4]; 2]> {
         let definitions = [if paint == FigurePaint::Both { self.state.colors.foreground } else { self.state.colors.definition() }, self.state.colors.background];

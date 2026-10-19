@@ -395,3 +395,17 @@ fn a_merge_that_undo_history_cannot_hold_is_refused_whole() {
     );
     assert_eq!(editor.document(), &doc);
 }
+#[test]
+fn merging_a_vector_layer_down_bakes_its_paths() {
+    use crate::authored::vector::*;
+    let mut doc = document(&["Lower"]);
+    let stroke = Stroke::new(Paint::color(crate::color::RgbColor::BLACK), 4.);
+    let path = PathItem::new(ItemId(1), Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([20., 30.]), Anchor::corner([300., 90.])], false)]).unwrap()), Arc::new(Style::new(vec![PaintEntry::Stroke(stroke)])));
+    let (layer, edit) = doc.create_vector_layer_edit("Ink", VectorObject::from_records(vec![Record::Path(path)]), None, 0).unwrap();
+    doc.apply(edit).unwrap();
+    doc.working.occurrence = Some(layer);
+    doc.working.target = None;
+    assert_eq!(baked(&doc, MergeKind::Down), ["Ink", "Lower"]);
+    let damage = doc.merge_plan(MergeKind::Down).unwrap().operation.bounds(doc.composition().size);
+    assert!(damage.min.x <= 18. && damage.min.y <= 28. && damage.max.x >= 302. && damage.max.y >= 92., "the merge bakes the stroked path: {damage:?}");
+}

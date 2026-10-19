@@ -214,7 +214,7 @@ impl<R: CanvasRenderer> UiSession<R> {
                 RegionSource::Editing => {
                     if let Some(target) = source_target {
                         layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::Raw(target)}
-                    } else if let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().object_layer(*handle).is_some()) {
+                    } else if let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().holds_objects(*handle)) {
                         layer_render::RegionSource::Scene {snapshot:doc.snapshot(),scope:SceneScope::RawObjects(handle)}
                     } else {
                         let Some(handle) = doc.working.occurrence.filter(|handle| doc.scene().effect(*handle).is_some_and(|effect| effect.constant_color().is_some())) else { return; };

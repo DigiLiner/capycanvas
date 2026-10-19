@@ -1083,3 +1083,42 @@ fn a_photo_shared_with_an_image_object_resamples_without_touching_the_object_ima
         assert_eq!(result.artwork.objects.get(object).unwrap().affine, geometry.to_canvas64().compose(Affine64::default()));
     }
 }
+
+#[test]
+fn vector_paths_follow_rotation_flip_and_resize() {
+    use crate::authored::vector::*;
+    let mut doc = fixture();
+    let ink = Paint::color(color::RgbColor::new(Default::default(), [0., 0., 0., 1.]).unwrap());
+    let line = PathItem::new(ItemId(1), std::sync::Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([10., 20.]), Anchor::corner([110., 20.])], false)]).unwrap()),
+        std::sync::Arc::new(Style::new(vec![PaintEntry::Stroke(Stroke::new(ink.clone(), 4.))])));
+    let frame = LiveShape { kind: ShapeKind::Rectangle { radii: [0.; 4] }, center: [300., 100.], size: [80., 40.], rotation: 0. };
+    let shape = PathItem::new(ItemId(2), std::sync::Arc::new(PathGeometry::new(vec![Subpath::new(&[Anchor::corner([0., 0.])], false)]).unwrap()),
+        std::sync::Arc::new(Style::new(vec![PaintEntry::Fill(Fill { paint: ink, unknown: None })]))).with_shape(frame).unwrap();
+    let (layer, edit) = doc.create_vector_layer_edit("Ink", VectorObject::from_records(vec![Record::Path(line), Record::Path(shape)]), None, 0).unwrap();
+    doc.apply(edit).unwrap();
+    let size = doc.composition().size;
+    let read = |d: &Document| {
+        let object = d.scene().vector_layer(layer).unwrap().clone();
+        let [ox, oy] = d.scene().occurrence_offset64(layer);
+        let paths: Vec<PathItem> = object.paths().map(|(_, p)| p.clone()).collect();
+        let start = paths[0].geometry.subpaths()[0].anchor(0).point();
+        ([start[0] + ox, start[1] + oy], paths[0].style.strokes().next().unwrap().width, paths[1].shape.as_ref().map(|s| (s.center[0] + ox, s.center[1] + oy, s.size)))
+    };
+    for (geometry, start, width, frame) in [
+        (CanvasGeometry::orient(size, ImageOrientation::RotateRight), [f64::from(size[1]) - 20., 10.], 4., Some((f64::from(size[1]) - 100., 300., [80., 40.]))),
+        (CanvasGeometry::orient(size, ImageOrientation::FlipHorizontal), [f64::from(size[0]) - 10., 20.], 4., Some((f64::from(size[0]) - 300., 100., [80., 40.]))),
+        (CanvasGeometry::resize(size, [size[0] * 2, size[1] * 2], Default::default()), [20., 40.], 8., Some((600., 200., [160., 80.]))),
+    ] {
+        let plan = doc.canvas_geometry_plan(&geometry, limits()).unwrap();
+        let mut editor = Editor::new(doc.clone());
+        editor.perform(Edit::Batch(plan.edits)).unwrap();
+        let (moved, stroke, shape) = read(editor.document());
+        assert!((moved[0] - start[0]).abs() < 1e-6 && (moved[1] - start[1]).abs() < 1e-6, "{moved:?} vs {start:?}");
+        assert!((stroke - width).abs() < 1e-9, "{stroke} vs {width}");
+        let (x, y, extent) = shape.expect("the rectangle stays a live shape");
+        let (ex, ey, eextent) = frame.unwrap();
+        assert!((x - ex).abs() < 1e-6 && (y - ey).abs() < 1e-6 && (extent[0] - eextent[0]).abs() < 1e-6 && (extent[1] - eextent[1]).abs() < 1e-6, "{x},{y},{extent:?}");
+        editor.undo().unwrap();
+        assert_eq!(read(editor.document()), read(&doc));
+    }
+}

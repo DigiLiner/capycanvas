@@ -593,3 +593,27 @@ fn appended_strokes_at_zoomed_out_levels_match_a_fresh_render() {
     }
     assert!(error < 1e-5, "appended strokes must match a full render: {error}");
 }
+
+#[test]
+fn rasterizing_a_vector_layer_bakes_what_it_shows() {
+    let (editor, layer) = document([300, 200], records());
+    let doc = editor.document().clone();
+    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let shown = native(&mut r, &doc);
+    let (_input, consumer) = layer_engine::input_queue(16);
+    let mut engine = layer_engine::CanvasEngine::new(r, doc, consumer, crate::test_support::view([300, 200]), layer_engine::ViewTransform::IDENTITY).unwrap();
+    let plan = engine.document().rasterize_plan(layer, false).unwrap();
+    engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        engine.render_frame().unwrap();
+        if !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { break; }
+        assert!(std::time::Instant::now() < deadline, "the bake must finish");
+        std::thread::yield_now();
+    }
+    assert!(engine.document().scene().vector_layer(layer).is_none());
+    let document = engine.document().clone();
+    let rasterized = native(engine.backend_mut(), &document);
+    assert!(rasterized.iter().filter(|p| p[3] > 0.5).count() > 5000, "the paint layer holds the paths' pixels");
+    assert!(max_error(&rasterized, &shown) < 2. / 255., "Rasterize Layer keeps the picture: {}", max_error(&rasterized, &shown));
+}

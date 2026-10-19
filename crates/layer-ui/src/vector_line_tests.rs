@@ -602,3 +602,76 @@ fn crowded_vector_layer_session_costs() {
             commits[commits.len() / 2], commits[commits.len() - 1]);
     }
 }
+
+#[test]
+fn vector_layer_masks_take_brush_strokes_while_paths_stay() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 30);
+    let drawn = s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    let id = occurrence_token(handle);
+    layer(&mut s, LayerAction::AddMask { id, replace: false });
+    layer(&mut s, LayerAction::Select { id, mask: true });
+    assert!(matches!(s.engine.document().working.target, Some(SourceTarget::Coverage(_))));
+    let revision = s.engine.document().revision;
+    draw_line(&mut s, 100, 30);
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap(), &drawn, "mask strokes leave the paths");
+    assert_ne!(s.engine.document().revision, revision, "the stroke paints the mask");
+    assert_eq!(s.state.notice, None);
+    invoke(&mut s, CommandId::Move);
+    let start = surface_at(&s, drawn.paths().next().unwrap().1.geometry.subpaths()[0].anchor(0).point());
+    press(&mut s, 200, &[start, start]);
+    assert!(s.engine.document().working.vector_items.is_none(), "Move on the mask leaves the paths unselected");
+}
+
+#[test]
+fn move_and_edit_points_reach_paths_while_pixels_are_selected() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 40);
+    let path = s.engine.document().scene().vector_layer(handle).unwrap().paths().next().unwrap().1.clone();
+    select(&mut s, rectangle([0., 0., 50., 50.]));
+    invoke(&mut s, CommandId::Move);
+    let start = surface_at(&s, path.geometry.subpaths()[0].anchor(0).point());
+    press(&mut s, 100, &[start, start]);
+    assert_eq!(s.engine.document().working.vector_items.as_ref().map(|selected| (*selected.items).clone()), Some([path.id].into()));
+    assert_eq!(s.state.notice, None);
+    invoke(&mut s, CommandId::EditPoints);
+    let mut overlay = Vec::new();
+    s.append_layer_overlay(&mut overlay);
+    assert_eq!(overlay.iter().filter(|segment| segment.marker == 1.).count(), path.geometry.subpaths()[0].len() * 4, "Edit Points shows the anchors");
+}
+
+#[test]
+fn clear_layer_removes_every_path_in_one_undo_step() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 30);
+    draw_line(&mut s, 100, 30);
+    let drawn = s.engine.document().scene().vector_layer(handle).unwrap().clone();
+    assert!(s.command(CommandId::ClearLayer).enabled);
+    invoke(&mut s, CommandId::ClearLayer);
+    s.frame(3_000_000_000, 3_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(handle).map(|object| object.path_count()), Some(0), "the layer stays a vector layer");
+    s.dispatch(UiAction::Invoke { command: CommandId::Undo }).unwrap();
+    s.frame(4_000_000_000, 4_000_000_000).unwrap();
+    assert_eq!(s.engine.document().scene().vector_layer(handle).unwrap(), &drawn, "one undo step restores the paths");
+    select(&mut s, rectangle([0., 0., 500., 500.]));
+    assert!(!s.command(CommandId::FillSelection).enabled, "vector layers hold no pixels to fill");
+}
+
+#[test]
+fn copy_and_the_wand_read_what_a_vector_layer_shows() {
+    let (mut s, handle) = vector_session();
+    draw_line(&mut s, 1, 30);
+    select(&mut s, rectangle([0., 0., 2000., 2000.]));
+    invoke(&mut s, CommandId::Copy);
+    assert_eq!(s.state.notice, None);
+    let copy = s.state.requests.iter().find_map(|r| match &r.kind {
+        HostRequestKind::Document { request: DocumentRequest::Copy { .. } } => Some(r.id),
+        _ => None,
+    }).expect("a copy request");
+    assert_eq!(s.capture_clipboard(copy).unwrap().scope, SceneScope::RawObjects(handle));
+    s.layer_action(LayerAction::Tool { tool: LayerCanvasTool::Region { fill: false, source: crate::RegionSource::Editing } }).unwrap();
+    let point = surface_at(&s, [600., 600.]);
+    press(&mut s, 100, &[point, point]);
+    let request = s.renderer_mut().region_requests.last().cloned().expect("the wand reads the layer");
+    assert!(matches!(request.source, layer_render::RegionSource::Scene { scope: SceneScope::RawObjects(layer), .. } if layer == handle));
+}

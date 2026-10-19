@@ -29,9 +29,7 @@ fn distance(a: [f64; 2], b: [f64; 2]) -> f64 { (a[0] - b[0]).hypot(a[1] - b[1]) 
 
 impl<R: CanvasRenderer> UiSession<R> {
     fn points_layer(&self) -> Option<OccurrenceHandle> {
-        let doc = self.engine.document();
-        let layer = doc.working.occurrence?;
-        (self.layer_interaction.tool == LayerCanvasTool::EditPoints && doc.working.selection.is_none() && doc.scene().vector_layer(layer).is_some()).then_some(layer)
+        self.editing_vector_layer().filter(|_| self.layer_interaction.tool == LayerCanvasTool::EditPoints)
     }
     fn edited_paths(&self) -> BTreeSet<ItemId> { self.selected_vector_items().map(|selection| (*selection.items).clone()).unwrap_or_default() }
     fn local_point(&self, layer: OccurrenceHandle, p: Point) -> [f64; 2] {

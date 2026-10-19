@@ -133,17 +133,23 @@ fn objects_support(scene: SceneView<'_>, h: OccurrenceHandle) -> SupportBounds {
     object_support(placement.compose(layer.affine), layer)
 }
 
+fn vectors_support(scene: SceneView<'_>, h: OccurrenceHandle) -> SupportBounds {
+    let Some([x0, y0, x1, y1]) = scene.vector_layer(h).and_then(|object| object.bounds()) else { return SupportBounds::EMPTY; };
+    let [x, y] = scene.occurrence_offset64(h);
+    SupportBounds { min: [x0 + x, y0 + y], max: [x1 + x, y1 + y] }.outset([1.; 2])
+}
+
 /// Whether paint contributes its painted pages or its whole editable domain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach { Content, Domain }
 
 /// The finite support of everything `scene` evaluates in its scope: paint,
-/// object images with their sampling footprint and the output of filters and
-/// generators. A generator's output is defined on the authored frame; a filter
+/// object images with their sampling footprint, vector paths with their
+/// strokes, and the output of filters and generators. A generator's output is defined on the authored frame; a filter
 /// whose reach can't be represented is refused with `UnboundedSupport`.
 pub fn output_support(scene: SceneView<'_>, reach: Reach) -> Result<SupportBounds, MergeRefusal> {
     let visible: Vec<_> = scene.order().iter().copied().filter(|h| layer_is_visible(scene, *h)).collect();
-    let mut bounds = visible.iter().fold(SupportBounds::EMPTY, |bounds, h| bounds.union(paint_support(scene, *h, reach)).union(objects_support(scene, *h)));
+    let mut bounds = visible.iter().fold(SupportBounds::EMPTY, |bounds, h| bounds.union(paint_support(scene, *h, reach)).union(objects_support(scene, *h)).union(vectors_support(scene, *h)));
     let frame = SupportBounds::extent(scene.evaluation_offset64(), scene.composition().size);
     for effect in visible.iter().filter_map(|h| scene.effect(*h)) {
         match (effect.program.kind, effect.program.alpha) {

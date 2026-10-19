@@ -371,24 +371,24 @@ impl<R: CanvasRenderer> UiSession<R> {
     }
     /// Why a Move drag cannot move the active layer, or with a selection its
     /// selected pixels.
-    pub(super) fn move_refusal(&self) -> Option<&'static str> {
+    pub(super) fn move_refusal(&self) -> Option<MessageId> {
         let doc = self.engine.document();
         if self.layer_transforming() {
             return doc.layer_move_targets(&self.transform_roots()).err().map(|reason| match reason {
-                layer_core::DocumentError::ProtectedOccurrence(h) if Some(h) == doc.working.occurrence => "The active layer is locked",
-                _ => "The selected layers cannot be moved together",
+                layer_core::DocumentError::ProtectedOccurrence(h) if Some(h) == doc.working.occurrence => MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED,
+                _ => MessageId::COMMANDS_MOVE_LAYERS_NOT_TOGETHER,
             });
         }
         let handle = doc.working.occurrence?;
         let layer = doc.scene().occurrence(handle)?;
         if doc.is_locked(handle) {
-            Some("The active layer is locked")
+            Some(MessageId::COMMANDS_THE_ACTIVE_LAYER_IS_LOCKED)
         } else if !self.moves_selected_pixels() {
             None
         } else if !matches!(doc.working.target, Some(SourceTarget::Coverage(_))) && layer.kind() != LayerKind::Paint {
-            Some("Choose a paint layer or a mask to move selected pixels")
+            Some(MessageId::COMMANDS_MOVE_PIXELS_NEEDS_PAINT)
         } else if !self.can_transform() {
-            Some("This layer has no pixels to move")
+            Some(MessageId::COMMANDS_MOVE_NO_PIXELS)
         } else {
             None
         }

@@ -495,6 +495,7 @@ pub(crate) fn geometry_edits(before: &Document, after: &Document) -> Result<Vec<
     changed!(paint, Paint);
     changed!(coverage, Coverage);
     changed!(objects, ImageObject);
+    changed!(vectors, Vector);
     changed!(effects, Effect);
     changed!(selections, SavedSelection);
     changed!(guides, Guides);
@@ -751,6 +752,11 @@ impl Document {
                     object.affine = map.compose(object.affine);
                     object.admit_affine().map_err(|_| CanvasGeometryError::Unsupported("A placed image would exceed the editor's range"))?;
                 }
+            }
+            if let OccurrenceContent::Vector(layer) = old.content {
+                let map = translation(offsets::checked_sub([0; 2], candidate.scene().layer_origin(Some(*h))).ok_or_else(out_of_range)?).compose(to_canvas64).compose(translation(scene.layer_origin(Some(*h))));
+                let object = candidate.artwork.vectors.get_mut(layer).ok_or(DocumentError::MissingOccurrence(*h))?;
+                *object = object.transformed(map).map_err(CanvasGeometryError::Unsupported)?;
             }
             let paint = scene.source_target(*h).filter(|t| matches!(t, SourceTarget::Paint(_)));
             let exact = pixel_map.filter(|_| paint.is_some_and(|t| scene.paint_base(t).is_some()));

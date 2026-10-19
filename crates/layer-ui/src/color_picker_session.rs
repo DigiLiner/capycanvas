@@ -130,7 +130,7 @@ impl<R: CanvasRenderer> UiSession<R> {
             ColorPickerAction::Source { layer } => {
                 if self.eyedropper.calibration.is_some() || self.targeted_curve.is_some() { return Ok(()); }
                 if layer && !self.picker_layer_available() {
-                    return Err("Select an editable paint layer to sample its color".into());
+                    return Err(self.localization().text(MessageId::COMMANDS_SAMPLE_NEEDS_PAINT_LAYER).to_string());
                 }
                 self.eyedropper.layer = layer;
                 if self.layer_interaction.tool.picks_color() {

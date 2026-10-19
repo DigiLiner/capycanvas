@@ -23,7 +23,10 @@ impl<R: CanvasRenderer> UiSession<R> {
         if event.flags.contains(SampleFlags::PREDICTED) || event.flags.contains(SampleFlags::CORRECTION) { return Ok(true); }
         let Some(layer) = self.vector_figure_layer() else {
             self.cancel_vector_path();
-            if event.phase == PenPhase::Down { return Err(self.localization().text(MessageId::COMMANDS_DRAW_PATHS_ON_A_VECTOR_LAYER).to_string()); }
+            if event.phase == PenPhase::Down {
+                let reason = if self.editing_vector_layer().is_some() { MessageId::COMMANDS_PATHS_NEED_A_COLOR } else { MessageId::COMMANDS_DRAW_PATHS_ON_A_VECTOR_LAYER };
+                return Err(self.localization().text(reason).to_string());
+            }
             return Ok(true);
         };
         let [ox, oy] = self.engine.document().scene().occurrence_offset64(layer);

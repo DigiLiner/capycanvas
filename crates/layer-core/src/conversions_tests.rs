@@ -275,6 +275,8 @@ fn rasterize_bakes_a_vector_layer_into_paint_and_removes_its_paths_undoably() {
     let source = changed(&plan.edits, |e| match e { Edit::Paint(c) if c.handle == paint => c.value.clone(), _ => None });
     assert!(source.domain[0] >= 300 && source.domain[1] >= 90, "the bake window covers the paths: {:?}", source.domain);
     assert!(matches!(&plan.operation.kind, RasterOperationKind::Bake { scope: SceneScope::RawObjects(h), .. } if *h == layer));
+    let damage = plan.operation.bounds(source.domain);
+    assert!(damage.min.x <= 18. && damage.min.y <= 28. && damage.max.x >= 302. && damage.max.y >= 92., "the bake covers the stroked path: {damage:?}");
     let undo = doc.apply(Edit::Batch(plan.edits.clone())).unwrap();
     assert!(doc.artwork.vectors.is_empty(), "the vector object goes with its last use");
     assert_eq!(doc.working.target, Some(plan.target));

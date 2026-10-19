@@ -27,10 +27,14 @@ fn path(id: ItemId, paint: &Paint, line: (layer_core::authored::vector::PathGeom
 }
 
 impl<R: CanvasRenderer> UiSession<R> {
-    pub(super) fn vector_drawing_layer(&self) -> Option<OccurrenceHandle> {
+    pub(super) fn editing_vector_layer(&self) -> Option<OccurrenceHandle> {
         let document = self.engine.document();
         let layer = document.working.occurrence?;
-        document.scene().vector_layer(layer)?;
+        (document.scene().vector_layer(layer).is_some() && !matches!(document.working.target, Some(SourceTarget::Coverage(_)))
+            && self.selection_masks.target().is_none()).then_some(layer)
+    }
+    pub(super) fn vector_drawing_layer(&self) -> Option<OccurrenceHandle> {
+        let layer = self.editing_vector_layer()?;
         let erasing = self.state.brush.tool == Tool::Eraser || self.state.colors.transparent();
         (!erasing && self.engine.configured_brush().draws_vector_lines()).then_some(layer)
     }
@@ -38,9 +42,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         event.tool == layer_engine::ToolKind::Eraser || event.flags.contains(SampleFlags::INVERTED)
     }
     pub(super) fn vector_erasing_layer(&self, eraser_end: bool) -> Option<OccurrenceHandle> {
-        let document = self.engine.document();
-        let layer = document.working.occurrence?;
-        document.scene().vector_layer(layer)?;
+        let layer = self.editing_vector_layer()?;
         let erasing = eraser_end || self.state.brush.tool == Tool::Eraser || self.state.colors.transparent();
         (erasing && self.layer_interaction.tool == LayerCanvasTool::Paint).then_some(layer)
     }

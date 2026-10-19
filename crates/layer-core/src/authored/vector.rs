@@ -633,6 +633,17 @@ impl VectorObject {
         }
         found
     }
+    pub fn transformed(&self, affine: Affine64) -> Result<Self, &'static str> {
+        let mut edits = BTreeMap::new();
+        for (chunk, records) in self.chunks().iter().enumerate().filter(|(_, chunk)| chunk.summary().paths > 0) {
+            let records = records.records().iter().map(|record| match record {
+                Record::Path(path) => path.transformed(affine).map(Record::Path),
+                other => Ok(other.clone()),
+            }).collect::<Result<Vec<_>, _>>()?;
+            edits.insert(chunk, records);
+        }
+        Ok(self.edit_chunks(edits))
+    }
     pub fn transform_items(&self, ids: &BTreeSet<ItemId>, affine: Affine64) -> Result<Self, &'static str> {
         let mut edits = BTreeMap::new();
         for (chunk, indices) in self.positions(ids) {
