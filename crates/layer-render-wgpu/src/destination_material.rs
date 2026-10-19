@@ -311,7 +311,6 @@ mod tests {
             let transport = &pipelines.destination_material;
             let ready = transport.kernels.values().filter(|p| p.ready()).count();
             assert_eq!(ready, expected, "{preset:?} compiles its commit, prediction and gather or reservoir kernels");
-            assert!(pipelines.material.iter().flatten().all(|p| !p.ready()), "{preset:?} compiles no material fragment");
             let normal = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
             brush.rendering.blend_mode = BrushBlendMode::Multiply;
             let multiply = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);

@@ -68,6 +68,24 @@ impl Canvas {
         }
     }
 
+    fn reset(&mut self) {
+        self.r.submit(FramePacket { reset_layers: true, blend_space: self.space, ..packet(self.document.scene(), self.extent) }).unwrap();
+    }
+
+    /// One frame of a stroke whose contacts arrive in batches of `chunk`, and
+    /// its composite.
+    fn frame(&mut self, mut style: DabStyle, dabs: &[Dab], chunk: usize, kind: DabBatchKind) -> Vec<[f64; 4]> {
+        style.blend_space = self.space;
+        self.strokes += 1;
+        let batches: Vec<_> = dabs.chunks(chunk).enumerate().map(|(i, contacts)| DabBatch {
+            stroke_id: StrokeId(self.strokes), kind, first_dab: (i * chunk) as u32, dab_count: contacts.len() as u32,
+            stroke_start: i == 0, stroke_end: kind == DabBatchKind::Persistent && (i + 1) * chunk >= dabs.len(),
+            ..crate::test_support::dab_batch(self.base, style.clone(), contacts.iter().fold(Rect::EMPTY, |r, d| r.union(d.bounds())))
+        }).collect();
+        self.r.submit(FramePacket { dabs, dab_batches: &batches, blend_space: self.space, ..packet(self.document.scene(), self.extent) }).unwrap();
+        self.pixels()
+    }
+
     fn fill(&mut self, target: SourceTarget, color: [f32; 4]) {
         let mut dab = test_dab([64., 64.], color, 1.);
         dab.radii = [200.; 2];
@@ -286,42 +304,70 @@ fn black_at_half_opacity_over_white_paint_is_middle_gray_when_blending_perceptua
 }
 
 #[test]
-fn a_brush_blend_mode_equals_the_layer_blend_mode_in_both_spaces() {
+fn a_brush_blend_mode_equals_the_layer_blend_mode_when_predicted_or_committed_and_erases_like_normal() {
+    let extent = [384, 128];
     let base = |canvas: &mut Canvas, layer| {
-        canvas.fill(layer, [0.3, 0.55, 0.2, 1.]);
-        canvas.paint(layer, test_style(BrushExecution::Dry), soft([40., 60.], [0.9, 0.1, 0.6, 1.], 70., 0.));
-        canvas.paint(layer, test_style(BrushExecution::Dry), soft([100., 90.], [0.05, 0.08, 0.5, 0.8], 50., 0.3));
+        canvas.paint(layer, test_style(BrushExecution::Dry), soft([192., 64.], [0.3, 0.55, 0.2, 1.], 400., 1.));
+        canvas.paint(layer, test_style(BrushExecution::Dry), soft([100., 60.], [0.9, 0.1, 0.6, 1.], 90., 0.));
+        canvas.paint(layer, test_style(BrushExecution::Dry), soft([300., 90.], [0.05, 0.08, 0.5, 0.8], 70., 0.3));
     };
     let custom = layer_core::BrushContact { pooling: 0.25, linear_edge: true, ..Default::default() };
     layer_core::BrushSnapshot { contact: Some(custom), ..Default::default() }.validate().unwrap();
-    for contact in [None, Some(custom)] {
-        let mut stroke = soft([70., 64.], [0.85, 0.7, 0.15, 0.75], 55., 0.2);
-        if contact.is_some() {
-            stroke.previous = [55., 55., 1., 0.];
-            stroke.contact = [0.8, 0., 0., 0.];
-            stroke.previous_contact = stroke.contact;
-        }
-        for space in BlendSpace::ALL {
-            for mode in [BrushBlendMode::Overlay, BrushBlendMode::Multiply, BrushBlendMode::Screen, BrushBlendMode::Darken, BrushBlendMode::Lighten] {
-                let mut brush = Canvas::new(DocumentColor::default(), space, None);
+    for space in BlendSpace::ALL {
+        let mut brush = Canvas::at(DocumentColor::default(), space, None, extent);
+        for mode in [BrushBlendMode::Normal, BrushBlendMode::Overlay, BrushBlendMode::Multiply, BrushBlendMode::Screen, BrushBlendMode::Darken, BrushBlendMode::Lighten] {
+            let mut layered = Canvas::at(DocumentColor::default(), space, Some(LayerBlend::from(mode)), extent);
+            for (contact, accumulation) in [None, Some(custom)].into_iter()
+                .flat_map(|contact| [BrushAccumulation::Flow, BrushAccumulation::Uniform].map(|accumulation| (contact, accumulation))) {
+                let mut stroke = [soft([226., 64.], [0.85, 0.7, 0.15, 0.75], 40., 0.2), soft([320., 70.], [0.2, 0.6, 0.9, 0.9], 30., 0.5)];
+                if contact.is_some() {
+                    for dab in &mut stroke {
+                        dab.previous = [dab.radii[0], dab.radii[1], 1., 0.];
+                        dab.contact = [0.8, 0., 0., 0.];
+                        dab.previous_contact = dab.contact;
+                    }
+                }
+                let mut style = test_style(BrushExecution::Dry);
+                style.contact = contact;
+                style.rendering.accumulation = accumulation;
+                let normal = style.clone();
+                style.rendering.blend_mode = mode;
+                layered.reset();
+                let target = layered.base;
+                base(&mut layered, target);
+                for dab in stroke { layered.paint(layered.over.unwrap(), normal.clone(), dab); }
+                let expected = layered.composite();
+                brush.reset();
                 let target = brush.base;
                 base(&mut brush, target);
                 let before = brush.composite();
-                let mut style = test_style(BrushExecution::Dry);
-                style.contact = contact;
-                let normal = style.clone();
-                style.rendering.blend_mode = mode;
-                brush.paint(brush.base, style, stroke);
-                let mut layered = Canvas::new(DocumentColor::default(), space, Some(LayerBlend::from(mode)));
-                let target = layered.base;
-                base(&mut layered, target);
-                layered.paint(layered.over.unwrap(), normal, stroke);
-                let actual = brush.composite();
-                assert!(actual.iter().zip(&before).any(|(a, b)| (0..3).any(|c| (a[c] - b[c]).abs() > 0.01)),
-                    "{space:?} {mode:?} contact={contact:?}: brush must change visible paint");
-                for (i, (a, b)) in actual.into_iter().zip(layered.composite()).enumerate() {
+                for (phase, kind, chunk) in [("one predicted batch", DabBatchKind::Preview, 2), ("two predicted batches", DabBatchKind::Preview, 1),
+                    ("two committed batches", DabBatchKind::Persistent, 1)] {
+                    if kind == DabBatchKind::Persistent {
+                        assert_eq!(brush.composite(), before, "{space:?} {mode:?} {accumulation:?} contact={contact:?}: predictions leave committed paint unchanged");
+                    }
+                    let actual = brush.frame(style.clone(), &stroke, chunk, kind);
+                    assert!(actual.iter().zip(&before).any(|(a, b)| (0..3).any(|c| (a[c] - b[c]).abs() > 0.01)),
+                        "{space:?} {mode:?} {accumulation:?} contact={contact:?} {phase}: brush must change visible paint");
+                    for (i, (a, b)) in actual.into_iter().zip(&expected).enumerate() {
+                        for c in 0..4 {
+                            assert!((a[c] - b[c]).abs() < 2e-4, "{space:?} {mode:?} {accumulation:?} contact={contact:?} {phase} pixel {i} channel {c}: brush {} != layer {}", a[c], b[c]);
+                        }
+                    }
+                }
+                let erased = [BrushBlendMode::Normal, mode].map(|blend| {
+                    brush.reset();
+                    let target = brush.base;
+                    base(&mut brush, target);
+                    let mut eraser = style.clone();
+                    eraser.mode = DabMode::Erase;
+                    eraser.rendering.blend_mode = blend;
+                    brush.frame(eraser, &stroke, 1, DabBatchKind::Persistent)
+                });
+                assert!(erased[1].iter().zip(&before).any(|(a, b)| (a[3] - b[3]).abs() > 0.01), "{space:?} {mode:?} {accumulation:?} contact={contact:?}: erasing removes paint");
+                for (i, (a, b)) in erased[1].iter().zip(&erased[0]).enumerate() {
                     for c in 0..4 {
-                        assert!((a[c] - b[c]).abs() < 2e-4, "{space:?} {mode:?} contact={contact:?} pixel {i} channel {c}: brush {} != layer {}", a[c], b[c]);
+                        assert!((a[c] - b[c]).abs() < 2e-4, "{space:?} {mode:?} {accumulation:?} contact={contact:?} pixel {i} channel {c}: erasing {} != erasing with Normal {}", a[c], b[c]);
                     }
                 }
             }

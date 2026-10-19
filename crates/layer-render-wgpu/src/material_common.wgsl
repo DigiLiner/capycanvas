@@ -43,9 +43,9 @@ struct MaterialSources {
 @group(2) @binding(12) var<uniform> material_sources: MaterialSources;
 
 struct MaterialOutput {
-    @location(0) color: vec4<f32>,
-    @location(1) coverage: vec4<f32>,
-    @location(2) wetness: vec4<f32>,
+    color: vec4<f32>,
+    coverage: vec4<f32>,
+    wetness: vec4<f32>,
 }
 
 struct MaterialContact { pigment:vec3<f32>, coverage:f32, repaint:bool, held:bool }
@@ -60,10 +60,6 @@ fn contact_coverage_field(dab: Dab, world: vec2<f32>, field: vec2<f32>) -> f32 {
 
 fn brush_blend() -> u32 {
     return u32(style.render_mode.x);
-}
-
-fn brush_normal() -> bool {
-    return MATERIAL_NORMAL_BLEND || blend_mode(brush_blend()) == 0u;
 }
 
 fn deposit_encoded() -> bool {
@@ -97,7 +93,7 @@ fn source_over(destination: vec4<f32>, source_color: vec3<f32>, source_alpha: f3
     // unassociation and two redundant products, keep this direct form: the
     // expanded general expression produces dark contact edges in specialized
     // shaders on the Wacom's Adreno Vulkan driver (including native saved paint).
-    if brush_normal() {
+    if MATERIAL_NORMAL_BLEND {
         if style.color.a > 0.5 {
             return vec4<f32>(mix(destination.rgb, source_color * da, source_alpha), da);
         }
@@ -144,7 +140,7 @@ fn grouped_deposit(result: vec4<f32>, background: vec4<f32>, pigment: vec3<f32>,
     if style.operation.w != 0u {
         return result * (1.0-alpha) + background * ((1.0-opacity)*alpha);
     }
-    if brush_normal() {
+    if MATERIAL_NORMAL_BLEND {
         let source = select(vec4<f32>(pigment,1.0),vec4<f32>(pigment*background.a,background.a),style.color.a>0.5);
         return mix(result,background*(1.0-opacity)+source*opacity,alpha);
     }

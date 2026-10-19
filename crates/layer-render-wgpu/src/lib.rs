@@ -510,26 +510,6 @@ impl DirectPipelineKind {
     const COUNT: usize = 2;
 }
 
-#[repr(usize)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum MaterialPipelineKind {
-    Color,
-    Coverage,
-}
-
-impl MaterialPipelineKind {
-    const COUNT: usize = 2;
-    const OPERATIONS: [MaterialOperation; 3] = [MaterialOperation::Deposit, MaterialOperation::Coverage, MaterialOperation::Clone];
-
-    fn index(self, operation: MaterialOperation) -> usize {
-        Self::OPERATIONS.iter().position(|o| *o == operation).expect("a fragment material") * Self::COUNT + self as usize
-    }
-
-    fn for_attachments(coverage: bool) -> Self {
-        if coverage { Self::Coverage } else { Self::Color }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BrushEncodingTarget {
     Persistent,
@@ -853,8 +833,6 @@ struct Pipelines {
     dry_material: dry_material::Pipelines,
     destination_material: destination_material::Pipelines,
     direct: [Deferred<wgpu::RenderPipeline>; DirectPipelineKind::COUNT],
-    material: [[Deferred<wgpu::RenderPipeline>;
-        MaterialPipelineKind::OPERATIONS.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_SLOTS],
     watercolor_transport: [Deferred<wgpu::ComputePipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
     stroke_edge: Deferred<wgpu::RenderPipeline>,
     watercolor_composite: Deferred<wgpu::RenderPipeline>,
@@ -865,15 +843,6 @@ struct Pipelines {
 impl Pipelines {
     fn direct(&self, kind: DirectPipelineKind) -> &wgpu::RenderPipeline {
         &self.direct[kind as usize]
-    }
-
-    fn material(
-        &self,
-        style: &layer_render::DabStyle,
-        operation: MaterialOperation,
-        kind: MaterialPipelineKind,
-    ) -> &Deferred<wgpu::RenderPipeline> {
-        &self.material[dry_material::material_slot(style)][kind.index(operation)]
     }
 }
 
@@ -2450,9 +2419,9 @@ impl WgpuRasterizer {
         self.style_upload.resize(used, 0);
         for index in 0..packet.dab_batches.len() {
             let batch = &packet.dab_batches[index];
-            let block = if self.compute_dry_material(batch) { self.dry_material_block(batch) } else { 1 };
+            let block = self.dry_material_block(batch);
             let mut record = StyleGpu::brush(self.target_extent(batch.target), batch, block, &self.device, self.paper_style(&batch.style));
-            if self.compute_dry_material(batch) && self.compact_preview_contribution(batch) {
+            if self.compact_preview_contribution(batch) {
                 record.flags[3] = 2.;
             }
             if dry_material::single_pigment_marked(&batch.style) && batch.dab_count>0 {
@@ -5340,7 +5309,7 @@ fn create_target_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 }
 
 fn create_material_layout(device: &PipelineDevice) -> wgpu::BindGroupLayout {
-    let stages = wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
+    let stages = wgpu::ShaderStages::COMPUTE;
     let storage = wgpu::BufferBindingType::Storage { read_only: true };
     let entries = (0..12).map(|binding| match binding {
         9 => bindings::buffer(9, stages, storage, false, None),
@@ -5628,16 +5597,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         ],
         immediate_size: 0,
     });
-    let material_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("layer destination brush pipeline layout"),
-        bind_group_layouts: &[
-            Some(layouts.style),
-            Some(layouts.target),
-            Some(layouts.material),
-            Some(layouts.advanced_texture),
-        ],
-        immediate_size: 0,
-    });
     let edge_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("layer post-stroke edge pipeline layout"),
         bind_group_layouts: &[
@@ -5707,43 +5666,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             brush_pipeline_format_recipe(mode, &device, &layout, &shader, "fragment_main", blend, device.working_format(), label)
         })
     });
-    let color_target = Some(wgpu::ColorTargetState {
-        format: device.working_format(),
-        blend: None,
-        write_mask: wgpu::ColorWrites::ALL,
-    });
-    let coverage_target = Some(wgpu::ColorTargetState {
-        format: device.scalar_format(),
-        blend: None,
-        write_mask: wgpu::ColorWrites::RED,
-    });
-    let material_targets = [
-        (
-            [color_target.clone(), None, None],
-            "layer destination brush color",
-        ),
-        (
-            [color_target, coverage_target, None],
-            "layer destination brush with stroke coverage",
-        ),
-    ];
-    // Each destination operation, contact and blend specialization compiles its
-    // own module; attachment variants of one operation share it.
-    let paint_shaders: [[_; MaterialPipelineKind::OPERATIONS.len()]; dry_material::MATERIAL_SLOTS] = std::array::from_fn(|slot| {
-        let (flags, blend) = dry_material::material_entries(slot);
-        MaterialPipelineKind::OPERATIONS.map(|operation| dry_material::material_shader(device, dry_material::Entries::Fragment(blend), flags, operation))
-    });
-    let material = std::array::from_fn(|slot| std::array::from_fn(|index| {
-        let (targets, label) = material_targets[index % MaterialPipelineKind::COUNT].clone();
-        let (device, layout, shader) = (
-            device.clone(),
-            material_pipeline_layout.clone(),
-            paint_shaders[slot][index / MaterialPipelineKind::COUNT].clone(),
-        );
-        Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_targets_with_constants_recipe(mode, &device, &layout, &shader, "fragment_main", &targets, &[], label)
-        })
-    }));
     let watercolor_transport = std::array::from_fn(|step| {
         let (device, layout, shader) = (
             device.clone(),
@@ -5830,7 +5752,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         dry_material,
         destination_material,
         direct,
-        material,
         watercolor_transport,
         stroke_edge,
         watercolor_composite,

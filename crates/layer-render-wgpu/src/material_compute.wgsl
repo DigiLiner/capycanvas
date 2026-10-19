@@ -19,7 +19,7 @@ fn copy_color(@builtin(global_invocation_id) id:vec3<u32>) {
 
 fn saturated_dry_coverage(p: vec2<i32>) -> f32 {
     if !grouped_opacity() && dry_start_stored() && style.canvas_opacity.w < 0.5
-        && contact_uniform() && brush_normal() && !bristles_enabled() {
+        && contact_uniform() && MATERIAL_NORMAL_BLEND && !bristles_enabled() {
         return dry_coverage(p);
     }
     return 0.0;

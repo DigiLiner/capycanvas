@@ -26,8 +26,8 @@ selection can wait for compilation, while later selections reuse those handles.
 Startup cannot fail because of shaders needed only by an unused brush.
 Each material operation compiles its own modules, specialized for brushes
 without contact; other contacts share a module that reads each dab's flags.
-Destination fragments and wet and watercolor page kernels are also specialized
-for the brush blend mode; Smudge and Liquify, which never blend, share one module per contact.
+Dry kernels for other blend modes and wet and watercolor page kernels are also
+specialized for the brush blend mode; Smudge and Liquify, which never blend, share one module per contact.
 Non-dry operations exclude dry relief. Deposit and coverage retain their
 captured contact capabilities.
 Material recipes use the captured contact flags, accumulation and blend mode, with
@@ -56,7 +56,9 @@ kernel its strokes select was prepared. Kernels without fine-tip filtering omit
 its shader code. Once the brush is ready and speculative work is admitted, every
 host prepares the other tip size in the background so a later size change is
 usually ready; selecting another brush discards that queued work. This
-background work does not hold startup completion. Web's
+background work does not hold startup completion. A brush with another blend
+mode prepares one commit and one prediction kernel for its contact family and
+blend, with no tip-size or single-pigment variants. Web's
 `--tip-resize-readiness` checks that a Pencil resized from 4 to 300 px after an
 idle pause needs no compilation.
 

@@ -32,7 +32,7 @@ pub(super) const FINE_TIP: u32 = 16384;
 /// Contact flags that destination-material modules are specialized for; any
 /// other contact evaluates the flags each dab carries.
 pub(super) const MATERIAL_CONTACTS: [u32; 3] = [0, 128, u32::MAX];
-/// Brush blend modes that destination fragments compile only the formula of.
+/// Brush blend modes that destination modules compile only the formula of.
 pub(super) const MATERIAL_BLENDS: [BrushBlendMode; 8] = [BrushBlendMode::Normal, BrushBlendMode::Multiply, BrushBlendMode::Screen,
     BrushBlendMode::Add, BrushBlendMode::Subtract, BrushBlendMode::Darken, BrushBlendMode::Lighten, BrushBlendMode::Overlay];
 pub(super) const MATERIAL_SLOTS: usize = MATERIAL_CONTACTS.len() * MATERIAL_BLENDS.len();
@@ -42,7 +42,7 @@ pub(super) fn material_contact_slot(style: &layer_render::DabStyle) -> usize {
     MATERIAL_CONTACTS.iter().position(|&key| key == flags).unwrap_or(MATERIAL_CONTACTS.len() - 1)
 }
 
-/// The contact and blend specialization of a style's destination fragments.
+/// The contact and blend specialization of a style's destination modules.
 pub(super) fn material_slot(style: &layer_render::DabStyle) -> usize {
     material_contact_slot(style) * MATERIAL_BLENDS.len()
         + MATERIAL_BLENDS.iter().position(|&blend| blend == style.rendering.blend_mode).unwrap()
@@ -97,10 +97,8 @@ fn destination(start: Start) -> Cow<'static, str> {
 /// The entry points a destination-material module provides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Entries {
-    /// Dry compute kernels.
-    Kernel(Start),
-    /// The material fragment for one blend code.
-    Fragment(u32),
+    /// Dry compute kernels for one blend code.
+    Kernel(Start, u32),
     /// Page kernels of a transported material for one blend code, and Wet's
     /// reservoir exchange.
     Transport(u32),
@@ -132,8 +130,8 @@ pub(super) fn specialize_contact(source: Cow<'static,str>, flags:u32)->Cow<'stat
 
 pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&str,entries:Entries,flags:u32,operation:MaterialOperation)->Cow<'static,str> {
     use MaterialOperation as M;
-    let kernel=matches!(entries,Entries::Kernel(_));
-    let start=if let Entries::Kernel(start)=entries {start} else {Start::Sampled};
+    let kernel=matches!(entries,Entries::Kernel(..));
+    let start=if let Entries::Kernel(start,_)=entries {start} else {Start::Sampled};
     let leaf=if flags==u32::MAX || flags&(64|512)==512 {include_str!("material_contact.wgsl")} else {include_str!("dry_material_contact.wgsl")};
     let clone=if operation==M::Clone {compose_wgsl(&[include_str!("retouch_sample.wgsl"),include_str!("material_clone.wgsl")])} else {include_str!("clone_absent.wgsl").into()};
     let operation_source:Cow<'static,str>=match operation {
@@ -151,18 +149,17 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
         }
     };
     let entry=match entries {
-        Entries::Kernel(_) => include_str!("material_compute.wgsl"),
-        Entries::Fragment(_) => include_str!("material_brush.wgsl"),
+        Entries::Kernel(..) => include_str!("material_compute.wgsl"),
         Entries::Transport(_) => include_str!("material_destination.wgsl"),
         Entries::Gather => include_str!("material_gather.wgsl"),
     };
-    let blend_code=match entries {Entries::Fragment(mode) | Entries::Transport(mode) => mode, Entries::Kernel(_) | Entries::Gather => 0};
+    let blend_code=match entries {Entries::Kernel(_, mode) | Entries::Transport(mode) => mode, Entries::Gather => 0};
     let blend=blend_source(blend_code);
     let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),&blend,float_sampling,
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
         include_str!("material_common.wgsl"),&operation_source,leaf,entry,&coverage_source(flags),
         if flags!=u32::MAX && flags&AGGREGATE!=0 {include_str!("selection_absent.wgsl")} else {include_str!("selection_clip.wgsl")}]);
-    let absent=if kernel || matches!(operation,M::Deposit|M::Coverage) {0} else {64};
+    let absent=if kernel {0} else {64};
     let normal=blend_code==0;
     specialize_contact(source,flags)
         .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32))
@@ -281,9 +278,10 @@ pub(super) struct Pipelines {
     layouts: [wgpu::BindGroupLayout; 2],
     gather_layout: wgpu::BindGroupLayout,
     pub kernels: Kernels,
-    copy: Deferred<wgpu::ComputePipeline>,
+    copy: [Deferred<wgpu::ComputePipeline>; 2],
     gather: Deferred<wgpu::ComputePipeline>,
     variants: std::collections::BTreeMap<u32, Kernels>,
+    blended: std::collections::BTreeMap<usize, Kernels>,
 }
 
 pub(super) fn contact_flags(contact: Option<layer_core::BrushContact>) -> u32 {
@@ -359,25 +357,25 @@ impl Pipelines {
         });
         let pipeline_layouts: [_; 2] = std::array::from_fn(|coverage| pipeline_layout(&layouts[coverage]));
         let start = if in_place { Start::Stored } else { Start::Sampled };
-        let make_kernels = |flags: u32| -> Kernels {
+        let make_kernels = |flags: u32, blend: u32| -> Kernels {
             let shaders=OPERATIONS.map(|operation| {
                 let device=device.for_recipe();
                 Deferred::new(move||device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label:Some("layer specialized contact shader"),
-                    source:wgpu::ShaderSource::Wgsl(material_source(device.working_space(),device.float_sampling_wgsl(),Entries::Kernel(start),flags,operation)),
+                    source:wgpu::ShaderSource::Wgsl(material_source(device.working_space(),device.float_sampling_wgsl(),Entries::Kernel(start,blend),flags,operation)),
                 }))
             });
             std::array::from_fn(|index| {
                 let entry = if index % 2 == 0 { "compute_color" } else { "compute_coverage" };
-                Deferred::compute(device, format!("dry material {entry} operation={} contact={flags:#x}", OPERATIONS[index / 2] as u32),
+                Deferred::compute(device, format!("dry material {entry} operation={} contact={flags:#x} blend={blend}", OPERATIONS[index / 2] as u32),
                     &pipeline_layouts[index % 2], &shaders[index / 2], entry)
             })
         };
         let pages = Deferred::wgsl(device, "dry material pages",
-            material_source(device.working_space(), device.float_sampling_wgsl(), Entries::Kernel(start), u32::MAX, MaterialOperation::Deposit));
-        let copy = Deferred::compute(device, "dry unchanged pixels", &pipeline_layouts[0], &pages, "copy_color");
+            material_source(device.working_space(), device.float_sampling_wgsl(), Entries::Kernel(start, 0), u32::MAX, MaterialOperation::Deposit));
+        let copy = std::array::from_fn(|coverage| Deferred::compute(device, "dry unchanged pixels", &pipeline_layouts[coverage], &pages, "copy_color"));
         let gather = Deferred::compute(device, "dry display inputs", &pipeline_layout(&gather_layout), &pages, "gather_display");
-        let kernels = make_kernels(u32::MAX);
+        let kernels = make_kernels(u32::MAX, 0);
         let retouching = [
             layer_core::DefaultBrushPreset::CloneStamp,
             layer_core::DefaultBrushPreset::HealingBrush,
@@ -396,16 +394,20 @@ impl Pipelines {
         flags.extend(flags.clone().into_iter().map(|flags| flags | 128));
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&128==0).map(|f|f|AGGREGATE));
         flags.extend(flags.clone().into_iter().filter(|f|f&64!=0 && f&4096==0).map(|f|f|FINE_TIP));
-        let variants = flags.into_iter().map(|f| (f, make_kernels(f))).collect();
-        Self { in_place, layouts, gather_layout, kernels, copy, gather, variants }
+        let variants = flags.into_iter().map(|f| (f, make_kernels(f, 0))).collect();
+        let blended = (0..MATERIAL_SLOTS).filter(|slot| slot % MATERIAL_BLENDS.len() != 0).map(|slot| {
+            let (flags, blend) = material_entries(slot);
+            (slot, make_kernels(flags, blend))
+        }).collect();
+        Self { in_place, layouts, gather_layout, kernels, copy, gather, variants, blended }
     }
 
     pub(super) fn in_place(&self) -> bool {
         self.in_place
     }
 
-    pub(super) fn copy_kernel(&self) -> &Deferred<wgpu::ComputePipeline> {
-        &self.copy
+    pub(super) fn copy_kernel(&self, coverage: bool) -> &Deferred<wgpu::ComputePipeline> {
+        &self.copy[usize::from(coverage)]
     }
 
     pub(super) fn gather_kernel(&self) -> &Deferred<wgpu::ComputePipeline> {
@@ -418,7 +420,8 @@ impl Pipelines {
         // requirements, rather than carrying both models through every pixel.
         let flags = extra | contact_flags(style.contact)
             | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 };
-        let kernels = self.variants.get(&flags).unwrap_or(&self.kernels);
+        let kernels = if style.rendering.blend_mode == BrushBlendMode::Normal { self.variants.get(&flags).unwrap_or(&self.kernels) }
+            else { &self.blended[&material_slot(style)] };
         let slot = OPERATIONS.iter().position(|o| *o == operation).expect("a pointwise operation");
         &kernels[slot * 2 + usize::from(coverage)]
     }
@@ -441,7 +444,7 @@ impl WgpuRasterizer {
     }
 
     pub(super) fn in_place_dry_material(&self, batch: &DabBatch) -> bool {
-        batch.kind == DabBatchKind::Persistent && self.compute_dry_material(batch)
+        batch.kind == DabBatchKind::Persistent && pointwise(&batch.style)
             && BrushPassPlan::for_device(&batch.style, &self.device).requires_destination()
             && self.pipelines.dry_material.in_place()
     }
@@ -451,12 +454,6 @@ impl WgpuRasterizer {
     pub(super) fn dry_display_gathers(&self, batch: &DabBatch) -> bool {
         self.dry_display(batch) && self.dry_material_block(batch) > 1
             && (!self.compact_preview_contribution(batch) || BrushPassPlan::for_device(&batch.style, &self.device).state.coverage)
-    }
-
-    pub(super) fn compute_dry_material(&self, batch: &DabBatch) -> bool {
-        // Adreno's compute destination-blend specialization corrupts predicted
-        // Multiply batches. Non-normal blends use the ordered fragment path.
-        dry_material_compute_eligible(&batch.style)
     }
 
     pub(super) fn dry_material_block(&self, batch: &DabBatch) -> u32 {
@@ -510,14 +507,14 @@ impl WgpuRasterizer {
         }
         let cropped = operation == MaterialOperation::Deposit && dry_flow(&batch.style);
         let stored_start = pipelines.in_place() && !self.compact_preview_contribution(batch);
-        let copied = |job: &&Job| !job.coverage && !in_place && if stored_start { job.display.is_none() } else { cropped };
+        let copied = |job: &&Job| !in_place && if stored_start { job.display.is_none() } else { !job.coverage && cropped };
         if jobs.iter().any(|job| copied(&job)) {
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("dry material copy pages"), timestamp_writes: None,
             });
             pass.set_bind_group(3, &textures.bind_group, &[]);
-            pass.set_pipeline(pipelines.copy_kernel());
             for job in jobs.iter().filter(copied) {
+                pass.set_pipeline(pipelines.copy_kernel(job.coverage));
                 pass.set_bind_group(0, &job.output, &[style_offset]);
                 pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, job.coordinate)]);
                 pass.set_bind_group(2, job.inputs(), &[job.record_offset]);
@@ -554,10 +551,6 @@ impl WgpuRasterizer {
             pass.dispatch_workgroups(size[0].div_ceil(32),size[1].div_ceil(2),1);
         }
     }
-}
-
-pub(super) fn dry_material_compute_eligible(style: &layer_render::DabStyle) -> bool {
-    pointwise(style) && style.rendering.blend_mode == BrushBlendMode::Normal
 }
 
 pub(super) fn single_pigment_marked(style: &layer_render::DabStyle) -> bool {
@@ -616,13 +609,13 @@ impl Reach {
 /// Basic analytic contacts (including G-Pen, eraser and airbrush) have no
 /// unresolved paper, fiber, bristle or texture frequencies at display scale.
 pub(super) fn display_preview_eligible(style: &layer_render::DabStyle) -> bool {
-    style.execution == BrushExecution::Dry && dry_material_compute_eligible(style) && !style.rendering.edge_after_stroke
+    style.execution == BrushExecution::Dry && style.rendering.blend_mode == BrushBlendMode::Normal && !style.rendering.edge_after_stroke
         && !style.alpha_locked && style.selection.is_none() && style.grain.is_none()
         && matches!(style.tip, BrushTip::AnalyticEllipse) && contact_flags(style.contact) <= 1
 }
 
 pub(super) fn native_dry_preview_eligible(style: &layer_render::DabStyle) -> bool {
-    style.execution == BrushExecution::Dry && style.opacity == 1. && dry_material_compute_eligible(style)
+    style.execution == BrushExecution::Dry && style.opacity == 1. && style.rendering.blend_mode == BrushBlendMode::Normal
         && style.contact.is_some_and(|c| c.dry.is_some()) && contact_flags(style.contact) & !(67|2048|4096|32768) == 0
         && style.rendering.accumulation == BrushAccumulation::Flow && !style.rendering.edge_after_stroke
         && !style.alpha_locked && style.selection.is_none()
@@ -679,6 +672,38 @@ mod tests {
     }
 
     #[test]
+    fn selecting_a_brush_with_another_blend_compiles_only_its_blend_kernels() {
+        use layer_core::DefaultBrushPreset as Preset;
+        let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let document = layer_core::Document::new(layer_core::authored::PortableId::random(), 128, 128,
+            layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
+        for preset in [Preset::GPen, Preset::Pencil, Preset::Airbrush, Preset::Paintbrush, Preset::Charcoal, Preset::BristlePaintbrush,
+            Preset::MultiplyGlaze, Preset::CloneStamp, Preset::HealingBrush] {
+            for blend in [BrushBlendMode::Multiply, BrushBlendMode::Overlay] {
+                let mut brush = layer_core::default_brush(preset);
+                brush.rendering.blend_mode = blend;
+                let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
+                renderer.shader_idle(false, false);
+                renderer.prepare_startup(&document, &brush, false).unwrap();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+                crate::test_support::wait_startup(&mut renderer, deadline, |progress| progress.brush_ready, format_args!("{preset:?} preparation timed out"));
+                let p = &renderer.pipelines.dry_material;
+                let style = layer_render::DabStyle::for_brush(&brush, layer_core::StrokeTool::Brush);
+                let plan = BrushPassPlan::for_device(&style, &renderer.device);
+                let ready = |kernels: &Kernels| kernels.iter().filter(|k| k.ready()).count();
+                let blended = p.blended.values().map(ready).sum::<usize>();
+                let copied = plan.material == MaterialOperation::Deposit && dry_flow(&style);
+                println!("{preset:?} {blend:?}: {blended} blend kernels, copy {}", p.copy_kernel(false).ready());
+                assert_eq!(blended, 1 + usize::from(plan.state.coverage), "{preset:?} {blend:?} compiles its commit and prediction kernels");
+                assert!(p.selected_kernel(&style, plan.material, plan.state.coverage, 0).ready() && p.selected_kernel(&style, plan.material, false, 0).ready());
+                assert_eq!(ready(&p.kernels) + p.variants.values().map(ready).sum::<usize>() + usize::from(p.gather.ready()), 0,
+                    "{preset:?} {blend:?} compiles no normal kernel");
+                assert_eq!(p.copy.iter().filter(|k| k.ready()).count(), usize::from(copied), "{preset:?} {blend:?} prepares the unchanged-pixel copy only for dry-contact deposits");
+            }
+        }
+    }
+
+    #[test]
     fn blend_specialization_accepts_lf_and_crlf_sources() {
         let lf = include_str!("blend_modes.wgsl").replace("\r\n", "\n");
         let crlf = lf.replace('\n', "\r\n");
@@ -708,7 +733,7 @@ mod tests {
         }
         for &flags in &families {for operation in OPERATIONS {for filterable in [true, false] {
             for start in [Start::Stored, Start::Sampled] {
-            let source = material_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),Entries::Kernel(start),flags,operation);
+            let source = material_source(Default::default(),crate::pipeline_device::float_sampling_wgsl(filterable),Entries::Kernel(start, 0),flags,operation);
             let module = naga::front::wgsl::parse_str(&source).unwrap();
             assert_eq!(module.overrides.iter().any(|(_,v)|v.name.as_deref()==Some("CONTACT_FLAGS")),flags==u32::MAX);
             if flags!=u32::MAX {assert!(source.contains(&format!("const CONTACT_FLAGS: u32 = {flags}u;")));}
@@ -728,12 +753,13 @@ mod tests {
         for slot in 0..MATERIAL_SLOTS {for filterable in [true, false] {
             let sampling = crate::pipeline_device::float_sampling_wgsl(filterable);
             let (flags, blend) = material_entries(slot);
-            let fragments = MaterialPipelineKind::OPERATIONS.map(|operation| (Entries::Fragment(blend), operation, "fragment_main"));
+            let pointwise = [Start::Stored, Start::Sampled].into_iter().flat_map(|start| OPERATIONS.into_iter()
+                .flat_map(move |operation| ["compute_color", "compute_coverage"].map(|entry| (Entries::Kernel(start, blend), operation, entry))));
             let kernels = destination::OPERATIONS.into_iter()
                 .filter(|&operation| destination::blended(operation) || slot % MATERIAL_BLENDS.len() == 0)
                 .flat_map(|operation| destination::entries(operation).iter().map(move |&entry|
                     (if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(blend) }, operation, entry.name())));
-            for (entries, operation, entry) in fragments.into_iter().chain(kernels) {
+            for (entries, operation, entry) in pointwise.chain(kernels) {
                 let mut used = naga::front::wgsl::parse_str(&material_source(Default::default(), sampling, entries, flags, operation)).unwrap();
                 validate(&used);
                 used.entry_points.retain(|e| e.name == entry);
@@ -777,7 +803,7 @@ mod tests {
             let flags = contact_flags(brush.contact) | if uniform { 128 } else { 0 };
             let operation = if retouching.contains(&preset) { MaterialOperation::Clone } else if uniform { MaterialOperation::Coverage } else { MaterialOperation::Deposit };
             for extra in [0, AGGREGATE, FINE_TIP] {
-                let present = compiled(Entries::Kernel(Start::Stored), flags | extra, operation, "compute_color");
+                let present = compiled(Entries::Kernel(Start::Stored, 0), flags | extra, operation, "compute_color");
                 let what = format!("{preset:?} kernel {:#x}", flags | extra);
                 if flags & 64 == 0 { absent(&present, &relief, &what); }
                 if flags & 512 == 0 { absent(&present, &bristle, &what); }
@@ -794,8 +820,12 @@ mod tests {
             let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
             assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Gather | Entry::Reservoir)), "{what} reaches {operations:?}");
         }}}
-        let multiply = Entries::Fragment(layer_core::LayerBlend::from(BrushBlendMode::Multiply).code());
+        let multiply = layer_core::LayerBlend::from(BrushBlendMode::Multiply).code();
         let formulas = blend.iter().filter(|f| *f != "blend_luma").cloned().collect();
-        absent(&compiled(multiply, 0, MaterialOperation::Deposit, "fragment_main"), &formulas, "Multiply fragment");
+        for start in [Start::Stored, Start::Sampled] {
+            let present = compiled(Entries::Kernel(start, multiply), 0, MaterialOperation::Deposit, "compute_color");
+            assert!(present.contains("blend"), "{start:?} Multiply kernel blends");
+            absent(&present, &formulas, "Multiply kernel");
+        }
     }
 }

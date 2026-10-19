@@ -173,16 +173,24 @@ and one set of contact flags. A branch on a module constant still hands every
 function it calls to the device compiler, so a module composes stub entry points
 for the features it cannot reach: relief, bristles, evolving contact, retouch
 sampling, the selection lookup in aggregate kernels, which only run without a
-selection, and, in dry kernels, which only serve normal blending, the blend-mode
-formulas. Destination fragments and wet and watercolor page kernels compile only
-their brush blend mode's formula, and Smudge and Liquify page kernels, which never blend,
+selection, and, in normal-blend kernels, the blend-mode formulas. Dry kernels
+for other blend modes and wet and watercolor page kernels compile only their
+brush blend mode's formula, and Smudge and Liquify page kernels, which never blend,
 compile none; for brushes without contact they omit contact evaluation, and any
 other contact evaluates each dab's flags. Aggregate and ordered deposition share one
 contact loop, selected by the existing batch marker. They compile separate
 variants so ordered compositing does not increase the fast path's register
-requirements. The small-contact antialiasing variant also remains separate. Normal pointwise brushes
-prepare their compute kernels without also compiling the unused render fallback.
-Other blend modes retain that fallback.
+requirements. The small-contact antialiasing variant also remains separate. Dry
+kernels for other blend modes have one module per contact family and blend,
+without aggregate or small-contact variants.
+
+Inside the contact loop, erasing multiplies the paint by the contact's
+transparency and every other mode deposits through the blend. The loop computes
+the deposit for every contact and then selects the erased paint, rather than
+branching between them on the batch's erase flag: the Adreno Vulkan driver on
+the Wacom MovinkPad 14 took the deposit branch for every contact after the first
+in modules that evaluate each dab's contact flags, so an eraser painted and
+partial-opacity strokes lost contacts.
 
 Selections apply after this transfer. Empty contacts remain empty through subsequent
 passes with the same pose and pressure. Opacity limits one stroke; pen-up resets

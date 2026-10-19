@@ -13,7 +13,7 @@ fn dry_material_kernel_spirv() {
     let operation = if uniform { MaterialOperation::Coverage } else { MaterialOperation::Deposit };
     let flags = dry_material::contact_flags(brush.contact) | if uniform { 128 } else { 0 } | extra;
     let start = if r.pipelines.dry_material.in_place() { dry_material::Start::Stored } else { dry_material::Start::Sampled };
-    let source = dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), dry_material::Entries::Kernel(start), flags, operation);
+    let source = dry_material::material_source(r.device.working_space(), r.device.float_sampling_wgsl(), dry_material::Entries::Kernel(start, 0), flags, operation);
     if let Ok(path) = std::env::var("CAPY_KERNEL_WGSL") { std::fs::write(path, source.as_bytes()).unwrap(); }
     let module = naga::front::wgsl::parse_str(&source).unwrap();
     let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())

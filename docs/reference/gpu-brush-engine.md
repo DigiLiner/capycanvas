@@ -72,8 +72,8 @@ One semantic model does not mean one pipeline. A renderer-private
 `BrushPassPlan` compiles each frozen batch style once into its raster family,
 typed material operation, sparse state attachments, reservoir use, and edge
 work. Allocation, committed rendering, and prediction consume that same plan.
-Readiness keys distinguish compute-material and fragment-material routes. Blend
-values that use the same route reuse its prepared pipelines.
+Readiness keys include the blend mode, which selects the material module;
+returning to a blend reuses its prepared pipelines.
 The selected pipeline is prepared before pen-down:
 
 - dry analytic paint or erase uses an instanced graphics pass and fixed-function

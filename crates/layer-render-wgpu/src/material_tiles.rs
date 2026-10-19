@@ -98,8 +98,7 @@ impl WgpuRasterizer {
         if transported {
             self.encode_transport_jobs(encoder, batch_index, batch, batch_dabs, &jobs, layer_index, preview, preview && !from_persistent)?;
         }
-        let texture_key = Self::texture_set_key(&batch.style);
-        let gathers = self.compute_dry_material(batch) && self.dry_display_gathers(batch);
+        let gathers = self.dry_display_gathers(batch);
         if gathers {
             while self.dry_display_inputs.len() < jobs.len().min(dry_material::DISPLAY_INPUT_SETS) {
                 let inputs = dry_material::DisplayInputs::new(&self.device);
@@ -150,76 +149,25 @@ impl WgpuRasterizer {
                         &coverage.primary
                     }
                 });
-            let coverage_view = coverage_surface.map(|p| &p.view);
-            let record_offset = self.material_records.offset(record_index);
-            if self.compute_dry_material(batch) {
-                let pipelines = &self.pipelines.dry_material;
-                let tracked = in_place || (self.compact_preview_contribution(batch) && pipelines.in_place()
-                    && self.changed_cells.as_ref().unwrap().preview_reusable(self,batch.target,job.coordinate,destination));
-                compute_jobs.push(dry_material::Job {
-                    output: pipelines.output(self, destination, coverage_surface, tracked.then_some((batch.target, job.coordinate))),
-                    source: source_bind_group,
-                    display: display_slot.zip(display).map(|(slot, inputs)| dry_material::DisplayJob {
-                        gather: self.dry_display_inputs[slot].gather(self, destination), inputs,
-                    }),
-                    coordinate: job.coordinate,
-                    coverage: coverage_view.is_some(),
-                    record_offset,
-                    dirty: job.local,
-                });
-                destination.preview.set(None);
-                if borrowed {
-                    self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
-                    compute_jobs.clear();
-                }
-                continue;
-            }
-            destination.preview.set(None);
-            let attachment = |view| wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            };
-            let color_attachments = [Some(attachment(&destination.view)), coverage_view.map(attachment), None];
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("layer material tile"),
-                color_attachments: &color_attachments,
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
+            let pipelines = &self.pipelines.dry_material;
+            let tracked = in_place || (self.compact_preview_contribution(batch) && pipelines.in_place()
+                && self.changed_cells.as_ref().unwrap().preview_reusable(self,batch.target,job.coordinate,destination));
+            compute_jobs.push(dry_material::Job {
+                output: pipelines.output(self, destination, coverage_surface, tracked.then_some((batch.target, job.coordinate))),
+                source: source_bind_group,
+                display: display_slot.zip(display).map(|(slot, inputs)| dry_material::DisplayJob {
+                    gather: self.dry_display_inputs[slot].gather(self, destination), inputs,
+                }),
+                coordinate: job.coordinate,
+                coverage: coverage_surface.is_some(),
+                record_offset: self.material_records.offset(record_index),
+                dirty: job.local,
             });
-            pass.set_pipeline(self.pipelines.material(
-                &batch.style,
-                plan.material,
-                MaterialPipelineKind::for_attachments(coverage_view.is_some()),
-            ));
-            pass.set_bind_group(
-                0,
-                &self.style_bind_group,
-                &[batch_index as u32 * self.style_stride as u32],
-            );
-            pass.set_bind_group(
-                1,
-                self.paint_target_binding(&batch.style),
-                &[self.layer_target_offset(batch.target, job.coordinate)],
-            );
-            pass.set_bind_group(2, &source_bind_group, &[record_offset]);
-            pass.set_bind_group(
-                3,
-                &self
-                    .texture_sets
-                    .iter()
-                    .find(|set| set.key == texture_key)
-                    .unwrap()
-                    .bind_group,
-                &[],
-            );
-            pass.draw(0..3, 0..1);
+            destination.preview.set(None);
+            if borrowed {
+                self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
+                compute_jobs.clear();
+            }
         }
         self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
         compute_jobs.clear();

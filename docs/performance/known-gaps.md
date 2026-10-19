@@ -17,9 +17,9 @@
     7.6, Opaque Gouache 7.7, Palette Knife 10.1, Natural Blender 10.4, Wet Round
     13.4, Watercolor Wash 13.5, Wet Watercolor 14.7 and Smudge 15.1, with at
     most 16,700 mappings.
-  - Multiply Glaze at 1024 px completes 36.5 updates/s on the MovinkPad Pro 14
-    (76.1 on 2026-09-27); dry brushes with a non-normal blend still render one
-    pass per page.
+  - Multiply Glaze at 1024 px completes 81.8 updates/s on the MovinkPad Pro 14
+    and 11.7 on the MovinkPad 11, where its compute kernel is slower than the
+    fragment path it replaced (13.7).
 - **The simple-brush class remains unqualified.**
   - On the current contained 60 × 10 path, 1536 px G-Pen reaches only
     75.36–75.54 fresh updates/s on Mid (target 90), although its gap passes.

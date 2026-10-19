@@ -21,14 +21,14 @@ fn pointwise_paint_fragment(fragment_position:vec4<f32>)->MaterialOutput {
         && !grouped && deposit_unchanged(result,background,dabs[range.x].color.rgb) {
         return MaterialOutput(result,vec4<f32>(0.0),vec4<f32>(0.0));
     }
-    if !grouped && contact_uniform() && brush_normal() && !bristles_enabled() && stroke_coverage >= 1.0 {
+    if !grouped && contact_uniform() && MATERIAL_NORMAL_BLEND && !bristles_enabled() && stroke_coverage >= 1.0 {
         return MaterialOutput(result, vec4<f32>(stroke_coverage, 0.0, 0.0, 1.0), vec4<f32>(0.0));
     }
     if MATERIAL_OPERATION == OP_DEPOSIT && grouped && style.material_a.w>0.5
         && deposit_unchanged(result,background,dabs[range.x].color.rgb) {
         return MaterialOutput(result,vec4<f32>(0.0),vec4<f32>(0.0));
     }
-    let telescoped = !grouped && MATERIAL_OPERATION == OP_CLONE && contact_uniform() && brush_normal();
+    let telescoped = !grouped && MATERIAL_OPERATION == OP_CLONE && contact_uniform() && MATERIAL_NORMAL_BLEND;
     var clone_source = vec4<f32>(0.0);
     if MATERIAL_OPERATION == OP_CLONE && !telescoped {
         let source = clone_source_at(fragment_position.xy);
@@ -99,13 +99,15 @@ fn pointwise_paint_fragment(fragment_position:vec4<f32>)->MaterialOutput {
                 stroke_coverage = next_coverage;
             }
         }
-        if !grouped && style.operation.w != 0u { result *= 1.0 - source_alpha; }
-        else if source_alpha > 0.0 {
+        let erasing = !grouped && style.operation.w != 0u;
+        let erased = result * (1.0 - source_alpha);
+        if source_alpha > 0.0 {
             if !deposited { deposited = true; result = deposit_paint(result); }
             let color = select(pigment, clone_source.rgb, MATERIAL_OPERATION == OP_CLONE);
             if grouped { result = grouped_deposit(result, background, color, source_alpha); }
             else { result = source_over(result, color, source_alpha); }
         }
+        result = select(result, erased, erasing);
     }
     if aggregate {
         let remaining = exp(-6.0*dose);

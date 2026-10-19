@@ -161,13 +161,13 @@ impl Requirements {
             return;
         }
         let plan = BrushPassPlan::for_device(style, &r.device);
-        if dry_material::dry_material_compute_eligible(style) && plan.direct.is_none() {
+        if pointwise(style) && plan.direct.is_none() {
             let pipelines = &r.pipelines.dry_material;
             if plan.material == MaterialOperation::Deposit && dry_material::dry_flow(style)
                 && (preview || (!pipelines.in_place() && !plan.state.coverage)) {
-                self.compute.push(pipelines.copy_kernel().clone());
+                self.compute.push(pipelines.copy_kernel(false).clone());
             }
-            if preview { self.compute.push(pipelines.gather_kernel().clone()); }
+            if preview && style.rendering.blend_mode == BrushBlendMode::Normal { self.compute.push(pipelines.gather_kernel().clone()); }
             for extra in reach.batch_variants(style) {
                 let kernel = |coverage| pipelines.selected_kernel(style, plan.material, coverage, extra).clone();
                 self.compute.push(kernel(plan.state.coverage));
@@ -179,14 +179,6 @@ impl Requirements {
         } else if destination_material::transported(style) {
             let kernels = &r.pipelines.destination_material;
             self.compute.extend(destination_material::selected(plan, preview).map(|entry| kernels.kernel(style, entry).clone()));
-        } else if !dry_material::dry_material_compute_eligible(style) {
-            let kind = MaterialPipelineKind::for_attachments(plan.state.coverage);
-            self.render.push(r.pipelines.material(style, plan.material, kind).clone());
-            if preview {
-                // A single predicted destination batch on a simple canvas reads
-                // persistent coverage but writes only its disposable color.
-                self.render.push(r.pipelines.material(style, plan.material, MaterialPipelineKind::Color).clone());
-            }
         }
         if plan.stroke_edge {
             self.render.push(r.pipelines.stroke_edge.clone());
@@ -222,7 +214,7 @@ struct ShaderBrushKey {
     execution: BrushExecution,
     paint: BrushPassPlan,
     erase: BrushPassPlan,
-    material_compute: bool,
+    blend: BrushBlendMode,
     dry_material: u32,
     reach: dry_material::Reach,
 }
@@ -247,7 +239,7 @@ impl ShaderBrushKey {
             execution: style.execution,
             paint,
             erase,
-            material_compute: dry_material::dry_material_compute_eligible(&style),
+            blend: style.rendering.blend_mode,
             dry_material: dry_material::contact_flags(style.contact) | if style.rendering.accumulation == BrushAccumulation::Uniform { 128 } else { 0 },
             reach: dry_material::Reach::of(brush),
         }
@@ -1078,7 +1070,7 @@ mod gpu_tests {
             }
             assert!(p.gather_kernel().ready(),"{preset:?} display input gather is ready");
             if brush.contact.is_some_and(|c|c.dry.is_some()) {
-                assert!(p.copy_kernel().ready());
+                assert!(p.copy_kernel(false).ready());
             }
         }
     }
@@ -1154,14 +1146,14 @@ mod gpu_tests {
     }
 
     #[test]
-    fn changing_normal_material_route_prepares_before_painting() {
+    fn changing_the_blend_mode_prepares_its_kernel_before_painting() {
         let reference = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
         let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
         let document = Document::new(layer_core::authored::PortableId::random(), 128, 128,
             layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
         let target = document.scene().targets().find(|target| matches!(target, SourceTarget::Paint(_))).unwrap();
         let mut brush = layer_core::default_brush(layer_core::DefaultBrushPreset::GPen);
-        for (step, mode) in [BrushBlendMode::Normal, BrushBlendMode::Multiply, BrushBlendMode::Normal].into_iter().enumerate() {
+        for (step, mode) in [BrushBlendMode::Normal, BrushBlendMode::Multiply, BrushBlendMode::Screen, BrushBlendMode::Normal].into_iter().enumerate() {
             brush.rendering.blend_mode = mode;
             assert!(renderer.startup_needs_update(&document, &brush, false), "route change must invalidate readiness");
             renderer.prepare_startup(&document, &brush, false).unwrap();
@@ -1171,20 +1163,14 @@ mod gpu_tests {
             let style = layer_render::DabStyle { blend_space: document.composition().blend,
                 ..layer_render::DabStyle::for_brush(&brush, StrokeTool::Brush) };
             let plan = BrushPassPlan::for_device(&style, &renderer.device);
-            if mode == BrushBlendMode::Multiply {
-                assert!(!dry_material::dry_material_compute_eligible(&style));
-                assert!(renderer.pipelines.material(&style, plan.material, MaterialPipelineKind::Coverage).ready(),
-                    "non-normal fragment must be compiled before painting");
-            } else {
-                assert!(renderer.pipelines.dry_material.selected_kernel(&style, plan.material, true, 0).ready(),
-                    "normal destination kernel must be compiled before painting");
-            }
+            assert!(renderer.pipelines.dry_material.selected_kernel(&style, plan.material, true, 0).ready(),
+                "{mode:?} destination kernel must be compiled before painting");
             let mut frame = crate::test_support::packet(document.scene(), [128; 2]);
             frame.blend_space = document.composition().blend;
             frame.reset_layers = step == 0;
             renderer.submit(frame).unwrap();
             let before = renderer.readback_srgb_rgba8().unwrap();
-            let x = 32 + step as u32 * 32;
+            let x = 24 + step as u32 * 26;
             let mut dab = crate::tests::test_dab([x as f32, 64.], [0.2, 0.4, 0.8, 1.], 1.);
             dab.radii = [8.; 2];
             dab.previous = [8., 8., 1., 0.];
