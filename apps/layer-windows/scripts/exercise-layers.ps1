@@ -37,14 +37,15 @@ function Expand([string]$Id){
     $hit=@{item=$null};Wait-Until {$hit.item=Find $Id -Type ([System.Windows.Automation.ControlType]::MenuItem);$null -ne $hit.item} "Missing submenu: $Id"
     $hit.item.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
 }
-function Focus([string]$Id){
+function Focus([string]$Id,[switch]$Keyboard){
     [CapyLayersCapture]::SetForegroundWindow($drawingWindow)|Out-Null
-    $item=Control $Id;$item.SetFocus();Wait-Until {$item.Current.HasKeyboardFocus} "Missing focus on $Id"
+    if($Keyboard){Focus-Keyboard (Control $Id -Arranged)}
+    else{$item=Control $Id;$item.SetFocus();Wait-Until {$item.Current.HasKeyboardFocus} "Missing focus on $Id"}
 }
 function Toggle-Flag([string]$Id,[switch]$Keyboard){
     $pattern=(Control $Id).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
     $before=$pattern.Current.ToggleState
-    if($Keyboard){Focus $Id;[CapyRowPointer]::Key([uint32]$review.Id,0x20)}else{$pattern.Toggle()}
+    if($Keyboard){Focus $Id -Keyboard;[CapyRowPointer]::Key([uint32]$review.Id,0x20)}else{$pattern.Toggle()}
     Wait-Until {$pattern.Current.ToggleState -ne $before} "Accessible toggle state did not change: $Id"
 }
 function Edit([string]$Id,[string]$Text){

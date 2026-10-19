@@ -413,7 +413,7 @@ function Paper-Geometry {
 }
 function Paper-Activate([switch]$Keyboard,[string]$Device='mouse'){
     $count=(Model).state.layers.Count
-    if($Keyboard){Focus 'layer-add-paper';[CapyRowPointer]::Key([uint32]$review.Id,0x20)}
+    if($Keyboard){Focus 'layer-add-paper' -Keyboard;[CapyRowPointer]::Key([uint32]$review.Id,0x20)}
     else{
         $b=(Control 'layer-add-paper' -Arranged).Current.BoundingRectangle
         @{device=$Device;bounds=$b;count=$count}|ConvertTo-Json|Set-Content (Join-Path $run "paper-activate-$Device-$((Model).state.theme).json")

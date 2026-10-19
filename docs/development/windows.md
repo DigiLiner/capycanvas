@@ -1026,6 +1026,8 @@ the focused header journeys also check placement cancellation and keyboard input
   before sending keys. `Focus-Keyboard` uses native Tab traversal when testing
   keyboard activation: UI Automation's SetFocus requests programmatic focus, and
   HasKeyboardFocus alone does not establish keyboard modality for Space.
+  The Layers fixture requests keyboard focus explicitly before Space activates
+  Add paper or native toggles.
   Revealing an offscreen row can move focus to another child.
   UI Automation hit queries can expose only the owned native host pane. Retain
   stable target bounds and native window ownership, then require acknowledged
