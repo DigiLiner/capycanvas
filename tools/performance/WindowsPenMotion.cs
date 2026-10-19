@@ -31,9 +31,9 @@ public static class WindowsPenMotion {
   Run(owner,cx,cy,rx,ry,seconds,hz,output,double.NaN,0);
  }
  public static void Run(uint owner,int cx,int cy,int rx,int ry,int seconds,int hz,string output,double sweep,double startAngle) {
-  if(!double.IsNaN(sweep)&&(!double.IsFinite(sweep)||Math.Abs(sweep)>2*Math.PI||sweep==0||!double.IsFinite(startAngle)))throw new ArgumentOutOfRangeException();
+  if(!double.IsNaN(sweep)&&(Math.Abs(sweep)>2*Math.PI||sweep==0||double.IsNaN(startAngle)||double.IsInfinity(startAngle)))throw new ArgumentOutOfRangeException();
   if(seconds<1||seconds>30||hz<30||hz>1000)throw new ArgumentOutOfRangeException();
-  if(Marshal.SizeOf(typeof(PenInfo))!=120)throw new Exception("Requires x64 Windows ABI");
+  if(Marshal.SizeOf(typeof(PenInfo))!=120)throw new Exception("Requires 64-bit Windows ABI");
   var device=CreateSyntheticPointerDevice(3,1,3);if(device==IntPtr.Zero)throw new Win32Exception(Marshal.GetLastWin32Error());
   var timer=CreateWaitableTimerEx(IntPtr.Zero,null,2,0x1F0003);
   if(timer==IntPtr.Zero){DestroySyntheticPointerDevice(device);throw new Win32Exception(Marshal.GetLastWin32Error());}

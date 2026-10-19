@@ -16,4 +16,15 @@ foreach($encoding in @([Text.Encoding]::UTF8,[Text.Encoding]::GetEncoding(1252))
     }
     if($projectTitle -cne $expected -or $modifiedProjectTitle -cne ([char]0x2022+' '+$expected)){throw 'Pen capture title checks depend on script encoding.'}
 }
-Write-Output 'Pen capture title encoding regression passed.'
+Add-Type -Path (Join-Path $PSScriptRoot '../../../tools/performance/WindowsPenMotion.cs')
+if([Runtime.InteropServices.Marshal]::SizeOf([type][WindowsPenMotion+PenInfo]) -ne 120){throw 'Pen capture ABI layout changed.'}
+foreach($angles in @(@([double]::PositiveInfinity,0),@([double]::NegativeInfinity,0),@(0,0),@(7,0),@(1,[double]::NaN),@(1,[double]::PositiveInfinity),@(1,[double]::NegativeInfinity))) {
+    $rejected=$false
+    try {[WindowsPenMotion]::Run(0,0,0,1,1,1,240,'unused.csv',$angles[0],$angles[1])}
+    catch [Management.Automation.MethodInvocationException] {
+        if($_.Exception.InnerException -isnot [ArgumentOutOfRangeException]){throw}
+        $rejected=$true
+    }
+    if(!$rejected){throw 'Pen capture accepted an invalid angle.'}
+}
+Write-Output 'Pen capture title encoding, ABI and input validation regressions passed.'

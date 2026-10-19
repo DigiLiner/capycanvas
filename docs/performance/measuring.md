@@ -467,6 +467,8 @@ It retains the owned drawing window and waits for the requested document,
 enabled canvas and current brush controls before committing the brush size.
 Title markers use explicit Unicode code points so Windows PowerShell 5.1 and
 PowerShell 7 enforce the same exact title checks.
+The pen driver compiles against Windows PowerShell's .NET Framework as well as
+PowerShell 7 and checks the common 64-bit Windows pointer layout.
 After three seconds of settling, it checks the arranged canvas bounds and paces
 a pen circle at up to 240 Hz, recording actual injection timestamps; a delayed
 sample never triggers a catch-up burst. The report matches inputs to DXGI frame
