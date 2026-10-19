@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Opt-in benchmark in an isolated editor. Uses the ordinary input owner,
 /// display link, renderer, panels, history and recovery writer on both hosts.
@@ -76,10 +77,12 @@ import Foundation
         restoringPrime = false
     }
     private func prepare() async throws {
-        guard let native = store?.native else { throw CancellationError() }
+        guard let store, let native = store.native else { throw CancellationError() }
         let extent = plan.documentExtent
         let source = plan.document.map { URL(fileURLWithPath: $0) }
         if source == nil {
+            let files = store.projectFiles
+            let epoch = store.state["document_file"]["epoch"].uint
             try await action(["type": "invoke", "command": "new_document"])
             let steps: [[String: Any]] = [
                 ["op": "open", "screen": NSNull(), "untitled": "Performance workload"],
@@ -90,24 +93,37 @@ import Foundation
                 ["op": "paper"], ["op": "pick_paper", "id": "drawing_paper"], ["op": "use_paper"],
                 ["op": "paper_color"], ["op": "paper_color_value", "color": ["space": "Srgb", "rgba": [1, 1, 1, 1]]],
                 ["op": "transparent", "transparent": false], ["op": "use_paper_color"], ["op": "create"]]
-            for step in steps { try await action(["type": "new_drawing", "action": step]) }
-        }
-        let job: NativeProjectTask = try await withCheckedThrowingContinuation { continuation in
-            native.projectTask(kind: .open) { task, error in
-                if let task { continuation.resume(returning: task) }
-                else { continuation.resume(throwing: HostFailure(message: error ?? "Workload document preparation failed")) }
+            for step in steps {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    files.newDrawing(step) { error in
+                        if let error { continuation.resume(throwing: HostFailure(message: error)) }
+                        else { continuation.resume() }
+                    }
+                }
             }
-        }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            NativeProjectTask.io.async {
-                do { try job.read(from: source); continuation.resume() }
-                catch { continuation.resume(throwing: error) }
+            for await busy in files.$busy.values { if !busy { break } }
+            guard files.error == nil, !files.creating, !files.blocksEditor,
+                store.state["document_file"]["epoch"].uint != epoch else {
+                throw HostFailure(message: files.error ?? "Workload document preparation failed")
             }
-        }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            native.finishProject(job, opening: true, title: "Performance workload", url: nil) { error in
-                if let error { continuation.resume(throwing: HostFailure(message: error)) }
-                else { continuation.resume() }
+        } else {
+            let job: NativeProjectTask = try await withCheckedThrowingContinuation { continuation in
+                native.projectTask(kind: .open) { task, error in
+                    if let task { continuation.resume(returning: task) }
+                    else { continuation.resume(throwing: HostFailure(message: error ?? "Workload document preparation failed")) }
+                }
+            }
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                NativeProjectTask.io.async {
+                    do { try job.read(from: source); continuation.resume() }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                native.finishProject(job, opening: true, title: "Performance workload", url: nil) { error in
+                    if let error { continuation.resume(throwing: HostFailure(message: error)) }
+                    else { continuation.resume() }
+                }
             }
         }
         // Seven translucent underpaint layers plus the active paint layer in
@@ -130,7 +146,7 @@ import Foundation
             }
             try await action(["type": "preferences", "action": ["type": "edit", "id": "transparency", "value": index]])
         }
-        guard let store, store.state["layers"].array.count == plan.paintLayers + 1 else {
+        guard store.state["layers"].array.count == plan.paintLayers + 1 else {
             throw HostFailure(message: "The workload layer count does not match its specification")
         }
         if let theme = plan.theme, store.state["theme"].string != theme {
