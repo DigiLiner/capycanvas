@@ -180,17 +180,12 @@ impl Requirements {
             let kernels = &r.pipelines.destination_material;
             self.compute.extend(destination_material::selected(plan, preview).map(|entry| kernels.kernel(style, entry).clone()));
         } else if !dry_material::dry_material_compute_eligible(style) {
-            let kind = MaterialPipelineKind::for_attachments(
-                plan.state.watercolor_wetness,
-                plan.state.coverage,
-            );
+            let kind = MaterialPipelineKind::for_attachments(plan.state.coverage);
             self.render.push(r.pipelines.material(style, plan.material, kind).clone());
             if preview {
                 // A single predicted destination batch on a simple canvas reads
                 // persistent coverage but writes only its disposable color.
-                if !plan.state.watercolor_wetness {
-                    self.render.push(r.pipelines.material(style, plan.material, MaterialPipelineKind::Color).clone());
-                }
+                self.render.push(r.pipelines.material(style, plan.material, MaterialPipelineKind::Color).clone());
             }
         }
         if plan.stroke_edge {

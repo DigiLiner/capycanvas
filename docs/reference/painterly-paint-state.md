@@ -52,9 +52,8 @@ strokes.
 
 ## Material transfer
 
-Each material invocation, a fragment for watercolor paint or a compute thread for
-Smudge, Liquify and wet paint, owns one destination pixel. It reads an
-immutable 3×3 neighborhood of source color pages and evaluates overlapping
+Each material invocation of these brushes, a compute thread, owns one destination
+pixel. It reads an immutable 3×3 neighborhood of source color pages and evaluates overlapping
 contacts in submission order:
 
 ```text
@@ -95,7 +94,7 @@ immediate one-contact destination ordering.
 ## Layer-wide watercolor
 
 Watercolor is a dedicated execution class within the same material shader. The
-paint layer's premultiplied RGBA stores flattened pigment while a sparse R8
+paint layer's premultiplied RGBA stores flattened pigment while a sparse R32Float
 channel stores water/membership. It never reads the composite or another layer
 and does not allocate a brush reservoir. Drying is explicit: merge the wet
 layer down and continue on a fresh layer.
@@ -191,10 +190,10 @@ require internal pigment planes and is outside this minimal model.
 
 ## Feature-specialized GPU work
 
-The material shader has one semantic implementation and three prepared render
-pipelines per operation, selected once per batch:
+The material shader has one semantic implementation and at most three prepared
+page kernels per operation, selected once per batch:
 
-| Enabled output | Attachments written |
+| Enabled output | Storage written |
 | --- | --- |
 | Color only | color |
 | Uniform coverage | color + coverage |
@@ -203,8 +202,14 @@ pipelines per operation, selected once per batch:
 This is deliberately a small finite pipeline set. It keeps disabled-feature
 bandwidth out of the fast path without generating a pipeline for every preset.
 Color and coverage use source/destination ping-pong textures to obey portable
-WebGPU read/write rules. Watercolor wetness ping-pongs because transport must read the
-pre-update value while writing all deposition from that submitted update.
+WebGPU read/write rules; each page kernel writes its whole inactive page.
+Watercolor wetness ping-pongs because transport must read the pre-update value
+while writing all deposition from that submitted update. The update first seeds
+the inactive surface from the pre-update wetness, then every microbatch stores
+`prior + (1-prior)·charge` inside its dirty rectangle only. Charge grows with
+the stroke's coverage, which never decreases across one update's microbatches,
+and a locked transparent pixel keeps its prior water, so a later store never
+lowers an earlier one and a plain store equals the maximum over the update.
 
 ## Painter presets and benchmark proof
 

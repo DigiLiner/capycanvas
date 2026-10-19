@@ -22,7 +22,6 @@ impl WgpuRasterizer {
             });
         let plan = BrushPassPlan::for_device(&batch.style, &self.device);
         let transported = destination_material::transported(&batch.style);
-        let writes_full_page = pointwise(&batch.style) || from_persistent || transported;
         let layer_index = self
             .paint_layers
             .iter()
@@ -31,24 +30,6 @@ impl WgpuRasterizer {
         if !preview && batch.stroke_start {
             for layer in &mut self.paint_layers {
                 for page in &mut layer.pages { page.clear_stroke_start(); }
-            }
-        }
-
-        // Evaluation that writes whole pages writes the new coverage page too.
-        // An old owner binds the shared zero scalar as its source, so no clear
-        // is needed before the first contact of a stroke reaches this tile.
-        if !preview && plan.state.coverage && !writes_full_page {
-            for tile in tiles {
-                let coordinate = tile.coordinate;
-                let page = self.paint_layers[layer_index]
-                    .coverage_pages
-                    .iter_mut()
-                    .find(|page| page.coordinate == coordinate)
-                    .expect("stroke coverage page is prepared before encoding");
-                if page.owner != Some(batch.stroke_id) {
-                    page.active().clear(&self.zero_pages, encoder);
-                    page.owner = Some(batch.stroke_id);
-                }
             }
         }
 
@@ -79,20 +60,6 @@ impl WgpuRasterizer {
                     .expect("material coverage prepared before encoding")
             });
             let coverage = coverage_index.map(|i| &coverage_pages[i]);
-            if !writes_full_page {
-                page.active()
-                    .copy_to(page.surface(!page.active_secondary), encoder);
-                if let Some(coverage) = coverage {
-                    coverage.active().copy_to(
-                        if coverage.active_secondary {
-                            &coverage.primary
-                        } else {
-                            &coverage.secondary
-                        },
-                        encoder,
-                    );
-                }
-            }
             jobs.push(MaterialJob {
                 coordinate,
                 local,
@@ -184,20 +151,8 @@ impl WgpuRasterizer {
                     }
                 });
             let coverage_view = coverage_surface.map(|p| &p.view);
-            let record_offset = if pointwise(&batch.style) {
-                self.material_records.offset(record_index)
-            } else {
-                0
-            };
-            let local = if writes_full_page {
-                PixelRect::full([PAGE_SIZE; 2])
-            } else {
-                job.local
-            };
-            if local.is_empty() {
-                continue;
-            }
-            if self.compute_dry_material(batch) && local == PixelRect::full([PAGE_SIZE; 2]) {
+            let record_offset = self.material_records.offset(record_index);
+            if self.compute_dry_material(batch) {
                 let pipelines = &self.pipelines.dry_material;
                 let tracked = in_place || (self.compact_preview_contribution(batch) && pipelines.in_place()
                     && self.changed_cells.as_ref().unwrap().preview_reusable(self,batch.target,job.coordinate,destination));
@@ -220,57 +175,16 @@ impl WgpuRasterizer {
                 continue;
             }
             destination.preview.set(None);
-            let scalar_state_view = if from_persistent {
-                None
-            } else if plan.state.watercolor_wetness {
-                let pages = if preview {
-                    &self.preview_watercolor_wetness_pages
-                } else {
-                    &self.paint_layers[layer_index].watercolor_wetness_pages
-                };
-                pages
-                    .iter()
-                    .find(|p| p.coordinate == job.coordinate)
-                    .map(|p| &p.inactive().view)
-            } else {
-                None
-            };
-            let portable_scalar = if self.device.portable_blend() {
-                scalar_state_view.map(|view| {
-                    self.portable_blend
-                        .source(&self.device, view, wgpu::TextureFormat::R32Float)
-                })
-            } else {
-                None
-            };
-            let color_load = if writes_full_page {
-                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-            } else {
-                wgpu::LoadOp::Load
-            };
-            let attachment = |view, load| wgpu::RenderPassColorAttachment {
+            let attachment = |view| wgpu::RenderPassColorAttachment {
                 view,
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
-                    load,
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                     store: wgpu::StoreOp::Store,
                 },
             };
-            let color_attachments = [
-                Some(attachment(&destination.view, color_load)),
-                coverage_view.map(|v| attachment(v, color_load)),
-                scalar_state_view.map(|v| {
-                    attachment(
-                        portable_scalar.as_ref().unwrap_or(v),
-                        if portable_scalar.is_some() {
-                            wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                    )
-                }),
-            ];
+            let color_attachments = [Some(attachment(&destination.view)), coverage_view.map(attachment), None];
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("layer material tile"),
                 color_attachments: &color_attachments,
@@ -279,11 +193,10 @@ impl WgpuRasterizer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_scissor_rect(local.min_x(), local.min_y(), local.width(), local.height());
             pass.set_pipeline(self.pipelines.material(
                 &batch.style,
                 plan.material,
-                MaterialPipelineKind::for_attachments(!from_persistent && plan.state.watercolor_wetness, coverage_view.is_some()),
+                MaterialPipelineKind::for_attachments(coverage_view.is_some()),
             ));
             pass.set_bind_group(
                 0,
@@ -307,17 +220,6 @@ impl WgpuRasterizer {
                 &[],
             );
             pass.draw(0..3, 0..1);
-            drop(pass);
-            if let Some(source) = portable_scalar {
-                self.portable_blend.apply(
-                    &self.device,
-                    encoder,
-                    &source,
-                    scalar_state_view.unwrap(),
-                    local,
-                    2,
-                );
-            }
         }
         self.encode_dry_material_jobs(encoder, batch_index, batch, &compute_jobs);
         compute_jobs.clear();

@@ -1,12 +1,14 @@
-//! Liquify, Smudge and Wet read only the pre-batch pages around each page they
-//! write, so one compute pass dispatches every page job of a batch. A job
-//! writes its whole inactive page: the material result inside its dirty
-//! rectangle and the unchanged texel elsewhere, so no page copy precedes it.
+//! Liquify, Smudge, Wet and watercolor read only the pre-batch pages around
+//! each page they write, so one compute pass dispatches every page job of a
+//! batch. A job writes its whole inactive page: the material result inside its
+//! dirty rectangle and the unchanged texel elsewhere, so no page copy precedes
+//! it. Watercolor wetness is stored only inside the rectangle.
 use super::*;
 use dry_material::{Entries, MATERIAL_BLENDS, MATERIAL_SLOTS};
 use material_sources::{elapsed, record, rect_words};
 
-pub(super) const OPERATIONS: [MaterialOperation; 3] = [MaterialOperation::Liquify, MaterialOperation::Smudge, MaterialOperation::Wet];
+pub(super) const OPERATIONS: [MaterialOperation; 4] = [MaterialOperation::Liquify, MaterialOperation::Smudge,
+    MaterialOperation::Wet, MaterialOperation::Watercolor];
 const WORKGROUP: u32 = 8;
 
 pub(super) fn transported(style: &layer_render::DabStyle) -> bool {
@@ -19,6 +21,7 @@ pub(super) enum Entry {
     Color,
     Coverage,
     Reservoir,
+    Watercolor,
 }
 
 impl Entry {
@@ -28,15 +31,29 @@ impl Entry {
             Self::Color => "transport_color",
             Self::Coverage => "transport_coverage",
             Self::Reservoir => "reservoir_exchange",
+            Self::Watercolor => "transport_watercolor",
+        }
+    }
+
+    /// The output layout: color, with coverage, or with coverage and wetness.
+    fn outputs(self) -> usize {
+        match self {
+            Self::Coverage => 1,
+            Self::Watercolor => 2,
+            Self::Gather | Self::Color | Self::Reservoir => 0,
         }
     }
 }
 
 /// Liquify and Smudge gather distant samples; Wet exchanges its reservoir
-/// with the canvas after each committed batch.
+/// with the canvas after each committed batch; watercolor always writes
+/// coverage and wetness.
 pub(super) fn entries(operation: MaterialOperation) -> &'static [Entry] {
-    if operation == MaterialOperation::Wet { &[Entry::Color, Entry::Coverage, Entry::Reservoir] }
-    else { &[Entry::Gather, Entry::Color, Entry::Coverage] }
+    match operation {
+        MaterialOperation::Wet => &[Entry::Color, Entry::Coverage, Entry::Reservoir],
+        MaterialOperation::Watercolor => &[Entry::Watercolor],
+        _ => &[Entry::Gather, Entry::Color, Entry::Coverage],
+    }
 }
 
 /// The kernels a brush selection prepares for committed and predicted pages.
@@ -44,28 +61,28 @@ pub(super) fn selected(plan: BrushPassPlan, preview: bool) -> impl Iterator<Item
     entries(plan.material).iter().copied().filter(move |&entry| match entry {
         Entry::Color => preview || !plan.state.coverage,
         Entry::Coverage => plan.state.coverage,
-        Entry::Gather | Entry::Reservoir => true,
+        Entry::Gather | Entry::Reservoir | Entry::Watercolor => true,
     })
 }
 
-/// Wet deposits through the brush blend. Liquify and Smudge only move paint,
-/// so every blend shares the normal slot of their contact.
+/// Wet and watercolor deposit through the brush blend. Liquify and Smudge only
+/// move paint, so every blend shares the normal slot of their contact.
 pub(super) fn blended(operation: MaterialOperation) -> bool {
-    operation == MaterialOperation::Wet
+    matches!(operation, MaterialOperation::Wet | MaterialOperation::Watercolor)
 }
 
 pub(super) struct Pipelines {
-    layouts: [wgpu::BindGroupLayout; 2],
+    layouts: [wgpu::BindGroupLayout; 3],
     kernels: std::collections::BTreeMap<(u32, usize, Entry), Deferred<wgpu::ComputePipeline>>,
 }
 
 impl Pipelines {
     /// `shared` holds the target, material source and texture layouts;
-    /// `layouts` the write-only color and color-with-coverage outputs.
-    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], layouts: [wgpu::BindGroupLayout; 2]) -> Self {
-        let pipeline_layouts: [_; 2] = std::array::from_fn(|coverage| device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+    /// `layouts` the write-only color, color-with-coverage and watercolor outputs.
+    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], layouts: [wgpu::BindGroupLayout; 3]) -> Self {
+        let pipeline_layouts: [_; 3] = std::array::from_fn(|outputs| device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("destination material pages"),
-            bind_group_layouts: &[Some(&layouts[coverage]), Some(shared[0]), Some(shared[1]), Some(shared[2])],
+            bind_group_layouts: &[Some(&layouts[outputs]), Some(shared[0]), Some(shared[1]), Some(shared[2])],
             immediate_size: 0,
         }));
         let mut kernels = std::collections::BTreeMap::new();
@@ -77,7 +94,7 @@ impl Pipelines {
                 let shader = if entry == Entry::Gather { dry_material::material_shader(device, Entries::Gather, flags, operation) } else { transport.clone() };
                 kernels.insert((operation as u32, slot, entry), Deferred::compute(device,
                     format!("destination material {} operation={} contact={flags:#x} blend={blend}", entry.name(), operation as u32),
-                    &pipeline_layouts[usize::from(entry == Entry::Coverage)], &shader, entry.name()));
+                    &pipeline_layouts[entry.outputs()], &shader, entry.name()));
             }
         }
         Self { layouts, kernels }
@@ -90,8 +107,9 @@ impl Pipelines {
         &self.kernels[&(operation as u32, slot, entry)]
     }
 
-    fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>) -> wgpu::BindGroup {
-        dry_material::output_binding(r, &self.layouts[usize::from(coverage.is_some())], color, coverage, None)
+    fn output(&self, r: &WgpuRasterizer, color: &PageSurface, coverage: Option<&PageSurface>, wetness: Option<&PageSurface>) -> wgpu::BindGroup {
+        let layout = &self.layouts[usize::from(coverage.is_some()) + usize::from(wetness.is_some())];
+        dry_material::output_binding(r, layout, color, coverage, wetness, None)
     }
 }
 
@@ -140,23 +158,26 @@ impl WgpuRasterizer {
         let mut dispatches = Vec::with_capacity(jobs.len());
         let mut first_record = 0;
         for (job, pages) in jobs.iter().zip(&distant) {
-            let (color_pages, coverage_pages) = if preview {
-                (&self.preview_pages, &self.preview_coverage_pages)
+            let layer = &self.paint_layers[layer_index];
+            let (color_pages, coverage_pages, wetness_pages) = if preview {
+                (&self.preview_pages, &self.preview_coverage_pages, &self.preview_watercolor_wetness_pages)
             } else {
-                (&self.paint_layers[layer_index].pages, &self.paint_layers[layer_index].coverage_pages)
+                (&layer.pages, &layer.coverage_pages, &layer.watercolor_wetness_pages)
             };
             let destination = color_pages[job.page_index].surface(job.destination_secondary);
             let coverage = job.coverage_index.zip(job.coverage_destination_secondary)
                 .map(|(i, secondary)| if secondary { &coverage_pages[i].secondary } else { &coverage_pages[i].primary });
+            let wetness = (operation == MaterialOperation::Watercolor).then(|| wetness_pages.iter().find(|p| p.coordinate == job.coordinate)
+                .expect("watercolor wetness page is prepared before encoding").inactive());
             destination.preview.set(None);
-            let output = self.pipelines.destination_material.output(self, destination, coverage);
-            let entry = if coverage.is_some() { Entry::Coverage } else { Entry::Color };
+            let output = self.pipelines.destination_material.output(self, destination, coverage, wetness);
+            let entry = if wetness.is_some() { Entry::Watercolor } else if coverage.is_some() { Entry::Coverage } else { Entry::Color };
             self.add_transport_job(encoder, batch_index, batch, job.coordinate, pages.as_deref(), first_record, sources_preview, entry, output, &mut dispatches)?;
             first_record += pages.as_ref().map_or(0, |pages| pages.len().div_ceil(9)) + 1;
         }
         if let Some((_, last)) = exchange {
             let coordinate = std::array::from_fn(|i| ([last.center.x, last.center.y][i].max(0.) as u32 / PAGE_SIZE).min(extent[i].saturating_sub(1) / PAGE_SIZE));
-            let output = self.pipelines.destination_material.output(self, self.reservoir.inactive(), None);
+            let output = self.pipelines.destination_material.output(self, self.reservoir.inactive(), None, None);
             self.add_transport_job(encoder, batch_index, batch, coordinate, None, first_record, false, Entry::Reservoir, output, &mut dispatches)?;
         }
         self.encode_transport(encoder, batch_index, batch, &dispatches);
@@ -201,7 +222,7 @@ impl WgpuRasterizer {
                 let accumulated = if chunk == 0 { &self.empty_view } else { &fields[1 - chunk % 2].view };
                 dispatches.push(Dispatch {
                     entry: Entry::Gather,
-                    output: self.pipelines.destination_material.output(self, &fields[chunk % 2], None),
+                    output: self.pipelines.destination_material.output(self, &fields[chunk % 2], None, None),
                     sources: create_material_bind_group(&self.device, &self.material_layout, &views, &self.dab_buffer,
                         &self.empty_scalar_view, accumulated, wgpu::BindingResource::Buffer(self.material_records.binding())),
                     coordinate,
@@ -279,7 +300,7 @@ mod tests {
         let document = layer_core::Document::new(layer_core::authored::PortableId::random(), 128, 128,
             layer_core::DocumentNames { paint: "Current ink".into(), paper: "Paper".into() });
         for (preset, expected) in [(Preset::LiquifyPush, 2), (Preset::Smudge, 2), (Preset::NaturalBlender, 3), (Preset::WetRound, 2),
-            (Preset::OpaqueGouache, 3), (Preset::LoadedOil, 3), (Preset::PaletteKnife, 3)] {
+            (Preset::OpaqueGouache, 3), (Preset::LoadedOil, 3), (Preset::PaletteKnife, 3), (Preset::WatercolorWash, 1), (Preset::WetWatercolor, 1)] {
             let mut renderer = crate::test_support::staged_renderer(&reference, Default::default());
             renderer.shader_idle(false, false);
             let mut brush = layer_core::default_brush(preset);

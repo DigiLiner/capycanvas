@@ -94,7 +94,8 @@ fn committed_batch_passes(preset: DefaultBrushPreset, radius: f32) -> u64 {
 #[test]
 fn committed_destination_batches_encode_their_pages_in_one_pass() {
     use DefaultBrushPreset as P;
-    for preset in [P::LiquifyTwirl, P::LiquifyPush, P::Smudge, P::NaturalBlender, P::WetRound, P::OpaqueGouache, P::LoadedOil, P::PaletteKnife] {
+    for preset in [P::LiquifyTwirl, P::LiquifyPush, P::Smudge, P::NaturalBlender, P::WetRound, P::OpaqueGouache, P::LoadedOil, P::PaletteKnife,
+        P::WatercolorWash, P::WetWatercolor] {
         let passes = [40., 380.].map(|radius| committed_batch_passes(preset, radius));
         println!("{preset:?}: one page {}, sixteen pages {}", passes[0], passes[1]);
         assert_eq!(passes[0], passes[1], "{preset:?} adds passes per page");

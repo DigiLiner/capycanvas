@@ -585,6 +585,49 @@ fn first_watercolor_frame_batches_page_initialization() {
     assert!(paint(&layer).raster.is_empty());
 }
 
+/// Every microbatch of one watercolor update stores wetness inside its dirty
+/// rectangle into the surface the update seeded with the prior wetness. A later
+/// microbatch never stores less than that surface holds, so plain stores equal
+/// the maximum over the update, including on locked transparent paint.
+#[test]
+fn watercolor_microbatches_never_lower_the_wetness_of_their_update() {
+    let layer = paint_document([512; 2], "watercolor update");
+    let style = DabStyle { transport: None, ..preset_style(layer_core::DefaultBrushPreset::WetWatercolor) };
+    let mut ink = dab([0.1, 0.3, 0.8, 1.]);
+    ink.center = Point { x: 256., y: 256. };
+    ink.radii = [200.; 2];
+    ink.material = [0.8, 1., 1., 1.];
+    let base = DabBatch { style: style.clone(), damage: ink.bounds(), ..batch(target(&layer)) };
+    let dabs: Vec<_> = (0..3).map(|i| Dab { center: Point { x: 300. + 70. * i as f32, y: 300. + 70. * i as f32 }, radii: [60.; 2], motion: [70.; 2], ..ink })
+        .collect();
+    for alpha_locked in [false, true] {
+        let wetness = (0..=dabs.len()).map(|microbatches| {
+            let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+            let mut send = |dabs: &[Dab], batches: &[DabBatch], reset_layers| r.submit(FramePacket { dabs, dab_batches: batches, reset_layers,
+                ..packet(layer.scene(), [512; 2]) }).unwrap();
+            send(&[], &[], true);
+            send(&[ink], std::slice::from_ref(&base), false);
+            let mut encoder = crate::submission::CommandEncoder::new(&r.device, &Default::default());
+            for page in &r.paint_layers[0].watercolor_wetness_pages { r.encode_clear_value(&mut encoder, &page.active().view, "prior wetness", 0.5); }
+            encoder.submit(&r.queue);
+            let update: Vec<_> = dabs.iter().enumerate().take(microbatches).map(|(i, dab)| DabBatch {
+                stroke_id: StrokeId(2), stroke_start: i == 0, stroke_end: false, first_dab: i as u32, damage: dab.bounds(),
+                style: DabStyle { alpha_locked, ..style.clone() }, ..base.clone()
+            }).collect();
+            r.submit(FramePacket { dabs: &dabs, dab_batches: &update, ..packet(layer.scene(), [512; 2]) }).unwrap();
+            let mut pages: Vec<_> = r.paint_layers[0].watercolor_wetness_pages.iter().map(|page| (page.coordinate, page.active())).collect();
+            pages.sort_by_key(|(coordinate, _)| [coordinate[1], coordinate[0]]);
+            let bytes: Vec<_> = pages.iter().flat_map(|(_, page)| crate::layer_tests::page_bytes(&r, &page.texture)).collect();
+            bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes(*b)).collect::<Vec<_>>()
+        }).collect::<Vec<_>>();
+        assert_ne!(wetness[dabs.len()], wetness[0], "alpha_locked={alpha_locked}: the update deposits water");
+        for (microbatches, earlier) in wetness.iter().enumerate() {
+            let lowered = wetness[dabs.len()].iter().zip(earlier).filter(|(last, earlier)| last < earlier).count();
+            assert_eq!(lowered, 0, "alpha_locked={alpha_locked}: {lowered} texels end below their wetness after {microbatches} microbatches");
+        }
+    }
+}
+
 #[test]
 fn page_zero_copies_reclear_both_formats_and_reduced_extents() {
     let layer = paint_document([512; 2], "zero page stamps");

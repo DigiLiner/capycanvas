@@ -12,6 +12,5 @@ fn blend(@builtin(global_invocation_id) id: vec3<u32>) {
     let dst = textureLoad(backdrop, p, 0);
     var result = src + dst * (1.0 - src.a);
     if settings.mode == 1u { result = dst * (1.0 - src.a); }
-    if settings.mode == 2u { result = max(src, dst); }
     textureStore(destination, p, result);
 }

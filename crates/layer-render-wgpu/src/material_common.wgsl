@@ -156,7 +156,6 @@ fn material_alpha_locked(result:MaterialOutput, original:vec4<f32>)->MaterialOut
     var locked=result;
     if style.operation.w!=0u {locked.color=original;}
     else {locked.color=vec4<f32>(working_unassociate(result.color)*original.a,original.a);}
-    locked.wetness*=select(0.0,1.0,original.a>0.0);
     return locked;
 }
 

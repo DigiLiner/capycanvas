@@ -204,7 +204,8 @@ fn watercolor_fragment(
     first: u32,
     count: u32,
 ) -> MaterialOutput {
-    let original = working_clamp(canvas_load(world));
+    let stored = canvas_load(world);
+    let original = working_clamp(stored);
     let state_coordinate = clamp(
         vec2<i32>(floor(fragment_position)),
         vec2<i32>(0),
@@ -261,8 +262,8 @@ fn watercolor_fragment(
         0.0,
         1.0,
     );
-    let deposited_wetness = prior_wetness
-        + (1.0 - prior_wetness) * water_charge;
+    let deposited_wetness = select(prior_wetness + (1.0 - prior_wetness) * water_charge, prior_wetness,
+        style.color.a > 0.5 && !(stored.a > 0.0));
     let coverage_increment = stroke_increment(prior_coverage, stroke_coverage);
     var result = original;
     if working_has_color(coverage_increment) && style.operation.w == 0u {

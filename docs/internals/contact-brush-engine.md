@@ -174,8 +174,8 @@ function it calls to the device compiler, so a module composes stub entry points
 for the features it cannot reach: relief, bristles, evolving contact, retouch
 sampling, the selection lookup in aggregate kernels, which only run without a
 selection, and, in dry kernels, which only serve normal blending, the blend-mode
-formulas. Destination fragments and wet page kernels compile only their brush
-blend mode's formula, and Smudge and Liquify page kernels, which never blend,
+formulas. Destination fragments and wet and watercolor page kernels compile only
+their brush blend mode's formula, and Smudge and Liquify page kernels, which never blend,
 compile none; for brushes without contact they omit contact evaluation, and any
 other contact evaluates each dab's flags. Aggregate and ordered deposition share one
 contact loop, selected by the existing batch marker. They compile separate

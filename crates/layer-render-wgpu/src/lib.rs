@@ -515,24 +515,18 @@ impl DirectPipelineKind {
 enum MaterialPipelineKind {
     Color,
     Coverage,
-    Watercolor,
 }
 
 impl MaterialPipelineKind {
-    const COUNT: usize = 3;
-    const OPERATIONS: [MaterialOperation; 4] = [MaterialOperation::Deposit, MaterialOperation::Coverage,
-        MaterialOperation::Watercolor, MaterialOperation::Clone];
+    const COUNT: usize = 2;
+    const OPERATIONS: [MaterialOperation; 3] = [MaterialOperation::Deposit, MaterialOperation::Coverage, MaterialOperation::Clone];
 
     fn index(self, operation: MaterialOperation) -> usize {
         Self::OPERATIONS.iter().position(|o| *o == operation).expect("a fragment material") * Self::COUNT + self as usize
     }
 
-    fn for_attachments(watercolor: bool, coverage: bool) -> Self {
-        match (watercolor, coverage) {
-            (true, _) => Self::Watercolor,
-            (false, true) => Self::Coverage,
-            (false, false) => Self::Color,
-        }
+    fn for_attachments(coverage: bool) -> Self {
+        if coverage { Self::Coverage } else { Self::Color }
     }
 }
 
@@ -637,9 +631,9 @@ struct StrokeCoveragePage {
     primary: PageSurface,
     secondary: PageSurface,
     active_secondary: bool,
-    // Persistent coverage restarts from zero when a stroke claims it;
-    // prediction forks committed coverage. Each batch writes the whole
-    // inactive surface, by copying the active one or in its page kernel.
+    // Persistent coverage restarts from zero when a stroke claims it: the
+    // claiming batch reads the shared zero scalar. Prediction forks committed
+    // coverage. Each batch writes the whole inactive surface.
     owner: Option<StrokeId>,
 }
 
@@ -1015,7 +1009,6 @@ pub struct WgpuRasterizer {
     target_layout: wgpu::BindGroupLayout,
     material_layout: wgpu::BindGroupLayout,
     empty_material_input: bindings::MaterialInput,
-    material_source_meta: wgpu::Buffer,
     material_records: material_sources::TileRecords,
     transport_records: material_sources::TileRecords,
     transport_regions: Vec<PixelRect>,
@@ -1180,10 +1173,6 @@ impl WgpuRasterizer {
         let advanced_texture_layout = create_advanced_texture_layout(&device);
         let target_layout = create_target_layout(&device);
         let material_layout = create_material_layout(&device);
-        let material_source_meta = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("adjacent material source pages"), size: 160,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false,
-        });
         let edge_layout = fragment_textures_layout(&device, 10, "layer post-stroke edge sources");
         let watercolor_layout = bindings::layout(&device, "layer watercolor pigment and wetness neighborhood",
             &(0..10).map(|i| bindings::texture(i, wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE, false)).collect::<Vec<_>>());
@@ -1407,7 +1396,6 @@ impl WgpuRasterizer {
             target_layout,
             material_layout,
             empty_material_input: Default::default(),
-            material_source_meta,
             material_records: Default::default(),
             transport_records: Default::default(),
             transport_regions: Vec::new(),
@@ -2062,9 +2050,7 @@ impl WgpuRasterizer {
             &self.dab_buffer,
             coverage,
             gathered.unwrap_or(auxiliary),
-            if pointwise(&batch.style) || destination_material::transported(&batch.style) {
-                wgpu::BindingResource::Buffer(self.material_records.binding())
-            } else { self.material_source_meta.as_entire_binding() },
+            wgpu::BindingResource::Buffer(self.material_records.binding()),
         );
         let display = display.map(|slot| self.dry_display_inputs[slot].inputs(self, views));
         if pointwise(&batch.style) {
@@ -3756,7 +3742,7 @@ impl CanvasRenderer for WgpuRasterizer {
             + m.composite_storage_bytes
             + self.thumbnails.storage_bytes()
             + self.portable_blend.byte_len()
-            + 160 + self.material_records.storage_bytes() + self.transport_records.storage_bytes()
+            + self.material_records.storage_bytes() + self.transport_records.storage_bytes()
             + self.dry_display_inputs.len() as u64 * dry_material::DisplayInputs::storage_bytes()
             + self.material_gather.as_ref().map_or(0, material_sources::Gather::storage_bytes)
             + self.device.effect_resources.lock().unwrap().bytes()
@@ -5584,7 +5570,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     // Native hosts request this feature only after checking Float32 read/write
     // storage support. Each dry invocation owns exactly one destination texel.
     let material_layouts = [layouts.target, layouts.material, layouts.advanced_texture];
-    let outputs = dry_material::output_layouts(device, false);
+    let outputs = dry_material::output_layouts::<3>(device, false);
     let dry_material = dry_material::Pipelines::new(device, material_layouts,
         device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES), &outputs);
     let destination_material = destination_material::Pipelines::new(device, material_layouts, outputs);
@@ -5721,18 +5707,6 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
             brush_pipeline_format_recipe(mode, &device, &layout, &shader, "fragment_main", blend, device.working_format(), label)
         })
     });
-    let max_blend = wgpu::BlendState {
-        color: wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::One,
-            operation: wgpu::BlendOperation::Max,
-        },
-        alpha: wgpu::BlendComponent {
-            src_factor: wgpu::BlendFactor::One,
-            dst_factor: wgpu::BlendFactor::One,
-            operation: wgpu::BlendOperation::Max,
-        },
-    };
     let color_target = Some(wgpu::ColorTargetState {
         format: device.working_format(),
         blend: None,
@@ -5743,29 +5717,14 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         blend: None,
         write_mask: wgpu::ColorWrites::RED,
     });
-    let watercolor_wetness_target = Some(wgpu::ColorTargetState {
-        format: device.scalar_format(),
-        // All microbatches in one submitted update write the same destination
-        // surface while the source remains the immutable pre-update snapshot.
-        blend: Some(max_blend),
-        write_mask: wgpu::ColorWrites::RED,
-    });
     let material_targets = [
         (
             [color_target.clone(), None, None],
             "layer destination brush color",
         ),
         (
-            [color_target.clone(), coverage_target.clone(), None],
+            [color_target, coverage_target, None],
             "layer destination brush with stroke coverage",
-        ),
-        (
-            [
-                color_target,
-                coverage_target.clone(),
-                watercolor_wetness_target,
-            ],
-            "layer watercolor brush with wetness state",
         ),
     ];
     // Each destination operation, contact and blend specialization compiles its

@@ -298,10 +298,9 @@ Sparse pages and changed-region bounds limit the affected area. Specialized path
 avoid allocating or updating material state that a brush does not use.
 
 Smudge, wet, watercolor and Liquify contacts evaluate one page job per page
-their contact batch touches. Smudge, Liquify and wet brushes dispatch every job
-of a batch in one compute pass, each writing its whole page, so a large brush
-adds no page copies or passes per page; watercolor jobs still run one render
-pass each. A frame's commands and bindings stay allocated until the GPU finishes it.
+their contact batch touches. They dispatch every job of a batch in one compute
+pass, each writing its whole page, so a large brush adds no page copies or
+passes per page. A frame's commands and bindings stay allocated until the GPU finishes it.
 A frame therefore consumes input only until its committed contacts reach 512
 page jobs; a slower device keeps the rest of the input queued
 for the next frame instead of building one frame from its whole backlog. Watercolor

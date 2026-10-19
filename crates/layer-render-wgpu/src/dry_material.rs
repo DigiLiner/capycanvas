@@ -313,12 +313,12 @@ fn storage_entry(binding: u32, format: wgpu::TextureFormat, read_write: bool) ->
         if read_write { wgpu::StorageTextureAccess::ReadWrite } else { wgpu::StorageTextureAccess::WriteOnly })
 }
 
-/// The style and page outputs of a destination kernel, the second layout with
-/// stroke coverage. In-place outputs also mark changed cells.
-pub(super) fn output_layouts(device: &PipelineDevice, in_place: bool) -> [wgpu::BindGroupLayout; 2] {
-    std::array::from_fn(|coverage| {
+/// The style and page outputs of a destination kernel: color, then stroke
+/// coverage, then watercolor wetness. In-place outputs also mark changed cells.
+pub(super) fn output_layouts<const N: usize>(device: &PipelineDevice, in_place: bool) -> [wgpu::BindGroupLayout; N] {
+    std::array::from_fn(|scalars| {
         let mut entries = vec![style_entry(), storage_entry(1, wgpu::TextureFormat::Rgba32Float, in_place)];
-        if coverage == 1 { entries.push(storage_entry(2, wgpu::TextureFormat::R32Float, false)); }
+        entries.extend((2..2 + scalars as u32).map(|binding| storage_entry(binding, wgpu::TextureFormat::R32Float, false)));
         if in_place {
             entries.push(crate::bindings::buffer(3, wgpu::ShaderStages::COMPUTE,
                 wgpu::BufferBindingType::Storage { read_only: false }, false, NonZeroU64::new(20)));
@@ -329,16 +329,17 @@ pub(super) fn output_layouts(device: &PipelineDevice, in_place: bool) -> [wgpu::
 
 /// A page output binding, retained by the coverage page when there is one.
 pub(super) fn output_binding(r: &WgpuRasterizer, layout: &wgpu::BindGroupLayout, color: &PageSurface,
-    coverage: Option<&PageSurface>, changed: Option<&wgpu::Buffer>) -> wgpu::BindGroup {
+    coverage: Option<&PageSurface>, wetness: Option<&PageSurface>, changed: Option<&wgpu::Buffer>) -> wgpu::BindGroup {
     let style = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
         buffer: &r.style_buffer, offset: 0, size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
     });
     let entries = [(0, Some(style)), (1, Some(wgpu::BindingResource::TextureView(&color.view))),
-        (2, coverage.map(|page| wgpu::BindingResource::TextureView(&page.view))), (3, changed.map(wgpu::Buffer::as_entire_binding))]
+        (2, coverage.map(|page| wgpu::BindingResource::TextureView(&page.view))),
+        (3, wetness.map(|page| wgpu::BindingResource::TextureView(&page.view))), (3, changed.map(wgpu::Buffer::as_entire_binding))]
         .into_iter().filter_map(|(binding, resource)| resource.map(|resource| wgpu::BindGroupEntry { binding, resource }))
         .collect::<Vec<_>>();
     coverage.unwrap_or(color).material_output.get(
-        (r.style_buffer.clone(), color.view.clone(), coverage.map(|p| p.view.clone()), changed.cloned()),
+        (r.style_buffer.clone(), color.view.clone(), [coverage, wetness].map(|p| p.map(|p| p.view.clone())), changed.cloned()),
         || r.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("destination material page output"), layout, entries: &entries }),
     )
 }
@@ -346,8 +347,8 @@ pub(super) fn output_binding(r: &WgpuRasterizer, layout: &wgpu::BindGroupLayout,
 impl Pipelines {
     /// `shared` holds the target, material source and texture layouts;
     /// `outputs` the write-only output layouts.
-    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], in_place: bool, outputs: &[wgpu::BindGroupLayout; 2]) -> Self {
-        let layouts = if in_place { output_layouts(device, true) } else { outputs.clone() };
+    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], in_place: bool, outputs: &[wgpu::BindGroupLayout; 3]) -> Self {
+        let layouts = if in_place { output_layouts(device, true) } else { [outputs[0].clone(), outputs[1].clone()] };
         let gather_layout = crate::bindings::layout(device, "dry display inputs", &[style_entry(),
             storage_entry(4, wgpu::TextureFormat::Rgba32Float, false), storage_entry(5, wgpu::TextureFormat::R32Float, false),
             storage_entry(6, wgpu::TextureFormat::Rgba32Float, false)]);
@@ -430,7 +431,7 @@ impl Pipelines {
             let cells = r.changed_cells.as_ref().unwrap();
             tracked.and_then(|(target, coordinate)| cells.buffer(target, coordinate)).unwrap_or(&cells.disabled)
         });
-        output_binding(r, &self.layouts[usize::from(coverage.is_some())], color, coverage, changed)
+        output_binding(r, &self.layouts[usize::from(coverage.is_some())], color, coverage, None, changed)
     }
 }
 
@@ -786,19 +787,13 @@ mod tests {
             }
         }
         use crate::destination_material::{self as destination, Entry};
-        for flags in [0, 128] {for operation in [MaterialOperation::Liquify, MaterialOperation::Smudge, MaterialOperation::Wet, MaterialOperation::Watercolor] {
-            let kernels: Vec<_> = if destination::OPERATIONS.contains(&operation) {
-                destination::entries(operation).iter().map(|&entry| (if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(0) },
-                    entry.name(), !matches!(entry, Entry::Gather | Entry::Reservoir))).collect()
-            } else { vec![(Entries::Fragment(0), "fragment_main", true)] };
-            for (entries, entry, evaluates) in kernels {
-                let what = format!("{operation:?} {entry} {flags:#x}");
-                let present = compiled(entries, flags, operation, entry);
-                for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
-                let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
-                assert_eq!(operations.len(), usize::from(evaluates), "{what} reaches {operations:?}");
-            }
-        }}
+        for flags in [0, 128] {for operation in destination::OPERATIONS {for &entry in destination::entries(operation) {
+            let what = format!("{operation:?} {entry:?} {flags:#x}");
+            let present = compiled(if entry == Entry::Gather { Entries::Gather } else { Entries::Transport(0) }, flags, operation, entry.name());
+            for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
+            let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
+            assert_eq!(operations.len(), usize::from(!matches!(entry, Entry::Gather | Entry::Reservoir)), "{what} reaches {operations:?}");
+        }}}
         let multiply = Entries::Fragment(layer_core::LayerBlend::from(BrushBlendMode::Multiply).code());
         let formulas = blend.iter().filter(|f| *f != "blend_luma").cloned().collect();
         absent(&compiled(multiply, 0, MaterialOperation::Deposit, "fragment_main"), &formulas, "Multiply fragment");

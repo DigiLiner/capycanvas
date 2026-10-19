@@ -259,7 +259,7 @@ mod tests {
             let original: Vec<_> = (0..32)
                 .flat_map(|_| old[..channels].iter().copied())
                 .collect();
-            for mode in 0..3 {
+            for mode in 0..2 {
                 let (target, view) = create_target(&device, size, format, "blend test destination");
                 upload(&target, &original);
                 let output = device.create_buffer(&wgpu::BufferDescriptor {
@@ -298,11 +298,7 @@ mod tests {
                             let expected = if !(1..7).contains(&x) || !(1..3).contains(&y) {
                                 old[c]
                             } else {
-                                match mode {
-                                    0 => src[c] + old[c] * (1. - src[3]),
-                                    1 => old[c] * (1. - src[3]),
-                                    _ => src[c].max(old[c]),
-                                }
+                                if mode == 0 { src[c] + old[c] * (1. - src[3]) } else { old[c] * (1. - src[3]) }
                             };
                             let offset = y * 256 + (x * channels + c) * 4;
                             let actual =

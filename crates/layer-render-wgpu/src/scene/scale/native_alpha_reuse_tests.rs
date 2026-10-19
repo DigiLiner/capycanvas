@@ -420,7 +420,7 @@ fn native_alpha_reuse_real_unchanged_stores_leave_gpu_flags_clear() {
                 let flags = r.changed_cells.as_ref().unwrap().reusable(target, [0, 0]).expect("warm real Engine prediction must be eligible for reuse");
                 let page=r.preview_page([0,0]).expect("real enabled prediction must remain live");
                 assert_eq!(page.primary.preview.get(),Some((target,[0,0])));assert!(!page.active_secondary);
-                page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,Some(flags.clone())),
+                page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),[None, None],Some(flags.clone())),
                     ||panic!("real warm Engine prediction must execute actual tracked display output"));
                 let bytes = pollster::block_on(crate::local_tone::read_buffer_async(&r.device, &r.queue, flags)).unwrap();
                 let changed = bytes[16..].chunks_exact(4).filter(|cell| u32::from_le_bytes((*cell).try_into().unwrap()) != 0).count();
@@ -773,7 +773,7 @@ fn fused_prediction_tracks_actual_warm_primary_and_forces_relocated_pages() {
             let flags=cells.buffer(target,coordinate).unwrap();
             let tracked=step==1 || step==2 || step==3;
             let expected=if tracked {flags.clone()} else {cells.disabled.clone()};
-            page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),None,Some(expected)),
+            page.primary.material_output.get((r.style_buffer.clone(),page.primary.view.clone(),[None, None],Some(expected)),
                 ||panic!("{name} {blend:?} level{level} step{step}: actual kernel/output binding must have expected tracking"));
             let data=pollster::block_on(crate::local_tone::read_buffer_async(&r.device,&r.queue,flags)).unwrap();
             let dirty=data[16..].chunks_exact(4).filter(|v|u32::from_le_bytes((*v).try_into().unwrap())!=0).count();
