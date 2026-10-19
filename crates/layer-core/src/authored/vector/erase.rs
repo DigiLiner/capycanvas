@@ -259,18 +259,17 @@ impl PathItem {
 }
 
 impl VectorObject {
-    pub fn erase(&self, candidates: &[Position], eraser: &Eraser, mode: EraseMode) -> Option<Self> {
+    pub fn erase(&self, index: &mut VectorIndex, eraser: &Eraser, mode: EraseMode) -> Option<Self> {
         let mut changes = BTreeMap::new();
         let mut fresh = BTreeSet::new();
-        for &position in candidates {
+        for position in index.near(self, eraser.bounds()) {
             let Some(path) = self.record(position).and_then(Record::path).filter(|path| !path.locked && !path.hidden) else { continue };
             let replacement = match mode {
                 EraseMode::Whole => path.touched_by(eraser).then(Vec::new),
                 EraseMode::Touched => path.erased(eraser, None),
                 EraseMode::ToIntersection => {
-                    let [x0, y0, x1, y1] = path.bounds();
-                    let others: Vec<&PathItem> = self.paths().map(|(_, other)| other)
-                        .filter(|other| other.id != path.id && !other.hidden && { let [a0, b0, a1, b1] = other.bounds(); a0 <= x1 && x0 <= a1 && b0 <= y1 && y0 <= b1 }).collect();
+                    let others: Vec<&PathItem> = index.near(self, path.bounds()).into_iter()
+                        .filter_map(|p| self.record(p).and_then(Record::path)).filter(|other| other.id != path.id && !other.hidden).collect();
                     path.erased(eraser, Some(&others))
                 }
             };

@@ -701,16 +701,15 @@ fn erasing_a_layer_splits_or_removes_only_touched_paths_with_fresh_ids() {
     let object = VectorObject::from_records((1..=100).map(|i| Record::Path(plain_line(i, [0., i as f64 * 10.], [200., i as f64 * 10.], 2.))).collect());
     let mut index = VectorIndex::default();
     let eraser = Eraser { from: [100., 5.], to: [100., 52.], radius: 4. };
-    let near = index.near(&object, eraser.bounds());
-    let split = object.erase(&near, &eraser, EraseMode::Touched).unwrap();
+    let split = object.erase(&mut index, &eraser, EraseMode::Touched).unwrap();
     split.validate().unwrap();
     assert_eq!(split.path_count(), 105, "five crossed lines split in two");
     let order: Vec<u64> = split.paths().map(|(_, p)| p.id.0).take(11).collect();
     assert_eq!(order[..2], [1, order[1]], "a split keeps the first piece's identity in place");
     assert!(order[1] > 100, "the second piece gets a new identity");
-    let whole = object.erase(&index.near(&object, eraser.bounds()), &eraser, EraseMode::Whole).unwrap();
+    let whole = object.erase(&mut index, &eraser, EraseMode::Whole).unwrap();
     assert_eq!(whole.path_count(), 95, "Whole Path removes every touched path");
-    assert!(object.erase(&index.near(&object, [500., 500., 510., 510.]), &Eraser { from: [505., 505.], to: [505., 505.], radius: 5. }, EraseMode::Touched).is_none());
+    assert!(object.erase(&mut index, &Eraser { from: [505., 505.], to: [505., 505.], radius: 5. }, EraseMode::Touched).is_none());
 }
 
 #[test]
@@ -763,18 +762,17 @@ fn erasing_up_to_intersections_removes_the_touched_span_between_crossings() {
     let object = VectorObject::from_records(vec![Record::Path(horizontal.clone()), Record::Path(left), Record::Path(right)]);
     let mut index = VectorIndex::default();
     let eraser = Eraser { from: [150., 45.], to: [150., 55.], radius: 3. };
-    let near = index.near(&object, eraser.bounds());
-    let erased = object.erase(&near, &eraser, EraseMode::ToIntersection).unwrap();
+    let erased = object.erase(&mut index, &eraser, EraseMode::ToIntersection).unwrap();
     erased.validate().unwrap();
     let pieces: Vec<[f64; 4]> = erased.paths().filter(|(_, p)| p.id == ItemId(1) || p.id.0 > 3).map(|(_, p)| p.geometry.hull()).collect();
     assert_eq!(pieces.len(), 2, "the line keeps both outer parts: {pieces:?}");
     assert!(pieces.iter().any(|h| (h[0] - 0.).abs() < 1e-3 && (h[2] - 100.).abs() < 1e-3), "{pieces:?}");
     assert!(pieces.iter().any(|h| (h[0] - 200.).abs() < 1e-3 && (h[2] - 300.).abs() < 1e-3), "{pieces:?}");
     assert_eq!(erased.paths().filter(|(_, p)| p.id == ItemId(2) || p.id == ItemId(3)).count(), 2, "the crossing lines stay");
-    let cut = object.erase(&near, &eraser, EraseMode::Touched).unwrap();
+    let cut = object.erase(&mut index, &eraser, EraseMode::Touched).unwrap();
     assert!(cut.paths().filter(|(_, p)| p.id == ItemId(1) || p.id.0 > 3).any(|(_, p)| p.geometry.hull()[2] > 140. && p.geometry.hull()[2] < 150.), "Touched Part cuts only under the eraser");
     let alone = VectorObject::from_records(vec![Record::Path(horizontal)]);
-    let gone = alone.erase(&index.near(&alone, eraser.bounds()), &eraser, EraseMode::ToIntersection).unwrap();
+    let gone = alone.erase(&mut VectorIndex::default(), &eraser, EraseMode::ToIntersection).unwrap();
     assert_eq!(gone.path_count(), 0, "a line that crosses nothing goes entirely");
     let square = PathItem::new(ItemId(9), Arc::new(PathGeometry::new(vec![Subpath::new(&[[0., 0.], [40., 0.], [40., 40.], [0., 40.]].map(Anchor::corner), true)]).unwrap()), Arc::new(Style::default()));
     assert!(square.encloses([20., 20.], 0.1) && !square.encloses([60., 20.], 0.1), "a closed path encloses its inside");

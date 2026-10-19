@@ -118,8 +118,7 @@ impl<R: CanvasRenderer> UiSession<R> {
         let local = [point[0] - offset[0], point[1] - offset[1]];
         let eraser = Eraser { from: erasing.last, to: local, radius: erasing.radius };
         erasing.last = local;
-        let candidates = self.vector_moves.index.near(&erasing.current, eraser.bounds());
-        let Some(erased) = erasing.current.erase(&candidates, &eraser, erasing.mode) else { return Ok(()) };
+        let Some(erased) = erasing.current.erase(&mut self.vector_moves.index, &eraser, erasing.mode) else { return Ok(()) };
         erasing.current = erased.clone();
         let layer = erasing.layer;
         let edit = self.engine.document().vector_object_edit(layer, erased).map_err(|e| e.to_string())?;
