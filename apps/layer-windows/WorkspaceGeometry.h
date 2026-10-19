@@ -141,18 +141,36 @@ inline PathGeometry squircleRectangle(float width,float height,std::array<float,
     squircleCorner(points,{tl,tl},{-tl,0},{0,-tl});
     figure.Segments().Append(outline);PathGeometry geometry;geometry.Figures().Append(figure);return geometry;
 }
+inline PathGeometry polygon(std::vector<Point> const& points){
+    PathGeometry geometry;if(points.empty())return geometry;
+    PathFigure figure;figure.StartPoint(points.front());figure.IsClosed(true);figure.IsFilled(true);
+    PolyLineSegment outline;auto line=outline.Points();for(auto point=points.begin()+1;point!=points.end();++point)line.Append(*point);
+    figure.Segments().Append(outline);geometry.Figures().Append(figure);return geometry;
+}
+inline std::vector<Point> clipColumns(std::vector<Point> points,float left,float right){
+    for(auto [edge,side]:{std::pair{left,1.f},std::pair{right,-1.f}}){
+        std::vector<Point> kept;
+        for(size_t i=0;i<points.size();++i){
+            auto a=points[i],b=points[(i+1)%points.size()];bool inside=(a.X-edge)*side>=0;
+            if(inside)kept.push_back(a);
+            if(inside!=((b.X-edge)*side>=0))kept.push_back({edge,a.Y+(edge-a.X)/(b.X-a.X)*(b.Y-a.Y)});
+        }
+        points=std::move(kept);
+    }
+    return points;
+}
 // The 6-DIP shoulders join the active tab to its panel. Coordinates include
 // both overhangs so a Path never has to arrange a negative geometry origin.
-inline PathGeometry panelTabShape(float width,float height){
+inline std::vector<Point> panelTabOutline(float width,float height){
     constexpr float foot=6;float r=std::min({SurfaceRadius,width*.5f,height-foot});
-    PathFigure figure;figure.StartPoint({0,height});figure.IsClosed(true);figure.IsFilled(true);
-    PolyLineSegment outline;auto points=outline.Points();
+    PointCollection points;
     squircleCorner(points,{0,height-foot},{0,foot},{foot,0});
     squircleCorner(points,{foot+r,r},{-r,0},{0,-r});
     squircleCorner(points,{foot+width-r,r},{0,-r},{r,0});
     squircleCorner(points,{2*foot+width,height-foot},{-foot,0},{0,foot});
-    figure.Segments().Append(outline);PathGeometry geometry;geometry.Figures().Append(figure);return geometry;
+    std::vector<Point> outline(points.Size());points.GetMany(0,outline);return outline;
 }
+inline PathGeometry panelTabShape(float width,float height){return polygon(panelTabOutline(width,height));}
 inline Grid panelTabShell(FrameworkElement const& content,Brush const& fill){
     Grid shell;shell.Tag(box_value(fill?L"active-panel-tab-shell":L"panel-tab-shell"));
     Canvas background;shell.Children().Append(background);

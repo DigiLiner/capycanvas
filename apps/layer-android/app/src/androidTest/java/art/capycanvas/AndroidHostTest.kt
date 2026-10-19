@@ -2338,6 +2338,32 @@ class AndroidHostTest {
         customize(obj("type" to "close_expanded"))
     }
 
+    @Test fun activeTabsMatchTheirPanelsAtEveryTransparency() {
+        val density = compose.activity.resources.displayMetrics.density
+        val levels = listOf("off", "low", "medium", "high")
+        val mismatches = mutableListOf<String>()
+        for (theme in listOf("dark", "light")) for ((index, level) in levels.withIndex()) {
+            action(obj("type" to "set_theme", "theme" to theme))
+            action(obj("type" to "preferences", "action" to obj("type" to "edit", "id" to "transparency", "value" to index)))
+            compose.waitUntil(10_000) { state().optString("theme") == theme && state().getJSONObject("settings").getString("transparency") == level }
+            settle()
+            val image = capture("active-tab-$theme-$level")
+            val tabbed = groups().filter { it.getBoolean("tabs_visible") }
+            assertTrue("The workspace has docked tab groups", tabbed.isNotEmpty())
+            for (group in tabbed) {
+                val active = group.getString("active")
+                val tab = screenBounds(compose.onNodeWithTag("tab-$active"))
+                val body = screenBounds(compose.onNodeWithTag("panel-body-$active", useUnmergedTree = true))
+                val x = (tab.left + 4 * density).toInt()
+                val tabPixel = image.getPixel(x, (tab.bottom - 3 * density).toInt())
+                val bodyPixel = image.getPixel(x, (body.top + 3 * density).toInt())
+                if (listOf(16, 8, 0).any { kotlin.math.abs((tabPixel shr it and 255) - (bodyPixel shr it and 255)) > 2 })
+                    mismatches += "$theme $level group ${group.getInt("id")} $active: tab #%06X panel #%06X".format(tabPixel and 0xFFFFFF, bodyPixel and 0xFFFFFF)
+            }
+        }
+        assertTrue("Active tabs differ from their panels:\n${mismatches.joinToString("\n")}", mismatches.isEmpty())
+    }
+
     @Test fun dockedPanelHandlesCollapseTheirColumnOnFirstDoubleTap() {
         for ((theme, style) in listOf("light" to "automatic", "dark" to "icon")) {
             action(obj("type" to "set_theme", "theme" to theme))

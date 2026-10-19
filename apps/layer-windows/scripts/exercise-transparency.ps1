@@ -26,9 +26,18 @@ function Switch-Workspace([string]$Name,[string]$Id){
     Wait-Until {try{$switch.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle();$true}catch{$false}} "$Name switch stayed unavailable" 20
     Wait-Until {(Model).windows_workspace.id -eq $Id -and !(Model).windows_workspace.busy} "$Name did not open" 20
 }
-function Preference([int]$Index){
+function Preference([int]$Index,[string]$Theme){
     Invoke 'settings-button'
     $dialog=Control 'Preferences' -Name -Type $ControlType::Window
+    if($Theme){
+        $null=[CapyRowPointer]::SetForegroundWindow($review.MainWindowHandle)
+        $choice=Control 'preference-choice-theme' -Within $dialog;$choice.SetFocus()
+        Wait-Until {$choice.Current.HasKeyboardFocus} 'Color theme did not take focus'
+        [CapyRowPointer]::Key([uint32]$review.Id,[uint16]0x73)
+        Wait-Until {Find 'Light' -Name -Type $ControlType::ListItem} 'Theme choices did not open'
+        foreach($key in @(0x24)+@(@(0x28)*@('system','light','dark').IndexOf($Theme))+@(0x0D)){[CapyRowPointer]::Key([uint32]$review.Id,[uint16]$key)}
+        Wait-Until {(Model).state.settings.theme -eq $Theme} "The $Theme theme did not apply"
+    }
     $circle=Control ('preference-transparency-'+$Index)
     if($circle.Current.Name -ne @('Off','Low','Medium','High')[$Index]){throw "Transparency circle $Index is misnamed"}
     Invoke ('preference-transparency-'+$Index)
@@ -45,6 +54,20 @@ function Sample([string]$Name,$Points){
     $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
     $image=[System.Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
     try{@($Points|ForEach-Object {$image.GetPixel($_.x-$origin[0],$_.y-$origin[1]).G})}finally{$image.Dispose()}
+}
+function Tab-Shades([string]$Name){
+    $origin=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$origin)
+    $image=[System.Drawing.Bitmap]::new((Join-Path $run ($Name+'.png')))
+    try{
+        foreach($group in @((Model).layout.groups|Where-Object {$_.tabs_visible})){
+            $tab=(Control ('panel-tab-'+$group.active) -Arranged).Current.BoundingRectangle
+            $x=[int]($tab.X+4*$scale-$origin[0])
+            $shade,$body=@(($tab.Bottom-3*$scale),($tab.Bottom+3*$scale))|ForEach-Object {$image.GetPixel($x,[int]($_-$origin[1]))}
+            $difference=[Math]::Max([Math]::Max([Math]::Abs($shade.R-$body.R),[Math]::Abs($shade.G-$body.G)),[Math]::Abs($shade.B-$body.B))
+            $line="$Name $($group.active): tab $($shade.R),$($shade.G),$($shade.B) panel $($body.R),$($body.G),$($body.B)"
+            $tabShades.Add($line);if($difference -gt 2){$tabMismatches.Add($line)}
+        }
+    }finally{$image.Dispose()}
 }
 function Zoom([int]$Steps){
     (Control 'drawing-canvas').SetFocus()
@@ -65,28 +88,47 @@ try {
     [CapyRowPointer]::Initialize([uint32]$review.Id)
     Switch-Workspace 'Paint' 'builtin:workspace:illustrator'
     if((Model).state.palette.glass.transparency -ne 'low'){throw 'Low is not the default transparency'}
+    Invoke 'panel-tab-stats'
+    Wait-Until {@((Model).layout.groups|Where-Object active -eq 'stats').Count -eq 1} 'Diagnostics did not become the active tab'
     Wait-Until {(Model).windows_glass.regions -ge 4} 'Paint did not publish its glass surfaces'
     $group=@((Model).layout.groups|Where-Object {$_.panels -contains 'layers'})[0]
     $scale=[Capy.GlassWindow]::GetDpiForWindow($review.MainWindowHandle)/96.;$client=[int[]]@(0,0);$null=[Capy.GlassWindow]::ClientToScreen($review.MainWindowHandle,$client)
     $bounds=$group.bounds
     $point=@{x=[int]($client[0]+($bounds.x+$bounds.width-24)*$scale);y=[int]($client[1]+($bounds.y+$bounds.height-72)*$scale)}
     $panel=[Convert]::ToInt32((Model).state.palette.panel.Substring(3,2),16)
+    $tabShades=[Collections.Generic.List[string]]::new();$tabMismatches=[Collections.Generic.List[string]]::new()
     Fit-Canvas
     $surround=@{};$overPaper=@{}
     foreach($level in 0,3,2,1){
         Preference $level
-        $surround[$level]=(Sample ('fit-'+$level) @($point))[0]
+        $surround[$level]=(Sample ('fit-'+$level) @($point))[0];Tab-Shades ('fit-'+$level)
         if([Math]::Abs($surround[$level]-$panel) -gt 1){throw "Level $level panel over the surround is $($surround[$level]), expected $panel"}
     }
     Zoom 12
     Wait-Until {$z=(Model).state.camera.zoom;$z -gt 2} 'The canvas did not zoom under the panels'
     foreach($level in 0,1,2,3){
         Preference $level
-        $overPaper[$level]=(Sample ('paper-'+$level) @($point))[0]
+        $overPaper[$level]=(Sample ('paper-'+$level) @($point))[0];Tab-Shades ('paper-'+$level)
     }
     Write-Output ("Layers panel green over the surround: "+(($surround.GetEnumerator()|Sort-Object Key|ForEach-Object {$_.Value}) -join ',')+"; over paper: "+(0..3|ForEach-Object {$overPaper[$_]}) -join ',')
     if($overPaper[0] -ne $panel){throw "Off panel over paper is $($overPaper[0]), expected $panel"}
     if(!($overPaper[1] -gt $overPaper[0] -and $overPaper[2] -gt $overPaper[1] -and $overPaper[3] -gt $overPaper[2])){throw 'Higher transparency did not show more paper'}
+    Preference 0 'light'
+    Fit-Canvas
+    foreach($level in 0,1,2,3){
+        if($level){Preference $level}
+        $null=Sample ('light-fit-'+$level) @();Tab-Shades ('light-fit-'+$level)
+    }
+    Zoom 12
+    Wait-Until {$z=(Model).state.camera.zoom;$z -gt 2} 'The light canvas did not zoom under the panels'
+    foreach($level in 0,1,2,3){
+        Preference $level
+        $null=Sample ('light-paper-'+$level) @();Tab-Shades ('light-paper-'+$level)
+    }
+    $tabShades|Write-Output
+    if(!$tabShades.Count){throw 'Paint has no tabbed group to compare'}
+    if($tabMismatches.Count){throw "Active tabs differ from their panels:`n"+($tabMismatches -join "`n")}
+    Preference 3 'dark'
     Switch-Workspace 'Sketch' 'builtin:workspace:painter'
     $color=$null;foreach($zone in @((Model).header.model.zones)){foreach($entry in @($zone)){if($entry.item.control.kind -eq 'color'){$color=$entry.id}}}
     $settled=@{count=-1;since=[Diagnostics.Stopwatch]::StartNew()}
@@ -99,7 +141,7 @@ try {
     & (Join-Path $PSScriptRoot 'exercise-window.ps1') -ProcessId $review.Id -Action Close -DiscardUnsaved
     if(!$review.WaitForExit(8000)){throw 'Transparency review did not close'}
     if((Get-Item -LiteralPath $stderr).Length){throw 'Transparency review wrote to stderr'}
-    [pscustomobject]@{default_low='passed';circles='passed';invisible_over_surround='passed';paper_by_level='passed';drawer_connector='passed';
+    [pscustomobject]@{default_low='passed';circles='passed';invisible_over_surround='passed';paper_by_level='passed';active_tab_matches_panel='passed';drawer_connector='passed';
         scope='Synthetic UIA and captured pixels; physical display and performance acceptance are separate'}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $run 'results.json')
 }catch{
     try{Capture 'failure'}catch{}

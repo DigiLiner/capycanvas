@@ -99,7 +99,7 @@ struct WorkspaceTabDrag::Impl {
             if(flag(presentation,L"show_icon"))row.Children().Append(panelIcon(data,str(entry.model,L"icon"),paintIcons));
             if(flag(presentation,L"show_name"))row.Children().Append(label(data,str(entry.model,L"title"),true));
             Border content;content.Padding({8,4,8,4});content.Child(row);
-            auto copy=panelTabShell(content,entry.active?Brush(data->glass(L"tab")):Brush(nullptr));
+            auto copy=panelTabShell(content,entry.active?Brush(data->brush(L"panel")):Brush(nullptr));
             auto bounds=rectangle(object(entry.hit,L"bounds"));bounds.X-=float(num(clip,L"x"));bounds.Y-=float(num(clip,L"y"));
             place(copy,rectangle(bounds));entry.copy=copy;
             Canvas::SetZIndex(copy,i==source?2:entry.active?1:0);overlay.Children().Append(copy);

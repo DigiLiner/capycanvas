@@ -445,6 +445,7 @@ Setup that some journeys need:
 
 - `--workspace-rendering` checks Navigator GPU pixels at 1x and 2x, including
   live pen strokes, brush-up convergence and artwork undo/redo in both themes.
+  It compares active tabs with their panel bodies at every transparency level.
   Its screenshots include the painted document and Navigator.
 - `--workspace-store` checks IndexedDB against the native SQLite contract. Write
   the fixture from current Rust first:

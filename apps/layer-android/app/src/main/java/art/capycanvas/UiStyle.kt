@@ -92,7 +92,6 @@ internal class Palette(val dark: Boolean, private val source: org.json.JSONObjec
     val tabs = role("tabbar")
     val panelFill = if (inGlass) glass("panel") else panel
     val strip = if (inGlass) glass("strip") else tabs
-    val tab = if (inGlass) glass("tab") else panel
     val sidebar = role("sidebar")
     val input = role("input")
     val text = role("text")

@@ -10,6 +10,7 @@ export async function checkWorkspaceRendering({call,evaluate,settle}) {
  Object.assign(fixture.layout,{bands:[{id:40,edge:'left',extent:252,root:tabs(41,['brushes','sizes'])},{id:42,edge:'right',extent:360,root:tabs(43,['layers','properties','adjustments'])}],floating:[],collapsed:[],column_scroll:[],fit_tab_groups:[],fit_height_groups:[],column_stacks:[],next_id:Math.max(44,fixture.layout.next_id)});fixture.zen_mode=false;
  for(const dpr of [1,2]) {
   await call('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:dpr,mobile:false});
+  await checkActiveTabShade({call,evaluate,send,fixture,dir,dpr});
   await send({type:'restore_workspace',workspace:fixture});
   for(const group of [41,43])await send({type:'customize',action:{type:'set_column_collapsed',group,collapsed:true}});
   const alignment=await evaluate(`Array.from(document.querySelectorAll('.collapsed-column .column-tab, .collapsed-column > .panel-grip'),n=>{const b=n.getBoundingClientRect(),i=n.querySelector('svg').getBoundingClientRect();return {kind:n.className,error:i.x+i.width/2-b.x-b.width/2,transform:getComputedStyle(n.querySelector('svg')).transform};})`);
@@ -175,4 +176,56 @@ export async function checkWorkspaceRendering({call,evaluate,settle}) {
 
  }
  await send({type:'restore_workspace',workspace:saved});await send({type:'preferences',action:{type:'edit',id:'transparency',value:transparency}});console.log('PASS: native pixels at 1x/2x, model rebase/cancel, mouse/touch/pen clipping, compact/short/long drops, squashed/preserved source heights, footer anchor, undo/redo');
+}
+
+async function checkActiveTabShade({call,evaluate,send,fixture,dir,dpr}) {
+ const levels=['off','low','medium','high'],mismatches=[];let variation=0,compared=0,continuous=0;
+ await send({type:'restore_workspace',workspace:fixture});await send({type:'move_group',group:43,target:{kind:'float',position:[1000,600]}});
+ await send({type:'invoke',command:'fit_canvas'});await send({type:'select_brush',id:1});await send({type:'set_color',rgba:[0,0,0,1]});
+ await send({type:'set_brush_size',value:20/await evaluate('layerApp.state().camera.zoom')});
+ const stripes=Array.from({length:13},(_,i)=>380+i*40);
+ for(const x of stripes)for(const [type,y] of [['mousePressed',150],['mouseMoved',320],['mouseMoved',500],['mouseReleased',500]])
+  await call('Input.dispatchMouseEvent',{type,x,y,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1});
+ await send({type:'move_group',group:43,target:{kind:'float',position:[550,220]}});
+ const range=pixels=>Math.max(...[0,1,2].map(i=>Math.max(...pixels.map(p=>p[i]))-Math.min(...pixels.map(p=>p[i]))));
+ const inspect=async(name,translucent)=>{
+  const shot=(await call('Page.captureScreenshot',{format:'png'})).data;await writeFile(`${dir}/${name}.png`,Buffer.from(shot,'base64'));
+  const groups=await evaluate(`(async()=>{const i=new Image();i.src='data:image/png;base64,${shot}';await i.decode();const s=i.width/innerWidth,c=new OffscreenCanvas(i.width,i.height),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(i,0,0);
+   const at=(px,py)=>Array.from(x.getImageData(Math.floor(px*s),Math.floor(py*s),1,1).data.slice(0,3)),across=(left,right)=>Array.from({length:Math.floor((right-left-8)/4)+1},(_,k)=>left+4+k*4);
+   const slide=document.querySelector('.tab-slide-overlay>.dock-tab[aria-selected=true]')?.getBoundingClientRect();
+   return [...document.querySelectorAll('.dock-group')].flatMap(n=>{const h=n.querySelector('.dock-tabs:has(>.tab-list)')?.getBoundingClientRect(),b=n.querySelector('.panel-preview>.panel-frame')?.getBoundingClientRect();if(!h||!b)return[];
+    const t=slide&&Math.abs(slide.y-h.y)<1&&slide.x>=h.x&&slide.right<=h.right?slide:n.querySelector('.tab-list>.dock-tab[aria-selected=true]').getBoundingClientRect();
+    return [{group:n.dataset.group,samples:across(t.x,t.right).map(px=>({x:px,tab:at(px,t.bottom-3),panel:at(px,b.y+2)})),
+     strip:across(h.x,h.right).filter(px=>px<t.x-7||px>t.right+7).map(px=>at(px,t.bottom-3)),body:across(h.x,h.right).map(px=>at(px,b.y+2))}];});})()`);
+  for(const {group,samples,strip,body} of groups){
+   compared+=samples.length;
+   if(range(body)<=1){continuous++;if(range(strip)>1)mismatches.push(`${name} group ${group}: tab strip ${JSON.stringify(strip)} is not one surface over a uniform backdrop`);}
+   for(const {x,tab,panel} of samples)if(tab.some((v,i)=>Math.abs(v-panel[i])>1))mismatches.push(`${name} group ${group} x=${x.toFixed(1)}: tab ${tab} panel ${panel}`);
+   if(translucent)variation=Math.max(variation,range(samples.map(s=>s.panel)));
+  }
+ };
+ const slide=async(name,panel,dx)=>{
+  const p=await evaluate(`(()=>{const b=document.querySelector('.dock-group[data-group="41"] .dock-tab[data-panel="${panel}"]').getBoundingClientRect();return{x:b.x+b.width/2,y:b.y+b.height/2}})()`);
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',...p});
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});
+  for(const step of [12,dx])await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:p.x+step,y:p.y,button:'left',buttons:1});
+  await evaluate('new Promise(r=>setTimeout(r,300))');assert.ok(await evaluate("!!document.querySelector('.tab-slide-overlay')"),`${name}: the tab slides`);
+  await inspect(name,true);
+  await evaluate('window.dispatchEvent(new Event("blur"))');
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x+dx,y:p.y,button:'left',buttons:0,clickCount:1});await evaluate('new Promise(r=>setTimeout(r,300))');
+ };
+ for(const theme of ['dark','light']){
+  for(const level of levels){
+   await send({type:'set_theme',theme});await send({type:'preferences',action:{type:'edit',id:'transparency',value:levels.indexOf(level)}});
+   await inspect(`web-active-tab-${theme}-${level}-${dpr}x`,level!=='off');
+  }
+  await slide(`web-active-tab-${theme}-dragged-${dpr}x`,'brushes',30);
+  await slide(`web-active-tab-${theme}-neighbor-${dpr}x`,'sizes',-60);
+ }
+ for(const _ of stripes)await send({type:'invoke',command:'undo'});
+ await send({type:'set_theme',theme:'dark'});await send({type:'preferences',action:{type:'edit',id:'transparency',value:0}});
+ assert.ok(variation>2,`stripes vary the backdrop behind an active tab: ${variation}`);
+ assert.ok(continuous>=12,`a tab strip over a uniform backdrop in every theme, level and slide: ${continuous}`);
+ assert.deepEqual(mismatches,[],`active tabs differ from their panels:\n${mismatches.join('\n')}`);
+ console.log(JSON.stringify({dpr,activeTabMatchesPanel:true,themes:['dark','light'],levels,slides:['dragged','neighbor'],compared,continuous,backdropVariation:variation}));
 }

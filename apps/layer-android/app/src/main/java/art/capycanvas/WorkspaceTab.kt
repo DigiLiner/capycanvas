@@ -7,13 +7,27 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.GlobalPositionAwareModifierNode
+import androidx.compose.ui.node.ModifierNodeElement
+import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.ui.node.requireLayoutCoordinates
+import androidx.compose.ui.platform.InspectorInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalDensity
@@ -45,9 +59,78 @@ private fun JSONObject.tabStyle(group: Int): String? {
     }
 }
 
+private val TabFoot = 6.dp
+
+private fun Path.tabFace(w: Float, h: Float, r: Float, f: Float) {
+    moveTo(r, 0f); lineTo(w-r, 0f); squircleTo(Offset(w-r, r), Offset(0f, -r), Offset(r, 0f))
+    lineTo(w, h-f); squircleTo(Offset(w+f, h-f), Offset(-f, 0f), Offset(0f, f))
+    lineTo(-f, h); squircleTo(Offset(-f, h-f), Offset(0f, f), Offset(f, 0f))
+    lineTo(0f, r); squircleTo(Offset(r, r), Offset(-r, 0f), Offset(0f, -r)); close()
+}
+
+internal class TabStrip {
+    var area: StripNode? = null
+    var tab: HoleNode? = null
+    fun moved() { area?.invalidateDraw() }
+}
+
+internal fun Modifier.tabStrip(strip: TabStrip, color: Color) = graphicsLayer().then(StripElement(strip, color))
+
+private data class StripElement(val strip: TabStrip, val color: Color) : ModifierNodeElement<StripNode>() {
+    override fun create() = StripNode(strip, color)
+    override fun update(node: StripNode) = node.update(strip, color)
+    override fun InspectorInfo.inspectableProperties() { name = "tabStrip" }
+}
+
+internal class StripNode(private var strip: TabStrip, private var color: Color) : Modifier.Node(), DrawModifierNode {
+    private val face = Path(); private val hole = Path(); private val band = Path(); private val cover = Path()
+    private var faceSize = IntSize.Zero; private var bandSize = Size.Zero
+    override fun onAttach() { strip.area = this }
+    override fun onDetach() { if (strip.area === this) strip.area = null }
+    fun update(strip: TabStrip, color: Color) {
+        if (strip !== this.strip) { onDetach(); this.strip = strip; onAttach() }
+        this.color = color
+        invalidateDraw()
+    }
+    override fun ContentDrawScope.draw() {
+        val tab = strip.tab
+        if (tab == null) drawRect(color) else {
+            val placed = tab.requireLayoutCoordinates()
+            if (placed.size != faceSize) {
+                faceSize = placed.size
+                face.reset(); face.tabFace(faceSize.width.toFloat(), faceSize.height.toFloat(), SurfaceRadius.toPx(), TabFoot.toPx())
+            }
+            if (size != bandSize) { bandSize = size; band.reset(); band.addRect(Rect(Offset.Zero, size)) }
+            hole.reset(); hole.addPath(face, requireLayoutCoordinates().localPositionOf(placed, Offset.Zero) + Offset(tab.slide(), 0f))
+            cover.op(band, hole, PathOperation.Difference)
+            drawPath(cover, color)
+        }
+        drawContent()
+    }
+}
+
+private fun Modifier.tabHole(strip: TabStrip, slide: () -> Float) = this then HoleElement(strip, slide)
+
+private data class HoleElement(val strip: TabStrip, val slide: () -> Float) : ModifierNodeElement<HoleNode>() {
+    override fun create() = HoleNode(strip, slide)
+    override fun update(node: HoleNode) = node.update(strip, slide)
+    override fun InspectorInfo.inspectableProperties() { name = "tabHole" }
+}
+
+internal class HoleNode(private var strip: TabStrip, var slide: () -> Float) : Modifier.Node(), GlobalPositionAwareModifierNode {
+    override fun onAttach() { strip.tab = this; strip.moved() }
+    override fun onDetach() { if (strip.tab === this) { strip.tab = null; strip.moved() } }
+    override fun onGloballyPositioned(coordinates: LayoutCoordinates) = strip.moved()
+    fun update(strip: TabStrip, slide: () -> Float) {
+        if (strip !== this.strip) { onDetach(); this.strip = strip; onAttach() }
+        this.slide = slide
+        strip.moved()
+    }
+}
+
 /** Docked, floating and drawer tabs share geometry, colors and focus feedback. */
 @Composable internal fun WorkspaceTab(host: CanvasHost, dock: DockInteraction, panel: JSONObject,
-    group: Int, index: Int, selected: Boolean, modifier: Modifier, enabled: Boolean = true, fittedName: Boolean? = null) {
+    group: Int, index: Int, selected: Boolean, strip: TabStrip, modifier: Modifier, enabled: Boolean = true, fittedName: Boolean? = null) {
     val colors = LocalPalette.current
     val id = panel.getString("id")
     val presentation = panel.getJSONObject("tab")
@@ -59,20 +142,16 @@ private fun JSONObject.tabStyle(group: Int): String? {
         measurer.measure(AnnotatedString(panel.getString("title")), style).size.width / dock.density
     SideEffect { if (enabled) dock.measure(id, tabWidth = width) }
     val dragged = dock.isDraggedTab(id)
+    val slide = tabSlide(host, group, id, index, dock.density)
     Row(modifier.height(36.dp).then(if (!showName) Modifier.width(36.dp) else Modifier)
         .zIndex(if (dragged) 2f else if (selected) 1f else 0f)
-        .workspaceTabMotion(host, group, id, index, dock.density)
-        .drawBehind {
-            if (dragged && !selected) drawRect(colors.tabs)
-            if (selected) {
-                val r = SurfaceRadius.toPx(); val f = 6.dp.toPx(); val w = size.width; val h = size.height
-                val path = Path().apply {
-                    moveTo(r, 0f); lineTo(w-r, 0f); squircleTo(Offset(w-r, r), Offset(0f, -r), Offset(r, 0f))
-                    lineTo(w, h-f); squircleTo(Offset(w+f, h-f), Offset(-f, 0f), Offset(0f, f))
-                    lineTo(-f, h); squircleTo(Offset(-f, h-f), Offset(0f, f), Offset(f, 0f))
-                    lineTo(0f, r); squircleTo(Offset(r, r), Offset(-r, 0f), Offset(0f, -r)); close()
-                }
-                drawPath(path, colors.tab)
+        .then(if (selected) Modifier.tabHole(strip, slide) else Modifier)
+        .graphicsLayer { translationX = slide() }
+        .drawWithCache {
+            val face = if (selected) Path().apply { tabFace(size.width, size.height, SurfaceRadius.toPx(), TabFoot.toPx()) } else null
+            onDrawBehind {
+                if (dragged && !selected) drawRect(colors.tabs)
+                face?.let { drawPath(it, colors.panelFill) }
             }
         }
         .combinedClickable(enabled = enabled,

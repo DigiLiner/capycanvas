@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
@@ -61,7 +60,7 @@ internal fun JSONObject.rect() = Rect(number("x"), number("y"), number("x") + nu
 
 /** Tab slots stay frozen for insertion decisions. Only retained native drawing
  * instructions translate inside the header clip; there is no bitmap rescaling. */
-@Composable internal fun Modifier.workspaceTabMotion(host: CanvasHost, group: Int, panel: String, index: Int, density: Float): Modifier {
+@Composable internal fun tabSlide(host: CanvasHost, group: Int, panel: String, index: Int, density: Float): () -> Float {
     val neighbor = remember(group, panel) { Animatable(0f) }
     LaunchedEffect(host, group, panel, index) {
         snapshotFlow {
@@ -71,8 +70,8 @@ internal fun JSONObject.rect() = Rect(number("x"), number("y"), number("x") + nu
             if (offset == null) neighbor.snapTo(0f) else neighbor.animateTo(offset, tween(120, easing = TabSlideEasing))
         }
     }
-    return graphicsLayer {
+    return remember(host, group, panel, density) { {
         val tab = host.workspaceGeometry?.tab?.takeIf { it.group == group }
-        translationX = ((if (tab?.panel == panel) tab.sourceOffset else if (tab != null) neighbor.value else 0f) * density).roundToInt().toFloat()
-    }
+        ((if (tab?.panel == panel) tab.sourceOffset else if (tab != null) neighbor.value else 0f) * density).roundToInt().toFloat()
+    } }
 }

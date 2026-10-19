@@ -970,12 +970,13 @@ function startTabSlide(drag) {
     for (const name of [...preview.attributes].map(a => a.name)) {
       if (name.startsWith("data-") || name === "id") preview.removeAttribute(name);
     }
-    preview.classList.add(source === drag.node ? "dragged-tab-preview" : "neighbor-tab-preview");
+    const dragged = source === drag.node, hole = source.matches(".tab-list > [aria-selected=true]");
+    preview.classList.add(dragged ? "dragged-tab-preview" : "neighbor-tab-preview", ...(hole ? ["docked-tab-preview"] : []));
     Object.assign(preview.style, { left: `${bounds.x - clip.x}px`, top: `${bounds.y - clip.y}px`,
       width: `${bounds.width}px`, height: `${bounds.height}px`, font: getComputedStyle(source).font, transform: "translateX(0px)" });
-    source.classList.add("dragged-tab-source");
+    source.classList.add("dragged-tab-source", ...(hole && !dragged ? ["neighbor-tab-source"] : []));
     overlay.append(preview);
-    return { source, preview, hit };
+    return { source, preview, hit, hole };
   });
   workspace.append(overlay);
   overlay.getBoundingClientRect(); // Establish the neighbors' transition starting positions.
@@ -983,7 +984,10 @@ function startTabSlide(drag) {
 }
 function clearTabSlide(drag) {
   if (!drag.tabSlide) return;
-  for (const tab of drag.tabSlide.tabs) tab.source.classList.remove("dragged-tab-source");
+  for (const { source } of drag.tabSlide.tabs) {
+    source.classList.remove("dragged-tab-source", "neighbor-tab-source");
+    source.style.removeProperty("--slide");
+  }
   drag.tabSlide.overlay.remove();
   drag.tabSlide = null;
 }
@@ -995,7 +999,9 @@ function updateTabSlide(drag, presentation) {
   for (const tab of slide.tabs) {
     const offset = tab.source === drag.node ? preview.bounds.x - presentation.source.x
       : preview.offsets.find(o => Number(o.index) === tab.hit.index)?.x || 0;
-    tab.preview.style.transform = `translateX(${deviceAligned(offset)}px)`;
+    const x = `${deviceAligned(offset)}px`;
+    tab.preview.style.transform = `translateX(${x})`;
+    if (tab.hole) tab.source.style.setProperty("--slide", x);
   }
 }
 function workspaceCursor(cursor) {

@@ -260,20 +260,21 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                         var tabClip by remember { mutableStateOf(Rect.Zero) }
                         PanelHeaderFeedback {
                             Row(Modifier.fillMaxWidth().height(tabHeight.dp).testTag("column-drawer-header-$id")
-                                .background(LocalPalette.current.strip).then(if (current != null) Modifier.dragSource(dock, item) else Modifier),
+                                .then(if (current != null) Modifier.dragSource(dock, item) else Modifier),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 var strip by remember { mutableFloatStateOf(0f) }
                                 val names = automaticTabNames(host, group, tabs.array("panels").values().map { bodies[it.toString()] }, strip)
+                                val cutout = remember { TabStrip() }
                                 Box(Modifier.weight(1f).clipToBounds().onGloballyPositioned {
                                     tabClip = it.boundsInRoot().translate(-dock.origin); dock.tabClips[group] = tabClip
                                     strip = it.size.width / dock.density
-                                }) {
+                                }.tabStrip(cutout, LocalPalette.current.strip)) {
                                     Row(Modifier.horizontalScroll(rememberScrollState()).testTag("column-drawer-tabs-$id")) {
                                         tabs.array("panels").values().forEachIndexed { tabIndex, panelId ->
                                             val panel = bodies[panelId.toString()] ?: return@forEachIndexed
                                             key(panelId.toString()) {
                                                 WorkspaceTab(host, dock, panel, group, tabIndex,
-                                                    panelId == tabs.getString("active"),
+                                                    panelId == tabs.getString("active"), cutout,
                                                     Modifier.testTag("drawer-tab-$panelId")
                                                         .then(if (current != null) Modifier.dragSource(dock, obj("kind" to "panel", "panel" to panelId)) else Modifier)
                                                         .drawerTabHit(dock, columnId, group, tabIndex, panelId.toString(), tabClip, current != null),
@@ -282,7 +283,7 @@ internal fun DockInteraction.drawerContainerShape(bounds: JSONObject, radius: Fl
                                         }
                                     }
                                 }
-                                Box(Modifier.width(20.dp).fillMaxHeight().testTag("column-drawer-grip-$id")
+                                Box(Modifier.width(20.dp).fillMaxHeight().background(LocalPalette.current.strip).testTag("column-drawer-grip-$id")
                                     .then(if (current != null) Modifier.dragSource(dock, item) else Modifier), contentAlignment = Alignment.Center) {
                                     PanelGrip("Move panel group")
                                 }

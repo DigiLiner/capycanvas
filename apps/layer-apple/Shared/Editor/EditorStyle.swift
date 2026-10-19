@@ -23,7 +23,6 @@ struct EditorPalette {
     var chromeSurface: Color { glass("chip", self["bg"]) }
     var glassPanel: Color { glass("panel", self["panel"]) }
     var glassStrip: Color { glass("strip", self["tabbar"]) }
-    var glassTab: Color { glass("tab", self["panel"]) }
     var glassSwitcher: Color { glass("switcher", self["tabbar"]) }
     var glassSwitcherSelection: Color { glass("switcher_selection", role("header_selection", "#afc6e5")) }
     var glassDocumentTab: Color { glass("document_tab", self["panel"]) }

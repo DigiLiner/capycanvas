@@ -85,7 +85,6 @@ pub struct GlassPalette {
     pub blur: BlurStyle,
     pub panel: GlassColor,
     pub strip: GlassColor,
-    pub tab: GlassColor,
     pub source: GlassColor,
     pub open_tile: GlassColor,
     pub chip: GlassColor,
@@ -166,7 +165,6 @@ impl GlassPalette {
             blur: transparency.blur(),
             panel: glass_panel,
             strip: glass_strip,
-            tab: GlassColor::over(panel, tabbar, joined),
             source: GlassColor::over(source, bg, strip),
             open_tile: GlassColor::over(panel, source, joined),
             chip,
@@ -207,23 +205,20 @@ mod tests {
             let bg = rgb(p.bg);
             assert!(close(g.panel.composite(bg), rgb(p.panel), 1. / 255.));
             assert!(close(g.strip.composite(bg), rgb(p.tabbar), 1. / 255.));
-            assert!(close(g.tab.composite(g.strip.composite(bg)), rgb(p.panel), 1. / 255.));
             assert!(close(g.selection.composite(g.panel.composite(bg)), rgb(p.selection), 1. / 255.));
             assert!(g.strip.0[3] < g.panel.0[3], "inactive tab strips show more of the canvas");
         }
     }
 
     #[test]
-    fn selected_tabs_match_the_panel_body_over_any_backdrop() {
+    fn open_tiles_match_the_panel_body_over_any_backdrop() {
         for transparency in [Transparency::Low, Transparency::Medium, Transparency::High] {
             let g = Settings { transparency, ..Settings::default() }
                 .palette(Theme::Dark, Platform::Gtk, None)
                 .glass;
             for backdrop in [[0.; 3], [1.; 3], [0.9, 0.2, 0.1], [0.1, 0.4, 0.8]] {
                 let body = g.panel.composite(backdrop);
-                let tab = g.tab.composite(g.strip.composite(backdrop));
                 let tile = g.open_tile.composite(g.source.composite(backdrop));
-                assert!(close(body, tab, 1. / 255.), "{transparency:?} {backdrop:?}");
                 assert!(close(body, tile, 1. / 255.), "{transparency:?} {backdrop:?}");
             }
         }
@@ -323,7 +318,6 @@ mod tests {
             for (glass, opaque) in [
                 (g.panel, p.panel),
                 (g.strip, p.tabbar),
-                (g.tab, p.panel),
                 (g.open_tile, p.panel),
                 (g.chip, p.bg),
                 (g.selection, p.selection),

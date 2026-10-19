@@ -2877,7 +2877,6 @@ impl Workspace {
         for (name, color) in [
             ("panel", glass.panel),
             ("strip", glass.strip),
-            ("tab", glass.tab),
             ("source", glass.source),
             ("open-tile", glass.open_tile),
             ("chip", glass.chip),

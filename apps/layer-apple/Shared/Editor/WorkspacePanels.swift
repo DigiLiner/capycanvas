@@ -127,7 +127,7 @@ private struct WorkspacePanelGroupContent: View {
                 if expansion.isNull {
                     content.clipShape(shape.fittedClip)
                         .environment(\.editorPalette, palette.glassy)
-                        .background { surface(radius: radius, square: square) }
+                        .backgroundPreferenceValue(WorkspaceActiveTab.self) { tab in surface(radius: radius, square: square, tab: tab) }
                         .modifier(GlassRegistration(shape: shape))
                 } else {
                     content.background(palette["panel"])
@@ -138,12 +138,12 @@ private struct WorkspacePanelGroupContent: View {
                 .accessibilityIdentifier("workspace-group-\(group["id"].uint)")
         }
     }
-    @ViewBuilder private func surface(radius: CGFloat, square: [Bool]) -> some View {
+    @ViewBuilder private func surface(radius: CGFloat, square: [Bool], tab: WorkspaceTabFrame?) -> some View {
         if group["tabs_visible"].bool && group["active"].string != "navigator" {
             let strip = SquircleShape(topLeading: square[0] ? 0 : radius, topTrailing: square[1] ? 0 : radius)
             let body = SquircleShape(bottomTrailing: square[2] ? 0 : radius, bottomLeading: square[3] ? 0 : radius)
             VStack(spacing: 0) {
-                strip.fill(palette.glassStrip).frame(height: 36)
+                WorkspaceTabStrip(shape: strip, tab: tab, strip: palette.glassStrip, panel: palette.glassPanel).frame(height: 36)
                 body.fill(palette.glassPanel)
             }
         } else {

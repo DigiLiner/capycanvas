@@ -82,6 +82,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         Canvas content;
         Grid layout{nullptr},header{nullptr};
         StackPanel tabLabels{nullptr};
+        Grid activeTab{nullptr};
         std::vector<AutomaticTab> automatic;
         Bindings paintIcons;
         ScrollView tabScroll{nullptr};
@@ -151,7 +152,7 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
         root.LayoutUpdated([weak=weak_from_this()](auto&&,auto&&){if(auto self=weak.lock())self->measured();});
     }
     void build(Group& group,J const& geometry,J const& panel){
-        group.body.reset();group.footer=nullptr;group.tabs.clear();group.automatic.clear();group.paintIcons.clear();group.backgroundKey=L"";
+        group.body.reset();group.footer=nullptr;group.tabs.clear();group.activeTab=nullptr;group.automatic.clear();group.paintIcons.clear();group.backgroundKey=L"";
         auto groupItem=O({{L"kind",S(L"group")},{L"group",N(num(geometry,L"id"))}});
         float fit=groupRadius(geometry)*CornerFit;group.border.Background(clear());group.border.CornerRadius(CornerRadius{fit,fit,fit,fit});
         if(!group.layout){
@@ -185,7 +186,13 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 gestures->Source(tab,O({{L"type",S(L"drag_workspace")},{L"item",item}}),item,false,
                     O({{L"group",N(num(geometry,L"id"))},{L"index",N(index++)},{L"panel",S(id)}}));
                 AutomationProperties::SetAutomationId(tab,L"panel-tab-"+id);
-                group.tabs.emplace(std::wstring(id),tab);tabs.Children().Append(panelTabShell(tab,active?Brush(data->glass(L"tab")):Brush(nullptr)));
+                auto shell=panelTabShell(tab,active?Brush(data->glass(L"panel")):Brush(nullptr));
+                if(active){
+                    group.activeTab=shell;auto cut=[weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))]{if(auto self=weak.lock())self->cutStrip(id);};
+                    shell.SizeChanged([cut](auto&&,auto&&){cut();});
+                    shell.RegisterPropertyChangedCallback(UIElement::OpacityProperty(),[cut](auto&&,auto&&){cut();});
+                }
+                group.tabs.emplace(std::wstring(id),tab);tabs.Children().Append(shell);
             }
             if(!group.tabScroll){
                 group.tabScroll=ScrollView();auto tabScroll=group.tabScroll;tabScroll.Content(tabs);tabScroll.HorizontalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
@@ -193,9 +200,11 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
                 tabScroll.VerticalScrollBarVisibility(ScrollingScrollBarVisibility::Hidden);
                 tabScroll.ContentOrientation(ScrollingContentOrientation::Horizontal);
                 tabScroll.IgnoredInputKinds(ScrollingInputKinds::Touch|ScrollingInputKinds::Pen);
-                tabScroll.Background(clear());
+                tabScroll.Background(clear());tabScroll.CornerRadius({});
                 gestures->Source(tabScroll,O({{L"type",S(L"drag_workspace")},{L"item",groupItem}}),groupItem,true);
-                tabScroll.SizeChanged([weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))](auto&&,auto&&){if(auto self=weak.lock())self->fitTabs(id);});
+                tabScroll.SizeChanged([weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))](auto&&,auto&&){if(auto self=weak.lock()){self->fitTabs(id);self->cutStrip(id);}});
+                tabScroll.ViewChanged([weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))](auto&&,auto&&){if(auto self=weak.lock())self->cutStrip(id);});
+                tabs.SizeChanged([weak=weak_from_this(),id=uint32_t(num(geometry,L"id"))](auto&&,auto&&){if(auto self=weak.lock())self->cutStrip(id);});
                 group.header=Grid();auto header=group.header;header.Background(clear());
                 ColumnDefinition labels;labels.Width({1,GridUnitType::Star});header.ColumnDefinitions().Append(labels);
                 ColumnDefinition trailing;trailing.Width({20,GridUnitType::Pixel});header.ColumnDefinitions().Append(trailing);
@@ -704,15 +713,12 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             GeometryGroup shape;shape.FillRule(FillRule::EvenOdd);
             float width=float(num(bounds,L"width")),height=float(num(bounds,L"height"));
             auto outline=expanded?expansionShape(group.presented):tabbed?squircleRectangle(width,std::max(0.f,height-36),{0,0,corners[2],corners[3]}):squircleRectangle(width,height,corners);
-            group.strip.Data(tabbed&&!expanded?squircleRectangle(width,36,{SurfaceRadius,SurfaceRadius,0,0}):PathGeometry());group.strip.Fill(data->glass(L"strip"));
+            cutStrip(group);group.strip.Fill(data->glass(L"strip"));
             if(tabbed&&!expanded){TranslateTransform body;body.Y(36);outline.Transform(body);}
             group.background.Fill(expanded?data->brush(L"panel"):data->glass(source.Size()?L"source":L"panel"));
-            if(group.header){
-                group.header.Background(expanded?data->brush(L"tabbar"):clear());
-                for(auto child:group.tabLabels.Children())if(auto shell=child.try_as<Grid>();shell&&unbox_value_or<hstring>(shell.Tag(),L"")==L"active-panel-tab-shell")
-                    for(auto layer:shell.Children())if(auto canvas=layer.try_as<Canvas>())for(auto item:canvas.Children())if(auto path=item.try_as<Microsoft::UI::Xaml::Shapes::Path>())
-                        path.Fill(expanded?data->brush(L"panel"):data->glass(L"tab"));
-            }
+            if(group.header)group.header.Background(expanded?data->brush(L"tabbar"):clear());
+            if(group.activeTab)for(auto layer:group.activeTab.Children())if(auto canvas=layer.try_as<Canvas>())for(auto item:canvas.Children())if(auto path=item.try_as<Microsoft::UI::Xaml::Shapes::Path>())
+                path.Fill(expanded?data->brush(L"panel"):data->glass(L"panel"));
             auto shadowKey=O({{L"expansion",group.presented},{L"radius",N(radius)},{L"width",bounds.GetNamedValue(L"width")},{L"height",bounds.GetNamedValue(L"height")}}).Stringify();
             if(shadowKey!=group.shadowKey){
                 group.shadowKey=shadowKey;
@@ -734,6 +740,21 @@ struct WorkspaceView::Impl : std::enable_shared_from_this<Impl> {
             }
             group.background.Data(shape);
         }
+    }
+    void cutStrip(uint32_t id){if(auto found=groups.find(id);found!=groups.end())cutStrip(found->second);}
+    void cutStrip(Group& group){
+        GeometryGroup shape;shape.FillRule(FillRule::EvenOdd);float width=placement(group).Width;
+        if(flag(group.geometry,L"tabs_visible")&&!group.presented.Size()&&width>0){
+            shape.Children().Append(squircleRectangle(width,36,{SurfaceRadius,SurfaceRadius,0,0}));
+            if(auto tab=group.activeTab;tab&&tab.Opacity()>0&&tab.ActualWidth()>0){
+                auto view=group.tabScroll.TransformToVisual(group.content).TransformPoint({0,0});
+                float x=view.X+group.tabLabels.ActualOffset().x+tab.ActualOffset().x-float(group.tabScroll.HorizontalOffset())-6;
+                auto outline=panelTabOutline(float(tab.ActualWidth()),float(tab.ActualHeight()));
+                for(auto& point:outline){point.X+=x;point.Y+=view.Y;}
+                shape.Children().Append(polygon(clipColumns(outline,view.X,view.X+float(group.tabScroll.ActualWidth()))));
+            }
+        }
+        group.strip.Data(shape);
     }
     void resizeHandle(std::wstring const& key,J const& bounds,J const& action,int z,bool resetColumn=false){
         auto [it,added]=handles.try_emplace(key);

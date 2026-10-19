@@ -105,12 +105,12 @@ looks unchanged over an empty canvas, and only artwork behind it shows through.
 - Panel bodies, drawers, connectors and open tiles use the level's surface alpha.
 - Inactive tab strips and toolbars with an open drawer use a lower alpha, so they
   are fainter than the active panel over artwork. They stay darker over the base.
-- On GTK the tab strip is cut out under the selected tab and its feet, which use
-  the panel body's fill, so the active tab and its content read as one surface
-  over any backdrop. An open tile on such a toolbar, and a selected tab on the
-  other hosts, uses `α = 1 − (1 − α_panel) / (1 − α_strip)` over the strip. That
-  matches the panel only while the required fill stays within the color range,
-  which light Medium and High exceed.
+- The tab strip is cut out under the selected tab and its feet, which use the
+  panel body's fill, so the active tab and its content read as one surface over
+  any backdrop. An open tile on a toolbar uses
+  `α = 1 − (1 − α_panel) / (1 − α_strip)` over the strip. That matches the
+  panel only while the required fill stays within the color range, which light
+  Medium and High exceed.
 - Selected tools, layers and workspaces are translucent fills over their parent
   surface.
 - Dark themes use about two thirds of the light theme's transparency at each
@@ -244,9 +244,24 @@ the variant.
 
 On macOS and iPadOS, `cargo test --locked -p layer-apple glass` checks region
 validation, display scaling and connector feet, and the `testPanelTransparency`
-journey checks the Settings circles and that panels over paper brighten from
-Off to Low to High. `CAPY_WORKLOAD_TRANSPARENCY=off|low|medium|high` selects the
+journey checks the Settings circles, that panels over paper brighten from
+Off to Low to High, and that the active tab matches its panel body in both
+themes at every level. `CAPY_WORKLOAD_TRANSPARENCY=off|low|medium|high` selects the
 level for the Apple drawing workloads.
+
+On Windows, `exercise-transparency.ps1` (the VM fixture `transparency`) also
+compares each active tab with its panel body, over the surround and over paper,
+in both themes at every level.
+
+On GTK, `native_active_tab_matches_panel` compares each active tab with its
+panel body in compositor captures, in both themes at every level. On Android,
+`AndroidHostTest#activeTabsMatchTheirPanelsAtEveryTransparency` does the same
+for every docked group.
+
+On Web, `--workspace-rendering` compares each active tab with its panel body,
+over the surround and over stripes painted on paper, in both themes at every
+level and while a selected tab slides. A tab strip over a uniform backdrop must
+be one even surface.
 
 For tablet pen timing, `LAYER_PEN_TRANSPARENCY=off|low|medium|high` selects the
 level in the Web pen harness (`tools/performance/web-pen.mjs`), and each run

@@ -529,13 +529,14 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
     Surface(modifier, color = if (tabsVisible) Color.Transparent else colors.panelFill) {
         Column {
             if (tabsVisible) PanelHeaderFeedback {
-                Row(Modifier.fillMaxWidth().height(36.dp).testTag("group-header-${group.getInt("id")}").background(colors.strip).dragSource(dock, groupItem)
+                Row(Modifier.fillMaxWidth().height(36.dp).testTag("group-header-${group.getInt("id")}").dragSource(dock, groupItem)
                     .combinedClickable(onClick = { if (panel.optBoolean("expanded")) host.customize(obj("type" to "close_expanded")) },
                         onLongClick = { dock.holdContext(groupItem) }), verticalAlignment = Alignment.CenterVertically) {
                     var strip by remember { mutableFloatStateOf(0f) }
                     val names = automaticTabNames(host, group.getInt("id"), group.array("panels").values().map { panels[it.toString()] }, strip)
+                    val cutout = remember { TabStrip() }
                     Row(Modifier.weight(1f).onGloballyPositioned { dock.tabClips[group.getInt("id")] = it.boundsInRoot().translate(-dock.origin); strip = it.size.width / dock.density }
-                        .horizontalScroll(rememberScrollState()).clickable(enabled = panel.optBoolean("expanded")) { host.customize(obj("type" to "close_expanded")) }) {
+                        .tabStrip(cutout, colors.strip).horizontalScroll(rememberScrollState()).clickable(enabled = panel.optBoolean("expanded")) { host.customize(obj("type" to "close_expanded")) }) {
                         group.array("panels").values().forEachIndexed { index, id ->
                             val p = panels[id.toString()] ?: return@forEachIndexed
                             val tab = Modifier.testTag("tab-$id").dragSource(dock, obj("kind" to "panel", "panel" to id))
@@ -548,10 +549,10 @@ private fun expandedShape(expansion: JSONObject, density: Float) = GenericShape 
                                     dock.tabSlots["${group.getInt("id")}:$index"] = obj("group" to group.getInt("id"), "index" to index, "panel" to id,
                                         "bounds" to obj("x" to natural.x, "y" to natural.y, "width" to coords.size.width / dock.density, "height" to coords.size.height / dock.density))
                                 }
-                            WorkspaceTab(host, dock, p, group.getInt("id"), index, id == active, tab, fittedName = names?.getOrNull(index))
+                            WorkspaceTab(host, dock, p, group.getInt("id"), index, id == active, cutout, tab, fittedName = names?.getOrNull(index))
                         }
                     }
-                    Box(Modifier.width(20.dp).height(36.dp).testTag("group-grip-${group.getInt("id")}")
+                    Box(Modifier.width(20.dp).height(36.dp).background(colors.strip).testTag("group-grip-${group.getInt("id")}")
                         .combinedClickable(onClick = { if (panel.optBoolean("expanded")) host.customize(obj("type" to "close_expanded")) },
                             onLongClick = { dock.holdContext(obj("kind" to "group", "group" to group.getInt("id"))) }), contentAlignment = Alignment.Center) { PanelGrip(host.catalog.getJSONObject("document_delivery_copy").getString("move_group")) }
                 }

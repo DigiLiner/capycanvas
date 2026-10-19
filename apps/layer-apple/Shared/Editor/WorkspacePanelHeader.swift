@@ -12,7 +12,7 @@ struct WorkspacePanelHeader: View {
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var navigator: Bool { group["active"].string == "navigator" }
     private var strip: Color { glass || drawer ? .clear : palette[navigator ? "panel" : "tabbar"] }
-    private var tab: Color? { drawer || (glass && navigator) ? nil : glass ? palette.glassTab : palette["panel"] }
+    private var tab: Color? { drawer || glass ? nil : palette["panel"] }
     var body: some View {
         HStack(spacing: 0) {
             GeometryReader { viewport in
@@ -28,7 +28,7 @@ struct WorkspacePanelHeader: View {
                 context: JSON(["kind": "group", "group": group["id"].raw])))
     }
     private func tabs(available: CGFloat) -> some View {
-        WorkspacePanelTabs(store: store, slide: store.workspace.tabSlide, group: group, panels: panels, drawer: drawer, available: available, fill: tab)
+        WorkspacePanelTabs(store: store, slide: store.workspace.tabSlide, group: group, panels: panels, drawer: drawer, available: available, fill: tab, cutsStrip: glass)
     }
 }
 
@@ -40,6 +40,7 @@ private struct WorkspacePanelTabs: View {
     let drawer: Bool
     let available: CGFloat
     let fill: Color?
+    let cutsStrip: Bool
     private var palette: EditorPalette { EditorPalette(source: store.state["palette"]) }
     private var automatic: Bool {
         func style(_ node: JSON) -> String? {
@@ -65,6 +66,7 @@ private struct WorkspacePanelTabs: View {
         ForEach(group["panels"].array.indices, id: \.self) { index in
             let tab = tabs[index]
             let selected = tab["id"].string == group["active"].string
+            let hidden = slide.isVisible(in: group["id"].uint)
             Button {
                 if !store.workspace.input.contact.consumeClick() { store.dispatch(["type": "select_panel_tab", "group": group["id"].raw, "panel": tab["id"].raw]) }
             } label: {
@@ -74,9 +76,9 @@ private struct WorkspacePanelTabs: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
                 .modifier(WorkspaceDrag(workspace: store.workspace, item: JSON(["kind": "panel", "panel": tab["id"].raw]),
                     context: JSON(["kind": "panel", "panel": tab["id"].raw])))
-                .modifier(WorkspaceTabMeasurement(group: group["id"].uint, index: index))
+                .modifier(WorkspaceTabMeasurement(group: group["id"].uint, index: index, cutsStrip: cutsStrip && selected && !hidden))
                 .zIndex(selected ? 1 : 0)
-                .opacity(slide.isVisible(in: group["id"].uint) ? 0 : 1)
+                .opacity(hidden ? 0 : 1)
         }
     }
 }
@@ -116,6 +118,34 @@ private struct WorkspaceTabShape: Shape {
     }
 }
 
+struct WorkspaceActiveTab: PreferenceKey {
+    static var defaultValue: WorkspaceTabFrame? { nil }
+    static func reduce(value: inout WorkspaceTabFrame?, nextValue: () -> WorkspaceTabFrame?) { value = nextValue() ?? value }
+}
+
+struct WorkspaceTabStrip: View {
+    let shape: SquircleShape
+    let tab: WorkspaceTabFrame?
+    let strip: Color
+    let panel: Color
+    var body: some View {
+        GeometryReader { allocation in
+            let origin = allocation.frame(in: .named("editor-workspace")).origin
+            let outline = shape.path(in: CGRect(origin: .zero, size: allocation.size))
+            let cut = tab.flatMap { active -> Path? in
+                let clip = active.clip.offsetBy(dx: -origin.x, dy: -origin.y)
+                guard !clip.isNull, !clip.isEmpty else { return nil }
+                return WorkspaceTabShape().path(in: active.bounds.offsetBy(dx: -origin.x, dy: -origin.y))
+                    .intersection(Path(clip)).intersection(outline)
+            } ?? Path()
+            ZStack(alignment: .topLeading) {
+                outline.subtracting(cut).fill(strip)
+                cut.fill(panel)
+            }
+        }
+    }
+}
+
 struct WorkspaceGroupGrip: View {
     @ObservedObject var store: EditorStore
     let group: JSON
@@ -135,6 +165,7 @@ struct WorkspaceGroupGrip: View {
 private struct WorkspaceTabMeasurement: ViewModifier {
     let group: UInt64
     let index: Int
+    let cutsStrip: Bool
     @Environment(\.workspaceClip) private var clip
     @Environment(\.workspaceGesturesEnabled) private var enabled
     func body(content: Content) -> some View {
@@ -145,6 +176,7 @@ private struct WorkspaceTabMeasurement: ViewModifier {
                 value: enabled && !bounds.isEmpty ? ["\(group):\(index)": bounds] : [:])
                 .preference(key: WorkspaceTabFrames.self,
                     value: enabled && !full.isEmpty ? ["\(group):\(index)": WorkspaceTabFrame(bounds: full, clip: clip)] : [:])
+                .preference(key: WorkspaceActiveTab.self, value: cutsStrip ? WorkspaceTabFrame(bounds: full, clip: clip) : nil)
         })
     }
 }

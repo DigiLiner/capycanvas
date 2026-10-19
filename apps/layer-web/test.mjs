@@ -750,7 +750,7 @@ try {
       );
       const surfaces = await evaluate(`(() => {
       const group=document.querySelector('.dock-group:not(.toolbar)'), tab=group.querySelector('.dock-tab[aria-selected=true]');
-      return {panel:getComputedStyle(group.querySelector('.panel-frame')).backgroundColor, bar:getComputedStyle(group.querySelector('.dock-tabs')).backgroundColor, active:getComputedStyle(tab).backgroundColor, radius:getComputedStyle(tab).borderBottomRightRadius, foot:getComputedStyle(tab,'::after').width};
+      return {panel:getComputedStyle(group.querySelector('.panel-frame')).backgroundColor, bar:getComputedStyle(tab,'::after').backgroundColor, active:getComputedStyle(tab).backgroundColor, radius:getComputedStyle(tab).borderBottomRightRadius, foot:getComputedStyle(tab,'::after').width};
     })()`);
       assert.equal(
         surfaces.panel,
