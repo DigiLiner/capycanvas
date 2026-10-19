@@ -295,12 +295,14 @@ fn native_vector_select_erase_mask_and_merge() {
     let before = paths(&d);
     d.w.dispatch(UiAction::Layer { action: LayerAction::AddMask { id, replace: false } });
     d.w.dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: true } });
-    d.w.dispatch(UiAction::SelectBrush { id: layer_core::DefaultBrushPreset::GPen as u32 });
+    d.w.dispatch(UiAction::Invoke { command: CommandId::Eraser });
     pump(200);
     let revision = ui_session(&d.w).engine().document().revision;
-    pen_points(&mut d, &stroke([300., 700.], [1100., 700.]));
+    pen_points(&mut d, &stroke([400., 300.], [400., 500.]));
     wait_for("the mask stroke", || ui_session(&d.w).engine().document().revision != revision);
     assert_eq!(paths(&d), before, "mask strokes leave the paths");
+    wait_for("the mask hides the left stub", || !inked(presented(&d, [400., 400.])) && inked(presented(&d, [1000., 400.])));
+    d.capture_canvas("mask.png");
     d.w.dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: false } });
     d.w.dispatch(UiAction::Layer { action: LayerAction::NewBelow });
     d.w.dispatch(UiAction::Layer { action: LayerAction::Select { id, mask: false } });
@@ -308,7 +310,7 @@ fn native_vector_select_erase_mask_and_merge() {
     d.w.dispatch(UiAction::Invoke { command: CommandId::MergeDown });
     press_notice(&mut d, layer_ui::NoticeActionId::Merge);
     wait_for("the lines become pixels", || !active_vector(&d) && ui_session(&d.w).engine().document().scene().vector_layer(layer).is_none());
-    wait_for("the merged pixels on screen", || inked(presented(&d, [400., 400.])));
+    wait_for("the merged pixels keep the mask", || !inked(presented(&d, [400., 400.])) && inked(presented(&d, [1000., 400.])));
     d.capture_canvas("merged.png");
     d.finish();
 }

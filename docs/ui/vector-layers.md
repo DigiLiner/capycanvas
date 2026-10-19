@@ -301,7 +301,9 @@ the session rules. `vector_paths_follow_rotation_flip_and_resize` in
 [`vector_tests.rs`](../../crates/layer-render-wgpu/src/scene/vector_tests.rs)
 cover canvas edits and baking; `paths_paint_over_a_paint_layer_through_a_bake_of_the_layer_and_a_reserved_path_layer`
 and the GPU test `paths_painted_onto_paint_layers_match_the_path_drawn_above_them`
-cover paths painted onto paint layers, and
+cover paths painted onto paint layers,
+`masks_hide_vector_layers_on_screen_and_once_rasterized_or_merged` covers layer
+masks on screen and through Rasterize Layer, Apply Mask and Merge Down, and
 [`ops_tests.rs`](../../crates/layer-core/src/authored/vector/ops_tests.rs) covers
 the path commands' geometry and width profiles. The GTK journey `native_vector_draw_move_and_delete` draws two
 G-Pen lines with tablet input, drags one, undoes, selects the other with a
@@ -314,8 +316,9 @@ vector refusal with Use G-Pen and New Paint Layer. `native_vector_color_and_canv
 fills inside an ellipse outline and outside it on a new paint layer below, then
 rotates the canvas. `native_vector_select_erase_mask_and_merge` selects all paths
 with Ctrl+A, flips them, clears the selection with Escape, erases up to
-intersection from the eraser's drawer, paints the layer's mask and merges the
-layer into paint through the notice. Each checks presented pixels. Run them with `--tablet` once per theme through
+intersection from the eraser's drawer, hides part of a line by erasing the
+layer's mask, and merges the layer into paint through the notice with that part
+still hidden. Each checks presented pixels. Run them with `--tablet` once per theme through
 `CAPY_NATIVE_TEST_THEME` ([Linux](../development/linux.md)); each writes its
 captures to the run's `input` directory. On a tablet,
 `AndroidVectorLayerTest#gPenLinesDrawMoveAndUndoOnVectorLayers` draws, drags and

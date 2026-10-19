@@ -49,6 +49,20 @@ fn native(r: &mut WgpuRasterizer, doc: &layer_core::Document) -> Vec<[f32; 4]> {
     float_pixels(r, &texture)
 }
 fn display(r: &WgpuRasterizer) -> Vec<[f32; 4]> { float_pixels(r, r.scale_display.as_ref().unwrap().texture()) }
+fn engine_for(doc: layer_core::Document) -> layer_engine::CanvasEngine<WgpuRasterizer> {
+    let r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
+    let view = crate::test_support::view(doc.composition().size);
+    layer_engine::CanvasEngine::new(r, doc, layer_engine::input_queue(16).1, view, layer_engine::ViewTransform::IDENTITY).unwrap()
+}
+fn settle(engine: &mut layer_engine::CanvasEngine<WgpuRasterizer>) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        engine.render_frame().unwrap();
+        if !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { return; }
+        assert!(std::time::Instant::now() < deadline, "the bake must finish");
+        std::thread::yield_now();
+    }
+}
 
 #[test]
 fn vector_layers_render_the_same_through_display_and_native_paths() {
@@ -598,19 +612,11 @@ fn appended_strokes_at_zoomed_out_levels_match_a_fresh_render() {
 fn rasterizing_a_vector_layer_bakes_what_it_shows() {
     let (editor, layer) = document([300, 200], records());
     let doc = editor.document().clone();
-    let mut r = WgpuRasterizer::new_native_headless(doc.composition().color).unwrap();
-    let shown = native(&mut r, &doc);
-    let (_input, consumer) = layer_engine::input_queue(16);
-    let mut engine = layer_engine::CanvasEngine::new(r, doc, consumer, crate::test_support::view([300, 200]), layer_engine::ViewTransform::IDENTITY).unwrap();
+    let mut engine = engine_for(doc.clone());
+    let shown = native(engine.backend_mut(), &doc);
     let plan = engine.document().rasterize_plan(layer, false).unwrap();
     engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    loop {
-        engine.render_frame().unwrap();
-        if !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { break; }
-        assert!(std::time::Instant::now() < deadline, "the bake must finish");
-        std::thread::yield_now();
-    }
+    settle(&mut engine);
     assert!(engine.document().scene().vector_layer(layer).is_none());
     let document = engine.document().clone();
     let rasterized = native(engine.backend_mut(), &document);
@@ -620,19 +626,8 @@ fn rasterizing_a_vector_layer_bakes_what_it_shows() {
 
 #[test]
 fn paths_painted_onto_paint_layers_match_the_path_drawn_above_them() {
-    let settle = |engine: &mut layer_engine::CanvasEngine<WgpuRasterizer>| {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        loop {
-            engine.render_frame().unwrap();
-            if !engine.has_pending_document_edits() && !engine.backend().has_pending_work() { break; }
-            assert!(std::time::Instant::now() < deadline, "the bake must finish");
-            std::thread::yield_now();
-        }
-    };
     let (editor, base) = document([300, 200], vec![shape(1, [30., 40., 200., 150.], [0.2, 0.6, 0.3, 0.7])]);
-    let r = WgpuRasterizer::new_native_headless(editor.document().composition().color).unwrap();
-    let (_input, consumer) = layer_engine::input_queue(16);
-    let mut engine = layer_engine::CanvasEngine::new(r, editor.document().clone(), consumer, crate::test_support::view([300, 200]), layer_engine::ViewTransform::IDENTITY).unwrap();
+    let mut engine = engine_for(editor.document().clone());
     let plan = engine.document().rasterize_plan(base, false).unwrap();
     engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
     settle(&mut engine);
@@ -664,5 +659,54 @@ fn paths_painted_onto_paint_layers_match_the_path_drawn_above_them() {
         let painted = native(engine.backend_mut(), &document);
         assert!(max_error(&painted, &shown) < 2. / 255., "alpha lock {alpha_locked}: {}", max_error(&painted, &shown));
         assert_eq!(document.scene().order().len(), doc.scene().order().len(), "no layer is added");
+    }
+}
+
+#[test]
+fn masks_hide_vector_layers_on_screen_and_once_rasterized_or_merged() {
+    use layer_core::{Edit, RecordChange};
+    let extent = [300u32, 200u32];
+    let mut artwork = layer_core::authored::Artwork::new(extent).unwrap();
+    crate::test_support::add_paint(&mut artwork, "Paint", extent);
+    let mut doc = layer_core::Document::from_artwork(artwork).unwrap();
+    let (layer, edit) = doc.create_vector_layer_edit("Ink", VectorObject::from_records(vec![stroke(1, &[[20., 100.], [280., 100.]], 12., [0.1, 0.1, 0.1, 1.])]), None, 0).unwrap();
+    doc.apply(edit).unwrap();
+    let mut engine = engine_for(doc);
+    settle(&mut engine);
+    let coverage = layer_core::CoverageSnapshot::reveal_all(engine.document().artwork.coverage.next_handle(), extent, [0, 0]);
+    let mask = SourceTarget::Coverage(coverage.target);
+    let mut occurrence = engine.document().scene().occurrence(layer).unwrap().clone();
+    occurrence.mask = Some(coverage.use_);
+    let mut working = engine.document().working.clone();
+    working.occurrence = Some(layer);
+    working.target = Some(mask);
+    engine.apply_edit(Edit::Batch(vec![Edit::Coverage(RecordChange::insert(&engine.document().artwork.coverage, coverage.source)),
+        Edit::Occurrence(RecordChange::replace(&engine.document().artwork.occurrences, layer, Some(occurrence)).unwrap()), Edit::Working(working)])).unwrap();
+    settle(&mut engine);
+    let mut hidden = layer_core::CoverageSnapshot::reveal_all(engine.document().artwork.coverage.next_handle(), extent, [0, 0]);
+    hidden.source.default_coverage = 0.;
+    hidden.selection = Some(layer_core::Selection::polygon(layer_core::Rect::from_extent([150, 200]).corners().to_vec()).unwrap());
+    engine.append_raster_operation(mask, layer_core::RasterOperation {
+        placement: layer_core::Affine::IDENTITY, coverage: hidden, kind: layer_core::RasterOperationKind::Erase { alpha_locked: false },
+    }).unwrap();
+    settle(&mut engine);
+    let masked = engine.document().clone();
+    let shown = display(engine.backend());
+    let exact = native(engine.backend_mut(), &masked);
+    let alpha = |pixels: &[[f32; 4]], x: usize| pixels[100 * extent[0] as usize + x][3];
+    for pixels in [&shown, &exact] {
+        assert!(alpha(pixels, 80) < 1e-3 && alpha(pixels, 220) > 0.99, "the mask hides the left of the line only: {} {}", alpha(pixels, 80), alpha(pixels, 220));
+    }
+    assert!(max_error(&shown, &exact) < 1e-5);
+    for (bake, apply_mask) in [("Rasterize Layer", Some(false)), ("Apply Mask", Some(true)), ("Merge Down", None)] {
+        let mut engine = engine_for(masked.clone());
+        settle(&mut engine);
+        let plan = apply_mask.map_or_else(|| engine.document().merge_plan(layer_core::MergeKind::Down).unwrap(), |apply| engine.document().rasterize_plan(layer, apply).unwrap());
+        engine.insert_with_operations(plan.edits, vec![(plan.target, plan.operation)], None).unwrap();
+        settle(&mut engine);
+        let document = engine.document().clone();
+        assert!(document.scene().vector_layer(layer).is_none());
+        let baked = native(engine.backend_mut(), &document);
+        assert!(max_error(&baked, &exact) < 2. / 255., "{bake} keeps the masked picture: {}", max_error(&baked, &exact));
     }
 }
