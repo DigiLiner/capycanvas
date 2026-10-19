@@ -982,6 +982,8 @@ pub struct WgpuRasterizer {
     transport_records: material_sources::TileRecords,
     transport_regions: Vec<PixelRect>,
     transport_jobs: Vec<WatercolorTransportJob>,
+    /// Pages whose wetness the current watercolor update has written.
+    watercolor_written: Vec<[u32; 2]>,
     material_jobs: Vec<MaterialJob>,
     dry_jobs: Vec<dry_material::Job>,
     dry_display_inputs: Vec<dry_material::DisplayInputs>,
@@ -1369,6 +1371,7 @@ impl WgpuRasterizer {
             transport_records: Default::default(),
             transport_regions: Vec::new(),
             transport_jobs: Vec::new(),
+            watercolor_written: Vec::new(),
             material_jobs: Vec::new(),
             dry_jobs: Vec::with_capacity(SOURCE_SLOTS),
             dry_display_inputs: Vec::new(),
@@ -2385,6 +2388,8 @@ impl WgpuRasterizer {
             .flat_map(|(snapshot, scope, _)| snapshot.with_scope(scope).order().iter().copied().filter(|h| packet.scene.occurrence(*h).is_none()).map(move |h| (h, snapshot)))
             .collect();
         let records = packet.dab_batches.len() + packet.scene.order().len() + removed_members.len();
+        self.material_records.restart();
+        self.transport_records.restart();
         self.dab_upload.clear();
         self.dab_upload.extend(packet.dabs.iter().copied().map(DabGpu::from));
         for batch in packet.dab_batches {
@@ -2656,30 +2661,13 @@ impl WgpuRasterizer {
         let plan = BrushPassPlan::for_device(&batch.style, &self.device);
         if plan.requires_destination() {
             let preview = context.target.is_preview();
-            let watercolor_first = plan.state.watercolor_wetness
-                && is_first_watercolor_update_batch(context.batches, batch_index);
             let watercolor_last = plan.state.watercolor_wetness
                 && is_last_watercolor_update_batch(context.batches, batch_index);
-            let watercolor_damages = (watercolor_first || watercolor_last).then(|| {
-                watercolor_update_damages(context.batches, batch_index, context.target_extent)
-            });
-            if watercolor_first {
-                self.begin_watercolor_wetness_update(
-                    encoder,
-                    batch.target,
-                    watercolor_damages
-                        .as_deref()
-                        .expect("first watercolor update has damage"),
-                    preview,
-                )?;
-            }
             self.encode_material_batch(encoder, batch_index, batch, context)?;
             if watercolor_last {
-                let damages = watercolor_damages
-                    .as_deref()
-                    .expect("last watercolor update has damage");
-                self.finish_watercolor_wetness_update(batch.target, damages, preview)?;
-                self.encode_watercolor_transport(encoder, batch_index, batch, damages, preview)?;
+                let damages = watercolor_update_damages(context.batches, batch_index, context.target_extent);
+                self.finish_watercolor_wetness_update(batch.target, preview)?;
+                self.encode_watercolor_transport(encoder, batch_index, batch, &damages, preview)?;
             }
             return Ok(());
         }
@@ -2713,57 +2701,9 @@ impl WgpuRasterizer {
         Ok(())
     }
 
-    fn begin_watercolor_wetness_update(
-        &self,
-        encoder: &mut crate::submission::CommandEncoder,
-        layer_id: SourceTarget,
-        damages: &[PixelRect],
-        preview: bool,
-    ) -> Result<(), GpuRasterError> {
-        let persistent_pages;
-        let pages = if preview {
-            &self.preview_watercolor_wetness_pages
-        } else {
-            persistent_pages = &self
-                .paint_layers
-                .iter()
-                .find(|layer| layer.id == layer_id)
-                .ok_or(GpuRasterError::MissingPaintLayer(layer_id))?
-                .watercolor_wetness_pages;
-            persistent_pages
-        };
-        for coordinate in unique_page_coordinates(damages) {
-            let page = pages
-                .iter()
-                .find(|page| page.coordinate == coordinate)
-                .expect("watercolor update page is prepared before snapshot");
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &page.active().texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &page.inactive().texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: PAGE_SIZE,
-                    height: PAGE_SIZE,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-        Ok(())
-    }
-
     fn finish_watercolor_wetness_update(
         &mut self,
         layer_id: SourceTarget,
-        damages: &[PixelRect],
         preview: bool,
     ) -> Result<(), GpuRasterError> {
         let persistent_pages;
@@ -2778,7 +2718,7 @@ impl WgpuRasterizer {
                 .watercolor_wetness_pages;
             persistent_pages
         };
-        for coordinate in unique_page_coordinates(damages) {
+        for coordinate in self.watercolor_written.drain(..) {
             let page = pages
                 .iter_mut()
                 .find(|page| page.coordinate == coordinate)
@@ -2838,16 +2778,15 @@ impl WgpuRasterizer {
         jobs: &[WatercolorTransportJob],
     ) {
         if jobs.is_empty() { return; }
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("layer nonlinear watercolor capillary relaxation"), timestamp_writes: None,
-        });
+        let pass = encoder.compute_pass();
         pass.set_pipeline(&self.pipelines.watercolor_transport[step as usize]);
         pass.set_bind_group(0, &self.style_bind_group, &[batch_index as u32 * self.style_stride as u32]);
         pass.set_bind_group(3, texture, &[]);
         for job in jobs {
             pass.set_bind_group(1, self.paint_target_binding(&batch.style), &[self.layer_target_offset(batch.target, job.coordinate)]);
             pass.set_bind_group(2, &job.sources, &[job.record_offset]);
-            pass.dispatch_workgroups(job.local.width().div_ceil(8), job.local.height().div_ceil(8), 1);
+            let size = if step == 0 { [PAGE_SIZE; 2] } else { [job.local.width(), job.local.height()] };
+            pass.dispatch_workgroups(size[0].div_ceil(8), size[1].div_ceil(8), 1);
         }
     }
 
@@ -2881,17 +2820,8 @@ impl WgpuRasterizer {
         regions.extend(updated.iter().map(|coordinate| damages.iter().fold(PixelRect::EMPTY, |combined, damage| {
             combined.union(damage.intersect(page_rect(*coordinate)))
         }).page_local(*coordinate)));
-        let used = self.transport_records.prepare(&self.device, updated.len())?;
-        if used == 0 { return Ok(()); }
-        self.uploads.write_mapped(encoder, self.transport_records.binding().buffer, 0, used, |mapped| {
-            mapped.slice(..).fill(0);
-            for (index, local) in regions.iter().enumerate() {
-                let offset = self.transport_records.offset(index) as usize;
-                for (i, word) in [local.min_x(), local.min_y(), local.max_x(), local.max_y()].into_iter().enumerate() {
-                    mapped.slice(offset + i * 4..offset + i * 4 + 4).copy_from_slice(&word.to_le_bytes());
-                }
-            }
-        })?;
+        let first = self.transport_records.upload(&self.device, &mut self.uploads, encoder,
+            regions.iter().map(|local| material_sources::record(material_sources::rect_words(*local), [])))?;
         let texture_key = Self::texture_set_key(&batch.style);
         let transport_texture_bind_group = self
             .texture_sets
@@ -2901,8 +2831,8 @@ impl WgpuRasterizer {
             .transport_bind_group
             .clone();
 
-        // Synchronize the first stage's destinations in one copy batch. Later
-        // stages overwrite the same scissor, leaving identical pixels outside.
+        // The first stage writes whole pages; later stages overwrite the same
+        // region, leaving identical pixels outside.
         for step in 0..WATERCOLOR_TRANSPORT_STEPS {
             let jobs = if preview {
                 updated
@@ -2918,10 +2848,6 @@ impl WgpuRasterizer {
                             .iter()
                             .find(|page| page.coordinate == *coordinate)
                             .expect("preview transport wetness is prepared before encoding");
-                        if step == 0 {
-                            color.active().copy_to(color.surface(!color.active_secondary), encoder);
-                            wetness.active().copy_to(wetness.inactive(), encoder);
-                        }
                         Job {
                             coordinate: *coordinate,
                             color_destination_secondary: !color.active_secondary,
@@ -2948,10 +2874,6 @@ impl WgpuRasterizer {
                             .iter()
                             .find(|page| page.coordinate == *coordinate)
                             .expect("transport wetness is prepared before encoding");
-                        if step == 0 {
-                            color.active().copy_to(color.surface(!color.active_secondary), encoder);
-                            wetness.active().copy_to(wetness.inactive(), encoder);
-                        }
                         Job {
                             coordinate: *coordinate,
                             color_destination_secondary: !color.active_secondary,
@@ -2963,7 +2885,6 @@ impl WgpuRasterizer {
 
             for (index, job) in jobs.iter().enumerate() {
                 let local = regions[index];
-                if local.is_empty() { continue; }
                 let base = self.tiled_sources.get(&batch.target);
                 let backing = self.native_backing(batch.target);
                 let borrowed = (base.is_some() || backing.is_some())
@@ -3023,7 +2944,7 @@ impl WgpuRasterizer {
                 let sources = self.transport_bind_group(batch.target, job.coordinate, preview,
                     &color_destination.view, &wetness_destination.view)?;
                 pending.push(WatercolorTransportJob {
-                    coordinate: job.coordinate, local, record_offset: self.transport_records.offset(index), sources,
+                    coordinate: job.coordinate, local, record_offset: self.transport_records.offset(first + index), sources,
                 });
                 if borrowed {
                     self.encode_watercolor_transport_jobs(encoder, batch_index, batch, step, &transport_texture_bind_group, &pending);
@@ -5181,15 +5102,6 @@ fn batch_pixel_rect(batch: &DabBatch, extent: [u32; 2]) -> PixelRect {
         .filter(|transport| transport.wet_flow > 0.0 || transport.dry_flow > 0.0)
         .map_or(0, |transport| transport.distance.ceil() as u32);
     damage.expand(transport_radius, extent)
-}
-
-fn is_first_watercolor_update_batch(batches: &[DabBatch], index: usize) -> bool {
-    let current = &batches[index];
-    batches[..index]
-        .iter()
-        .rev()
-        .take_while(|b| same_material_update(b, current))
-        .all(|b| b.dab_count == 0)
 }
 
 fn is_last_watercolor_update_batch(batches: &[DabBatch], index: usize) -> bool {

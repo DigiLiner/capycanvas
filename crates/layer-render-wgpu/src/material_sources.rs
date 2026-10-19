@@ -5,19 +5,30 @@
 use super::*;
 use layer_core::{Point, Rect};
 
-/// Aligned material tile uniforms retain their allocation across batches.
+/// Aligned material tile uniforms retain their allocation across frames. Each
+/// frame's records follow one another, so every batch keeps its own.
 #[derive(Default)]
 pub(super) struct TileRecords {
     buffer: Option<wgpu::Buffer>,
     stride: u64,
+    used: usize,
 }
 impl TileRecords {
-    pub fn prepare(&mut self, device: &wgpu::Device, count: usize) -> Result<u64, GpuRasterError> {
+    pub fn restart(&mut self) {
+        self.used = 0;
+    }
+
+    /// Writes records after the frame's earlier ones, in the encoder's
+    /// prologue so no pass waits on them, and returns the index of the first.
+    pub fn upload(&mut self, device: &wgpu::Device, uploads: &mut Uploads, encoder: &mut crate::submission::CommandEncoder,
+        records: impl Iterator<Item = [u32; RECORD_WORDS]> + Clone) -> Result<usize, GpuRasterError> {
         self.stride = u64::from(device.limits().min_uniform_buffer_offset_alignment.max(256));
-        let used = (count as u64).checked_mul(self.stride)
+        let (first, count) = (self.used, records.clone().count());
+        let used = ((first + count) as u64).checked_mul(self.stride)
             .filter(|size| *size <= device.limits().max_buffer_size)
             .ok_or(GpuRasterError::SizeOverflow)?;
-        if used > 0 && self.buffer.as_ref().is_none_or(|buffer| buffer.size() < used) {
+        if count == 0 { return Ok(first); }
+        if self.buffer.as_ref().is_none_or(|buffer| buffer.size() < used) {
             self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("reusable material tile records"),
                 size: used.next_power_of_two().min(device.limits().max_buffer_size),
@@ -25,7 +36,17 @@ impl TileRecords {
                 mapped_at_creation: false,
             }));
         }
-        Ok(used)
+        self.used = first + count;
+        let stride = self.stride as usize;
+        uploads.write_mapped(encoder.prologue(), self.buffer.as_ref().unwrap(), first as u64 * self.stride, count as u64 * self.stride, |mapped| {
+            mapped.slice(..).fill(0);
+            for (index, words) in records.enumerate() {
+                for (i, word) in words.into_iter().enumerate() {
+                    mapped.slice(index * stride + i * 4..index * stride + i * 4 + 4).copy_from_slice(&word.to_le_bytes());
+                }
+            }
+        })?;
+        Ok(first)
     }
 
     pub fn storage_bytes(&self) -> u64 { self.buffer.as_ref().map_or(0, wgpu::Buffer::size) }
@@ -219,24 +240,14 @@ fn swept_rotation(bounds: Rect, center: Point, angle: f32) -> Rect {
 
 impl WgpuRasterizer {
     /// Upload one batch's tile records into pooled mapped storage, with no
-    /// intermediate byte vector or second CPU copy on the drawing path.
+    /// intermediate byte vector or second CPU copy on the drawing path, and
+    /// return the index of the first.
     pub(super) fn prepare_records(
         &mut self,
         records: impl Iterator<Item = [u32; RECORD_WORDS]> + Clone,
         encoder: &mut crate::submission::CommandEncoder,
-    ) -> Result<(), GpuRasterError> {
-        let records_buffer = &mut self.material_records;
-        let used = records_buffer.prepare(&self.device, records.clone().count())?;
-        if used == 0 { return Ok(()); }
-        self.uploads.write_mapped(encoder, records_buffer.buffer.as_ref().unwrap(), 0, used, |mapped| {
-            mapped.slice(..).fill(0);
-            for (index, words) in records.enumerate() {
-                let offset = index * records_buffer.stride as usize;
-                for (i, word) in words.into_iter().enumerate() {
-                    mapped.slice(offset + i * 4..offset + i * 4 + 4).copy_from_slice(&word.to_le_bytes());
-                }
-            }
-        })
+    ) -> Result<usize, GpuRasterError> {
+        self.material_records.upload(&self.device, &mut self.uploads, encoder, records)
     }
 
     pub(super) fn material_source_binding(

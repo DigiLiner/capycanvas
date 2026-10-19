@@ -108,9 +108,8 @@ Both prevent an unused coverage feature from writing its state target. A single 
 allocation, committed rendering, and prediction. Only damaged
 pixels are rasterized and recomposited. Capillary transport uses three
 incommensurate scalar-field-aligned hops rather than iterating one-pixel diffusion
-up to the requested distance. Its first stage synchronizes ping-pong pages;
-the following stages overwrite the same scissor without additional page
-copies. Export readback and completed-work waits are explicit cold or benchmark
+up to the requested distance. Its first stage writes whole ping-pong pages;
+the following stages overwrite the same region without page copies. Export readback and completed-work waits are explicit cold or benchmark
 operations.
 
 The current measured results and exact workload are in

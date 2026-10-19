@@ -2,7 +2,7 @@ use layer_core::{BrushExecution, Document, RasterOperationKind, Point, Rect};
 use layer_render::{Dab, DabBatch, DabBatchKind};
 use std::borrow::Cow;
 
-pub(super) const MATERIAL_PAGE_PASSES_PER_FRAME: u32 = 512;
+pub(super) const MATERIAL_PAGE_JOBS_PER_FRAME: u32 = 512;
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct FrameSteps {
@@ -18,7 +18,7 @@ impl FrameSteps {
             batch.damage.max.x - batch.damage.min.x > Self::SIDE as f32
                 || batch.damage.max.y - batch.damage.min.y > Self::SIDE as f32
         ));
-        (bake || material_page_passes(batches) > 2 * MATERIAL_PAGE_PASSES_PER_FRAME).then(Self::default)
+        (bake || material_page_jobs(batches) > 2 * MATERIAL_PAGE_JOBS_PER_FRAME).then(Self::default)
     }
 
     fn is_bake(document: &Document, batch: &DabBatch) -> bool {
@@ -56,21 +56,21 @@ impl FrameSteps {
         if matches!(batches[self.batch].kind, DabBatchKind::RasterOperation(_)) {
             return self.batch + 1;
         }
-        let mut passes = 0;
+        let mut jobs = 0;
         let mut end = self.batch;
         while let Some(batch) = batches.get(end).filter(|batch| !matches!(batch.kind, DabBatchKind::RasterOperation(_))) {
-            let more = material_page_passes(std::slice::from_ref(batch));
-            if end > self.batch && passes + more > MATERIAL_PAGE_PASSES_PER_FRAME && !same_watercolor_update(&batches[end - 1], batch) {
+            let more = material_page_jobs(std::slice::from_ref(batch));
+            if end > self.batch && jobs + more > MATERIAL_PAGE_JOBS_PER_FRAME && !same_watercolor_update(&batches[end - 1], batch) {
                 break;
             }
-            passes += more;
+            jobs += more;
             end += 1;
         }
         end
     }
 }
 
-pub(super) fn material_page_passes(batches: &[DabBatch]) -> u32 {
+pub(super) fn material_page_jobs(batches: &[DabBatch]) -> u32 {
     batches
         .iter()
         .filter(|batch| batch.kind == DabBatchKind::Persistent && batch.style.execution != BrushExecution::Dry

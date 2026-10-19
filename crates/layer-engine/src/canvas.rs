@@ -1716,7 +1716,7 @@ impl<B: CanvasRenderer> CanvasEngine<B> {
             }
             if self.active_stroke.as_ref().is_some_and(|stroke| stroke.style.execution != BrushExecution::Dry && !stroke.style.execution.retouches()) {
                 self.advance_finalized_prefix();
-                if frame_steps::material_page_passes(&self.batches) >= frame_steps::MATERIAL_PAGE_PASSES_PER_FRAME {
+                if frame_steps::material_page_jobs(&self.batches) >= frame_steps::MATERIAL_PAGE_JOBS_PER_FRAME {
                     break;
                 }
             }
@@ -2909,7 +2909,7 @@ mod tests {
         persistent_dabs: usize,
         persistent: Vec<Dab>,
         persistent_batches: Vec<(StrokeId, bool, bool, u32)>,
-        material_page_passes: u32,
+        material_page_jobs: u32,
         material_batches: Vec<(u32, u32)>,
         operation_batches: Vec<(SourceTarget, u32, layer_core::Rect, bool)>,
         restored_rasters: Vec<(SourceTarget, u64)>,
@@ -3041,7 +3041,7 @@ mod tests {
             }
             self.preview.clear();
             self.styles.clear();
-            self.material_page_passes = frame_steps::material_page_passes(packet.dab_batches);
+            self.material_page_jobs = frame_steps::material_page_jobs(packet.dab_batches);
             for batch in packet.dab_batches {
                 self.styles.push(batch.style.clone());
                 let start = batch.first_dab as usize;
@@ -6391,7 +6391,7 @@ mod tests {
                     while engine.has_pending_input() || engine.has_pending_document_edits() {
                         assert!(clock < 10 * MATERIAL_STROKE_SAMPLES as u64, "{preset:?} replay did not finish");
                         engine.render_frame_at(clock * 1_000_000).unwrap();
-                        largest = largest.max(engine.backend().material_page_passes);
+                        largest = largest.max(engine.backend().material_page_jobs);
                         clock += 1;
                     }
                 };
@@ -6402,7 +6402,7 @@ mod tests {
                 }
                 queue_material_samples(&mut producer, MATERIAL_STROKE_SAMPLES / 2..MATERIAL_STROKE_SAMPLES);
                 drain(&mut engine);
-                assert!(largest <= 2 * frame_steps::MATERIAL_PAGE_PASSES_PER_FRAME, "{preset:?} rebuild {rebuild}: {largest}");
+                assert!(largest <= 2 * frame_steps::MATERIAL_PAGE_JOBS_PER_FRAME, "{preset:?} rebuild {rebuild}: {largest}");
                 assert_replays_completed_stroke(&engine, preset);
             }
         }
@@ -6418,8 +6418,8 @@ mod tests {
             while engine.completed_stroke.is_none() {
                 assert!(frames < 1000, "{preset:?} backlog did not drain");
                 engine.render_frame_at((count as u64 + frames) * 1_000_000).unwrap();
-                let passes = engine.backend().material_page_passes;
-                assert!(engine.completed_stroke.is_some() || passes <= frame_steps::MATERIAL_PAGE_PASSES_PER_FRAME * 5 / 4, "{preset:?} frame {frames}: {passes}");
+                let jobs = engine.backend().material_page_jobs;
+                assert!(engine.completed_stroke.is_some() || jobs <= frame_steps::MATERIAL_PAGE_JOBS_PER_FRAME * 5 / 4, "{preset:?} frame {frames}: {jobs}");
                 frames += 1;
             }
             assert!(frames > 3, "{preset:?} drained in {frames} frames");

@@ -325,9 +325,16 @@ fn transport_result(position: vec4<f32>) -> TransportOutput {
 
 @compute @workgroup_size(8, 8)
 fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
-    let coordinate = invocation.xy + region.bounds.xy;
-    if any(coordinate >= region.bounds.zw) { return; }
+    let coordinate = invocation.xy + select(region.bounds.xy, vec2<u32>(0u), TRANSPORT_PASS == 0u);
+    let p = vec2<i32>(coordinate);
+    if any(coordinate < region.bounds.xy) || any(coordinate >= region.bounds.zw) {
+        if TRANSPORT_PASS == 0u {
+            textureStore(color_output, p, textureLoad(color_center, p, 0));
+            textureStore(wetness_output, p, textureLoad(wet_center, p, 0));
+        }
+        return;
+    }
     let result = transport_result(vec4<f32>(vec2<f32>(coordinate) + 0.5, 0.0, 1.0));
-    textureStore(color_output, vec2<i32>(coordinate), result.color);
-    textureStore(wetness_output, vec2<i32>(coordinate), result.wetness);
+    textureStore(color_output, p, result.color);
+    textureStore(wetness_output, p, result.wetness);
 }

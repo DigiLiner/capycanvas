@@ -146,17 +146,18 @@ impl WgpuRasterizer {
         let distant = jobs.iter().map(|job| gathers.then(|| material_sources::distant_pages(batch, dabs, job.coordinate, extent)).flatten())
             .collect::<Vec<_>>();
         let exchange = dabs.first().zip(dabs.last()).filter(|_| !preview && operation == MaterialOperation::Wet);
+        let seeds: Vec<_> = jobs.iter().map(|job| operation == MaterialOperation::Watercolor && !self.watercolor_written.contains(&job.coordinate)).collect();
+        self.watercolor_written.extend(jobs.iter().zip(&seeds).filter(|(_, seed)| **seed).map(|(job, _)| job.coordinate));
         self.metrics.material_cpu_ms[0] += elapsed(started);
-        self.prepare_records(jobs.iter().zip(&distant).flat_map(|(job, pages)| {
+        let mut first_record = self.prepare_records(jobs.iter().zip(&distant).zip(&seeds).flat_map(|((job, pages), &seed)| {
             pages.iter().flat_map(|pages| pages.chunks(9)).enumerate()
                 .map(|(chunk, pages)| record([1, pages.len() as u32, u32::from(chunk > 0), 0], pages.iter().map(|p| [p[0], p[1], 0, 0])))
-                .chain(std::iter::once(record([if pages.is_some() { 2 } else { 0 }, 0, 0, 0], [rect_words(job.local)])))
+                .chain(std::iter::once(record([if pages.is_some() { 2 } else { 0 }, 0, 0, u32::from(seed)], [rect_words(job.local)])))
         }).chain(exchange.map(|(first, _)| {
             let color = first.color_rgba_linear;
             record([0; 4], [[color[0], color[1], color[2], batch.style.wet_mix.amount_of_paint * first.material[2]].map(f32::to_bits)])
         })), encoder)?;
         let mut dispatches = Vec::with_capacity(jobs.len());
-        let mut first_record = 0;
         for (job, pages) in jobs.iter().zip(&distant) {
             let layer = &self.paint_layers[layer_index];
             let (color_pages, coverage_pages, wetness_pages) = if preview {
@@ -271,10 +272,7 @@ impl WgpuRasterizer {
         let texture_key = Self::texture_set_key(&batch.style);
         let textures = &self.texture_sets.iter().find(|set| set.key == texture_key).unwrap().bind_group;
         let style_offset = batch_index as u32 * self.style_stride as u32;
-        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("destination material pages"),
-            timestamp_writes: None,
-        });
+        let pass = encoder.compute_pass();
         pass.set_bind_group(3, textures, &[]);
         for dispatch in dispatches {
             pass.set_pipeline(self.pipelines.destination_material.kernel(&batch.style, dispatch.entry));
@@ -284,7 +282,6 @@ impl WgpuRasterizer {
             let size = if dispatch.entry == Entry::Reservoir { RESERVOIR_SIZE } else { PAGE_SIZE } / WORKGROUP;
             pass.dispatch_workgroups(size, size, 1);
         }
-        drop(pass);
         self.metrics.material_cpu_ms[3] += elapsed(started);
     }
 }

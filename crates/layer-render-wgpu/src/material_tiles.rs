@@ -91,10 +91,10 @@ impl WgpuRasterizer {
         } else {
             Vec::new()
         };
-        if pointwise(&batch.style) {
+        let first_record = if pointwise(&batch.style) {
             self.prepare_records(jobs.iter().enumerate()
-                .map(|(i, j)| material_sources::dry_record(j.local, j.dabs.clone(), mappings.get(i).map_or([0; 16], |m| m.words))), encoder)?;
-        }
+                .map(|(i, j)| material_sources::dry_record(j.local, j.dabs.clone(), mappings.get(i).map_or([0; 16], |m| m.words))), encoder)?
+        } else { 0 };
         if transported {
             self.encode_transport_jobs(encoder, batch_index, batch, batch_dabs, &jobs, layer_index, preview, preview && !from_persistent)?;
         }
@@ -160,7 +160,7 @@ impl WgpuRasterizer {
                 }),
                 coordinate: job.coordinate,
                 coverage: coverage_surface.is_some(),
-                record_offset: self.material_records.offset(record_index),
+                record_offset: self.material_records.offset(first_record + record_index),
                 dirty: job.local,
             });
             destination.preview.set(None);

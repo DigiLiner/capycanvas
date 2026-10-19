@@ -65,9 +65,10 @@ fn liquify_modes_move_a_marker_in_their_labelled_direction() {
     );
 }
 
-/// Render and compute passes that one committed batch of `preset` adds on a
-/// 4×4-page layer when its contact covers `radius` around the centre.
-fn committed_batch_passes(preset: DefaultBrushPreset, radius: f32) -> u64 {
+/// Render and compute passes that one committed frame of `style` adds on a
+/// 4×4-page layer when each of its `batches` contacts covers `radius` around
+/// the centre.
+fn committed_frame_passes(style: &DabStyle, radius: f32, batches: usize) -> u64 {
     let extent = [4 * PAGE_SIZE; 2];
     let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
     let document = paint_document(extent, "material batch pages");
@@ -79,25 +80,33 @@ fn committed_batch_passes(preset: DefaultBrushPreset, radius: f32) -> u64 {
     let frame = |dabs, batches| FramePacket { dabs, dab_batches: batches, commit_rasters: false, ..packet(document.scene(), extent) };
     let paint = crate::test_support::dab_batch(layer, crate::tests::test_style(BrushExecution::Dry), full);
     r.submit(FramePacket { reset_layers: true, ..frame(std::slice::from_ref(&base), std::slice::from_ref(&paint)) }).unwrap();
-    let mut contact = dab([0.; 4]);
-    contact.center = Point { x: 400., y: 400. };
-    contact.radii = [radius; 2];
-    contact.motion = [48., 32.];
-    contact.material = [0., 1., 1., 0.8];
-    let stroke = DabBatch { stroke_id: StrokeId(2), ..crate::test_support::dab_batch(layer, preset_style(preset), contact.bounds()) };
+    let contacts: Vec<_> = (0..batches).map(|i| {
+        let mut contact = dab([0.9, 0.2, 0.1, 1.]);
+        contact.center = Point { x: 400. + 6. * i as f32, y: 400. };
+        contact.radii = [radius; 2];
+        contact.motion = [48., 32.];
+        contact.material = [0., 1., 1., 0.8];
+        contact
+    }).collect();
+    let strokes: Vec<_> = contacts.iter().enumerate().map(|(i, contact)| DabBatch { stroke_id: StrokeId(2), first_dab: i as u32,
+        stroke_start: i == 0, stroke_end: false, ..crate::test_support::dab_batch(layer, style.clone(), contact.bounds()) }).collect();
     let before = r.metrics().command_passes;
-    r.submit(frame(std::slice::from_ref(&contact), std::slice::from_ref(&stroke))).unwrap();
+    r.submit(frame(&contacts, &strokes)).unwrap();
     r.wait_idle().unwrap();
     r.metrics().command_passes - before
 }
 
 #[test]
-fn committed_destination_batches_encode_their_pages_in_one_pass() {
+fn committed_destination_frames_encode_their_pages_and_batches_in_one_pass() {
     use DefaultBrushPreset as P;
-    for preset in [P::LiquifyTwirl, P::LiquifyPush, P::Smudge, P::NaturalBlender, P::WetRound, P::OpaqueGouache, P::LoadedOil, P::PaletteKnife,
-        P::WatercolorWash, P::WetWatercolor] {
-        let passes = [40., 380.].map(|radius| committed_batch_passes(preset, radius));
-        println!("{preset:?}: one page {}, sixteen pages {}", passes[0], passes[1]);
-        assert_eq!(passes[0], passes[1], "{preset:?} adds passes per page");
+    let mut multiply = preset_style(P::GPen);
+    multiply.rendering.blend_mode = layer_core::BrushBlendMode::Multiply;
+    let destination = [P::LiquifyTwirl, P::LiquifyPush, P::Smudge, P::NaturalBlender, P::WetRound, P::OpaqueGouache, P::LoadedOil,
+        P::PaletteKnife, P::WatercolorWash, P::WetWatercolor].map(|preset| (format!("{preset:?}"), preset_style(preset), [1; 3]));
+    let dry = [P::GPen, P::Pencil, P::Airbrush].map(|preset| (format!("{preset:?}"), preset_style(preset), [1, 1, 4]));
+    for (name, style, expected) in destination.into_iter().chain(dry).chain([("GPen Multiply".to_string(), multiply, [1, 1, 4])]) {
+        let passes = [(40., 1), (380., 1), (380., 4)].map(|(radius, batches)| committed_frame_passes(&style, radius, batches));
+        println!("{name}: one page {}, sixteen pages {}, four batches {}", passes[0], passes[1], passes[2]);
+        assert_eq!(passes, expected, "{name} adds passes per page or batch");
     }
 }

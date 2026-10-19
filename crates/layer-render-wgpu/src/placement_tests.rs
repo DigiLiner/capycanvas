@@ -557,7 +557,7 @@ fn watercolor_multitile_prediction_commit_and_restore(restored_empty: bool) {
     let accepted = send(&mut r, &layer, &[ink], &[stroke], false);
     assert_eq!(send(&mut r, &layer, &[], &[], true), accepted);
     println!("watercolor transport: restored_empty={restored_empty}, passes={passes}");
-    assert_eq!(passes, u64::from(WATERCOLOR_TRANSPORT_STEPS));
+    assert_eq!(passes, 1, "every transport step of every page shares one compute pass");
 }
 
 #[test]

@@ -88,7 +88,7 @@ the new ink presets use coverage state to grow a coherent stroke.
 
 Committed and predicted contacts use one batch scheduler. Preview is a target
 policy over the same schedule: it chooses private pages or reads committed pages
-directly, while watercolor snapshot, deposition, transport, and direct-page
+directly, while watercolor deposition, transport, and direct-page
 traversal stay shared. Direct and material target-layout pipelines are stored as
 finite indexed tables rather than independent feature branches. The textured
 direct and material shaders also compose the same `brush_coverage.wgsl`
@@ -242,8 +242,8 @@ The scalar conductance texture is sufficient: the shader uses its gradient on
 fiber shoulders and curvature at ridge crests to derive a local tangent, then
 uses a shorter cross-fiber pair to enter nearby fibers. Endpoint conductance
 gates each hop. The union of expanded dab damage is the hard effect bound, and
-only the first stage synchronizes the color/wetness ping-pong destinations;
-later stages overwrite the same scissor without redundant page copies.
+only the first stage writes whole color/wetness ping-pong destinations, copying
+texels outside its region; later stages overwrite the same region without page copies.
 Separate wet-to-wet and wet-to-dry coefficients let watercolor favor
 interaction with existing watercolor material while ink can favor dry-paper
 bleed. Water above the floor decays toward it on input events, while the floor
@@ -274,13 +274,15 @@ resource rules. It also makes damaged-region checkpoints possible for undo.
 Smudge, Liquify, wet and watercolor brushes write their destination pages from
 compute kernels through write-only storage. A page job stores the material
 result inside its dirty rectangle and the unchanged source texel elsewhere,
-including stroke coverage, so no page copy or coverage clear precedes it. One compute pass
-dispatches every job of a batch, together with the gather dispatches of jobs
+including stroke coverage, so no page copy or coverage clear precedes it. One compute pass,
+shared by a frame's consecutive batches and their watercolor transport, dispatches every job of a batch, together with the gather dispatches of jobs
 whose samples reach beyond their 3×3 neighborhood and, after a committed wet
 batch's jobs, its reservoir exchange. At stroke start the exchange begins from
 the selected pigment instead of the stored reservoir. Watercolor stores wetness
-only inside the dirty rectangle, into the surface its update seeded from the
-pre-update wetness; a later microbatch never stores less, so no blend is needed.
+only inside the dirty rectangle, except that the first job of an update on a
+page also stores the pre-update wetness outside it; a later microbatch never
+stores less, so no blend is needed. Tile records for all of a frame's batches
+follow one another and upload before the frame's other commands.
 Each dispatch is its own WebGPU usage scope, so a
 later dispatch reads earlier writes in recorded order. Only a job that binds
 decoded source tiles ends the pass first, because preparing it may reuse a cache

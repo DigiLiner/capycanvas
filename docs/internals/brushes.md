@@ -297,10 +297,14 @@ runs pixel work in parallel while retaining the ordering that each brush require
 Sparse pages and changed-region bounds limit the affected area. Specialized paths
 avoid allocating or updating material state that a brush does not use.
 
-Smudge, wet, watercolor and Liquify contacts evaluate one page job per page
-their contact batch touches. They dispatch every job of a batch in one compute
-pass, each writing its whole page, so a large brush adds no page copies or
-passes per page. A frame's commands and bindings stay allocated until the GPU finishes it.
+Every brush that reads its destination evaluates one page job per page its
+contact batch touches, each writing its whole page. A frame's consecutive
+Smudge, Liquify, wet and watercolor batches and their watercolor transport
+share one compute pass, so a large brush or a long frame adds no page copies or
+passes per page or batch; only preparing decoded source tiles, a page's
+starting paint, a pen-up edge or healing ends it. Dry, clone and healing
+batches keep one pass each: sharing a pass across them added about 0.8 ms of
+GPU time per update on the MovinkPad 11. A frame's commands and bindings stay allocated until the GPU finishes it.
 A frame therefore consumes input only until its committed contacts reach 512
 page jobs; a slower device keeps the rest of the input queued
 for the next frame instead of building one frame from its whole backlog. Watercolor

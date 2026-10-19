@@ -53,7 +53,9 @@ impl Drop for DiscardedCacheWrite {
 }
 
 pub(crate) struct CommandEncoder {
+    compute: Option<wgpu::ComputePass<'static>>,
     device: wgpu::Device,
+    prologue: Option<wgpu::CommandEncoder>,
     current: wgpu::CommandEncoder,
     earlier: Vec<wgpu::CommandEncoder>,
     passes: usize,
@@ -67,7 +69,9 @@ impl CommandEncoder {
 
     pub fn new(device: &wgpu::Device, descriptor: &wgpu::CommandEncoderDescriptor<'_>) -> Self {
         Self {
+            compute: None,
             device: device.clone(),
+            prologue: None,
             current: device.create_command_encoder(descriptor),
             earlier: Vec::new(),
             passes: 0,
@@ -81,6 +85,7 @@ impl CommandEncoder {
     /// the helper so its complete batch fits the same command-buffer ceiling.
     pub fn reserve_passes(&mut self, count: usize) {
         assert!(count <= Self::PASSES_PER_SUBMISSION);
+        self.compute = None;
         if self.passes + count > Self::PASSES_PER_SUBMISSION {
             let next = self
                 .device
@@ -112,18 +117,42 @@ impl CommandEncoder {
         self.begin_pass();
         self.current.begin_compute_pass(descriptor)
     }
+    /// A compute pass that consecutive dispatches share until any other pass,
+    /// copy or command ends it.
+    pub fn compute_pass(&mut self) -> &mut wgpu::ComputePass<'static> {
+        if self.compute.is_none() {
+            self.begin_pass();
+            self.compute = Some(self.current.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("shared compute"),
+                timestamp_writes: None,
+            }).forget_lifetime());
+        }
+        self.compute.as_mut().unwrap()
+    }
+    /// Commands that run before every other command of this encoder, such as
+    /// uploads to storage that nothing earlier in it reads.
+    pub fn prologue(&mut self) -> &mut wgpu::CommandEncoder {
+        let device = &self.device;
+        self.prologue.get_or_insert_with(|| device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("submission prologue"),
+        }))
+    }
     /// Finish staging uploads before calling this. Their completion callbacks
     /// belong to the final encoder, after every earlier chunk on this queue.
-    pub fn submit(self, queue: &wgpu::Queue) -> wgpu::SubmissionIndex {
-        for encoder in self.earlier {
-            submit_traced(queue, encoder);
+    pub fn submit(mut self, queue: &wgpu::Queue) -> wgpu::SubmissionIndex {
+        self.compute = None;
+        let mut chunks = self.earlier.into_iter().chain([self.current]);
+        let mut index = submit_traced(queue, self.prologue.take().into_iter().chain(chunks.next()));
+        for encoder in chunks {
+            index = submit_traced(queue, [encoder]);
         }
-        submit_traced(queue, self.current)
+        index
     }
 }
 
 // Copies, upload callbacks and query commands do not start render/compute
-// passes. Forward them to the current chunk without changing their ordering.
+// passes. Forward them to the current chunk without changing their ordering;
+// recording one ends the shared compute pass.
 impl Deref for CommandEncoder {
     type Target = wgpu::CommandEncoder;
     fn deref(&self) -> &Self::Target {
@@ -132,15 +161,16 @@ impl Deref for CommandEncoder {
 }
 impl DerefMut for CommandEncoder {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        self.compute = None;
         &mut self.current
     }
 }
 
-fn submit_traced(queue: &wgpu::Queue, encoder: wgpu::CommandEncoder) -> wgpu::SubmissionIndex {
+fn submit_traced(queue: &wgpu::Queue, encoders: impl IntoIterator<Item = wgpu::CommandEncoder>) -> wgpu::SubmissionIndex {
     let mut trace = crate::performance_trace::Span::new(c"capy.command_finish");
-    let commands = encoder.finish();
+    let commands = encoders.into_iter().map(wgpu::CommandEncoder::finish).collect::<Vec<_>>();
     trace.next(c"capy.queue_submit");
-    queue.submit([commands])
+    queue.submit(commands)
 }
 
 pub(crate) trait ColorPass {
