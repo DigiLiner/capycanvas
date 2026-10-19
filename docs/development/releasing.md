@@ -391,7 +391,7 @@ creation require successful validation and every platform package.
 | Renderer | CPU renderer models and shader contracts, Apple bridge models, Android bridge tests, command inventory regressions and Windows bridge lint |
 | Prediction | Prediction benchmark tests, optimized replay tools and the complete recorded stroke bank's analysis checks |
 | Arch | Fresh package dependencies, native packaging and Wayland protocol tests, patched GTK/GLib/Pango runtime, codec and Wayland callback regressions, GTK model tests and offline launcher build |
-| Windows x64 and ARM64 | Native Release build, C++ input and script tests, serial Rust/document tests on WARP, model snapshot reader and native bridge lint |
+| Windows x64 and ARM64 | Native Release build, C++ input and script tests, shared color/codec/render math suites, serial Rust/document tests on WARP, model snapshot reader and native bridge lint |
 | Apple | Simulator app and XCTest bundle build; Swift state/input/persistence, offscreen SwiftUI workspace and header geometry, appearance, window state and sandbox fixtures that do not attach Metal surfaces |
 
 The Android package job also builds its debug app and instrumentation APK and
