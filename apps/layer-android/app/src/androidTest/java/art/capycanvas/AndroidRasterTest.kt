@@ -144,7 +144,7 @@ class AndroidRasterTest {
                         Native.pointer(handle, 71, 0, 0, samples, samples.size, false, false)
                     }
                     output.writeText(evidence.toString(2))
-                    compose.waitUntil(120_000) { drawingSettled() }
+                    compose.waitUntil(120_000) { drawingSettled() && revision() != before }
                     assertNull(host.failure)
                     assertEquals("Texture changes and drawing keep Paper selected", paper, native { state(it).getJSONObject("layer_tools").getJSONObject("editing_layer").getLong("id") })
                     assertNotEquals("$theme Paper $choice retains the immediate Pencil stroke", before, revision())
