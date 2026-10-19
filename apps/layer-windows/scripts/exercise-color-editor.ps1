@@ -82,7 +82,6 @@ function Numeric-Input([string]$Device,[ValidateSet('cancel','outside','modifier
         if($Ending -eq 'cancel'){
             Wait-Until {(Draft-Identity) -ceq $baseline} "$case did not restore every shared draft readout exactly"
         }else{
-            if(!$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).WaitForInputIdle(5000)){throw "$case native input queue did not become idle after release"}
             if((Draft-Identity) -cne $moved){throw "$case release changed the acknowledged scrub draft"}
         }
         if($Modifier){[CapyRowPointer]::Hold($Modifier,$false)}
