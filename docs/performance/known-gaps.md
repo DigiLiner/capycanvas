@@ -2,24 +2,23 @@
 
 [Performance targets](../PERFORMANCE_TARGETS.md)
 
-- **Material brushes fall behind the pen at 512 px.**
+- **Wet, watercolor, Smudge and blending brushes fall behind the pen at 512 px.**
   - A frame consumes input only until its material contacts reach 512 page
-    passes ([brushes](../internals/brushes.md)), so these brushes no longer
-    run out of memory; a slower device keeps the rest of the input queued and
-    the stroke trails the pen.
-  - On the TCL (12 MP) Watercolor Wash completes 1.0 updates/s, Opaque Gouache
-    1.25, Wet Round 1.5, Natural Blender 1.75, Smudge 2.2 and Liquify Push 3.9,
-    at most 1.8 GB resident and 7,400 mappings.
-  - On the MovinkPad 11 (24 MP) Watercolor Wash completes 1.5 updates/s, Opaque
-    Gouache and Loaded Oil 1.75, Wet Round 2.2, Natural Blender 2.4, Smudge 3.1
-    and Liquify Push 5.7, at most 2.6 GB resident and 6,100 mappings.
-  - On the MovinkPad Pro 14 Loaded Oil completes 6.9 updates/s, Liquify Push
-    7.6, Opaque Gouache 7.7, Palette Knife 10.1, Natural Blender 10.4, Wet Round
-    13.4, Watercolor Wash 13.5, Wet Watercolor 14.7 and Smudge 15.1, with at
-    most 16,700 mappings.
-  - Multiply Glaze at 1024 px completes 81.8 updates/s on the MovinkPad Pro 14
-    and 11.7 on the MovinkPad 11, where its compute kernel is slower than the
-    fragment path it replaced (13.7).
+    jobs ([brushes](../internals/brushes.md)), so these brushes never run out
+    of memory; a slower device keeps the rest of the input queued and the
+    stroke trails the pen.
+  - On the TCL (12 MP) they complete 1.0–2.5 updates/s, at most 1.8 GB
+    resident; Liquify completes 5.2 (Push) to 35 (Twirl) updates/s.
+  - On the MovinkPad 11 (24 MP) they complete 1.6–3.1 updates/s, at most
+    2.6 GB resident; Liquify completes 5.7 (Push) to 28 (Twirl) updates/s.
+  - On the MovinkPad Pro 14 (61 MP) they complete 7.7 (Loaded Oil) to 54
+    (Smudge) updates/s; every Liquify preset meets 120 updates/s.
+  - Multiply Glaze at 1024 px completes 86.8 updates/s on the MovinkPad Pro 14
+    and 12.1 on the MovinkPad 11, where its compute kernel is slower than the
+    fragment path it replaced (14.4).
+  - On the MovinkPad Pro 14, the eraser fix in the dry contact loop made Pencil
+    at 16 px about 10% slower (258 -> 233 updates/s); Pencil at 2048 px is
+    unchanged.
 - **The simple-brush class remains unqualified.**
   - On the current contained 60 × 10 path, 1536 px G-Pen reaches only
     75.36–75.54 fresh updates/s on Mid (target 90), although its gap passes.
