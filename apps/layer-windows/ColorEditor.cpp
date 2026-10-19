@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ColorEditor.h"
 #include "PointerGesture.h"
+#include "PointerScrub.h"
 #include "ColorStrip.h"
 #include "ColorWheel.h"
 #include "Checker.h"
@@ -20,10 +21,7 @@ constexpr double WheelSide=232,RecentTile=34,SheetTile=40,NarrowWidth=700,ScrubS
 constexpr winrt::Windows::UI::Color Invalid{255,0xe0,0x1b,0x24};
 
 bool held(int key){return (GetKeyState(key)&0x8000)!=0;}
-hstring speed(){
-    if(held(VK_SHIFT))return L"fast";
-    return held(VK_CONTROL)||held(VK_MENU)?L"fine":L"normal";
-}
+hstring speed(bool shift,bool fine){return shift?L"fast":fine?L"fine":L"normal";}
 double textWidth(hstring const& sample,double size,winrt::Windows::UI::Text::FontWeight weight){
     TextBlock probe;probe.FontFamily(FontFamily(L"Segoe UI"));probe.FontSize(size);probe.FontWeight(weight);probe.Text(sample);
     probe.Measure({10000,10000});return std::ceil(probe.DesiredSize().Width);
@@ -82,7 +80,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
     bool drawQueued=false;
     std::optional<uint32_t> wheelPointer,arcPointer;
     uint32_t wheelPart=0;
-    struct Scrub{std::shared_ptr<Field> field;uint32_t pointer=0;double y=0;bool active=false;};
+    struct Scrub{std::shared_ptr<Field> field;uint32_t pointer=0;PointerScrub motion{0};bool active=false;};
     std::optional<Scrub> scrub;
     uint64_t colorListener=0,sheetGeneration=0,recentGeneration=0;
     Animation::Storyboard slide{nullptr};
@@ -301,7 +299,7 @@ struct Editor:std::enable_shared_from_this<Editor>{
             auto self=weak.lock();auto f=owner.lock();if(!self||!f)return;
             if(e.Key()!=VirtualKey::Up&&e.Key()!=VirtualKey::Down)return;
             e.Handled(true);
-            if(self->act(O({{L"op",S(L"scrub")},{L"target",f->target},{L"pixels",N(e.Key()==VirtualKey::Up?2:-2)},{L"speed",S(speed())}}),f->target))
+            if(self->act(O({{L"op",S(L"scrub")},{L"target",f->target},{L"pixels",N(e.Key()==VirtualKey::Up?2:-2)},{L"speed",S(speed(held(VK_SHIFT),held(VK_CONTROL)||held(VK_MENU)))}}),f->target))
                 self->act(O({{L"op",S(L"end_scrub")},{L"cancel",B(false)}}),f->target);
         });
         f->clicks=PointerGesture::Clicks(f->show,[weak](uint32_t id,bool cancel){
@@ -313,14 +311,15 @@ struct Editor:std::enable_shared_from_this<Editor>{
             auto self=weak.lock();auto f=owner.lock();if(!self||!f||self->scrub)return;
             auto p=e.GetCurrentPoint(self->root);
             if(!f->clicks->Owns(p.PointerId()))return;
-            self->scrub=Scrub{f,p.PointerId(),p.Position().Y,false};
+            self->scrub=Scrub{f,p.PointerId(),PointerScrub{p.Position().Y}};
         })),true);
         f->show.AddHandler(UIElement::PointerMovedEvent(),box_value(PointerEventHandler([weak](auto&&,PointerRoutedEventArgs const& e){
             auto self=weak.lock();if(!self||!self->scrub||self->scrub->pointer!=e.Pointer().PointerId())return;
-            double pixels=self->scrub->y-e.GetCurrentPoint(self->root).Position().Y;
-            if(!self->scrub->active&&std::abs(pixels)<ScrubSlop)return;
+            auto pixels=self->scrub->motion.Move(e.GetCurrentPoint(self->root).Position().Y,e.IsGenerated());
+            if(!pixels||(!self->scrub->active&&std::abs(*pixels)<ScrubSlop))return;
             self->scrub->active=true;self->scrub->field->clicks->Suppress(e.Pointer().PointerId());e.Handled(true);
-            self->act(O({{L"op",S(L"scrub")},{L"target",self->scrub->field->target},{L"pixels",N(pixels)},{L"speed",S(speed())}}),self->scrub->field->target);
+            using Mod=winrt::Windows::System::VirtualKeyModifiers;auto modifiers=e.KeyModifiers();
+            self->act(O({{L"op",S(L"scrub")},{L"target",self->scrub->field->target},{L"pixels",N(*pixels)},{L"speed",S(speed((modifiers&Mod::Shift)!=Mod::None,(modifiers&(Mod::Control|Mod::Menu))!=Mod::None))}}),self->scrub->field->target);
         })),true);
         return f;
     }

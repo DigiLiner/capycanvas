@@ -75,8 +75,8 @@ function Numeric-Input([string]$Device,[ValidateSet('cancel','outside','modifier
         Wait-Until {[int](Shown $id) -lt 255} "$case did not change the shared color draft while scrubbing"
         $moved=Draft-Identity;$check.moved=$moved
         if($Ending -eq 'modifier'){
-            [CapyRowPointer]::Hold($Modifier,$true);[CapyRowPointer]::Up()
-            $check.moves_after_modifier=0
+            [CapyRowPointer]::Hold($Modifier,$true);[CapyRowPointer]::Move($x,$endY);[CapyRowPointer]::Up()
+            $check.stationary_updates_after_modifier=1
         }elseif($Ending -eq 'cancel'){[CapyRowPointer]::Cancel()}else{[CapyRowPointer]::Up($Device -eq 'pen')}
         $check.contact_ms=[CapyRowPointer]::ContactDurationMilliseconds;$check.max_gap_ms=[CapyRowPointer]::MaxGapMilliseconds
         if($Ending -eq 'cancel'){

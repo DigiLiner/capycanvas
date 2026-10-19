@@ -3,6 +3,7 @@
 #include "../NativeKeyRepeats.h"
 #include "../CanvasPointerSample.h"
 #include "../PointerCompletion.h"
+#include "../PointerScrub.h"
 #include <limits>
 #include "../CanvasQueryQueue.h"
 #include "../CanvasLatencyTrace.h"
@@ -168,6 +169,16 @@ int main() {
         activate();assert(activations==11&&!clicks.Cancel());
     }
     std::cout<<"Scrub suppression preserves native Click ordering and permits immediate accessibility activation after release\n";
+
+    {
+        PointerScrub motion{100};std::vector<double> values;
+        auto move=[&](double y,bool generated,double speed){if(auto pixels=motion.Move(y,generated))values.push_back(255+*pixels*.5*speed);};
+        move(108,false,1);move(108,false,10);move(120,true,10);move(108,false,10);
+        assert((values==std::vector<double>{251}));
+        move(112,false,10);move(112,false,.1);move(100,false,1);
+        assert((values==std::vector<double>{251,195,255}));
+    }
+    std::cout<<"Stationary and generated pointer updates cannot reapply a scrub with new modifiers\n";
 
     for(uint32_t phase=0;phase<=4;++phase) {
         assert(CanvasPointerPhase(phase,false)==phase);

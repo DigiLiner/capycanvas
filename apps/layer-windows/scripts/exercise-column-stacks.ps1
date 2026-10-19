@@ -21,8 +21,7 @@ function Layout {
 }
 function At([string]$Id,[switch]$Name){
     if($Id -match '^collapsed-column-(\d+)$'){return Screen (Column ([int]$Matches[1])).bounds}
-    $bounds=(Control $Id -Name:$Name).Current.BoundingRectangle
-    if($bounds.IsEmpty -or $bounds.Width -le 0 -or $bounds.Height -le 0){throw "Control is not arranged: $Id"}
+    $bounds=(Control $Id -Name:$Name -Arranged).Current.BoundingRectangle
     @{x=[int]($bounds.X+$bounds.Width*.5);y=[int]($bounds.Y+$bounds.Height*.5)}
 }
 function Screen($Bounds){

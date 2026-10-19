@@ -631,7 +631,8 @@ shortcut hints. Repeat with `-Theme light`.
 native clipboard ownership and the Paper fill. It records the immediate fill,
 then waits for the same layer thumbnail to be ready before capturing it again.
 Numeric input cases check canceled touch scrubs and outside mouse, pen and touch
-releases followed by native activation, plus modifier keys during a held scrub.
+releases followed by native activation, plus stationary updates with modifier
+keys during a held scrub.
 Review the thumbnail color in both themes; readiness alone does not prove its
 visible content. Check the split footer preview against its actual shared frame
 and the footer buttons; fractional display scaling rounds border pixels.
@@ -884,6 +885,8 @@ Immediate custom drag surfaces capture on press; native Buttons keep their captu
 the drag is admitted.
 Feed recognizers only from non-generated motion events; exits and scene changes
 can replay older samples.
+For scrubs with modifier keys, ignore repeated coordinates and read
+`KeyModifiers` from the pointer event.
 The canvas has an independent input source; an ancestor XAML observer alone
 cannot guarantee delivery of an outside release.
 
