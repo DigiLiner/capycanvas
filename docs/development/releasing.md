@@ -404,7 +404,9 @@ size, mounted-image state and disk-image creation and verification output.
 
 The renderer job selects tests that do not create GPU devices. Shader contract
 checks select individual CPU tests from modules that also contain GPU tests.
-Windows runs the existing native host and document suites on WARP. Renderer
+Windows runs the existing native host and document suites on WARP: the system
+runtime on native x64 and the pinned development-only runtime on ARM64. Neither
+runtime enters distribution packages. Renderer
 pixel/reference suites, GPU telemetry and timing, pipeline-cache qualification,
 native canvas journeys, physical pen/touch, HDR, device loss and performance still
 need the [checks for your change](testing.md) on appropriate hardware. WARP results do not

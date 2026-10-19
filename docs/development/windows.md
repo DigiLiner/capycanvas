@@ -618,9 +618,16 @@ consumers one shared 60-second budget; normal hardware builds retain 30 seconds.
 The large-canvas fixture keeps its 60-second overall deadline and exact pose and
 pixel checks. Hardware qualification uses normal builds.
 
-The test script restores `Microsoft.Direct3D.WARP` 1.0.21 from the separate
+Native x64 tests use Windows' system WARP. The test script checks its architecture
+and reports its path, version and SHA-256 without copying or removing the DLL.
+It refuses an app-local WARP DLL beside Cargo test executables. NuGet x64 WARP
+1.0.20 and 1.0.21 can stall the hosted float32 readback tests even in isolated
+processes; the system runtime completes the same cases without changing their
+deadlines or assertions.
+
+For ARM64, the test script restores `Microsoft.Direct3D.WARP` 1.0.21 from the separate
 [`tests/packages.config`](../../apps/layer-windows/tests/packages.config) into
-`artifacts/windows/test-packages`. It stages only the selected architecture's
+`artifacts/windows/test-packages`. It stages only the ARM64
 `d3d10warp.dll` beside Cargo test executables, using Cargo's resolved target
 directory, and removes its own copy on exit. System ARM64 WARP 10.0.26100.8972
 can fail fast in its pixel JIT during clipboard readbacks; the pinned runtime

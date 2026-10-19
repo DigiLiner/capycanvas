@@ -6,17 +6,19 @@ $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $build = Resolve-WindowsArchitecture $Architecture
 $packages = 'layer-core','layer-engine','layer-color','layer-render','layer-ui','layer-workspace','layer-host','layer-windows' | ForEach-Object { '-p', $_ }
 $cargoProfileArgs = @(if ($Configuration -eq 'Release') { '--release' })
+& (Join-Path $PSScriptRoot '../tests/software-test-runtime.ps1')
 & (Join-Path $PSScriptRoot 'build.ps1') -Configuration $Configuration -Architecture $build.architecture
 & (Join-Path $PSScriptRoot 'test-input.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $repo "artifacts/windows/tests/$($build.architecture)")
 & (Join-Path $PSScriptRoot '../tests/architecture.ps1')
 & (Join-Path $PSScriptRoot '../tests/application-menu-query.ps1')
 & (Join-Path $PSScriptRoot '../tests/pen-capture.ps1')
-& (Join-Path $PSScriptRoot '../tests/software-test-runtime.ps1')
 $testPackages=Join-Path $repo 'artifacts/windows/test-packages'
-$nuget=Get-Command nuget -ErrorAction SilentlyContinue
-$nugetPath=if($nuget){$nuget.Source}else{Join-Path $env:USERPROFILE '.local/tools/nuget/nuget.exe'}
-& $nugetPath restore (Join-Path $PSScriptRoot '../tests/packages.config') -PackagesDirectory $testPackages -NonInteractive
-if($LASTEXITCODE -ne 0){throw 'Software test runtime restore failed.'}
+if($build.architecture -eq 'arm64') {
+    $nuget=Get-Command nuget -ErrorAction SilentlyContinue
+    $nugetPath=if($nuget){$nuget.Source}else{Join-Path $env:USERPROFILE '.local/tools/nuget/nuget.exe'}
+    & $nugetPath restore (Join-Path $PSScriptRoot '../tests/packages.config') -PackagesDirectory $testPackages -NonInteractive
+    if($LASTEXITCODE -ne 0){throw 'Software test runtime restore failed.'}
+}
 $testRuntime=$null
 Push-Location $repo
 $previousSoftwareGpu = $env:LAYER_TEST_SOFTWARE_GPU

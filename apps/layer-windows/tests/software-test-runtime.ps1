@@ -53,11 +53,22 @@ try {
     $rejected=$false
     try {Assert-WindowsDistributionRuntime $deps arm64} catch {$rejected=$true}
     if(!$rejected){throw 'Packaging accepted development-only WARP symbols.'}
-    $x64=Join-Path $packages ("$($package.id).$($package.version)/build/native/bin/x64/d3d10warp.dll")
+    $x64Deps=Join-Path $run 'x64-deps'
+    $x64=Join-Path $x64Deps 'd3d10warp.dll'
     Write-Binary $x64 0x8664
-    $staged=Install-WindowsSoftwareTestRuntime $packages (Join-Path $run 'x64-deps') x64
-    if(!(Test-WindowsBinaryArchitecture $staged.path x64)){throw 'x64 WARP was not staged.'}
-    Remove-WindowsSoftwareTestRuntime $staged
+    $hash=(Get-FileHash -LiteralPath $x64).Hash
+    $rejected=$false
+    try {Install-WindowsSoftwareTestRuntime $packages $x64Deps x64|Out-Null} catch {if($_.Exception.Message -notmatch 'app-local runtime'){throw};$rejected=$true}
+    if(!$rejected -or (Get-FileHash -LiteralPath $x64).Hash -ne $hash){throw 'x64 tests accepted or changed an app-local WARP runtime.'}
+    Remove-Item -LiteralPath $x64
+    if((Resolve-WindowsArchitecture native).architecture -eq 'x64') {
+        $system=Join-Path ([Environment]::SystemDirectory) 'd3d10warp.dll'
+        $hash=(Get-FileHash -LiteralPath $system).Hash
+        $staged=Install-WindowsSoftwareTestRuntime (Join-Path $run 'missing-packages') $x64Deps x64
+        if($staged -or (Test-Path -LiteralPath $x64)){throw 'x64 tests staged a software runtime instead of using system WARP.'}
+        Remove-WindowsSoftwareTestRuntime $staged
+        if((Get-FileHash -LiteralPath $system).Hash -ne $hash){throw 'x64 test cleanup changed system WARP.'}
+    }
     Write-Output 'Software test runtime architecture, ownership, cleanup and distribution regressions passed.'
 } finally {
     $actual=(Resolve-Path -LiteralPath $run).Path
