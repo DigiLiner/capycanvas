@@ -388,7 +388,7 @@ creation require successful validation and every platform package.
 | --- | --- |
 | Ordinary CI | Shared model suites, localization, Wasm, generated Apple project, Git hooks and licenses |
 | Scripts | Python tests under build, Git, devices, Windows VM, visual and performance tools, prediction and Apple resources; the explicit Web Node unit suites, packaging/capture/report tests and isolated headless Chrome CDP tests |
-| Renderer | CPU renderer models and shader contracts, Apple bridge and paper-library models, Android bridge tests, command inventory regressions and Windows bridge lint |
+| Renderer | CPU renderer models, shader and workgroup contracts, Apple bridge and paper-library models, Android bridge tests, command inventory regressions and Windows bridge lint |
 | Prediction | Prediction benchmark tests, optimized replay tools and the complete recorded stroke bank's analysis checks |
 | Arch | Fresh package dependencies, native packaging and Wayland protocol tests, patched GTK/GLib/Pango runtime, codec and Wayland callback regressions, GTK model tests and offline launcher build |
 | Windows x64 and ARM64 | Native Release build, C++ input and script tests, shared color/codec/render math suites, serial Rust/document tests on WARP, isolated profile-menu storage regression, model snapshot reader and native bridge lint |

@@ -67,6 +67,7 @@ jobs:
             dry_material::tests::blend_specialization_accepts_lf_and_crlf_sources \
             dry_material::tests::every_kernel_entry_resolves_its_overrides \
             dry_material::tests::specialized_modules_omit_unreachable_features \
+            destination_material::tests::transport_kernels_declare_the_workgroup_they_are_dispatched_with \
             pixel_transform::program_tests:: attached:: \
             bristle_table::tests:: brush_stamp::tests:: brush_tiles::tests:: builtin_masks:: \
             display_memory::tests:: effects::tests:: moving_projection::tests:: pixel_rect::tests:: \
