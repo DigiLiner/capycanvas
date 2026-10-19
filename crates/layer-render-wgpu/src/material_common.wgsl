@@ -31,9 +31,10 @@ struct Target {
 @group(2) @binding(11) var reservoir_texture: texture_2d<f32>;
 struct MaterialSources {
     // 0: adjacent pages; 1: disjoint gather pages; 2: gathered sample field.
-    // Adjacent pages also provide the ordered dry-contact range in zw.
+    // Adjacent pages also provide the ordered dry-contact range in zw. Gather
+    // pages count y pages; z adds the field gathered by earlier chunks.
     header: vec4<u32>,
-    // For dry paint, pages[0] is the local dirty rectangle (min xy, max xy).
+    // For page kernels, pages[0] is the local dirty rectangle (min xy, max xy).
     // A clone's pages[1..5] map it to its source, whose 2x2 blocks of target
     // and reference pages it binds around source_11.
     pages: array<vec4<u32>, 9>,

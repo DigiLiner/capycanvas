@@ -47,6 +47,7 @@ mod source_access;
 mod material_sources;
 mod brush_tiles;
 mod dry_material;
+mod destination_material;
 mod brush_stamp;
 mod changed_cells;
 mod material_tiles;
@@ -474,26 +475,13 @@ enum MaterialOperation {
     Clone = 6,
 }
 
-impl MaterialOperation {
-    const ALL: [Self; 7] = [
-        Self::Deposit,
-        Self::Coverage,
-        Self::Liquify,
-        Self::Smudge,
-        Self::Wet,
-        Self::Watercolor,
-        Self::Clone,
-    ];
-
-}
-
 /// What a material pass reads besides its destination page.
 #[derive(Clone, Copy)]
 enum MaterialInputs<'a> {
     /// The pages around the destination.
     Neighborhood,
-    /// A gathered sample field and its page metadata.
-    Gathered(&'a wgpu::TextureView, &'a wgpu::Buffer),
+    /// A gathered sample field.
+    Gathered(&'a wgpu::TextureView),
     /// A retouching source's target and reference pages, in the eight slots
     /// around the destination.
     Retouch(&'a [wgpu::TextureView; 8]),
@@ -532,9 +520,11 @@ enum MaterialPipelineKind {
 
 impl MaterialPipelineKind {
     const COUNT: usize = 3;
+    const OPERATIONS: [MaterialOperation; 5] = [MaterialOperation::Deposit, MaterialOperation::Coverage,
+        MaterialOperation::Wet, MaterialOperation::Watercolor, MaterialOperation::Clone];
 
     fn index(self, operation: MaterialOperation) -> usize {
-        operation as usize * Self::COUNT + self as usize
+        Self::OPERATIONS.iter().position(|o| *o == operation).expect("a fragment material") * Self::COUNT + self as usize
     }
 
     fn for_attachments(watercolor: bool, coverage: bool) -> Self {
@@ -649,8 +639,9 @@ struct StrokeCoveragePage {
     primary: PageSurface,
     secondary: PageSurface,
     active_secondary: bool,
-    // Persistent coverage is cleared when a stroke claims it; prediction forks
-    // committed coverage. Each batch copies the active surface before writing.
+    // Persistent coverage restarts from zero when a stroke claims it;
+    // prediction forks committed coverage. Each batch writes the whole
+    // inactive surface, by copying the active one or in its page kernel.
     owner: Option<StrokeId>,
 }
 
@@ -868,10 +859,10 @@ struct TextureSet {
 
 struct Pipelines {
     dry_material: dry_material::Pipelines,
+    destination_material: destination_material::Pipelines,
     direct: [Deferred<wgpu::RenderPipeline>; DirectPipelineKind::COUNT],
     material: [[Deferred<wgpu::RenderPipeline>;
-        MaterialOperation::ALL.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_SLOTS],
-    material_gather: [[Deferred<wgpu::RenderPipeline>; 2]; dry_material::MATERIAL_CONTACTS.len()],
+        MaterialPipelineKind::OPERATIONS.len() * MaterialPipelineKind::COUNT]; dry_material::MATERIAL_SLOTS],
     watercolor_transport: [Deferred<wgpu::ComputePipeline>; WATERCOLOR_TRANSPORT_STEPS as usize],
     reservoir: [Deferred<wgpu::RenderPipeline>; dry_material::MATERIAL_SLOTS],
     stroke_edge: Deferred<wgpu::RenderPipeline>,
@@ -892,10 +883,6 @@ impl Pipelines {
         kind: MaterialPipelineKind,
     ) -> &Deferred<wgpu::RenderPipeline> {
         &self.material[dry_material::material_slot(style)][kind.index(operation)]
-    }
-
-    fn material_gather(&self, style: &layer_render::DabStyle, index: usize) -> &Deferred<wgpu::RenderPipeline> {
-        &self.material_gather[dry_material::material_contact_slot(style)][index]
     }
 
     fn reservoir(&self, style: &layer_render::DabStyle) -> &Deferred<wgpu::RenderPipeline> {
@@ -1036,7 +1023,7 @@ pub struct WgpuRasterizer {
     material_layout: wgpu::BindGroupLayout,
     empty_material_input: bindings::MaterialInput,
     material_source_meta: wgpu::Buffer,
-    dry_records: material_sources::TileRecords,
+    material_records: material_sources::TileRecords,
     transport_records: material_sources::TileRecords,
     transport_regions: Vec<PixelRect>,
     transport_jobs: Vec<WatercolorTransportJob>,
@@ -1428,7 +1415,7 @@ impl WgpuRasterizer {
             material_layout,
             empty_material_input: Default::default(),
             material_source_meta,
-            dry_records: Default::default(),
+            material_records: Default::default(),
             transport_records: Default::default(),
             transport_regions: Vec::new(),
             transport_jobs: Vec::new(),
@@ -1984,6 +1971,15 @@ impl WgpuRasterizer {
         }
     }
 
+    /// The source pages a material job binds around its destination. Dry
+    /// paint reads only its destination pixel, and completed gather fields
+    /// already hold distant samples: neither decodes surrounding tiles.
+    fn material_offsets(&self, batch: &DabBatch, gathered: bool) -> [Option<[i32; 2]>; 9] {
+        let stored = self.in_place_dry_material(batch) || self.compact_preview_contribution(batch);
+        let center = pointwise(&batch.style) || gathered;
+        std::array::from_fn(|i| (!stored && (!center || i == 4)).then_some([i as i32 % 3 - 1, i as i32 / 3 - 1]))
+    }
+
     fn material_bind_group(
         &mut self,
         batch: &DabBatch,
@@ -1995,20 +1991,10 @@ impl WgpuRasterizer {
     ) -> Result<(wgpu::BindGroup, Option<wgpu::BindGroup>), GpuRasterError> {
         let in_place = self.in_place_dry_material(batch);
         let gathered = match inputs {
-            MaterialInputs::Gathered(field, meta) => Some((field, meta)),
+            MaterialInputs::Gathered(field) => Some(field),
             _ => None,
         };
-        let offsets = std::array::from_fn::<_, 9, _>(|i| {
-            if in_place || self.compact_preview_contribution(batch)
-                || ((pointwise(&batch.style) || gathered.is_some()) && i != 4) {
-                // Dry paint reads only its destination pixel. Completed gather
-                // fields already contain nonlocal smudge/liquify samples.
-                // Neither needs to decode or bind surrounding source tiles.
-                None
-            } else {
-                Some([i as i32 % 3 - 1, i as i32 / 3 - 1])
-            }
-        });
+        let offsets = self.material_offsets(batch, gathered.is_some());
         self.prepare_raw_neighborhood(batch.target, coordinate, offsets, preview, encoder)?;
         if pointwise(&batch.style) && batch.style.opacity < 1. {
             let committed_start = self.paint_layers.iter().find(|l| l.id == batch.target)
@@ -2082,10 +2068,10 @@ impl WgpuRasterizer {
             &views,
             &self.dab_buffer,
             coverage,
-            gathered.map_or(auxiliary, |g| g.0),
-            if pointwise(&batch.style) {
-                wgpu::BindingResource::Buffer(self.dry_records.binding())
-            } else { gathered.map_or(&self.material_source_meta, |g| g.1).as_entire_binding() },
+            gathered.unwrap_or(auxiliary),
+            if pointwise(&batch.style) || destination_material::transported(&batch.style) {
+                wgpu::BindingResource::Buffer(self.material_records.binding())
+            } else { self.material_source_meta.as_entire_binding() },
         );
         let display = display.map(|slot| self.dry_display_inputs[slot].inputs(self, views));
         if pointwise(&batch.style) {
@@ -2097,7 +2083,7 @@ impl WgpuRasterizer {
                 .map(|p| if in_place { &p.material_in_place_input } else { &p.material_input })
                 .unwrap_or(&self.empty_material_input);
             let bound = std::array::from_fn(|i| match i { 9 => coverage, 10 => auxiliary, _ => views[i] }.clone());
-            Ok((cache.get(([self.dab_buffer.clone(), self.dry_records.binding().buffer.clone()], bound), create), display))
+            Ok((cache.get(([self.dab_buffer.clone(), self.material_records.binding().buffer.clone()], bound), create), display))
         } else { Ok((create(), display)) }
     }
 
@@ -3817,7 +3803,7 @@ impl CanvasRenderer for WgpuRasterizer {
             + m.composite_storage_bytes
             + self.thumbnails.storage_bytes()
             + self.portable_blend.byte_len()
-            + 160 + self.dry_records.storage_bytes() + self.transport_records.storage_bytes()
+            + 160 + self.material_records.storage_bytes() + self.transport_records.storage_bytes()
             + self.dry_display_inputs.len() as u64 * dry_material::DisplayInputs::storage_bytes()
             + self.material_gather.as_ref().map_or(0, material_sources::Gather::storage_bytes)
             + self.device.effect_resources.lock().unwrap().bytes()
@@ -5644,8 +5630,11 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     let advanced_brush = advanced_brush_shader(device);
     // Native hosts request this feature only after checking Float32 read/write
     // storage support. Each dry invocation owns exactly one destination texel.
-    let dry_material = dry_material::Pipelines::new(device, [layouts.target, layouts.material, layouts.advanced_texture],
-        device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES));
+    let material_layouts = [layouts.target, layouts.material, layouts.advanced_texture];
+    let outputs = dry_material::output_layouts(device, false);
+    let dry_material = dry_material::Pipelines::new(device, material_layouts,
+        device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES), &outputs);
+    let destination_material = destination_material::Pipelines::new(device, material_layouts, outputs);
     let stroke_edge_shader = {
         let device = device.clone();
         Deferred::new(move || {
@@ -5828,43 +5817,19 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     ];
     // Each destination operation, contact and blend specialization compiles its
     // own module; attachment variants of one operation share it.
-    let paint_shaders: [[_; MaterialOperation::ALL.len()]; dry_material::MATERIAL_SLOTS] = std::array::from_fn(|slot| {
-        let (flags, entries) = dry_material::material_fragment_entries(slot);
-        MaterialOperation::ALL.map(|operation| dry_material::material_shader(device, entries, flags, operation))
+    let paint_shaders: [[_; MaterialPipelineKind::OPERATIONS.len()]; dry_material::MATERIAL_SLOTS] = std::array::from_fn(|slot| {
+        let (flags, blend) = dry_material::material_entries(slot);
+        MaterialPipelineKind::OPERATIONS.map(|operation| dry_material::material_shader(device, dry_material::Entries::Fragment(blend), flags, operation))
     });
     let material = std::array::from_fn(|slot| std::array::from_fn(|index| {
-        let operation = MaterialOperation::ALL[index / MaterialPipelineKind::COUNT];
         let (targets, label) = material_targets[index % MaterialPipelineKind::COUNT].clone();
         let (device, layout, shader) = (
             device.clone(),
             material_pipeline_layout.clone(),
-            paint_shaders[slot][operation as usize].clone(),
+            paint_shaders[slot][index / MaterialPipelineKind::COUNT].clone(),
         );
         Deferred::pipeline(move |mode| {
             fullscreen_pipeline_targets_with_constants_recipe(mode, &device, &layout, &shader, "fragment_main", &targets, &[], label)
-        })
-    }));
-    let material_gather = std::array::from_fn(|slot| [MaterialOperation::Liquify, MaterialOperation::Smudge].map(|operation| {
-        let (device, layout, shader) = (
-            device.clone(),
-            material_pipeline_layout.clone(),
-            dry_material::material_shader(device, dry_material::Entries::Gather, dry_material::MATERIAL_CONTACTS[slot], operation),
-        );
-        Deferred::pipeline(move |mode| {
-            fullscreen_pipeline_targets_with_constants_recipe(
-                mode,
-                &device,
-                &layout,
-                &shader,
-                "gather_fragment",
-                &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba32Float,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                &[],
-                "gather distant material samples",
-            )
         })
     }));
     let watercolor_transport = std::array::from_fn(|step| {
@@ -5888,7 +5853,7 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
         let (device, layout, shader) = (
             device.clone(),
             material_pipeline_layout.clone(),
-            paint_shaders[slot][MaterialOperation::Wet as usize].clone(),
+            paint_shaders[slot][MaterialPipelineKind::OPERATIONS.iter().position(|o| *o == MaterialOperation::Wet).unwrap()].clone(),
         );
         Deferred::pipeline(move |mode| {
             fullscreen_pipeline_recipe(
@@ -5970,9 +5935,9 @@ fn create_pipelines(device: &PipelineDevice, layouts: PipelineLayouts<'_>) -> Pi
     };
     Pipelines {
         dry_material,
+        destination_material,
         direct,
         material,
-        material_gather,
         watercolor_transport,
         reservoir,
         stroke_edge,

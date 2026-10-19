@@ -201,14 +201,14 @@ impl Deferred<wgpu::ComputePipeline> {
     }
     pub fn compute(
         device: &super::PipelineDevice,
-        label: &'static str,
+        label: impl Into<std::borrow::Cow<'static, str>>,
         layout: &wgpu::PipelineLayout,
         module: &Deferred<wgpu::ShaderModule>,
         entry: &'static str,
     ) -> Self {
-        let (device, layout, module) = (device.for_recipe(), layout.clone(), module.clone());
+        let (device, layout, module, label) = (device.for_recipe(), layout.clone(), module.clone(), label.into());
         Self::pipeline(move |mode| mode.compute(&device, &wgpu::ComputePipelineDescriptor {
-            label: Some(label),
+            label: Some(&label),
             layout: Some(&layout),
             module: &module,
             entry_point: Some(entry),

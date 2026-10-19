@@ -120,7 +120,7 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
         if preset!=DefaultBrushPreset::GPen {assert_eq!(r.preview_level,0);assert!(!r.preview_requires_base);}
         let coverage=||r.paint_layers.iter().find(|p|p.id==target).unwrap().coverage_pages.iter().find(|p|p.coordinate==[0,0]).map(|p|p.active());
         let input=||coverage().unwrap_or_else(||r.paint_layers.iter().find(|p|p.id==target).unwrap().pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active());
-        let key=( [r.dab_buffer.clone(),r.dry_records.binding().buffer.clone()],
+        let key=( [r.dab_buffer.clone(),r.material_records.binding().buffer.clone()],
             std::array::from_fn(|i|if i==9 {coverage().map_or(&r.empty_scalar_view,|p|&p.view).clone()}else {r.empty_view.clone()}) );
         input().material_input.get(key,||panic!("{preset:?} {name} {blend:?}: actual contribution must bind empty paint"));
         let actual=crate::layer_tests::page_bytes(&r,&r.preview_page([0,0]).unwrap().active().texture);
@@ -132,7 +132,7 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
             let inputs=crate::dry_material::DisplayInputs::new(&r.device);r.dry_display_inputs.push(inputs);
         }
         r.preview_contribution=false;
-        let (source,display)=r.material_source_binding(0,&preview,std::slice::from_ref(&dab),[0,0],false,display,&mut encoder).unwrap();
+        let (source,display)=r.material_source_binding(&preview,[0,0],false,display,&mut encoder).unwrap();
         r.preview_contribution=true;
         let display=display.map(|inputs|crate::dry_material::DisplayJob {gather:r.dry_display_inputs[0].gather(&r,&reference),inputs});
         r.encode_dry_material_jobs(&mut encoder,0,&preview,&[crate::dry_material::Job {output,source,display,coordinate:[0,0],coverage:false,
@@ -144,11 +144,11 @@ fn compact_contribution_omits_unused_paint_and_matches_bound_source() {
             let mut fallback=preview.clone();fallback.style=crate::layer_tests::preset_style(preset);fallback.style.blend_space=blend;
             assert!(!r.compact_preview_contribution(&fallback));
             let mut encoder=crate::submission::CommandEncoder::new(&r.device,&Default::default());
-            r.material_source_binding(0,&fallback,std::slice::from_ref(&dab),[0,0],false,None,&mut encoder).unwrap();
+            r.material_source_binding(&fallback,[0,0],false,None,&mut encoder).unwrap();
             let layer=r.paint_layers.iter().find(|p|p.id==target).unwrap();
             let color=layer.pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active();
             let coverage=layer.coverage_pages.iter().find(|p|p.coordinate==[0,0]).unwrap().active();
-            let key=([r.dab_buffer.clone(),r.dry_records.binding().buffer.clone()],std::array::from_fn(|i|match i {4=>color.view.clone(),9=>coverage.view.clone(),_=>r.empty_view.clone()}));
+            let key=([r.dab_buffer.clone(),r.material_records.binding().buffer.clone()],std::array::from_fn(|i|match i {4=>color.view.clone(),9=>coverage.view.clone(),_=>r.empty_view.clone()}));
             coverage.material_input.get(key,||panic!("{name} {blend:?}: fallback {level} {contribution} {preset:?} must retain paint and coverage"));
             r.uploads.finish(&encoder);encoder.submit(&r.queue);r.wait_idle().unwrap();
         }}

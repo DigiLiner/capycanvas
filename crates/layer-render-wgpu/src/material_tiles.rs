@@ -21,7 +21,8 @@ impl WgpuRasterizer {
                 from_persistent: true,
             });
         let plan = BrushPassPlan::for_device(&batch.style, &self.device);
-        let writes_full_page = pointwise(&batch.style) || from_persistent;
+        let transported = destination_material::transported(&batch.style);
+        let writes_full_page = pointwise(&batch.style) || from_persistent || transported;
         let layer_index = self
             .paint_layers
             .iter()
@@ -46,9 +47,9 @@ impl WgpuRasterizer {
             );
         }
 
-        // Full-page dry evaluation writes the new coverage page too. An old
-        // owner binds the shared zero scalar as its source, so no clear pass is
-        // needed before the first contact of a stroke reaches this tile.
+        // Evaluation that writes whole pages writes the new coverage page too.
+        // An old owner binds the shared zero scalar as its source, so no clear
+        // is needed before the first contact of a stroke reaches this tile.
         if !preview && plan.state.coverage && !writes_full_page {
             for tile in tiles {
                 let coordinate = tile.coordinate;
@@ -136,11 +137,13 @@ impl WgpuRasterizer {
         } else {
             Vec::new()
         };
-        self.prepare_dry_records(
-            batch,
-            jobs.iter().enumerate().map(|(i, j)| (j.local, j.dabs.clone(), mappings.get(i).map_or([0; 16], |m| m.words))),
-            encoder,
-        )?;
+        if pointwise(&batch.style) {
+            self.prepare_records(jobs.iter().enumerate()
+                .map(|(i, j)| material_sources::dry_record(j.local, j.dabs.clone(), mappings.get(i).map_or([0; 16], |m| m.words))), encoder)?;
+        }
+        if transported {
+            self.encode_transport_jobs(encoder, batch_index, batch, batch_dabs, &jobs, layer_index, preview, preview && !from_persistent)?;
+        }
         let texture_key = Self::texture_set_key(&batch.style);
         let gathers = self.compute_dry_material(batch) && self.dry_display_gathers(batch);
         if gathers {
@@ -150,7 +153,7 @@ impl WgpuRasterizer {
             }
         }
         let mut compute_jobs = mem::take(&mut self.dry_jobs);
-        for (record_index, job) in jobs.iter().enumerate() {
+        for (record_index, job) in jobs.iter().enumerate().filter(|_| !transported) {
             // A decoded original slot may be overwritten by the next source
             // preparation. Owned paint pages never have that eviction hazard.
             let borrowed = from_persistent && !self.compact_preview_contribution(batch)
@@ -171,15 +174,7 @@ impl WgpuRasterizer {
             let (source_bind_group, display) = if retouches {
                 self.clone_source_binding(batch, job.coordinate, &mappings[record_index], preview && !from_persistent, display_slot, encoder)?
             } else {
-                self.material_source_binding(
-                    batch_index,
-                    batch,
-                    batch_dabs,
-                    job.coordinate,
-                    preview && !from_persistent,
-                    display_slot,
-                    encoder,
-                )?
+                self.material_source_binding(batch, job.coordinate, preview && !from_persistent, display_slot, encoder)?
             };
             let (pages, coverage_pages) = if preview {
                 (&self.preview_pages, &self.preview_coverage_pages)
@@ -203,7 +198,7 @@ impl WgpuRasterizer {
                 });
             let coverage_view = coverage_surface.map(|p| &p.view);
             let record_offset = if pointwise(&batch.style) {
-                self.dry_records.offset(record_index)
+                self.material_records.offset(record_index)
             } else {
                 0
             };

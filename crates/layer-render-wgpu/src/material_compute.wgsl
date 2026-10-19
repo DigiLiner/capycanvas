@@ -1,4 +1,3 @@
-@group(0) @binding(2) var material_coverage_output: texture_storage_2d<r32float, write>;
 fn dry_block_result(id: vec2<u32>) -> MaterialOutput {
     let block = style.operation.z;
     return material_result(vec4<f32>(vec2<f32>(id * block) + 0.5 * f32(block), 0.0, 1.0));

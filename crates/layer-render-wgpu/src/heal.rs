@@ -537,7 +537,7 @@ impl RetouchSources {
         });
 
         r.ensure_material_gather();
-        let fields = r.material_gather.as_ref().unwrap().fields.each_ref().map(|(_, view)| view.clone());
+        let fields = r.material_gather.as_ref().unwrap().fields.each_ref().map(|field| field.view.clone());
         let (found, copied) = if spot {
             (vec![r.empty_view.clone(); pages.len()], vec![r.empty_view.clone(); pages.len()])
         } else {

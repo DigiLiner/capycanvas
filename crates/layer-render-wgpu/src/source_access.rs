@@ -147,6 +147,25 @@ impl WgpuRasterizer {
         Ok(())
     }
 
+    /// Whether preparing this neighborhood reads decoded-tile slots, which a
+    /// later preparation may reuse before earlier commands execute.
+    pub(super) fn borrows_decoded_tiles<const N: usize>(
+        &self,
+        layer: SourceTarget,
+        coordinate: [u32; 2],
+        offsets: [Option<[i32; 2]>; N],
+        preview: bool,
+    ) -> bool {
+        let pages = self.paint_layers.iter().find(|l| l.id == layer).map_or(&[][..], |l| &l.pages[..]);
+        (self.tiled_sources.contains_key(&layer) || self.native_backing(layer).is_some())
+            && offsets.into_iter().flatten().any(|[dx, dy]| {
+                let [x, y] = [coordinate[0] as i32 + dx, coordinate[1] as i32 + dy];
+                let neighbor = [x as u32, y as u32];
+                x >= 0 && y >= 0 && !(preview && self.preview_page(neighbor).is_some())
+                    && pages.iter().all(|p| p.coordinate != neighbor)
+            })
+    }
+
     /// Consume the resulting binding before preparing another neighborhood;
     /// no cache eviction may intervene. All returned resources are borrowed.
     pub(super) fn raw_layer_neighborhood<'a, const N: usize>(

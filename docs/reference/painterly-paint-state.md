@@ -52,7 +52,8 @@ strokes.
 
 ## Material transfer
 
-The material fragment invocation owns one destination pixel. It reads an
+Each material invocation, a fragment for wet and watercolor paint or a compute
+thread for Smudge and Liquify, owns one destination pixel. It reads an
 immutable 3×3 neighborhood of source color pages and evaluates overlapping
 contacts in submission order:
 
@@ -75,7 +76,7 @@ charge depletion is the only current material-loss control. Selected pigment
 loads the wet reservoir once at stroke start and is not reintroduced by later
 contacts.
 
-Smudge and Natural Blender do not use that reservoir. Their fragment path
+Smudge and Natural Blender do not use that reservoir. Their page kernel
 reverse-composes the ordered contact motion into one semi-Lagrangian backtrace,
 bilinearly samples the immutable canvas once, and mixes straight color in the
 brush's Color mixing space without lowering existing alpha. This prevents
@@ -159,8 +160,10 @@ increment = (c1 - c0) / (1 - c0)
 
 This reaches `c1` without applying already accumulated coverage twice. Stroke
 Opacity limits the resulting contribution over the starting paint. Coverage
-pages remember their owning stroke ID and clear lazily when another stroke first
-touches them; there is no canvas-wide reset.
+pages remember their owning stroke ID and restart from zero lazily when another
+stroke first touches them; there is no canvas-wide reset. Kernels that write
+whole pages, such as dry and Smudge kernels, read the shared zero page for that
+first batch instead of clearing.
 
 An after-stroke edge brush reuses those same pages. At pen-up, a full-screen
 triangle is scissored independently to each touched page and reads a 3×3-page

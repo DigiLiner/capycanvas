@@ -271,6 +271,16 @@ swaps them. The same rule applies to the brush reservoir. This is deterministic,
 removes data races between neighboring pixels, and stays within portable WebGPU
 resource rules. It also makes damaged-region checkpoints possible for undo.
 
+Smudge and Liquify write their destination pages from compute kernels through
+write-only storage. A page job stores the material result inside its dirty
+rectangle and the unchanged source texel elsewhere, including stroke coverage,
+so no page copy or coverage clear precedes it. One compute pass dispatches every
+job of a batch, together with the gather dispatches of jobs whose samples reach
+beyond their 3×3 neighborhood. Each dispatch is its own WebGPU usage scope, so a
+later dispatch reads earlier writes in recorded order. Only a job that binds
+decoded source tiles ends the pass first, because preparing it may reuse a cache
+slot that an earlier job still reads.
+
 When sparse storage is justified, affected regions gain a filtering halo and
 neighbor material state. The public API still reports only document-space
 damage; tile dimensions, halo size, ping-pong textures, and dispatch lists stay

@@ -176,6 +176,12 @@ impl Requirements {
         }
         if let Some(kind) = plan.direct {
             self.render.push(r.pipelines.direct[kind as usize].clone());
+        } else if destination_material::transported(style) {
+            use destination_material::Entry;
+            let kernel = |entry| r.pipelines.destination_material.kernel(style, entry).clone();
+            self.compute.push(kernel(if plan.state.coverage { Entry::Coverage } else { Entry::Color }));
+            if preview { self.compute.push(kernel(Entry::Color)); }
+            self.compute.push(kernel(Entry::Gather));
         } else if !dry_material::dry_material_compute_eligible(style) {
             let kind = MaterialPipelineKind::for_attachments(
                 plan.state.watercolor_wetness,
@@ -192,13 +198,6 @@ impl Requirements {
         }
         if plan.reservoir {
             self.render.push(r.pipelines.reservoir(style).clone());
-        }
-        if let Some(index) = match style.execution {
-            BrushExecution::Liquify => Some(0),
-            BrushExecution::Smudge => Some(1),
-            _ => None,
-        } {
-            self.render.push(r.pipelines.material_gather(style, index).clone());
         }
         if plan.stroke_edge {
             self.render.push(r.pipelines.stroke_edge.clone());

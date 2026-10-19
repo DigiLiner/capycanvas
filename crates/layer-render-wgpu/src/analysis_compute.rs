@@ -37,7 +37,7 @@ impl Pipelines {
         let module = Deferred::wgsl(device, label, source);
         let pipelines = names
             .iter()
-            .map(|entry| Deferred::compute(device, entry, &pipeline_layout, &module, entry))
+            .map(|&entry| Deferred::compute(device, entry, &pipeline_layout, &module, entry))
             .collect();
         let texture=device.create_texture(&wgpu::TextureDescriptor {
             label:Some(label),size:wgpu::Extent3d {width:1,height:1,depth_or_array_layers:1},

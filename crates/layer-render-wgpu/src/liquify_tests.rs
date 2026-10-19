@@ -64,3 +64,38 @@ fn liquify_modes_move_a_marker_in_their_labelled_direction() {
         "the shipped Twirl keeps its behaviour"
     );
 }
+
+/// Render and compute passes that one committed batch of `preset` adds on a
+/// 4×4-page layer when its contact covers `radius` around the centre.
+fn committed_batch_passes(preset: DefaultBrushPreset, radius: f32) -> u64 {
+    let extent = [4 * PAGE_SIZE; 2];
+    let mut r = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+    let document = paint_document(extent, "material batch pages");
+    let layer = target(&document);
+    let mut base = dab([0.2, 0.4, 0.8, 1.]);
+    base.center = Point { x: 512., y: 512. };
+    base.radii = [500.; 2];
+    let full = layer_core::Rect::from_extent(extent);
+    let frame = |dabs, batches| FramePacket { dabs, dab_batches: batches, commit_rasters: false, ..packet(document.scene(), extent) };
+    let paint = crate::test_support::dab_batch(layer, crate::tests::test_style(BrushExecution::Dry), full);
+    r.submit(FramePacket { reset_layers: true, ..frame(std::slice::from_ref(&base), std::slice::from_ref(&paint)) }).unwrap();
+    let mut contact = dab([0.; 4]);
+    contact.center = Point { x: 400., y: 400. };
+    contact.radii = [radius; 2];
+    contact.motion = [48., 32.];
+    contact.material = [0., 1., 1., 0.8];
+    let stroke = DabBatch { stroke_id: StrokeId(2), ..crate::test_support::dab_batch(layer, preset_style(preset), contact.bounds()) };
+    let before = r.metrics().command_passes;
+    r.submit(frame(std::slice::from_ref(&contact), std::slice::from_ref(&stroke))).unwrap();
+    r.wait_idle().unwrap();
+    r.metrics().command_passes - before
+}
+
+#[test]
+fn committed_destination_batches_encode_their_pages_in_one_pass() {
+    for preset in [DefaultBrushPreset::LiquifyTwirl, DefaultBrushPreset::LiquifyPush, DefaultBrushPreset::Smudge, DefaultBrushPreset::NaturalBlender] {
+        let passes = [40., 380.].map(|radius| committed_batch_passes(preset, radius));
+        println!("{preset:?}: one page {}, sixteen pages {}", passes[0], passes[1]);
+        assert_eq!(passes[0], passes[1], "{preset:?} adds passes per page");
+    }
+}

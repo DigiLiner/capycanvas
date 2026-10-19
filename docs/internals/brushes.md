@@ -297,15 +297,18 @@ runs pixel work in parallel while retaining the ordering that each brush require
 Sparse pages and changed-region bounds limit the affected area. Specialized paths
 avoid allocating or updating material state that a brush does not use.
 
-Smudge, wet, watercolor and Liquify contacts run one page pass per page their
-contact batch touches, and a frame's commands and bindings stay allocated until
-the GPU finishes it. A frame therefore consumes input only until its committed
-contacts reach 512 such passes; a slower device keeps the rest of the input queued
+Smudge, wet, watercolor and Liquify contacts evaluate one page job per page
+their contact batch touches. Smudge and Liquify dispatch every job of a batch in
+one compute pass, each writing its whole page, so a large brush adds no page
+copies or passes per page; wet and watercolor jobs still run one render pass
+each. A frame's commands and bindings stay allocated until the GPU finishes it.
+A frame therefore consumes input only until its committed contacts reach 512
+page jobs; a slower device keeps the rest of the input queued
 for the next frame instead of building one frame from its whole backlog. Watercolor
 transport runs once per frame, so a device that falls behind now runs it as often
 as one that keeps up. A replay that repaints a whole stroke, after a late sensor
 correction, an end taper or a renderer rebuild, is submitted in windows of at most
-512 passes that never split one watercolor update; the layer is captured once,
+512 page jobs that never split one watercolor update; the layer is captured once,
 after the last window, so the result matches a single-frame replay.
 
 These choices target both performance and energy use. On mobile hardware, memory

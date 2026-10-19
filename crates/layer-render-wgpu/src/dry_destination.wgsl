@@ -1,6 +1,7 @@
 // Prediction evaluates the existing contact/coverage model at display texel
 // centres. Its starting paint and stroke coverage average the same footprint.
 // This is a presentation approximation; exact queries replay the retained tail.
+@group(0) @binding(2) var material_coverage_output: texture_storage_2d<r32float, write>;
 @group(0) @binding(4) var display_original: texture_storage_2d<rgba32float, write>;
 @group(0) @binding(5) var display_coverage: texture_storage_2d<r32float, write>;
 @group(0) @binding(6) var display_start: texture_storage_2d<rgba32float, write>;

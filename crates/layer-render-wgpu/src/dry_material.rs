@@ -48,9 +48,10 @@ pub(super) fn material_slot(style: &layer_render::DabStyle) -> usize {
         + MATERIAL_BLENDS.iter().position(|&blend| blend == style.rendering.blend_mode).unwrap()
 }
 
-pub(super) fn material_fragment_entries(slot: usize) -> (u32, Entries) {
+/// The contact flags and blend code of a material slot.
+pub(super) fn material_entries(slot: usize) -> (u32, u32) {
     let blend = layer_core::LayerBlend::from(MATERIAL_BLENDS[slot % MATERIAL_BLENDS.len()]);
-    (MATERIAL_CONTACTS[slot / MATERIAL_BLENDS.len()], Entries::Fragment(blend.code()))
+    (MATERIAL_CONTACTS[slot / MATERIAL_BLENDS.len()], blend.code())
 }
 
 /// `blend` as `blend_modes.wgsl` defines it for one mode's code alone.
@@ -100,6 +101,8 @@ pub(super) enum Entries {
     Kernel(Start),
     /// The material fragment and the wet reservoir exchange for one blend code.
     Fragment(u32),
+    /// Page kernels of a transported material for one blend code.
+    Transport(u32),
     /// Distant samples gathered for Liquify and Smudge.
     Gather,
 }
@@ -146,17 +149,19 @@ pub(super) fn material_source(space:layer_core::color::RgbSpace,float_sampling:&
         }
     };
     let entry=match entries {
-        Entries::Kernel(_) => include_str!("material_compute.wgsl").into(),
-        Entries::Fragment(_) => include_str!("material_brush.wgsl").into(),
-        Entries::Gather => compose_wgsl(&[include_str!("material_brush.wgsl"),include_str!("material_gather.wgsl")]),
+        Entries::Kernel(_) => include_str!("material_compute.wgsl"),
+        Entries::Fragment(_) => include_str!("material_brush.wgsl"),
+        Entries::Transport(_) => include_str!("material_destination.wgsl"),
+        Entries::Gather => include_str!("material_gather.wgsl"),
     };
-    let blend=match entries {Entries::Kernel(_) => blend_source(0), Entries::Fragment(mode) => blend_source(mode), Entries::Gather => include_str!("blend_modes.wgsl").into()};
+    let blend_code=match entries {Entries::Fragment(mode) | Entries::Transport(mode) => mode, Entries::Kernel(_) | Entries::Gather => 0};
+    let blend=blend_source(blend_code);
     let source=compose_wgsl(&[&working_color::source(space),include_str!("blend_codes.wgsl"),&blend,float_sampling,
         &destination(start),include_str!("brush_types.wgsl"),include_str!("brush_textures.wgsl"),&clone,
-        include_str!("material_common.wgsl"),&operation_source,leaf,&entry,&coverage_source(flags),
+        include_str!("material_common.wgsl"),&operation_source,leaf,entry,&coverage_source(flags),
         if flags!=u32::MAX && flags&AGGREGATE!=0 {include_str!("selection_absent.wgsl")} else {include_str!("selection_clip.wgsl")}]);
     let absent=if kernel || matches!(operation,M::Deposit|M::Coverage) {0} else {64};
-    let normal=matches!(entries,Entries::Kernel(_)|Entries::Fragment(0));
+    let normal=blend_code==0;
     specialize_contact(source,flags)
         .replace("override MATERIAL_OPERATION: u32;",&format!("const MATERIAL_OPERATION: u32 = {}u;",operation as u32))
         .replace("override CONTACT_ABSENT: u32 = 0u;",&format!("const CONTACT_ABSENT: u32 = {absent}u;"))
@@ -192,9 +197,9 @@ impl DisplayInputs {
         let mut views = neighborhood;
         views[4] = &self.views[0];
         let bound = std::array::from_fn(|i| match i { 9 => &self.views[1], 10 => &self.views[2], _ => views[i] }.clone());
-        self.inputs.get(([r.dab_buffer.clone(), r.dry_records.binding().buffer.clone()], bound), || create_material_bind_group(
+        self.inputs.get(([r.dab_buffer.clone(), r.material_records.binding().buffer.clone()], bound), || create_material_bind_group(
             &r.device, &r.material_layout, &views, &r.dab_buffer,
-            &self.views[1], &self.views[2], wgpu::BindingResource::Buffer(r.dry_records.binding())))
+            &self.views[1], &self.views[2], wgpu::BindingResource::Buffer(r.material_records.binding())))
     }
 
     /// The gather pass's outputs. Where the start is stored, the averaged
@@ -296,24 +301,54 @@ pub(super) fn contact_flags(contact: Option<layer_core::BrushContact>) -> u32 {
         | (u32::from(c.dry.is_some_and(|d|d.relief_offset!=0.)) << 15)
 }
 
+fn style_entry() -> wgpu::BindGroupLayoutEntry {
+    crate::bindings::buffer(0, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Uniform, true,
+        NonZeroU64::new(mem::size_of::<StyleGpu>() as u64))
+}
+
+fn storage_entry(binding: u32, format: wgpu::TextureFormat, read_write: bool) -> wgpu::BindGroupLayoutEntry {
+    crate::bindings::storage_texture(binding, wgpu::ShaderStages::COMPUTE, format,
+        if read_write { wgpu::StorageTextureAccess::ReadWrite } else { wgpu::StorageTextureAccess::WriteOnly })
+}
+
+/// The style and page outputs of a destination kernel, the second layout with
+/// stroke coverage. In-place outputs also mark changed cells.
+pub(super) fn output_layouts(device: &PipelineDevice, in_place: bool) -> [wgpu::BindGroupLayout; 2] {
+    std::array::from_fn(|coverage| {
+        let mut entries = vec![style_entry(), storage_entry(1, wgpu::TextureFormat::Rgba32Float, in_place)];
+        if coverage == 1 { entries.push(storage_entry(2, wgpu::TextureFormat::R32Float, false)); }
+        if in_place {
+            entries.push(crate::bindings::buffer(3, wgpu::ShaderStages::COMPUTE,
+                wgpu::BufferBindingType::Storage { read_only: false }, false, NonZeroU64::new(20)));
+        }
+        crate::bindings::layout(device, "destination material outputs", &entries)
+    })
+}
+
+/// A page output binding, retained by the coverage page when there is one.
+pub(super) fn output_binding(r: &WgpuRasterizer, layout: &wgpu::BindGroupLayout, color: &PageSurface,
+    coverage: Option<&PageSurface>, changed: Option<&wgpu::Buffer>) -> wgpu::BindGroup {
+    let style = wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+        buffer: &r.style_buffer, offset: 0, size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
+    });
+    let entries = [(0, Some(style)), (1, Some(wgpu::BindingResource::TextureView(&color.view))),
+        (2, coverage.map(|page| wgpu::BindingResource::TextureView(&page.view))), (3, changed.map(wgpu::Buffer::as_entire_binding))]
+        .into_iter().filter_map(|(binding, resource)| resource.map(|resource| wgpu::BindGroupEntry { binding, resource }))
+        .collect::<Vec<_>>();
+    coverage.unwrap_or(color).material_output.get(
+        (r.style_buffer.clone(), color.view.clone(), coverage.map(|p| p.view.clone()), changed.cloned()),
+        || r.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("destination material page output"), layout, entries: &entries }),
+    )
+}
+
 impl Pipelines {
-    /// `shared` holds the target, material source and texture layouts.
-    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], in_place: bool) -> Self {
-        let style = || crate::bindings::buffer(0, wgpu::ShaderStages::COMPUTE, wgpu::BufferBindingType::Uniform, true,
-            NonZeroU64::new(mem::size_of::<StyleGpu>() as u64));
-        let storage = |binding, format| crate::bindings::storage_texture(binding, wgpu::ShaderStages::COMPUTE, format,
-            if in_place && binding == 1 { wgpu::StorageTextureAccess::ReadWrite } else { wgpu::StorageTextureAccess::WriteOnly });
-        let layouts = std::array::from_fn(|coverage| {
-            let mut entries = vec![style(), storage(1, wgpu::TextureFormat::Rgba32Float)];
-            if coverage == 1 { entries.push(storage(2, wgpu::TextureFormat::R32Float)); }
-            if in_place {
-                entries.push(crate::bindings::buffer(3, wgpu::ShaderStages::COMPUTE,
-                    wgpu::BufferBindingType::Storage { read_only: false }, false, NonZeroU64::new(20)));
-            }
-            crate::bindings::layout(device, "dry material outputs", &entries)
-        });
-        let gather_layout = crate::bindings::layout(device, "dry display inputs", &[style(),
-            storage(4, wgpu::TextureFormat::Rgba32Float), storage(5, wgpu::TextureFormat::R32Float), storage(6, wgpu::TextureFormat::Rgba32Float)]);
+    /// `shared` holds the target, material source and texture layouts;
+    /// `outputs` the write-only output layouts.
+    pub fn new(device: &PipelineDevice, shared: [&wgpu::BindGroupLayout; 3], in_place: bool, outputs: &[wgpu::BindGroupLayout; 2]) -> Self {
+        let layouts = if in_place { output_layouts(device, true) } else { outputs.clone() };
+        let gather_layout = crate::bindings::layout(device, "dry display inputs", &[style_entry(),
+            storage_entry(4, wgpu::TextureFormat::Rgba32Float, false), storage_entry(5, wgpu::TextureFormat::R32Float, false),
+            storage_entry(6, wgpu::TextureFormat::Rgba32Float, false)]);
         let pipeline_layout = |group: &wgpu::BindGroupLayout| device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("dry material pages"),
             bind_group_layouts: &[Some(group), Some(shared[0]), Some(shared[1]), Some(shared[2])],
@@ -330,23 +365,9 @@ impl Pipelines {
                 }))
             });
             std::array::from_fn(|index| {
-                let layout = pipeline_layouts[index % 2].clone();
                 let entry = if index % 2 == 0 { "compute_color" } else { "compute_coverage" };
-                let label = format!("dry material {entry} operation={} contact={flags:#x}", OPERATIONS[index / 2] as u32);
-                let (device, shader) = (device.for_recipe(), shaders[index/2].clone());
-                Deferred::pipeline(move |mode| {
-                    mode.compute(
-                        &device,
-                        &wgpu::ComputePipelineDescriptor {
-                            label: Some(&label),
-                            layout: Some(&layout),
-                            module: &shader,
-                            entry_point: Some(entry),
-                            compilation_options: Default::default(),
-                            cache: None,
-                        },
-                    )
-                })
+                Deferred::compute(device, format!("dry material {entry} operation={} contact={flags:#x}", OPERATIONS[index / 2] as u32),
+                    &pipeline_layouts[index % 2], &shaders[index / 2], entry)
             })
         };
         let pages = Deferred::wgsl(device, "dry material pages",
@@ -407,36 +428,7 @@ impl Pipelines {
             let cells = r.changed_cells.as_ref().unwrap();
             tracked.and_then(|(target, coordinate)| cells.buffer(target, coordinate)).unwrap_or(&cells.disabled)
         });
-        let mut entries = vec![
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &r.style_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(mem::size_of::<StyleGpu>() as u64),
-                }),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&color.view),
-            },
-        ];
-        if let Some(coverage) = coverage {
-            entries.push(wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&coverage.view) });
-        }
-        if let Some(changed) = changed {
-            entries.push(wgpu::BindGroupEntry { binding: 3, resource: changed.as_entire_binding() });
-        }
-        coverage.unwrap_or(color).material_output.get(
-            (r.style_buffer.clone(), color.view.clone(), coverage.map(|p| p.view.clone()), changed.cloned()),
-            || {
-                r.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("dry material page output"),
-                    layout: &self.layouts[usize::from(coverage.is_some())],
-                    entries: &entries,
-                })
-            },
-        )
+        output_binding(r, &self.layouts[usize::from(coverage.is_some())], color, coverage, changed)
     }
 }
 
@@ -729,13 +721,15 @@ mod tests {
                     "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
             }
         }}}}
-        for slot in 0..MATERIAL_SLOTS {for operation in MaterialOperation::ALL {for filterable in [true, false] {
+        for slot in 0..MATERIAL_SLOTS {for filterable in [true, false] {
             let sampling = crate::pipeline_device::float_sampling_wgsl(filterable);
-            let (flags, fragment) = material_fragment_entries(slot);
-            let gathered = slot % MATERIAL_BLENDS.len() == 0 && matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge);
-            let modules = [(fragment, &["fragment_main", "reservoir_fragment"][..usize::from(operation == MaterialOperation::Wet) + 1]),
-                (Entries::Gather, &["gather_fragment"][..usize::from(gathered)])];
-            for (entries, used_entries) in modules {
+            let (flags, blend) = material_entries(slot);
+            let transported = crate::destination_material::OPERATIONS;
+            let fragments = MaterialPipelineKind::OPERATIONS.map(|operation| (Entries::Fragment(blend), operation,
+                &["fragment_main", "reservoir_fragment"][..usize::from(operation == MaterialOperation::Wet) + 1]));
+            let transports = transported.map(|operation| (Entries::Transport(blend), operation, &["transport_color", "transport_coverage"][..]));
+            let gathers = transported.map(|operation| (Entries::Gather, operation, &["gather_samples"][..usize::from(slot % MATERIAL_BLENDS.len() == 0)]));
+            for (entries, operation, used_entries) in fragments.into_iter().chain(transports).chain(gathers) {
                 if used_entries.is_empty() {continue;}
                 let module = naga::front::wgsl::parse_str(&material_source(Default::default(), sampling, entries, flags, operation)).unwrap();
                 validate(&module);
@@ -747,7 +741,7 @@ mod tests {
                         "{entry}/{operation:?}/{flags:#x} needs an override no pipeline supplies");
                 }
             }
-        }}}
+        }}
     }
 
     #[test]
@@ -791,15 +785,23 @@ mod tests {
                 absent(&present, &blend, &what);
             }
         }
+        let transported = crate::destination_material::OPERATIONS;
         for flags in [0, 128] {for operation in [MaterialOperation::Liquify, MaterialOperation::Smudge, MaterialOperation::Wet, MaterialOperation::Watercolor] {
-            let what = format!("{operation:?} fragment {flags:#x}");
-            let present = compiled(Entries::Fragment(0), flags, operation, "fragment_main");
-            for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
-            let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
-            assert_eq!(operations.len(), 1, "{what} reaches {operations:?}");
-            if matches!(operation, MaterialOperation::Liquify | MaterialOperation::Smudge) {
-                let present = compiled(Entries::Gather, flags, operation, "gather_fragment");
-                for feature in [&relief, &bristle, &clone, &pointwise] { absent(&present, feature, &format!("{operation:?} gather {flags:#x}")); }
+            let entries: &[_] = if transported.contains(&operation) {
+                &[(Entries::Transport(0), "transport_color"), (Entries::Transport(0), "transport_coverage")]
+            } else { &[(Entries::Fragment(0), "fragment_main")] };
+            for &(entries, entry) in entries {
+                let what = format!("{operation:?} {entry} {flags:#x}");
+                let present = compiled(entries, flags, operation, entry);
+                for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &what); }
+                let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
+                assert_eq!(operations.len(), 1, "{what} reaches {operations:?}");
+            }
+            if transported.contains(&operation) {
+                let present = compiled(Entries::Gather, flags, operation, "gather_samples");
+                for feature in [&relief, &bristle, &clone, &pointwise, &blend] { absent(&present, feature, &format!("{operation:?} gather {flags:#x}")); }
+                let operations: Vec<_> = fragments.iter().filter(|f| present.contains(**f)).collect();
+                assert!(operations.is_empty(), "{operation:?} gather reaches {operations:?}");
             }
         }}
         let multiply = Entries::Fragment(layer_core::LayerBlend::from(BrushBlendMode::Multiply).code());

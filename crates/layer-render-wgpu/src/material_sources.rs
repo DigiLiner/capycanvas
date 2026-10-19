@@ -1,10 +1,9 @@
 //! Full-resolution destination-brush samples beyond the adjacent tile window.
 //! Gather disjoint source pages into two reusable 256px Float32 fields. Each
-//! pass binds at most nine original/paint tiles; no full-photo texture or CPU
-//! readback is needed, and source-cache eviction remains queue ordered.
+//! dispatch binds at most nine original/paint tiles; no full-photo texture or
+//! CPU readback is needed, and source-cache eviction remains queue ordered.
 use super::*;
 use layer_core::{Point, Rect};
-use wgpu::util::DeviceExt;
 
 /// Aligned material tile uniforms retain their allocation across batches.
 #[derive(Default)]
@@ -42,55 +41,43 @@ impl TileRecords {
     }
 }
 
+/// Two reusable full-resolution sample fields that gather chunks ping-pong.
 pub(super) struct Gather {
-    pub(super) fields: [(wgpu::Texture, wgpu::TextureView); 2],
-    pages: wgpu::Buffer,
-    complete: wgpu::Buffer,
+    pub(super) fields: [PageSurface; 2],
 }
 impl Gather {
-    fn new(device: &wgpu::Device) -> Self {
-        Self {
-            fields: std::array::from_fn(|_| {
-                create_target(
-                    device,
-                    [PAGE_SIZE; 2],
-                    wgpu::TextureFormat::Rgba32Float,
-                    "full-resolution material sample field",
-                )
-            }),
-            pages: descriptor(device, 1, &[]),
-            complete: descriptor(device, 2, &[]),
-        }
-    }
     pub(super) fn storage_bytes(&self) -> u64 {
-        self.fields
-            .iter()
-            .map(|(texture, _)| texture_bytes(texture))
-            .sum::<u64>()
-            + 320
+        self.fields.iter().map(PageSurface::storage_bytes).sum()
     }
 }
 
-// WGSL uniform: header (mode, count), followed by nine vec4 tile coordinates.
-fn descriptor_bytes(mode: u32, pages: &[[u32; 2]]) -> [u8; 160] {
-    let mut words = [0u32; 40];
-    words[0] = mode;
-    words[1] = pages.len() as u32;
-    for (i, page) in pages.iter().enumerate() {
-        words[4 + i * 4..6 + i * 4].copy_from_slice(page);
+pub(super) const RECORD_WORDS: usize = 40;
+
+/// A tile record: its header, then up to nine page words.
+pub(super) fn record(header: [u32; 4], pages: impl IntoIterator<Item = [u32; 4]>) -> [u32; RECORD_WORDS] {
+    let mut words = [0; RECORD_WORDS];
+    words[..4].copy_from_slice(&header);
+    for (destination, page) in words[4..].as_chunks_mut::<4>().0.iter_mut().zip(pages) {
+        *destination = page;
     }
-    let mut bytes = [0u8; 160];
-    for (destination, word) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(words) {
-        destination.copy_from_slice(&word.to_le_bytes());
-    }
-    bytes
+    words
 }
-fn descriptor(device: &wgpu::Device, mode: u32, pages: &[[u32; 2]]) -> wgpu::Buffer {
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("material source page coordinates"),
-        contents: &descriptor_bytes(mode, pages),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    })
+
+pub(super) fn rect_words(rect: PixelRect) -> [u32; 4] {
+    [rect.min_x(), rect.min_y(), rect.max_x(), rect.max_y()]
+}
+
+/// A pointwise job's dab range and dirty rectangle, then a retouching job's
+/// source mapping.
+pub(super) fn dry_record(local: PixelRect, dabs: std::ops::Range<u32>, mapping: [u32; 16]) -> [u32; RECORD_WORDS] {
+    record([0, 0, dabs.start, dabs.len() as u32], std::iter::once(rect_words(local)).chain(mapping.as_chunks::<4>().0.iter().copied()))
+}
+
+/// The pages a Liquify or Smudge job on page `at` samples, when they reach
+/// beyond its neighborhood.
+pub(super) fn distant_pages(batch: &DabBatch, dabs: &[Dab], at: [u32; 2], extent: [u32; 2]) -> Option<Vec<[u32; 2]>> {
+    let pages = page_coordinates(sample_bounds(batch, dabs, at, extent)).collect::<Vec<_>>();
+    pages.iter().any(|p| p[0].abs_diff(at[0]) > 1 || p[1].abs_diff(at[1]) > 1).then_some(pages)
 }
 
 /// Conservative bounds of every backtrace and blur tap from this output page.
@@ -231,169 +218,44 @@ fn swept_rotation(bounds: Rect, center: Point, angle: f32) -> Rect {
 }
 
 impl WgpuRasterizer {
-    /// Each pointwise job's dirty rectangle and dab range, then a retouching
-    /// job's source mapping.
-    pub(super) fn prepare_dry_records(
-        &mut self, batch: &DabBatch,
-        records: impl Iterator<Item = (PixelRect, std::ops::Range<u32>, [u32; 16])> + Clone,
+    /// Upload one batch's tile records into pooled mapped storage, with no
+    /// intermediate byte vector or second CPU copy on the drawing path.
+    pub(super) fn prepare_records(
+        &mut self,
+        records: impl Iterator<Item = [u32; RECORD_WORDS]> + Clone,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(), GpuRasterError> {
-        if !pointwise(&batch.style) { return Ok(()); }
-        let records_buffer = &mut self.dry_records;
+        let records_buffer = &mut self.material_records;
         let used = records_buffer.prepare(&self.device, records.clone().count())?;
         if used == 0 { return Ok(()); }
-        // Serialize directly into pooled mapped storage: no intermediate byte
-        // vector or second CPU copy on the drawing path.
         self.uploads.write_mapped(encoder, records_buffer.buffer.as_ref().unwrap(), 0, used, |mapped| {
             mapped.slice(..).fill(0);
-            for (index, (local, range, mapping)) in records.enumerate() {
+            for (index, words) in records.enumerate() {
                 let offset = index * records_buffer.stride as usize;
-                let words = [0, 0, range.start, range.len() as u32, local.min_x(), local.min_y(), local.max_x(), local.max_y()];
-                for (i, word) in words.into_iter().chain(mapping).enumerate() {
+                for (i, word) in words.into_iter().enumerate() {
                     mapped.slice(offset + i * 4..offset + i * 4 + 4).copy_from_slice(&word.to_le_bytes());
                 }
             }
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn material_source_binding(
         &mut self,
-        batch_index: usize,
         batch: &DabBatch,
-        dabs: &[Dab],
         coordinate: [u32; 2],
         preview: bool,
         display: Option<usize>,
         encoder: &mut crate::submission::CommandEncoder,
     ) -> Result<(wgpu::BindGroup, Option<wgpu::BindGroup>), GpuRasterError> {
-        let timing = self.telemetry.enabled;
-        let started = timing.then(web_time::Instant::now);
-        let operation = match batch.style.execution {
-            BrushExecution::Liquify => Some(0),
-            BrushExecution::Smudge => Some(1),
-            _ => None,
-        };
-        let pages = operation.map(|_| {
-            page_coordinates(sample_bounds(
-                batch,
-                dabs,
-                coordinate,
-                self.target_extent(batch.target),
-            ))
-            .collect::<Vec<_>>()
-        });
-        let distant = pages.as_ref().is_some_and(|pages| {
-            pages
-                .iter()
-                .any(|p| p[0].abs_diff(coordinate[0]) > 1 || p[1].abs_diff(coordinate[1]) > 1)
-        });
-        self.metrics.material_cpu_ms[0] += elapsed(started);
-        if !distant {
-            let started = timing.then(web_time::Instant::now);
-            let result = self.material_bind_group(batch, coordinate, preview, MaterialInputs::Neighborhood, display, encoder);
-            self.metrics.material_cpu_ms[4] += elapsed(started);
-            return result;
-        }
-        self.ensure_material_gather();
-        self.metrics.material_sample_jobs += 1;
-        let mut current = 0;
-        {
-            let gather = self.material_gather.as_ref().unwrap();
-            let _pass = encoder.color_pass(
-                "clear material sample field",
-                &gather.fields[current].1,
-                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-            );
-        }
-        let key = Self::texture_set_key(&batch.style);
-        for pages in pages.unwrap().chunks(9) {
-            let started = timing.then(web_time::Instant::now);
-            self.metrics.material_sample_passes += 1;
-            let offsets = std::array::from_fn::<_, 9, _>(|i| {
-                pages.get(i).map(|p| {
-                    [
-                        p[0] as i32 - coordinate[0] as i32,
-                        p[1] as i32 - coordinate[1] as i32,
-                    ]
-                })
-            });
-            self.prepare_raw_neighborhood(batch.target, coordinate, offsets, preview, encoder)?;
-            self.metrics.material_cpu_ms[1] += elapsed(started);
-            let started = timing.then(web_time::Instant::now);
-            // Reuse one uniform in command order. Queue::write_buffer would
-            // replace every pass's coordinates before any of them executes.
-            self.uploads.write(
-                encoder,
-                &self.material_gather.as_ref().unwrap().pages,
-                &descriptor_bytes(1, pages),
-            )?;
-            let layer = self
-                .paint_layers
-                .iter()
-                .find(|l| l.id == batch.target)
-                .ok_or(GpuRasterError::MissingPaintLayer(batch.target))?;
-            let sources = self.source_tiles.borrow();
-            let views = self.raw_layer_neighborhood(&sources, layer, coordinate, offsets, preview);
-            let gather = self.material_gather.as_ref().unwrap();
-            let binding = create_material_bind_group(
-                &self.device,
-                &self.material_layout,
-                &views,
-                &self.dab_buffer,
-                &self.empty_scalar_view,
-                &gather.fields[current].1,
-                gather.pages.as_entire_binding(),
-            );
-            self.metrics.material_cpu_ms[2] += elapsed(started);
-            let started = timing.then(web_time::Instant::now);
-            let next = 1 - current;
-            let textures = self
-                .texture_sets
-                .iter()
-                .find(|s| s.key == key)
-                .expect("material textures are prepared before gathering");
-            let mut pass = encoder.color_pass(
-                "gather full-resolution material source pages",
-                &gather.fields[next].1,
-                wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-            );
-            pass.set_pipeline(self.pipelines.material_gather(&batch.style, operation.unwrap()));
-            pass.set_bind_group(
-                0,
-                &self.style_bind_group,
-                &[batch_index as u32 * self.style_stride as u32],
-            );
-            pass.set_bind_group(
-                1,
-                self.paint_target_binding(&batch.style),
-                &[self.layer_target_offset(batch.target, coordinate)],
-            );
-            pass.set_bind_group(2, &binding, &[0]);
-            pass.set_bind_group(3, &textures.bind_group, &[]);
-            pass.draw(0..3, 0..1);
-            drop(pass);
-            self.metrics.material_cpu_ms[3] += elapsed(started);
-            current = next;
-        }
-        let gather = self.material_gather.as_ref().unwrap();
-        let (samples, meta) = (gather.fields[current].1.clone(), gather.complete.clone());
-        let started = timing.then(web_time::Instant::now);
-        let result = self.material_bind_group(
-            batch,
-            coordinate,
-            preview,
-            MaterialInputs::Gathered(&samples, &meta),
-            display,
-            encoder,
-        );
+        let started = self.telemetry.enabled.then(web_time::Instant::now);
+        let result = self.material_bind_group(batch, coordinate, preview, MaterialInputs::Neighborhood, display, encoder);
         self.metrics.material_cpu_ms[4] += elapsed(started);
         result
     }
 
     pub(super) fn ensure_material_gather(&mut self) {
         if self.material_gather.is_none() {
-            let gather = Gather::new(&self.device);
+            let gather = Gather { fields: std::array::from_fn(|_| self.create_page_surface("full-resolution material sample field")) };
             self.metrics.material_sample_storage_bytes = gather.storage_bytes();
             self.material_gather = Some(gather);
         }
@@ -415,6 +277,6 @@ impl WgpuRasterizer {
     }
 }
 
-fn elapsed(started: Option<web_time::Instant>) -> f64 {
+pub(super) fn elapsed(started: Option<web_time::Instant>) -> f64 {
     started.map_or(0., |at| at.elapsed().as_secs_f64() * 1000.)
 }
