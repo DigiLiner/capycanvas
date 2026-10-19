@@ -2493,10 +2493,10 @@ fn native_toolbar_strength_preview_input() {
     let before=history(&d);let mut reports=Vec::new();let mut defaults=Vec::new();
     for theme in [Theme::Light,Theme::Dark] {
         d.w.dispatch(UiAction::SetTheme {theme:Some(theme)});
-        for (id,name,loading) in [(2,"Pencil",0.9),(25,"Pointy",0.95),(26,"ShadingPencil",0.85),(27,"Charcoal",0.55),(6,"Chalk",0.15),(17,"Pastel",0.5),(43,"Crayon",0.9)] {
+        for (id,name,loading) in [(2,"Pencil",0.7),(25,"Pointy",0.75),(26,"ShadingPencil",0.65),(27,"Charcoal",0.55),(6,"Chalk",0.15),(17,"Pastel",0.5),(43,"Crayon",0.9)] {
             d.w.dispatch(UiAction::SelectBrush {id});pump(80);let s=state(&d.w);
-            let ids=s.tool_settings.iter().map(|f|f.id).collect::<Vec<_>>();assert_eq!(ids,["size","flow","grain_depth","material_hardness","angle","opacity","smoothing_strength"]);
-            let smoothing=s.tool_settings.last().unwrap();assert_eq!(smoothing.group_id,"tool-setting-group-smoothing");assert_eq!((smoothing.numeric.min,smoothing.numeric.max,smoothing.numeric.scale),(0.,1.,100.));
+            let ids=s.tool_settings.iter().map(|f|f.id).collect::<Vec<_>>();assert_eq!(ids,["size","flow","grain_depth","material_hardness","smoothing_strength","angle","opacity"]);
+            let smoothing=s.tool_settings.iter().find(|f|f.id=="smoothing_strength").unwrap();assert_eq!(smoothing.group_id,"tool-setting-group-smoothing");assert_eq!((smoothing.numeric.min,smoothing.numeric.max,smoothing.numeric.scale),(0.,1.,100.));
             assert_eq!(s.tool_settings.iter().find(|f|f.id=="flow").unwrap().value,1.,"{name}: default Strength100");
             let material=s.tool_settings.iter().find(|f|f.id=="material_hardness").unwrap();assert_eq!(material.label.as_ref(),"Material hardness");assert_eq!((material.numeric.max,material.numeric.scale),(1.,100.));assert!((material.value-loading).abs()<1e-6,"{name}: authored Material hardness default");
             defaults.push(serde_json::json!({"theme":format!("{theme:?}"),"brush":name,"preset":id,"fields":s.tool_settings}));

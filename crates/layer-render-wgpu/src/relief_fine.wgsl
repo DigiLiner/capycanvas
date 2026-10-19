@@ -10,7 +10,7 @@ fn relief_tap_pixel(dab:Dab,world:vec2<f32>,paper:f32,dose:f32)->f32 {
     if !contact_feature(32768u,style.contact_c.z!=0.0) {outer=min(1.0,outer);}
     if outer<=0.0 {return 0.0;}
     let inner=min(outer,relief_inverse((gap-1.0/style.material_a.y)/k,profile));
-    let loading=1.0-style.material_a.z+style.material_a.z*pressure;
+    let loading=1.0-style.material_a.z+style.material_a.z*pressure*pressure;
     let dx=vec2<f32>(dab.metric.x,dab.metric.z);
     let dy=vec2<f32>(dab.metric.y,dab.metric.w);
     let relative=world-dab.center+dab.motion;

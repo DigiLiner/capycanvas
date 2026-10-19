@@ -5057,7 +5057,9 @@ impl StyleGpu {
                 f32::from(contact.linear_edge),
             ];
             if let Some(dry) = contact.dry {
-                result.material_a = [dry.corner, dry.softness.recip(), dry.loading, 0.];
+                let hardness = 1. - (1. - dry.loading).powi(2);
+                result.material_a = [dry.corner, dry.softness.recip(), hardness, 0.];
+                result.material_b[3] = 0.015625 * (dry.softness / 0.05).min(1.).powi(2);
                 result.contact_c[0] = 1.;
                 result.contact_c[2] = dry.relief_offset;
             }

@@ -86,7 +86,7 @@ fn relief_piece(o: vec2<f32>, v: vec2<f32>, ray: vec4<f32>, bounds: vec2<f32>, g
         return vec2<f32>(stroke.y-stroke.x,full);
     }
     let half = 0.5*(stroke.y-stroke.x);
-    if ray.z*half*half < 0.015625 && !contact_feature(4096u,style.material_a.x>0.0) {
+    if ray.z*half*half < style.material_b.w && !contact_feature(4096u,style.material_a.x>0.0) {
         let m = o+v*(stroke.x+half);
         let near = v*(0.5384693101056831*half);
         let far = v*(0.9061798459386640*half);
@@ -212,7 +212,7 @@ fn relief_evaluate(dab: Dab, world: vec2<f32>, paper: f32, paired: bool) -> vec2
         let face = vec2<f32>(1.0)-rim;
         if all(max(abs(o+v*bounds.x),abs(o+v*bounds.y))<=face) {
             let contact=relief_transfer((gap-k*profile.x)*style.material_a.y);
-            return vec2<f32>(contact*(bounds.y-bounds.x)/sum.y*(1.0-style.material_a.z+style.material_a.z*p),0.0);
+            return vec2<f32>(contact*(bounds.y-bounds.x)/sum.y*(1.0-style.material_a.z+style.material_a.z*p*p),0.0);
         }
         let moving = abs(v)>vec2<f32>(0.000001);
         let safe = select(vec2<f32>(1.0),v,moving);
@@ -233,5 +233,5 @@ fn relief_evaluate(dab: Dab, world: vec2<f32>, paper: f32, paired: bool) -> vec2
             if hi >= bounds.y { break; }
         }
     }
-    return clamp(vec2<f32>(sum.x,full_integral)/max(sum.y,0.000001),vec2<f32>(0.0),vec2<f32>(1.0))*(1.0-style.material_a.z+style.material_a.z*p);
+    return clamp(vec2<f32>(sum.x,full_integral)/max(sum.y,0.000001),vec2<f32>(0.0),vec2<f32>(1.0))*(1.0-style.material_a.z+style.material_a.z*p*p);
 }

@@ -124,7 +124,8 @@ fn material_pressure(pressure: f64, brush: &BrushSnapshot) -> f64 {
 
 fn material_response(pressure:f64, brush:&BrushSnapshot)->(f64,f64) {
     let hardness=f64::from(brush.contact.unwrap().dry.unwrap().loading);
-    (pressure,1.-hardness+hardness*pressure)
+    let softness=(1.-hardness).powi(2);
+    (pressure,softness+(1.-softness)*pressure*pressure)
 }
 
 fn reference_alpha(y: usize, pressure: f64, brush: &BrushSnapshot) -> u8 {
@@ -172,6 +173,21 @@ fn rotated_block_taps_keep_every_supported_corner_and_no_outside_pixels() {
                 if q > 1.01 { assert_eq!(alpha, 0, "angle={angle} tap outside support ({x},{y}) paints"); }
             }
         }
+    }
+}
+
+#[test]
+fn short_sweeps_preserve_sharp_relief_transfer() {
+    let mut brush=analytic(0.,1.4);
+    let dry=brush.contact.as_mut().unwrap().dry.as_mut().unwrap();
+    dry.softness=0.005;
+    dry.relief_offset=0.35;
+    for pose in &mut dry.poses {pose.relief[2]=4.;}
+    let image=line(brush.clone(),1.,0.5,Run::default());
+    for y in 84..173 {
+        let actual=image.rgba[(y*256+128)*4+3];
+        let expected=reference_alpha(y,1.,&brush);
+        assert!(actual.abs_diff(expected)<=2,"y={y}: GPU alpha {actual}, quadrature {expected}");
     }
 }
 

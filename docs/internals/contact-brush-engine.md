@@ -43,9 +43,13 @@ and increases their transfer; maximum pressure need not reach every recessed are
 Texture strength scales the authored paper strength `S` from zero to twice the
 preset value. Engagement width `W` is fixed at `0.05` in all built-in dry brushes
 and is absent from their painting controls. Material hardness is `loading=0..1`,
-displayed as 0–100%. It blends pressure-independent and pressure-proportional
-pigment loading; contact always responds to material pressure. Pencils and Crayon
-use high defaults, Charcoal and Pastel Block medium, and Chalk low. All seven dry
+displayed as 0–100%. The CPU resolves displayed hardness `h` to `H = 1 - (1 - h)^2`
+before the GPU style upload. Pigment loading is `L = 1 - H + H*p*p`, where `p` is
+material pressure. Displayed 50% gives effective hardness 75%; both endpoints stay
+fixed. Hardness blends constant loading with material pressure squared without
+changing paper contact or brush dimensions. Contact always responds to material
+pressure. Pencil defaults to 70%, Pointy Pencil to 75%, and Shading Pencil to 65%.
+Crayon defaults high, Charcoal and Pastel Block medium, and Chalk low. All seven dry
 presets default Strength to 100%. A preset pressure gain below one keeps material
 pressure below one even at full stylus pressure.
 Tilt changes the relief itself, including
@@ -106,8 +110,10 @@ its square and cube. The [NIST quadrature reference](https://dlmf.nist.gov/3.5#v
 gives the exactness criterion. This is an algebraic integral, not sparse sampling
 of the unclipped contact field. An ellipse interval that travels less than a
 quarter of the contact radius instead applies five-point Gauss–Legendre to the
-clamped transfer, skipping the four square roots that clip it; the quadrature
-tests hold it within two 8-bit codes of the exact integral. Blocks split at their four inner face boundaries, yielding at most five
+clamped transfer, skipping the four square roots that clip it. For engagement widths
+below `0.05`, the CPU reduces that travel limit in proportion to the width; sharper
+transitions use exact clipping over shorter sweeps. The quadrature tests hold this
+within two 8-bit codes of the exact integral. Blocks split at their four inner face boundaries, yielding at most five
 quadratic pieces. Flat pieces have constant contact. Neither shape uses rotated stamps.
 
 Brush recipes specialize ellipse versus block and whether any pose has quartic
