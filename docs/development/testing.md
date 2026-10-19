@@ -90,12 +90,21 @@ in both themes.
 The release validation Arch job installs the package recipe's dependencies into
 a fresh Arch container, tests SDK validation, and builds the default GTK
 development launcher. Its XMLB introspection dependency enables the localized
-store metadata test.
+store metadata test, and colord's installed ICC profiles exercise working-profile
+recognition.
 It verifies the private GTK/GLib/Pango library paths and text/codec behavior,
 then repeats the launcher build offline. Changes to the runtime recipe or SDK
 setup run these same checks and the source regressions in the
 [runtime guide](../../tools/build/gtk-runtime/README.md#build-and-validate).
 GPU journeys still run through the private display on hardware.
+
+Release checks also run the large AVIF gain-map grid test in release mode and
+compare WebP decoding against checksum-pinned public-domain samples decoded by
+the system libwebp. Arch checks independent LittleCMS CMYK and print-proof
+references, plus CMYK, YCCK, progressive and oriented JPEG interchange against
+Pillow and ImageMagick. Reference reports record tool versions and source hashes.
+The remaining ignored color tests require the pinned libavif 1.3.0 qualification
+SDK or external HEIF references, or only emit fixtures for hardware journeys.
 
 Run the rows that match your change, then walk the affected user journeys on each
 affected host. Scope Cargo commands with `-p`; `cargo test --workspace` pulls in

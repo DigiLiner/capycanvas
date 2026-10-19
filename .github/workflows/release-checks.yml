@@ -89,6 +89,17 @@ jobs:
             --skip cached_gpu_startup_matches_eager_pixels_and_waits_for_catalog \
             --skip positions_grow_and_keep_their_texture_for_smaller_windows \
             2>&1 | tee artifacts/release-tests/renderer.log
+      - name: Independent WebP and AVIF grid tests
+        if: ${{ !cancelled() }}
+        env:
+          LAYER_WEBP_REFERENCES: ${{ github.workspace }}/artifacts/release-tests/webp
+        run: |
+          sudo apt-get update && sudo apt-get install -y libwebp7
+          python3 tools/validation/webp_reference.py --output "$LAYER_WEBP_REFERENCES"
+          cargo test --locked --release -p layer-color --lib -- \
+            photo::raster_tests::external_webp_reference_samples \
+            photo::gainmap::tests::avif_grid_preserves_partial_cells_alpha_and_gain_samples \
+            --ignored --nocapture 2>&1 | tee artifacts/release-tests/codec-references.log
       - name: Apple bridge model tests
         if: ${{ !cancelled() }}
         run: |
@@ -126,6 +137,7 @@ jobs:
           path: |
             artifacts/release-tests/*.log
             artifacts/release-tests/inventory.json
+            artifacts/release-tests/webp/manifest.json
           if-no-files-found: error
 
   prediction:
@@ -170,7 +182,41 @@ jobs:
       - run: python3 tools/build/gtk-runtime/test-tablet-entry.py target/gtk-runtime/gtk-4.24.1
       - run: python3 tools/build/gtk-runtime/test-pad-focus.py target/gtk-runtime/gtk-4.24.1
       - run: LD_LIBRARY_PATH="$PWD/target/gtk-runtime/prefix/lib" cargo test --locked -p layer-linux --lib
+      - name: Independent ICC and JPEG references
+        env:
+          LAYER_TEST_WORKING_PROFILES: /usr/share/color/icc/colord
+          LAYER_TEST_CMYK_PROFILE: /usr/share/color/icc/colord/FOGRA39L_coated.icc
+          LAYER_TEST_CMYK_REFERENCE: ${{ github.workspace }}/artifacts/release-tests/color/cmyk
+          LAYER_TEST_JPEG_FIXTURES: ${{ github.workspace }}/artifacts/release-tests/color/jpeg
+          LAYER_PROOF_REFERENCE: ${{ github.workspace }}/artifacts/release-tests/color/proof
+        run: |
+          python3 tools/validation/icc_reference.py "$LAYER_TEST_CMYK_PROFILE" "$LAYER_TEST_CMYK_REFERENCE"
+          python3 tools/validation/jpeg_interchange.py prepare "$LAYER_TEST_JPEG_FIXTURES" --cmyk-profile "$LAYER_TEST_CMYK_PROFILE" --rgb-profile "$LAYER_TEST_WORKING_PROFILES/sRGB.icc"
+          cargo run --locked --release -p layer-color --example proof_profiles -- artifacts/release-tests/color/working
+          python3 tools/validation/proof_synthetic.py artifacts/release-tests/color/synthetic
+          python3 tools/validation/proof_reference.py artifacts/release-tests/color/working "$LAYER_PROOF_REFERENCE" \
+            --target artifacts/release-tests/color/synthetic/matrix-v2.icc \
+            --target artifacts/release-tests/color/synthetic/mft1-xyz.icc \
+            --target artifacts/release-tests/color/synthetic/mft2-xyz.icc \
+            --target artifacts/release-tests/color/synthetic/mab-xyz.icc \
+            --target "$LAYER_TEST_CMYK_PROFILE"
+          cargo test --locked --release -p layer-color --lib -- \
+            icc::description::tests::installed_working_profile_suggestions \
+            icc::output::tests::cmyk_output_matches_independent_reference_samples \
+            icc::proof::tests::proof_matches_independent_cmm \
+            photo::jpeg_tests::external_cmyk_jpeg_variants_match_reference_ink_samples \
+            photo::jpeg_tests::external_progressive_and_oriented_jpeg_match_reference_samples_and_budget \
+            --ignored --nocapture 2>&1 | tee artifacts/release-tests/color/color.log
+          python3 tools/validation/jpeg_interchange.py verify "$LAYER_TEST_JPEG_FIXTURES"
       - run: CARGO_NET_OFFLINE=true apps/layer-linux/run.sh --help
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: color-reference-test-reports
+          path: |
+            artifacts/release-tests/color/**/*.json
+            artifacts/release-tests/color/*.log
+          if-no-files-found: warn
 
   windows:
     strategy:
