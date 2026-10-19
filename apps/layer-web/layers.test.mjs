@@ -434,7 +434,8 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   const layout=()=>evaluate(`(()=>{const d=document.querySelector('${dialog}'),r=d.getBoundingClientRect(),title=d.querySelector('.dialog-title'),t=title.getBoundingClientRect(),tiles=[...d.querySelectorAll('.texture-tile')],frame=n=>n.querySelector('.texture-frame'),top=tiles[0].getBoundingClientRect().top,preview=frame(tiles[0]).querySelector('canvas'),p=preview.getBoundingClientRect(),footer=d.querySelector('.dialog-footer'),page=d.querySelector('.dialog-page');
     return{shell:{x:r.x,y:r.y,width:r.width,height:r.height},title:title.textContent,titleCenter:t.left+t.width/2-(r.left+r.width/2),columns:tiles.filter(n=>n.getBoundingClientRect().top===top).length,frames:tiles.every(n=>frame(n).getBoundingClientRect().width===102&&frame(n).getBoundingClientRect().height===102),preview:[p.width,p.height,preview.width],
       rings:tiles.map(n=>getComputedStyle(frame(n)).outlineStyle==='solid'&&getComputedStyle(frame(n)).outlineWidth==='2px'),captions:tiles.map(n=>n.querySelector('.texture-caption').textContent),focused:tiles.indexOf(document.activeElement),
-      buttons:[...footer.querySelectorAll('button')].filter(n=>!n.hidden).map(n=>[n.textContent,n.getBoundingClientRect().height]),divider:getComputedStyle(footer).borderTopWidth,scrolls:page.scrollHeight>page.clientHeight}})()`);
+      buttons:[...footer.querySelectorAll('button')].filter(n=>!n.hidden).map(n=>[n.textContent,n.getBoundingClientRect().height]),divider:getComputedStyle(footer).borderTopWidth,scrolls:page.scrollHeight>page.clientHeight,
+      visible:(()=>{const b=page.getBoundingClientRect();return tiles.filter(n=>{const r=n.getBoundingClientRect();return r.top>=b.top&&r.bottom<=b.bottom}).length})()}})()`);
   await send({type:'layer',action:{op:'select',id:paper,mask:false}});
   const shell=await editColor(),initial=await texture(),last=initial.labels.length-1,other=(initial.value+2)%initial.labels.length;
   assert.equal(initial.paper?.editable,true,'Paper rows publish their editable texture');
@@ -447,7 +448,8 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   assert.equal(selected.layer,paper,'The texture thumbnail selects its Paper');
   assert.equal(await evaluate(`layerApp.state().layers.find(l=>Number(l.id)===${paper}).selected`),true);
   const shown=await layout();
-  for(const side of ['x','y','width','height'])assert.ok(Math.abs(shown.shell[side]-shell[side])<=1,`Choose Texture matches the Edit Color dialog ${side}: ${JSON.stringify([shown.shell,shell])}`);
+  for(const side of ['x','width'])assert.ok(Math.abs(shown.shell[side]-shell[side])<=1,`Choose Texture has the Edit Color dialog's ${side}: ${JSON.stringify([shown.shell,shell])}`);
+  assert.ok(shown.visible>=Math.min(shown.captions.length,shown.columns*3),`Choose Texture shows three full rows: ${shown.visible} of ${shown.captions.length} in ${shown.columns} columns`);
   assert.equal(shown.title,'Choose Texture');assert.ok(Math.abs(shown.titleCenter)<=1,'The title is centered');
   assert.deepEqual(shown.captions,initial.labels,'One tile per texture, in order');
   assert.equal(shown.columns,Math.min(6,initial.labels.length),'Six tiles per row at full width');
@@ -456,7 +458,7 @@ async function checkTextureChoice({call,evaluate,settle,theme,directory,device})
   assert.deepEqual(shown.rings,initial.labels.map((_,i)=>i===initial.value),'Only the current texture carries the ring');
   assert.equal(shown.focused,initial.value,'Keyboard focus starts on the current texture');
   assert.deepEqual(shown.buttons,[...(initial.import?[[initial.import,34]]:[]),['Cancel',34],['Use Texture',34]]);assert.equal(shown.divider,'1px');
-  assert.equal(shown.scrolls,true,'The grid scrolls inside the dialog');
+  assert.equal(shown.scrolls,shown.visible<shown.captions.length,'The grid scrolls inside the dialog only when papers are hidden');
   await click(tile(other));
   assert.equal(await pending(),other,'A tap moves the pending texture');
   assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('${tile(other)} .texture-frame')).backgroundColor`),'rgba(0, 0, 0, 0)','Hover tints the tile frame');

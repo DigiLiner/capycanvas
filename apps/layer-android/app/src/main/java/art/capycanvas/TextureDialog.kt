@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -170,9 +171,9 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
     PickerDialog(host, request.windowed, "texture-dialog", keys, { host.textureDialog = null }, page = {
         Column(Modifier.padding(start = 20.dp, top = 20.dp, end = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             DialogTitle(copy.getString("choose"), "texture-dialog-title")
-            BoxWithConstraints(Modifier.weight(1f, fill = false).height(colorEditorBodyHeight() + TexturePageEnd)) {
+            BoxWithConstraints(Modifier.weight(1f, fill = false).height(maxOf(colorEditorBodyHeight(), threeTextureRows()) + TexturePageEnd)) {
                 val columns = ((maxWidth + TextureGap) / (TextureFrame + TextureGap)).toInt().coerceIn(1, 6)
-                Column(Modifier.fillMaxSize().onPlaced { placed[0] = it }.panelScroll(scroll).padding(bottom = TexturePageEnd).testTag("texture-grid"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.fillMaxSize().onPlaced { placed[0] = it }.panelScroll(scroll).padding(bottom = TexturePageEnd).testTag("texture-grid"), verticalArrangement = Arrangement.spacedBy(TextureRowGap)) {
                     picker.tiles.withIndex().chunked(columns).forEach { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TextureGap)) {
                             row.forEach { (index, tile) ->
@@ -225,6 +226,14 @@ private fun documentEpoch(state: JSONObject?) = state?.objectOrNull("document_fi
 
 internal val TextureFrame = 102.dp
 private val TexturePageEnd = 20.dp
+private val TextureRowGap = 14.dp
+private val TextureCaptionGap = 6.dp
+
+@Composable private fun threeTextureRows(): Dp {
+    val style = LocalTextStyle.current
+    val caption = rememberTextMeasurer().measure("", style.copy(fontSize = style.fontSize * .83333f, lineHeight = style.lineHeight * .83333f)).size.height
+    return (TextureFrame + TextureCaptionGap + with(LocalDensity.current) { caption.toDp() }) * 3 + TextureRowGap * 2
+}
 internal val TextureGap = 12.dp
 
 /** A click chooses; a second click within the double-tap time uses the choice. */
@@ -263,7 +272,7 @@ internal val TextureGap = 12.dp
                 .onKeyEvent { event -> if (actions.isNotEmpty() && event.type == KeyEventType.KeyDown && event.key == Key.Menu) { menu = true; true } else false }
                 .hoverable(interactions)
                 .combinedClickable(interactions, null, role = Role.RadioButton, onLongClick = if (actions.isEmpty()) null else ({ menu = true }), onClick = rememberActivation(choose, use)),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(TextureCaptionGap)) {
                 Box(Modifier.size(TextureFrame).clip(TileShape).background(if (hovered) colors.text.copy(alpha = .10f) else Color.Transparent)
                     .then(if (chosen) Modifier.border(2.dp, colors.accent, TileShape) else Modifier).padding(3.dp)) {
                     PaperPreview(host, tile.paperId(), 96.dp, colors.text.copy(alpha = .06f), empty)

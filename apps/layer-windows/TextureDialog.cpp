@@ -132,7 +132,7 @@ void PaperThumbnail::refresh(){
 }
 
 namespace {
-constexpr double TileFrame=102,TilePreview=96,TileColumnGap=12,TileRowGap=14;
+constexpr double TileFrame=102,TilePreview=96,TileColumnGap=12,TileRowGap=14,TextureDialogHeight=600;
 struct TexturePicker {J paper;uint32_t selected=0;hstring key;bool enabled=false;};
 std::optional<TexturePicker> texturePicker(J const& state,double layer,double epoch){
     if(num(object(state,L"document_file"),L"epoch")!=epoch)return std::nullopt;
@@ -260,7 +260,7 @@ struct TextureDialog : std::enable_shared_from_this<TextureDialog> {
         apply=pickerButton(data,L"texture-apply",3,true,[weak]{if(auto self=weak.lock())self->close(true);});
         import.Visibility(Visibility::Collapsed);
         for(auto const& node:{import,cancel,apply})footer.Children().Append(node);
-        root.Height(PickerDialogHeight);
+        root.Height(TextureDialogHeight);
         root.KeyDown([weak](auto&&,KeyRoutedEventArgs const& e){if(auto self=weak.lock();self&&e.Key()==Windows::System::VirtualKey::Enter){e.Handled(true);self->close(true);}});
         resized=xaml.Changed(auto_revoke,[weak](auto&&,auto&&){if(auto self=weak.lock())fitPicker(self->root);});
         dialog.Opened([weak](auto&&,auto&&){if(auto self=weak.lock()){fitPicker(self->root);self->focusPending=true;self->focus();}});

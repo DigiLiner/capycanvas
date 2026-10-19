@@ -394,9 +394,9 @@ class AndroidInteractionTest {
         val grid = bounds("texture-grid")
         val opened = layout("texture-tile-$start")
         assertTrue("The current paper opens in view: $opened / $grid", opened.top >= grid.top - 1 && opened.bottom <= grid.bottom + 1)
-        assertTrue("The grid at Edit Color's height scrolls", layout("texture-tile-${tiles.size - 1}").bottom - layout("texture-tile-0").top > grid.height)
+        val rows = tiles.indices.groupBy { layout("texture-tile-$it").top }.toSortedMap().values.take(3).flatten()
         if (layout("texture-tile-0").top >= grid.top - 1)
-            assertTrue("A row peeks above the footer", tiles.indices.map { layout("texture-tile-$it") }.any { it.top < grid.bottom - 1 && it.bottom > grid.bottom + 1 })
+            assertTrue("Three full rows show", rows.all { layout("texture-tile-$it").let { tile -> tile.top >= grid.top - 1 && tile.bottom <= grid.bottom + 1 } })
         screenshot("validation/paper/texture-dialog-$theme.png")
         val other = if (start + 1 < tiles.size) start + 1 else start - 1
         tap(bounds("texture-tile-$other").center)
@@ -446,7 +446,7 @@ class AndroidInteractionTest {
         waitFor("Edit Color opens from the Paper color") { shown("color-editor") }
         settle()
         assertEquals("Choose Texture has Edit Color's width", bounds("color-editor").width, dialog.width, 1.5f)
-        assertEquals("Choose Texture has Edit Color's height", bounds("color-editor").height, dialog.height, 1.5f)
+        assertTrue("Choose Texture is taller than Edit Color", dialog.height > bounds("color-editor").height)
         screenshot("validation/paper/texture-edit-color-$theme.png")
         tap(bounds("color-cancel").center)
         waitFor("Edit Color closes") { !exists("color-editor") }

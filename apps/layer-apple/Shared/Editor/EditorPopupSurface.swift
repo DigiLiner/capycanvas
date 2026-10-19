@@ -15,8 +15,9 @@ struct EditorFittedPresentation: ViewModifier {
 
 struct EditorDialogPresentation: ViewModifier {
     let identifier: String
+    var idealHeight: CGFloat = 500
     func body(content: Content) -> some View {
-        content.frame(minWidth: 380, idealWidth: 800, maxWidth: 860, minHeight: 420, idealHeight: 500, maxHeight: 620)
+        content.frame(minWidth: 380, idealWidth: 800, maxWidth: 860, minHeight: 420, idealHeight: idealHeight, maxHeight: 620)
             .accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
             .modifier(EditorFittedPresentation()).modifier(EditorPopupPresentation())
     }

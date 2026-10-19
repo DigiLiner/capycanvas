@@ -205,7 +205,7 @@ struct PaperFiles: ViewModifier {
             PaperNameForm(controller:controller,draft:draft).modifier(EditorPopupPresentation())
         }
             .sheet(item:$controller.texture,onDismiss:{ controller.textureClosed() }) { request in
-                TextureDialog(store:store,controller:controller,request:request).modifier(EditorDialogPresentation(identifier:"texture-dialog"))
+                TextureDialog(store:store,controller:controller,request:request).modifier(EditorDialogPresentation(identifier:"texture-dialog",idealHeight:600))
             }
             .overlay(alignment:.top) {
                 if controller.busy {
