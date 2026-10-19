@@ -743,6 +743,9 @@ The VM fixture names are `tool-variations` and `tool-variations:light`.
 Properties sliders use the shared [compact numeric layout](../ui/numeric-controls.md),
 with the track beneath the caption and room for the value and its editor.
 Long captions trim and relabel without replacing the control.
+Compact inline fields grow to fit their formatted value and keep that width
+when a later value is shorter. Review the fractional Layers readout in the
+fine-scrub captures.
 `exercise-effects.ps1 -Executable <path> -PropertyLayout -Theme dark` checks
 opacity and filter sliders, typed edits, mouse/pen/touch value drags that snap
 like the slider, a mouse drag that continues ten times slower while Shift is

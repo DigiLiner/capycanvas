@@ -140,3 +140,5 @@ if($LASTEXITCODE -ne 0){throw 'Canvas queue test failed.'}
  $model.layout.groups[0].floating=$false
  if(Floating-Toolbar $model 11){throw 'Docked toolbar passed floating release'}
 }
+
+& (Join-Path $PSScriptRoot '../tests/numeric-readout.ps1')

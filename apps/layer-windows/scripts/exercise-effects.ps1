@@ -22,6 +22,18 @@ $Executable=(Resolve-Path -LiteralPath $Executable).Path
 $directory=Split-Path -Parent $Executable
 $run=Join-Path $repo ('artifacts/windows/effects/'+[Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($run)|Out-Null
+function Assert-NumericReadoutFit($Element,[double]$Scale){
+    Add-Type -AssemblyName PresentationCore
+    $range=$Element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern).DocumentRange
+    $font=$range.GetAttributeValue([System.Windows.Automation.TextPattern]::FontNameAttribute)
+    $points=$range.GetAttributeValue([System.Windows.Automation.TextPattern]::FontSizeAttribute)
+    if($font -isnot [string] -or $points -isnot [double] -or $points -le 0 -or $Scale -le 0){throw 'Numeric readout font or scale metadata is unavailable'}
+    $value=$Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $measured=[Windows.Media.FormattedText]::new($value,[Globalization.CultureInfo]::CurrentCulture,[Windows.FlowDirection]::LeftToRight,[Windows.Media.Typeface]::new($font),($points*96/72),[Windows.Media.Brushes]::Black,$Scale)
+    $required=($measured.WidthIncludingTrailingWhitespace+12)*$Scale
+    $width=$Element.Current.BoundingRectangle.Width
+    if($required -gt $width+1){throw "Numeric readout '$value' needs $required physical pixels including padding; available width is $width"}
+}
 function Invoke([string]$Value,[switch]$Name){
     $hit=@{item=$null}
     Wait-Until {
@@ -321,6 +333,7 @@ function Check-PropertyValueScrub {Pointer-Session {
                 for($step=7;$step -le 12;$step++){[CapyRowPointer]::Move($x,$y-5*$step-1);Start-Sleep -Milliseconds 35}
                 try{Wait-Until {[Math]::Abs((Property 'opacity').value.value-$fine) -lt 1e-6 -and (Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value -eq $fineText} "Shift did not continue the scrub ten times slower from $expected to $fine"}catch{throw "Shift scrub actual=$((Property 'opacity').value.value), native=$((Control 'property-opacity').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value): $_"}
                 Capture "opacity-fine-scrub-$((Model).state.theme)" -Composed
+                Assert-NumericReadoutFit (Control 'layer-opacity') ([CapyRowPointer]::GetDpiForWindow($drawingWindow)/96.)
                 [CapyRowPointer]::Up()
             }finally{[CapyRowPointer]::Hold(0x10,$false)}
             $expected=$fine

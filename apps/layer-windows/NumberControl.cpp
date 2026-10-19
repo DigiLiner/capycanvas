@@ -239,6 +239,7 @@ StackPanel number(std::shared_ptr<WorkspaceData> const& data,hstring const& titl
                 if(auto target=surface.get())target.Visibility(reading?Visibility::Visible:Visibility::Collapsed);
                 control.Foreground(reading?hiddenText:data->brush(L"text"));
             }
+            if(inlineTrack)control.Width(std::max(control.Width(),measureText(value)+control.Padding().Left+control.Padding().Right));
             if(ranged&&!valueOnly&&!inlineTrack){
                 auto width=panel?68.:control.FocusState()==FocusState::Unfocused?measureText(value)+(preference?18:12):92.;
                 if(std::abs(control.Width()-width)>.01)control.Width(width);
