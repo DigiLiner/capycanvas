@@ -26,7 +26,7 @@ always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
   resolutions that would cross a limit are disabled.
 - **Presets.** Search, category pills, tiles with a sheet thumbnail, name, size
   and details, and a summary of the picked preset in the footer, whose texture
-  name is followed by its visibility, as in "Sanded 50 %, Chalkboard". Recent
+  name is followed by its visibility, as in "Extra rough 150 %, Natural white". Recent
   comes first once a preset was used; Your presets appears once one is saved.
   Save As… names the current sheet into a category; your own presets have
   Rename and Delete. Select applies the picked preset.
@@ -38,8 +38,10 @@ always opens on a white A4 landscape sheet at 300 ppi (3,508 × 2,480 px, sRGB
 - **Texture visibility in presets.** Screens, comics pages, print sizes and
   Blueprint start at 0%: their drawings are reproduced, so a lit sheet would
   print over the real one. Physical papers start at 100%, the relief their
-  brushes feel. Newsprint and Chalkboard start at 50%; the rough Full sheet and
-  the handmade Journal start at 150% so their surface reads.
+  brushes feel. Newsprint and Chalkboard start at 50%. The rough Full sheet,
+  Extra rough, the handmade Journal and the surfaces whose structure is the
+  point, Barn board, Cracked earth, Crumpled page, Sidewalk and Toilet paper,
+  start at 150% so their surface reads.
 - **Paper color.** The Edit Color form without its copy buttons and eyedropper,
   a Color / Transparent choice, and the Paper Colors palette with + and Delete.
   Transparent keeps the Paper layer but hides it.

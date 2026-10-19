@@ -1,3 +1,7 @@
+fn first_imported() -> u32 {
+    layer_core::paper::built_in_papers().len() as u32
+}
+
 fn paper_layer(s: &UiSession<Recorder>) -> u64 {
     occurrence_token(layer_core::paper::paper_occurrence(s.engine.document().scene(), None).unwrap())
 }
@@ -331,19 +335,19 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
     let entry = PaperEntry { id: id.clone(), name: "scan_0042".into(), bytes: 64, preview: vec![128; 96 * 96].into() };
     s.set_paper_library(vec![entry.clone()]).unwrap();
     let view = picker(&s);
-    assert_eq!(view.tiles.len(), 14);
-    assert_eq!(view.tiles[13].label.as_ref(), "scan_0042");
-    assert_eq!(view.tiles[13].actions.iter().map(|a| a.label.as_str()).collect::<Vec<_>>(), ["Rename…", "Delete"]);
+    assert_eq!(view.tiles.len(), first_imported() as usize + 1);
+    assert_eq!(view.tiles[first_imported() as usize].label.as_ref(), "scan_0042");
+    assert_eq!(view.tiles[first_imported() as usize].actions.iter().map(|a| a.label.as_str()).collect::<Vec<_>>(), ["Rename…", "Delete"]);
     assert_eq!(view.import.as_ref().map(|a| a.action.clone()), Some(EffectAction::ImportPaper { layer }));
     let checkpoint = s.engine.checkpoint();
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(13) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(first_imported()) } }).unwrap();
     assert_eq!(paper_requests(&s), [PaperRequest::Load { id: id.clone() }]);
     assert_eq!(s.engine.checkpoint(), checkpoint, "nothing changes until the paper is read");
     s.paper_loaded(&id, image.clone()).unwrap();
     let layer_core::TextureSource::Image(applied) = s.engine.document().paper(None).texture else { panic!("an image paper") };
     assert_eq!(*applied.storage().as_ref(), image);
     assert_eq!(applied.id(), crate::paper_library::paper_image_id(&id).unwrap());
-    assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(13));
+    assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(first_imported()));
     assert_eq!(s.state.settings.new_document.paper.as_deref(), Some(id.as_str()));
     assert_eq!(s.new_drawing_paper(), layer_core::TextureSource::Image(applied.clone()));
     invoke(&mut s, CommandId::Undo);
@@ -358,7 +362,7 @@ fn library_papers_load_when_chosen_and_new_drawings_remember_them() {
     let imported_id = paper_identity(&imported).unwrap();
     let entries = vec![entry, PaperEntry { id: imported_id.clone(), name: "linen scan".into(), bytes: 64, preview: vec![90; 96 * 96].into() }];
     s.paper_imported(Some(layer), entries.clone(), &imported_id, imported).unwrap();
-    assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(14));
+    assert_eq!(paper_control(&s, "texture").value, layer_core::EffectValue::Choice(first_imported() + 1));
     assert_eq!(s.state.settings.new_document.paper.as_deref(), Some(imported_id.as_str()));
     assert!(matches!(s.new_drawing_paper(), layer_core::TextureSource::Image(_)));
     s.set_paper_library(entries[..1].to_vec()).unwrap();
@@ -398,7 +402,7 @@ fn paper_rows_name_their_texture_and_previews_resolve_by_identity() {
     let id = paper_identity(&image).unwrap();
     s.set_paper_library(vec![PaperEntry { id: id.clone(), name: "scan".into(), bytes: 64, preview: vec![7; 96 * 96].into() }]).unwrap();
     s.paper_loaded(&id, image).unwrap();
-    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(13) } }).unwrap();
+    s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(first_imported()) } }).unwrap();
     s.paper_loaded(&id, gray_paper(40)).unwrap();
     assert_eq!(row(&s), crate::LayerPaper { id: Some(id.as_str().into()), label: "scan".into(), editable: true });
     assert_eq!(s.paper_preview(&id).as_deref(), Some(&[7; 96 * 96][..]));
@@ -422,7 +426,7 @@ fn a_late_library_read_cannot_replace_a_newer_paper_choice() {
             let id = paper_identity(&image).unwrap();
             s.set_paper_library(vec![PaperEntry { id: id.clone(), name: "linen scan".into(), bytes: 64,
                 preview: vec![90;96 * 96].into() }]).unwrap();
-            s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(13) } }).unwrap();
+            s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: layer_core::EffectValue::Choice(first_imported()) } }).unwrap();
             let request = s.state.requests.iter().find(|request|matches!(&request.kind,HostRequestKind::Paper { .. })).unwrap().id;
             let value = if different { layer_core::EffectValue::Choice(2) } else { current };
             s.dispatch(UiAction::Effect { action: EffectAction::Set { layer, key: "texture".into(), value: value.clone() } }).unwrap();
@@ -449,7 +453,7 @@ fn scaling_paper_preserves_the_pending_library_choice() {
         s.dispatch(UiAction::SelectLayer { id:layer }).unwrap();
         let image = gray_paper(90);let id = paper_identity(&image).unwrap();
         s.set_paper_library(vec![PaperEntry { id:id.clone(),name:"linen scan".into(),bytes:64,preview:vec![90;96 * 96].into() }]).unwrap();
-        s.dispatch(UiAction::Effect { action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)} }).unwrap();
+        s.dispatch(UiAction::Effect { action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(first_imported())} }).unwrap();
         s.dispatch(UiAction::Effect { action:EffectAction::Number {layer,key:"scale".into(),operation:NumericOperation::Value {value:1.5}} }).unwrap();
         s.paper_loaded(&id,image.clone()).unwrap();
         assert_eq!(*s.paper_image(layer).unwrap(),image);
@@ -468,7 +472,7 @@ fn imported_and_loaded_papers_save_the_remembered_paper_through_host_requests() 
         if imported { s.paper_imported(Some(layer),vec![entry],&id,image).unwrap(); }
         else {
             s.set_paper_library(vec![entry]).unwrap();
-            s.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}}).unwrap();
+            s.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(first_imported())}}).unwrap();
             s.paper_loaded(&id,image).unwrap();
         }
         assert_eq!(s.state.requests.iter().filter(|request|matches!(&request.kind,
@@ -559,7 +563,7 @@ fn deleted_and_readded_paper_reuses_retained_history_source_after_reload() {
         assert_eq!(s.engine.checkpoint(),imported_checkpoint); assert_live_artwork_eq(s.engine.document(),&imported);
         s.dispatch(UiAction::Effect { action:EffectAction::Reset { layer,key:"texture".into() } }).unwrap();
         let reset = s.engine.checkpoint();
-        s.dispatch(UiAction::Effect { action:EffectAction::Set { layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13) } })
+        s.dispatch(UiAction::Effect { action:EffectAction::Set { layer,key:"texture".into(),value:layer_core::EffectValue::Choice(first_imported()) } })
             .expect("reselecting a reloaded library paper must retain its authored source identity");
         assert_live_artwork_eq(s.engine.document(),&imported);
         invoke(&mut s,CommandId::Undo); assert_eq!(s.engine.checkpoint(),reset);
@@ -596,7 +600,7 @@ fn evicted_library_paper_reuses_retained_history_source_after_reload() {
         assert!(s.papers.image(&ids[0]).is_none(),"the original three-entry strong cache still evicts");
         s.dispatch(UiAction::Effect { action:EffectAction::Reset { layer,key:"texture".into() } }).unwrap();
         let reset = s.engine.checkpoint();
-        s.dispatch(UiAction::Effect { action:EffectAction::Set { layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13) } }).unwrap();
+        s.dispatch(UiAction::Effect { action:EffectAction::Set { layer,key:"texture".into(),value:layer_core::EffectValue::Choice(first_imported()) } }).unwrap();
         let decoded = layer_core::paper::decode_png(&layer_core::paper::encode_png(&images[0]).unwrap()).unwrap();
         assert_eq!(paper_identity(&decoded).unwrap(),ids[0]);
         s.paper_loaded(&ids[0],decoded).expect("an evicted paper must reuse the source retained by authored history");
@@ -648,7 +652,7 @@ fn opened_and_recovered_paper_uses_destination_owners_before_inherited_cache() {
             let baseline=opened.engine.document().clone();
             assert_eq!(portable(&baseline),portable(&expected));
             let checkpoint=opened.engine.checkpoint();
-            opened.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(13)}})
+            opened.dispatch(UiAction::Effect {action:EffectAction::Set {layer,key:"texture".into(),value:layer_core::EffectValue::Choice(first_imported())}})
                 .expect("an inherited cached owner must defer to the destination editor's verified Paper worker");
             assert_eq!(paper_requests(&opened).last(),Some(&crate::paper_library::PaperRequest::Load {id:id.clone()}));
             assert_eq!(opened.engine.checkpoint(),checkpoint);assert_live_artwork_eq(opened.engine.document(),&baseline);

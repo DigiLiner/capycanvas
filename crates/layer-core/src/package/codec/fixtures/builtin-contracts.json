@@ -430,5 +430,62 @@
     "priming":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
     "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
     "threads":{"dimension":"scalar","kind":{"kind":"number","max":30.0,"min":8.0},"opaque":false}
+  }},
+  "newsprint": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "flocs":{"dimension":"scalar","kind":{"kind":"number","max":6.0,"min":0.30000001192092896},"opaque":false},
+    "fuzz":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "fabric": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "irregularity":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "openness":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "priming":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "threads":{"dimension":"scalar","kind":{"kind":"number","max":30.0,"min":3.0},"opaque":false}
+  }},
+  "gesso": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "brush":{"dimension":"scalar","kind":{"kind":"number","max":1.5,"min":0.20000000298023224},"opaque":false},
+    "down":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "sanding":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "concrete": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "grain":{"dimension":"scalar","kind":{"kind":"number","max":1.0,"min":0.019999999552965164},"opaque":false},
+    "pore_size":{"dimension":"scalar","kind":{"kind":"number","max":6.0,"min":0.20000000298023224},"opaque":false},
+    "pores":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "scratches":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "aggregate": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "embed":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "grain":{"dimension":"scalar","kind":{"kind":"number","max":12.0,"min":0.10000000149011612},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
+  }},
+  "wood": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "knots":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "rings":{"dimension":"scalar","kind":{"kind":"number","max":12.0,"min":2.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "weathering":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false}
+  }},
+  "crackle": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "folds":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "gap":{"dimension":"scalar","kind":{"kind":"number","max":3.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "size":{"dimension":"scalar","kind":{"kind":"number","max":40.0,"min":3.0},"opaque":false}
+  }},
+  "papyrus": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "across":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "down":{"dimension":"scalar","kind":{"kind":"number","max":100.0,"min":0.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "width":{"dimension":"scalar","kind":{"kind":"number","max":60.0,"min":5.0},"opaque":false}
+  }},
+  "leaf": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false},
+    "size":{"dimension":"scalar","kind":{"kind":"number","max":80.0,"min":10.0},"opaque":false},
+    "veins":{"dimension":"scalar","kind":{"kind":"number","max":10.0,"min":1.0},"opaque":false}
+  }},
+  "quilt": {"version":1,"kind":"texture","alpha":"preserve","space":"linear","time":false,"constraints":[],"parameters": {
+    "cell":{"dimension":"scalar","kind":{"kind":"number","max":40.0,"min":14.0},"opaque":false},
+    "seed":{"dimension":"count","kind":{"kind":"number","max":16777215.0,"min":0.0},"opaque":false}
   }}
 }

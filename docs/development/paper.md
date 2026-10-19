@@ -19,7 +19,7 @@ the library, lighting, rendering, saved data and what each host has.
 | Paper layer with Color, Texture and Scale | Lighting the thickness of paint with the paper |
 | Texture visibility, Light and Shows through paint, lighting the canvas and exports; Texture visibility in New drawing and its presets | Light and Shows through paint in New drawing |
 | One resolution per drawing, 300 ppi by default | Texture parameters in Properties and saved variations |
-| Thirteen built-in papers from eight programs | Portable user texture programs, shared with a portable custom-filter contract |
+| 38 built-in papers from eighteen programs | Portable user texture programs, shared with a portable custom-filter contract |
 | Every grain brush follows the paper | Per-brush textures |
 | Importing a paper image and an app-wide paper library | Paper that changes as it is drawn on: burnishing, sizing, absorbency |
 | A brief preview of the paper on the canvas when it changes | Non-repeating full sheets and deckle edges |
@@ -61,7 +61,7 @@ the library, lighting, rendering, saved data and what each host has.
 | Layer › New | Paper, beside Solid Color and Gradient Fill. The filter drawer lists Paper with the other fills, from the catalog. |
 | Layers panel | Paper stays at the bottom, outside groups, without a drag handle. Its color thumbnail opens Edit Color. Its texture thumbnail sits left of the name and opens Choose Texture unless the layer is locked. Add mask in the footer and the row menu's Add mask, mask-from-selection and Paste mask items are disabled while Paper is selected. When Paper is missing, every client shows a centered Add paper action immediately after the last layer, inside the scrolling list. It uses the standard layer row's height and padding, with regular text, square corners and native hover, pressed and focus feedback. Native keyboard activation works on the focused action; releasing a pointer outside cancels. Adding Paper again selects the existing sheet. |
 | Properties | Titled Paper. Color with Use Color; Texture, a tile showing the current paper with logical-group spacing between its thumbnail and name, which opens Choose Texture; Scale, a logarithmic slider from 25% to 400%; Texture visibility, a slider from 0 to 300%; Light, a [dial](../ui/numeric-controls.md) with its angle; Shows through paint, a slider from 0 to 100%. Double-clicking a label returns it to its default: Scale 100%, Texture visibility 0%, Light 225° (upper left) and Shows through paint 100%. Light and Shows through paint are disabled while Texture visibility is 0. |
-| Choose Texture | A dialog with Edit Color's width, title and footer, tall enough to show three full rows of papers. One grid of squircle tiles, each preview at its own size with the paper's name below: the thirteen built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
+| Choose Texture | A dialog with Edit Color's width, title and footer, tall enough to show three full rows of papers. One grid of squircle tiles, each preview at its own size with the paper's name below: the built-in papers, then imported papers. The selected Paper's own image comes first when it is not in the library, with Add to Library. Imported papers have Rename and Delete in the tile's menu. Choosing a tile only marks it; Use Texture applies it and Cancel keeps the current paper. Import… sits at the left of the footer. |
 | Canvas | The lit relief while Texture visibility is above 0. On a flat paper, relief shading while Scale changes and for a moment after a paper is chosen. |
 | Tool Settings | Texture strength, unchanged. Brushes have no texture picker or texture scale. |
 
@@ -243,8 +243,8 @@ paper is used. New drawing chooses its own paper in the dialog.
 
 One shared view model, presented by each host in a dialog that shares Edit
 Color's shell: a single grid with the
-built-in papers (Hot press, Cold press, Rough, Drawing, Bristol, Ingres,
-Pastel, Sanded, Washi, Unryu, Handmade, Canvas and Linen),
+built-in papers in catalog order (watercolor, drawing, pastel and Asian papers,
+canvases and panels, then surfaces such as Concrete, Barn wood and Toilet),
 then imported papers, with Import… at the left of the footer. When the selected Paper
 uses an embedded image that is not in the library, that paper comes first with
 Add to Library. Tiles show 16 mm of each paper under raking light with its
@@ -386,7 +386,7 @@ keep their Solid Color.
 
 | Area | State |
 | --- | --- |
-| Shared Rust | Paper layer, texture value, eight programs and thirteen papers, bake, brushes on Paper, resolution, Scale, relief preview, lighting with Texture visibility, Light and Shows through paint on the canvas and in exports, library policy, import |
+| Shared Rust | Paper layer, texture value, eighteen programs and 38 papers, bake, brushes on Paper, resolution, Scale, relief preview, lighting with Texture visibility, Light and Shows through paint on the canvas and in exports, library policy, import |
 | GTK | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, paper, Texture visibility and paper color in New drawing, with an Import… tile adding to the library, relief preview, Texture visibility, the Light dial, Shows through paint and the Add paper row. `native_paper_lighting`, `native_paper_picker_relief_and_scale` and `native_fill_drawing_targets_and_paper_order` cover the lighting controls, the dialog, the row thumbnails, drawing targets, fill masks, Paper's disabled mask controls and sheet creation in both themes. `native_paper_scale_drag` drags Scale with real input on a 12 MP drawing in both themes and records how soon each step reaches the canvas. |
 | Windows | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, paper and paper color in New drawing, with Import… adding to the library, shared relief preview and lighting, the Light dial, and the Add paper row. Image decoding, preview decoding and library files use native workers. The Layers Paper fixture covers the rows, Choose Texture, the Scale relief and the lighting controls in both themes. |
 | Apple | Choose Texture from Properties and the Paper row, with Import, Rename, Delete and Add to Library, paper, Texture visibility and paper color in New drawing, with an Import… tile adding to the library, shared relief preview and lighting, Texture visibility, the Light dial, Shows through paint and the Add paper row. The `light` case of the property slider fixture covers the dial. Native workers run image decoding and library files through the shared `layer_host::papers::PaperTask`. Shared Add Paper and remembered-paper cold-start journeys cover layer creation and initial library selection on Mac and iPad. |
@@ -437,7 +437,7 @@ choices are in [texture program decisions](texture-programs.md#decisions).
 | Choosing a paper | Choose Texture, a dialog like Edit Color, opened from Properties and from the texture thumbnail on the Paper row | A popover that applies on tap, from Properties only. It was hard to discover, and Use Texture and Cancel match Edit Color. |
 | Texture tiles | Relief under raking light | A graphite stroke across each tile. It needs a brush render per tile, while raking light already shows the texture and its depth. |
 | Texture layout | One grid, with the drawing's own paper first only when it is not in the library | Separate sections for this drawing, built-in and imported papers. The drawing's paper is usually already in the grid, so the section repeats it. |
-| Built-in papers | Thirteen | Fourteen, adding Bristol vellum and raw linen. Bristol vellum sits between Drawing and Bristol with little visible difference, and painters draw on primed linen rather than raw. |
+| Built-in papers | 38: the art papers, boards and canvases painters buy, and surfaces from wood, pavement, earth, plants and household paper with a history in frottage and street painting | Adding Bristol vellum, raw linen, parchment and velour. Bristol vellum sits between Drawing and Bristol with little visible difference; painters draw on primed linen rather than raw; parchment is mostly color and translucency, and velour's fibers are finer than a texel, so both wait for paper behavior that a height cannot carry. |
 | Paper in New drawing | Texture and paper color in the dialog, saved with presets | The paper last chosen. Art-store presets are papers as much as sizes: a watercolor block, toned pastel paper or a chalkboard. |
 | Library management | Rename and Delete in Choose Texture | A library panel: a handful of imported papers does not need one. Delete alone: imported names come from file names such as scan_0042.png. |
 | Resolution controls | New drawing and Image Size | A resolution field on Paper or on import. New drawing and Image Size are where painting and photo apps put resolution, and a second field would let the paper disagree with the drawing. |

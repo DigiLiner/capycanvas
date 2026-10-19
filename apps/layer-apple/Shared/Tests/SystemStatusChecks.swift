@@ -97,9 +97,12 @@ extension XCTestCase {
             XCTAssertTrue(drawer.waitForExistence(timeout: 10))
             #endif
         }
-        let papers = ["Hot press", "Cold press", "Rough", "Drawing paper", "Bristol", "Ingres", "Pastel paper",
-            "Sanded pastel", "Washi", "Unryu", "Handmade paper", "Canvas", "Linen"]
-        XCTAssertTrue(texture.waitForExistence(timeout: 10)); expectPaperValue(texture, "Drawing paper")
+        let papers = ["Hot press", "Cold press", "Rough", "Extra rough", "Drawing", "Bristol", "Newsprint", "Ingres",
+            "Pastel", "Sanded", "Coarse grit", "Washi", "Unryu", "Handmade", "Canvas", "Linen",
+            "Canvas paper", "Rough linen", "Burlap", "Gesso panel", "Gesso across", "Gesso down", "Rough gesso", "Rough across",
+            "Rough down", "Matte film", "Chalkboard", "Concrete", "Sand", "Asphalt", "Barn wood", "Dry mud",
+            "Crumpled", "Papyrus", "Reeds across", "Reeds down", "Leaf", "Toilet"]
+        XCTAssertTrue(texture.waitForExistence(timeout: 10)); expectPaperValue(texture, "Drawing")
         let textureDialog = app.descendants(matching: .any)["texture-dialog"].firstMatch
         func chooseTexture(_ index: Int) {
             let option = app.buttons["texture-tile-\(index)"]
@@ -108,7 +111,7 @@ extension XCTestCase {
             expectation(for: NSPredicate(format: "selected == YES"), evaluatedWith: option)
             waitForExpectations(timeout: 10)
         }
-        var previousPaper = "Drawing paper"
+        var previousPaper = "Drawing"
         for (index, name) in papers.enumerated() {
             revealEditorControl(texture, in: propertyScroll); workspaceActivate(texture)
             XCTAssertTrue(textureDialog.waitForExistence(timeout: 10))
@@ -116,14 +119,14 @@ extension XCTestCase {
                 let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "texture-tile-"))
                 XCTAssertEqual(options.count, papers.count)
                 for (option, label) in papers.enumerated() { XCTAssertEqual(app.buttons["texture-tile-\(option)"].label, label) }
-                XCTAssertTrue(app.buttons["texture-tile-3"].isSelected, "Choose Texture starts on the current texture")
+                XCTAssertTrue(app.buttons["texture-tile-4"].isSelected, "Choose Texture starts on the current texture")
                 chooseTexture(2)
                 workspaceActivate(app.buttons["texture-cancel"])
                 XCTAssertTrue(textureDialog.waitForNonExistence(timeout: 10))
-                expectPaperValue(texture, "Drawing paper")
+                expectPaperValue(texture, "Drawing")
                 revealEditorControl(texture, in: propertyScroll); workspaceActivate(texture)
                 XCTAssertTrue(textureDialog.waitForExistence(timeout: 10))
-                XCTAssertTrue(app.buttons["texture-tile-3"].isSelected, "Reopening forgets the cancelled choice")
+                XCTAssertTrue(app.buttons["texture-tile-4"].isSelected, "Reopening forgets the cancelled choice")
                 attachEditor(in: app, name: "texture-dialog-" + theme)
             }
             chooseTexture(index)
@@ -542,7 +545,7 @@ extension XCTestCase {
             let shot=XCTAttachment(screenshot:app.screenshot())
             shot.name="paper-"+phase+"-"+theme;shot.lifetime = .keepAlways;add(shot)
         }
-        properties();expect(texture,value:"Drawing paper")
+        properties();expect(texture,value:"Drawing")
         let original=settledSample()
         openChooser();workspaceActivate(app.buttons["texture-import"]);XCTAssertTrue(chooser.waitForNonExistence(timeout:10))
         #if os(macOS)
@@ -555,7 +558,7 @@ extension XCTestCase {
         XCTAssertTrue(cancel.waitForExistence(timeout:20));captureState("import-cancel-chooser");workspaceActivate(cancel)
         XCTAssertTrue(cancel.waitForNonExistence(timeout:15))
         #endif
-        properties();expect(texture,value:"Drawing paper");samePixels(original);noError()
+        properties();expect(texture,value:"Drawing");samePixels(original);noError()
         openChooser();workspaceActivate(app.buttons["texture-import"]);XCTAssertTrue(chooser.waitForNonExistence(timeout:10))
         #if os(macOS)
         XCTAssertTrue(open.waitForExistence(timeout:20));goToFolder(photo,in:app)
@@ -578,7 +581,7 @@ extension XCTestCase {
         let thumbnailBefore=try await ordinaryPaperThumbnail(importedTile,name:"paper-native-import-preview-"+theme)
         useTile(importedTile)
         let imported=settledSample()
-        editorMenu(in:app,menu:"Edit",id:"undo",label:"Undo");properties();expect(texture,value:"Drawing paper")
+        editorMenu(in:app,menu:"Edit",id:"undo",label:"Undo");properties();expect(texture,value:"Drawing")
         editorMenu(in:app,menu:"Edit",id:"redo",label:"Redo");properties();expect(texture,value:fileName)
         samePixels(imported)
         context(fileName,action:"Rename…")

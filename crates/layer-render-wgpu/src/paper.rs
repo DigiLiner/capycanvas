@@ -756,7 +756,12 @@ mod tests {
     #[ignore = "writes assets/filters/paper_previews.gray"]
     fn write_built_in_paper_previews() {
         let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
-        let atlas: Vec<u8> = layer_core::paper::built_in_papers().iter().flat_map(|paper| preview(&mut renderer, &paper.texture)).collect();
+        let mut atlas = Vec::new();
+        for definition in layer_core::bundled_texture_catalog().filters() {
+            for preset in &definition.presets {
+                atlas.extend(preview(&mut renderer, &TextureSource::Program(definition.preset(preset).unwrap())));
+            }
+        }
         std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/filters/paper_previews.gray"), atlas).unwrap();
     }
 
@@ -799,8 +804,79 @@ mod tests {
                 relief.insert(preset.id.to_string(), measured);
             }
         }
-        assert!(relief["hot_press"] < relief["cold_press"] && relief["cold_press"] < relief["rough"], "{relief:?}");
+        assert!(relief["hot_press"] < relief["cold_press"] && relief["cold_press"] < relief["rough"] && relief["rough"] < relief["torchon"], "{relief:?}");
         assert!(relief["bristol"] < relief["drawing_paper"], "{relief:?}");
+        assert!(relief["sanded_pastel"] < relief["coarse_sanded"] && relief["gesso_panel"] < relief["brushed_gesso"], "{relief:?}");
+        assert!(relief["drafting_film"] < relief["chalkboard"] && relief["sand"] < relief["asphalt"] && relief["rough_linen"] < relief["burlap"], "{relief:?}");
+    }
+
+    fn blurred(values: &[f64], [width, height]: [usize; 2], radius: usize) -> Vec<f64> {
+        let mut out = values.to_vec();
+        for _ in 0..2 {
+            for (count, lines, along, across) in [(width, height, 1, width), (height, width, width, 1)] {
+                let source = out.clone();
+                let taps = (2 * radius + 1) as f64;
+                for line in 0..lines {
+                    let at = |i: usize| source[line * across + (i % count) * along];
+                    let mut sum: f64 = (count - radius..=count + radius).map(at).sum();
+                    for i in 0..count {
+                        out[line * across + i * along] = sum / taps;
+                        sum += at(i + radius + 1) - at(i + count - radius);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    #[ignore = "prints relief statistics and bake times of the built-in papers; PAPERS picks papers by ID"]
+    fn built_in_paper_relief_statistics() {
+        let mut renderer = WgpuRasterizer::new_native_headless(Default::default()).unwrap();
+        let only = std::env::var("PAPERS").ok();
+        println!("paper\tperiod\tfirst_ms\trelief_um\tbake_ms\tns_texel\tmean\tskew\tfine_um\tmid_um\tcoarse_um\treach25\treach50\treach75\treach100");
+        for definition in layer_core::bundled_texture_catalog().filters() {
+            for preset in &definition.presets {
+                if only.as_deref().is_some_and(|only| !only.split(',').any(|id| id == preset.id.as_ref())) { continue; }
+                let instance = definition.preset(preset).unwrap();
+                let start = std::time::Instant::now();
+                let (pixels, [width, height], relief) = bake(&mut renderer, TextureSource::Program(instance.clone()));
+                let first = start.elapsed().as_secs_f64() * 1000.;
+                let mut time = |ppi: f64| {
+                    let mut times: Vec<f64> = (2..7).map(|seed| {
+                        let mut varied = instance.clone();
+                        varied.set("seed", layer_core::EffectValue::Number(seed as f32)).unwrap();
+                        let binding = PaperBinding { surface: Arc::new(PaperSurface { texture: TextureSource::Program(varied), mapping: reference([64, 64], [ppi; 2]).mapping }), target_offset: [0; 2] };
+                        let start = std::time::Instant::now();
+                        renderer.papers.require(&renderer.device, None, &binding, startup::BRUSH).unwrap();
+                        renderer.papers.advance(&renderer.device, &renderer.queue, true, None).unwrap();
+                        start.elapsed().as_secs_f64() * 1000.
+                    }).collect();
+                    times.sort_by(f64::total_cmp);
+                    times[2]
+                };
+                let texels = |ppi: f64| (f64::from(definition.program.period.unwrap()) * ppi / 25.4).round().min(f64::from(MAX_TEXELS)).powi(2);
+                let (base, fine) = (time(300.), time(1200.));
+                let ns_per_texel = (fine - base) * 1e6 / (texels(1200.) - texels(300.));
+                let relief_um = f64::from(relief * REFERENCE_RELIEF_UM);
+                let heights: Vec<f64> = pixels.iter().map(|v| f64::from(*v) / 255. * relief_um).collect();
+                let n = heights.len() as f64;
+                let mean = heights.iter().sum::<f64>() / n;
+                let variance = heights.iter().map(|h| (h - mean).powi(2)).sum::<f64>() / n;
+                let skew = heights.iter().map(|h| (h - mean).powi(3)).sum::<f64>() / n / variance.powf(1.5);
+                let texel = f64::from(definition.program.period.unwrap()) / f64::from(width);
+                let extent = [width as usize, height as usize];
+                let fine_cut = blurred(&heights, extent, (0.15 / texel).round().max(1.) as usize);
+                let coarse = blurred(&heights, extent, (2.5 / texel).round() as usize);
+                let deviation = |values: &mut dyn Iterator<Item = f64>| { let v: Vec<f64> = values.collect(); let m = v.iter().sum::<f64>() / n; (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / n).sqrt() };
+                let fine = deviation(&mut heights.iter().zip(&fine_cut).map(|(h, b)| h - b));
+                let mid = deviation(&mut fine_cut.iter().zip(&coarse).map(|(a, b)| a - b));
+                let large = deviation(&mut coarse.iter().copied());
+                let reach = |pressure: f64| heights.iter().filter(|h| **h >= 0.5 * relief_um - 50. * pressure).count() as f64 / n;
+                println!("{}\t{}\t{first:.1}\t{relief_um:.0}\t{base:.2}\t{ns_per_texel:.2}\t{:.3}\t{skew:.2}\t{fine:.1}\t{mid:.1}\t{large:.1}\t{:.2}\t{:.2}\t{:.2}\t{:.2}",
+                    preset.id, definition.program.period.unwrap(), mean / relief_um, reach(0.25), reach(0.5), reach(0.75), reach(1.));
+            }
+        }
     }
 
     #[test]

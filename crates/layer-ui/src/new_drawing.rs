@@ -201,12 +201,13 @@ pub enum PresetGroup {
     Watercolor,
     Pastel,
     Canvas,
+    MixedMedia,
     Comics,
     Prints,
     Digital,
 }
 impl PresetGroup {
-    pub const ALL: [Self; 8] = [Self::Yours, Self::Sketch, Self::Watercolor, Self::Pastel, Self::Canvas, Self::Comics, Self::Prints, Self::Digital];
+    pub const ALL: [Self; 9] = [Self::Yours, Self::Sketch, Self::Watercolor, Self::Pastel, Self::Canvas, Self::MixedMedia, Self::Comics, Self::Prints, Self::Digital];
     pub fn label(self, l: &Localizer) -> Arc<str> {
         l.text(match self {
             Self::Yours => MessageId::DOCUMENTS_YOUR_PRESETS,
@@ -214,6 +215,7 @@ impl PresetGroup {
             Self::Watercolor => MessageId::DOCUMENTS_GROUP_WATERCOLOR,
             Self::Pastel => MessageId::DOCUMENTS_GROUP_PASTEL,
             Self::Canvas => MessageId::DOCUMENTS_GROUP_CANVAS,
+            Self::MixedMedia => MessageId::DOCUMENTS_GROUP_MIXED_MEDIA,
             Self::Comics => MessageId::DOCUMENTS_GROUP_COMICS,
             Self::Prints => MessageId::DOCUMENTS_GROUP_PRINTS,
             Self::Digital => MessageId::DOCUMENTS_GROUP_DIGITAL,
@@ -261,7 +263,13 @@ const BLACK: RgbColor = srgb(0x1e, 0x1e, 0x1e);
 const NEWSPRINT: RgbColor = srgb(0xe6, 0xe1, 0xd3);
 const CHALKBOARD: RgbColor = srgb(0x2b, 0x32, 0x30);
 const BLUEPRINT: RgbColor = srgb(0x1f, 0x4b, 0x7a);
-pub const PAPER_COLORS: [(MessageId, RgbColor); 14] = [
+const SAND: RgbColor = srgb(0xd6, 0xc1, 0x96);
+const EARTH: RgbColor = srgb(0xb5, 0x9a, 0x74);
+const LEAF_GREEN: RgbColor = srgb(0x7d, 0x9a, 0x5b);
+const WEATHERED_WOOD: RgbColor = srgb(0x8d, 0x85, 0x74);
+const CONCRETE: RgbColor = srgb(0x9b, 0x9a, 0x95);
+const ASPHALT: RgbColor = srgb(0x3c, 0x3c, 0x3e);
+pub const PAPER_COLORS: [(MessageId, RgbColor); 20] = [
     (MessageId::DOCUMENTS_WHITE, WHITE),
     (MessageId::DOCUMENTS_PAPER_NATURAL_WHITE, NATURAL),
     (MessageId::DOCUMENTS_PAPER_CREAM, CREAM),
@@ -276,6 +284,12 @@ pub const PAPER_COLORS: [(MessageId, RgbColor); 14] = [
     (MessageId::DOCUMENTS_PAPER_NEWSPRINT, NEWSPRINT),
     (MessageId::DOCUMENTS_PAPER_CHALKBOARD, CHALKBOARD),
     (MessageId::DOCUMENTS_PAPER_BLUEPRINT, BLUEPRINT),
+    (MessageId::DOCUMENTS_PAPER_SAND, SAND),
+    (MessageId::DOCUMENTS_PAPER_EARTH, EARTH),
+    (MessageId::DOCUMENTS_PAPER_LEAF_GREEN, LEAF_GREEN),
+    (MessageId::DOCUMENTS_PAPER_WEATHERED_WOOD, WEATHERED_WOOD),
+    (MessageId::DOCUMENTS_PAPER_CONCRETE, CONCRETE),
+    (MessageId::DOCUMENTS_PAPER_ASPHALT, ASPHALT),
 ];
 pub const MAX_PAPER_COLORS: usize = 64;
 pub const SCREEN_PPI: u32 = 144;
@@ -317,7 +331,8 @@ pub fn built_in_presets() -> &'static [BuiltInPreset] {
             p("kraft-paper", M::DOCUMENTS_PRESET_KRAFT_PAPER, Sketch, sheet(In, 8.5, 11., 300, Srgb, U8, "drawing_paper", 100, KRAFT, false)),
             p("black-book", M::DOCUMENTS_PRESET_BLACK_BOOK, Sketch, sheet(Mm, 148., 210., 300, Srgb, U8, "drawing_paper", 100, BLACK, false)),
             p("bristol-pad", M::DOCUMENTS_PRESET_BRISTOL_PAD, Sketch, sheet(In, 11., 14., 300, Srgb, U8, "bristol", 100, WHITE, false)),
-            p("newsprint-pad", M::DOCUMENTS_PRESET_NEWSPRINT_PAD, Sketch, sheet(In, 18., 24., 300, Srgb, U8, "drawing_paper", 50, NEWSPRINT, false)),
+            p("newsprint-pad", M::DOCUMENTS_PRESET_NEWSPRINT_PAD, Sketch, sheet(In, 18., 24., 300, Srgb, U8, "newsprint", 50, NEWSPRINT, false)),
+            p("drafting-film", M::DOCUMENTS_PRESET_DRAFTING_FILM, Sketch, sheet(In, 9., 12., 300, Srgb, U8, "drafting_film", 100, WHITE, false)),
             p("trading-card", M::DOCUMENTS_PRESET_TRADING_CARD, Sketch, sheet(In, 2.5, 3.5, 300, Srgb, U8, "bristol", 100, CREAM, false)),
             p("postcard", M::DOCUMENTS_PRESET_POSTCARD, Watercolor, sheet(In, 6., 4., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
             p("bookmark", M::DOCUMENTS_PRESET_BOOKMARK, Watercolor, sheet(In, 2., 6., 300, Srgb, U16, "cold_press", 100, WHITE, false)),
@@ -326,6 +341,7 @@ pub fn built_in_presets() -> &'static [BuiltInPreset] {
             p("quarter-sheet", M::DOCUMENTS_PRESET_QUARTER_SHEET, Watercolor, sheet(In, 11., 15., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
             p("half-sheet", M::DOCUMENTS_PRESET_HALF_SHEET, Watercolor, sheet(In, 15., 22., 300, Srgb, U16, "cold_press", 100, NATURAL, false)),
             p("full-sheet", M::DOCUMENTS_PRESET_FULL_SHEET, Watercolor, sheet(In, 22., 30., 300, Srgb, U16, "rough", 150, NATURAL, false)),
+            p("extra-rough", M::DOCUMENTS_PRESET_EXTRA_ROUGH, Watercolor, sheet(In, 15., 22., 300, Srgb, U16, "torchon", 150, NATURAL, false)),
             p("botanical", M::DOCUMENTS_PRESET_BOTANICAL, Watercolor, sheet(In, 11., 14., 300, Srgb, U16, "hot_press", 100, WHITE, false)),
             p("journal", M::DOCUMENTS_PRESET_JOURNAL, Watercolor, sheet(In, 6., 8., 300, Srgb, U16, "handmade_paper", 150, CREAM, false)),
             p("washi-sheet", M::DOCUMENTS_PRESET_WASHI_SHEET, Watercolor, sheet(In, 12., 18., 300, Srgb, U16, "washi", 100, NATURAL, false)),
@@ -337,8 +353,10 @@ pub fn built_in_presets() -> &'static [BuiltInPreset] {
             p("black-paper", M::DOCUMENTS_PRESET_BLACK_PAPER, Pastel, sheet(In, 9., 12., 300, Srgb, U8, "pastel_paper", 100, BLACK, false)),
             p("sanded-pastel", M::DOCUMENTS_PRESET_SANDED_PASTEL, Pastel, sheet(In, 12., 18., 300, Srgb, U8, "sanded_pastel", 100, OYSTER, false)),
             p("sanded-pastel-large", M::DOCUMENTS_PRESET_SANDED_PASTEL, Pastel, sheet(In, 18., 24., 300, Srgb, U8, "sanded_pastel", 100, TONED_GRAY, false)),
+            p("pastel-board", M::DOCUMENTS_PRESET_PASTEL_BOARD, Pastel, sheet(In, 12., 16., 300, Srgb, U8, "coarse_sanded", 100, TONED_GRAY, false)),
             p("charcoal-pad", M::DOCUMENTS_PRESET_CHARCOAL_PAD, Pastel, sheet(In, 18., 24., 300, Srgb, U8, "ingres", 100, NATURAL, false)),
-            p("chalkboard", M::DOCUMENTS_PRESET_CHALKBOARD, Pastel, sheet(In, 36., 24., 150, Srgb, U8, "sanded_pastel", 50, CHALKBOARD, false)),
+            p("chalkboard", M::DOCUMENTS_PRESET_CHALKBOARD, Pastel, sheet(In, 36., 24., 150, Srgb, U8, "chalkboard", 50, CHALKBOARD, false)),
+            p("sidewalk", M::DOCUMENTS_PRESET_SIDEWALK, Pastel, sheet(In, 48., 36., 150, Srgb, U8, "asphalt", 150, ASPHALT, false)),
             p("blueprint", M::DOCUMENTS_PRESET_BLUEPRINT, Pastel, sheet(In, 24., 18., 150, Srgb, U8, "hot_press", 0, BLUEPRINT, false)),
             p("canvas-panel", M::DOCUMENTS_PRESET_CANVAS_PANEL, Canvas, sheet(In, 8., 10., 300, Srgb, U16, "canvas", 100, WHITE, false)),
             p("canvas-panel-large", M::DOCUMENTS_PRESET_CANVAS_PANEL, Canvas, sheet(In, 11., 14., 300, Srgb, U16, "canvas", 100, WHITE, false)),
@@ -347,6 +365,25 @@ pub fn built_in_presets() -> &'static [BuiltInPreset] {
             p("canvas", M::DOCUMENTS_PRESET_CANVAS, Canvas, sheet(In, 18., 24., 300, Srgb, U16, "canvas", 100, WHITE, false)),
             p("gray-linen", M::DOCUMENTS_PRESET_GRAY_LINEN, Canvas, sheet(Cm, 30., 40., 300, Srgb, U16, "linen", 100, PEARL, false)),
             p("linen", M::DOCUMENTS_PRESET_LINEN, Canvas, sheet(In, 24., 36., 300, Srgb, U16, "linen", 100, WHITE, false)),
+            p("gesso-panel", M::DOCUMENTS_PRESET_GESSO_PANEL, Canvas, sheet(In, 9., 12., 300, Srgb, U16, "gesso_panel", 100, WHITE, false)),
+            p("gesso-across", M::DOCUMENTS_PRESET_GESSO_ACROSS, Canvas, sheet(In, 12., 9., 300, Srgb, U16, "gesso_across", 100, WHITE, false)),
+            p("gesso-down", M::DOCUMENTS_PRESET_GESSO_DOWN, Canvas, sheet(In, 9., 12., 300, Srgb, U16, "gesso_down", 100, WHITE, false)),
+            p("primed-board", M::DOCUMENTS_PRESET_PRIMED_BOARD, Canvas, sheet(In, 12., 16., 300, Srgb, U16, "brushed_gesso", 100, WHITE, false)),
+            p("rough-across", M::DOCUMENTS_PRESET_ROUGH_ACROSS, Canvas, sheet(In, 16., 12., 300, Srgb, U16, "rough_gesso_across", 100, WHITE, false)),
+            p("rough-down", M::DOCUMENTS_PRESET_ROUGH_DOWN, Canvas, sheet(In, 12., 16., 300, Srgb, U16, "rough_gesso_down", 100, WHITE, false)),
+            p("rough-linen", M::DOCUMENTS_PRESET_ROUGH_LINEN, Canvas, sheet(In, 24., 30., 300, Srgb, U16, "rough_linen", 100, OYSTER, false)),
+            p("canvas-pad", M::DOCUMENTS_PRESET_CANVAS_PAD, Canvas, sheet(In, 9., 12., 300, Srgb, U16, "canvas_paper", 100, WHITE, false)),
+            p("barn-board", M::DOCUMENTS_PRESET_BARN_BOARD, MixedMedia, sheet(In, 24., 12., 300, Srgb, U16, "weathered_wood", 150, WEATHERED_WOOD, false)),
+            p("concrete-wall", M::DOCUMENTS_PRESET_CONCRETE_WALL, MixedMedia, sheet(In, 48., 36., 150, Srgb, U8, "concrete", 100, CONCRETE, false)),
+            p("cracked-earth", M::DOCUMENTS_PRESET_CRACKED_EARTH, MixedMedia, sheet(In, 16., 16., 300, Srgb, U16, "cracked_earth", 150, EARTH, false)),
+            p("sand-ground", M::DOCUMENTS_PRESET_SAND_GROUND, MixedMedia, sheet(In, 12., 16., 300, Srgb, U16, "sand", 100, SAND, false)),
+            p("papyrus", M::DOCUMENTS_PRESET_PAPYRUS, MixedMedia, sheet(Cm, 30., 40., 300, Srgb, U16, "papyrus", 100, SAND, false)),
+            p("leaf", M::DOCUMENTS_PRESET_LEAF, MixedMedia, sheet(In, 6., 9., 300, Srgb, U16, "leaf", 100, LEAF_GREEN, false)),
+            p("crumpled-page", M::DOCUMENTS_PRESET_CRUMPLED_PAGE, MixedMedia, sheet(Mm, 210., 297., 300, Srgb, U8, "crumpled_paper", 150, NATURAL, false)),
+            p("burlap", M::DOCUMENTS_PRESET_BURLAP, MixedMedia, sheet(In, 16., 20., 300, Srgb, U16, "burlap", 100, KRAFT, false)),
+            p("reed-mat", M::DOCUMENTS_PRESET_REED_MAT, MixedMedia, sheet(In, 24., 12., 300, Srgb, U16, "reeds_across", 100, TONED_TAN, false)),
+            p("reed-screen", M::DOCUMENTS_PRESET_REED_SCREEN, MixedMedia, sheet(In, 12., 24., 300, Srgb, U16, "reeds_down", 100, TONED_TAN, false)),
+            p("toilet-paper", M::DOCUMENTS_PRESET_TOILET_PAPER, MixedMedia, sheet(In, 4., 4.5, 300, Srgb, U8, "toilet", 150, WHITE, false)),
             p("manga-b5", M::DOCUMENTS_PRESET_MANGA_B5, Comics, sheet(Mm, 182., 257., 600, Srgb, U8, "bristol", 0, WHITE, false)),
             p("manga-b4", M::DOCUMENTS_PRESET_MANGA_B4, Comics, sheet(Mm, 257., 364., 350, Srgb, U8, "bristol", 0, WHITE, false)),
             p("us-comic", M::DOCUMENTS_PRESET_US_COMIC, Comics, sheet(In, 6.875, 10.5, 600, Srgb, U8, "bristol", 0, WHITE, false)),
@@ -843,7 +880,7 @@ mod tests {
     #[test]
     fn built_in_presets_are_unique_valid_and_use_every_built_in_paper() {
         let presets = built_in_presets();
-        assert_eq!(presets.len(), 70);
+        assert_eq!(presets.len(), 93);
         let mut ids: Vec<_> = presets.iter().map(|preset| preset.id).collect();
         ids.sort_unstable();
         ids.dedup();
@@ -1063,7 +1100,7 @@ mod tests {
         let catalog = PresetCatalog { screen: Some(ScreenInfo { extent: [2880, 1800], ppi: Some(220) }), ..catalog(&settings, &l) };
         let found = catalog.tiles(BrowserTab::Recent, "  CHALK ");
         assert_eq!(found.iter().map(|view| view.name.as_str()).collect::<Vec<_>>(), ["Chalkboard"]);
-        assert_eq!(found[0].details, "150 ppi · Sanded");
+        assert_eq!(found[0].details, "150 ppi · Chalkboard");
         assert!(catalog.tiles(BrowserTab::Recent, "zzz").is_empty());
         assert_eq!(catalog.no_match("zzz"), "No presets match “zzz”.");
         let screen = catalog.get(&PresetKey::BuiltIn(THIS_SCREEN.into())).unwrap();

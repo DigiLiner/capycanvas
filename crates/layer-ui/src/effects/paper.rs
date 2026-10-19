@@ -249,9 +249,12 @@ mod tests {
         assert_eq!((numeric.kind, numeric.min, numeric.max), (NumericKind::Dial, 0., 360.));
         assert_eq!(view.controls[4].value, EffectValue::Number(225.));
         let PropertyKind::Choice { options } = &view.controls[1].kind else { panic!("texture is a choice") };
-        assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["Hot press", "Cold press", "Rough", "Drawing", "Bristol", "Ingres",
-            "Pastel", "Sanded", "Washi", "Unryu", "Handmade", "Canvas", "Linen"]);
-        assert_eq!(view.controls[1].value, EffectValue::Choice(3));
+        assert_eq!(options.iter().map(|o| o.as_ref()).collect::<Vec<_>>(), ["Hot press", "Cold press", "Rough", "Extra rough", "Drawing", "Bristol", "Newsprint", "Ingres",
+            "Pastel", "Sanded", "Coarse grit", "Washi", "Unryu", "Handmade", "Canvas", "Linen",
+            "Canvas paper", "Rough linen", "Burlap", "Gesso panel", "Gesso across", "Gesso down", "Rough gesso", "Rough across",
+            "Rough down", "Matte film", "Chalkboard", "Concrete", "Sand", "Asphalt", "Barn wood", "Dry mud",
+            "Crumpled", "Papyrus", "Reeds across", "Reeds down", "Leaf", "Toilet"]);
+        assert_eq!(view.controls[1].value, EffectValue::Choice(4));
         assert!(!view.controls[1].modified);
         let EffectValue::Number(scale) = view.controls[2].value else { panic!("scale is a number") };
         assert!((scale - 1.).abs() < 1e-6);
@@ -271,7 +274,7 @@ mod tests {
         let spatial = doubled.spatial.unwrap();
         assert!((paper::scale(&spatial, [300.; 2]) - 2.).abs() < 1e-9);
         assert_eq!(spatial.mapping.0[4..], [0., 0.]);
-        assert!(edited(application, &document, &[], &papers, TEXTURE, &EffectValue::Choice(13), &l).unwrap().is_err());
+        assert!(edited(application, &document, &[], &papers, TEXTURE, &EffectValue::Choice(paper::built_in_papers().len() as u32), &l).unwrap().is_err());
         assert!(edited(application, &document, &[], &papers, "color", &EffectValue::Choice(0), &l).is_none());
     }
 }

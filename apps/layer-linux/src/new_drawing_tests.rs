@@ -107,9 +107,11 @@ fn native_new_drawing_dialog_review() {
         let across = (0..8).filter_map(|index| tiles.child_at_index(index)).filter(|tile| tile.compute_bounds(&tiles).is_some_and(|bounds| bounds.y() < 1.)).count();
         assert_eq!(across, 5, "five presets across on desktop");
         shot("2-presets");
+        tab(&w, "Mixed media");
+        shot("2-presets-mixed-media");
         tab(&w, "Pastel");
         let grid = part::<gtk::FlowBox>(&w, "new-drawing-presets");
-        pick(&grid, 8);
+        pick(&grid, 9);
         assert_eq!(label(&w, "new-drawing-summary-name"), "Chalkboard");
         shot("3-presets-pastel");
         press(&w, "new-drawing-save-as");
@@ -120,7 +122,7 @@ fn native_new_drawing_dialog_review() {
         press(&w, "new-drawing-select");
         assert!(label(&w, "new-drawing-caption").is_empty() || part::<gtk::Label>(&w, "new-drawing-caption").label().contains("Chalkboard"));
         assert_eq!(label(&w, "new-drawing-texture-relief"), "50 %");
-        assert_eq!(label(&w, "new-drawing-summary-details"), "sRGB 8-bit SDR · Sanded 50 %, Chalkboard");
+        assert_eq!(label(&w, "new-drawing-summary-details"), "sRGB 8-bit SDR · Chalkboard 50 %, Chalkboard");
         shot("5-chalkboard");
 
         press(&w, "new-drawing-texture");

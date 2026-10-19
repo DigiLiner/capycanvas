@@ -112,6 +112,22 @@
        "value": 5
       }
      }
+    },
+    {
+     "id": "torchon",
+     "label": {
+      "message": "resources-paper-torchon"
+     },
+     "values": {
+      "felt": {
+       "kind": "number",
+       "value": 4.0
+      },
+      "pressing": {
+       "kind": "number",
+       "value": 0
+      }
+     }
     }
    ]
   },
@@ -204,6 +220,82 @@
        "value": 55
       }
      }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "newsprint",
+    "kind": "texture",
+    "label": "Newsprint",
+    "period": 64,
+    "entry": "capy_newsprint",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_newsprint.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "flocs",
+      "label": "Flocs",
+      "default": {
+       "kind": "number",
+       "value": 1.5
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.3,
+       "max": 6,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "fuzz",
+      "label": "Fuzz",
+      "default": {
+       "kind": "number",
+       "value": 60
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "newsprint",
+     "label": {
+      "message": "resources-paper-newsprint"
+     },
+     "values": {}
     }
    ]
   },
@@ -400,6 +492,18 @@
       "message": "resources-paper-sanded-pastel"
      },
      "values": {}
+    },
+    {
+     "id": "coarse_sanded",
+     "label": {
+      "message": "resources-paper-coarse-sanded"
+     },
+     "values": {
+      "grit": {
+       "kind": "number",
+       "value": 0.09
+      }
+     }
     }
    ]
   },
@@ -696,6 +800,1056 @@
        "value": 60
       }
      }
+    },
+    {
+     "id": "canvas_paper",
+     "label": {
+      "message": "resources-paper-canvas-paper"
+     },
+     "values": {
+      "threads": {
+       "kind": "number",
+       "value": 10
+      },
+      "irregularity": {
+       "kind": "number",
+       "value": 0
+      },
+      "priming": {
+       "kind": "number",
+       "value": 90
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "fabric",
+    "kind": "texture",
+    "label": "Fabric",
+    "period": 64,
+    "entry": "capy_fabric",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_fabric.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "threads",
+      "label": "Threads",
+      "default": {
+       "kind": "number",
+       "value": 9
+      },
+      "kind": {
+       "kind": "number",
+       "min": 3,
+       "max": 30,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "/cm"
+      }
+     },
+     {
+      "key": "irregularity",
+      "label": "Irregularity",
+      "default": {
+       "kind": "number",
+       "value": 60
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "openness",
+      "label": "Openness",
+      "default": {
+       "kind": "number",
+       "value": 0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "priming",
+      "label": "Priming",
+      "default": {
+       "kind": "number",
+       "value": 0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "rough_linen",
+     "label": {
+      "message": "resources-paper-rough-linen"
+     },
+     "values": {
+      "threads": {
+       "kind": "number",
+       "value": 11
+      },
+      "irregularity": {
+       "kind": "number",
+       "value": 80
+      },
+      "openness": {
+       "kind": "number",
+       "value": 10
+      },
+      "priming": {
+       "kind": "number",
+       "value": 30
+      }
+     }
+    },
+    {
+     "id": "burlap",
+     "label": {
+      "message": "resources-paper-burlap"
+     },
+     "values": {
+      "threads": {
+       "kind": "number",
+       "value": 3.8
+      },
+      "irregularity": {
+       "kind": "number",
+       "value": 70
+      },
+      "openness": {
+       "kind": "number",
+       "value": 72
+      },
+      "priming": {
+       "kind": "number",
+       "value": 0
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "gesso",
+    "kind": "texture",
+    "label": "Gesso",
+    "period": 128,
+    "entry": "capy_gesso",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_gesso.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "brush",
+      "label": "Brush marks",
+      "default": {
+       "kind": "number",
+       "value": 0.4
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.2,
+       "max": 1.5,
+       "step": 0.01,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "sanding",
+      "label": "Sanding",
+      "default": {
+       "kind": "number",
+       "value": 70
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "down",
+      "label": "Downward strokes",
+      "default": {
+       "kind": "number",
+       "value": 50
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "gesso_panel",
+     "label": {
+      "message": "resources-paper-gesso-panel"
+     },
+     "values": {
+      "sanding": {
+       "kind": "number",
+       "value": 75
+      }
+     }
+    },
+    {
+     "id": "gesso_across",
+     "label": {
+      "message": "resources-paper-gesso-across"
+     },
+     "values": {
+      "sanding": {
+       "kind": "number",
+       "value": 75
+      },
+      "down": {
+       "kind": "number",
+       "value": 0
+      }
+     }
+    },
+    {
+     "id": "gesso_down",
+     "label": {
+      "message": "resources-paper-gesso-down"
+     },
+     "values": {
+      "sanding": {
+       "kind": "number",
+       "value": 75
+      },
+      "down": {
+       "kind": "number",
+       "value": 100
+      }
+     }
+    },
+    {
+     "id": "brushed_gesso",
+     "label": {
+      "message": "resources-paper-brushed-gesso"
+     },
+     "values": {
+      "brush": {
+       "kind": "number",
+       "value": 0.6
+      },
+      "sanding": {
+       "kind": "number",
+       "value": 0
+      }
+     }
+    },
+    {
+     "id": "rough_gesso_across",
+     "label": {
+      "message": "resources-paper-rough-gesso-across"
+     },
+     "values": {
+      "brush": {
+       "kind": "number",
+       "value": 0.6
+      },
+      "sanding": {
+       "kind": "number",
+       "value": 0
+      },
+      "down": {
+       "kind": "number",
+       "value": 0
+      }
+     }
+    },
+    {
+     "id": "rough_gesso_down",
+     "label": {
+      "message": "resources-paper-rough-gesso-down"
+     },
+     "values": {
+      "brush": {
+       "kind": "number",
+       "value": 0.6
+      },
+      "sanding": {
+       "kind": "number",
+       "value": 0
+      },
+      "down": {
+       "kind": "number",
+       "value": 100
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "concrete",
+    "kind": "texture",
+    "label": "Concrete",
+    "period": 128,
+    "entry": "capy_concrete",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_concrete.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "grain",
+      "label": "Grain",
+      "default": {
+       "kind": "number",
+       "value": 0.12
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.02,
+       "max": 1,
+       "step": 0.01,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "pores",
+      "label": "Pores",
+      "default": {
+       "kind": "number",
+       "value": 15
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "pore_size",
+      "label": "Pore size",
+      "default": {
+       "kind": "number",
+       "value": 0.9
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.2,
+       "max": 6,
+       "step": 0.05,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "scratches",
+      "label": "Scratches",
+      "default": {
+       "kind": "number",
+       "value": 0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "drafting_film",
+     "label": {
+      "message": "resources-paper-drafting-film"
+     },
+     "values": {
+      "grain": {
+       "kind": "number",
+       "value": 0.03
+      },
+      "pores": {
+       "kind": "number",
+       "value": 0
+      }
+     }
+    },
+    {
+     "id": "chalkboard",
+     "label": {
+      "message": "resources-paper-chalkboard"
+     },
+     "values": {
+      "grain": {
+       "kind": "number",
+       "value": 0.15
+      },
+      "pores": {
+       "kind": "number",
+       "value": 0
+      },
+      "scratches": {
+       "kind": "number",
+       "value": 60
+      }
+     }
+    },
+    {
+     "id": "concrete",
+     "label": {
+      "message": "resources-paper-concrete"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "aggregate",
+    "kind": "texture",
+    "label": "Aggregate",
+    "period": 128,
+    "entry": "capy_aggregate",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_aggregate.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "grain",
+      "label": "Grain",
+      "default": {
+       "kind": "number",
+       "value": 0.4
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0.1,
+       "max": 12,
+       "step": 0.01,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "embed",
+      "label": "Embedding",
+      "default": {
+       "kind": "number",
+       "value": 30
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "sand",
+     "label": {
+      "message": "resources-paper-sand"
+     },
+     "values": {}
+    },
+    {
+     "id": "asphalt",
+     "label": {
+      "message": "resources-paper-asphalt"
+     },
+     "values": {
+      "grain": {
+       "kind": "number",
+       "value": 6.0
+      },
+      "embed": {
+       "kind": "number",
+       "value": 25
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "wood",
+    "kind": "texture",
+    "label": "Wood",
+    "period": 175,
+    "entry": "capy_wood",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_wood.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "rings",
+      "label": "Rings",
+      "default": {
+       "kind": "number",
+       "value": 5
+      },
+      "kind": {
+       "kind": "number",
+       "min": 2,
+       "max": 12,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "weathering",
+      "label": "Weathering",
+      "default": {
+       "kind": "number",
+       "value": 70
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "knots",
+      "label": "Knots",
+      "default": {
+       "kind": "number",
+       "value": 40
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "weathered_wood",
+     "label": {
+      "message": "resources-paper-weathered-wood"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "crackle",
+    "kind": "texture",
+    "label": "Crackle",
+    "period": 175,
+    "entry": "capy_crackle",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_crackle.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "size",
+      "label": "Size",
+      "default": {
+       "kind": "number",
+       "value": 22
+      },
+      "kind": {
+       "kind": "number",
+       "min": 3,
+       "max": 40,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "gap",
+      "label": "Gap",
+      "default": {
+       "kind": "number",
+       "value": 1.2
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 3,
+       "step": 0.05,
+       "decimals": 2,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "folds",
+      "label": "Folds",
+      "default": {
+       "kind": "number",
+       "value": 0
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "cracked_earth",
+     "label": {
+      "message": "resources-paper-cracked-earth"
+     },
+     "values": {}
+    },
+    {
+     "id": "crumpled_paper",
+     "label": {
+      "message": "resources-paper-crumpled-paper"
+     },
+     "values": {
+      "size": {
+       "kind": "number",
+       "value": 9
+      },
+      "gap": {
+       "kind": "number",
+       "value": 0
+      },
+      "folds": {
+       "kind": "number",
+       "value": 50
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "papyrus",
+    "kind": "texture",
+    "label": "Papyrus",
+    "period": 175,
+    "entry": "capy_papyrus",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_papyrus.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "width",
+      "label": "Strips",
+      "default": {
+       "kind": "number",
+       "value": 25
+      },
+      "kind": {
+       "kind": "number",
+       "min": 5,
+       "max": 60,
+       "step": 0.5,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "across",
+      "label": "Across",
+      "default": {
+       "kind": "number",
+       "value": 100
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "down",
+      "label": "Down",
+      "default": {
+       "kind": "number",
+       "value": 85
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 100,
+       "step": 1,
+       "decimals": 0,
+       "unit": "%"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "papyrus",
+     "label": {
+      "message": "resources-paper-papyrus"
+     },
+     "values": {}
+    },
+    {
+     "id": "reeds_across",
+     "label": {
+      "message": "resources-paper-reeds-across"
+     },
+     "values": {
+      "down": {
+       "kind": "number",
+       "value": 0
+      }
+     }
+    },
+    {
+     "id": "reeds_down",
+     "label": {
+      "message": "resources-paper-reeds-down"
+     },
+     "values": {
+      "across": {
+       "kind": "number",
+       "value": 0
+      },
+      "down": {
+       "kind": "number",
+       "value": 100
+      }
+     }
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "leaf",
+    "kind": "texture",
+    "label": "Leaf",
+    "period": 128,
+    "entry": "capy_leaf",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_leaf.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "size",
+      "label": "Leaves",
+      "default": {
+       "kind": "number",
+       "value": 45
+      },
+      "kind": {
+       "kind": "number",
+       "min": 10,
+       "max": 80,
+       "step": 0.5,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "veins",
+      "label": "Veins",
+      "default": {
+       "kind": "number",
+       "value": 3
+      },
+      "kind": {
+       "kind": "number",
+       "min": 1,
+       "max": 10,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "leaf",
+     "label": {
+      "message": "resources-paper-leaf"
+     },
+     "values": {}
+    }
+   ]
+  },
+  {
+   "category": "paper",
+   "icon": "paper",
+   "program": {
+    "abi": 5,
+    "id": "quilt",
+    "kind": "texture",
+    "label": "Embossed tissue",
+    "period": 64,
+    "entry": "capy_quilt",
+    "wgsl": [
+     "texture_library.wgsl",
+     "texture_quilt.wgsl"
+    ],
+    "parameters": [
+     {
+      "key": "cell",
+      "label": "Motif spacing",
+      "default": {
+       "kind": "number",
+       "value": 21
+      },
+      "kind": {
+       "kind": "number",
+       "min": 14,
+       "max": 40,
+       "step": 0.1,
+       "decimals": 1,
+       "unit": "mm"
+      }
+     },
+     {
+      "key": "seed",
+      "label": "Variation",
+      "default": {
+       "kind": "number",
+       "value": 1
+      },
+      "kind": {
+       "kind": "number",
+       "min": 0,
+       "max": 16777215,
+       "step": 1,
+       "decimals": 0,
+       "unit": ""
+      },
+      "dimension": "count"
+     }
+    ]
+   },
+   "presets": [
+    {
+     "id": "toilet",
+     "label": {
+      "message": "resources-paper-toilet"
+     },
+     "values": {}
     }
    ]
   }

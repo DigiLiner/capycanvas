@@ -45,11 +45,21 @@ fn save(path: &std::path::Path, image: &support::Image) {
     encoder.write_header().unwrap().write_image_data(&image.rgba).unwrap();
 }
 
+fn coverage(image: &support::Image, [x0, y0, x1, y1]: [u32; 4]) -> [f64; 4] {
+    let values: Vec<f64> = (y0..y1).flat_map(|y| (x0..x1).map(move |x| (y * image.size[0] + x) as usize))
+        .map(|i| 1. - f64::from(image.rgba[4 * i..4 * i + 3].iter().map(|v| u32::from(*v)).sum::<u32>()) / 765.).collect();
+    let n = values.len() as f64;
+    let mean = values.iter().sum::<f64>() / n;
+    let deviation = (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n).sqrt();
+    [mean, values.iter().filter(|v| **v > 0.85).count() as f64 / n, values.iter().filter(|v| **v < 0.15).count() as f64 / n, deviation]
+}
+
 #[test]
 #[ignore]
 fn paper_gallery() {
     let directory = std::path::PathBuf::from(std::env::var("GALLERY_DIR").unwrap());
     let only = std::env::var("GALLERY_PAPERS").ok();
+    let mut table = String::from("paper\tbrush\tpressure\tcoverage\tsolid\topen\tcontrast\n");
     for paper in paper::built_in_papers() {
         if only.as_deref().is_some_and(|only| !only.split(',').any(|id| id == paper.id.as_ref())) { continue; }
         let mut document = Document::new(PortableId::random(), EXTENT[0], EXTENT[1], DocumentNames { paint: "Ink".into(), paper: "Paper".into() });
@@ -81,5 +91,14 @@ fn paper_gallery() {
         }
         let image = support::image(&mut engine, time + 100_000_000);
         save(&directory.join(format!("{}.png", paper.id)), &image);
+        for (row, (preset, _, _)) in rows.iter().enumerate() {
+            let y = 60 + row as u32 * 140;
+            for (column, pressure) in [0.2f32, 0.45, 0.8].iter().enumerate() {
+                let x = 760 + column as u32 * 245;
+                let [mean, solid, open, contrast] = coverage(&image, [x + 30, y - 25, x + 170, y + 35]);
+                table.push_str(&format!("{}\t{preset:?}\t{pressure}\t{mean:.3}\t{solid:.3}\t{open:.3}\t{contrast:.3}\n", paper.id));
+            }
+        }
     }
+    std::fs::write(directory.join("coverage.tsv"), table).unwrap();
 }

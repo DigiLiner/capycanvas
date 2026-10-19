@@ -11,8 +11,8 @@ filter package format with `kind: "texture"`, so they reuse its parameter
 declarations, WGSL modules, naga validation and saved-value contract without
 appearing among filters.
 
-This guide defines the program contract, the `tx_` library, the bake and one
-program for each of ten reference surfaces. [Paper](paper.md) covers the layer,
+This guide defines the program contract, the `tx_` library, the bake and the
+programs behind the built-in papers. [Paper](paper.md) covers the layer,
 brushes, resolution model and library that use the result.
 
 ## Principles
@@ -40,7 +40,7 @@ brushes, resolution model and library that use the result.
   pressure; smooth papers have less of it, not none. At 300 ppi a texel is
   85 µm, so fibers are drawn as bundles about a texel wide.
 - **Only what the surfaces need.** There are no stages, buffers, image inputs or
-  user programs. Each was checked against the ten surfaces below; see
+  user programs. Each was checked against the surfaces below; see
   [decisions](#decisions).
 
 ## Program contract
@@ -179,7 +179,7 @@ layout.
 
 ### Neighborhood effects without stages
 
-The ten surfaces need blur, dilation and slope only of shapes the program
+The surfaces need blur, dilation and slope only of shapes the program
 already describes, so the program evaluates them directly:
 
 - **Blur:** average a helper over `tx_disc` taps. The canvas program levels its
@@ -280,7 +280,10 @@ has no measured relief, so it uses the 100 µm reference.
   [`paper_gallery`](../../crates/layer-render-wgpu/tests/paper_gallery.rs) test
   paints every dry-media brush at three pressures on each paper at real size
   and writes one PNG per paper to `GALLERY_DIR` (`GALLERY_PAPERS` picks papers by
-  ID); tune programs against it.
+  ID), with `coverage.tsv` giving each shading box's coverage and its solid and
+  open shares; tune programs against it. The ignored
+  `built_in_paper_relief_statistics` test prints each paper's relief, height
+  spread by feature size, skew and bake cost per texel (`PAPERS` picks papers).
 - **Cost:** bake time per preset on each tier's reference hardware belongs in
   the [performance targets](../PERFORMANCE_TARGETS.md).
 
@@ -315,7 +318,7 @@ the app simpler to use.
 
 ## Reference surfaces
 
-Eight programs cover ten surfaces; presets are listed with each. Their
+Eighteen programs make 38 papers; presets are listed with each. Their
 amplitudes are tooth depths tuned by eye, not measurements
 ([measurements](paper.md#measurements)). Drawing paper has the height spread of
 the paper the app had before Paper, so each dry-media brush keeps its tooth
@@ -324,6 +327,14 @@ contrast; the other papers were tuned against it in the
 Drawing paper; rough, handmade and canvas leave more paper white. Each 300 ppi
 tile bakes in under 4 ms on an NVIDIA RTX PRO 6000; mobile bake times are not
 measured.
+
+Every paper keeps its baked heights within the spread of the first thirteen,
+which `built_in_paper_relief_statistics` prints: relief of 30–150 µm, at least
+5 µm of variation finer than 0.3 mm, skew within ±0.8 and a few micrometers
+above 5 mm. Deeper relief clips the contact: brushes scale tooth by relief, so
+everything above the paper's middle fills at once. Surfaces whose real relief
+is millimeters deep, such as asphalt, burlap and dry mud, keep it in
+narrow gaps and give their tops the fine tooth.
 
 ### Hot-press, cold-press and rough watercolor
 
@@ -342,7 +353,7 @@ flattens the fibers with the felt, so hot press keeps faint, flush fibers.
 | `seed` | count | 0–16777215 | 1 |
 
 Presets: Hot press (`felt` 2.0, `pressing` 85), Cold press (1.0, 45), Rough
-(3.0, 5). Period 128 mm.
+(3.0, 5), Extra rough (4.0, 0), Hahnemühle's torchon. Period 128 mm.
 
 ```wgsl
 fn capy_watercolor(p: vec2f, b: u32) -> f32 {
@@ -469,14 +480,15 @@ correspond to particles from about 59 to 12 µm
 ([grit table](https://steeldata.info/semi/demo/help/others/grit_size_table.html)),
 under a fifth of a pixel to two thirds of a pixel at 300 ppi. Each grain is a
 round particle of random size; the jittered bake turns them into per-pixel
-statistics.
+statistics. Coarser grit stands taller, as on Pastelbord and Colourfix
+Rough.
 
 | Parameter | Unit | Range | Default |
 | --- | --- | --- | --- |
 | `grit` | mm | 0.012–0.1 | 0.035 |
 | `seed` | count | 0–16777215 | 1 |
 
-Preset: Sanded pastel. Period 64 mm.
+Presets: Sanded pastel, Coarse grit (`grit` 0.09). Period 64 mm.
 
 ```wgsl
 fn capy_sanded(p: vec2f, b: u32) -> f32 {
@@ -486,7 +498,7 @@ fn capy_sanded(p: vec2f, b: u32) -> f32 {
     let size = 0.6 + 0.8 * grains.z;
     let grain = size * tx_thread(grains.x, 0.6 * size);
     let binder = tx_fbm(p, vec2f(0.5), 3u, seed + 1u);
-    return 40.0 * tx_smin(1.3 * grain, 0.9, 0.2) + 8.0 * binder;
+    return 40.0 * sqrt(max(grit / 0.035, 1.0)) * tx_smin(1.3 * grain, 0.9, 0.2) + 8.0 * binder;
 }
 ```
 
@@ -589,7 +601,8 @@ first. Finer threads make a shallower weave.
 | `seed` | count | 0–16777215 | 1 |
 
 Presets: Canvas (`threads` 13, `irregularity` 50, `priming` 70), Linen (20, 40,
-60). Period 64 mm.
+60), Canvas paper (10, 0, 90), the embossed weave of oil sketching pads.
+Period 64 mm.
 
 ```wgsl
 fn capy_canvas(p: vec2f, b: u32) -> f32 {
@@ -609,3 +622,198 @@ fn capy_canvas(p: vec2f, b: u32) -> f32 {
     return mix(500.0, 120.0, priming) * 13.0 / threads * ground + 8.0 * priming * skin;
 }
 ```
+
+### Newsprint
+
+Newsprint is groundwood: about 45% fines under 0.5 mm, short broken fibers and
+a few percent shives, with a length-weighted fiber length near 0.75 mm against
+2.5 mm for chemical pulp. Its formation is cloudy, with blotches stretched along
+the machine direction, and its surface is fuzzy. The program has no calender
+plateau and no long fibers: a fine pebbly grain over cloudy flocs, short hairs
+and sparse raised shives, so charcoal lays down a soft, mottled gray.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `flocs` | mm | 0.3–6 | 1.5 |
+| `fuzz` | % | 0–100 | 60 |
+| `seed` | count | 0–16777215 | 1 |
+
+Preset: Newsprint. Period 64 mm. Source:
+[`texture_newsprint.wgsl`](../../assets/filters/texture_newsprint.wgsl).
+
+### Fabric: rough linen and burlap
+
+Linen reads through its slubs: yarns swell to about twice their width for 7–30
+mm, warp threads stay thin and straight, weft threads lump at each crossing, and
+rows bunch and loosen. Burlap is a loose jute weave of about 3 threads per cm
+with square holes, flattened twisted yarns, swollen yarns and pairs pulled
+together. The program weaves paired threads, so over and under survive the tile
+wrap, through a slowly warped grid. Each thread has its own position, width and
+slubs, and the thread on top carries fine grain and twist ridges along its own
+direction; priming fills the hollows.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `threads` | /cm | 3–30 | 9 |
+| `irregularity` | % | 0–100 | 60 |
+| `openness` | % | 0–100 | 0 |
+| `priming` | % | 0–100 | 0 |
+| `seed` | count | 0–16777215 | 1 |
+
+Presets: Rough linen (`threads` 11, `irregularity` 80, `openness` 10, `priming`
+30), Burlap (3.8, 70, 72, 0). Period 64 mm. Source:
+[`texture_fabric.wgsl`](../../assets/filters/texture_fabric.wgsl).
+
+### Gesso
+
+Gessobord has a "slight, consistent texture": sanding makes it smoother and
+extra coats rougher ([Ampersand](https://ampersandart.com/full/introduction-to-ampersand-gessobord));
+unsanded gesso keeps its brush marks. Two coats of bristle grooves, each warped
+and loaded unevenly along the stroke, lie horizontally and vertically;
+`down` sets how much of the panel the vertical coat covers, from all horizontal
+to all vertical with crossing patches between. Sanding levels the ridges to a
+plateau over chalky grit.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `brush` | mm | 0.2–1.5 | 0.4 |
+| `sanding` | % | 0–100 | 70 |
+| `down` | % | 0–100 | 50 |
+| `seed` | count | 0–16777215 | 1 |
+
+Presets: Gesso panel, Gesso across and Gesso down (`sanding` 75, `down` 50, 0
+and 100), Rough gesso, Rough across and Rough down (`brush` 0.6, `sanding` 0,
+`down` 50, 0 and 100). Period 128 mm. Source:
+[`texture_gesso.wgsl`](../../assets/filters/texture_gesso.wgsl).
+
+### Concrete: matte film, chalkboard and concrete
+
+Formed concrete is a smooth skin with sparse, isolated pits, mostly 1–4 mm and
+rarely 8–16 mm, covering about 0.4–1.1% of a wall. A painted chalkboard is a
+dense, uniform, pebbly grain with hairline scratches and no pits; drafting film
+is a fine, even matte. One program makes all three: a cement-paste grain at
+`grain`, large pores at three times `pore_size` with smaller ones between, and
+long straight scratches.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `grain` | mm | 0.02–1 | 0.12 |
+| `pores` | % | 0–100 | 15 |
+| `pore_size` | mm | 0.2–6 | 0.9 |
+| `scratches` | % | 0–100 | 0 |
+| `seed` | count | 0–16777215 | 1 |
+
+Presets: Matte film (`grain` 0.03, `pores` 0), Chalkboard (0.15, 0, `scratches`
+60), Concrete. Period 128 mm. Source:
+[`texture_concrete.wgsl`](../../assets/filters/texture_concrete.wgsl).
+
+### Aggregate: sand and asphalt
+
+Medium sand is 0.25–0.5 mm; asphalt surfaces use 9.5–12.5 mm aggregate with
+1–1.5 mm of profile depth ([CT DOT](https://portal.ct.gov/-/media/dot/documents/dresearch/ct22432103pdf.pdf)),
+which the program keeps in narrow gaps. Grains below 1 mm are round beads of
+two sizes scattered at random; above it they turn chipped and rough-topped and
+mix with two smaller grades of stone. `embed` raises the binder around them.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `grain` | mm | 0.1–12 | 0.4 |
+| `embed` | % | 0–100 | 30 |
+| `seed` | count | 0–16777215 | 1 |
+
+Presets: Sand, Asphalt (`grain` 6, `embed` 25). Period 128 mm. Source:
+[`texture_aggregate.wgsl`](../../assets/filters/texture_aggregate.wgsl).
+
+### Weathered wood
+
+Weathering erodes soft earlywood faster than latewood
+([Williams et al.](https://wfs.swst.org/index.php/wfs/article/view/884)), so
+the rings, 4–10 mm apart in softwood, stand as ridges, the surface Ernst rubbed
+for his first frottages ([Tate](https://www.tate.org.uk/art/art-terms/f/frottage)).
+Growth rings are warped lines along the grain that flow around knots; aligned
+fibers, streaks and checks give the valleys their tooth.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `rings` | mm | 2–12 | 5 |
+| `weathering` | % | 0–100 | 70 |
+| `knots` | % | 0–100 | 40 |
+| `seed` | count | 0–16777215 | 1 |
+
+Preset: Barn wood. Period 175 mm. Source:
+[`texture_wood.wgsl`](../../assets/filters/texture_wood.wgsl).
+
+### Crackle: dry mud and crumpled paper
+
+Drying mud splits into plates whose crack spacing follows the layer thickness
+([Ma et al.](https://arxiv.org/pdf/1807.06126)); a flattened crumpled sheet
+keeps a web of creases. Both are networks of cell edges at two sizes. `folds`
+raises that share of the edges into creases and sinks the rest into cracks;
+`gap` sets their width. Plates curl up at their rims and keep silty grain;
+facets sit at slightly different heights.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `size` | mm | 3–40 | 22 |
+| `gap` | mm | 0–3 | 1.2 |
+| `folds` | % | 0–100 | 0 |
+| `seed` | count | 0–16777215 | 1 |
+
+Presets: Dry mud, Crumpled (`size` 9, `gap` 0, `folds` 50). Period 175 mm.
+Source: [`texture_crackle.wgsl`](../../assets/filters/texture_crackle.wgsl).
+
+### Papyrus and reeds
+
+Papyrus is two crossed layers of pith strips, 15–50 mm wide with a few narrow
+slivers, laid edge to edge with 1–2 mm overlaps and pounded together. The
+strips are the main pattern: each is a plateau at its own height with its own
+fiber strength, overlaps rise as narrow ridges and a few strips leave thin
+slits. Within a strip, fiber bundles run parallel about 1.2 mm apart, wander
+gently and sit offset from the neighboring strip's, with finer fibers and grain
+along them. `across` and `down` set the strength of the horizontal and vertical
+layers; Reeds are a single layer.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `width` | mm | 5–60 | 25 |
+| `across` | % | 0–100 | 100 |
+| `down` | % | 0–100 | 85 |
+| `seed` | count | 0–16777215 | 1 |
+
+Presets: Papyrus, Reeds across (`down` 0), Reeds down (`across` 0, `down` 100).
+Period 175 mm. Source:
+[`texture_papyrus.wgsl`](../../assets/filters/texture_papyrus.wgsl).
+
+### Leaf
+
+Fallen leaves overlap as smooth plates 2–4 deep, in mixed shapes and random
+orientations, and a rubbing picks up their raised veins and outlines. Each cell
+places three leaves of random size, angle and shape, ovate, lanceolate, lobed
+or toothed; the top leaf at each point contributes its midrib, angled secondary
+veins and a fine net of veinlets, and every outline steps the surface.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `size` | mm | 10–80 | 45 |
+| `veins` | mm | 1–10 | 3 |
+| `seed` | count | 0–16777215 | 1 |
+
+Preset: Leaf. Period 128 mm. Source:
+[`texture_leaf.wgsl`](../../assets/filters/texture_leaf.wgsl).
+
+### Quilted tissue
+
+Bathroom tissue is embossed with discrete dots, not ridges: an all-over
+staggered lattice about 1.3 mm apart, chains of single dots tracing outlines,
+and medallions of concentric dot rings. Dots are about 0.45 mm across. The quilt
+is a diamond lattice on diagonals whose spacing is snapped to the tile, with
+dotted outlines, a ring medallion in each diamond and a finer lattice between,
+over a soft, fibrous base.
+
+| Parameter | Unit | Range | Default |
+| --- | --- | --- | --- |
+| `cell` | mm | 6–40 | 22 |
+| `seed` | count | 0–16777215 | 1 |
+
+Preset: Toilet. Period 64 mm. Source:
+[`texture_quilt.wgsl`](../../assets/filters/texture_quilt.wgsl).

@@ -69,7 +69,7 @@ and how parity is checked.
   brushes read paper, the paper library and saved data. It is built on GTK and
   awaits review before the other hosts.
 - [Texture programs](texture-programs.md) defines the WGSL language for paper
-  surfaces, its bake and programs for ten reference surfaces.
+  surfaces, its bake and the programs behind the built-in papers.
 - [Photo editing roadmap](photo-editing-roadmap.md) collects deferred inspection,
   presets, export, masking, retouching and host qualification work. Current
   measurements and remaining targets belong in the

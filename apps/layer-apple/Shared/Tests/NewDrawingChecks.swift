@@ -74,7 +74,7 @@ extension XCTestCase {
         #endif
         workspaceActivate(chalkboard)
         expectNewDrawingText("new-drawing-summary-name", in: app) { $0 == "Chalkboard" }
-        expectNewDrawingText("new-drawing-summary-details", in: app) { $0.hasSuffix("Sanded 50 %, Chalkboard") }
+        expectNewDrawingText("new-drawing-summary-details", in: app) { $0.hasSuffix("Chalkboard 50 %, Chalkboard") }
         workspaceActivate(app.buttons["new-drawing-save-as"])
         let saveName = app.textFields["new-drawing-save-name"]
         XCTAssertTrue(saveName.waitForExistence(timeout: 10))

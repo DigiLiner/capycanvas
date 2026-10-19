@@ -46,6 +46,18 @@ fn content_size(dialog: &adw::Dialog) -> (i32, i32) {
     (content.width(), content.height())
 }
 
+fn built_in() -> i32 {
+    layer_core::paper::built_in_papers().len() as i32
+}
+
+fn drawing() -> Option<i32> {
+    Some(index(layer_core::paper::DEFAULT_PAPER))
+}
+
+fn index(id: &str) -> i32 {
+    layer_core::paper::built_in_papers().iter().position(|paper| paper.id.as_ref() == id).unwrap() as i32
+}
+
 fn pending(grid: &gtk::FlowBox) -> Option<i32> {
     grid.selected_children().first().map(|child| child.index())
 }
@@ -86,8 +98,8 @@ fn native_paper_picker_relief_and_scale() {
     let (dialog, grid) = texture_dialog(&w, &button);
     save_snapshot(&w, 200, || path("texture-dialog"));
     assert_eq!(dialog.title(), "Choose Texture");
-    assert_eq!(grid.observe_children().n_items(), 13);
-    assert_eq!(pending(&grid), Some(3), "Drawing is selected");
+    assert_eq!(grid.observe_children().n_items(), built_in() as u32);
+    assert_eq!(pending(&grid), drawing(), "Drawing is selected");
     let size = content_size(&dialog);
     assert_eq!(size, (720, 560), "Choose Texture is Edit Color's width and shows three full rows");
     let tile = grid.child_at_index(0).unwrap();
@@ -104,7 +116,7 @@ fn native_paper_picker_relief_and_scale() {
     assert_eq!(ui_session(&w).engine().checkpoint(), before, "Cancel changes nothing");
     let (dialog, grid) = texture_dialog(&w, &button);
     assert_eq!(content_size(&dialog), size);
-    assert_eq!(pending(&grid), Some(3), "a cancelled choice is not kept");
+    assert_eq!(pending(&grid), drawing(), "a cancelled choice is not kept");
     grid.select_child(&grid.child_at_index(2).unwrap());
     save_snapshot(&w, 100, || path("texture-dialog-chosen"));
     assert_eq!(texture(&w), layer_core::paper::default_texture(), "nothing changes before Use Texture");
@@ -140,18 +152,18 @@ fn native_paper_picker_relief_and_scale() {
     file.response(gtk::ResponseType::Accept);
     until(|| matches!(texture(&w), layer_core::TextureSource::Image(_)), "the imported paper is applied");
     let tiles = || state(&w).layer_properties.controls[1].paper.clone().unwrap().tiles;
-    assert_eq!(tiles().len(), 14);
-    assert_eq!(tiles()[13].label.as_ref(), "cotton-rag");
-    assert_eq!(state(&w).layer_properties.controls[1].value, EffectValue::Choice(13));
+    assert_eq!(tiles().len(), built_in() as usize + 1);
+    assert_eq!(tiles()[built_in() as usize].label.as_ref(), "cotton-rag");
+    assert_eq!(state(&w).layer_properties.controls[1].value, EffectValue::Choice(built_in() as u32));
     let imported = ui_session(&w).engine().checkpoint();
     let remembered = ui_session(&w).state().settings.new_document.paper.clone().unwrap();
     assert_eq!(remembered.len(), 64, "new drawings start on the imported paper");
     pump(1800);
     let button: gtk::Button = named(w.window.upcast_ref(), "property-texture");
     let (textures, grid) = texture_dialog(&w, &button);
-    assert_eq!(pending(&grid), Some(13), "the imported paper is chosen");
+    assert_eq!(pending(&grid), Some(built_in()), "the imported paper is chosen");
     let scroller = grid.ancestor(gtk::ScrolledWindow::static_type()).unwrap();
-    let chosen = grid.child_at_index(13).unwrap().compute_bounds(&scroller).unwrap();
+    let chosen = grid.child_at_index(built_in()).unwrap().compute_bounds(&scroller).unwrap();
     assert!(chosen.y() >= 0. && chosen.y() + chosen.height() <= scroller.height() as f32, "the chosen paper is scrolled into view: {chosen:?}");
     save_snapshot(&w, 200, || path("texture-dialog-imported"));
     let caption = |index: i32| grid.child_at_index(index).and_then(|child| child.tooltip_text()).unwrap_or_default();
@@ -166,22 +178,22 @@ fn native_paper_picker_relief_and_scale() {
         click(&find_button(menu.upcast_ref(), label).unwrap());
         pump(200);
     };
-    menu(13, "Rename…");
+    menu(built_in(), "Rename…");
     let dialog = w.window.visible_dialog().unwrap();
     named::<adw::EntryRow>(dialog.upcast_ref(), "paper-rename-name").set_text("Cotton rag");
     pump(100);
     response(&w, "rename");
-    until(|| tiles()[13].label.as_ref() == "Cotton rag" && caption(13) == "Cotton rag", "the paper is renamed in the open dialog");
-    assert!(textures.is_mapped() && pending(&grid) == Some(13));
-    menu(13, "Delete");
-    until(|| tiles().len() == 14 && tiles()[0].label.as_ref() == "This drawing’s paper" && caption(0) == "This drawing’s paper", "the drawing keeps its deleted paper");
+    until(|| tiles()[built_in() as usize].label.as_ref() == "Cotton rag" && caption(built_in()) == "Cotton rag", "the paper is renamed in the open dialog");
+    assert!(textures.is_mapped() && pending(&grid) == Some(built_in()));
+    menu(built_in(), "Delete");
+    until(|| tiles().len() == built_in() as usize + 1 && tiles()[0].label.as_ref() == "This drawing’s paper" && caption(0) == "This drawing’s paper", "the drawing keeps its deleted paper");
     assert_eq!(pending(&grid), Some(0), "the choice follows the drawing's paper");
     assert!(matches!(texture(&w), layer_core::TextureSource::Image(_)));
     save_snapshot(&w, 200, || path("texture-dialog-own"));
     menu(0, "Add to Library");
-    until(|| tiles().len() == 14 && tiles()[13].label.as_ref() == state(&w).document_file.title(), "the drawing's paper returns to the library");
-    assert_eq!(state(&w).layer_properties.controls[1].value, EffectValue::Choice(13));
-    until(|| pending(&grid) == Some(13), "the open dialog follows the library");
+    until(|| tiles().len() == built_in() as usize + 1 && tiles()[built_in() as usize].label.as_ref() == state(&w).document_file.title(), "the drawing's paper returns to the library");
+    assert_eq!(state(&w).layer_properties.controls[1].value, EffectValue::Choice(built_in() as u32));
+    until(|| pending(&grid) == Some(built_in()), "the open dialog follows the library");
     click(&texture_button(&textures, "cancel"));
     until(|| !textures.is_mapped(), "Choose Texture closes");
 
@@ -223,8 +235,8 @@ fn native_paper_picker_relief_and_scale() {
     save_snapshot(&w, 200, || path("paper-row-texture"));
     let (dialog, grid) = texture_dialog(&w, &buttons[1]);
     assert_eq!(state(&w).layer_properties.layer, Some(paper), "the texture thumbnail selects its Paper");
-    assert_eq!(pending(&grid), Some(3));
-    grid.select_child(&grid.child_at_index(4).unwrap());
+    assert_eq!(pending(&grid), drawing());
+    grid.select_child(&grid.child_at_index(index("bristol")).unwrap());
     click(&texture_button(&dialog, "apply"));
     until(|| !dialog.is_mapped(), "Use Texture closes Choose Texture");
     assert_eq!(texture(&w), layer_core::paper::built_in_paper("bristol").unwrap().texture);
