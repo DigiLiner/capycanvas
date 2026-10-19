@@ -3790,28 +3790,34 @@ with a 16% fitted camera, Immediate presentation and maximum frame latency 1.
 A composed preflight capture verifies the entire 400 × 240 pixel pen ellipse
 lies inside the artwork and clear of panels.
 
-One one-second priming contact precedes three nominal six-second contacts
-with an 18 px G-Pen. Actual contacts last 6.44–6.50 seconds at
-221.59–223.56 injected samples/s. All 4,564 inputs, including priming, are
+Each brush runs in a separate process with one one-second priming contact
+and three nominal six-second contacts. G-Pen uses 18 px and Pencil uses 4 px.
+Actual contacts last 6.44–6.57 seconds at 219.18–223.56 injected samples/s.
+All 4,564 inputs per process, including priming, are
 consumed with zero unmatched records or overflow. Each contact changes the
 native document title and enables Undo; Undo returns to the clean drawing,
 unchanged camera and unchanged arranged canvas. The app exits 0.
 
-| G-Pen contact | Renderer submissions/s | Submitted interval p99, ms | Input-to-frame-return p99, ms | Pen-down to frame return, ms |
+| Brush and contact | Renderer submissions/s | Submitted interval p99, ms | Input-to-frame-return p99, ms | Pen-down to frame return, ms |
 | --- | ---: | ---: | ---: | ---: |
-| 1 | 173.42 | 13.14 | 14.78 | 21.17 |
-| 2 | 158.87 | 14.01 | 13.58 | 18.32 |
-| 3 | 161.88 | 13.31 | 14.31 | 18.87 |
+| G-Pen 1 | 173.42 | 13.14 | 14.78 | 21.17 |
+| G-Pen 2 | 158.87 | 14.01 | 13.58 | 18.32 |
+| G-Pen 3 | 161.88 | 13.31 | 14.31 | 18.87 |
+| Pencil 1 | 171.69 | 13.71 | 14.64 | 9.91 |
+| Pencil 2 | 156.02 | 14.40 | 16.44 | 9.62 |
+| Pencil 3 | 171.28 | 13.25 | 14.46 | 9.66 |
 
-Pooled input-to-frame return is 5.23 ms median, 8.71 ms p95, 14.32 ms p99
-and 40.67 ms maximum. All measured Down/Move/Up samples, initial samples and
+Pooled G-Pen input-to-frame return is 5.23 ms median, 8.71 ms p95, 14.32 ms
+p99 and 40.67 ms maximum. Pencil p99 is 15.57 ms and maximum is 35.66 ms.
+All measured Down/Move/Up samples, initial samples and
 tails remain included; priming is retained separately. No PresentMon,
 per-frame UI tracing, compiler or other owned workload runs during capture.
 These are renderer submissions and software timestamps, excluding physical
 digitizer and panel response. They do not establish displayed FPS or a
 reference-tier target; the reporter leaves both qualifications unset.
 Raw traces, capture, geometry image and summary are in
-`artifacts/windows/arm64-validation/performance/native-maximized-23ff405f7da8454490005ab6f1aef246/g-pen-18/`.
+`artifacts/windows/arm64-validation/performance/native-maximized-23ff405f7da8454490005ab6f1aef246/`
+under `g-pen-18/` and `pencil-4/`.
 
 ## iPadOS 17 compatibility diagnostics
 
