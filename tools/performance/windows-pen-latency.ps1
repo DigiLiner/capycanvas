@@ -51,7 +51,7 @@ $review.Id|Set-Content (Join-Path $OutputDirectory 'process-id.txt')
 Wait-Until {$script:drawing=Owned-DrawingWindow $review;$null -ne $drawing} 'The owned drawing window did not open' 60
 [CapyWindowApi]::SetThreadDpiAwarenessContext([IntPtr](-4))|Out-Null
 $window=$drawing.Handle;$root=$drawing.Root
-if($NavigationMode -or $ObjectMotionMode){$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)}
+if($NavigationMode -or $ObjectMotionMode -or $brushSeries){$root.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)}
 Wait-Until {$script:probe=Trace-File 'presentation-probe';$null -ne $probe} 'Renderer did not become ready' 90
 Open-Project $Project
 $projectTitle=[IO.Path]::GetFileName($Project)+' '+[char]0x00b7+' Capy Canvas'

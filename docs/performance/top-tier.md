@@ -3779,6 +3779,40 @@ closure, captures and summary are in
 the compiler observation is in `offscreen-2ef84b0ee012415baf1378f954d4725b/`
 beside it.
 
+### Windows ARM64 native pen input, 2026-10-18
+
+The same Surface Pro 11 runs the ordinary native ARM64 Release app from
+`098d05435`, with the Rust renderer sources above. EXE/DLL SHA-256 prefixes
+are `1D238E16871C`/`821AB2FF00D1`. The synthetic 9504 × 6336 source image
+has an empty active paint layer; project SHA-256 begins `C791D1738B8F`.
+The maximized canvas viewport is 2880 × 1824 physical pixels at 200% scaling,
+with a 16% fitted camera, Immediate presentation and maximum frame latency 1.
+A composed preflight capture verifies the entire 400 × 240 pixel pen ellipse
+lies inside the artwork and clear of panels.
+
+One one-second priming contact precedes three nominal six-second contacts
+with an 18 px G-Pen. Actual contacts last 6.44–6.50 seconds at
+221.59–223.56 injected samples/s. All 4,564 inputs, including priming, are
+consumed with zero unmatched records or overflow. Each contact changes the
+native document title and enables Undo; Undo returns to the clean drawing,
+unchanged camera and unchanged arranged canvas. The app exits 0.
+
+| G-Pen contact | Renderer submissions/s | Submitted interval p99, ms | Input-to-frame-return p99, ms | Pen-down to frame return, ms |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 173.42 | 13.14 | 14.78 | 21.17 |
+| 2 | 158.87 | 14.01 | 13.58 | 18.32 |
+| 3 | 161.88 | 13.31 | 14.31 | 18.87 |
+
+Pooled input-to-frame return is 5.23 ms median, 8.71 ms p95, 14.32 ms p99
+and 40.67 ms maximum. All measured Down/Move/Up samples, initial samples and
+tails remain included; priming is retained separately. No PresentMon,
+per-frame UI tracing, compiler or other owned workload runs during capture.
+These are renderer submissions and software timestamps, excluding physical
+digitizer and panel response. They do not establish displayed FPS or a
+reference-tier target; the reporter leaves both qualifications unset.
+Raw traces, capture, geometry image and summary are in
+`artifacts/windows/arm64-validation/performance/native-maximized-23ff405f7da8454490005ab6f1aef246/g-pen-18/`.
+
 ## iPadOS 17 compatibility diagnostics
 
 The 2026-10-17 older-device GPU-counter candidate is based on `86a0fd0e4`;

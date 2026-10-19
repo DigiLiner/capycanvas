@@ -482,6 +482,9 @@ For an in-process warmed brush series, add `-BrushPreset Pencil -Seconds 6
 preset, then the native selected state, committed size and ready canvas must agree.
 One one-second priming contact and three measured contacts run in the same process,
 with Undo restoring the clean drawing between contacts. UI tracing stays disabled.
+Brush series maximize the window before opening the drawing so high-DPI panels
+leave room for the pen path; record the actual viewport and review the composed
+canvas before accepting a measurement.
 The report retains all raw inputs and measured Down/Move/Up tails, excludes priming
 from measured latency, and never joins frame intervals across contacts. Omitting
 `-BrushPreset` keeps the original single-contact G-Pen workload.
