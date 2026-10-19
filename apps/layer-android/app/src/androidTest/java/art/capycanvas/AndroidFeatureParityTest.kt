@@ -781,8 +781,12 @@ class AndroidFeatureParityTest {
     @Test fun newDrawingDialogJourneyInBothThemes() {
         fun shot(theme: String, name: String) = screenshot("new-drawing/$theme-$name.png")
         fun tap(tag: String, scroll: Boolean = false) {
+            if (scroll) {
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag(tag).performScrollTo()
+            }
             shown(tag)
-            compose.onNodeWithTag(tag).apply { if (scroll) performScrollTo() }.performClick()
+            compose.onNodeWithTag(tag).performClick()
             compose.waitForIdle()
         }
         fun hold(tag: String) { compose.onNodeWithTag(tag).performScrollTo().performTouchInput { longClick() }; compose.waitForIdle() }
